@@ -45,6 +45,7 @@ import { Route as ExportPortbridgeManualBlackholeDottxtRouteImport } from './rou
 import { Route as GhidraShaRouteImport } from './routes/ghidra.$sha'
 import { Route as PayloadAnalysisHashRouteImport } from './routes/payload-analysis.$hash'
 import { Route as PayloadWorkbenchResultsRouteImport } from './routes/payload-workbench.results'
+import { Route as RevdeckShaRouteImport } from './routes/revdeck.$sha'
 import { Route as SandboxJobRouteImport } from './routes/sandbox.$job'
 import { Route as SessionsIdRouteImport } from './routes/sessions.$id'
 import { Route as TtyReplayShasumRouteImport } from './routes/tty-replay.$shasum'
@@ -235,6 +236,11 @@ const PayloadWorkbenchResultsRoute = PayloadWorkbenchResultsRouteImport.update({
   path: '/payload-workbench/results',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RevdeckShaRoute = RevdeckShaRouteImport.update({
+  id: '/$sha',
+  path: '/$sha',
+  getParentRoute: () => RevdeckRoute,
+} as any)
 const SandboxJobRoute = SandboxJobRouteImport.update({
   id: '/sandbox/$job',
   path: '/sandbox/$job',
@@ -302,7 +308,7 @@ export interface FileRoutesByFullPath {
   '/problem-reports': typeof ProblemReportsRoute
   '/recordings': typeof RecordingsRoute
   '/reports': typeof ReportsRoute
-  '/revdeck': typeof RevdeckRoute
+  '/revdeck': typeof RevdeckRouteWithChildren
   '/search': typeof SearchRoute
   '/sensors': typeof SensorsRoute
   '/settings': typeof SettingsRoute
@@ -315,6 +321,7 @@ export interface FileRoutesByFullPath {
   '/ghidra/$sha': typeof GhidraShaRoute
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
+  '/revdeck/$sha': typeof RevdeckShaRoute
   '/sandbox/$job': typeof SandboxJobRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
@@ -348,7 +355,7 @@ export interface FileRoutesByTo {
   '/problem-reports': typeof ProblemReportsRoute
   '/recordings': typeof RecordingsRoute
   '/reports': typeof ReportsRoute
-  '/revdeck': typeof RevdeckRoute
+  '/revdeck': typeof RevdeckRouteWithChildren
   '/search': typeof SearchRoute
   '/sensors': typeof SensorsRoute
   '/settings': typeof SettingsRoute
@@ -361,6 +368,7 @@ export interface FileRoutesByTo {
   '/ghidra/$sha': typeof GhidraShaRoute
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
+  '/revdeck/$sha': typeof RevdeckShaRoute
   '/sandbox/$job': typeof SandboxJobRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
@@ -395,7 +403,7 @@ export interface FileRoutesById {
   '/problem-reports': typeof ProblemReportsRoute
   '/recordings': typeof RecordingsRoute
   '/reports': typeof ReportsRoute
-  '/revdeck': typeof RevdeckRoute
+  '/revdeck': typeof RevdeckRouteWithChildren
   '/search': typeof SearchRoute
   '/sensors': typeof SensorsRoute
   '/settings': typeof SettingsRoute
@@ -408,6 +416,7 @@ export interface FileRoutesById {
   '/ghidra/$sha': typeof GhidraShaRoute
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
+  '/revdeck/$sha': typeof RevdeckShaRoute
   '/sandbox/$job': typeof SandboxJobRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
@@ -456,6 +465,7 @@ export interface FileRouteTypes {
     | '/ghidra/$sha'
     | '/payload-analysis/$hash'
     | '/payload-workbench/results'
+    | '/revdeck/$sha'
     | '/sandbox/$job'
     | '/sessions/$id'
     | '/tty-replay/$shasum'
@@ -502,6 +512,7 @@ export interface FileRouteTypes {
     | '/ghidra/$sha'
     | '/payload-analysis/$hash'
     | '/payload-workbench/results'
+    | '/revdeck/$sha'
     | '/sandbox/$job'
     | '/sessions/$id'
     | '/tty-replay/$shasum'
@@ -548,6 +559,7 @@ export interface FileRouteTypes {
     | '/ghidra/$sha'
     | '/payload-analysis/$hash'
     | '/payload-workbench/results'
+    | '/revdeck/$sha'
     | '/sandbox/$job'
     | '/sessions/$id'
     | '/tty-replay/$shasum'
@@ -582,7 +594,7 @@ export interface RootRouteChildren {
   ProblemReportsRoute: typeof ProblemReportsRoute
   RecordingsRoute: typeof RecordingsRoute
   ReportsRoute: typeof ReportsRoute
-  RevdeckRoute: typeof RevdeckRoute
+  RevdeckRoute: typeof RevdeckRouteWithChildren
   SearchRoute: typeof SearchRoute
   SensorsRoute: typeof SensorsRoute
   SettingsRoute: typeof SettingsRoute
@@ -859,6 +871,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PayloadWorkbenchResultsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/revdeck/$sha': {
+      id: '/revdeck/$sha'
+      path: '/$sha'
+      fullPath: '/revdeck/$sha'
+      preLoaderRoute: typeof RevdeckShaRouteImport
+      parentRoute: typeof RevdeckRoute
+    }
     '/sandbox/$job': {
       id: '/sandbox/$job'
       path: '/sandbox/$job'
@@ -918,6 +937,17 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface RevdeckRouteChildren {
+  RevdeckShaRoute: typeof RevdeckShaRoute
+}
+
+const RevdeckRouteChildren: RevdeckRouteChildren = {
+  RevdeckShaRoute: RevdeckShaRoute,
+}
+
+const RevdeckRouteWithChildren =
+  RevdeckRoute._addFileChildren(RevdeckRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentCampaignsRoute: AgentCampaignsRoute,
@@ -942,7 +972,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProblemReportsRoute: ProblemReportsRoute,
   RecordingsRoute: RecordingsRoute,
   ReportsRoute: ReportsRoute,
-  RevdeckRoute: RevdeckRoute,
+  RevdeckRoute: RevdeckRouteWithChildren,
   SearchRoute: SearchRoute,
   SensorsRoute: SensorsRoute,
   SettingsRoute: SettingsRoute,
