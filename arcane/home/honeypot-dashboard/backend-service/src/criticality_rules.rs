@@ -18,6 +18,10 @@ const SENSITIVE_PATHS: &[&str] = &[
     "/var/run/secrets/kubernetes.io/serviceaccount/token",
 ];
 
+/// (transform name, decoder) — the candidate exfil-encoding attempts tried
+/// in the DNS/HTTP-label decode loop below.
+type DecodeAttempt = (&'static str, Box<dyn Fn(&str) -> Option<Vec<u8>>>);
+
 const NAMED_ACTORS: &[&str] = &[
     "admin",
     "system",
@@ -191,7 +195,7 @@ pub fn rule_encoded_egress_external(raw: &serde_json::Value) -> Option<RuleMatch
         // "raw": the HTTP-payload candidate is checked as already-plaintext
         // bytes (no decode applied) — an interchangeable exfil transport
         // alongside DNS-label base32, not a placeholder.
-        let attempts: [(&str, Box<dyn Fn(&str) -> Option<Vec<u8>>>); 2] = [
+        let attempts: [DecodeAttempt; 2] = [
             ("raw", Box::new(|b: &str| Some(b.as_bytes().to_vec()))),
             (
                 "base32",

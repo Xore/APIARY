@@ -27,6 +27,8 @@ jobs:
         include:
           - image: agent-intrusion-worker
             context: arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus
+          - image: backend-service
+            context: arcane/home/honeypot-dashboard/backend-service
           - image: cisco-asa-honeypot
             context: arcane/home/honeypot-cisco-asa-honeypot/cisco-asa-honeypot
           - image: citrix-honeypot
@@ -35,6 +37,8 @@ jobs:
             context: arcane/home/honeypot-conpot/conpot
           - image: dashboard
             context: arcane/home/honeypot-dashboard/dashboard
+          - image: dashboard-next
+            context: arcane/home/honeypot-dashboard/frontend-next
           - image: dicompot
             context: arcane/home/honeypot-dicompot/dicompot
           - image: dionaea

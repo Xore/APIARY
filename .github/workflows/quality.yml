@@ -172,6 +172,38 @@ jobs:
       - name: Generated route tree is current
         run: git diff --exit-code -- arcane/home/honeypot-dashboard/frontend-next/src/routeTree.gen.ts
 
+  # First CI coverage for this crate (#1608's Rust service tier had none
+  # until now -- a broken build or a real regression wouldn't have
+  # surfaced until Arcane tried to build it live on the homeserver).
+  # ubuntu-latest only, not self-hosted-eligible like the jobs above --
+  # unlike setup-go/setup-node, there's no verified-present Rust
+  # toolchain on the self-hosted runner to fall back to yet.
+  # `cargo fmt --check` deliberately isn't part of this gate: the crate
+  # predates any formatting pass and has never been run through rustfmt
+  # (532 diff hunks against its default profile) -- landing that gate
+  # now would force an unrelated repo-wide reformat into this PR instead
+  # of a follow-up that can be reviewed on its own.
+  backend-service:
+    name: Dashboard backend-service (Rust)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: arcane/home/honeypot-dashboard/backend-service
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup component add clippy
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            arcane/home/honeypot-dashboard/backend-service/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('arcane/home/honeypot-dashboard/backend-service/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+      - run: cargo build --all-targets
+      - run: cargo test
+      - run: cargo clippy --all-targets -- -D warnings
+
   dashboard-browser:
     name: Dashboard browser matrix
     runs-on: ubuntu-latest
@@ -495,6 +527,15 @@ jobs:
               # external reference; config validation does not require those to
               # actually exist, so no APIARY setup is needed here either.
               docker compose -f arcane/home/honeypot-init/compose.yml config --quiet
+              # The modernization-port ("next" profile) services validate
+              # along with the rest — config resolves every service
+              # regardless of profile gating, profiles only affect `up`.
+              # Split apart since #1622: honeypot-dashboard-backend
+              # resolves backend-service:8081 against the sibling stack by
+              # bare service-name DNS at runtime (shared honeynet
+              # network), which config validation doesn't need to prove.
+              docker compose -f arcane/home/honeypot-dashboard/compose.yml config --quiet
+              docker compose -f arcane/home/honeypot-dashboard-backend/compose.yml config --quiet
               docker compose -f vps/docker-compose.yml config --quiet
               # The sandbox gateway is never started here — it answers live malware
               # on an isolated bridge that does not exist on a CI runner. Validating

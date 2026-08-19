@@ -550,6 +550,11 @@ pub async fn correlator_loop(state: AppState) {
 mod tests {
     use super::*;
 
+    // Test fixture only: one positional arg per CampaignBucket field, in
+    // field order — a builder would add indirection without adding safety
+    // for internal test code that's never called with fields transposed
+    // by accident (every call site below is a literal, checked by eye).
+    #[allow(clippy::too_many_arguments)]
     fn bucket(cidr: &str, events: i64, sensors: usize, unique_ips: i64, creds: i64, payloads: i64, fingerprints: i64, providers: usize) -> CampaignBucket {
         CampaignBucket {
             cidr: cidr.to_string(),

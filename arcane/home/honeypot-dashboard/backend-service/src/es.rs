@@ -429,7 +429,7 @@ impl Es {
             for _ in 0..max_pages {
                 let mut body = body_fn(search_after.as_ref());
                 body["size"] = Value::from(page_size);
-                body["pit"] = Value::from(serde_json::json!({"id": pit_id, "keep_alive": "2m"}));
+                body["pit"] = serde_json::json!({"id": pit_id, "keep_alive": "2m"});
                 let response = self.client.search(SearchParts::None).body(body).send().await?;
                 let status = response.status_code();
                 let json = response.json::<Value>().await?;

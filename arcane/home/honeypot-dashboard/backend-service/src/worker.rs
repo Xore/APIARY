@@ -45,7 +45,7 @@ fn human_bytes(n: u64) -> String {
         exp += 1;
         x /= UNIT;
     }
-    let suffix = [b'K', b'M', b'G', b'T', b'P', b'E'][exp] as char;
+    let suffix = b"KMGTPE"[exp] as char;
     format!("{:.1} {suffix}B", n as f64 / div as f64)
 }
 

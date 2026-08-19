@@ -209,10 +209,11 @@ fn promote_dionaea_incident_fields(e: &mut Value) -> bool {
 
     let user = first_non_empty(&[&str(&data, "username"), &str(&data, "user"), &str(&data, "login")]);
     let pass = first_non_empty(&[&str(&data, "password"), &str(&data, "pass")]);
-    if (!user.is_empty() || !pass.is_empty()) && (kind.contains("login") || kind.contains("auth")) {
-        if set_creds(e, &user, &pass) {
-            changed = true;
-        }
+    if (!user.is_empty() || !pass.is_empty())
+        && (kind.contains("login") || kind.contains("auth"))
+        && set_creds(e, &user, &pass)
+    {
+        changed = true;
     }
 
     let mut shasum = first_non_empty(&[

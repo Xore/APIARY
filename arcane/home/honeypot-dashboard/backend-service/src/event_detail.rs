@@ -277,12 +277,7 @@ fn multipot_detail(hp: &Value) -> String {
         "command" => format!("{proto}: {}", s(&hp["command"])),
         _ => format!("{proto} {kind}"),
     };
-    if kind != "command" && kind != "http_request" {
-        let cmd = s(&hp["command"]);
-        if !cmd.is_empty() {
-            d += &format!(": {cmd}");
-        }
-    } else if kind == "http_request" {
+    if kind != "command" {
         let cmd = s(&hp["command"]);
         if !cmd.is_empty() {
             d += &format!(": {cmd}");

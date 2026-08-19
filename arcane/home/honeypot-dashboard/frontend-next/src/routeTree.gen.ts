@@ -23,6 +23,7 @@ import { Route as CredentialsRouteImport } from './routes/credentials'
 import { Route as DeadLettersRouteImport } from './routes/dead-letters'
 import { Route as EventsRouteImport } from './routes/events'
 import { Route as GithubAnalysisRouteImport } from './routes/github-analysis'
+import { Route as HealthzRouteImport } from './routes/healthz'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as IpsRouteImport } from './routes/ips'
 import { Route as KillChainRouteImport } from './routes/kill-chain'
@@ -126,6 +127,11 @@ const EventsRoute = EventsRouteImport.update({
 const GithubAnalysisRoute = GithubAnalysisRouteImport.update({
   id: '/github-analysis',
   path: '/github-analysis',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HealthzRoute = HealthzRouteImport.update({
+  id: '/healthz',
+  path: '/healthz',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HistoryRoute = HistoryRouteImport.update({
@@ -317,6 +323,7 @@ export interface FileRoutesByFullPath {
   '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
   '/github-analysis': typeof GithubAnalysisRoute
+  '/healthz': typeof HealthzRoute
   '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
   '/kill-chain': typeof KillChainRoute
@@ -367,6 +374,7 @@ export interface FileRoutesByTo {
   '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
   '/github-analysis': typeof GithubAnalysisRoute
+  '/healthz': typeof HealthzRoute
   '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
   '/kill-chain': typeof KillChainRoute
@@ -418,6 +426,7 @@ export interface FileRoutesById {
   '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
   '/github-analysis': typeof GithubAnalysisRoute
+  '/healthz': typeof HealthzRoute
   '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
   '/kill-chain': typeof KillChainRoute
@@ -470,6 +479,7 @@ export interface FileRouteTypes {
     | '/dead-letters'
     | '/events'
     | '/github-analysis'
+    | '/healthz'
     | '/history'
     | '/ips'
     | '/kill-chain'
@@ -520,6 +530,7 @@ export interface FileRouteTypes {
     | '/dead-letters'
     | '/events'
     | '/github-analysis'
+    | '/healthz'
     | '/history'
     | '/ips'
     | '/kill-chain'
@@ -570,6 +581,7 @@ export interface FileRouteTypes {
     | '/dead-letters'
     | '/events'
     | '/github-analysis'
+    | '/healthz'
     | '/history'
     | '/ips'
     | '/kill-chain'
@@ -621,6 +633,7 @@ export interface RootRouteChildren {
   DeadLettersRoute: typeof DeadLettersRoute
   EventsRoute: typeof EventsRoute
   GithubAnalysisRoute: typeof GithubAnalysisRoute
+  HealthzRoute: typeof HealthzRoute
   HistoryRoute: typeof HistoryRoute
   IpsRoute: typeof IpsRoute
   KillChainRoute: typeof KillChainRoute
@@ -754,6 +767,13 @@ declare module '@tanstack/react-router' {
       path: '/github-analysis'
       fullPath: '/github-analysis'
       preLoaderRoute: typeof GithubAnalysisRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/healthz': {
+      id: '/healthz'
+      path: '/healthz'
+      fullPath: '/healthz'
+      preLoaderRoute: typeof HealthzRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/history': {
@@ -1023,6 +1043,7 @@ const rootRouteChildren: RootRouteChildren = {
   DeadLettersRoute: DeadLettersRoute,
   EventsRoute: EventsRoute,
   GithubAnalysisRoute: GithubAnalysisRoute,
+  HealthzRoute: HealthzRoute,
   HistoryRoute: HistoryRoute,
   IpsRoute: IpsRoute,
   KillChainRoute: KillChainRoute,

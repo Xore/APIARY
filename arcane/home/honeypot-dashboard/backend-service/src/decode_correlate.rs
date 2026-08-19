@@ -57,7 +57,7 @@ fn try_base64(data: &[u8]) -> Option<Vec<u8>> {
         let mut out = v.to_vec();
         let rem = out.len() % 4;
         if rem != 0 {
-            out.extend(std::iter::repeat(b'=').take(4 - rem));
+            out.extend(std::iter::repeat_n(b'=', 4 - rem));
         }
         out
     };
