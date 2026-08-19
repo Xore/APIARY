@@ -21,8 +21,14 @@
 // api/live.ts's SSE passthrough — no buffering, no assumption about the
 // response shape (the splat can be any Rust /api/v1/... path serviceFetch
 // callers pass today or add later).
+//
+// #1616: gated by the same backendLimiter as serviceFetch's direct path —
+// this is the split-frontend-host's only route to the Rust tier, so it
+// has to share (not duplicate) that fan-out's bounded queue, otherwise a
+// split deployment could push 2x backendLimiter's real cap through.
 import { createFileRoute } from '@tanstack/react-router'
-import { backendURL, serveMode } from '../lib/backend.server'
+import { backendLimiter, backendURL, serveMode } from '../lib/backend.server'
+import { Overloaded, overloadedResponse, releaseOnFinish } from '../lib/backpressure.server'
 
 const BODY_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
@@ -38,6 +44,13 @@ async function proxy(request: Request, splat: string | undefined): Promise<Respo
   if (token && request.headers.get('x-service-token') !== token) {
     return new Response('unauthorized', { status: 401 })
   }
+  let release: () => void
+  try {
+    release = await backendLimiter.acquire()
+  } catch (err) {
+    if (err instanceof Overloaded) return overloadedResponse(err)
+    throw err
+  }
   const search = new URL(request.url).search
   const upstreamPath = `/${splat ?? ''}${search}`
   const contentType = request.headers.get('content-type')
@@ -48,9 +61,16 @@ async function proxy(request: Request, splat: string | undefined): Promise<Respo
       'x-service-token': token,
     },
     body: BODY_METHODS.has(request.method) ? await request.arrayBuffer() : undefined,
-    signal: AbortSignal.timeout(15_000),
+    signal: request.signal,
+  }).catch((err) => {
+    release()
+    throw err
   })
-  return new Response(upstream.body, {
+  if (!upstream.body) {
+    release()
+    return new Response(null, { status: upstream.status })
+  }
+  return new Response(releaseOnFinish(upstream.body, release), {
     status: upstream.status,
     headers: { 'content-type': upstream.headers.get('content-type') ?? 'application/octet-stream' },
   })

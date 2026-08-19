@@ -12,6 +12,27 @@
 // runs. In all-mode (the only mode deployed today), bffInternalURL() is
 // unused and this is byte-for-byte the same direct backendURL() call as
 // before #1608's cross-host split existed.
+//
+// #1616 scalability: a shared keep-alive undici Agent replaces Node's
+// default global dispatcher so every fetch in this process — serviceFetch,
+// the byte-streaming proxy routes, and bff.$.ts's forward — reuses a
+// pooled set of sockets to the Rust tier instead of dialing fresh per
+// request. backendLimiter is the bounded queue in front of that fan-out:
+// BACKEND_MAX_INFLIGHT run at once, BACKEND_MAX_QUEUE more wait briefly,
+// anything past that sheds with 503 rather than growing without bound.
+import { Agent, setGlobalDispatcher } from 'undici'
+import { ConcurrencyLimiter, envInt, Overloaded, overloadedResponse } from './backpressure.server'
+
+setGlobalDispatcher(
+  new Agent({
+    keepAliveTimeout: 30_000,
+    keepAliveMaxTimeout: 60_000,
+    connections: envInt('BACKEND_HTTP_MAX_SOCKETS', 128),
+  }),
+)
+
+export const backendLimiter = new ConcurrencyLimiter(envInt('BACKEND_MAX_INFLIGHT', 64), envInt('BACKEND_MAX_QUEUE', 128))
+
 export type ServeMode = 'all' | 'frontend' | 'bff'
 
 export function serveMode(): ServeMode {
@@ -34,17 +55,32 @@ export function bffInternalURL(): string {
  * all-mode) calls the Rust service directly; a split frontend tier has no
  * route to BACKEND_URL at all, so it goes through the /bff/* proxy on
  * bffInternalURL() instead — same call site, same signature, the seam is
- * entirely inside this function. */
+ * entirely inside this function.
+ *
+ * Gated by backendLimiter (#1616): a 503 here on shed is indistinguishable
+ * to callers from any other backend failure — serviceJSON already treats
+ * !response.ok as "return null, let the route render its empty state",
+ * and direct serviceFetch callers already branch on response.ok — so
+ * shedding needed no new error-handling contract at any call site. */
 export async function serviceFetch(path: string, init?: RequestInit): Promise<Response> {
   const base = serveMode() === 'frontend' ? `${bffInternalURL()}/bff` : backendURL()
-  return fetch(`${base}${path}`, {
-    ...init,
-    headers: {
-      ...(init?.headers ?? {}),
-      'x-service-token': process.env.SERVICE_TOKEN ?? '',
-    },
-    signal: init?.signal ?? AbortSignal.timeout(15_000),
-  })
+  return backendLimiter
+    .run(() =>
+      fetch(`${base}${path}`, {
+        ...init,
+        headers: {
+          ...(init?.headers ?? {}),
+          'x-service-token': process.env.SERVICE_TOKEN ?? '',
+        },
+        signal: init?.signal ?? AbortSignal.timeout(15_000),
+      }),
+    )
+    .catch((err) => overloadedOrThrow(err))
+}
+
+function overloadedOrThrow(err: unknown): Response {
+  if (err instanceof Overloaded) return overloadedResponse(err)
+  throw err
 }
 
 /** Short-TTL payload cache behind the predictive prefetcher: a predicted
