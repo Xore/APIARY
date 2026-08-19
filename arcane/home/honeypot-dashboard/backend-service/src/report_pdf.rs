@@ -34,6 +34,7 @@ use printpdf::{
     LinePoint, Mm, Op, PaintMode, PdfDocument as PrintPdfDocument, PdfFontHandle, PdfPage as PrintPdfPage,
     PdfSaveOptions, Point as PrintPoint, Pt, Rect as PrintRect, Rgb as PrintRgb, TextItem, XObjectTransform,
 };
+use serde_json::Value;
 
 const PDF_PAGE_WIDTH: f64 = 595.0;
 const PDF_PAGE_HEIGHT: f64 = 842.0;
@@ -666,6 +667,88 @@ impl PdfReportWriter {
         self.paragraph("Limitations: honeypot interactions show hostile or suspicious activity directed at decoy services. GeoIP, ASN, provider, behavioral mappings, and risk scoring are contextual triage aids. They do not prove attribution, physical location, successful compromise, or impact to production systems.");
     }
 
+    // -- artifact-report primitives (sandbox_pdf.go/ghidra_pdf.go/
+    // payload_pdf.go's pdfReportWriter.sandboxMetricGrid/sandboxKeyValues —
+    // both genuinely shared across all three Go renderers despite the
+    // "sandbox" name, so shared here too rather than duplicated per
+    // artifact type. `metric_grid` above stays untouched: it's specific to
+    // the generic telemetry report's fixed 8-metric ReportSummary shape.)
+
+    /// A variable-length grid of label/value tiles, 4 per row, shrinking
+    /// the value's font (then wrapping to two lines) rather than ever
+    /// truncating it — a print artifact has no hover/expand affordance to
+    /// recover a cut-off value.
+    fn variable_metric_grid(&mut self, metrics: &[(&str, String)]) {
+        let t = self.theme;
+        let (cell_w, cell_h) = (126.5, 54.0);
+        let count = metrics.len();
+        for (index, (label, value)) in metrics.iter().enumerate() {
+            if index % 4 == 0 {
+                self.ensure(cell_h + 8.0);
+            }
+            let x = 32.0 + (index % 4) as f64 * (cell_w + 7.0);
+            let y = self.y - cell_h;
+            self.rect(x, y, cell_w, cell_h, t.card);
+            self.stroke_rect(x, y, cell_w, cell_h, t.card_border);
+            let value = if value.is_empty() { "not available" } else { value.as_str() };
+            match value.len() {
+                0..=22 => self.text(x + 10.0, y + 31.0, 13.0, true, t.brand_text, value),
+                23..=30 => self.text(x + 10.0, y + 31.0, 10.0, true, t.brand_text, value),
+                _ => {
+                    let lines = wrap_pdf_text(value, 30);
+                    self.text(x + 10.0, y + 35.0, 8.5, true, t.brand_text, &lines[0]);
+                    if let Some(second) = lines.get(1) {
+                        self.text(x + 10.0, y + 25.0, 8.5, true, t.brand_text, second);
+                    }
+                }
+            }
+            self.text(x + 10.0, y + 14.0, 7.5, true, t.muted_text, &label.to_uppercase());
+            if index % 4 == 3 || index == count - 1 {
+                self.y -= cell_h + 8.0;
+            }
+        }
+        self.y -= 6.0;
+    }
+
+    /// A titled section of label/value rows, alternating row background,
+    /// silently skipping any row whose value is empty (Go's
+    /// sandboxKeyValues: a field the artifact never populated is omitted,
+    /// not shown blank).
+    fn key_values(&mut self, title: &str, rows: &[(&str, String)]) {
+        let t = self.theme;
+        self.section(title);
+        for (index, (label, value)) in rows.iter().filter(|(_, v)| !v.trim().is_empty()).enumerate() {
+            let lines = wrap_pdf_text(value, 70);
+            let height = (lines.len() as f64 * 11.0 + 10.0).max(24.0);
+            self.ensure(height);
+            if index % 2 == 0 {
+                self.rect(32.0, self.y - height + 5.0, PDF_PAGE_WIDTH - 64.0, height, t.alt_row);
+            }
+            self.text(38.0, self.y - 7.0, 8.0, true, t.muted_text, &label.to_uppercase());
+            for (line_index, line) in lines.iter().enumerate() {
+                self.text(176.0, self.y - 7.0 - line_index as f64 * 11.0, 8.2, false, t.brand_text, line);
+            }
+            self.y -= height;
+        }
+        self.y -= 5.0;
+    }
+
+    /// Added/removed entries between two snapshots — sandbox_pdf.go's
+    /// sandboxDifference, ported for the one artifact-report caller that
+    /// has this shape (the sockets before/after comparison; see
+    /// render_sandbox_pdf's own comment on why there's no process-diff
+    /// equivalent here).
+    fn difference(&mut self, title: &str, note: &str, added: &[String], removed: &[String]) {
+        self.section(title);
+        self.paragraph(note);
+        if added.is_empty() && removed.is_empty() {
+            self.paragraph("No added or removed entries were observed.");
+            return;
+        }
+        self.bullets(&format!("Added ({})", added.len()), &limit_strings(added, 100));
+        self.bullets(&format!("Removed ({})", removed.len()), &limit_strings(removed, 100));
+    }
+
     // -- drawing primitives (report_pdf.go's pdfReportWriter.text/rect/line/…) --
 
     fn text(&mut self, x: f64, y: f64, size: f64, bold: bool, color: PdfRgb, value: &str) {
@@ -799,6 +882,18 @@ fn first_non_empty<'a>(values: &[&'a str], fallback: &'a str) -> &'a str {
     values.iter().copied().find(|v| !v.is_empty()).unwrap_or(fallback)
 }
 
+/// Caps a bounded-report list at `limit` entries, noting the omission
+/// rather than silently dropping it — ported from sandbox_pdf.go's
+/// limitStrings.
+fn limit_strings(values: &[String], limit: usize) -> Vec<String> {
+    if values.len() <= limit {
+        return values.to_vec();
+    }
+    let mut out = values[..limit].to_vec();
+    out.push(format!("... {} additional entries omitted from this bounded report", values.len() - limit));
+    out
+}
+
 fn wrap_pdf_text(value: &str, width: usize) -> Vec<String> {
     let joined = value.split_whitespace().collect::<Vec<_>>().join(" ");
     if joined.is_empty() {
@@ -894,6 +989,575 @@ pub fn render_report_pdf(
             _ => {}
         }
     }
+    writer.finish()
+}
+
+// ---------------------------------------------------------------------------
+// Artifact-scoped reports (sandbox_pdf.go / payload_pdf.go / ghidra_pdf.go):
+// one referenced artifact rendered as its own themed/branded PDF, rather
+// than the generic telemetry report above. Each takes the already-fetched
+// raw ES document(s) — working off `&Value` directly rather than a fully
+// typed struct per artifact, matching this crate's established posture for
+// producer-controlled JSON this deep (detail.rs's summarize_cape_report
+// takes the same approach) — and is otherwise pure, same contract as
+// render_report_pdf: reports_api.rs does the fetching, these do the
+// rendering.
+
+fn v_str(value: &Value) -> String {
+    value.as_str().unwrap_or("").to_string()
+}
+
+fn v_bool_str(value: &Value) -> String {
+    value.as_bool().map(|b| b.to_string()).unwrap_or_default()
+}
+
+fn v_i64(value: &Value) -> i64 {
+    value.as_i64().unwrap_or(0)
+}
+
+fn v_i64_str(value: &Value) -> String {
+    value.as_i64().map(|n| n.to_string()).unwrap_or_default()
+}
+
+fn v_f64(value: &Value) -> f64 {
+    value.as_f64().unwrap_or(0.0)
+}
+
+fn v_strings(value: &Value) -> Vec<String> {
+    value.as_array().into_iter().flatten().filter_map(|item| item.as_str().map(str::to_string)).collect()
+}
+
+fn slash_join(values: &[String]) -> String {
+    values.iter().filter(|v| !v.is_empty()).cloned().collect::<Vec<_>>().join(" / ")
+}
+
+fn render_windows_forensics(writer: &mut PdfReportWriter, forensics: &Value) {
+    writer.key_values(
+        "Windows PE forensics",
+        &[
+            ("Format / machine", slash_join(&[v_str(&forensics["pe_type"]), v_str(&forensics["machine"])])),
+            ("Execution mode", v_str(&forensics["execution_mode"])),
+            ("Compile timestamp", v_str(&forensics["compile_timestamp"])),
+            ("Entry point", v_i64_str(&forensics["entry_point"])),
+            ("Image base", v_i64_str(&forensics["image_base"])),
+            ("Import hash", v_str(&forensics["imp_hash"])),
+            ("Embedded signature", v_bool_str(&forensics["signature_present"])),
+        ],
+    );
+    let imports: Vec<String> = forensics["imports"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|item| format!("{}: {}", v_str(&item["dll"]), limit_strings(&v_strings(&item["symbols"]), 30).join(", ")))
+        .collect();
+    writer.bullets("Imported libraries and symbols", &limit_strings(&imports, 80));
+    let mut suspicious: Vec<String> = forensics["suspicious_imports"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(key, values)| format!("{key}: {}", v_strings(values).join(", ")))
+        .collect();
+    suspicious.sort();
+    writer.bullets("Suspicious Windows API imports", &limit_strings(&suspicious, 60));
+    writer.bullets("Parser warnings", &limit_strings(&v_strings(&forensics["warnings"]), 40));
+}
+
+/// Renders one sandbox dynamic-analysis run, ported from sandbox_pdf.go's
+/// renderThemedSandboxReportPDF. `doc` is detail::sandbox_run's response
+/// (the raw sandbox-analysis-v1 `_source`, both the promoted top-level
+/// fields and the full nested `sandbox` object).
+///
+/// One gap from Go: sandbox_pdf.go's "Process difference" section (added/
+/// removed process rows between pre/post-execution snapshots) has no
+/// equivalent here — this tier's sandbox-analysis-v1 documents carry
+/// sockets_before/sockets_after but no processes_before/processes_after
+/// snapshot pair (confirmed against a live document), so there is nothing
+/// to diff. "Sockets difference", which does have real data, is computed
+/// from sockets_before/after and rendered in full.
+pub fn render_sandbox_pdf(doc: &Value, generated: chrono::DateTime<chrono::Utc>, theme: PdfTheme, branding: PdfBranding) -> Vec<u8> {
+    let branding = branding.with_defaults();
+    let s = &doc["sandbox"];
+    let job = v_str(&s["job"]);
+    let sha256 = v_str(&s["sha256"]);
+    let mut writer = PdfReportWriter::new(theme, branding);
+    writer.new_page();
+    let data = ReportData {
+        generated,
+        title: "Sandbox Dynamic Analysis Report".to_string(),
+        scope: format!("{job} | SHA-256 {sha256}"),
+        summary: ReportSummary {
+            first_seen: first_non_empty(&[&v_str(&s["started_at"]), &v_str(&s["requested_at"])], "").to_string(),
+            last_seen: v_str(&s["completed_at"]),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    writer.cover(&data);
+
+    let risk_score = v_i64(&s["risk_score"]);
+    let risk_level = v_str(&s["risk_level"]);
+    let run_status = v_str(&s["run_status"]);
+    let net = &s["network_summary"];
+    writer.section("Run assessment");
+    writer.variable_metric_grid(&[
+        ("Dynamic risk", format!("{risk_score} - {}", first_non_empty(&[&risk_level], "not rated").to_uppercase())),
+        ("Run status", first_non_empty(&[&run_status], "unknown").to_uppercase()),
+        ("Duration", format!("{:.1} seconds", v_f64(&s["duration_seconds"]))),
+        ("Guest started", v_bool_str(&s["guest_started"])),
+        ("Sockets before", v_strings(&s["sockets_before"]).len().to_string()),
+        ("Sockets after", v_strings(&s["sockets_after"]).len().to_string()),
+        ("DNS names", v_strings(&net["dns_queries"]).len().to_string()),
+        ("Changed files", v_strings(&s["changed_files"]).len().to_string()),
+    ]);
+    let assessment = if run_status != "completed" {
+        "Analysis did not run to completion. Empty evidence sections indicate an infrastructure or execution failure and must not be interpreted as a clean payload result.".to_string()
+    } else {
+        format!(
+            "The isolated guest completed the selected {} path. The deterministic dynamic risk score is {risk_score}/100 ({}); review the evidence sections before drawing a verdict.",
+            first_non_empty(&[&v_str(&s["analysis_path"])], "sandbox analysis"),
+            first_non_empty(&[&risk_level], "not rated").to_uppercase(),
+        )
+    };
+    writer.paragraph(&assessment);
+
+    writer.key_values(
+        "Sample and execution identity",
+        &[
+            ("SHA-256", sha256.clone()),
+            ("SHA-1", v_str(&s["hashes"]["sha1"])),
+            ("MD5", v_str(&s["hashes"]["md5"])),
+            ("Capture name", v_str(&s["capture_name"])),
+            ("Source", v_str(&s["source"])),
+            ("File type", v_str(&s["file_type"])),
+            ("Classification", slash_join(&[v_str(&s["classification"]["label"]), v_str(&s["classification"]["code"])])),
+            ("Platform / category", slash_join(&[v_str(&s["platform"]), v_str(&s["classification"]["category"])])),
+            ("Selected analysis path", first_non_empty(&[&v_str(&s["analysis_path"]), &v_str(&s["classification"]["analysis_path"])], "").to_string()),
+            ("Execution mode", v_str(&s["execution_mode"])),
+            ("Exit status", v_str(&s["exit_status"])),
+        ],
+    );
+    let infra_evidence: Vec<String> =
+        [v_str(&s["failure_reason"]), v_str(&s["timeout_reason"])].into_iter().filter(|v| !v.is_empty()).collect();
+    if !infra_evidence.is_empty() {
+        writer.bullets("Infrastructure failure evidence", &infra_evidence);
+    }
+
+    let sockets_before = v_strings(&s["sockets_before"]);
+    let sockets_after = v_strings(&s["sockets_after"]);
+    let added: Vec<String> = sockets_after.iter().filter(|v| !sockets_before.contains(v)).cloned().collect();
+    let removed: Vec<String> = sockets_before.iter().filter(|v| !sockets_after.contains(v)).cloned().collect();
+    writer.difference(
+        "Sockets difference",
+        "Socket rows added or removed between pre- and post-execution snapshots.",
+        &added,
+        &removed,
+    );
+
+    writer.section("Network and DNS evidence");
+    writer.variable_metric_grid(&[
+        ("Host packets", v_i64_str(&net["packets"])),
+        ("Host bytes", v_i64_str(&net["bytes"])),
+        ("Guest packets", v_i64_str(&net["guest_packets"])),
+        ("Guest PCAP bytes", v_i64_str(&net["guest_pcap_bytes"])),
+    ]);
+    writer.bullets("Captured DNS names", &limit_strings(&v_strings(&net["dns_queries"]), 80));
+    writer.bullets("Network attempts", &limit_strings(&v_strings(&net["attempts"]), 80));
+    writer.bullets("Host capture events", &limit_strings(&v_strings(&net["events"]), 60));
+    writer.bullets("Guest capture events", &limit_strings(&v_strings(&net["guest_events"]), 60));
+
+    let techniques: Vec<String> = s["techniques"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|item| format!("{} {} - {}", v_str(&item["id"]), v_str(&item["name"]), v_str(&item["evidence"])).trim().to_string())
+        .collect();
+    if !techniques.is_empty() {
+        writer.bullets("ATT&CK behavior mapping", &limit_strings(&techniques, 60));
+    }
+    writer.bullets("Changed files", &limit_strings(&v_strings(&s["changed_files"]), 100));
+    let syscalls: Vec<String> = s["top_syscalls"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|item| format!("{} - {} calls", v_str(&item["name"]), v_i64(&item["count"])))
+        .collect();
+    if !syscalls.is_empty() {
+        writer.bullets("Top system calls", &limit_strings(&syscalls, 50));
+    }
+
+    if s["windows_forensics"].as_object().is_some_and(|object| !object.is_empty()) {
+        render_windows_forensics(&mut writer, &s["windows_forensics"]);
+    }
+
+    writer.ensure(150.0);
+    writer.section("Evidence access and limitations");
+    writer.paragraph("The administrator dashboard provides the sanitized JSON result and, when retained, host PCAP, guest PCAP, and a bounded diagnostics bundle. Use the SHA-256 on the result page to open the corresponding VirusTotal file record.");
+    writer.paragraph("Dynamic analysis records what this bounded isolated run observed. Missing evidence is not proof of benign behavior. Emulation, guest time limits, environment checks, unsupported formats, encrypted traffic, and delayed execution can reduce visibility. Risk scoring and ATT&CK mappings are deterministic triage aids, not attribution or a compromise verdict.");
+    writer.finish()
+}
+
+/// Renders one Ghidra static-analysis result, ported from ghidra_pdf.go's
+/// renderThemedGhidraReportPDF. `doc` is detail::ghidra_run's response
+/// (the raw ghidra-analysis-v1 `_source`, still under its own `ghidra`
+/// wrapper key — unwrapped here, not by the caller, so the same document
+/// detail.rs already hands the frontend straight through works here too).
+///
+/// One gap from Go: ghidraResult.IOCCorrelation (FLOSS-decoded strings
+/// cross-referenced against Windows-sandbox runs of the same SHA-256) has
+/// no equivalent field on this tier's ghidra-analysis-v1 documents
+/// (confirmed against a live document: no ioc_correlation key) — that
+/// cross-referencing is computed by ghidra.go at read time from a separate
+/// sandbox-run lookup this port's ghidra worker/detail route doesn't
+/// perform. Omitted rather than guessed at.
+pub fn render_ghidra_pdf(doc: &Value, generated: chrono::DateTime<chrono::Utc>, theme: PdfTheme, branding: PdfBranding) -> Vec<u8> {
+    let branding = branding.with_defaults();
+    let g = &doc["ghidra"];
+    let sha256 = v_str(&g["sha256"]);
+    let exit_status = v_str(&g["exit_status"]);
+    let mut writer = PdfReportWriter::new(theme, branding);
+    writer.new_page();
+    let data = ReportData {
+        generated,
+        title: "Ghidra Static Analysis Report".to_string(),
+        scope: format!("SHA-256 {sha256}"),
+        summary: ReportSummary {
+            first_seen: first_non_empty(&[&v_str(&g["requested_at"]), &v_str(&g["started_at"])], "").to_string(),
+            last_seen: v_str(&g["completed_at"]),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    writer.cover(&data);
+
+    let functions = g["functions"].as_array().cloned().unwrap_or_default();
+    let strings_list = v_strings(&g["strings"]);
+    let imports = v_strings(&g["imports"]);
+
+    writer.section("Analysis assessment");
+    let assessment = if exit_status == "error" || v_str(&g["completed_at"]).is_empty() {
+        "Analysis did not complete successfully. Empty evidence sections indicate an infrastructure or execution failure and must not be interpreted as a clean payload result.".to_string()
+    } else {
+        format!(
+            "Headless decompilation completed: {} function(s), {} string(s), and {} import(s) recovered. Review the evidence sections below before drawing a verdict.",
+            functions.len(),
+            strings_list.len(),
+            imports.len(),
+        )
+    };
+    writer.paragraph(&assessment);
+
+    if !g["ai_triage"].is_null() {
+        let triage = &g["ai_triage"];
+        writer.key_values(
+            "AI triage",
+            &[
+                ("Family guess", v_str(&triage["family_guess"])),
+                ("Risk level", first_non_empty(&[&v_str(&triage["risk_level"])], "not rated").to_uppercase()),
+                ("Model", v_str(&triage["model"])),
+                ("Evidence shown to model", v_str(&triage["evidence_shown"])),
+            ],
+        );
+        writer.bullets("Behaviors noted", &limit_strings(&v_strings(&triage["behaviors"]), 40));
+    }
+
+    writer.key_values(
+        "Sample identity",
+        &[
+            ("SHA-256", sha256.clone()),
+            ("Exit status", exit_status.clone()),
+            ("Requested", v_str(&g["requested_at"])),
+            ("Completed", v_str(&g["completed_at"])),
+        ],
+    );
+    let error = v_str(&g["error"]);
+    if !error.is_empty() {
+        writer.bullets("Failure evidence", &[error]);
+    }
+
+    if !g["lief"].is_null() {
+        let l = &g["lief"];
+        writer.key_values(
+            "Structural info (lief)",
+            &[
+                ("Format", v_str(&l["format"])),
+                ("Architecture", v_str(&l["architecture"])),
+                ("Entry point", v_str(&l["entrypoint"])),
+                ("Position-independent", v_bool_str(&l["is_pie"])),
+                ("Sections", v_i64_str(&l["section_count"])),
+                ("Stripped", v_bool_str(&l["stripped"])),
+                ("Is DLL", v_bool_str(&l["is_dll"])),
+                ("Compile timestamp", v_i64_str(&l["compile_timestamp"])),
+            ],
+        );
+        writer.bullets("Linked libraries", &limit_strings(&v_strings(&l["libraries"]), 60));
+    }
+
+    writer.section("Functions, strings, and imports");
+    writer.variable_metric_grid(&[
+        ("Functions", functions.len().to_string()),
+        ("Strings", strings_list.len().to_string()),
+        ("Imports", imports.len().to_string()),
+        ("Crypto constants", g["findcrypt"].as_array().map_or(0, Vec::len).to_string()),
+    ]);
+    let function_lines: Vec<String> = functions
+        .iter()
+        .map(|f| {
+            let raw_name = v_str(&f["name"]);
+            let name = first_non_empty(&[&raw_name], "(unnamed)");
+            format!("{} {name} - {} ({} bytes)", v_str(&f["address"]), v_str(&f["signature"]), v_i64(&f["size"]))
+        })
+        .collect();
+    writer.bullets(&format!("Functions ({})", functions.len()), &limit_strings(&function_lines, 80));
+    writer.bullets(&format!("Strings ({})", strings_list.len()), &limit_strings(&strings_list, 100));
+    writer.bullets(&format!("Imports ({})", imports.len()), &limit_strings(&imports, 100));
+    let findcrypt: Vec<String> = g["findcrypt"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|item| format!("{}: {} ({})", v_str(&item["address"]), v_str(&item["algorithm"]), v_str(&item["constant"])))
+        .collect();
+    if !findcrypt.is_empty() {
+        writer.bullets("Cryptographic constants", &limit_strings(&findcrypt, 60));
+    }
+
+    if !g["capa"].is_null() {
+        writer.section("Capabilities (capa)");
+        let capa = &g["capa"];
+        let unsupported = v_str(&capa["unsupported"]);
+        let capabilities = capa["capabilities"].as_array().cloned().unwrap_or_default();
+        if !unsupported.is_empty() {
+            writer.paragraph(&format!("capa declined this sample: {unsupported}"));
+        } else if capabilities.is_empty() {
+            writer.paragraph("No capabilities observed.");
+        } else {
+            let items: Vec<String> = capabilities
+                .iter()
+                .map(|c| format!("{} ({}) - {} match(es)", v_str(&c["name"]), v_str(&c["namespace"]), v_i64(&c["matches"])))
+                .collect();
+            writer.bullets(&format!("Capabilities ({})", capabilities.len()), &limit_strings(&items, 80));
+            let attack: Vec<String> = capa["attack"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|a| {
+                    format!("{} {} - {} {}", v_str(&a["id"]), v_str(&a["tactic"]), v_str(&a["technique"]), v_str(&a["subtechnique"]))
+                        .trim()
+                        .to_string()
+                })
+                .collect();
+            if !attack.is_empty() {
+                writer.bullets("ATT&CK mapping", &limit_strings(&attack, 60));
+            }
+            let mbc: Vec<String> = capa["mbc"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|m| {
+                    format!("{} {} - {} {}", v_str(&m["id"]), v_str(&m["objective"]), v_str(&m["behavior"]), v_str(&m["method"]))
+                        .trim()
+                        .to_string()
+                })
+                .collect();
+            if !mbc.is_empty() {
+                writer.bullets("Malware Behavior Catalog mapping", &limit_strings(&mbc, 60));
+            }
+        }
+    }
+
+    if !g["floss"].is_null() {
+        writer.section("Deobfuscated strings (FLOSS)");
+        let floss = &g["floss"];
+        let unsupported = v_str(&floss["unsupported"]);
+        if !unsupported.is_empty() {
+            writer.paragraph(&format!("FLOSS declined this sample: {unsupported}"));
+        } else {
+            for (label, list_key, total_key) in [
+                ("Static strings", "static_strings", "static_strings_total"),
+                ("Stack strings", "stack_strings", "stack_strings_total"),
+                ("Tight strings", "tight_strings", "tight_strings_total"),
+                ("Decoded strings", "decoded_strings", "decoded_strings_total"),
+            ] {
+                let items = v_strings(&floss[list_key]);
+                writer.bullets(&format!("{label} ({} of {})", items.len(), v_i64(&floss[total_key])), &limit_strings(&items, 60));
+            }
+        }
+    }
+
+    if !g["fuzzy_hashes"].is_null() {
+        let fh = &g["fuzzy_hashes"];
+        writer.key_values(
+            "Fuzzy hashes",
+            &[
+                ("ssdeep", first_non_empty(&[&v_str(&fh["ssdeep"]), &v_str(&fh["ssdeep_error"])], "").to_string()),
+                ("TLSH", first_non_empty(&[&v_str(&fh["tlsh"]), &v_str(&fh["tlsh_error"])], "").to_string()),
+            ],
+        );
+    }
+
+    let revdeck_answer = v_str(&g["revdeck"]["answer"]);
+    if !revdeck_answer.is_empty() {
+        writer.section("Rev·Deck assisted analysis");
+        writer.key_values(
+            "Run",
+            &[
+                ("Workflow", v_str(&g["revdeck"]["workflow"])),
+                ("Status", v_str(&g["revdeck"]["status"])),
+                ("Tool calls", v_i64_str(&g["revdeck"]["tool_calls"])),
+            ],
+        );
+        writer.paragraph(&revdeck_answer);
+        writer.bullets("Warnings", &limit_strings(&v_strings(&g["revdeck"]["warnings"]), 20));
+    }
+
+    writer.ensure(150.0);
+    writer.section("Evidence access and limitations");
+    writer.paragraph("The administrator dashboard provides the sanitized JSON result, the rendered call graph (when graphviz is installed on the analysis host), and the raw sample. Use the SHA-256 above to open the corresponding VirusTotal file record.");
+    writer.paragraph("This is a static analysis: it describes what the sample contains, not what it does when run. capa and FLOSS each cover a bounded set of formats/architectures - \"unsupported\" above means the tool declined this sample's format, not that it found nothing. AI triage and Rev·Deck answers are model output over attacker-influenced content and must be reviewed, not trusted as fact.");
+    writer.finish()
+}
+
+/// Renders one captured payload's static/dynamic analysis, ported from
+/// payload_pdf.go's renderThemedPayloadReportPDF. Assembled from the same
+/// three-index read payload_detail.rs's own GET /api/v1/payloads/{hash}
+/// already does (inventory/analysis/yara — `inventory`/`analysis` are the
+/// raw `_source` docs, `yara` the raw hit `_source`s), plus two pieces
+/// payload_detail.rs doesn't need: sandbox runs matching this hash (raw
+/// `_source` docs, same shape render_sandbox_pdf reads) and any
+/// GitHub-analysis verdict (detail::github_analysis_run's response shape,
+/// or `Value::Null` if there is none) — both queried by reports_api.rs's
+/// dispatcher and passed in pre-fetched, keeping this function pure like
+/// its siblings.
+#[allow(clippy::too_many_arguments)]
+pub fn render_payload_pdf(
+    hash: &str,
+    inventory: &Value,
+    analysis: &Value,
+    yara: &[Value],
+    sandbox_runs: &[Value],
+    github_analysis: &Value,
+    generated: chrono::DateTime<chrono::Utc>,
+    theme: PdfTheme,
+    branding: PdfBranding,
+) -> Vec<u8> {
+    let branding = branding.with_defaults();
+    let a = &analysis["Analysis"];
+    let classification = &a["Classification"];
+    let sha256 = first_non_empty(&[&v_str(&a["SHA256"])], hash).to_string();
+    let mut writer = PdfReportWriter::new(theme, branding);
+    writer.new_page();
+    let origin_label = v_str(&inventory["OriginLabel"]);
+    let data = ReportData {
+        generated,
+        title: "Payload Analysis Report".to_string(),
+        scope: format!("SHA-256 {sha256}"),
+        summary: ReportSummary { first_seen: origin_label.clone(), ..Default::default() },
+        ..Default::default()
+    };
+    writer.cover(&data);
+
+    let risk_score = v_i64(&a["StaticRiskScore"]);
+    let risk_level = v_str(&a["StaticRiskLevel"]);
+    let entropy_value = v_f64(&a["EntropyValue"]);
+    let packed_likely = a["PackedLikely"].as_bool().unwrap_or(false);
+    let yara_matches: Vec<String> = yara.iter().flat_map(|item| v_strings(&item["yara"]["matches"])).collect();
+    let iocs = v_strings(&a["IOCs"]);
+    let github_label = if github_analysis.is_null() {
+        "not queued".to_string()
+    } else if let Some(verdict) = github_analysis.get("verdict").filter(|v| !v.is_null()) {
+        format!("{}/{} {}", v_i64(&verdict["malicious"]), v_i64(&verdict["total"]), v_str(&verdict["level"]))
+    } else {
+        first_non_empty(&[&v_str(&github_analysis["exit_status"])], "queued").to_string()
+    };
+
+    writer.section("Assessment");
+    writer.variable_metric_grid(&[
+        ("Static risk", format!("{risk_score} - {}", first_non_empty(&[&risk_level], "not rated").to_uppercase())),
+        ("Classification", slash_join(&[v_str(&classification["Label"]), v_str(&classification["Code"])])),
+        ("Entropy", format!("{entropy_value:.3} ({})", if packed_likely { "packed likely" } else { "not packed-like" })),
+        ("Size", v_str(&a["Size"])),
+        ("YARA matches", yara_matches.len().to_string()),
+        ("IOCs extracted", iocs.len().to_string()),
+        ("Sandbox runs", sandbox_runs.len().to_string()),
+        ("GitHub verdict", github_label),
+    ]);
+    let assessment = format!(
+        "Static analysis classifies this sample as {} ({risk_score}/100, {}). Review the evidence sections below, and any linked dynamic-analysis run, before drawing a verdict.",
+        first_non_empty(&[&v_str(&classification["Label"])], "an unclassified file"),
+        first_non_empty(&[&risk_level], "not rated").to_uppercase(),
+    );
+    writer.paragraph(&assessment);
+
+    writer.key_values(
+        "Sample identity",
+        &[
+            ("Capture id", hash.to_string()),
+            ("SHA-256", sha256.clone()),
+            ("SHA-1", v_str(&a["SHA1"])),
+            ("MD5", v_str(&a["MD5"])),
+            ("MIME / magic", slash_join(&[v_str(&a["MIME"]), v_str(&a["Magic"])])),
+            ("Platform", v_str(&classification["Platform"])),
+            ("Suggested analysis path", v_str(&classification["AnalysisPath"])),
+            ("Script type", v_str(&a["ScriptType"])),
+            ("Family attribution", v_str(&inventory["Family"])),
+            ("First observed", origin_label),
+        ],
+    );
+
+    let format_info = v_strings(&a["FormatInfo"]);
+    if !format_info.is_empty() {
+        writer.bullets("Executable format details", &limit_strings(&format_info, 60));
+    }
+    let indicators = v_strings(&a["Indicators"]);
+    if !indicators.is_empty() {
+        writer.bullets("Script indicators", &limit_strings(&indicators, 60));
+    }
+    writer.bullets("Indicators of compromise", &limit_strings(&iocs, 80));
+    let rules: Vec<String> = a["Rules"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|r| format!("{} [{}] - {}", v_str(&r["name"]), v_str(&r["severity"]).to_uppercase(), v_str(&r["description"])))
+        .collect();
+    if !rules.is_empty() {
+        writer.bullets("Static rule matches", &limit_strings(&rules, 60));
+    }
+
+    writer.section("YARA and dynamic analysis");
+    if yara_matches.is_empty() {
+        writer.paragraph("No YARA rule matched this sample as of the last scan.");
+    } else {
+        let scanned = yara.first().map(|item| v_str(&item["yara"]["scanned_at"])).unwrap_or_default();
+        writer.bullets(&format!("YARA matches (scanned {})", first_non_empty(&[&scanned], "unknown time")), &limit_strings(&yara_matches, 60));
+    }
+    if sandbox_runs.is_empty() {
+        writer.paragraph("No isolated dynamic-analysis run has been queued for this sample yet.");
+    } else {
+        let items: Vec<String> = sandbox_runs
+            .iter()
+            .map(|run| {
+                let s = &run["sandbox"];
+                format!(
+                    "{} - {} - risk {} ({})",
+                    v_str(&s["completed_at"]),
+                    first_non_empty(&[&v_str(&s["run_status"])], "unknown").to_uppercase(),
+                    v_i64(&s["risk_score"]),
+                    first_non_empty(&[&v_str(&s["risk_level"])], "not rated").to_uppercase(),
+                )
+            })
+            .collect();
+        writer.bullets("Sandbox runs", &limit_strings(&items, 40));
+    }
+    if !github_analysis.is_null() {
+        writer.key_values(
+            "GitHub-analysis verdict",
+            &[("Exit status", v_str(&github_analysis["exit_status"])), ("Family", v_str(&github_analysis["family"]))],
+        );
+    }
+
+    writer.ensure(150.0);
+    writer.section("Evidence access and limitations");
+    writer.paragraph("The administrator dashboard provides the raw sample (read-only, sandboxed access), the full static analysis, and links to any queued Ghidra/sandbox/GitHub-analysis results. Use the SHA-256 above to open the corresponding VirusTotal file record.");
+    writer.paragraph("Static analysis characterizes the file as captured; it does not execute it. Missing evidence (no YARA match, no sandbox run yet) is not proof of benign behavior. Risk scoring is a deterministic triage aid, not attribution or a compromise verdict.");
     writer.finish()
 }
 

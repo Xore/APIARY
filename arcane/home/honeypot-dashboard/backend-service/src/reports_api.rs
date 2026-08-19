@@ -165,8 +165,28 @@ fn map_render_error(message: String) -> (StatusCode, String) {
     }
 }
 
-/// renderDefinitionToStored + renderDefinitionPDFBytes's `default` branch,
-/// shared by the manual generate endpoint and the scheduler (worker.rs).
+/// Up to 20 sandbox-analysis-v1 runs matching a captured payload's hash,
+/// newest first — payload_pdf.go's own `binaryAnalysis.SandboxRuns` slice,
+/// assembled here from the promoted `file.hash.sha256` field every
+/// es_importer.rs-mirrored source carries (same field ghidra_run/cape_run
+/// query elsewhere in this crate). Raw `_source` docs, same shape
+/// render_sandbox_pdf itself reads.
+async fn sandbox_runs_for_hash(state: &AppState, hash: &str) -> anyhow::Result<Vec<Value>> {
+    let result = state
+        .es
+        .search_index(
+            &["sandbox-analysis-v1"],
+            json!({"size": 20, "sort": [{"@timestamp": {"order": "desc"}}], "query": {"term": {"file.hash.sha256": hash}}}),
+        )
+        .await?;
+    Ok(result["hits"]["hits"].as_array().into_iter().flatten().map(|hit| hit["_source"].clone()).collect())
+}
+
+/// renderDefinitionToStored + renderDefinitionPDFBytes, shared by the
+/// manual generate endpoint and the scheduler (worker.rs). The sandbox/
+/// payload/ghidra branches each resolve their scope reference to one
+/// artifact and hand it to report_pdf.rs's matching renderer; `default`
+/// keeps the generic telemetry path unchanged.
 pub async fn render_definition_to_stored(
     state: &AppState,
     def: &ReportDefinition,
@@ -177,13 +197,6 @@ pub async fn render_definition_to_stored(
         .find(|t| t.id == def.template)
         .ok_or_else(|| "unknown report template".to_string())?;
 
-    if template.sandbox || template.payload || template.ghidra {
-        return Err(format!(
-            "the {} template is not yet implemented in this tier — it renders a referenced artifact through a dedicated renderer this pass did not port",
-            template.id
-        ));
-    }
-
     let title = {
         let trimmed = def.branding.title.trim();
         if trimmed.is_empty() {
@@ -192,22 +205,65 @@ pub async fn render_definition_to_stored(
             trimmed.to_string()
         }
     };
-    let appendix_limit = if def.appendix_limit <= 0 {
-        120
-    } else {
-        def.appendix_limit
-    };
-
-    let mut data =
-        crate::reports_data::report_data_for(state, &def.scope, title.clone(), appendix_limit)
-            .await
-            .map_err(|e| e.to_string())?;
-    data.title = title.clone();
-
     let theme = crate::report_pdf::pdf_theme_named(&def.theme);
     let branding = def.branding.to_pdf_branding();
-    let pdf =
-        crate::report_pdf::render_report_pdf(&data, theme, branding, &def.elements, appendix_limit);
+    let generated = chrono::Utc::now();
+
+    let pdf = if template.sandbox {
+        let job = def.scope.job.trim();
+        if job.is_empty() {
+            return Err("scope.job does not resolve to a completed sandbox result".to_string());
+        }
+        let doc = crate::detail::sandbox_run(State(state.clone()), Path(job.to_string()))
+            .await
+            .map_err(|_| "scope.job does not resolve to a completed sandbox result".to_string())?
+            .0;
+        crate::report_pdf::render_sandbox_pdf(&doc, generated, theme, branding)
+    } else if template.ghidra {
+        let hash = def.scope.hash.trim();
+        if hash.is_empty() {
+            return Err("scope.hash does not resolve to a completed ghidra result".to_string());
+        }
+        let doc = crate::detail::ghidra_run(State(state.clone()), Path(hash.to_string()))
+            .await
+            .map_err(|_| "scope.hash does not resolve to a completed ghidra result".to_string())?
+            .0;
+        crate::report_pdf::render_ghidra_pdf(&doc, generated, theme, branding)
+    } else if template.payload {
+        let hash = def.scope.hash.trim();
+        if hash.is_empty() {
+            return Err("scope.hash does not resolve to a captured payload".to_string());
+        }
+        let detail = crate::payload_detail::detail(State(state.clone()), Path(hash.to_string()))
+            .await
+            .map_err(|_| "scope.hash does not resolve to a captured payload".to_string())?
+            .0;
+        let inventory = detail.inventory.unwrap_or(Value::Null);
+        let analysis = detail.analysis.unwrap_or(Value::Null);
+        let sandbox_runs = sandbox_runs_for_hash(state, hash).await.map_err(|e| e.to_string())?;
+        let github_analysis = crate::detail::github_analysis_run(State(state.clone()), Path(hash.to_string()))
+            .await
+            .map(|json| json.0)
+            .unwrap_or(Value::Null);
+        crate::report_pdf::render_payload_pdf(
+            hash,
+            &inventory,
+            &analysis,
+            &detail.yara,
+            &sandbox_runs,
+            &github_analysis,
+            generated,
+            theme,
+            branding,
+        )
+    } else {
+        let appendix_limit = if def.appendix_limit <= 0 { 120 } else { def.appendix_limit };
+        let mut data = crate::reports_data::report_data_for(state, &def.scope, title.clone(), appendix_limit)
+            .await
+            .map_err(|e| e.to_string())?;
+        data.title = title.clone();
+        crate::report_pdf::render_report_pdf(&data, theme, branding, &def.elements, appendix_limit)
+    };
 
     reports_store::add_generated(
         state,
