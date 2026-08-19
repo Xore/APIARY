@@ -132,6 +132,71 @@ pub async fn cape_raw(
     Ok(Json(doc["cape"].clone()))
 }
 
+/// /api/v1/github-analysis/{sha} — one publication result, ported from
+/// github_analysis.go's githubAnalysisData. Adds two fields the producer
+/// scripts never write, computed here the same way Go's dashboard layer
+/// does: `requested_by` (looked up from the audit log — this tier has no
+/// session of its own, so "who submitted this" only exists as an audit
+/// trail) and `view_url` (a validated raw.githubusercontent.com link to
+/// the rendered PDF report, when one genuinely exists).
+pub async fn github_analysis_run(
+    State(state): State<AppState>,
+    Path(sha): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let doc = state
+        .es
+        .get_doc("github-analysis-v1", &format!("github_analysis:{sha}"))
+        .await
+        .map_err(bad_gateway)?
+        .ok_or((StatusCode::NOT_FOUND, "not found".to_string()))?;
+    let mut result = doc["github_analysis"].clone();
+    result["requested_by"] = json!(requester_for(&state, &sha));
+    result["view_url"] = github_analysis_pdf_url(&result).map_or(Value::Null, |url| json!(url));
+    Ok(Json(result))
+}
+
+/// Mirrors githubAnalysisRequester: the newest queued github_analysis.submit
+/// audit entry for this hash, preferring the username over the bare
+/// subject — same posture every other actor-attributed field in this
+/// crate takes.
+fn requester_for(state: &AppState, sha: &str) -> String {
+    for event in state.audit.read(500) {
+        if event["action"].as_str() != Some("github_analysis.submit") || event["result"].as_str() != Some("queued") {
+            continue;
+        }
+        let first_field = event["fields"].as_array().and_then(|fields| fields.first()).and_then(Value::as_str);
+        if !first_field.is_some_and(|field| field.eq_ignore_ascii_case(sha)) {
+            continue;
+        }
+        let username = event["actor_username"].as_str().unwrap_or("");
+        return if username.is_empty() { event["actor_subject"].as_str().unwrap_or("").to_string() } else { username.to_string() };
+    }
+    String::new()
+}
+
+/// Mirrors githubAnalysisPDFURL: report_commit (falling back to commit)
+/// must be a real 40-hex-char sha, and report_pdf can't escape the
+/// repository via ".." or an absolute path — both are producer-controlled
+/// strings that become URL path segments, so validated the same way
+/// resolve_payload_path treats a worker-written filename before it
+/// becomes a filesystem path.
+fn github_analysis_pdf_url(row: &Value) -> Option<String> {
+    let commit = row["report_commit"]
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .or_else(|| row["commit"].as_str().filter(|value| !value.is_empty()))?;
+    let report_pdf = row["report_pdf"].as_str().filter(|value| !value.is_empty())?;
+    if !commit_re().is_match(commit) || report_pdf.contains("..") || report_pdf.starts_with('/') {
+        return None;
+    }
+    Some(format!("https://raw.githubusercontent.com/Xore/honeypot/{commit}/{report_pdf}"))
+}
+
+fn commit_re() -> &'static regex::Regex {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| regex::Regex::new(r"^[0-9a-f]{40}$").expect("static commit pattern"))
+}
+
 fn summarize_cape_report(report: &Value) -> Value {
     if !report.is_object() {
         return Value::Null;

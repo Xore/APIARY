@@ -46,6 +46,7 @@ import { Route as BffSplatRouteImport } from './routes/bff.$'
 import { Route as CapeShaRouteImport } from './routes/cape.$sha'
 import { Route as ExportPortbridgeManualBlackholeDottxtRouteImport } from './routes/export.portbridge-manual-blackhole[.]txt'
 import { Route as GhidraShaRouteImport } from './routes/ghidra.$sha'
+import { Route as GithubAnalysisShaRouteImport } from './routes/github-analysis.$sha'
 import { Route as InvestigateClusterRouteImport } from './routes/investigate.cluster'
 import { Route as PayloadAnalysisHashRouteImport } from './routes/payload-analysis.$hash'
 import { Route as PayloadWorkbenchResultsRouteImport } from './routes/payload-workbench.results'
@@ -247,6 +248,11 @@ const GhidraShaRoute = GhidraShaRouteImport.update({
   path: '/ghidra/$sha',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GithubAnalysisShaRoute = GithubAnalysisShaRouteImport.update({
+  id: '/$sha',
+  path: '/$sha',
+  getParentRoute: () => GithubAnalysisRoute,
+} as any)
 const InvestigateClusterRoute = InvestigateClusterRouteImport.update({
   id: '/investigate/cluster',
   path: '/investigate/cluster',
@@ -334,7 +340,7 @@ export interface FileRoutesByFullPath {
   '/credentials': typeof CredentialsRoute
   '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
-  '/github-analysis': typeof GithubAnalysisRoute
+  '/github-analysis': typeof GithubAnalysisRouteWithChildren
   '/healthz': typeof HealthzRoute
   '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
@@ -358,6 +364,7 @@ export interface FileRoutesByFullPath {
   '/cape/$sha': typeof CapeShaRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/ghidra/$sha': typeof GhidraShaRoute
+  '/github-analysis/$sha': typeof GithubAnalysisShaRoute
   '/investigate/cluster': typeof InvestigateClusterRoute
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
@@ -387,7 +394,7 @@ export interface FileRoutesByTo {
   '/credentials': typeof CredentialsRoute
   '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
-  '/github-analysis': typeof GithubAnalysisRoute
+  '/github-analysis': typeof GithubAnalysisRouteWithChildren
   '/healthz': typeof HealthzRoute
   '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
@@ -411,6 +418,7 @@ export interface FileRoutesByTo {
   '/cape/$sha': typeof CapeShaRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/ghidra/$sha': typeof GhidraShaRoute
+  '/github-analysis/$sha': typeof GithubAnalysisShaRoute
   '/investigate/cluster': typeof InvestigateClusterRoute
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
@@ -441,7 +449,7 @@ export interface FileRoutesById {
   '/credentials': typeof CredentialsRoute
   '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
-  '/github-analysis': typeof GithubAnalysisRoute
+  '/github-analysis': typeof GithubAnalysisRouteWithChildren
   '/healthz': typeof HealthzRoute
   '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
@@ -465,6 +473,7 @@ export interface FileRoutesById {
   '/cape/$sha': typeof CapeShaRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/ghidra/$sha': typeof GhidraShaRoute
+  '/github-analysis/$sha': typeof GithubAnalysisShaRoute
   '/investigate/cluster': typeof InvestigateClusterRoute
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
@@ -520,6 +529,7 @@ export interface FileRouteTypes {
     | '/cape/$sha'
     | '/export/portbridge-manual-blackhole.txt'
     | '/ghidra/$sha'
+    | '/github-analysis/$sha'
     | '/investigate/cluster'
     | '/payload-analysis/$hash'
     | '/payload-workbench/results'
@@ -573,6 +583,7 @@ export interface FileRouteTypes {
     | '/cape/$sha'
     | '/export/portbridge-manual-blackhole.txt'
     | '/ghidra/$sha'
+    | '/github-analysis/$sha'
     | '/investigate/cluster'
     | '/payload-analysis/$hash'
     | '/payload-workbench/results'
@@ -626,6 +637,7 @@ export interface FileRouteTypes {
     | '/cape/$sha'
     | '/export/portbridge-manual-blackhole.txt'
     | '/ghidra/$sha'
+    | '/github-analysis/$sha'
     | '/investigate/cluster'
     | '/payload-analysis/$hash'
     | '/payload-workbench/results'
@@ -656,7 +668,7 @@ export interface RootRouteChildren {
   CredentialsRoute: typeof CredentialsRoute
   DeadLettersRoute: typeof DeadLettersRoute
   EventsRoute: typeof EventsRoute
-  GithubAnalysisRoute: typeof GithubAnalysisRoute
+  GithubAnalysisRoute: typeof GithubAnalysisRouteWithChildren
   HealthzRoute: typeof HealthzRoute
   HistoryRoute: typeof HistoryRoute
   IpsRoute: typeof IpsRoute
@@ -955,6 +967,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GhidraShaRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/github-analysis/$sha': {
+      id: '/github-analysis/$sha'
+      path: '/$sha'
+      fullPath: '/github-analysis/$sha'
+      preLoaderRoute: typeof GithubAnalysisShaRouteImport
+      parentRoute: typeof GithubAnalysisRoute
+    }
     '/investigate/cluster': {
       id: '/investigate/cluster'
       path: '/investigate/cluster'
@@ -1066,6 +1085,18 @@ const CapeRouteChildren: CapeRouteChildren = {
 
 const CapeRouteWithChildren = CapeRoute._addFileChildren(CapeRouteChildren)
 
+interface GithubAnalysisRouteChildren {
+  GithubAnalysisShaRoute: typeof GithubAnalysisShaRoute
+}
+
+const GithubAnalysisRouteChildren: GithubAnalysisRouteChildren = {
+  GithubAnalysisShaRoute: GithubAnalysisShaRoute,
+}
+
+const GithubAnalysisRouteWithChildren = GithubAnalysisRoute._addFileChildren(
+  GithubAnalysisRouteChildren,
+)
+
 interface RevdeckRouteChildren {
   RevdeckShaRoute: typeof RevdeckShaRoute
 }
@@ -1091,7 +1122,7 @@ const rootRouteChildren: RootRouteChildren = {
   CredentialsRoute: CredentialsRoute,
   DeadLettersRoute: DeadLettersRoute,
   EventsRoute: EventsRoute,
-  GithubAnalysisRoute: GithubAnalysisRoute,
+  GithubAnalysisRoute: GithubAnalysisRouteWithChildren,
   HealthzRoute: HealthzRoute,
   HistoryRoute: HistoryRoute,
   IpsRoute: IpsRoute,
