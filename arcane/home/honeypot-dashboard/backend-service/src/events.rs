@@ -102,19 +102,12 @@ pub fn row_from_source(src: &Value) -> EventRow {
         let p = text(&src["network"]["protocol"]);
         if p.is_empty() { text(&src["honeypot"]["proto"]) } else { p }
     };
-    let port = {
-        let p = src["destination"]["port"].as_u64().map(|p| p.to_string()).unwrap_or_else(|| text(&src["destination"]["port"]));
-        if p.is_empty() {
-            let hp_port = src["honeypot"]["port"].as_u64().map(|p| p.to_string()).unwrap_or_else(|| text(&src["honeypot"]["port"]));
-            if hp_port.is_empty() {
-                src["honeypot"]["dst_port"].as_u64().map(|p| p.to_string()).unwrap_or_else(|| text(&src["honeypot"]["dst_port"]))
-            } else {
-                hp_port
-            }
-        } else {
-            p
-        }
-    };
+    let num_or_str = |v: &Value| v.as_u64().map(|n| n.to_string()).unwrap_or_else(|| text(v));
+    let port = [&src["destination"]["port"], &src["honeypot"]["port"], &src["honeypot"]["dst_port"]]
+        .into_iter()
+        .map(num_or_str)
+        .find(|s| !s.is_empty())
+        .unwrap_or_default();
     EventRow {
         time: text(&src["@timestamp"]),
         sensor: sensor.clone(),

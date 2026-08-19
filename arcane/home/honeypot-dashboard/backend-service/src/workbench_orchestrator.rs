@@ -254,18 +254,25 @@ fn sandbox_status() -> Value {
             _ => 0,
         }
     }
+    #[derive(Default)]
+    struct SandboxCounts {
+        queued: i64,
+        running: i64,
+        completed: i64,
+        failed: i64,
+    }
     let mut worker_state = String::new();
-    let mut counts = (0i64, 0i64, 0i64, 0i64); // queued, running, completed, failed
+    let mut counts = SandboxCounts::default();
     let mut jobs = Vec::new();
     for dir in sandbox_results_dirs() {
         let path = Path::new(&dir).join("status.json");
         match read_json_file(&path) {
             Some(value) => {
                 let state = value["worker_state"].as_str().unwrap_or("").to_string();
-                counts.0 += value["counts"]["queued"].as_i64().unwrap_or(0);
-                counts.1 += value["counts"]["running"].as_i64().unwrap_or(0);
-                counts.2 += value["counts"]["completed"].as_i64().unwrap_or(0);
-                counts.3 += value["counts"]["failed"].as_i64().unwrap_or(0);
+                counts.queued += value["counts"]["queued"].as_i64().unwrap_or(0);
+                counts.running += value["counts"]["running"].as_i64().unwrap_or(0);
+                counts.completed += value["counts"]["completed"].as_i64().unwrap_or(0);
+                counts.failed += value["counts"]["failed"].as_i64().unwrap_or(0);
                 if let Some(more) = value["jobs"].as_array() {
                     jobs.extend(more.iter().cloned());
                 }
@@ -301,7 +308,7 @@ fn sandbox_status() -> Value {
     }
     json!({
         "worker_state": worker_state,
-        "counts": {"queued": counts.0, "running": counts.1, "completed": counts.2, "failed": counts.3},
+        "counts": {"queued": counts.queued, "running": counts.running, "completed": counts.completed, "failed": counts.failed},
         "handoff": handoff,
         "handoff_stale": handoff_old,
         "jobs": jobs,

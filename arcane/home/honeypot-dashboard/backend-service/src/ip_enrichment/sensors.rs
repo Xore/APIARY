@@ -53,6 +53,17 @@ pub fn marshal_if_changed(line: &[u8], e: &Value, changed: bool) -> Vec<u8> {
     serde_json::to_vec(e).unwrap_or_else(|_| line.to_vec())
 }
 
+/// Sets `e[key]` to `value` if it differs from the current string value,
+/// returning whether it actually changed anything.
+fn set_if_changed(e: &mut Value, key: &str, value: impl Into<String>) -> bool {
+    let value = value.into();
+    if e.get(key).and_then(Value::as_str) == Some(value.as_str()) {
+        return false;
+    }
+    e[key] = Value::from(value);
+    true
+}
+
 /// The generic case: fix conpot dest port, promote canonical fields
 /// unconditionally on every attempt (including retries — cheap, idempotent
 /// against the same original line), then resolve src_ip via the
@@ -176,53 +187,33 @@ pub fn enrich_beelzebub_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _perso
 
     let mut changed = false;
     if let Some(proto) = ev.get("Protocol").and_then(Value::as_str).filter(|s| !s.is_empty()) {
-        if e.get("sensor").and_then(Value::as_str) != Some("beelzebub") {
-            e["sensor"] = Value::from("beelzebub");
-            changed = true;
-        }
-        if e.get("protocol").and_then(Value::as_str) != Some(proto) {
-            e["protocol"] = Value::from(proto);
-            changed = true;
-        }
+        changed |= set_if_changed(&mut e, "sensor", "beelzebub");
+        changed |= set_if_changed(&mut e, "protocol", proto);
     }
     for (src_key, dst_key) in [("User", "username"), ("Password", "password"), ("Command", "command"), ("RequestURI", "path")] {
         if let Some(v) = ev.get(src_key).and_then(Value::as_str).filter(|s| !s.is_empty()) {
-            if e.get(dst_key).and_then(Value::as_str) != Some(v) {
-                e[dst_key] = Value::from(v);
-                changed = true;
-            }
+            changed |= set_if_changed(&mut e, dst_key, v);
         }
     }
-    if promote_canonical_fields("beelzebub", &mut e) {
-        changed = true;
-    }
-    if super::attck::promote_attck_technique_fields("beelzebub", &mut e) {
-        changed = true;
-    }
+    changed |= promote_canonical_fields("beelzebub", &mut e);
+    changed |= super::attck::promote_attck_technique_fields("beelzebub", &mut e);
 
     let ip = ev.get("SourceIp").and_then(Value::as_str).unwrap_or("").to_string();
     if ip != TUNNEL_PEER_IP {
-        if !ip.is_empty() && e.get("src_ip").and_then(Value::as_str) != Some(ip.as_str()) {
-            e["src_ip"] = Value::from(ip.clone());
-            changed = true;
+        if !ip.is_empty() {
+            changed |= set_if_changed(&mut e, "src_ip", ip);
         }
         return (marshal_if_changed(line, &e, changed), true);
     }
 
     let port: Option<i64> = ev.get("SourcePort").and_then(Value::as_str).and_then(|s| s.parse().ok());
     let Some(port) = port.filter(|p| *p != 0) else {
-        if e.get("src_ip").and_then(Value::as_str) != Some(ip.as_str()) {
-            e["src_ip"] = Value::from(ip);
-            changed = true;
-        }
+        changed |= set_if_changed(&mut e, "src_ip", ip);
         return (marshal_if_changed(line, &e, changed), true);
     };
 
     let Some(real) = vm.get(&port) else {
-        if e.get("src_ip").and_then(Value::as_str) != Some(ip.as_str()) {
-            e["src_ip"] = Value::from(ip);
-            changed = true;
-        }
+        changed |= set_if_changed(&mut e, "src_ip", ip);
         return (marshal_if_changed(line, &e, changed), false);
     };
 
@@ -246,55 +237,32 @@ pub fn enrich_hellpot_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _persona
     };
 
     let mut changed = false;
-    if e.get("sensor").and_then(Value::as_str) != Some("hellpot") {
-        e["sensor"] = Value::from("hellpot");
-        changed = true;
-    }
-    if e.get("protocol").and_then(Value::as_str) != Some("HTTP") {
-        e["protocol"] = Value::from("HTTP");
-        changed = true;
-    }
+    changed |= set_if_changed(&mut e, "sensor", "hellpot");
+    changed |= set_if_changed(&mut e, "protocol", "HTTP");
     if let Some(url) = e.get("URL").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string) {
-        if e.get("path").and_then(Value::as_str) != Some(url.as_str()) {
-            e["path"] = Value::from(url);
-            changed = true;
-        }
+        changed |= set_if_changed(&mut e, "path", url);
     }
     if let Some(ua) = e.get("USERAGENT").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string) {
-        if e.get("user_agent").and_then(Value::as_str) != Some(ua.as_str()) {
-            e["user_agent"] = Value::from(ua);
-            changed = true;
-        }
+        changed |= set_if_changed(&mut e, "user_agent", ua);
     }
-    if super::attck::promote_attck_technique_fields("hellpot", &mut e) {
-        changed = true;
-    }
+    changed |= super::attck::promote_attck_technique_fields("hellpot", &mut e);
 
     let Some((ip, port_str)) = split_host_port(&remote_addr) else {
         return (marshal_if_changed(line, &e, changed), true); // malformed REMOTE_ADDR
     };
 
     if ip != TUNNEL_PEER_IP {
-        if e.get("src_ip").and_then(Value::as_str) != Some(ip.as_str()) {
-            e["src_ip"] = Value::from(ip);
-            changed = true;
-        }
+        changed |= set_if_changed(&mut e, "src_ip", ip);
         return (marshal_if_changed(line, &e, changed), true);
     }
 
     let Ok(port) = port_str.parse::<i64>().map_err(|_| ()).and_then(|p| if p != 0 { Ok(p) } else { Err(()) }) else {
-        if e.get("src_ip").and_then(Value::as_str) != Some(ip.as_str()) {
-            e["src_ip"] = Value::from(ip);
-            changed = true;
-        }
+        changed |= set_if_changed(&mut e, "src_ip", ip);
         return (marshal_if_changed(line, &e, changed), true);
     };
 
     let Some(real) = vm.get(&port) else {
-        if e.get("src_ip").and_then(Value::as_str) != Some(ip.as_str()) {
-            e["src_ip"] = Value::from(ip);
-            changed = true;
-        }
+        changed |= set_if_changed(&mut e, "src_ip", ip);
         return (marshal_if_changed(line, &e, changed), false);
     };
 
@@ -318,67 +286,40 @@ pub fn enrich_galah_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _persona: 
     }
 
     let mut changed = false;
-    if e.get("sensor").and_then(Value::as_str) != Some("galah") {
-        e["sensor"] = Value::from("galah");
-        changed = true;
-    }
-    if e.get("protocol").and_then(Value::as_str) != Some("HTTP") {
-        e["protocol"] = Value::from("HTTP");
-        changed = true;
-    }
+    changed |= set_if_changed(&mut e, "sensor", "galah");
+    changed |= set_if_changed(&mut e, "protocol", "HTTP");
     if let Some(dst) = e.get("port").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string) {
-        if e.get("dst_port").and_then(Value::as_str) != Some(dst.as_str()) {
-            e["dst_port"] = Value::from(dst);
-            changed = true;
-        }
+        changed |= set_if_changed(&mut e, "dst_port", dst);
     }
     if let Some(hr) = e.get("httpRequest").cloned().filter(Value::is_object) {
         if let Some(req) = hr.get("request").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string) {
-            if e.get("path").and_then(Value::as_str) != Some(req.as_str()) {
-                e["path"] = Value::from(req);
-                changed = true;
-            }
+            changed |= set_if_changed(&mut e, "path", req);
         }
         if let Some(ua) = hr.get("userAgent").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string) {
-            if e.get("user_agent").and_then(Value::as_str) != Some(ua.as_str()) {
-                e["user_agent"] = Value::from(ua);
-                changed = true;
-            }
+            changed |= set_if_changed(&mut e, "user_agent", ua);
         }
         if let Some(sha) = hr.get("bodySha256").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string) {
-            if e.get("body_sha256").and_then(Value::as_str) != Some(sha.as_str()) {
-                e["body_sha256"] = Value::from(sha);
-                changed = true;
-            }
+            changed |= set_if_changed(&mut e, "body_sha256", sha);
         }
     }
-    if super::attck::promote_attck_technique_fields("galah", &mut e) {
-        changed = true;
-    }
+    changed |= super::attck::promote_attck_technique_fields("galah", &mut e);
 
     let ip = e.get("srcIP").and_then(Value::as_str).unwrap_or("").to_string();
     if ip != TUNNEL_PEER_IP {
-        if !ip.is_empty() && e.get("src_ip").and_then(Value::as_str) != Some(ip.as_str()) {
-            e["src_ip"] = Value::from(ip.clone());
-            changed = true;
+        if !ip.is_empty() {
+            changed |= set_if_changed(&mut e, "src_ip", ip);
         }
         return (marshal_if_changed(line, &e, changed), true);
     }
 
     let port: Option<i64> = e.get("srcPort").and_then(Value::as_str).and_then(|s| s.parse().ok());
     let Some(port) = port.filter(|p| *p != 0) else {
-        if e.get("src_ip").and_then(Value::as_str) != Some(ip.as_str()) {
-            e["src_ip"] = Value::from(ip);
-            changed = true;
-        }
+        changed |= set_if_changed(&mut e, "src_ip", ip);
         return (marshal_if_changed(line, &e, changed), true);
     };
 
     let Some(real) = vm.get(&port) else {
-        if e.get("src_ip").and_then(Value::as_str) != Some(ip.as_str()) {
-            e["src_ip"] = Value::from(ip);
-            changed = true;
-        }
+        changed |= set_if_changed(&mut e, "src_ip", ip);
         return (marshal_if_changed(line, &e, changed), false);
     };
 
@@ -400,49 +341,29 @@ pub fn enrich_sentrypeer_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _pers
     };
 
     let mut changed = false;
-    if e.get("sensor").and_then(Value::as_str) != Some("sentrypeer") {
-        e["sensor"] = Value::from("sentrypeer");
-        changed = true;
-    }
-    if e.get("protocol").and_then(Value::as_str) != Some("SIP") {
-        e["protocol"] = Value::from("SIP");
-        changed = true;
-    }
+    changed |= set_if_changed(&mut e, "sensor", "sentrypeer");
+    changed |= set_if_changed(&mut e, "protocol", "SIP");
     if let Some(ua) = e.get("sip_user_agent").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string) {
-        if e.get("user_agent").and_then(Value::as_str) != Some(ua.as_str()) {
-            e["user_agent"] = Value::from(ua);
-            changed = true;
-        }
+        changed |= set_if_changed(&mut e, "user_agent", ua);
     }
-    if super::attck::promote_attck_technique_fields("sentrypeer", &mut e) {
-        changed = true;
-    }
+    changed |= super::attck::promote_attck_technique_fields("sentrypeer", &mut e);
 
     let Some((ip, port_str)) = split_host_port(&source_addr) else {
         return (marshal_if_changed(line, &e, changed), true);
     };
 
     if ip != TUNNEL_PEER_IP {
-        if e.get("src_ip").and_then(Value::as_str) != Some(ip.as_str()) {
-            e["src_ip"] = Value::from(ip);
-            changed = true;
-        }
+        changed |= set_if_changed(&mut e, "src_ip", ip);
         return (marshal_if_changed(line, &e, changed), true);
     }
 
     let Ok(port) = port_str.parse::<i64>().map_err(|_| ()).and_then(|p| if p != 0 { Ok(p) } else { Err(()) }) else {
-        if e.get("src_ip").and_then(Value::as_str) != Some(ip.as_str()) {
-            e["src_ip"] = Value::from(ip);
-            changed = true;
-        }
+        changed |= set_if_changed(&mut e, "src_ip", ip);
         return (marshal_if_changed(line, &e, changed), true);
     };
 
     let Some(real) = vm.get(&port) else {
-        if e.get("src_ip").and_then(Value::as_str) != Some(ip.as_str()) {
-            e["src_ip"] = Value::from(ip);
-            changed = true;
-        }
+        changed |= set_if_changed(&mut e, "src_ip", ip);
         return (marshal_if_changed(line, &e, changed), false);
     };
 
@@ -471,46 +392,39 @@ static WORDPOT_AUTHOR_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^probe
 /// Sets structured fields on `e` from a known wordpot message template,
 /// returning whether it actually changed anything.
 fn classify_wordpot_message(e: &mut Value, msg: &str) -> bool {
-    let mut set = |k: &str, v: String| -> bool {
-        if e.get(k).and_then(Value::as_str) == Some(v.as_str()) {
-            return false;
-        }
-        e[k] = Value::from(v);
-        true
-    };
     if WORDPOT_LOGIN_ATTEMPT_RE.is_match(msg) {
         let caps = WORDPOT_LOGIN_ATTEMPT_RE.captures(msg).unwrap();
-        let c1 = set("path", "/wp-login.php".to_string());
-        let c2 = set("username", caps[1].to_string());
-        let c3 = set("password", caps[2].to_string());
+        let c1 = set_if_changed(e, "path", "/wp-login.php");
+        let c2 = set_if_changed(e, "username", caps[1].to_string());
+        let c3 = set_if_changed(e, "password", caps[2].to_string());
         c1 || c2 || c3
     } else if WORDPOT_LOGIN_PROBE_RE.is_match(msg) {
-        set("path", "/wp-login.php".to_string())
+        set_if_changed(e, "path", "/wp-login.php")
     } else if WORDPOT_ADMIN_PROBE_RE.is_match(msg) {
         let caps = WORDPOT_ADMIN_PROBE_RE.captures(msg).unwrap();
-        set("path", format!("/wp-admin{}", &caps[1]))
+        set_if_changed(e, "path", format!("/wp-admin{}", &caps[1]))
     } else if WORDPOT_PLUGIN_PROBE_RE.is_match(msg) {
         let caps = WORDPOT_PLUGIN_PROBE_RE.captures(msg).unwrap();
-        let c1 = set("plugin", caps[1].to_string());
-        let c2 = set("path", format!("/wp-content/plugins/{}{}", &caps[1], &caps[2]));
+        let c1 = set_if_changed(e, "plugin", caps[1].to_string());
+        let c2 = set_if_changed(e, "path", format!("/wp-content/plugins/{}{}", &caps[1], &caps[2]));
         c1 || c2
     } else if WORDPOT_THEME_PROBE_RE.is_match(msg) {
         let caps = WORDPOT_THEME_PROBE_RE.captures(msg).unwrap();
-        let c1 = set("theme", caps[1].to_string());
-        let c2 = set("path", format!("/wp-content/themes/{}{}", &caps[1], &caps[2]));
+        let c1 = set_if_changed(e, "theme", caps[1].to_string());
+        let c2 = set_if_changed(e, "path", format!("/wp-content/themes/{}{}", &caps[1], &caps[2]));
         c1 || c2
     } else if WORDPOT_TIMTHUMB_RE.is_match(msg) {
         let caps = WORDPOT_TIMTHUMB_RE.captures(msg).unwrap();
-        set("path", caps[1].to_string())
+        set_if_changed(e, "path", caps[1].to_string())
     } else if WORDPOT_BACKUPS_RE.is_match(msg) {
         let caps = WORDPOT_BACKUPS_RE.captures(msg).unwrap();
-        set("path", caps[1].to_string())
+        set_if_changed(e, "path", caps[1].to_string())
     } else if WORDPOT_AUTHOR_RE.is_match(msg) {
         let caps = WORDPOT_AUTHOR_RE.captures(msg).unwrap();
-        set("username", caps[1].to_string())
+        set_if_changed(e, "username", caps[1].to_string())
     } else if WORDPOT_COMMON_FILE_RE.is_match(msg) {
         let caps = WORDPOT_COMMON_FILE_RE.captures(msg).unwrap();
-        set("path", format!("/{}", &caps[1]))
+        set_if_changed(e, "path", format!("/{}", &caps[1]))
     } else {
         false
     }
@@ -532,40 +446,23 @@ pub fn enrich_wordpot_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _persona
     let (ip, port_str, rest) = (caps[1].to_string(), caps[2].to_string(), caps[3].to_string());
 
     let mut changed = false;
-    if e.get("sensor").and_then(Value::as_str) != Some("wordpot") {
-        e["sensor"] = Value::from("wordpot");
-        changed = true;
-    }
-    if e.get("protocol").and_then(Value::as_str) != Some("HTTP") {
-        e["protocol"] = Value::from("HTTP");
-        changed = true;
-    }
-    changed = classify_wordpot_message(&mut e, &rest) || changed;
-    if super::attck::promote_attck_technique_fields("wordpot", &mut e) {
-        changed = true;
-    }
+    changed |= set_if_changed(&mut e, "sensor", "wordpot");
+    changed |= set_if_changed(&mut e, "protocol", "HTTP");
+    changed |= classify_wordpot_message(&mut e, &rest);
+    changed |= super::attck::promote_attck_technique_fields("wordpot", &mut e);
 
     if ip != TUNNEL_PEER_IP {
-        if e.get("src_ip").and_then(Value::as_str) != Some(ip.as_str()) {
-            e["src_ip"] = Value::from(ip);
-            changed = true;
-        }
+        changed |= set_if_changed(&mut e, "src_ip", ip);
         return (marshal_if_changed(line, &e, changed), true);
     }
 
     let Ok(port) = port_str.parse::<i64>().map_err(|_| ()).and_then(|p| if p != 0 { Ok(p) } else { Err(()) }) else {
-        if e.get("src_ip").and_then(Value::as_str) != Some(ip.as_str()) {
-            e["src_ip"] = Value::from(ip);
-            changed = true;
-        }
+        changed |= set_if_changed(&mut e, "src_ip", ip);
         return (marshal_if_changed(line, &e, changed), true);
     };
 
     let Some(real) = vm.get(&port) else {
-        if e.get("src_ip").and_then(Value::as_str) != Some(ip.as_str()) {
-            e["src_ip"] = Value::from(ip);
-            changed = true;
-        }
+        changed |= set_if_changed(&mut e, "src_ip", ip);
         return (marshal_if_changed(line, &e, changed), false);
     };
 

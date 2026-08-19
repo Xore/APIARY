@@ -141,12 +141,10 @@ fn mostly_text(text: &[u8]) -> bool {
 fn normalized_text(data: &[u8]) -> Vec<u8> {
     let data = &data[..data.len().min(1 << 20)];
     if data.len() >= 2 && data[0] == 0xff && data[1] == 0xfe {
-        let mut units = Vec::with_capacity((data.len() - 2) / 2);
-        let mut i = 2;
-        while i + 1 < data.len() {
-            units.push(u16::from_le_bytes([data[i], data[i + 1]]));
-            i += 2;
-        }
+        let units: Vec<u16> = data[2..]
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
         return char::decode_utf16(units)
             .map(|r| r.unwrap_or(char::REPLACEMENT_CHARACTER))
             .collect::<String>()

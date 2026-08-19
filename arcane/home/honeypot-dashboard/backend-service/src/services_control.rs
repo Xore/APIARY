@@ -100,12 +100,13 @@ async fn load_services_status() -> Result<Vec<Value>, String> {
     let payload: Value =
         serde_json::from_slice(&body).map_err(|_| "services adapter returned an invalid schema".to_string())?;
     let services = payload["services"].as_array().cloned().unwrap_or_default();
-    for service in &services {
+    let all_valid = services.iter().all(|service| {
         let name_ok = service["name"].as_str().is_some_and(|n| !n.trim().is_empty());
         let state_ok = service["state"].as_str().is_some_and(|s| VALID_STATES.contains(&s));
-        if !name_ok || !state_ok {
-            return Err("services adapter returned an invalid schema".into());
-        }
+        name_ok && state_ok
+    });
+    if !all_valid {
+        return Err("services adapter returned an invalid schema".into());
     }
     Ok(services)
 }

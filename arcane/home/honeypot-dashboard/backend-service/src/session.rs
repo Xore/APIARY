@@ -133,8 +133,7 @@ pub async fn detail(
         let source = &hit["_source"];
         let hp = &source["honeypot"];
         let row = crate::events::row_from_source(source);
-        sensors.entry(row.sensor.clone()).or_insert(0);
-        *sensors.get_mut(&row.sensor).unwrap() += 1;
+        *sensors.entry(row.sensor.clone()).or_insert(0) += 1;
         let command = {
             let input = text(&hp["input"]);
             if input.is_empty() { text(&hp["command"]) } else { input }

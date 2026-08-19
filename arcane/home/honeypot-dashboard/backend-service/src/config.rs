@@ -65,19 +65,20 @@ pub struct ActorQuery {
     actor_username: String,
 }
 
-pub async fn put_presentation(
-    State(state): State<AppState>,
-    Query(actor): Query<ActorQuery>,
-    Json(presentation): Json<Value>,
-) -> Result<Json<Value>, (StatusCode, String)> {
-    if !presentation.is_object() {
-        return Err((StatusCode::BAD_REQUEST, "presentation object required".into()));
-    }
-    let mut doc = load_config(&state)
+/// Shared write path for put_presentation and put_config_section: load or
+/// default the doc, splat `value` into `payload.{payload_key}`, bump
+/// revision, persist, and record history + audit trail.
+async fn put_config_field(
+    state: &AppState,
+    actor: ActorQuery,
+    payload_key: &str,
+    value: Value,
+) -> Result<Value, (StatusCode, String)> {
+    let mut doc = load_config(state)
         .await
         .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?
         .unwrap_or_else(|| json!({"schema_version": 4, "revision": 0, "payload": {}}));
-    doc["payload"]["presentation"] = presentation;
+    doc["payload"][payload_key] = value;
     doc["revision"] = json!(doc["revision"].as_u64().unwrap_or(0) + 1);
     doc["updated"] = json!(chrono::Utc::now().to_rfc3339());
     state
@@ -86,7 +87,7 @@ pub async fn put_presentation(
         .await
         .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?;
     let revision = doc["revision"].as_i64().unwrap_or(0);
-    let fields = vec!["presentation".to_string()];
+    let fields = vec![payload_key.to_string()];
     state.config_history.append(HistoryEntry {
         revision,
         time: String::new(),
@@ -105,7 +106,18 @@ pub async fn put_presentation(
         result: "success".into(),
         ..Default::default()
     });
-    Ok(Json(doc))
+    Ok(doc)
+}
+
+pub async fn put_presentation(
+    State(state): State<AppState>,
+    Query(actor): Query<ActorQuery>,
+    Json(presentation): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    if !presentation.is_object() {
+        return Err((StatusCode::BAD_REQUEST, "presentation object required".into()));
+    }
+    Ok(Json(put_config_field(&state, actor, "presentation", presentation).await?))
 }
 
 /// URL section name -> `payload.*` key. Only these three are exposed here;
@@ -140,39 +152,7 @@ pub async fn put_config_section(
     if !value.is_object() {
         return Err((StatusCode::BAD_REQUEST, format!("{payload_key} object required")));
     }
-    let mut doc = load_config(&state)
-        .await
-        .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?
-        .unwrap_or_else(|| json!({"schema_version": 4, "revision": 0, "payload": {}}));
-    doc["payload"][payload_key] = value;
-    doc["revision"] = json!(doc["revision"].as_u64().unwrap_or(0) + 1);
-    doc["updated"] = json!(chrono::Utc::now().to_rfc3339());
-    state
-        .es
-        .index_doc(CONFIG_INDEX, CONFIG_ID, doc.clone())
-        .await
-        .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?;
-    let revision = doc["revision"].as_i64().unwrap_or(0);
-    let fields = vec![payload_key.to_string()];
-    state.config_history.append(HistoryEntry {
-        revision,
-        time: String::new(),
-        actor_subject: actor.actor_subject.clone(),
-        actor_username: actor.actor_username.clone(),
-        action: "update".into(),
-        fields: fields.clone(),
-        payload: doc["payload"].clone(),
-    });
-    state.audit.log(AuditEvent {
-        actor_subject: actor.actor_subject,
-        actor_username: actor.actor_username,
-        action: "config.update".into(),
-        fields,
-        revision,
-        result: "success".into(),
-        ..Default::default()
-    });
-    Ok(Json(doc))
+    Ok(Json(put_config_field(&state, actor, payload_key, value).await?))
 }
 
 /// configHistoryView-equivalent: everything needed for review and rollback

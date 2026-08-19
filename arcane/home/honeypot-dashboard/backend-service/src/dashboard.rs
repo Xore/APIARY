@@ -78,15 +78,11 @@ pub struct Dashboard {
 
 fn key_string(bucket: &Value) -> String {
     let key = &bucket["key"];
-    if let Some(text) = key.as_str() {
-        text.to_string()
-    } else if let Some(number) = key.as_i64() {
-        number.to_string()
-    } else if let Some(number) = key.as_f64() {
-        number.to_string()
-    } else {
-        String::new()
-    }
+    key.as_str()
+        .map(String::from)
+        .or_else(|| key.as_i64().map(|n| n.to_string()))
+        .or_else(|| key.as_f64().map(|n| n.to_string()))
+        .unwrap_or_default()
 }
 
 fn kv_rows(result: &Value, agg: &str, link: impl Fn(&str) -> String) -> Vec<Kv> {

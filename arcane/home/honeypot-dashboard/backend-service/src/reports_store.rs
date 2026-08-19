@@ -120,6 +120,18 @@ fn known_report_element(id: &str) -> bool {
 // Template catalog
 // ---------------------------------------------------------------------------
 
+/// Which artifact-referenced renderer (if any) a template dispatches to.
+/// A template is exactly one of these — the prior three independent bools
+/// allowed representing an invalid "two true" template that no renderer
+/// actually handles.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ReportTemplateKind {
+    Generic,
+    Sandbox,
+    Payload,
+    Ghidra,
+}
+
 pub struct ReportTemplate {
     pub id: &'static str,
     pub name: &'static str,
@@ -128,9 +140,7 @@ pub struct ReportTemplate {
     pub theme: &'static str,
     pub window: &'static str,
     pub elements: &'static [&'static str],
-    pub sandbox: bool,
-    pub payload: bool,
-    pub ghidra: bool,
+    pub kind: ReportTemplateKind,
 }
 
 pub fn report_template_catalog() -> Vec<ReportTemplate> {
@@ -141,60 +151,60 @@ pub fn report_template_catalog() -> Vec<ReportTemplate> {
             description: "Management-ready summary of the observation window: headline metrics, assessment, findings, and recommendations.",
             title: "Honeypot Executive Security Report", theme: "dark", window: "24h",
             elements: &[ELEMENT_COVER, ELEMENT_METRICS, ELEMENT_ASSESSMENT, ELEMENT_FINDINGS, ELEMENT_RECOMMENDATIONS, ELEMENT_TOP_SOURCES, ELEMENT_TOP_COUNTRIES, ELEMENT_PARAMETERS],
-            sandbox: false, payload: false, ghidra: false,
+            kind: ReportTemplateKind::Generic,
         },
         ReportTemplate {
             id: "security", name: "Full security report",
             description: "Complete defensive picture: every metric, ranking, operational alert, and a bounded evidence appendix.",
             title: "Honeypot Security Operations Report", theme: "dark", window: "24h",
             elements: &[ELEMENT_COVER, ELEMENT_METRICS, ELEMENT_ASSESSMENT, ELEMENT_FINDINGS, ELEMENT_RECOMMENDATIONS, ELEMENT_TOP_SENSORS, ELEMENT_TOP_SOURCES, ELEMENT_TOP_SIGNATURES, ELEMENT_TOP_ASNS, ELEMENT_TOP_COUNTRIES, ELEMENT_TOP_PORTS, ELEMENT_OPERATIONAL_ALERTS, ELEMENT_EVENT_APPENDIX, ELEMENT_PARAMETERS],
-            sandbox: false, payload: false, ghidra: false,
+            kind: ReportTemplateKind::Generic,
         },
         ReportTemplate {
             id: "threat", name: "Threat landscape",
             description: "Who and what is attacking: signatures, autonomous systems, countries, and targeted ports over a longer window.",
             title: "Honeypot Threat Landscape Report", theme: "dark", window: "7d",
             elements: &[ELEMENT_COVER, ELEMENT_METRICS, ELEMENT_TOP_SIGNATURES, ELEMENT_TOP_ASNS, ELEMENT_TOP_COUNTRIES, ELEMENT_TOP_PORTS, ELEMENT_FINDINGS, ELEMENT_PARAMETERS],
-            sandbox: false, payload: false, ghidra: false,
+            kind: ReportTemplateKind::Generic,
         },
         ReportTemplate {
             id: "incident", name: "Incident investigation",
             description: "Scoped deep-dive for one IP, session, network, or signature with operational alerts and an extended event appendix.",
             title: "Honeypot Incident Investigation Report", theme: "dark", window: "24h",
             elements: &[ELEMENT_COVER, ELEMENT_METRICS, ELEMENT_ASSESSMENT, ELEMENT_FINDINGS, ELEMENT_RECOMMENDATIONS, ELEMENT_OPERATIONAL_ALERTS, ELEMENT_EVENT_APPENDIX, ELEMENT_PARAMETERS],
-            sandbox: false, payload: false, ghidra: false,
+            kind: ReportTemplateKind::Generic,
         },
         ReportTemplate {
             id: "sensors", name: "Sensor and collection health",
             description: "Collection coverage and operational state: sensor volumes plus open operational alerts.",
             title: "Honeypot Sensor and Collection Health Report", theme: "dark", window: "24h",
             elements: &[ELEMENT_COVER, ELEMENT_METRICS, ELEMENT_TOP_SENSORS, ELEMENT_OPERATIONAL_ALERTS, ELEMENT_PARAMETERS],
-            sandbox: false, payload: false, ghidra: false,
+            kind: ReportTemplateKind::Generic,
         },
         ReportTemplate {
             id: "sandbox", name: "Sandbox analysis",
             description: "Dynamic-analysis report for one sandbox job: assessment, process / socket / network evidence, and ATT&CK mapping.",
             title: "Sandbox Dynamic Analysis Report", theme: "dark", window: "",
-            elements: &[], sandbox: true, payload: false, ghidra: false,
+            elements: &[], kind: ReportTemplateKind::Sandbox,
         },
         ReportTemplate {
             id: "payload", name: "Payload analysis",
             description: "Static/dynamic analysis report for one captured payload: classification, IOCs, YARA, sandbox runs, and any GitHub-analysis verdict.",
             title: "Payload Analysis Report", theme: "dark", window: "",
-            elements: &[], sandbox: false, payload: true, ghidra: false,
+            elements: &[], kind: ReportTemplateKind::Payload,
         },
         ReportTemplate {
             id: "ghidra", name: "Ghidra static analysis",
             description: "Headless-decompilation report for one captured payload: functions, strings, imports, capa capabilities, FLOSS-deobfuscated strings, fuzzy hashes, and structural (lief) info.",
             title: "Ghidra Static Analysis Report", theme: "dark", window: "",
-            elements: &[], sandbox: false, payload: false, ghidra: true,
+            elements: &[], kind: ReportTemplateKind::Ghidra,
         },
         ReportTemplate {
             id: "custom", name: "Custom report",
             description: "Blank canvas: pick every element, the scope, the theme, and the branding yourself.",
             title: "Honeypot Custom Report", theme: "dark", window: "",
             elements: &[ELEMENT_COVER, ELEMENT_METRICS, ELEMENT_PARAMETERS],
-            sandbox: false, payload: false, ghidra: false,
+            kind: ReportTemplateKind::Generic,
         },
     ]
 }
@@ -428,53 +438,57 @@ pub fn validate_definition_fields(def: &ReportDefinition) -> Result<(), String> 
     if def.theme != "dark" && def.theme != "light" {
         return Err("theme must be dark or light".into());
     }
-    if template.sandbox {
-        if def.scope.job.trim().is_empty() {
-            return Err(
-                "scope.job selects the sandbox analysis run for the sandbox template".into(),
-            );
-        }
-        if !def.scope.hash.is_empty() {
-            return Err("scope.hash is only valid for the payload and ghidra templates".into());
-        }
-        if !def.elements.is_empty() {
-            return Err(
-                "elements are fixed for the sandbox template; only theme and branding apply".into(),
-            );
-        }
-    } else if template.payload || template.ghidra {
-        if !hash_name(&def.scope.hash) {
-            return Err(
-                "scope.hash selects the captured payload for the payload and ghidra templates"
-                    .into(),
-            );
-        }
-        if !def.scope.job.is_empty() {
-            return Err("scope.job is only valid for the sandbox template".into());
-        }
-        if !def.elements.is_empty() {
-            return Err("elements are fixed for the payload and ghidra templates; only theme and branding apply".into());
-        }
-    } else {
-        if !def.scope.job.is_empty() {
-            return Err("scope.job is only valid for the sandbox template".into());
-        }
-        if !def.scope.hash.is_empty() {
-            return Err("scope.hash is only valid for the payload and ghidra templates".into());
-        }
-        if def.elements.is_empty() || def.elements.len() > REPORT_ELEMENT_CATALOG.len() {
-            return Err(format!(
-                "elements must select between 1 and {} report elements",
-                REPORT_ELEMENT_CATALOG.len()
-            ));
-        }
-        let mut seen = std::collections::HashSet::new();
-        for element in &def.elements {
-            if !known_report_element(element) {
-                return Err("elements contains an unknown report element".into());
+    match template.kind {
+        ReportTemplateKind::Sandbox => {
+            if def.scope.job.trim().is_empty() {
+                return Err(
+                    "scope.job selects the sandbox analysis run for the sandbox template".into(),
+                );
             }
-            if !seen.insert(element.clone()) {
-                return Err("elements must not repeat a report element".into());
+            if !def.scope.hash.is_empty() {
+                return Err("scope.hash is only valid for the payload and ghidra templates".into());
+            }
+            if !def.elements.is_empty() {
+                return Err(
+                    "elements are fixed for the sandbox template; only theme and branding apply".into(),
+                );
+            }
+        }
+        ReportTemplateKind::Payload | ReportTemplateKind::Ghidra => {
+            if !hash_name(&def.scope.hash) {
+                return Err(
+                    "scope.hash selects the captured payload for the payload and ghidra templates"
+                        .into(),
+                );
+            }
+            if !def.scope.job.is_empty() {
+                return Err("scope.job is only valid for the sandbox template".into());
+            }
+            if !def.elements.is_empty() {
+                return Err("elements are fixed for the payload and ghidra templates; only theme and branding apply".into());
+            }
+        }
+        ReportTemplateKind::Generic => {
+            if !def.scope.job.is_empty() {
+                return Err("scope.job is only valid for the sandbox template".into());
+            }
+            if !def.scope.hash.is_empty() {
+                return Err("scope.hash is only valid for the payload and ghidra templates".into());
+            }
+            if def.elements.is_empty() || def.elements.len() > REPORT_ELEMENT_CATALOG.len() {
+                return Err(format!(
+                    "elements must select between 1 and {} report elements",
+                    REPORT_ELEMENT_CATALOG.len()
+                ));
+            }
+            let mut seen = std::collections::HashSet::new();
+            for element in &def.elements {
+                if !known_report_element(element) {
+                    return Err("elements contains an unknown report element".into());
+                }
+                if !seen.insert(element.clone()) {
+                    return Err("elements must not repeat a report element".into());
+                }
             }
         }
     }
@@ -615,27 +629,24 @@ pub async fn put_definition(
         .unwrap_or_default();
     let mut definitions: Vec<ReportDefinition> =
         serde_json::from_value(Value::Array(list)).unwrap_or_default();
-    let mut found = false;
-    for existing in definitions.iter_mut() {
-        if existing.id == def.id {
+    match definitions.iter_mut().find(|existing| existing.id == def.id) {
+        Some(existing) => {
             if def.created.is_empty() {
                 def.created = existing.created.clone();
             }
             *existing = def.clone();
-            found = true;
-            break;
         }
-    }
-    if !found {
-        if def.created.is_empty() {
-            return Err("no report definition with this id".into());
+        None => {
+            if def.created.is_empty() {
+                return Err("no report definition with this id".into());
+            }
+            if definitions.len() >= MAX_REPORT_DEFINITIONS {
+                return Err(format!(
+                    "report definition limit reached ({MAX_REPORT_DEFINITIONS})"
+                ));
+            }
+            definitions.push(def.clone());
         }
-        if definitions.len() >= MAX_REPORT_DEFINITIONS {
-            return Err(format!(
-                "report definition limit reached ({MAX_REPORT_DEFINITIONS})"
-            ));
-        }
-        definitions.push(def.clone());
     }
     doc["payload"]["definitions"] = json!(definitions);
     save_definitions_doc(state, doc)

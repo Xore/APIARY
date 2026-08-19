@@ -24,17 +24,24 @@ const ADAPTER_WEBHOOK_URL: &str = "http://canarytokens-adapter.internal:8090/";
 const DEFAULT_API_ROOT: &str = "/d3aece8093b71007b5ccfedad91ebb11";
 const MAX_UPLOAD_BYTES: usize = 8 << 20;
 
-/// (type, label, description, download fmt, content type, suffix,
-/// requires upload, supports snippet)
-type TokenType = (&'static str, &'static str, &'static str, &'static str, &'static str, &'static str, bool, bool);
+pub struct TokenType {
+    id: &'static str,
+    label: &'static str,
+    description: &'static str,
+    download_fmt: &'static str,
+    content_type: &'static str,
+    filename_suffix: &'static str,
+    requires_upload: bool,
+    supports_snippet: bool,
+}
 
 pub const TYPES: &[TokenType] = &[
-    ("adobe_pdf", "PDF document", "A decoy PDF that fires when opened.", "pdf", "application/pdf", ".pdf", false, false),
-    ("ms_word", "Word document", "A decoy .docx that fires when opened.", "msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".docx", false, true),
-    ("ms_excel", "Excel workbook", "A decoy .xlsx that fires when opened.", "msexcel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xlsx", false, true),
-    ("web_image", "Custom web image", "A web bug behind your own image; fires on load.", "", "", "", true, false),
-    ("windows_dir", "Windows Folder token", "A desktop.ini + icon bundle that fires when the folder is opened in Explorer.", "zip", "application/zip", ".zip", false, false),
-    ("qr_code", "QR code", "A PNG QR code that fires when scanned and opened.", "qr_code", "image/png", ".png", false, false),
+    TokenType { id: "adobe_pdf", label: "PDF document", description: "A decoy PDF that fires when opened.", download_fmt: "pdf", content_type: "application/pdf", filename_suffix: ".pdf", requires_upload: false, supports_snippet: false },
+    TokenType { id: "ms_word", label: "Word document", description: "A decoy .docx that fires when opened.", download_fmt: "msword", content_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename_suffix: ".docx", requires_upload: false, supports_snippet: true },
+    TokenType { id: "ms_excel", label: "Excel workbook", description: "A decoy .xlsx that fires when opened.", download_fmt: "msexcel", content_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", filename_suffix: ".xlsx", requires_upload: false, supports_snippet: true },
+    TokenType { id: "web_image", label: "Custom web image", description: "A web bug behind your own image; fires on load.", download_fmt: "", content_type: "", filename_suffix: "", requires_upload: true, supports_snippet: false },
+    TokenType { id: "windows_dir", label: "Windows Folder token", description: "A desktop.ini + icon bundle that fires when the folder is opened in Explorer.", download_fmt: "zip", content_type: "application/zip", filename_suffix: ".zip", requires_upload: false, supports_snippet: false },
+    TokenType { id: "qr_code", label: "QR code", description: "A PNG QR code that fires when scanned and opened.", download_fmt: "qr_code", content_type: "image/png", filename_suffix: ".png", requires_upload: false, supports_snippet: false },
 ];
 
 fn base_url() -> Option<String> {
@@ -47,18 +54,18 @@ fn base_url() -> Option<String> {
 }
 
 fn type_info(token_type: &str) -> Option<&'static TokenType> {
-    TYPES.iter().find(|entry| entry.0 == token_type)
+    TYPES.iter().find(|entry| entry.id == token_type)
 }
 
 pub async fn types() -> Json<Value> {
     Json(json!(TYPES
         .iter()
-        .map(|(id, label, description, _, _, _, upload, snippet)| json!({
-            "token_type": id,
-            "label": label,
-            "description": description,
-            "requires_upload": upload,
-            "supports_snippet": snippet,
+        .map(|entry| json!({
+            "token_type": entry.id,
+            "label": entry.label,
+            "description": entry.description,
+            "requires_upload": entry.requires_upload,
+            "supports_snippet": entry.supports_snippet,
         }))
         .collect::<Vec<_>>()))
 }
@@ -114,7 +121,7 @@ pub async fn create(
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
 
     let request = client.post(format!("{base}/generate"));
-    let response = if info.6 {
+    let response = if info.requires_upload {
         // upload-required type (web_image): multipart form.
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(&body.file_base64)
@@ -138,7 +145,7 @@ pub async fn create(
             "memo": memo,
             "webhook_url": ADAPTER_WEBHOOK_URL,
         });
-        if info.7 && body.include_text_snippet {
+        if info.supports_snippet && body.include_text_snippet {
             payload["include_text_snippet"] = json!(true);
             payload["text_snippet"] = json!(body.text_snippet.trim());
         }
@@ -257,7 +264,7 @@ pub async fn download(
         .ok_or((StatusCode::NOT_FOUND, "no such token".to_string()))?;
     let token_type = source["token_type"].as_str().unwrap_or("");
     let info = type_info(token_type).ok_or((StatusCode::BAD_REQUEST, "unknown token type".to_string()))?;
-    if info.3.is_empty() {
+    if info.download_fmt.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "this token type has no downloadable artifact".into()));
     }
     let auth = source["auth_token"].as_str().unwrap_or("");
@@ -267,7 +274,7 @@ pub async fn download(
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
     let upstream = client
         .get(format!("{base}/download"))
-        .query(&[("token", id.as_str()), ("auth", auth), ("fmt", info.3)])
+        .query(&[("token", id.as_str()), ("auth", auth), ("fmt", info.download_fmt)])
         .send()
         .await
         .map_err(|error| (StatusCode::BAD_GATEWAY, format!("canarytokens: {error}")))?;
@@ -278,10 +285,10 @@ pub async fn download(
         .bytes()
         .await
         .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?;
-    let filename = format!("canarytoken-{}{}", &id[..id.len().min(12)], info.5);
+    let filename = format!("canarytoken-{}{}", &id[..id.len().min(12)], info.filename_suffix);
     Ok((
         [
-            (header::CONTENT_TYPE, info.4.to_string()),
+            (header::CONTENT_TYPE, info.content_type.to_string()),
             (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{filename}\"")),
         ],
         bytes.to_vec(),
