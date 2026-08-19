@@ -257,6 +257,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/credentials/{id}/link-token", post(credentials::link_token))
         .route("/api/v1/payloads", get(stores::payloads))
         .route("/api/v1/payloads/{hash}", get(payload_detail::detail))
+        .route("/api/v1/payloads/{hash}/raw", get(payload_detail::raw))
         .route("/api/v1/store/{name}", get(stores::generic))
         // #1612 mounted worker role (phase 3a): sandbox/ghidra/github-
         // analysis submission + golden-image status. Registered in the
