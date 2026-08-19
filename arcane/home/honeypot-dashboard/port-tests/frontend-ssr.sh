@@ -8,7 +8,7 @@ start_backend
 start_frontend
 
 for page in "" events ips campaigns clusters attackers kill-chain commands sensors recordings \
-    alerts source-health history reports canarytokens payloads payload-workbench/results \
+    alerts source-health history reports canarytokens credentials payloads payload-workbench/results \
     ml-anomalies llm-analysis agent-campaigns auth-events settings problem-reports dead-letters \
     revdeck cape github-analysis "search?q=root"; do
   check_http "page /$page" 200 "$FE_URL/$page"
