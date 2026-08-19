@@ -600,6 +600,13 @@ services:
       - OIDC_CLIENT_SECRET_FILE=/run/dashboard-secrets/oidc-client-secret
       - OIDC_SESSION_REDIS_URL=redis://oidc-sessions:6379/0
       - TZ=Europe/Berlin
+      # #1616 scalability tuning — every var below has a code default
+      # (cluster.mjs / backpressure.server.ts) and is safe to leave unset;
+      # these overrides exist so an operator can retune without a rebuild.
+      - WEB_CONCURRENCY=${DASHBOARD_WEB_CONCURRENCY:-}
+      - BACKEND_MAX_INFLIGHT=${DASHBOARD_BACKEND_MAX_INFLIGHT:-}
+      - BACKEND_MAX_QUEUE=${DASHBOARD_BACKEND_MAX_QUEUE:-}
+      - BACKEND_HTTP_MAX_SOCKETS=${DASHBOARD_BACKEND_HTTP_MAX_SOCKETS:-}
     volumes:
       - ${DASHBOARD_SECRETS_DIR:-/var/dockge/stacks/honeypot-dashboard/secrets}:/run/dashboard-secrets:ro
     networks:
@@ -609,7 +616,11 @@ services:
     cap_drop: [ALL]
     # Deliberately NO resource limit on the BFF/SSR tier (per Xore): it
     # must scale with load rather than get throttled; horizontal scaling
-    # happens by adding replicas/hosts, not by capping this one.
+    # happens by adding replicas/hosts, not by capping this one. #1616
+    # is the in-process side of that promise: cluster mode spreads load
+    # across cores instead of one event loop, and backendLimiter sheds
+    # with 503 instead of degrading into an unresponsive pile-up when the
+    # Rust tier (or this tier itself) can't keep up.
 
   # #378: ships Ghidra/sandbox/GitHub-analysis/workbench-run results into
   # Elasticsearch (ghidra-analysis-v1/sandbox-analysis-v1/github-analysis-v1/
