@@ -24,14 +24,21 @@
 # today.
 #
 # services-adapter moves together with dashboard, not out on its own: the
-# two communicate over services-adapter-socket, a volume genuinely nothing
-# else touches (confirmed -- grepped for it across every compose file), so
-# there is no reason to split them into separate projects. Left unnamed/
-# project-scoped here -- a fresh volume in the new project, not migrated
-# from the old one -- per explicit instruction that this split does not
-# need to preserve existing state across the cutover. dashboard-state gets
-# the opposite treatment (explicit shared name) precisely because, unlike
-# the socket, other services still depend on it.
+# two communicate over services-adapter-socket -- a volume that, at the time
+# of this #258 split, genuinely nothing else touched (confirmed -- grepped
+# for it across every compose file), so there was no reason to split them
+# into separate projects. Originally left unnamed/project-scoped here -- a
+# fresh volume in the new project, not migrated from the old one -- per
+# explicit instruction that this split does not need to preserve existing
+# state across the cutover. dashboard-state got the opposite treatment
+# (explicit shared name) precisely because, unlike the socket at the time,
+# other services still depended on it.
+#
+# That "nothing else touches it" premise no longer holds: #1622 moved
+# backend-service (a third consumer of this same socket) into the sibling
+# honeypot-dashboard-backend stack, so services-adapter-socket below now
+# also carries an explicit shared `name:`, same mechanism as dionaea-lib/
+# dashboard-state.
 #
 # EXPECTED_SENSORS and every /logs-derived, host-bind-mounted path are
 # unaffected by this move: the dashboard reads sensor activity from log
@@ -390,68 +397,20 @@ services:
   # — actually running a split frontend-only/bff-only pair on two docker
   # hosts, with their own compose services and socat bridges, is #1622's
   # job, not this one.
+  #
+  # #1622: `backend-service` itself moved out of this file into its own
+  # Arcane-managed stack, arcane/home/honeypot-dashboard-backend/compose.yml
+  # -- the compose-layer counterpart to this section's own "either tier can
+  # move to another docker host" claim above, so it can actually be
+  # restarted/redeployed independently of dashboard-next and everything
+  # else here. `backend-service-mounted`, `backend-worker`,
+  # `backend-worker-importer`, `backend-worker-enrichment`, and
+  # `dashboard-next` below are unaffected -- still bundled in this file,
+  # splitting those is further work, not done in this pass. dashboard-next's
+  # BACKEND_URL=http://backend-service:8081 below still resolves: both
+  # stacks attach to the same explicitly-named `honeynet` bridge, the same
+  # cross-project DNS mechanism this file's own header documents.
   # ------------------------------------------------------------------
-  backend-service:
-    <<: *runtime-defaults
-    profiles: ["next"]
-    build: ./backend-service
-    image: apiary-backend:latest
-    container_name: hp-apiary-backend
-    restart: unless-stopped
-    environment:
-      - LISTEN_ADDR=0.0.0.0:8081
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
-      - CANARYTOKENS_API_URL=${CANARYTOKENS_API_URL:-}
-      # #1612 misc write paths: honeyfs-implant credential provisioning/
-      # rotation. Same reachability posture as CANARYTOKENS_API_URL above --
-      # a plain HTTP URL over the WireGuard tunnel, off unless configured,
-      # no host mount needed (unlike the settings-admin block below).
-      - HONEYFS_IMPLANT_URL=${HONEYFS_IMPLANT_URL:-}
-      - HONEYFS_IMPLANT_TOKEN=${HONEYFS_IMPLANT_TOKEN:-}
-      # #1612 settings admin surface: services control needs the adapter
-      # socket, retention sweep needs WORKER_LOOPS. Both dashboard-state
-      # and services-adapter-socket are mounted directly into
-      # backend-service (not backend-worker) — a tier decision, not an
-      # oversight: they're host-local, single-instance resources, and
-      # backend-service is the single-instance request/response tier,
-      # unlike backend-worker which #1610 requires to stay
-      # host-portable/statelessly scalable.
-      - SERVICES_ADAPTER_SOCKET=/run/services-adapter/control.sock
-      # reports-scheduler (#1612 phase 4b) joins the same list: ES-only
-      # (dashboard-reports-definitions-v1 due-schedule scan +
-      # dashboard-generated-reports-v1 writes), no host mount of its own,
-      # so it belongs on this single-instance tier for the same reason
-      # user-retention-sweep does. payload-inventory (#1610) joins for the
-      # opposite-but-compatible reason: it needs the read-only PAYLOAD_DIRS
-      # mount below, which this service already carries for the on-demand
-      # bytes-mirror self-heal — no new mount, just a second consumer of one
-      # already here.
-      - WORKER_LOOPS=user-retention-sweep,reports-scheduler,payload-inventory
-      - SCAN_INTERVAL=${PAYLOAD_INVENTORY_SCAN_INTERVAL:-5m}
-      # #1612 payload-bytes on-demand mirror self-heal (payload_bytes.rs):
-      # read-only access to the same capture sources main.go's PAYLOAD_DIRS
-      # wiring reads, so a hash dashboard-payload-bytes-v1 hasn't mirrored
-      # yet can still be served (mirrored on demand) instead of coming back
-      # empty until payload-inventory-worker's next scan. Read-only and
-      # single-instance-safe like the Phase-1 mounts above, so it stays on
-      # backend-service rather than the new backend-service-mounted below.
-      - PAYLOAD_DIRS=/dionaea-lib/binaries,/cowrie-downloads
-      - SCRIPT_PAYLOAD_DIR=/state/script-payloads
-      - TZ=Europe/Berlin
-    volumes:
-      - dashboard-state:/state
-      - services-adapter-socket:/run/services-adapter
-      - dionaea-lib:/dionaea-lib:ro
-      - /opt/stacks/apiary/logs/cowrie/downloads:/cowrie-downloads:ro
-    networks:
-      - honeynet
-    security_opt: [no-new-privileges:true]
-    cap_drop: [ALL]
-    deploy:
-      resources:
-        limits: {cpus: "2.0", memory: 512M}
-
   # #1612 mounted worker role (phase 3a/3b): sandbox/ghidra/github-analysis
   # submission, the Payload Workbench orchestrator, and anything else that
   # needs to WRITE into a host-side request spool. Deliberately a separate
@@ -918,11 +877,15 @@ volumes:
   # below, cannot be left project-scoped.
   dashboard-state:
     name: dashboard-state
-  # Private to this stack -- nothing else references it (grepped every
-  # compose file to confirm). A fresh volume in the new project, not
-  # migrated from the old one: per explicit instruction, this split does
-  # not need to preserve existing state across the cutover.
-  services-adapter-socket: null
+  # Was private/unnamed here ("nothing else references it") until #1622
+  # moved backend-service (also a consumer, see that service's own
+  # SERVICES_ADAPTER_SOCKET env var) into the sibling honeypot-dashboard-
+  # backend stack -- now given an explicit shared name, same mechanism as
+  # dionaea-lib/dashboard-state above, so both projects resolve the same
+  # underlying Docker volume. honeypot-dashboard-backend/compose.yml
+  # declares the identical name.
+  services-adapter-socket:
+    name: services-adapter-socket
   # #378: es-results-importer's own last-imported-mtime bookkeeping. Private
   # to this service -- losing it just means the next pass re-sends every
   # result once (idempotent, deterministic _id), not a data loss.
