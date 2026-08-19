@@ -68,7 +68,14 @@ function Clusters() {
         label="Correlation"
         title="Infrastructure clusters"
         subtitle="Shared fingerprints, payloads, autonomous systems, and provider classifications across multiple source IPs."
-        chips={<span className="chip">{rows ? `${rows.length} shared pivots` : '…'}</span>}
+        chips={
+          <>
+            <span className="chip">{rows ? `${rows.length} shared pivots` : '…'}</span>
+            <a className="chip" title="Download every infrastructure cluster as CSV" href="/api/export/clusters.csv">
+              ⇩ CSV
+            </a>
+          </>
+        }
       />
       <MasterDetailTable
         rows={rows}

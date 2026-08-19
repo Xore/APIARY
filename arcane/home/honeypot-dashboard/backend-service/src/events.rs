@@ -133,12 +133,11 @@ pub fn row_from_source(src: &Value) -> EventRow {
     }
 }
 
-pub async fn list(
-    State(state): State<AppState>,
-    Query(q): Query<EventsQuery>,
-) -> Result<Json<EventsPage>, (StatusCode, String)> {
-    let size = q.size.min(100);
-    let offset = q.offset.min(10_000 - size); // ES from+size window guard
+/// Shared between the paginated list below and exports.rs's full-scope CSV
+/// export — same filter fields, same semantics, so an export always
+/// matches exactly what the equivalent list view is currently showing
+/// (#513's own "never a silently different scope than the page" rule).
+pub fn build_filters(q: &EventsQuery) -> Vec<Value> {
     let mut filters = vec![json!({"range": {"@timestamp": {"gte": since_to_range(&q.since)}}})];
     if let Some(ip) = q.ip.as_deref().filter(|v| !v.is_empty()) {
         filters.push(json!({"term": {"source.ip": ip}}));
@@ -166,6 +165,16 @@ pub async fn list(
         // shard failure, matching the legacy page's forgiving behavior.
         filters.push(json!({"query_string": {"query": text, "lenient": true}}));
     }
+    filters
+}
+
+pub async fn list(
+    State(state): State<AppState>,
+    Query(q): Query<EventsQuery>,
+) -> Result<Json<EventsPage>, (StatusCode, String)> {
+    let size = q.size.min(100);
+    let offset = q.offset.min(10_000 - size); // ES from+size window guard
+    let filters = build_filters(&q);
 
     let body = json!({
         "from": offset,

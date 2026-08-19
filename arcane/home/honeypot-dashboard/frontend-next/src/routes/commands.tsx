@@ -86,7 +86,14 @@ function Commands() {
         label="Attacker behavior"
         title="Executed commands"
         subtitle="Every shell command attackers typed into interactive honeypots, newest first."
-        chips={<span className="chip">{total.toLocaleString('en-US')} commands</span>}
+        chips={
+          <>
+            <span className="chip">{total.toLocaleString('en-US')} commands</span>
+            <a className="chip" title="Download every executed command as CSV" href="/api/export/commands.csv">
+              ⇩ CSV
+            </a>
+          </>
+        }
       />
       <MasterDetailTable
         rows={rows}

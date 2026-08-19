@@ -125,8 +125,15 @@ function History() {
           Search
         </button>
         <button className="btn btn-secondary btn-sm" type="button" onClick={exportJSON} disabled={!rows || rows.length === 0}>
-          Export JSON
+          Export loaded rows
         </button>
+        <a
+          className="btn btn-secondary btn-sm"
+          title="Download up to 500 matches for the current query directly from the server, not just what's loaded here"
+          href={`/api/export/history.json${activeQuery.current ? `?q=${encodeURIComponent(activeQuery.current)}` : ''}`}
+        >
+          Export JSON
+        </a>
       </form>
       <MasterDetailTable
         rows={rows}

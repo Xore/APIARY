@@ -83,7 +83,14 @@ function Sources() {
         label="Attack sources"
         title="Source IPs"
         subtitle="Every source address observed by the sensors, with event volume, geolocation, and activity window."
-        chips={<span className="chip">{total.toLocaleString('en-US')} unique IPs</span>}
+        chips={
+          <>
+            <span className="chip">{total.toLocaleString('en-US')} unique IPs</span>
+            <a className="chip" title="Download every attack source as CSV" href="/api/export/ips.csv">
+              ⇩ CSV
+            </a>
+          </>
+        }
       />
       <div className="card wide" id="ips-table">
         <div className="hp-src-grid">

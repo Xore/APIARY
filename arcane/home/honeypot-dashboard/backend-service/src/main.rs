@@ -38,6 +38,7 @@ mod es;
 mod event_detail;
 mod es_importer;
 mod events;
+mod exports;
 mod fusion;
 mod ghidra_submit;
 mod github_analysis_submit;
@@ -157,6 +158,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/overview/kpis", get(overview::kpis))
         .route("/api/v1/overview/dashboard", get(dashboard::dashboard))
         .route("/api/v1/events", get(events::list))
+        .route("/api/v1/export/events.csv", get(exports::events_csv))
+        .route("/api/v1/export/commands.csv", get(exports::commands_csv))
+        .route("/api/v1/export/ips.csv", get(exports::ips_csv))
+        .route("/api/v1/export/campaigns.csv", get(exports::campaigns_csv))
+        .route("/api/v1/export/clusters.csv", get(exports::clusters_csv))
+        .route("/api/v1/export/history.json", get(exports::history_json))
         .route("/api/v1/live", get(live::stream))
         .route("/api/v1/mail/{session_id}", get(mail::get))
         .route("/api/v1/ml-health", get(ml_health::list))

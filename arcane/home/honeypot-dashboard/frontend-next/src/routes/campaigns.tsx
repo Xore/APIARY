@@ -81,7 +81,14 @@ function Campaigns() {
         label="Correlation"
         title="Correlated campaigns"
         subtitle="Related source networks grouped across sensors over a rolling 7-day window."
-        chips={<span className="chip">{rows ? `${rows.length} active networks` : '…'}</span>}
+        chips={
+          <>
+            <span className="chip">{rows ? `${rows.length} active networks` : '…'}</span>
+            <a className="chip" title="Download every correlated campaign as CSV" href="/api/export/campaigns.csv">
+              ⇩ CSV
+            </a>
+          </>
+        }
       />
       <MasterDetailTable rows={rows} columns={COLUMNS} rowKey={(row) => row.cidr} />
     </>

@@ -257,32 +257,15 @@ function Events() {
             × clear filters
           </button>
         ) : null}
-        <button
+        <a
           className="chip"
-          type="button"
-          disabled={!rows || rows.length === 0}
-          title="Download the currently loaded rows as CSV"
-          onClick={() => {
-            if (!rows) return
-            const esc = (value: string) => `"${value.replaceAll('"', '""')}"`
-            const csv = [
-              'time,sensor,source_ip,country,port,proto,detail,session',
-              ...rows.map((row) =>
-                [row.time, row.sensor, row.src_ip, row.country, row.port, row.proto, row.detail, row.session]
-                  .map((value) => esc(String(value ?? '')))
-                  .join(','),
-              ),
-            ].join('\n')
-            const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
-            const link = document.createElement('a')
-            link.href = url
-            link.download = 'honeypot-events.csv'
-            link.click()
-            URL.revokeObjectURL(url)
-          }}
+          title="Download every event matching the current filter scope as CSV — not just the rows loaded here"
+          href={`/api/export/events.csv?${new URLSearchParams(
+            Object.fromEntries(Object.entries(search).filter(([, value]) => value !== undefined)) as Record<string, string>,
+          ).toString()}`}
         >
           ⇩ CSV
-        </button>
+        </a>
         <button
           className="chip"
           type="button"

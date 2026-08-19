@@ -55,6 +55,7 @@ import { Route as SandboxJobRouteImport } from './routes/sandbox.$job'
 import { Route as SessionsIdRouteImport } from './routes/sessions.$id'
 import { Route as TtyReplayShasumRouteImport } from './routes/tty-replay.$shasum'
 import { Route as ApiChartNameRouteImport } from './routes/api/chart.$name'
+import { Route as ApiExportNameRouteImport } from './routes/api/export.$name'
 import { Route as InvestigateCidrCidrRouteImport } from './routes/investigate.cidr.$cidr'
 import { Route as InvestigateIpIpRouteImport } from './routes/investigate.ip.$ip'
 import { Route as ApiCanarytokenIdDownloadRouteImport } from './routes/api/canarytoken.$id.download'
@@ -293,6 +294,11 @@ const ApiChartNameRoute = ApiChartNameRouteImport.update({
   path: '/api/chart/$name',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiExportNameRoute = ApiExportNameRouteImport.update({
+  id: '/api/export/$name',
+  path: '/api/export/$name',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const InvestigateCidrCidrRoute = InvestigateCidrCidrRouteImport.update({
   id: '/investigate/cidr/$cidr',
   path: '/investigate/cidr/$cidr',
@@ -373,6 +379,7 @@ export interface FileRoutesByFullPath {
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
   '/api/chart/$name': typeof ApiChartNameRoute
+  '/api/export/$name': typeof ApiExportNameRoute
   '/investigate/cidr/$cidr': typeof InvestigateCidrCidrRoute
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
@@ -427,6 +434,7 @@ export interface FileRoutesByTo {
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
   '/api/chart/$name': typeof ApiChartNameRoute
+  '/api/export/$name': typeof ApiExportNameRoute
   '/investigate/cidr/$cidr': typeof InvestigateCidrCidrRoute
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
@@ -482,6 +490,7 @@ export interface FileRoutesById {
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
   '/api/chart/$name': typeof ApiChartNameRoute
+  '/api/export/$name': typeof ApiExportNameRoute
   '/investigate/cidr/$cidr': typeof InvestigateCidrCidrRoute
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
@@ -538,6 +547,7 @@ export interface FileRouteTypes {
     | '/sessions/$id'
     | '/tty-replay/$shasum'
     | '/api/chart/$name'
+    | '/api/export/$name'
     | '/investigate/cidr/$cidr'
     | '/investigate/ip/$ip'
     | '/api/canarytoken/$id/download'
@@ -592,6 +602,7 @@ export interface FileRouteTypes {
     | '/sessions/$id'
     | '/tty-replay/$shasum'
     | '/api/chart/$name'
+    | '/api/export/$name'
     | '/investigate/cidr/$cidr'
     | '/investigate/ip/$ip'
     | '/api/canarytoken/$id/download'
@@ -646,6 +657,7 @@ export interface FileRouteTypes {
     | '/sessions/$id'
     | '/tty-replay/$shasum'
     | '/api/chart/$name'
+    | '/api/export/$name'
     | '/investigate/cidr/$cidr'
     | '/investigate/ip/$ip'
     | '/api/canarytoken/$id/download'
@@ -698,6 +710,7 @@ export interface RootRouteChildren {
   SessionsIdRoute: typeof SessionsIdRoute
   TtyReplayShasumRoute: typeof TtyReplayShasumRoute
   ApiChartNameRoute: typeof ApiChartNameRoute
+  ApiExportNameRoute: typeof ApiExportNameRoute
   InvestigateCidrCidrRoute: typeof InvestigateCidrCidrRoute
   InvestigateIpIpRoute: typeof InvestigateIpIpRoute
   ApiCanarytokenIdDownloadRoute: typeof ApiCanarytokenIdDownloadRoute
@@ -1030,6 +1043,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiChartNameRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/export/$name': {
+      id: '/api/export/$name'
+      path: '/api/export/$name'
+      fullPath: '/api/export/$name'
+      preLoaderRoute: typeof ApiExportNameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/investigate/cidr/$cidr': {
       id: '/investigate/cidr/$cidr'
       path: '/investigate/cidr/$cidr'
@@ -1153,6 +1173,7 @@ const rootRouteChildren: RootRouteChildren = {
   SessionsIdRoute: SessionsIdRoute,
   TtyReplayShasumRoute: TtyReplayShasumRoute,
   ApiChartNameRoute: ApiChartNameRoute,
+  ApiExportNameRoute: ApiExportNameRoute,
   InvestigateCidrCidrRoute: InvestigateCidrCidrRoute,
   InvestigateIpIpRoute: InvestigateIpIpRoute,
   ApiCanarytokenIdDownloadRoute: ApiCanarytokenIdDownloadRoute,
