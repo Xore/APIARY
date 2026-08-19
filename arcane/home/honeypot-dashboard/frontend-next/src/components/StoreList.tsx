@@ -7,9 +7,9 @@ import { InvestigateHeader, MasterDetailTable, type Column } from './Investigate
 import type { JsonRecord } from '../lib/json'
 
 export type StoreRow = JsonRecord
-export type StorePage = { total: number; rows: StoreRow[] }
+export type StorePage<Row = StoreRow> = { total: number; rows: Row[] }
 
-export function StoreListPage({
+export function StoreListPage<Row = StoreRow>({
   fetchPage,
   label,
   title,
@@ -20,17 +20,17 @@ export function StoreListPage({
   chipNoun,
   inspectorExtra,
 }: {
-  fetchPage: (input: { data: { offset: number } }) => Promise<StorePage | null>
+  fetchPage: (input: { data: { offset: number } }) => Promise<StorePage<Row> | null>
   label: string
   title: string
   subtitle: string
-  columns: Column<StoreRow>[]
-  rowKey: (row: StoreRow, index: number) => string
+  columns: Column<Row>[]
+  rowKey: (row: Row, index: number) => string
   inspectorTitle?: string
   chipNoun: string
-  inspectorExtra?: (row: StoreRow) => React.ReactNode
+  inspectorExtra?: (row: Row) => React.ReactNode
 }) {
-  const [rows, setRows] = useState<StoreRow[] | null>(null)
+  const [rows, setRows] = useState<Row[] | null>(null)
   const [total, setTotal] = useState(0)
   const [loadingMore, setLoadingMore] = useState(false)
 

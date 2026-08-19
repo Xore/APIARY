@@ -2,8 +2,8 @@
 // counts, first/last seen, acknowledge flags).
 import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { usePaginatedList } from '../lib/hooks'
 
 type AlertRow = {
   Key: string
@@ -66,30 +66,7 @@ const COLUMNS: Column<AlertRow>[] = [
 
 function Alerts() {
   const { first } = Route.useLoaderData()
-  const [rows, setRows] = useState<AlertRow[] | null>(null)
-  const [total, setTotal] = useState(0)
-  const [loadingMore, setLoadingMore] = useState(false)
-  useEffect(() => {
-    let cancelled = false
-    first.then((page) => {
-      if (cancelled || !page) return
-      setRows(page.rows)
-      setTotal(page.total)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [first])
-  const viewMore = useCallback(async () => {
-    if (!rows || loadingMore) return
-    setLoadingMore(true)
-    try {
-      const page = await fetchAlerts({ data: { offset: rows.length } })
-      if (page) setRows((current) => [...(current ?? []), ...page.rows])
-    } finally {
-      setLoadingMore(false)
-    }
-  }, [rows, loadingMore])
+  const { rows, setRows, total, loadingMore, viewMore } = usePaginatedList(first, (offset) => fetchAlerts({ data: { offset } }))
   return (
     <>
       <InvestigateHeader

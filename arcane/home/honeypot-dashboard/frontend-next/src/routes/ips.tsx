@@ -2,8 +2,9 @@
 // every column of the old table on each card.
 import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useCallback, useEffect, useState } from 'react'
+import { useMemo } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
+import { usePaginatedList } from '../lib/hooks'
 
 type SourceRow = {
   ip: string
@@ -50,32 +51,14 @@ function SkeletonCards({ count }: { count: number }) {
 
 function Sources() {
   const { first } = Route.useLoaderData()
-  const [rows, setRows] = useState<SourceRow[] | null>(null)
-  const [total, setTotal] = useState(0)
-  const [loadingMore, setLoadingMore] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    first.then((page) => {
-      if (cancelled || !page) return
-      setRows(page.rows)
-      setTotal(page.total_unique)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [first])
-
-  const viewMore = useCallback(async () => {
-    if (!rows || loadingMore) return
-    setLoadingMore(true)
-    try {
-      const page = await fetchSources({ data: { offset: rows.length } })
-      if (page) setRows((current) => [...(current ?? []), ...page.rows])
-    } finally {
-      setLoadingMore(false)
-    }
-  }, [rows, loadingMore])
+  // SourcesPage names its count total_unique, not total — adapt to the
+  // {total, rows} shape usePaginatedList expects. Memoized so the adapted
+  // promise's identity stays stable across renders (it's an effect dep).
+  const adaptedFirst = useMemo(() => first.then((page) => (page ? { total: page.total_unique, rows: page.rows } : null)), [first])
+  const { rows, total, loadingMore, viewMore } = usePaginatedList(adaptedFirst, async (offset) => {
+    const page = await fetchSources({ data: { offset } })
+    return page ? { total: page.total_unique, rows: page.rows } : null
+  })
 
   return (
     <>

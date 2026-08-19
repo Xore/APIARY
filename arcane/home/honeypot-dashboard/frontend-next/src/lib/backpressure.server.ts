@@ -90,6 +90,41 @@ export function overloadedResponse(err: Overloaded): Response {
   })
 }
 
+/** Shared acquire-limiter/fetch-upstream/release-and-stream sequence behind
+ * every byte-streaming proxy route (artifact/canarytoken/export/payload/
+ * report/live). Callers keep their own pre-limiter validation (allowlist,
+ * hash format, admin role) and only supply the upstream URL, the success
+ * response's headers (computed from the upstream response), and the
+ * unavailable-case message — with an optional fixed status for routes like
+ * live.ts's SSE proxy that don't forward upstream.status. */
+export async function limitedStreamProxy(
+  request: Request,
+  limiter: ConcurrencyLimiter,
+  url: string,
+  headersFor: (upstream: Response) => HeadersInit,
+  unavailable: { message: string; status?: number },
+): Promise<Response> {
+  let release: () => void
+  try {
+    release = await limiter.acquire()
+  } catch (err) {
+    if (err instanceof Overloaded) return overloadedResponse(err)
+    throw err
+  }
+  const upstream = await fetch(url, {
+    headers: { 'x-service-token': process.env.SERVICE_TOKEN ?? '' },
+    signal: request.signal,
+  }).catch((err) => {
+    release()
+    throw err
+  })
+  if (!upstream.ok || !upstream.body) {
+    release()
+    return new Response(unavailable.message, { status: unavailable.status ?? upstream.status })
+  }
+  return new Response(releaseOnFinish(upstream.body, release), { status: 200, headers: headersFor(upstream) })
+}
+
 /** Wraps a proxied upstream body so a route-level limiter slot (acquired
  * for the life of a stream, not just one request/response cycle — SSE,
  * PDF/artifact downloads) is released exactly once: when the stream ends

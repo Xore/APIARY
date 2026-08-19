@@ -13,7 +13,7 @@
 // backendLimiter's request budget with every cheap JSON call.
 import { createFileRoute } from '@tanstack/react-router'
 import { backendURL } from '../../lib/backend.server'
-import { ConcurrencyLimiter, envInt, Overloaded, overloadedResponse, releaseOnFinish } from '../../lib/backpressure.server'
+import { ConcurrencyLimiter, envInt, limitedStreamProxy } from '../../lib/backpressure.server'
 import { getSession, sidFrom } from '../../lib/session.server'
 
 const HASH_RE = /^[0-9a-fA-F]{32,64}$/
@@ -29,32 +29,17 @@ export const Route = createFileRoute('/api/payload/$hash/download')({
           if (session.role !== 'admin') return new Response('administrator role required', { status: 403 })
         }
         if (!HASH_RE.test(params.hash)) return new Response('invalid payload id', { status: 400 })
-        let release: () => void
-        try {
-          release = await payloadLimiter.acquire()
-        } catch (err) {
-          if (err instanceof Overloaded) return overloadedResponse(err)
-          throw err
-        }
-        const upstream = await fetch(`${backendURL()}/api/v1/payloads/${encodeURIComponent(params.hash)}/raw`, {
-          headers: { 'x-service-token': process.env.SERVICE_TOKEN ?? '' },
-          signal: request.signal,
-        }).catch((err) => {
-          release()
-          throw err
-        })
-        if (!upstream.ok || !upstream.body) {
-          release()
-          return new Response('payload unavailable', { status: upstream.status })
-        }
-        return new Response(releaseOnFinish(upstream.body, release), {
-          status: 200,
-          headers: {
+        return limitedStreamProxy(
+          request,
+          payloadLimiter,
+          `${backendURL()}/api/v1/payloads/${encodeURIComponent(params.hash)}/raw`,
+          (upstream) => ({
             'content-type': 'application/octet-stream',
             'x-content-type-options': 'nosniff',
             'content-disposition': upstream.headers.get('content-disposition') ?? 'attachment',
-          },
-        })
+          }),
+          { message: 'payload unavailable' },
+        )
       },
     },
   },

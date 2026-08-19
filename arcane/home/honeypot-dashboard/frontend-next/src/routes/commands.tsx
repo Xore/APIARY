@@ -2,8 +2,8 @@
 // "command"; the full record rides the inspector.
 import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { usePaginatedList } from '../lib/hooks'
 import type { JsonRecord } from '../lib/json'
 
 type EventRow = {
@@ -56,30 +56,7 @@ const COLUMNS: Column<EventRow>[] = [
 
 function Commands() {
   const { first } = Route.useLoaderData()
-  const [rows, setRows] = useState<EventRow[] | null>(null)
-  const [total, setTotal] = useState(0)
-  const [loadingMore, setLoadingMore] = useState(false)
-  useEffect(() => {
-    let cancelled = false
-    first.then((page) => {
-      if (cancelled || !page) return
-      setRows(page.rows)
-      setTotal(page.total)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [first])
-  const viewMore = useCallback(async () => {
-    if (!rows || loadingMore) return
-    setLoadingMore(true)
-    try {
-      const page = await fetchCommands({ data: { offset: rows.length } })
-      if (page) setRows((current) => [...(current ?? []), ...page.rows])
-    } finally {
-      setLoadingMore(false)
-    }
-  }, [rows, loadingMore])
+  const { rows, total, loadingMore, viewMore } = usePaginatedList(first, (offset) => fetchCommands({ data: { offset } }))
   return (
     <>
       <InvestigateHeader

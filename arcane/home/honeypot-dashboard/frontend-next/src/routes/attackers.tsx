@@ -2,10 +2,10 @@
 // entities), shared master-detail kit; credentials/IPs are pane detail.
 import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { EChart } from '../components/EChart'
 import { AttackerGraph } from '../components/AttackerGraph'
+import { usePaginatedList } from '../lib/hooks'
 
 type AttackerRow = {
   id: string
@@ -59,30 +59,7 @@ const COLUMNS: Column<AttackerRow>[] = [
 
 function Attackers() {
   const { first } = Route.useLoaderData()
-  const [rows, setRows] = useState<AttackerRow[] | null>(null)
-  const [total, setTotal] = useState(0)
-  const [loadingMore, setLoadingMore] = useState(false)
-  useEffect(() => {
-    let cancelled = false
-    first.then((page) => {
-      if (cancelled || !page) return
-      setRows(page.rows)
-      setTotal(page.total)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [first])
-  const viewMore = useCallback(async () => {
-    if (!rows || loadingMore) return
-    setLoadingMore(true)
-    try {
-      const page = await fetchAttackers({ data: { offset: rows.length } })
-      if (page) setRows((current) => [...(current ?? []), ...page.rows])
-    } finally {
-      setLoadingMore(false)
-    }
-  }, [rows, loadingMore])
+  const { rows, total, loadingMore, viewMore } = usePaginatedList(first, (offset) => fetchAttackers({ data: { offset } }))
   return (
     <>
       <InvestigateHeader
