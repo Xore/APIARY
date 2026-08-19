@@ -59,9 +59,14 @@ retirement below), not a hazard.
 ## Cutover procedure
 
 Each step assumes the previous one is verified, not just completed.
-Referenced scripts (`docker compose --profile next up -d`,
-`deploy-dashboard-rolling.sh`) run from each stack's own directory on the
-homeserver, per `docs/CI-CD.md`'s existing deploy conventions.
+Steps 2-4 and 6 (and their rollback) are automated by
+`scripts/cutover-dashboard.sh`, run from the `honeypot-dashboard` stack
+directory on the homeserver (`honeypot-dashboard-backend` is expected as
+the sibling directory `../honeypot-dashboard-backend`, matching how
+Arcane's directory-aware sync materializes both) — see the script's own
+header comment for exactly what it does and does not cover; it does not
+touch Traefik (step 5) or make the step 7 validation/step 8-9
+retirement calls for you.
 
 1. **Confirm #1628's prerequisites are actually met**, not assumed —
    walk its checklist literally, item by item.
@@ -71,33 +76,41 @@ homeserver, per `docs/CI-CD.md`'s existing deploy conventions.
    an empty value there means the two tiers trust every request from
    anything else on `honeynet`, not just each other.
 3. **Bring the new tiers up without touching Traefik**:
-   `docker compose --profile next up -d` in both stacks. All new
-   containers start; nothing external routes to them yet — `dashboard`
-   is still the only thing Traefik reaches.
-4. **Verify from the homeserver directly**, bypassing Traefik entirely
-   (`curl` against the container's own port, or a host port temporarily
-   published for this check only): `/healthz` returns 200, a handful of
-   golden-path pages SSR correctly, `/api/live` streams, login redirects
-   to Keycloak and completes. Run `port-tests/{backend-api,frontend-ssr,
+   `./scripts/cutover-dashboard.sh preflight` — brings up the `next`
+   profile in both stacks (idempotent), hard-fails if
+   `DASHBOARD_SERVICE_TOKEN` resolves empty in either, and health-checks
+   `dashboard-next`/`backend-service`/`backend-service-mounted` directly
+   over the `honeynet` bridge (no host port ever published, so this step
+   alone touches nothing external — `dashboard` is still the only thing
+   Traefik reaches).
+4. **Verify from the homeserver directly**: preflight's own health checks
+   cover `/healthz`; still manually confirm a handful of golden-path
+   pages SSR correctly, `/api/live` streams, and login redirects to
+   Keycloak and completes. Run `port-tests/{backend-api,frontend-ssr,
    auth-flow}.sh` against this live instance if not already fresh.
-5. **Re-point Traefik**: in `vps/traefik/dynamic.yml`, change the
-   `honeypot-dashboard` service's `loadBalancer` target from
-   `socat-hp-dashboard:8090` to wherever `dashboard-next` is reachable
-   from the VPS (a new `socat` forward, same pattern as the existing
-   one, or a direct WireGuard-bridge address — decide based on how
-   `dashboard-next`'s eventual host placement is resolved; today
-   everything is still on one host, so this mirrors the existing
-   `socat-hp-dashboard` pattern exactly). Deploy just this change and
-   watch Traefik's own health check — it hits `/healthz` on an interval,
-   so a bad repoint fails visibly within seconds, not silently.
-6. **Move the port binding**: add a `ports:` mapping to `dashboard-next`
-   in `compose.yml` (host `19090:8080`, same host port the old service
-   held), remove it from `dashboard`, then `docker compose up -d
-   dashboard-next` to apply. Leave `dashboard` running underneath (it
-   just stops being reachable by port or by Traefik) rather than
-   stopping it in this same step — that's the next step, deliberately
-   separated so a problem discovered here doesn't also cost the instant
-   restart-old-service rollback.
+5. **Re-point Traefik** — only if this cutover is ever cross-host; in
+   the current single-host topology the VPS-side `socat-hp-dashboard`
+   forward already points at a fixed home address
+   (`10.8.0.2:19090`) regardless of which container answers there, so
+   step 6's port move is what actually redirects traffic and no Traefik
+   change is needed. If a future cross-host split does need this,
+   change `vps/traefik/dynamic.yml`'s `honeypot-dashboard` service
+   `loadBalancer` target and deploy via `.github/workflows/deploy.yml`'s
+   own Traefik-config step (not something a homeserver script can drive).
+6. **Move the port binding**: `./scripts/cutover-dashboard.sh cutover`
+   — re-runs preflight, stops `dashboard` (frees host port `19090`;
+   the container and its image are left in place for rollback — not
+   yet removed), applies the port move to `dashboard-next` via a
+   generated `cutover.override.yml` layered on top of the checked-in
+   `compose.yml` rather than a live-only hand-edit of it, and waits for
+   `dashboard-next` to report healthy on the live port. If this
+   sticks, move that `ports:` mapping into `compose.yml` itself in a
+   real PR afterward and delete the override file — a live-only edit
+   risks a later Arcane gitops-sync silently reverting it.
+   `./scripts/cutover-dashboard.sh rollback` reverses this exactly:
+   stops `dashboard-next`'s override-added binding, deletes the
+   override file, and restarts `dashboard` (reusing
+   `deploy-dashboard-rolling.sh`'s own Health.Status poll).
 7. **Full live validation**: every golden-path page, every export/
    download path, SSE, settings save, credentials/canarytokens actions,
    report generation, auth (login, TOTP, logout, session expiry),
@@ -122,8 +135,11 @@ homeserver, per `docs/CI-CD.md`'s existing deploy conventions.
 ## Hard-cutover removal list (step 9 above, spelled out)
 
 - `dashboard` Compose service and its container, plus `scripts/
-  deploy-dashboard-rolling.sh` (superseded — replace with whatever
-  redeploy tooling #1628's "no redeploy tooling" item lands)
+  deploy-dashboard-rolling.sh` (superseded by `scripts/
+  cutover-dashboard.sh` for the cutover path — redeploying
+  `dashboard-next` afterward is still the plain `docker compose build
+  <service> && docker compose up -d <service>` `docs/CI-CD.md` already
+  describes; that part didn't need its own wrapper)
 - `arcane/home/honeypot-attacker-identity-worker/` stack, if its
   Rust replacement in `backend-worker` was confirmed at parity (#1628's
   worker-retirement decision, not automatic)
