@@ -253,6 +253,15 @@
     "maxSyncFiles": 2500
   },
   {
+    "syncName": "honeypot-dashboard-backend",
+    "gitRepo": "apiary",
+    "branch": "main",
+    "dockerComposePath": "arcane/home/honeypot-dashboard-backend/compose.yml",
+    "autoSync": false,
+    "syncDirectory": true,
+    "syncInterval": 300
+  },
+  {
     "syncName": "honeypot-utilities",
     "gitRepo": "apiary",
     "branch": "main",

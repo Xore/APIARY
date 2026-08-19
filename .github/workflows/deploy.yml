@@ -30,7 +30,7 @@ jobs:
       # install-analysis-host.sh --host-files-only) -- every stack that
       # used to build from or bind-mount an absolute path under
       # /opt/stacks/apiary is now either an Arcane-managed directory-aware
-      # Git sync with its own self-contained build context (32 stacks,
+      # Git sync with its own self-contained build context (33 stacks,
       # arcane/home/<name>/) or one of the 6 stacks that were already
       # self-contained and are provisioned by scripts/install-homeserver.sh
       # instead of this file. Kept rather than removed: still the simplest
@@ -149,13 +149,13 @@ jobs:
       # problem #1502's own migration review flagged: two independent
       # mechanisms racing to own the same on-host directory. What's left
       # for this job to do now is a lightweight CI gate: every stack listed
-      # in the manifest -- the 32 that migrated under arcane/home/ plus the
+      # in the manifest -- the 33 that migrated under arcane/home/ plus the
       # 6 that were already self-contained (auth-events-worker, llm-worker,
       # ml-worker, ghidra, ghosts, pihole) and stayed at their existing
       # path -- still has a syntactically valid compose file, so a broken
       # commit on this branch fails here instead of silently sitting
       # unsynced (or, worse, half-synced) on the Arcane side. None of those
-      # 38 are deployed by this workflow at all any more; the 6
+      # 39 are deployed by this workflow at all any more; the 6
       # self-contained ones are still provisioned by
       # scripts/install-homeserver.sh's own dedicated steps on a
       # from-scratch install, not by anything in this file.
@@ -167,7 +167,7 @@ jobs:
           # fail on purpose when nothing provides a real value -- that's
           # the fail-closed behavior #1502's own migration deliberately
           # kept, not something CI should route around with a hand-
-          # maintained list of every required var across 38 stacks (which
+          # maintained list of every required var across 39 stacks (which
           # would silently drift the moment a new one is added). Instead:
           # retry with whatever variable Compose's own error names as
           # missing set to a throwaway placeholder, until config succeeds
