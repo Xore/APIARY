@@ -307,6 +307,27 @@ impl Es {
         Ok(())
     }
 
+    /// `_delete_by_query` with a caller-supplied query, returning the
+    /// deleted count — the general-purpose sibling of
+    /// `delete_by_query_except`'s keep-list-shaped one. Ported from
+    /// elastic.go's purgeDeadLetters: `conflicts=proceed`, same reasoning
+    /// as above (a version conflict mid-sweep isn't worth aborting over).
+    pub async fn delete_by_query(&self, index: &str, query: Value) -> anyhow::Result<u64> {
+        let response = self
+            .client
+            .delete_by_query(elasticsearch::DeleteByQueryParts::Index(&[index]))
+            .conflicts(elasticsearch::params::Conflicts::Proceed)
+            .body(serde_json::json!({"query": query}))
+            .send()
+            .await?;
+        let status = response.status_code();
+        let body = response.json::<Value>().await.unwrap_or_default();
+        if !status.is_success() {
+            anyhow::bail!("elasticsearch delete_by_query {}: {}", status, body);
+        }
+        Ok(body["deleted"].as_u64().unwrap_or(0))
+    }
+
     pub async fn ping(&self) -> bool {
         self.client
             .ping()

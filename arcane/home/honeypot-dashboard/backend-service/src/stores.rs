@@ -30,6 +30,12 @@ pub struct StoreQuery {
     pub offset: u64,
     #[serde(default = "default_size")]
     pub size: u64,
+    /// Free-text Lucene query string (dead-letters' search box, elastic.go's
+    /// deadLetters `q` param). Only dead-letters.tsx sends this today, but
+    /// every generic-backed store list can use it — additive, ignored by
+    /// callers that never set it.
+    #[serde(default)]
+    pub q: Option<String>,
 }
 
 fn default_size() -> u64 {
@@ -61,7 +67,13 @@ async fn store_page_excluding(
     excludes: &[&str],
 ) -> anyhow::Result<Value> {
     let size = q.size.min(100);
-    let query = extra_filter.unwrap_or_else(|| json!({"match_all": {}}));
+    let query = match extra_filter {
+        Some(filter) => filter,
+        None => match q.q.as_deref().map(str::trim).filter(|text| !text.is_empty()) {
+            Some(text) => json!({"query_string": {"query": text, "default_operator": "AND"}}),
+            None => json!({"match_all": {}}),
+        },
+    };
     let mut body = json!({
         "from": q.offset,
         "size": size,
@@ -236,4 +248,38 @@ pub async fn generic(
         .await
         .map(Json)
         .map_err(bad_gateway)
+}
+
+#[derive(Deserialize)]
+pub struct PurgeQuery {
+    #[serde(default)]
+    pub q: Option<String>,
+}
+
+/// DELETE /api/v1/store/{name} — allowlisted like `generic`'s GET side,
+/// but only dead-letters has a delete today (ported from elastic.go's
+/// purgeDeadLetters). Sharing the route with `generic` rather than
+/// registering a second literal path at `/api/v1/store/dead-letters`
+/// avoids relying on axum/matchit's literal-over-param route precedence
+/// for what would otherwise be an overlapping registration.
+///
+/// Admin-gated at the BFF (not here), same posture as every other admin
+/// action in this tier. Purges exactly the same `q` Lucene query-string
+/// scope the GET side searches with — an absent/empty q purges every
+/// retained dead letter, matching Go's documented "the operator purges
+/// exactly the scope they were just looking at" contract.
+pub async fn generic_delete(
+    axum::extract::Path(name): axum::extract::Path<String>,
+    State(state): State<AppState>,
+    Query(q): Query<PurgeQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    if name != "dead-letters" {
+        return Err((StatusCode::METHOD_NOT_ALLOWED, format!("store {name} has no delete route")));
+    }
+    let query = match q.q.as_deref().map(str::trim).filter(|text| !text.is_empty()) {
+        Some(text) => json!({"query_string": {"query": text, "default_operator": "AND"}}),
+        None => json!({"match_all": {}}),
+    };
+    let deleted = state.es.delete_by_query("dead-letter-honeypot", query).await.map_err(bad_gateway)?;
+    Ok(Json(json!({"deleted": deleted})))
 }
