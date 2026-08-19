@@ -178,6 +178,26 @@ alone. Re-verify against whatever Arcane version is pinned in
   `destroy` call and be ready to bring the affected service back up by
   hand (plain `docker compose up -d`, same as the ghosts-api workaround
   above) rather than assuming the next sync attempt alone will do it.
+- **Arcane has no Docker Compose `profiles:` support at all** — not a
+  quirk, a confirmed missing feature
+  ([getarcaneapp/arcane#1193](https://github.com/getarcaneapp/arcane/issues/1193),
+  open/unimplemented as of v2.8.1, the latest release at time of writing).
+  Confirmed independently against this deployment: `GET
+  /environments/0/gitops-syncs` and `GET
+  /environments/0/projects/{id}` both return zero profile-related fields
+  anywhere in their schemas, and `honeypot-dashboard`'s own project record
+  reports `serviceCount: 4` / `runningCount: 4` — exactly its four
+  profile-less services (`dashboard`, `oidc-sessions`,
+  `es-results-importer`, `services-adapter`), with none of its
+  `profiles: ["next"]`-gated services (`dashboard-next`, `backend-worker`,
+  etc.) counted or running. This settles #1628's own open question: a
+  sync brings up only a stack's base (non-profiled) services; activating
+  any `profiles:`-gated service group — `next` here, same as
+  `geoip-update`/`threat-intel`/`revdeck`/`mitm`/`test`/`blackhole`
+  elsewhere in this repo — is always a manual `docker compose --profile X
+  up -d` run against the synced directory on the host afterward. There is
+  no Arcane-native mechanism (env override or otherwise) that activates a
+  profile instead.
 
 ## Local environment overrides
 

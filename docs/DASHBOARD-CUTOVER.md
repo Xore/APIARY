@@ -5,6 +5,22 @@ Status: first draft runbook for #1628. Unlike
 end-to-end — refine it against what actually happens the first time it's
 run, the way that doc was.
 
+**Confirmed live against the homeserver (2026-08-20): the `next` profile
+has never been activated.** `honeypot-dashboard`'s Arcane project reports
+exactly 4 running services — `dashboard`, `oidc-sessions`,
+`es-results-importer`, `services-adapter`, all legacy — and zero
+`hp-apiary-*` containers exist anywhere on the host. `dashboard-next`,
+`backend-service`, and every Rust worker (`backend-worker`,
+`backend-worker-importer`, `backend-worker-enrichment`,
+`backend-service-mounted`) have never run in production. This means:
+no bake period has started for any worker, so none of #1628's
+worker-retirement decisions can move to "retire" yet regardless of how
+much parity testing has landed in CI — that testing proves the Rust
+implementations are *correct*, not that they've *run* against real
+production load. The actual next step, once #1628's remaining ops-
+blocker items are resolved, is step 3 below (`cutover-dashboard.sh
+preflight`) for the very first time — not any worker's retirement.
+
 Tracking issue for everything this cutover depends on:
 [#1628](https://github.com/Xore/APIARY/issues/1628). **Do not start the
 procedure below until every item in that issue's "Deployment / ops
