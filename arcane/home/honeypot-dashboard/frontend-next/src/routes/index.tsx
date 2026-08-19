@@ -56,8 +56,6 @@ type Presentation = {
   dashboard_title?: string
   dashboard_subtitle?: string
   footer_text?: string
-  banner_text?: string
-  banner_severity?: string
 }
 
 const fetchKpis = createServerFn({ method: 'GET' }).handler(async (): Promise<OverviewKpis | null> => {
@@ -213,11 +211,6 @@ function Overview() {
   return (
     <>
       <header className="hp-hero" id="overview-header">
-        {presentation?.banner_text ? (
-          <div className={presentation.banner_severity === 'critical' ? 'badge badge--danger' : 'badge badge--warning'}>
-            {presentation.banner_text}
-          </div>
-        ) : null}
         <div className="label-section">{presentation?.dashboard_title || 'Honeypot command center'}</div>
         <Suspense fallback={<h1>{greeting('')}</h1>}>
           <Await promise={data.kpis}>{(kpis) => <h1>{greeting(kpis?.change24h ?? '')}</h1>}</Await>

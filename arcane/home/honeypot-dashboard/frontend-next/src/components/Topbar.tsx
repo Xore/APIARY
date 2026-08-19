@@ -4,8 +4,9 @@
 import { Link, useRouterState } from '@tanstack/react-router'
 import { pageFor, sectionFor } from '../lib/nav'
 import { cycleTheme, useThemeMode } from '../lib/prefs'
+import type { BannerView } from '../lib/banner'
 
-export function Topbar() {
+export function Topbar({ banner }: { banner?: BannerView | null }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const mode = useThemeMode()
   const section = sectionFor(pathname)
@@ -78,6 +79,11 @@ export function Topbar() {
           ·
         </a>
       </div>
+      {banner ? (
+        <div className={`alert alert--${banner.severity} app-toolbar__banner`} role="status">
+          {banner.text}
+        </div>
+      ) : null}
     </header>
   )
 }
