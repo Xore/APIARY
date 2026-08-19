@@ -374,6 +374,27 @@ fn merge_entity_into(a: &mut Working, b: &Working) {
     }
 }
 
+/// KNOWN GAP (found during #1628's worker-retirement research, not yet
+/// resolved): this seeds on a timestamp, and the old Go worker's own
+/// newEntityID does too — but with a different string format (Go's
+/// RFC3339Nano trims trailing zero fractional digits; this always emits 9).
+/// Two uncoordinated writers that each independently see the same
+/// never-before-seen attacker IP within one cycle (a real possibility
+/// during any dual-write bake period, since neither implementation checks
+/// with the other before minting a new entity) will therefore compute two
+/// different IDs for it and create two separate attackers-v1 documents
+/// both claiming that IP — corrupting the "one IP -> one entity" invariant.
+/// This is NOT fixed by matching the timestamp format between the two
+/// implementations; the race is inherent to any two uncoordinated writers
+/// minting new primary keys concurrently, format aside. Do not assume a
+/// dual-write bake period is safe for this specific worker (unlike
+/// agent-intrusion-worker, whose campaign_id is a pure function of event
+/// content and is safely idempotent under concurrent writers) without
+/// either fixing the ID scheme to be IP-derived only (dropping the
+/// timestamp seed so repeated/concurrent runs converge on the same ID for
+/// the same IP) or stopping the old worker before starting this one,
+/// rather than running them side by side. Flag for an explicit decision —
+/// do not silently redesign this.
 fn new_entity_id(seed_ip: &str, at: chrono::DateTime<chrono::Utc>) -> String {
     let nanos = at.format("%Y-%m-%dT%H:%M:%S%.9fZ").to_string();
     let digest = Sha256::digest(format!("attacker:{seed_ip}:{nanos}").as_bytes());

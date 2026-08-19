@@ -432,6 +432,19 @@ impl Es {
         page_size: u64,
         max_pages: u32,
     ) -> anyhow::Result<Vec<Value>> {
+        // A PIT open on an index that doesn't exist yet returns 404 — the
+        // expected state before a caller's very first successful write
+        // (every dashboard-owned index here is created lazily on first
+        // index_doc). Ported from attacker-identity-worker's own
+        // docScrollAll: treating that as "zero existing documents" rather
+        // than an error is what lets a caller like attacker_identity.rs's
+        // load_existing_entities bootstrap past its first cycle instead of
+        // looping forever on a load failure.
+        let exists = self.client.indices().exists(elasticsearch::indices::IndicesExistsParts::Index(&[index_pattern])).send().await?;
+        if exists.status_code().as_u16() == 404 {
+            return Ok(Vec::new());
+        }
+
         let open = self
             .client
             .open_point_in_time(elasticsearch::OpenPointInTimeParts::Index(&[index_pattern]))

@@ -323,3 +323,165 @@ pub async fn agent_intrusion_loop(state: AppState) {
         tracing::info!(written, "agent-intrusion: cycle complete");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The shared ground-truth corpus (already exercised independently by
+    // campaign_correlator.rs's and criticality_rules.rs's own corpus-driven
+    // tests) — included from its single source of truth rather than
+    // duplicated here, so this can never silently drift from what the
+    // corpus's own authors hand-labeled. Same file the old Python worker's
+    // test_worker.py::TestFullPipelineAgainstRealCorpus loads.
+    const CORPUS_JSONL: &str =
+        include_str!("../../../honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/corpus.jsonl");
+
+    fn load_corpus() -> Vec<(CorrelatorEvent, bool)> {
+        CORPUS_JSONL
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| {
+                let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
+                let event = CorrelatorEvent {
+                    event_id: parsed["event_id"].as_str().unwrap().to_string(),
+                    timestamp: parsed["timestamp"].as_str().unwrap().to_string(),
+                    raw: parsed["raw"].clone(),
+                };
+                let is_benign = parsed["is_benign"].as_bool().unwrap_or(false);
+                (event, is_benign)
+            })
+            .collect()
+    }
+
+    /// Ports test_worker.py's TestFullPipelineAgainstRealCorpus — proves
+    /// campaign_correlator.rs and criticality_rules.rs (each already
+    /// verified against the corpus independently, in their own test
+    /// modules) produce the same real capstone finding when driven through
+    /// this module's own correlate-then-score wiring, the exact call
+    /// sequence run_cycle uses — not just when called directly by their
+    /// own unit tests. This is the one thing nothing in the Rust crate
+    /// exercised before: the wiring itself, not either half in isolation.
+    #[test]
+    fn merged_campaign_still_reaches_critical_through_worker_wiring() {
+        let events: Vec<CorrelatorEvent> = load_corpus().into_iter().map(|(e, _)| e).collect();
+        let campaigns = campaign_correlator::correlate_campaigns(&events, chrono::Duration::hours(72));
+        let events_by_id: HashMap<String, CorrelatorEvent> = events.into_iter().map(|e| (e.event_id.clone(), e)).collect();
+        let critical: Vec<serde_json::Value> = campaigns
+            .iter()
+            .filter_map(|c| build_campaign_verdict(c, &events_by_id))
+            .filter(|v| v["severity"] == "critical")
+            .collect();
+        assert_eq!(critical.len(), 1);
+        assert!(critical[0]["event_count"].as_u64().unwrap() >= 8);
+        let member_ids: Vec<&str> = critical[0]["events"].as_array().unwrap().iter().map(|e| e["event_id"].as_str().unwrap()).collect();
+        assert!(member_ids.contains(&"corpus-017"));
+    }
+
+    #[test]
+    fn benign_only_events_never_produce_a_verdict() {
+        let benign: Vec<CorrelatorEvent> = load_corpus().into_iter().filter(|(_, is_benign)| *is_benign).map(|(e, _)| e).collect();
+        assert!(!benign.is_empty(), "corpus fixture should contain at least one benign event");
+        let campaigns = campaign_correlator::correlate_campaigns(&benign, chrono::Duration::hours(72));
+        let events_by_id: HashMap<String, CorrelatorEvent> = benign.into_iter().map(|e| (e.event_id.clone(), e)).collect();
+        let verdicts: Vec<serde_json::Value> = campaigns.iter().filter_map(|c| build_campaign_verdict(c, &events_by_id)).collect();
+        assert!(verdicts.is_empty());
+    }
+
+    // normalize_timestamp — ports TestNormalizeTimestamp, previously
+    // untested on the Rust side.
+    #[test]
+    fn normalize_timestamp_bare_z_suffix_passes_through() {
+        assert_eq!(normalize_timestamp("2026-01-01T00:00:00Z").as_deref(), Some("2026-01-01T00:00:00Z"));
+    }
+
+    #[test]
+    fn normalize_timestamp_truncates_fractional_seconds() {
+        assert_eq!(normalize_timestamp("2026-01-01T00:00:00.123456Z").as_deref(), Some("2026-01-01T00:00:00Z"));
+    }
+
+    #[test]
+    fn normalize_timestamp_normalizes_a_numeric_utc_offset_to_z() {
+        assert_eq!(normalize_timestamp("2026-01-01T02:00:00+02:00").as_deref(), Some("2026-01-01T00:00:00Z"));
+    }
+
+    #[test]
+    fn normalize_timestamp_rejects_an_unparseable_string() {
+        assert_eq!(normalize_timestamp("not-a-timestamp"), None);
+    }
+
+    // sensor_raw — ports the ES-shape-unwrap intent of
+    // TestFetchWindowEvents::test_unwraps_live_honeypot_ecs_shape, without
+    // needing a FakeElasticsearch: this function is a pure mapping of one
+    // already-fetched _source document, so it's directly testable.
+    #[test]
+    fn sensor_raw_unwraps_the_honeypot_sub_document() {
+        let source = serde_json::json!({"honeypot": {"src_ip": "203.0.113.5"}, "event": {"category": "network"}});
+        assert_eq!(sensor_raw(&source)["src_ip"], "203.0.113.5");
+    }
+
+    #[test]
+    fn sensor_raw_unwraps_the_suricata_eve_sub_document() {
+        let source = serde_json::json!({"suricata": {"eve": {"src_ip": "203.0.113.6"}}});
+        assert_eq!(sensor_raw(&source)["src_ip"], "203.0.113.6");
+    }
+
+    #[test]
+    fn sensor_raw_falls_back_to_the_bare_source_for_corpus_style_fixtures() {
+        // Corpus fixtures already use the sensor-native shape at the top
+        // level (no honeypot/suricata.eve wrapper) — this is the branch
+        // load_corpus()'s own events above exercise implicitly.
+        let source = serde_json::json!({"src_ip": "203.0.113.7"});
+        assert_eq!(sensor_raw(&source)["src_ip"], "203.0.113.7");
+    }
+
+    // build_campaign_verdict — ports the shape of TestBuildCampaignVerdict,
+    // previously untested on the Rust side (only criticality_rules.rs's
+    // own campaign_severity/evaluate_event were tested, never this
+    // module's wiring around them).
+    fn hand_built_event(id: &str, ts: &str, raw: serde_json::Value) -> CorrelatorEvent {
+        CorrelatorEvent { event_id: id.to_string(), timestamp: ts.to_string(), raw }
+    }
+
+    #[test]
+    fn build_campaign_verdict_yields_none_for_a_low_severity_campaign() {
+        let events = vec![hand_built_event(
+            "e1",
+            "2026-01-01T00:00:00Z",
+            serde_json::json!({"eventid": "cowrie.session.connect", "session": "s1", "src_ip": "203.0.113.5"}),
+        )];
+        let events_by_id: HashMap<String, CorrelatorEvent> = events.into_iter().map(|e| (e.event_id.clone(), e)).collect();
+        let campaign = Campaign {
+            event_ids: vec!["e1".to_string()],
+            identifiers: ["session:s1".to_string()].into_iter().collect(),
+            start: "2026-01-01T00:00:00Z".to_string(),
+            end: "2026-01-01T00:00:00Z".to_string(),
+        };
+        assert!(build_campaign_verdict(&campaign, &events_by_id).is_none());
+    }
+
+    #[test]
+    fn build_campaign_verdict_campaign_id_is_deterministic_regardless_of_event_order() {
+        // A single matched rule already reaches "high" (campaign_severity's
+        // own threshold is >=1 category for high, >=3 for critical) — one
+        // rule-triggering event is enough to get a real verdict back.
+        let raw = serde_json::json!({"event": "container_create", "flags": ["--privileged", "-v", "/:/host"]});
+        let make_events = |order: [&str; 2]| -> HashMap<String, CorrelatorEvent> {
+            order
+                .into_iter()
+                .enumerate()
+                .map(|(i, id)| (id.to_string(), hand_built_event(id, &format!("2026-01-01T00:0{i}:00Z"), raw.clone())))
+                .collect()
+        };
+        let campaign_a = Campaign {
+            event_ids: vec!["a".to_string(), "b".to_string()],
+            identifiers: ["session:s1".to_string()].into_iter().collect(),
+            start: "2026-01-01T00:00:00Z".to_string(),
+            end: "2026-01-01T00:01:00Z".to_string(),
+        };
+        let campaign_b = Campaign { event_ids: vec!["b".to_string(), "a".to_string()], ..campaign_a.clone() };
+        let verdict_a = build_campaign_verdict(&campaign_a, &make_events(["a", "b"])).expect("single-rule match should reach high severity");
+        let verdict_b = build_campaign_verdict(&campaign_b, &make_events(["b", "a"])).expect("same fixture, reversed event order");
+        assert_eq!(verdict_a["campaign_id"], verdict_b["campaign_id"]);
+    }
+}
