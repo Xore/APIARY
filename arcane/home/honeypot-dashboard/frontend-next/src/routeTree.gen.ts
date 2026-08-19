@@ -40,6 +40,7 @@ import { Route as ApiLiveRouteImport } from './routes/api/live'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
 import { Route as AuthLoginRouteImport } from './routes/auth/login'
 import { Route as AuthLogoutRouteImport } from './routes/auth/logout'
+import { Route as BffSplatRouteImport } from './routes/bff.$'
 import { Route as ExportPortbridgeManualBlackholeDottxtRouteImport } from './routes/export.portbridge-manual-blackhole[.]txt'
 import { Route as GhidraShaRouteImport } from './routes/ghidra.$sha'
 import { Route as PayloadAnalysisHashRouteImport } from './routes/payload-analysis.$hash'
@@ -208,6 +209,11 @@ const AuthLogoutRoute = AuthLogoutRouteImport.update({
   path: '/auth/logout',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BffSplatRoute = BffSplatRouteImport.update({
+  id: '/bff/$',
+  path: '/bff/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ExportPortbridgeManualBlackholeDottxtRoute =
   ExportPortbridgeManualBlackholeDottxtRouteImport.update({
     id: '/export/portbridge-manual-blackhole.txt',
@@ -304,6 +310,7 @@ export interface FileRoutesByFullPath {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
+  '/bff/$': typeof BffSplatRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/ghidra/$sha': typeof GhidraShaRoute
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
@@ -349,6 +356,7 @@ export interface FileRoutesByTo {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
+  '/bff/$': typeof BffSplatRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/ghidra/$sha': typeof GhidraShaRoute
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
@@ -395,6 +403,7 @@ export interface FileRoutesById {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
+  '/bff/$': typeof BffSplatRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/ghidra/$sha': typeof GhidraShaRoute
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
@@ -442,6 +451,7 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
+    | '/bff/$'
     | '/export/portbridge-manual-blackhole.txt'
     | '/ghidra/$sha'
     | '/payload-analysis/$hash'
@@ -487,6 +497,7 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
+    | '/bff/$'
     | '/export/portbridge-manual-blackhole.txt'
     | '/ghidra/$sha'
     | '/payload-analysis/$hash'
@@ -532,6 +543,7 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
+    | '/bff/$'
     | '/export/portbridge-manual-blackhole.txt'
     | '/ghidra/$sha'
     | '/payload-analysis/$hash'
@@ -578,6 +590,7 @@ export interface RootRouteChildren {
   AuthCallbackRoute: typeof AuthCallbackRoute
   AuthLoginRoute: typeof AuthLoginRoute
   AuthLogoutRoute: typeof AuthLogoutRoute
+  BffSplatRoute: typeof BffSplatRoute
   ExportPortbridgeManualBlackholeDottxtRoute: typeof ExportPortbridgeManualBlackholeDottxtRoute
   GhidraShaRoute: typeof GhidraShaRoute
   PayloadAnalysisHashRoute: typeof PayloadAnalysisHashRoute
@@ -811,6 +824,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthLogoutRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/bff/$': {
+      id: '/bff/$'
+      path: '/bff/$'
+      fullPath: '/bff/$'
+      preLoaderRoute: typeof BffSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/export/portbridge-manual-blackhole.txt': {
       id: '/export/portbridge-manual-blackhole.txt'
       path: '/export/portbridge-manual-blackhole.txt'
@@ -930,6 +950,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthCallbackRoute: AuthCallbackRoute,
   AuthLoginRoute: AuthLoginRoute,
   AuthLogoutRoute: AuthLogoutRoute,
+  BffSplatRoute: BffSplatRoute,
   ExportPortbridgeManualBlackholeDottxtRoute:
     ExportPortbridgeManualBlackholeDottxtRoute,
   GhidraShaRoute: GhidraShaRoute,

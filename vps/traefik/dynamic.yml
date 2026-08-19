@@ -404,6 +404,34 @@ http:
         options: modern
       middlewares: [security-headers-dashboard-pdf]
 
+    # #1608 architecture addendum (2026-08-17): the frontend/BFF host split
+    # requires the /bff/* proxy surface (frontend-next's routes/bff.$.ts,
+    # see lib/backend.server.ts's serviceFetch) to always resolve to
+    # whichever host is actually running the BFF role, independent of the
+    # bare Host() match below that sends "everything else" to the
+    # frontend-only tier once split.
+    #
+    # Currently a no-op in practice: dashboard-next isn't cut over yet
+    # (still behind compose.yml's `profiles: ["next"]`, unreached from
+    # here), and even once it is, both roles still run combined
+    # (SERVE_MODE=all, loopback bffInternalURL) on the single
+    # honeypot-dashboard service below -- #1622 is what stands up a second
+    # docker host and its own socat bridge for a BFF-only instance. At that
+    # point only this router's `service:` target needs to change to point
+    # at that new bridge instead of reusing honeypot-dashboard.
+    #
+    # Longer rule than the bare Host() below, so Traefik's automatic
+    # rule-specificity priority already picks this one first -- same
+    # mechanism honeypot-dashboard-pdf/-github-analysis-pdf/-ghidra-report
+    # above rely on, no explicit `priority:` needed.
+    honeypot-dashboard-bff:
+      rule: "Host(`honeypot.honeypot.example`) && PathPrefix(`/bff`)"
+      entryPoints: [websecure]
+      service: honeypot-dashboard
+      tls:
+        options: modern
+      middlewares: [security-headers]
+
     # dashboard.honeypot.example redirects here rather than sharing this
     # router: the dashboard's own native OIDC runtime (#1026) has
     # OIDC_EXTERNAL_URL hardcoded to a single host (honeypot.honeypot.example)
