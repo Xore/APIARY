@@ -1,6 +1,6 @@
 # Arcane Git sync
 
-How the 38 home-hosted stacks (32 that migrated under `arcane/home/` plus 6
+How the 39 home-hosted stacks (33 that migrated under `arcane/home/` plus 6
 that were already self-contained and stayed at their existing path) get to
 the live host, replacing the old model of copying or symlinking top-level
 `docker-compose.*.yml` files into place. Everything here was confirmed live
@@ -15,11 +15,11 @@ Each stack gets its own **directory-aware Git sync**: Arcane clones the
 selected `compose.yml` (not just that one file) under
 `/var/dockge/stacks/<syncName>/`, and deploys it. The manifest at
 [`arcane/manifests/home-production.json`](../arcane/manifests/home-production.json)
-is the single source of truth for which 38 stacks exist, what branch/path
+is the single source of truth for which 39 stacks exist, what branch/path
 each syncs from, and any per-stack sync limits — `scripts/install-homeserver.sh`,
 CI, and this doc all read from it rather than maintaining separate lists.
 
-- The 32 `honeypot-*` stacks live under `arcane/home/<name>/`: their build
+- The 33 `honeypot-*` stacks live under `arcane/home/<name>/`: their build
   context and git-tracked config were moved there from repository root
   (see each compose file's own `#1502` comment for what moved and why).
 - The 6 other stacks (`auth-events-worker`, `llm-worker`, `ml-worker`,
@@ -182,7 +182,7 @@ alone. Re-verify against whatever Arcane version is pinned in
 ## Local environment overrides
 
 Compose's own `.env`-in-project-directory interpolation already covers
-every `${VAR}` reference in these 38 stacks — none of them use `env_file:`,
+every `${VAR}` reference in these 39 stacks — none of them use `env_file:`,
 and none needed it added. Arcane's effective environment merge
 (`project.env` + `.env.git` → `.env`) feeds that same mechanism
 transparently, so a local override set through Arcane's own UI for a synced
