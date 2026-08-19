@@ -4,6 +4,12 @@
 //!   + behavior), driving branding text across the frontend.
 //! - PUT /api/v1/config/presentation — replace the presentation block
 //!   (revision+1); the BFF enforces the admin role before calling.
+//! - PUT /api/v1/config/{section} for section in {honeypot, behavior,
+//!   report-presets} — same shape as put_presentation, one level deeper:
+//!   each replaces its own `payload.*` block (honeypot / behavior /
+//!   report_presets respectively). Still deliberately JSON `Value`-level,
+//!   not settings_admin_api.go's typed behaviorPatch/honeypotPatch +
+//!   pinned-field + impact-classification machinery — see put_config_section.
 //! - GET /api/v1/config/history, POST /api/v1/config/rollback (#1612) —
 //!   revision history and restore, working at the JSON `Value` level like
 //!   everything else here rather than porting settings_admin_api.go's full
@@ -13,7 +19,7 @@
 //!   seen timestamps; per-user preference blobs stay out of the list).
 
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
@@ -81,6 +87,73 @@ pub async fn put_presentation(
         .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?;
     let revision = doc["revision"].as_i64().unwrap_or(0);
     let fields = vec!["presentation".to_string()];
+    state.config_history.append(HistoryEntry {
+        revision,
+        time: String::new(),
+        actor_subject: actor.actor_subject.clone(),
+        actor_username: actor.actor_username.clone(),
+        action: "update".into(),
+        fields: fields.clone(),
+        payload: doc["payload"].clone(),
+    });
+    state.audit.log(AuditEvent {
+        actor_subject: actor.actor_subject,
+        actor_username: actor.actor_username,
+        action: "config.update".into(),
+        fields,
+        revision,
+        result: "success".into(),
+        ..Default::default()
+    });
+    Ok(Json(doc))
+}
+
+/// URL section name -> `payload.*` key. Only these three are exposed here;
+/// `presentation` keeps its own dedicated route/handler above.
+fn config_section_key(section: &str) -> Option<&'static str> {
+    match section {
+        "honeypot" => Some("honeypot"),
+        "behavior" => Some("behavior"),
+        "report-presets" => Some("report_presets"),
+        _ => None,
+    }
+}
+
+/// PUT /api/v1/config/{section} — identical in shape to put_presentation,
+/// just parameterized over which `payload.*` block it replaces. Backs the
+/// three settings.tsx admin panes that were previously entirely missing
+/// server-side storage: Honeypot operations (staged thresholds, applied on
+/// the consuming services' next restart — this endpoint only stores the
+/// values), Dashboard behavior (live global defaults + feature toggles),
+/// and Report Studio presets (per-preset name/description override map,
+/// keyed by template id — an arbitrary object, same as everywhere else in
+/// this file that just round-trips whatever JSON `Value` it's given).
+pub async fn put_config_section(
+    State(state): State<AppState>,
+    Path(section): Path<String>,
+    Query(actor): Query<ActorQuery>,
+    Json(value): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let Some(payload_key) = config_section_key(&section) else {
+        return Err((StatusCode::NOT_FOUND, "unknown config section".into()));
+    };
+    if !value.is_object() {
+        return Err((StatusCode::BAD_REQUEST, format!("{payload_key} object required")));
+    }
+    let mut doc = load_config(&state)
+        .await
+        .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?
+        .unwrap_or_else(|| json!({"schema_version": 4, "revision": 0, "payload": {}}));
+    doc["payload"][payload_key] = value;
+    doc["revision"] = json!(doc["revision"].as_u64().unwrap_or(0) + 1);
+    doc["updated"] = json!(chrono::Utc::now().to_rfc3339());
+    state
+        .es
+        .index_doc(CONFIG_INDEX, CONFIG_ID, doc.clone())
+        .await
+        .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?;
+    let revision = doc["revision"].as_i64().unwrap_or(0);
+    let fields = vec![payload_key.to_string()];
     state.config_history.append(HistoryEntry {
         revision,
         time: String::new(),

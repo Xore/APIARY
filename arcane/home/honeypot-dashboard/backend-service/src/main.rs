@@ -172,6 +172,10 @@ async fn main() -> anyhow::Result<()> {
             "/api/v1/config/presentation",
             axum::routing::put(config::put_presentation),
         )
+        .route(
+            "/api/v1/config/{section}",
+            axum::routing::put(config::put_config_section),
+        )
         .route("/api/v1/config/history", get(config::history))
         .route("/api/v1/config/rollback", post(config::rollback))
         .route("/api/v1/users", get(config::users))
