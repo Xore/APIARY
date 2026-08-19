@@ -243,7 +243,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/alerts", get(stores::alerts))
         .route("/api/v1/alerts/{key}/ack", post(stores::acknowledge))
         .route("/api/v1/canarytokens/types", get(canarytokens::types))
-        .route("/api/v1/canarytokens", post(canarytokens::create))
+        .route("/api/v1/canarytokens", get(canarytokens::list).post(canarytokens::create))
         .route("/api/v1/canarytokens/{id}/download", get(canarytokens::download))
         // #1612 misc write paths: honeyfs-implant credential provisioning/
         // rotation (credentials_manager.go/credentials_api.go). Plain HTTP
@@ -257,7 +257,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/credentials/{id}/link-token", post(credentials::link_token))
         .route("/api/v1/payloads", get(stores::payloads))
         .route("/api/v1/payloads/{hash}", get(payload_detail::detail))
-        .route("/api/v1/store/{name}", get(stores::generic))
+        .route("/api/v1/payloads/{hash}/raw", get(payload_detail::raw))
+        .route("/api/v1/store/{name}", get(stores::generic).delete(stores::generic_delete))
         // #1612 mounted worker role (phase 3a): sandbox/ghidra/github-
         // analysis submission + golden-image status. Registered in the
         // same shared route table as everything else — which container

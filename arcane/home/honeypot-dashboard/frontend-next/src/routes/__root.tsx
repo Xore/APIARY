@@ -3,8 +3,18 @@
 // same vendored stylesheet the Go dashboard serves), so the port inherits
 // the claude-pure element set 1:1 — no visual drift by construction.
 import { HeadContent, Scripts, createRootRoute, redirect } from '@tanstack/react-router'
+import { createServerFn } from '@tanstack/react-start'
 import { AppShell } from '../components/AppShell'
 import { getSessionUser } from '../lib/auth'
+import { activeBanner, type BannerView, type BehaviorConfig, type PresentationConfig } from '../lib/banner'
+
+const fetchActiveBanner = createServerFn({ method: 'GET' }).handler(async (): Promise<BannerView | null> => {
+  const { serviceJSON } = await import('../lib/backend.server')
+  const config = await serviceJSON<{
+    payload?: { presentation?: PresentationConfig; behavior?: BehaviorConfig }
+  }>('/api/v1/config')
+  return activeBanner(config?.payload?.presentation, config?.payload?.behavior)
+})
 
 export const Route = createRootRoute({
   // BFF-owned auth: every navigation resolves the redis session on the
@@ -20,6 +30,13 @@ export const Route = createRootRoute({
       })
     }
     return { user }
+  },
+  // The maintenance/incident banner is shell-wide in the Go dashboard (every
+  // page shares one topbar partial); fetched once here rather than per-route
+  // so /auth/* skips the extra backend round-trip pre-login.
+  loader: async ({ location }) => {
+    if (location.pathname.startsWith('/auth/')) return { banner: null }
+    return { banner: await fetchActiveBanner() }
   },
   head: () => ({
     meta: [
@@ -55,13 +72,14 @@ export const Route = createRootRoute({
 })
 
 function RootDocument({ children }: { children: React.ReactNode }) {
+  const { banner } = Route.useLoaderData()
   return (
     <html lang="en">
       <head>
         <HeadContent />
       </head>
       <body>
-        <AppShell>{children}</AppShell>
+        <AppShell banner={banner}>{children}</AppShell>
         <Scripts />
       </body>
     </html>

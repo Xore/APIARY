@@ -6,7 +6,8 @@
 
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{header, StatusCode},
+    response::IntoResponse,
     Json,
 };
 use base64::Engine;
@@ -16,6 +17,10 @@ use serde_json::{json, Value};
 use crate::AppState;
 
 const PREVIEW_BYTES: usize = 512;
+/// Matches Go's payloadBytesRawCap (payload_bytes_es.go) — the same
+/// dashboard-payload-bytes-v1 documents this crate's payload_bytes.rs
+/// mirrors, capped at the same 32MB.
+const RAW_CAP_BYTES: u64 = 32 << 20;
 
 #[derive(Serialize)]
 pub struct PayloadDetail {
@@ -117,4 +122,48 @@ pub async fn detail(
     }
 
     Ok(Json(PayloadDetail { hash, inventory, analysis, yara: yara_rows, size_bytes, hex_preview }))
+}
+
+/// GET /api/v1/payloads/{hash}/raw — streams the full captured binary,
+/// ported from payloads_data.go's servePayload. Admin-gating happens at
+/// the BFF (frontend-next checks the session role before ever calling
+/// this route) — this tier has no admin check of its own, same posture as
+/// every other write/download action here.
+pub async fn raw(
+    State(state): State<AppState>,
+    Path(hash): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    if !crate::payload_paths::is_valid_hash(&hash) {
+        return Err((StatusCode::BAD_REQUEST, "invalid payload id".into()));
+    }
+    let bad_gateway = |error: anyhow::Error| (StatusCode::BAD_GATEWAY, error.to_string());
+
+    let mut doc = state.es.get_doc("dashboard-payload-bytes-v1", &hash).await.map_err(bad_gateway)?;
+    if doc.is_none() {
+        crate::payload_bytes::ensure_mirrored(&state, &hash).await;
+        doc = state.es.get_doc("dashboard-payload-bytes-v1", &hash).await.map_err(bad_gateway)?;
+    }
+    let Some(source) = doc else {
+        return Err((StatusCode::NOT_FOUND, "no such payload".into()));
+    };
+    if source["too_large"].as_bool().unwrap_or(false) {
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            format!("payload exceeds the {RAW_CAP_BYTES}-byte size cap for dashboard download"),
+        ));
+    }
+    let encoded = source["data_base64"].as_str().unwrap_or("");
+    let data = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|error| (StatusCode::BAD_GATEWAY, format!("payload decode: {error}")))?;
+
+    // Force a download of an inert blob — never let a browser sniff/run it.
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/octet-stream".to_string()),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string()),
+            (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{hash}.malware.bin\"")),
+        ],
+        data,
+    ))
 }

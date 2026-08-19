@@ -56,6 +56,7 @@ import { Route as ApiChartNameRouteImport } from './routes/api/chart.$name'
 import { Route as InvestigateCidrCidrRouteImport } from './routes/investigate.cidr.$cidr'
 import { Route as InvestigateIpIpRouteImport } from './routes/investigate.ip.$ip'
 import { Route as ApiCanarytokenIdDownloadRouteImport } from './routes/api/canarytoken.$id.download'
+import { Route as ApiPayloadHashDownloadRouteImport } from './routes/api/payload.$hash.download'
 import { Route as ApiReportIdPdfRouteImport } from './routes/api/report.$id.pdf'
 import { Route as ApiArtifactKindKeyFilenameRouteImport } from './routes/api/artifact.$kind.$key.$filename'
 
@@ -296,6 +297,11 @@ const ApiCanarytokenIdDownloadRoute =
     path: '/api/canarytoken/$id/download',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPayloadHashDownloadRoute = ApiPayloadHashDownloadRouteImport.update({
+  id: '/api/payload/$hash/download',
+  path: '/api/payload/$hash/download',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiReportIdPdfRoute = ApiReportIdPdfRouteImport.update({
   id: '/api/report/$id/pdf',
   path: '/api/report/$id/pdf',
@@ -356,6 +362,7 @@ export interface FileRoutesByFullPath {
   '/investigate/cidr/$cidr': typeof InvestigateCidrCidrRoute
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
+  '/api/payload/$hash/download': typeof ApiPayloadHashDownloadRoute
   '/api/report/$id/pdf': typeof ApiReportIdPdfRoute
   '/api/artifact/$kind/$key/$filename': typeof ApiArtifactKindKeyFilenameRoute
 }
@@ -407,6 +414,7 @@ export interface FileRoutesByTo {
   '/investigate/cidr/$cidr': typeof InvestigateCidrCidrRoute
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
+  '/api/payload/$hash/download': typeof ApiPayloadHashDownloadRoute
   '/api/report/$id/pdf': typeof ApiReportIdPdfRoute
   '/api/artifact/$kind/$key/$filename': typeof ApiArtifactKindKeyFilenameRoute
 }
@@ -459,6 +467,7 @@ export interface FileRoutesById {
   '/investigate/cidr/$cidr': typeof InvestigateCidrCidrRoute
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
+  '/api/payload/$hash/download': typeof ApiPayloadHashDownloadRoute
   '/api/report/$id/pdf': typeof ApiReportIdPdfRoute
   '/api/artifact/$kind/$key/$filename': typeof ApiArtifactKindKeyFilenameRoute
 }
@@ -512,6 +521,7 @@ export interface FileRouteTypes {
     | '/investigate/cidr/$cidr'
     | '/investigate/ip/$ip'
     | '/api/canarytoken/$id/download'
+    | '/api/payload/$hash/download'
     | '/api/report/$id/pdf'
     | '/api/artifact/$kind/$key/$filename'
   fileRoutesByTo: FileRoutesByTo
@@ -563,6 +573,7 @@ export interface FileRouteTypes {
     | '/investigate/cidr/$cidr'
     | '/investigate/ip/$ip'
     | '/api/canarytoken/$id/download'
+    | '/api/payload/$hash/download'
     | '/api/report/$id/pdf'
     | '/api/artifact/$kind/$key/$filename'
   id:
@@ -614,6 +625,7 @@ export interface FileRouteTypes {
     | '/investigate/cidr/$cidr'
     | '/investigate/ip/$ip'
     | '/api/canarytoken/$id/download'
+    | '/api/payload/$hash/download'
     | '/api/report/$id/pdf'
     | '/api/artifact/$kind/$key/$filename'
   fileRoutesById: FileRoutesById
@@ -665,6 +677,7 @@ export interface RootRouteChildren {
   InvestigateCidrCidrRoute: typeof InvestigateCidrCidrRoute
   InvestigateIpIpRoute: typeof InvestigateIpIpRoute
   ApiCanarytokenIdDownloadRoute: typeof ApiCanarytokenIdDownloadRoute
+  ApiPayloadHashDownloadRoute: typeof ApiPayloadHashDownloadRoute
   ApiReportIdPdfRoute: typeof ApiReportIdPdfRoute
   ApiArtifactKindKeyFilenameRoute: typeof ApiArtifactKindKeyFilenameRoute
 }
@@ -1000,6 +1013,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiCanarytokenIdDownloadRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/payload/$hash/download': {
+      id: '/api/payload/$hash/download'
+      path: '/api/payload/$hash/download'
+      fullPath: '/api/payload/$hash/download'
+      preLoaderRoute: typeof ApiPayloadHashDownloadRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/report/$id/pdf': {
       id: '/api/report/$id/pdf'
       path: '/api/report/$id/pdf'
@@ -1076,6 +1096,7 @@ const rootRouteChildren: RootRouteChildren = {
   InvestigateCidrCidrRoute: InvestigateCidrCidrRoute,
   InvestigateIpIpRoute: InvestigateIpIpRoute,
   ApiCanarytokenIdDownloadRoute: ApiCanarytokenIdDownloadRoute,
+  ApiPayloadHashDownloadRoute: ApiPayloadHashDownloadRoute,
   ApiReportIdPdfRoute: ApiReportIdPdfRoute,
   ApiArtifactKindKeyFilenameRoute: ApiArtifactKindKeyFilenameRoute,
 }

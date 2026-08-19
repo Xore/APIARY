@@ -358,6 +358,11 @@ function PayloadAnalysis() {
               >
                 VirusTotal →
               </a>
+              {isAdmin ? (
+                <a className="chip" href={`/api/payload/${encodeURIComponent(detail.hash)}/download`}>
+                  Download sample ↓
+                </a>
+              ) : null}
               <Link className="chip" to="/payloads">← all payloads</Link>
             </>
           ) : undefined

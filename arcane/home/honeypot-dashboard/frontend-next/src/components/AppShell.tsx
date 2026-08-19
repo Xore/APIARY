@@ -6,13 +6,14 @@ import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { CommandPalette } from './CommandPalette'
 import { usePredictivePrefetch } from '../lib/prefetch'
+import type { BannerView } from '../lib/banner'
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({ children, banner }: { children: React.ReactNode; banner?: BannerView | null }) {
   usePredictivePrefetch()
   return (
     <div className="app-shell">
       <CommandPalette />
-      <Topbar />
+      <Topbar banner={banner} />
       <Sidebar />
       <main className="app-main">
         <div
