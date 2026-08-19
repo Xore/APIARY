@@ -28,6 +28,9 @@ export type EventFilters = {
   port?: string
   proto?: string
   kind?: string
+  /** Captured-payload hash pivot, arrived at via a link (e.g. RevDeck's
+   * "related events") — not a manual filter control in this bar. */
+  shasum?: string
 }
 
 type FilterValues = { sensors: string[]; countries: string[]; protos: string[]; ports: string[]; kinds: string[] }
@@ -60,6 +63,7 @@ export const Route = createFileRoute('/events')({
       port: pick('port'),
       proto: pick('proto'),
       kind: pick('kind'),
+      shasum: pick('shasum'),
       since: pick('since'),
     }
   },
@@ -99,7 +103,9 @@ function Events() {
   const [total, setTotal] = useState(0)
   const [loadingMore, setLoadingMore] = useState(false)
   const [selected, setSelected] = useState<number | null>(null)
-  const filtersActive = Boolean(search.ip || search.sensor || search.country || search.port || search.proto || search.kind || search.since)
+  const filtersActive = Boolean(
+    search.ip || search.sensor || search.country || search.port || search.proto || search.kind || search.shasum || search.since,
+  )
   // Live tail is unfiltered by design (the legacy stream is too); it
   // pauses automatically while a filter scope is active.
   const [live, setLive] = useState(!filtersActive)
