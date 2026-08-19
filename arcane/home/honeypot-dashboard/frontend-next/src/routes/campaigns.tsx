@@ -1,6 +1,6 @@
 // Correlated campaigns — compact core columns; ports/sensors detail in the
 // click-open inspector (investigate-consistency rules).
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
@@ -48,6 +48,19 @@ const COLUMNS: Column<CampaignRow>[] = [
   { header: 'fingerprints', detail: true, render: (row) => row.fingerprints },
   { header: 'provider', detail: true, render: (row) => row.providers.join(' ') },
   { header: 'first', detail: true, render: (row) => row.first.replace('T', ' ').slice(0, 19) },
+  {
+    header: '',
+    render: (row) => (
+      <Link
+        className="lnk"
+        to="/investigate/cidr/$cidr"
+        params={{ cidr: row.cidr }}
+        title="#354: everything Elasticsearch has correlated for this network across honeypot, Suricata, and portbridge tunnel records"
+      >
+        ES &rarr;
+      </Link>
+    ),
+  },
 ]
 
 function Campaigns() {

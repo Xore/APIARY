@@ -1,6 +1,6 @@
 // Infrastructure clusters — compact list columns, heavy detail in the
 // click-open inspector (per the investigate-consistency round).
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
@@ -34,6 +34,19 @@ const COLUMNS: Column<ClusterRow>[] = [
     header: 'coverage',
     detail: true,
     render: (row) => `${row.sensors.length} sensors: ${row.sensors.join(' ')}`,
+  },
+  {
+    header: '',
+    render: (row) => (
+      <Link
+        className="lnk"
+        to="/investigate/cluster"
+        search={{ kind: row.kind, value: row.value }}
+        title="#354: everything Elasticsearch has correlated for this cluster's member IPs"
+      >
+        ES &rarr;
+      </Link>
+    ),
   },
 ]
 

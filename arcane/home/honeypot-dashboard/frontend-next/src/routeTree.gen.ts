@@ -40,14 +40,17 @@ import { Route as ApiLiveRouteImport } from './routes/api/live'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
 import { Route as AuthLoginRouteImport } from './routes/auth/login'
 import { Route as AuthLogoutRouteImport } from './routes/auth/logout'
+import { Route as BffSplatRouteImport } from './routes/bff.$'
 import { Route as ExportPortbridgeManualBlackholeDottxtRouteImport } from './routes/export.portbridge-manual-blackhole[.]txt'
 import { Route as GhidraShaRouteImport } from './routes/ghidra.$sha'
+import { Route as InvestigateClusterRouteImport } from './routes/investigate.cluster'
 import { Route as PayloadAnalysisHashRouteImport } from './routes/payload-analysis.$hash'
 import { Route as PayloadWorkbenchResultsRouteImport } from './routes/payload-workbench.results'
 import { Route as SandboxJobRouteImport } from './routes/sandbox.$job'
 import { Route as SessionsIdRouteImport } from './routes/sessions.$id'
 import { Route as TtyReplayShasumRouteImport } from './routes/tty-replay.$shasum'
 import { Route as ApiChartNameRouteImport } from './routes/api/chart.$name'
+import { Route as InvestigateCidrCidrRouteImport } from './routes/investigate.cidr.$cidr'
 import { Route as InvestigateIpIpRouteImport } from './routes/investigate.ip.$ip'
 import { Route as ApiCanarytokenIdDownloadRouteImport } from './routes/api/canarytoken.$id.download'
 import { Route as ApiReportIdPdfRouteImport } from './routes/api/report.$id.pdf'
@@ -208,6 +211,11 @@ const AuthLogoutRoute = AuthLogoutRouteImport.update({
   path: '/auth/logout',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BffSplatRoute = BffSplatRouteImport.update({
+  id: '/bff/$',
+  path: '/bff/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ExportPortbridgeManualBlackholeDottxtRoute =
   ExportPortbridgeManualBlackholeDottxtRouteImport.update({
     id: '/export/portbridge-manual-blackhole.txt',
@@ -217,6 +225,11 @@ const ExportPortbridgeManualBlackholeDottxtRoute =
 const GhidraShaRoute = GhidraShaRouteImport.update({
   id: '/ghidra/$sha',
   path: '/ghidra/$sha',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InvestigateClusterRoute = InvestigateClusterRouteImport.update({
+  id: '/investigate/cluster',
+  path: '/investigate/cluster',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PayloadAnalysisHashRoute = PayloadAnalysisHashRouteImport.update({
@@ -247,6 +260,11 @@ const TtyReplayShasumRoute = TtyReplayShasumRouteImport.update({
 const ApiChartNameRoute = ApiChartNameRouteImport.update({
   id: '/api/chart/$name',
   path: '/api/chart/$name',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InvestigateCidrCidrRoute = InvestigateCidrCidrRouteImport.update({
+  id: '/investigate/cidr/$cidr',
+  path: '/investigate/cidr/$cidr',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InvestigateIpIpRoute = InvestigateIpIpRouteImport.update({
@@ -304,14 +322,17 @@ export interface FileRoutesByFullPath {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
+  '/bff/$': typeof BffSplatRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/ghidra/$sha': typeof GhidraShaRoute
+  '/investigate/cluster': typeof InvestigateClusterRoute
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/sandbox/$job': typeof SandboxJobRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
   '/api/chart/$name': typeof ApiChartNameRoute
+  '/investigate/cidr/$cidr': typeof InvestigateCidrCidrRoute
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
   '/api/report/$id/pdf': typeof ApiReportIdPdfRoute
@@ -349,14 +370,17 @@ export interface FileRoutesByTo {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
+  '/bff/$': typeof BffSplatRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/ghidra/$sha': typeof GhidraShaRoute
+  '/investigate/cluster': typeof InvestigateClusterRoute
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/sandbox/$job': typeof SandboxJobRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
   '/api/chart/$name': typeof ApiChartNameRoute
+  '/investigate/cidr/$cidr': typeof InvestigateCidrCidrRoute
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
   '/api/report/$id/pdf': typeof ApiReportIdPdfRoute
@@ -395,14 +419,17 @@ export interface FileRoutesById {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
+  '/bff/$': typeof BffSplatRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/ghidra/$sha': typeof GhidraShaRoute
+  '/investigate/cluster': typeof InvestigateClusterRoute
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/sandbox/$job': typeof SandboxJobRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
   '/api/chart/$name': typeof ApiChartNameRoute
+  '/investigate/cidr/$cidr': typeof InvestigateCidrCidrRoute
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
   '/api/report/$id/pdf': typeof ApiReportIdPdfRoute
@@ -442,14 +469,17 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
+    | '/bff/$'
     | '/export/portbridge-manual-blackhole.txt'
     | '/ghidra/$sha'
+    | '/investigate/cluster'
     | '/payload-analysis/$hash'
     | '/payload-workbench/results'
     | '/sandbox/$job'
     | '/sessions/$id'
     | '/tty-replay/$shasum'
     | '/api/chart/$name'
+    | '/investigate/cidr/$cidr'
     | '/investigate/ip/$ip'
     | '/api/canarytoken/$id/download'
     | '/api/report/$id/pdf'
@@ -487,14 +517,17 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
+    | '/bff/$'
     | '/export/portbridge-manual-blackhole.txt'
     | '/ghidra/$sha'
+    | '/investigate/cluster'
     | '/payload-analysis/$hash'
     | '/payload-workbench/results'
     | '/sandbox/$job'
     | '/sessions/$id'
     | '/tty-replay/$shasum'
     | '/api/chart/$name'
+    | '/investigate/cidr/$cidr'
     | '/investigate/ip/$ip'
     | '/api/canarytoken/$id/download'
     | '/api/report/$id/pdf'
@@ -532,14 +565,17 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
+    | '/bff/$'
     | '/export/portbridge-manual-blackhole.txt'
     | '/ghidra/$sha'
+    | '/investigate/cluster'
     | '/payload-analysis/$hash'
     | '/payload-workbench/results'
     | '/sandbox/$job'
     | '/sessions/$id'
     | '/tty-replay/$shasum'
     | '/api/chart/$name'
+    | '/investigate/cidr/$cidr'
     | '/investigate/ip/$ip'
     | '/api/canarytoken/$id/download'
     | '/api/report/$id/pdf'
@@ -578,14 +614,17 @@ export interface RootRouteChildren {
   AuthCallbackRoute: typeof AuthCallbackRoute
   AuthLoginRoute: typeof AuthLoginRoute
   AuthLogoutRoute: typeof AuthLogoutRoute
+  BffSplatRoute: typeof BffSplatRoute
   ExportPortbridgeManualBlackholeDottxtRoute: typeof ExportPortbridgeManualBlackholeDottxtRoute
   GhidraShaRoute: typeof GhidraShaRoute
+  InvestigateClusterRoute: typeof InvestigateClusterRoute
   PayloadAnalysisHashRoute: typeof PayloadAnalysisHashRoute
   PayloadWorkbenchResultsRoute: typeof PayloadWorkbenchResultsRoute
   SandboxJobRoute: typeof SandboxJobRoute
   SessionsIdRoute: typeof SessionsIdRoute
   TtyReplayShasumRoute: typeof TtyReplayShasumRoute
   ApiChartNameRoute: typeof ApiChartNameRoute
+  InvestigateCidrCidrRoute: typeof InvestigateCidrCidrRoute
   InvestigateIpIpRoute: typeof InvestigateIpIpRoute
   ApiCanarytokenIdDownloadRoute: typeof ApiCanarytokenIdDownloadRoute
   ApiReportIdPdfRoute: typeof ApiReportIdPdfRoute
@@ -811,6 +850,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthLogoutRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/bff/$': {
+      id: '/bff/$'
+      path: '/bff/$'
+      fullPath: '/bff/$'
+      preLoaderRoute: typeof BffSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/export/portbridge-manual-blackhole.txt': {
       id: '/export/portbridge-manual-blackhole.txt'
       path: '/export/portbridge-manual-blackhole.txt'
@@ -823,6 +869,13 @@ declare module '@tanstack/react-router' {
       path: '/ghidra/$sha'
       fullPath: '/ghidra/$sha'
       preLoaderRoute: typeof GhidraShaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/investigate/cluster': {
+      id: '/investigate/cluster'
+      path: '/investigate/cluster'
+      fullPath: '/investigate/cluster'
+      preLoaderRoute: typeof InvestigateClusterRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/payload-analysis/$hash': {
@@ -865,6 +918,13 @@ declare module '@tanstack/react-router' {
       path: '/api/chart/$name'
       fullPath: '/api/chart/$name'
       preLoaderRoute: typeof ApiChartNameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/investigate/cidr/$cidr': {
+      id: '/investigate/cidr/$cidr'
+      path: '/investigate/cidr/$cidr'
+      fullPath: '/investigate/cidr/$cidr'
+      preLoaderRoute: typeof InvestigateCidrCidrRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/investigate/ip/$ip': {
@@ -930,15 +990,18 @@ const rootRouteChildren: RootRouteChildren = {
   AuthCallbackRoute: AuthCallbackRoute,
   AuthLoginRoute: AuthLoginRoute,
   AuthLogoutRoute: AuthLogoutRoute,
+  BffSplatRoute: BffSplatRoute,
   ExportPortbridgeManualBlackholeDottxtRoute:
     ExportPortbridgeManualBlackholeDottxtRoute,
   GhidraShaRoute: GhidraShaRoute,
+  InvestigateClusterRoute: InvestigateClusterRoute,
   PayloadAnalysisHashRoute: PayloadAnalysisHashRoute,
   PayloadWorkbenchResultsRoute: PayloadWorkbenchResultsRoute,
   SandboxJobRoute: SandboxJobRoute,
   SessionsIdRoute: SessionsIdRoute,
   TtyReplayShasumRoute: TtyReplayShasumRoute,
   ApiChartNameRoute: ApiChartNameRoute,
+  InvestigateCidrCidrRoute: InvestigateCidrCidrRoute,
   InvestigateIpIpRoute: InvestigateIpIpRoute,
   ApiCanarytokenIdDownloadRoute: ApiCanarytokenIdDownloadRoute,
   ApiReportIdPdfRoute: ApiReportIdPdfRoute,
