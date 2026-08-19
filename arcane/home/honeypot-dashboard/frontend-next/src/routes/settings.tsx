@@ -18,6 +18,7 @@ import { useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
 import { str } from '../components/StoreList'
 import { applyPalette, applyTheme, pullServerTheme, useThemeMode, type ThemeMode } from '../lib/prefs'
+import type { JsonRecord } from '../lib/json'
 import { prefetchEnabled, setPrefetchEnabled } from '../lib/prefetch'
 import { getSessionUser } from '../lib/auth'
 
@@ -83,7 +84,7 @@ type ReportTemplate = { id: string; name: string; description: string }
 
 type Operator = { subject: string; username: string; role: string; first_seen_at: string; last_seen_at: string }
 
-type ServiceRow = Record<string, unknown>
+type ServiceRow = JsonRecord
 type ServicesResponse = { available: boolean; services: ServiceRow[]; reason?: string }
 
 type HistoryEntry = { revision: number; time: string; actor_subject: string; actor_username: string; action: string; fields: string[] }
@@ -100,7 +101,7 @@ type AuditEvent = {
 }
 type AuditResponse = { events: AuditEvent[] }
 
-type ReporterStats = { available: boolean; stats?: Record<string, unknown>; reason?: string }
+type ReporterStats = { available: boolean; stats?: JsonRecord; reason?: string }
 
 const fetchStorage = createServerFn({ method: 'GET' }).handler(async (): Promise<Storage | null> => {
   const { serviceJSON } = await import('../lib/backend.server')

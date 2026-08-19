@@ -8,8 +8,9 @@ import { Fragment, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { ArtifactList } from '../components/ArtifactList'
 import { getSessionUser } from '../lib/auth'
+import type { JsonRecord } from '../lib/json'
 
-type StoreRow = Record<string, unknown>
+type StoreRow = JsonRecord
 type Page = { total: number; rows: StoreRow[] }
 
 // Workbench builder types — mirror backend-service/src/workbench_domain.rs's
