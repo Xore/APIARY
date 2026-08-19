@@ -42,6 +42,7 @@ import { Route as ApiLiveRouteImport } from './routes/api/live'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
 import { Route as AuthLoginRouteImport } from './routes/auth/login'
 import { Route as AuthLogoutRouteImport } from './routes/auth/logout'
+import { Route as BffMountedSplatRouteImport } from './routes/bff-mounted.$'
 import { Route as BffSplatRouteImport } from './routes/bff.$'
 import { Route as CapeShaRouteImport } from './routes/cape.$sha'
 import { Route as ExportPortbridgeManualBlackholeDottxtRouteImport } from './routes/export.portbridge-manual-blackhole[.]txt'
@@ -229,6 +230,11 @@ const AuthLogoutRoute = AuthLogoutRouteImport.update({
   path: '/auth/logout',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BffMountedSplatRoute = BffMountedSplatRouteImport.update({
+  id: '/bff-mounted/$',
+  path: '/bff-mounted/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const BffSplatRoute = BffSplatRouteImport.update({
   id: '/bff/$',
   path: '/bff/$',
@@ -372,6 +378,7 @@ export interface FileRoutesByFullPath {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
+  '/bff-mounted/$': typeof BffMountedSplatRoute
   '/bff/$': typeof BffSplatRoute
   '/cape/$sha': typeof CapeShaRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
@@ -428,6 +435,7 @@ export interface FileRoutesByTo {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
+  '/bff-mounted/$': typeof BffMountedSplatRoute
   '/bff/$': typeof BffSplatRoute
   '/cape/$sha': typeof CapeShaRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
@@ -485,6 +493,7 @@ export interface FileRoutesById {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
+  '/bff-mounted/$': typeof BffMountedSplatRoute
   '/bff/$': typeof BffSplatRoute
   '/cape/$sha': typeof CapeShaRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
@@ -543,6 +552,7 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
+    | '/bff-mounted/$'
     | '/bff/$'
     | '/cape/$sha'
     | '/export/portbridge-manual-blackhole.txt'
@@ -599,6 +609,7 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
+    | '/bff-mounted/$'
     | '/bff/$'
     | '/cape/$sha'
     | '/export/portbridge-manual-blackhole.txt'
@@ -655,6 +666,7 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
+    | '/bff-mounted/$'
     | '/bff/$'
     | '/cape/$sha'
     | '/export/portbridge-manual-blackhole.txt'
@@ -712,6 +724,7 @@ export interface RootRouteChildren {
   AuthCallbackRoute: typeof AuthCallbackRoute
   AuthLoginRoute: typeof AuthLoginRoute
   AuthLogoutRoute: typeof AuthLogoutRoute
+  BffMountedSplatRoute: typeof BffMountedSplatRoute
   BffSplatRoute: typeof BffSplatRoute
   ExportPortbridgeManualBlackholeDottxtRoute: typeof ExportPortbridgeManualBlackholeDottxtRoute
   GhidraShaRoute: typeof GhidraShaRoute
@@ -965,6 +978,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthLogoutRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/bff-mounted/$': {
+      id: '/bff-mounted/$'
+      path: '/bff-mounted/$'
+      fullPath: '/bff-mounted/$'
+      preLoaderRoute: typeof BffMountedSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/bff/$': {
       id: '/bff/$'
       path: '/bff/$'
@@ -1182,6 +1202,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthCallbackRoute: AuthCallbackRoute,
   AuthLoginRoute: AuthLoginRoute,
   AuthLogoutRoute: AuthLogoutRoute,
+  BffMountedSplatRoute: BffMountedSplatRoute,
   BffSplatRoute: BffSplatRoute,
   ExportPortbridgeManualBlackholeDottxtRoute:
     ExportPortbridgeManualBlackholeDottxtRoute,

@@ -50,7 +50,7 @@ type GoldenImageStatus = {
 
 const fetchGoldenImageStatus = createServerFn({ method: 'GET' }).handler(async (): Promise<GoldenImageStatus | null> => {
   const { serviceJSON } = await import('../lib/backend.server')
-  return serviceJSON<GoldenImageStatus>('/api/v1/sandbox/golden-image-status')
+  return serviceJSON<GoldenImageStatus>('/api/v1/sandbox/golden-image-status', { mounted: true })
 })
 
 type SubmitResult = { ok: boolean; target?: string; error?: string }
@@ -64,11 +64,11 @@ type SubmitResult = { ok: boolean; target?: string; error?: string }
 async function submitAnalysisJob(user: User | null, path: string, body: Record<string, unknown>, failMessage: string): Promise<SubmitResult> {
   if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
   const { serviceFetch } = await import('../lib/backend.server')
-  const response = await serviceFetch(path, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  })
+  const response = await serviceFetch(
+    path,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
+    { mounted: true },
+  )
   const responseBody = await response.json().catch(() => null)
   if (response.ok && responseBody?.queued) {
     return { ok: true, target: typeof responseBody?.target === 'string' ? responseBody.target : undefined }

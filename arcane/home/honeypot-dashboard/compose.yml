@@ -592,6 +592,14 @@ services:
       - PORT=8080
       - SERVE_MODE=${DASHBOARD_SERVE_MODE:-all}
       - BACKEND_URL=http://backend-service:8081
+      # #1612 phase 3a/3b wiring: sandbox/ghidra/github-analysis submission,
+      # sandbox golden-image-status and vnc status, and the whole workbench
+      # orchestrator surface only work against the write-capable mounted
+      # instance below (main.rs's own comment on that route block explains
+      # why: same route table as backend-service, but only this container
+      # has the host-side request-spool mounts). serviceFetch/serviceJSON's
+      # `{ mounted: true }` callers resolve to this URL, not BACKEND_URL.
+      - BACKEND_MOUNTED_URL=http://backend-service-mounted:8082
       - BFF_INTERNAL_URL=${BFF_INTERNAL_URL:-}
       - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
       - OIDC_ISSUER_URL=${OIDC_ISSUER_URL:-https://auth.example.invalid/realms/apiary}
