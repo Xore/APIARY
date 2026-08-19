@@ -13,6 +13,81 @@ const fetchAcks = createServerFn({ method: 'GET' }).handler(async (): Promise<Re
   return serviceJSON<Record<string, AckRecord>>('/api/v1/ml-anomalies/acks')
 })
 
+// Per-model retrain history (#1611 workstream E.5) — a drifting or
+// silently-rejected model is otherwise invisible; this is the one place
+// that surfaces each detector's most recent retrain outcome.
+type ModelHealth = {
+  model: string
+  timestamp: string
+  accepted: boolean
+  reason: string
+  anomaly_rate_new: number
+  anomaly_rate_previous: number
+  train_samples: number
+}
+
+const fetchModelHealth = createServerFn({ method: 'GET' }).handler(async (): Promise<ModelHealth[] | null> => {
+  const { serviceJSON } = await import('../lib/backend.server')
+  return serviceJSON<ModelHealth[]>('/api/v1/ml-health')
+})
+
+function outcomeBadge(accepted: boolean) {
+  return <span className={accepted ? 'badge badge--success' : 'badge badge--danger'}>{accepted ? 'accepted' : 'rejected'}</span>
+}
+
+function ModelHealthCard() {
+  const [models, setModels] = useState<ModelHealth[] | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    fetchModelHealth().then((result) => {
+      if (!cancelled) setModels(result ?? [])
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  return (
+    <div className="card wide" id="ml-model-health-card">
+      <h2>Model health</h2>
+      <p className="note">Each detector model's most recent retrain decision — accepted or rejected, and why.</p>
+      {models === null ? (
+        <span className="skeleton-line" aria-hidden="true" />
+      ) : models.length === 0 ? (
+        <p className="empty">No retrain history recorded yet.</p>
+      ) : (
+        <div className="card__scroll">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>model</th>
+                <th>outcome</th>
+                <th>reason</th>
+                <th>anomaly rate (prev → new)</th>
+                <th>train samples</th>
+                <th>last retrain</th>
+              </tr>
+            </thead>
+            <tbody>
+              {models.map((model) => (
+                <tr key={model.model}>
+                  <td className="v">{model.model}</td>
+                  <td>{outcomeBadge(model.accepted)}</td>
+                  <td className="v">{model.reason || '—'}</td>
+                  <td className="n">
+                    {model.anomaly_rate_previous.toFixed(4)} → {model.anomaly_rate_new.toFixed(4)}
+                  </td>
+                  <td className="n">{model.train_samples.toLocaleString('en-US')}</td>
+                  <td>{model.timestamp ? model.timestamp.replace('T', ' ').slice(0, 19) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 const setAck = createServerFn({ method: 'POST' })
   .inputValidator((input: { key: string; ack: boolean }) => input)
   .handler(async ({ data }): Promise<boolean> => {
@@ -96,6 +171,7 @@ function Page() {
         </p>
         <EChart kind="scatter" url="/api/chart/ml-anomaly-scores" height={300} />
       </div>
+      <ModelHealthCard />
       <StoreListPage
       fetchPage={fetchPage}
       label="Monitor"
