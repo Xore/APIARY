@@ -52,6 +52,7 @@ import { Route as PayloadAnalysisHashRouteImport } from './routes/payload-analys
 import { Route as PayloadWorkbenchResultsRouteImport } from './routes/payload-workbench.results'
 import { Route as RevdeckShaRouteImport } from './routes/revdeck.$sha'
 import { Route as SandboxJobRouteImport } from './routes/sandbox.$job'
+import { Route as SandboxVncRouteImport } from './routes/sandbox.vnc'
 import { Route as SessionsIdRouteImport } from './routes/sessions.$id'
 import { Route as TtyReplayShasumRouteImport } from './routes/tty-replay.$shasum'
 import { Route as ApiChartNameRouteImport } from './routes/api/chart.$name'
@@ -279,6 +280,11 @@ const SandboxJobRoute = SandboxJobRouteImport.update({
   path: '/sandbox/$job',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SandboxVncRoute = SandboxVncRouteImport.update({
+  id: '/sandbox/vnc',
+  path: '/sandbox/vnc',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SessionsIdRoute = SessionsIdRouteImport.update({
   id: '/sessions/$id',
   path: '/sessions/$id',
@@ -376,6 +382,7 @@ export interface FileRoutesByFullPath {
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/revdeck/$sha': typeof RevdeckShaRoute
   '/sandbox/$job': typeof SandboxJobRoute
+  '/sandbox/vnc': typeof SandboxVncRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
   '/api/chart/$name': typeof ApiChartNameRoute
@@ -431,6 +438,7 @@ export interface FileRoutesByTo {
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/revdeck/$sha': typeof RevdeckShaRoute
   '/sandbox/$job': typeof SandboxJobRoute
+  '/sandbox/vnc': typeof SandboxVncRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
   '/api/chart/$name': typeof ApiChartNameRoute
@@ -487,6 +495,7 @@ export interface FileRoutesById {
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/revdeck/$sha': typeof RevdeckShaRoute
   '/sandbox/$job': typeof SandboxJobRoute
+  '/sandbox/vnc': typeof SandboxVncRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
   '/api/chart/$name': typeof ApiChartNameRoute
@@ -544,6 +553,7 @@ export interface FileRouteTypes {
     | '/payload-workbench/results'
     | '/revdeck/$sha'
     | '/sandbox/$job'
+    | '/sandbox/vnc'
     | '/sessions/$id'
     | '/tty-replay/$shasum'
     | '/api/chart/$name'
@@ -599,6 +609,7 @@ export interface FileRouteTypes {
     | '/payload-workbench/results'
     | '/revdeck/$sha'
     | '/sandbox/$job'
+    | '/sandbox/vnc'
     | '/sessions/$id'
     | '/tty-replay/$shasum'
     | '/api/chart/$name'
@@ -654,6 +665,7 @@ export interface FileRouteTypes {
     | '/payload-workbench/results'
     | '/revdeck/$sha'
     | '/sandbox/$job'
+    | '/sandbox/vnc'
     | '/sessions/$id'
     | '/tty-replay/$shasum'
     | '/api/chart/$name'
@@ -707,6 +719,7 @@ export interface RootRouteChildren {
   PayloadAnalysisHashRoute: typeof PayloadAnalysisHashRoute
   PayloadWorkbenchResultsRoute: typeof PayloadWorkbenchResultsRoute
   SandboxJobRoute: typeof SandboxJobRoute
+  SandboxVncRoute: typeof SandboxVncRoute
   SessionsIdRoute: typeof SessionsIdRoute
   TtyReplayShasumRoute: typeof TtyReplayShasumRoute
   ApiChartNameRoute: typeof ApiChartNameRoute
@@ -1022,6 +1035,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SandboxJobRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/sandbox/vnc': {
+      id: '/sandbox/vnc'
+      path: '/sandbox/vnc'
+      fullPath: '/sandbox/vnc'
+      preLoaderRoute: typeof SandboxVncRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sessions/$id': {
       id: '/sessions/$id'
       path: '/sessions/$id'
@@ -1170,6 +1190,7 @@ const rootRouteChildren: RootRouteChildren = {
   PayloadAnalysisHashRoute: PayloadAnalysisHashRoute,
   PayloadWorkbenchResultsRoute: PayloadWorkbenchResultsRoute,
   SandboxJobRoute: SandboxJobRoute,
+  SandboxVncRoute: SandboxVncRoute,
   SessionsIdRoute: SessionsIdRoute,
   TtyReplayShasumRoute: TtyReplayShasumRoute,
   ApiChartNameRoute: ApiChartNameRoute,

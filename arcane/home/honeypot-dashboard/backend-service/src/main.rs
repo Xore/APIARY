@@ -281,6 +281,7 @@ async fn main() -> anyhow::Result<()> {
         // mounted), not on route registration here.
         .route("/api/v1/sandbox/submit", post(sandbox_submit::submit))
         .route("/api/v1/sandbox/golden-image-status", get(sandbox_submit::golden_image_status))
+        .route("/api/v1/sandbox/vnc", get(sandbox_submit::vnc_status))
         .route("/api/v1/ghidra/submit", post(ghidra_submit::submit))
         .route("/api/v1/github-analysis/submit", post(github_analysis_submit::submit))
         // #1612 phase 3b: Payload Workbench orchestrator (recipes, run
