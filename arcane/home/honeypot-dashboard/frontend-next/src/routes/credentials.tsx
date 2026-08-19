@@ -99,12 +99,15 @@ const linkCredentialToken = createServerFn({ method: 'POST' })
   })
 
 // Mirrors credentials.rs's PASSWORD_ALPHABET (visually-unambiguous
-// look-alikes excluded) — client-side convenience only, the bait password
-// itself isn't a secret requiring a cryptographic RNG.
+// look-alikes excluded) — client-side convenience only. crypto.getRandomValues
+// costs nothing extra over Math.random() here, so there's no reason to use
+// the weaker generator even for a bait value.
 const PASSWORD_ALPHABET = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%*'
 function randomPassword(): string {
+  const bytes = new Uint32Array(20)
+  crypto.getRandomValues(bytes)
   let out = ''
-  for (let i = 0; i < 20; i++) out += PASSWORD_ALPHABET[Math.floor(Math.random() * PASSWORD_ALPHABET.length)]
+  for (let i = 0; i < bytes.length; i++) out += PASSWORD_ALPHABET[bytes[i] % PASSWORD_ALPHABET.length]
   return out
 }
 
