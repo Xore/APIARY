@@ -5,6 +5,13 @@
 // BFF_INTERNAL_URL) and the BFF from the Rust service (BACKEND_URL),
 // without touching call sites. All state behind these calls is
 // redis/ES-backed; no tier holds host-local state.
+//
+// In frontend mode, serviceFetch below doesn't reach BACKEND_URL at all —
+// it calls the /bff/* proxy (routes/bff.$.ts) on bffInternalURL() instead,
+// which forwards into the Rust tier from wherever the BFF role actually
+// runs. In all-mode (the only mode deployed today), bffInternalURL() is
+// unused and this is byte-for-byte the same direct backendURL() call as
+// before #1608's cross-host split existed.
 export type ServeMode = 'all' | 'frontend' | 'bff'
 
 export function serveMode(): ServeMode {
@@ -23,11 +30,14 @@ export function bffInternalURL(): string {
   return (process.env.BFF_INTERNAL_URL ?? '').replace(/\/$/, '')
 }
 
-/** Fetch from the Rust service with the service token. Only the BFF tier
- * (or all-mode) may call this; the split frontend tier goes through
- * bffFetch instead. */
+/** Fetch from the Rust service with the service token. The BFF tier (or
+ * all-mode) calls the Rust service directly; a split frontend tier has no
+ * route to BACKEND_URL at all, so it goes through the /bff/* proxy on
+ * bffInternalURL() instead — same call site, same signature, the seam is
+ * entirely inside this function. */
 export async function serviceFetch(path: string, init?: RequestInit): Promise<Response> {
-  return fetch(`${backendURL()}${path}`, {
+  const base = serveMode() === 'frontend' ? `${bffInternalURL()}/bff` : backendURL()
+  return fetch(`${base}${path}`, {
     ...init,
     headers: {
       ...(init?.headers ?? {}),

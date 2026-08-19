@@ -380,6 +380,16 @@ services:
   # move to another docker host by pointing those URLs across the
   # WireGuard mesh, and the BFF can scale horizontally (SERVE_MODE
   # splits frontend/bff; no compose resource limit on the BFF tier).
+  #
+  # That capability is genuinely real now, not just scaffolding: dashboard-
+  # next's SERVE_MODE=frontend actually routes every serviceFetch/
+  # serviceJSON call through the /bff/* proxy (frontend-next's
+  # routes/bff.$.ts) on BFF_INTERNAL_URL instead of hitting BACKEND_URL
+  # directly, and vps/traefik/dynamic.yml has a matching (today inert)
+  # PathPrefix('/bff') router. Still one dashboard-next service pair below
+  # — actually running a split frontend-only/bff-only pair on two docker
+  # hosts, with their own compose services and socat bridges, is #1622's
+  # job, not this one.
   # ------------------------------------------------------------------
   backend-service:
     <<: *runtime-defaults
