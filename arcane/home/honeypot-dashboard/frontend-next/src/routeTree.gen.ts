@@ -19,6 +19,7 @@ import { Route as CanarytokensRouteImport } from './routes/canarytokens'
 import { Route as CapeRouteImport } from './routes/cape'
 import { Route as ClustersRouteImport } from './routes/clusters'
 import { Route as CommandsRouteImport } from './routes/commands'
+import { Route as CredentialsRouteImport } from './routes/credentials'
 import { Route as DeadLettersRouteImport } from './routes/dead-letters'
 import { Route as EventsRouteImport } from './routes/events'
 import { Route as GithubAnalysisRouteImport } from './routes/github-analysis'
@@ -46,6 +47,7 @@ import { Route as GhidraShaRouteImport } from './routes/ghidra.$sha'
 import { Route as InvestigateClusterRouteImport } from './routes/investigate.cluster'
 import { Route as PayloadAnalysisHashRouteImport } from './routes/payload-analysis.$hash'
 import { Route as PayloadWorkbenchResultsRouteImport } from './routes/payload-workbench.results'
+import { Route as RevdeckShaRouteImport } from './routes/revdeck.$sha'
 import { Route as SandboxJobRouteImport } from './routes/sandbox.$job'
 import { Route as SessionsIdRouteImport } from './routes/sessions.$id'
 import { Route as TtyReplayShasumRouteImport } from './routes/tty-replay.$shasum'
@@ -104,6 +106,11 @@ const ClustersRoute = ClustersRouteImport.update({
 const CommandsRoute = CommandsRouteImport.update({
   id: '/commands',
   path: '/commands',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CredentialsRoute = CredentialsRouteImport.update({
+  id: '/credentials',
+  path: '/credentials',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DeadLettersRoute = DeadLettersRouteImport.update({
@@ -242,6 +249,11 @@ const PayloadWorkbenchResultsRoute = PayloadWorkbenchResultsRouteImport.update({
   path: '/payload-workbench/results',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RevdeckShaRoute = RevdeckShaRouteImport.update({
+  id: '/$sha',
+  path: '/$sha',
+  getParentRoute: () => RevdeckRoute,
+} as any)
 const SandboxJobRoute = SandboxJobRouteImport.update({
   id: '/sandbox/$job',
   path: '/sandbox/$job',
@@ -301,6 +313,7 @@ export interface FileRoutesByFullPath {
   '/cape': typeof CapeRoute
   '/clusters': typeof ClustersRoute
   '/commands': typeof CommandsRoute
+  '/credentials': typeof CredentialsRoute
   '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
   '/github-analysis': typeof GithubAnalysisRoute
@@ -313,7 +326,7 @@ export interface FileRoutesByFullPath {
   '/problem-reports': typeof ProblemReportsRoute
   '/recordings': typeof RecordingsRoute
   '/reports': typeof ReportsRoute
-  '/revdeck': typeof RevdeckRoute
+  '/revdeck': typeof RevdeckRouteWithChildren
   '/search': typeof SearchRoute
   '/sensors': typeof SensorsRoute
   '/settings': typeof SettingsRoute
@@ -328,6 +341,7 @@ export interface FileRoutesByFullPath {
   '/investigate/cluster': typeof InvestigateClusterRoute
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
+  '/revdeck/$sha': typeof RevdeckShaRoute
   '/sandbox/$job': typeof SandboxJobRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
@@ -349,6 +363,7 @@ export interface FileRoutesByTo {
   '/cape': typeof CapeRoute
   '/clusters': typeof ClustersRoute
   '/commands': typeof CommandsRoute
+  '/credentials': typeof CredentialsRoute
   '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
   '/github-analysis': typeof GithubAnalysisRoute
@@ -361,7 +376,7 @@ export interface FileRoutesByTo {
   '/problem-reports': typeof ProblemReportsRoute
   '/recordings': typeof RecordingsRoute
   '/reports': typeof ReportsRoute
-  '/revdeck': typeof RevdeckRoute
+  '/revdeck': typeof RevdeckRouteWithChildren
   '/search': typeof SearchRoute
   '/sensors': typeof SensorsRoute
   '/settings': typeof SettingsRoute
@@ -376,6 +391,7 @@ export interface FileRoutesByTo {
   '/investigate/cluster': typeof InvestigateClusterRoute
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
+  '/revdeck/$sha': typeof RevdeckShaRoute
   '/sandbox/$job': typeof SandboxJobRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
@@ -398,6 +414,7 @@ export interface FileRoutesById {
   '/cape': typeof CapeRoute
   '/clusters': typeof ClustersRoute
   '/commands': typeof CommandsRoute
+  '/credentials': typeof CredentialsRoute
   '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
   '/github-analysis': typeof GithubAnalysisRoute
@@ -410,7 +427,7 @@ export interface FileRoutesById {
   '/problem-reports': typeof ProblemReportsRoute
   '/recordings': typeof RecordingsRoute
   '/reports': typeof ReportsRoute
-  '/revdeck': typeof RevdeckRoute
+  '/revdeck': typeof RevdeckRouteWithChildren
   '/search': typeof SearchRoute
   '/sensors': typeof SensorsRoute
   '/settings': typeof SettingsRoute
@@ -425,6 +442,7 @@ export interface FileRoutesById {
   '/investigate/cluster': typeof InvestigateClusterRoute
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
+  '/revdeck/$sha': typeof RevdeckShaRoute
   '/sandbox/$job': typeof SandboxJobRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
@@ -448,6 +466,7 @@ export interface FileRouteTypes {
     | '/cape'
     | '/clusters'
     | '/commands'
+    | '/credentials'
     | '/dead-letters'
     | '/events'
     | '/github-analysis'
@@ -475,6 +494,7 @@ export interface FileRouteTypes {
     | '/investigate/cluster'
     | '/payload-analysis/$hash'
     | '/payload-workbench/results'
+    | '/revdeck/$sha'
     | '/sandbox/$job'
     | '/sessions/$id'
     | '/tty-replay/$shasum'
@@ -496,6 +516,7 @@ export interface FileRouteTypes {
     | '/cape'
     | '/clusters'
     | '/commands'
+    | '/credentials'
     | '/dead-letters'
     | '/events'
     | '/github-analysis'
@@ -523,6 +544,7 @@ export interface FileRouteTypes {
     | '/investigate/cluster'
     | '/payload-analysis/$hash'
     | '/payload-workbench/results'
+    | '/revdeck/$sha'
     | '/sandbox/$job'
     | '/sessions/$id'
     | '/tty-replay/$shasum'
@@ -544,6 +566,7 @@ export interface FileRouteTypes {
     | '/cape'
     | '/clusters'
     | '/commands'
+    | '/credentials'
     | '/dead-letters'
     | '/events'
     | '/github-analysis'
@@ -571,6 +594,7 @@ export interface FileRouteTypes {
     | '/investigate/cluster'
     | '/payload-analysis/$hash'
     | '/payload-workbench/results'
+    | '/revdeck/$sha'
     | '/sandbox/$job'
     | '/sessions/$id'
     | '/tty-replay/$shasum'
@@ -593,6 +617,7 @@ export interface RootRouteChildren {
   CapeRoute: typeof CapeRoute
   ClustersRoute: typeof ClustersRoute
   CommandsRoute: typeof CommandsRoute
+  CredentialsRoute: typeof CredentialsRoute
   DeadLettersRoute: typeof DeadLettersRoute
   EventsRoute: typeof EventsRoute
   GithubAnalysisRoute: typeof GithubAnalysisRoute
@@ -605,7 +630,7 @@ export interface RootRouteChildren {
   ProblemReportsRoute: typeof ProblemReportsRoute
   RecordingsRoute: typeof RecordingsRoute
   ReportsRoute: typeof ReportsRoute
-  RevdeckRoute: typeof RevdeckRoute
+  RevdeckRoute: typeof RevdeckRouteWithChildren
   SearchRoute: typeof SearchRoute
   SensorsRoute: typeof SensorsRoute
   SettingsRoute: typeof SettingsRoute
@@ -701,6 +726,13 @@ declare module '@tanstack/react-router' {
       path: '/commands'
       fullPath: '/commands'
       preLoaderRoute: typeof CommandsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/credentials': {
+      id: '/credentials'
+      path: '/credentials'
+      fullPath: '/credentials'
+      preLoaderRoute: typeof CredentialsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dead-letters': {
@@ -892,6 +924,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PayloadWorkbenchResultsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/revdeck/$sha': {
+      id: '/revdeck/$sha'
+      path: '/$sha'
+      fullPath: '/revdeck/$sha'
+      preLoaderRoute: typeof RevdeckShaRouteImport
+      parentRoute: typeof RevdeckRoute
+    }
     '/sandbox/$job': {
       id: '/sandbox/$job'
       path: '/sandbox/$job'
@@ -958,6 +997,17 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface RevdeckRouteChildren {
+  RevdeckShaRoute: typeof RevdeckShaRoute
+}
+
+const RevdeckRouteChildren: RevdeckRouteChildren = {
+  RevdeckShaRoute: RevdeckShaRoute,
+}
+
+const RevdeckRouteWithChildren =
+  RevdeckRoute._addFileChildren(RevdeckRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentCampaignsRoute: AgentCampaignsRoute,
@@ -969,6 +1019,7 @@ const rootRouteChildren: RootRouteChildren = {
   CapeRoute: CapeRoute,
   ClustersRoute: ClustersRoute,
   CommandsRoute: CommandsRoute,
+  CredentialsRoute: CredentialsRoute,
   DeadLettersRoute: DeadLettersRoute,
   EventsRoute: EventsRoute,
   GithubAnalysisRoute: GithubAnalysisRoute,
@@ -981,7 +1032,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProblemReportsRoute: ProblemReportsRoute,
   RecordingsRoute: RecordingsRoute,
   ReportsRoute: ReportsRoute,
-  RevdeckRoute: RevdeckRoute,
+  RevdeckRoute: RevdeckRouteWithChildren,
   SearchRoute: SearchRoute,
   SensorsRoute: SensorsRoute,
   SettingsRoute: SettingsRoute,

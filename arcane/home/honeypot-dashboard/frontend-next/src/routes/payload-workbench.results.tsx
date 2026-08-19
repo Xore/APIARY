@@ -226,6 +226,33 @@ const childActionFn = createServerFn({ method: 'POST' })
 // The "?hash=" prefill from payloads.tsx's Analyze link is instead read
 // client-side after mount (see WorkbenchBuilder below), which needs no
 // router-level search schema at all.
+
+// GPU job queue (#1611 workstream E.6) — ported from dashboard/gpu_queue.go,
+// which rendered this same card on the legacy /ghidra page (now redirected
+// here). Read-only: the legacy abort action is an operator write against a
+// queue/spool, out of scope for this pass — this only closes the "can't
+// even see it" gap the issue's live audit found (2 stuck queued jobs with
+// nothing surfacing them).
+type GpuJob = {
+  job_id: string
+  job_type: string
+  ref: string
+  model: string
+  estimated_vram_mib: number
+  status: string
+  requested_at: string
+  started_at: string
+  finished_at: string
+  abort_requested: boolean
+  error: string
+  attempts: number
+}
+
+const fetchGpuQueue = createServerFn({ method: 'GET' }).handler(async (): Promise<GpuJob[] | null> => {
+  const { serviceJSON } = await import('../lib/backend.server')
+  return serviceJSON<GpuJob[]>('/api/v1/gpu-queue')
+})
+
 export const Route = createFileRoute('/payload-workbench/results')({
   loader: async () => ({
     workbench: fetchWorkbench({ data: { offset: 0 } }),
@@ -233,6 +260,7 @@ export const Route = createFileRoute('/payload-workbench/results')({
     yara: fetchYara({ data: { offset: 0 } }),
     sandbox: fetchSandbox({ data: { offset: 0 } }),
     ghidra: fetchGhidra({ data: { offset: 0 } }),
+    gpuQueue: fetchGpuQueue(),
     user: await getSessionUser(),
   }),
   component: Results,
@@ -842,6 +870,36 @@ function usePage(promise: Promise<Page | null>): Page | null {
   return page
 }
 
+function gpuStatusBadge(status: string) {
+  const cls =
+    status === 'completed' || status === 'done'
+      ? 'badge badge--success'
+      : status === 'failed' || status === 'error'
+        ? 'badge badge--danger'
+        : status === 'running'
+          ? 'badge badge--warning'
+          : 'badge badge--muted' // queued, aborted, unknown
+  return <span className={cls}>{status || 'unknown'}</span>
+}
+
+const GPU_QUEUE_COLUMNS: Column<GpuJob>[] = [
+  { header: 'requested', render: (row) => (row.requested_at ? when(row.requested_at) : '—') },
+  { header: 'type', className: 'v', render: (row) => row.job_type },
+  { header: 'model', className: 'v', render: (row) => row.model },
+  { header: 'status', render: (row) => gpuStatusBadge(row.status) },
+  { header: 'attempts', className: 'n', render: (row) => String(row.attempts) },
+  {
+    header: 'abort requested',
+    render: (row) => (row.abort_requested ? <span className="badge badge--warning">yes</span> : '—'),
+  },
+  { header: 'ref', detail: true, className: 'v', render: (row) => <code>{row.ref}</code> },
+  { header: 'estimated VRAM', detail: true, render: (row) => (row.estimated_vram_mib ? `${row.estimated_vram_mib} MiB` : '—') },
+  { header: 'started', detail: true, render: (row) => (row.started_at ? when(row.started_at) : '—') },
+  { header: 'finished', detail: true, render: (row) => (row.finished_at ? when(row.finished_at) : '—') },
+  { header: 'error', detail: true, render: (row) => row.error || '—' },
+  { header: 'job id', detail: true, render: (row) => <code>{row.job_id}</code> },
+]
+
 function Results() {
   const data = Route.useLoaderData()
   const workbench = usePage(data.workbench)
@@ -849,6 +907,16 @@ function Results() {
   const yara = usePage(data.yara)
   const sandbox = usePage(data.sandbox)
   const ghidra = usePage(data.ghidra)
+  const [gpuQueue, setGpuQueue] = useState<GpuJob[] | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    data.gpuQueue.then((result) => {
+      if (!cancelled) setGpuQueue(result ?? [])
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [data.gpuQueue])
   const owner = data.user?.username ?? ''
   const [runsToken, setRunsToken] = useState(0)
 
@@ -870,6 +938,21 @@ function Results() {
       />
       <WorkbenchBuilder owner={owner} onRunCreated={() => setRunsToken((token) => token + 1)} />
       <RecentRunsCard owner={owner} refreshToken={runsToken} />
+      {gpuQueue === null || gpuQueue.length > 0 ? (
+        <>
+          <h2 className="label-section">GPU queue</h2>
+          <p className="note">
+            Jobs deferred because there wasn't enough free GPU headroom when they were submitted — a queued job's AI triage
+            runs automatically once the card frees up; the rest of that analysis is unaffected and already completed.
+          </p>
+          <MasterDetailTable
+            rows={gpuQueue}
+            columns={GPU_QUEUE_COLUMNS}
+            rowKey={(row, i) => `gq-${row.job_id}-${i}`}
+            inspectorTitle="GPU queue job"
+          />
+        </>
+      ) : null}
       <h2 className="label-section">Workbench runs</h2>
       <MasterDetailTable rows={workbench ? workbench.rows : null} columns={WORKBENCH_COLUMNS} rowKey={(row, i) => `wb-${str(row, 'id')}-${i}`} inspectorTitle="Workbench run" />
       <h2 className="label-section">Static analysis</h2>
