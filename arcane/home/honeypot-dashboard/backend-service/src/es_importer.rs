@@ -227,10 +227,19 @@ fn shard_index_default() -> u64 {
     0
 }
 
-fn first_present<'a>(payload: &'a Value, fields: &[&str]) -> Option<&'a str> {
-    fields
-        .iter()
-        .find_map(|field| payload.get(*field).and_then(|v| v.as_str()).filter(|v| !v.is_empty()))
+/// Mirrors importer.py's doc_id(): `value = payload.get(field); if value:
+/// ...` — any Python-truthy scalar (a non-empty string, a nonzero number,
+/// `true`) is coerced into the id, not just JSON strings. A numeric
+/// id_field value (e.g. {"sha256": 12345}) must produce the same id here
+/// as it does there, or the two importers mint different doc ids for the
+/// same file.
+fn first_present(payload: &Value, fields: &[&str]) -> Option<String> {
+    fields.iter().find_map(|field| match payload.get(*field) {
+        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
+        Some(Value::Number(n)) if n.as_f64() != Some(0.0) => Some(n.to_string()),
+        Some(Value::Bool(true)) => Some("True".to_string()),
+        _ => None,
+    })
 }
 
 fn doc_id(source: &Source, payload: &Value, path: &Path) -> String {
@@ -241,20 +250,22 @@ fn doc_id(source: &Source, payload: &Value, path: &Path) -> String {
     format!("{}:{stem}", source.label)
 }
 
+/// Field-presence helper mirroring Python's `a or b or c` truthy-chain:
+/// an empty string is not "present" and falls through to the next field,
+/// same as first_present() above but for a plain string (not a doc-id).
+fn first_non_empty_str<'a>(payload: &'a Value, fields: &[&str]) -> Option<&'a str> {
+    fields.iter().find_map(|field| payload[*field].as_str().filter(|v| !v.is_empty()))
+}
+
 fn build_document(source: &Source, payload: &Value) -> Value {
     let mut doc = json!({
         source.label: payload,
         "event": {"category": source.label},
     });
-    let ts = payload["completed_at"]
-        .as_str()
-        .or_else(|| payload["updated_at"].as_str())
-        .or_else(|| payload["requested_at"].as_str());
-    if let Some(ts) = ts {
+    if let Some(ts) = first_non_empty_str(payload, &["completed_at", "updated_at", "requested_at"]) {
         doc["@timestamp"] = json!(ts);
     }
-    let sha256 = payload["sha256"].as_str().or_else(|| payload["payload_sha256"].as_str());
-    if let Some(sha256) = sha256 {
+    if let Some(sha256) = first_non_empty_str(payload, &["sha256", "payload_sha256"]) {
         doc["file"] = json!({"hash": {"sha256": sha256}});
     }
     for field in ["exit_status", "risk_level", "risk_score", "family", "platform"] {
@@ -621,5 +632,38 @@ mod tests {
         let src = Source { id_fields: &["job", "sha256"], ..source("X", "sandbox", "idx", "*") };
         let id = doc_id(&src, &json!({"sha256": "deadbeef"}), Path::new("/tmp/x.json"));
         assert_eq!(id, "sandbox:deadbeef");
+    }
+
+    #[test]
+    fn doc_id_coerces_a_numeric_id_field_same_as_importer_py() {
+        // importer.py's doc_id() does `if value:` (any Python-truthy scalar),
+        // not a string-type check — a numeric job id must still produce an id.
+        let src = Source { id_fields: &["job"], ..source("X", "sandbox", "idx", "*") };
+        let id = doc_id(&src, &json!({"job": 12345}), Path::new("/tmp/x.json"));
+        assert_eq!(id, "sandbox:12345");
+    }
+
+    #[test]
+    fn doc_id_treats_a_zero_id_field_as_falsy_same_as_python() {
+        let src = Source { id_fields: &["job", "sha256"], ..source("X", "sandbox", "idx", "*") };
+        let id = doc_id(&src, &json!({"job": 0, "sha256": "deadbeef"}), Path::new("/tmp/x.json"));
+        assert_eq!(id, "sandbox:deadbeef");
+    }
+
+    #[test]
+    fn build_document_timestamp_falls_through_an_empty_leading_field() {
+        // Python's `a or b or c` treats "" as falsy and moves to the next
+        // field; a naive Option::or_else on .as_str() does not, since
+        // Some("") is still Some.
+        let payload = json!({"completed_at": "", "updated_at": "2026-01-01T00:00:00Z"});
+        let doc = build_document(&Source { id_fields: &[], ..source("X", "label", "idx", "*") }, &payload);
+        assert_eq!(doc["@timestamp"], "2026-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn build_document_sha256_falls_through_an_empty_leading_field() {
+        let payload = json!({"sha256": "", "payload_sha256": "deadbeef"});
+        let doc = build_document(&Source { id_fields: &[], ..source("X", "label", "idx", "*") }, &payload);
+        assert_eq!(doc["file"]["hash"]["sha256"], "deadbeef");
     }
 }
