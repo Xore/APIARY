@@ -39,16 +39,34 @@ below for how this route compares to the Linux, WAN-permitted GHOSTS, and
 CAPE routes side by side. TANNER containers are web-request emulators, not
 malware detonation sandboxes.
 
+**Everything below describes what is actually live.** A TanStack Start +
+Rust rewrite of `honeypot-dashboard` (`frontend-next`/`backend-service`/
+`backend-worker` and siblings, [#1608](https://github.com/Xore/APIARY/issues/1608))
+has feature parity with the Go dashboard described here and has landed on
+the `port-foundation` integration branch, but **has not been deployed to
+production as of this writing** — every one of its Compose services stays
+behind the `next` profile, and a live check against the homeserver
+(2026-08-20) found zero of its containers running; the Go `dashboard`
+service diagrammed throughout this document is still the only thing
+actually serving traffic. See [#1628](https://github.com/Xore/APIARY/issues/1628)
+for the cutover tracking issue and `docs/DASHBOARD-CUTOVER.md` for the
+runbook — this document does not attempt to also diagram the new tiers'
+target architecture ahead of that cutover; update it once they're live
+rather than maintaining two parallel descriptions of the dashboard stack.
+
 **The home side is not one deployment unit.** [#258](https://github.com/Xore/APIARY/issues/258)
 split what used to be a single `docker-compose.yml` into independently
 deployed Arcane-managed stacks, and [#1502](https://github.com/Xore/APIARY/issues/1502)
 moved every one of them onto Arcane's own directory-aware Git sync — each
 stack has its own self-contained directory (`arcane/home/<name>/compose.yml`
-for the 32 that needed relocating, or their existing repository-root path
+for the 33 that needed relocating, or their existing repository-root path
 for 6 more that were already self-contained) and its own start/stop/update
 lifecycle. That first #258 split produced 12 stacks; new sensors and
-workers have each landed as their own stack since, and the home side now
-runs **32** Arcane-managed stacks via that Git sync, plus 6 more — see
+workers have each landed as their own stack since (most recently
+`honeypot-dashboard-backend`, split from `honeypot-dashboard` by
+[#1622](https://github.com/Xore/APIARY/issues/1622) — still `next`-profile-gated,
+not yet live either), and the home side now
+runs **33** Arcane-managed stacks via that Git sync, plus 6 more — see
 [`arcane/manifests/home-production.json`](../arcane/manifests/home-production.json)
 for the authoritative list (not `.github/workflows/deploy.yml`, which no
 longer deploys any of them — see `docs/ARCANE-GIT-SYNC.md`). The root

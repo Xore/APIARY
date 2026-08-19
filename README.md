@@ -27,7 +27,7 @@ flowchart LR
 
 **All core sensors run without compose profiles.** The only profile is the
 optional on-demand `geoip-update` maintenance job. 33 deployment pieces —
-32 independent Arcane-managed stacks at home plus the VPS (see
+33 independent Arcane-managed stacks at home plus the VPS (see
 [docs/ARCANE-GIT-SYNC.md](docs/ARCANE-GIT-SYNC.md) for how a repo commit
 reaches the live host, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for
 why the home side split into this many Compose stacks):
@@ -44,7 +44,8 @@ why the home side split into this many Compose stacks):
 | `honeypot-ip-enrichment-worker` ([arcane/home/honeypot-ip-enrichment-worker/compose.yml](arcane/home/honeypot-ip-enrichment-worker/compose.yml)) | **home** | networkless worker that moves the portbridge `via_port` → real attacker IP join from dashboard read-time to ingest-time, writing `logs/enriched/*.json` for Filebeat |
 | `honeypot-agent-intrusion-worker` ([arcane/home/honeypot-agent-intrusion-worker/compose.yml](arcane/home/honeypot-agent-intrusion-worker/compose.yml)) | **home** | correlates sensor/Suricata events into campaigns, scores them against deterministic criticality rules, writes the `agent-intrusion-campaigns` index the dashboard's `/agent-campaigns` route reads |
 | `honeypot-attacker-identity-worker`, `honeypot-correlator-worker`, `honeypot-payload-inventory-worker` (`arcane/home/honeypot-<name>/compose.yml`, one directory each) | **home** | three more workers that had their own top-level compose file but had drifted out of the deploy/installer inventory before #1502's audit caught it (same class of gap #560 and #891 each fixed once before) -- attacker-identity correlation, cross-sensor campaign correlation, and payload inventory tracking |
-| `honeypot-dashboard` ([arcane/home/honeypot-dashboard/compose.yml](arcane/home/honeypot-dashboard/compose.yml)) | **home** | the live investigation dashboard |
+| `honeypot-dashboard` ([arcane/home/honeypot-dashboard/compose.yml](arcane/home/honeypot-dashboard/compose.yml)) | **home** | the live investigation dashboard (Go), plus its in-progress TanStack Start/Rust replacement (`dashboard-next`/`backend-worker`/`backend-service-mounted`, #1608) -- feature-complete but still `next`-profile-gated, not yet live; see [#1628](https://github.com/Xore/APIARY/issues/1628) and [docs/DASHBOARD-CUTOVER.md](docs/DASHBOARD-CUTOVER.md) |
+| `honeypot-dashboard-backend` ([arcane/home/honeypot-dashboard-backend/compose.yml](arcane/home/honeypot-dashboard-backend/compose.yml)) | **home** | `backend-service`, the modernization port's single-instance request/response tier, split out from `honeypot-dashboard` by #1622 -- same `next`-profile/not-yet-live status |
 | `honeypot-payload-analysis` ([arcane/home/honeypot-payload-analysis/compose.yml](arcane/home/honeypot-payload-analysis/compose.yml)) | **home** | payload dedup + YARA scanning |
 | `honeypot-utilities` ([arcane/home/honeypot-utilities/compose.yml](arcane/home/honeypot-utilities/compose.yml)) | **home** | autoheal, log rotation, disk-space monitoring, reporting |
 | [`vps/`](vps/) | **VPS** | Traefik, portbridge raw tunnels, Suricata, WireGuard HTTP bridges, and isolated Keycloak OIDC gateways |

@@ -1,33 +1,66 @@
 # frontend-next
 
-A minimal TanStack Start app with one route and plain CSS.
+TanStack Start frontend/BFF tier of the honeypot dashboard modernization
+port ([#1608](https://github.com/Xore/APIARY/issues/1608)) — the
+replacement for the Go `dashboard`'s HTML/template UI, paired with the
+Rust `backend-service`/`backend-worker` tier
+(`../backend-service`) it proxies every `/api/v1/*` call to. See
+[`../../../../docs/DASHBOARD-CUTOVER.md`](../../../../docs/DASHBOARD-CUTOVER.md)
+for the cutover status (still `next`-profile-gated, not live) and
+[#1628](https://github.com/Xore/APIARY/issues/1628) for the tracking
+issue. Routes live under `src/routes/`, BFF-only server logic in
+`*.server.ts` files (TanStack Start's `import-protection` plugin blocks
+these from being statically imported by anything bundled for the client —
+`createServerFn().handler()` bodies dynamically `import()` them instead;
+see `src/lib/backend.server.ts` for the tier-split (SERVE_MODE) seam these
+files sit behind), shared components in `src/components/`.
+
+## Local development
+
+Needs a reachable Elasticsearch (`../port-tests/README.md`'s
+"Prerequisites" section documents the devbox tunnel — default
+`http://127.0.0.1:19200`) and a running `backend-service` (`cd
+../backend-service && cargo run`, defaults to `127.0.0.1:8081`). With both
+up:
 
 ```bash
 npm install
 npm run dev
 ```
 
-Edit `src/routes/index.tsx` to get started. Add route files under
-`src/routes`; TanStack Router updates `src/routeTree.gen.ts` for you.
+`OIDC_DISABLED=1` skips the Keycloak login flow entirely (treats every
+request as an authenticated admin) — the mode `port-tests/` and most local
+iteration use, since standing up a real Keycloak realm locally is rarely
+worth it just to click around the UI. Without it, set `OIDC_ISSUER_URL`/
+`OIDC_CLIENT_ID`/`OIDC_CLIENT_SECRET_FILE`/`OIDC_EXTERNAL_URL` to point at
+a real Keycloak instance.
 
-Build the production app with:
+Add route files under `src/routes/`; TanStack Router regenerates
+`src/routeTree.gen.ts` for you (`npm run generate-routes` to force it
+without a dev-server rebuild).
+
+## Build and run
 
 ```bash
 npm run build
+OIDC_DISABLED=1 BACKEND_URL=http://127.0.0.1:8081 PORT=3000 node .output/server/index.mjs
 ```
 
-## Deploy with Nitro
+The real deployment target is the `dashboard-next` service in
+`../compose.yml` (Docker, built from this directory, gated behind the
+`next` Compose profile) — not a generic Nitro preset (Vercel/Netlify/AWS
+Lambda/etc.); this app assumes it's always reached through the BFF's own
+env-var-configured `backend-service`/`BACKEND_MOUNTED_URL`/session-Redis
+wiring, not a serverless request/response model. See
+[`../../../../docs/ARCANE-GIT-SYNC.md`](../../../../docs/ARCANE-GIT-SYNC.md)
+for how a commit actually reaches the live host.
 
-This project uses Nitro as a generic server adapter, so it can run on any Node-compatible host.
+## Verification
 
-```bash
-npm run build
-node dist/server/index.mjs
-```
-
-The build output is a self-contained Node server. To deploy, push the `dist/` directory to your host (Render, Fly.io, your own VPS, etc.) and run the server command above.
-
-For host-specific presets (Vercel, Netlify, Cloudflare, AWS Lambda, etc.) and tuning, see https://v3.nitro.build/deploy.
+`../port-tests/` is the live-ES smoke suite for this tier and
+`backend-service` together (`frontend-ssr.sh`, `auth-flow.sh`,
+`backend-api.sh`, `bff-load.sh`) — see `../port-tests/README.md`. Run
+against a real build, not `npm run dev`'s HMR server.
 
 ## Scaling (#1616)
 
@@ -46,6 +79,4 @@ vars, all optional with in-code defaults: `BACKEND_MAX_INFLIGHT`,
 `BACKEND_MAX_QUEUE`, `BACKEND_HTTP_MAX_SOCKETS`, `LIVE_MAX_STREAMS`,
 `REPORT_PDF_MAX_CONCURRENT`, `ARTIFACT_MAX_CONCURRENT`,
 `CANARYTOKEN_MAX_CONCURRENT`, `BFF_EVENT_LOOP_SHED_MS`. See
-`port-tests/bff-load.sh` for the load-test gate that exercises both.
-
-
+`../port-tests/bff-load.sh` for the load-test gate that exercises both.
