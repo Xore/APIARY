@@ -20,10 +20,11 @@ so results reflect actual parity, not fixtures.
 | `frontend-ssr.sh` | every route SSRs 200 under `OIDC_DISABLED=1`, 404 page, chart/SSE proxies, unauthenticated blackhole export | no |
 | `auth-flow.sh` | auth guard: SSR redirect to `/auth/login`, 401 API proxies, blackhole export stays open (tunnel trust) | no |
 | `worker-notifier.sh` | `WORKER_LOOPS=alert-notifier` baseline pass | yes — upserts `dashboard-alert-state-v1` on the same key/shape contract as the Go alertManager (safe alongside it) |
+| `worker-reports-scheduler.sh` | `WORKER_LOOPS=reports-scheduler` scheduled-tick parity against the old Go `reportScheduleLoop`'s own test contract (success path + #1340 no-hot-loop failure path) | yes — two throwaway definitions in `dashboard-reports-definitions-v1` + one generated doc in `dashboard-generated-reports-v1`, all deleted at the end |
 | `bff-load.sh` | #1616 load-test gate: cluster.mjs actually forks WEB_CONCURRENCY workers; SSE fan-out + burst navigation run concurrently against artificially tight caps and the BFF sheds (503) instead of hanging/500ing/crashing | no |
 
 Run one: `bash port-tests/backend-api.sh`
-Run all: `for s in port-tests/{backend-api,frontend-ssr,auth-flow,worker-notifier}.sh; do bash "$s" || exit 1; done`
+Run all: `for s in port-tests/{backend-api,frontend-ssr,auth-flow,worker-notifier,worker-reports-scheduler}.sh; do bash "$s" || exit 1; done`
 
 `bff-load.sh` is slower and noisier (concurrent bursts, not single checks) than
 the rest of the sweep, so it's not in the "run all" loop above — run it on

@@ -581,6 +581,159 @@ mod tests {
         Pending { key: key.to_string(), mtime: 1.0, index: "test-v1", id: id.to_string(), doc: json!({}) }
     }
 
+    /// A scratch directory scan_source() can read real files from — each
+    /// test picks a distinct `name` (cargo test runs all tests in one
+    /// process, parallel by default) and the directory is removed on drop,
+    /// so a failed run doesn't leave stray fixtures behind either.
+    struct TmpDir(PathBuf);
+    impl TmpDir {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!("es_importer_test_{name}"));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            TmpDir(dir)
+        }
+        fn write(&self, filename: &str, contents: &[u8]) -> PathBuf {
+            let path = self.0.join(filename);
+            fs::write(&path, contents).unwrap();
+            path
+        }
+    }
+    impl Drop for TmpDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn no_state() -> HashMap<String, f64> {
+        HashMap::new()
+    }
+
+    #[test]
+    fn scan_source_plain_json_computes_doc_id_and_document_from_the_file() {
+        let dir = TmpDir::new("plain_json");
+        dir.write("abc_ghidra.json", br#"{"sha256": "abc", "completed_at": "2026-01-01T00:00:00Z"}"#);
+        let src = Source { id_fields: &["sha256"], ..source("X", "ghidra", "ghidra-analysis-v1", "*_ghidra.json") };
+        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, "ghidra:abc");
+        assert_eq!(pending[0].doc["@timestamp"], "2026-01-01T00:00:00Z");
+        assert_eq!(pending[0].doc["ghidra"]["sha256"], "abc");
+    }
+
+    #[test]
+    fn scan_source_skips_a_file_whose_mtime_is_already_in_state() {
+        let dir = TmpDir::new("mtime_skip");
+        let path = dir.write("abc_ghidra.json", br#"{"sha256": "abc"}"#);
+        let mtime = mtime_secs(&fs::metadata(&path).unwrap());
+        let src = Source { id_fields: &["sha256"], ..source("X", "ghidra", "ghidra-analysis-v1", "*_ghidra.json") };
+        let mut state = no_state();
+        state.insert(path.to_string_lossy().to_string(), mtime);
+        assert!(scan_source(&src, &dir.0, &state, 1, 0).is_empty());
+    }
+
+    #[test]
+    fn scan_source_binary_ttylog_encodes_the_whole_file_as_base64() {
+        let dir = TmpDir::new("binary_ttylog");
+        dir.write("deadbeef", b"raw ttylog bytes");
+        let src = Source { binary: true, ..source("X", "cowrie_ttylog", "cowrie-ttylog-v1", "*") };
+        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, "deadbeef");
+        assert_eq!(pending[0].doc["shasum"], "deadbeef");
+        assert_eq!(pending[0].doc["ttylog_base64"], base64::engine::general_purpose::STANDARD.encode(b"raw ttylog bytes"));
+    }
+
+    #[test]
+    fn scan_source_binary_with_id_suffix_derives_sha256_and_kind_from_the_filename() {
+        let dir = TmpDir::new("binary_report_html");
+        dir.write("abc123_ghidra_report.html", b"<html></html>");
+        let src = Source {
+            binary: true,
+            id_suffix: Some("_ghidra_report.html"),
+            artifact_kind: Some("report"),
+            content_type: Some("text/html"),
+            ..source("X", "ghidra_report_html", "ghidra-report-artifacts-v1", "*_ghidra_report.html")
+        };
+        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, "abc123:report");
+        assert_eq!(pending[0].doc["sha256"], "abc123");
+        assert_eq!(pending[0].doc["kind"], "report");
+        assert_eq!(pending[0].doc["content_type"], "text/html");
+    }
+
+    #[test]
+    fn scan_source_mailoney_mail_ids_by_sha256_of_the_filename_not_the_filename_itself() {
+        // #1611 workstream B: mailoney's saved filenames carry no
+        // content-hash guarantee (unlike cowrie's ttylog names), so the
+        // doc id has to be derived by hashing the filename.
+        let dir = TmpDir::new("binary_mailoney");
+        dir.write("some-saved-mail.eml", b"From: attacker@example.com\r\n\r\nbody");
+        let src = Source { binary: true, mailoney_mail: true, ..source("X", "mailoney_mail", "mailoney-mail-v1", "*") };
+        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0);
+        assert_eq!(pending.len(), 1);
+        let expected_id = {
+            use sha2::{Digest, Sha256};
+            Sha256::digest(b"some-saved-mail.eml").iter().map(|b| format!("{b:02x}")).collect::<String>()
+        };
+        assert_eq!(pending[0].id, expected_id);
+        assert_eq!(pending[0].doc["body_path"], "some-saved-mail.eml");
+        assert!(pending[0].doc.get("eml_base64").is_some());
+    }
+
+    #[test]
+    fn scan_source_chunked_artifact_splits_into_one_chunk_when_under_the_size_cap() {
+        let dir = TmpDir::new("chunked");
+        dir.write("abc.host.pcap", b"small pcap bytes");
+        let src = Source {
+            chunked: true,
+            id_suffix: Some(".host.pcap"),
+            artifact_kind: Some("host_pcap"),
+            content_type: Some("application/vnd.tcpdump.pcap"),
+            ..source("X", "sandbox_export", "sandbox-export-artifacts-v1", "*.host.pcap")
+        };
+        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, "abc:host_pcap:0");
+        assert_eq!(pending[0].doc["job"], "abc");
+        assert_eq!(pending[0].doc["kind"], "host_pcap");
+        assert_eq!(pending[0].doc["chunk_index"], 0);
+        assert_eq!(pending[0].doc["total_chunks"], 1);
+    }
+
+    #[test]
+    fn scan_source_aggregate_samples_fans_out_one_pending_action_per_sample() {
+        let dir = TmpDir::new("aggregate_samples");
+        dir.write(
+            "results.json",
+            br#"{"updated_at": "2026-01-01T00:00:00Z", "samples": {"s1": {"sha256": "aaa", "match": "rule1"}, "s2": {"sha256": "bbb", "match": "rule2"}}}"#,
+        );
+        let src = Source { aggregate_samples: Some("samples"), ..source("X", "yara", "yara-analysis-v1", "results.json") };
+        let mut pending = scan_source(&src, &dir.0, &no_state(), 1, 0);
+        pending.sort_by(|a, b| a.id.cmp(&b.id));
+        assert_eq!(pending.len(), 2);
+        assert_eq!(pending[0].id, "yara:s1");
+        assert_eq!(pending[0].doc["@timestamp"], "2026-01-01T00:00:00Z");
+        assert_eq!(pending[0].doc["file"]["hash"]["sha256"], "aaa");
+        assert_eq!(pending[0].doc["yara"]["match"], "rule1");
+        // report_context carries the rest of the file minus the samples
+        // key itself — every sample doc gets the same shared context.
+        assert_eq!(pending[0].doc["report"]["updated_at"], "2026-01-01T00:00:00Z");
+        assert!(pending[0].doc["report"].get("samples").is_none());
+        assert_eq!(pending[1].id, "yara:s2");
+    }
+
+    #[test]
+    fn scan_source_aggregate_samples_falls_back_to_the_map_key_when_a_sample_has_no_sha256() {
+        let dir = TmpDir::new("aggregate_no_sha");
+        dir.write("results.json", br#"{"samples": {"s1": {"match": "rule1"}}}"#);
+        let src = Source { aggregate_samples: Some("samples"), ..source("X", "yara", "yara-analysis-v1", "results.json") };
+        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].doc["file"]["hash"]["sha256"], "s1");
+    }
+
     #[test]
     fn advance_state_skips_a_key_with_any_failed_action() {
         let items = vec![pending("chunked-file", "job:kind:0"), pending("chunked-file", "job:kind:1"), pending("chunked-file", "job:kind:2")];
