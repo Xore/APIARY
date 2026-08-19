@@ -103,7 +103,7 @@ fn human_bytes(n: u64) -> String {
         div *= UNIT;
         exp += 1;
     }
-    let suffixes = [b'K', b'M', b'G', b'T', b'P', b'E'];
+    let suffixes = b"KMGTPE";
     format!("{:.1} {}B", n as f64 / div as f64, suffixes[exp] as char)
 }
 
@@ -271,7 +271,7 @@ fn mime_for(category: &str, head: &[u8]) -> String {
         "document" if head.starts_with(b"%PDF-") => "application/pdf".to_string(),
         "document" => "application/x-ole-storage".to_string(),
         "archive" if head.starts_with(&[b'P', b'K', 3, 4]) => "application/zip".to_string(),
-        "archive" if head.starts_with(&[b'R', b'a', b'r', b'!']) => "application/x-rar-compressed".to_string(),
+        "archive" if head.starts_with(b"Rar!") => "application/x-rar-compressed".to_string(),
         "archive" if head.starts_with(&[b'7', b'z', 0xbc, 0xaf]) => "application/x-7z-compressed".to_string(),
         "archive" if head.starts_with(&[0x1f, 0x8b]) => "application/gzip".to_string(),
         "text" | "script" => "text/plain; charset=utf-8".to_string(),

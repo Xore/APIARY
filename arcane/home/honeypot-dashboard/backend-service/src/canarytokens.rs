@@ -7,7 +7,7 @@
 //! pipeline unchanged).
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, State},
     http::{header, StatusCode},
     response::IntoResponse,
     Json,
@@ -26,7 +26,9 @@ const MAX_UPLOAD_BYTES: usize = 8 << 20;
 
 /// (type, label, description, download fmt, content type, suffix,
 /// requires upload, supports snippet)
-pub const TYPES: &[(&str, &str, &str, &str, &str, &str, bool, bool)] = &[
+type TokenType = (&'static str, &'static str, &'static str, &'static str, &'static str, &'static str, bool, bool);
+
+pub const TYPES: &[TokenType] = &[
     ("adobe_pdf", "PDF document", "A decoy PDF that fires when opened.", "pdf", "application/pdf", ".pdf", false, false),
     ("ms_word", "Word document", "A decoy .docx that fires when opened.", "msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".docx", false, true),
     ("ms_excel", "Excel workbook", "A decoy .xlsx that fires when opened.", "msexcel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xlsx", false, true),
@@ -44,7 +46,7 @@ fn base_url() -> Option<String> {
     Some(format!("{}{}", api.trim_end_matches('/'), root))
 }
 
-fn type_info(token_type: &str) -> Option<&'static (&'static str, &'static str, &'static str, &'static str, &'static str, &'static str, bool, bool)> {
+fn type_info(token_type: &str) -> Option<&'static TokenType> {
     TYPES.iter().find(|entry| entry.0 == token_type)
 }
 
@@ -189,19 +191,12 @@ pub async fn create(
     }))
 }
 
-#[derive(Deserialize)]
-pub struct DownloadQuery {
-    #[serde(default)]
-    pub fmt: String,
-}
-
 /// GET /api/v1/canarytokens/{id}/download — proxy the token's artifact.
 /// web_image never goes through /download (fetching the trigger URL
 /// server-side would itself fire the token).
 pub async fn download(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Query(_query): Query<DownloadQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let base = base_url().ok_or((StatusCode::SERVICE_UNAVAILABLE, "not configured".to_string()))?;
     let record = state

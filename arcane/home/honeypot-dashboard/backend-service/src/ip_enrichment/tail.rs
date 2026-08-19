@@ -68,7 +68,7 @@ mod tests {
         assert_eq!(lines[0], b"{\"a\":1}");
         // offset stops before the trailing partial line
         let mut f = fs::OpenOptions::new().append(true).open(&path).unwrap();
-        write!(f, "al\n").unwrap();
+        writeln!(f, "al").unwrap();
         let (lines2, _offset2) = read_new_lines(&path, offset).unwrap();
         assert_eq!(lines2.len(), 1);
         assert_eq!(lines2[0], b"partial");

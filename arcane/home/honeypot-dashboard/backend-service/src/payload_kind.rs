@@ -131,7 +131,7 @@ fn mostly_text(text: &[u8]) -> bool {
     let total = text.len().min(8192);
     let printable = text[..total]
         .iter()
-        .filter(|&&b| b == b'\n' || b == b'\r' || b == b'\t' || (b >= 0x20 && b < 0x7f))
+        .filter(|&&b| b == b'\n' || b == b'\r' || b == b'\t' || (0x20..0x7f).contains(&b))
         .count();
     total > 0 && printable * 100 / total >= 85
 }
@@ -184,7 +184,7 @@ pub fn classify_payload(data: &[u8]) -> PayloadClassification {
             ),
         };
     }
-    if data.len() >= 4 && &data[..4] == [0x7f, b'E', b'L', b'F'] {
+    if data.len() >= 4 && data[..4] == [0x7f, b'E', b'L', b'F'] {
         if elf_is_dyn_without_interpreter(data) == Some(true) {
             return kind(
                 "elf-library",

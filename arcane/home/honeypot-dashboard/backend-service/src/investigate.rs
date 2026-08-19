@@ -309,7 +309,7 @@ async fn build_correlation(state: &AppState, filter: Value, portbridge_filter: V
     if portbridge_total > 0 {
         sensors.push(Kv { key: "portbridge".to_string(), count: portbridge_total });
     }
-    sensors.sort_by(|a, b| b.count.cmp(&a.count));
+    sensors.sort_by_key(|s| std::cmp::Reverse(s.count));
     sensors.truncate(10);
 
     let mut tunnel_os_guesses: Vec<String> = kv(&portbridge, "os").into_iter().map(|row| row.key).collect();

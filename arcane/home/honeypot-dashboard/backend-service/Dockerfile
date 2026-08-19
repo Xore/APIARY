@@ -6,6 +6,12 @@ FROM rust:1-slim-bookworm AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock* ./
 COPY src ./src
+# report_pdf.rs's two include_bytes!("../assets_pdf/...") calls need this
+# present at compile time, not just runtime -- omitting it here isn't a
+# missing-at-runtime issue, it's a build failure (only caught now that
+# #1628's prep work added this image to containers.yml's build matrix
+# for the first time).
+COPY assets_pdf ./assets_pdf
 RUN cargo build --release
 
 FROM debian:bookworm-slim
