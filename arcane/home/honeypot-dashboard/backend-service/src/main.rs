@@ -243,7 +243,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/alerts", get(stores::alerts))
         .route("/api/v1/alerts/{key}/ack", post(stores::acknowledge))
         .route("/api/v1/canarytokens/types", get(canarytokens::types))
-        .route("/api/v1/canarytokens", post(canarytokens::create))
+        .route("/api/v1/canarytokens", get(canarytokens::list).post(canarytokens::create))
         .route("/api/v1/canarytokens/{id}/download", get(canarytokens::download))
         // #1612 misc write paths: honeyfs-implant credential provisioning/
         // rotation (credentials_manager.go/credentials_api.go). Plain HTTP

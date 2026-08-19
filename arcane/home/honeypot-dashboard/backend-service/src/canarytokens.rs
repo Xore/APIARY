@@ -191,6 +191,49 @@ pub async fn create(
     }))
 }
 
+/// GET /api/v1/canarytokens — every created token's history record, newest
+/// first, for the Settings pane's history table and credentials'
+/// link-token id validation. auth_token is the platform's own management
+/// credential for that token (equivalent to a password) and must never
+/// reach a browser — see create()'s CreatedToken response for the same
+/// redaction, this list applies it too rather than encoding the ES
+/// document straight through.
+///
+/// Restored (2026-08-19) after a prior pass deleted this as "dead code" on
+/// the theory that frontend-next only reads the list through the generic
+/// /api/v1/store/canarytokens proxy — true for canarytokens.tsx, but
+/// credentials.tsx (added in the same PR that deleted this) calls this
+/// exact route by name to populate its link-token dropdown, and the
+/// generic proxy returns a different shape ({total, rows}, not {tokens})
+/// and does not redact auth_token. Deleting this silently broke that
+/// dropdown (serviceJSON swallows the resulting 404 as null) with no
+/// visible error anywhere.
+pub async fn list(State(state): State<AppState>) -> Result<Json<Value>, (StatusCode, String)> {
+    let result = state
+        .es
+        .search_index(&["dashboard-canarytokens-v1"], json!({"size": 1000}))
+        .await
+        .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?;
+    let mut records: Vec<Value> = result["hits"]["hits"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|hit| {
+            let mut record = hit["_source"].clone();
+            if let Some(object) = record.as_object_mut() {
+                object.remove("auth_token");
+            }
+            record
+        })
+        .collect();
+    records.sort_by(|a, b| {
+        let a = a["created_at"].as_str().unwrap_or_default();
+        let b = b["created_at"].as_str().unwrap_or_default();
+        b.cmp(a)
+    });
+    Ok(Json(json!({"tokens": records})))
+}
+
 /// GET /api/v1/canarytokens/{id}/download — proxy the token's artifact.
 /// web_image never goes through /download (fetching the trigger URL
 /// server-side would itself fire the token).
