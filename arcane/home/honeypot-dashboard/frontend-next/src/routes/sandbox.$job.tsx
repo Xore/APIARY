@@ -5,10 +5,10 @@
 // not this one — see sandbox.vnc.tsx.
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
 import { ArtifactList } from '../components/ArtifactList'
-import type { JsonRecord } from '../lib/json'
+import { useResolved } from '../lib/hooks'
+import { pathString, type JsonRecord } from '../lib/json'
 
 type Run = JsonRecord
 
@@ -24,34 +24,17 @@ export const Route = createFileRoute('/sandbox/$job')({
   component: SandboxDetail,
 })
 
-const str = (row: Run | null, ...path: string[]): string => {
-  let value: unknown = row
-  for (const key of path) {
-    if (typeof value !== 'object' || value === null) return ''
-    value = (value as Run)[key]
-  }
-  return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : ''
-}
-
 function SandboxDetail() {
   const { first } = Route.useLoaderData()
   const { job } = Route.useParams()
-  const [run, setRun] = useState<Run | null | 'missing'>(null)
-  useEffect(() => {
-    let cancelled = false
-    first.then((result) => {
-      if (!cancelled) setRun(result ?? 'missing')
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [first])
+  const resolved = useResolved(first)
+  const run: Run | null | 'missing' = resolved === undefined ? null : resolved ?? 'missing'
 
   if (run === 'missing') {
     return <InvestigateHeader label="Evidence" title={job} subtitle="No sandbox run found for this job id." />
   }
   const doc = run === null ? null : run
-  const level = str(doc, 'risk_level')
+  const level = pathString(doc, 'risk_level')
   return (
     <>
       <InvestigateHeader
@@ -70,12 +53,12 @@ function SandboxDetail() {
                       : 'badge badge--muted'
                 }
               >
-                {level || 'n/a'} {str(doc, 'risk_score')}
+                {level || 'n/a'} {pathString(doc, 'risk_score')}
               </span>
-              <span className="badge badge--muted">{str(doc, 'platform')}</span>
-              <span className="chip">exit {str(doc, 'exit_status')}</span>
-              {str(doc, 'file', 'hash', 'sha256') ? (
-                <Link className="chip" to="/payload-analysis/$hash" params={{ hash: str(doc, 'file', 'hash', 'sha256') }}>
+              <span className="badge badge--muted">{pathString(doc, 'platform')}</span>
+              <span className="chip">exit {pathString(doc, 'exit_status')}</span>
+              {pathString(doc, 'file', 'hash', 'sha256') ? (
+                <Link className="chip" to="/payload-analysis/$hash" params={{ hash: pathString(doc, 'file', 'hash', 'sha256') }}>
                   payload analysis →
                 </Link>
               ) : null}

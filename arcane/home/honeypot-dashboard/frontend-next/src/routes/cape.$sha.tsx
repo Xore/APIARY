@@ -8,8 +8,8 @@
 // dumped payloads/configs, and the analyzer log.
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
+import { useResolved } from '../lib/hooks'
 import type { Json, JsonRecord } from '../lib/json'
 
 type Signature = { name: string; description: string; severity: Json }
@@ -111,16 +111,8 @@ function ProcessActivityCard({ summary }: { summary: ReportSummary }) {
 function CapeDetail() {
   const { first } = Route.useLoaderData()
   const { sha } = Route.useParams()
-  const [run, setRun] = useState<CapeRun | null | 'missing'>(null)
-  useEffect(() => {
-    let cancelled = false
-    first.then((result) => {
-      if (!cancelled) setRun(result ?? 'missing')
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [first])
+  const resolved = useResolved(first)
+  const run: CapeRun | null | 'missing' = resolved === undefined ? null : resolved ?? 'missing'
 
   if (run === 'missing') {
     return <InvestigateHeader label="Evidence" title={sha.slice(0, 24)} subtitle="No CAPE result found for this hash." />

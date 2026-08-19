@@ -9,7 +9,7 @@ export type Session = {
   sub: string
   username: string
   displayName: string
-  role: string
+  role: 'admin' | 'user'
   idToken?: string
   createdAt: number
 }

@@ -10,8 +10,8 @@
 // visible error card, matching dashboard/ui/revdeck.html's own alert.
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
+import { useResolved } from '../lib/hooks'
 
 type Citation = { kind: string; raw: string; value: string; valid: boolean }
 
@@ -136,16 +136,8 @@ function RevDeckCard({ analysis }: { analysis: RevDeckAnalysis | null }) {
 function RevdeckDetail() {
   const { first } = Route.useLoaderData()
   const { sha } = Route.useParams()
-  const [run, setRun] = useState<RevdeckRun | null | 'missing'>(null)
-  useEffect(() => {
-    let cancelled = false
-    first.then((result) => {
-      if (!cancelled) setRun(result ?? 'missing')
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [first])
+  const resolved = useResolved(first)
+  const run: RevdeckRun | null | 'missing' = resolved === undefined ? null : resolved ?? 'missing'
 
   if (run === 'missing') {
     return <InvestigateHeader label="Evidence" title={sha.slice(0, 24)} subtitle="No RevDeck analysis found for this hash." />

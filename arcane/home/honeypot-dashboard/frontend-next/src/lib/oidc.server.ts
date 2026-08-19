@@ -79,7 +79,7 @@ export async function completeLogin(requestUrl: URL): Promise<{
   sub: string
   username: string
   displayName: string
-  role: string
+  role: 'admin' | 'user'
   idToken?: string
   returnTo: string
 } | null> {

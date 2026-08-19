@@ -93,3 +93,11 @@ export function num(row: StoreRow, key: string): number {
 export function when(iso: string): string {
   return iso.replace('T', ' ').slice(0, 19)
 }
+
+// The promoted top-level file.hash.sha256 es_importer.rs writes onto every
+// cape/github-analysis document alongside its wrapped source payload.
+export function sha256Of(row: StoreRow): string {
+  const file = row.file as StoreRow | undefined
+  const hash = file?.hash as StoreRow | undefined
+  return typeof hash?.sha256 === 'string' ? hash.sha256 : ''
+}

@@ -106,9 +106,7 @@ const PASSWORD_ALPHABET = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ2345
 function randomPassword(): string {
   const bytes = new Uint32Array(20)
   crypto.getRandomValues(bytes)
-  let out = ''
-  for (let i = 0; i < bytes.length; i++) out += PASSWORD_ALPHABET[bytes[i] % PASSWORD_ALPHABET.length]
-  return out
+  return Array.from(bytes, (b) => PASSWORD_ALPHABET[b % PASSWORD_ALPHABET.length]).join('')
 }
 
 function ProvisionForm({ onCreated }: { onCreated: () => void }) {

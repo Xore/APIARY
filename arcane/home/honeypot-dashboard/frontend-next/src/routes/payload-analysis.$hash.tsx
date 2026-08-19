@@ -9,9 +9,10 @@
 // every other mutation here.
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
 import { getSessionUser } from '../lib/auth'
+import { useResolved } from '../lib/hooks'
 import type { JsonRecord } from '../lib/json'
 
 type PayloadDetail = {
@@ -305,20 +306,9 @@ function OperatorActionsCard({ hash, golden, editable }: { hash: string; golden:
 function PayloadAnalysis() {
   const { first, golden, user } = Route.useLoaderData()
   const { hash } = Route.useParams()
-  const [detail, setDetail] = useState<PayloadDetail | null | 'missing'>(null)
-  const [goldenStatus, setGoldenStatus] = useState<GoldenImageStatus | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    first.then((result) => {
-      if (!cancelled) setDetail(result ?? 'missing')
-    })
-    golden.then((result) => {
-      if (!cancelled) setGoldenStatus(result)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [first, golden])
+  const resolvedDetail = useResolved(first)
+  const detail: PayloadDetail | null | 'missing' = resolvedDetail === undefined ? null : resolvedDetail ?? 'missing'
+  const goldenStatus: GoldenImageStatus | null = useResolved(golden) ?? null
 
   // Same "no session (dev mode)" posture as settings.tsx: treat a missing
   // session as admin so local/dev runs aren't blocked, and gate on role

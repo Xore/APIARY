@@ -2,7 +2,9 @@
 // same node/edge shape the legacy /api/attacker-graph served, colors
 // resolved from theme.css at init (canvas can't resolve var(), #1532).
 import { createServerFn } from '@tanstack/react-start'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
+import { cssVar as cssColor } from '../lib/cssVar'
+import { useServerQuery } from '../lib/useServerQuery'
 
 type GraphNode = { id: string; label: string; kind: 'hub' | 'spoke' | 'overflow' }
 type GraphEdge = { source: string; target: string }
@@ -15,25 +17,9 @@ const fetchGraph = createServerFn({ method: 'GET' })
     return serviceJSON<Graph>(`/api/v1/attackers-graph?id=${encodeURIComponent(data.id)}`)
   })
 
-function cssColor(name: string, fallback: string): string {
-  if (typeof document === 'undefined') return fallback
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
-}
-
 export function AttackerGraph({ id }: { id: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const [graph, setGraph] = useState<Graph | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    setGraph(null)
-    fetchGraph({ data: { id } }).then((result) => {
-      if (!cancelled) setGraph(result)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [id])
+  const graph = useServerQuery(fetchGraph, { id }, [id])
 
   useEffect(() => {
     const container = containerRef.current

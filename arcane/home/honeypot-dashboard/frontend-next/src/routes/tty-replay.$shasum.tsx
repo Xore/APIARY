@@ -3,8 +3,8 @@
 // inline; this page is the shareable deep link).
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
+import { useResolved } from '../lib/hooks'
 
 type Replay = {
   shasum: string
@@ -38,16 +38,8 @@ function plainTranscript(transcript: string): string {
 function TtyReplay() {
   const { first } = Route.useLoaderData()
   const { shasum } = Route.useParams()
-  const [replay, setReplay] = useState<Replay | null | 'missing'>(null)
-  useEffect(() => {
-    let cancelled = false
-    first.then((result) => {
-      if (!cancelled) setReplay(result ?? 'missing')
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [first])
+  const resolved = useResolved(first)
+  const replay: Replay | null | 'missing' = resolved === undefined ? null : resolved ?? 'missing'
 
   if (replay === 'missing') {
     return <InvestigateHeader label="Attacker behavior" title={shasum} subtitle="No recording found for this id." />

@@ -16,3 +16,14 @@ export type Json = string | number | boolean | null | Json[] | { [key: string]: 
 // endpoint (or similar). Alias kept distinct from `Json` itself so call
 // sites read naturally: a store row is always an object, not any JSON value.
 export type JsonRecord = Record<string, Json>
+
+// Walks an ES-sourced JSON value by a nested key path, returning the leaf
+// as a string (numbers stringified) or '' if any step is missing/non-object.
+export function pathString(row: unknown, ...path: string[]): string {
+  let value: unknown = row
+  for (const key of path) {
+    if (typeof value !== 'object' || value === null) return ''
+    value = (value as Record<string, unknown>)[key]
+  }
+  return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : ''
+}
