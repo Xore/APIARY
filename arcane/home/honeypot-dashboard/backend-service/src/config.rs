@@ -34,7 +34,7 @@ const CONFIG_INDEX: &str = "dashboard-config-v1";
 const CONFIG_ID: &str = "config";
 const USERS_INDEX: &str = "dashboard-users-v1";
 
-async fn load_config(state: &AppState) -> anyhow::Result<Option<Value>> {
+pub(crate) async fn load_config(state: &AppState) -> anyhow::Result<Option<Value>> {
     if let Some(doc) = state.es.get_doc(CONFIG_INDEX, CONFIG_ID).await? {
         return Ok(Some(doc));
     }
