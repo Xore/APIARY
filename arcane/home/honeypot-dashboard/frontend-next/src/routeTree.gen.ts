@@ -43,6 +43,7 @@ import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
 import { Route as AuthLoginRouteImport } from './routes/auth/login'
 import { Route as AuthLogoutRouteImport } from './routes/auth/logout'
 import { Route as BffSplatRouteImport } from './routes/bff.$'
+import { Route as CapeShaRouteImport } from './routes/cape.$sha'
 import { Route as ExportPortbridgeManualBlackholeDottxtRouteImport } from './routes/export.portbridge-manual-blackhole[.]txt'
 import { Route as GhidraShaRouteImport } from './routes/ghidra.$sha'
 import { Route as InvestigateClusterRouteImport } from './routes/investigate.cluster'
@@ -230,6 +231,11 @@ const BffSplatRoute = BffSplatRouteImport.update({
   path: '/bff/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CapeShaRoute = CapeShaRouteImport.update({
+  id: '/$sha',
+  path: '/$sha',
+  getParentRoute: () => CapeRoute,
+} as any)
 const ExportPortbridgeManualBlackholeDottxtRoute =
   ExportPortbridgeManualBlackholeDottxtRouteImport.update({
     id: '/export/portbridge-manual-blackhole.txt',
@@ -322,7 +328,7 @@ export interface FileRoutesByFullPath {
   '/auth-events': typeof AuthEventsRoute
   '/campaigns': typeof CampaignsRoute
   '/canarytokens': typeof CanarytokensRoute
-  '/cape': typeof CapeRoute
+  '/cape': typeof CapeRouteWithChildren
   '/clusters': typeof ClustersRoute
   '/commands': typeof CommandsRoute
   '/credentials': typeof CredentialsRoute
@@ -349,6 +355,7 @@ export interface FileRoutesByFullPath {
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
   '/bff/$': typeof BffSplatRoute
+  '/cape/$sha': typeof CapeShaRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/ghidra/$sha': typeof GhidraShaRoute
   '/investigate/cluster': typeof InvestigateClusterRoute
@@ -374,7 +381,7 @@ export interface FileRoutesByTo {
   '/auth-events': typeof AuthEventsRoute
   '/campaigns': typeof CampaignsRoute
   '/canarytokens': typeof CanarytokensRoute
-  '/cape': typeof CapeRoute
+  '/cape': typeof CapeRouteWithChildren
   '/clusters': typeof ClustersRoute
   '/commands': typeof CommandsRoute
   '/credentials': typeof CredentialsRoute
@@ -401,6 +408,7 @@ export interface FileRoutesByTo {
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
   '/bff/$': typeof BffSplatRoute
+  '/cape/$sha': typeof CapeShaRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/ghidra/$sha': typeof GhidraShaRoute
   '/investigate/cluster': typeof InvestigateClusterRoute
@@ -427,7 +435,7 @@ export interface FileRoutesById {
   '/auth-events': typeof AuthEventsRoute
   '/campaigns': typeof CampaignsRoute
   '/canarytokens': typeof CanarytokensRoute
-  '/cape': typeof CapeRoute
+  '/cape': typeof CapeRouteWithChildren
   '/clusters': typeof ClustersRoute
   '/commands': typeof CommandsRoute
   '/credentials': typeof CredentialsRoute
@@ -454,6 +462,7 @@ export interface FileRoutesById {
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
   '/bff/$': typeof BffSplatRoute
+  '/cape/$sha': typeof CapeShaRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/ghidra/$sha': typeof GhidraShaRoute
   '/investigate/cluster': typeof InvestigateClusterRoute
@@ -508,6 +517,7 @@ export interface FileRouteTypes {
     | '/auth/login'
     | '/auth/logout'
     | '/bff/$'
+    | '/cape/$sha'
     | '/export/portbridge-manual-blackhole.txt'
     | '/ghidra/$sha'
     | '/investigate/cluster'
@@ -560,6 +570,7 @@ export interface FileRouteTypes {
     | '/auth/login'
     | '/auth/logout'
     | '/bff/$'
+    | '/cape/$sha'
     | '/export/portbridge-manual-blackhole.txt'
     | '/ghidra/$sha'
     | '/investigate/cluster'
@@ -612,6 +623,7 @@ export interface FileRouteTypes {
     | '/auth/login'
     | '/auth/logout'
     | '/bff/$'
+    | '/cape/$sha'
     | '/export/portbridge-manual-blackhole.txt'
     | '/ghidra/$sha'
     | '/investigate/cluster'
@@ -638,7 +650,7 @@ export interface RootRouteChildren {
   AuthEventsRoute: typeof AuthEventsRoute
   CampaignsRoute: typeof CampaignsRoute
   CanarytokensRoute: typeof CanarytokensRoute
-  CapeRoute: typeof CapeRoute
+  CapeRoute: typeof CapeRouteWithChildren
   ClustersRoute: typeof ClustersRoute
   CommandsRoute: typeof CommandsRoute
   CredentialsRoute: typeof CredentialsRoute
@@ -922,6 +934,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BffSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cape/$sha': {
+      id: '/cape/$sha'
+      path: '/$sha'
+      fullPath: '/cape/$sha'
+      preLoaderRoute: typeof CapeShaRouteImport
+      parentRoute: typeof CapeRoute
+    }
     '/export/portbridge-manual-blackhole.txt': {
       id: '/export/portbridge-manual-blackhole.txt'
       path: '/export/portbridge-manual-blackhole.txt'
@@ -1037,6 +1056,16 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface CapeRouteChildren {
+  CapeShaRoute: typeof CapeShaRoute
+}
+
+const CapeRouteChildren: CapeRouteChildren = {
+  CapeShaRoute: CapeShaRoute,
+}
+
+const CapeRouteWithChildren = CapeRoute._addFileChildren(CapeRouteChildren)
+
 interface RevdeckRouteChildren {
   RevdeckShaRoute: typeof RevdeckShaRoute
 }
@@ -1056,7 +1085,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthEventsRoute: AuthEventsRoute,
   CampaignsRoute: CampaignsRoute,
   CanarytokensRoute: CanarytokensRoute,
-  CapeRoute: CapeRoute,
+  CapeRoute: CapeRouteWithChildren,
   ClustersRoute: ClustersRoute,
   CommandsRoute: CommandsRoute,
   CredentialsRoute: CredentialsRoute,

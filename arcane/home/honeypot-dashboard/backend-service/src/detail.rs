@@ -88,6 +88,94 @@ pub async fn revdeck_run(
     Ok(Json(doc["revdeck"].clone()))
 }
 
+/// /api/v1/cape/{sha} — one CAPE detonation result, ported from cape.go's
+/// capeData. `report` is CAPE's own raw report — tens of thousands of
+/// API-call entries per traced process is normal — so it's never shipped
+/// whole; only the bounded `report_summary` this handler reduces it to
+/// crosses the wire (mirrors cape.go's own capeReportSummary). The full
+/// report stays in Elasticsearch for anyone who needs it, same posture
+/// Go's page takes ("too large for this page" — Go links to the raw-JSON
+/// API route instead).
+pub async fn cape_run(
+    State(state): State<AppState>,
+    Path(sha): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let doc = state
+        .es
+        .get_doc("cape-analysis-v1", &format!("cape:{sha}"))
+        .await
+        .map_err(bad_gateway)?
+        .ok_or((StatusCode::NOT_FOUND, "not found".to_string()))?;
+    let mut result = doc["cape"].clone();
+    let summary = summarize_cape_report(&result["report"]);
+    if let Some(object) = result.as_object_mut() {
+        object.remove("report");
+    }
+    result["report_summary"] = summary;
+    Ok(Json(result))
+}
+
+/// /api/v1/cape/{sha}/raw — the untouched result, full report included.
+/// A distinct route from cape_run above (not a query flag on it) so the
+/// page's own fetch never accidentally pulls the full report in — this is
+/// only ever reached by an explicit "download raw report" click.
+pub async fn cape_raw(
+    State(state): State<AppState>,
+    Path(sha): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let doc = state
+        .es
+        .get_doc("cape-analysis-v1", &format!("cape:{sha}"))
+        .await
+        .map_err(bad_gateway)?
+        .ok_or((StatusCode::NOT_FOUND, "not found".to_string()))?;
+    Ok(Json(doc["cape"].clone()))
+}
+
+fn summarize_cape_report(report: &Value) -> Value {
+    if !report.is_object() {
+        return Value::Null;
+    }
+    let mut summary_keys: Vec<&String> = report["behavior"]["summary"].as_object().into_iter().flatten().map(|(key, _)| key).collect();
+    summary_keys.sort();
+
+    let processes: Vec<Value> = report["behavior"]["processes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|process| {
+            let call_count = process["calls"].as_array().map_or(0, Vec::len);
+            json!({
+                "process_id": process["process_id"],
+                "process_name": process["process_name"],
+                "parent_id": process["parent_id"],
+                "module_path": process["module_path"],
+                "first_seen": process["first_seen"],
+                "call_count": call_count,
+            })
+        })
+        .collect();
+    let total_calls: i64 = processes.iter().map(|process| process["call_count"].as_i64().unwrap_or(0)).sum();
+
+    json!({
+        "machine": report["info"]["machine"]["label"],
+        "package": report["info"]["package"],
+        "route": report["info"]["route"],
+        "timeout": report["info"]["timeout"],
+        "duration": report["info"]["duration"],
+        "malscore": report["malscore"],
+        "malstatus": report["malstatus"],
+        "summary": report["behavior"]["summary"],
+        "summary_keys": summary_keys,
+        "processes": processes,
+        "total_calls": total_calls,
+        "payloads": report["CAPE"]["payloads"],
+        "configs": report["CAPE"]["configs"],
+        "debug_log": report["debug"]["log"],
+        "debug_errors": report["debug"]["errors"],
+    })
+}
+
 #[derive(Deserialize)]
 pub struct GraphQuery {
     pub id: String,

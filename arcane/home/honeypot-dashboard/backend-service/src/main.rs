@@ -200,6 +200,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/sandbox/{job}", get(detail::sandbox_run))
         .route("/api/v1/ghidra/{sha}", get(detail::ghidra_run))
         .route("/api/v1/revdeck/{sha}", get(detail::revdeck_run))
+        .route("/api/v1/cape/{sha}", get(detail::cape_run))
+        .route("/api/v1/cape/{sha}/raw", get(detail::cape_raw))
         .route("/api/v1/attackers-graph", get(detail::attackers_graph))
         .route("/api/v1/attack-vectors", get(detail::attack_vectors))
         .route("/api/v1/ml-anomalies/ack", post(detail::ml_anomaly_ack))
