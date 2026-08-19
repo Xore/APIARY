@@ -129,8 +129,10 @@ fn scope_filters(scope: &ReportScope) -> Vec<Value> {
 /// risk scale this dashboard reuses across sandbox/payload/report scoring
 /// (report_pdf.go's reportDataFor calls the very same function). Any
 /// divergence here would make a ported report show a different risk word
-/// for the same score than the Go tier does/did.
-fn risk_level(score: i64) -> &'static str {
+/// for the same score than the Go tier does/did. pub(crate) so
+/// payload_static_analysis's deterministic-analyzer scoring reuses this
+/// same canonical scale rather than a second copy of the same four bands.
+pub(crate) fn risk_level(score: i64) -> &'static str {
     match score {
         s if s >= 75 => "critical",
         s if s >= 50 => "high",

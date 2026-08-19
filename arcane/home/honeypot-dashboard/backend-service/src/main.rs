@@ -58,6 +58,7 @@ mod payload_detail;
 mod payload_inventory;
 mod payload_kind;
 mod payload_paths;
+mod payload_static_analysis;
 mod preferences;
 mod replay;
 mod report_pdf;
