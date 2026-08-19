@@ -21,7 +21,7 @@
 // BACKEND_MAX_INFLIGHT run at once, BACKEND_MAX_QUEUE more wait briefly,
 // anything past that sheds with 503 rather than growing without bound.
 import { Agent, setGlobalDispatcher } from 'undici'
-import { ConcurrencyLimiter, envInt, Overloaded, overloadedResponse } from './backpressure.server'
+import { ConcurrencyLimiter, envInt, Overloaded, overloadedResponse, releaseOnFinish } from './backpressure.server'
 
 setGlobalDispatcher(
   new Agent({
@@ -45,6 +45,20 @@ export function backendURL(): string {
   return (process.env.BACKEND_URL ?? 'http://127.0.0.1:8081').replace(/\/$/, '')
 }
 
+/** Base URL of the write-capable "mounted" Rust service instance — the only
+ * container with the host-side sandbox/Ghidra/GitHub-analysis request-spool
+ * mounts (compose's backend-service-mounted, #1612 phase 3a/3b). Same image,
+ * same route table as backendURL()'s target (routes aren't container-
+ * specific — see main.rs); the only difference is which container has those
+ * mounts. Every route that writes into (or reads a live listing straight off
+ * disk from) a host spool — sandbox/ghidra/github-analysis submit, sandbox
+ * golden-image-status and vnc status, and the whole workbench orchestrator
+ * surface — must go through this base, or it silently comes back "not
+ * configured"/empty against the regular instance instead of erroring loudly. */
+export function backendMountedURL(): string {
+  return (process.env.BACKEND_MOUNTED_URL ?? 'http://127.0.0.1:8082').replace(/\/$/, '')
+}
+
 /** Base URL of the BFF tier as seen from the frontend tier when split;
  * loopback (same process) in all-mode. */
 export function bffInternalURL(): string {
@@ -55,15 +69,22 @@ export function bffInternalURL(): string {
  * all-mode) calls the Rust service directly; a split frontend tier has no
  * route to BACKEND_URL at all, so it goes through the /bff/* proxy on
  * bffInternalURL() instead — same call site, same signature, the seam is
- * entirely inside this function.
+ * entirely inside this function. Pass `{ mounted: true }` for any route
+ * that only exists on backend-service-mounted (see backendMountedURL()) —
+ * routed to /bff-mounted/* in split mode, the same seam.
  *
  * Gated by backendLimiter (#1616): a 503 here on shed is indistinguishable
  * to callers from any other backend failure — serviceJSON already treats
  * !response.ok as "return null, let the route render its empty state",
  * and direct serviceFetch callers already branch on response.ok — so
  * shedding needed no new error-handling contract at any call site. */
-export async function serviceFetch(path: string, init?: RequestInit): Promise<Response> {
-  const base = serveMode() === 'frontend' ? `${bffInternalURL()}/bff` : backendURL()
+export async function serviceFetch(path: string, init?: RequestInit, opts?: { mounted?: boolean }): Promise<Response> {
+  const base =
+    serveMode() === 'frontend'
+      ? `${bffInternalURL()}/${opts?.mounted ? 'bff-mounted' : 'bff'}`
+      : opts?.mounted
+        ? backendMountedURL()
+        : backendURL()
   return backendLimiter
     .run(() =>
       fetch(`${base}${path}`, {
@@ -120,17 +141,23 @@ async function cacheRedis(): Promise<import('ioredis').Redis | null> {
 }
 
 /** JSON convenience over serviceFetch; null on any failure so routes can
- * fall back to skeleton/error states without try/catch noise. */
-export async function serviceJSON<T>(path: string): Promise<T | null> {
-  const cached = payloadCache.get(path)
+ * fall back to skeleton/error states without try/catch noise. Pass
+ * `{ mounted: true }` for a backend-service-mounted-only route, same as
+ * serviceFetch — the cache key is prefixed by target, not just `path`,
+ * since backendURL() and backendMountedURL() can disagree on the same
+ * path (confirmed live: without the prefix, whichever target answered
+ * first poisons the cache for the other for PAYLOAD_TTL_MS). */
+export async function serviceJSON<T>(path: string, opts?: { mounted?: boolean }): Promise<T | null> {
+  const cacheKey = opts?.mounted ? `mounted:${path}` : path
+  const cached = payloadCache.get(cacheKey)
   if (cached && Date.now() - cached.at < PAYLOAD_TTL_MS) return cached.body as T
   const redis = await cacheRedis()
   if (redis) {
     try {
-      const shared = await redis.get(REDIS_PREFIX + path)
+      const shared = await redis.get(REDIS_PREFIX + cacheKey)
       if (shared) {
         const body = JSON.parse(shared) as T
-        payloadCache.set(path, { at: Date.now(), body })
+        payloadCache.set(cacheKey, { at: Date.now(), body })
         return body
       }
     } catch {
@@ -138,19 +165,73 @@ export async function serviceJSON<T>(path: string): Promise<T | null> {
     }
   }
   try {
-    const response = await serviceFetch(path)
+    const response = await serviceFetch(path, undefined, opts)
     if (!response.ok) return null
     const body = (await response.json()) as T
-    payloadCache.set(path, { at: Date.now(), body })
+    payloadCache.set(cacheKey, { at: Date.now(), body })
     if (payloadCache.size > 500) {
       const cutoff = Date.now() - PAYLOAD_TTL_MS
       for (const [key, value] of payloadCache) if (value.at < cutoff) payloadCache.delete(key)
     }
     if (redis) {
-      redis.set(REDIS_PREFIX + path, JSON.stringify(body), 'PX', PAYLOAD_TTL_MS).catch(() => {})
+      redis.set(REDIS_PREFIX + cacheKey, JSON.stringify(body), 'PX', PAYLOAD_TTL_MS).catch(() => {})
     }
     return body
   } catch {
     return null
   }
+}
+
+const PROXY_BODY_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
+/** Shared implementation behind routes/bff.$.ts and routes/bff-mounted.$.ts
+ * (the same seam, one per backendURL()/backendMountedURL() target): streams
+ * a split-off frontend-only host's request into the given Rust-tier `base`
+ * and the response straight back, no buffering — same posture as
+ * api/live.ts's SSE passthrough. Gated by backendLimiter (#1616), shared
+ * with serviceFetch's direct path since this is a split deployment's only
+ * route to the Rust tier and must not duplicate that fan-out's bounded
+ * queue. */
+export async function proxyToRust(request: Request, splat: string | undefined, base: string): Promise<Response> {
+  if (serveMode() === 'frontend') {
+    // This instance IS the frontend-only tier — it has no Rust backend to
+    // proxy to. Reaching this branch means /bff*/* was routed here by
+    // mistake (Traefik split misconfigured, or a direct hit that bypassed
+    // it) rather than to the actual BFF host.
+    return new Response('not the bff tier', { status: 404 })
+  }
+  const token = process.env.SERVICE_TOKEN ?? ''
+  if (token && request.headers.get('x-service-token') !== token) {
+    return new Response('unauthorized', { status: 401 })
+  }
+  let release: () => void
+  try {
+    release = await backendLimiter.acquire()
+  } catch (err) {
+    if (err instanceof Overloaded) return overloadedResponse(err)
+    throw err
+  }
+  const search = new URL(request.url).search
+  const upstreamPath = `/${splat ?? ''}${search}`
+  const contentType = request.headers.get('content-type')
+  const upstream = await fetch(`${base}${upstreamPath}`, {
+    method: request.method,
+    headers: {
+      ...(contentType ? { 'content-type': contentType } : {}),
+      'x-service-token': token,
+    },
+    body: PROXY_BODY_METHODS.has(request.method) ? await request.arrayBuffer() : undefined,
+    signal: request.signal,
+  }).catch((err) => {
+    release()
+    throw err
+  })
+  if (!upstream.body) {
+    release()
+    return new Response(null, { status: upstream.status })
+  }
+  return new Response(releaseOnFinish(upstream.body, release), {
+    status: upstream.status,
+    headers: { 'content-type': upstream.headers.get('content-type') ?? 'application/octet-stream' },
+  })
 }

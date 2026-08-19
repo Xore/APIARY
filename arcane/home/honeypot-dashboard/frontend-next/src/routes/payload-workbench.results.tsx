@@ -123,21 +123,25 @@ const fetchAnalyzerCatalog = createServerFn({ method: 'GET' })
   .inputValidator((input: { hash: string }) => input)
   .handler(async ({ data }): Promise<AnalyzersResponse | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
-    return serviceJSON<AnalyzersResponse>(`/api/v1/workbench/analyzers?hash=${encodeURIComponent(data.hash)}`)
+    return serviceJSON<AnalyzersResponse>(`/api/v1/workbench/analyzers?hash=${encodeURIComponent(data.hash)}`, { mounted: true })
   })
 
 const fetchRecipes = createServerFn({ method: 'GET' }).handler(async (): Promise<{ recipes: WorkbenchRecipe[] } | null> => {
   const { getSessionUser } = await import('../lib/auth')
   const user = await getSessionUser()
   const { serviceJSON } = await import('../lib/backend.server')
-  return serviceJSON<{ recipes: WorkbenchRecipe[] }>(`/api/v1/workbench/recipes?owner=${encodeURIComponent(user?.username ?? '')}`)
+  return serviceJSON<{ recipes: WorkbenchRecipe[] }>(`/api/v1/workbench/recipes?owner=${encodeURIComponent(user?.username ?? '')}`, {
+    mounted: true,
+  })
 })
 
 const fetchOwnRuns = createServerFn({ method: 'GET' }).handler(async (): Promise<{ runs: WorkbenchRun[] } | null> => {
   const { getSessionUser } = await import('../lib/auth')
   const user = await getSessionUser()
   const { serviceJSON } = await import('../lib/backend.server')
-  return serviceJSON<{ runs: WorkbenchRun[] }>(`/api/v1/workbench/runs?owner=${encodeURIComponent(user?.username ?? '')}&limit=25`)
+  return serviceJSON<{ runs: WorkbenchRun[] }>(`/api/v1/workbench/runs?owner=${encodeURIComponent(user?.username ?? '')}&limit=25`, {
+    mounted: true,
+  })
 })
 
 // Bypasses serviceJSON's short-TTL cache on purpose — a status refresh right
@@ -149,7 +153,11 @@ const refreshRunFn = createServerFn({ method: 'GET' })
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
     const { serviceFetch } = await import('../lib/backend.server')
-    const response = await serviceFetch(`/api/v1/workbench/runs/${encodeURIComponent(data.id)}?owner=${encodeURIComponent(user?.username ?? '')}`)
+    const response = await serviceFetch(
+      `/api/v1/workbench/runs/${encodeURIComponent(data.id)}?owner=${encodeURIComponent(user?.username ?? '')}`,
+      undefined,
+      { mounted: true },
+    )
     if (!response.ok) return { ok: false, error: await response.text() }
     const body = (await response.json()) as { run: WorkbenchRun }
     return { ok: true, run: body.run }
@@ -165,16 +173,20 @@ const submitRun = createServerFn({ method: 'POST' })
     const user = await getSessionUser()
     if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
     const { serviceFetch } = await import('../lib/backend.server')
-    const response = await serviceFetch('/api/v1/workbench/runs', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        payload_sha256: data.payload_sha256,
-        owner: user?.username ?? '',
-        recipe_name: data.recipe_name,
-        analyzers: data.analyzers,
-      }),
-    })
+    const response = await serviceFetch(
+      '/api/v1/workbench/runs',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          payload_sha256: data.payload_sha256,
+          owner: user?.username ?? '',
+          recipe_name: data.recipe_name,
+          analyzers: data.analyzers,
+        }),
+      },
+      { mounted: true },
+    )
     if (!response.ok) return { ok: false, error: await response.text() }
     const body = (await response.json()) as { run: WorkbenchRun; reused: boolean }
     return { ok: true, run: body.run, reused: body.reused }
@@ -190,11 +202,11 @@ const saveRecipeFn = createServerFn({ method: 'POST' })
     const user = await getSessionUser()
     if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
     const { serviceFetch } = await import('../lib/backend.server')
-    const response = await serviceFetch('/api/v1/workbench/recipes', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ...data, owner: user?.username ?? '' }),
-    })
+    const response = await serviceFetch(
+      '/api/v1/workbench/recipes',
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...data, owner: user?.username ?? '' }) },
+      { mounted: true },
+    )
     if (!response.ok) return { ok: false, error: await response.text() }
     const body = (await response.json()) as { recipe: WorkbenchRecipe }
     return { ok: true, recipe: body.recipe }
@@ -214,6 +226,7 @@ const childActionFn = createServerFn({ method: 'POST' })
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ owner: user?.username ?? '' }),
       },
+      { mounted: true },
     )
     if (!response.ok) return { ok: false, error: await response.text() }
     const body = (await response.json()) as { run: WorkbenchRun }

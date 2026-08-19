@@ -22,7 +22,7 @@ type VncStatus = { sha256: string; bridge_ws: string }
 
 const fetchVncStatus = createServerFn({ method: 'GET' }).handler(async (): Promise<{ status: VncStatus | null; error: string | null }> => {
   const { serviceFetch } = await import('../lib/backend.server')
-  const response = await serviceFetch('/api/v1/sandbox/vnc')
+  const response = await serviceFetch('/api/v1/sandbox/vnc', undefined, { mounted: true })
   if (!response.ok) return { status: null, error: await response.text() }
   return { status: (await response.json()) as VncStatus, error: null }
 })
