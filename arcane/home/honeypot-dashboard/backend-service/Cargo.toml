@@ -1,0 +1,54 @@
+# apiary-backend — the Rust service tier of the modernization port (#1608).
+# Serves /api/v1 JSON to the Nitro BFF: Elasticsearch queries, correlation,
+# the SSE event source, result spools, and (later) PDF generation. Chosen by
+# the serving-quality decision matrix on #1608 (axum/tokio over Go/Node/
+# Elixir for latency, CPU-bound correlation, memory predictability, and
+# hostile-input correctness).
+[package]
+name = "apiary-backend"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = { version = "0.8", features = ["macros"] }
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.6", features = ["trace", "compression-gzip"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+elasticsearch = { version = "8.19.0-alpha.1", default-features = false, features = ["rustls-tls"] }
+regex = "1"
+reqwest = { version = "0.12", features = ["json", "multipart", "rustls-tls"], default-features = false }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
+async-stream = "0.3"
+base64 = "0.22"
+thiserror = "2"
+chrono = { version = "0.4", features = ["serde"] }
+futures = "0.3"
+tokio-stream = { version = "0.1", features = ["sync"] }
+# Payload Workbench (#1612 phase 3b): idempotency-key hashing and recipe-id
+# generation. Both need to agree with the Go tier's algorithm (SHA-256 of
+# the same material; crypto/rand-strength ids) while both write
+# dashboard-workbench-runs-v1/-recipes-v1 during the cutover window.
+sha2 = "0.10"
+rand = "0.9"
+# PDF report composer (#1612 follow-up): only the core Op/graphics/
+# builtin-font API is used (no HTML layout, no raster image decoding — the
+# two embedded emblems are hand-registered XObject::External stencil masks,
+# see report_pdf.rs), so every optional feature (html/text_layout/images/
+# svg/...) is disabled to skip printpdf's azul-layout+taffy+hyphenation
+# dependency chain entirely.
+printpdf = { version = "0.12.6", default-features = false }
+# agent-intrusion-worker port (#1610): bounded_decode needs real gzip/zlib
+# decompression (no equivalent in std) to verify a decoded payload actually
+# unpacks, not just that it base64-decodes.
+flate2 = "1"
+# rule_encoded_egress_external needs base32 to try-decode a DNS query label
+# (the campaign's own DNS-transport exfil shape uses base32, not base64).
+data-encoding = "2"
+mail-parser = "0.11.6"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

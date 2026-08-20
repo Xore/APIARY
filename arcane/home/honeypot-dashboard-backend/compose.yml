@@ -1,0 +1,169 @@
+# honeypot-dashboard-backend -- #1622: backend-service split out of
+# arcane/home/honeypot-dashboard/compose.yml into its own Arcane-managed
+# stack, deployed as /opt/stacks/honeypot-dashboard-backend. This is the
+# deployment-layer counterpart to #1608's SERVE_MODE=all|frontend|bff /
+# BFF_INTERNAL_URL application-code work: that issue made the frontend/BFF
+# tier able to run cross-host; this split is what lets Arcane actually
+# restart/redeploy the request/response backend tier without touching
+# dashboard-next (or vice versa), instead of both living behind one
+# `docker compose` invocation in the combined honeypot-dashboard stack.
+#
+# Scope, deliberately narrow (per the #1622 task): only `backend-service`
+# moved here. `backend-service-mounted`, `backend-worker`,
+# `backend-worker-importer`, `backend-worker-enrichment`, and `dashboard-next`
+# all stay in arcane/home/honeypot-dashboard/compose.yml for now -- splitting
+# those too is further work, not done in this pass. `backend-service` and
+# `dashboard-next` still resolve each other by bare service-name DNS
+# (BACKEND_URL=http://backend-service:8081 in dashboard-next's environment)
+# because both stacks attach to the same explicitly-named `honeynet` bridge
+# below -- the exact mechanism honeypot-attacker-identity-worker and every
+# other split-out stack already use to reach the main stack's services, and
+# already proven live (see honeypot-dashboard/compose.yml's own header).
+#
+# x-runtime-defaults is redefined locally (not inherited -- the anchor lived
+# in the old shared file, which this stack no longer reads) with the exact
+# same content as honeypot-dashboard/compose.yml's own copy, matching the
+# pattern every other split-out worker stack in arcane/home/ already uses
+# (see e.g. honeypot-attacker-identity-worker/compose.yml).
+#
+# Build context (`build: ../honeypot-dashboard/backend-service`): the Rust
+# crate source was deliberately NOT moved -- only this compose service
+# definition split out -- so the build context has to reach into the
+# sibling honeypot-dashboard stack's own directory. No existing arcane/home/
+# stack references a build context outside its own directory (grepped for
+# `build: ../` across every compose file here, found none), so there is no
+# established precedent to follow; this is a considered choice, not a
+# default. It works today because Arcane's directory-aware sync
+# materializes every stack under a shared parent (/var/dockge/stacks/<name>/,
+# see docs/ARCANE-GIT-SYNC.md), so `../honeypot-dashboard/backend-service`
+# resolves correctly as long as both stacks are synced to the SAME host --
+# true of the current single-host topology. It reintroduces exactly the
+# cross-stack coupling this split is otherwise meant to remove: this stack's
+# build breaks if honeypot-dashboard's directory is ever removed, renamed,
+# or (the actual motivating case from #1608/#1622) synced to a *different*
+# Docker host than this one. Genuinely deploying backend-service to a host
+# that doesn't also carry honeypot-dashboard's own directory needs the crate
+# source relocated to a shared/independent path first -- flagged here as a
+# follow-up, not resolved by this pass (see #1622's own report for the
+# on-the-day reasoning).
+#
+# services-adapter-socket: previously left project-scoped/unnamed in
+# honeypot-dashboard/compose.yml on the stated grounds that "nothing else
+# touches it" (see that file's header) -- no longer true once backend-service
+# lives in a different Compose project than services-adapter and dashboard.
+# Given an explicit shared `name:` here AND in honeypot-dashboard/compose.yml
+# (updated in the same #1622 change) so both projects resolve the same
+# underlying Docker volume, the same mechanism honeynet/dashboard-state/
+# dionaea-lib already use. dashboard-state and dionaea-lib were already
+# explicitly named for cross-stack sharing with the main APIARY stack, so
+# their declarations below are unchanged, just now also declared in this
+# second file.
+
+name: honeypot-dashboard-backend
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  # ------------------------------------------------------------------
+  # Moved verbatim from honeypot-dashboard/compose.yml (#1622) -- same
+  # image, container name, environment, volumes, resource limits as
+  # before the split. Still behind the `next` profile until the
+  # modernization port (#1608) cuts over; see that file's own comment on
+  # this service for the cutover plan.
+  # ------------------------------------------------------------------
+  backend-service:
+    <<: *runtime-defaults
+    profiles: ["next"]
+    build: ../honeypot-dashboard/backend-service
+    image: apiary-backend:latest
+    container_name: hp-apiary-backend
+    restart: unless-stopped
+    environment:
+      - LISTEN_ADDR=0.0.0.0:8081
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
+      - CANARYTOKENS_API_URL=${CANARYTOKENS_API_URL:-}
+      # #1612 misc write paths: honeyfs-implant credential provisioning/
+      # rotation. Same reachability posture as CANARYTOKENS_API_URL above --
+      # a plain HTTP URL over the WireGuard tunnel, off unless configured,
+      # no host mount needed (unlike the settings-admin block below).
+      - HONEYFS_IMPLANT_URL=${HONEYFS_IMPLANT_URL:-}
+      - HONEYFS_IMPLANT_TOKEN=${HONEYFS_IMPLANT_TOKEN:-}
+      # #1612 settings admin surface: services control needs the adapter
+      # socket, retention sweep needs WORKER_LOOPS. Both dashboard-state
+      # and services-adapter-socket are mounted directly into
+      # backend-service (not backend-worker) — a tier decision, not an
+      # oversight: they're host-local, single-instance resources, and
+      # backend-service is the single-instance request/response tier,
+      # unlike backend-worker which #1610 requires to stay
+      # host-portable/statelessly scalable.
+      - SERVICES_ADAPTER_SOCKET=/run/services-adapter/control.sock
+      # reports-scheduler (#1612 phase 4b) joins the same list: ES-only
+      # (dashboard-reports-definitions-v1 due-schedule scan +
+      # dashboard-generated-reports-v1 writes), no host mount of its own,
+      # so it belongs on this single-instance tier for the same reason
+      # user-retention-sweep does. payload-inventory (#1610) joins for the
+      # opposite-but-compatible reason: it needs the read-only PAYLOAD_DIRS
+      # mount below, which this service already carries for the on-demand
+      # bytes-mirror self-heal — no new mount, just a second consumer of one
+      # already here.
+      - WORKER_LOOPS=user-retention-sweep,reports-scheduler,payload-inventory
+      - SCAN_INTERVAL=${PAYLOAD_INVENTORY_SCAN_INTERVAL:-5m}
+      # #1612 payload-bytes on-demand mirror self-heal (payload_bytes.rs):
+      # read-only access to the same capture sources main.go's PAYLOAD_DIRS
+      # wiring reads, so a hash dashboard-payload-bytes-v1 hasn't mirrored
+      # yet can still be served (mirrored on demand) instead of coming back
+      # empty until payload-inventory-worker's next scan. Read-only and
+      # single-instance-safe like the Phase-1 mounts above, so it stays on
+      # backend-service rather than the new backend-service-mounted below.
+      - PAYLOAD_DIRS=/dionaea-lib/binaries,/cowrie-downloads
+      - SCRIPT_PAYLOAD_DIR=/state/script-payloads
+      - TZ=Europe/Berlin
+    volumes:
+      - dashboard-state:/state
+      - services-adapter-socket:/run/services-adapter
+      - dionaea-lib:/dionaea-lib:ro
+      - /opt/stacks/apiary/logs/cowrie/downloads:/cowrie-downloads:ro
+    networks:
+      - honeynet
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    deploy:
+      resources:
+        limits: {cpus: "2.0", memory: 512M}
+
+networks:
+  # Shared with the main honeypot-dashboard stack (and the wider APIARY
+  # stack) -- explicit fixed name, not project-prefixed, non-external. Same
+  # mechanism honeypot-dashboard/compose.yml's own header documents and
+  # every other split-out worker stack in arcane/home/ already relies on.
+  honeynet:
+    name: honeynet
+    driver: bridge
+
+volumes:
+  # Shared with honeypot-dashboard and the main APIARY stack (dionaea
+  # writes, this stack only reads) -- explicit fixed name, matching both of
+  # those files' own declarations exactly.
+  dionaea-lib:
+    name: dionaea-lib
+  # Shared with honeypot-dashboard (and, both ways, with the main APIARY
+  # stack's payload-dedupe/yara-scanner) -- explicit fixed name, matching
+  # honeypot-dashboard/compose.yml's own declaration exactly.
+  dashboard-state:
+    name: dashboard-state
+  # Newly given an explicit shared name by this #1622 split -- previously
+  # left project-scoped/unnamed in honeypot-dashboard/compose.yml because
+  # only services within that one project touched it. Now shared across
+  # this project and honeypot-dashboard's (dashboard and services-adapter
+  # both still mount it there) -- see this file's header for the full
+  # reasoning. honeypot-dashboard/compose.yml's own declaration was updated
+  # to the same explicit name in the same change so both projects resolve
+  # the identical underlying Docker volume.
+  services-adapter-socket:
+    name: services-adapter-socket

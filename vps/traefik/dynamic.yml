@@ -24,6 +24,12 @@
 # socat-hp-http           :8081   →  10.8.0.2:19081 (http-honeypot :8080)
 # socat-hp-snare          :8082   →  10.8.0.2:19082 (snare :8080)
 # socat-hp-dashboard      :8090   →  10.8.0.2:19090 (dashboard :8080)
+# socat-hp-dashboard-next :8092   →  10.8.0.2:19092 (dashboard-next :8080,
+#                                     #1628 staged/beta path -- side by
+#                                     side with socat-hp-dashboard above,
+#                                     not yet wired up: needs the ports:
+#                                     mapping added to dashboard-next in
+#                                     compose.yml first)
 # socat-hp-kibana         :5601   →  10.8.0.2:19601 (kibana :5601)
 # socat-hp-tanner         :8091   →  10.8.0.2:19091 (tanner_web :8091)
 # socat-hp-evebox         :5636   →  10.8.0.2:19636 (evebox :5636)
@@ -404,6 +410,34 @@ http:
         options: modern
       middlewares: [security-headers-dashboard-pdf]
 
+    # #1608 architecture addendum (2026-08-17): the frontend/BFF host split
+    # requires the /bff/* proxy surface (frontend-next's routes/bff.$.ts,
+    # see lib/backend.server.ts's serviceFetch) to always resolve to
+    # whichever host is actually running the BFF role, independent of the
+    # bare Host() match below that sends "everything else" to the
+    # frontend-only tier once split.
+    #
+    # Currently a no-op in practice: dashboard-next isn't cut over yet
+    # (still behind compose.yml's `profiles: ["next"]`, unreached from
+    # here), and even once it is, both roles still run combined
+    # (SERVE_MODE=all, loopback bffInternalURL) on the single
+    # honeypot-dashboard service below -- #1622 is what stands up a second
+    # docker host and its own socat bridge for a BFF-only instance. At that
+    # point only this router's `service:` target needs to change to point
+    # at that new bridge instead of reusing honeypot-dashboard.
+    #
+    # Longer rule than the bare Host() below, so Traefik's automatic
+    # rule-specificity priority already picks this one first -- same
+    # mechanism honeypot-dashboard-pdf/-github-analysis-pdf/-ghidra-report
+    # above rely on, no explicit `priority:` needed.
+    honeypot-dashboard-bff:
+      rule: "Host(`honeypot.honeypot.example`) && PathPrefix(`/bff`)"
+      entryPoints: [websecure]
+      service: honeypot-dashboard
+      tls:
+        options: modern
+      middlewares: [security-headers]
+
     # dashboard.honeypot.example redirects here rather than sharing this
     # router: the dashboard's own native OIDC runtime (#1026) has
     # OIDC_EXTERNAL_URL hardcoded to a single host (honeypot.honeypot.example)
@@ -430,6 +464,39 @@ http:
       # retired outright (no router has referenced it since #1026); only the
       # oidc-dashboard network remains, for socat-hp-dashboard/-b and
       # Traefik itself to reach the dashboard replicas directly.
+      middlewares: [security-headers]
+
+    # Staged/beta path for the dashboard modernization port (#1628) --
+    # dashboard-next, side by side with the production honeypot-dashboard
+    # router above, which stays completely untouched. Exists so an
+    # operator can validate dashboard-next from a real public host before
+    # scripts/cutover-dashboard.sh's `cutover` step ever moves the
+    # production port binding -- though note preflight's own honeynet-
+    # bridge health checks already cover most of that need without
+    # requiring this router at all (this is for a genuinely public,
+    # browser-driven validation pass, not a substitute for it).
+    #
+    # Needs, before first use: (1) the `ports:` mapping on dashboard-next
+    # and socat-hp-dashboard-next bridge this router's service depends on
+    # (see vps/docker-compose.yml and honeypot-dashboard/compose.yml --
+    # neither exists yet either); (2) a dedicated OIDC_EXTERNAL_URL for
+    # dashboard-next's own OIDC runtime pointed at this host (same single-
+    # hardcoded-redirect-uri constraint the honeypot-dashboard router
+    # comment above documents, just needing its own host here instead of
+    # sharing production's); (3) that host's callback
+    # (https://beta.honeypot.example/auth/callback) registered as an
+    # additional valid redirect URI on the Keycloak apiary-dashboard
+    # client -- a Keycloak-side change outside this repo's tracked config,
+    # see docs/KEYCLOAK-CUTOVER.md's client-config conventions; (4) real
+    # DNS for beta.honeypot.<domain> (Cloudflare, proxied/orange-cloud per
+    # this file's own header note) -- an operator naming/registration
+    # decision, not something to guess here.
+    honeypot-dashboard-beta:
+      rule: "Host(`beta.honeypot.example`)"
+      entryPoints: [websecure]
+      service: honeypot-dashboard-next
+      tls:
+        options: modern
       middlewares: [security-headers]
 
     honeypot-dashboard-canonical-redirect:
@@ -662,6 +729,19 @@ http:
       loadBalancer:
         servers:
           - url: "http://socat-hp-dashboard:8090"
+        healthCheck:
+          path: /healthz
+          interval: "5s"
+          timeout: "3s"
+        passHostHeader: true
+
+    # dashboard-next's own beta-path target -- see honeypot-dashboard-beta
+    # router above for what still needs setting up before this resolves
+    # to anything live.
+    honeypot-dashboard-next:
+      loadBalancer:
+        servers:
+          - url: "http://socat-hp-dashboard-next:8092"
         healthCheck:
           path: /healthz
           interval: "5s"

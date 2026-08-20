@@ -262,7 +262,7 @@ are otherwise identical in shape. Same log-directory/`.env` posture as
 `arcane/home/honeypot-dashboard/compose.yml` runs as its own Arcane-managed stack at
 `/opt/stacks/honeypot-dashboard`, bundling `dashboard` and
 `services-adapter` -- kept together because they talk to each other only
-over `services-adapter-socket`, a volume nothing else touches. Unlike the
+over `services-adapter-socket`. Unlike the
 five services above, this pair could not be split with the "own fully
 private network" treatment: `dashboard` resolves `elasticsearch` and
 `filebeat` by service name over the shared `honeynet` network, and reads/
@@ -283,9 +283,11 @@ the standalone honeypots above -- Compose itself doesn't require the
 ordering (none of the shared resources are `external: true`, so whichever
 project runs first just creates them), but starting `APIARY` first
 means the dashboard has real data to show immediately instead of booting
-against empty indices. `services-adapter-socket` stays private/unnamed to
-this stack; grepped every compose file to confirm nothing else references
-it.
+against empty indices. `services-adapter-socket` was originally left
+private/unnamed to this stack (grepped every compose file at the time to
+confirm nothing else referenced it); #1622 (below) added a second consumer
+in a different project, so it now carries an explicit shared `name:` too,
+same mechanism as the other three.
 
 Per explicit instruction, this split did not preserve `dashboard-state`
 across the cutover -- the new stack starts with a fresh volume, and any
@@ -312,6 +314,63 @@ cd /var/dockge/stacks/honeypot-dashboard
 The brief recreate window is accepted on this single-operator deployment;
 Traefik's active `/healthz` check (vps/traefik/dynamic.yml) fails fast during
 it instead of hanging connections.
+
+`scripts/deploy-dashboard-rolling.sh` only ever targets the legacy `dashboard`
+service above -- it does not build or recreate `backend-service`,
+`backend-service-mounted`, `backend-worker`, or `dashboard-next`, in either
+this stack or `honeypot-dashboard-backend` below, so #1622's split needed no
+change to it. Redeploying the modernization-port tiers today is a plain
+`docker compose build <service> && docker compose up -d <service>` run from
+each stack's own directory; there is no equivalent wrapper script for them
+yet.
+
+### honeypot-dashboard-backend (#1622)
+
+`arcane/home/honeypot-dashboard-backend/compose.yml` runs as its own
+Arcane-managed stack at `/opt/stacks/honeypot-dashboard-backend`, carrying
+just the modernization-port `backend-service` (moved out of
+`honeypot-dashboard` above, #1608's Rust request/response tier) so it can be
+restarted/redeployed without touching `dashboard-next` or anything else in
+the combined stack -- the deployment-layer counterpart to #1608's
+`SERVE_MODE`/`BFF_INTERNAL_URL` cross-host application-code work.
+`backend-service-mounted`, `backend-worker`, `backend-worker-importer`,
+`backend-worker-enrichment`, and `dashboard-next` are unaffected and stay in
+`honeypot-dashboard`'s own compose file; splitting those out is further
+work, not part of #1622.
+
+`backend-service` still resolves `dashboard-next`'s
+`BACKEND_URL=http://backend-service:8081` (and vice versa) because both
+stacks attach to the same explicitly-named `honeynet` bridge -- the same
+cross-project DNS mechanism described above. It also still mounts
+`dashboard-state`, `dionaea-lib`, and (new as of this split)
+`services-adapter-socket` by explicit shared `name:`, so it reads/writes the
+same underlying volumes as before the move.
+
+The Rust crate source (`backend-service/`) was **not** moved -- only this
+compose service definition -- so the new stack's `build:` context reaches
+into the sibling `honeypot-dashboard` directory
+(`../honeypot-dashboard/backend-service`). This is a considered choice, not
+an established repo pattern (no other `arcane/home/` stack references a
+build context outside its own directory): it works because Arcane's
+directory-aware sync materializes every stack under the same parent
+(`/var/dockge/stacks/<name>/`, see [`ARCANE-GIT-SYNC.md`](ARCANE-GIT-SYNC.md)),
+so the relative path resolves correctly as long as both stacks stay synced
+to the same host -- true of the current single-host topology, but it
+reintroduces a build-time coupling to `honeypot-dashboard`'s own directory
+that genuine cross-host deployment (the motivating case for both #1608 and
+#1622) would need to resolve first, e.g. by relocating the crate source to
+a path both stacks can reach independently. Flagged as a follow-up, not
+resolved by this split.
+
+`arcane/manifests/home-production.json` carries this stack's own
+`honeypot-dashboard-backend` entry (`syncDirectory: true`,
+`arcane/home/honeypot-dashboard-backend/compose.yml`) so both
+`scripts/install-homeserver.sh`'s `step_arcane_import_stacks` and the `home`
+job's manifest-driven compose-validation loop pick it up the same way as
+every other stack -- see `ARCANE-GIT-SYNC.md` for what actually triggers
+Arcane to sync/deploy a manifest entry (creating the sync is a manual,
+operator-triggered API call; being listed in the manifest alone does not
+deploy anything).
 
 ### honeypot-utilities (#258)
 

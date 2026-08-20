@@ -1,6 +1,6 @@
 # Arcane Git sync
 
-How the 38 home-hosted stacks (32 that migrated under `arcane/home/` plus 6
+How the 39 home-hosted stacks (33 that migrated under `arcane/home/` plus 6
 that were already self-contained and stayed at their existing path) get to
 the live host, replacing the old model of copying or symlinking top-level
 `docker-compose.*.yml` files into place. Everything here was confirmed live
@@ -15,11 +15,11 @@ Each stack gets its own **directory-aware Git sync**: Arcane clones the
 selected `compose.yml` (not just that one file) under
 `/var/dockge/stacks/<syncName>/`, and deploys it. The manifest at
 [`arcane/manifests/home-production.json`](../arcane/manifests/home-production.json)
-is the single source of truth for which 38 stacks exist, what branch/path
+is the single source of truth for which 39 stacks exist, what branch/path
 each syncs from, and any per-stack sync limits — `scripts/install-homeserver.sh`,
 CI, and this doc all read from it rather than maintaining separate lists.
 
-- The 32 `honeypot-*` stacks live under `arcane/home/<name>/`: their build
+- The 33 `honeypot-*` stacks live under `arcane/home/<name>/`: their build
   context and git-tracked config were moved there from repository root
   (see each compose file's own `#1502` comment for what moved and why).
 - The 6 other stacks (`auth-events-worker`, `llm-worker`, `ml-worker`,
@@ -178,11 +178,31 @@ alone. Re-verify against whatever Arcane version is pinned in
   `destroy` call and be ready to bring the affected service back up by
   hand (plain `docker compose up -d`, same as the ghosts-api workaround
   above) rather than assuming the next sync attempt alone will do it.
+- **Arcane has no Docker Compose `profiles:` support at all** — not a
+  quirk, a confirmed missing feature
+  ([getarcaneapp/arcane#1193](https://github.com/getarcaneapp/arcane/issues/1193),
+  open/unimplemented as of v2.8.1, the latest release at time of writing).
+  Confirmed independently against this deployment: `GET
+  /environments/0/gitops-syncs` and `GET
+  /environments/0/projects/{id}` both return zero profile-related fields
+  anywhere in their schemas, and `honeypot-dashboard`'s own project record
+  reports `serviceCount: 4` / `runningCount: 4` — exactly its four
+  profile-less services (`dashboard`, `oidc-sessions`,
+  `es-results-importer`, `services-adapter`), with none of its
+  `profiles: ["next"]`-gated services (`dashboard-next`, `backend-worker`,
+  etc.) counted or running. This settles #1628's own open question: a
+  sync brings up only a stack's base (non-profiled) services; activating
+  any `profiles:`-gated service group — `next` here, same as
+  `geoip-update`/`threat-intel`/`revdeck`/`mitm`/`test`/`blackhole`
+  elsewhere in this repo — is always a manual `docker compose --profile X
+  up -d` run against the synced directory on the host afterward. There is
+  no Arcane-native mechanism (env override or otherwise) that activates a
+  profile instead.
 
 ## Local environment overrides
 
 Compose's own `.env`-in-project-directory interpolation already covers
-every `${VAR}` reference in these 38 stacks — none of them use `env_file:`,
+every `${VAR}` reference in these 39 stacks — none of them use `env_file:`,
 and none needed it added. Arcane's effective environment merge
 (`project.env` + `.env.git` → `.env`) feeds that same mechanism
 transparently, so a local override set through Arcane's own UI for a synced

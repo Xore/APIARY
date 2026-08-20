@@ -24,14 +24,21 @@
 # today.
 #
 # services-adapter moves together with dashboard, not out on its own: the
-# two communicate over services-adapter-socket, a volume genuinely nothing
-# else touches (confirmed -- grepped for it across every compose file), so
-# there is no reason to split them into separate projects. Left unnamed/
-# project-scoped here -- a fresh volume in the new project, not migrated
-# from the old one -- per explicit instruction that this split does not
-# need to preserve existing state across the cutover. dashboard-state gets
-# the opposite treatment (explicit shared name) precisely because, unlike
-# the socket, other services still depend on it.
+# two communicate over services-adapter-socket -- a volume that, at the time
+# of this #258 split, genuinely nothing else touched (confirmed -- grepped
+# for it across every compose file), so there was no reason to split them
+# into separate projects. Originally left unnamed/project-scoped here -- a
+# fresh volume in the new project, not migrated from the old one -- per
+# explicit instruction that this split does not need to preserve existing
+# state across the cutover. dashboard-state got the opposite treatment
+# (explicit shared name) precisely because, unlike the socket at the time,
+# other services still depended on it.
+#
+# That "nothing else touches it" premise no longer holds: #1622 moved
+# backend-service (a third consumer of this same socket) into the sibling
+# honeypot-dashboard-backend stack, so services-adapter-socket below now
+# also carries an explicit shared `name:`, same mechanism as dionaea-lib/
+# dashboard-state.
 #
 # EXPECTED_SENSORS and every /logs-derived, host-bind-mounted path are
 # unaffected by this move: the dashboard reads sensor activity from log
@@ -367,6 +374,286 @@ services:
           memory: 2G
 
 
+  # ------------------------------------------------------------------
+  # Modernization port (#1608): the replacement stack, behind the "next"
+  # profile until cutover. dashboard-next's own 19092 port mapping below
+  # (#1628's staged/beta path, vps/traefik/dynamic.yml's
+  # honeypot-dashboard-beta router) is a separate, currently-inert host
+  # port — bringing up the `next` profile publishes it, but nothing
+  # routes to it externally until the VPS-side socat bridge, DNS, and
+  # Keycloak client registration this still needs are set up (#1628); it
+  # does not touch the production 19090 binding at all. At cutover: move
+  # THAT (19090) port mapping from `dashboard` to `dashboard-next`, drop
+  # the profile lines, retire `dashboard`.
+  #
+  # Cross-host readiness (per Xore): both tiers are stateless,
+  # env-configured containers — session/OIDC state lives in the
+  # oidc-sessions valkey (network-reachable, no localhost sockets), data
+  # access goes through BACKEND_URL/BFF_INTERNAL_URL, so either tier can
+  # move to another docker host by pointing those URLs across the
+  # WireGuard mesh, and the BFF can scale horizontally (SERVE_MODE
+  # splits frontend/bff; no compose resource limit on the BFF tier).
+  #
+  # That capability is genuinely real now, not just scaffolding: dashboard-
+  # next's SERVE_MODE=frontend actually routes every serviceFetch/
+  # serviceJSON call through the /bff/* proxy (frontend-next's
+  # routes/bff.$.ts) on BFF_INTERNAL_URL instead of hitting BACKEND_URL
+  # directly, and vps/traefik/dynamic.yml has a matching (today inert)
+  # PathPrefix('/bff') router. Still one dashboard-next service pair below
+  # — actually running a split frontend-only/bff-only pair on two docker
+  # hosts, with their own compose services and socat bridges, is #1622's
+  # job, not this one.
+  #
+  # #1622: `backend-service` itself moved out of this file into its own
+  # Arcane-managed stack, arcane/home/honeypot-dashboard-backend/compose.yml
+  # -- the compose-layer counterpart to this section's own "either tier can
+  # move to another docker host" claim above, so it can actually be
+  # restarted/redeployed independently of dashboard-next and everything
+  # else here. `backend-service-mounted`, `backend-worker`,
+  # `backend-worker-importer`, `backend-worker-enrichment`, and
+  # `dashboard-next` below are unaffected -- still bundled in this file,
+  # splitting those is further work, not done in this pass. dashboard-next's
+  # BACKEND_URL=http://backend-service:8081 below still resolves: both
+  # stacks attach to the same explicitly-named `honeynet` bridge, the same
+  # cross-project DNS mechanism this file's own header documents.
+  # ------------------------------------------------------------------
+  # #1612 mounted worker role (phase 3a/3b): sandbox/ghidra/github-analysis
+  # submission, the Payload Workbench orchestrator, and anything else that
+  # needs to WRITE into a host-side request spool. Deliberately a separate
+  # service from backend-service, not an extra mount bolted onto it: those
+  # spool dirs are the dashboard's only path to root-owned host workers
+  # (services-adapter is a narrow socket; these are real filesystem write
+  # access), a distinct trust/mount boundary worth keeping visible in the
+  # compose file rather than folding into backend-service's Phase-1 (state
+  # + services-adapter-socket) scope. Also distinct from backend-worker:
+  # this one serves HTTP request/response for submissions (LISTEN_ADDR is
+  # network-reachable), where backend-worker only runs background loops and
+  # binds loopback-only. Same image, same route table (routes aren't
+  # container-specific — see main.rs) — reachable internally at
+  # http://backend-service-mounted:8082; BFF wiring is a follow-up (owned
+  # by the parallel frontend track).
+  backend-service-mounted:
+    <<: *runtime-defaults
+    profiles: ["next"]
+    image: apiary-backend:latest
+    container_name: hp-apiary-backend-mounted
+    restart: unless-stopped
+    environment:
+      - LISTEN_ADDR=0.0.0.0:8082
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
+      - SANDBOX_REQUEST_DIR=/sandbox-requests
+      - WINDOWS_SANDBOX_REQUEST_DIR=${WINDOWS_SANDBOX_REQUEST_DIR:-}
+      - GHOSTS_SANDBOX_REQUEST_DIR=${GHOSTS_SANDBOX_REQUEST_DIR:-}
+      - WINDOWS_SANDBOX_RESULTS_DIR=${WINDOWS_SANDBOX_RESULTS_DIR:-}
+      - GHOSTS_SANDBOX_RESULTS_DIR=${GHOSTS_SANDBOX_RESULTS_DIR:-}
+      - GHIDRA_REQUEST_DIR=${GHIDRA_REQUEST_DIR:-}
+      - GHIDRA_RESULTS_DIR=${GHIDRA_RESULTS_DIR:-}
+      - GITHUB_ANALYSIS_REQUEST_DIR=${GITHUB_ANALYSIS_REQUEST_DIR:-}
+      # #1612 phase 3b: Payload Workbench orchestrator. REVDECK_RESULTS_DIR
+      # is also fed by ghidra-worker.py's drain_revdeck() for the "ghidra"
+      # analyzer's embedded RevDeck enrichment (read, not written, here) —
+      # SANDBOX_RESULTS_DIR is read-write-adjacent: this service only reads
+      # it (reconciliation), the host-side worker owns writing job results.
+      - SANDBOX_RESULTS_DIR=/sandbox-results
+      - REVDECK_REQUEST_DIR=${REVDECK_REQUEST_DIR:-}
+      - REVDECK_RESULTS_DIR=${REVDECK_RESULTS_DIR:-}
+      - PAYLOAD_DIRS=/dionaea-lib/binaries,/cowrie-downloads
+      - SCRIPT_PAYLOAD_DIR=/state/script-payloads
+      - TZ=Europe/Berlin
+    volumes:
+      - dashboard-state:/state
+      - dionaea-lib:/dionaea-lib:ro
+      - /opt/stacks/apiary/logs/cowrie/downloads:/cowrie-downloads:ro
+      # Read-write: this service is the one thing that CREATES these
+      # markers. Windows/GHOSTS/Ghidra/GitHub-analysis/Rev·Deck stay inert
+      # (empty env var above) until the operator has actually deployed that
+      # host-side worker, same posture as every other optional spool in
+      # this stack.
+      - /var/lib/honeypot-sandbox/requests/pending:/sandbox-requests
+      - /var/lib/honeypot-windows-sandbox/requests/pending:/windows-sandbox-requests
+      - /var/lib/honeypot-ghosts-sandbox/requests/pending:/ghosts-sandbox-requests
+      - /var/lib/honeypot-windows-sandbox/export:/windows-sandbox-results:ro
+      - /var/lib/honeypot-ghosts-sandbox/export:/ghosts-sandbox-results:ro
+      - /var/lib/honeypot-ghidra/requests/pending:/ghidra-requests
+      - /var/lib/honeypot-ghidra/results:/ghidra-results:ro
+      - /var/lib/honeypot-github/requests/pending:/github-analysis-requests
+      - /var/lib/honeypot-revdeck/requests/pending:/revdeck-requests
+      - /var/lib/honeypot-revdeck/results:/revdeck-results:ro
+      # Read-only: reconciliation polls job-completion state directly off
+      # disk (never through the ES mirror — see workbench_orchestrator.rs's
+      # module comment), the same reasoning golden-image-status already
+      # established for WINDOWS_SANDBOX_RESULTS_DIR above.
+      - /var/lib/honeypot-sandbox/export:/sandbox-results:ro
+    networks:
+      - honeynet
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    deploy:
+      resources:
+        limits: {cpus: "1.0", memory: 512M}
+
+  # Worker role (#1610): the same apiary-backend image with WORKER_LOOPS
+  # enabled and no service port — movable to any docker host that can
+  # reach ES (stateless, env-configured). Scale by listing loops per
+  # replica.
+  backend-worker:
+    <<: *runtime-defaults
+    profiles: ["next"]
+    image: apiary-backend:latest
+    container_name: hp-apiary-worker
+    restart: unless-stopped
+    environment:
+      - LISTEN_ADDR=127.0.0.1:8099
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      # #1610: attacker-identity is pure ES (no host mounts, no local
+      # state — durable entities live in attackers-v1), so it fits this
+      # already-stateless loop container directly, unlike es-results-
+      # importer (needs root+DAC_READ_SEARCH for root-owned result dirs
+      # plus a persistent dedup state file — its own separate service).
+      # agent-intrusion (#1610): same "pure ES, no host mounts, no local
+      # state" shape as attacker-identity above — durable campaign verdicts
+      # live in agent-intrusion-campaigns, everything else is recomputed
+      # from the rolling fetch window each cycle.
+      # correlator (#1610): same shape again — campaigns-v1/attacker-
+      # clusters-v1 are fully recomputed from scratch every cycle (pure ES
+      # aggregations, no raw-document paging needed at all here, unlike its
+      # two siblings above), so it fits this stateless loop container too.
+      - WORKER_LOOPS=alert-notifier,attacker-identity,agent-intrusion,correlator
+      - EVIDENCE_WINDOW=${EVIDENCE_WINDOW:-6h}
+      - ATTACKER_IDENTITY_RUN_INTERVAL=${ATTACKER_IDENTITY_RUN_INTERVAL:-15m}
+      - AGENT_INTRUSION_POLL_INTERVAL=${AGENT_INTRUSION_POLL_INTERVAL:-300}
+      - AGENT_INTRUSION_MAX_EVENTS_PER_SOURCE=${AGENT_INTRUSION_MAX_EVENTS_PER_SOURCE:-10000}
+      - AGENT_INTRUSION_FETCH_WINDOW_DAYS=${AGENT_INTRUSION_FETCH_WINDOW_DAYS:-10}
+      - CORRELATION_WINDOW=${CORRELATION_WINDOW:-168h}
+      - CORRELATOR_RUN_INTERVAL=${CORRELATOR_RUN_INTERVAL:-15m}
+      - ALERT_WEBHOOK_URL=${HONEYPOT_ALERT_WEBHOOK_URL:-}
+      - ALERT_COOLDOWN=${HONEYPOT_ALERT_COOLDOWN:-6h}
+      - ALERT_CAMPAIGN_SCORE=${HONEYPOT_ALERT_CAMPAIGN_SCORE:-80}
+      - SANDBOX_ALERT_RISK_SCORE=${SANDBOX_ALERT_RISK_SCORE:-50}
+      - LLM_ANALYSIS_ALERT_SEVERITIES=${LLM_ANALYSIS_ALERT_SEVERITIES:-high,critical}
+      # #1612 host-local alert signals: log-stream sizes, sandbox/ghidra/
+      # cape/github-analysis spool health, and Filebeat stats all need
+      # either a bind-mounted host directory or a service URL only this
+      # worker container has (see volumes: below) — the Go dashboard read
+      # the same paths directly. Windows/GHOSTS sandbox and the three
+      # analysis spools stay off (empty var) unless the operator has
+      # actually deployed that host-side worker, same as the Go tier.
+      - LOG_DIR=/logs
+      - SANDBOX_RESULTS_DIR=/sandbox-results
+      - SANDBOX_REQUEST_DIR=/sandbox-requests
+      - WINDOWS_SANDBOX_RESULTS_DIR=${WINDOWS_SANDBOX_RESULTS_DIR:-}
+      - WINDOWS_SANDBOX_REQUEST_DIR=${WINDOWS_SANDBOX_REQUEST_DIR:-}
+      - GHOSTS_SANDBOX_RESULTS_DIR=${GHOSTS_SANDBOX_RESULTS_DIR:-}
+      - GHOSTS_SANDBOX_REQUEST_DIR=${GHOSTS_SANDBOX_REQUEST_DIR:-}
+      - GHIDRA_RESULTS_DIR=${GHIDRA_RESULTS_DIR:-}
+      - GHIDRA_REQUEST_DIR=${GHIDRA_REQUEST_DIR:-}
+      - GHIDRA_ALERT_RISK_LEVELS=${GHIDRA_ALERT_RISK_LEVELS:-high,critical}
+      - GHIDRA_ALERT_ON_CRYPTO=${GHIDRA_ALERT_ON_CRYPTO:-false}
+      - CAPE_RESULTS_DIR=${CAPE_RESULTS_DIR:-}
+      - CAPE_REQUEST_DIR=${CAPE_REQUEST_DIR:-}
+      - GITHUB_ANALYSIS_RESULTS_DIR=${GITHUB_ANALYSIS_RESULTS_DIR:-}
+      - GITHUB_ANALYSIS_REQUEST_DIR=${GITHUB_ANALYSIS_REQUEST_DIR:-}
+      - GITHUB_ANALYSIS_ALERT_POSITIVES=${GITHUB_ANALYSIS_ALERT_POSITIVES:-10}
+      - FILEBEAT_URL=${FILEBEAT_URL:-http://filebeat:5066}
+      - TZ=Europe/Berlin
+    volumes:
+      - type: bind
+        source: /opt/stacks/apiary/logs
+        target: /logs
+        read_only: true
+        bind:
+          propagation: rslave
+      - /var/lib/honeypot-sandbox/export:/sandbox-results:ro
+      - /var/lib/honeypot-sandbox/requests/pending:/sandbox-requests:ro
+      - /var/lib/honeypot-windows-sandbox/export:/windows-sandbox-results:ro
+      - /var/lib/honeypot-windows-sandbox/requests/pending:/windows-sandbox-requests:ro
+      - /var/lib/honeypot-ghosts-sandbox/export:/ghosts-sandbox-results:ro
+      - /var/lib/honeypot-ghosts-sandbox/requests/pending:/ghosts-sandbox-requests:ro
+      - /var/lib/honeypot-ghidra/results:/ghidra-results:ro
+      - /var/lib/honeypot-ghidra/requests/pending:/ghidra-requests:ro
+      - /var/lib/honeypot-cape/results:/cape-results:ro
+      - /var/lib/honeypot-cape/requests/pending:/cape-requests:ro
+      - /var/lib/honeypot-github/results:/github-analysis-results:ro
+      - /var/lib/honeypot-github/requests/pending:/github-analysis-requests:ro
+    networks:
+      - honeynet
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    deploy:
+      resources:
+        limits: {cpus: "0.5", memory: 256M}
+
+  dashboard-next:
+    <<: *runtime-defaults
+    profiles: ["next"]
+    build: ./frontend-next
+    image: apiary-dashboard-next:latest
+    container_name: hp-dashboard-next
+    restart: unless-stopped
+    depends_on:
+      oidc-sessions:
+        condition: service_healthy
+    environment:
+      - PORT=8080
+      - SERVE_MODE=${DASHBOARD_SERVE_MODE:-all}
+      - BACKEND_URL=http://backend-service:8081
+      # #1612 phase 3a/3b wiring: sandbox/ghidra/github-analysis submission,
+      # sandbox golden-image-status and vnc status, and the whole workbench
+      # orchestrator surface only work against the write-capable mounted
+      # instance below (main.rs's own comment on that route block explains
+      # why: same route table as backend-service, but only this container
+      # has the host-side request-spool mounts). serviceFetch/serviceJSON's
+      # `{ mounted: true }` callers resolve to this URL, not BACKEND_URL.
+      - BACKEND_MOUNTED_URL=http://backend-service-mounted:8082
+      - BFF_INTERNAL_URL=${BFF_INTERNAL_URL:-}
+      - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
+      - OIDC_ISSUER_URL=${OIDC_ISSUER_URL:-https://auth.example.invalid/realms/apiary}
+      # #1628 staged/beta path: a dedicated var, not the shared
+      # OIDC_EXTERNAL_URL production uses, since oidc.server.ts builds its
+      # redirect_uri directly from this and Keycloak only accepts a
+      # registered exact match — dashboard-next needs its own if it's ever
+      # reachable at a different host than production (beta.honeypot.*)
+      # without breaking either flow. Defaults to OIDC_EXTERNAL_URL so
+      # today's behavior (same host as production) is unchanged until an
+      # operator sets DASHBOARD_NEXT_OIDC_EXTERNAL_URL explicitly.
+      - OIDC_EXTERNAL_URL=${DASHBOARD_NEXT_OIDC_EXTERNAL_URL:-${OIDC_EXTERNAL_URL:-https://honeypot.example.invalid}}
+      - OIDC_CLIENT_ID=apiary-dashboard
+      - OIDC_CLIENT_SECRET_FILE=/run/dashboard-secrets/oidc-client-secret
+      - OIDC_SESSION_REDIS_URL=redis://oidc-sessions:6379/0
+      - TZ=Europe/Berlin
+      # #1616 scalability tuning — every var below has a code default
+      # (cluster.mjs / backpressure.server.ts) and is safe to leave unset;
+      # these overrides exist so an operator can retune without a rebuild.
+      - WEB_CONCURRENCY=${DASHBOARD_WEB_CONCURRENCY:-}
+      - BACKEND_MAX_INFLIGHT=${DASHBOARD_BACKEND_MAX_INFLIGHT:-}
+      - BACKEND_MAX_QUEUE=${DASHBOARD_BACKEND_MAX_QUEUE:-}
+      - BACKEND_HTTP_MAX_SOCKETS=${DASHBOARD_BACKEND_HTTP_MAX_SOCKETS:-}
+    # #1628 staged/beta path: 19092 is a new, previously-unused port (see
+    # vps/traefik/dynamic.yml's own socat table) — this doesn't touch or
+    # conflict with `dashboard`'s production 19090 binding at all, and
+    # nothing external routes to it until the matching VPS-side socat
+    # bridge/DNS/Keycloak registration (still open, see #1628) exist.
+    # cutover-dashboard.sh's own `preflight` health check already reaches
+    # this container over the honeynet bridge without needing this port —
+    # this exists for a real, public, browser-driven validation pass.
+    ports:
+      - "${HP_BIND:-10.8.0.2}:19092:8080"
+    volumes:
+      - ${DASHBOARD_SECRETS_DIR:-/var/dockge/stacks/honeypot-dashboard/secrets}:/run/dashboard-secrets:ro
+    networks:
+      - honeynet
+      - oidc-session
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    # Deliberately NO resource limit on the BFF/SSR tier (per Xore): it
+    # must scale with load rather than get throttled; horizontal scaling
+    # happens by adding replicas/hosts, not by capping this one. #1616
+    # is the in-process side of that promise: cluster mode spreads load
+    # across cores instead of one event loop, and backendLimiter sheds
+    # with 503 instead of degrading into an unresponsive pile-up when the
+    # Rust tier (or this tier itself) can't keep up.
+
   # #378: ships Ghidra/sandbox/GitHub-analysis/workbench-run results into
   # Elasticsearch (ghidra-analysis-v1/sandbox-analysis-v1/github-analysis-v1/
   # workbench-runs-v1, see analysis/elasticsearch-setup.sh) -- previously
@@ -454,6 +741,122 @@ services:
           cpus: "0.5"
           memory: 256M
 
+  # #1610 worker migration: Rust port of es-results-importer above, running
+  # side by side with it behind the `next` profile (parity pass, not a
+  # cutover — #1610's own text: "each migration ships with parity tests
+  # against the current worker's observable outputs before the old one
+  # retires"). A separate service from backend-worker, not an extra
+  # WORKER_LOOPS entry bolted onto it: this worker needs the SAME root +
+  # DAC_READ_SEARCH privilege escalation the Python service above needs
+  # (Ghidra/GitHub-analysis result directories are root-owned host bind
+  # mounts a normal container user can't read) plus a persistent local
+  # dedup-state file — backend-worker is deliberately unprivileged and
+  # stateless-by-design (see its own compose comment: "movable to any
+  # docker host... state in ES"), and every other loop running there
+  # (alert-notifier, reports-scheduler, user-retention-sweep) needs neither.
+  # Also separate from backend-service-mounted (that boundary is about
+  # WRITE access to host request spools; this one only ever reads results).
+  backend-worker-importer:
+    <<: *runtime-defaults
+    profiles: ["next"]
+    image: apiary-backend:latest
+    container_name: hp-apiary-worker-importer
+    restart: unless-stopped
+    environment:
+      - LISTEN_ADDR=127.0.0.1:8098
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - WORKER_LOOPS=es-results-importer
+      - IMPORT_INTERVAL=${ES_IMPORTER_INTERVAL:-300}
+      - IMPORTER_STATE=/state-importer/es-results-importer.json
+      - SHARD_COUNT=${ES_IMPORTER_SHARD_COUNT:-1}
+      - GHIDRA_RESULTS_DIR=/ghidra-results
+      - SANDBOX_RESULTS_DIR=/sandbox-results
+      - WINDOWS_SANDBOX_RESULTS_DIR=/windows-sandbox-results
+      - GHOSTS_SANDBOX_RESULTS_DIR=/ghosts-sandbox-results
+      - GITHUB_ANALYSIS_RESULTS_DIR=/github-analysis-results
+      - REVDECK_RESULTS_DIR=/revdeck-results
+      - CAPE_RESULTS_DIR=/cape-results
+      - COWRIE_TTYLOG_DIR=/cowrie-tty
+      # #1611 workstream B: mailoney's saved SMTP DATA bodies -- Rust-only,
+      # no Python-importer.py equivalent, since src/mail.rs's
+      # GET /api/v1/mail/{session_id} is itself new (#1611) functionality.
+      - MAILONEY_MAIL_DIR=/mailoney-mail
+      - REPORTER_METRICS_DIR=/reporter-data
+      - YARA_RESULTS_DIR=/yara-results
+      - TZ=Europe/Berlin
+    volumes:
+      - /var/lib/honeypot-ghidra/results:/ghidra-results:ro
+      - /var/lib/honeypot-sandbox/export:/sandbox-results:ro
+      - /var/lib/honeypot-windows-sandbox/export:/windows-sandbox-results:ro
+      - /var/lib/honeypot-ghosts-sandbox/export:/ghosts-sandbox-results:ro
+      - /var/lib/honeypot-github/results:/github-analysis-results:ro
+      - /var/lib/honeypot-revdeck/results:/revdeck-results:ro
+      - /var/lib/honeypot-cape/results:/cape-results:ro
+      - es-importer-state:/state-importer
+      - /opt/stacks/apiary/logs/cowrie/tty:/cowrie-tty:ro
+      - /opt/stacks/apiary/logs/mailoney/mail:/mailoney-mail:ro
+      - reporter-data:/reporter-data:ro
+      - yara-results:/yara-results:ro
+    networks:
+      - honeynet
+    user: "0:0"
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_READ_SEARCH
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  # #1610: ip-enrichment-worker. Unlike every other backend-* service in
+  # this file, this loop never touches Elasticsearch (or any network) at
+  # all -- it tails raw sensor JSON logs and rewrites tunnel-peer-masked
+  # src_ip fields via a portbridge via_port join, writing the result to
+  # OUT_DIR for Filebeat to tail instead of the raw file. A distinct
+  # compose service from backend-worker (whose other loops all need to
+  # reach Elasticsearch) and backend-service-mounted (whose write access is
+  # scoped to host-worker request spools, not raw sensor logs), same
+  # "distinct trust/mount boundary, distinct service" precedent as
+  # backend-worker-importer above -- network_mode: none is a deliberate
+  # security posture carried over unchanged from the Go worker's own
+  # compose service, matching services-adapter's identical reasoning below.
+  # Read-only for every sensor's raw log directory and portbridge's own
+  # connection log; a separate, more specific read-write mount for the one
+  # subdirectory this worker actually writes to (Docker resolves the more
+  # specific bind for overlapping paths).
+  backend-worker-enrichment:
+    <<: *runtime-defaults
+    profiles: ["next"]
+    image: apiary-backend:latest
+    container_name: hp-apiary-worker-enrichment
+    restart: unless-stopped
+    network_mode: none
+    environment:
+      - WORKER_LOOPS=ip-enrichment
+      - LOGS_DIR=/logs
+      - OUT_DIR=/logs/enriched
+      - STATE_DIR=/state/ip-enrichment-worker
+      - REFRESH_INTERVAL=2s
+      - PENDING_TIMEOUT=5s
+      - OUTPUT_MAX_BYTES=${JSON_STREAM_MAX_BYTES:-67108864}
+      - TZ=Europe/Berlin
+    volumes:
+      - /opt/stacks/apiary/logs:/logs:ro
+      - /opt/stacks/apiary/logs/enriched:/logs/enriched:rw
+      - /opt/stacks/apiary/state/ip-enrichment-worker:/state/ip-enrichment-worker:rw
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
   services-adapter:
     <<: *runtime-defaults
     build: ./services-adapter
@@ -517,11 +920,15 @@ volumes:
   # below, cannot be left project-scoped.
   dashboard-state:
     name: dashboard-state
-  # Private to this stack -- nothing else references it (grepped every
-  # compose file to confirm). A fresh volume in the new project, not
-  # migrated from the old one: per explicit instruction, this split does
-  # not need to preserve existing state across the cutover.
-  services-adapter-socket: null
+  # Was private/unnamed here ("nothing else references it") until #1622
+  # moved backend-service (also a consumer, see that service's own
+  # SERVICES_ADAPTER_SOCKET env var) into the sibling honeypot-dashboard-
+  # backend stack -- now given an explicit shared name, same mechanism as
+  # dionaea-lib/dashboard-state above, so both projects resolve the same
+  # underlying Docker volume. honeypot-dashboard-backend/compose.yml
+  # declares the identical name.
+  services-adapter-socket:
+    name: services-adapter-socket
   # #378: es-results-importer's own last-imported-mtime bookkeeping. Private
   # to this service -- losing it just means the next pass re-sends every
   # result once (idempotent, deterministic _id), not a data loss.
