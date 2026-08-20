@@ -62,7 +62,7 @@ export async function oidcConfig(): Promise<oidc.Configuration> {
   return configPromise
 }
 
-function externalURL(): string {
+export function externalURL(): string {
   return (process.env.OIDC_EXTERNAL_URL ?? 'http://127.0.0.1:4173').replace(/\/$/, '')
 }
 
