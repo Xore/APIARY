@@ -62,8 +62,14 @@ check_service_token() {
   local dir="$1" label="$2" token
   # docker compose config renders `- SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}`
   # as a `SERVICE_TOKEN: <value>` mapping line; strip the key and any
-  # quoting to get just the resolved value.
-  token="$( (cd "$dir" && docker compose config 2>/dev/null) | grep -m1 'SERVICE_TOKEN:' | sed -E 's/^[^:]*:[[:space:]]*"?//; s/"?[[:space:]]*$//' )"
+  # quoting to get just the resolved value. Needs --profile next: the only
+  # services that reference SERVICE_TOKEN (dashboard-next/backend-worker
+  # here, backend-service in the sibling stack) are themselves next-profile-
+  # gated, and `docker compose config` excludes inactive-profile services
+  # from its output the same way `up` does — without the flag this always
+  # greps nothing and reports a false "empty" even when the token is set
+  # (caught live during #1628's first real preflight run, not by shellcheck).
+  token="$( (cd "$dir" && docker compose --profile next config 2>/dev/null) | grep -m1 'SERVICE_TOKEN:' | sed -E 's/^[^:]*:[[:space:]]*"?//; s/"?[[:space:]]*$//' )"
   if [[ -z "$token" || "$token" == "null" ]]; then
     echo "FATAL: DASHBOARD_SERVICE_TOKEN resolves empty for $label — set it before preflight, not after" >&2
     exit 1
@@ -110,8 +116,19 @@ cmd_preflight() {
   echo "  ok"
 
   echo "== bringing up the next profile in both stacks (idempotent) =="
-  (cd "$DASHBOARD_DIR" && docker compose --profile next up -d)
+  # Order matters on a host where apiary-backend:latest has never been
+  # built: only $BACKEND_DIR's backend-service declares `build:` for that
+  # image (the honeynet-shared tag every backend-worker*/backend-service-
+  # mounted service in $DASHBOARD_DIR references but does not itself build).
+  # Bringing up $DASHBOARD_DIR first leaves Compose with no local image and
+  # no build context for those services, so it falls back to pulling
+  # `apiary-backend:latest` from Docker Hub's default namespace and fails
+  # closed with "pull access denied" (caught live during #1628's first real
+  # preflight run, not by shellcheck). $BACKEND_DIR first builds the image
+  # once; $DASHBOARD_DIR's own services then resolve it from the local
+  # image cache instead of attempting a pull.
   (cd "$BACKEND_DIR" && docker compose --profile next up -d)
+  (cd "$DASHBOARD_DIR" && docker compose --profile next up -d)
 
   echo "== waiting for the next tier to report healthy =="
   local ok=1
