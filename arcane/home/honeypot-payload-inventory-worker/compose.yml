@@ -11,6 +11,17 @@
 # reads from -- the read side doesn't change. Deployed as
 # /opt/stacks/honeypot-payload-inventory-worker.
 #
+# Retired (#1649): the write-side port into backend-service's
+# payload_inventory.rs has existed since #1610, but was never actually
+# wired to run anywhere (no WORKER_LOOPS list ever included
+# "payload-inventory") until this pass added
+# backend-worker-payload-inventory to the honeypot-dashboard stack --
+# confirmed scanning the same PAYLOAD_DIRS and upserting into
+# dashboard-payload-inventory-v1/dashboard-payload-bytes-v1. profiles:
+# ["legacy"] keeps this container defined for rollback without Arcane's
+# routine gitops-sync trying to restart it -- same reasoning as
+# arcane/home/honeypot-dashboard/compose.yml's own `dashboard` service.
+#
 # Whether dashboard's own scanPayloads is removed once this worker is
 # confirmed running (redundant, not wrong -- both writers converge on the
 # same hash-keyed documents) is #1202, not this.
@@ -30,6 +41,7 @@ services:
     build: ./payload-inventory-worker
     container_name: hp-payload-inventory-worker
     restart: unless-stopped
+    profiles: ["legacy"]
     networks:
       - honeynet
     environment:

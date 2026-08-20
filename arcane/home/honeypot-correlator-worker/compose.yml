@@ -13,6 +13,17 @@
 # scale-driven compromise forced by the raw-document-fetch approach that
 # redesign replaced. Deployed as /opt/stacks/honeypot-correlator-worker.
 #
+# Retired (#1649): #1610 already ported this into backend-service's
+# correlator.rs, wired live as WORKER_LOOPS=correlator on backend-worker
+# in the honeypot-dashboard stack -- confirmed producing fresh
+# campaigns-v1/attacker-clusters-v1 documents (a pre-existing
+# too_many_buckets_exception affecting BOTH implementations against
+# real production data volume was fixed by raising the ES cluster's
+# search.max_buckets setting, not by touching either query). profiles:
+# ["legacy"] keeps this container defined for rollback without Arcane's
+# routine gitops-sync trying to restart it -- same reasoning as
+# arcane/home/honeypot-dashboard/compose.yml's own `dashboard` service.
+#
 # Whether dashboard's own correlateCampaigns/clustersData are rewired to
 # read these indices instead of recomputing in-process (redundant, not
 # wrong) is #1202, not this.
@@ -32,6 +43,7 @@ services:
     build: ./correlator-worker
     container_name: hp-correlator-worker
     restart: unless-stopped
+    profiles: ["legacy"]
     networks:
       - honeynet
     environment:

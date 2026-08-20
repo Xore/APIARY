@@ -6,6 +6,14 @@
 # comment for the merge algorithm. Deployed as
 # /opt/stacks/honeypot-attacker-identity-worker.
 #
+# Retired (#1649): #1610 already ported this into backend-service's
+# attacker_identity.rs, wired live as WORKER_LOOPS=attacker-identity on
+# backend-worker in the honeypot-dashboard stack -- confirmed writing
+# fresh attackers-v1 documents. profiles: ["legacy"] keeps this
+# container defined for rollback without Arcane's routine gitops-sync
+# trying to restart it -- same reasoning as arcane/home/honeypot-
+# dashboard/compose.yml's own `dashboard` service.
+#
 # Unlike campaigns-v1/attacker-clusters-v1 (correlator-worker, #1199),
 # entities here are durable and only ever grow -- this worker never
 # deletes a document for going quiet, only when two entities merge into
@@ -26,6 +34,7 @@ services:
     build: ./attacker-identity-worker
     container_name: hp-attacker-identity-worker
     restart: unless-stopped
+    profiles: ["legacy"]
     networks:
       - honeynet
     environment:
