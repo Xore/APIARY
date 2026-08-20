@@ -21,7 +21,16 @@ RUN apt-get update \
 COPY --from=build /src/target/release/apiary-backend /usr/local/bin/apiary-backend
 ENV LISTEN_ADDR=0.0.0.0:8081
 EXPOSE 8081
+# Port derived from $LISTEN_ADDR at check time, not hardcoded to the 8081
+# default: every non-default LISTEN_ADDR consumer of this image (backend-
+# worker at 127.0.0.1:8099, backend-worker-importer at 127.0.0.1:8098,
+# backend-service-mounted at 0.0.0.0:8082 -- see honeypot-dashboard/
+# compose.yml) curled the wrong port forever otherwise, reporting
+# permanently unhealthy in `docker ps`/`docker inspect` despite actually
+# serving correctly (caught live during #1628's first real preflight run,
+# not by any test -- CI never runs the image under a non-default
+# LISTEN_ADDR).
 HEALTHCHECK --interval=15s --timeout=5s --retries=5 --start-period=20s \
-    CMD curl -sf http://127.0.0.1:8081/healthz || exit 1
+    CMD curl -sf "http://127.0.0.1:${LISTEN_ADDR##*:}/healthz" || exit 1
 USER nobody
 CMD ["apiary-backend"]

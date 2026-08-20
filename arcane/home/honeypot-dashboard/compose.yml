@@ -582,7 +582,16 @@ services:
     cap_drop: [ALL]
     deploy:
       resources:
-        limits: {cpus: "0.5", memory: 256M}
+        # 256M OOM-killed this container repeatedly against real production
+        # ES data volume during #1628's first-ever live preflight (kernel
+        # dmesg: memcg OOM, anon-rss ~254-260MB at kill time, right at the
+        # ceiling) -- CI's fixture-sized ES indices never had enough data
+        # for any of the four bundled loops (alert-notifier, attacker-
+        # identity, agent-intrusion, correlator) to approach this limit.
+        # 512M matches backend-service/backend-service-mounted's own
+        # allocation, not a guess -- headroom, not just clearing the
+        # observed peak.
+        limits: {cpus: "0.5", memory: 512M}
 
   dashboard-next:
     <<: *runtime-defaults
