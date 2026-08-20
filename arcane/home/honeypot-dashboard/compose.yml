@@ -195,8 +195,24 @@ services:
     depends_on:
       oidc-sessions:
         condition: service_healthy
-    ports:
-      - ${HP_BIND:-10.8.0.2}:19090:8080
+    # profiles + no ports: -- #1628's cutover moved the live 19090 binding
+    # to dashboard-next below, permanently. This service stays defined,
+    # not deleted, purely for rollback (docs/DASHBOARD-CUTOVER.md), but a
+    # profile-less service is still a routine `docker compose up` target
+    # regardless of whether an operator manually stopped it -- confirmed
+    # live, in two stages: first an Arcane gitops-sync after cutover tried
+    # to bring this back up with its old ports: line still present,
+    # colliding with dashboard-next's and failing the sync outright rather
+    # than silently reverting the cutover; then, with that ports: line
+    # removed, the very same sync mechanism still tried to *start* this
+    # container from cold (no traffic, no warm state, hours after it was
+    # deliberately stopped) and failed on its own healthcheck instead.
+    # `next` and every other on-demand stack in this repo already solve
+    # exactly this with a profile Arcane's own sync never activates (see
+    # docs/ARCANE-GIT-SYNC.md's confirmed-live finding) -- `legacy` here
+    # does the same: cutover-dashboard.sh rollback is the only thing that
+    # activates it, via `docker compose --profile legacy up -d dashboard`.
+    profiles: ["legacy"]
     volumes: *dashboard-volumes
     environment:
       - LISTEN_ADDR=:8080
@@ -649,15 +665,25 @@ services:
       - BACKEND_MAX_INFLIGHT=${DASHBOARD_BACKEND_MAX_INFLIGHT:-}
       - BACKEND_MAX_QUEUE=${DASHBOARD_BACKEND_MAX_QUEUE:-}
       - BACKEND_HTTP_MAX_SOCKETS=${DASHBOARD_BACKEND_HTTP_MAX_SOCKETS:-}
-    # #1628 staged/beta path: 19092 is a new, previously-unused port (see
-    # vps/traefik/dynamic.yml's own socat table) — this doesn't touch or
-    # conflict with `dashboard`'s production 19090 binding at all, and
-    # nothing external routes to it until the matching VPS-side socat
-    # bridge/DNS/Keycloak registration (still open, see #1628) exist.
-    # cutover-dashboard.sh's own `preflight` health check already reaches
-    # this container over the honeynet bridge without needing this port —
-    # this exists for a real, public, browser-driven validation pass.
+    # 19090: the live production binding, moved here permanently by #1628's
+    # cutover (previously a cutover-dashboard.sh-generated override.yml
+    # layer, not checked in -- moved into the real compose.yml once the
+    # cutover held through step 7's live validation, exactly as the
+    # runbook itself anticipated: a live-only override risks a later
+    # Arcane gitops-sync silently reverting it, and in fact did worse than
+    # that live -- with `dashboard`'s now-removed conflicting ports: line
+    # still present, a routine sync failed outright trying to rebind
+    # 19090 out from under this container).
+    #
+    # 19092 (#1628 staged/beta path): a second, previously-unused port
+    # (see vps/traefik/dynamic.yml's own socat table) -- nothing external
+    # routes to it until the matching VPS-side socat bridge/DNS/Keycloak
+    # registration (still open, see #1628) exist. cutover-dashboard.sh's
+    # own `preflight` health check already reaches this container over
+    # the honeynet bridge without needing either host port; both exist for
+    # real, public, browser-driven validation.
     ports:
+      - "${HP_BIND:-10.8.0.2}:19090:8080"
       - "${HP_BIND:-10.8.0.2}:19092:8080"
     volumes:
       - ${DASHBOARD_SECRETS_DIR:-/var/dockge/stacks/honeypot-dashboard/secrets}:/run/dashboard-secrets:ro
