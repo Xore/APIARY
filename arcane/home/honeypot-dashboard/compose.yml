@@ -588,10 +588,21 @@ services:
         # ceiling) -- CI's fixture-sized ES indices never had enough data
         # for any of the four bundled loops (alert-notifier, attacker-
         # identity, agent-intrusion, correlator) to approach this limit.
-        # 512M matches backend-service/backend-service-mounted's own
-        # allocation, not a guess -- headroom, not just clearing the
-        # observed peak.
-        limits: {cpus: "0.5", memory: 512M}
+        # The follow-up 512M bump (matching backend-service/backend-
+        # service-mounted) was itself still not enough under sustained
+        # real load: live `docker stats` showed it pinned at 508/512MB and
+        # 50.22% CPU (its full 0.5-core quota) simultaneously, causing
+        # /healthz to miss its 5s timeout on every check -- the container
+        # wasn't crashing this time, just too CPU-starved under its own
+        # four-loop-plus-HTTP-server workload to answer in time. cpus
+        # raised to 1.0 (matching backend-service-mounted, the next
+        # smallest allocation of the three backend-image consumers, and
+        # this one runs continuous background loops where that one only
+        # answers on-demand requests) and memory to 768M -- the host has
+        # 16 cores/91G with 69G free, so there was no real reason either
+        # limit was ever this tight. Re-verify against real load before
+        # assuming 768M/1.0 is itself the final number.
+        limits: {cpus: "1.0", memory: 768M}
 
   dashboard-next:
     <<: *runtime-defaults
