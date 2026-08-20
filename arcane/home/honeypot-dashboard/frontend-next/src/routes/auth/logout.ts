@@ -1,7 +1,7 @@
 // GET /auth/logout — destroys the BFF session, clears the cookie, and ends
 // Keycloak's own SSO session (RP-Initiated Logout). Destroying only the
 // local session is not enough on its own: Keycloak keeps its own SSO
-// cookie scoped to auth.xore.rocks independently of this app's session,
+// cookie scoped to the Keycloak issuer's own host independently of this app's session,
 // so the very next /auth/login (including the one dashboard-next's own
 // unauthenticated-page redirect fires automatically) gets silently
 // re-approved with no login form shown -- confirmed live (#1628): clicking
