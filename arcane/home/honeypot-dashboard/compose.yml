@@ -727,8 +727,19 @@ services:
   # importers when the backlog is large: drop `container_name:` below (it
   # would collide across replicas), set ES_IMPORTER_SHARD_COUNT to the
   # replica count, then `docker compose up -d --scale es-results-importer=N`.
+  # Retired (#1649 follow-through): #1610 already ported this into
+  # backend-service's es_importer.rs, wired live as
+  # WORKER_LOOPS=es-results-importer on backend-worker-importer below --
+  # confirmed zero errors over 3h and fresh writes (yara-analysis-v1's
+  # newest doc seconds old at verification time; ghidra/sandbox showing
+  # older timestamps is source-starved, not importer-broken -- both
+  # implementations read the same near-empty result directories).
+  # profiles: ["legacy"] keeps this container defined for rollback
+  # without Arcane's routine gitops-sync trying to restart it -- same
+  # reasoning as this file's own `dashboard` service (#1648).
   es-results-importer:
     <<: *runtime-defaults
+    profiles: ["legacy"]
     build: ./analysis/es-results-importer
     container_name: hp-es-results-importer
     restart: unless-stopped
