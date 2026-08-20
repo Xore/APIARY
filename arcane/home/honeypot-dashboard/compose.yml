@@ -916,6 +916,51 @@ services:
           cpus: "0.5"
           memory: 128M
 
+  # #1610 worker migration, closing the last unwired gap: payload_inventory.rs
+  # (payload-inventory-worker's Rust port) has existed since #1610 and even
+  # had its own worker.rs match arm, but nothing ever set
+  # WORKER_LOOPS=payload-inventory anywhere in this file -- so the code
+  # shipped, compiled, and was dead the whole time, and the standalone Go
+  # worker below stayed the only thing actually keeping
+  # dashboard-payload-inventory-v1/dashboard-payload-bytes-v1 current.
+  # Found auditing #1630's "still-Go, not yet ported" follow-up (#1649) —
+  # attacker-identity/correlator/ip-enrichment were already live via the
+  # services above; this one alone wasn't.
+  #
+  # Needs its own service rather than an entry bolted onto backend-worker,
+  # same reasoning as backend-worker-importer/-enrichment above:
+  # backend-worker is deliberately host-mount-free (see its own "movable to
+  # any docker host" comment), and this loop needs read access to both
+  # payload capture sources -- the exact PAYLOAD_DIRS mounts dashboard/
+  # dashboard-next already carry -- plus a live ES connection (unlike
+  # backend-worker-enrichment just above, which is network_mode: none).
+  backend-worker-payload-inventory:
+    <<: *runtime-defaults
+    profiles: ["next"]
+    image: apiary-backend:latest
+    container_name: hp-apiary-worker-payload-inventory
+    restart: unless-stopped
+    environment:
+      - LISTEN_ADDR=127.0.0.1:8097
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - WORKER_LOOPS=payload-inventory
+      - PAYLOAD_DIRS=/dionaea-lib/binaries,/cowrie-downloads
+      - SCAN_INTERVAL=${PAYLOAD_INVENTORY_SCAN_INTERVAL:-5m}
+      - TZ=Europe/Berlin
+    volumes:
+      - dionaea-lib:/dionaea-lib:ro
+      - /opt/stacks/apiary/logs/cowrie/downloads:/cowrie-downloads:ro
+    networks:
+      - honeynet
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
   services-adapter:
     <<: *runtime-defaults
     build: ./services-adapter
