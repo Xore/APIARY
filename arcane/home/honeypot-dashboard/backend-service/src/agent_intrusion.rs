@@ -283,27 +283,52 @@ async fn run_cycle(state: &AppState, fetch_window: Duration, max_events_per_sour
         return 0;
     }
 
-    for event in &mut events {
-        if let Some(normalized) = normalize_timestamp(&event.timestamp) {
-            event.timestamp = normalized;
+    // Normalize/sort/correlate/score is CPU-bound, synchronous work with no
+    // .await points in it anywhere — run it on tokio's dedicated blocking-
+    // thread-pool via spawn_blocking, not inline on this task's own async
+    // worker thread. Without this, a long enough pass here (criticality_
+    // rules::evaluate_event's per-event decode/hash rule chain, run once per
+    // fetched event — up to 20,000 under the default fetch caps) starves
+    // every other task sharing this process's tokio runtime, including
+    // main.rs's /healthz handler: confirmed live during #1628's preflight —
+    // agent-intrusion run alone reliably made /healthz stop responding
+    // entirely (a direct curl timed out at 45s with zero response) within
+    // ~90s of every cycle start. The container's own cpu.max cgroup quota
+    // makes this worse, not just theoretical: `available_parallelism()`
+    // (which tokio's multi-threaded runtime sizes its worker-thread pool
+    // from) respects cgroup CPU limits on Linux, so a 1-cpu container can
+    // end up with too few worker threads for a second one to ever pick up
+    // the HTTP server's work while this task hogs the only one running.
+    let verdicts = tokio::task::spawn_blocking(move || {
+        let mut events = events;
+        for event in &mut events {
+            if let Some(normalized) = normalize_timestamp(&event.timestamp) {
+                event.timestamp = normalized;
+            }
         }
-    }
-    events.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        events.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
 
-    // Correlate against the slice first, then move events into the lookup
-    // map — avoids cloning every event just to satisfy both call sites.
-    let campaigns = campaign_correlator::correlate_campaigns(&events, chrono::Duration::hours(72));
-    let events_by_id: HashMap<String, CorrelatorEvent> = events
-        .into_iter()
-        .map(|e| (e.event_id.clone(), e))
-        .collect();
+        // Correlate against the slice first, then move events into the
+        // lookup map — avoids cloning every event just to satisfy both call
+        // sites.
+        let campaigns = campaign_correlator::correlate_campaigns(&events, chrono::Duration::hours(72));
+        let events_by_id: HashMap<String, CorrelatorEvent> = events
+            .into_iter()
+            .map(|e| (e.event_id.clone(), e))
+            .collect();
+
+        campaigns
+            .iter()
+            .filter_map(|campaign| build_campaign_verdict(campaign, &events_by_id))
+            .collect::<Vec<_>>()
+    })
+    .await
+    .unwrap_or_default();
 
     let mut written = 0u64;
-    for campaign in &campaigns {
-        if let Some(verdict) = build_campaign_verdict(campaign, &events_by_id) {
-            write_campaign_verdict(state, &verdict).await;
-            written += 1;
-        }
+    for verdict in &verdicts {
+        write_campaign_verdict(state, verdict).await;
+        written += 1;
     }
     written
 }
