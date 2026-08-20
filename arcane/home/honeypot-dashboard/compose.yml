@@ -661,6 +661,19 @@ services:
       - "${HP_BIND:-10.8.0.2}:19092:8080"
     volumes:
       - ${DASHBOARD_SECRETS_DIR:-/var/dockge/stacks/honeypot-dashboard/secrets}:/run/dashboard-secrets:ro
+    # The secrets dir's own files are -r--rw---- github-deploy-runner:
+    # deploy-runner (Arcane's own deploy-time provisioning owner). The old
+    # Go dashboard reading the same mount never needed this: it runs as
+    # root (no USER in its Dockerfile), which bypasses file permissions
+    # entirely. dashboard-next correctly runs as the frontend-next
+    # Dockerfile's unprivileged `node` user instead, so it needs actual
+    # group membership -- confirmed live (EACCES reading oidc-client-
+    # secret, #1628) that nothing had granted it that. group_add joins
+    # the container process to deploy-runner's GID (literal 980, not a
+    # name -- /etc/group only exists on the host, not inside this image)
+    # without loosening the file's own permissions for anything else.
+    group_add:
+      - "980"
     networks:
       - honeynet
       - oidc-session
