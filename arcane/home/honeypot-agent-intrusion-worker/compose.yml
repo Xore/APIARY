@@ -13,6 +13,22 @@
 # step copies this file to /opt/stacks/honeypot-agent-intrusion-worker/compose.yml
 # (Dockge's naming convention) on every push, same as every other #258/#560
 # split stack.
+#
+# Retired (#1649 follow-through): backend-service's agent_intrusion.rs
+# (its own doc comment: "agent-intrusion-worker port (#1610 worker
+# migration -- 'campaign correlator'), worker.py half") is the Rust
+# port of this exact worker -- same agent-intrusion-campaigns index,
+# same POLL_INTERVAL/FETCH_WINDOW_DAYS/MAX_EVENTS_PER_SOURCE shape
+# (AGENT_INTRUSION_-prefixed on backend-worker). Wired live as
+# WORKER_LOOPS=agent-intrusion since #1610 -- this had been dual-
+# writing the same index for as long as backend-worker's been up.
+# Missed in #1649's first pass (wrongly assumed unrelated to the #154
+# CI jobs, which actually validate this same Rust port). Confirmed live
+# before retiring: 14 clean cycles / zero errors over 5h, fresh
+# agent-intrusion-campaigns writes. profiles: ["legacy"] keeps this
+# container defined for rollback without Arcane's routine gitops-sync
+# trying to restart it -- same reasoning as every other retirement in
+# this series.
 
 name: honeypot-agent-intrusion-worker
 
@@ -28,6 +44,7 @@ services:
     build: ./analysis/agent-intrusion-corpus
     container_name: hp-agent-intrusion-worker
     restart: unless-stopped
+    profiles: ["legacy"]
     networks:
       - honeynet
     environment:
