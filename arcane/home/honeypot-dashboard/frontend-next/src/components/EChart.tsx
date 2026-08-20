@@ -357,15 +357,35 @@ export function EChart({ kind, url, height }: { kind: ChartKind; url: string; he
 
   return (
     <>
-      <div
-        ref={containerRef}
-        style={{ width: '100%', height }}
-        aria-busy={state === 'loading'}
-        role={state === 'error' ? 'alert' : undefined}
-      >
-        {state === 'loading' ? <span className="skeleton-line" aria-hidden="true" /> : null}
+      {/* echarts.init(container, ...) below injects its own DOM nodes
+          directly into this div, entirely outside React's tracking. It
+          must never also be a parent React renders children into --
+          confirmed live (#1628): mixing the two crashed every chart that
+          ever reached 'empty' (no data) with "Failed to execute
+          'removeChild' on 'Node': the node to be removed is not a child
+          of this node", because chart.dispose() below removes echarts'
+          own DOM synchronously, inside the same effect tick as the
+          setState that swaps in the "No data yet" React children --
+          React's reconciler then tries to remove a sibling node echarts
+          already tore down. Loading/empty/error status is rendered as an
+          absolutely-positioned OVERLAY SIBLING instead, inside a
+          position:relative wrapper, so React never owns any node inside
+          the div echarts controls. */}
+      <div style={{ position: 'relative', width: '100%', height }}>
+        <div
+          ref={containerRef}
+          style={{ width: '100%', height }}
+          aria-busy={state === 'loading'}
+          role={state === 'error' ? 'alert' : undefined}
+        />
+        {state === 'loading' ? (
+          <span className="skeleton-line" aria-hidden="true" style={{ position: 'absolute', inset: 0 }} />
+        ) : null}
         {state === 'empty' || state === 'error' ? (
-          <p className="empty" style={{ display: 'grid', placeItems: 'center', width: '100%', height: '100%', padding: '2rem', textAlign: 'center' }}>
+          <p
+            className="empty"
+            style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', padding: '2rem', textAlign: 'center' }}
+          >
             {status}
           </p>
         ) : null}
