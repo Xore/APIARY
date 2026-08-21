@@ -1,6 +1,8 @@
-// Payload analysis — one captured artifact's full picture: inventory
-// metadata, hex preview, static analysis, and YARA verdicts, plus the
-// three operator actions that queue further work on this same artifact
+// Payload analysis — one captured artifact's full picture, restored to the
+// Go dashboard's structured layout (#1653; payloads.html's
+// "payload-analysis" template + hp-payload-analysis.js): KPI tiles,
+// Identity/Findings/Content tabs, prior-analysis correlation cards, and
+// the operator actions that queue further work on this same artifact
 // (#1608 workstream L): sandbox detonation, Ghidra decompilation, and
 // GitHub-analysis publication. Static analysis itself never executes the
 // payload; the actions below hand off to the sensor host's own async
@@ -9,11 +11,13 @@
 // every other mutation here.
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { confirmAction } from '../components/ConfirmDialog'
 import { InvestigateHeader } from '../components/Investigate'
 import { getSessionUser, type User } from '../lib/auth'
 import { useResolved } from '../lib/hooks'
-import type { JsonRecord } from '../lib/json'
+import type { Json, JsonRecord } from '../lib/json'
+import { formatTimestamp } from '../lib/time'
 
 type PayloadDetail = {
   hash: string
@@ -96,9 +100,10 @@ const submitGhidra = createServerFn({ method: 'POST' })
 // "publish" in `confirm` and audits every outcome — publication is
 // external and irreversible (a public repo + third-party scanners), so
 // the operator must have actually confirmed in the UI before this is
-// ever called; see the window.confirm in OperatorActionsCard's `publish`
-// handler below (same precedent as reports.tsx's DefinitionsCard
-// delete-definition flow).
+// ever called; every caller (this page's External-publication card, and
+// payloads.tsx's own copy behind its per-card action menu) wraps it in
+// confirmAction with the publication wording from payloads.html's
+// data-hp-confirm-* attributes.
 const submitGithubAnalysis = createServerFn({ method: 'POST' })
   .inputValidator((input: { hash: string }) => input)
   .handler(async ({ data }): Promise<SubmitResult> => {
@@ -112,6 +117,115 @@ const submitGithubAnalysis = createServerFn({ method: 'POST' })
     )
   })
 
+// ── Prior-analysis correlation (hp-payload-analysis.js's aggregation
+//    pass, #1142) — the Rust tier has no aggregation endpoint, so this
+//    reads the same result stores the Go backend aggregated
+//    (sandbox-analysis-v1 / ghidra-analysis-v1 / github-analysis-v1 via
+//    /api/v1/store/*) and filters by hash with the store's own Lucene `q`.
+type SandboxRunRow = { job: string; completed_at: string; exit_status: string; changed: number }
+type GithubView = { sha256: string; exit_status: string; malicious: number | null; total: number | null; level: string; family: string }
+type GhidraView = { exit_status: string; completed_at: string }
+type Correlation = { sandbox_runs: SandboxRunRow[]; github: GithubView | null; ghidra: GhidraView | null }
+
+type StorePage = { total: number; rows: JsonRecord[] }
+
+function jobj(value: Json | undefined | null): JsonRecord | null {
+  return value !== null && value !== undefined && typeof value === 'object' && !Array.isArray(value) ? (value as JsonRecord) : null
+}
+function jarr(value: Json | undefined | null): Json[] {
+  return Array.isArray(value) ? value : []
+}
+function jstr(value: Json | undefined | null): string {
+  return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : ''
+}
+function jnum(value: Json | undefined | null): number | null {
+  return typeof value === 'number' ? value : null
+}
+
+const fetchCorrelation = createServerFn({ method: 'GET' })
+  .inputValidator((input: { key: string }) => input)
+  .handler(async ({ data }): Promise<Correlation> => {
+    const { serviceJSON } = await import('../lib/backend.server')
+    const key = data.key.toLowerCase()
+    const q = encodeURIComponent(key)
+    const [sandbox, ghidra, github] = await Promise.all([
+      serviceJSON<StorePage>(`/api/v1/store/sandbox-runs?offset=0&size=25&q=${q}`),
+      serviceJSON<StorePage>(`/api/v1/store/ghidra-runs?offset=0&size=5&q=${q}`),
+      serviceJSON<StorePage>(`/api/v1/store/github-analysis?offset=0&size=5&q=${q}`),
+    ])
+    // Result documents are namespaced by the es-results-importer source
+    // label ("sandbox"/"ghidra"/"github_analysis" sub-objects) — read the
+    // namespaced object first, fall back to the row itself, same
+    // defensive shape detail.rs's own sandbox_run query takes.
+    const sandboxRuns: SandboxRunRow[] = []
+    for (const row of sandbox?.rows ?? []) {
+      const run = jobj(row.sandbox) ?? row
+      const sha = jstr(run.sha256).toLowerCase()
+      if (sha && sha !== key) continue
+      const job = jstr(run.job)
+      if (!job || !jstr(run.completed_at)) continue
+      sandboxRuns.push({
+        job,
+        completed_at: jstr(run.completed_at),
+        exit_status: jstr(run.exit_status),
+        changed: jarr(run.changed_files).length,
+      })
+    }
+    let githubView: GithubView | null = null
+    for (const row of github?.rows ?? []) {
+      const result = jobj(row.github_analysis) ?? row
+      const sha = jstr(result.sha256).toLowerCase()
+      if (!sha || (sha !== key && jstr(jobj(jobj(row.file)?.hash ?? null)?.sha256).toLowerCase() !== key)) continue
+      const verdict = jobj(result.verdict)
+      githubView = {
+        sha256: sha,
+        exit_status: jstr(result.exit_status),
+        malicious: verdict ? jnum(verdict.malicious) : null,
+        total: verdict ? jnum(verdict.total) : null,
+        level: verdict ? jstr(verdict.level) : '',
+        family: jstr(result.family),
+      }
+      break
+    }
+    let ghidraView: GhidraView | null = null
+    for (const row of ghidra?.rows ?? []) {
+      const sha = jstr(jobj(jobj(row.file)?.hash ?? null)?.sha256).toLowerCase()
+      if (sha && sha !== key) continue
+      const run = jobj(row.ghidra) ?? row
+      ghidraView = { exit_status: jstr(run.exit_status) || 'completed', completed_at: jstr(run.completed_at) }
+      break
+    }
+    return { sandbox_runs: sandboxRuns, github: githubView, ghidra: ghidraView }
+  })
+
+// Related-event sightings + capture origin, recovered from the event feed
+// the same way Go's earliestEventByShasum did (payloads_data.go) — the
+// feed sorts newest-first, so the earliest sighting is the last row of
+// the filtered result set (bounded by ES's from+size window).
+type RelatedEvents = {
+  total: number
+  earliest: { time: string; sensor: string; session: string } | null
+}
+
+const fetchRelatedEvents = createServerFn({ method: 'GET' })
+  .inputValidator((input: { hash: string }) => input)
+  .handler(async ({ data }): Promise<RelatedEvents> => {
+    const { serviceJSON } = await import('../lib/backend.server')
+    type EventsPage = { total: number; rows: { time: string; sensor: string; session: string }[] }
+    const base = `/api/v1/events?shasum=${encodeURIComponent(data.hash)}&size=1`
+    const first = await serviceJSON<EventsPage>(base)
+    if (!first || first.total === 0) return { total: first?.total ?? 0, earliest: null }
+    let row = first.rows[0] ?? null
+    if (first.total > 1 && first.total <= 10000) {
+      const last = await serviceJSON<EventsPage>(`${base}&offset=${first.total - 1}`)
+      row = last?.rows[0] ?? row
+    }
+    return {
+      total: first.total,
+      earliest: row ? { time: row.time, sensor: row.sensor, session: row.session } : null,
+    }
+  })
+
 export const Route = createFileRoute('/payload-analysis/$hash')({
   loader: async ({ params }) => ({
     first: fetchDetail({ data: { hash: params.hash } }),
@@ -120,6 +234,115 @@ export const Route = createFileRoute('/payload-analysis/$hash')({
   }),
   component: PayloadAnalysis,
 })
+
+// ── Static-analysis view — the structured half hp-payload-analysis.js's
+//    loadStaticAnalysis() rendered. The dashboard-static-analysis-v1
+//    document is Go's staticAnalysisCacheDoc ({Fingerprint, Analysis}),
+//    whose payloadStaticAnalysis fields serialize with Go-capitalized
+//    names except the json-tagged nested structs (classification/rules/
+//    decoded items are lowercase) — read both spellings defensively.
+type DecodedItem = { kind: string; source: string; preview: string }
+type RuleItem = { name: string; severity: string; description: string }
+type StaticView = {
+  classification: { code: string; label: string; platform: string; category: string; analysisPath: string; dynamic: boolean } | null
+  magic: string
+  mime: string
+  size: string
+  entropy: string
+  sha256: string
+  sha1: string
+  md5: string
+  packedLikely: boolean | null
+  riskScore: number | null
+  riskLevel: string
+  truncated: boolean
+  hexdump: string
+  ascii: string[]
+  utf16: string[]
+  formatInfo: string[]
+  decoded: DecodedItem[]
+  scriptType: string
+  indicators: string[]
+  iocs: string[]
+  rules: RuleItem[]
+  yaraMatches: string[]
+}
+
+function buildStaticView(analysis: JsonRecord | null): StaticView | null {
+  if (!analysis) return null
+  const doc = jobj(analysis.Analysis) ?? analysis
+  const pick = (...keys: string[]): Json | undefined => {
+    for (const key of keys) if (doc[key] !== undefined) return doc[key]
+    return undefined
+  }
+  const strings = (value: Json | undefined): string[] => jarr(value).map(jstr).filter(Boolean)
+  const c = jobj(pick('Classification', 'classification'))
+  const packedRaw = pick('PackedLikely', 'packed_likely')
+  const entropyText = jstr(pick('Entropy'))
+  const entropyValue = jnum(pick('EntropyValue', 'entropy'))
+  return {
+    classification: c
+      ? {
+          code: jstr(c.code),
+          label: jstr(c.label),
+          platform: jstr(c.platform),
+          category: jstr(c.category),
+          analysisPath: jstr(c.analysis_path),
+          dynamic: c.dynamic === true,
+        }
+      : null,
+    magic: jstr(pick('Magic', 'magic')),
+    mime: jstr(pick('MIME', 'mime')),
+    size: jstr(pick('Size', 'size')),
+    entropy: entropyText || (entropyValue !== null ? entropyValue.toFixed(2) : ''),
+    sha256: jstr(pick('SHA256', 'sha256')),
+    sha1: jstr(pick('SHA1', 'sha1')),
+    md5: jstr(pick('MD5', 'md5')),
+    packedLikely: typeof packedRaw === 'boolean' ? packedRaw : null,
+    riskScore: jnum(pick('StaticRiskScore', 'risk_score')),
+    riskLevel: jstr(pick('StaticRiskLevel', 'risk_level')),
+    truncated: pick('Truncated', 'truncated') === true,
+    hexdump: jstr(pick('Hexdump', 'hexdump')),
+    ascii: strings(pick('ASCII', 'ascii')),
+    utf16: strings(pick('UTF16', 'utf16')),
+    formatInfo: strings(pick('FormatInfo', 'format_info')),
+    decoded: jarr(pick('Decoded', 'decoded')).map((item) => {
+      const record = jobj(item)
+      return record
+        ? { kind: jstr(record.kind), source: jstr(record.source), preview: jstr(record.preview) }
+        : { kind: '', source: '', preview: '' }
+    }),
+    scriptType: jstr(pick('ScriptType', 'script_type')),
+    indicators: strings(pick('Indicators', 'indicators')),
+    iocs: strings(pick('IOCs', 'iocs')),
+    rules: jarr(pick('Rules', 'rules')).map((item) => {
+      const record = jobj(item)
+      return record
+        ? { name: jstr(record.name), severity: jstr(record.severity), description: jstr(record.description) }
+        : { name: '', severity: '', description: '' }
+    }),
+    yaraMatches: strings(pick('YARAMatches', 'yara_matches')),
+  }
+}
+
+// yara-analysis-v1 samples arrive namespaced under a "yara" sub-object
+// (es-results-importer's label contract, dashboard/yara.go's yaraSample).
+function buildYaraView(rows: JsonRecord[]): { matches: string[]; scanned: string; error: string } {
+  const matches: string[] = []
+  let scanned = ''
+  let error = ''
+  for (const row of rows) {
+    const sample = jobj(row.yara) ?? row
+    for (const match of jarr(sample.matches)) {
+      const name = jstr(match)
+      if (name && !matches.includes(name)) matches.push(name)
+    }
+    const at = jstr(sample.scanned_at)
+    if (at > scanned) scanned = at
+    if (!error) error = jstr(sample.error)
+  }
+  return { matches, scanned, error }
+}
 
 // Badge + note for the Detonate row, derived from golden-image-status.
 // Missing/unreadable/unconfigured is not an error (see golden_image_status
@@ -154,29 +377,136 @@ function goldenImageNote(golden: GoldenImageStatus | null): { cls: string; label
   return null
 }
 
+// Page-level numbered tab strip — theme.css's .tabs/.tab vocabulary
+// (payloads.html:247-251), which the shared Tabs component can't emit (it
+// speaks .segmented and can't put the .tab class on its buttons), so the
+// markup is inlined here with the same roving-tabindex/Arrow/Home/End
+// semantics hp-app.js's dashboard-tab handler had.
+function PageTabs({
+  tabs,
+  active,
+  onSelect,
+  label,
+}: {
+  tabs: { id: string; label: string }[]
+  active: string
+  onSelect: (id: string) => void
+  label: string
+}) {
+  const move = (event: React.KeyboardEvent, index: number) => {
+    let target: number | null = null
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') target = (index + 1) % tabs.length
+    else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') target = (index - 1 + tabs.length) % tabs.length
+    else if (event.key === 'Home') target = 0
+    else if (event.key === 'End') target = tabs.length - 1
+    if (target === null) return
+    event.preventDefault()
+    onSelect(tabs[target].id)
+    document.getElementById(`pl-tab-${tabs[target].id}`)?.focus()
+  }
+  return (
+    <div className="tabs" role="tablist" aria-label={label}>
+      {tabs.map((tab, index) => (
+        <button
+          key={tab.id}
+          id={`pl-tab-${tab.id}`}
+          className={tab.id === active ? 'tab active' : 'tab'}
+          type="button"
+          role="tab"
+          aria-selected={tab.id === active}
+          aria-controls={`pl-panel-${tab.id}`}
+          tabIndex={tab.id === active ? 0 : -1}
+          onClick={() => onSelect(tab.id)}
+          onKeyDown={(event) => move(event, index)}
+        >
+          <span>0{index + 1}</span>
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// Searchable evidence pane — the port of hp-payload-analysis.js's
+// renderSearchableEvidence: count note, filter input, bounded <pre>.
+function SearchablePane({
+  entries,
+  empty,
+  placeholder,
+  itemLabel,
+  note,
+}: {
+  entries: { label: string; value: string }[]
+  empty: string
+  placeholder: string
+  itemLabel: string
+  note: string
+}) {
+  const [query, setQuery] = useState('')
+  if (entries.length === 0) return <p className="empty">{empty}</p>
+  const trimmed = query.trim().toLowerCase()
+  const shown = trimmed
+    ? entries.filter((entry) => `${entry.label} ${entry.value}`.toLowerCase().includes(trimmed))
+    : entries
+  return (
+    <>
+      <p className="note">
+        {shown.length} of {entries.length} {itemLabel}
+        {entries.length === 1 ? '' : 's'} shown — {note}
+      </p>
+      <input
+        className="search"
+        type="search"
+        placeholder={placeholder}
+        aria-label={placeholder}
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+      />
+      <div className="card__scroll">
+        <pre className="code">
+          {shown.length
+            ? shown.map((entry) => (entry.label ? `[${entry.label}]\n${entry.value}` : entry.value)).join('\n\n')
+            : 'No entries match this filter.'}
+        </pre>
+      </div>
+    </>
+  )
+}
+
 function OperatorActionsCard({ hash, golden, editable }: { hash: string; golden: GoldenImageStatus | null; editable: boolean }) {
   const [sandboxBusy, setSandboxBusy] = useState(false)
   const [sandboxMessage, setSandboxMessage] = useState('')
   const [ghidraBusy, setGhidraBusy] = useState(false)
   const [ghidraMessage, setGhidraMessage] = useState('')
-  const [githubBusy, setGithubBusy] = useState(false)
-  const [githubMessage, setGithubMessage] = useState('')
 
-  const detonate = async () => {
-    setSandboxBusy(true)
-    setSandboxMessage('')
-    try {
-      const result = await submitSandbox({ data: { hash } })
-      setSandboxMessage(
-        result.ok
-          ? `Queued${result.target ? ` for the ${result.target} sandbox` : ''} — see the sandbox queue once the job starts.`
-          : result.error || 'Sandbox submission failed.',
-      )
-    } finally {
-      setSandboxBusy(false)
-    }
-  }
+  // The Go dashboard's one sandbox confirm surface (hp-modals.js:143-150)
+  // — same title/description/warning/label copy verbatim.
+  const detonate = () =>
+    confirmAction({
+      title: 'Submit payload to the sandbox?',
+      description: 'This queues the captured artifact for execution in the isolated malware-analysis environment.',
+      warning: `The payload ${hash} will be detonated and may generate network, process, and filesystem activity.`,
+      confirmLabel: 'Submit to sandbox',
+      onConfirm: async () => {
+        setSandboxBusy(true)
+        try {
+          const result = await submitSandbox({ data: { hash } })
+          if (!result.ok) {
+            const message = result.error || 'Sandbox submission failed.'
+            setSandboxMessage(message)
+            throw new Error(message)
+          }
+          const message = `Queued${result.target ? ` for the ${result.target} sandbox` : ''} — see the sandbox queue once the job starts.`
+          setSandboxMessage(message)
+          return message
+        } finally {
+          setSandboxBusy(false)
+        }
+      },
+    })
 
+  // Ghidra deliberately has no confirm — hp-modals.js's own comment: a
+  // modal per read-only decompilation is confirmation fatigue.
   const decompile = async () => {
     setGhidraBusy(true)
     setGhidraMessage('')
@@ -188,27 +518,6 @@ function OperatorActionsCard({ hash, golden, editable }: { hash: string; golden:
     }
   }
 
-  const publish = async () => {
-    if (
-      typeof window !== 'undefined' &&
-      !window.confirm(
-        'Publish this sample to the public Xore/honeypot repository and third-party scanner APIs?\n\nThis cannot be undone.',
-      )
-    ) {
-      return
-    }
-    setGithubBusy(true)
-    setGithubMessage('')
-    try {
-      const result = await submitGithubAnalysis({ data: { hash } })
-      setGithubMessage(
-        result.ok ? 'Queued — see GitHub analysis once it completes.' : result.error || 'GitHub-analysis submission failed.',
-      )
-    } finally {
-      setGithubBusy(false)
-    }
-  }
-
   const goldenNote = goldenImageNote(golden)
 
   return (
@@ -216,7 +525,7 @@ function OperatorActionsCard({ hash, golden, editable }: { hash: string; golden:
       <h2>Operator actions</h2>
       <p className="note">
         Each action queues asynchronous work on the sensor host — nothing here executes inline. Results appear on the
-        sandbox, Ghidra, and GitHub-analysis pages once the matching worker finishes.
+        sandbox and Ghidra pages once the matching worker finishes.
       </p>
       <div className="table-scroll">
         <table className="data-table">
@@ -267,26 +576,63 @@ function OperatorActionsCard({ hash, golden, editable }: { hash: string; golden:
               </td>
               <td className="v">{ghidraMessage ? <span className="note">{ghidraMessage}</span> : '—'}</td>
             </tr>
-            <tr>
-              <td className="v">
-                <button
-                  className="btn btn-danger btn-sm"
-                  type="button"
-                  disabled={!editable || githubBusy}
-                  onClick={publish}
-                >
-                  {githubBusy ? 'Publishing…' : 'Submit for GitHub analysis'}
-                </button>
-              </td>
-              <td>
-                <span className="note">Publishes the sample to the public Xore/honeypot repository and third-party scanners.</span>
-              </td>
-              <td className="v">{githubMessage ? <span className="note">{githubMessage}</span> : '—'}</td>
-            </tr>
           </tbody>
         </table>
       </div>
       {!editable ? <p className="note">Admin role required to submit for analysis.</p> : null}
+    </div>
+  )
+}
+
+// GitHub publication kept apart from the local-analysis actions above,
+// with the distinct trust-boundary framing payload_workbench.html:112
+// gives it — it leaves the local trust boundary (public repo +
+// third-party scanners), which detonation and decompilation never do.
+function ExternalPublicationCard({ hash, editable }: { hash: string; editable: boolean }) {
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+
+  const publish = () =>
+    confirmAction({
+      title: 'Publish to Xore/honeypot?',
+      description: 'This uploads the sample to the public Xore/honeypot repository and to third-party scanner APIs.',
+      warning: 'This cannot be undone.',
+      confirmLabel: 'Publish sample',
+      onConfirm: async () => {
+        setBusy(true)
+        try {
+          const result = await submitGithubAnalysis({ data: { hash } })
+          if (!result.ok) {
+            const failed = result.error || 'GitHub-analysis submission failed.'
+            setMessage(failed)
+            throw new Error(failed)
+          }
+          const queued = 'Queued — see GitHub analysis once it completes.'
+          setMessage(queued)
+          return queued
+        } finally {
+          setBusy(false)
+        }
+      },
+    })
+
+  return (
+    <div className="card wide">
+      <div className="tw:flex tw:flex-wrap tw:items-center tw:gap-2">
+        <h2 className="tw:mr-auto">External publication</h2>
+        <span className="badge badge--red">leaves local trust boundary</span>
+      </div>
+      <p className="note">
+        GitHub analysis uploads captured material externally — to the public Xore/honeypot repository and third-party
+        scanner APIs. It is a separate administrator-only workflow with its own confirmation and audit trail, unlike the
+        local analyses above, which never leave this host.
+      </p>
+      <div className="tw:flex tw:flex-wrap tw:items-center tw:gap-2">
+        <button className="btn btn-danger btn-sm" type="button" disabled={!editable || busy} onClick={publish}>
+          {busy ? 'Publishing…' : 'Publish to Xore/honeypot'}
+        </button>
+        {message ? <span className="note">{message}</span> : null}
+      </div>
     </div>
   )
 }
@@ -297,6 +643,31 @@ function PayloadAnalysis() {
   const resolvedDetail = useResolved(first)
   const detail: PayloadDetail | null | 'missing' = resolvedDetail === undefined ? null : resolvedDetail ?? 'missing'
   const goldenStatus: GoldenImageStatus | null = useResolved(golden) ?? null
+  const [tab, setTab] = useState('identity')
+  const [correlation, setCorrelation] = useState<Correlation | null>(null)
+  const [related, setRelated] = useState<RelatedEvents | null>(null)
+
+  const view = useMemo(() => buildStaticView(detail && detail !== 'missing' ? detail.analysis : null), [detail])
+  const yara = useMemo(() => buildYaraView(detail && detail !== 'missing' ? detail.yara : []), [detail])
+
+  // The correlation pass keys result stores by sha256; Dionaea captures
+  // are MD5-addressed, so wait for the static-analysis doc to resolve the
+  // real sha256 before querying (hp-payload-analysis.js's own re-fire-
+  // with-sha256 dance, collapsed to one fetch since both arrive together).
+  useEffect(() => {
+    if (detail === null) return
+    const key = view?.sha256 || hash
+    let cancelled = false
+    fetchCorrelation({ data: { key } }).then((result) => {
+      if (!cancelled && result) setCorrelation(result)
+    })
+    fetchRelatedEvents({ data: { hash } }).then((result) => {
+      if (!cancelled && result) setRelated(result)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [detail, view, hash])
 
   // Same "no session (dev mode)" posture as settings.tsx: treat a missing
   // session as admin so local/dev runs aren't blocked, and gate on role
@@ -314,78 +685,556 @@ function PayloadAnalysis() {
   }
 
   const inventory = detail && detail.inventory ? detail.inventory : null
-  const kind = inventory && typeof inventory.Kind === 'string' ? inventory.Kind : ''
+  const kind = view?.classification?.label || jstr(inventory?.Kind)
+  const sha256 = view?.sha256 || (hash.length === 64 ? hash : '')
+  const allMatches = [...new Set([...(view?.yaraMatches ?? []), ...yara.matches])]
+  const iocs = view?.iocs ?? []
+  const origin = related?.earliest ?? null
+  const originLabel = origin ? `${origin.sensor} · ${formatTimestamp(origin.time)}` : ''
+  const known = !!correlation && (correlation.sandbox_runs.length > 0 || !!correlation.github || !!correlation.ghidra || (related?.total ?? 0) > 0)
+
+  const skeleton = (
+    <>
+      <span className="skeleton-line" aria-hidden="true" />
+      <span className="skeleton-line" aria-hidden="true" />
+    </>
+  )
 
   return (
     <>
       <InvestigateHeader
         label="Evidence"
         title="Payload analysis"
-        subtitle="Static analysis of one captured artifact — metadata, bytes, strings and rule matches. The payload is never executed here."
+        subtitle="Bounded static analysis — the sample is never executed."
         chips={
           detail ? (
             <>
+              <Link className="chip" to="/payloads">← payloads</Link>
               <span className="chip"><code>{detail.hash.slice(0, 32)}</code></span>
               {kind ? <span className="badge badge--muted">{kind}</span> : null}
               <span className="chip">{(detail.size_bytes / 1024).toFixed(1)} KB</span>
-              <a
-                className="chip"
-                href={`https://www.virustotal.com/gui/search/${encodeURIComponent(detail.hash)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                VirusTotal →
-              </a>
-              {isAdmin ? (
-                <a className="chip" href={`/api/payload/${encodeURIComponent(detail.hash)}/download`}>
-                  Download sample ↓
-                </a>
+              {/* #673: origin as a labeled disclosure, matching the
+                  action-menu pattern (payloads.html:200-206). */}
+              {origin ? (
+                <details className="action-menu hp-pl-label-trigger">
+                  <summary aria-label="Origin" title="Where this payload was captured">Origin</summary>
+                  <div className="action-menu__popover hp-pl-info-popover" role="menu">
+                    <div className="hp-pl-info-row">
+                      <span className="k">captured by</span>
+                      <span className="v">{originLabel}</span>
+                    </div>
+                    {origin.session ? (
+                      <a className="action-menu__item" role="menuitem" href={`/sessions/${encodeURIComponent(origin.session)}`}>
+                        Open capturing session →
+                      </a>
+                    ) : (
+                      <div className="hp-pl-info-row">
+                        <span className="k">session</span>
+                        <span className="v">none recorded for this capture</span>
+                      </div>
+                    )}
+                  </div>
+                </details>
               ) : null}
-              <Link className="chip" to="/payloads">← all payloads</Link>
+              {/* #1140: every payload action folded into one menu,
+                  matching /payloads' own payloadrow action-menu. */}
+              <details className="action-menu">
+                <summary aria-label="Payload actions" title="Payload actions">⋮</summary>
+                <div className="action-menu__popover" role="menu">
+                  <a
+                    className="action-menu__item"
+                    role="menuitem"
+                    href={`/payload-workbench/results?hash=${encodeURIComponent(detail.hash)}#workbench-builder`}
+                  >
+                    Analysis workbench →
+                  </a>
+                  <a className="action-menu__item" role="menuitem" href={`/events?shasum=${encodeURIComponent(detail.hash)}`}>
+                    Related events →
+                  </a>
+                  <a
+                    className="action-menu__item"
+                    role="menuitem"
+                    href={`https://www.virustotal.com/gui/file/${encodeURIComponent(detail.hash)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    VirusTotal ↗
+                  </a>
+                  {isAdmin ? (
+                    <a className="action-menu__item" role="menuitem" href={`/api/payload/${encodeURIComponent(detail.hash)}/download`}>
+                      Download sample ↓
+                    </a>
+                  ) : null}
+                </div>
+              </details>
             </>
           ) : undefined
         }
       />
       {detail === null ? (
-        <div className="card wide">
-          <span className="skeleton-line" aria-hidden="true" />
-          <span className="skeleton-line" aria-hidden="true" />
-        </div>
+        <div className="card wide">{skeleton}</div>
       ) : (
         <>
+          {view?.classification && !view.classification.dynamic ? (
+            <p className="note">
+              {view.classification.label} has no dynamic detonation path — {view.classification.analysisPath}. The
+              evidence below is the whole analysis for this artifact.
+            </p>
+          ) : null}
+
+          <div className="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:gap-3 tw:mb-6">
+            <div className="metric">
+              <div className="metric__value">
+                {view?.riskScore !== null && view?.riskScore !== undefined ? `${view.riskScore} / 100 • ${view.riskLevel}` : '—'}
+              </div>
+              <div className="metric__label">Static risk</div>
+            </div>
+            <div className="metric">
+              <div className="metric__value metric__value--text">
+                {view?.packedLikely === null || view === null ? '—' : view.packedLikely ? 'elevated' : 'not indicated'}
+              </div>
+              <div className="metric__label">Packing likelihood</div>
+            </div>
+            <div className="metric">
+              <div className="metric__value">{view ? iocs.length : '—'}</div>
+              <div className="metric__label">Extracted IOCs</div>
+            </div>
+          </div>
+
+          <PageTabs
+            tabs={[
+              { id: 'identity', label: 'Identity' },
+              { id: 'findings', label: 'Findings' },
+              { id: 'content', label: 'Content' },
+            ]}
+            active={tab}
+            onSelect={setTab}
+            label="Payload analysis views"
+          />
+
+          <div
+            className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5"
+            id="pl-panel-identity"
+            role="tabpanel"
+            aria-labelledby="pl-tab-identity"
+            hidden={tab !== 'identity'}
+          >
+            <div className="section-heading">
+              <div>
+                <h2>What this file is</h2>
+                <p>Type, hashes, and whether it has been detonated in the isolated sandbox.</p>
+              </div>
+            </div>
+            <div className="card wide">
+              <h2>Identity and selected analysis path</h2>
+              {view ? (
+                <>
+                  {view.classification ? (
+                    <>
+                      <div className="card__row">
+                        <span className="card__label">identified type</span>
+                        <span className="card__value">
+                          <strong>{view.classification.label}</strong>{' '}
+                          <span className="badge badge--muted">{view.classification.code}</span>
+                        </span>
+                      </div>
+                      <div className="card__row">
+                        <span className="card__label">platform / category</span>
+                        <span className="card__value card__value--mono">
+                          {view.classification.platform} / {view.classification.category}
+                        </span>
+                      </div>
+                      <div className="card__row">
+                        <span className="card__label">sandbox route</span>
+                        <span className="card__value card__value--mono">{view.classification.analysisPath}</span>
+                      </div>
+                      <div className="card__row">
+                        <span className="card__label">dynamic execution</span>
+                        <span className="card__value">
+                          {view.classification.dynamic ? 'supported for this type' : 'not automatic; static analysis only'}
+                        </span>
+                      </div>
+                    </>
+                  ) : null}
+                  <div className="card__row">
+                    <span className="card__label">magic</span>
+                    <span className="card__value">{view.magic || '—'}</span>
+                  </div>
+                  <div className="card__row">
+                    <span className="card__label">MIME</span>
+                    <span className="card__value card__value--mono">{view.mime || jstr(inventory?.MIME) || '—'}</span>
+                  </div>
+                  <div className="card__row">
+                    <span className="card__label">size</span>
+                    <span className="card__value card__value--mono">{view.size || jstr(inventory?.SizeH) || '—'}</span>
+                  </div>
+                  <div className="card__row">
+                    <span className="card__label">entropy</span>
+                    <span className="card__value card__value--mono">{view.entropy || '—'}</span>
+                  </div>
+                  <div className="card__row">
+                    <span className="card__label">SHA-256</span>
+                    <span className="card__value card__value--mono">{view.sha256 || '—'}</span>
+                  </div>
+                  <div className="card__row">
+                    <span className="card__label">SHA-1</span>
+                    <span className="card__value card__value--mono">{view.sha1 || '—'}</span>
+                  </div>
+                  <div className="card__row">
+                    <span className="card__label">MD5</span>
+                    <span className="card__value card__value--mono">{view.md5 || '—'}</span>
+                  </div>
+                  {view.truncated ? (
+                    <p className="note">deep inspection capped at 16 MiB; hashes cover the complete file</p>
+                  ) : null}
+                </>
+              ) : inventory ? (
+                <>
+                  <div className="card__row">
+                    <span className="card__label">identified type</span>
+                    <span className="card__value">
+                      <strong>{jstr(inventory.Kind) || 'unknown'}</strong>
+                    </span>
+                  </div>
+                  <div className="card__row">
+                    <span className="card__label">platform</span>
+                    <span className="card__value card__value--mono">{jstr(inventory.Platform) || '—'}</span>
+                  </div>
+                  <div className="card__row">
+                    <span className="card__label">sandbox route</span>
+                    <span className="card__value card__value--mono">{jstr(inventory.AnalysisPath) || '—'}</span>
+                  </div>
+                  <div className="card__row">
+                    <span className="card__label">MIME</span>
+                    <span className="card__value card__value--mono">{jstr(inventory.MIME) || '—'}</span>
+                  </div>
+                  <div className="card__row">
+                    <span className="card__label">size</span>
+                    <span className="card__value card__value--mono">{jstr(inventory.SizeH) || '—'}</span>
+                  </div>
+                  <p className="note">No static-analysis record for this hash yet — inventory metadata only.</p>
+                </>
+              ) : (
+                <p className="empty">No static-analysis record for this hash yet.</p>
+              )}
+            </div>
+            {view && (view.scriptType || view.indicators.length > 0) ? (
+              <div className="card half">
+                <h2>Script classification</h2>
+                {view.scriptType ? (
+                  <div className="card__row">
+                    <span className="card__label">language/type</span>
+                    <span className="card__value card__value--mono">{view.scriptType}</span>
+                  </div>
+                ) : null}
+                {view.indicators.length > 0 ? (
+                  <div className="card__row">
+                    <span className="card__label">behavior indicators</span>
+                    <span className="card__value">
+                      {view.indicators.map((indicator) => (
+                        <span key={indicator} className="chip">
+                          {indicator}
+                        </span>
+                      ))}
+                    </span>
+                  </div>
+                ) : null}
+                <p className="note">Heuristic static findings only. Captured content is never interpreted or executed.</p>
+              </div>
+            ) : null}
+            <div className="card half">
+              <h2>Isolated dynamic analysis</h2>
+              {correlation === null ? (
+                skeleton
+              ) : correlation.sandbox_runs.length === 0 ? (
+                <p className="empty">
+                  No completed KVM sandbox run for this payload. Queue one from the{' '}
+                  <a className="lnk" href={`/payload-workbench/results?hash=${encodeURIComponent(detail.hash)}#workbench-builder`}>
+                    analysis workbench
+                  </a>
+                  .
+                </p>
+              ) : (
+                <div className="card__scroll">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>completed</th>
+                        <th>exit</th>
+                        <th>changed paths</th>
+                        <th>details</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {correlation.sandbox_runs.map((run) => (
+                        <tr key={run.job}>
+                          <td>{formatTimestamp(run.completed_at)}</td>
+                          <td className="n">{run.exit_status}</td>
+                          <td className="n">{run.changed}</td>
+                          <td>
+                            <a className="lnk" href={`/sandbox/${encodeURIComponent(run.job)}`}>
+                              sandbox report →
+                            </a>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            <div className="card half">
+              <h2>GitHub analysis</h2>
+              {correlation === null ? (
+                skeleton
+              ) : correlation.github === null ? (
+                <p className="empty">
+                  Not published to Xore/honeypot. Use <strong>Publish to Xore/honeypot</strong> below to queue one.
+                </p>
+              ) : (
+                <>
+                  <div className="card__row">
+                    <span className="card__label">exit status</span>
+                    <span className="card__value card__value--mono">{correlation.github.exit_status || '—'}</span>
+                  </div>
+                  {correlation.github.total !== null ? (
+                    <div className="card__row">
+                      <span className="card__label">detections</span>
+                      <span className="card__value card__value--mono">
+                        {correlation.github.malicious ?? 0} / {correlation.github.total} • {correlation.github.level}
+                      </span>
+                    </div>
+                  ) : null}
+                  {correlation.github.family ? (
+                    <div className="card__row">
+                      <span className="card__label">family</span>
+                      <span className="card__value">
+                        <a
+                          className="lnk"
+                          href={`/events?q=${encodeURIComponent(correlation.github.family)}`}
+                          title="Other sessions that delivered this family"
+                        >
+                          {correlation.github.family}
+                        </a>
+                      </span>
+                    </div>
+                  ) : null}
+                  <a className="lnk" href={`/github-analysis/${encodeURIComponent(correlation.github.sha256)}`}>
+                    full result →
+                  </a>
+                </>
+              )}
+            </div>
+            <div className="card wide">
+              <h2>
+                Known elsewhere{' '}
+                {correlation !== null && related !== null ? (
+                  known ? (
+                    <span className="badge badge--green">already analyzed</span>
+                  ) : (
+                    <span className="badge badge--muted">not seen elsewhere</span>
+                  )
+                ) : null}
+              </h2>
+              <p className="note">
+                Advisory only — checked before queueing a new run so you know if this hash was already analyzed. Never
+                blocks a fresh submission.
+              </p>
+              {correlation === null || related === null ? (
+                skeleton
+              ) : (
+                <>
+                  <div className="card__row">
+                    <span className="card__label">Ghidra</span>
+                    <span className="card__value">
+                      {correlation.ghidra ? (
+                        <>
+                          <span className="badge badge--muted">{correlation.ghidra.exit_status}</span>
+                          {correlation.ghidra.completed_at ? ` completed ${formatTimestamp(correlation.ghidra.completed_at)} — ` : ' — '}
+                          <a className="lnk" href={`/ghidra/${encodeURIComponent(sha256 || detail.hash)}`}>
+                            full result →
+                          </a>
+                        </>
+                      ) : (
+                        <>
+                          <span className="empty">not yet analyzed</span> —{' '}
+                          <a className="lnk" href={`/payload-workbench/results?hash=${encodeURIComponent(detail.hash)}#workbench-builder`}>
+                            queue Ghidra →
+                          </a>
+                        </>
+                      )}
+                    </span>
+                  </div>
+                  <div className="card__row">
+                    <span className="card__label">Elasticsearch sightings</span>
+                    <span className="card__value">
+                      {related.total} event(s)
+                      {related.earliest ? `, first seen ${formatTimestamp(related.earliest.time)}` : ''} —{' '}
+                      <a className="lnk" href={`/events?shasum=${encodeURIComponent(detail.hash)}`}>
+                        related events →
+                      </a>
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div
+            className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5"
+            id="pl-panel-findings"
+            role="tabpanel"
+            aria-labelledby="pl-tab-findings"
+            hidden={tab !== 'findings'}
+          >
+            <div className="section-heading">
+              <div>
+                <h2>What the scanners found</h2>
+                <p>YARA matches, built-in heuristics, and the indicators worth pivoting on.</p>
+              </div>
+            </div>
+            <div className="card wide">
+              <h2>YARA static scan</h2>
+              {allMatches.length > 0 ? (
+                <div className="card__scroll">
+                  <table className="data-table">
+                    <tbody>
+                      {allMatches.map((match) => (
+                        <tr key={match}>
+                          <td>
+                            <span className="badge badge--red">match</span>
+                          </td>
+                          <td className="v">{match}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="empty">{yara.scanned ? 'No YARA rules matched this sample.' : 'Waiting for the isolated YARA scanner.'}</p>
+              )}
+              {yara.error ? <p className="note tw:text-red">{yara.error}</p> : null}
+              {yara.scanned ? (
+                <p className="note">
+                  Scanned {formatTimestamp(yara.scanned)} by the networkless YARA sidecar. A match is a triage signal, not
+                  attribution.
+                </p>
+              ) : null}
+            </div>
+            <div className="card half">
+              <h2>Rule matches</h2>
+              {view && view.rules.length > 0 ? (
+                <div className="card__scroll">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>severity</th>
+                        <th>rule</th>
+                        <th>reason</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {view.rules.map((rule) => (
+                        <tr key={rule.name}>
+                          <td>
+                            <span className="badge badge--muted">{rule.severity}</span>
+                          </td>
+                          <td className="v">{rule.name}</td>
+                          <td className="v">{rule.description}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="empty">No built-in static rules matched.</p>
+              )}
+              <p className="note">Deterministic YARA-style heuristics; no sample execution or attribution.</p>
+            </div>
+            <div className="card half">
+              <h2>Extracted indicators</h2>
+              {iocs.length > 0 ? (
+                <div className="card__scroll">
+                  <table className="data-table">
+                    <tbody>
+                      {iocs.map((ioc) => (
+                        <tr key={ioc}>
+                          <td className="v">
+                            <a href={`/search?q=${encodeURIComponent(ioc)}`} title="search telemetry for this indicator">
+                              {ioc}
+                            </a>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="empty">No URL, domain, or IP indicators found.</p>
+              )}
+            </div>
+          </div>
+
+          <div
+            className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5"
+            id="pl-panel-content"
+            role="tabpanel"
+            aria-labelledby="pl-tab-content"
+            hidden={tab !== 'content'}
+          >
+            <div className="section-heading">
+              <div>
+                <h2>What is inside the file</h2>
+                <p>Raw bytes, metadata, and extracted text are visible below in bounded, searchable regions.</p>
+              </div>
+            </div>
+            <div className="card wide">
+              <h2>Bytes and metadata</h2>
+              <p className="note">The sample is read, never interpreted or executed.</p>
+              <h3>Hex / ASCII preview — first 512 bytes</h3>
+              <pre className="code hp-code-results">
+                {view?.hexdump || detail.hex_preview.join('\n') || 'No byte preview is available.'}
+              </pre>
+              <h3>Executable metadata</h3>
+              {view && view.formatInfo.length > 0 ? (
+                <pre className="code hp-code-results">{view.formatInfo.join('\n')}</pre>
+              ) : (
+                <p className="empty">Not a recognized PE or ELF file.</p>
+              )}
+              {view?.truncated ? (
+                <p className="note">Deep inspection is capped at 16 MiB; hashes cover the complete file.</p>
+              ) : null}
+            </div>
+            <div className="card half">
+              <h2>Extracted text</h2>
+              <SearchablePane
+                entries={[
+                  ...(view?.ascii ?? []).map((value) => ({ label: 'ASCII', value })),
+                  ...(view?.utf16 ?? []).map((value) => ({ label: 'UTF-16LE', value })),
+                ]}
+                empty="No printable sequences extracted."
+                placeholder="Filter printable strings"
+                itemLabel="sequence"
+                note="bounded static extraction; sample content is never executed"
+              />
+            </div>
+            <div className="card half">
+              <h2>Decoded candidates</h2>
+              <SearchablePane
+                entries={(view?.decoded ?? []).map((item) => ({
+                  label: item.kind || 'decoded',
+                  value: `source: ${item.source || 'unknown'}\n${item.preview}`,
+                }))}
+                empty="No bounded Base64, hex, URL or UTF-16 candidates found."
+                placeholder="Filter decoded candidates"
+                itemLabel="candidate"
+                note="bounded decodes only; recovered content is never executed"
+              />
+            </div>
+          </div>
+
           <OperatorActionsCard hash={detail.hash} golden={goldenStatus} editable={isAdmin} />
-          {detail.hex_preview.length > 0 ? (
-            <div className="card wide">
-              <h2>Hex preview — first 512 bytes</h2>
-              <div className="card__scroll">
-                <pre className="code">{detail.hex_preview.join('\n')}</pre>
-              </div>
-            </div>
-          ) : null}
-          {detail.analysis ? (
-            <div className="card wide">
-              <h2>Static analysis</h2>
-              <div className="card__scroll">
-                <pre className="code">{JSON.stringify(detail.analysis, null, 2)}</pre>
-              </div>
-            </div>
-          ) : null}
-          {detail.yara.length > 0 ? (
-            <div className="card wide">
-              <h2>YARA verdicts</h2>
-              <div className="card__scroll">
-                <pre className="code">{JSON.stringify(detail.yara, null, 2)}</pre>
-              </div>
-            </div>
-          ) : null}
-          {inventory ? (
-            <div className="card wide">
-              <h2>Inventory record</h2>
-              <div className="card__scroll">
-                <pre className="code">{JSON.stringify(inventory, null, 2)}</pre>
-              </div>
-            </div>
-          ) : null}
+          <ExternalPublicationCard hash={detail.hash} editable={isAdmin} />
         </>
       )}
     </>
