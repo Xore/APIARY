@@ -20,6 +20,8 @@ export function StoreListPage<Row = StoreRow>({
   inspectorTitle,
   chipNoun,
   inspectorExtra,
+  beforeTable,
+  extraChips,
 }: {
   fetchPage: (input: { data: { offset: number } }) => Promise<StorePage<Row> | null>
   label: string
@@ -30,6 +32,11 @@ export function StoreListPage<Row = StoreRow>({
   inspectorTitle?: string
   chipNoun: string
   inspectorExtra?: (row: Row) => React.ReactNode
+  /** Rendered between the header and the table — KPI tile rows,
+   * aggregation cards, filter bars (#1653 fidelity restorations). */
+  beforeTable?: React.ReactNode
+  /** Extra chips next to the running-total chip. */
+  extraChips?: React.ReactNode
 }) {
   const [rows, setRows] = useState<Row[] | null>(null)
   const [total, setTotal] = useState(0)
@@ -65,8 +72,14 @@ export function StoreListPage<Row = StoreRow>({
         label={label}
         title={title}
         subtitle={subtitle}
-        chips={<span className="chip">{total.toLocaleString('en-US')} {chipNoun}</span>}
+        chips={
+          <>
+            <span className="chip">{total.toLocaleString('en-US')} {chipNoun}</span>
+            {extraChips}
+          </>
+        }
       />
+      {beforeTable}
       <MasterDetailTable
         rows={rows}
         columns={columns}
