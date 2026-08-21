@@ -5,6 +5,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { setConnectionHealthy, useLiveState } from '../lib/live'
 import type { JsonRecord } from '../lib/json'
 
 type EventRow = {
@@ -134,8 +135,12 @@ function Events() {
   // Live tail via the BFF's SSE proxy: new events prepend in arrival
   // order; the selected index shifts with them so the open record stays
   // the same row. Capped so an all-day tab doesn't grow unbounded.
+  // Subordinate to the shell's shared LIVE switch (lib/live.ts): pausing
+  // drops the stream, resuming reopens it, and the connection's own
+  // open/error state feeds the topbar's stalled indicator (#210).
+  const { paused: livePaused } = useLiveState()
   useEffect(() => {
-    if (!live) return
+    if (!live || livePaused) return
     const source = new EventSource('/api/live')
     const onEvent = (event: MessageEvent) => {
       let row: EventRow
@@ -149,11 +154,15 @@ function Events() {
       setSelected((index) => (index === null ? null : Math.min(index + 1, 499)))
     }
     source.addEventListener('event', onEvent)
+    source.addEventListener('open', () => setConnectionHealthy(true))
+    source.addEventListener('error', () => setConnectionHealthy(false))
     return () => {
       source.removeEventListener('event', onEvent)
       source.close()
+      // Leaving the page (or pausing) isn't a connection failure.
+      setConnectionHealthy(true)
     }
-  }, [live])
+  }, [live, livePaused])
 
   useEffect(() => {
     let cancelled = false

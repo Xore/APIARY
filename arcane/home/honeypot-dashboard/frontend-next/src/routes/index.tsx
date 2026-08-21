@@ -8,6 +8,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { Suspense, useEffect, useState } from 'react'
 import { AttackMap, AttackVectors, Heatmap, Tbl, type HeatRow, type Kv, type MapPoint } from '../components/OverviewPanels'
 import { EChart } from '../components/EChart'
+import { isLivePaused } from '../lib/live'
 import type { JsonRecord } from '../lib/json'
 
 type OverviewKpis = {
@@ -199,12 +200,18 @@ function Overview() {
   const router = useRouter()
 
   // Auto-refresh (legacy 60s replaceHoneypotPage cycle): re-run the
-  // loaders while the tab is visible; hidden tabs skip the tick.
+  // loaders while the tab is visible; hidden tabs skip the tick, and the
+  // shell's shared LIVE switch pauses it entirely (resume refetches now).
   useEffect(() => {
     const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') void router.invalidate()
+      if (document.visibilityState === 'visible' && !isLivePaused()) void router.invalidate()
     }, 60_000)
-    return () => clearInterval(timer)
+    const onResume = () => void router.invalidate()
+    window.addEventListener('hp-live-resumed', onResume)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('hp-live-resumed', onResume)
+    }
   }, [router])
 
   const str = (row: StoreRow, key: string) => (typeof row[key] === 'string' ? (row[key] as string) : '')
