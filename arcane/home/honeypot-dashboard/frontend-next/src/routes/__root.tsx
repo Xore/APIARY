@@ -5,7 +5,7 @@
 import { HeadContent, Scripts, createRootRoute, redirect } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { AppShell } from '../components/AppShell'
-import { getSessionUser } from '../lib/auth'
+import { getSessionUser, type User } from '../lib/auth'
 import { activeBanner, type BannerView, type BehaviorConfig, type PresentationConfig } from '../lib/banner'
 
 type ShellConfig = { banner: BannerView | null; showProblemReportButton: boolean }
@@ -85,13 +85,17 @@ export const Route = createRootRoute({
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   const { banner, showProblemReportButton } = Route.useLoaderData()
+  // beforeLoad already resolved the session user into router context for
+  // every non-/auth navigation — thread it to the shell so the sidebar
+  // profile widget and topbar avatar show a real identity (#1653).
+  const { user } = Route.useRouteContext() as { user?: User | null }
   return (
     <html lang="en">
       <head>
         <HeadContent />
       </head>
       <body>
-        <AppShell banner={banner} showProblemReportButton={showProblemReportButton}>
+        <AppShell banner={banner} showProblemReportButton={showProblemReportButton} user={user ?? null}>
           {children}
         </AppShell>
         <Scripts />

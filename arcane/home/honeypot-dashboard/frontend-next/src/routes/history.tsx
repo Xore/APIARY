@@ -114,7 +114,7 @@ function History() {
         }}
       >
         <input
-          className="input"
+          className="form-input"
           type="search"
           placeholder='Lucene query — e.g. source.ip:1.2.3.4 AND honeypot.event:login'
           value={query}

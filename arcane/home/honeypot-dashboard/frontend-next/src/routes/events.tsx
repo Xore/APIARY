@@ -216,7 +216,7 @@ function Events() {
           {live ? '● live' : '○ paused'}
         </button>
         <input
-          className="input"
+          className="form-input"
           type="search"
           placeholder="source ip"
           defaultValue={search.ip ?? ''}
@@ -239,7 +239,7 @@ function Events() {
         ).map(([key, options]) => (
           <select
             key={key}
-            className="input"
+            className="form-input"
             aria-label={`Filter by ${key}`}
             value={(search[key] as string | undefined) ?? ''}
             onChange={(event) => setFilter(key, event.target.value)}

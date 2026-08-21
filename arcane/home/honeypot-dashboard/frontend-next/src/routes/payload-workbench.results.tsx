@@ -698,7 +698,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
         <label className="note" style={{ display: 'block', minWidth: 320 }}>
           Payload hash (sha256 or md5)
           <input
-            className="input"
+            className="form-input"
             style={{ width: '100%' }}
             type="text"
             maxLength={64}
@@ -725,7 +725,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
           {(recipes?.length ?? 0) > 0 ? (
             <label className="note" style={{ display: 'block', maxWidth: 380 }}>
               Load from saved recipe
-              <select className="input" style={{ width: '100%' }} value={pickedRecipeId} onChange={(event) => pickRecipe(event.target.value)}>
+              <select className="form-input" style={{ width: '100%' }} value={pickedRecipeId} onChange={(event) => pickRecipe(event.target.value)}>
                 <option value="">Custom selection…</option>
                 {(recipes ?? []).map((recipe) => (
                   <option key={`${recipe.id}:${recipe.revision}`} value={recipe.id}>
@@ -801,7 +801,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
             <label className="note" style={{ display: 'block', minWidth: 220 }}>
               Run / recipe name
               <input
-                className="input"
+                className="form-input"
                 style={{ width: '100%' }}
                 type="text"
                 maxLength={80}
@@ -824,7 +824,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
               <label className="note" style={{ display: 'block', minWidth: 240 }}>
                 Recipe description
                 <input
-                  className="input"
+                  className="form-input"
                   style={{ width: '100%' }}
                   type="text"
                   maxLength={400}
@@ -834,7 +834,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
               </label>
               <label className="note" style={{ display: 'block', minWidth: 160 }}>
                 Scope
-                <select className="input" style={{ width: '100%' }} value={recipeScope} onChange={(event) => setRecipeScope(event.target.value)}>
+                <select className="form-input" style={{ width: '100%' }} value={recipeScope} onChange={(event) => setRecipeScope(event.target.value)}>
                   <option value="private">Private</option>
                   <option value="shared">Shared with analysts</option>
                 </select>

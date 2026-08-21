@@ -59,7 +59,7 @@ function SearchPage() {
         }}
       >
         <input
-          className="input"
+          className="form-input"
           type="search"
           placeholder="IP, session, hash, credential, command…"
           value={query}

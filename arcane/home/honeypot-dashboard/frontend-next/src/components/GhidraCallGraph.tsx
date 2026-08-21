@@ -151,7 +151,7 @@ export function GhidraCallGraph({ sha }: { sha: string }) {
     <>
       <div className="filters" style={{ marginBottom: 8 }}>
         <input
-          className="input"
+          className="form-input"
           type="search"
           placeholder="Filter by function name"
           value={filter}

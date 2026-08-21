@@ -126,7 +126,7 @@ export function AttackVectors({ sensors }: { sensors: string[] }) {
   return (
     <>
       <div className="filters">
-        <select className="input" aria-label="Sensor drill-down" value={sensor} onChange={(event) => setSensor(event.target.value)}>
+        <select className="form-input" aria-label="Sensor drill-down" value={sensor} onChange={(event) => setSensor(event.target.value)}>
           <option value="">All sensors</option>
           {options.map((name) => (
             <option key={name} value={name}>

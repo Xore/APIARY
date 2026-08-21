@@ -68,19 +68,73 @@ export const NAV_SECTIONS: NavSection[] = [
   },
 ]
 
-/** Section label for a pathname — drives the topbar breadcrumb. */
+// Drill-down routes with no sidebar entry of their own — the prefix
+// fallbacks hp-app.js's pageName() carried (:1115-1130) so a detail page
+// never reads as the generic "Dashboard". Order matters: first match wins.
+const PAGE_PREFIXES: Array<[string, string]> = [
+  ['/payload-analysis/', 'Payload analysis'],
+  ['/payload-workbench/', 'Analysis results'],
+  ['/sandbox/', 'Sandbox result'],
+  ['/ghidra/', 'Ghidra result'],
+  ['/revdeck/', 'RevDeck result'],
+  ['/cape/', 'CAPE result'],
+  ['/github-analysis/', 'GitHub analysis'],
+  ['/sessions/', 'Session replay'],
+  ['/investigate/ip/', 'Attacker profile'],
+  ['/investigate/cidr/', 'CIDR investigation'],
+  ['/investigate/cluster', 'Cluster investigation'],
+  ['/tty-replay/', 'Session recording'],
+]
+
+// Routes without a nav item that still deserve a proper label.
+const PAGE_LABELS: Record<string, string> = {
+  '/settings': 'Settings',
+  '/search': 'Search',
+  '/dead-letters': 'Ingest dead letters',
+  '/problem-reports': 'Problem reports',
+  '/credentials': 'Credentials',
+}
+
+/** The sidebar entry a pathname rolls up to — hp-app.js's activeHref():
+ * detail pages highlight (and breadcrumb under) their parent section. */
+export function navHrefFor(pathname: string): string {
+  if (pathname.startsWith('/payload-analysis')) return '/payloads'
+  if (
+    pathname.startsWith('/payload-workbench/') ||
+    pathname.startsWith('/sandbox/') ||
+    pathname.startsWith('/ghidra/') ||
+    pathname.startsWith('/revdeck/') ||
+    pathname.startsWith('/cape/') ||
+    pathname.startsWith('/github-analysis/')
+  ) {
+    return '/payload-workbench/results'
+  }
+  if (pathname.startsWith('/sessions/')) return '/events'
+  if (pathname.startsWith('/investigate/ip/')) return '/ips'
+  if (pathname.startsWith('/investigate/cidr/') || pathname.startsWith('/investigate/cluster')) return '/campaigns'
+  if (pathname.startsWith('/tty-replay/')) return '/recordings'
+  return pathname
+}
+
+/** Section label for a pathname — drives the topbar breadcrumb. Detail
+ * routes resolve through their sidebar roll-up first. */
 export function sectionFor(pathname: string): string {
+  const target = navHrefFor(pathname)
   for (const section of NAV_SECTIONS) {
-    if (section.items.some((item) => item.to === pathname)) return section.label
+    if (section.items.some((item) => item.to === target)) return section.label
   }
   return ''
 }
 
-/** Page label for a pathname. */
+/** Page label for a pathname, with prefix fallbacks for drill-downs. */
 export function pageFor(pathname: string): string {
   for (const section of NAV_SECTIONS) {
     const hit = section.items.find((item) => item.to === pathname)
     if (hit) return hit.label
+  }
+  if (PAGE_LABELS[pathname]) return PAGE_LABELS[pathname]
+  for (const [prefix, label] of PAGE_PREFIXES) {
+    if (pathname.startsWith(prefix)) return label
   }
   return 'Dashboard'
 }

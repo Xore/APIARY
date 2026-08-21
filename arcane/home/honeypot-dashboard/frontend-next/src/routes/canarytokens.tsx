@@ -122,7 +122,7 @@ function MintForm({ onCreated }: { onCreated: () => void }) {
           }
         }}
       >
-        <select className="input" aria-label="Token type" value={tokenType} onChange={(event) => setTokenType(event.target.value)}>
+        <select className="form-input" aria-label="Token type" value={tokenType} onChange={(event) => setTokenType(event.target.value)}>
           {types.map((entry) => (
             <option key={entry.token_type} value={entry.token_type}>
               {entry.label}
@@ -130,7 +130,7 @@ function MintForm({ onCreated }: { onCreated: () => void }) {
           ))}
         </select>
         <input
-          className="input"
+          className="form-input"
           type="text"
           required
           placeholder="memo — where will this token live?"
@@ -140,7 +140,7 @@ function MintForm({ onCreated }: { onCreated: () => void }) {
         />
         {selected?.supports_snippet ? (
           <input
-            className="input"
+            className="form-input"
             type="text"
             placeholder="visible text snippet (optional)"
             value={snippet}
@@ -150,7 +150,7 @@ function MintForm({ onCreated }: { onCreated: () => void }) {
         ) : null}
         {selected?.requires_upload ? (
           <input
-            className="input"
+            className="form-input"
             type="file"
             accept="image/*"
             onChange={(event) => setFile(event.target.files?.[0] ?? null)}

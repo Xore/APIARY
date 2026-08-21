@@ -42,7 +42,7 @@ function SemanticSearchCard() {
         }}
       >
         <input
-          className="input"
+          className="form-input"
           type="search"
           placeholder='e.g. "attacker installed a cryptominer via wget"'
           value={query}

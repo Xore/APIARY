@@ -299,7 +299,7 @@ function DefinitionForm({
     <label className="note" style={{ display: 'block', minWidth: 180 }}>
       {label}
       <input
-        className="input"
+        className="form-input"
         style={{ width: '100%' }}
         type="text"
         maxLength={maxLength}
@@ -313,7 +313,7 @@ function DefinitionForm({
     <label className="note" style={{ display: 'block', minWidth: 180 }}>
       {label}
       <input
-        className="input"
+        className="form-input"
         style={{ width: '100%' }}
         type="text"
         maxLength={maxLength}
@@ -361,7 +361,7 @@ function DefinitionForm({
           <label className="note" style={{ display: 'block', minWidth: 200 }}>
             Name
             <input
-              className="input"
+              className="form-input"
               style={{ width: '100%' }}
               type="text"
               required
@@ -372,7 +372,7 @@ function DefinitionForm({
           </label>
           <label className="note" style={{ display: 'block', minWidth: 200 }}>
             Template
-            <select className="input" style={{ width: '100%' }} value={template} onChange={(event) => pickTemplate(event.target.value)} required>
+            <select className="form-input" style={{ width: '100%' }} value={template} onChange={(event) => pickTemplate(event.target.value)} required>
               <option value="" disabled>
                 Select a template…
               </option>
@@ -385,7 +385,7 @@ function DefinitionForm({
           </label>
           <label className="note" style={{ display: 'block', minWidth: 140 }}>
             Theme
-            <select className="input" style={{ width: '100%' }} value={theme} onChange={(event) => setTheme(event.target.value)}>
+            <select className="form-input" style={{ width: '100%' }} value={theme} onChange={(event) => setTheme(event.target.value)}>
               <option value="dark">Dark</option>
               <option value="light">Light</option>
             </select>
@@ -410,7 +410,7 @@ function DefinitionForm({
               <label className="note" style={{ display: 'block', minWidth: 160 }}>
                 Window
                 <select
-                  className="input"
+                  className="form-input"
                   style={{ width: '100%' }}
                   value={scope.window}
                   onChange={(event) => setScope((current) => ({ ...current, window: event.target.value }))}
@@ -463,7 +463,7 @@ function DefinitionForm({
         <label className="note" style={{ display: 'block', maxWidth: 220 }}>
           Event appendix limit
           <input
-            className="input"
+            className="form-input"
             style={{ width: '100%' }}
             type="number"
             min={0}
@@ -486,7 +486,7 @@ function DefinitionForm({
           {schedule.enabled ? (
             <>
               <select
-                className="input"
+                className="form-input"
                 value={schedule.frequency}
                 onChange={(event) => setSchedule((current) => ({ ...current, frequency: event.target.value }))}
               >
@@ -495,7 +495,7 @@ function DefinitionForm({
                 <option value="monthly">Monthly</option>
               </select>
               <input
-                className="input"
+                className="form-input"
                 type="number"
                 min={0}
                 max={23}
@@ -505,7 +505,7 @@ function DefinitionForm({
                 style={{ width: 80 }}
               />
               <input
-                className="input"
+                className="form-input"
                 type="number"
                 min={0}
                 max={59}

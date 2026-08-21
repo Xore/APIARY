@@ -264,7 +264,7 @@ function PresentationCard({ initial, editable }: { initial: Presentation; editab
     <label className="note" style={{ display: 'block' }}>
       {label}
       <input
-        className="input"
+        className="form-input"
         style={{ width: '100%' }}
         type="text"
         value={(form[key] as string) ?? ''}
@@ -278,7 +278,7 @@ function PresentationCard({ initial, editable }: { initial: Presentation; editab
     <label className="note" style={{ display: 'block' }}>
       {label}
       <textarea
-        className="input"
+        className="form-input"
         style={{ width: '100%' }}
         rows={2}
         value={(form[key] as string) ?? ''}
@@ -312,7 +312,7 @@ function PresentationCard({ initial, editable }: { initial: Presentation; editab
           <label className="note" style={{ display: 'block' }}>
             Banner severity
             <select
-              className="input"
+              className="form-input"
               style={{ width: '100%' }}
               value={form.banner_severity ?? ''}
               disabled={!editable}
@@ -358,7 +358,7 @@ function HoneypotOperationsCard({ initial, editable }: { initial: HoneypotConfig
     <label className="note" style={{ display: 'block' }}>
       {label}
       <input
-        className="input"
+        className="form-input"
         style={{ width: '100%' }}
         type="text"
         inputMode="numeric"
@@ -503,7 +503,7 @@ function BehaviorCard({ initial, editable }: { initial: BehaviorConfig; editable
           <label className="note" style={{ display: 'block' }}>
             Default landing page
             <select
-              className="input"
+              className="form-input"
               style={{ width: '100%' }}
               value={form.default_landing}
               disabled={!editable}
@@ -519,7 +519,7 @@ function BehaviorCard({ initial, editable }: { initial: BehaviorConfig; editable
           <label className="note" style={{ display: 'block' }}>
             Default time window
             <select
-              className="input"
+              className="form-input"
               style={{ width: '100%' }}
               value={form.default_time_window}
               disabled={!editable}
@@ -535,7 +535,7 @@ function BehaviorCard({ initial, editable }: { initial: BehaviorConfig; editable
           <label className="note" style={{ display: 'block' }}>
             Rows-per-page choices (comma-separated, from 10/25/50/100)
             <input
-              className="input"
+              className="form-input"
               style={{ width: '100%' }}
               type="text"
               placeholder="25, 50, 100"
@@ -547,7 +547,7 @@ function BehaviorCard({ initial, editable }: { initial: BehaviorConfig; editable
           <label className="note" style={{ display: 'block' }}>
             Maximum export rows (100–100000)
             <input
-              className="input"
+              className="form-input"
               style={{ width: '100%' }}
               type="text"
               inputMode="numeric"
@@ -559,7 +559,7 @@ function BehaviorCard({ initial, editable }: { initial: BehaviorConfig; editable
           <label className="note" style={{ display: 'block' }}>
             Refresh interval choices in seconds (from 10/15/30/60/120/300)
             <input
-              className="input"
+              className="form-input"
               style={{ width: '100%' }}
               type="text"
               placeholder="15, 30, 60, 300"
@@ -571,7 +571,7 @@ function BehaviorCard({ initial, editable }: { initial: BehaviorConfig; editable
           <label className="note" style={{ display: 'block' }}>
             Source stale threshold in minutes (2–120)
             <input
-              className="input"
+              className="form-input"
               style={{ width: '100%' }}
               type="text"
               inputMode="numeric"
@@ -583,7 +583,7 @@ function BehaviorCard({ initial, editable }: { initial: BehaviorConfig; editable
           <label className="note" style={{ display: 'block' }}>
             Default map provider
             <select
-              className="input"
+              className="form-input"
               style={{ width: '100%' }}
               value={form.map_provider}
               disabled={!editable}
@@ -595,7 +595,7 @@ function BehaviorCard({ initial, editable }: { initial: BehaviorConfig; editable
           <label className="note" style={{ display: 'block' }}>
             Default timezone for new users
             <input
-              className="input"
+              className="form-input"
               style={{ width: '100%' }}
               type="text"
               placeholder="utc"
@@ -660,7 +660,7 @@ function ReportPresetsCard({
               <label className="note" style={{ display: 'block' }}>
                 Name
                 <input
-                  className="input"
+                  className="form-input"
                   style={{ width: '100%' }}
                   type="text"
                   placeholder={template.name}
@@ -674,7 +674,7 @@ function ReportPresetsCard({
               <label className="note" style={{ display: 'block' }}>
                 Description
                 <textarea
-                  className="input"
+                  className="form-input"
                   style={{ width: '100%' }}
                   rows={2}
                   placeholder={template.description}
@@ -1015,7 +1015,7 @@ function AuditLogCard({ initial }: { initial: AuditResponse | null }) {
     <div className="card wide">
       <h2>Audit log</h2>
       <p className="note">Settings mutations, newest first. Sensitive values are never logged.</p>
-      <select className="input" aria-label="Filter by action" value={filter} onChange={(event) => applyFilter(event.target.value)}>
+      <select className="form-input" aria-label="Filter by action" value={filter} onChange={(event) => applyFilter(event.target.value)}>
         <option value="">All actions</option>
         {AUDIT_ACTIONS.map((action) => (
           <option key={action} value={action}>
