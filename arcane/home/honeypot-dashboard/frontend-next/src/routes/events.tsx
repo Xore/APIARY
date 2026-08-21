@@ -7,6 +7,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { setConnectionHealthy, useLiveState } from '../lib/live'
 import type { JsonRecord } from '../lib/json'
+import { formatTimestamp } from '../lib/time'
 
 type EventRow = {
   time: string
@@ -379,7 +380,7 @@ function FragmentRow({
         </tr>
       ) : null}
       <tr className={selected ? 'selected' : undefined} onClick={onSelect}>
-        <td data-hp-time>{row.time.replace('T', ' ').slice(0, 19)}</td>
+        <td data-hp-time>{formatTimestamp(row.time)}</td>
         <td>
           <span className="badge badge--muted">{row.sensor}</span>
         </td>

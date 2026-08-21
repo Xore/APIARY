@@ -4,6 +4,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { formatTimestamp } from '../lib/time'
 
 type RecordingRow = {
   shasum: string
@@ -82,7 +83,7 @@ export const Route = createFileRoute('/recordings')({
 })
 
 const COLUMNS: Column<RecordingRow>[] = [
-  { header: 'imported', render: (row) => row.imported_at.replace('T', ' ').slice(0, 19) },
+  { header: 'imported', render: (row) => formatTimestamp(row.imported_at) },
   { header: 'recording', className: 'v', render: (row) => row.shasum },
   { header: 'size', className: 'n', render: (row) => `${(row.size_bytes / 1024).toFixed(1)} KB` },
 ]

@@ -4,6 +4,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
+import { formatTimestamp } from '../lib/time'
 
 type PayloadRow = {
   Hash: string
@@ -104,7 +105,7 @@ function Payloads() {
                   </pre>
                 ) : null}
                 <div className="hp-src-card__when">
-                  {row.MtimeUTC.replace('T', ' ').slice(0, 19)} · {row.Copies} {row.Copies === 1 ? 'copy' : 'copies'} ·{' '}
+                  {formatTimestamp(row.MtimeUTC)} · {row.Copies} {row.Copies === 1 ? 'copy' : 'copies'} ·{' '}
                   <a className="lnk" href={`/payload-analysis/${encodeURIComponent(row.Hash)}`}>
                     static analysis →
                   </a>{' '}

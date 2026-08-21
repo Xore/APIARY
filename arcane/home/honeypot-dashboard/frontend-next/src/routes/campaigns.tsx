@@ -4,6 +4,7 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { formatTimestamp } from '../lib/time'
 
 type CampaignRow = {
   cidr: string
@@ -38,7 +39,7 @@ const COLUMNS: Column<CampaignRow>[] = [
   { header: 'events', className: 'n', render: (row) => row.events.toLocaleString('en-US') },
   { header: 'ips', className: 'n', render: (row) => row.unique_ips.toLocaleString('en-US') },
   { header: 'sensors', className: 'v', render: (row) => row.sensors.slice(0, 5).join(' ') + (row.sensors.length > 5 ? ` +${row.sensors.length - 5}` : '') },
-  { header: 'last', render: (row) => row.last.replace('T', ' ').slice(11, 19) },
+  { header: 'last', render: (row) => formatTimestamp(row.last) },
   { header: 'why correlated', detail: true, render: (row) => row.explanation },
   { header: 'all sensors', detail: true, render: (row) => row.sensors.join(' ') },
   { header: 'ports', detail: true, render: (row) => row.ports.join(' ') },
@@ -47,7 +48,7 @@ const COLUMNS: Column<CampaignRow>[] = [
   { header: 'alerts', detail: true, render: (row) => row.alerts },
   { header: 'fingerprints', detail: true, render: (row) => row.fingerprints },
   { header: 'provider', detail: true, render: (row) => row.providers.join(' ') },
-  { header: 'first', detail: true, render: (row) => row.first.replace('T', ' ').slice(0, 19) },
+  { header: 'first', detail: true, render: (row) => formatTimestamp(row.first) },
   {
     header: '',
     render: (row) => (

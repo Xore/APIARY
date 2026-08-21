@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { getSessionUser } from '../lib/auth'
 import type { JsonRecord } from '../lib/json'
+import { formatTimestamp } from '../lib/time'
 
 type StoreRow = JsonRecord
 type Page = { total: number; rows: StoreRow[] }
@@ -178,7 +179,7 @@ const str = (row: StoreRow, key: string): string => (typeof row[key] === 'string
 const num = (row: StoreRow, key: string): number => (typeof row[key] === 'number' ? (row[key] as number) : 0)
 
 const COLUMNS: Column<StoreRow>[] = [
-  { header: 'created', render: (row) => str(row, 'created_at').replace('T', ' ').slice(0, 19) },
+  { header: 'created', render: (row) => formatTimestamp(str(row, 'created_at')) },
   { header: 'title', className: 'v', render: (row) => str(row, 'title') || str(row, 'name') },
   { header: 'template', render: (row) => <span className="badge badge--muted">{str(row, 'template')}</span> },
   { header: 'origin', render: (row) => str(row, 'origin') },
@@ -629,7 +630,7 @@ function DefinitionsCard({
                         ? `${definition.schedule.frequency} @ ${pad2(definition.schedule.hour)}:${pad2(definition.schedule.minute)} UTC`
                         : '—'}
                     </td>
-                    <td>{(definition.created || '').replace('T', ' ').slice(0, 19)}</td>
+                    <td>{formatTimestamp((definition.created || ''))}</td>
                     {editable ? (
                       <td>
                         <div className="filters">

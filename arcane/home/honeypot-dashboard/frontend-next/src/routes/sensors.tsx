@@ -5,6 +5,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { formatTimestamp } from '../lib/time'
 
 type MailoneySession = {
   session_id: string
@@ -77,7 +78,7 @@ export const Route = createFileRoute('/sensors')({
 })
 
 function clock(iso: string): string {
-  return iso.replace('T', ' ').slice(0, 19)
+  return formatTimestamp(iso)
 }
 
 function kvList(map: Record<string, string>) {

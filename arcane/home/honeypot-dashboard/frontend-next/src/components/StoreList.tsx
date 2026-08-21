@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from './Investigate'
 import type { JsonRecord } from '../lib/json'
+import { formatTimestamp } from '../lib/time'
 
 export type StoreRow = JsonRecord
 export type StorePage<Row = StoreRow> = { total: number; rows: Row[] }
@@ -91,7 +92,7 @@ export function num(row: StoreRow, key: string): number {
 }
 
 export function when(iso: string): string {
-  return iso.replace('T', ' ').slice(0, 19)
+  return formatTimestamp(iso)
 }
 
 // The promoted top-level file.hash.sha256 es_importer.rs writes onto every

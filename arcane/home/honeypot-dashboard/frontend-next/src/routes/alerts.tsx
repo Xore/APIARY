@@ -4,6 +4,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { usePaginatedList } from '../lib/hooks'
+import { formatTimestamp } from '../lib/time'
 
 type AlertRow = {
   Key: string
@@ -49,8 +50,8 @@ const COLUMNS: Column<AlertRow>[] = [
   },
   { header: 'alert', className: 'v', render: (row) => row.Message },
   { header: 'count', className: 'n', render: (row) => row.Count.toLocaleString('en-US') },
-  { header: 'last seen', render: (row) => row.LastSeen.replace('T', ' ').slice(0, 19) },
-  { header: 'first seen', detail: true, render: (row) => row.FirstSeen.replace('T', ' ').slice(0, 19) },
+  { header: 'last seen', render: (row) => formatTimestamp(row.LastSeen) },
+  { header: 'first seen', detail: true, render: (row) => formatTimestamp(row.FirstSeen) },
   { header: 'key', detail: true, render: (row) => row.Key },
   {
     header: 'links',

@@ -6,6 +6,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import type { JsonRecord } from '../lib/json'
+import { formatTimestamp } from '../lib/time'
 
 type EventRow = {
   time: string
@@ -35,7 +36,7 @@ export const Route = createFileRoute('/history')({
 })
 
 const COLUMNS: Column<EventRow>[] = [
-  { header: 'time', render: (row) => row.time.replace('T', ' ').slice(0, 19) },
+  { header: 'time', render: (row) => formatTimestamp(row.time) },
   { header: 'sensor', render: (row) => <span className="badge badge--muted">{row.sensor}</span> },
   { header: 'source ip', className: 'v', render: (row) => row.src_ip },
   { header: 'port', className: 'n', render: (row) => (row.port ? `:${row.port}` : '') },

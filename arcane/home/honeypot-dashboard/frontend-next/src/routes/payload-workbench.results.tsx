@@ -9,6 +9,7 @@ import { InvestigateHeader, MasterDetailTable, type Column } from '../components
 import { ArtifactList } from '../components/ArtifactList'
 import { getSessionUser } from '../lib/auth'
 import { pathString, type JsonRecord } from '../lib/json'
+import { formatTimestamp } from '../lib/time'
 
 type StoreRow = JsonRecord
 type Page = { total: number; rows: StoreRow[] }
@@ -280,7 +281,7 @@ export const Route = createFileRoute('/payload-workbench/results')({
   component: Results,
 })
 
-const when = (iso: string) => iso.replace('T', ' ').slice(0, 19)
+const when = (iso: string) => formatTimestamp(iso)
 
 const recordColumn: Column<StoreRow> = {
   header: 'result',
@@ -523,7 +524,7 @@ function RecentRunsCard({ owner, refreshToken }: { owner: string; refreshToken: 
               {runs.map((run) => (
                 <Fragment key={run.id}>
                   <tr onClick={() => setSelected(selected === run.id ? null : run.id)} style={{ cursor: 'pointer' }}>
-                    <td>{run.created_at.replace('T', ' ').slice(0, 19)}</td>
+                    <td>{formatTimestamp(run.created_at)}</td>
                     <td className="v">
                       <code>{run.payload_sha256.slice(0, 16)}</code>
                     </td>

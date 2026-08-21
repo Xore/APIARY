@@ -6,6 +6,7 @@ import { InvestigateHeader, MasterDetailTable, type Column } from '../components
 import { EChart } from '../components/EChart'
 import { AttackerGraph } from '../components/AttackerGraph'
 import { usePaginatedList } from '../lib/hooks'
+import { formatTimestamp } from '../lib/time'
 
 type AttackerRow = {
   id: string
@@ -50,8 +51,8 @@ const COLUMNS: Column<AttackerRow>[] = [
       </>
     ),
   },
-  { header: 'first', detail: true, render: (row) => row.first.replace('T', ' ').slice(0, 19) },
-  { header: 'last', render: (row) => row.last.replace('T', ' ').slice(0, 19) },
+  { header: 'first', detail: true, render: (row) => formatTimestamp(row.first) },
+  { header: 'last', render: (row) => formatTimestamp(row.last) },
   { header: 'member IPs', detail: true, render: (row) => row.ips.join(' ') },
   { header: 'credentials', detail: true, render: (row) => row.credentials.slice(0, 40).join(', ') },
   { header: 'fingerprints', detail: true, render: (row) => row.fingerprints.join(' ') },

@@ -21,6 +21,7 @@ import { applyPalette, applyTheme, pullServerTheme, useThemeMode, type ThemeMode
 import type { JsonRecord } from '../lib/json'
 import { prefetchEnabled, setPrefetchEnabled } from '../lib/prefetch'
 import { getSessionUser } from '../lib/auth'
+import { formatTimestamp } from '../lib/time'
 
 type Storage = { cluster_status: string; index_count: number; doc_count: number; store_bytes: number }
 
@@ -888,7 +889,7 @@ function ReporterStatsCard({ data }: { data: ReporterStats | null }) {
             </div>
           </div>
           {data.stats?.updated_at ? (
-            <p className="note">Updated {String(data.stats.updated_at).replace('T', ' ').slice(0, 19)}</p>
+            <p className="note">Updated {formatTimestamp(String(data.stats.updated_at))}</p>
           ) : null}
         </>
       )}
@@ -943,7 +944,7 @@ function ConfigHistoryCard({ initial, editable }: { initial: HistoryResponse | n
               {data.entries.map((entry) => (
                 <tr key={entry.revision}>
                   <td className="n">{entry.revision}</td>
-                  <td>{entry.time.replace('T', ' ').slice(0, 19)}</td>
+                  <td>{formatTimestamp(entry.time)}</td>
                   <td>{entry.actor_username || entry.actor_subject || '—'}</td>
                   <td>
                     <span className="badge badge--muted">{entry.action}</span>
@@ -1043,7 +1044,7 @@ function AuditLogCard({ initial }: { initial: AuditResponse | null }) {
             <tbody>
               {data.events.map((event, index) => (
                 <tr key={`${event.time}-${index}`}>
-                  <td>{event.time.replace('T', ' ').slice(0, 19)}</td>
+                  <td>{formatTimestamp(event.time)}</td>
                   <td>{event.actor_username || event.actor_subject || '—'}</td>
                   <td>
                     <span className="badge badge--muted">{event.action}</span>
@@ -1235,7 +1236,7 @@ function Settings() {
                       {operator.role}
                     </span>
                   </td>
-                  <td className="ago">{operator.last_seen_at.replace('T', ' ').slice(0, 19)}</td>
+                  <td className="ago">{formatTimestamp(operator.last_seen_at)}</td>
                 </tr>
               ))}
             </tbody>

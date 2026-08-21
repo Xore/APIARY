@@ -3,6 +3,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { formatTimestamp } from '../lib/time'
 
 type SensorHealth = {
   sensor: string
@@ -36,7 +37,7 @@ const COLUMNS: Column<SensorHealth>[] = [
   { header: 'sensor', className: 'v', render: (row) => row.sensor },
   { header: 'state', render: (row) => stateBadge(row.state) },
   { header: 'documents', className: 'n', render: (row) => row.documents.toLocaleString('en-US') },
-  { header: 'last event', render: (row) => row.last_seen.replace('T', ' ').slice(0, 19) },
+  { header: 'last event', render: (row) => formatTimestamp(row.last_seen) },
 ]
 
 function clusterBadge(status: string) {

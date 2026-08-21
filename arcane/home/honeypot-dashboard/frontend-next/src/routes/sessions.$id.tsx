@@ -6,6 +6,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import type { JsonRecord } from '../lib/json'
+import { formatTimestamp } from '../lib/time'
 
 type Kv = { key: string; count: number }
 type Technique = { id: string; count: number; url: string }
@@ -80,7 +81,7 @@ export const Route = createFileRoute('/sessions/$id')({
 })
 
 const EVENT_COLUMNS: Column<EventRow>[] = [
-  { header: 'time', render: (row) => row.time.replace('T', ' ').slice(0, 19) },
+  { header: 'time', render: (row) => formatTimestamp(row.time) },
   { header: 'sensor', render: (row) => <span className="badge badge--muted">{row.sensor}</span> },
   { header: 'detail', className: 'v', render: (row) => row.detail || row.proto },
   {
@@ -266,7 +267,7 @@ function SessionPage() {
               <span className="chip">{detail.total.toLocaleString('en-US')} events</span>
               <span className="chip">{detail.ip}{detail.country ? ` · ${detail.country}` : ''}</span>
               <span className="chip">
-                {detail.first.replace('T', ' ').slice(0, 19)} → {detail.last.replace('T', ' ').slice(11, 19)}
+                {formatTimestamp(detail.first)} → {formatTimestamp(detail.last)}
               </span>
             </>
           ) : undefined

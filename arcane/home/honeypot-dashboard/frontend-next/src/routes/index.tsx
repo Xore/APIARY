@@ -10,6 +10,7 @@ import { AttackMap, AttackVectors, Heatmap, Tbl, type HeatRow, type Kv, type Map
 import { EChart } from '../components/EChart'
 import { isLivePaused } from '../lib/live'
 import type { JsonRecord } from '../lib/json'
+import { formatTimestamp } from '../lib/time'
 
 type OverviewKpis = {
   total: number
@@ -312,7 +313,7 @@ function Overview() {
                   <tbody>
                     {recent.rows.map((row, index) => (
                       <tr key={`${row.time}-${index}`}>
-                        <td>{row.time.replace('T', ' ').slice(0, 19)}</td>
+                        <td>{formatTimestamp(row.time)}</td>
                         <td><span className="badge badge--muted">{row.sensor}</span></td>
                         <td className="v">
                           {row.src_ip}{' '}
@@ -360,7 +361,7 @@ function Overview() {
                           <td className="n">{sensor.count.toLocaleString('en-US')}</td>
                           <td><span className={`badge b-${sensor.name}`}>{sensor.name}</span></td>
                           <td className={`state s-${sensor.state}`}>{sensor.state}</td>
-                          <td className="ago">{sensor.last_seen.replace('T', ' ').slice(0, 19)}</td>
+                          <td className="ago">{formatTimestamp(sensor.last_seen)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -487,7 +488,7 @@ function Overview() {
                   <tbody>
                     {payloads.rows.map((row, index) => (
                       <tr key={`${str(row, 'Hash')}-${index}`}>
-                        <td>{str(row, 'MtimeUTC').replace('T', ' ').slice(0, 19)}</td>
+                        <td>{formatTimestamp(str(row, 'MtimeUTC'))}</td>
                         <td className="v"><a href="/payloads">{str(row, 'Hash')}</a></td>
                         <td><span className="badge badge--muted">{str(row, 'Kind')}</span></td>
                       </tr>
@@ -521,7 +522,7 @@ function Overview() {
                         <td className="n">{num(row, 'events').toLocaleString('en-US')}</td>
                         <td className="n">{num(row, 'unique_ips').toLocaleString('en-US')}</td>
                         <td className="n">{Array.isArray(row.sensors) ? (row.sensors as string[]).length : 0}</td>
-                        <td>{str(row, 'last').replace('T', ' ').slice(0, 19)}</td>
+                        <td>{formatTimestamp(str(row, 'last'))}</td>
                       </tr>
                     ))}
                   </tbody>

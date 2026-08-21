@@ -5,6 +5,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useMemo } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
 import { usePaginatedList } from '../lib/hooks'
+import { formatTimestamp } from '../lib/time'
 
 type SourceRow = {
   ip: string
@@ -32,7 +33,7 @@ export const Route = createFileRoute('/ips')({
 })
 
 function when(iso: string): string {
-  return iso.replace('T', ' ').slice(0, 19)
+  return formatTimestamp(iso)
 }
 
 function SkeletonCards({ count }: { count: number }) {

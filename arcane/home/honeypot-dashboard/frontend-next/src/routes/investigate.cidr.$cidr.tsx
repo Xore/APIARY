@@ -9,6 +9,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import type { JsonRecord } from '../lib/json'
+import { formatTimestamp } from '../lib/time'
 
 type Kv = { key: string; count: number }
 
@@ -51,7 +52,7 @@ export const Route = createFileRoute('/investigate/cidr/$cidr')({
 })
 
 const RECORD_COLUMNS: Column<EventRow>[] = [
-  { header: 'time', render: (row) => row.time.replace('T', ' ').slice(0, 19) },
+  { header: 'time', render: (row) => formatTimestamp(row.time) },
   { header: 'sensor', render: (row) => <span className="badge badge--muted">{row.sensor}</span> },
   { header: 'detail', className: 'v', render: (row) => row.detail || row.proto },
   {

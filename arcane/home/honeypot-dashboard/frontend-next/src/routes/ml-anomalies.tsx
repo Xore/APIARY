@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { StoreListPage, str, num, when, type StorePage, type StoreRow } from '../components/StoreList'
 import type { Column } from '../components/Investigate'
 import { EChart } from '../components/EChart'
+import { formatTimestamp } from '../lib/time'
 
 type AckRecord = { Acknowledged: boolean; AckedBy?: string; AckedAt?: string }
 
@@ -77,7 +78,7 @@ function ModelHealthCard() {
                     {model.anomaly_rate_previous.toFixed(4)} → {model.anomaly_rate_new.toFixed(4)}
                   </td>
                   <td className="n">{model.train_samples.toLocaleString('en-US')}</td>
-                  <td>{model.timestamp ? model.timestamp.replace('T', ' ').slice(0, 19) : '—'}</td>
+                  <td>{model.timestamp ? formatTimestamp(model.timestamp) : '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -186,7 +187,7 @@ function Page() {
           {acks[str(row, '_doc_id')]?.Acknowledged ? (
             <p className="note">
               Acknowledged by {acks[str(row, '_doc_id')]?.AckedBy || 'unknown'}
-              {acks[str(row, '_doc_id')]?.AckedAt ? ` at ${(acks[str(row, '_doc_id')]!.AckedAt as string).slice(0, 19).replace('T', ' ')}` : ''}
+              {acks[str(row, '_doc_id')]?.AckedAt ? ` at ${formatTimestamp((acks[str(row, '_doc_id')]!.AckedAt as string))}` : ''}
             </p>
           ) : null}
           <AckControl docId={str(row, '_doc_id')} acks={acks} onChanged={refreshAcks} />
