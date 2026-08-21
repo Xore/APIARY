@@ -1,6 +1,6 @@
 // Kill-chain analytics (#1224) — sankey flow, campaign timeline, ATT&CK
 // coverage grid. Copy and layout mirror kill_chain.html.
-import { createFileRoute } from '@tanstack/react-router'
+import { Link, createFileRoute } from '@tanstack/react-router'
 import { InvestigateHeader } from '../components/Investigate'
 import { EChart } from '../components/EChart'
 
@@ -13,6 +13,19 @@ function KillChain() {
         label="Correlation"
         title="Kill-chain analytics"
         subtitle="Attacker progression through MITRE ATT&CK tactics (#1224), built on top of #1200/#1219's own correlation work — behavior context only, never actor attribution."
+        chips={
+          <>
+            <Link className="chip" to="/">
+              ← dashboard
+            </Link>
+            <Link className="chip" to="/campaigns">
+              network campaigns
+            </Link>
+            <Link className="chip" to="/attackers">
+              attacker identities
+            </Link>
+          </>
+        }
       />
       <div className="card wide">
         <h2>Kill-chain flow</h2>

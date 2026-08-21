@@ -1,7 +1,7 @@
 // Session detail — one attacker session's whole story, chronologically:
 // summary chips, curated attack-sequence detections, per-session
 // leaderboards, ATT&CK techniques, and the full event list.
-import { createFileRoute } from '@tanstack/react-router'
+import { Link, createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
@@ -262,15 +262,35 @@ function SessionPage() {
         title={`Session ${id.slice(0, 24)}`}
         subtitle="Everything this attacker session did, in order — commands, credentials, payloads, and the derived behavior context."
         chips={
-          detail ? (
-            <>
-              <span className="chip">{detail.total.toLocaleString('en-US')} events</span>
-              <span className="chip">{detail.ip}{detail.country ? ` · ${detail.country}` : ''}</span>
-              <span className="chip">
-                {formatTimestamp(detail.first)} → {formatTimestamp(detail.last)}
-              </span>
-            </>
-          ) : undefined
+          <>
+            {/* Quick pivots, session.html:13 — back to the explorer, the
+                attacker's profile, this session's filtered event view, and
+                the session-scoped CSV export (exports.rs events_csv accepts
+                the same session= pivot filter as /api/v1/events). */}
+            <Link className="chip" to="/events">
+              ← event explorer
+            </Link>
+            {detail && detail.ip ? (
+              <Link className="chip" to="/investigate/ip/$ip" params={{ ip: detail.ip }}>
+                attacker profile
+              </Link>
+            ) : null}
+            <a className="chip" href={`/events?session=${encodeURIComponent(id)}`}>
+              filtered events
+            </a>
+            <a className="chip" href={`/api/export/events.csv?session=${encodeURIComponent(id)}`}>
+              export CSV ↓
+            </a>
+            {detail ? (
+              <>
+                <span className="chip">{detail.total.toLocaleString('en-US')} events</span>
+                <span className="chip">{detail.ip}{detail.country ? ` · ${detail.country}` : ''}</span>
+                <span className="chip">
+                  {formatTimestamp(detail.first)} → {formatTimestamp(detail.last)}
+                </span>
+              </>
+            ) : null}
+          </>
         }
       />
       {detail?.sequences.map((sequence) => (

@@ -61,6 +61,7 @@ export type EventFilters = {
   persona?: string
   site?: string
   asset?: string
+  session?: string
   fingerprint?: string
   cmd?: string
   cred?: string
@@ -74,6 +75,7 @@ export type EventFilters = {
 
 const PIVOT_KEYS = [
   'shasum',
+  'session',
   'persona',
   'site',
   'asset',
