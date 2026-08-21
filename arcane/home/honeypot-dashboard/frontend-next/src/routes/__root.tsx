@@ -8,7 +8,7 @@ import { AppShell } from '../components/AppShell'
 import { getSessionUser, type User } from '../lib/auth'
 import { activeBanner, type BannerView, type BehaviorConfig, type PresentationConfig } from '../lib/banner'
 
-type ShellConfig = { banner: BannerView | null; showProblemReportButton: boolean }
+type ShellConfig = { banner: BannerView | null; showProblemReportButton: boolean; appName: string }
 
 // One /api/v1/config read backs every shell-wide (not per-route) piece of
 // chrome: the banner and whether the "Report a problem" button shows at
@@ -18,13 +18,17 @@ const fetchShellConfig = createServerFn({ method: 'GET' }).handler(async (): Pro
   const { serviceJSON } = await import('../lib/backend.server')
   const config = await serviceJSON<{
     payload?: {
-      presentation?: PresentationConfig
+      presentation?: (PresentationConfig & { app_name?: string })
       behavior?: BehaviorConfig & { show_problem_report_button?: boolean }
     }
   }>('/api/v1/config')
   return {
     banner: activeBanner(config?.payload?.presentation, config?.payload?.behavior),
     showProblemReportButton: config?.payload?.behavior?.show_problem_report_button ?? false,
+    // Operator-editable brand (settings → Application name) — feeds the
+    // per-navigation document titles (#1653: every Go page titled
+    // "{brandText} — page").
+    appName: config?.payload?.presentation?.app_name || 'APIARY',
   }
 })
 
@@ -47,7 +51,7 @@ export const Route = createRootRoute({
   // rather than per-route, both because every page shares it and so
   // /auth/* skips the extra backend round-trip pre-login.
   loader: async ({ location }): Promise<ShellConfig> => {
-    if (location.pathname.startsWith('/auth/')) return { banner: null, showProblemReportButton: false }
+    if (location.pathname.startsWith('/auth/')) return { banner: null, showProblemReportButton: false, appName: 'APIARY' }
     return fetchShellConfig()
   },
   head: () => ({
@@ -84,7 +88,7 @@ export const Route = createRootRoute({
 })
 
 function RootDocument({ children }: { children: React.ReactNode }) {
-  const { banner, showProblemReportButton } = Route.useLoaderData()
+  const { banner, showProblemReportButton, appName } = Route.useLoaderData()
   // beforeLoad already resolved the session user into router context for
   // every non-/auth navigation — thread it to the shell so the sidebar
   // profile widget and topbar avatar show a real identity (#1653).
@@ -95,7 +99,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body>
-        <AppShell banner={banner} showProblemReportButton={showProblemReportButton} user={user ?? null}>
+        <AppShell banner={banner} showProblemReportButton={showProblemReportButton} user={user ?? null} appName={appName}>
           {children}
         </AppShell>
         <Scripts />

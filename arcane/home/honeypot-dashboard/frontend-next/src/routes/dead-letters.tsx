@@ -7,6 +7,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useState } from 'react'
+import { confirmAction } from '../components/ConfirmDialog'
 import { InvestigateHeader, MasterDetailTable } from '../components/Investigate'
 import { str, when, type StorePage, type StoreRow } from '../components/StoreList'
 import type { Column } from '../components/Investigate'
@@ -90,15 +91,21 @@ function Page() {
 
   const runSearch = () => setAppliedQuery(queryInput)
 
-  const purge = async () => {
+  const purge = () => {
     const q = queryInput.trim()
     const scope = q ? `matching "${q}"` : 'every retained dead letter (no query is set)'
-    if (
-      typeof window !== 'undefined' &&
-      !window.confirm(`Permanently deletes ${scope} from Elasticsearch. This cannot be undone.`)
-    ) {
-      return
-    }
+    // Themed confirm (hp-modals contract) instead of window.confirm —
+    // a destructive delete states its exact scope before running (#1653).
+    confirmAction({
+      title: 'Purge dead letters?',
+      description: 'Removes the retained un-ingestable records from Elasticsearch so the backlog count resets.',
+      warning: `Permanently deletes ${scope}. This cannot be undone.`,
+      confirmLabel: 'Purge',
+      onConfirm: () => void doPurge(q),
+    })
+  }
+
+  const doPurge = async (q: string) => {
     setPurging(true)
     setMessage('')
     try {

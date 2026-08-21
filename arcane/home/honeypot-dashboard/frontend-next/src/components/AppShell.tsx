@@ -11,6 +11,7 @@ import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { CommandPalette } from './CommandPalette'
 import { ConfirmHost } from './ConfirmDialog'
+import { LiveToasts } from './LiveToasts'
 import { ProblemReportButton } from './ProblemReportButton'
 import { FlashHost } from '../lib/flash'
 import { usePredictivePrefetch } from '../lib/prefetch'
@@ -26,11 +27,14 @@ export function AppShell({
   banner,
   showProblemReportButton,
   user,
+  appName,
   children,
 }: {
   banner?: BannerView | null
   showProblemReportButton?: boolean
   user?: User | null
+  /** Operator-editable brand (settings → Application name). */
+  appName?: string
   children: React.ReactNode
 }) {
   usePredictivePrefetch()
@@ -73,9 +77,9 @@ export function AppShell({
   // readers), record entity pages into the sidebar's Recent list.
   useEffect(() => {
     setNavOpen(false)
-    document.title = `APIARY — ${pageFor(location.pathname)}`
+    document.title = `${appName || 'APIARY'} — ${pageFor(location.pathname)}`
     recordRecentFromLocation(location.pathname, location.searchStr)
-  }, [location.pathname, location.searchStr])
+  }, [location.pathname, location.searchStr, appName])
 
   useEffect(() => {
     if (!navOpen) return
@@ -96,6 +100,7 @@ export function AppShell({
       <ProblemReportButton enabled={showProblemReportButton ?? false} />
       <ConfirmHost />
       <FlashHost />
+      <LiveToasts />
       <Topbar banner={banner} user={user} onToggleNav={toggleNav} />
       <Sidebar user={user} />
       {/* Click-to-dismiss backdrop behind the ≤520px drawer — visible only

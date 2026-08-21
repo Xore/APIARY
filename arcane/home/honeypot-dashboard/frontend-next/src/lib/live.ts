@@ -44,10 +44,49 @@ export function toggleLive() {
   } catch {
     /* storage unavailable */
   }
+  syncStream()
   if (!state.paused) {
     // Resuming shows current data rather than whatever went stale while
     // updates were suppressed — pages listen for this to refetch now.
     window.dispatchEvent(new CustomEvent('hp-live-resumed'))
+  }
+}
+
+// ── Shared SSE stream — one connection for the whole shell (#1564: the
+// Go dashboard deliberately kept a single EventSource so navigating never
+// tears one down and opens another; hp-app.js:1967-1986). Consumers
+// subscribe; the stream exists while at least one subscriber is mounted
+// and LIVE isn't paused, and its open/error state feeds the topbar's
+// stalled indicator.
+type LiveEventHandler = (data: string) => void
+const streamHandlers = new Set<LiveEventHandler>()
+let stream: EventSource | null = null
+
+function syncStream() {
+  if (typeof window === 'undefined' || typeof EventSource === 'undefined') return
+  const wanted = streamHandlers.size > 0 && !state.paused
+  if (wanted && !stream) {
+    stream = new EventSource('/api/live')
+    stream.addEventListener('open', () => setConnectionHealthy(true))
+    stream.addEventListener('error', () => setConnectionHealthy(false))
+    stream.addEventListener('event', (event) => {
+      for (const handler of streamHandlers) handler((event as MessageEvent).data)
+    })
+  } else if (!wanted && stream) {
+    stream.close()
+    stream = null
+    // Closing on purpose (pause/unmount) is not a connection failure.
+    setConnectionHealthy(true)
+  }
+}
+
+/** Subscribe to live event frames. Returns the unsubscribe function. */
+export function subscribeLiveEvents(handler: LiveEventHandler): () => void {
+  streamHandlers.add(handler)
+  syncStream()
+  return () => {
+    streamHandlers.delete(handler)
+    syncStream()
   }
 }
 

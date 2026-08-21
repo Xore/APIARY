@@ -6,7 +6,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { copyWithFlash } from '../lib/flash'
-import { setConnectionHealthy, useLiveState } from '../lib/live'
+import { subscribeLiveEvents, useLiveState } from '../lib/live'
 import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
 
@@ -194,36 +194,25 @@ function Events() {
   const paneRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
-  // Live tail via the BFF's SSE proxy: new events prepend in arrival
+  // Live tail over the shell's shared SSE stream (lib/live.ts — one
+  // connection for the whole app, #1564): new events prepend in arrival
   // order; the selected index shifts with them so the open record stays
-  // the same row. Capped so an all-day tab doesn't grow unbounded.
-  // Subordinate to the shell's shared LIVE switch (lib/live.ts): pausing
-  // drops the stream, resuming reopens it, and the connection's own
-  // open/error state feeds the topbar's stalled indicator (#210).
+  // the same row. Capped so an all-day tab doesn't grow unbounded. The
+  // shared layer owns pause/resume and connection health.
   const { paused: livePaused } = useLiveState()
   useEffect(() => {
     if (!live || livePaused) return
-    const source = new EventSource('/api/live')
-    const onEvent = (event: MessageEvent) => {
+    return subscribeLiveEvents((data) => {
       let row: EventRow
       try {
-        row = JSON.parse(event.data) as EventRow
+        row = JSON.parse(data) as EventRow
       } catch {
         return
       }
       setRows((current) => (current === null ? current : [row, ...current].slice(0, 500)))
       setTotal((count) => count + 1)
       setSelected((index) => (index === null ? null : Math.min(index + 1, 499)))
-    }
-    source.addEventListener('event', onEvent)
-    source.addEventListener('open', () => setConnectionHealthy(true))
-    source.addEventListener('error', () => setConnectionHealthy(false))
-    return () => {
-      source.removeEventListener('event', onEvent)
-      source.close()
-      // Leaving the page (or pausing) isn't a connection failure.
-      setConnectionHealthy(true)
-    }
+    })
   }, [live, livePaused])
 
   useEffect(() => {
