@@ -7,21 +7,23 @@
 // (staged operational thresholds), Dashboard behavior (live global
 // defaults + feature visibility), and Report Studio presets (#1612).
 // Theme/palette use the same localStorage contract as the legacy tier
-// (hp-theme / hp-palette); theme additionally write-throughs to the
-// server-side per-operator preference store (see lib/prefs.ts) so it
-// really does follow an operator across devices — palette stays local
-// only, matching preferences.rs's PreferencesPatch, which deliberately
-// excludes it.
+// (hp-theme / hp-palette) with a server write-through (see lib/prefs.ts).
+// #1653 restores the rest of the legacy modal's personal-preference panes
+// (settings_modal.html:103-381 / hp-settings.js:294-651) against the same
+// preference store: per-pane dirty-gated saves through the shared confirm
+// dialog, hp-settings-status status lines, and timezone/clock mirrored to
+// localStorage (hp-tz / hp-clock) so lib/time.ts picks them up instantly.
 import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { confirmAction } from '../components/ConfirmDialog'
 import { InvestigateHeader } from '../components/Investigate'
 import { str } from '../components/StoreList'
 import { applyPalette, applyTheme, pullServerTheme, useThemeMode, type ThemeMode } from '../lib/prefs'
 import type { JsonRecord } from '../lib/json'
 import { prefetchEnabled, setPrefetchEnabled } from '../lib/prefetch'
 import { getSessionUser } from '../lib/auth'
-import { formatTimestamp } from '../lib/time'
+import { formatTimestamp, writeTimePrefs } from '../lib/time'
 
 type Storage = { cluster_status: string; index_count: number; doc_count: number; store_bytes: number }
 
@@ -174,6 +176,92 @@ const fetchReporterStats = createServerFn({ method: 'GET' }).handler(async (): P
   return serviceJSON<ReporterStats>('/api/v1/reporter-stats')
 })
 
+// Personal preferences (#1653): the full field set the Rust tier's
+// PreferencesPatch accepts (preferences.rs, ported from settings_api.go's
+// preferencesPatch). Theme/palette also appear here — the appearance card
+// above the panes owns those two — the panes own the rest.
+type Prefs = {
+  theme?: string
+  palette?: string
+  density?: string
+  reduced_motion?: string
+  collapsed_sidebar?: boolean
+  landing_page?: string
+  remember_filters?: boolean
+  rows_per_page?: number
+  wrap_long_values?: boolean
+  timezone?: string
+  clock?: string
+  timestamps?: string
+  auto_refresh?: boolean
+  refresh_interval_seconds?: number
+  live_toasts?: boolean
+  map_basemap?: string
+  map_clustering?: boolean
+  map_animation?: boolean
+  high_contrast?: boolean
+  large_evidence_text?: boolean
+  notify_severity?: string
+  notify_sound?: boolean
+  notify_desktop?: boolean
+  default_event_window?: string
+  preserve_filters?: boolean
+  open_details_new_tab?: boolean
+}
+type PrefKey = keyof Prefs
+
+const fetchPreferences = createServerFn({ method: 'GET' }).handler(async (): Promise<Prefs | null> => {
+  const { getSessionUser } = await import('../lib/auth')
+  const user = await getSessionUser()
+  if (!user) return null
+  const { serviceJSON } = await import('../lib/backend.server')
+  // GET creates the projection with compiled defaults on first contact,
+  // so a brand-new operator sees real values, not blanks.
+  const params = new URLSearchParams({ subject: user.sub, username: user.username, role: user.role })
+  const result = await serviceJSON<{ preferences?: Prefs }>(`/api/v1/preferences?${params.toString()}`)
+  return result?.preferences ?? null
+})
+
+const putPreferences = createServerFn({ method: 'POST' })
+  .inputValidator((input: { patch: Prefs }) => input)
+  .handler(async ({ data }): Promise<{ ok: boolean; preferences?: Prefs; error?: string }> => {
+    const { getSessionUser } = await import('../lib/auth')
+    const user = await getSessionUser()
+    if (!user) return { ok: false, error: 'no session' }
+    const { serviceFetch } = await import('../lib/backend.server')
+    const body = JSON.stringify({ subject: user.sub, username: user.username, patch: data.patch })
+    const put = () =>
+      serviceFetch('/api/v1/preferences', { method: 'PUT', headers: { 'content-type': 'application/json' }, body })
+    let response = await put()
+    if (response.status === 404) {
+      // No settings record yet: GET creates it, then retry once — the
+      // same dance lib/prefs.ts's pushAppearancePreference does.
+      const params = new URLSearchParams({ subject: user.sub, username: user.username, role: user.role })
+      await serviceFetch(`/api/v1/preferences?${params.toString()}`)
+      response = await put()
+    }
+    if (!response.ok) return { ok: false, error: await response.text().catch(() => 'save failed') }
+    const result = (await response.json().catch(() => null)) as { preferences?: Prefs } | null
+    return { ok: true, preferences: result?.preferences }
+  })
+
+const resetPreferences = createServerFn({ method: 'POST' }).handler(
+  async (): Promise<{ ok: boolean; preferences?: Prefs; error?: string }> => {
+    const { getSessionUser } = await import('../lib/auth')
+    const user = await getSessionUser()
+    if (!user) return { ok: false, error: 'no session' }
+    const { serviceFetch } = await import('../lib/backend.server')
+    const response = await serviceFetch('/api/v1/preferences/reset', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ subject: user.sub, username: user.username }),
+    })
+    if (!response.ok) return { ok: false, error: await response.text().catch(() => 'reset failed') }
+    const result = (await response.json().catch(() => null)) as { preferences?: Prefs } | null
+    return { ok: true, preferences: result?.preferences }
+  },
+)
+
 const savePresentation = createServerFn({ method: 'POST' })
   .inputValidator((input: Presentation) => input)
   .handler(async ({ data }): Promise<boolean> => {
@@ -245,6 +333,7 @@ const rollbackConfig = createServerFn({ method: 'POST' })
 export const Route = createFileRoute('/settings')({
   loader: async () => ({
     storage: fetchStorage(),
+    preferences: fetchPreferences(),
     admin: fetchAdminData(),
     services: fetchServices(),
     history: fetchHistory(),
@@ -257,9 +346,592 @@ export const Route = createFileRoute('/settings')({
 
 const BANNER_SEVERITIES = ['', 'info', 'success', 'warning', 'danger']
 
+function errorText(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).trim()
+}
+
+// The status-line contract from hp-settings.js's setStatus (:325-331):
+// success announcements auto-clear after ~5s, errors persist until the
+// next status replaces them. theme.css:3857's hp-settings-status classes.
+function useSettingsStatus(): [ReactNode, (text: string, kind?: 'ok' | 'error') => void] {
+  const [status, setStatusState] = useState<{ text: string; kind?: 'ok' | 'error' }>({ text: '' })
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const setStatus = useCallback((text: string, kind?: 'ok' | 'error') => {
+    if (timer.current) clearTimeout(timer.current)
+    setStatusState({ text, kind })
+    if (kind === 'ok') timer.current = setTimeout(() => setStatusState({ text: '' }), 5000)
+  }, [])
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current)
+    },
+    [],
+  )
+  const node = (
+    <p className={`hp-settings-status${status.kind ? ` is-${status.kind}` : ''}`} role="status">
+      {status.text}
+    </p>
+  )
+  return [node, setStatus]
+}
+
+function SwitchRow({
+  label,
+  desc,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string
+  desc: string
+  checked: boolean
+  disabled?: boolean
+  onChange: (value: boolean) => void
+}) {
+  return (
+    <div className="card__row">
+      <div>
+        <div className="card__label">{label}</div>
+        <div className="card__value">{desc}</div>
+      </div>
+      <label className="switch">
+        <input
+          type="checkbox"
+          aria-label={label}
+          checked={checked}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.checked)}
+        />
+        <span></span>
+      </label>
+    </div>
+  )
+}
+
+// Segmented picker matching the Go markup exactly: role="group" of
+// aria-pressed buttons (settings_modal.html:103-141) — theme.css styles
+// the active option off [aria-pressed="true"].
+function Segmented({
+  label,
+  value,
+  options,
+  onChange,
+  desc,
+}: {
+  label: string
+  value: string
+  options: { value: string; label: string }[]
+  onChange: (value: string) => void
+  desc?: string
+}) {
+  return (
+    <div className="settings-field">
+      <span className="form-label">{label}</span>
+      <div className="segmented" role="group" aria-label={label}>
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            data-value={option.value}
+            aria-pressed={value === option.value}
+            onClick={() => onChange(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      {desc ? <div className="settings-field__desc">{desc}</div> : null}
+    </div>
+  )
+}
+
+// Per-pane field lists — dirty tracking and the confirm dialog's
+// "Apply these changes: …" copy both come from these, matching
+// hp-settings.js's collectPatch/requestSave (:559-596).
+const PREF_PANES = {
+  navigation: ['landing_page', 'collapsed_sidebar', 'remember_filters', 'open_details_new_tab', 'rows_per_page', 'wrap_long_values'],
+  time: ['timezone', 'clock', 'timestamps', 'auto_refresh', 'refresh_interval_seconds', 'live_toasts'],
+  notifications: ['notify_severity', 'notify_sound', 'notify_desktop'],
+  map: ['map_basemap', 'map_clustering', 'map_animation', 'default_event_window', 'preserve_filters'],
+  appearance: ['density', 'reduced_motion', 'high_contrast', 'large_evidence_text'],
+} satisfies Record<string, PrefKey[]>
+type PaneName = keyof typeof PREF_PANES
+
+// The personal landing-page choices from settings_modal.html:168-181 —
+// wider than the admin default_landing list on purpose.
+const PREF_LANDING_PAGES: [string, string][] = [
+  ['/', 'Overview'],
+  ['/events', 'Event explorer'],
+  ['/alerts', 'Alerts'],
+  ['/source-health', 'Sensor & pipeline health'],
+  ['/ips', 'Attack sources'],
+  ['/payloads', 'Captured payloads'],
+  ['/payload-workbench/results', 'Analysis results'],
+  ['/campaigns', 'Campaigns'],
+  ['/clusters', 'Infrastructure clusters'],
+  ['/commands', 'Executed commands'],
+  ['/history', 'Elasticsearch history'],
+  ['/dead-letters', 'Ingest dead letters'],
+]
+
+// IANA starting-point suggestions from settings_modal.html:242-269 — a
+// datalist, not a closed enum: any real zone name is accepted.
+const TZ_SUGGESTIONS: [string, string][] = [
+  ['America/New_York', 'USA — Eastern'],
+  ['America/Chicago', 'USA — Central'],
+  ['America/Denver', 'USA — Mountain'],
+  ['America/Los_Angeles', 'USA — Pacific'],
+  ['Europe/Berlin', 'Germany'],
+  ['Asia/Shanghai', 'China'],
+  ['Europe/London', 'England (UK)'],
+  ['Europe/Paris', 'France'],
+  ['Europe/Madrid', 'Spain'],
+  ['Europe/Rome', 'Italy'],
+  ['Europe/Amsterdam', 'Netherlands'],
+  ['Europe/Moscow', 'Russia — Moscow'],
+  ['Asia/Tokyo', 'Japan'],
+  ['Asia/Seoul', 'South Korea'],
+  ['Asia/Kolkata', 'India'],
+  ['Asia/Singapore', 'Singapore'],
+  ['Asia/Dubai', 'UAE'],
+  ['Australia/Sydney', 'Australia — Sydney'],
+  ['Australia/Perth', 'Australia — Perth'],
+  ['Pacific/Auckland', 'New Zealand'],
+  ['America/Sao_Paulo', 'Brazil'],
+  ['America/Mexico_City', 'Mexico'],
+  ['America/Toronto', 'Canada — Eastern'],
+  ['Africa/Johannesburg', 'South Africa'],
+  ['browser', "browser — this device's own zone"],
+  ['utc', 'utc'],
+]
+
+const REFRESH_INTERVALS: [number, string][] = [
+  [10, 'Every 10 seconds'],
+  [15, 'Every 15 seconds'],
+  [30, 'Every 30 seconds'],
+  [60, 'Every minute'],
+  [120, 'Every 2 minutes'],
+  [300, 'Every 5 minutes'],
+]
+
+// Preference side effects other parts of this frontend read from
+// localStorage mirrors, applied immediately on save so the operator never
+// has to reload to see their own change (hp-settings.js:519-544):
+// timezone/clock feed lib/time.ts's formatTimestamp (hp-tz / hp-clock),
+// the sidebar flag feeds AppShell's collapse boot check.
+function applyPrefSideEffects(prefs: Prefs) {
+  writeTimePrefs({
+    tz: prefs.timezone || 'browser',
+    clock: prefs.clock === 'h12' ? 'h12' : 'h24',
+  })
+  try {
+    if (prefs.collapsed_sidebar) localStorage.setItem('hp-sidebar-collapsed', '1')
+    else localStorage.removeItem('hp-sidebar-collapsed')
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+// The five personal-preference panes from the legacy settings modal
+// (settings_modal.html:103-381), backed by GET/PUT /api/v1/preferences.
+function PreferencesPanes({ initial, onReset }: { initial: Prefs; onReset: (prefs: Prefs) => void }) {
+  const [snapshot, setSnapshot] = useState<Prefs>(initial)
+  const [form, setForm] = useState<Prefs>(initial)
+  const [navStatus, setNavStatus] = useSettingsStatus()
+  const [timeStatus, setTimeStatus] = useSettingsStatus()
+  const [notifyStatus, setNotifyStatus] = useSettingsStatus()
+  const [mapStatus, setMapStatus] = useSettingsStatus()
+  const [appearanceStatus, setAppearanceStatus] = useSettingsStatus()
+  const [resetStatus, setResetStatus] = useSettingsStatus()
+
+  const patch = <K extends PrefKey>(key: K, value: Prefs[K]) => setForm((current) => ({ ...current, [key]: value }))
+
+  const changedFields = (pane: PaneName): PrefKey[] =>
+    PREF_PANES[pane].filter((key) => JSON.stringify(form[key]) !== JSON.stringify(snapshot[key]))
+
+  const requestSave = (pane: PaneName, setStatus: (text: string, kind?: 'ok' | 'error') => void) => {
+    const fields = changedFields(pane)
+    if (fields.length === 0) return
+    const body: Prefs = {}
+    const take = <K extends PrefKey>(key: K) => {
+      body[key] = form[key]
+    }
+    fields.forEach(take)
+    confirmAction({
+      title: 'Save preferences?',
+      description: `Apply these changes: ${fields.join(', ')}.`,
+      confirmLabel: 'Save preferences',
+      danger: false,
+      onConfirm: async () => {
+        setStatus('Saving…')
+        try {
+          const result = await putPreferences({ data: { patch: body } })
+          if (!result.ok || !result.preferences) throw new Error(result.error?.trim() || 'save failed')
+          setSnapshot(result.preferences)
+          setForm(result.preferences)
+          applyPrefSideEffects(result.preferences)
+          setStatus('Preferences saved.', 'ok')
+        } catch (error) {
+          setStatus(`Preferences could not be saved — ${errorText(error)}`, 'error')
+          throw error
+        }
+      },
+    })
+  }
+
+  const requestReset = () => {
+    confirmAction({
+      title: 'Reset all preferences?',
+      description: 'Every preference returns to its default. This cannot be undone.',
+      warning: 'This resets appearance, navigation, time, and map preferences in one step.',
+      confirmLabel: 'Reset everything',
+      danger: true,
+      onConfirm: async () => {
+        setResetStatus('Resetting…')
+        try {
+          const result = await resetPreferences()
+          if (!result.ok || !result.preferences) throw new Error(result.error?.trim() || 'reset failed')
+          const prefs = result.preferences
+          setSnapshot(prefs)
+          setForm(prefs)
+          applyPrefSideEffects(prefs)
+          // The reset also returns theme/palette to their defaults; apply
+          // locally without re-pushing what the server already holds.
+          applyTheme(prefs.theme === 'dark' || prefs.theme === 'light' ? prefs.theme : 'system', { sync: false })
+          applyPalette(prefs.palette ?? 'claude', { sync: false })
+          onReset(prefs)
+          setResetStatus('All preferences reset to defaults.', 'ok')
+        } catch (error) {
+          setResetStatus(`Preferences could not be reset — ${errorText(error)}`, 'error')
+          throw error
+        }
+      },
+    })
+  }
+
+  const saveButton = (pane: PaneName, setStatus: (text: string, kind?: 'ok' | 'error') => void) => (
+    <div className="settings-actions">
+      <button
+        className="btn btn-primary"
+        type="button"
+        disabled={changedFields(pane).length === 0}
+        onClick={() => requestSave(pane, setStatus)}
+      >
+        Save changes
+      </button>
+    </div>
+  )
+
+  return (
+    <>
+      <div className="card half">
+        <h2>Navigation &amp; tables</h2>
+        {navStatus}
+        <div className="settings-grid">
+          <div className="settings-field">
+            <label className="form-label" htmlFor="hp-pref-landing">
+              Landing page
+            </label>
+            <select
+              className="form-input"
+              id="hp-pref-landing"
+              value={form.landing_page ?? '/'}
+              onChange={(event) => patch('landing_page', event.target.value)}
+            >
+              {PREF_LANDING_PAGES.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <div className="settings-field__desc">First page after sign-in.</div>
+          </div>
+          <div className="settings-field">
+            <label className="form-label" htmlFor="hp-pref-rows">
+              Rows per page
+            </label>
+            <select
+              className="form-input"
+              id="hp-pref-rows"
+              value={String(form.rows_per_page ?? 50)}
+              onChange={(event) => patch('rows_per_page', Number(event.target.value))}
+            >
+              {[10, 25, 50, 100].map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <SwitchRow
+          label="Collapsed sidebar"
+          desc="Start with the navigation rail minimized on wide screens."
+          checked={form.collapsed_sidebar ?? false}
+          onChange={(value) => patch('collapsed_sidebar', value)}
+        />
+        <SwitchRow
+          label="Remember filters"
+          desc="Keep table filters when navigating between pages."
+          checked={form.remember_filters ?? false}
+          onChange={(value) => patch('remember_filters', value)}
+        />
+        <SwitchRow
+          label="Open details in a new tab"
+          desc="Sessions and payload analysis open alongside the current view."
+          checked={form.open_details_new_tab ?? false}
+          onChange={(value) => patch('open_details_new_tab', value)}
+        />
+        <SwitchRow
+          label="Wrap long values"
+          desc="Wrap commands and payloads instead of truncating them."
+          checked={form.wrap_long_values ?? false}
+          onChange={(value) => patch('wrap_long_values', value)}
+        />
+        {saveButton('navigation', setNavStatus)}
+      </div>
+      <div className="card half">
+        <h2>Time &amp; live data</h2>
+        {timeStatus}
+        <div className="settings-grid">
+          <div className="settings-field">
+            <label className="form-label" htmlFor="hp-pref-timezone">
+              Timezone
+            </label>
+            <input
+              className="form-input"
+              id="hp-pref-timezone"
+              list="hp-tz-suggestions"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="browser"
+              value={form.timezone ?? ''}
+              onChange={(event) => patch('timezone', event.target.value)}
+            />
+            <datalist id="hp-tz-suggestions">
+              {TZ_SUGGESTIONS.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </datalist>
+            <div className="settings-field__desc">
+              "browser", "utc", or an IANA zone such as Europe/Berlin — start typing to see suggestions.
+            </div>
+          </div>
+          <div className="settings-field">
+            <label className="form-label" htmlFor="hp-pref-refresh">
+              Refresh interval
+            </label>
+            <select
+              className="form-input"
+              id="hp-pref-refresh"
+              value={String(form.refresh_interval_seconds ?? 30)}
+              onChange={(event) => patch('refresh_interval_seconds', Number(event.target.value))}
+            >
+              {REFRESH_INTERVALS.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <Segmented
+          label="Clock format"
+          value={form.clock ?? 'h24'}
+          options={[
+            { value: 'h24', label: '24-hour' },
+            { value: 'h12', label: '12-hour' },
+          ]}
+          onChange={(value) => patch('clock', value)}
+        />
+        <Segmented
+          label="Timestamps"
+          value={form.timestamps ?? 'relative'}
+          options={[
+            { value: 'relative', label: 'Relative' },
+            { value: 'absolute', label: 'Absolute' },
+          ]}
+          onChange={(value) => patch('timestamps', value)}
+        />
+        <SwitchRow
+          label="Auto-refresh"
+          desc="Keep dashboard pages updating in the background."
+          checked={form.auto_refresh ?? true}
+          onChange={(value) => patch('auto_refresh', value)}
+        />
+        <SwitchRow
+          label="Live event toasts"
+          desc="Show a toast when new honeypot events arrive."
+          checked={form.live_toasts ?? true}
+          onChange={(value) => patch('live_toasts', value)}
+        />
+        {saveButton('time', setTimeStatus)}
+      </div>
+      <div className="card half">
+        <h2>Notifications</h2>
+        {notifyStatus}
+        <div className="settings-grid">
+          <div className="settings-field">
+            <label className="form-label" htmlFor="hp-pref-severity">
+              Minimum severity
+            </label>
+            <select
+              className="form-input"
+              id="hp-pref-severity"
+              value={form.notify_severity ?? 'high'}
+              onChange={(event) => patch('notify_severity', event.target.value)}
+            >
+              <option value="low">Low and above</option>
+              <option value="medium">Medium and above</option>
+              <option value="high">High and above</option>
+              <option value="critical">Critical only</option>
+            </select>
+          </div>
+        </div>
+        <SwitchRow
+          label="Notification sound"
+          desc="Play a short tone for qualifying alerts."
+          checked={form.notify_sound ?? false}
+          onChange={(value) => patch('notify_sound', value)}
+        />
+        <SwitchRow
+          label="Desktop notifications"
+          desc="Uses the browser notification permission."
+          checked={form.notify_desktop ?? false}
+          onChange={(value) => patch('notify_desktop', value)}
+        />
+        {saveButton('notifications', setNotifyStatus)}
+      </div>
+      <div className="card half">
+        <h2>Map &amp; investigation</h2>
+        {mapStatus}
+        <div className="settings-grid">
+          <div className="settings-field">
+            <label className="form-label" htmlFor="hp-pref-basemap">
+              Basemap
+            </label>
+            <select
+              className="form-input"
+              id="hp-pref-basemap"
+              value={form.map_basemap ?? 'osm'}
+              onChange={(event) => patch('map_basemap', event.target.value)}
+            >
+              <option value="osm">OpenStreetMap</option>
+            </select>
+          </div>
+          <div className="settings-field">
+            <label className="form-label" htmlFor="hp-pref-window">
+              Default event window
+            </label>
+            <select
+              className="form-input"
+              id="hp-pref-window"
+              value={form.default_event_window ?? '24h'}
+              onChange={(event) => patch('default_event_window', event.target.value)}
+            >
+              {WINDOW_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <SwitchRow
+          label="Cluster markers"
+          desc="Group nearby attack origins at low zoom levels."
+          checked={form.map_clustering ?? true}
+          onChange={(value) => patch('map_clustering', value)}
+        />
+        <SwitchRow
+          label="Map animation"
+          desc="Animate zoom and pan transitions."
+          checked={form.map_animation ?? true}
+          onChange={(value) => patch('map_animation', value)}
+        />
+        <SwitchRow
+          label="Preserve filters while drilling down"
+          desc="Carry the current filter set into linked investigations."
+          checked={form.preserve_filters ?? false}
+          onChange={(value) => patch('preserve_filters', value)}
+        />
+        {saveButton('map', setMapStatus)}
+      </div>
+      <div className="card half">
+        <h2>Readability &amp; density</h2>
+        {appearanceStatus}
+        <Segmented
+          label="Density"
+          value={form.density ?? 'comfortable'}
+          options={[
+            { value: 'comfortable', label: 'Comfortable' },
+            { value: 'compact', label: 'Compact' },
+          ]}
+          onChange={(value) => patch('density', value)}
+        />
+        <Segmented
+          label="Motion"
+          value={form.reduced_motion ?? 'system'}
+          options={[
+            { value: 'system', label: 'System' },
+            { value: 'on', label: 'Reduced' },
+            { value: 'off', label: 'Full' },
+          ]}
+          onChange={(value) => patch('reduced_motion', value)}
+          desc='"Reduced" minimizes non-essential animation.'
+        />
+        <SwitchRow
+          label="High contrast"
+          desc="Strengthens borders and text separation."
+          checked={form.high_contrast ?? false}
+          onChange={(value) => patch('high_contrast', value)}
+        />
+        <SwitchRow
+          label="Larger evidence text"
+          desc="Increases the font size of raw logs and payload evidence."
+          checked={form.large_evidence_text ?? false}
+          onChange={(value) => patch('large_evidence_text', value)}
+        />
+        {saveButton('appearance', setAppearanceStatus)}
+      </div>
+      <div className="card half">
+        <h2>Reset preferences</h2>
+        <p className="note">Returns every personal preference — appearance included — to its default.</p>
+        {resetStatus}
+        <div className="settings-actions">
+          <button className="btn btn-danger btn-sm" type="button" onClick={requestReset}>
+            Reset all preferences
+          </button>
+        </div>
+      </div>
+    </>
+  )
+}
+
+const PRESENTATION_FIELDS: (keyof Presentation)[] = [
+  'app_name',
+  'product_label',
+  'dashboard_title',
+  'dashboard_subtitle',
+  'org_name',
+  'overview_intro',
+  'help_link_label',
+  'help_link_url',
+  'banner_text',
+  'banner_severity',
+  'banner_expires',
+  'footer_text',
+  'ai_disclaimer',
+  'privacy_notice',
+]
+
 function PresentationCard({ initial, editable }: { initial: Presentation; editable: boolean }) {
   const [form, setForm] = useState<Presentation>(initial)
-  const [message, setMessage] = useState('')
+  const [snapshot, setSnapshot] = useState<Presentation>(initial)
+  const [status, setStatus] = useSettingsStatus()
+  const changed = PRESENTATION_FIELDS.filter((key) => (form[key] ?? '') !== (snapshot[key] ?? ''))
   const set = (key: keyof Presentation, value: string) => setForm((current) => ({ ...current, [key]: value }))
   const field = (key: keyof Presentation, label: string, extra?: { type?: string; placeholder?: string }) => (
     <label className="note" style={{ display: 'block' }}>
@@ -293,11 +965,29 @@ function PresentationCard({ initial, editable }: { initial: Presentation; editab
       <h2>Presentation</h2>
       <p className="note">Branding text across the dashboard, and the help/notice copy shown alongside it.</p>
       <form
-        onSubmit={async (event) => {
+        onSubmit={(event) => {
           event.preventDefault()
-          setMessage('Saving…')
-          const ok = await savePresentation({ data: form })
-          setMessage(ok ? 'Saved — refresh to see it everywhere.' : 'Save failed (admin role required).')
+          if (changed.length === 0) return
+          // hp-settings.js:831-835's exact copy convention: name the
+          // changed fields in the confirmation.
+          confirmAction({
+            title: 'Save configuration?',
+            description: `Apply these changes: ${changed.join(', ')}.`,
+            confirmLabel: 'Save configuration',
+            danger: false,
+            onConfirm: async () => {
+              setStatus('Saving…')
+              try {
+                const ok = await savePresentation({ data: form })
+                if (!ok) throw new Error('save failed (admin role required)')
+                setSnapshot(form)
+                setStatus('Saved — refresh to see it everywhere.', 'ok')
+              } catch (error) {
+                setStatus(`Configuration could not be saved — ${errorText(error)}`, 'error')
+                throw error
+              }
+            },
+          })
         }}
       >
         <div className="settings-grid">
@@ -332,13 +1022,13 @@ function PresentationCard({ initial, editable }: { initial: Presentation; editab
         {textarea('ai_disclaimer', 'AI analysis disclaimer')}
         {textarea('privacy_notice', 'Evidence-handling / privacy notice')}
         {editable ? (
-          <button className="btn btn-secondary btn-sm" type="submit" style={{ marginTop: 8 }}>
+          <button className="btn btn-secondary btn-sm" type="submit" style={{ marginTop: 8 }} disabled={changed.length === 0}>
             Save presentation
           </button>
         ) : (
           <p className="note">Admin role required to edit.</p>
         )}
-        {message ? <p className="note">{message}</p> : null}
+        {status}
       </form>
     </div>
   )
@@ -354,7 +1044,9 @@ function HoneypotOperationsCard({ initial, editable }: { initial: HoneypotConfig
     yara_max_bytes: initial.yara_max_bytes?.toString() ?? '',
     payload_dedupe_interval_seconds: initial.payload_dedupe_interval_seconds?.toString() ?? '',
   })
-  const [message, setMessage] = useState('')
+  const [snapshot, setSnapshot] = useState(form)
+  const [status, setStatus] = useSettingsStatus()
+  const changed = Object.keys(form).filter((key) => form[key] !== snapshot[key])
   const field = (key: keyof typeof form, label: string, placeholder?: string) => (
     <label className="note" style={{ display: 'block' }}>
       {label}
@@ -378,22 +1070,44 @@ function HoneypotOperationsCard({ initial, editable }: { initial: HoneypotConfig
         restart — nothing here applies live.
       </p>
       <form
-        onSubmit={async (event) => {
+        onSubmit={(event) => {
           event.preventDefault()
-          setMessage('Staging…')
-          const value: HoneypotConfig = {
-            alert_cooldown: form.alert_cooldown || undefined,
-            alert_campaign_score: form.alert_campaign_score ? Number(form.alert_campaign_score) : undefined,
-            sandbox_alert_risk_score: form.sandbox_alert_risk_score ? Number(form.sandbox_alert_risk_score) : undefined,
-            ml_alert_threshold: form.ml_alert_threshold ? Number(form.ml_alert_threshold) : undefined,
-            yara_scan_interval_seconds: form.yara_scan_interval_seconds ? Number(form.yara_scan_interval_seconds) : undefined,
-            yara_max_bytes: form.yara_max_bytes ? Number(form.yara_max_bytes) : undefined,
-            payload_dedupe_interval_seconds: form.payload_dedupe_interval_seconds
-              ? Number(form.payload_dedupe_interval_seconds)
-              : undefined,
-          }
-          const ok = await saveConfigSection({ data: { section: 'honeypot', value } })
-          setMessage(ok ? 'Staged — apply with a restart of the affected services.' : 'Save failed (admin role required).')
+          if (changed.length === 0) return
+          // The "staged" variant of hp-settings.js:831-835's confirm copy:
+          // these fields are all restart-required.
+          confirmAction({
+            title: 'Stage configuration?',
+            description: `Apply these changes: ${changed.join(', ')}.`,
+            warning:
+              'Restart-required values are staged only. Saving never restarts a service — apply them with an operator-run restart.',
+            confirmLabel: 'Stage changes',
+            danger: false,
+            onConfirm: async () => {
+              setStatus('Staging…')
+              try {
+                const value: HoneypotConfig = {
+                  alert_cooldown: form.alert_cooldown || undefined,
+                  alert_campaign_score: form.alert_campaign_score ? Number(form.alert_campaign_score) : undefined,
+                  sandbox_alert_risk_score: form.sandbox_alert_risk_score ? Number(form.sandbox_alert_risk_score) : undefined,
+                  ml_alert_threshold: form.ml_alert_threshold ? Number(form.ml_alert_threshold) : undefined,
+                  yara_scan_interval_seconds: form.yara_scan_interval_seconds
+                    ? Number(form.yara_scan_interval_seconds)
+                    : undefined,
+                  yara_max_bytes: form.yara_max_bytes ? Number(form.yara_max_bytes) : undefined,
+                  payload_dedupe_interval_seconds: form.payload_dedupe_interval_seconds
+                    ? Number(form.payload_dedupe_interval_seconds)
+                    : undefined,
+                }
+                const ok = await saveConfigSection({ data: { section: 'honeypot', value } })
+                if (!ok) throw new Error('save failed (admin role required)')
+                setSnapshot(form)
+                setStatus('Staged — apply with a restart of the affected services.', 'ok')
+              } catch (error) {
+                setStatus(`Configuration could not be staged — ${errorText(error)}`, 'error')
+                throw error
+              }
+            },
+          })
         }}
       >
         <div className="settings-grid">
@@ -406,13 +1120,13 @@ function HoneypotOperationsCard({ initial, editable }: { initial: HoneypotConfig
           {field('payload_dedupe_interval_seconds', 'Payload dedupe interval in seconds (300–86400)')}
         </div>
         {editable ? (
-          <button className="btn btn-secondary btn-sm" type="submit" style={{ marginTop: 8 }}>
+          <button className="btn btn-secondary btn-sm" type="submit" style={{ marginTop: 8 }} disabled={changed.length === 0}>
             Stage changes
           </button>
         ) : (
           <p className="note">Admin role required to edit.</p>
         )}
-        {message ? <p className="note">{message}</p> : null}
+        {status}
       </form>
     </div>
   )
@@ -456,7 +1170,11 @@ function BehaviorCard({ initial, editable }: { initial: BehaviorConfig; editable
     read_only: initial.read_only ?? false,
     show_problem_report_button: initial.show_problem_report_button ?? false,
   })
-  const [message, setMessage] = useState('')
+  const [snapshot, setSnapshot] = useState(form)
+  const [status, setStatus] = useSettingsStatus()
+  const changed = (Object.keys(form) as (keyof typeof form)[]).filter(
+    (key) => JSON.stringify(form[key]) !== JSON.stringify(snapshot[key]),
+  )
   const toggle = (key: 'show_ml_panels' | 'maintenance_mode' | 'read_only' | 'show_problem_report_button', label: string, desc: string) => (
     <div className="card__row">
       <div>
@@ -479,25 +1197,41 @@ function BehaviorCard({ initial, editable }: { initial: BehaviorConfig; editable
       <h2>Dashboard behavior</h2>
       <p className="note">Global defaults users can still override per session, plus feature visibility applied live for every user.</p>
       <form
-        onSubmit={async (event) => {
+        onSubmit={(event) => {
           event.preventDefault()
-          setMessage('Saving…')
-          const value: BehaviorConfig = {
-            default_landing: form.default_landing,
-            default_time_window: form.default_time_window,
-            rows_per_page_options: parseIntList(form.rows_per_page_options),
-            max_export_rows: form.max_export_rows ? Number(form.max_export_rows) : undefined,
-            refresh_interval_seconds_options: parseIntList(form.refresh_interval_seconds_options),
-            source_stale_minutes: form.source_stale_minutes ? Number(form.source_stale_minutes) : undefined,
-            map_provider: form.map_provider,
-            default_timezone: form.default_timezone || undefined,
-            show_ml_panels: form.show_ml_panels,
-            maintenance_mode: form.maintenance_mode,
-            read_only: form.read_only,
-            show_problem_report_button: form.show_problem_report_button,
-          }
-          const ok = await saveConfigSection({ data: { section: 'behavior', value } })
-          setMessage(ok ? 'Saved — applies live for every user.' : 'Save failed (admin role required).')
+          if (changed.length === 0) return
+          confirmAction({
+            title: 'Save configuration?',
+            description: `Apply these changes: ${changed.join(', ')}.`,
+            confirmLabel: 'Save configuration',
+            danger: false,
+            onConfirm: async () => {
+              setStatus('Saving…')
+              try {
+                const value: BehaviorConfig = {
+                  default_landing: form.default_landing,
+                  default_time_window: form.default_time_window,
+                  rows_per_page_options: parseIntList(form.rows_per_page_options),
+                  max_export_rows: form.max_export_rows ? Number(form.max_export_rows) : undefined,
+                  refresh_interval_seconds_options: parseIntList(form.refresh_interval_seconds_options),
+                  source_stale_minutes: form.source_stale_minutes ? Number(form.source_stale_minutes) : undefined,
+                  map_provider: form.map_provider,
+                  default_timezone: form.default_timezone || undefined,
+                  show_ml_panels: form.show_ml_panels,
+                  maintenance_mode: form.maintenance_mode,
+                  read_only: form.read_only,
+                  show_problem_report_button: form.show_problem_report_button,
+                }
+                const ok = await saveConfigSection({ data: { section: 'behavior', value } })
+                if (!ok) throw new Error('save failed (admin role required)')
+                setSnapshot(form)
+                setStatus('Saved — applies live for every user.', 'ok')
+              } catch (error) {
+                setStatus(`Configuration could not be saved — ${errorText(error)}`, 'error')
+                throw error
+              }
+            },
+          })
         }}
       >
         <div className="settings-grid">
@@ -611,13 +1345,13 @@ function BehaviorCard({ initial, editable }: { initial: BehaviorConfig; editable
         {toggle('read_only', 'Read-only mode', 'Freeze evidence-changing dashboard actions.')}
         {toggle('show_problem_report_button', '"Report a problem" button', 'Show a button on every page for reporting bugs.')}
         {editable ? (
-          <button className="btn btn-secondary btn-sm" type="submit" style={{ marginTop: 8 }}>
+          <button className="btn btn-secondary btn-sm" type="submit" style={{ marginTop: 8 }} disabled={changed.length === 0}>
             Save changes
           </button>
         ) : (
           <p className="note">Admin role required to edit.</p>
         )}
-        {message ? <p className="note">{message}</p> : null}
+        {status}
       </form>
     </div>
   )
@@ -633,7 +1367,14 @@ function ReportPresetsCard({
   editable: boolean
 }) {
   const [form, setForm] = useState<Record<string, ReportPresetOverride>>(overrides)
-  const [message, setMessage] = useState('')
+  const [snapshot, setSnapshot] = useState<Record<string, ReportPresetOverride>>(overrides)
+  const [status, setStatus] = useSettingsStatus()
+
+  // Normalized so an untouched empty field never reads as a change.
+  const norm = (override?: ReportPresetOverride) => ({ name: override?.name ?? '', description: override?.description ?? '' })
+  const changed = templates
+    .filter((template) => JSON.stringify(norm(form[template.id])) !== JSON.stringify(norm(snapshot[template.id])))
+    .map((template) => template.id)
 
   if (templates.length === 0) return null
 
@@ -642,11 +1383,28 @@ function ReportPresetsCard({
       <h2>Report Studio presets</h2>
       <p className="note">Renamed/re-described copy for the compiled report-template catalog. Leave a field empty to use the compiled default.</p>
       <form
-        onSubmit={async (event) => {
+        onSubmit={(event) => {
           event.preventDefault()
-          setMessage('Saving…')
-          const ok = await saveConfigSection({ data: { section: 'report-presets', value: form } })
-          setMessage(ok ? 'Saved.' : 'Save failed (admin role required).')
+          if (changed.length === 0) return
+          // hp-settings.js:909-912's copy for the preset-text save.
+          confirmAction({
+            title: 'Save Report Studio preset text?',
+            description: 'Apply the edited name/description overrides. Presets left blank keep their compiled default.',
+            confirmLabel: 'Save changes',
+            danger: false,
+            onConfirm: async () => {
+              setStatus('Saving…')
+              try {
+                const ok = await saveConfigSection({ data: { section: 'report-presets', value: form } })
+                if (!ok) throw new Error('save failed (admin role required)')
+                setSnapshot(form)
+                setStatus('Saved.', 'ok')
+              } catch (error) {
+                setStatus(`Presets could not be saved — ${errorText(error)}`, 'error')
+                throw error
+              }
+            },
+          })
         }}
       >
         {templates.map((template) => {
@@ -693,13 +1451,13 @@ function ReportPresetsCard({
           )
         })}
         {editable ? (
-          <button className="btn btn-secondary btn-sm" type="submit" style={{ marginTop: 8 }}>
+          <button className="btn btn-secondary btn-sm" type="submit" style={{ marginTop: 8 }} disabled={changed.length === 0}>
             Save changes
           </button>
         ) : (
           <p className="note">Admin role required to edit.</p>
         )}
-        {message ? <p className="note">{message}</p> : null}
+        {status}
       </form>
     </div>
   )
@@ -720,7 +1478,7 @@ function stateBadge(state: string) {
 function ServicesCard({ initial, editable }: { initial: ServicesResponse | null; editable: boolean }) {
   const [data, setData] = useState<ServicesResponse | null>(initial)
   const [busyName, setBusyName] = useState<string | null>(null)
-  const [message, setMessage] = useState('')
+  const [status, setStatus] = useSettingsStatus()
   const [logsFor, setLogsFor] = useState<string | null>(null)
   const [logsText, setLogsText] = useState('')
   const [logsBusy, setLogsBusy] = useState(false)
@@ -732,16 +1490,32 @@ function ServicesCard({ initial, editable }: { initial: ServicesResponse | null;
     if (result) setData(result)
   }
 
-  const act = async (name: string, action: 'start' | 'stop' | 'restart') => {
-    setBusyName(name)
-    setMessage('')
-    try {
-      const result = await runServiceAction({ data: { name, action } })
-      setMessage(result.ok ? `${action} sent to ${name}.` : result.error || 'Action failed.')
-      if (result.ok) await refresh()
-    } finally {
-      setBusyName(null)
-    }
+  // hp-settings.js:1107-1126's requestServiceAction: confirm first (stop
+  // gets the connection-loss warning, only start is non-danger), then the
+  // container list reloads whether the action landed or not.
+  const act = (name: string, action: 'start' | 'stop' | 'restart') => {
+    const label = action[0].toUpperCase() + action.slice(1)
+    confirmAction({
+      title: `${label} ${name}?`,
+      description: `This sends ${action} to the live container through the services adapter.`,
+      warning: action === 'stop' ? `${name} stops accepting connections until it is started again.` : undefined,
+      confirmLabel: label,
+      danger: action !== 'start',
+      onConfirm: async () => {
+        setBusyName(name)
+        try {
+          const result = await runServiceAction({ data: { name, action } })
+          if (!result.ok) throw new Error(result.error || 'action failed')
+          setStatus(`${name}: ${action} succeeded.`, 'ok')
+        } catch (error) {
+          setStatus(`${name}: ${action} failed — ${errorText(error)}`, 'error')
+          throw error
+        } finally {
+          setBusyName(null)
+          void refresh()
+        }
+      },
+    })
   }
 
   const viewLogs = async (name: string) => {
@@ -833,7 +1607,7 @@ function ServicesCard({ initial, editable }: { initial: ServicesResponse | null;
         </div>
       )}
       {!editable ? <p className="note">Admin role required to control services.</p> : null}
-      {message ? <p className="note">{message}</p> : null}
+      {status}
       {logsFor ? (
         <>
           <p className="note">
@@ -900,23 +1674,34 @@ function ReporterStatsCard({ data }: { data: ReporterStats | null }) {
 function ConfigHistoryCard({ initial, editable }: { initial: HistoryResponse | null; editable: boolean }) {
   const [data, setData] = useState<HistoryResponse | null>(initial)
   const [busy, setBusy] = useState<number | null>(null)
-  const [message, setMessage] = useState('')
+  const [status, setStatus] = useSettingsStatus()
 
   useEffect(() => setData(initial), [initial])
 
-  const rollback = async (revision: number) => {
-    setBusy(revision)
-    setMessage('')
-    try {
-      const result = await rollbackConfig({ data: { revision } })
-      setMessage(result.ok ? `Rolled back to revision ${revision}.` : result.error || 'Rollback failed.')
-      if (result.ok) {
-        const fresh = await fetchHistory()
-        if (fresh) setData(fresh)
-      }
-    } finally {
-      setBusy(null)
-    }
+  // hp-settings.js:1513-1517's exact rollback copy.
+  const rollback = (revision: number) => {
+    confirmAction({
+      title: 'Roll back configuration?',
+      description: `Restore revision ${revision} as a new revision. The current state stays in history.`,
+      warning: `Every configuration field returns to the retained snapshot of revision ${revision}.`,
+      confirmLabel: 'Roll back',
+      danger: true,
+      onConfirm: async () => {
+        setBusy(revision)
+        try {
+          const result = await rollbackConfig({ data: { revision } })
+          if (!result.ok) throw new Error(result.error || 'rollback failed')
+          setStatus(`Configuration rolled back to revision ${revision}.`, 'ok')
+          const fresh = await fetchHistory()
+          if (fresh) setData(fresh)
+        } catch (error) {
+          setStatus(`Rollback failed: ${errorText(error)}`, 'error')
+          throw error
+        } finally {
+          setBusy(null)
+        }
+      },
+    })
   }
 
   return (
@@ -968,7 +1753,7 @@ function ConfigHistoryCard({ initial, editable }: { initial: HistoryResponse | n
           </table>
         </div>
       )}
-      {message ? <p className="note">{message}</p> : null}
+      {status}
     </div>
   )
 }
@@ -1062,19 +1847,20 @@ function AuditLogCard({ initial }: { initial: AuditResponse | null }) {
   )
 }
 
-// The nine accent presets from theme.css (#32): claude is the default,
-// the rest are data-hp-palette values. Swatch colors are the dark-theme
-// accents; the applied palette resolves per-theme in CSS.
-const PALETTES: { id: string; label: string; swatch: string }[] = [
-  { id: 'claude', label: 'Claude', swatch: '#d97757' },
-  { id: 'slate', label: 'Slate', swatch: '#8aa2c0' },
-  { id: 'ocean', label: 'Ocean', swatch: '#55a7d8' },
-  { id: 'sage', label: 'Sage', swatch: '#8fb27b' },
-  { id: 'lavender', label: 'Lavender', swatch: '#ab93e3' },
-  { id: 'rose', label: 'Rose', swatch: '#d98aa6' },
-  { id: 'amber', label: 'Amber', swatch: '#deb36a' },
-  { id: 'lime', label: 'Lime', swatch: '#b3c86a' },
-  { id: 'neon', label: 'Neon', swatch: '#6adec2' },
+// The nine accent presets from theme.css (#32) in the legacy picker's
+// order (settings_modal.html:115-125): claude is the default, the rest
+// are data-hp-palette values. Swatch dots are colored by theme.css's
+// .hp-palette-pick [data-value] rules, per-theme.
+const PALETTES: { id: string; label: string }[] = [
+  { id: 'claude', label: 'Claude' },
+  { id: 'slate', label: 'Slate' },
+  { id: 'ocean', label: 'Ocean' },
+  { id: 'sage', label: 'Sage' },
+  { id: 'lavender', label: 'Lavender' },
+  { id: 'lime', label: 'Lime' },
+  { id: 'amber', label: 'Amber' },
+  { id: 'rose', label: 'Rose' },
+  { id: 'neon', label: 'Neon' },
 ]
 
 function bytesHuman(bytes: number): string {
@@ -1085,10 +1871,11 @@ function bytesHuman(bytes: number): string {
 }
 
 function Settings() {
-  const { storage, admin, services, history, audit, reporterStats, user } = Route.useLoaderData()
+  const { storage, preferences, admin, services, history, audit, reporterStats, user } = Route.useLoaderData()
   const theme = useThemeMode()
   const [palette, setPalette] = useState('claude')
   const [prefetch, setPrefetch] = useState(true)
+  const [prefsData, setPrefsData] = useState<Prefs | null | 'loading'>('loading')
   const [storageData, setStorageData] = useState<Storage | null>(null)
   const [adminData, setAdminData] = useState<AdminConfig | null>(null)
   const [servicesData, setServicesData] = useState<ServicesResponse | null>(null)
@@ -1109,6 +1896,9 @@ function Settings() {
     storage.then((result) => {
       if (!cancelled && result) setStorageData(result)
     })
+    preferences.then((result) => {
+      if (!cancelled) setPrefsData(result)
+    })
     admin.then((result) => {
       if (!cancelled && result) setAdminData(result)
     })
@@ -1127,7 +1917,7 @@ function Settings() {
     return () => {
       cancelled = true
     }
-  }, [storage, admin, services, history, audit, reporterStats])
+  }, [storage, preferences, admin, services, history, audit, reporterStats])
 
   const pickPalette = (id: string) => {
     applyPalette(id)
@@ -1145,17 +1935,20 @@ function Settings() {
       <InvestigateHeader
         label="Operations"
         title="Settings"
-        subtitle="Appearance, session, and storage — preferences apply instantly; theme also syncs to your account across devices, other preferences stay in this browser for now."
+        subtitle="Appearance, personal preferences, session, and storage — preferences apply instantly and sync to your account across devices."
       />
       <div className="card half">
         <h2>Appearance</h2>
+        {/* Go's segmented markup (settings_modal.html:103-125): a
+            role="group" of aria-pressed buttons — never radiogroup, which
+            aria-pressed is invalid inside. */}
         <p className="note">Theme mode</p>
-        <div className="filters" role="radiogroup" aria-label="Theme mode">
+        <div className="segmented" role="group" aria-label="Theme mode">
           {modes.map((mode) => (
             <button
               key={mode.id}
               type="button"
-              className={theme === mode.id ? 'chip is-active' : 'chip'}
+              data-value={mode.id}
               aria-pressed={theme === mode.id}
               onClick={() => applyTheme(mode.id)}
             >
@@ -1164,19 +1957,16 @@ function Settings() {
           ))}
         </div>
         <p className="note">Accent palette</p>
-        <div className="filters" role="radiogroup" aria-label="Accent palette">
+        <div className="segmented hp-palette-pick" role="group" aria-label="Accent palette">
           {PALETTES.map((preset) => (
             <button
               key={preset.id}
               type="button"
-              className={palette === preset.id ? 'chip is-active' : 'chip'}
+              data-value={preset.id}
               aria-pressed={palette === preset.id}
               onClick={() => pickPalette(preset.id)}
             >
-              <span
-                aria-hidden="true"
-                style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: preset.swatch, marginRight: 6 }}
-              />
+              <span className="dot" aria-hidden="true" />
               {preset.label}
             </button>
           ))}
@@ -1216,6 +2006,20 @@ function Settings() {
           <p className="note">No session (development mode).</p>
         )}
       </div>
+      {prefsData === 'loading' ? (
+        <div className="card half">
+          <h2>Preferences</h2>
+          <span className="skeleton-line" aria-hidden="true" />
+          <span className="skeleton-line" aria-hidden="true" />
+        </div>
+      ) : prefsData ? (
+        <PreferencesPanes initial={prefsData} onReset={(prefs) => setPalette(prefs.palette ?? 'claude')} />
+      ) : (
+        <div className="card half">
+          <h2>Preferences</h2>
+          <p className="empty">Preferences could not be loaded — reload to retry.</p>
+        </div>
+      )}
       {adminData ? <PresentationCard initial={adminData.presentation} editable={isAdmin} /> : null}
       {adminData ? <HoneypotOperationsCard initial={adminData.honeypot} editable={isAdmin} /> : null}
       {adminData ? <BehaviorCard initial={adminData.behavior} editable={isAdmin} /> : null}
