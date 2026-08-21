@@ -45,6 +45,13 @@ pub struct Hit {
 pub struct Group {
     pub title: String,
     pub hits: Vec<Hit>,
+    /// How many further matches the GROUP_LIMIT-capped terms agg left out
+    /// (sum_other_doc_count) — feeds the "N more →" overflow link the Go
+    /// results page carried (search.html:51, #1653).
+    pub more: u64,
+    /// Where the overflow link goes: the raw ES history console scoped to
+    /// this query, the one surface guaranteed to show everything.
+    pub more_url: String,
 }
 
 #[derive(Serialize)]
@@ -65,12 +72,15 @@ struct GroupSpec {
 
 const GROUPS: &[GroupSpec] = &[
     GroupSpec { title: "Sessions", agg: "sessions", field: "honeypot.session", url: |v| format!("/sessions/{v}") },
-    GroupSpec { title: "Payloads", agg: "payloads", field: "honeypot.shasum", url: |_| "/payloads".to_string() },
-    GroupSpec { title: "Commands", agg: "commands", field: "honeypot.canonical_command", url: |_| "/commands".to_string() },
+    // Per-hit pivots target the events explorer's pivot filters
+    // (events.rs, #1653) — a search hit lands on the exact filtered
+    // scope, not a generic list page (the Go tier's own hit-URL shape).
+    GroupSpec { title: "Payloads", agg: "payloads", field: "honeypot.shasum", url: |v| format!("/payload-analysis/{v}") },
+    GroupSpec { title: "Commands", agg: "commands", field: "honeypot.canonical_command", url: |v| format!("/events?cmd={}", crate::services_control::urlencode(v)) },
     // "HTTP paths" (url.path, wildcard) is queried separately below.
     GroupSpec { title: "Credentials (usernames)", agg: "users", field: "honeypot.username", url: |_| "/events?kind=login".to_string() },
-    GroupSpec { title: "Fingerprints", agg: "fingerprints", field: "honeypot.canonical_fingerprint", url: |_| "/events".to_string() },
-    GroupSpec { title: "Personas", agg: "personas", field: "honeypot.persona_id", url: |_| "/events".to_string() },
+    GroupSpec { title: "Fingerprints", agg: "fingerprints", field: "honeypot.canonical_fingerprint", url: |v| format!("/events?fingerprint={}", crate::services_control::urlencode(v)) },
+    GroupSpec { title: "Personas", agg: "personas", field: "honeypot.persona_id", url: |v| format!("/events?persona={}", crate::services_control::urlencode(v)) },
 ];
 
 pub async fn search(
@@ -138,6 +148,8 @@ pub async fn search(
 
     let mut groups: Vec<Group> = Vec::new();
     let mut total = 0usize;
+    let more_url = format!("/history?q={}", crate::services_control::urlencode(&needle));
+    let overflow = |agg: &Value| agg["values"]["sum_other_doc_count"].as_u64().unwrap_or(0);
 
     if ip_query.is_some() {
         let count = result_aggs["ips"]["doc_count"].as_u64().unwrap_or(0);
@@ -145,6 +157,8 @@ pub async fn search(
             total += 1;
             groups.push(Group {
                 title: "Attack sources".to_string(),
+                more: 0,
+                more_url: more_url.clone(),
                 hits: vec![Hit {
                     label: needle.clone(),
                     count,
@@ -166,7 +180,8 @@ pub async fn search(
             .collect();
         if !hits.is_empty() {
             total += hits.len();
-            groups.push(Group { title: spec.title.to_string(), hits });
+            let more = overflow(&result_aggs[spec.agg]);
+            groups.push(Group { title: spec.title.to_string(), hits, more, more_url: more_url.clone() });
         }
     }
 
@@ -181,7 +196,8 @@ pub async fn search(
         .collect();
     if !signature_hits.is_empty() {
         total += signature_hits.len();
-        groups.push(Group { title: "Suricata signatures".to_string(), hits: signature_hits });
+        let more = overflow(&result_aggs["signatures"]);
+        groups.push(Group { title: "Suricata signatures".to_string(), hits: signature_hits, more, more_url: more_url.clone() });
     }
 
     let path_hits: Vec<Hit> = result_aggs["paths"]["values"]["buckets"]
@@ -195,7 +211,8 @@ pub async fn search(
         .collect();
     if !path_hits.is_empty() {
         total += path_hits.len();
-        groups.push(Group { title: "HTTP paths".to_string(), hits: path_hits });
+        let more = overflow(&result_aggs["paths"]);
+        groups.push(Group { title: "HTTP paths".to_string(), hits: path_hits, more, more_url: more_url.clone() });
     }
 
     // Exact-entity redirect: a session id or payload hash that matched a

@@ -153,7 +153,7 @@ async fn fetch_service_logs(name: &str, lines: u32) -> Result<(String, u32), (u1
     Ok((log, lines))
 }
 
-fn urlencode(value: &str) -> String {
+pub fn urlencode(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for byte in value.bytes() {
         match byte {
