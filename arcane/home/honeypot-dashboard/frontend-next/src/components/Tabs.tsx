@@ -67,7 +67,9 @@ export function Tabs({
           <button
             key={tab.id}
             id={`${idPrefix}-${tab.id}`}
-            className={selected ? 'is-active' : undefined}
+            // theme.css's segmented active state is `button.active`
+            // (theme.css:1354), not is-active.
+            className={selected ? 'active' : undefined}
             type="button"
             role="tab"
             aria-selected={selected}
