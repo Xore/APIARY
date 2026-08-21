@@ -143,12 +143,14 @@ pub async fn get(
     Ok(Json(json!({"preferences": preferences, "revision": 0})))
 }
 
-/// The 24 fields settings_api.go's preferencesPatch allows — deliberately
-/// excludes `palette`, which the Go patch struct also leaves out.
+/// The fields settings_api.go's preferencesPatch allows. `palette` rides
+/// along since Go commit 31286e1 (#1621) added it there — before that,
+/// every appearance save carrying it 400'd on the strict decoder.
 #[derive(Deserialize, Default, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct PreferencesPatch {
     theme: Option<String>,
+    palette: Option<String>,
     density: Option<String>,
     reduced_motion: Option<String>,
     collapsed_sidebar: Option<bool>,
@@ -193,6 +195,7 @@ impl PreferencesPatch {
             };
         }
         set!("theme", self.theme);
+        set!("palette", self.palette);
         set!("density", self.density);
         set!("reduced_motion", self.reduced_motion);
         set!("collapsed_sidebar", self.collapsed_sidebar);

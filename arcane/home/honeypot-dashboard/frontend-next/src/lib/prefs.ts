@@ -7,11 +7,9 @@
 // /api/v1/preferences) — instant local apply (data attribute +
 // localStorage) always happens first and never waits on the network; the
 // server sync is fire-and-forget on top of it, so a slow or failed
-// request never blocks or reverts what's already on screen. Palette is
-// deliberately NOT synced: preferences.rs's PreferencesPatch excludes
-// `palette` (matching the Go tier's own patch struct — a `deny_unknown_
-// fields` PUT with `palette` set would simply error), so it stays
-// localStorage-only, same as before.
+// request never blocks or reverts what's already on screen. Palette
+// syncs the same way since both patch structs accept it (Go: settings_
+// api.go via #1621; Rust: preferences.rs's PreferencesPatch).
 import { useSyncExternalStore } from 'react'
 import { createServerFn } from '@tanstack/react-start'
 
@@ -30,14 +28,17 @@ function emit() {
 // failure (offline, dev mode with no session, backend unreachable) is
 // swallowed — this is a write-through on top of the local apply, never a
 // gate on it.
-const pushThemePreference = createServerFn({ method: 'POST' })
-  .inputValidator((input: { theme: ThemeMode }) => input)
+const pushAppearancePreference = createServerFn({ method: 'POST' })
+  .inputValidator((input: { theme?: ThemeMode; palette?: string }) => input)
   .handler(async ({ data }): Promise<void> => {
     const { getSessionUser } = await import('./auth')
     const user = await getSessionUser()
     if (!user) return
     const { serviceFetch } = await import('./backend.server')
-    const body = JSON.stringify({ subject: user.sub, username: user.username, patch: { theme: data.theme } })
+    const patch: Record<string, string> = {}
+    if (data.theme) patch.theme = data.theme
+    if (data.palette !== undefined) patch.palette = data.palette
+    const body = JSON.stringify({ subject: user.sub, username: user.username, patch })
     const put = () =>
       serviceFetch('/api/v1/preferences', { method: 'PUT', headers: { 'content-type': 'application/json' }, body })
     try {
@@ -106,11 +107,11 @@ export function applyTheme(mode: ThemeMode, options?: { sync?: boolean }) {
   // is used by pullServerTheme itself, to avoid immediately re-pushing
   // the value it just pulled).
   if (options?.sync !== false && typeof window !== 'undefined') {
-    void pushThemePreference({ data: { theme: mode } }).catch(() => {})
+    void pushAppearancePreference({ data: { theme: mode } }).catch(() => {})
   }
 }
 
-export function applyPalette(palette: string) {
+export function applyPalette(palette: string, options?: { sync?: boolean }) {
   try {
     if (palette && palette !== 'claude') {
       document.documentElement.dataset.hpPalette = palette
@@ -123,6 +124,11 @@ export function applyPalette(palette: string) {
     /* storage unavailable */
   }
   emit()
+  // Same write-through as theme: "" stores as claude-equivalent default
+  // server-side (the Go domain accepts "" as claude).
+  if (options?.sync !== false && typeof window !== 'undefined') {
+    void pushAppearancePreference({ data: { palette: palette || 'claude' } }).catch(() => {})
+  }
 }
 
 export function useThemeMode(): ThemeMode {
