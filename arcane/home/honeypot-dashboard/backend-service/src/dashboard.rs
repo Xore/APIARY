@@ -46,6 +46,24 @@ pub struct MapPoint {
     pub lon: f64,
     pub events: u64,
     pub ips: u64,
+    /// Marker drill-down target (hp-app.js:519-533's events_url). The Go
+    /// tier's mapPointEventsURL also carried the city; this events
+    /// endpoint has no city filter yet, so country is the nearest
+    /// supported scope.
+    pub url: String,
+}
+
+/// One row of the overview "Captured payloads" card — aggregate.go's
+/// payloadRow (shasum / attacker target path / seen count / lookup links).
+#[derive(Serialize)]
+pub struct PayloadRow {
+    pub shasum: String,
+    /// Where the attacker tried to write the payload (classify.go's
+    /// ev.download: destfile/url/filename, whichever the sensor filled).
+    pub download: String,
+    pub count: u64,
+    pub link: String,
+    pub vt: String,
 }
 
 #[derive(Serialize)]
@@ -62,6 +80,8 @@ pub struct Dashboard {
     pub top_ports: Vec<Kv>,
     pub countries: Vec<Kv>,
     pub asns: Vec<Kv>,
+    /// ASNs' deliberate half/half sibling (#1565, overview.html:259).
+    pub providers: Vec<Kv>,
     pub top_ips: Vec<Kv>,
     pub top_paths: Vec<Kv>,
     pub top_creds: Vec<Kv>,
@@ -70,6 +90,7 @@ pub struct Dashboard {
     pub fingerprints: Vec<Kv>,
     pub alerts: Vec<Kv>,
     pub alert_cats: Vec<Kv>,
+    pub payloads: Vec<PayloadRow>,
     pub logins: u64,
     pub heatmap: Vec<HeatRow>,
     pub map_points: Vec<MapPoint>,
@@ -116,6 +137,7 @@ pub async fn dashboard(State(state): State<AppState>) -> Result<Json<Dashboard>,
             "protocols": {"terms": {"field": "network.protocol", "size": 30}},
             "ports": {"terms": {"field": "destination.port", "size": 15}},
             "countries": {"terms": {"field": "source.geo.country_iso_code", "size": 12}},
+            "providers": {"terms": {"field": "source.as.type", "size": 12}},
             "asns": {
                 "terms": {"field": "source.as.asn", "size": 12},
                 "aggs": {"org": {"terms": {"field": "source.as.organization_name", "size": 1}}}
@@ -161,7 +183,19 @@ pub async fn dashboard(State(state): State<AppState>) -> Result<Json<Dashboard>,
             "clients": {"terms": {"field": "honeypot.version", "size": 15}},
             "fingerprints": {"terms": {"field": "honeypot.canonical_fingerprint", "size": 15}},
             "alerts": {"terms": {"field": "suricata.eve.alert.signature.keyword", "size": 15}},
-            "alert_cats": {"terms": {"field": "suricata.eve.alert.category.keyword", "size": 15}}
+            "alert_cats": {"terms": {"field": "suricata.eve.alert.category.keyword", "size": 15}},
+            // aggregate.go's payload leaderboard keyed on ev.shasum;
+            // canonical_shasum is that same promotion (and, per
+            // ip_enrichment/canonical.rs, never set on cowrie.log.closed,
+            // so TTY recordings don't count as payload deliveries — #1266).
+            "payloads": {
+                "terms": {"field": "honeypot.canonical_shasum", "size": 50},
+                "aggs": {"latest": {"top_hits": {
+                    "size": 1,
+                    "sort": [{"@timestamp": {"order": "desc"}}],
+                    "_source": {"includes": ["honeypot.destfile", "honeypot.url", "honeypot.filename"]}
+                }}}
+            }
         }
     });
 
@@ -209,6 +243,32 @@ pub async fn dashboard(State(state): State<AppState>) -> Result<Json<Dashboard>,
         .filter(|row| !row.key.trim().is_empty() && row.key != " / ")
         .collect();
 
+    // Payload rows: "seen | sha-256 | attacker target path | lookup",
+    // ported from aggregate.go's payloadRows (overview.html:400-412).
+    let payloads = behavior["aggregations"]["payloads"]["buckets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|bucket| {
+            let shasum = key_string(bucket);
+            let hp = &bucket["latest"]["hits"]["hits"][0]["_source"]["honeypot"];
+            let download = ["destfile", "url", "filename"]
+                .iter()
+                .map(|field| hp[*field].as_str().unwrap_or(""))
+                .find(|value| !value.is_empty())
+                .unwrap_or("")
+                .to_string();
+            PayloadRow {
+                count: bucket["doc_count"].as_u64().unwrap_or(0),
+                link: format!("/events?shasum={shasum}"),
+                vt: format!("https://www.virustotal.com/gui/file/{shasum}"),
+                shasum,
+                download,
+            }
+        })
+        .filter(|row| !row.shasum.is_empty())
+        .collect();
+
     let heatmap = main["aggregations"]["heatmap"]["sensors"]["buckets"]
         .as_array()
         .into_iter()
@@ -242,9 +302,11 @@ pub async fn dashboard(State(state): State<AppState>) -> Result<Json<Dashboard>,
         .flatten()
         .filter_map(|bucket| {
             let key = bucket["key"].as_array()?;
+            let country = key.get(1)?.as_str().unwrap_or("").to_string();
             Some(MapPoint {
                 city: key.first()?.as_str().unwrap_or("").to_string(),
-                country: key.get(1)?.as_str().unwrap_or("").to_string(),
+                url: format!("/events?country={country}"),
+                country,
                 lat: bucket["centroid"]["location"]["lat"].as_f64()?,
                 lon: bucket["centroid"]["location"]["lon"].as_f64()?,
                 events: bucket["doc_count"].as_u64().unwrap_or(0),
@@ -283,6 +345,7 @@ pub async fn dashboard(State(state): State<AppState>) -> Result<Json<Dashboard>,
         top_ports: kv_rows(&main, "ports", |key| format!("/events?port={key}")),
         countries: kv_rows(&main, "countries", |key| format!("/events?country={key}")),
         asns,
+        providers: kv_rows(&main, "providers", |key| format!("/events?provider={key}")),
         top_ips: kv_rows(&main, "top_ips", |key| format!("/events?ip={key}")),
         top_paths: kv_rows(&main, "paths", |key| format!("/events?path={key}")),
         top_creds,
@@ -291,6 +354,7 @@ pub async fn dashboard(State(state): State<AppState>) -> Result<Json<Dashboard>,
         fingerprints: kv_rows(&behavior, "fingerprints", |_| "/events".to_string()),
         alerts: kv_rows(&behavior, "alerts", |_| "/events".to_string()),
         alert_cats: kv_rows(&behavior, "alert_cats", |_| "/events".to_string()),
+        payloads,
         logins: main["aggregations"]["logins"]["doc_count"].as_u64().unwrap_or(0),
         heatmap,
         map_points,

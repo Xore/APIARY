@@ -104,9 +104,18 @@ const fetchVectors = createServerFn({ method: 'GET' })
   })
 
 /// The heatmap's companion drill-down (#471): pick one sensor, see which
-/// ports/protocols actually drew its last-24h traffic.
-export function AttackVectors({ sensors }: { sensors: string[] }) {
-  const [sensor, setSensor] = useState('')
+/// ports/protocols actually drew its last-24h traffic. The picker is
+/// controlled by the card (overview.html:94-120): the same selection also
+/// narrows the heatmap above to that sensor's row.
+export function AttackVectors({
+  sensors,
+  sensor,
+  onSensorChange,
+}: {
+  sensors: string[]
+  sensor: string
+  onSensorChange: (sensor: string) => void
+}) {
   const [vectors, setVectors] = useState<Vectors | null>(null)
   useEffect(() => {
     if (!sensor) {
@@ -126,7 +135,7 @@ export function AttackVectors({ sensors }: { sensors: string[] }) {
   return (
     <>
       <div className="filters">
-        <select className="form-input" aria-label="Sensor drill-down" value={sensor} onChange={(event) => setSensor(event.target.value)}>
+        <select className="form-input" aria-label="Sensor drill-down" value={sensor} onChange={(event) => onSensorChange(event.target.value)}>
           <option value="">All sensors</option>
           {options.map((name) => (
             <option key={name} value={name}>
@@ -135,7 +144,7 @@ export function AttackVectors({ sensors }: { sensors: string[] }) {
           ))}
         </select>
         {sensor ? (
-          <button className="chip" type="button" onClick={() => setSensor('')}>
+          <button className="chip" type="button" onClick={() => onSensorChange('')}>
             × all sensors
           </button>
         ) : null}
@@ -177,7 +186,7 @@ export function AttackVectors({ sensors }: { sensors: string[] }) {
   )
 }
 
-export type MapPoint = { city: string; country: string; lat: number; lon: number; events: number; ips: number }
+export type MapPoint = { city: string; country: string; lat: number; lon: number; events: number; ips: number; url: string }
 
 export function AttackMap({ points }: { points: MapPoint[] | null }) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -199,16 +208,38 @@ export function AttackMap({ points }: { points: MapPoint[] | null }) {
       const maxEvents = points.reduce((max, point) => Math.max(max, point.events), 1)
       for (const point of points) {
         const radius = 40_000 + 400_000 * Math.sqrt(point.events / maxEvents)
-        L.circle([point.lat, point.lon], {
+        const circle = L.circle([point.lat, point.lon], {
           radius,
           color: 'var(--accent)',
           weight: 1,
           fillOpacity: 0.35,
-        })
-          .bindTooltip(
-            `${point.city || 'Unknown city'}, ${point.country} — ${point.ips.toLocaleString('en-US')} IPs, ${point.events.toLocaleString('en-US')} events`,
+        }).bindTooltip(
+          `${point.city || 'Unknown city'}, ${point.country} — ${point.ips.toLocaleString('en-US')} IPs, ${point.events.toLocaleString('en-US')} events`,
+        )
+        // Markers navigate to the place's events, keyboard included
+        // (hp-app.js:519-533): tabbable, announced as a link, Enter/Space.
+        const go = () => {
+          if (point.url) location.assign(point.url)
+        }
+        circle.on('click', go)
+        circle.on('add', () => {
+          const el = circle.getElement()
+          if (!el) return
+          el.setAttribute('tabindex', '0')
+          el.setAttribute('role', 'link')
+          el.setAttribute(
+            'aria-label',
+            `${point.city && point.country ? `${point.city}, ${point.country}` : point.city || point.country || 'Unknown location'}, ${point.events.toLocaleString('en-US')} events`,
           )
-          .addTo(map)
+          el.addEventListener('keydown', (event) => {
+            const key = (event as KeyboardEvent).key
+            if (key === 'Enter' || key === ' ') {
+              event.preventDefault()
+              go()
+            }
+          })
+        })
+        circle.addTo(map)
       }
     })()
     return () => {

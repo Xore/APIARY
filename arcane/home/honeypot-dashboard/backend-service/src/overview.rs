@@ -19,6 +19,11 @@ pub struct OverviewKpis {
     /// the previous window is empty (mirrors the Go hero's guard).
     pub change24h: String,
     pub unique_ips: u64,
+    /// Per-hour event counts for the last 24 hours, oldest first — the
+    /// "Events in 24 hours" KPI sparkline (overview.html:65-68 /
+    /// page_hero.go's hourlySpark, which summed the heatmap's columns;
+    /// here the same series comes straight from a date_histogram).
+    pub hourly: Vec<u64>,
     pub ready: bool,
 }
 
@@ -28,7 +33,13 @@ pub async fn kpis(State(state): State<AppState>) -> Result<Json<OverviewKpis>, (
         "track_total_hits": true,
         "query": {"range": {"@timestamp": {"gte": "now-48h"}}},
         "aggs": {
-            "last24h": {"filter": {"range": {"@timestamp": {"gte": "now-24h"}}}},
+            "last24h": {
+                "filter": {"range": {"@timestamp": {"gte": "now-24h"}}},
+                "aggs": {"hourly": {"date_histogram": {
+                    "field": "@timestamp", "fixed_interval": "1h", "min_doc_count": 0,
+                    "extended_bounds": {"min": "now-23h/h", "max": "now/h"}
+                }}}
+            },
             "previous24h": {"filter": {"range": {"@timestamp": {"gte": "now-48h", "lt": "now-24h"}}}},
             "unique_ips": {"cardinality": {"field": "source.ip"}}
         }
@@ -43,6 +54,12 @@ pub async fn kpis(State(state): State<AppState>) -> Result<Json<OverviewKpis>, (
     let last24h = result["aggregations"]["last24h"]["doc_count"].as_u64().unwrap_or(0);
     let previous24h = result["aggregations"]["previous24h"]["doc_count"].as_u64().unwrap_or(0);
     let unique_ips = result["aggregations"]["unique_ips"]["value"].as_u64().unwrap_or(0);
+    let hourly: Vec<u64> = result["aggregations"]["last24h"]["hourly"]["buckets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|bucket| bucket["doc_count"].as_u64().unwrap_or(0))
+        .collect();
 
     let change24h = if previous24h > 0 {
         let delta = (last24h as i64 - previous24h as i64) * 100 / previous24h as i64;
@@ -57,6 +74,7 @@ pub async fn kpis(State(state): State<AppState>) -> Result<Json<OverviewKpis>, (
         previous24h,
         change24h,
         unique_ips,
+        hourly,
         ready: true,
     }))
 }
