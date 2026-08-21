@@ -3,9 +3,13 @@
 // downloading their artifacts.
 import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { StoreListPage, str, when, type StorePage, type StoreRow } from '../components/StoreList'
-import type { Column } from '../components/Investigate'
+import { InvestigateHeader, type Column } from '../components/Investigate'
+import { Tabs, TabPanel } from '../components/Tabs'
+import { pathString, type JsonRecord } from '../lib/json'
+import { isLivePaused } from '../lib/live'
+import { formatTimestamp } from '../lib/time'
 
 type TokenType = {
   token_type: string
@@ -21,6 +25,27 @@ const fetchPage = createServerFn({ method: 'GET' })
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<StorePage>(`/api/v1/store/canarytokens?offset=${data.offset}&size=25`)
   })
+
+/** One fired-token event off /api/v1/events — the slice of EventRow this
+ * tab renders (the full record rides along for honeypot.token_type/
+ * manage_url, which the flat row doesn't carry). */
+type FiredRow = {
+  time: string
+  src_ip: string
+  country: string
+  detail: string
+  record: JsonRecord
+}
+
+type FiredPage = { total: number; rows: FiredRow[] }
+
+const fetchFired = createServerFn({ method: 'GET' }).handler(async (): Promise<FiredPage | null> => {
+  const { serviceJSON } = await import('../lib/backend.server')
+  // since=365d: tokens fire rarely — the events endpoint's 10d default
+  // would hide older fires the old page still showed (hp-canarytokens.js
+  // loadReports read the whole in-memory event cache).
+  return serviceJSON<FiredPage>('/api/v1/events?sensor=canarytokens&size=50&since=365d')
+})
 
 const fetchTypes = createServerFn({ method: 'GET' }).handler(async (): Promise<TokenType[] | null> => {
   const { serviceJSON } = await import('../lib/backend.server')
@@ -192,25 +217,158 @@ const COLUMNS: Column<StoreRow>[] = [
   },
 ]
 
+// Fired-tokens tab (canarytokens.html:114-133 / hp-canarytokens.js
+// renderFiredRow+loadReports): every time a planted token was opened,
+// scanned or triggered — newest first, with the platform's manage link.
+function FiredTokens() {
+  const [page, setPage] = useState<FiredPage | null>(null)
+  const [error, setError] = useState('')
+  const load = useCallback(async () => {
+    try {
+      const result = await fetchFired()
+      if (result) {
+        setPage(result)
+        setError('')
+      } else {
+        setError('Fired-token history unavailable.')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Fired-token history unavailable.')
+    }
+  }, [])
+  useEffect(() => {
+    void load()
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible' && !isLivePaused()) void load()
+    }, 60_000)
+    const onResume = () => void load()
+    window.addEventListener('hp-live-resumed', onResume)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('hp-live-resumed', onResume)
+    }
+  }, [load])
+  const rows = page?.rows ?? null
+  return (
+    <div className="card wide">
+      <div className="card__header">
+        <div>
+          <h2>Fired tokens</h2>
+          <p className="card__meta">Every time a planted token was opened, scanned, or triggered — newest first.</p>
+        </div>
+        <div className="hp-head-actions">
+          <button className="btn btn-ghost btn-sm" type="button" onClick={() => void load()}>
+            Refresh
+          </button>
+        </div>
+      </div>
+      <div className="card__scroll">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Source IP</th>
+              <th>Country</th>
+              <th>Token type</th>
+              <th>Detail</th>
+              <th>Manage</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows === null ? (
+              <tr>
+                <td colSpan={6}>
+                  <span className="skeleton-line" aria-hidden="true" />
+                </td>
+              </tr>
+            ) : (
+              rows.map((row, index) => {
+                const manageURL = pathString(row.record, 'honeypot', 'manage_url')
+                const tokenType =
+                  pathString(row.record, 'honeypot', 'token_type') || pathString(row.record, 'honeypot', 'channel')
+                return (
+                  <tr key={`${row.time}-${index}`}>
+                    <td>{formatTimestamp(row.time)}</td>
+                    <td className="mono">
+                      {row.src_ip ? (
+                        <a href={`/investigate/ip/${encodeURIComponent(row.src_ip)}`}>{row.src_ip}</a>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td>{row.country ? <span className="badge badge--info">{row.country}</span> : '—'}</td>
+                    <td>{tokenType || '—'}</td>
+                    <td className="v">{row.detail || pathString(row.record, 'honeypot', 'memo') || '—'}</td>
+                    <td>
+                      {manageURL ? (
+                        <a className="btn btn-ghost btn-sm" href={manageURL} target="_blank" rel="noopener noreferrer">
+                          Manage token
+                        </a>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                  </tr>
+                )
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+      {rows !== null && rows.length === 0 ? (
+        <p className="empty" role="status">
+          No token has fired yet.
+        </p>
+      ) : null}
+      {error ? (
+        <p className="card__meta" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 export const Route = createFileRoute('/canarytokens')({ component: Page })
 
 function Page() {
   // Remount the list after a mint so the new token appears immediately.
   const [generation, setGeneration] = useState(0)
+  const [tab, setTab] = useState('tokens')
   return (
     <>
-      <MintForm onCreated={() => setGeneration((current) => current + 1)} />
-      <StoreListPage
-        key={generation}
-        fetchPage={fetchPage}
-        label="Tools"
-        title="Canarytokens"
-        subtitle="Deployed decoy tokens — documents, URLs and hostnames that phone home the moment an attacker touches them."
-        columns={COLUMNS}
-        rowKey={(row, index) => `${str(row, 'id')}-${index}`}
-        inspectorTitle="Token details"
-        chipNoun="tokens"
+      <Tabs
+        tabs={[
+          { id: 'tokens', label: 'Tokens' },
+          { id: 'fired', label: 'Fired tokens' },
+        ]}
+        active={tab}
+        onSelect={setTab}
+        label="Canarytokens sections"
+        idPrefix="ct"
       />
+      <TabPanel id="tokens" active={tab} idPrefix="ct" className="dashboard-panel">
+        <MintForm onCreated={() => setGeneration((current) => current + 1)} />
+        <StoreListPage
+          key={generation}
+          fetchPage={fetchPage}
+          label="Tools"
+          title="Canarytokens"
+          subtitle="Deployed decoy tokens — documents, URLs and hostnames that phone home the moment an attacker touches them."
+          columns={COLUMNS}
+          rowKey={(row, index) => `${str(row, 'id')}-${index}`}
+          inspectorTitle="Token details"
+          chipNoun="tokens"
+        />
+      </TabPanel>
+      <TabPanel id="fired" active={tab} idPrefix="ct" className="dashboard-panel">
+        <InvestigateHeader
+          label="Tools"
+          title="Canarytokens"
+          subtitle="What's fired — every planted token that phoned home, wherever it was opened."
+        />
+        <FiredTokens />
+      </TabPanel>
     </>
   )
 }
