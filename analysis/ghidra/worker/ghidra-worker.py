@@ -1367,8 +1367,12 @@ def _clean(text: str, limit: int, *, keep_newlines: bool = False) -> str:
     characters, so the default behavior above silently flattened RevDeck's
     own one-shot answer and mirrored chat messages -- markdown text meant to
     keep its author's paragraph/line breaks, not raw sample content -- into
-    one unbroken line before dashboard/static/hp-ghidra-markdown.js's
-    marked.js `breaks: true` config ever saw a single \\n to convert.
+    one unbroken line before it ever reached a renderer that cares about
+    them. dashboard-next (frontend-next/src/routes/ghidra.$sha.tsx) renders
+    this as literal text with `white-space: pre-wrap`, a deliberate
+    dependency-free choice over the retired Go dashboard's marked.js+
+    DOMPurify pipeline (#1285/#1659) -- still just as dependent on real
+    \\n characters surviving to reach it.
     Genuine escape sequences (ESC and other C0/C1 control codes) are still
     stripped either way.
     """

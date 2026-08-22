@@ -353,10 +353,15 @@ jobs:
           - name: conpot persona extraction in geoip-honeypot pipeline (#567)
             run: analysis/tests/test_conpot_persona_pipeline.sh
 
-          - name: Sensor event-kind coverage audit (#789)
-            run: |
-              python3 scripts/tests/test_audit_sensor_event_coverage.py
-              python3 scripts/audit-sensor-event-coverage.py
+          # #1659 deleted dashboard/classify.go, which this audit (#789) diffs
+          # sensor source against. backend-service/src/ip_enrichment/
+          # canonical.rs is a real but narrower successor (a different subset
+          # of sensors, a different concern -- field promotion for
+          # aggregation, not per-line event-kind classification), so this
+          # isn't a path fix. Disabled pending #1665's re-architecture
+          # decision rather than left silently broken.
+          - name: Sensor event-kind coverage audit (#789) [disabled, #1665]
+            run: echo "skipped -- classify.go retired with the Go dashboard (#1659), see #1665"
 
           - name: Payload/artifact dedupe (#481/#528)
             run: |
