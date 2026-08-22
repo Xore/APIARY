@@ -149,6 +149,14 @@ services:
   backend-service-mounted:
     <<: *runtime-defaults
     image: apiary-backend:latest
+    # never: this image has no build: here on purpose (built by the sibling
+    # honeypot-dashboard-backend stack's own backend-service service, shared
+    # by local tag) and was never pushed to any registry -- Arcane's
+    # redeploy does an unconditional `docker compose pull` across every
+    # image in the file, which fails outright ("repository does not exist")
+    # without this. Redeploying honeypot-dashboard-backend first keeps the
+    # local tag current for every service below that references it.
+    pull_policy: never
     container_name: hp-apiary-backend-mounted
     restart: unless-stopped
     environment:
@@ -213,6 +221,9 @@ services:
   backend-worker:
     <<: *runtime-defaults
     image: apiary-backend:latest
+    # never: see backend-service-mounted's own comment above -- same image,
+    # no build: here, built by the sibling honeypot-dashboard-backend stack.
+    pull_policy: never
     container_name: hp-apiary-worker
     restart: unless-stopped
     environment:
@@ -423,6 +434,9 @@ services:
   backend-worker-importer:
     <<: *runtime-defaults
     image: apiary-backend:latest
+    # never: see backend-service-mounted's own comment above -- same image,
+    # no build: here, built by the sibling honeypot-dashboard-backend stack.
+    pull_policy: never
     container_name: hp-apiary-worker-importer
     restart: unless-stopped
     environment:
@@ -494,6 +508,9 @@ services:
   backend-worker-enrichment:
     <<: *runtime-defaults
     image: apiary-backend:latest
+    # never: see backend-service-mounted's own comment above -- same image,
+    # no build: here, built by the sibling honeypot-dashboard-backend stack.
+    pull_policy: never
     container_name: hp-apiary-worker-enrichment
     restart: unless-stopped
     network_mode: none
@@ -540,6 +557,9 @@ services:
   backend-worker-payload-inventory:
     <<: *runtime-defaults
     image: apiary-backend:latest
+    # never: see backend-service-mounted's own comment above -- same image,
+    # no build: here, built by the sibling honeypot-dashboard-backend stack.
+    pull_policy: never
     container_name: hp-apiary-worker-payload-inventory
     restart: unless-stopped
     environment:

@@ -81,6 +81,14 @@ services:
     <<: *runtime-defaults
     build: ../honeypot-dashboard/backend-service
     image: apiary-backend:latest
+    # build: this image is never pushed to any registry -- Arcane's
+    # redeploy does an unconditional `docker compose pull` across every
+    # image in the file, which would fail with "repository does not exist"
+    # the same way it did for honeypot-dashboard's worker services (which
+    # reference this same local tag with pull_policy: never, since they
+    # have no build: of their own). This service does have a build:, so
+    # the fix here is to always build instead of ever pulling.
+    pull_policy: build
     container_name: hp-apiary-backend
     restart: unless-stopped
     environment:
