@@ -143,7 +143,7 @@ const COLUMNS: Column<StoreRow>[] = [
   { header: 'severity (AI-guessed)', render: (row) => severityBadge(str(row, 'severity')) },
   { header: 'confidence', render: (row) => str(row, 'confidence') || <span className="tw:text-muted">—</span> },
   { header: 'intent', className: 'v', render: (row) => str(row, 'intent') },
-  { header: 'summary', className: 'v', render: (row) => str(row, 'summary') },
+  { header: 'summary', className: 'v', primary: true, render: (row) => str(row, 'summary') || <span className="tw:text-muted">(no summary)</span> },
   { header: 'evidence', className: 'v', render: (row) => evidenceLink(row) },
   { header: 'model', detail: true, render: (row) => str(row, 'model') },
   { header: 'source ip', detail: true, render: (row) => str(row, 'src_ip') },
@@ -171,6 +171,7 @@ function Page() {
       rowKey={(row, index) => `${str(row, 'analysis_id')}-${index}`}
       inspectorTitle="Analysis details"
       chipNoun="analyses"
+      layout="cards"
       />
     </>
   )

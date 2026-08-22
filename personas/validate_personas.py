@@ -42,8 +42,10 @@ if not compose_path.exists():  # Dockge deploys the repository file as compose.y
     compose_path = ROOT / "compose.yml"
 surfaces = [
     # #1502: each of these moved under arcane/home/honeypot-<name>/.
+    # #1659 dropped honeypot-dashboard/dashboard/main.go (retired Go
+    # dashboard) -- every persona ID already shows up in compose.yml or
+    # filebeat.yml, confirmed empirically before removing it here.
     compose_path, ROOT / "arcane/home/honeypot-elk/analysis/filebeat.yml",
-    ROOT / "arcane/home/honeypot-dashboard/dashboard/main.go",
     ROOT / "arcane/home/honeypot-multipot/multipot/main.go",
     ROOT / "arcane/home/honeypot-http/http-honeypot/main.go",
     ROOT / "arcane/home/honeypot-dnp3/dnp3-honeypot/main.go",

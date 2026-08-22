@@ -17,13 +17,7 @@ ALLOWED_DOTENV = {
     # attackers to find, not a real credential.
     Path("arcane/home/honeypot-cowrie/cowrie/honeyfs/opt/nexusai-inference/.env"),
 }
-SKIP_PREFIXES = (
-    # #1502: moved under arcane/home/honeypot-dashboard/ along with the
-    # rest of dashboard/'s build context.
-    "arcane/home/honeypot-dashboard/dashboard/vendor/",
-    "arcane/home/honeypot-dashboard/dashboard/frontend/node_modules/",
-    ".git/",
-)
+SKIP_PREFIXES = (".git/",)
 FORBIDDEN_LITERALS = {
     "xore.rocks": "deployment-specific public domain",
     "87.106.162.235": "deployment-specific VPS address",

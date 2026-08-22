@@ -29,7 +29,7 @@ done
 # underneath it too was never needed.
 tar -czf "$destination/stack-config-state.tar.gz" \
   --exclude='./logs' --exclude='./analysis/geoip/*.mmdb' \
-  --exclude='./arcane/home/honeypot-dashboard/dashboard/geoip/*.csv' \
+  --exclude='./analysis/threat-intel/*.csv' \
   --exclude='./state/elasticsearch-snapshots' \
   "$@"
 

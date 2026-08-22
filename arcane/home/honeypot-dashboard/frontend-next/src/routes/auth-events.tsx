@@ -40,6 +40,7 @@ const COLUMNS: Column<StoreRow>[] = [
   {
     header: 'ip',
     className: 'v',
+    primary: true,
     render: (row) =>
       str(row, 'ip_address') ? (
         <Link to="/events" search={{ ip: str(row, 'ip_address') }} onClick={(event) => event.stopPropagation()}>
@@ -149,6 +150,7 @@ function Page() {
       inspectorTitle="Event details"
       chipNoun="events"
       beforeTable={<AuthStats />}
+      layout="cards"
     />
   )
 }

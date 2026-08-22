@@ -149,15 +149,14 @@ flowchart TB
   payload["payload-analysis"]
   util["utilities"]
   elk["elk"]
-  dashboard["dashboard —<br/>scripts/deploy-dashboard-rolling.sh,<br/>not a blind recreate (see below)"]
 
   approve --> runner --> sync
-  sync --> init --> marker --> conpot --> sensorLoop --> workers --> payload --> util --> elk --> dashboard
+  sync --> init --> marker --> conpot --> sensorLoop --> workers --> payload --> util --> elk
 ```
 
 Every step after `sync` is `docker compose -f compose.yml config --quiet`
-(validate) then `up -d --build` (or `deploy-dashboard-rolling.sh` for the
-last step only) against that one stack's own compose file — a failure on
+(validate) then `up -d --build` against that one stack's own compose file —
+a failure on
 any step is visible in that step's own job log without the whole workflow
 stopping later stacks from at least attempting to reconcile. `honeypot-init`
 runs first because every other stack polls its `state/init-markers/*.done`
@@ -300,29 +299,22 @@ group) has since split out too -- see the `honeypot-dionaea` and
 `APIARY`, as part of its own internal `depends_on` chain not yet
 worth splitting.
 
-#### Dashboard redeploy (single replica; #266 rolling pair retired)
+#### Dashboard redeploy (single replica; #266 rolling pair retired, #1659 legacy `dashboard` removed)
 
-The dashboard runs one replica (per Xore). `scripts/deploy-dashboard-rolling.sh`
-keeps its historical name but now just builds `honeypot-dashboard:latest` and
-recreates the single `dashboard` service, then waits for its healthcheck:
+The dashboard runs one replica (per Xore). The legacy Go `dashboard` service
+and `scripts/deploy-dashboard-rolling.sh` that redeployed it are both gone
+(#1659) -- `dashboard-next` is the only tier now, and redeploying it (like
+`backend-service`, `backend-service-mounted`, and `backend-worker`) is a
+plain build + recreate from each stack's own directory, no wrapper script:
 
 ```bash
 cd /var/dockge/stacks/honeypot-dashboard
-./scripts/deploy-dashboard-rolling.sh   # build + up -d dashboard + wait healthy
+docker compose build dashboard-next && docker compose up -d dashboard-next
 ```
 
 The brief recreate window is accepted on this single-operator deployment;
 Traefik's active `/healthz` check (vps/traefik/dynamic.yml) fails fast during
 it instead of hanging connections.
-
-`scripts/deploy-dashboard-rolling.sh` only ever targets the legacy `dashboard`
-service above -- it does not build or recreate `backend-service`,
-`backend-service-mounted`, `backend-worker`, or `dashboard-next`, in either
-this stack or `honeypot-dashboard-backend` below, so #1622's split needed no
-change to it. Redeploying the modernization-port tiers today is a plain
-`docker compose build <service> && docker compose up -d <service>` run from
-each stack's own directory; there is no equivalent wrapper script for them
-yet.
 
 ### honeypot-dashboard-backend (#1622)
 

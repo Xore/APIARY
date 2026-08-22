@@ -343,7 +343,7 @@ upstream into the scanner's rules directory on a timer:
 - Keep upstream rules in a separate `rules/upstream/` subtree so local rules in
   `analysis/yara/rules/honeypot.yar` are never overwritten.
 - Record the upstream commit SHA in a lock file, mirroring the vendored-theme
-  approach in `scripts/check-vendored-theme.sh` / `dashboard/frontend/theme.lock`.
+  approach in `scripts/check-vendored-theme.sh` / `frontend-next/theme.lock`.
 - Auto rules carry `auto_generated = true` in their meta; surface them in the
   dashboard's YARA match list with a distinct badge so an auto-rule hit is never
   mistaken for a curated detection.

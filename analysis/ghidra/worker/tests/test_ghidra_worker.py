@@ -455,8 +455,8 @@ def test_unit():
     # sample strings/short labels) strips all of it, same as before.
     check(w._clean("a\nb\tc", 100) == "abc", "default strips newlines/tabs like before")
     # keep_newlines=True (RevDeck's own answer/chat content, markdown text
-    # meant for dashboard/static/hp-ghidra-markdown.js's marked.js) must
-    # preserve real line breaks while still stripping an actual escape byte.
+    # dashboard-next renders as literal pre-wrap text) must preserve real
+    # line breaks while still stripping an actual escape byte.
     check(w._clean("line one\nline two", 100, keep_newlines=True) == "line one\nline two",
           "keep_newlines preserves \\n")
     check(w._clean("a\x1b[31mred\x1b[0m\nb", 100, keep_newlines=True) == "a[31mred[0m\nb",

@@ -75,6 +75,7 @@ mod search;
 mod services_control;
 mod session;
 mod stores;
+mod threat_intel;
 mod worker;
 mod workbench_api;
 mod workbench_domain;

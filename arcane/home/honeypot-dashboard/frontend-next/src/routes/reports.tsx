@@ -225,7 +225,12 @@ const num = (row: StoreRow, key: string): number => (typeof row[key] === 'number
 
 const COLUMNS: Column<StoreRow>[] = [
   { header: 'created', render: (row) => formatTimestamp(str(row, 'created_at')) },
-  { header: 'title', className: 'v', render: (row) => str(row, 'title') || str(row, 'name') },
+  {
+    header: 'title',
+    className: 'v',
+    primary: true,
+    render: (row) => str(row, 'title') || str(row, 'name') || <span className="tw:text-muted">(untitled report)</span>,
+  },
   { header: 'template', render: (row) => <span className="badge badge--muted">{str(row, 'template')}</span> },
   { header: 'origin', render: (row) => str(row, 'origin') },
   { header: 'size', className: 'n', render: (row) => `${(num(row, 'size_bytes') / 1024).toFixed(0)} KB` },
@@ -1189,6 +1194,8 @@ function Reports() {
           columns={COLUMNS}
           rowKey={(row, index) => `${str(row, 'id')}-${index}`}
           inspectorTitle="Report details"
+          layout="cards"
+          gridId="hp-rp-generated"
         />
       </div>
     </>

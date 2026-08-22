@@ -18,7 +18,6 @@ updates:
     # whose stack migrated there. portbridge/vps/portbridge are VPS-side,
     # out of #1502's scope, unchanged.
     directories:
-      - /arcane/home/honeypot-dashboard/dashboard
       - /arcane/home/honeypot-dnp3/dnp3-honeypot
       - /arcane/home/honeypot-http/http-honeypot
       - /arcane/home/honeypot-multipot/multipot
@@ -38,7 +37,7 @@ updates:
     labels: [dependencies, go]
 
   - package-ecosystem: npm
-    directory: /arcane/home/honeypot-dashboard/dashboard/frontend  # #1502
+    directory: /arcane/home/honeypot-dashboard/frontend-next  # #1659: repointed off the retired Go dashboard's frontend
     schedule:
       interval: weekly
       day: monday
@@ -76,7 +75,6 @@ updates:
       - /arcane/home/honeypot-citrix-honeypot/citrix-honeypot
       - /arcane/home/honeypot-conpot/conpot
       - /arcane/home/honeypot-cowrie/cowrie
-      - /arcane/home/honeypot-dashboard/dashboard
       - /arcane/home/honeypot-dicompot/dicompot
       - /arcane/home/honeypot-dionaea/dionaea
       - /arcane/home/honeypot-dnp3/dnp3-honeypot

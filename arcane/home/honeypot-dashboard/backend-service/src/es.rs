@@ -345,6 +345,38 @@ impl Es {
         Ok(body["deleted"].as_u64().unwrap_or(0))
     }
 
+    /// `_update_by_query` across `indices` with a caller-supplied query and
+    /// painless script (`script_params` become the script's `params`),
+    /// returning the updated count. `conflicts=proceed` — same reasoning as
+    /// `delete_by_query`: a version conflict racing an in-flight write
+    /// isn't worth aborting the whole sweep over, the next cycle will
+    /// pick it up.
+    pub async fn update_by_query(
+        &self,
+        indices: &[&str],
+        query: Value,
+        script_source: &str,
+        script_params: Value,
+    ) -> anyhow::Result<u64> {
+        let body = serde_json::json!({
+            "query": query,
+            "script": {"source": script_source, "lang": "painless", "params": script_params},
+        });
+        let response = self
+            .client
+            .update_by_query(elasticsearch::UpdateByQueryParts::Index(indices))
+            .conflicts(elasticsearch::params::Conflicts::Proceed)
+            .body(body)
+            .send()
+            .await?;
+        let status = response.status_code();
+        let body = response.json::<Value>().await.unwrap_or_default();
+        if !status.is_success() {
+            anyhow::bail!("elasticsearch update_by_query {}: {}", status, body);
+        }
+        Ok(body["updated"].as_u64().unwrap_or(0))
+    }
+
     pub async fn ping(&self) -> bool {
         self.client
             .ping()

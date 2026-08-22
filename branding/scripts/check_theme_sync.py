@@ -9,8 +9,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-# #1502: dashboard/ moved under arcane/home/honeypot-dashboard/.
-THEME = ROOT / "arcane" / "home" / "honeypot-dashboard" / "dashboard" / "static" / "theme.css"
+# #1659: repointed at frontend-next after the Go dashboard's retirement.
+THEME = ROOT / "arcane" / "home" / "honeypot-dashboard" / "frontend-next" / "public" / "static" / "theme.css"
 TOKENS = ROOT / "branding" / "tokens.json"
 
 MAPPING = {

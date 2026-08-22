@@ -188,6 +188,10 @@ export function AttackVectors({
 
 export type MapPoint = { city: string; country: string; lat: number; lon: number; events: number; ips: number; url: string }
 
+// Fixed marker size regardless of event count — scaling by count made dense
+// cities' circles grow large enough to overlap and obscure neighboring markers.
+const MARKER_RADIUS_METERS = 60_000
+
 export function AttackMap({ points }: { points: MapPoint[] | null }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<import('leaflet').Map | null>(null)
@@ -205,11 +209,9 @@ export function AttackMap({ points }: { points: MapPoint[] | null }) {
       L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors',
       }).addTo(map)
-      const maxEvents = points.reduce((max, point) => Math.max(max, point.events), 1)
       for (const point of points) {
-        const radius = 40_000 + 400_000 * Math.sqrt(point.events / maxEvents)
         const circle = L.circle([point.lat, point.lon], {
-          radius,
+          radius: MARKER_RADIUS_METERS,
           color: 'var(--accent)',
           weight: 1,
           fillOpacity: 0.35,
