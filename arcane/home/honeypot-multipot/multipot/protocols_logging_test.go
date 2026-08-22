@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Covers logging gaps found while auditing every sensor's data completeness
@@ -149,6 +150,54 @@ func TestElasticLogsRequestBody(t *testing.T) {
 	}
 	if events[0].Data != payload {
 		t.Fatalf("expected request body captured, got Data=%q", events[0].Data)
+	}
+}
+
+// TestServeSkipsLoggingOwnHealthcheck covers #1677: main()'s -healthcheck
+// mode dials 127.0.0.1:6379 directly, and that connection is accepted by
+// serve()'s own listener as real traffic -- a real external connection can
+// never present that address (it always arrives as either a real attacker
+// IP via the ":pp" portbridge rule or the tunnel peer otherwise), so this
+// can only be the container's own healthcheck. Exercises the real serve()
+// accept loop (not a handler called directly against a pipe, like the
+// tests above) since the guard depends on a genuine RemoteAddr.
+func TestServeSkipsLoggingOwnHealthcheck(t *testing.T) {
+	const testPort = 19654
+	var buf bytes.Buffer
+	log := &logger{out: &buf}
+	handlerCalled := make(chan struct{}, 1)
+
+	go serve(service{proto: "test", port: testPort, handler: func(net.Conn, *sessionLogger, int) {
+		handlerCalled <- struct{}{}
+	}}, log, false)
+
+	// Give the listener a moment to come up before dialing it.
+	var conn net.Conn
+	var err error
+	for i := 0; i < 50; i++ {
+		conn, err = net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", testPort))
+		if err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	conn.Close()
+
+	select {
+	case <-handlerCalled:
+		t.Fatal("the protocol handler ran for a loopback-sourced (healthcheck) connection")
+	case <-time.After(300 * time.Millisecond):
+	}
+	// serve()'s own one-time startup "listening" event is expected and
+	// unrelated to this guard -- only a per-connection "connect" event
+	// would mean the healthcheck got logged as a sensor interaction.
+	for _, ev := range decodeEvents(t, buf.String()) {
+		if ev.Event == "connect" {
+			t.Fatalf("logged a connect event for the container's own healthcheck: %+v", ev)
+		}
 	}
 }
 

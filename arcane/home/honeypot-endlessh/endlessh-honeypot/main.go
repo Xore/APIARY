@@ -151,6 +151,17 @@ func randByte() byte {
 func serve(c net.Conn, log *logger, port int, delay time.Duration) {
 	defer c.Close()
 	host, portText, _ := net.SplitHostPort(c.RemoteAddr().String())
+	// #1677: main()'s -healthcheck dials 127.0.0.1 directly (see main), and
+	// that connection is accepted by this same listener -- a real external
+	// connection can never present that address (it always arrives as
+	// either a real attacker IP via the ":pp" portbridge rule or the tunnel
+	// peer otherwise), so this can only be the container's own healthcheck.
+	// Close it without logging a fake sensor event with a meaningless
+	// source IP; running the tarpit ticker against ourselves would also
+	// hold this goroutine open for no reason.
+	if host == "127.0.0.1" || host == "::1" {
+		return
+	}
 	srcPort, _ := strconv.Atoi(portText)
 	log.emit(event{Port: port, SrcIP: host, SrcPort: srcPort, Event: "connect"})
 

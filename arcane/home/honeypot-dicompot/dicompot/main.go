@@ -225,6 +225,16 @@ func main() {
 			conn := decodeProxy(conn, proxy)
 			defer conn.Close()
 			ip := srcIP(conn)
+			// #1677: the image's own Docker HEALTHCHECK is `nc -z
+			// 127.0.0.1 <port>`, a real TCP connect accepted by this same
+			// listener -- a real external connection can never present
+			// that address (it always arrives as either a real attacker
+			// IP via the ":pp" portbridge rule or the tunnel peer
+			// otherwise), so this can only be the healthcheck probe.
+			// Close it without logging a fake sensor event.
+			if ip == "127.0.0.1" || ip == "::1" {
+				return
+			}
 			log.emit(event{Port: port, SrcIP: ip, Event: "connect"})
 			conn, calledAE, callingAE := peekAETitles(conn)
 			if calledAE != "" || callingAE != "" {
