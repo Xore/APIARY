@@ -5,6 +5,13 @@ root=/var/lib/honeypot-sandbox/requests
 pending="$root/pending"
 rejected="$root/rejected"
 install -d -m 0700 -o root -g root "$pending" "$rejected"
+# apiary-backend's backend-service-mounted (image USER nobody, uid 65534)
+# is what CREATES the *.request files here -- install -d resets the base
+# mode on every run, which collapses any ACL mask back down too (Linux:
+# chmod on a dir with an ACL recomputes the mask from the requested group
+# bits), silently reverting the grant below on this script's very next
+# invocation if it isn't reasserted every time alongside it.
+setfacl -m u:65534:rwx,mask::rwx "$pending" 2>/dev/null || true
 
 exec 9>/run/lock/honeypot-sandbox-web-requests.lock
 flock -n 9 || exit 0

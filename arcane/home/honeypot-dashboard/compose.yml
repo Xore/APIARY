@@ -306,8 +306,15 @@ services:
       - /opt/stacks/apiary/analysis/threat-intel:/geoip:ro
     networks:
       - honeynet
+    # Every *-results dir above is root:root 0700 (same "old Go dashboard
+    # ran as root and bypassed file permissions entirely" gap as backend-
+    # worker-importer's identical comment below describes) -- root +
+    # DAC_READ_SEARCH only, no DAC_OVERRIDE/write capability, matching that
+    # service exactly: this one only ever reads results, same as it does.
+    user: "0:0"
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
+    cap_add: [DAC_READ_SEARCH]
     deploy:
       resources:
         # 256M OOM-killed this container repeatedly against real production
@@ -328,9 +335,19 @@ services:
         # this one runs continuous background loops where that one only
         # answers on-demand requests) and memory to 768M -- the host has
         # 16 cores/91G with 69G free, so there was no real reason either
-        # limit was ever this tight. Re-verify against real load before
-        # assuming 768M/1.0 is itself the final number.
-        limits: {cpus: "1.0", memory: 768M}
+        # limit was ever this tight.
+        #
+        # 768M itself then proved not enough either: confirmed live
+        # (2026-08-22, dmesg cgroup OOM) killed every ~30s on a fresh
+        # restart, anon-rss ~778-782MB every single time -- right at the
+        # 786432KB (768MiB) ceiling, before a single cycle completed. A
+        # fifth loop (threat-intel) had been added since the 768M number
+        # above was set without a further bump, and this container gained
+        # DAC_READ_SEARCH+root just above (a real, if usually small, extra
+        # footprint). 1536M for real headroom this time rather than another
+        # minimum-viable guess -- same "no real reason to keep this tight"
+        # reasoning as the 768M bump itself already gave.
+        limits: {cpus: "1.0", memory: 1536M}
 
   dashboard-next:
     <<: *runtime-defaults

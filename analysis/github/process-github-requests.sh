@@ -45,6 +45,13 @@ owner_args=()
 [[ $EUID -eq 0 ]] && owner_args=(-o root -g root)
 install -d -m 0700 "${owner_args[@]}" "$pending" "$rejected" "$results" "$GITHUB_ANALYSIS_PENDING_DIR"
 export GITHUB_ANALYSIS_PENDING_DIR
+# apiary-backend's backend-service-mounted (image USER nobody, uid 65534)
+# is what CREATES the *.request files here -- install -d resets the base
+# mode on every run, which collapses any ACL mask back down too (Linux:
+# chmod on a dir with an ACL recomputes the mask from the requested group
+# bits), silently reverting the grant below on this script's very next
+# invocation if it isn't reasserted every time alongside it.
+setfacl -m u:65534:rwx,mask::rwx "$pending" 2>/dev/null || true
 
 exec 9>"$GITHUB_ANALYSIS_LOCK"
 flock -n 9 || exit 0

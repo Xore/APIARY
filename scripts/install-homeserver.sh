@@ -1183,6 +1183,68 @@ step_provision_arcane_oidc_secret() {
     "$REPO_DIR/keycloak/provision-arcane-oidc-secret.sh"
 }
 
+step_fix_apiary_backend_permissions() {
+  # apiary-backend's image runs USER nobody (uid 65534) -- deliberately
+  # unprivileged, unlike the retired Go dashboard which ran as root and (its
+  # own compose comment says explicitly) bypassed file permissions entirely.
+  # Every host resource backend-service/backend-service-mounted/backend-
+  # worker-payload-inventory touch was provisioned under that old root-bypass
+  # assumption and never revisited for #1608/#1612/#1622's cutover to this
+  # image. Confirmed live (2026-08-22): `cat /state/dashboard-config.json`
+  # inside hp-apiary-backend itself returned Permission denied -- the
+  # dashboard's own config/users/audit/threat-intel state was unreadable by
+  # the container serving it. Narrow ACL grants (this repo's own existing
+  # precedent -- see sandbox/repair-permissions.sh) rather than running these
+  # two network-reachable services as root: grants exactly nobody's uid the
+  # access it needs, nothing broader. The six honeypot-*/requests/pending
+  # spools get the identical grant at their own point of creation (each
+  # one's install/process script, not here) since those are host directories
+  # this script doesn't own; dashboard-state/dionaea-lib/services-adapter-
+  # socket are plain Docker-managed named volumes with no other natural home.
+  command -v setfacl >/dev/null 2>&1 || apt-get install -y acl
+
+  local dashboard_state dionaea_lib adapter_socket
+  dashboard_state=$(docker volume inspect dashboard-state --format '{{.Mountpoint}}' 2>/dev/null) || return 0
+  dionaea_lib=$(docker volume inspect dionaea-lib --format '{{.Mountpoint}}' 2>/dev/null) || return 0
+  adapter_socket=$(docker volume inspect services-adapter-socket --format '{{.Mountpoint}}' 2>/dev/null) || return 0
+
+  # dashboard-state: config/users/audit/intelligence + script-payloads, all
+  # root:*00 from the old Go dashboard's root-owned writes. Recursive grant
+  # covers what's there today; the default ACL (d:u:...) covers every file
+  # either service creates from here on. Explicit mask on every call --
+  # combining access and default entries in one `-m` invocation was found
+  # live to leave the access mask at `---` (any named entry silently
+  # ineffective) despite the entry itself showing correctly in getfacl.
+  setfacl -R -m u:65534:rwX "$dashboard_state"
+  setfacl -m mask::rwx "$dashboard_state"
+  setfacl -m d:u:65534:rwx "$dashboard_state"
+  setfacl -m d:mask::rwx "$dashboard_state"
+
+  # dionaea-lib: read-only for backend-service/backend-service-mounted/
+  # backend-worker-payload-inventory's PAYLOAD_DIRS reconciliation --
+  # read+traverse only, dionaea itself is the only writer. Host-created
+  # (owner xore:xore, 0700), not root -- same fix either way.
+  setfacl -R -m u:65534:rX "$dionaea_lib"
+  setfacl -m mask::rx "$dionaea_lib"
+  setfacl -m d:u:65534:rx "$dionaea_lib"
+  setfacl -m d:mask::rx "$dionaea_lib"
+
+  # services-adapter-socket: control.sock is recreated by services-adapter
+  # (runs as root) on every restart, so a grant on the socket file itself
+  # doesn't survive -- the default ACL on its parent directory is what
+  # actually persists this across restarts (a new file created in a
+  # directory with a default ACL inherits it as its initial ACL). Also
+  # grant the current socket directly so this step is effective immediately
+  # rather than only after the next services-adapter restart.
+  setfacl -m d:u:65534:rw "$adapter_socket"
+  setfacl -m d:mask::rw "$adapter_socket"
+  [[ -S "$adapter_socket/control.sock" ]] && {
+    setfacl -m u:65534:rw "$adapter_socket/control.sock"
+    setfacl -m mask::rw "$adapter_socket/control.sock"
+  }
+  true
+}
+
 step_auth_events_worker_start() {
   # #1505: provisioning (materializing the directory, `docker compose up`)
   # is now step_arcane_import_stacks/step_start_remaining_stacks' job, same
@@ -1766,6 +1828,7 @@ run_step start-remaining       "Start remaining sensor/dashboard stacks" step_st
 
 run_step provision-events-poller-secrets "Grant auth-events-poller view-events + write its secret" step_provision_events_poller_secrets
 run_step provision-dashboard-oidc-secret "Write dashboard's OIDC client secret from Keycloak" step_provision_dashboard_oidc_secret
+run_step fix-apiary-backend-permissions "Grant apiary-backend's nobody uid ACL access to dashboard-state/dionaea-lib/services-adapter-socket" step_fix_apiary_backend_permissions
 run_step provision-arcane-oidc-secret "Sync Arcane's real OIDC client secret from Keycloak, re-up" step_provision_arcane_oidc_secret
 run_step auth-events-worker-start "Start auth-events-worker" step_auth_events_worker_start
 
