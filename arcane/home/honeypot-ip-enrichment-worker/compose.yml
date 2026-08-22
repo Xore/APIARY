@@ -9,6 +9,19 @@
 # ip-enrichment-worker/main.go's own package doc comment for the full
 # design. Deployed as /opt/stacks/honeypot-ip-enrichment-worker.
 #
+# Retired (#1649): #1610 already ported this into backend-service's
+# ip_enrichment module, wired live as WORKER_LOOPS=ip-enrichment on
+# backend-worker-enrichment in the honeypot-dashboard stack -- same
+# LOGS_DIR/OUT_DIR/STATE_DIR host paths, confirmed writing fresh
+# logs/enriched/*.json. The two had been dual-writing the SAME
+# STATE_DIR and OUT_DIR files for as long as backend-worker-enrichment
+# has been up -- harmless in practice (each cycle's output is
+# idempotent), but not something to leave running once one side is
+# confirmed correct. profiles: ["legacy"] keeps this container defined
+# for rollback without Arcane's routine gitops-sync trying to restart
+# it -- same reasoning as arcane/home/honeypot-dashboard/compose.yml's
+# own `dashboard` service.
+#
 # No network of any kind: this only ever reads/writes local files, the same
 # "no access beyond what's needed" boundary the dashboard's own Docker
 # socket exclusion follows.
@@ -28,6 +41,7 @@ services:
     build: ./ip-enrichment-worker
     container_name: hp-ip-enrichment-worker
     restart: unless-stopped
+    profiles: ["legacy"]
     network_mode: none
     environment:
       - LOGS_DIR=/logs

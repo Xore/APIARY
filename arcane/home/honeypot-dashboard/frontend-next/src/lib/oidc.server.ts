@@ -41,15 +41,28 @@ async function clientSecret(): Promise<string> {
 
 export async function oidcConfig(): Promise<oidc.Configuration> {
   if (!configPromise) {
+    // A failed attempt must not stick: `configPromise` held a permanently-
+    // rejected promise here before this fix, because `if (!configPromise)`
+    // is false for ANY assigned promise, resolved or rejected -- one
+    // transient failure (confirmed live: a real EACCES on the OIDC client
+    // secret file, since fixed separately, but Keycloak/Redis being
+    // briefly unreachable at startup would hit this identically) poisoned
+    // every login attempt for the rest of the process's life, since
+    // nothing ever reset the cache back to null. Clearing it on rejection
+    // lets the next request retry fresh instead of replaying the same
+    // cached error forever.
     configPromise = (async () => {
       const issuer = new URL(process.env.OIDC_ISSUER_URL ?? 'https://auth.example.invalid/realms/apiary')
       return oidc.discovery(issuer, process.env.OIDC_CLIENT_ID ?? 'apiary-dashboard', await clientSecret())
-    })()
+    })().catch((err) => {
+      configPromise = null
+      throw err
+    })
   }
   return configPromise
 }
 
-function externalURL(): string {
+export function externalURL(): string {
   return (process.env.OIDC_EXTERNAL_URL ?? 'http://127.0.0.1:4173').replace(/\/$/, '')
 }
 

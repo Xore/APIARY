@@ -6,12 +6,13 @@
 
 use elasticsearch::{
     cluster::ClusterHealthParts,
-    http::transport::Transport,
+    http::transport::{SingleNodeConnectionPool, TransportBuilder},
     params::{OpType, Refresh},
     BulkOperation, BulkParts, Elasticsearch, SearchParts,
 };
 use serde_json::Value;
 use std::collections::HashSet;
+use std::time::Duration;
 
 pub const EVENT_INDICES: &[&str] = &["honeypot-v2-*", "suricata-v2-*"];
 
@@ -62,7 +63,23 @@ pub enum WriteError {
 
 impl Es {
     pub fn connect(url: &str) -> anyhow::Result<Self> {
-        let transport = Transport::single_node(url)?;
+        // Transport::single_node's own default carries no request timeout at
+        // all -- confirmed live during #1628's preflight: backend-worker's
+        // /healthz calls this same shared client's ping() (main.rs's healthz
+        // handler), and a slow/stuck query from any of its four bundled
+        // worker loops (correlator's aggregation was hitting Elasticsearch's
+        // own too_many_buckets_exception on every cycle against real data,
+        // plausibly saturating the cluster's search queue for a while) could
+        // therefore hang ping() indefinitely too, since nothing ever timed
+        // out client-side -- the container never crashed, /healthz just
+        // never returned, and something external kept restarting it every
+        // few minutes on the resulting healthcheck failure. 30s bounds the
+        // worst case without punishing legitimately slower real-data
+        // queries the way CI's fixture-sized indices never needed to.
+        let conn_pool = SingleNodeConnectionPool::new(url.parse()?);
+        let transport = TransportBuilder::new(conn_pool)
+            .timeout(Duration::from_secs(30))
+            .build()?;
         Ok(Self {
             client: Elasticsearch::new(transport),
         })
