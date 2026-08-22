@@ -26,6 +26,54 @@ func TestEmittedSensorFieldMatchesLogDirectoryName(t *testing.T) {
 	}
 }
 
+// TestServeSkipsLoggingOwnHealthcheck covers #1677: main()'s -healthcheck
+// mode dials 127.0.0.1 directly, and that connection is accepted by this
+// same listener as real traffic -- a real external connection can never
+// present that address (it always arrives as either a real attacker IP via
+// the ":pp" portbridge rule or the tunnel peer otherwise), so this can only
+// be the container's own healthcheck. Uses a real TCP loopback pair (not
+// net.Pipe, whose RemoteAddr isn't a real host:port) so RemoteAddr()
+// genuinely reports 127.0.0.1.
+func TestServeSkipsLoggingOwnHealthcheck(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		c, err := ln.Accept()
+		if err == nil {
+			accepted <- c
+		}
+	}()
+
+	client, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer client.Close()
+	server := <-accepted
+
+	buf := &syncBuffer{}
+	log := &logger{out: buf}
+	done := make(chan struct{})
+	go func() {
+		serve(server, log, 2222, 5*time.Millisecond)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("serve() did not return for a loopback-sourced connection")
+	}
+	if len(buf.data) != 0 {
+		t.Fatalf("logged an event for the container's own healthcheck: %s", buf.data)
+	}
+}
+
 func TestRandomBannerLineNeverStartsWithSSHPrefix(t *testing.T) {
 	for i := 0; i < 500; i++ {
 		line := randomBannerLine()

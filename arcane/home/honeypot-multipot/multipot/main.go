@@ -286,6 +286,16 @@ func serve(s service, log *logger, proxy bool) {
 			// attacker address before anything reads/logs the connection.
 			conn = decodeProxy(conn, proxy)
 			defer conn.Close()
+			// #1677: main()'s -healthcheck dials 127.0.0.1:6379 directly,
+			// and that connection is accepted by this same listener as real
+			// traffic -- a real external connection can never present that
+			// address (it always arrives as either a real attacker IP via
+			// the ":pp" portbridge rule or the tunnel peer otherwise), so
+			// this can only be the container's own healthcheck. Close it
+			// without logging a fake sensor event.
+			if ip := srcIP(conn); ip == "127.0.0.1" || ip == "::1" {
+				return
+			}
 			// Hard cap on how long any single attacker can hold a connection.
 			conn.SetDeadline(time.Now().Add(45 * time.Second))
 			sl := &sessionLogger{logger: log, id: newSessionID()}

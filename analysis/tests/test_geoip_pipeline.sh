@@ -223,6 +223,22 @@ result="$(simulate_flow "$tmp/dionaea_incident.json")"
   fail "dionaea_incident's nested remote_ip was not promoted to source.ip (got: '$result')"
 pass "dionaea_incident's nested honeypot.data.connection.remote_ip is promoted to source.ip"
 
+# #1677 defense-in-depth: several sensors' own Docker HEALTHCHECK dials
+# 127.0.0.1 directly, and that self-connection can get logged with a
+# meaningless loopback src_ip -- fixed at the source for the sensors this
+# repo owns, but not every sensor's own binary is something this repo can
+# patch (third-party C/Python images). Never let source.ip end up as a
+# loopback address regardless of which branch above set it, so an
+# unpatched or future sensor's self-probe can't leak into the dashboard
+# looking like a real (if meaningless) attacker IP.
+cat > "$tmp/loopback_src.json" <<'EOF'
+{"docs":[{"_source":{"honeypot":{"sensor":"sentrypeer","src_ip":"127.0.0.1"}}}]}
+EOF
+result="$(simulate_flow "$tmp/loopback_src.json")"
+[ "$result" = "  " ] ||
+  fail "a loopback source.ip was not scrubbed (got: '$result')"
+pass "a loopback source.ip is scrubbed regardless of which sensor produced it"
+
 simulate_hash() {
   # simulate_hash <fixture-file> -> prints file.hash.sha256 (or empty)
   curl -fsS -X POST "$es_url/_ingest/pipeline/geoip-honeypot/_simulate" \

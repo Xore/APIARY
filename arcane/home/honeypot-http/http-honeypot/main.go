@@ -258,6 +258,17 @@ type server struct {
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// #1677: this binary's own -healthcheck dials 127.0.0.1 directly (see
+	// main()) -- a real external request can never present that address
+	// (it either arrives with a genuine attacker IP via portbridge's ":pp"
+	// rule, or as the tunnel peer via a plain rule), so this can only be
+	// the container's own healthcheck. Answer it without logging a fake
+	// sensor event with a meaningless source IP.
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && (host == "127.0.0.1" || host == "::1") {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 64<<10)) // cap at 64 KiB
 	r.Body.Close()
 
