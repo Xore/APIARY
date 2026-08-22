@@ -336,6 +336,10 @@ services:
     <<: *runtime-defaults
     build: ./frontend-next
     image: apiary-dashboard-next:latest
+    # build: same "never pushed to any registry, Arcane's redeploy pulls
+    # unconditionally" issue as apiary-backend:latest above -- this one has
+    # its own build: right here though, so always build instead of pull.
+    pull_policy: build
     container_name: hp-dashboard-next
     restart: unless-stopped
     depends_on:
