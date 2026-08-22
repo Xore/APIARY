@@ -68,6 +68,27 @@ RESULTS_DIR = Path(os.environ.get("GHIDRA_RESULTS_DIR", "/ghidra-results"))
 SAMPLES_DIR = Path(os.environ.get(
     "GHIDRA_SAMPLES_DIR", "/var/lib/honeypot-sandbox/inbox/samples"))
 
+
+def _reassert_dir_perms(path: Path) -> None:
+    """chmod 0700 plus the apiary-backend nobody-uid ACL grant, together.
+
+    apiary-backend's backend-service-mounted (image USER nobody, uid 65534)
+    is what CREATES the *.request files under REQUEST_DIR/the Rev-Deck
+    request dir -- os.chmod on every drain() run recomputes the ACL mask
+    from the requested group bits (Linux: chmod on a dir with an ACL
+    recalculates the mask), silently reverting any grant set outside this
+    process the moment this runs again. Both have to happen together, every
+    time, or the next drain() undoes the grant.
+    """
+    os.chmod(path, 0o700)
+    try:
+        subprocess.run(
+            ["setfacl", "-m", "u:65534:rwx,mask::rwx", str(path)],
+            check=False, capture_output=True,
+        )
+    except OSError:
+        pass  # setfacl/acl package not installed -- degrade to chmod-only, don't crash drain()
+
 # #1114: the dashboard's Ghidra/Rev-Deck submission path deliberately never
 # writes sample content -- only sandbox/submit-capture.sh's Linux-sandbox flow
 # ever populates SAMPLES_DIR. A Ghidra/Rev-Deck request whose sample was never
@@ -1876,7 +1897,7 @@ def drain_revdeck() -> int:
     results_dir = Path(REVDECK_RESULTS_DIR)
     request_dir.mkdir(parents=True, exist_ok=True)
     results_dir.mkdir(parents=True, exist_ok=True)
-    os.chmod(request_dir, 0o700)
+    _reassert_dir_perms(request_dir)
     os.chmod(results_dir, 0o700)
 
     processed = 0
@@ -2068,7 +2089,7 @@ def analyse_one(client: GhidraClient, sha: str, sample: Path,
 def drain() -> int:
     REQUEST_DIR.mkdir(parents=True, exist_ok=True)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    os.chmod(REQUEST_DIR, 0o700)
+    _reassert_dir_perms(REQUEST_DIR)
     os.chmod(RESULTS_DIR, 0o700)
 
     pending = sorted(REQUEST_DIR.glob("*.request"))
