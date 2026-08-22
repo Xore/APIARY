@@ -88,6 +88,10 @@ export async function beginLogin(returnTo: string): Promise<{ redirect: string }
   return { redirect: url.href }
 }
 
+function dashboardClientId(): string {
+  return process.env.OIDC_CLIENT_ID ?? 'apiary-dashboard'
+}
+
 export async function completeLogin(requestUrl: URL): Promise<{
   sub: string
   username: string
@@ -112,7 +116,13 @@ export async function completeLogin(requestUrl: URL): Promise<{
   const claims = tokens.claims()
   if (!claims?.sub) return null
   const username = String(claims.preferred_username ?? claims.sub)
-  const roles = (claims.realm_access as { roles?: string[] } | undefined)?.roles ?? []
+  // Dashboard roles are the apiary-dashboard client's own roles, not realm
+  // roles (docs/KEYCLOAK-CUTOVER.md "Claims and sessions") — they live under
+  // resource_access.<client id>.roles, not realm_access.roles.
+  const resourceAccess = claims.resource_access as
+    | Record<string, { roles?: string[] } | undefined>
+    | undefined
+  const roles = resourceAccess?.[dashboardClientId()]?.roles ?? []
   return {
     sub: String(claims.sub),
     username,

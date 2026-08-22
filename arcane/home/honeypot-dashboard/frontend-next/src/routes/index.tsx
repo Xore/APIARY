@@ -428,8 +428,8 @@ function Overview() {
             <h2>Attack origins — live geographic view</h2>
             <AttackMap points={dashboard ? dashboard.map_points : null} />
             <p className="note">
-              Approximate geolocation only. One marker per city, accumulating every IP that geolocated there; radius is weighted by
-              event count. Map data © OpenStreetMap contributors.
+              Approximate geolocation only. One marker per city, accumulating every IP that geolocated there. Map data ©
+              OpenStreetMap contributors.
             </p>
           </div>
           <div className="section-heading">
