@@ -531,6 +531,20 @@ services:
       - /opt/stacks/apiary/logs:/logs:ro
       - /opt/stacks/apiary/logs/enriched:/logs/enriched:rw
       - /opt/stacks/apiary/state/ip-enrichment-worker:/state/ip-enrichment-worker:rw
+    # /logs/enriched is github-deploy-runner:github-deploy-runner (994:979,
+    # Arcane's own deploy-time provisioning owner) on disk, same as the
+    # dashboard-secrets dir dashboard-next mounts above. This image runs
+    # unprivileged (nobody), so without group membership every open() here
+    # fails EACCES -- confirmed live: every single source failed to open
+    # its output file from the container's first log line onward, silently
+    # (WARN, not fatal), so the container reported healthy the entire time
+    # while shipping zero enrichment output and every dependent sensor
+    # (everything Filebeat tails from /logs/enriched/*.json -- see
+    # honeypot-elk/analysis/filebeat.yml's own #746 comment for the full
+    # list) went STALE the moment the retired Go worker's last write aged
+    # out. Same group_add fix as dashboard-next's identical EACCES above.
+    group_add:
+      - "979"
     security_opt:
       - no-new-privileges:true
     cap_drop: [ALL]
