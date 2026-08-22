@@ -576,10 +576,10 @@ function Overview() {
             <a className="section-link" href="/commands">Review all commands →</a>
           </div>
           <Tbl title="Top credentials (user / pass)" rows={dashboard ? dashboard.top_creds : null} hint="authentication events only" />
-          <Tbl title="Top commands" rows={dashboard ? dashboard.top_commands : null} hint="no shell commands captured yet — fed by cowrie and multipot sessions" />
-          <Tbl title="SSH/telnet clients" rows={dashboard ? dashboard.clients : null} hint="no client banners yet — fed by cowrie" />
-          <Tbl title="Top fingerprints (HASSH / JA3 / JA4 / User-Agent)" rows={dashboard ? dashboard.fingerprints : null} half hint="no protocol or client fingerprints captured yet" />
-          <Tbl title="Top HTTP paths" rows={dashboard ? dashboard.top_paths : null} half hint="no web probes yet — fed by http-honeypot and tanner" />
+          <Tbl title="Top commands" rows={dashboard ? dashboard.top_commands : null} hint="No shell commands captured yet — fed by cowrie and multipot sessions." />
+          <Tbl title="SSH/telnet clients" rows={dashboard ? dashboard.clients : null} hint="No client banners yet — fed by cowrie." />
+          <Tbl title="Top fingerprints (HASSH / JA3 / JA4 / User-Agent)" rows={dashboard ? dashboard.fingerprints : null} half hint="No protocol or client fingerprints captured yet." />
+          <Tbl title="Top HTTP paths" rows={dashboard ? dashboard.top_paths : null} half hint="No web probes yet — fed by http-honeypot and tanner." />
           <div className="card wide" id="os-distribution-card">
             <h2>Attacker OS distribution</h2>
             <p className="note">p0f's passive OS fingerprint, resolved from the portbridge tunnel join — a best-effort guess, not certainty.</p>
@@ -626,7 +626,7 @@ function Overview() {
                 <span className="skeleton-line" aria-hidden="true" />
               </>
             ) : dashboard.payloads.length === 0 ? (
-              <p className="empty">no payloads captured yet — cowrie logs downloads/uploads during a shell session</p>
+              <p className="empty">No payloads captured yet — cowrie logs downloads/uploads during a shell session.</p>
             ) : (
               <div className="card__scroll">
                 <table className="data-table">

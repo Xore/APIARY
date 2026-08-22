@@ -47,7 +47,7 @@ function SearchPage() {
     <>
       <InvestigateHeader
         label="Investigate"
-        title="search results"
+        title="Search results"
         subtitle="Grouped matches across sources, sessions, payloads, commands, credentials, fingerprints and signatures."
         chips={result ? <span className="chip">{result.total.toLocaleString('en-US')} matches</span> : undefined}
       />

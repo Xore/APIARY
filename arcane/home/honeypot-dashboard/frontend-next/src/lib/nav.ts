@@ -36,6 +36,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: 'Executed commands', to: '/commands', icon: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>' },
       { label: 'Sensor detail', to: '/sensors', icon: '<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>' },
       { label: 'Session recordings', to: '/recordings', icon: '<circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/>' },
+      { label: 'Hash / IOC lookup', to: '/investigate/lookup', icon: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>' },
     ],
   },
   {

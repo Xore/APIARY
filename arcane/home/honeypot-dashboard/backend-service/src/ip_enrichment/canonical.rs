@@ -137,7 +137,12 @@ fn promote_cowrie_fields(e: &mut Value) -> bool {
             }
         }
         "cowrie.command.input" | "cowrie.command.failed" | "cowrie.command.success" | "cowrie.session.input" => {
-            let cmd = str(e, "input");
+            // #1565: trailing whitespace/CRLF in the raw terminal input
+            // (present on some capture paths, not others, for what's
+            // otherwise the same command) split one command into two
+            // identical-looking terms-agg buckets with matching counts —
+            // trim so "enable" and "enable " collapse into one bucket.
+            let cmd = str(e, "input").trim().to_string();
             if !cmd.is_empty() {
                 e["canonical_command"] = Value::from(cmd);
                 changed = true;
@@ -262,7 +267,7 @@ fn promote_cisco_asa_fields(e: &mut Value) -> bool {
     let mut changed = false;
     let kind = str(e, "event");
     if kind == "cve_2018_0101_payload" || kind == "post" {
-        let body = str(e, "data");
+        let body = str(e, "data").trim().to_string();
         if !body.is_empty() {
             e["canonical_command"] = Value::from(body);
             changed = true;
@@ -301,7 +306,7 @@ fn promote_multipot_fields(e: &mut Value) -> bool {
         changed = true;
     }
     if kind != "http_request" {
-        let cmd = str(e, "command");
+        let cmd = str(e, "command").trim().to_string();
         if !cmd.is_empty() {
             e["canonical_command"] = Value::from(cmd);
             changed = true;
@@ -335,7 +340,7 @@ fn promote_beelzebub_fields(e: &mut Value) -> bool {
 fn promote_citrix_fields(e: &mut Value) -> bool {
     let mut changed = false;
     if str(e, "event") == "cve_2019_19781_payload" {
-        let body = str(e, "data");
+        let body = str(e, "data").trim().to_string();
         if !body.is_empty() {
             e["canonical_command"] = Value::from(body);
             changed = true;
@@ -440,6 +445,16 @@ mod tests {
         assert_eq!(e["password"], "toor");
         assert_eq!(e["canonical_user"], "root");
         assert_eq!(e["canonical_pass"], "toor");
+    }
+
+    #[test]
+    fn cowrie_command_input_trims_trailing_whitespace() {
+        // #1565: "enable" and "enable " (trailing space from some capture
+        // paths) were bucketing as two distinct top-commands terms with
+        // identical counts -- trim so they collapse into one value.
+        let mut e = json!({"eventid": "cowrie.command.input", "input": "enable \r\n"});
+        assert!(promote_canonical_fields("cowrie", &mut e));
+        assert_eq!(e["canonical_command"], "enable");
     }
 
     #[test]

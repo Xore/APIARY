@@ -49,6 +49,7 @@ import { Route as ExportPortbridgeManualBlackholeDottxtRouteImport } from './rou
 import { Route as GhidraShaRouteImport } from './routes/ghidra.$sha'
 import { Route as GithubAnalysisShaRouteImport } from './routes/github-analysis.$sha'
 import { Route as InvestigateClusterRouteImport } from './routes/investigate.cluster'
+import { Route as InvestigateLookupRouteImport } from './routes/investigate.lookup'
 import { Route as PayloadAnalysisHashRouteImport } from './routes/payload-analysis.$hash'
 import { Route as PayloadWorkbenchResultsRouteImport } from './routes/payload-workbench.results'
 import { Route as RevdeckShaRouteImport } from './routes/revdeck.$sha'
@@ -266,6 +267,11 @@ const InvestigateClusterRoute = InvestigateClusterRouteImport.update({
   path: '/investigate/cluster',
   getParentRoute: () => rootRouteImport,
 } as any)
+const InvestigateLookupRoute = InvestigateLookupRouteImport.update({
+  id: '/investigate/lookup',
+  path: '/investigate/lookup',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PayloadAnalysisHashRoute = PayloadAnalysisHashRouteImport.update({
   id: '/payload-analysis/$hash',
   path: '/payload-analysis/$hash',
@@ -385,6 +391,7 @@ export interface FileRoutesByFullPath {
   '/ghidra/$sha': typeof GhidraShaRoute
   '/github-analysis/$sha': typeof GithubAnalysisShaRoute
   '/investigate/cluster': typeof InvestigateClusterRoute
+  '/investigate/lookup': typeof InvestigateLookupRoute
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/revdeck/$sha': typeof RevdeckShaRoute
@@ -442,6 +449,7 @@ export interface FileRoutesByTo {
   '/ghidra/$sha': typeof GhidraShaRoute
   '/github-analysis/$sha': typeof GithubAnalysisShaRoute
   '/investigate/cluster': typeof InvestigateClusterRoute
+  '/investigate/lookup': typeof InvestigateLookupRoute
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/revdeck/$sha': typeof RevdeckShaRoute
@@ -500,6 +508,7 @@ export interface FileRoutesById {
   '/ghidra/$sha': typeof GhidraShaRoute
   '/github-analysis/$sha': typeof GithubAnalysisShaRoute
   '/investigate/cluster': typeof InvestigateClusterRoute
+  '/investigate/lookup': typeof InvestigateLookupRoute
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/revdeck/$sha': typeof RevdeckShaRoute
@@ -559,6 +568,7 @@ export interface FileRouteTypes {
     | '/ghidra/$sha'
     | '/github-analysis/$sha'
     | '/investigate/cluster'
+    | '/investigate/lookup'
     | '/payload-analysis/$hash'
     | '/payload-workbench/results'
     | '/revdeck/$sha'
@@ -616,6 +626,7 @@ export interface FileRouteTypes {
     | '/ghidra/$sha'
     | '/github-analysis/$sha'
     | '/investigate/cluster'
+    | '/investigate/lookup'
     | '/payload-analysis/$hash'
     | '/payload-workbench/results'
     | '/revdeck/$sha'
@@ -673,6 +684,7 @@ export interface FileRouteTypes {
     | '/ghidra/$sha'
     | '/github-analysis/$sha'
     | '/investigate/cluster'
+    | '/investigate/lookup'
     | '/payload-analysis/$hash'
     | '/payload-workbench/results'
     | '/revdeck/$sha'
@@ -729,6 +741,7 @@ export interface RootRouteChildren {
   ExportPortbridgeManualBlackholeDottxtRoute: typeof ExportPortbridgeManualBlackholeDottxtRoute
   GhidraShaRoute: typeof GhidraShaRoute
   InvestigateClusterRoute: typeof InvestigateClusterRoute
+  InvestigateLookupRoute: typeof InvestigateLookupRoute
   PayloadAnalysisHashRoute: typeof PayloadAnalysisHashRoute
   PayloadWorkbenchResultsRoute: typeof PayloadWorkbenchResultsRoute
   SandboxJobRoute: typeof SandboxJobRoute
@@ -1027,6 +1040,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InvestigateClusterRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/investigate/lookup': {
+      id: '/investigate/lookup'
+      path: '/investigate/lookup'
+      fullPath: '/investigate/lookup'
+      preLoaderRoute: typeof InvestigateLookupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/payload-analysis/$hash': {
       id: '/payload-analysis/$hash'
       path: '/payload-analysis/$hash'
@@ -1208,6 +1228,7 @@ const rootRouteChildren: RootRouteChildren = {
     ExportPortbridgeManualBlackholeDottxtRoute,
   GhidraShaRoute: GhidraShaRoute,
   InvestigateClusterRoute: InvestigateClusterRoute,
+  InvestigateLookupRoute: InvestigateLookupRoute,
   PayloadAnalysisHashRoute: PayloadAnalysisHashRoute,
   PayloadWorkbenchResultsRoute: PayloadWorkbenchResultsRoute,
   SandboxJobRoute: SandboxJobRoute,

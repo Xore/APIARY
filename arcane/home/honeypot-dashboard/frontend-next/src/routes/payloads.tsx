@@ -345,7 +345,7 @@ function Payloads() {
           {rows === null ? (
             <SkeletonCards count={6} />
           ) : rows.length === 0 ? (
-            <p className="empty">no payloads captured yet</p>
+            <p className="empty">No payloads captured yet.</p>
           ) : (
             rows.map((row) => <PayloadCard key={row.Hash} row={row} badge={badgeFor(row.Hash)} />)
           )}
