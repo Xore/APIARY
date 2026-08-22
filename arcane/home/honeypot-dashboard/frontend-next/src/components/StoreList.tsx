@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from './Investigate'
 import type { JsonRecord } from '../lib/json'
+import { formatTimestamp } from '../lib/time'
 
 export type StoreRow = JsonRecord
 export type StorePage<Row = StoreRow> = { total: number; rows: Row[] }
@@ -19,6 +20,8 @@ export function StoreListPage<Row = StoreRow>({
   inspectorTitle,
   chipNoun,
   inspectorExtra,
+  beforeTable,
+  extraChips,
 }: {
   fetchPage: (input: { data: { offset: number } }) => Promise<StorePage<Row> | null>
   label: string
@@ -29,6 +32,11 @@ export function StoreListPage<Row = StoreRow>({
   inspectorTitle?: string
   chipNoun: string
   inspectorExtra?: (row: Row) => React.ReactNode
+  /** Rendered between the header and the table — KPI tile rows,
+   * aggregation cards, filter bars (#1653 fidelity restorations). */
+  beforeTable?: React.ReactNode
+  /** Extra chips next to the running-total chip. */
+  extraChips?: React.ReactNode
 }) {
   const [rows, setRows] = useState<Row[] | null>(null)
   const [total, setTotal] = useState(0)
@@ -64,8 +72,14 @@ export function StoreListPage<Row = StoreRow>({
         label={label}
         title={title}
         subtitle={subtitle}
-        chips={<span className="chip">{total.toLocaleString('en-US')} {chipNoun}</span>}
+        chips={
+          <>
+            <span className="chip">{total.toLocaleString('en-US')} {chipNoun}</span>
+            {extraChips}
+          </>
+        }
       />
+      {beforeTable}
       <MasterDetailTable
         rows={rows}
         columns={columns}
@@ -91,7 +105,7 @@ export function num(row: StoreRow, key: string): number {
 }
 
 export function when(iso: string): string {
-  return iso.replace('T', ' ').slice(0, 19)
+  return formatTimestamp(iso)
 }
 
 // The promoted top-level file.hash.sha256 es_importer.rs writes onto every

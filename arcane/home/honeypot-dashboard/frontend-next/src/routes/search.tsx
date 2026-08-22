@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
 
 type Hit = { label: string; count: number; url: string }
-type Group = { title: string; hits: Hit[] }
+type Group = { title: string; hits: Hit[]; more: number; more_url: string }
 type SearchResult = { query: string; redirect: string | null; groups: Group[]; total: number }
 
 const searchFn = createServerFn({ method: 'GET' })
@@ -59,7 +59,7 @@ function SearchPage() {
         }}
       >
         <input
-          className="input"
+          className="form-input"
           type="search"
           placeholder="IP, session, hash, credential, command…"
           value={query}
@@ -77,8 +77,31 @@ function SearchPage() {
         </div>
       ) : null}
       {result && result.total === 0 ? (
+        /* The Go zero-state (search.html:57-66): explain what was searched
+           and hand the operator pivots out, never a bare sentence. */
         <div className="card wide">
-          <p className="empty">No matches for “{result.query}” in the current window.</p>
+          <div className="empty-state">
+            <h3>Nothing matched “{result.query}”</h3>
+            <p>
+              No sensor event, session, payload, command, credential, detection, fingerprint, decoy, or sandbox run
+              mentions this value. Sensors only hold the retention window configured for this deployment — an older
+              indicator may have aged out.
+            </p>
+            <div className="filters">
+              <Link className="chip" to="/events">
+                browse all events
+              </Link>
+              <Link className="chip" to="/ips">
+                attack sources
+              </Link>
+              <Link className="chip" to="/payloads">
+                captured payloads
+              </Link>
+              <Link className="chip" to="/history" search={{ q: result.query }}>
+                search Elasticsearch history
+              </Link>
+            </div>
+          </div>
         </div>
       ) : null}
       {result?.groups.map((group) => (
@@ -96,6 +119,14 @@ function SearchPage() {
               ))}
             </tbody>
           </table>
+          {group.more > 0 ? (
+            /* Overflow past the 8-per-group cap (search.html:51). */
+            <p className="note">
+              <a className="lnk" href={group.more_url}>
+                {group.more.toLocaleString('en-US')} more →
+              </a>
+            </p>
+          ) : null}
         </div>
       ))}
     </>

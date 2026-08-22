@@ -10,6 +10,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import type { JsonRecord } from '../lib/json'
+import { formatTimestamp } from '../lib/time'
 
 type Kv = { key: string; count: number }
 
@@ -62,7 +63,7 @@ export const Route = createFileRoute('/investigate/cluster')({
 })
 
 const RECORD_COLUMNS: Column<EventRow>[] = [
-  { header: 'time', render: (row) => row.time.replace('T', ' ').slice(0, 19) },
+  { header: 'time', render: (row) => formatTimestamp(row.time) },
   { header: 'sensor', render: (row) => <span className="badge badge--muted">{row.sensor}</span> },
   { header: 'detail', className: 'v', render: (row) => row.detail || row.proto },
   {
@@ -97,10 +98,16 @@ function InvestigateCluster() {
   const { first } = Route.useLoaderData()
   const { kind, value } = Route.useSearch()
   const [data, setData] = useState<ClusterCorrelation | null | 'missing'>(null)
+  // Snapshot time for the header's "generated" chip — the Go shell stamped
+  // .Generated at render time (intel.html's cluster-correlation header),
+  // and fetch-arrival is this tier's equivalent moment.
+  const [generated, setGenerated] = useState('')
   useEffect(() => {
     let cancelled = false
     first.then((result) => {
-      if (!cancelled) setData(result ?? 'missing')
+      if (cancelled) return
+      setData(result ?? 'missing')
+      setGenerated(new Date().toISOString())
     })
     return () => {
       cancelled = true
@@ -108,9 +115,12 @@ function InvestigateCluster() {
   }, [first])
 
   const backChip = (
-    <Link className="chip" to="/clusters">
-      &larr; clusters
-    </Link>
+    <>
+      <Link className="chip" to="/clusters">
+        &larr; clusters
+      </Link>
+      {generated ? <span className="chip">generated {formatTimestamp(generated)}</span> : null}
+    </>
   )
 
   if (data === 'missing') {
@@ -154,9 +164,14 @@ function InvestigateCluster() {
           </div>
         </div>
       ) : null}
-      {correlation && correlation.tunnel_os_guesses.length > 0 ? (
+      {correlation ? (
         <p className="note">
-          p0f OS guesses seen across this cluster&rsquo;s tunnel connections: {correlation.tunnel_os_guesses.join(', ')}.
+          {correlation.truncated
+            ? `Showing the ${correlation.records.length} most recent of ${correlation.total.toLocaleString('en-US')} total matches.`
+            : 'Newest first.'}
+          {correlation.tunnel_os_guesses.length > 0
+            ? ` p0f OS guesses seen across this cluster’s tunnel connections: ${correlation.tunnel_os_guesses.join(', ')}.`
+            : ''}
         </p>
       ) : null}
       <MiniTable title="Sensors" rows={correlation ? correlation.sensors : []} />

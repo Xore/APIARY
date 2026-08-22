@@ -1,11 +1,12 @@
 // Session detail — one attacker session's whole story, chronologically:
 // summary chips, curated attack-sequence detections, per-session
 // leaderboards, ATT&CK techniques, and the full event list.
-import { createFileRoute } from '@tanstack/react-router'
+import { Link, createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import type { JsonRecord } from '../lib/json'
+import { formatTimestamp } from '../lib/time'
 
 type Kv = { key: string; count: number }
 type Technique = { id: string; count: number; url: string }
@@ -80,7 +81,7 @@ export const Route = createFileRoute('/sessions/$id')({
 })
 
 const EVENT_COLUMNS: Column<EventRow>[] = [
-  { header: 'time', render: (row) => row.time.replace('T', ' ').slice(0, 19) },
+  { header: 'time', render: (row) => formatTimestamp(row.time) },
   { header: 'sensor', render: (row) => <span className="badge badge--muted">{row.sensor}</span> },
   { header: 'detail', className: 'v', render: (row) => row.detail || row.proto },
   {
@@ -261,15 +262,35 @@ function SessionPage() {
         title={`Session ${id.slice(0, 24)}`}
         subtitle="Everything this attacker session did, in order — commands, credentials, payloads, and the derived behavior context."
         chips={
-          detail ? (
-            <>
-              <span className="chip">{detail.total.toLocaleString('en-US')} events</span>
-              <span className="chip">{detail.ip}{detail.country ? ` · ${detail.country}` : ''}</span>
-              <span className="chip">
-                {detail.first.replace('T', ' ').slice(0, 19)} → {detail.last.replace('T', ' ').slice(11, 19)}
-              </span>
-            </>
-          ) : undefined
+          <>
+            {/* Quick pivots, session.html:13 — back to the explorer, the
+                attacker's profile, this session's filtered event view, and
+                the session-scoped CSV export (exports.rs events_csv accepts
+                the same session= pivot filter as /api/v1/events). */}
+            <Link className="chip" to="/events">
+              ← event explorer
+            </Link>
+            {detail && detail.ip ? (
+              <Link className="chip" to="/investigate/ip/$ip" params={{ ip: detail.ip }}>
+                attacker profile
+              </Link>
+            ) : null}
+            <a className="chip" href={`/events?session=${encodeURIComponent(id)}`}>
+              filtered events
+            </a>
+            <a className="chip" href={`/api/export/events.csv?session=${encodeURIComponent(id)}`}>
+              export CSV ↓
+            </a>
+            {detail ? (
+              <>
+                <span className="chip">{detail.total.toLocaleString('en-US')} events</span>
+                <span className="chip">{detail.ip}{detail.country ? ` · ${detail.country}` : ''}</span>
+                <span className="chip">
+                  {formatTimestamp(detail.first)} → {formatTimestamp(detail.last)}
+                </span>
+              </>
+            ) : null}
+          </>
         }
       />
       {detail?.sequences.map((sequence) => (

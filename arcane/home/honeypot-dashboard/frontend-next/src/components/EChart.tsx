@@ -5,6 +5,7 @@
 // Client-only: echarts is imported dynamically inside useEffect so SSR
 // ships the skeleton and the canvas hydrates in.
 import { useEffect, useRef, useState } from 'react'
+import { copyWithFlash } from '../lib/flash'
 
 export type ChartKind = 'sankey' | 'timeline' | 'heatmap' | 'pie' | 'line' | 'bar' | 'barh' | 'scatter' | 'radar'
 
@@ -232,7 +233,10 @@ const builders: Record<ChartKind, Builder> = {
     chart.on('click', (params) => {
       if (params.componentType !== 'series') return
       const label = categories[params.dataIndex]
-      if (label) void navigator.clipboard?.writeText(label)
+      // Visible confirmation, hp-kill-chain.js flashCopied's contract —
+      // a silent copy (and a silently swallowed failure) reads as a dead
+      // click (#1653).
+      if (label) copyWithFlash(label)
     })
     const total = values.reduce((sum, v) => sum + v, 0)
     if (categories.length === 0) return 'No data yet.'

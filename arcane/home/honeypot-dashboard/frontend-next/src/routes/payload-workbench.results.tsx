@@ -9,6 +9,8 @@ import { InvestigateHeader, MasterDetailTable, type Column } from '../components
 import { ArtifactList } from '../components/ArtifactList'
 import { getSessionUser } from '../lib/auth'
 import { pathString, type JsonRecord } from '../lib/json'
+import { formatTimestamp } from '../lib/time'
+import { useSidebarViewTabs } from '../lib/viewTabs'
 
 type StoreRow = JsonRecord
 type Page = { total: number; rows: StoreRow[] }
@@ -20,6 +22,13 @@ type Page = { total: number; rows: StoreRow[] }
 // externally_publishing, gpu -> gpu_consuming).
 type WorkbenchOptions = { timeout_seconds: number; max_queue_age_seconds: number; retry_limit: number }
 type WorkbenchSelection = { analyzer_id: string; options: WorkbenchOptions }
+type WorkbenchOptionSchema = {
+  timeout_min_seconds: number
+  timeout_max_seconds: number
+  queue_age_min_seconds: number
+  queue_age_max_seconds: number
+  retry_limit_max: number
+}
 type Classification = { code: string; label: string; platform: string; category: string; analysis_path: string; dynamic: boolean }
 type WorkbenchAnalyzer = {
   id: string
@@ -36,6 +45,8 @@ type WorkbenchAnalyzer = {
   detonates: boolean
   gpu_consuming: boolean
   requires_opt_in: boolean
+  default_options: WorkbenchOptions
+  option_schema: WorkbenchOptionSchema
 }
 type AnalyzersResponse = { classification: Classification; analyzers: WorkbenchAnalyzer[] }
 type WorkbenchChild = {
@@ -267,6 +278,26 @@ const fetchGpuQueue = createServerFn({ method: 'GET' }).handler(async (): Promis
   return serviceJSON<GpuJob[]>('/api/v1/gpu-queue')
 })
 
+// "Approved local-model health" (payload_workbench.html:89 +
+// hp-workbench.js's renderModel), advisory only. The legacy model-status
+// adapter has no Rust equivalent; ml_health.rs's per-model retrain history
+// is the surface that replaced it, so the card renders that instead:
+// latest retrain outcome per approved local model.
+type ModelHealth = {
+  model: string
+  timestamp: string
+  accepted: boolean
+  reason: string
+  anomaly_rate_new: number
+  anomaly_rate_previous: number
+  train_samples: number
+}
+
+const fetchModelHealth = createServerFn({ method: 'GET' }).handler(async (): Promise<ModelHealth[] | null> => {
+  const { serviceJSON } = await import('../lib/backend.server')
+  return serviceJSON<ModelHealth[]>('/api/v1/ml-health')
+})
+
 export const Route = createFileRoute('/payload-workbench/results')({
   loader: async () => ({
     workbench: fetchWorkbench({ data: { offset: 0 } }),
@@ -280,7 +311,7 @@ export const Route = createFileRoute('/payload-workbench/results')({
   component: Results,
 })
 
-const when = (iso: string) => iso.replace('T', ' ').slice(0, 19)
+const when = (iso: string) => formatTimestamp(iso)
 
 const recordColumn: Column<StoreRow> = {
   header: 'result',
@@ -523,7 +554,7 @@ function RecentRunsCard({ owner, refreshToken }: { owner: string; refreshToken: 
               {runs.map((run) => (
                 <Fragment key={run.id}>
                   <tr onClick={() => setSelected(selected === run.id ? null : run.id)} style={{ cursor: 'pointer' }}>
-                    <td>{run.created_at.replace('T', ' ').slice(0, 19)}</td>
+                    <td>{formatTimestamp(run.created_at)}</td>
                     <td className="v">
                       <code>{run.payload_sha256.slice(0, 16)}</code>
                     </td>
@@ -549,12 +580,87 @@ function RecentRunsCard({ owner, refreshToken }: { owner: string; refreshToken: 
   )
 }
 
+function ModelHealthCard() {
+  const [models, setModels] = useState<ModelHealth[] | null | 'unavailable'>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchModelHealth().then((result) => {
+      if (!cancelled) setModels(result ?? 'unavailable')
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  return (
+    <div className="card wide">
+      <div className="tw:flex tw:flex-wrap tw:items-center tw:gap-2">
+        <h2 className="tw:mr-auto">Approved local-model health</h2>
+        <span className="badge badge--muted">advisory only</span>
+      </div>
+      {models === null ? (
+        <span className="skeleton-line" aria-hidden="true" />
+      ) : models === 'unavailable' || models.length === 0 ? (
+        <p className="note">
+          {models === 'unavailable' ? 'Model-status adapter is unavailable' : 'No retrain history recorded yet'}. Drift or unavailability
+          never disables deterministic analysis.
+        </p>
+      ) : (
+        <>
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Model</th>
+                  <th>Last retrain</th>
+                  <th>Outcome</th>
+                  <th>Anomaly rate</th>
+                  <th>Samples</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {models.map((model) => (
+                  <tr key={model.model}>
+                    <td className="v">{model.model}</td>
+                    <td>{model.timestamp ? formatTimestamp(model.timestamp) : '—'}</td>
+                    <td>
+                      <span className={model.accepted ? 'badge badge--success' : 'badge badge--danger'}>
+                        {model.accepted ? 'accepted' : 'rejected'}
+                      </span>
+                    </td>
+                    <td className="n">
+                      {(model.anomaly_rate_previous * 100).toFixed(2)}% → {(model.anomaly_rate_new * 100).toFixed(2)}%
+                    </td>
+                    <td className="n">{model.train_samples.toLocaleString('en-US')}</td>
+                    <td className="v">{model.reason || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="note">
+            Latest retrain decision per approved local model, through the read-only ml-health surface. Drift or unavailability never
+            disables deterministic analysis.
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
 function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated: (run: WorkbenchRun) => void }) {
   const [hash, setHash] = useState('')
   const [catalog, setCatalog] = useState<AnalyzersResponse | null>(null)
   const [catalogError, setCatalogError] = useState('')
   const [loadingCatalog, setLoadingCatalog] = useState(false)
   const [selected, setSelected] = useState<string[]>([])
+  // Per-analyzer orchestration options (hp-workbench.js:99-129), seeded
+  // from the catalog's server-computed defaults and clamped to its schema
+  // at submit — all-zeros is the backend's "use defaults" sentinel, so an
+  // analyzer with no edited options still round-trips correctly.
+  const [options, setOptions] = useState<Record<string, WorkbenchOptions>>({})
   const [confirmed, setConfirmed] = useState(false)
   const [recipeName, setRecipeName] = useState('')
   const [recipes, setRecipes] = useState<WorkbenchRecipe[] | null>(null)
@@ -590,6 +696,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
       if (result) {
         setCatalog(result)
         setSelected([])
+        setOptions({})
         setLastRun(null)
       } else {
         setCatalog(null)
@@ -614,8 +721,18 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const analyzerById = (id: string) => catalog?.analyzers.find((entry) => entry.id === id)
+
+  const selectionOptions = (id: string): WorkbenchOptions =>
+    options[id] ?? analyzerById(id)?.default_options ?? { timeout_seconds: 0, max_queue_age_seconds: 0, retry_limit: 0 }
+
+  const setOption = (id: string, field: keyof WorkbenchOptions, value: number) => {
+    setOptions((current) => ({ ...current, [id]: { ...selectionOptions(id), [field]: Number.isFinite(value) ? value : 0 } }))
+  }
+
   const toggleAnalyzer = (id: string) => {
     setSelected((current) => (current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]))
+    setOptions((current) => (current[id] ? current : { ...current, [id]: selectionOptions(id) }))
     setPickedRecipeId('')
   }
 
@@ -624,10 +741,20 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
     const recipe = (recipes ?? []).find((entry) => entry.id === id)
     if (recipe) {
       setSelected(recipe.analyzers.map((entry) => entry.analyzer_id))
+      setOptions(Object.fromEntries(recipe.analyzers.map((entry) => [entry.analyzer_id, entry.options])))
       setRecipeName(recipe.name)
       setRecipeDescription(recipe.description)
       setRecipeScope(recipe.scope)
     }
+  }
+
+  // hp-workbench.js:328-332 — bulk-select every applicable local analyzer;
+  // opt-in analyzers (real internet egress) stay a deliberate click.
+  const runAllApplicable = () => {
+    if (!catalog) return
+    setSelected(catalog.analyzers.filter((entry) => entry.applicable && entry.available && !entry.requires_opt_in).map((entry) => entry.id))
+    setPickedRecipeId('')
+    setMessage('All currently applicable local analyzers selected.')
   }
 
   const needsConfirmation = selected.some((id) => catalog?.analyzers.find((entry) => entry.id === id)?.confirmation === 'detonation')
@@ -640,7 +767,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
     try {
       const analyzers: WorkbenchSelection[] = selected.map((analyzer_id) => ({
         analyzer_id,
-        options: { timeout_seconds: 0, max_queue_age_seconds: 0, retry_limit: 0 },
+        options: selectionOptions(analyzer_id),
       }))
       if (saveAsRecipe) {
         const savedName = recipeName.trim()
@@ -698,7 +825,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
         <label className="note" style={{ display: 'block', minWidth: 320 }}>
           Payload hash (sha256 or md5)
           <input
-            className="input"
+            className="form-input"
             style={{ width: '100%' }}
             type="text"
             maxLength={64}
@@ -725,7 +852,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
           {(recipes?.length ?? 0) > 0 ? (
             <label className="note" style={{ display: 'block', maxWidth: 380 }}>
               Load from saved recipe
-              <select className="input" style={{ width: '100%' }} value={pickedRecipeId} onChange={(event) => pickRecipe(event.target.value)}>
+              <select className="form-input" style={{ width: '100%' }} value={pickedRecipeId} onChange={(event) => pickRecipe(event.target.value)}>
                 <option value="">Custom selection…</option>
                 {(recipes ?? []).map((recipe) => (
                   <option key={`${recipe.id}:${recipe.revision}`} value={recipe.id}>
@@ -735,6 +862,12 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
               </select>
             </label>
           ) : null}
+
+          <div className="filters">
+            <button className="btn btn-sm btn-secondary" type="button" onClick={runAllApplicable}>
+              Run all applicable
+            </button>
+          </div>
 
           <div className="table-scroll">
             <table className="data-table">
@@ -764,6 +897,46 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
                     <td className="v">
                       <strong>{analyzer.display_name}</strong>
                       <p className="note">{analyzer.description}</p>
+                      {selected.includes(analyzer.id) ? (
+                        <details className="wb-options">
+                          <summary>Orchestration options</summary>
+                          <div className="wb-option-grid">
+                            <label>
+                              Timeout (seconds)
+                              <input
+                                className="form-input"
+                                type="number"
+                                min={analyzer.option_schema?.timeout_min_seconds}
+                                max={analyzer.option_schema?.timeout_max_seconds}
+                                value={selectionOptions(analyzer.id).timeout_seconds}
+                                onChange={(event) => setOption(analyzer.id, 'timeout_seconds', event.target.valueAsNumber)}
+                              />
+                            </label>
+                            <label>
+                              Maximum queue age (seconds)
+                              <input
+                                className="form-input"
+                                type="number"
+                                min={analyzer.option_schema?.queue_age_min_seconds}
+                                max={analyzer.option_schema?.queue_age_max_seconds}
+                                value={selectionOptions(analyzer.id).max_queue_age_seconds}
+                                onChange={(event) => setOption(analyzer.id, 'max_queue_age_seconds', event.target.valueAsNumber)}
+                              />
+                            </label>
+                            <label>
+                              Retry allowance
+                              <input
+                                className="form-input"
+                                type="number"
+                                min={0}
+                                max={analyzer.option_schema?.retry_limit_max}
+                                value={selectionOptions(analyzer.id).retry_limit}
+                                onChange={(event) => setOption(analyzer.id, 'retry_limit', event.target.valueAsNumber)}
+                              />
+                            </label>
+                          </div>
+                        </details>
+                      ) : null}
                     </td>
                     <td>
                       <span className={analyzerBadgeClass(analyzer)}>{!analyzer.applicable ? 'not applicable' : analyzer.availability}</span>
@@ -801,7 +974,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
             <label className="note" style={{ display: 'block', minWidth: 220 }}>
               Run / recipe name
               <input
-                className="input"
+                className="form-input"
                 style={{ width: '100%' }}
                 type="text"
                 maxLength={80}
@@ -824,7 +997,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
               <label className="note" style={{ display: 'block', minWidth: 240 }}>
                 Recipe description
                 <input
-                  className="input"
+                  className="form-input"
                   style={{ width: '100%' }}
                   type="text"
                   maxLength={400}
@@ -834,7 +1007,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
               </label>
               <label className="note" style={{ display: 'block', minWidth: 160 }}>
                 Scope
-                <select className="input" style={{ width: '100%' }} value={recipeScope} onChange={(event) => setRecipeScope(event.target.value)}>
+                <select className="form-input" style={{ width: '100%' }} value={recipeScope} onChange={(event) => setRecipeScope(event.target.value)}>
                   <option value="private">Private</option>
                   <option value="shared">Shared with analysts</option>
                 </select>
@@ -857,6 +1030,29 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
           <RunDetail run={lastRun} currentOwner={owner} onChanged={setLastRun} />
         </div>
       ) : null}
+    </div>
+  )
+}
+
+// Client-side text search over one analyzer's result list — matches
+// anywhere in the row document (hash, rule name, classification, ...).
+function filterRows(rows: StoreRow[] | null, query: string): StoreRow[] | null {
+  if (!rows || !query.trim()) return rows
+  const needle = query.trim().toLowerCase()
+  return rows.filter((row) => JSON.stringify(row).toLowerCase().includes(needle))
+}
+
+function FilterInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <div className="filters">
+      <input
+        className="form-input"
+        type="search"
+        placeholder={`Filter ${label}…`}
+        aria-label={`Filter ${label}`}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
     </div>
   )
 }
@@ -905,6 +1101,19 @@ const GPU_QUEUE_COLUMNS: Column<GpuJob>[] = [
   { header: 'job id', detail: true, render: (row) => <code>{row.job_id}</code> },
 ]
 
+// payload_workbench.html:16-20's tablist, extended to one view per
+// analyzer result family this port shows (static analysis and YARA have
+// their own stores here; GitHub's list folded into the workbench store).
+const RESULT_TABS = [
+  { id: 'workbench', label: 'Workbench' },
+  { id: 'static', label: 'Static analysis' },
+  { id: 'yara', label: 'YARA' },
+  { id: 'sandbox', label: 'Sandbox' },
+  { id: 'ghidra', label: 'Ghidra' },
+] as const
+
+type ResultTabId = (typeof RESULT_TABS)[number]['id']
+
 function Results() {
   const data = Route.useLoaderData()
   const workbench = usePage(data.workbench)
@@ -924,6 +1133,23 @@ function Results() {
   }, [data.gpuQueue])
   const owner = data.user?.username ?? ''
   const [runsToken, setRunsToken] = useState(0)
+  const [tab, setTab] = useState<ResultTabId>('workbench')
+  // Design pick 7D: the page's view tabs relocate into the sidebar rail
+  // (inline below 520px, where the sidebar is off-canvas). Panels hide
+  // via the hidden attribute instead of unmounting so the builder's
+  // in-progress selections survive a look at another analyzer's results.
+  const viewTabs = useSidebarViewTabs({
+    label: 'Analysis results views',
+    tabs: RESULT_TABS,
+    active: tab,
+    onSelect: (id) => setTab(id as ResultTabId),
+    idPrefix: 'wb',
+  })
+  const [workbenchQuery, setWorkbenchQuery] = useState('')
+  const [staticQuery, setStaticQuery] = useState('')
+  const [yaraQuery, setYaraQuery] = useState('')
+  const [sandboxQuery, setSandboxQuery] = useState('')
+  const [ghidraQuery, setGhidraQuery] = useState('')
 
   return (
     <>
@@ -941,51 +1167,71 @@ function Results() {
           </>
         }
       />
-      <WorkbenchBuilder owner={owner} onRunCreated={() => setRunsToken((token) => token + 1)} />
-      <RecentRunsCard owner={owner} refreshToken={runsToken} />
-      {gpuQueue === null || gpuQueue.length > 0 ? (
-        <>
-          <h2 className="label-section">GPU queue</h2>
-          <p className="note">
-            Jobs deferred because there wasn't enough free GPU headroom when they were submitted — a queued job's AI triage
-            runs automatically once the card frees up; the rest of that analysis is unaffected and already completed.
-          </p>
-          <MasterDetailTable
-            rows={gpuQueue}
-            columns={GPU_QUEUE_COLUMNS}
-            rowKey={(row, i) => `gq-${row.job_id}-${i}`}
-            inspectorTitle="GPU queue job"
-          />
-        </>
-      ) : null}
-      <h2 className="label-section">Workbench runs</h2>
-      <MasterDetailTable rows={workbench ? workbench.rows : null} columns={WORKBENCH_COLUMNS} rowKey={(row, i) => `wb-${pathString(row, 'id')}-${i}`} inspectorTitle="Workbench run" />
-      <h2 className="label-section">Static analysis</h2>
-      <MasterDetailTable rows={statics ? statics.rows : null} columns={STATIC_COLUMNS} rowKey={(row, i) => `st-${pathString(row, 'Fingerprint')}-${i}`} inspectorTitle="Static analysis" />
-      <h2 className="label-section">YARA</h2>
-      <MasterDetailTable rows={yara ? yara.rows : null} columns={YARA_COLUMNS} rowKey={(_, i) => `ya-${i}`} inspectorTitle="YARA result" />
-      <h2 className="label-section">Sandbox detonations</h2>
-      <MasterDetailTable
-        rows={sandbox ? sandbox.rows : null}
-        columns={SANDBOX_COLUMNS}
-        rowKey={(_, i) => `sb-${i}`}
-        inspectorTitle="Sandbox run"
-        inspectorExtra={(row) => {
-          const job = pathString(row, 'sandbox', 'job') || pathString(row, 'job')
-          return job ? <ArtifactList kind="sandbox" artifactKey={job} /> : null
-        }}
-      />
-      <h2 className="label-section">Ghidra decompilation</h2>
-      <MasterDetailTable
-        rows={ghidra ? ghidra.rows : null}
-        columns={GHIDRA_COLUMNS}
-        rowKey={(_, i) => `gh-${i}`}
-        inspectorTitle="Ghidra run"
-        inspectorExtra={(row) => {
-          const sha = pathString(row, 'file', 'hash', 'sha256')
-          return sha ? <ArtifactList kind="ghidra" artifactKey={sha} /> : null
-        }}
-      />
+      {viewTabs}
+      <div className="dashboard-panel" role="tabpanel" id="wb-panel-workbench" aria-labelledby="wb-workbench" hidden={tab !== 'workbench'}>
+        <WorkbenchBuilder owner={owner} onRunCreated={() => setRunsToken((token) => token + 1)} />
+        <ModelHealthCard />
+        <RecentRunsCard owner={owner} refreshToken={runsToken} />
+        <h2 className="label-section">Workbench runs</h2>
+        <FilterInput label="workbench runs" value={workbenchQuery} onChange={setWorkbenchQuery} />
+        <MasterDetailTable rows={filterRows(workbench ? workbench.rows : null, workbenchQuery)} columns={WORKBENCH_COLUMNS} rowKey={(row, i) => `wb-${pathString(row, 'id')}-${i}`} inspectorTitle="Workbench run" />
+      </div>
+      <div className="dashboard-panel" role="tabpanel" id="wb-panel-static" aria-labelledby="wb-static" hidden={tab !== 'static'}>
+        <h2 className="label-section">Static analysis</h2>
+        <FilterInput label="static analyses" value={staticQuery} onChange={setStaticQuery} />
+        <MasterDetailTable rows={filterRows(statics ? statics.rows : null, staticQuery)} columns={STATIC_COLUMNS} rowKey={(row, i) => `st-${pathString(row, 'Fingerprint')}-${i}`} inspectorTitle="Static analysis" />
+      </div>
+      <div className="dashboard-panel" role="tabpanel" id="wb-panel-yara" aria-labelledby="wb-yara" hidden={tab !== 'yara'}>
+        <h2 className="label-section">YARA</h2>
+        <FilterInput label="YARA results" value={yaraQuery} onChange={setYaraQuery} />
+        <MasterDetailTable rows={filterRows(yara ? yara.rows : null, yaraQuery)} columns={YARA_COLUMNS} rowKey={(_, i) => `ya-${i}`} inspectorTitle="YARA result" />
+      </div>
+      <div className="dashboard-panel" role="tabpanel" id="wb-panel-sandbox" aria-labelledby="wb-sandbox" hidden={tab !== 'sandbox'}>
+        <h2 className="label-section">Sandbox detonations</h2>
+        <FilterInput label="sandbox detonations" value={sandboxQuery} onChange={setSandboxQuery} />
+        <MasterDetailTable
+          rows={filterRows(sandbox ? sandbox.rows : null, sandboxQuery)}
+          columns={SANDBOX_COLUMNS}
+          rowKey={(_, i) => `sb-${i}`}
+          inspectorTitle="Sandbox run"
+          inspectorExtra={(row) => {
+            const job = pathString(row, 'sandbox', 'job') || pathString(row, 'job')
+            return job ? <ArtifactList kind="sandbox" artifactKey={job} /> : null
+          }}
+        />
+      </div>
+      <div className="dashboard-panel" role="tabpanel" id="wb-panel-ghidra" aria-labelledby="wb-ghidra" hidden={tab !== 'ghidra'}>
+        {/* GPU queue lives with Ghidra — the legacy /ghidra page rendered
+            this card (dashboard/gpu_queue.go), and that page folded in
+            here. */}
+        {gpuQueue === null || gpuQueue.length > 0 ? (
+          <>
+            <h2 className="label-section">GPU queue</h2>
+            <p className="note">
+              Jobs deferred because there wasn't enough free GPU headroom when they were submitted — a queued job's AI triage
+              runs automatically once the card frees up; the rest of that analysis is unaffected and already completed.
+            </p>
+            <MasterDetailTable
+              rows={gpuQueue}
+              columns={GPU_QUEUE_COLUMNS}
+              rowKey={(row, i) => `gq-${row.job_id}-${i}`}
+              inspectorTitle="GPU queue job"
+            />
+          </>
+        ) : null}
+        <h2 className="label-section">Ghidra decompilation</h2>
+        <FilterInput label="Ghidra runs" value={ghidraQuery} onChange={setGhidraQuery} />
+        <MasterDetailTable
+          rows={filterRows(ghidra ? ghidra.rows : null, ghidraQuery)}
+          columns={GHIDRA_COLUMNS}
+          rowKey={(_, i) => `gh-${i}`}
+          inspectorTitle="Ghidra run"
+          inspectorExtra={(row) => {
+            const sha = pathString(row, 'file', 'hash', 'sha256')
+            return sha ? <ArtifactList kind="ghidra" artifactKey={sha} /> : null
+          }}
+        />
+      </div>
     </>
   )
 }

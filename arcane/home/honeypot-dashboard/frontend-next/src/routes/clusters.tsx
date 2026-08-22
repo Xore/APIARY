@@ -1,9 +1,12 @@
 // Infrastructure clusters — compact list columns, heavy detail in the
-// click-open inspector (per the investigate-consistency round).
+// click-open inspector (per the investigate-consistency round). Per-row
+// drill-downs mirror dashboard/ui/intel.html's clusters-body: shared-value
+// cells and an "investigate →" column, both into the cluster correlation.
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { formatTimestamp } from '../lib/time'
 
 type ClusterRow = {
   kind: string
@@ -11,6 +14,7 @@ type ClusterRow = {
   sources: number
   events: number
   sensors: string[]
+  generated?: string
 }
 
 type Page = { total: number; rows: ClusterRow[] }
@@ -25,11 +29,19 @@ export const Route = createFileRoute('/clusters')({
   component: Clusters,
 })
 
+function drill(row: ClusterRow, children: React.ReactNode) {
+  return (
+    <Link to="/investigate/cluster" search={{ kind: row.kind, value: row.value }}>
+      {children}
+    </Link>
+  )
+}
+
 const COLUMNS: Column<ClusterRow>[] = [
   { header: 'cluster type', render: (row) => <span className="badge badge--muted">{row.kind}</span> },
-  { header: 'shared value', className: 'v', render: (row) => row.value },
-  { header: 'source IPs', className: 'n', render: (row) => row.sources.toLocaleString('en-US') },
-  { header: 'events', className: 'n', render: (row) => row.events.toLocaleString('en-US') },
+  { header: 'shared value', className: 'v', render: (row) => drill(row, row.value) },
+  { header: 'source IPs', className: 'n', render: (row) => drill(row, row.sources.toLocaleString('en-US')) },
+  { header: 'events', className: 'n', render: (row) => drill(row, row.events.toLocaleString('en-US')) },
   {
     header: 'coverage',
     detail: true,
@@ -37,6 +49,17 @@ const COLUMNS: Column<ClusterRow>[] = [
   },
   {
     header: '',
+    render: (row) => (
+      <Link className="lnk" to="/investigate/cluster" search={{ kind: row.kind, value: row.value }}>
+        investigate &rarr;
+      </Link>
+    ),
+  },
+  {
+    // Header is a lone space, not '': MasterDetailTable keys cells by
+    // header text, and intel.html's clusters table has two blank link
+    // columns just like this.
+    header: ' ',
     render: (row) => (
       <Link
         className="lnk"
@@ -62,6 +85,7 @@ function Clusters() {
       cancelled = true
     }
   }, [page])
+  const generated = rows?.find((row) => row.generated)?.generated
   return (
     <>
       <InvestigateHeader
@@ -74,6 +98,7 @@ function Clusters() {
             <a className="chip" title="Download every infrastructure cluster as CSV" href="/api/export/clusters.csv">
               ⇩ CSV
             </a>
+            {generated ? <span className="chip">generated {formatTimestamp(generated)}</span> : null}
           </>
         }
       />

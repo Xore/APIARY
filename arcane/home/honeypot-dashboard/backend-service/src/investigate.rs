@@ -245,6 +245,9 @@ fn portbridge_row(src: &Value) -> EventRow {
         proto: String::new(),
         detail,
         session: String::new(),
+        // portbridge docs carry no honeypot.* namespace, so every pivot
+        // extraction comes back empty — harmless and correct.
+        pivots: crate::events::pivots_from_source(src),
         record: src.clone(),
     }
 }

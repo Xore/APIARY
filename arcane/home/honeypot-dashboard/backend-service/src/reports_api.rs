@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 
 use crate::reports_store::{
     self, put_definition, report_template_catalog, GeneratedReportMeta, ReportDefinition,
-    ReportTemplateKind, REPORT_ELEMENT_CATALOG,
+    ReportScope, ReportTemplateKind, REPORT_ELEMENT_CATALOG,
 };
 use crate::AppState;
 
@@ -155,6 +155,38 @@ pub async fn generate(
         .await
         .map_err(map_render_error)?;
     Ok((StatusCode::CREATED, Json(json!({"generated": meta}))))
+}
+
+/// POST /api/v1/payloads/{hash}/report — #474's one-click "Generate PDF"
+/// trigger on the payload detail page, ported from reports_api.go's
+/// generatePayloadReport: unlike the designer flow it never requires a
+/// saved definition. An ephemeral, never-persisted payload-template
+/// definition scoped to this one hash goes through the exact same
+/// rendering/storage pipeline as every other Reports-studio PDF — the
+/// generated record lands in dashboard-generated-reports-v1 and is
+/// viewable/deletable from Reports studio like any other, it just has no
+/// definition_id (nothing to look back up). The viewer then iframes
+/// /api/v1/reports/{id}/pdf. Admin gating lives in the BFF, same as every
+/// other write path in this crate.
+pub async fn generate_payload_report(
+    State(state): State<AppState>,
+    Path(hash): Path<String>,
+) -> Result<(StatusCode, Json<Value>), (StatusCode, String)> {
+    let valid = (hash.len() == 64 || hash.len() == 32) && hash.chars().all(|c| c.is_ascii_hexdigit());
+    if !valid {
+        return Err(bad_request("invalid payload id"));
+    }
+    let def = ReportDefinition {
+        name: format!("Payload {hash}"),
+        template: "payload".into(),
+        theme: "dark".into(),
+        scope: ReportScope { hash: hash.clone(), ..Default::default() },
+        ..Default::default()
+    };
+    let meta = render_definition_to_stored(&state, &def, "manual")
+        .await
+        .map_err(map_render_error)?;
+    Ok((StatusCode::CREATED, Json(json!({"id": meta.id, "generated": meta}))))
 }
 
 fn map_render_error(message: String) -> (StatusCode, String) {

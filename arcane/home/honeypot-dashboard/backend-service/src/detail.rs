@@ -476,18 +476,71 @@ pub async fn ml_anomaly_ack(
     if body.key.trim().is_empty() {
         return Err((StatusCode::BAD_REQUEST, "missing anomaly key".into()));
     }
-    let record = json!({
-        "Key": body.key,
-        "Acknowledged": body.ack,
-        "AckedBy": body.actor,
-        "AckedAt": chrono::Utc::now().to_rfc3339(),
-    });
-    state
-        .es
-        .index_doc(ML_ACK_INDEX, &body.key, record.clone())
+    let record = write_ml_ack(&state, &body.key, body.ack, &body.actor)
         .await
         .map_err(bad_gateway)?;
     Ok(Json(record))
+}
+
+/// The one ack-record write path (#913 record shape), shared by the
+/// single-row ack above and ack-all below so both write identical records.
+async fn write_ml_ack(state: &AppState, key: &str, ack: bool, actor: &str) -> anyhow::Result<Value> {
+    let record = json!({
+        "Key": key,
+        "Acknowledged": ack,
+        "AckedBy": actor,
+        "AckedAt": chrono::Utc::now().to_rfc3339(),
+    });
+    state.es.index_doc(ML_ACK_INDEX, key, record.clone()).await?;
+    Ok(record)
+}
+
+#[derive(Deserialize)]
+pub struct MlAckAllBody {
+    #[serde(default)]
+    pub actor: String,
+}
+
+/// POST /api/v1/ml-anomalies/ack-all — #1566's bulk acknowledge, ported
+/// from ml_anomaly_ack.go's serveMLAnomalyAckAll: every open anomaly
+/// across the full index (not just the page the client has loaded),
+/// through the same per-record write path as the single ack so one failed
+/// write can't abort the rest. Returns {"changed": N}.
+pub async fn ml_anomaly_ack_all(
+    State(state): State<AppState>,
+    Json(body): Json<MlAckAllBody>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let anomalies = state
+        .es
+        .search_index(
+            &["ml-anomalies"],
+            json!({"size": 10000, "_source": false, "query": {"match_all": {}}}),
+        )
+        .await
+        .map_err(bad_gateway)?;
+    let acks = state
+        .es
+        .search_index(&[ML_ACK_INDEX], json!({"size": 10000, "query": {"match_all": {}}}))
+        .await
+        .map_err(bad_gateway)?;
+    let acked: std::collections::HashSet<&str> = acks["hits"]["hits"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|hit| hit["_source"]["Acknowledged"].as_bool() == Some(true))
+        .filter_map(|hit| hit["_id"].as_str())
+        .collect();
+    let mut changed = 0u64;
+    for hit in anomalies["hits"]["hits"].as_array().into_iter().flatten() {
+        let Some(id) = hit["_id"].as_str().filter(|id| !id.is_empty()) else { continue };
+        if acked.contains(id) {
+            continue;
+        }
+        if write_ml_ack(&state, id, true, &body.actor).await.is_ok() {
+            changed += 1;
+        }
+    }
+    Ok(Json(json!({"changed": changed})))
 }
 
 /// GET /api/v1/ml-anomalies/acks — key → ack record, merged client-side

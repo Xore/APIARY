@@ -4,6 +4,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { formatTimestamp } from '../lib/time'
 
 type RecordingRow = {
   shasum: string
@@ -34,6 +35,28 @@ const fetchReplay = createServerFn({ method: 'GET' })
     return serviceJSON<Replay>(`/api/v1/recordings/${encodeURIComponent(data.shasum)}`)
   })
 
+/** Who produced a recording — recordings.html:30-37 listed source IP,
+ * country and session per row, read off the Go tier's in-memory
+ * cowrie.log.closed events. The cowrie-ttylog-v1 docs this list pages
+ * over only carry shasum/size_bytes/imported_at, so the attribution is
+ * joined lazily per opened row instead: the closed event's
+ * honeypot.shasum IS the recording's shasum (events.rs:99-102), so one
+ * filtered /api/v1/events lookup recovers it. since=365d — the events
+ * default (10d) would drop attribution for older recordings the list
+ * still shows. */
+type Provenance = { src_ip: string; country: string; session: string }
+
+const fetchProvenance = createServerFn({ method: 'GET' })
+  .inputValidator((input: { shasum: string }) => input)
+  .handler(async ({ data }): Promise<Provenance | null> => {
+    const { serviceJSON } = await import('../lib/backend.server')
+    const page = await serviceJSON<{ rows: Provenance[] }>(
+      `/api/v1/events?kind=cowrie.log.closed&shasum=${encodeURIComponent(data.shasum)}&size=1&since=365d`,
+    )
+    const row = page?.rows?.[0]
+    return row ? { src_ip: row.src_ip, country: row.country, session: row.session } : null
+  })
+
 // Control bytes the transcript view drops so raw ANSI/VT sequences don't
 // litter the plain text (a real player lands with the workbench round).
 function plainTranscript(transcript: string): string {
@@ -46,15 +69,25 @@ function plainTranscript(transcript: string): string {
 
 function ReplayPane({ shasum }: { shasum: string }) {
   const [replay, setReplay] = useState<Replay | null | 'loading'>('loading')
+  const [who, setWho] = useState<Provenance | null | 'loading'>('loading')
   useEffect(() => {
     let cancelled = false
     setReplay('loading')
+    setWho('loading')
     fetchReplay({ data: { shasum } }).then(
       (result) => {
         if (!cancelled) setReplay(result)
       },
       () => {
         if (!cancelled) setReplay(null)
+      },
+    )
+    fetchProvenance({ data: { shasum } }).then(
+      (result) => {
+        if (!cancelled) setWho(result)
+      },
+      () => {
+        if (!cancelled) setWho(null)
       },
     )
     return () => {
@@ -65,6 +98,30 @@ function ReplayPane({ shasum }: { shasum: string }) {
   if (!replay) return <p className="subtitle">Replay unavailable for this recording.</p>
   return (
     <>
+      {who === 'loading' ? (
+        <span className="skeleton-line" aria-hidden="true" />
+      ) : who ? (
+        <p className="subtitle">
+          {who.src_ip ? (
+            <a className="lnk" href={`/investigate/ip/${encodeURIComponent(who.src_ip)}`} title={`attacker profile for ${who.src_ip}`}>
+              {who.src_ip}
+            </a>
+          ) : (
+            'unattributed'
+          )}
+          {who.country ? <> <span className="badge badge--info">{who.country}</span></> : null}
+          {who.session ? (
+            <>
+              {' · '}
+              <a className="lnk sess" href={`/sessions/${encodeURIComponent(who.session)}`} title="full chronological session replay">
+                session {who.session}
+              </a>
+            </>
+          ) : null}
+        </p>
+      ) : (
+        <p className="subtitle">No cowrie.log.closed event still references this recording — attribution unavailable.</p>
+      )}
       <p className="subtitle">
         {replay.frames.toLocaleString('en-US')} frames · {replay.duration_seconds.toFixed(1)}s of terminal time ·{' '}
         <a className="lnk" href={`/tty-replay/${encodeURIComponent(shasum)}`}>
@@ -82,7 +139,7 @@ export const Route = createFileRoute('/recordings')({
 })
 
 const COLUMNS: Column<RecordingRow>[] = [
-  { header: 'imported', render: (row) => row.imported_at.replace('T', ' ').slice(0, 19) },
+  { header: 'imported', render: (row) => formatTimestamp(row.imported_at) },
   { header: 'recording', className: 'v', render: (row) => row.shasum },
   { header: 'size', className: 'n', render: (row) => `${(row.size_bytes / 1024).toFixed(1)} KB` },
 ]

@@ -1,9 +1,11 @@
 // Correlated campaigns — compact core columns; ports/sensors detail in the
-// click-open inspector (investigate-consistency rules).
+// click-open inspector (investigate-consistency rules). Column set and the
+// score-explanation note mirror dashboard/ui/intel.html's campaigns-body.
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { formatTimestamp } from '../lib/time'
 
 type CampaignRow = {
   cidr: string
@@ -20,6 +22,13 @@ type CampaignRow = {
   explanation: string
   first: string
   last: string
+  // asns/sequence are optional on purpose: correlator-worker's campaigns-v1
+  // docs don't carry them (dashboard/campaigns.go's
+  // readCampaignsFromWorkerIndex documents the same presentation-only gap
+  // for the Go tier), so both columns render empty until the worker does.
+  asns?: string[]
+  sequence?: string[] | string
+  generated?: string
 }
 
 const fetchCampaigns = createServerFn({ method: 'GET' }).handler(async () => {
@@ -32,22 +41,47 @@ export const Route = createFileRoute('/campaigns')({
   component: Campaigns,
 })
 
+// Every glance cell deep-links into the campaign's correlation drill-down,
+// matching intel.html's campaignrows where each cell is an anchor.
+function drill(row: CampaignRow, title: string, children: React.ReactNode) {
+  return (
+    <Link to="/investigate/cidr/$cidr" params={{ cidr: row.cidr }} title={title}>
+      {children}
+    </Link>
+  )
+}
+
 const COLUMNS: Column<CampaignRow>[] = [
-  { header: 'score', className: 'n', render: (row) => row.score },
-  { header: 'network', className: 'v', render: (row) => row.cidr },
-  { header: 'events', className: 'n', render: (row) => row.events.toLocaleString('en-US') },
-  { header: 'ips', className: 'n', render: (row) => row.unique_ips.toLocaleString('en-US') },
-  { header: 'sensors', className: 'v', render: (row) => row.sensors.slice(0, 5).join(' ') + (row.sensors.length > 5 ? ` +${row.sensors.length - 5}` : '') },
-  { header: 'last', render: (row) => row.last.replace('T', ' ').slice(11, 19) },
+  { header: 'score', className: 'n', render: (row) => drill(row, 'investigate this campaign', row.score) },
+  { header: 'network', className: 'v', render: (row) => drill(row, 'investigate this campaign', row.cidr) },
+  { header: 'events', className: 'n', render: (row) => drill(row, 'show campaign events', row.events.toLocaleString('en-US')) },
+  { header: 'ips', className: 'n', render: (row) => drill(row, 'show campaign source addresses', row.unique_ips.toLocaleString('en-US')) },
+  {
+    header: 'sensors',
+    className: 'v',
+    render: (row) =>
+      drill(
+        row,
+        'show campaign sensor activity',
+        row.sensors.slice(0, 5).join(' ') + (row.sensors.length > 5 ? ` +${row.sensors.length - 5}` : ''),
+      ),
+  },
+  { header: 'last', render: (row) => formatTimestamp(row.last) },
   { header: 'why correlated', detail: true, render: (row) => row.explanation },
   { header: 'all sensors', detail: true, render: (row) => row.sensors.join(' ') },
   { header: 'ports', detail: true, render: (row) => row.ports.join(' ') },
   { header: 'creds', detail: true, render: (row) => row.creds },
   { header: 'files', detail: true, render: (row) => row.payloads },
   { header: 'alerts', detail: true, render: (row) => row.alerts },
+  { header: 'ASNs', detail: true, render: (row) => (row.asns ?? []).join(' ') },
   { header: 'fingerprints', detail: true, render: (row) => row.fingerprints },
   { header: 'provider', detail: true, render: (row) => row.providers.join(' ') },
-  { header: 'first', detail: true, render: (row) => row.first.replace('T', ' ').slice(0, 19) },
+  {
+    header: 'sequence',
+    detail: true,
+    render: (row) => (Array.isArray(row.sequence) ? row.sequence.join(' ← ') : (row.sequence ?? '')),
+  },
+  { header: 'first', detail: true, render: (row) => formatTimestamp(row.first) },
   {
     header: '',
     render: (row) => (
@@ -75,6 +109,7 @@ function Campaigns() {
       cancelled = true
     }
   }, [page])
+  const generated = rows?.find((row) => row.generated)?.generated
   return (
     <>
       <InvestigateHeader
@@ -87,9 +122,14 @@ function Campaigns() {
             <a className="chip" title="Download every correlated campaign as CSV" href="/api/export/campaigns.csv">
               ⇩ CSV
             </a>
+            {generated ? <span className="chip">generated {formatTimestamp(generated)}</span> : null}
           </>
         }
       />
+      <p className="note">
+        Score combines volume, unique sources, sensor and port spread, reused credentials, captured payloads, and IDS
+        alerts. Select a network for its complete event chain.
+      </p>
       <MasterDetailTable rows={rows} columns={COLUMNS} rowKey={(row) => row.cidr} />
     </>
   )

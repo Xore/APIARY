@@ -3,12 +3,16 @@
 // landscape / Attacker behavior / Evidence & campaigns. Skeleton-first:
 // the shell renders instantly, every panel hydrates from its deferred
 // promise.
-import { Await, createFileRoute, useRouter } from '@tanstack/react-router'
+import { Await, Link, createFileRoute, useRouter } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { Suspense, useEffect, useState } from 'react'
 import { AttackMap, AttackVectors, Heatmap, Tbl, type HeatRow, type Kv, type MapPoint } from '../components/OverviewPanels'
 import { EChart } from '../components/EChart'
+import { copyWithFlash } from '../lib/flash'
+import { isLivePaused } from '../lib/live'
 import type { JsonRecord } from '../lib/json'
+import { formatTimestamp } from '../lib/time'
+import { useSidebarViewTabs } from '../lib/viewTabs'
 
 type OverviewKpis = {
   total: number
@@ -16,16 +20,21 @@ type OverviewKpis = {
   previous24h: number
   change24h: string
   unique_ips: number
+  /** Per-hour counts, oldest first — the 24h tile's sparkline (3B). */
+  hourly: number[]
   ready: boolean
 }
 
 type SensorFeed = { name: string; count: number; last_seen: string; state: string }
+
+type PayloadRow = { shasum: string; download: string; count: number; link: string; vt: string }
 
 type Dashboard = {
   protocols: Kv[]
   top_ports: Kv[]
   countries: Kv[]
   asns: Kv[]
+  providers: Kv[]
   top_ips: Kv[]
   top_paths: Kv[]
   top_creds: Kv[]
@@ -34,6 +43,7 @@ type Dashboard = {
   fingerprints: Kv[]
   alerts: Kv[]
   alert_cats: Kv[]
+  payloads: PayloadRow[]
   logins: number
   heatmap: HeatRow[]
   map_points: MapPoint[]
@@ -48,6 +58,8 @@ type EventRow = {
   port: string
   detail: string
   proto: string
+  session: string
+  record: JsonRecord
 }
 
 type StoreRow = JsonRecord
@@ -119,6 +131,23 @@ function KpiValue({ value }: { value: number | null }) {
   return <>{value.toLocaleString('en-US')}</>
 }
 
+/** The 24h tile's hourly-rhythm sparkline (overview.html:65-68).
+ * page_hero.go's hourlySpark rules: normalize against the busiest hour,
+ * floor at 4% so silent hours stay visible as a baseline tick, render
+ * nothing while the whole day is empty. */
+function KpiSpark({ hourly }: { hourly: number[] | undefined }) {
+  if (!hourly || hourly.length === 0) return null
+  const max = Math.max(...hourly)
+  if (max === 0) return null
+  return (
+    <div className="metric__spark" aria-hidden="true">
+      {hourly.map((count, index) => (
+        <i key={index} style={{ height: `${Math.max(4, Math.floor((count * 100) / max))}%` }} />
+      ))}
+    </div>
+  )
+}
+
 function KpiStrip({ kpis, logins, payloads }: { kpis: OverviewKpis | null; logins: number | null; payloads: number | null }) {
   return (
     <div className="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:xl:grid-cols-5 tw:gap-3 tw:mb-6" id="overview-kpis">
@@ -141,6 +170,7 @@ function KpiStrip({ kpis, logins, payloads }: { kpis: OverviewKpis | null; login
           ) : null}
         </div>
         <div className="metric__label">Events in 24 hours</div>
+        <KpiSpark hourly={kpis?.hourly} />
       </a>
       <a className="metric" href="/ips" title="Distinct attacker source addresses observed by the sensors">
         <div className="metric__value">
@@ -188,6 +218,112 @@ function usePromise<T>(promise: Promise<T | null>): T | null {
   return value
 }
 
+/** One stream row, ported from events.html's shared "everow" template:
+ * per-cell pivot links, hover quick actions, and a row click that expands
+ * the full normalized record inline (the stream stays compact until
+ * asked, #1565's JSON-wall fix). */
+function RecentEventRow({ row, open, onToggle }: { row: EventRow; open: boolean; onToggle: () => void }) {
+  const stop = (event: React.MouseEvent) => event.stopPropagation()
+  return (
+    <>
+      <tr className={open ? 'selected' : undefined} onClick={onToggle}>
+        <td data-hp-time>{formatTimestamp(row.time)}</td>
+        <td>
+          <a className={`badge b-${row.sensor}`} href={`/events?sensor=${encodeURIComponent(row.sensor)}`} onClick={stop}>
+            {row.sensor}
+          </a>
+        </td>
+        <td className="v">
+          {row.src_ip ? (
+            <a href={`/events?ip=${encodeURIComponent(row.src_ip)}`} title={`attack chain for ${row.src_ip}`} onClick={stop}>
+              {row.src_ip}
+            </a>
+          ) : (
+            <span
+              className="badge badge--muted"
+              title="This event reached the sensor over the WireGuard tunnel and could not be joined back to a real client address."
+            >
+              unattributed
+            </span>
+          )}
+          {row.country ? (
+            <>
+              {' '}
+              <a className="badge badge--info" href={`/events?country=${encodeURIComponent(row.country)}`} onClick={stop}>
+                {row.country}
+              </a>
+            </>
+          ) : null}
+        </td>
+        <td className="n">
+          {row.port ? (
+            <a href={`/events?port=${encodeURIComponent(row.port)}`} onClick={stop}>
+              :{row.port}
+            </a>
+          ) : (
+            ''
+          )}
+        </td>
+        <td className="v">{row.detail || row.proto}</td>
+        <td className="hp-row-actions-cell">
+          <div className="hp-row-actions">
+            {row.src_ip ? (
+              <button
+                type="button"
+                title="Copy source IP"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  copyWithFlash(row.src_ip)
+                }}
+              >
+                ⧁
+              </button>
+            ) : null}
+            {row.session ? (
+              <a href={`/sessions/${encodeURIComponent(row.session)}`} title="Replay session" onClick={stop}>
+                ▶
+              </a>
+            ) : null}
+            {row.src_ip ? (
+              <a href={`/investigate/ip/${encodeURIComponent(row.src_ip)}`} title="Attacker profile" onClick={stop}>
+                👤
+              </a>
+            ) : null}
+          </div>
+        </td>
+      </tr>
+      {open ? (
+        <tr>
+          <td colSpan={6}>
+            <article className="card wide tw:mt-3" aria-label="Full normalized event">
+              <h3>Normalized event</h3>
+              <p className="note">Complete read-only record as stored by the pipeline.</p>
+              {row.src_ip || row.session ? (
+                <p className="note">
+                  {row.src_ip ? (
+                    <a className="lnk" href={`/investigate/ip/${encodeURIComponent(row.src_ip)}`}>
+                      attacker profile for {row.src_ip}
+                    </a>
+                  ) : null}
+                  {row.src_ip && row.session ? ' • ' : null}
+                  {row.session ? (
+                    <a className="lnk sess" href={`/sessions/${encodeURIComponent(row.session)}`}>
+                      replay session {row.session}
+                    </a>
+                  ) : null}
+                </p>
+              ) : null}
+              <div className="card__scroll">
+                <pre className="code">{JSON.stringify(row.record, null, 2)}</pre>
+              </div>
+            </article>
+          </td>
+        </tr>
+      ) : null}
+    </>
+  )
+}
+
 function Overview() {
   const data = Route.useLoaderData()
   const dashboard = usePromise(data.dashboard)
@@ -196,15 +332,36 @@ function Overview() {
   const payloads = usePromise(data.payloads)
   const presentation = usePromise(data.presentation)
   const [tab, setTab] = useState<TabId>('live')
+  // Design pick 7D: the overview's five view tabs relocate into the
+  // sidebar rail below the Overview nav item; below 520px (off-canvas
+  // sidebar) they render inline right here instead.
+  const viewTabs = useSidebarViewTabs({
+    label: 'Dashboard views',
+    tabs: TABS,
+    active: tab,
+    onSelect: (id) => setTab(id as TabId),
+    idPrefix: 'ov',
+  })
+  // Heatmap sensor picker (overview.html:94-120): one selection narrows
+  // both the heatmap and its attack-vectors companion panel. The rows
+  // already carry their sensor, so the narrowing is purely client-side.
+  const [heatSensor, setHeatSensor] = useState('')
+  const [openEvent, setOpenEvent] = useState<number | null>(null)
   const router = useRouter()
 
   // Auto-refresh (legacy 60s replaceHoneypotPage cycle): re-run the
-  // loaders while the tab is visible; hidden tabs skip the tick.
+  // loaders while the tab is visible; hidden tabs skip the tick, and the
+  // shell's shared LIVE switch pauses it entirely (resume refetches now).
   useEffect(() => {
     const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') void router.invalidate()
+      if (document.visibilityState === 'visible' && !isLivePaused()) void router.invalidate()
     }, 60_000)
-    return () => clearInterval(timer)
+    const onResume = () => void router.invalidate()
+    window.addEventListener('hp-live-resumed', onResume)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('hp-live-resumed', onResume)
+    }
   }, [router])
 
   const str = (row: StoreRow, key: string) => (typeof row[key] === 'string' ? (row[key] as string) : '')
@@ -243,24 +400,10 @@ function Overview() {
         </Await>
       </Suspense>
 
-      <div className="tabs" role="tablist" aria-label="Dashboard views">
-        {TABS.map((entry, index) => (
-          <button
-            key={entry.id}
-            className={tab === entry.id ? 'tab active' : 'tab'}
-            type="button"
-            role="tab"
-            aria-selected={tab === entry.id}
-            onClick={() => setTab(entry.id)}
-          >
-            <span>{String(index + 1).padStart(2, '0')}</span>
-            {entry.label}
-          </button>
-        ))}
-      </div>
+      {viewTabs}
 
       {tab === 'live' ? (
-        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel">
+        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel" id="ov-panel-live" aria-labelledby="ov-live">
           <div className="section-heading">
             <div>
               <h2>Current activity</h2>
@@ -270,8 +413,16 @@ function Overview() {
           </div>
           <div className="card wide chart-card">
             <h2>Activity — last 24h</h2>
-            <Heatmap rows={dashboard ? dashboard.heatmap : null} />
-            {dashboard ? <AttackVectors sensors={dashboard.sensors.map((sensor) => sensor.name)} /> : null}
+            <Heatmap
+              rows={dashboard ? dashboard.heatmap.filter((row) => !heatSensor || row.sensor === heatSensor) : null}
+            />
+            {dashboard ? (
+              <AttackVectors
+                sensors={dashboard.sensors.map((sensor) => sensor.name)}
+                sensor={heatSensor}
+                onSensorChange={setHeatSensor}
+              />
+            ) : null}
           </div>
           <div className="card wide map-card">
             <h2>Attack origins — live geographic view</h2>
@@ -300,20 +451,16 @@ function Overview() {
               <div className="card__scroll">
                 <table className="recent data-table">
                   <thead>
-                    <tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th></tr>
+                    <tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th><th></th></tr>
                   </thead>
                   <tbody>
                     {recent.rows.map((row, index) => (
-                      <tr key={`${row.time}-${index}`}>
-                        <td>{row.time.replace('T', ' ').slice(0, 19)}</td>
-                        <td><span className="badge badge--muted">{row.sensor}</span></td>
-                        <td className="v">
-                          {row.src_ip}{' '}
-                          {row.country ? <span className="badge badge--info">{row.country}</span> : null}
-                        </td>
-                        <td className="n">{row.port ? `:${row.port}` : ''}</td>
-                        <td className="v">{row.detail || row.proto}</td>
-                      </tr>
+                      <RecentEventRow
+                        key={`${row.time}-${index}`}
+                        row={row}
+                        open={openEvent === index}
+                        onToggle={() => setOpenEvent(openEvent === index ? null : index)}
+                      />
                     ))}
                   </tbody>
                 </table>
@@ -324,7 +471,7 @@ function Overview() {
       ) : null}
 
       {tab === 'health' ? (
-        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel">
+        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel" id="ov-panel-health" aria-labelledby="ov-health">
           <div className="section-heading">
             <div>
               <h2>Collection status</h2>
@@ -353,7 +500,7 @@ function Overview() {
                           <td className="n">{sensor.count.toLocaleString('en-US')}</td>
                           <td><span className={`badge b-${sensor.name}`}>{sensor.name}</span></td>
                           <td className={`state s-${sensor.state}`}>{sensor.state}</td>
-                          <td className="ago">{sensor.last_seen.replace('T', ' ').slice(0, 19)}</td>
+                          <td className="ago">{formatTimestamp(sensor.last_seen)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -375,7 +522,7 @@ function Overview() {
       ) : null}
 
       {tab === 'threats' ? (
-        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel">
+        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel" id="ov-panel-threats" aria-labelledby="ov-threats">
           <div className="section-heading">
             <div>
               <h2>Threat landscape</h2>
@@ -386,7 +533,11 @@ function Overview() {
           <Tbl title="Top source IPs" rows={dashboard ? dashboard.top_ips : null} />
           <Tbl title="Top targeted ports" rows={dashboard ? dashboard.top_ports : null} />
           <Tbl title="Top countries" rows={dashboard ? dashboard.countries : null} />
+          {/* #1565 (overview.html:258-259): ASNs and provider classes are a
+              deliberate half/half pair; the ids let theme.css widen the
+              busier ASN card. */}
           <Tbl title="Top autonomous systems" rows={dashboard ? dashboard.asns : null} half id="overview-asns-card" />
+          <Tbl title="Network/provider classes" rows={dashboard ? dashboard.providers : null} half id="overview-providers-card" />
           <div className="card wide" id="netflow-bytes-card">
             <h2>Traffic volume — bytes/hour, last 7 days</h2>
             <EChart kind="line" url="/api/chart/netflow-bytes" height={280} />
@@ -416,7 +567,7 @@ function Overview() {
       ) : null}
 
       {tab === 'behavior' ? (
-        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel">
+        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel" id="ov-panel-behavior" aria-labelledby="ov-behavior">
           <div className="section-heading">
             <div>
               <h2>Attacker behavior</h2>
@@ -453,7 +604,7 @@ function Overview() {
       ) : null}
 
       {tab === 'evidence' ? (
-        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel">
+        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel" id="ov-panel-evidence" aria-labelledby="ov-evidence">
           <div className="section-heading">
             <div>
               <h2>Detection and evidence</h2>
@@ -466,23 +617,38 @@ function Overview() {
           <div className="card wide">
             <h2>Captured payloads</h2>
             <p className="note">Inert copies of malware and high-confidence scripts. Static analysis never executes the payload.</p>
-            {payloads === null ? (
+            {/* overview.html:400-412's columns: seen count → the payload's
+                events, hash → static analysis, target path → events,
+                lookup → static analysis + VirusTotal. */}
+            {dashboard === null ? (
               <>
                 <span className="skeleton-line" aria-hidden="true" />
                 <span className="skeleton-line" aria-hidden="true" />
               </>
+            ) : dashboard.payloads.length === 0 ? (
+              <p className="empty">no payloads captured yet — cowrie logs downloads/uploads during a shell session</p>
             ) : (
               <div className="card__scroll">
                 <table className="data-table">
                   <thead>
-                    <tr><th>seen</th><th>sha-256</th><th>kind</th></tr>
+                    <tr><th>seen</th><th>sha-256</th><th>attacker target path</th><th>lookup</th></tr>
                   </thead>
                   <tbody>
-                    {payloads.rows.map((row, index) => (
-                      <tr key={`${str(row, 'Hash')}-${index}`}>
-                        <td>{str(row, 'MtimeUTC').replace('T', ' ').slice(0, 19)}</td>
-                        <td className="v"><a href="/payloads">{str(row, 'Hash')}</a></td>
-                        <td><span className="badge badge--muted">{str(row, 'Kind')}</span></td>
+                    {dashboard.payloads.map((row) => (
+                      <tr key={row.shasum}>
+                        <td className="n">
+                          <a href={row.link} title="show events for this payload">{row.count.toLocaleString('en-US')}</a>
+                        </td>
+                        <td className="v">
+                          <a href={`/payload-analysis/${row.shasum}`} title="static analysis of this payload">{row.shasum}</a>
+                        </td>
+                        <td className="v">
+                          <a href={row.link} title="show events for this captured artifact">{row.download}</a>
+                        </td>
+                        <td className="v">
+                          <a className="lnk" href={`/payload-analysis/${row.shasum}`}>static analysis →</a>{' '}
+                          <a className="lnk" href={row.vt} target="_blank" rel="noopener noreferrer">VirusTotal →</a>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -508,15 +674,35 @@ function Overview() {
                     <tr><th>network</th><th>events</th><th>ips</th><th>sensors</th><th>last seen</th></tr>
                   </thead>
                   <tbody>
-                    {campaigns.rows.map((row, index) => (
-                      <tr key={`${str(row, 'cidr')}-${index}`}>
-                        <td className="v"><a href="/campaigns">{str(row, 'cidr')}</a></td>
-                        <td className="n">{num(row, 'events').toLocaleString('en-US')}</td>
-                        <td className="n">{num(row, 'unique_ips').toLocaleString('en-US')}</td>
-                        <td className="n">{Array.isArray(row.sensors) ? (row.sensors as string[]).length : 0}</td>
-                        <td>{str(row, 'last').replace('T', ' ').slice(0, 19)}</td>
-                      </tr>
-                    ))}
+                    {/* intel.html:136-149 (campaignrows-summary): every
+                        cell deep-links to the campaign's own CIDR
+                        investigation. */}
+                    {campaigns.rows.map((row, index) => {
+                      const cidr = str(row, 'cidr')
+                      return (
+                        <tr key={`${cidr}-${index}`}>
+                          <td className="v">
+                            <Link to="/investigate/cidr/$cidr" params={{ cidr }}>{cidr}</Link>
+                          </td>
+                          <td className="n">
+                            <Link to="/investigate/cidr/$cidr" params={{ cidr }} title="show campaign events">
+                              {num(row, 'events').toLocaleString('en-US')}
+                            </Link>
+                          </td>
+                          <td className="n">
+                            <Link to="/investigate/cidr/$cidr" params={{ cidr }} title="show campaign source addresses">
+                              {num(row, 'unique_ips').toLocaleString('en-US')}
+                            </Link>
+                          </td>
+                          <td className="v">
+                            <Link to="/investigate/cidr/$cidr" params={{ cidr }} title="show campaign sensor activity">
+                              {Array.isArray(row.sensors) ? (row.sensors as string[]).join(' ') : ''}
+                            </Link>
+                          </td>
+                          <td>{formatTimestamp(str(row, 'last'))}</td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>

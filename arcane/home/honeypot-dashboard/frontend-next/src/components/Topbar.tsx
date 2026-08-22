@@ -1,19 +1,110 @@
-// Topbar — the 11E floating pill bar: breadcrumb (section / page from the
-// router, never diverging from the sidebar), alerts bell, theme cycler,
-// LIVE state, account avatar. Ports partials/dashboard.html's topbar.
+// Topbar — the 11E floating pill bar: nav toggle, breadcrumb (section /
+// page from the router, never diverging from the sidebar), alerts bell
+// with unread badge (60s poll, hp-app.js:1877-1891), theme cycler, the
+// LIVE pause/resume control over the shared live layer
+// (hp-app.js:1896-1924), account avatar. Ports partials/dashboard.html's
+// topbar with its behaviors, not just its markup.
+import { useEffect, useState } from 'react'
 import { Link, useRouterState } from '@tanstack/react-router'
+import { createServerFn } from '@tanstack/react-start'
 import { pageFor, sectionFor } from '../lib/nav'
 import { cycleTheme, useThemeMode } from '../lib/prefs'
+import { isLivePaused, toggleLive, useLiveState } from '../lib/live'
 import type { BannerView } from '../lib/banner'
+import type { User } from '../lib/auth'
 
-export function Topbar({ banner }: { banner?: BannerView | null }) {
+const fetchOpenAlertCount = createServerFn({ method: 'GET' }).handler(async (): Promise<number> => {
+  const { serviceJSON } = await import('../lib/backend.server')
+  const page = await serviceJSON<{ rows?: Array<{ Acknowledged?: boolean }> }>('/api/v1/alerts?size=100')
+  return page?.rows?.filter((row) => !row.Acknowledged).length ?? 0
+})
+
+function useOpenAlertCount(): number {
+  const [count, setCount] = useState(0)
+  useEffect(() => {
+    let cancelled = false
+    const refresh = () => {
+      if (isLivePaused()) return
+      fetchOpenAlertCount()
+        .then((value) => {
+          if (!cancelled) setCount(value)
+        })
+        .catch(() => {
+          /* transient — the badge keeps its last value */
+        })
+    }
+    refresh()
+    const interval = setInterval(refresh, 60_000)
+    // Resuming after a pause shows current data immediately.
+    window.addEventListener('hp-live-resumed', refresh)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+      window.removeEventListener('hp-live-resumed', refresh)
+    }
+  }, [])
+  return count
+}
+
+function LiveToggle() {
+  const { paused, connectionHealthy } = useLiveState()
+  const stalled = !paused && !connectionHealthy
+  const className = [
+    'hp-live-state',
+    paused ? 'hp-live-state--paused' : '',
+    stalled ? 'hp-live-state--stalled' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+  return (
+    <button
+      className={className}
+      type="button"
+      aria-pressed={paused}
+      onClick={toggleLive}
+      title={
+        paused
+          ? 'Dashboard refresh is paused — resume it'
+          : stalled
+            ? 'Live connection lost — reconnecting automatically'
+            : 'Dashboard refresh is active — pause it'
+      }
+    >
+      <span className="status-dot" />
+      <span>{paused ? 'Paused' : stalled ? 'Reconnecting…' : 'Live'}</span>
+    </button>
+  )
+}
+
+export function Topbar({
+  banner,
+  user,
+  onToggleNav,
+  onOpenSettings,
+}: {
+  banner?: BannerView | null
+  user?: User | null
+  onToggleNav?: () => void
+  /** When set, the avatar opens the centered settings modal instead of
+   * navigating (hp-settings.js:23-27, per Xore); the /settings href stays
+   * as the no-JS / middle-click / new-tab fallback. Unset on /settings. */
+  onOpenSettings?: () => void
+}) {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const mode = useThemeMode()
   const section = sectionFor(pathname)
   const page = pageFor(pathname)
+  const alertCount = useOpenAlertCount()
+  const initial = (user?.displayName || user?.username || '·').trim().charAt(0).toUpperCase()
   return (
     <header className="app-toolbar">
-      <button className="btn btn-icon btn-ghost" type="button" aria-label="Toggle navigation" title="Toggle navigation">
+      <button
+        className="btn btn-icon btn-ghost"
+        type="button"
+        aria-label="Toggle navigation"
+        title="Toggle navigation"
+        onClick={onToggleNav}
+      >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <rect x="3" y="3" width="18" height="18" rx="2" />
           <line x1="9" y1="3" x2="9" y2="21" />
@@ -39,6 +130,9 @@ export function Topbar({ banner }: { banner?: BannerView | null }) {
             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
             <path d="M13.73 21a2 2 0 0 1-3.46 0" />
           </svg>
+          <span className="hp-alert-badge" hidden={alertCount === 0}>
+            {alertCount > 99 ? '99+' : alertCount}
+          </span>
         </Link>
         <button
           className="btn btn-icon btn-ghost"
@@ -71,13 +165,22 @@ export function Topbar({ banner }: { banner?: BannerView | null }) {
             </svg>
           )}
         </button>
-        <button className="hp-live-state" type="button" aria-pressed="false" title="Dashboard refresh is active">
-          <span className="status-dot" />
-          <span>Live</span>
-        </button>
-        <a className="avatar hp-toolbar-avatar" href="/settings" title="Account & settings" aria-label="Account and settings">
-          ·
-        </a>
+        <LiveToggle />
+        <Link
+          className="avatar hp-toolbar-avatar"
+          to="/settings"
+          title="Account & settings"
+          aria-label="Account and settings"
+          onClick={(event) => {
+            // Plain left-click opens the modal; modified clicks keep their
+            // browser meaning (new tab/window) via the real href.
+            if (!onOpenSettings || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+            event.preventDefault()
+            onOpenSettings()
+          }}
+        >
+          {initial}
+        </Link>
       </div>
       {banner ? (
         <div className={`alert alert--${banner.severity} app-toolbar__banner`} role="status">

@@ -151,7 +151,7 @@ function ProvisionForm({ onCreated }: { onCreated: () => void }) {
         }}
       >
         <input
-          className="input"
+          className="form-input"
           type="text"
           required
           placeholder="path — e.g. home/mwagner/.aws/credentials"
@@ -160,7 +160,7 @@ function ProvisionForm({ onCreated }: { onCreated: () => void }) {
           aria-label="Honeyfs path"
         />
         <input
-          className="input"
+          className="form-input"
           type="text"
           required
           placeholder="username"
@@ -169,7 +169,7 @@ function ProvisionForm({ onCreated }: { onCreated: () => void }) {
           aria-label="Username"
         />
         <input
-          className="input"
+          className="form-input"
           type="text"
           required
           placeholder="password"
@@ -181,7 +181,7 @@ function ProvisionForm({ onCreated }: { onCreated: () => void }) {
           Generate
         </button>
         <input
-          className="input"
+          className="form-input"
           type="text"
           required
           placeholder="memo — why this bait exists"
@@ -190,7 +190,7 @@ function ProvisionForm({ onCreated }: { onCreated: () => void }) {
           aria-label="Memo"
         />
         <textarea
-          className="input"
+          className="form-input"
           rows={2}
           placeholder="content template (optional) — defaults to a two-line username=/password= file using {{username}}/{{password}} placeholders"
           value={template}
@@ -266,7 +266,7 @@ function CredentialActions({
     <>
       <div className="filters">
         <input
-          className="input"
+          className="form-input"
           type="text"
           placeholder="new password (blank = auto-generate)"
           value={newPassword}
@@ -281,7 +281,7 @@ function CredentialActions({
       </div>
       <div className="filters">
         <select
-          className="input"
+          className="form-input"
           aria-label="Link canarytoken"
           value={tokenChoice}
           disabled={!isAdmin || linkBusy}

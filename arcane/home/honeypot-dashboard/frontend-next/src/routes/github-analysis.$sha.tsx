@@ -8,7 +8,8 @@
 // rules + the PDF report or a JSON fallback).
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { confirmAction } from '../components/ConfirmDialog'
 import { InvestigateHeader } from '../components/Investigate'
 import { useResolved } from '../lib/hooks'
 
@@ -45,6 +46,36 @@ const fetchRun = createServerFn({ method: 'GET' })
     return serviceJSON<GithubAnalysisRun>(`/api/v1/github-analysis/${encodeURIComponent(data.sha)}`)
   })
 
+// Re-analyze (github_analysis.html:94's /github-analysis/submit form):
+// resubmits the sample for GitHub publication and scanning. Same request
+// shape as payloads.tsx's submitGithubAnalysis — confirm:'publish' is the
+// backend's explicit-consent gate, actor fields feed the audit log.
+const resubmitAnalysis = createServerFn({ method: 'POST' })
+  .inputValidator((input: { hash: string }) => input)
+  .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
+    const { getSessionUser } = await import('../lib/auth')
+    const user = await getSessionUser()
+    if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
+    const { serviceFetch } = await import('../lib/backend.server')
+    const response = await serviceFetch(
+      '/api/v1/github-analysis/submit',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          hash: data.hash,
+          confirm: 'publish',
+          actor_subject: user?.sub ?? '',
+          actor_username: user?.username ?? '',
+        }),
+      },
+      { mounted: true },
+    )
+    const body = await response.json().catch(() => null)
+    if (response.ok && body?.queued) return { ok: true }
+    return { ok: false, error: body?.error || 'GitHub-analysis submission failed.' }
+  })
+
 export const Route = createFileRoute('/github-analysis/$sha')({
   loader: async ({ params }) => ({ first: fetchRun({ data: { sha: params.sha } }) }),
   component: GithubAnalysisDetail,
@@ -78,6 +109,62 @@ const STATUS_NOTES: Record<string, { tone: 'orange' | 'red'; render: (run: Githu
   },
 }
 
+// Report viewer (#309, hp-github-analysis.js): one application-managed
+// centered overlay per page, same .modal/.pdf-viewer-modal shape as the
+// reports-studio viewer. Focus moves to the close button on open, Tab
+// cycles inside the dialog, Escape and backdrop clicks close, and focus
+// returns to the trigger card (the caller's DOM) on unmount. The iframe is
+// sandboxed — view_url is third-party content (raw.githubusercontent.com).
+function ReportViewer({ url, onClose }: { url: string; onClose: () => void }) {
+  const closeRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const previous = document.activeElement
+    closeRef.current?.focus()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onClose()
+        return
+      }
+      if (event.key !== 'Tab' || !panelRef.current) return
+      const focusables = panelRef.current.querySelectorAll<HTMLElement>('button, iframe')
+      if (!focusables.length) return
+      const first = focusables[0]
+      const last = focusables[focusables.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus()
+    }
+  }, [onClose])
+  return (
+    <>
+      <div className="modal-backdrop open" aria-hidden="true" onClick={onClose} />
+      <section className="modal pdf-viewer-modal open" role="dialog" aria-modal="true" aria-label="Report" ref={panelRef}>
+        <button className="modal__close" type="button" aria-label="Close report viewer" onClick={onClose} ref={closeRef}>
+          ✕
+        </button>
+        <h2 className="pdf-viewer-title">Report</h2>
+        <iframe
+          className="pdf-viewer-frame"
+          title="GitHub analysis report preview"
+          src={url}
+          sandbox="allow-scripts allow-same-origin allow-downloads"
+        />
+      </section>
+    </>
+  )
+}
+
 function scannerBadge(scanner: Scanner) {
   if (!scanner.ok) return <span className="badge badge--muted tw:text-red">failed{scanner.error ? `: ${scanner.error}` : ''}</span>
   if ((scanner.positives ?? 0) > 0) return <span className="badge badge--red">detected</span>
@@ -91,6 +178,8 @@ function GithubAnalysisDetail() {
   const resolved = useResolved(first)
   const run: GithubAnalysisRun | null | 'missing' = resolved === undefined ? null : resolved ?? 'missing'
   const [tab, setTab] = useState<'verdict' | 'provenance' | 'artifacts'>('verdict')
+  const [queued, setQueued] = useState(false)
+  const [viewerOpen, setViewerOpen] = useState(false)
 
   if (run === 'missing') {
     return <InvestigateHeader label="Evidence" title={sha.slice(0, 24)} subtitle="No GitHub-analysis result found for this hash." />
@@ -126,10 +215,39 @@ function GithubAnalysisDetail() {
                 report ↓
               </a>
               <Link className="chip" to="/github-analysis">← all runs</Link>
+              {/* github_analysis.html:94's Re-analyze form, with its exact
+                  data-hp-confirm-* publication wording — publication to the
+                  public repo is irreversible, hence the danger dialog. */}
+              <button
+                className="btn btn-sm btn-danger"
+                type="button"
+                title="Resubmit this sample for GitHub publication and scanning"
+                onClick={() =>
+                  confirmAction({
+                    title: 'Publish to Xore/honeypot?',
+                    description: 'This uploads the sample to the public Xore/honeypot repository and to third-party scanner APIs.',
+                    warning: 'This cannot be undone.',
+                    confirmLabel: 'Publish sample',
+                    onConfirm: async () => {
+                      const result = await resubmitAnalysis({ data: { hash: sha } })
+                      if (!result.ok) throw new Error(result.error || 'Submission failed.')
+                      setQueued(true)
+                      return 'Publication queued.'
+                    },
+                  })
+                }
+              >
+                Re-analyze
+              </button>
             </>
           ) : undefined
         }
       />
+      {queued ? (
+        <div className="alert alert--success" role="status">
+          Publication queued. This page updates once the host-side collector resolves a result.
+        </div>
+      ) : null}
       {run === null ? (
         <div className="card wide">
           <span className="skeleton-line" aria-hidden="true" />
@@ -329,12 +447,28 @@ function GithubAnalysisDetail() {
               <div className="card wide">
                 <h2>Report</h2>
                 {run.view_url ? (
-                  <>
-                    <p className="note">The rendered PDF report from the upstream repository, completed {run.completed_at}.</p>
-                    <a className="lnk" href={run.view_url} target="_blank" rel="noopener noreferrer">
-                      view PDF report ↗
-                    </a>
-                  </>
+                  // github_analysis.html's Report project-card (#309): a real
+                  // <button> here, so the template's hand-rolled Enter/Space
+                  // handling comes for free; opens the in-page viewer modal.
+                  <div className="project-grid">
+                    <button type="button" className="project-card" aria-label="View PDF report" onClick={() => setViewerOpen(true)}>
+                      <div className="project-card__header">
+                        <span className="project-card__icon">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                            <line x1="16" y1="13" x2="8" y2="13" />
+                            <line x1="16" y1="17" x2="8" y2="17" />
+                          </svg>
+                        </span>
+                        <span className="project-card__title">PDF report</span>
+                      </div>
+                      <p className="project-card__desc">The rendered PDF report from the upstream repository.</p>
+                      <div className="project-card__meta">
+                        <span>completed {run.completed_at}</span>
+                      </div>
+                    </button>
+                  </div>
                 ) : (
                   <>
                     <p className="note">No PDF has been generated for this analysis yet — this downloads the JSON record instead.</p>
@@ -346,6 +480,8 @@ function GithubAnalysisDetail() {
               </div>
             </div>
           ) : null}
+
+          {viewerOpen && run.view_url ? <ReportViewer url={run.view_url} onClose={() => setViewerOpen(false)} /> : null}
         </>
       )}
     </>

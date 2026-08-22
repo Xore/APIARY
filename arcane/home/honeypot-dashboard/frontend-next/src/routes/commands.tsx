@@ -5,6 +5,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { usePaginatedList } from '../lib/hooks'
 import type { JsonRecord } from '../lib/json'
+import { formatTimestamp } from '../lib/time'
 
 type EventRow = {
   time: string
@@ -42,7 +43,7 @@ function commandText(record: JsonRecord): string {
 }
 
 const COLUMNS: Column<EventRow>[] = [
-  { header: 'seen', render: (row) => row.time.replace('T', ' ').slice(0, 19) },
+  { header: 'seen', render: (row) => formatTimestamp(row.time) },
   { header: 'sensor', render: (row) => <span className="badge badge--muted">{row.sensor}</span> },
   { header: 'source ip', className: 'v', render: (row) => row.src_ip },
   { header: 'command', className: 'v', render: (row) => <code>{commandText(row.record) || row.detail}</code> },

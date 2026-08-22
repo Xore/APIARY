@@ -36,10 +36,124 @@ pub struct EventsQuery {
     /// Go-style duration ("24h", "7d") relative to now; defaults to the
     /// explorer's rolling window.
     pub since: Option<String>,
+    // ── Pivot filters (#1653): the everow detail-pane links the Go
+    // explorer rendered (events.html:23-26) all filter here. honeypot.*
+    // is flattened — exact terms work; each pivot accepts the value its
+    // corresponding link carries.
+    /// Decoy persona (honeypot.persona_id).
+    pub persona: Option<String>,
+    /// Decoy site (honeypot.site_id).
+    pub site: Option<String>,
+    /// Decoy asset (honeypot.asset_id).
+    pub asset: Option<String>,
+    /// Client fingerprint — matches any of the fields sensors record one
+    /// in (canonical_fingerprint, hassh, fingerprint, client, user_agent).
+    pub fingerprint: Option<String>,
+    /// Exact command text (canonical_command, command, input).
+    pub cmd: Option<String>,
+    /// "user / pass" credential pair, split on the legacy separator.
+    pub cred: Option<String>,
+    /// Request path (honeypot.path, honeypot.url).
+    pub path: Option<String>,
+    /// Session id (honeypot.session / session.id / honeypot.session_id).
+    pub session: Option<String>,
+    /// Source AS number (source.as.asn).
+    pub asn: Option<String>,
+    /// Source network organization (source.as.organization_name).
+    pub org: Option<String>,
+    /// Provider class (source.as.type).
+    pub provider: Option<String>,
+    /// IDS alert signature (suricata.eve.alert.signature).
+    pub sig: Option<String>,
+    /// Detection category (suricata alert category or honeypot.category).
+    pub cat: Option<String>,
 }
 
 fn default_size() -> u64 {
     25
+}
+
+/// The pivot values the explorer's detail pane renders as link groups —
+/// the Go tier's classified-event fields (decoy / pivot / origin /
+/// detection / recording, events.html:23-27), extracted here so the
+/// frontend never re-derives per-sensor field naming. Empty string means
+/// "absent"; the pane skips empty groups.
+#[derive(Serialize)]
+pub struct EventPivots {
+    pub persona: String,
+    pub site: String,
+    pub asset: String,
+    pub fingerprint: String,
+    pub fingerprint_kind: String,
+    pub command: String,
+    pub user: String,
+    pub pass: String,
+    pub path: String,
+    pub shasum: String,
+    pub asn: String,
+    pub org: String,
+    pub provider: String,
+    pub alert: String,
+    pub category: String,
+    /// Route to the in-app TTY replay when this event closed a recorded
+    /// session (cowrie.log.closed — its `shasum` is the recording's own
+    /// hash, deliberately NOT surfaced as a payload hash; see
+    /// classify.go's #638/#1266 note).
+    pub tty_replay: String,
+}
+
+pub fn pivots_from_source(src: &Value) -> EventPivots {
+    let text = |v: &Value| v.as_str().unwrap_or("").to_string();
+    let hp = &src["honeypot"];
+    let first = |keys: &[&str]| -> String {
+        keys.iter().map(|k| text(&hp[*k])).find(|s| !s.is_empty()).unwrap_or_default()
+    };
+    let eventid = text(&hp["eventid"]);
+    let is_tty_close = eventid == "cowrie.log.closed";
+    let (fingerprint, fingerprint_kind) = {
+        let canonical = text(&hp["canonical_fingerprint"]);
+        if !canonical.is_empty() {
+            (canonical, {
+                let kind = text(&hp["canonical_fingerprint_kind"]);
+                if kind.is_empty() { "fingerprint".to_string() } else { kind }
+            })
+        } else if !text(&hp["hassh"]).is_empty() {
+            (text(&hp["hassh"]), "HASSH".to_string())
+        } else if !text(&hp["fingerprint"]).is_empty() {
+            (text(&hp["fingerprint"]), "SSH pubkey".to_string())
+        } else if !text(&hp["client"]).is_empty() {
+            (text(&hp["client"]), "client banner".to_string())
+        } else if !text(&hp["user_agent"]).is_empty() {
+            (text(&hp["user_agent"]), "User-Agent".to_string())
+        } else {
+            (String::new(), String::new())
+        }
+    };
+    EventPivots {
+        persona: text(&hp["persona_id"]),
+        site: text(&hp["site_id"]),
+        asset: text(&hp["asset_id"]),
+        fingerprint,
+        fingerprint_kind,
+        command: first(&["canonical_command", "command", "input"]),
+        user: first(&["canonical_user", "username"]),
+        pass: first(&["canonical_pass", "password"]),
+        path: first(&["path", "url", "query"]),
+        shasum: if is_tty_close { String::new() } else { first(&["canonical_shasum", "shasum"]) },
+        asn: src["source"]["as"]["asn"].as_u64().map(|n| n.to_string()).unwrap_or_default(),
+        org: text(&src["source"]["as"]["organization_name"]),
+        provider: text(&src["source"]["as"]["type"]),
+        alert: text(&src["suricata"]["eve"]["alert"]["signature"]),
+        category: {
+            let sig_cat = text(&src["suricata"]["eve"]["alert"]["category"]);
+            if sig_cat.is_empty() { text(&hp["category"]) } else { sig_cat }
+        },
+        tty_replay: if is_tty_close && !text(&hp["shasum"]).is_empty() {
+            format!("/tty-replay/{}", text(&hp["shasum"]))
+        } else {
+            String::new()
+        },
+    }
 }
 
 #[derive(Serialize)]
@@ -52,6 +166,8 @@ pub struct EventRow {
     pub proto: String,
     pub detail: String,
     pub session: String,
+    /// Detail-pane pivot groups (#1653) — see EventPivots.
+    pub pivots: EventPivots,
     /// The complete normalized ECS document, for the record inspector pane
     /// (the row click opens it; nothing is hidden). #1611 workstream E.4:
     /// this is also where `network.community_id` (when suricata populated
@@ -122,6 +238,7 @@ pub fn row_from_source(src: &Value) -> EventRow {
             let s1 = text(&src["honeypot"]["session"]);
             if s1.is_empty() { text(&src["session"]["id"]) } else { s1 }
         },
+        pivots: pivots_from_source(src),
         record: src.clone(),
     }
 }
@@ -157,6 +274,64 @@ pub fn build_filters(q: &EventsQuery) -> Vec<Value> {
         // lenient: a malformed user query returns no matches instead of a
         // shard failure, matching the legacy page's forgiving behavior.
         filters.push(json!({"query_string": {"query": text, "lenient": true}}));
+    }
+    // ── Pivot filters (#1653). A multi-field pivot is a should-of-terms:
+    // the sensors record the same concept under different keys, and any
+    // match is the semantics the Go in-memory filter had.
+    let any_of = |fields: &[&str], value: &str| -> Value {
+        let should: Vec<Value> = fields.iter().map(|f| json!({"term": {*f: value}})).collect();
+        json!({"bool": {"should": should, "minimum_should_match": 1}})
+    };
+    if let Some(persona) = q.persona.as_deref().filter(|v| !v.is_empty()) {
+        filters.push(json!({"term": {"honeypot.persona_id": persona}}));
+    }
+    if let Some(site) = q.site.as_deref().filter(|v| !v.is_empty()) {
+        filters.push(json!({"term": {"honeypot.site_id": site}}));
+    }
+    if let Some(asset) = q.asset.as_deref().filter(|v| !v.is_empty()) {
+        filters.push(json!({"term": {"honeypot.asset_id": asset}}));
+    }
+    if let Some(fp) = q.fingerprint.as_deref().filter(|v| !v.is_empty()) {
+        filters.push(any_of(
+            &[
+                "honeypot.canonical_fingerprint",
+                "honeypot.hassh",
+                "honeypot.fingerprint",
+                "honeypot.client",
+                "honeypot.user_agent",
+            ],
+            fp,
+        ));
+    }
+    if let Some(cmd) = q.cmd.as_deref().filter(|v| !v.is_empty()) {
+        filters.push(any_of(&["honeypot.canonical_command", "honeypot.command", "honeypot.input"], cmd));
+    }
+    if let Some(cred) = q.cred.as_deref().filter(|v| !v.is_empty()) {
+        // "user / pass", the exact separator the credential links carry.
+        let (user, pass) = cred.split_once(" / ").unwrap_or((cred, ""));
+        filters.push(any_of(&["honeypot.canonical_user", "honeypot.username"], user));
+        filters.push(any_of(&["honeypot.canonical_pass", "honeypot.password"], pass));
+    }
+    if let Some(path) = q.path.as_deref().filter(|v| !v.is_empty()) {
+        filters.push(any_of(&["honeypot.path", "honeypot.url"], path));
+    }
+    if let Some(session) = q.session.as_deref().filter(|v| !v.is_empty()) {
+        filters.push(any_of(&["honeypot.session", "honeypot.session_id", "session.id"], session));
+    }
+    if let Some(asn) = q.asn.as_deref().filter(|v| !v.is_empty()) {
+        filters.push(json!({"term": {"source.as.asn": asn}}));
+    }
+    if let Some(org) = q.org.as_deref().filter(|v| !v.is_empty()) {
+        filters.push(json!({"term": {"source.as.organization_name": org}}));
+    }
+    if let Some(provider) = q.provider.as_deref().filter(|v| !v.is_empty()) {
+        filters.push(json!({"term": {"source.as.type": provider}}));
+    }
+    if let Some(sig) = q.sig.as_deref().filter(|v| !v.is_empty()) {
+        filters.push(json!({"term": {"suricata.eve.alert.signature": sig}}));
+    }
+    if let Some(cat) = q.cat.as_deref().filter(|v| !v.is_empty()) {
+        filters.push(any_of(&["suricata.eve.alert.category", "honeypot.category"], cat));
     }
     filters
 }
