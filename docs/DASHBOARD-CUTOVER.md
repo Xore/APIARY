@@ -1,7 +1,19 @@
 # Dashboard modernization-port cutover
 
-Status: first draft runbook for #1628. Unlike
-[`KEYCLOAK-CUTOVER.md`](KEYCLOAK-CUTOVER.md), this has not yet been executed
+**Status: COMPLETE (2026-08-22, per Xore).** The cutover finished and its
+step 9 was executed in full: the Go `dashboard` and Python
+`es-results-importer` service blocks are deleted from
+`honeypot-dashboard/compose.yml`, every `profiles: ["next"]` line is gone
+(the new tier is the default and only tier), and
+`scripts/cutover-dashboard.sh` is removed. **There is no runtime fallback
+to the Go dashboard** — falling back means checking out a pre-cutover
+commit (any commit before this change) and running it normally, a
+deliberate decision so no profile/override machinery lingers in the live
+compose files. The rest of this document is the historical runbook the
+cutover followed, kept for the record.
+
+Status at drafting: first runbook for #1628. Unlike
+[`KEYCLOAK-CUTOVER.md`](KEYCLOAK-CUTOVER.md), this had not yet been executed
 end-to-end — refine it against what actually happens the first time it's
 run, the way that doc was.
 
