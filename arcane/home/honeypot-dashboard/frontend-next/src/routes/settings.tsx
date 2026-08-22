@@ -92,7 +92,9 @@ type Operator = { subject: string; username: string; role: string; first_seen_at
 type ServiceRow = JsonRecord
 type ServicesResponse = { available: boolean; services: ServiceRow[]; reason?: string }
 
-type HistoryEntry = { revision: number; time: string; actor_subject: string; actor_username: string; action: string; fields: string[] }
+// fields is absent for a rejected write (e.g. result: "conflict") -- there's
+// nothing to report, the update never computed a changed-field list.
+type HistoryEntry = { revision: number; time: string; actor_subject: string; actor_username: string; action: string; fields: string[] | null }
 type HistoryResponse = { entries: HistoryEntry[] }
 
 type AuditEvent = {
@@ -100,7 +102,7 @@ type AuditEvent = {
   actor_subject: string
   actor_username: string
   action: string
-  fields: string[]
+  fields: string[] | null
   revision: number
   result: string
 }
@@ -2206,7 +2208,7 @@ function ConfigHistoryCard({ initial, editable }: { initial: HistoryResponse | n
                   <td>
                     <span className="badge badge--muted">{entry.action}</span>
                   </td>
-                  <td className="v">{entry.fields.join(', ')}</td>
+                  <td className="v">{(entry.fields ?? []).join(', ')}</td>
                   {editable ? (
                     <td>
                       <button
@@ -2307,7 +2309,7 @@ function AuditLogCard({ initial }: { initial: AuditResponse | null }) {
                   <td>
                     <span className="badge badge--muted">{event.action}</span>
                   </td>
-                  <td className="v">{event.fields.join(', ')}</td>
+                  <td className="v">{(event.fields ?? []).join(', ')}</td>
                   <td className="n">{event.revision || ''}</td>
                   <td>{resultBadge(event.result)}</td>
                 </tr>
