@@ -31,7 +31,14 @@ const fetchHistory = createServerFn({ method: 'GET' })
   })
 
 export const Route = createFileRoute('/history')({
-  loader: async () => ({ first: fetchHistory({ data: { offset: 0, q: '' } }) }),
+  // ?q= lands scoped: search pivots across the dashboard (ML-anomaly and
+  // agent-campaign source-event links, the search page's history chip)
+  // build /history?q=… URLs — the Go page read the same param (#1653).
+  validateSearch: (search: Record<string, unknown>): { q?: string } => ({
+    q: typeof search.q === 'string' && search.q ? search.q : undefined,
+  }),
+  loaderDeps: ({ search }) => search,
+  loader: async ({ deps }) => ({ first: fetchHistory({ data: { offset: 0, q: deps.q ?? '' } }), initialQ: deps.q ?? '' }),
   component: History,
 })
 
@@ -49,15 +56,23 @@ const COLUMNS: Column<EventRow>[] = [
 ]
 
 function History() {
-  const { first } = Route.useLoaderData()
+  const { first, initialQ } = Route.useLoaderData()
   const [rows, setRows] = useState<EventRow[] | null>(null)
   const [total, setTotal] = useState(0)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [query, setQuery] = useState('')
-  const activeQuery = useRef('')
+  const [query, setQuery] = useState(initialQ)
+  const activeQuery = useRef(initialQ)
+
+  // A client-side navigation to /history?q=… re-runs the loader with new
+  // deps; sync the input and paging scope to the arriving query.
+  useEffect(() => {
+    setQuery(initialQ)
+    activeQuery.current = initialQ
+  }, [initialQ])
 
   useEffect(() => {
     let cancelled = false
+    setRows(null)
     first.then((page) => {
       if (cancelled || !page) return
       setRows(page.rows)
