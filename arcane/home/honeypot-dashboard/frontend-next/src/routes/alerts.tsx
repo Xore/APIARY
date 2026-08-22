@@ -24,6 +24,54 @@ type AlertRow = {
 
 type Page = { total: number; rows: AlertRow[] }
 
+// #1566: 200 same-rule YARA hits (one row per file hash) flooded the New
+// tab as visually-identical rows. Collapse same-class alerts into one
+// group — same Key prefix (the alert kind, e.g. "yara"/"campaign") plus
+// the Message with any hash-like or dotted-quad token blanked out, so
+// "YARA payload match: <hash> rules=X source=dionaea" for 200 different
+// hashes becomes one group instead of 200 rows.
+const VARIABLE_TOKEN = /\b(?:[0-9a-fA-F]{12,64}|(?:\d{1,3}\.){3}\d{1,3})\b/g
+
+function groupSignature(row: AlertRow): string {
+  const prefix = row.Key.slice(0, row.Key.indexOf(':')) || row.Key
+  return `${prefix}::${row.Message.replace(VARIABLE_TOKEN, '…')}`
+}
+
+type AlertGroup = {
+  signature: string
+  label: string
+  members: AlertRow[]
+  count: number
+  lastSeen: string
+  firstSeen: string
+  acknowledged: boolean
+}
+
+function groupAlerts(rows: AlertRow[]): AlertGroup[] {
+  const groups = new Map<string, AlertGroup>()
+  for (const row of rows) {
+    const signature = groupSignature(row)
+    const existing = groups.get(signature)
+    if (existing) {
+      existing.members.push(row)
+      existing.count += row.Count
+      if (row.LastSeen > existing.lastSeen) existing.lastSeen = row.LastSeen
+      if (row.FirstSeen < existing.firstSeen) existing.firstSeen = row.FirstSeen
+    } else {
+      groups.set(signature, {
+        signature,
+        label: row.Message,
+        members: [row],
+        count: row.Count,
+        lastSeen: row.LastSeen,
+        firstSeen: row.FirstSeen,
+        acknowledged: row.Acknowledged,
+      })
+    }
+  }
+  return [...groups.values()].sort((a, b) => (a.lastSeen < b.lastSeen ? 1 : -1))
+}
+
 // The Go alert board renders the whole store at once (capped at 200 records,
 // alerts.html #301 — no server-side pagination); store_page caps each read at
 // 100, so page up to that same 200 cap here.
@@ -51,6 +99,26 @@ const acknowledgeAlert = createServerFn({ method: 'POST' })
       body: JSON.stringify({ ack: data.ack }),
     })
     if (!response.ok) throw new Error(`Alert update failed (${response.status})`)
+  })
+
+// Group-level acknowledge/reopen — one call per member key, same endpoint
+// per-row acknowledge uses. Bounded by a rule-group's member count (never
+// the whole board), so no offset-walk like acknowledgeAll needs.
+const acknowledgeKeys = createServerFn({ method: 'POST' })
+  .inputValidator((input: { keys: string[]; ack: boolean }) => input)
+  .handler(async ({ data }): Promise<number> => {
+    const { serviceFetch } = await import('../lib/backend.server')
+    let changed = 0
+    for (const key of data.keys) {
+      const response = await serviceFetch(`/api/v1/alerts/${encodeURIComponent(key)}/ack`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ack: data.ack }),
+      })
+      if (!response.ok) throw new Error(`Alert update failed (${response.status})`)
+      changed += 1
+    }
+    return changed
   })
 
 // The Go tier's POST /api/alerts scope=all acknowledged every open alert
@@ -84,7 +152,7 @@ export const Route = createFileRoute('/alerts')({
   component: Alerts,
 })
 
-function buildColumns(onToggle: (row: AlertRow) => void): Column<AlertRow>[] {
+function buildColumns(onToggleGroup: (group: AlertGroup) => void, onToggleMember: (row: AlertRow) => void): Column<AlertGroup>[] {
   const linkCell = (row: AlertRow, text: string) =>
     row.Link ? (
       <a className="lnk" href={row.Link} title="show the events behind this alert" onClick={(event) => event.stopPropagation()}>
@@ -96,31 +164,61 @@ function buildColumns(onToggle: (row: AlertRow) => void): Column<AlertRow>[] {
   return [
     {
       header: 'state',
-      render: (row) =>
-        row.Acknowledged ? (
+      render: (group) =>
+        group.acknowledged ? (
           <span className="badge badge--muted">acknowledged</span>
         ) : (
           <span className="badge badge--warning">open</span>
         ),
     },
-    { header: 'key', className: 'v', render: (row) => linkCell(row, row.Key) },
-    { header: 'message', className: 'v', render: (row) => linkCell(row, row.Message) },
-    { header: 'observed', className: 'n', render: (row) => row.Count.toLocaleString('en-US') },
-    { header: 'last seen', render: (row) => formatTimestamp(row.LastSeen) },
-    { header: 'last notified', render: (row) => (row.LastNotified ? formatTimestamp(row.LastNotified) : '—') },
-    { header: 'first seen', detail: true, render: (row) => formatTimestamp(row.FirstSeen) },
+    {
+      header: 'message',
+      className: 'v',
+      render: (group) => (
+        <>
+          {group.label}
+          {group.members.length > 1 ? <span className="badge badge--muted" title="alerts of this same rule/kind, grouped by hash"> ×{group.members.length}</span> : null}
+        </>
+      ),
+    },
+    { header: 'observed', className: 'n', render: (group) => group.count.toLocaleString('en-US') },
+    { header: 'last seen', render: (group) => formatTimestamp(group.lastSeen) },
+    { header: 'first seen', detail: true, render: (group) => formatTimestamp(group.firstSeen) },
+    {
+      header: 'members',
+      detail: true,
+      render: (group) => (
+        <ul>
+          {group.members.map((member) => (
+            <li key={member.Key}>
+              {linkCell(member, member.Key)} — {member.Count.toLocaleString('en-US')} observed, last {formatTimestamp(member.LastSeen)}{' '}
+              <button
+                className="copy"
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onToggleMember(member)
+                }}
+              >
+                {member.Acknowledged ? 'reopen' : 'acknowledge'}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ),
+    },
     {
       header: 'action',
-      render: (row) => (
+      render: (group) => (
         <button
           className="copy"
           type="button"
           onClick={(event) => {
             event.stopPropagation()
-            onToggle(row)
+            onToggleGroup(group)
           }}
         >
-          {row.Acknowledged ? 'reopen' : 'acknowledge'}
+          {group.acknowledged ? 'reopen' : `acknowledge${group.members.length > 1 ? ` (${group.members.length})` : ''}`}
         </button>
       ),
     },
@@ -147,9 +245,10 @@ function Alerts() {
     setAlerts(await fetchAlerts())
   }, [])
 
-  // Per-row acknowledge/reopen — same confirm surface and copy as
-  // hp-modals.js's data-hp-alert-ack handler.
-  const toggle = useCallback(
+  // Per-member acknowledge/reopen (from a group's expanded member list) —
+  // same confirm surface and copy as hp-modals.js's data-hp-alert-ack
+  // handler.
+  const toggleMember = useCallback(
     (row: AlertRow) => {
       const acknowledge = !row.Acknowledged
       confirmAction({
@@ -164,6 +263,30 @@ function Alerts() {
           await acknowledgeAlert({ data: { key: row.Key, ack: acknowledge } })
           await reload()
           return acknowledge ? 'Alert acknowledged.' : 'Alert reopened.'
+        },
+      })
+    },
+    [reload],
+  )
+
+  // Group-level acknowledge/reopen — every member of a rule-group at once,
+  // restoring the old dashboard's grouped-flood cleanup in one click.
+  const toggleGroup = useCallback(
+    (group: AlertGroup) => {
+      const acknowledge = !group.acknowledged
+      const keys = group.members.map((member) => member.Key)
+      confirmAction({
+        title: acknowledge ? 'Acknowledge this alert group?' : 'Reopen this alert group?',
+        description: acknowledge
+          ? 'Acknowledging suppresses repeat notifications for every alert in this group until reopened.'
+          : 'Reopening makes every alert in this group active and eligible for notifications again.',
+        warning: `${group.label} — ${keys.length} alert${keys.length === 1 ? '' : 's'} in this group.`,
+        confirmLabel: acknowledge ? `Acknowledge ${keys.length === 1 ? 'alert' : `all ${keys.length}`}` : `Reopen ${keys.length === 1 ? 'alert' : `all ${keys.length}`}`,
+        danger: acknowledge,
+        onConfirm: async () => {
+          const changed = await acknowledgeKeys({ data: { keys, ack: acknowledge } })
+          await reload()
+          return acknowledge ? `${changed} alert${changed === 1 ? '' : 's'} acknowledged.` : `${changed} alert${changed === 1 ? '' : 's'} reopened.`
         },
       })
     },
@@ -187,25 +310,26 @@ function Alerts() {
     })
   }, [openCount, reload])
 
-  const columns = buildColumns(toggle)
+  const columns = buildColumns(toggleGroup, toggleMember)
   const q = query.trim().toLowerCase()
   const matches = (row: AlertRow) => !q || `${row.Key} ${row.Message}`.toLowerCase().includes(q)
-  const partition = (acknowledged: boolean) => (alerts ? alerts.filter((row) => row.Acknowledged === acknowledged && matches(row)) : null)
+  const partition = (acknowledged: boolean) =>
+    alerts ? groupAlerts(alerts.filter((row) => row.Acknowledged === acknowledged && matches(row))) : null
 
   const panel = (id: string, acknowledged: boolean) => {
-    const rows = partition(acknowledged)
+    const groups = partition(acknowledged)
     return (
       <TabPanel id={id} active={tab} idPrefix="alerts" className="dashboard-panel">
-        {rows && rows.length === 0 ? (
+        {groups && groups.length === 0 ? (
           <p className="empty" role="status" aria-live="polite">
             {alerts && alerts.length ? 'No alerts match this filter.' : 'No alerts recorded.'}
           </p>
         ) : (
           <MasterDetailTable
-            rows={rows}
+            rows={groups}
             columns={columns}
-            rowKey={(row) => row.Key}
-            inspectorTitle="Alert details"
+            rowKey={(group) => group.signature}
+            inspectorTitle="Alert group details"
           />
         )}
       </TabPanel>

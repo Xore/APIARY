@@ -405,21 +405,44 @@ fn alert_counts_by_cidr(alert_counts: &std::collections::HashMap<String, i64>) -
     out
 }
 
+/// Saturating 0..100 curve (value=0 -> 0, value=half -> 50, value=inf ->
+/// 100) used to score one campaign dimension. Unlike a flat per-unit
+/// weight capped post-hoc, this keeps discriminating across the range
+/// real campaigns actually occupy instead of every busy campaign alike
+/// pinning its dimension (and, additively, the whole score) at the cap.
+fn saturating(value: i64, half: f64) -> f64 {
+    let value = value.max(0) as f64;
+    if value <= 0.0 {
+        0.0
+    } else {
+        100.0 * value / (value + half)
+    }
+}
+
+/// #1565/#1566: the old additive-and-cap formula (each dimension capped
+/// then summed then min'd at 100) saturated to 100 for almost any real
+/// campaign -- a handful of sensors plus a few dozen events already
+/// cleared the cap on their own, so the column carried no signal. This
+/// replaces it with a weighted average of per-dimension saturating
+/// curves (weights sum to 1, so the result is naturally bounded 0..100
+/// without a hard cap masking the blend), calibrated so a modest
+/// campaign scores in the 20s-40s and only a campaign that's genuinely
+/// large *and* diverse across every dimension approaches the ceiling.
 fn score_campaigns(buckets: Vec<CampaignBucket>, now: chrono::DateTime<chrono::Utc>, alert_counts: &std::collections::HashMap<String, i64>) -> Vec<Value> {
     let by_cidr = alert_counts_by_cidr(alert_counts);
     let mut docs: Vec<(i64, i64, String, Value)> = buckets
         .into_iter()
         .map(|b| {
             let alerts = *by_cidr.get(&b.cidr).unwrap_or(&0);
-            let score = (b.events.min(30)
-                + (b.sensors.len() as i64) * 15
-                + b.unique_ips * 3
-                + b.creds * 8
-                + b.payloads * 20
-                + alerts.min(15) * 2
-                + b.fingerprints * 3
-                + (b.providers.len() as i64) * 2)
-                .min(100);
+            let score = (0.28 * saturating(b.events, 200.0)
+                + 0.18 * saturating(b.sensors.len() as i64, 3.0)
+                + 0.14 * saturating(b.unique_ips, 10.0)
+                + 0.14 * saturating(b.payloads, 3.0)
+                + 0.09 * saturating(b.creds, 3.0)
+                + 0.07 * saturating(alerts, 20.0)
+                + 0.05 * saturating(b.fingerprints, 5.0)
+                + 0.05 * saturating(b.providers.len() as i64, 2.0))
+            .round() as i64;
             let mut why = Vec::new();
             if b.sensors.len() > 1 {
                 why.push(format!("cross-sensor activity ({})", b.sensors.len()));
@@ -572,13 +595,33 @@ mod tests {
     }
 
     #[test]
-    fn score_formula_matches_go_and_caps_at_100() {
+    fn score_does_not_saturate_for_a_modest_campaign() {
         let now = chrono::Utc::now();
-        // events=100(cap 30) + sensors(2*15=30) + unique_ips(5*3=15) +
-        // creds(3*8=24) + payloads(2*20=40) + fingerprints(4*3=12) +
-        // providers(1*2=2) = 30+30+15+24+40+12+2 = 153, capped to 100.
+        // The old additive-and-cap formula pinned this exact input at 100;
+        // the weighted-saturating-curve formula keeps it mid-range instead.
         let docs = score_campaigns(vec![bucket("203.0.113.0/24", 100, 2, 5, 3, 2, 4, 1)], now, &std::collections::HashMap::new());
-        assert_eq!(docs[0]["score"], 100);
+        let score = docs[0]["score"].as_i64().unwrap();
+        assert!((1..80).contains(&score), "expected a discriminating mid-range score, got {score}");
+    }
+
+    #[test]
+    fn score_approaches_ceiling_only_for_a_large_diverse_campaign() {
+        let now = chrono::Utc::now();
+        let docs = score_campaigns(vec![bucket("203.0.113.0/24", 90_000, 5, 500, 20, 15, 25, 4)], now, &std::collections::HashMap::new());
+        let score = docs[0]["score"].as_i64().unwrap();
+        assert!(score > 75, "expected a large, diverse campaign to score high, got {score}");
+    }
+
+    #[test]
+    fn score_is_monotonic_in_events() {
+        let now = chrono::Utc::now();
+        let low = score_campaigns(vec![bucket("203.0.113.0/24", 10, 1, 1, 0, 0, 0, 0)], now, &std::collections::HashMap::new())[0]["score"]
+            .as_i64()
+            .unwrap();
+        let high = score_campaigns(vec![bucket("198.51.100.0/24", 5000, 1, 1, 0, 0, 0, 0)], now, &std::collections::HashMap::new())[0]["score"]
+            .as_i64()
+            .unwrap();
+        assert!(high > low);
     }
 
     #[test]

@@ -262,7 +262,7 @@ function Events() {
       <header className="overview-header">
         <div>
           <div className="label-section">Investigate</div>
-          <h1>event explorer</h1>
+          <h1>Event explorer</h1>
           <p className="subtitle">Every normalized event across all sensors — pivot on any value, or export the exact filtered scope.</p>
         </div>
       </header>
