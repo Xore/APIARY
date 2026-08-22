@@ -11,6 +11,7 @@ import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { CommandPalette } from './CommandPalette'
 import { ConfirmHost } from './ConfirmDialog'
+import { SettingsModal } from './SettingsModal'
 import { LiveToasts } from './LiveToasts'
 import { ProblemReportButton } from './ProblemReportButton'
 import { FlashHost } from '../lib/flash'
@@ -43,6 +44,13 @@ export function AppShell({
   // drawer is transient and closes on navigation, scrim click or Escape.
   const [collapsed, setCollapsed] = useState(false)
   const [navOpen, setNavOpen] = useState(false)
+  // Settings-as-modal from anywhere (hp-settings.js:23-38, per Xore): the
+  // topbar avatar and account-menu item open the centered settings modal
+  // instead of navigating; on /settings itself the openers stay plain
+  // links (the page is already the settings surface).
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const onSettingsRoute = location.pathname === '/settings'
+  const openSettings = onSettingsRoute ? undefined : () => setSettingsOpen(true)
 
   useEffect(() => {
     try {
@@ -77,6 +85,9 @@ export function AppShell({
   // readers), record entity pages into the sidebar's Recent list.
   useEffect(() => {
     setNavOpen(false)
+    // Navigating underneath the settings overlay (command palette, browser
+    // back) dismisses it — the destination page is what the user asked for.
+    setSettingsOpen(false)
     document.title = `${appName || 'APIARY'} — ${pageFor(location.pathname)}`
     recordRecentFromLocation(location.pathname, location.searchStr)
   }, [location.pathname, location.searchStr, appName])
@@ -101,8 +112,11 @@ export function AppShell({
       <ConfirmHost />
       <FlashHost />
       <LiveToasts />
-      <Topbar banner={banner} user={user} onToggleNav={toggleNav} />
-      <Sidebar user={user} />
+      <Topbar banner={banner} user={user} onToggleNav={toggleNav} onOpenSettings={openSettings} />
+      <Sidebar user={user} onOpenSettings={openSettings} />
+      {settingsOpen && !onSettingsRoute ? (
+        <SettingsModal user={user} onClose={() => setSettingsOpen(false)} />
+      ) : null}
       {/* Click-to-dismiss backdrop behind the ≤520px drawer — visible only
           while .hp-nav-open is on the shell (theme.css:2143-2158). */}
       <div className="app-shell__nav-scrim" aria-hidden="true" onClick={() => setNavOpen(false)} />

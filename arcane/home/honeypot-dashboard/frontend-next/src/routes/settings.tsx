@@ -26,7 +26,7 @@ import { str } from '../components/StoreList'
 import { applyPalette, applyTheme, pullServerTheme, useThemeMode, type ThemeMode } from '../lib/prefs'
 import type { JsonRecord } from '../lib/json'
 import { prefetchEnabled, setPrefetchEnabled } from '../lib/prefetch'
-import { getSessionUser } from '../lib/auth'
+import { getSessionUser, type User } from '../lib/auth'
 import { formatTimestamp, writeTimePrefs } from '../lib/time'
 
 // The full presentation.* field list from the legacy settings modal's
@@ -369,6 +369,32 @@ const rollbackConfig = createServerFn({ method: 'POST' })
     return { ok: false, error: await response.text() }
   })
 
+// The full data set the settings surface consumes, as in-flight promises —
+// the route loader kicks these off; the anywhere-modal (SettingsModal.tsx)
+// calls fetchSettingsData itself on open, so both hosts share one fetch
+// path and one shape.
+export type SettingsData = {
+  storage: Promise<EsStorage | null>
+  preferences: Promise<Prefs | null>
+  admin: Promise<AdminConfig | null>
+  services: Promise<ServicesResponse | null>
+  history: Promise<HistoryResponse | null>
+  audit: Promise<AuditResponse | null>
+  reporterStats: Promise<ReporterStats | null>
+}
+
+export function fetchSettingsData(): SettingsData {
+  return {
+    storage: fetchStorage(),
+    preferences: fetchPreferences(),
+    admin: fetchAdminData(),
+    services: fetchServices(),
+    history: fetchHistory(),
+    audit: fetchAudit({ data: { action: '' } }),
+    reporterStats: fetchReporterStats(),
+  }
+}
+
 export const Route = createFileRoute('/settings')({
   // Deep-linkable pane: /settings?pane=services etc. Unknown names — and
   // admin panes for non-admins — fall back to "account" in the component
@@ -377,13 +403,7 @@ export const Route = createFileRoute('/settings')({
     pane: typeof search.pane === 'string' && search.pane ? search.pane : undefined,
   }),
   loader: async () => ({
-    storage: fetchStorage(),
-    preferences: fetchPreferences(),
-    admin: fetchAdminData(),
-    services: fetchServices(),
-    history: fetchHistory(),
-    audit: fetchAudit({ data: { action: '' } }),
-    reporterStats: fetchReporterStats(),
+    ...fetchSettingsData(),
     user: await getSessionUser(),
   }),
   component: Settings,
@@ -2317,9 +2337,41 @@ const PALETTES: { id: string; label: string }[] = [
 ]
 
 function Settings() {
-  const { storage, preferences, admin, services, history, audit, reporterStats, user } = Route.useLoaderData()
+  const { user, ...data } = Route.useLoaderData()
   const searchParams = Route.useSearch()
   const navigate = useNavigate()
+  return (
+    <SettingsSurface
+      data={data}
+      user={user ?? null}
+      pane={searchParams.pane}
+      onPaneChange={(id) => void navigate({ to: '/settings', search: id === 'account' ? {} : { pane: id } })}
+    />
+  )
+}
+
+// The settings surface itself — the export seam (#1653 settings-as-modal):
+// the /settings route above renders it in page mode (pane ↔ ?pane= search
+// param, "pick 13B"); components/SettingsModal.tsx renders the same surface
+// with `onClose` set, which swaps the permanently-open page chrome for the
+// theme's centered-modal contract (settings_modal.html's
+// .modal.hp-dash-settings + .modal__close).
+export function SettingsSurface({
+  data,
+  user,
+  pane,
+  onPaneChange,
+  onClose,
+}: {
+  data: SettingsData
+  user: User | null
+  /** Requested pane name (unvalidated — falls back to "account"). */
+  pane?: string
+  onPaneChange: (id: string) => void
+  /** Present in modal mode: renders modal chrome and the close button. */
+  onClose?: () => void
+}) {
+  const { storage, preferences, admin, services, history, audit, reporterStats } = data
   const theme = useThemeMode()
   const [palette, setPalette] = useState('claude')
   const [prefetch, setPrefetch] = useState(true)
@@ -2335,7 +2387,7 @@ function Settings() {
 
   // ?pane= deep link; unknown names and admin panes for non-admins fall
   // back to "account" (hp-settings.js:339-341).
-  const requested = searchParams.pane as PaneId | undefined
+  const requested = pane as PaneId | undefined
   const active: PaneId =
     requested && PANE_META[requested] && (isAdmin || !PANE_META[requested].admin) ? requested : 'account'
 
@@ -2347,7 +2399,7 @@ function Settings() {
   const showPane = (id: PaneId) => {
     // Selecting a pane leaves search mode, like hp-settings.js:346-347.
     setRawQuery('')
-    void navigate({ to: '/settings', search: id === 'account' ? {} : { pane: id } })
+    onPaneChange(id)
   }
 
   /* ---- aggregate dirty state (#1653 item 4) ---- */
@@ -2366,9 +2418,12 @@ function Settings() {
 
   // In-app navigation guard + beforeunload for hard reloads
   // (hp-settings.js:317-321). Pane switches stay inside /settings and are
-  // never blocked.
+  // never blocked. In modal mode router navigation is never blocked (the
+  // overlay just closes with the page changing underneath, like the Go
+  // modal); the beforeunload guard still covers hard reloads.
+  const inModal = onClose !== undefined
   const blocker = useBlocker({
-    shouldBlockFn: ({ next }) => (next.pathname === '/settings' ? false : dirtyRef.current),
+    shouldBlockFn: ({ next }) => (inModal || next.pathname === '/settings' ? false : dirtyRef.current),
     enableBeforeUnload: () => dirtyRef.current,
     withResolver: true,
   })
@@ -2564,8 +2619,22 @@ function Settings() {
       {/* The page-mode settings surface (theme.css "pick 13B",
           #hp-settings.hp-dash-settings--page): the modal fragment's exact
           rail/pane composition, permanently open, minus the overlay
-          chrome — matching what hp-settings.js:88-99 builds on /settings. */}
-      <section className="modal hp-dash-settings hp-dash-settings--page open" id="hp-settings">
+          chrome — matching what hp-settings.js:88-99 builds on /settings.
+          In modal mode the same fragment keeps its overlay chrome
+          (settings_modal.html:8-9): the centered .modal.hp-dash-settings
+          box with its absolute .modal__close. */}
+      <section
+        className={inModal ? 'modal hp-dash-settings open' : 'modal hp-dash-settings hp-dash-settings--page open'}
+        id={inModal ? undefined : 'hp-settings'}
+        role={inModal ? 'dialog' : undefined}
+        aria-modal={inModal ? true : undefined}
+        aria-labelledby="hp-dash-settings-title"
+      >
+        {inModal ? (
+          <button className="modal__close" type="button" aria-label="Close settings" onClick={onClose}>
+            {'✕'}
+          </button>
+        ) : null}
         <div className="settings-layout">
           <aside className="settings-layout__sidebar" aria-label="Settings sections">
             <div className="sidebar__search">

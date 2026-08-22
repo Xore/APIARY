@@ -80,10 +80,15 @@ export function Topbar({
   banner,
   user,
   onToggleNav,
+  onOpenSettings,
 }: {
   banner?: BannerView | null
   user?: User | null
   onToggleNav?: () => void
+  /** When set, the avatar opens the centered settings modal instead of
+   * navigating (hp-settings.js:23-27, per Xore); the /settings href stays
+   * as the no-JS / middle-click / new-tab fallback. Unset on /settings. */
+  onOpenSettings?: () => void
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const mode = useThemeMode()
@@ -161,7 +166,19 @@ export function Topbar({
           )}
         </button>
         <LiveToggle />
-        <Link className="avatar hp-toolbar-avatar" to="/settings" title="Account & settings" aria-label="Account and settings">
+        <Link
+          className="avatar hp-toolbar-avatar"
+          to="/settings"
+          title="Account & settings"
+          aria-label="Account and settings"
+          onClick={(event) => {
+            // Plain left-click opens the modal; modified clicks keep their
+            // browser meaning (new tab/window) via the real href.
+            if (!onOpenSettings || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+            event.preventDefault()
+            onOpenSettings()
+          }}
+        >
           {initial}
         </Link>
       </div>
