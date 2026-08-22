@@ -10,6 +10,7 @@ import { ArtifactList } from '../components/ArtifactList'
 import { getSessionUser } from '../lib/auth'
 import { pathString, type JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
+import { useSidebarViewTabs } from '../lib/viewTabs'
 
 type StoreRow = JsonRecord
 type Page = { total: number; rows: StoreRow[] }
@@ -1100,6 +1101,19 @@ const GPU_QUEUE_COLUMNS: Column<GpuJob>[] = [
   { header: 'job id', detail: true, render: (row) => <code>{row.job_id}</code> },
 ]
 
+// payload_workbench.html:16-20's tablist, extended to one view per
+// analyzer result family this port shows (static analysis and YARA have
+// their own stores here; GitHub's list folded into the workbench store).
+const RESULT_TABS = [
+  { id: 'workbench', label: 'Workbench' },
+  { id: 'static', label: 'Static analysis' },
+  { id: 'yara', label: 'YARA' },
+  { id: 'sandbox', label: 'Sandbox' },
+  { id: 'ghidra', label: 'Ghidra' },
+] as const
+
+type ResultTabId = (typeof RESULT_TABS)[number]['id']
+
 function Results() {
   const data = Route.useLoaderData()
   const workbench = usePage(data.workbench)
@@ -1119,6 +1133,18 @@ function Results() {
   }, [data.gpuQueue])
   const owner = data.user?.username ?? ''
   const [runsToken, setRunsToken] = useState(0)
+  const [tab, setTab] = useState<ResultTabId>('workbench')
+  // Design pick 7D: the page's view tabs relocate into the sidebar rail
+  // (inline below 520px, where the sidebar is off-canvas). Panels hide
+  // via the hidden attribute instead of unmounting so the builder's
+  // in-progress selections survive a look at another analyzer's results.
+  const viewTabs = useSidebarViewTabs({
+    label: 'Analysis results views',
+    tabs: RESULT_TABS,
+    active: tab,
+    onSelect: (id) => setTab(id as ResultTabId),
+    idPrefix: 'wb',
+  })
   const [workbenchQuery, setWorkbenchQuery] = useState('')
   const [staticQuery, setStaticQuery] = useState('')
   const [yaraQuery, setYaraQuery] = useState('')
@@ -1141,57 +1167,71 @@ function Results() {
           </>
         }
       />
-      <WorkbenchBuilder owner={owner} onRunCreated={() => setRunsToken((token) => token + 1)} />
-      <ModelHealthCard />
-      <RecentRunsCard owner={owner} refreshToken={runsToken} />
-      {gpuQueue === null || gpuQueue.length > 0 ? (
-        <>
-          <h2 className="label-section">GPU queue</h2>
-          <p className="note">
-            Jobs deferred because there wasn't enough free GPU headroom when they were submitted — a queued job's AI triage
-            runs automatically once the card frees up; the rest of that analysis is unaffected and already completed.
-          </p>
-          <MasterDetailTable
-            rows={gpuQueue}
-            columns={GPU_QUEUE_COLUMNS}
-            rowKey={(row, i) => `gq-${row.job_id}-${i}`}
-            inspectorTitle="GPU queue job"
-          />
-        </>
-      ) : null}
-      <h2 className="label-section">Workbench runs</h2>
-      <FilterInput label="workbench runs" value={workbenchQuery} onChange={setWorkbenchQuery} />
-      <MasterDetailTable rows={filterRows(workbench ? workbench.rows : null, workbenchQuery)} columns={WORKBENCH_COLUMNS} rowKey={(row, i) => `wb-${pathString(row, 'id')}-${i}`} inspectorTitle="Workbench run" />
-      <h2 className="label-section">Static analysis</h2>
-      <FilterInput label="static analyses" value={staticQuery} onChange={setStaticQuery} />
-      <MasterDetailTable rows={filterRows(statics ? statics.rows : null, staticQuery)} columns={STATIC_COLUMNS} rowKey={(row, i) => `st-${pathString(row, 'Fingerprint')}-${i}`} inspectorTitle="Static analysis" />
-      <h2 className="label-section">YARA</h2>
-      <FilterInput label="YARA results" value={yaraQuery} onChange={setYaraQuery} />
-      <MasterDetailTable rows={filterRows(yara ? yara.rows : null, yaraQuery)} columns={YARA_COLUMNS} rowKey={(_, i) => `ya-${i}`} inspectorTitle="YARA result" />
-      <h2 className="label-section">Sandbox detonations</h2>
-      <FilterInput label="sandbox detonations" value={sandboxQuery} onChange={setSandboxQuery} />
-      <MasterDetailTable
-        rows={filterRows(sandbox ? sandbox.rows : null, sandboxQuery)}
-        columns={SANDBOX_COLUMNS}
-        rowKey={(_, i) => `sb-${i}`}
-        inspectorTitle="Sandbox run"
-        inspectorExtra={(row) => {
-          const job = pathString(row, 'sandbox', 'job') || pathString(row, 'job')
-          return job ? <ArtifactList kind="sandbox" artifactKey={job} /> : null
-        }}
-      />
-      <h2 className="label-section">Ghidra decompilation</h2>
-      <FilterInput label="Ghidra runs" value={ghidraQuery} onChange={setGhidraQuery} />
-      <MasterDetailTable
-        rows={filterRows(ghidra ? ghidra.rows : null, ghidraQuery)}
-        columns={GHIDRA_COLUMNS}
-        rowKey={(_, i) => `gh-${i}`}
-        inspectorTitle="Ghidra run"
-        inspectorExtra={(row) => {
-          const sha = pathString(row, 'file', 'hash', 'sha256')
-          return sha ? <ArtifactList kind="ghidra" artifactKey={sha} /> : null
-        }}
-      />
+      {viewTabs}
+      <div className="dashboard-panel" role="tabpanel" id="wb-panel-workbench" aria-labelledby="wb-workbench" hidden={tab !== 'workbench'}>
+        <WorkbenchBuilder owner={owner} onRunCreated={() => setRunsToken((token) => token + 1)} />
+        <ModelHealthCard />
+        <RecentRunsCard owner={owner} refreshToken={runsToken} />
+        <h2 className="label-section">Workbench runs</h2>
+        <FilterInput label="workbench runs" value={workbenchQuery} onChange={setWorkbenchQuery} />
+        <MasterDetailTable rows={filterRows(workbench ? workbench.rows : null, workbenchQuery)} columns={WORKBENCH_COLUMNS} rowKey={(row, i) => `wb-${pathString(row, 'id')}-${i}`} inspectorTitle="Workbench run" />
+      </div>
+      <div className="dashboard-panel" role="tabpanel" id="wb-panel-static" aria-labelledby="wb-static" hidden={tab !== 'static'}>
+        <h2 className="label-section">Static analysis</h2>
+        <FilterInput label="static analyses" value={staticQuery} onChange={setStaticQuery} />
+        <MasterDetailTable rows={filterRows(statics ? statics.rows : null, staticQuery)} columns={STATIC_COLUMNS} rowKey={(row, i) => `st-${pathString(row, 'Fingerprint')}-${i}`} inspectorTitle="Static analysis" />
+      </div>
+      <div className="dashboard-panel" role="tabpanel" id="wb-panel-yara" aria-labelledby="wb-yara" hidden={tab !== 'yara'}>
+        <h2 className="label-section">YARA</h2>
+        <FilterInput label="YARA results" value={yaraQuery} onChange={setYaraQuery} />
+        <MasterDetailTable rows={filterRows(yara ? yara.rows : null, yaraQuery)} columns={YARA_COLUMNS} rowKey={(_, i) => `ya-${i}`} inspectorTitle="YARA result" />
+      </div>
+      <div className="dashboard-panel" role="tabpanel" id="wb-panel-sandbox" aria-labelledby="wb-sandbox" hidden={tab !== 'sandbox'}>
+        <h2 className="label-section">Sandbox detonations</h2>
+        <FilterInput label="sandbox detonations" value={sandboxQuery} onChange={setSandboxQuery} />
+        <MasterDetailTable
+          rows={filterRows(sandbox ? sandbox.rows : null, sandboxQuery)}
+          columns={SANDBOX_COLUMNS}
+          rowKey={(_, i) => `sb-${i}`}
+          inspectorTitle="Sandbox run"
+          inspectorExtra={(row) => {
+            const job = pathString(row, 'sandbox', 'job') || pathString(row, 'job')
+            return job ? <ArtifactList kind="sandbox" artifactKey={job} /> : null
+          }}
+        />
+      </div>
+      <div className="dashboard-panel" role="tabpanel" id="wb-panel-ghidra" aria-labelledby="wb-ghidra" hidden={tab !== 'ghidra'}>
+        {/* GPU queue lives with Ghidra — the legacy /ghidra page rendered
+            this card (dashboard/gpu_queue.go), and that page folded in
+            here. */}
+        {gpuQueue === null || gpuQueue.length > 0 ? (
+          <>
+            <h2 className="label-section">GPU queue</h2>
+            <p className="note">
+              Jobs deferred because there wasn't enough free GPU headroom when they were submitted — a queued job's AI triage
+              runs automatically once the card frees up; the rest of that analysis is unaffected and already completed.
+            </p>
+            <MasterDetailTable
+              rows={gpuQueue}
+              columns={GPU_QUEUE_COLUMNS}
+              rowKey={(row, i) => `gq-${row.job_id}-${i}`}
+              inspectorTitle="GPU queue job"
+            />
+          </>
+        ) : null}
+        <h2 className="label-section">Ghidra decompilation</h2>
+        <FilterInput label="Ghidra runs" value={ghidraQuery} onChange={setGhidraQuery} />
+        <MasterDetailTable
+          rows={filterRows(ghidra ? ghidra.rows : null, ghidraQuery)}
+          columns={GHIDRA_COLUMNS}
+          rowKey={(_, i) => `gh-${i}`}
+          inspectorTitle="Ghidra run"
+          inspectorExtra={(row) => {
+            const sha = pathString(row, 'file', 'hash', 'sha256')
+            return sha ? <ArtifactList kind="ghidra" artifactKey={sha} /> : null
+          }}
+        />
+      </div>
     </>
   )
 }

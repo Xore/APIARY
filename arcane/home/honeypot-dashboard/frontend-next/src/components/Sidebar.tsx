@@ -4,10 +4,11 @@
 // Recent-investigations list (pick 12B), and the account/session menu
 // (hp-account.js's dropdown: settings, log out, role badge). Identity is
 // resolved server-side into router context — no /api/whoami fetch here.
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { NAV_SECTIONS, navHrefFor } from '../lib/nav'
 import { hrefForRecent, labelForRecent, useRecentInvestigations } from '../lib/recent'
+import { SidebarViewTabs } from '../lib/viewTabs'
 import { openCommandPalette } from './CommandPalette'
 import type { User } from '../lib/auth'
 
@@ -109,6 +110,10 @@ export function Sidebar({ user }: { user?: User | null }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const activeHref = navHrefFor(pathname)
   const recent = useRecentInvestigations()
+  // Whether any nav item owns the current path — when none does, the
+  // relocated view-tabs rail falls back to the end of the nav body
+  // (hp-app.js:2049-2052's side.append fallback).
+  const hasActiveItem = NAV_SECTIONS.some((section) => section.items.some((item) => item.to === activeHref))
   return (
     <aside className="app-sidebar" aria-label="Primary navigation">
       <button
@@ -142,19 +147,25 @@ export function Sidebar({ user }: { user?: User | null }) {
               // activeHref) so drill-downs never orphan the rail.
               const active = activeHref === item.to
               return (
-                <Link
-                  key={item.to}
-                  to={item.to}
-                  className={active ? 'sidebar__item active' : 'sidebar__item'}
-                  aria-current={active ? 'page' : undefined}
-                >
-                  <NavIcon path={item.icon} />
-                  <span>{item.label}</span>
-                </Link>
+                <Fragment key={item.to}>
+                  <Link
+                    to={item.to}
+                    className={active ? 'sidebar__item active' : 'sidebar__item'}
+                    aria-current={active ? 'page' : undefined}
+                  >
+                    <NavIcon path={item.icon} />
+                    <span>{item.label}</span>
+                  </Link>
+                  {/* Design pick 7D: the current page's view tabs nest
+                      directly under the active nav item, indented like a
+                      tree branch (hp-app.js:2044-2051). */}
+                  {active ? <SidebarViewTabs /> : null}
+                </Fragment>
               )
             })}
           </div>
         ))}
+        {!hasActiveItem ? <SidebarViewTabs /> : null}
         {recent.length > 0 ? (
           <>
             <div className="sidebar__section-label hp-views-label">Recent</div>

@@ -9,6 +9,7 @@ import { InvestigateHeader, MasterDetailTable, type Column } from '../components
 import { getSessionUser } from '../lib/auth'
 import { pathString, type JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
+import { useSidebarViewTabs } from '../lib/viewTabs'
 
 type StoreRow = JsonRecord
 type Page = { total: number; rows: StoreRow[] }
@@ -244,6 +245,18 @@ const COLUMNS: Column<StoreRow>[] = [
   },
 ]
 
+// reports.html:38-43's wizard steps — the studio reads as five views:
+// four form steps plus the Library of saved definitions and finished PDFs.
+const STEPS = [
+  { id: 'design', label: 'Design' },
+  { id: 'scope', label: 'Scope' },
+  { id: 'schedule', label: 'Schedule' },
+  { id: 'branding', label: 'Branding' },
+  { id: 'library', label: 'Library' },
+] as const
+
+type StepId = (typeof STEPS)[number]['id']
+
 function emptyBranding(): ReportBranding {
   return { title: '', author: '', header_left: '', header_right: '', footer_left: '', classification: '' }
 }
@@ -381,6 +394,7 @@ const SCHEDULE_PRESETS: SchedulePreset[] = [
 ]
 
 function DefinitionForm({
+  step,
   templates,
   elements,
   initial,
@@ -388,6 +402,9 @@ function DefinitionForm({
   onCancel,
   onSaved,
 }: {
+  /** Which wizard step is active — the form keeps every step mounted
+   * (hidden panels) so state survives moving between steps. */
+  step: StepId
   templates: ReportTemplate[]
   elements: ReportElementInfo[]
   initial: ReportDefinition
@@ -517,10 +534,9 @@ function DefinitionForm({
   )
 
   return (
-    <div className="card wide">
-      <h2>{isCreate ? 'New report definition' : `Edit — ${initial.name}`}</h2>
-      <form
-        onSubmit={async (event) => {
+    <form
+      hidden={step === 'library'}
+      onSubmit={async (event) => {
           event.preventDefault()
           if (busy) return
           setBusy(true)
@@ -548,8 +564,12 @@ function DefinitionForm({
           } finally {
             setBusy(false)
           }
-        }}
-      >
+      }}
+    >
+      {/* 01 Design — template, basics, theme, elements (reports.html:47-85). */}
+      <div className="dashboard-panel" role="tabpanel" id="rp-panel-design" aria-labelledby="rp-design" hidden={step !== 'design'}>
+        <div className="card wide">
+        <h2>{isCreate ? 'New report definition' : `Edit — ${initial.name}`}</h2>
         <div className="filters">
           <label className="note" style={{ display: 'block', minWidth: 200 }}>
             Name
@@ -585,7 +605,67 @@ function DefinitionForm({
           </label>
         </div>
         {activeTemplate ? <p className="note">{activeTemplate.description}</p> : null}
+        <div className="filters">
+          {!isSpecial ? (
+            // reports.html:61 — the observation window is a Design-step
+            // basic, not a scope filter.
+            <label className="note" style={{ display: 'block', minWidth: 160 }}>
+              Window
+              <select
+                className="form-input"
+                style={{ width: '100%' }}
+                value={scope.window}
+                onChange={(event) => setScope((current) => ({ ...current, window: event.target.value }))}
+              >
+                <option value="">Template default</option>
+                <option value="1h">1 hour</option>
+                <option value="6h">6 hours</option>
+                <option value="24h">24 hours</option>
+                <option value="7d">7 days</option>
+                <option value="30d">30 days</option>
+              </select>
+            </label>
+          ) : null}
+          <label className="note" style={{ display: 'block', maxWidth: 220 }}>
+            Event appendix limit
+            <input
+              className="form-input"
+              style={{ width: '100%' }}
+              type="number"
+              min={0}
+              max={500}
+              value={appendixLimit}
+              onChange={(event) => setAppendixLimit(Number(event.target.value))}
+            />
+          </label>
+        </div>
+        {!isSpecial ? (
+          <>
+            <p className="note">Elements</p>
+            <div className="filters" role="group" aria-label="Report elements">
+              {elements.map((element) => (
+                <button
+                  key={element.id}
+                  type="button"
+                  className={selectedElements.includes(element.id) ? 'chip is-active' : 'chip'}
+                  aria-pressed={selectedElements.includes(element.id)}
+                  title={element.description}
+                  onClick={() => toggleElement(element.id)}
+                >
+                  {element.label}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : null}
+        </div>
+      </div>
 
+      {/* 02 Scope — search criteria, or the sandbox/payload reference
+          pickers for the fixed-structure templates (reports.html:87-126). */}
+      <div className="dashboard-panel" role="tabpanel" id="rp-panel-scope" aria-labelledby="rp-scope" hidden={step !== 'scope'}>
+        <div className="card wide">
+        <h2>Scope &amp; search criteria</h2>
         {isSpecial ? (
           // reports.html:109-125's sandbox/payload scope pickers. The old
           // blanket "not yet implemented" note is gone on purpose: the
@@ -687,22 +767,6 @@ function DefinitionForm({
         ) : (
           <>
             <div className="filters">
-              <label className="note" style={{ display: 'block', minWidth: 160 }}>
-                Window
-                <select
-                  className="form-input"
-                  style={{ width: '100%' }}
-                  value={scope.window}
-                  onChange={(event) => setScope((current) => ({ ...current, window: event.target.value }))}
-                >
-                  <option value="">Template default</option>
-                  <option value="1h">1 hour</option>
-                  <option value="6h">6 hours</option>
-                  <option value="24h">24 hours</option>
-                  <option value="7d">7 days</option>
-                  <option value="30d">30 days</option>
-                </select>
-              </label>
               {scopeField('ip', 'IP', 64)}
               {scopeField('sensor', 'Sensor', 64)}
               {scopeField('port', 'Port', 16)}
@@ -712,48 +776,15 @@ function DefinitionForm({
               Scope narrows what the report covers; leave fields blank for an unscoped report. Network, country, ASN, text,
               type, and session scope aren't exposed here and stay unscoped.
             </p>
-            <p className="note">Elements</p>
-            <div className="filters" role="group" aria-label="Report elements">
-              {elements.map((element) => (
-                <button
-                  key={element.id}
-                  type="button"
-                  className={selectedElements.includes(element.id) ? 'chip is-active' : 'chip'}
-                  aria-pressed={selectedElements.includes(element.id)}
-                  title={element.description}
-                  onClick={() => toggleElement(element.id)}
-                >
-                  {element.label}
-                </button>
-              ))}
-            </div>
           </>
         )}
-
-        <p className="note">Branding</p>
-        <div className="filters">
-          {brandingField('title', 'Title (defaults to template title)', 80)}
-          {brandingField('author', 'Author', 60)}
-          {brandingField('header_left', 'Header left', 60)}
-          {brandingField('header_right', 'Header right', 60)}
-          {brandingField('footer_left', 'Footer left', 80)}
-          {brandingField('classification', 'Classification', 120)}
         </div>
+      </div>
 
-        <label className="note" style={{ display: 'block', maxWidth: 220 }}>
-          Event appendix limit
-          <input
-            className="form-input"
-            style={{ width: '100%' }}
-            type="number"
-            min={0}
-            max={500}
-            value={appendixLimit}
-            onChange={(event) => setAppendixLimit(Number(event.target.value))}
-          />
-        </label>
-
-        <p className="note">Schedule</p>
+      {/* 03 Schedule — cadence + the starter presets (reports.html:128-174). */}
+      <div className="dashboard-panel" role="tabpanel" id="rp-panel-schedule" aria-labelledby="rp-schedule" hidden={step !== 'schedule'}>
+        <div className="card wide">
+        <h2>Schedule</h2>
         {!anyScheduled ? (
           // #1575 (reports.html:136-163): schedule starter cards, shown
           // while no saved definition has an active schedule. A click fills
@@ -876,37 +907,56 @@ function DefinitionForm({
             origin <em>schedule</em>; the retention cap prunes the oldest artifacts automatically.
           </p>
         ) : null}
-
-        <div className="filters" style={{ marginTop: 8 }}>
-          <button className="btn btn-primary btn-sm" type="submit" disabled={busy || !name.trim() || !template}>
-            {busy ? 'Saving…' : isCreate ? 'Create definition' : 'Save changes'}
-          </button>
-          <button className="btn btn-ghost btn-sm" type="button" onClick={onCancel}>
-            Cancel
-          </button>
         </div>
-        {message ? <p className="note">{message}</p> : null}
-      </form>
-    </div>
+      </div>
+
+      {/* 04 Branding — headers, footer, classification (reports.html:176-190). */}
+      <div className="dashboard-panel" role="tabpanel" id="rp-panel-branding" aria-labelledby="rp-branding" hidden={step !== 'branding'}>
+        <div className="card wide">
+        <h2>Branding</h2>
+        <div className="filters">
+          {brandingField('title', 'Title (defaults to template title)', 80)}
+          {brandingField('author', 'Author', 60)}
+          {brandingField('header_left', 'Header left', 60)}
+          {brandingField('header_right', 'Header right', 60)}
+          {brandingField('footer_left', 'Footer left', 80)}
+          {brandingField('classification', 'Classification', 120)}
+        </div>
+        </div>
+      </div>
+
+      {/* Shared action row — visible on every form step, hp-rp-actions
+          style: the wizard is one definition, saved once. */}
+      <div className="filters" style={{ marginTop: 8 }}>
+        <button className="btn btn-primary btn-sm" type="submit" disabled={busy || !name.trim() || !template}>
+          {busy ? 'Saving…' : isCreate ? 'Create definition' : 'Save changes'}
+        </button>
+        <button className="btn btn-ghost btn-sm" type="button" onClick={onCancel}>
+          {isCreate ? 'Reset' : 'Cancel edit'}
+        </button>
+      </div>
+      {message ? <p className="note">{message}</p> : null}
+    </form>
   )
 }
 
 function DefinitionsCard({
-  templates,
-  elements,
   definitions,
   editable,
+  onEdit,
+  onNew,
   onChanged,
   onGenerated,
 }: {
-  templates: ReportTemplate[]
-  elements: ReportElementInfo[]
   definitions: ReportDefinition[] | null
   editable: boolean
+  /** Load a saved definition into the wizard (jumps to the Design step). */
+  onEdit: (definition: ReportDefinition) => void
+  /** Reset the wizard to a fresh definition (jumps to the Design step). */
+  onNew: () => void
   onChanged: () => Promise<void> | void
   onGenerated: () => Promise<void> | void
 }) {
-  const [editingId, setEditingId] = useState<string | 'new' | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [rowMessage, setRowMessage] = useState<Record<string, string>>({})
 
@@ -916,7 +966,7 @@ function DefinitionsCard({
       const result = await generateDefinition({ data: { id } })
       setRowMessage((current) => ({
         ...current,
-        [id]: result.ok ? 'Generated — see the reports table above.' : result.error || 'Generation failed.',
+        [id]: result.ok ? 'Generated — see the Generated reports table below.' : result.error || 'Generation failed.',
       }))
       if (result.ok) await onGenerated()
     } finally {
@@ -930,7 +980,6 @@ function DefinitionsCard({
     try {
       const result = await deleteDefinition({ data: { id } })
       if (result.ok) {
-        if (editingId === id) setEditingId(null)
         await onChanged()
       } else {
         setRowMessage((current) => ({ ...current, [id]: result.error || 'Delete failed.' }))
@@ -940,15 +989,13 @@ function DefinitionsCard({
     }
   }
 
-  const editing = editingId === 'new' ? emptyDefinition() : (definitions ?? []).find((entry) => entry.id === editingId)
-
   return (
     <>
       <div className="card wide">
-        <h2>Report definitions</h2>
-        <p className="note">Definitions drive the scheduler and on-demand generation below.</p>
+        <h2>Saved definitions</h2>
+        <p className="note">Definitions drive the scheduler and on-demand generation.</p>
         {editable ? (
-          <button className="btn btn-secondary btn-sm" type="button" onClick={() => setEditingId('new')} style={{ marginBottom: 12 }}>
+          <button className="btn btn-secondary btn-sm" type="button" onClick={onNew} style={{ marginBottom: 12 }}>
             New definition
           </button>
         ) : null}
@@ -990,7 +1037,7 @@ function DefinitionsCard({
                             className="btn btn-secondary btn-sm"
                             type="button"
                             disabled={busyId === definition.id}
-                            onClick={() => setEditingId(definition.id)}
+                            onClick={() => onEdit(definition)}
                           >
                             Edit
                           </button>
@@ -1021,19 +1068,6 @@ function DefinitionsCard({
           </div>
         )}
       </div>
-      {editingId !== null && editing ? (
-        <DefinitionForm
-          templates={templates}
-          elements={elements}
-          anyScheduled={(definitions ?? []).some((definition) => definition.schedule?.enabled)}
-          initial={hydrateDefinition(editing)}
-          onCancel={() => setEditingId(null)}
-          onSaved={async () => {
-            setEditingId(null)
-            await onChanged()
-          }}
-        />
-      ) : null}
     </>
   )
 }
@@ -1043,6 +1077,21 @@ function Reports() {
   const [generated, setGenerated] = useState<Page | null>(null)
   const [templatesData, setTemplatesData] = useState<TemplatesResponse | null>(null)
   const [definitions, setDefinitions] = useState<ReportDefinition[] | null>(null)
+  // Wizard state: which step is showing, and which saved definition (if
+  // any) is loaded into the form. formSeed remounts the form so "New
+  // definition" / cancel always reset to a blank draft.
+  const [step, setStep] = useState<StepId>('design')
+  const [editing, setEditing] = useState<ReportDefinition | null>(null)
+  const [formSeed, setFormSeed] = useState(0)
+  // Design pick 7D: the studio's five step-tabs relocate into the sidebar
+  // rail (inline below 520px, where the sidebar is off-canvas).
+  const viewTabs = useSidebarViewTabs({
+    label: 'Reports studio steps',
+    tabs: STEPS,
+    active: step,
+    onSelect: (id) => setStep(id as StepId),
+    idPrefix: 'rp',
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -1061,15 +1110,32 @@ function Reports() {
   }, [data])
 
   const isAdmin = !data.user || data.user.role === 'admin'
+  const editable = isAdmin && templatesData !== null
 
   const refreshDefinitions = async () => {
     const result = await fetchDefinitions()
-    setDefinitions(result?.definitions ?? [])
+    const next = result?.definitions ?? []
+    setDefinitions(next)
+    // The definition being edited may have been deleted from the library —
+    // fall back to a fresh draft rather than resurrecting it on save.
+    setEditing((current) => (current && !next.some((entry) => entry.id === current.id) ? null : current))
   }
 
   const refreshGenerated = async () => {
     const page = await fetchGenerated({ data: { offset: 0 } })
     if (page) setGenerated(page)
+  }
+
+  const startEdit = (definition: ReportDefinition) => {
+    setEditing(definition)
+    setFormSeed((seed) => seed + 1)
+    setStep('design')
+  }
+
+  const startNew = () => {
+    setEditing(null)
+    setFormSeed((seed) => seed + 1)
+    setStep('design')
   }
 
   return (
@@ -1080,20 +1146,51 @@ function Reports() {
         subtitle="Finished PDF reports and the definitions that produce them — scheduled and on-demand runs land here."
         chips={<span className="chip">{(generated?.total ?? 0).toLocaleString('en-US')} generated reports</span>}
       />
-      <MasterDetailTable
-        rows={generated ? generated.rows : null}
-        columns={COLUMNS}
-        rowKey={(row, index) => `${str(row, 'id')}-${index}`}
-        inspectorTitle="Report details"
-      />
-      <DefinitionsCard
-        templates={templatesData?.templates ?? []}
-        elements={templatesData?.elements ?? []}
-        definitions={definitions}
-        editable={isAdmin && templatesData !== null}
-        onChanged={refreshDefinitions}
-        onGenerated={refreshGenerated}
-      />
+      {viewTabs}
+      {/* Steps 01-04 are the wizard form — always mounted (hidden panels)
+          so a half-built definition survives a detour through the Library. */}
+      {editable ? (
+        <DefinitionForm
+          key={`${editing?.id ?? 'new'}:${formSeed}`}
+          step={step}
+          templates={templatesData?.templates ?? []}
+          elements={templatesData?.elements ?? []}
+          anyScheduled={(definitions ?? []).some((definition) => definition.schedule?.enabled)}
+          initial={hydrateDefinition(editing ?? emptyDefinition())}
+          onCancel={startNew}
+          onSaved={async () => {
+            setEditing(null)
+            setFormSeed((seed) => seed + 1)
+            await refreshDefinitions()
+            setStep('library')
+          }}
+        />
+      ) : step !== 'library' ? (
+        templatesData === null ? (
+          <span className="skeleton-line" aria-hidden="true" />
+        ) : (
+          <p className="empty">Admin role required to design report definitions — the Library step is read-only browsing.</p>
+        )
+      ) : null}
+
+      {/* 05 Library — saved definitions + finished PDFs (reports.html:193-232). */}
+      <div className="dashboard-panel" role="tabpanel" id="rp-panel-library" aria-labelledby="rp-library" hidden={step !== 'library'}>
+        <DefinitionsCard
+          definitions={definitions}
+          editable={editable}
+          onEdit={startEdit}
+          onNew={startNew}
+          onChanged={refreshDefinitions}
+          onGenerated={refreshGenerated}
+        />
+        <h2 className="label-section">Generated reports</h2>
+        <MasterDetailTable
+          rows={generated ? generated.rows : null}
+          columns={COLUMNS}
+          rowKey={(row, index) => `${str(row, 'id')}-${index}`}
+          inspectorTitle="Report details"
+        />
+      </div>
     </>
   )
 }

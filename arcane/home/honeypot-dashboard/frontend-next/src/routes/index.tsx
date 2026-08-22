@@ -12,6 +12,7 @@ import { copyWithFlash } from '../lib/flash'
 import { isLivePaused } from '../lib/live'
 import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
+import { useSidebarViewTabs } from '../lib/viewTabs'
 
 type OverviewKpis = {
   total: number
@@ -331,6 +332,16 @@ function Overview() {
   const payloads = usePromise(data.payloads)
   const presentation = usePromise(data.presentation)
   const [tab, setTab] = useState<TabId>('live')
+  // Design pick 7D: the overview's five view tabs relocate into the
+  // sidebar rail below the Overview nav item; below 520px (off-canvas
+  // sidebar) they render inline right here instead.
+  const viewTabs = useSidebarViewTabs({
+    label: 'Dashboard views',
+    tabs: TABS,
+    active: tab,
+    onSelect: (id) => setTab(id as TabId),
+    idPrefix: 'ov',
+  })
   // Heatmap sensor picker (overview.html:94-120): one selection narrows
   // both the heatmap and its attack-vectors companion panel. The rows
   // already carry their sensor, so the narrowing is purely client-side.
@@ -389,24 +400,10 @@ function Overview() {
         </Await>
       </Suspense>
 
-      <div className="tabs" role="tablist" aria-label="Dashboard views">
-        {TABS.map((entry, index) => (
-          <button
-            key={entry.id}
-            className={tab === entry.id ? 'tab active' : 'tab'}
-            type="button"
-            role="tab"
-            aria-selected={tab === entry.id}
-            onClick={() => setTab(entry.id)}
-          >
-            <span>{String(index + 1).padStart(2, '0')}</span>
-            {entry.label}
-          </button>
-        ))}
-      </div>
+      {viewTabs}
 
       {tab === 'live' ? (
-        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel">
+        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel" id="ov-panel-live" aria-labelledby="ov-live">
           <div className="section-heading">
             <div>
               <h2>Current activity</h2>
@@ -474,7 +471,7 @@ function Overview() {
       ) : null}
 
       {tab === 'health' ? (
-        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel">
+        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel" id="ov-panel-health" aria-labelledby="ov-health">
           <div className="section-heading">
             <div>
               <h2>Collection status</h2>
@@ -525,7 +522,7 @@ function Overview() {
       ) : null}
 
       {tab === 'threats' ? (
-        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel">
+        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel" id="ov-panel-threats" aria-labelledby="ov-threats">
           <div className="section-heading">
             <div>
               <h2>Threat landscape</h2>
@@ -570,7 +567,7 @@ function Overview() {
       ) : null}
 
       {tab === 'behavior' ? (
-        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel">
+        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel" id="ov-panel-behavior" aria-labelledby="ov-behavior">
           <div className="section-heading">
             <div>
               <h2>Attacker behavior</h2>
@@ -607,7 +604,7 @@ function Overview() {
       ) : null}
 
       {tab === 'evidence' ? (
-        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel">
+        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel" id="ov-panel-evidence" aria-labelledby="ov-evidence">
           <div className="section-heading">
             <div>
               <h2>Detection and evidence</h2>

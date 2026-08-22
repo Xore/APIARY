@@ -6,6 +6,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { formatTimestamp } from '../lib/time'
+import { useSidebarViewTabs } from '../lib/viewTabs'
 
 type MailoneySession = {
   session_id: string
@@ -155,9 +156,28 @@ const TANNER_COLUMNS: Column<TannerRequest>[] = [
   { header: 'headers', detail: true, render: (row) => kvList(row.headers) },
 ]
 
+// sensors.html:29-32's tablist — one view per covered sensor.
+const SENSOR_TABS = [
+  { id: 'sd-mailoney', label: 'Mailoney (SMTP)' },
+  { id: 'sd-http', label: 'HTTP honeypot' },
+  { id: 'sd-tanner', label: 'Tanner (web emulator)' },
+] as const
+
+type SensorTabId = (typeof SENSOR_TABS)[number]['id']
+
 function Sensors() {
   const { first } = Route.useLoaderData()
   const [detail, setDetail] = useState<SensorDetail | null>(null)
+  const [tab, setTab] = useState<SensorTabId>('sd-mailoney')
+  // Design pick 7D: the page's view tabs relocate into the sidebar rail
+  // (inline below 520px, where the sidebar is off-canvas).
+  const viewTabs = useSidebarViewTabs({
+    label: 'Sensor sections',
+    tabs: SENSOR_TABS,
+    active: tab,
+    onSelect: (id) => setTab(id as SensorTabId),
+    idPrefix: 'sd',
+  })
   useEffect(() => {
     let cancelled = false
     first.then((result) => {
@@ -183,27 +203,40 @@ function Sensors() {
           ) : undefined
         }
       />
-      <h2 className="label-section">mailoney — SMTP conversations</h2>
-      <MasterDetailTable
-        rows={detail ? detail.mailoney : null}
-        columns={MAILONEY_COLUMNS}
-        rowKey={(row) => row.session_id}
-        inspectorTitle="SMTP session"
-      />
-      <h2 className="label-section">http-honeypot — requests</h2>
-      <MasterDetailTable
-        rows={detail ? detail.http_requests : null}
-        columns={HTTP_COLUMNS}
-        rowKey={(row, index) => `${row.when}-${index}`}
-        inspectorTitle="HTTP request"
-      />
-      <h2 className="label-section">tanner — requests & detections</h2>
-      <MasterDetailTable
-        rows={detail ? detail.tanner : null}
-        columns={TANNER_COLUMNS}
-        rowKey={(row, index) => `${row.when}-${index}`}
-        inspectorTitle="Tanner request"
-      />
+      {viewTabs}
+      {tab === 'sd-mailoney' ? (
+        <div className="dashboard-panel" role="tabpanel" id="sd-panel-sd-mailoney" aria-labelledby="sd-sd-mailoney">
+          <h2 className="label-section">mailoney — SMTP conversations</h2>
+          <MasterDetailTable
+            rows={detail ? detail.mailoney : null}
+            columns={MAILONEY_COLUMNS}
+            rowKey={(row) => row.session_id}
+            inspectorTitle="SMTP session"
+          />
+        </div>
+      ) : null}
+      {tab === 'sd-http' ? (
+        <div className="dashboard-panel" role="tabpanel" id="sd-panel-sd-http" aria-labelledby="sd-sd-http">
+          <h2 className="label-section">http-honeypot — requests</h2>
+          <MasterDetailTable
+            rows={detail ? detail.http_requests : null}
+            columns={HTTP_COLUMNS}
+            rowKey={(row, index) => `${row.when}-${index}`}
+            inspectorTitle="HTTP request"
+          />
+        </div>
+      ) : null}
+      {tab === 'sd-tanner' ? (
+        <div className="dashboard-panel" role="tabpanel" id="sd-panel-sd-tanner" aria-labelledby="sd-sd-tanner">
+          <h2 className="label-section">tanner — requests & detections</h2>
+          <MasterDetailTable
+            rows={detail ? detail.tanner : null}
+            columns={TANNER_COLUMNS}
+            rowKey={(row, index) => `${row.when}-${index}`}
+            inspectorTitle="Tanner request"
+          />
+        </div>
+      ) : null}
     </>
   )
 }
