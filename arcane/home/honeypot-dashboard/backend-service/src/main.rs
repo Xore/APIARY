@@ -189,6 +189,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/api/v1/config/history", get(config::history))
         .route("/api/v1/config/rollback", post(config::rollback))
+        .route("/api/v1/config/validate", post(config::validate))
         .route("/api/v1/users", get(config::users))
         .route("/api/v1/audit", get(audit::list))
         .route(
@@ -271,6 +272,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/payloads", get(stores::payloads))
         .route("/api/v1/payloads/{hash}", get(payload_detail::detail))
         .route("/api/v1/payloads/{hash}/raw", get(payload_detail::raw))
+        // #474 one-click payload PDF (hp-payload-report.js): ephemeral
+        // payload-scoped report into the generated store, no saved
+        // definition. See reports_api::generate_payload_report.
+        .route("/api/v1/payloads/{hash}/report", post(reports_api::generate_payload_report))
         .route("/api/v1/store/{name}", get(stores::generic).delete(stores::generic_delete))
         .route("/api/v1/problem-reports", post(problem_reports::submit))
         .route("/api/v1/problem-reports/{id}", patch(problem_reports::patch_status))
