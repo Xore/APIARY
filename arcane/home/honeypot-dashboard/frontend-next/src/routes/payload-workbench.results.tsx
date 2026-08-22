@@ -4,7 +4,7 @@
 // the full result document in the inspector.
 import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { Fragment, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { ArtifactList } from '../components/ArtifactList'
 import { getSessionUser } from '../lib/auth'
@@ -353,7 +353,7 @@ const SANDBOX_COLUMNS: Column<StoreRow>[] = [
           {job.slice(0, 28)} →
         </a>
       ) : (
-        ''
+        <span className="tw:text-muted">no job id</span>
       )
     },
   },
@@ -367,7 +367,12 @@ const SANDBOX_COLUMNS: Column<StoreRow>[] = [
       return <span className={cls}>{level} {pathString(row, 'risk_score')}</span>
     },
   },
-  { header: 'file', className: 'v', render: (row) => <code>{pathString(row, 'file', 'hash', 'sha256').slice(0, 16) || pathString(row, 'file', 'name')}</code> },
+  {
+    header: 'file',
+    className: 'v',
+    primary: true,
+    render: (row) => <code>{pathString(row, 'file', 'hash', 'sha256').slice(0, 16) || pathString(row, 'file', 'name')}</code>,
+  },
   { header: 'exit', render: (row) => pathString(row, 'exit_status') },
   recordColumn,
 ]
@@ -377,6 +382,7 @@ const GHIDRA_COLUMNS: Column<StoreRow>[] = [
   {
     header: 'file',
     className: 'v',
+    primary: true,
     render: (row) => {
       const sha = pathString(row, 'file', 'hash', 'sha256')
       return sha ? (
@@ -540,41 +546,32 @@ function RecentRunsCard({ owner, refreshToken }: { owner: string; refreshToken: 
       ) : runs.length === 0 ? (
         <p className="empty">No workbench runs submitted yet.</p>
       ) : (
-        <div className="table-scroll">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Created</th>
-                <th>Payload</th>
-                <th>Recipe</th>
-                <th>State</th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.map((run) => (
-                <Fragment key={run.id}>
-                  <tr onClick={() => setSelected(selected === run.id ? null : run.id)} style={{ cursor: 'pointer' }}>
-                    <td>{formatTimestamp(run.created_at)}</td>
-                    <td className="v">
-                      <code>{run.payload_sha256.slice(0, 16)}</code>
-                    </td>
-                    <td>{run.recipe_name || run.recipe_id || 'one-off'}</td>
-                    <td>
-                      <span className={stateBadgeClass(run.state)}>{run.state}</span>
-                    </td>
-                  </tr>
-                  {selected === run.id ? (
-                    <tr>
-                      <td colSpan={4}>
-                        <RunDetail run={run} currentOwner={owner} onChanged={updateRun} />
-                      </td>
-                    </tr>
-                  ) : null}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <div className="project-grid" id="workbench-results-list">
+            {runs.map((run) => (
+              <div key={run.id} className="project-card" onClick={() => setSelected(selected === run.id ? null : run.id)}>
+                <div className="project-card__header">
+                  <span className="project-card__title">{run.recipe_name || run.recipe_id || 'one-off'}</span>
+                  <div className="project-card__badges">
+                    <span className={stateBadgeClass(run.state)}>{run.state}</span>
+                  </div>
+                </div>
+                <div className="project-card__meta">
+                  <span>{formatTimestamp(run.created_at)}</span>
+                  <span className="mono">{run.payload_sha256.slice(0, 16)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          {(() => {
+            const run = runs.find((candidate) => candidate.id === selected)
+            return run ? (
+              <div className="card wide tw:mt-2">
+                <RunDetail run={run} currentOwner={owner} onChanged={updateRun} />
+              </div>
+            ) : null
+          })()}
+        </>
       )}
     </div>
   )
@@ -1198,6 +1195,8 @@ function Results() {
             const job = pathString(row, 'sandbox', 'job') || pathString(row, 'job')
             return job ? <ArtifactList kind="sandbox" artifactKey={job} /> : null
           }}
+          layout="cards"
+          gridId="sandbox-results"
         />
       </div>
       <div className="dashboard-panel" role="tabpanel" id="wb-panel-ghidra" aria-labelledby="wb-ghidra" hidden={tab !== 'ghidra'}>
@@ -1230,6 +1229,8 @@ function Results() {
             const sha = pathString(row, 'file', 'hash', 'sha256')
             return sha ? <ArtifactList kind="ghidra" artifactKey={sha} /> : null
           }}
+          layout="cards"
+          gridId="ghidra-results"
         />
       </div>
     </>

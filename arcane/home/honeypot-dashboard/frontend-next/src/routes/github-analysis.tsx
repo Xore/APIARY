@@ -19,14 +19,15 @@ const COLUMNS: Column<StoreRow>[] = [
   {
     header: 'detail',
     className: 'v',
+    primary: true,
     render: (row) => {
       const sha = sha256Of(row)
       return sha ? (
         <Link className="lnk" to="/github-analysis/$sha" params={{ sha }}>
-          full result →
+          {sha.slice(0, 16)} — full result →
         </Link>
       ) : (
-        ''
+        <span className="tw:text-muted">no source hash</span>
       )
     },
   },
@@ -50,6 +51,8 @@ function Page() {
       rowKey={(_, index) => String(index)}
       inspectorTitle="Analysis run"
       chipNoun="runs"
+      layout="cards"
+      gridId="github-analysis-results"
     />
   )
 }

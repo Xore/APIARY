@@ -392,10 +392,13 @@ services:
   # #244: same shape as geoipupdate above -- long-running (restart:
   # unless-stopped, loops internally rather than completing), optional, and
   # GeoIP-adjacent rather than a bootstrap step anything depends on. Keeps
-  # dashboard/geoip/threat-cidrs.csv current from free, zero-auth
+  # analysis/threat-intel/threat-cidrs.csv current from free, zero-auth
   # threat-intel sources (Spamhaus DROP, the Tor bulk exit list, AWS/GCP
   # published ranges) -- see refresh-threat-cidrs.sh for the fetch/merge
-  # logic and docs/dashboard/geoip/README.md for the file's shape.
+  # logic and docs/GEOIP-THREAT-INTEL.md for the file's shape. Mounted from
+  # the full apiary checkout (like geoipupdate's own volume above), not a
+  # stack-local copy -- #1659 removed the honeypot-init-local duplicate
+  # this used to bind-mount instead.
   #
   # profiles: [threat-intel], off by default like geoip-update above: unlike
   # geoipupdate this needs no credentials, but it does add new outbound
@@ -403,9 +406,10 @@ services:
   # an existing deployment did not previously make, which deserves the same
   # explicit opt-in.
   #
-  # geoip.go's threatIntelReloadLoop re-reads threat-cidrs.csv within
-  # threatIntelReloadInterval of a refresh landing on disk -- no dashboard
-  # restart needed for a new refresh to take effect.
+  # backend-service's threat_intel.rs worker loop (WORKER_LOOPS=threat-intel)
+  # re-reads threat-cidrs.csv on its own interval -- no restart needed for a
+  # refresh to take effect (#1659; previously geoip.go's
+  # threatIntelReloadLoop, retired with the Go dashboard).
   threat-cidrs-refresh:
     image: alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
     container_name: hp-threat-cidrs-refresh
@@ -418,7 +422,7 @@ services:
       - THREAT_INTEL_REFRESH_INTERVAL=86400
       - THREAT_INTEL_START_DELAY=300
     volumes:
-      - ./dashboard/geoip:/geoip
+      - /opt/stacks/apiary/analysis/threat-intel:/geoip
     command: >
       sh -c "
         apk add --no-cache bash curl jq >/dev/null &&

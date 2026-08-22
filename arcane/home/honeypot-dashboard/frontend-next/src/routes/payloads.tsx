@@ -341,7 +341,7 @@ function Payloads() {
           Python, JavaScript and other script artifacts. Files are inert on disk but <strong>hostile</strong> — handle
           only in an isolated analysis VM.
         </p>
-        <div className="project-grid">
+        <div className="project-grid" id="payloads-results">
           {rows === null ? (
             <SkeletonCards count={6} />
           ) : rows.length === 0 ? (

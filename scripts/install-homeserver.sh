@@ -1079,7 +1079,7 @@ step_start_init() {
     echo "honeypot-init: MAXMIND_ACCOUNT_ID/MAXMIND_LICENSE_KEY not set in $init_env —"
     echo "  skipping GeoIP database provisioning. The attack-origin map and every"
     echo "  GeoIP-derived field will stay empty until you fill those in (a free"
-    echo "  MaxMind account + license key, see docs/dashboard/geoip/README.md)"
+    echo "  MaxMind account + license key, see docs/GEOIP-THREAT-INTEL.md)"
     echo "  and re-run: cd /var/dockge/stacks/honeypot-init && docker compose -f compose.yml --profile geoip-update up -d geoipupdate"
   fi
   if ! (cd /var/dockge/stacks/honeypot-init && with_retry 3 15 docker compose -f compose.yml "${compose_profile_args[@]}" up -d); then

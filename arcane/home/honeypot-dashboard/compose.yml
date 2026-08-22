@@ -231,7 +231,11 @@ services:
       # clusters-v1 are fully recomputed from scratch every cycle (pure ES
       # aggregations, no raw-document paging needed at all here, unlike its
       # two siblings above), so it fits this stateless loop container too.
-      - WORKER_LOOPS=alert-notifier,attacker-identity,agent-intrusion,correlator
+      # threat-intel (#1659): reads THREAT_CIDRS_FILE off the mount below —
+      # kept fresh by the threat-cidrs-refresh container in the honeypot-
+      # init stack (profiles: [threat-intel], both bind the same host path).
+      - WORKER_LOOPS=alert-notifier,attacker-identity,agent-intrusion,correlator,threat-intel
+      - THREAT_CIDRS_FILE=/geoip/threat-cidrs.csv
       - EVIDENCE_WINDOW=${EVIDENCE_WINDOW:-6h}
       - ATTACKER_IDENTITY_RUN_INTERVAL=${ATTACKER_IDENTITY_RUN_INTERVAL:-15m}
       - AGENT_INTRUSION_POLL_INTERVAL=${AGENT_INTRUSION_POLL_INTERVAL:-300}
@@ -288,6 +292,7 @@ services:
       - /var/lib/honeypot-cape/requests/pending:/cape-requests:ro
       - /var/lib/honeypot-github/results:/github-analysis-results:ro
       - /var/lib/honeypot-github/requests/pending:/github-analysis-requests:ro
+      - /opt/stacks/apiary/analysis/threat-intel:/geoip:ro
     networks:
       - honeynet
     security_opt: [no-new-privileges:true]

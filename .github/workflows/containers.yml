@@ -35,8 +35,6 @@ jobs:
             context: arcane/home/honeypot-citrix-honeypot/citrix-honeypot
           - image: conpot
             context: arcane/home/honeypot-conpot/conpot
-          - image: dashboard
-            context: arcane/home/honeypot-dashboard/dashboard
           - image: dashboard-next
             context: arcane/home/honeypot-dashboard/frontend-next
           - image: dicompot

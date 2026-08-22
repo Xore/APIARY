@@ -18,6 +18,7 @@ const COLUMNS: Column<StoreRow>[] = [
   {
     header: 'sha',
     className: 'v',
+    primary: true,
     render: (row) => {
       // es_importer.rs wraps the raw revdeck payload one level deeper under
       // the "revdeck" source label (build_document); the raw payload's own
@@ -30,7 +31,9 @@ const COLUMNS: Column<StoreRow>[] = [
         <a className="lnk" href={`/revdeck/${encodeURIComponent(sha)}`} onClick={(event) => event.stopPropagation()}>
           <code>{sha.slice(0, 16)}</code> →
         </a>
-      ) : null
+      ) : (
+        <span className="tw:text-muted">no source hash</span>
+      )
     },
   },
   { header: 'exit', render: (row) => <span className="badge badge--muted">{str(row, 'exit_status')}</span> },
@@ -54,6 +57,7 @@ function Page() {
       rowKey={(_, index) => String(index)}
       inspectorTitle="RevDeck run"
       chipNoun="runs"
+      layout="cards"
     />
   )
 }

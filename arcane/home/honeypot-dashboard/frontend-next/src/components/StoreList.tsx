@@ -22,6 +22,8 @@ export function StoreListPage<Row = StoreRow>({
   inspectorExtra,
   beforeTable,
   extraChips,
+  layout,
+  gridId,
 }: {
   fetchPage: (input: { data: { offset: number } }) => Promise<StorePage<Row> | null>
   label: string
@@ -37,6 +39,11 @@ export function StoreListPage<Row = StoreRow>({
   beforeTable?: React.ReactNode
   /** Extra chips next to the running-total chip. */
   extraChips?: React.ReactNode
+  /** 'cards' renders a .project-card grid (theme.css's result-surface
+   * pattern) instead of the default data-table. */
+  layout?: 'table' | 'cards'
+  /** `layout="cards"` only: id on the `.project-grid` container. */
+  gridId?: string
 }) {
   const [rows, setRows] = useState<Row[] | null>(null)
   const [total, setTotal] = useState(0)
@@ -89,6 +96,8 @@ export function StoreListPage<Row = StoreRow>({
         loadingMore={loadingMore}
         inspectorTitle={inspectorTitle}
         inspectorExtra={inspectorExtra}
+        layout={layout}
+        gridId={gridId}
       />
     </>
   )

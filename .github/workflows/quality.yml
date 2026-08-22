@@ -36,8 +36,8 @@ jobs:
   # default, automatic path is completely unchanged. Only jobs needing
   # nothing beyond a language toolchain (no sudo, no Docker) get this --
   # the self-hosted runner's dedicated system user deliberately has
-  # neither (see install-ci-runner.sh), so scripts-and-compose and
-  # dashboard-browser (apt-get/docker) always stay on ubuntu-latest.
+  # neither (see install-ci-runner.sh), so scripts-and-compose
+  # (apt-get/docker) always stays on ubuntu-latest.
   public-safety:
     name: Public repository safety
     runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.use_self_hosted_runner) && 'self-hosted' || 'ubuntu-latest' }}
@@ -87,7 +87,6 @@ jobs:
           - arcane/home/honeypot-citrix-honeypot/citrix-honeypot
           - arcane/home/honeypot-correlator-worker/correlator-worker
           - arcane/home/honeypot-cowrie/honeyfs-implant
-          - arcane/home/honeypot-dashboard/dashboard
           - arcane/home/honeypot-dicompot/dicompot
           - arcane/home/honeypot-dionaea/tftp-relay
           - arcane/home/honeypot-dnp3/dnp3-honeypot
@@ -120,25 +119,6 @@ jobs:
       - name: Fail if any module job failed
         if: needs.go-fmt.result != 'success' || needs.go-test.result != 'success'
         run: exit 1
-
-  frontend:
-    name: Dashboard frontend
-    runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.use_self_hosted_runner) && 'self-hosted' || 'ubuntu-latest' }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: arcane/home/honeypot-dashboard/dashboard/frontend/package-lock.json
-      - run: npm ci
-        working-directory: arcane/home/honeypot-dashboard/dashboard/frontend
-      - run: npm run typecheck
-        working-directory: arcane/home/honeypot-dashboard/dashboard/frontend
-      - run: npm run build
-        working-directory: arcane/home/honeypot-dashboard/dashboard/frontend
-      - name: Generated assets are current
-        run: git diff --exit-code -- arcane/home/honeypot-dashboard/dashboard/static/hp-api.js
 
   frontend-next:
     name: Dashboard frontend (next)
@@ -204,31 +184,6 @@ jobs:
       - run: cargo test
       - run: cargo clippy --all-targets -- -D warnings
 
-  dashboard-browser:
-    name: Dashboard browser matrix
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version: "1.25.x"
-          cache-dependency-path: arcane/home/honeypot-dashboard/dashboard/go.sum
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: arcane/home/honeypot-dashboard/dashboard/frontend/package-lock.json
-      - run: npm ci
-        working-directory: arcane/home/honeypot-dashboard/dashboard/frontend
-      - run: npx playwright install --with-deps chromium
-        working-directory: arcane/home/honeypot-dashboard/dashboard/frontend
-      # #1034: start-dashboard.mjs spawns a real redis-server for the OIDC
-      # session store fixture rather than reimplementing RESP -- ubuntu-latest
-      # ships it already in most images, but don't depend on that silently.
-      - run: command -v redis-server || sudo apt-get install -y redis-server
-      - run: npm run test:browser
-        working-directory: arcane/home/honeypot-dashboard/dashboard/frontend
-
   vendored-theme:
     name: Vendored Xore/theme is in sync
     runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.use_self_hosted_runner) && 'self-hosted' || 'ubuntu-latest' }}
@@ -238,14 +193,6 @@ jobs:
         run: scripts/check-vendored-theme.sh
       - name: Portable APIARY tokens match Xore/theme
         run: python branding/scripts/check_theme_sync.py
-
-  vendored-novnc:
-    name: Vendored noVNC is in sync
-    runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.use_self_hosted_runner) && 'self-hosted' || 'ubuntu-latest' }}
-    steps:
-      - uses: actions/checkout@v7
-      - name: dashboard/static/vendor/novnc matches novnc.lock
-        run: scripts/check-vendored-novnc.sh
 
   scripts-and-compose:
     name: ${{ matrix.name }}
@@ -370,20 +317,12 @@ jobs:
           - name: oauth2-proxy gateway pattern is resilient
             run: ./scripts/test-oauth2-proxy-gateway-resilience.sh
 
-          # #982: the OIDC protocol golden-path itself -- real authorization-
-          # code+PKCE login, including the realm's mandatory TOTP second
-          # factor, against the real dashboard binary and a real disposable
-          # Keycloak. Was previously only ever run by hand; nothing caught a
-          # regression here automatically before this.
-          - name: Dashboard PKCE + mandatory-TOTP login (real Keycloak)
-            run: ./scripts/test-dashboard-oidc-pkce-totp-login.sh
-
-          # #982: Keycloak outage/restart/signing-key-rotation chaos testing
-          # against the real dashboard binary + a real disposable Keycloak.
-          # Same "was only ever run by hand" gap as above.
-          - name: Dashboard survives Keycloak outage, restart, and key rotation
-            run: ./scripts/test-dashboard-oidc-chaos.sh
-
+          # #982's PKCE+TOTP login and Keycloak-outage/key-rotation chaos
+          # suites (test-dashboard-oidc-pkce-totp-login.sh,
+          # test-dashboard-oidc-chaos.sh) drove `go run .` against the real
+          # Go dashboard binary -- retired with it (#1659). No equivalent
+          # exists yet against dashboard-next's BFF + Keycloak; tracked as a
+          # real coverage gap, not a silent drop.
           - name: GitHub-analysis publisher stays dry-run by default
             run: |
               # The one property this whole feature depends on (#74):
@@ -400,7 +339,7 @@ jobs:
               done
 
           - name: Threat-intel CIDR refresh script (#244)
-            run: arcane/home/honeypot-dashboard/dashboard/geoip/tests/test_refresh_threat_cidrs.sh
+            run: analysis/threat-intel/tests/test_refresh_threat_cidrs.sh
 
           - name: honeypot-30d ILM policy rolls over and deletes (#585)
             run: analysis/tests/test_honeypot_ilm_rollover.sh

@@ -16,6 +16,9 @@
 //! Milestone F), ported from userStore.SweepRetention: no in-memory cache to
 //! poll here, so this just re-reads the users doc on its own interval rather
 //! than the Go store's 3s poll tick.
+//! `threat-intel` (#1659) — Tor-exit/reputation-blocklist CIDR
+//! classification, ported from geoip.go's intel matching; see
+//! threat_intel.rs's own doc comment.
 
 use serde_json::{json, Value};
 use std::path::Path;
@@ -127,6 +130,11 @@ pub fn spawn_enabled(state: AppState) {
                 let state = state.clone();
                 tokio::spawn(async move { crate::correlator::correlator_loop(state).await });
                 tracing::info!("worker loop enabled: correlator");
+            }
+            "threat-intel" => {
+                let state = state.clone();
+                tokio::spawn(async move { crate::threat_intel::threat_intel_loop(state).await });
+                tracing::info!("worker loop enabled: threat-intel");
             }
             other => tracing::warn!(loop_name = other, "unknown worker loop requested"),
         }

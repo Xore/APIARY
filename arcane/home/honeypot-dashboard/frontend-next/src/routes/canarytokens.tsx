@@ -195,7 +195,7 @@ function MintForm({ onCreated }: { onCreated: () => void }) {
 const COLUMNS: Column<StoreRow>[] = [
   { header: 'created', render: (row) => when(str(row, 'created_at')) },
   { header: 'type', render: (row) => <span className="badge badge--muted">{str(row, 'token_type')}</span> },
-  { header: 'memo', className: 'v', render: (row) => str(row, 'memo') },
+  { header: 'memo', className: 'v', primary: true, render: (row) => str(row, 'memo') || <span className="tw:text-muted">(no memo)</span> },
   { header: 'token url', className: 'v', render: (row) => <code>{str(row, 'token_url')}</code> },
   { header: 'hostname', detail: true, render: (row) => str(row, 'hostname') },
   { header: 'created by', detail: true, render: (row) => str(row, 'created_by') },
@@ -359,6 +359,7 @@ function Page() {
           rowKey={(row, index) => `${str(row, 'id')}-${index}`}
           inspectorTitle="Token details"
           chipNoun="tokens"
+          layout="cards"
         />
       </TabPanel>
       <TabPanel id="fired" active={tab} idPrefix="ct" className="dashboard-panel">
