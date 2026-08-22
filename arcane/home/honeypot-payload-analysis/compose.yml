@@ -77,11 +77,15 @@ services:
         limits:
           # Was 0.25/128M; bistreams/ added tens of thousands of files and
           # tens of GB to what this container hashes every pass (#112).
-          # Chunked reads keep per-file memory bounded regardless of file
-          # size, so 128M is still enough; the CPU bump is so a pass over
-          # the full backlog finishes comfortably inside one interval.
+          # 128M turned out not to be enough -- per-file reads are chunked,
+          # but the in-memory hash/path index for the full multi-day
+          # bistreams backlog isn't, and the container OOM-looped on every
+          # single pass for days without ever completing one (confirmed via
+          # dmesg cgroup OOM kills every ~28s). 2048M gives a comfortable
+          # margin for a from-scratch catch-up pass; steady-state usage
+          # once the backlog is pruned down should be far lower.
           cpus: "0.5"
-          memory: 128M
+          memory: 2048M
 
   # Real static YARA scanning in a networkless least-privilege sidecar. It has
   # only DAC_READ_SEARCH because Dionaea captures are deliberately mode 0600;
