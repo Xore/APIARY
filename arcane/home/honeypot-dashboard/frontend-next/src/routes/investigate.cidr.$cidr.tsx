@@ -87,10 +87,16 @@ function InvestigateCidr() {
   const { first } = Route.useLoaderData()
   const { cidr } = Route.useParams()
   const [data, setData] = useState<CidrCorrelation | null | 'missing'>(null)
+  // Snapshot time for the header's "generated" chip — the Go shell stamped
+  // .Generated at render time (intel.html's cidr-correlation header), and
+  // fetch-arrival is this tier's equivalent moment.
+  const [generated, setGenerated] = useState('')
   useEffect(() => {
     let cancelled = false
     first.then((result) => {
-      if (!cancelled) setData(result ?? 'missing')
+      if (cancelled) return
+      setData(result ?? 'missing')
+      setGenerated(new Date().toISOString())
     })
     return () => {
       cancelled = true
@@ -121,9 +127,19 @@ function InvestigateCidr() {
         title={cidr}
         subtitle="#354: everything Elasticsearch has correlated for this network across honeypot, Suricata, and portbridge tunnel records."
         chips={
-          <Link className="chip" to="/campaigns">
-            &larr; campaigns
-          </Link>
+          <>
+            <Link className="chip" to="/campaigns">
+              &larr; campaigns
+            </Link>
+            {/* Go's /events?cidr= chip (intel.html:180) — the events API's
+                ip filter is a term query on the ip-mapped source.ip field
+                (events.rs), which accepts CIDR notation natively, so ?ip=
+                carries the old ?cidr= role. */}
+            <Link className="chip" to="/events" search={{ ip: cidr, since: '168h' }}>
+              in-memory events for this network
+            </Link>
+            {generated ? <span className="chip">generated {formatTimestamp(generated)}</span> : null}
+          </>
         }
       />
       {correlation ? (
@@ -142,9 +158,14 @@ function InvestigateCidr() {
           </div>
         </div>
       ) : null}
-      {correlation && correlation.tunnel_os_guesses.length > 0 ? (
+      {correlation ? (
         <p className="note">
-          p0f OS guesses seen over this network&rsquo;s tunnel connections: {correlation.tunnel_os_guesses.join(', ')}.
+          {correlation.truncated
+            ? `Showing the ${correlation.records.length} most recent of ${correlation.total.toLocaleString('en-US')} total matches.`
+            : 'Newest first.'}
+          {correlation.tunnel_os_guesses.length > 0
+            ? ` p0f OS guesses seen over this network’s tunnel connections: ${correlation.tunnel_os_guesses.join(', ')}.`
+            : ''}
         </p>
       ) : null}
       <MiniTable title="Sensors" rows={correlation ? correlation.sensors : []} />
