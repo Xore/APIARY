@@ -181,6 +181,48 @@ result="$(simulate_flow "$tmp/netflow_neither_homenet.json")"
   fail "a flow with neither side in home_net was swapped when it shouldn't be (got: '$result')"
 pass "a flow with neither side in home_net falls back to positional (no false-positive swap)"
 
+# #1677: an "alert" event (unlike netflow) carries both packet-level
+# src_ip/dest_ip (the specific packet that matched, whichever direction it
+# travelled) and a flow object (always attacker-as-source regardless of
+# packet direction). A signature that fires on the server's own response
+# content (Suricata's own direction:"to_client") reports packet-level
+# src_ip as OUR OWN address -- and since that address is a real routable
+# IP, not a private/home_net range, the home_net-swap heuristic above
+# never catches it, so source.ip ends up as our own service instead of
+# the attacker. The fixture's addresses are deliberately NOT in this
+# test's home_net (198.51.100.1) -- the whole point is that this case
+# doesn't depend on home_net at all, it's caught by preferring flow.
+cat > "$tmp/alert_to_client.json" <<'EOF'
+{"docs":[{"_source":{"suricata":{"eve":{"event_type":"alert","direction":"to_client","src_ip":"203.0.113.9","src_port":23,"dest_ip":"198.51.100.77","dest_port":55102,"proto":"TCP","flow":{"src_ip":"198.51.100.77","src_port":55102,"dest_ip":"203.0.113.9","dest_port":23}}}}}]}
+EOF
+result="$(simulate_flow "$tmp/alert_to_client.json")"
+[ "$result" = "198.51.100.77 203.0.113.9 23" ] ||
+  fail "a to_client alert's flow-level attribution was not preferred over its packet-level fields (got: '$result')"
+pass "a to_client alert uses the flow's attacker-as-source, not the responding packet's own src_ip"
+
+# Ordinary to_server alert: flow and packet-level fields already agree --
+# confirms preferring flow doesn't change the overwhelmingly common case.
+cat > "$tmp/alert_to_server.json" <<'EOF'
+{"docs":[{"_source":{"suricata":{"eve":{"event_type":"alert","direction":"to_server","src_ip":"198.51.100.77","src_port":55102,"dest_ip":"203.0.113.9","dest_port":23,"proto":"TCP","flow":{"src_ip":"198.51.100.77","src_port":55102,"dest_ip":"203.0.113.9","dest_port":23}}}}}]}
+EOF
+result="$(simulate_flow "$tmp/alert_to_server.json")"
+[ "$result" = "198.51.100.77 203.0.113.9 23" ] ||
+  fail "an ordinary to_server alert regressed (got: '$result')"
+pass "an ordinary to_server alert (flow and packet already agree) is unaffected"
+
+# #1677: dionaea_incident.json records (e.g. DoublePulsar) carry no
+# top-level honeypot.src_ip at all -- the real signal is nested under
+# honeypot.data.connection.remote_ip, which ip-enrichment-worker resolves
+# in place but this pipeline never promoted to source.ip, so these events
+# always rendered as "unattributed" regardless of enrichment succeeding.
+cat > "$tmp/dionaea_incident.json" <<'EOF'
+{"docs":[{"_source":{"honeypot":{"name":"dionaea","data":{"name":"DoublePulsar connection attempt","connection":{"local_ip":"172.16.10.2","remote_ip":"198.51.100.66","local_port":445,"remote_port":38514,"transport":"tcp"}}}}}]}
+EOF
+result="$(simulate_flow "$tmp/dionaea_incident.json")"
+[ "$result" = "198.51.100.66  445" ] ||
+  fail "dionaea_incident's nested remote_ip was not promoted to source.ip (got: '$result')"
+pass "dionaea_incident's nested honeypot.data.connection.remote_ip is promoted to source.ip"
+
 simulate_hash() {
   # simulate_hash <fixture-file> -> prints file.hash.sha256 (or empty)
   curl -fsS -X POST "$es_url/_ingest/pipeline/geoip-honeypot/_simulate" \
