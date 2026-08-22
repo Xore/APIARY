@@ -55,96 +55,6 @@ x-runtime-defaults: &runtime-defaults
       max-size: "25m"
       max-file: "3"
 
-# Anchor kept from the #266 era (the rolling pair is retired -- single
-# dashboard replica now): the volume list still lives in one place so any
-# future second consumer of these host paths can share it without drift.
-x-dashboard-volumes: &dashboard-volumes
-  # rslave propagation: /logs/portbridge and /logs/suricata are sshfs
-  # mounts from the VPS on the host. They must be established BEFORE this
-  # container starts (never x-systemd.automount — autofs triggers return
-  # EPERM to container processes), and rslave lets later host-side
-  # remounts propagate in without recreating the container.
-  - type: bind
-    source: /opt/stacks/apiary/logs
-    target: /logs
-    read_only: true
-    bind:
-      propagation: rslave
-  # Optional GeoIP: drop a "start_ip,end_ip,country" CSV as
-  # dashboard/geoip/country.csv (DB-IP lite export works as-is). Absent →
-  # geo stays off; cf-ipcountry still enriches tanner/http events.
-  - ./dashboard/geoip:/geoip:ro
-  - /opt/stacks/apiary/analysis/geoip:/geoip-mmdb:ro
-  - ${DASHBOARD_SECRETS_DIR:-/var/dockge/stacks/honeypot-dashboard/secrets}:/run/dashboard-secrets:ro
-  # Unified read-only payload inventory: Dionaea binaries, Cowrie
-  # transfers, and dashboard-retained inline script artifacts are all
-  # listed, source-labelled, analysed, and downloadable from /payloads.
-  # dionaea-lib is a shared, explicitly-named volume (see this file's
-  # header) -- dionaea (main stack) writes into it, this stack only reads.
-  # yara-results (same mechanism) is no longer mounted here (#1103 Category
-  # 4): dashboard/yara.go reads yara-analysis-v1 from ES exclusively now,
-  # es-results-importer's own mount below is the only remaining consumer.
-  - dionaea-lib:/dionaea-lib:ro
-  - /opt/stacks/apiary/logs/cowrie/downloads:/cowrie-downloads:ro
-  - dashboard-state:/state
-  - /var/lib/honeypot-sandbox/export:/sandbox-results:ro
-  # Narrow intent channel for the Analyze button. The dashboard never
-  # receives access to libvirt, systemd, Docker, or sandbox samples.
-  - /var/lib/honeypot-sandbox/requests/pending:/sandbox-requests
-  # The Windows guest is a separate host worker with its own spool, so
-  # Windows-native samples never land in the Linux runner's queue. These
-  # mounts are inert until WINDOWS_SANDBOX_*_DIR are set in .env; the
-  # dashboard refuses Windows submissions until then.
-  - /var/lib/honeypot-windows-sandbox/export:/windows-sandbox-results:ro
-  - /var/lib/honeypot-windows-sandbox/requests/pending:/windows-sandbox-requests
-  # #498: GHOSTS-sandbox (WAN-permitted route, #327/#331) is a separate host
-  # worker with its own spool, same shape as the Windows mounts above -- was
-  # missing entirely, which meant the Workbench's "windows-ghosts" analyzer
-  # always evaluated ghostsConfigured=false and every GHOSTS child was
-  # silently recorded skipped, exactly the kind of "looks wired up, never
-  # actually run" gap #53 found for Windows one step earlier in this chain.
-  - /var/lib/honeypot-ghosts-sandbox/export:/ghosts-sandbox-results:ro
-  - /var/lib/honeypot-ghosts-sandbox/requests/pending:/ghosts-sandbox-requests
-  # Ghidra static analysis: a third spool, same shape and same boundary.
-  # Bind mounts rather than named volumes because the consumer is a host
-  # systemd unit (analysis/ghidra/worker/), not a compose service — a named
-  # volume would be awkward for it to reach and would put the queue inside
-  # Docker's lifecycle. Results are read-only here: the dashboard displays
-  # them and must never be able to forge one.
-  - /var/lib/honeypot-ghidra/results:/ghidra-results:ro
-  - /var/lib/honeypot-ghidra/requests/pending:/ghidra-requests
-  # Standalone Rev·Deck spool (#78): a fourth, independent request/results
-  # pair alongside the Ghidra one above, same shape and same read-only
-  # results boundary. ghidra-worker.py's drain_revdeck() is the consumer.
-  - /var/lib/honeypot-revdeck/results:/revdeck-results:ro
-  - /var/lib/honeypot-revdeck/requests/pending:/revdeck-requests
-  # #1134: CAPE sandbox spool, same shape as the Ghidra/Rev·Deck pairs above
-  # -- host paths per sandbox/cape/worker/honeypot-cape.default.example's
-  # own CAPE_REQUEST_DIR/CAPE_RESULTS_DIR, cape-worker.py is the consumer.
-  # #319 added the Go-side Workbench entry/result page against these same
-  # env vars (dashboard/cape.go's capeRequestDir()/capeResultsDir()) but
-  # never actually wired the compose mounts/env -- both defaulted to "",
-  # so CAPE submissions and results silently went nowhere on every real
-  # deployment until now.
-  - /var/lib/honeypot-cape/results:/cape-results:ro
-  - /var/lib/honeypot-cape/requests/pending:/cape-requests
-  # Privileged read-only adapter for #158's owner-only model-status file.
-  # The dashboard sees only an AF_UNIX HTTP socket and never mounts the
-  # 0600 host artifact or gains a model-management action.
-  - /run/honeypot-model-status:/model-status:ro
-  # #197: the Services pane's only path to hp-services-adapter -- an
-  # AF_UNIX socket, never docker.sock itself. Read-write (unlike the
-  # model-status mount above) because this channel carries start/stop/
-  # restart actions, not just a read-only status query. Private to this
-  # stack now -- both ends moved here together.
-  - services-adapter-socket:/run/services-adapter
-  # GitHub-analysis publishing: a fourth spool, same shape and same
-  # boundary as the three above. The dashboard writes {sha256}.request
-  # and never talks to git, GitHub, or holds GH_PAT -- that lives only in
-  # analysis/github/'s root-owned host publisher. See #74.
-  - /var/lib/honeypot-github/results:/github-analysis-results:ro
-  - /var/lib/honeypot-github/requests/pending:/github-analysis-requests
-
 services:
   oidc-sessions:
     <<: *runtime-defaults
@@ -177,230 +87,18 @@ services:
       resources:
         limits: {cpus: "0.25", memory: 160M}
 
-  # Single replica (per Xore, supersedes #266's rolling pair): dashboard-b
-  # and scripts/deploy-dashboard-rolling.sh are retired -- one dashboard
-  # runs everything, including the background loops (main.go's
-  # backgroundLoopsEnabled() still honors DASHBOARD_BACKGROUND_LOOPS for a
-  # future return to replicas; unset means enabled). A redeploy is a plain
-  # `docker compose build dashboard && docker compose up -d`, accepting the
-  # brief recreate window on this single-operator deployment.
-  dashboard:
-    <<: *runtime-defaults
-    build: ./dashboard
-    # Explicit stable tag so redeploy tooling can `docker compose build
-    # dashboard` and recreate against a known image name.
-    image: honeypot-dashboard:latest
-    container_name: hp-dashboard
-    restart: unless-stopped
-    depends_on:
-      oidc-sessions:
-        condition: service_healthy
-    # profiles + no ports: -- #1628's cutover moved the live 19090 binding
-    # to dashboard-next below, permanently. This service stays defined,
-    # not deleted, purely for rollback (docs/DASHBOARD-CUTOVER.md), but a
-    # profile-less service is still a routine `docker compose up` target
-    # regardless of whether an operator manually stopped it -- confirmed
-    # live, in two stages: first an Arcane gitops-sync after cutover tried
-    # to bring this back up with its old ports: line still present,
-    # colliding with dashboard-next's and failing the sync outright rather
-    # than silently reverting the cutover; then, with that ports: line
-    # removed, the very same sync mechanism still tried to *start* this
-    # container from cold (no traffic, no warm state, hours after it was
-    # deliberately stopped) and failed on its own healthcheck instead.
-    # `next` and every other on-demand stack in this repo already solve
-    # exactly this with a profile Arcane's own sync never activates (see
-    # docs/ARCANE-GIT-SYNC.md's confirmed-live finding) -- `legacy` here
-    # does the same: cutover-dashboard.sh rollback is the only thing that
-    # activates it, via `docker compose --profile legacy up -d dashboard`.
-    profiles: ["legacy"]
-    volumes: *dashboard-volumes
-    environment:
-      - LISTEN_ADDR=:8080
-      - LOG_DIR=/logs
-      - LOG_STREAM_MAX_BYTES=${JSON_STREAM_MAX_BYTES:-67108864}
-      - LOG_STREAM_ALERT_PERCENT=${LOG_STREAM_ALERT_PERCENT:-90}
-      - GEOIP_CSV=/geoip/country.csv
-      - GEOIP_CITY_MMDB=/geoip-mmdb/GeoLite2-City.mmdb
-      - GEOIP_ASN_MMDB=/geoip-mmdb/GeoLite2-ASN.mmdb
-      - THREAT_CIDRS_FILE=/geoip/threat-cidrs.csv
-      - MAP_TILE_URL=${HONEYPOT_MAP_TILE_URL:-https://tile.openstreetmap.org/{z}/{x}/{y}.png}
-      - MAP_ATTRIBUTION=${HONEYPOT_MAP_ATTRIBUTION:-© OpenStreetMap contributors}
-      # Resolved by service-name DNS over the shared honeynet network --
-      # see this file's header for why that works across the project
-      # boundary (already proven live by honeypot-init today).
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - FILEBEAT_URL=http://filebeat:5066
-      # #151: query-time embedding for /llm-analysis semantic search.
-      # Shared with analysis/ghidra/docker-compose.ghidra.yml's own ollama
-      # service, over the honeypot-llm network below -- same service name
-      # ("ollama") that network's own internal DNS already resolves.
-      - OLLAMA_URL=http://ollama:11434
-      # #1487: dashboard-driven Canarytoken creation. canarytokens-frontend
-      # (arcane/home/honeypot-canarytokens/compose.yml) lives on its own
-      # isolated canarytokens_net, not shared with this stack's network --
-      # unlike OLLAMA_URL/ELASTICSEARCH_URL above, this reaches it the same
-      # way an operator's own browser would (10.8.0.2:19426, the
-      # WireGuard-bound port), not a docker service name. Empty by default --
-      # an unset value leaves canarytoken creation disabled
-      # (canarytokensAPIURLIsLocal in dashboard/canarytokens_client.go), the
-      # same "off unless configured" posture OLLAMA_URL itself takes. Set
-      # CANARYTOKENS_API_URL=http://10.8.0.2:19426 once the canarytokens
-      # stack (#1426) is deployed on this host -- unverified whether a
-      # container on this stack's default bridge network can actually route
-      # to another container's host-published WireGuard-interface port on
-      # the same machine; confirm at deploy time before relying on this
-      # rather than assuming it works like Kibana's own 10.8.0.2:19601
-      # exposure (a cross-host case, VPS reaching in, not this same-host
-      # case).
-      - CANARYTOKENS_API_URL=${CANARYTOKENS_API_URL:-}
-      # #1487 items 3/5: live credential provisioning/rotation via
-      # honeyfs-implant (arcane/home/honeypot-cowrie/honeyfs-implant,
-      # #1553). Same reachability posture as CANARYTOKENS_API_URL above --
-      # honeyfs-implant is WireGuard-tunnel-bound (compose.yml in that
-      # project, e.g. 10.8.0.2:19428), not a docker service name reachable
-      # over this stack's own network. Empty by default -- an unset value
-      # leaves credential provisioning/rotation disabled
-      # (honeyfsImplantURLIsLocal in dashboard/honeyfs_implant_client.go),
-      # same "off unless configured" posture as everything else in this
-      # block. HONEYFS_IMPLANT_TOKEN is the optional defense-in-depth
-      # bearer token honeyfs-implant's own requireToken supports -- empty
-      # by default, matching that service's own compose.yml comment on why
-      # (network reachability is the trust boundary, this is a second,
-      # optional layer on top).
-      - HONEYFS_IMPLANT_URL=${HONEYFS_IMPLANT_URL:-}
-      - HONEYFS_IMPLANT_TOKEN=${HONEYFS_IMPLANT_TOKEN:-}
-      # Where the Open-in links on an event point. Set HONEYPOT_DOMAIN and the
-      # dashboard derives https://<tool>.<domain>; the three explicit URLs
-      # override it for path-routed deployments. All four are deliberately
-      # empty by default: these URLs carry the IP under investigation, so an
-      # unset variable must produce no link rather than a plausible-looking one
-      # aimed at a domain we do not own. See issue #97.
-      - HONEYPOT_DOMAIN=${HONEYPOT_DOMAIN:-}
-      - KIBANA_PUBLIC_URL=${KIBANA_PUBLIC_URL:-}
-      - EVEBOX_PUBLIC_URL=${EVEBOX_PUBLIC_URL:-}
-      - ARKIME_PUBLIC_URL=${ARKIME_PUBLIC_URL:-}
-      - ALERT_COOLDOWN=${HONEYPOT_ALERT_COOLDOWN:-6h}
-      - PAYLOAD_DIRS=/dionaea-lib/binaries,/cowrie-downloads
-      - SCRIPT_PAYLOAD_DIR=/state/script-payloads
-      - INTELLIGENCE_STATE_FILE=/state/intelligence.json
-      - SANDBOX_RESULTS_DIR=/sandbox-results
-      - SANDBOX_REQUEST_DIR=/sandbox-requests
-      # Empty until the Windows guest and its worker exist on the host; see
-      # .env.example. The mounts below are always present so enabling the
-      # backend is a .env change, not a Compose edit.
-      - WINDOWS_SANDBOX_RESULTS_DIR=${WINDOWS_SANDBOX_RESULTS_DIR:-}
-      - WINDOWS_SANDBOX_REQUEST_DIR=${WINDOWS_SANDBOX_REQUEST_DIR:-}
-      - GHOSTS_SANDBOX_RESULTS_DIR=${GHOSTS_SANDBOX_RESULTS_DIR:-}
-      - GHOSTS_SANDBOX_REQUEST_DIR=${GHOSTS_SANDBOX_REQUEST_DIR:-}
-      - SANDBOX_ALERT_RISK_SCORE=${SANDBOX_ALERT_RISK_SCORE:-50}
-      # #805: empty disables the "Watch live" link/route entirely, same
-      # off-by-default convention as REVDECK_API_BASE below -- the bridge
-      # itself (sandbox/windows/vnc-bridge/) is a separate host service,
-      # not something this compose file starts.
-      - SANDBOX_VNC_BRIDGE_WS=${SANDBOX_VNC_BRIDGE_WS:-}
-      # Empty until the host-side Ghidra worker exists; see .env.example. The
-      # mounts above are always present so enabling it is a .env change, not a
-      # Compose edit — the same arrangement as the Windows backend.
-      - GHIDRA_RESULTS_DIR=${GHIDRA_RESULTS_DIR:-}
-      - GHIDRA_REQUEST_DIR=${GHIDRA_REQUEST_DIR:-}
-      - REVDECK_RESULTS_DIR=${REVDECK_RESULTS_DIR:-}
-      - REVDECK_REQUEST_DIR=${REVDECK_REQUEST_DIR:-}
-      # #1134: CAPE spool -- see x-dashboard-volumes' own comment on why
-      # this was silently unwired until now.
-      - CAPE_RESULTS_DIR=${CAPE_RESULTS_DIR:-}
-      - CAPE_REQUEST_DIR=${CAPE_REQUEST_DIR:-}
-      - GHIDRA_ALERT_RISK_LEVELS=${GHIDRA_ALERT_RISK_LEVELS:-high,critical}
-      - GHIDRA_ALERT_ON_CRYPTO=${GHIDRA_ALERT_ON_CRYPTO:-false}
-      # #154 item 9 follow-up: same allowlist pattern as
-      # GHIDRA_ALERT_RISK_LEVELS above -- llm-worker's own severity judgment
-      # for a session/payload analysis, not a deterministic signal.
-      - LLM_ANALYSIS_ALERT_SEVERITIES=${LLM_ANALYSIS_ALERT_SEVERITIES:-high,critical}
-      # Empty until analysis/github/install-github-publisher.sh has been run
-      # AND an operator has separately armed GITHUB_PUBLISH_ENABLED in
-      # /etc/honeypot-github.env -- see .env.example and #74. The mounts
-      # above are always present, same arrangement as Ghidra/Windows.
-      - GITHUB_ANALYSIS_REQUEST_DIR=${GITHUB_ANALYSIS_REQUEST_DIR:-}
-      - GITHUB_ANALYSIS_RESULTS_DIR=${GITHUB_ANALYSIS_RESULTS_DIR:-}
-      - GITHUB_ANALYSIS_ALERT_POSITIVES=${GITHUB_ANALYSIS_ALERT_POSITIVES:-10}
-      - ALERT_CAMPAIGN_SCORE=${HONEYPOT_ALERT_CAMPAIGN_SCORE:-80}
-      - DASHBOARD_REQUIRE_ADMIN=${DASHBOARD_REQUIRE_ADMIN:-true}
-      - MODEL_STATUS_SOCKET=/model-status/status.sock
-      - SERVICES_ADAPTER_SOCKET=/run/services-adapter/control.sock
-      - OIDC_ISSUER_URL=${OIDC_ISSUER_URL:-https://auth.example.invalid/realms/apiary}
-      - OIDC_EXTERNAL_URL=${OIDC_EXTERNAL_URL:-https://honeypot.example.invalid}
-      - OIDC_CLIENT_SECRET_FILE=/run/dashboard-secrets/oidc-client-secret
-      - OIDC_SESSION_REDIS_URL=redis://oidc-sessions:6379/0
-      - AUTH_ACCOUNT_URL=${AUTH_ACCOUNT_URL:-https://auth.example.invalid/realms/apiary/account/}
-      - AUTH_ADMIN_URL=${AUTH_ADMIN_URL:-https://auth.example.invalid/admin/apiary/console/}
-      - EXPECTED_SENSORS=cowrie,multipot,http,api-honeypot,dionaea,dnp3,dicompot,dns-honeypot,citrix-honeypot,cisco-asa-honeypot,rdp-honeypot,conpot,conpot-s7-1200,conpot-s7-1500,conpot-iec104,conpot-guardian,conpot-kamstrup,tanner,suricata,endlessh,beelzebub,hellpot,elasticpot,galah,sentrypeer,wordpot,mailoney,canarytokens
-      - ALERT_WEBHOOK_URL=${HONEYPOT_ALERT_WEBHOOK_URL:-}
-      - TZ=Europe/Berlin
-    networks:
-      - honeynet
-      - honeypot-llm
-      - oidc-session
-    healthcheck:
-      test: ["CMD", "/usr/local/bin/dashboard", "-healthcheck"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      # #828: bumped from 10s -- /healthz now reports 503 until the first
-      # rebuild() has real ES-derived data (dashboard/main.go), which
-      # takes 60-120s against this host's real event volume, confirmed
-      # live. A failure during start_period never counts toward retries,
-      # so this margin is what actually keeps a normal warm-up from ever
-      # reaching "unhealthy" -- 10s was already borderline before this
-      # fix (10s start_period + 5 retries * 15s interval = 85s total
-      # tolerance, close to the observed worst case) and would have been
-      # a real regression (spurious autoheal restarts) without this bump.
-      start_period: 180s
-    # Restarted by the autoheal sidecar (main stack) on unhealthy, not by
-    # restart: alone -- see #119. autoheal watches by Docker label via
-    # /var/run/docker.sock daemon-wide, unaffected by the stack split.
-    labels:
-      - autoheal=true
-    # #118: measured (2026-08-02). Runs as root by default (no USER in
-    # dashboard/Dockerfile) and reads read-only mounts owned by every
-    # sensor's own UID under /logs, plus dionaea-lib, cowrie-downloads,
-    # yara-results, sandbox/ghidra/github-analysis results -- the same
-    # "root, but needs the permission-bypass capability that comes with
-    # root, not just the UID" situation as filebeat. DAC_READ_SEARCH
-    # restored clean reads across all of them.
-    cap_drop:
-      - ALL
-    cap_add:
-      - DAC_READ_SEARCH
-    security_opt:
-      - no-new-privileges:true
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          # The dashboard reads the tail (tailCap=8M) of every
-          # JSON log each cycle. The Suricata eve.json mounted at /logs/suricata
-          # is ~1.25G, so its 8M tail parses into tens of thousands of event
-          # structs — 32M OOM-restarted the container in a loop (53x).
-          # 1G leaves GC headroom for correlation and payload inventory work.
-          # Raised to 2G after live growth (accumulating log volume on this
-          # actively-attacked host, not a leak) pushed a rebuild cycle to
-          # ~1014MiB, right against the old 1G ceiling -- see #353 for the
-          # broader fix (an ES-backed cache instead of re-parsing every log
-          # file's tail from scratch on every cycle), this bump just buys
-          # headroom until that lands.
-          memory: 2G
-
 
   # ------------------------------------------------------------------
-  # Modernization port (#1608): the replacement stack, behind the "next"
-  # profile until cutover. dashboard-next's own 19092 port mapping below
-  # (#1628's staged/beta path, vps/traefik/dynamic.yml's
-  # honeypot-dashboard-beta router) is a separate, currently-inert host
-  # port — bringing up the `next` profile publishes it, but nothing
-  # routes to it externally until the VPS-side socat bridge, DNS, and
-  # Keycloak client registration this still needs are set up (#1628); it
-  # does not touch the production 19090 binding at all. At cutover: move
-  # THAT (19090) port mapping from `dashboard` to `dashboard-next`, drop
-  # the profile lines, retire `dashboard`.
+  # Modernization port (#1608) — cutover complete: this stack IS the
+  # dashboard now, no profile gate, and the retired Go `dashboard`
+  # service is gone from this file entirely (an older git commit is the
+  # only way back, deliberately — no runtime fallback). dashboard-next's
+  # own 19092 port mapping below (#1628's staged/beta path,
+  # vps/traefik/dynamic.yml's honeypot-dashboard-beta router) is a
+  # separate, currently-inert host port — nothing routes to it externally
+  # until the VPS-side socat bridge, DNS, and Keycloak client
+  # registration this still needs are set up (#1628); it does not touch
+  # the production 19090 binding at all.
   #
   # Cross-host readiness (per Xore): both tiers are stateless,
   # env-configured containers — session/OIDC state lives in the
@@ -450,7 +148,6 @@ services:
   # by the parallel frontend track).
   backend-service-mounted:
     <<: *runtime-defaults
-    profiles: ["next"]
     image: apiary-backend:latest
     container_name: hp-apiary-backend-mounted
     restart: unless-stopped
@@ -515,7 +212,6 @@ services:
   # replica.
   backend-worker:
     <<: *runtime-defaults
-    profiles: ["next"]
     image: apiary-backend:latest
     container_name: hp-apiary-worker
     restart: unless-stopped
@@ -622,7 +318,6 @@ services:
 
   dashboard-next:
     <<: *runtime-defaults
-    profiles: ["next"]
     build: ./frontend-next
     image: apiary-dashboard-next:latest
     container_name: hp-dashboard-next
@@ -678,10 +373,11 @@ services:
     # 19092 (#1628 staged/beta path): a second, previously-unused port
     # (see vps/traefik/dynamic.yml's own socat table) -- nothing external
     # routes to it until the matching VPS-side socat bridge/DNS/Keycloak
-    # registration (still open, see #1628) exist. cutover-dashboard.sh's
-    # own `preflight` health check already reaches this container over
-    # the honeynet bridge without needing either host port; both exist for
-    # real, public, browser-driven validation.
+    # registration (still open, see #1628) exist. Health checks reach
+    # this container over the honeynet bridge without needing either host
+    # port; both exist for real, public, browser-driven validation.
+    # (cutover-dashboard.sh, which once automated that preflight, was
+    # removed with the completed cutover.)
     ports:
       - "${HP_BIND:-10.8.0.2}:19090:8080"
       - "${HP_BIND:-10.8.0.2}:19092:8080"
@@ -705,119 +401,12 @@ services:
       - oidc-session
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
-    # Deliberately NO resource limit on the BFF/SSR tier (per Xore): it
-    # must scale with load rather than get throttled; horizontal scaling
-    # happens by adding replicas/hosts, not by capping this one. #1616
-    # is the in-process side of that promise: cluster mode spreads load
-    # across cores instead of one event loop, and backendLimiter sheds
-    # with 503 instead of degrading into an unresponsive pile-up when the
-    # Rust tier (or this tier itself) can't keep up.
 
-  # #378: ships Ghidra/sandbox/GitHub-analysis/workbench-run results into
-  # Elasticsearch (ghidra-analysis-v1/sandbox-analysis-v1/github-analysis-v1/
-  # workbench-runs-v1, see analysis/elasticsearch-setup.sh) -- previously
-  # local-disk-JSON-only, per the issue's gap analysis. Read-only mirror:
-  # local JSON stays authoritative, this never writes back to the result
-  # directories. Same read-only spool boundaries as the dashboard service
-  # above -- no request-side mount, this only ever consumes finished results.
-  #
-  # Horizontal scaling (issue's second ask): SHARD_COUNT partitions files by
-  # sha256(path) across replicas; SHARD_INDEX defaults to the trailing "-N"
-  # docker compose assigns each replica's $HOSTNAME when scaled. To run more
-  # importers when the backlog is large: drop `container_name:` below (it
-  # would collide across replicas), set ES_IMPORTER_SHARD_COUNT to the
-  # replica count, then `docker compose up -d --scale es-results-importer=N`.
-  # Retired (#1649 follow-through): #1610 already ported this into
-  # backend-service's es_importer.rs, wired live as
-  # WORKER_LOOPS=es-results-importer on backend-worker-importer below --
-  # confirmed zero errors over 3h and fresh writes (yara-analysis-v1's
-  # newest doc seconds old at verification time; ghidra/sandbox showing
-  # older timestamps is source-starved, not importer-broken -- both
-  # implementations read the same near-empty result directories).
-  # profiles: ["legacy"] keeps this container defined for rollback
-  # without Arcane's routine gitops-sync trying to restart it -- same
-  # reasoning as this file's own `dashboard` service (#1648).
-  es-results-importer:
-    <<: *runtime-defaults
-    profiles: ["legacy"]
-    build: ./analysis/es-results-importer
-    container_name: hp-es-results-importer
-    restart: unless-stopped
-    volumes:
-      - /var/lib/honeypot-ghidra/results:/ghidra-results:ro
-      - /var/lib/honeypot-sandbox/export:/sandbox-results:ro
-      - /var/lib/honeypot-windows-sandbox/export:/windows-sandbox-results:ro
-      # #498: same "sandbox" ES label/index as the two mounts above --
-      # importer.py's SOURCES list merges all three into sandbox-analysis-v1.
-      - /var/lib/honeypot-ghosts-sandbox/export:/ghosts-sandbox-results:ro
-      - /var/lib/honeypot-github/results:/github-analysis-results:ro
-      # #404: same host path the dashboard service's own REVDECK_RESULTS_DIR
-      # mount above uses -- see that comment for the write-side boundary
-      # (ghidra-worker.py's drain_revdeck() is the sole producer).
-      - /var/lib/honeypot-revdeck/results:/revdeck-results:ro
-      # #1134: same shape as the Ghidra/Rev·Deck mounts above -- was missing
-      # entirely, the actual root cause of cape-analysis-v1 having no writer.
-      - /var/lib/honeypot-cape/results:/cape-results:ro
-      - dashboard-state:/state:ro
-      - es-importer-state:/state-importer
-      # #638/#612: cowrie's persisted TTY session recordings (#611) --
-      # read-only, same bind-mount source path the cowrie service itself
-      # writes into, mirrored into ES so the dashboard never has to open
-      # this file directly.
-      - /opt/stacks/apiary/logs/cowrie/tty:/cowrie-tty:ro
-      # #666: reporter's own metrics.json (attempted/suppressed/dry_run/
-      # sent/failed counters) -- read-only, same cross-stack shared-name
-      # mechanism as dionaea-lib above. Per #638, this is the ONLY path
-      # into the dashboard: mirrored into ES here, never mounted into the
-      # dashboard service itself.
-      - reporter-data:/reporter-data:ro
-      # #1103 Category 4: analysis/yara/scanner.py's aggregate results.json,
-      # same shared named volume the dashboard service's own YARA_RESULTS_FILE
-      # mount above uses -- see importer.py's "yara" source comment for why
-      # this is a new document-per-sample-inside-one-file shape rather than
-      # a plain glob-of-files source like everything else here.
-      - yara-results:/yara-results:ro
-    environment:
-      - ES_HOST=http://elasticsearch:9200
-      - IMPORT_INTERVAL=${ES_IMPORTER_INTERVAL:-300}
-      - IMPORTER_STATE=/state-importer/es-results-importer.json
-      - SHARD_COUNT=${ES_IMPORTER_SHARD_COUNT:-1}
-      - GHIDRA_RESULTS_DIR=/ghidra-results
-      - SANDBOX_RESULTS_DIR=/sandbox-results
-      - WINDOWS_SANDBOX_RESULTS_DIR=/windows-sandbox-results
-      - GHOSTS_SANDBOX_RESULTS_DIR=/ghosts-sandbox-results
-      - GITHUB_ANALYSIS_RESULTS_DIR=/github-analysis-results
-      - REVDECK_RESULTS_DIR=/revdeck-results
-      - CAPE_RESULTS_DIR=/cape-results
-      - COWRIE_TTYLOG_DIR=/cowrie-tty
-      - REPORTER_METRICS_DIR=/reporter-data
-      - YARA_RESULTS_DIR=/yara-results
-      - TZ=Europe/Berlin
-    networks:
-      - honeynet
-    # Same DAC_READ_SEARCH justification as the dashboard service above:
-    # the Ghidra/GitHub-analysis result directories are root-owned host bind
-    # mounts this container otherwise can't read.
-    user: "0:0"
-    cap_drop:
-      - ALL
-    cap_add:
-      - DAC_READ_SEARCH
-    security_opt:
-      - no-new-privileges:true
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 256M
-
-  # #1610 worker migration: Rust port of es-results-importer above, running
-  # side by side with it behind the `next` profile (parity pass, not a
-  # cutover — #1610's own text: "each migration ships with parity tests
-  # against the current worker's observable outputs before the old one
-  # retires"). A separate service from backend-worker, not an extra
-  # WORKER_LOOPS entry bolted onto it: this worker needs the SAME root +
-  # DAC_READ_SEARCH privilege escalation the Python service above needs
+  # #1610 worker migration: Rust port of the retired Python
+  # es-results-importer (removed with the completed cutover — an older git
+  # commit is the only way back, deliberately). A separate service from
+  # backend-worker, not an extra WORKER_LOOPS entry bolted onto it: this
+  # worker needs root + DAC_READ_SEARCH privilege escalation
   # (Ghidra/GitHub-analysis result directories are root-owned host bind
   # mounts a normal container user can't read) plus a persistent local
   # dedup-state file — backend-worker is deliberately unprivileged and
@@ -828,7 +417,6 @@ services:
   # WRITE access to host request spools; this one only ever reads results).
   backend-worker-importer:
     <<: *runtime-defaults
-    profiles: ["next"]
     image: apiary-backend:latest
     container_name: hp-apiary-worker-importer
     restart: unless-stopped
@@ -900,7 +488,6 @@ services:
   # specific bind for overlapping paths).
   backend-worker-enrichment:
     <<: *runtime-defaults
-    profiles: ["next"]
     image: apiary-backend:latest
     container_name: hp-apiary-worker-enrichment
     restart: unless-stopped
@@ -947,7 +534,6 @@ services:
   # backend-worker-enrichment just above, which is network_mode: none).
   backend-worker-payload-inventory:
     <<: *runtime-defaults
-    profiles: ["next"]
     image: apiary-backend:latest
     container_name: hp-apiary-worker-payload-inventory
     restart: unless-stopped
@@ -1025,7 +611,7 @@ volumes:
   yara-results:
     name: yara-results
   # #666: shared with arcane/home/honeypot-utilities/compose.yml -- reporter writes,
-  # es-results-importer here only reads. Same mechanism as dionaea-lib.
+  # backend-worker-importer here only reads. Same mechanism as dionaea-lib.
   reporter-data:
     name: reporter-data
   # Also shared with the main stack, both ways -- payload-dedupe and
@@ -1044,7 +630,7 @@ volumes:
   # declares the identical name.
   services-adapter-socket:
     name: services-adapter-socket
-  # #378: es-results-importer's own last-imported-mtime bookkeeping. Private
-  # to this service -- losing it just means the next pass re-sends every
+  # #378: backend-worker-importer's last-imported-mtime bookkeeping. Private
+  # to that service -- losing it just means the next pass re-sends every
   # result once (idempotent, deterministic _id), not a data loss.
   es-importer-state: null

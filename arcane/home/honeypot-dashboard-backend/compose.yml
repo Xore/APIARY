@@ -72,13 +72,13 @@ services:
   # ------------------------------------------------------------------
   # Moved verbatim from honeypot-dashboard/compose.yml (#1622) -- same
   # image, container name, environment, volumes, resource limits as
-  # before the split. Still behind the `next` profile until the
-  # modernization port (#1608) cuts over; see that file's own comment on
-  # this service for the cutover plan.
+  # before the split. The #1608 cutover is complete: this is the default
+  # (and only) request/response tier, no profile gate. Falling back to
+  # the retired Go dashboard means checking out a pre-cutover commit and
+  # running it normally -- deliberately not a runtime switch.
   # ------------------------------------------------------------------
   backend-service:
     <<: *runtime-defaults
-    profiles: ["next"]
     build: ../honeypot-dashboard/backend-service
     image: apiary-backend:latest
     container_name: hp-apiary-backend

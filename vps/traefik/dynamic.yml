@@ -468,13 +468,10 @@ http:
 
     # Staged/beta path for the dashboard modernization port (#1628) --
     # dashboard-next, side by side with the production honeypot-dashboard
-    # router above, which stays completely untouched. Exists so an
-    # operator can validate dashboard-next from a real public host before
-    # scripts/cutover-dashboard.sh's `cutover` step ever moves the
-    # production port binding -- though note preflight's own honeynet-
-    # bridge health checks already cover most of that need without
-    # requiring this router at all (this is for a genuinely public,
-    # browser-driven validation pass, not a substitute for it).
+    # router above, which stays completely untouched. Predates the
+    # completed #1628 cutover (dashboard-next now owns the production
+    # binding); kept as a second, independently-routable validation path
+    # for a genuinely public, browser-driven check of a staged build.
     #
     # Needs, before first use: (1) the `ports:` mapping on dashboard-next
     # and socat-hp-dashboard-next bridge this router's service depends on
