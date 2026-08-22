@@ -24,7 +24,7 @@
     "openid-client": "^6.8.6",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "undici": "^7.29.0"
+    "undici": "^8.10.0"
   },
   "devDependencies": {
     "@tanstack/router-cli": "^1.167.32",
