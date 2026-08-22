@@ -11,10 +11,11 @@
 // every other mutation here.
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { confirmAction } from '../components/ConfirmDialog'
 import { InvestigateHeader } from '../components/Investigate'
 import { getSessionUser, type User } from '../lib/auth'
+import { flash } from '../lib/flash'
 import { useResolved } from '../lib/hooks'
 import type { Json, JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
@@ -115,6 +116,36 @@ const submitGithubAnalysis = createServerFn({ method: 'POST' })
       { hash: data.hash, confirm: 'publish', actor_subject: user?.sub ?? '', actor_username: user?.username ?? '' },
       'GitHub-analysis submission failed.',
     )
+  })
+
+// One-click "Generate PDF report" (#474, hp-payload-report.js): POSTs
+// reports_api.rs's generate_payload_report, which renders an ephemeral
+// payload-template definition through the same pipeline as every
+// Reports-studio PDF and returns the stored record's id. No background
+// job, no polling — the in-process PDF emitter finishes within this one
+// request, so the trigger's own busy state is the whole "spinner".
+// Admin-gated at the BFF like every other mutation on this page; errors
+// come back as the Rust tier's plain-text body, surfaced verbatim.
+const generatePdfReport = createServerFn({ method: 'POST' })
+  .inputValidator((input: { hash: string }) => input)
+  .handler(async ({ data }): Promise<{ ok: boolean; id?: string; error?: string }> => {
+    const { getSessionUser } = await import('../lib/auth')
+    const user = await getSessionUser()
+    if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
+    const { serviceFetch } = await import('../lib/backend.server')
+    const response = await serviceFetch(
+      `/api/v1/payloads/${encodeURIComponent(data.hash)}/report`,
+      { method: 'POST' },
+      { mounted: true },
+    )
+    if (!response.ok) {
+      const text = (await response.text().catch(() => '')).trim()
+      return { ok: false, error: text || `Report generation failed (${response.status}).` }
+    }
+    const body = (await response.json().catch(() => null)) as { id?: unknown } | null
+    const id = typeof body?.id === 'string' ? body.id : ''
+    if (!id) return { ok: false, error: 'Report generation returned no report id.' }
+    return { ok: true, id }
   })
 
 // ── Prior-analysis correlation (hp-payload-analysis.js's aggregation
@@ -637,6 +668,72 @@ function ExternalPublicationCard({ hash, editable }: { hash: string; editable: b
   )
 }
 
+// Payload PDF viewer (payloads.html:326-331 + hp-payload-report.js's
+// openViewer/closeViewer): the same application-managed
+// .modal.pdf-viewer-modal overlay as github-analysis.$sha.tsx's
+// ReportViewer — focus moves to the close button on open, Tab cycles
+// inside the dialog, Escape and backdrop clicks close, and focus returns
+// to the trigger on unmount. The iframe is same-origin (the BFF's
+// /api/report/{id}/pdf streaming proxy in front of the Rust tier's
+// /api/v1/reports/{id}/pdf), so no sandbox attribute; the plain link is
+// the browsers-without-inline-PDF fallback.
+function PayloadReportViewer({ id, onClose }: { id: string; onClose: () => void }) {
+  const closeRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLElement>(null)
+  const url = `/api/report/${encodeURIComponent(id)}/pdf`
+  useEffect(() => {
+    const previous = document.activeElement
+    closeRef.current?.focus()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onClose()
+        return
+      }
+      if (event.key !== 'Tab' || !panelRef.current) return
+      const focusables = panelRef.current.querySelectorAll<HTMLElement>('button, a[href], iframe')
+      if (!focusables.length) return
+      const first = focusables[0]
+      const last = focusables[focusables.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus()
+    }
+  }, [onClose])
+  return (
+    <>
+      <div className="modal-backdrop open" aria-hidden="true" onClick={onClose} />
+      <section
+        className="modal pdf-viewer-modal open"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Payload report"
+        ref={panelRef}
+      >
+        <button className="modal__close" type="button" aria-label="Close report viewer" onClick={onClose} ref={closeRef}>
+          ✕
+        </button>
+        <h2 className="pdf-viewer-title">
+          Payload report{' '}
+          <a className="lnk" href={url} target="_blank" rel="noopener noreferrer">
+            open in new tab ↗
+          </a>
+        </h2>
+        <iframe className="pdf-viewer-frame" title="Payload PDF report preview" src={url} />
+      </section>
+    </>
+  )
+}
+
 function PayloadAnalysis() {
   const { first, golden, user } = Route.useLoaderData()
   const { hash } = Route.useParams()
@@ -646,6 +743,28 @@ function PayloadAnalysis() {
   const [tab, setTab] = useState('identity')
   const [correlation, setCorrelation] = useState<Correlation | null>(null)
   const [related, setRelated] = useState<RelatedEvents | null>(null)
+  const [reportBusy, setReportBusy] = useState(false)
+  const [reportId, setReportId] = useState<string | null>(null)
+
+  // hp-payload-report.js's trigger flow: disable + relabel while the one
+  // synchronous generate request runs, surface progress and failure in
+  // the flash line, and open the viewer on the returned id.
+  const generateReport = async () => {
+    if (reportBusy) return
+    setReportBusy(true)
+    flash('Generating PDF report…')
+    try {
+      const result = await generatePdfReport({ data: { hash } })
+      if (!result.ok || !result.id) {
+        flash(result.error || 'Report generation failed.', { error: true })
+        return
+      }
+      flash('PDF report ready.', { duration: 1600 })
+      setReportId(result.id)
+    } finally {
+      setReportBusy(false)
+    }
+  }
 
   const view = useMemo(() => buildStaticView(detail && detail !== 'missing' ? detail.analysis : null), [detail])
   const yara = useMemo(() => buildYaraView(detail && detail !== 'missing' ? detail.yara : []), [detail])
@@ -764,6 +883,22 @@ function PayloadAnalysis() {
                     <a className="action-menu__item" role="menuitem" href={`/api/payload/${encodeURIComponent(detail.hash)}/download`}>
                       Download sample ↓
                     </a>
+                  ) : null}
+                  {/* payloads.html:223 — Generate PDF report stays a
+                      <button> (see #474's comment on why it POSTs in
+                      place rather than linking to /reports);
+                      action-menu__item styles it exactly like the <a>
+                      items around it. */}
+                  {isAdmin ? (
+                    <button
+                      className="action-menu__item"
+                      role="menuitem"
+                      type="button"
+                      disabled={reportBusy}
+                      onClick={generateReport}
+                    >
+                      {reportBusy ? 'Generating…' : 'Generate PDF report'}
+                    </button>
                   ) : null}
                 </div>
               </details>
@@ -1237,6 +1372,7 @@ function PayloadAnalysis() {
           <ExternalPublicationCard hash={detail.hash} editable={isAdmin} />
         </>
       )}
+      {reportId ? <PayloadReportViewer id={reportId} onClose={() => setReportId(null)} /> : null}
     </>
   )
 }
