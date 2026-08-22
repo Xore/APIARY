@@ -1,7 +1,7 @@
 // GitHub analysis — VirusTotal-style multi-engine results for payloads
 // published to the analysis repo (github-analysis-v1). Empty until the
 // publisher is armed; submissions land with #1612.
-import { createFileRoute, Link } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { StoreListPage, sha256Of, str, when, type StorePage, type StoreRow } from '../components/StoreList'
 import type { Column } from '../components/Investigate'
@@ -17,18 +17,12 @@ const COLUMNS: Column<StoreRow>[] = [
   { header: 'analyzed', render: (row) => when(str(row, '@timestamp')) },
   { header: 'status', render: (row) => <span className="badge badge--muted">{str(row, 'status') || str(row, 'exit_status')}</span> },
   {
-    header: 'detail',
+    header: 'file',
     className: 'v',
     primary: true,
     render: (row) => {
       const sha = sha256Of(row)
-      return sha ? (
-        <Link className="lnk" to="/github-analysis/$sha" params={{ sha }}>
-          {sha.slice(0, 16)} — full result →
-        </Link>
-      ) : (
-        <span className="tw:text-muted">no source hash</span>
-      )
+      return sha ? <span className="mono">{sha.slice(0, 16)}</span> : <span className="tw:text-muted">no source hash</span>
     },
   },
   {
@@ -53,6 +47,10 @@ function Page() {
       chipNoun="runs"
       layout="cards"
       gridId="github-analysis-results"
+      cardHref={(row) => {
+        const sha = sha256Of(row)
+        return sha ? `/github-analysis/${encodeURIComponent(sha)}` : undefined
+      }}
     />
   )
 }

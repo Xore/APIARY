@@ -78,6 +78,7 @@ export function MasterDetailTable<Row>({
   inspectorExtra,
   layout = 'table',
   gridId,
+  cardHref,
 }: {
   rows: Row[] | null
   columns: Column<Row>[]
@@ -97,6 +98,14 @@ export function MasterDetailTable<Row>({
    * action-menu alignment) to specific result-surface ids. Omit for a card
    * grid theme.css doesn't name. */
   gridId?: string
+  /** `layout="cards"` only: when a row has exactly one detail page to go
+   * to (sandbox/ghidra/github-analysis/cape/revdeck/a payload's own
+   * analysis page — the legacy Go templates rendered these result grids
+   * as `<a class="project-card" href="...">`, not click-to-inspect), the
+   * whole card becomes that link and the inspector pane is skipped for
+   * it. Return undefined for a row with nothing to link to (falls back
+   * to opening the inspector, same as when this prop is omitted). */
+  cardHref?: (row: Row) => string | undefined
 }) {
   const [selected, setSelected] = useState<number | null>(null)
   const paneRef = useRef<HTMLDivElement>(null)
@@ -130,20 +139,25 @@ export function MasterDetailTable<Row>({
               {rows === null ? (
                 <SkeletonCards count={12} />
               ) : (
-                rows.map((row, index) => (
-                  <div key={rowKey(row, index)} className="project-card" onClick={onRowClick(index)}>
-                    <div className="project-card__header">
-                      <span className="project-card__title">{primaryColumn?.render(row)}</span>
-                    </div>
-                    {metaColumns.length > 0 ? (
-                      <div className="project-card__meta tw:flex-wrap">
-                        {metaColumns.map((column) => (
-                          <span key={column.header}>{column.render(row)}</span>
-                        ))}
+                rows.map((row, index) => {
+                  const href = cardHref?.(row)
+                  const CardTag = href ? 'a' : 'div'
+                  const cardProps = href ? { href } : { onClick: onRowClick(index) }
+                  return (
+                    <CardTag key={rowKey(row, index)} className="project-card" {...cardProps}>
+                      <div className="project-card__header">
+                        <span className="project-card__title">{primaryColumn?.render(row)}</span>
                       </div>
-                    ) : null}
-                  </div>
-                ))
+                      {metaColumns.length > 0 ? (
+                        <div className="project-card__meta tw:flex-wrap">
+                          {metaColumns.map((column) => (
+                            <span key={column.header}>{column.render(row)}</span>
+                          ))}
+                        </div>
+                      ) : null}
+                    </CardTag>
+                  )
+                })
               )}
               {loadingMore ? <SkeletonCards count={4} /> : null}
             </div>

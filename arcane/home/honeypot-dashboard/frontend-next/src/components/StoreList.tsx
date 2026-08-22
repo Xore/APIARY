@@ -24,6 +24,7 @@ export function StoreListPage<Row = StoreRow>({
   extraChips,
   layout,
   gridId,
+  cardHref,
 }: {
   fetchPage: (input: { data: { offset: number } }) => Promise<StorePage<Row> | null>
   label: string
@@ -44,6 +45,10 @@ export function StoreListPage<Row = StoreRow>({
   layout?: 'table' | 'cards'
   /** `layout="cards"` only: id on the `.project-grid` container. */
   gridId?: string
+  /** `layout="cards"` only: makes the whole card a link to a row's detail
+   * page instead of opening the inspector. See MasterDetailTable's own
+   * doc comment. */
+  cardHref?: (row: Row) => string | undefined
 }) {
   const [rows, setRows] = useState<Row[] | null>(null)
   const [total, setTotal] = useState(0)
@@ -98,6 +103,7 @@ export function StoreListPage<Row = StoreRow>({
         inspectorExtra={inspectorExtra}
         layout={layout}
         gridId={gridId}
+        cardHref={cardHref}
       />
     </>
   )

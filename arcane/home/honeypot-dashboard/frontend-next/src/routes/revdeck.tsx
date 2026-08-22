@@ -13,6 +13,15 @@ const fetchPage = createServerFn({ method: 'GET' })
     return serviceJSON<StorePage>(`/api/v1/store/revdeck?offset=${data.offset}&size=25`)
   })
 
+// es_importer.rs wraps the raw revdeck payload one level deeper under the
+// "revdeck" source label (build_document); the raw payload's own sha256 may
+// also ride flat on some rows — same nested-vs-flat ambiguity the sandbox
+// job field has, resolved the same way (nested first, flat fallback), e.g.
+// payload-workbench.results.tsx's SANDBOX_COLUMNS.
+function revdeckSha(row: StoreRow): string {
+  return pathString(row, 'revdeck', 'sha256') || pathString(row, 'sha256')
+}
+
 const COLUMNS: Column<StoreRow>[] = [
   { header: 'analyzed', render: (row) => when(str(row, '@timestamp')) },
   {
@@ -20,20 +29,8 @@ const COLUMNS: Column<StoreRow>[] = [
     className: 'v',
     primary: true,
     render: (row) => {
-      // es_importer.rs wraps the raw revdeck payload one level deeper under
-      // the "revdeck" source label (build_document); the raw payload's own
-      // sha256 may also ride flat on some rows — same nested-vs-flat
-      // ambiguity the sandbox job field has, resolved the same way (nested
-      // first, flat fallback), e.g. payload-workbench.results.tsx's
-      // SANDBOX_COLUMNS.
-      const sha = pathString(row, 'revdeck', 'sha256') || pathString(row, 'sha256')
-      return sha ? (
-        <a className="lnk" href={`/revdeck/${encodeURIComponent(sha)}`} onClick={(event) => event.stopPropagation()}>
-          <code>{sha.slice(0, 16)}</code> →
-        </a>
-      ) : (
-        <span className="tw:text-muted">no source hash</span>
-      )
+      const sha = revdeckSha(row)
+      return sha ? <code>{sha.slice(0, 16)}</code> : <span className="tw:text-muted">no source hash</span>
     },
   },
   { header: 'exit', render: (row) => <span className="badge badge--muted">{str(row, 'exit_status')}</span> },
@@ -58,6 +55,10 @@ function Page() {
       inspectorTitle="RevDeck run"
       chipNoun="runs"
       layout="cards"
+      cardHref={(row) => {
+        const sha = revdeckSha(row)
+        return sha ? `/revdeck/${encodeURIComponent(sha)}` : undefined
+      }}
     />
   )
 }

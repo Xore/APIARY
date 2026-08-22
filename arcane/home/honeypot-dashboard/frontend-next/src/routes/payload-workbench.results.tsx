@@ -320,41 +320,54 @@ const recordColumn: Column<StoreRow> = {
 }
 
 const WORKBENCH_COLUMNS: Column<StoreRow>[] = [
-  { header: 'created', render: (row) => when(pathString(row, 'created_at')) },
+  {
+    header: 'recipe',
+    className: 'v',
+    primary: true,
+    render: (row) => pathString(row, 'recipe_name') || <span className="tw:text-muted">one-off</span>,
+  },
   { header: 'state', render: (row) => <span className="badge badge--muted">{pathString(row, 'state')}</span> },
-  { header: 'recipe', className: 'v', render: (row) => pathString(row, 'recipe_name') },
-  { header: 'payload', className: 'v', render: (row) => <code>{pathString(row, 'payload_sha256').slice(0, 16)}</code> },
+  { header: 'payload', className: 'v', render: (row) => <span className="mono">{pathString(row, 'payload_sha256').slice(0, 16)}</span> },
+  { header: 'created', render: (row) => when(pathString(row, 'created_at')) },
   { header: 'owner', render: (row) => pathString(row, 'owner') },
   recordColumn,
 ]
 
 const STATIC_COLUMNS: Column<StoreRow>[] = [
-  { header: 'fingerprint', className: 'v', render: (row) => <code>{pathString(row, 'Fingerprint').slice(0, 24)}</code> },
+  {
+    header: 'fingerprint',
+    className: 'v',
+    primary: true,
+    render: (row) => <span className="mono">{pathString(row, 'Fingerprint').slice(0, 24)}</span>,
+  },
   { header: 'kind', render: (row) => pathString(row, 'Analysis', 'Kind') },
   { header: 'summary', className: 'v', render: (row) => pathString(row, 'Analysis', 'Summary') },
   recordColumn,
 ]
 
 const YARA_COLUMNS: Column<StoreRow>[] = [
-  { header: 'analyzed', render: (row) => when(pathString(row, '@timestamp')) },
-  { header: 'file', className: 'v', render: (row) => <code>{pathString(row, 'file', 'hash', 'sha256').slice(0, 16) || pathString(row, 'file', 'name')}</code> },
+  {
+    header: 'file',
+    className: 'v',
+    primary: true,
+    render: (row) => <span className="mono">{pathString(row, 'file', 'hash', 'sha256').slice(0, 16) || pathString(row, 'file', 'name')}</span>,
+  },
   { header: 'matches', className: 'v', render: (row) => pathString(row, 'yara', 'match_count') || (Array.isArray((row.yara as StoreRow | undefined)?.matches) ? String(((row.yara as StoreRow).matches as unknown[]).length) : '') },
+  { header: 'analyzed', render: (row) => when(pathString(row, '@timestamp')) },
   recordColumn,
 ]
+
+function sandboxJob(row: StoreRow): string {
+  return pathString(row, 'sandbox', 'job') || pathString(row, 'job')
+}
 
 const SANDBOX_COLUMNS: Column<StoreRow>[] = [
   {
     header: 'job',
     className: 'v',
     render: (row) => {
-      const job = pathString(row, 'sandbox', 'job') || pathString(row, 'job')
-      return job ? (
-        <a className="lnk" href={`/sandbox/${encodeURIComponent(job)}`} onClick={(event) => event.stopPropagation()}>
-          {job.slice(0, 28)} →
-        </a>
-      ) : (
-        <span className="tw:text-muted">no job id</span>
-      )
+      const job = sandboxJob(row)
+      return job ? <span className="mono">{job.slice(0, 28)}</span> : <span className="tw:text-muted">no job id</span>
     },
   },
   { header: 'detonated', render: (row) => when(pathString(row, '@timestamp')) },
@@ -386,9 +399,7 @@ const GHIDRA_COLUMNS: Column<StoreRow>[] = [
     render: (row) => {
       const sha = pathString(row, 'file', 'hash', 'sha256')
       return sha ? (
-        <a className="lnk" href={`/ghidra/${encodeURIComponent(sha)}`} onClick={(event) => event.stopPropagation()}>
-          <code>{sha.slice(0, 16)}</code> →
-        </a>
+        <code>{sha.slice(0, 16)}</code>
       ) : (
         <code>{pathString(row, 'file', 'name')}</code>
       )
@@ -1171,17 +1182,50 @@ function Results() {
         <RecentRunsCard owner={owner} refreshToken={runsToken} />
         <h2 className="label-section">Workbench runs</h2>
         <FilterInput label="workbench runs" value={workbenchQuery} onChange={setWorkbenchQuery} />
-        <MasterDetailTable rows={filterRows(workbench ? workbench.rows : null, workbenchQuery)} columns={WORKBENCH_COLUMNS} rowKey={(row, i) => `wb-${pathString(row, 'id')}-${i}`} inspectorTitle="Workbench run" />
+        <MasterDetailTable
+          rows={filterRows(workbench ? workbench.rows : null, workbenchQuery)}
+          columns={WORKBENCH_COLUMNS}
+          rowKey={(row, i) => `wb-${pathString(row, 'id')}-${i}`}
+          inspectorTitle="Workbench run"
+          layout="cards"
+          gridId="workbench-runs-results"
+          cardHref={(row) => {
+            const sha = pathString(row, 'payload_sha256')
+            return sha ? `/payload-analysis/${encodeURIComponent(sha)}` : undefined
+          }}
+        />
       </div>
       <div className="dashboard-panel" role="tabpanel" id="wb-panel-static" aria-labelledby="wb-static" hidden={tab !== 'static'}>
         <h2 className="label-section">Static analysis</h2>
         <FilterInput label="static analyses" value={staticQuery} onChange={setStaticQuery} />
-        <MasterDetailTable rows={filterRows(statics ? statics.rows : null, staticQuery)} columns={STATIC_COLUMNS} rowKey={(row, i) => `st-${pathString(row, 'Fingerprint')}-${i}`} inspectorTitle="Static analysis" />
+        <MasterDetailTable
+          rows={filterRows(statics ? statics.rows : null, staticQuery)}
+          columns={STATIC_COLUMNS}
+          rowKey={(row, i) => `st-${pathString(row, 'Fingerprint')}-${i}`}
+          inspectorTitle="Static analysis"
+          layout="cards"
+          gridId="static-analysis-results"
+          cardHref={(row) => {
+            const fingerprint = pathString(row, 'Fingerprint')
+            return fingerprint ? `/payload-analysis/${encodeURIComponent(fingerprint)}` : undefined
+          }}
+        />
       </div>
       <div className="dashboard-panel" role="tabpanel" id="wb-panel-yara" aria-labelledby="wb-yara" hidden={tab !== 'yara'}>
         <h2 className="label-section">YARA</h2>
         <FilterInput label="YARA results" value={yaraQuery} onChange={setYaraQuery} />
-        <MasterDetailTable rows={filterRows(yara ? yara.rows : null, yaraQuery)} columns={YARA_COLUMNS} rowKey={(_, i) => `ya-${i}`} inspectorTitle="YARA result" />
+        <MasterDetailTable
+          rows={filterRows(yara ? yara.rows : null, yaraQuery)}
+          columns={YARA_COLUMNS}
+          rowKey={(_, i) => `ya-${i}`}
+          inspectorTitle="YARA result"
+          layout="cards"
+          gridId="yara-results"
+          cardHref={(row) => {
+            const sha = pathString(row, 'file', 'hash', 'sha256')
+            return sha ? `/payload-analysis/${encodeURIComponent(sha)}` : undefined
+          }}
+        />
       </div>
       <div className="dashboard-panel" role="tabpanel" id="wb-panel-sandbox" aria-labelledby="wb-sandbox" hidden={tab !== 'sandbox'}>
         <h2 className="label-section">Sandbox detonations</h2>
@@ -1197,6 +1241,10 @@ function Results() {
           }}
           layout="cards"
           gridId="sandbox-results"
+          cardHref={(row) => {
+            const job = sandboxJob(row)
+            return job ? `/sandbox/${encodeURIComponent(job)}` : undefined
+          }}
         />
       </div>
       <div className="dashboard-panel" role="tabpanel" id="wb-panel-ghidra" aria-labelledby="wb-ghidra" hidden={tab !== 'ghidra'}>
@@ -1231,6 +1279,10 @@ function Results() {
           }}
           layout="cards"
           gridId="ghidra-results"
+          cardHref={(row) => {
+            const sha = pathString(row, 'file', 'hash', 'sha256')
+            return sha ? `/ghidra/${encodeURIComponent(sha)}` : undefined
+          }}
         />
       </div>
     </>
