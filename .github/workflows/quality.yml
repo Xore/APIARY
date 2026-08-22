@@ -360,8 +360,8 @@ jobs:
           # aggregation, not per-line event-kind classification), so this
           # isn't a path fix. Disabled pending #1665's re-architecture
           # decision rather than left silently broken.
-          - name: Sensor event-kind coverage audit (#789) [disabled, #1665]
-            run: echo "skipped -- classify.go retired with the Go dashboard (#1659), see #1665"
+          - name: "Sensor event-kind coverage audit (#789) [disabled, issue 1665]"
+            run: echo "skipped -- classify.go retired with the Go dashboard (issue 1659), see issue 1665"
 
           - name: Payload/artifact dedupe (#481/#528)
             run: |
