@@ -128,7 +128,16 @@ fn clean(value: &str) -> String {
 pub async fn dashboard(State(state): State<AppState>) -> Result<Json<Dashboard>, (StatusCode, String)> {
     let main_body = json!({
         "size": 0,
-        "query": {"range": {"@timestamp": {"gte": WINDOW}}},
+        // #1677: self-generated probe traffic is excluded from every figure on
+        // this page, not just from top_ips. A Docker healthcheck connecting to
+        // its own sensor is not an attack, and it was inflating sensor
+        // rankings, event counts and -- because conpot's healthcheck events
+        // arrive tagged T0886 -- the MITRE ICS technique tallies. 312,905 such
+        // events in 24 hours, 13.5% of everything ingested.
+        "query": {"bool": {
+            "filter": [{"range": {"@timestamp": {"gte": WINDOW}}}],
+            "must_not": [{"term": {"honeypot.internal_probe": true}}]
+        }},
         "aggs": {
             "sensors": {
                 "terms": {"field": "event.sensor", "size": 50},
@@ -142,7 +151,22 @@ pub async fn dashboard(State(state): State<AppState>) -> Result<Json<Dashboard>,
                 "terms": {"field": "source.as.asn", "size": 12},
                 "aggs": {"org": {"terms": {"field": "source.as.organization_name", "size": 1}}}
             },
-            "top_ips": {"terms": {"field": "source.ip", "size": 15, "exclude": ["127.0.0.1", "::1", "10.8.0.1"]}},
+            // #1677: 10.8.0.1 only. The two loopback addresses used to be
+            // excluded here as well, because the documents carried no way to
+            // tell a Docker healthcheck apart from an attack -- the sensors
+            // log both identically. They now do: ip_enrichment marks
+            // self-generated traffic `internal_probe`, and this handler's own
+            // query filters it out, so hiding the address is no longer
+            // standing in for classifying the event.
+            //
+            // The tunnel peer stays excluded because it is a different
+            // problem, not a solved one. Those are real attackers whose
+            // via_port join against portbridge missed, so the document is
+            // genuinely wrong rather than genuinely internal. Enriching them
+            // is the remaining half of #1677; until that lands, showing the
+            // tunnel endpoint as a top attacker would be a lie of a different
+            // kind.
+            "top_ips": {"terms": {"field": "source.ip", "size": 15, "exclude": ["10.8.0.1"]}},
             "paths": {"terms": {"field": "url.path", "size": 15}},
             "logins": {"filter": logins_filter()},
             "heatmap": {
@@ -173,7 +197,16 @@ pub async fn dashboard(State(state): State<AppState>) -> Result<Json<Dashboard>,
 
     let behavior_body = json!({
         "size": 0,
-        "query": {"range": {"@timestamp": {"gte": WINDOW}}},
+        // #1677: self-generated probe traffic is excluded from every figure on
+        // this page, not just from top_ips. A Docker healthcheck connecting to
+        // its own sensor is not an attack, and it was inflating sensor
+        // rankings, event counts and -- because conpot's healthcheck events
+        // arrive tagged T0886 -- the MITRE ICS technique tallies. 312,905 such
+        // events in 24 hours, 13.5% of everything ingested.
+        "query": {"bool": {
+            "filter": [{"range": {"@timestamp": {"gte": WINDOW}}}],
+            "must_not": [{"term": {"honeypot.internal_probe": true}}]
+        }},
         "aggs": {
             "creds": {"multi_terms": {
                 "terms": [{"field": "honeypot.username"}, {"field": "honeypot.password"}],

@@ -1,0 +1,29 @@
+# Captured-data deployment entrypoint (#1751).
+#
+# docker-compose.yml is the Safe #66 base: synthetic checks only, no route to
+# Elasticsearch, Ollama, captured payloads or the Internet. Its own header
+# says, correctly, not to fold the captured-data mounts and networks into it —
+# #83 owns that authorization and the base file has to stay safe by default.
+#
+# But the live deployment on this fleet HAS been authorized for captured data
+# (2026-08-22, recorded in #1660), and that authorization existed only as an
+# overlay applied by hand to the running stack. It was in no file, so an
+# Arcane sync + redeploy silently reverted it: the container came back on
+# `synthetic-only` with LLM_ALLOW_CAPTURED_DATA=true still set, unable to
+# resolve `elasticsearch`, believing it was in captured-data mode while
+# reaching nothing (#1751).
+#
+# This file is that authorization, written down. It folds nothing: both files
+# stay exactly as they are, and `include` composes them at deploy time. The
+# base remains the safe default for anyone running
+# `docker compose -f llm-worker/docker-compose.yml up`; deployments that have
+# been through #83's gate point at this file instead.
+#
+#   docker compose -f llm-worker/docker-compose.captured-data-deploy.yml up -d
+#
+# Deleting this file returns the deployment to synthetic-only, which is the
+# property that makes it a legible record of the decision rather than a
+# workaround.
+include:
+  - docker-compose.yml
+  - docker-compose.captured-data.yml

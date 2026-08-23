@@ -14,6 +14,44 @@ use super::viamap::ViaMap;
 
 pub const TUNNEL_PEER_IP: &str = "10.8.0.1";
 
+/// Loopback sources. A honeypot is reached from the network; nothing on this
+/// fleet is legitimately attacked from inside its own container.
+const LOOPBACK_IPS: [&str; 2] = ["127.0.0.1", "::1"];
+
+/// #1677: mark self-generated probe traffic instead of counting it as an attack.
+///
+/// Every sensor here is fronted by a Docker healthcheck that connects to the
+/// sensor's own listening port -- `nc -z 127.0.0.1 5060` for sentrypeer, an
+/// HTTP GET for http-honeypot, `conpot-healthcheck.py` for the conpot
+/// personas -- and the sensor logs that connection exactly as it logs a real
+/// one. Measured live: 312,905 such events in 24 hours, 13.5% of everything
+/// ingested.
+///
+/// This is not the tunnel case and must not be enriched like one. There is no
+/// attacker address hiding behind a healthcheck; the container probed itself.
+/// Rewriting the IP would produce a better-labelled fiction, and dropping the
+/// event outright would destroy the evidence that a probe happened at all.
+///
+/// So the document is marked and kept. Attack-facing queries filter on this
+/// field, which lets `dashboard.rs`'s `top_ips` stop hard-coding an exclusion
+/// list -- the exclusion exists today only because the documents carry no way
+/// to tell the two apart.
+///
+/// Worth being precise about the damage this was doing: conpot's healthcheck
+/// events arrive tagged `canonical_attck_techniques: ["T0886"]`, so Docker
+/// liveness probes were being recorded as MITRE ICS technique usage.
+fn mark_internal_probe(e: &mut Value) -> bool {
+    let ip = str(e, "src_ip");
+    if !LOOPBACK_IPS.contains(&ip.as_str()) {
+        return false;
+    }
+    if e.get("internal_probe").and_then(Value::as_bool) == Some(true) {
+        return false;
+    }
+    e["internal_probe"] = Value::Bool(true);
+    true
+}
+
 fn str(e: &Value, key: &str) -> String {
     e.get(key).and_then(Value::as_str).unwrap_or("").to_string()
 }
@@ -79,7 +117,8 @@ pub fn enrich_line(line: &[u8], vm: &ViaMap, tftp_vm: &ViaMap, persona: &str) ->
     let port_fixed = fix_conpot_dest_port(&mut e, persona);
     let canonical_changed = promote_canonical_fields(persona, &mut e);
     let attck_changed = super::attck::promote_attck_technique_fields(persona, &mut e);
-    let fields_changed = attck_changed || canonical_changed || port_fixed;
+    let probe_marked = mark_internal_probe(&mut e);
+    let fields_changed = attck_changed || canonical_changed || port_fixed || probe_marked;
 
     let ip = str(&e, "src_ip");
     let lookup = if ip == TUNNEL_PEER_IP {
@@ -488,6 +527,47 @@ fn join_host_port(ip: &str, port: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn loopback_source_is_marked_as_an_internal_probe() {
+        // #1677: every sensor here is fronted by a Docker healthcheck that
+        // connects to its own listening port, and the sensor logs it exactly
+        // as it logs a real connection.
+        let line = json!({"src_ip": "127.0.0.1", "src_port": 37253, "sensor": "sentrypeer"}).to_string();
+        let (out, resolved) = enrich_line(line.as_bytes(), &ViaMap::new(), &ViaMap::new(), "sentrypeer");
+        let e: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(e["internal_probe"], json!(true));
+        assert!(resolved, "a probe is terminal, never queued for retry");
+    }
+
+    #[test]
+    fn ipv6_loopback_counts_too() {
+        let line = json!({"src_ip": "::1", "src_port": 1, "sensor": "http-honeypot"}).to_string();
+        let (out, _) = enrich_line(line.as_bytes(), &ViaMap::new(), &ViaMap::new(), "http-honeypot");
+        let e: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(e["internal_probe"], json!(true));
+    }
+
+    #[test]
+    fn a_real_attacker_is_never_marked() {
+        let line = json!({"src_ip": "223.123.126.43", "src_port": 44321, "sensor": "cowrie"}).to_string();
+        let (out, _) = enrich_line(line.as_bytes(), &ViaMap::new(), &ViaMap::new(), "cowrie");
+        let e: Value = serde_json::from_slice(&out).unwrap();
+        assert!(e.get("internal_probe").is_none(), "only loopback is a probe");
+        assert_eq!(e["src_ip"], json!("223.123.126.43"), "and the address is untouched");
+    }
+
+    #[test]
+    fn marking_a_probe_does_not_rewrite_its_address() {
+        // The address is the evidence that this was self-generated. Enriching
+        // it away would turn a probe into a plausible-looking attack.
+        let line = json!({"src_ip": "127.0.0.1", "src_port": 502, "sensor": "conpot"}).to_string();
+        let (out, _) = enrich_line(line.as_bytes(), &ViaMap::new(), &ViaMap::new(), "conpot");
+        let e: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(e["src_ip"], json!("127.0.0.1"));
+        assert_eq!(e["internal_probe"], json!(true));
+    }
+
+
     use super::*;
     use serde_json::json;
 

@@ -65,7 +65,16 @@ pub async fn ghidra_run(
     State(state): State<AppState>,
     Path(sha): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
-    one_doc(&state, "ghidra-analysis-v1", json!({"term": {"file.hash.sha256": sha}})).await
+    let Json(mut doc) = one_doc(&state, "ghidra-analysis-v1", json!({"term": {"file.hash.sha256": &sha}})).await?;
+    // #1735: the Floss/Windows-sandbox IOC correlation the Go tier computed
+    // in ghidraData() for the viewed row. Folded into this response rather
+    // than served from its own route so the detail page keeps its single
+    // hydrate fetch. Correlation failure is not detail-page failure — an
+    // unreachable sandbox index costs the card, not the whole analysis, so
+    // this cannot return Err.
+    let correlation = crate::ioc_correlation::correlate(&state, &sha, &doc).await;
+    doc["ioc_correlation"] = serde_json::to_value(correlation).unwrap_or(Value::Null);
+    Ok(Json(doc))
 }
 
 const GHIDRA_CALLGRAPH_MAX_NODES: usize = 200;

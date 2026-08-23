@@ -7,11 +7,13 @@ import os
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import contracts
 import worker  # noqa: E402
 from contracts import SessionAnalysis  # noqa: E402
 
@@ -254,6 +256,132 @@ class ProductionCanaryTests(unittest.TestCase):
         self.assertEqual(result["sessions"], 1)
         self.assertEqual(result["payloads"], 0)
         self.assertEqual(result["reports"], 0)
+
+
+class AnnotationSchemaGrammarBoundTests(unittest.TestCase):
+    """#1748: no annotation field may declare a maxLength Ollama cannot compile.
+
+    Each of these schemas is sent to Ollama as a structured-output `format`,
+    and a bounded string becomes a repetition rule in the generated GBNF. Past
+    roughly 1200 that grammar stops compiling and the request is rejected
+    outright:
+
+        400 Failed to initialize samplers: failed to parse grammar
+
+    DailyReport shipped with summary maxLength 2000 and its pipeline never
+    produced a single real output. Nothing caught it, because the failure only
+    appears when that annotation type runs against a live model -- and it was
+    only enabled long after it was written.
+
+    Bisected to that one field: `summary` alone reproduces it, all three
+    arrays together do not, and lowering it to 1200 fixes the full schema.
+    """
+
+    ANNOTATIONS = (contracts.SessionAnalysis, contracts.PayloadAnalysis, contracts.DailyReport)
+
+    def _string_bounds(self, schema, path=""):
+        """Every maxLength in a JSON schema, including inside arrays and $defs."""
+        found = []
+        if isinstance(schema, dict):
+            if schema.get("type") == "string" and "maxLength" in schema:
+                found.append((path or "<root>", schema["maxLength"]))
+            for key, value in schema.items():
+                found += self._string_bounds(value, f"{path}.{key}" if path else key)
+        elif isinstance(schema, list):
+            for i, value in enumerate(schema):
+                found += self._string_bounds(value, f"{path}[{i}]")
+        return found
+
+    def test_no_field_exceeds_the_compilable_bound(self):
+        for annotation in self.ANNOTATIONS:
+            for field, bound in self._string_bounds(annotation.model_json_schema()):
+                self.assertLessEqual(
+                    bound, contracts.MAX_ANNOTATION_STRING,
+                    f"{annotation.__name__} {field} declares maxLength={bound}; Ollama's "
+                    f"grammar compiler rejects the whole schema above "
+                    f"{contracts.MAX_ANNOTATION_STRING} (#1748)",
+                )
+
+    def test_the_bound_is_one_shared_constant(self):
+        # The point of a single constant is that raising the ceiling is a
+        # deliberate, reviewable act rather than a number someone copies.
+        self.assertEqual(contracts.MAX_ANNOTATION_STRING, 1200)
+
+    def test_daily_report_specifically(self):
+        # The regression itself, named, so a revert is unambiguous.
+        summary = contracts.DailyReport.model_json_schema()["properties"]["summary"]
+        self.assertEqual(summary["maxLength"], 1200)
+
+
+class CycleStageIsolationTests(unittest.TestCase):
+    """#1748: one failing stage must not discard the others' work.
+
+    Before this, a stage raising aborted run_once() entirely -- the sessions
+    and payloads already analysed were lost from the status document, which
+    reported only the exception type. That made a broken daily report
+    indistinguishable from a broken worker, and disabling the report was the
+    only way to get the other two pipelines running again.
+    """
+
+    def _worker(self):
+        w = worker.LLMWorker.__new__(worker.LLMWorker)
+        w.es = unittest.mock.Mock()
+        w.es.ping.return_value = True
+        w.model = unittest.mock.Mock()
+        w.config = unittest.mock.Mock(
+            dry_run=False, session_enabled=True, payload_enabled=True, daily_report_enabled=True
+        )
+        w.ensure_indices = lambda: None
+        w.collect_session_events = lambda: 7
+        w.analyze_ready_sessions = lambda: 3
+        w.analyze_payloads = lambda: 2
+        return w
+
+    def test_a_failing_stage_keeps_the_others_results(self):
+        w = self._worker()
+
+        def boom():
+            raise RuntimeError("grammar rejected")
+
+        w.analyze_daily_report = boom
+        result = w.run_once()
+        self.assertEqual(result["sessions"], 3, "session work must survive the report failing")
+        self.assertEqual(result["payloads"], 2, "payload work must survive it too")
+        self.assertEqual(result["reports"], 0)
+        self.assertEqual(result["stage_errors"], {"daily_report": "RuntimeError"})
+
+    def test_a_healthy_cycle_reports_no_stage_errors(self):
+        w = self._worker()
+        w.analyze_daily_report = lambda: 1
+        result = w.run_once()
+        self.assertNotIn("stage_errors", result)
+        self.assertEqual(result["reports"], 1)
+
+    def test_only_the_exception_type_is_recorded_never_its_message(self):
+        # These exceptions come from a model fed attacker-controlled text; a
+        # message can carry that text back out into the status file.
+        w = self._worker()
+
+        def boom():
+            raise ValueError("payload said: <script>alert(1)</script>")
+
+        w.analyze_daily_report = boom
+        errors = w.run_once()["stage_errors"]
+        self.assertEqual(errors, {"daily_report": "ValueError"})
+        self.assertNotIn("script", json.dumps(errors))
+
+    def test_every_stage_is_isolated_not_just_the_report(self):
+        w = self._worker()
+
+        def boom():
+            raise RuntimeError("es unavailable")
+
+        w.analyze_payloads = boom
+        w.analyze_daily_report = lambda: 1
+        result = w.run_once()
+        self.assertEqual(result["payloads"], 0)
+        self.assertEqual(result["reports"], 1, "the report still runs after payloads fail")
+        self.assertEqual(result["stage_errors"], {"payloads": "RuntimeError"})
 
 
 class GPUQueueVendoringTests(unittest.TestCase):

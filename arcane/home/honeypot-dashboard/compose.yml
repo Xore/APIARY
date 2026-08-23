@@ -257,6 +257,17 @@ services:
       - ALERT_WEBHOOK_URL=${HONEYPOT_ALERT_WEBHOOK_URL:-}
       - ALERT_COOLDOWN=${HONEYPOT_ALERT_COOLDOWN:-6h}
       - ALERT_CAMPAIGN_SCORE=${HONEYPOT_ALERT_CAMPAIGN_SCORE:-80}
+      # #1750 ingestion-lag alerting. The freshness thresholds are per
+      # index and live in worker.rs (derived from each index's own history);
+      # these two tune the volume-collapse half. FLOOR_PERCENT is how far
+      # below its own weekly baseline an index's last hour may fall before
+      # it counts as stalled -- the lowest hour any high-volume index
+      # recorded across two healthy weeks was 37% of its median, so 10
+      # leaves 3.7x of headroom. MIN_BASELINE is the rate below which a
+      # percentage stops meaning anything and freshness alone covers the
+      # index.
+      - ALERT_INGEST_FLOOR_PERCENT=${HONEYPOT_ALERT_INGEST_FLOOR_PERCENT:-10}
+      - ALERT_INGEST_MIN_BASELINE=${HONEYPOT_ALERT_INGEST_MIN_BASELINE:-1000}
       - SANDBOX_ALERT_RISK_SCORE=${SANDBOX_ALERT_RISK_SCORE:-50}
       - LLM_ANALYSIS_ALERT_SEVERITIES=${LLM_ANALYSIS_ALERT_SEVERITIES:-high,critical}
       # #1612 host-local alert signals: log-stream sizes, sandbox/ghidra/
