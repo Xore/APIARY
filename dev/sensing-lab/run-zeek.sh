@@ -75,7 +75,7 @@ echo "sensing-lab: running Zeek over $(ls "$pcap_dir" | wc -l) pcap file(s)"
         # -c, not -lc: a login shell re-reads /etc/profile and discards the
         # image PATH, so zeek is simply "command not found". PATH is exported
         # again here so the entrypoint cannot silently matter.
-        export PATH=/usr/local/zeek/bin:/opt/zeek/bin:$PATH
+        export PATH=/usr/local/zeek/bin:$PATH
         cd /work/logs
         mergecap -w - -F pcap /work/pcap/* \
             | zeek -C -r - /usr/local/share/zeek-lab/local.zeek 2>&1 | tail -20

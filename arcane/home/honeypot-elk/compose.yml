@@ -591,7 +591,18 @@ services:
   # and the interface is br-<that>. The entrypoint fails loudly if it is
   # absent rather than capturing nothing.
   zeek-proxy:
-    build: ../../../vps/zeek
+    # No build here. The context lives at vps/zeek, which is outside this
+    # stack's directory -- Arcane syncs per-directory, so a relative path that
+    # escapes it does not resolve on the homeserver. The image is built there
+    # directly instead:
+    #
+    #   rsync -a vps/zeek/ homeserver:/opt/stacks/apiary/zeek-build/
+    #   ssh homeserver 'docker build -t xore-zeek:local \
+    #       -f /opt/stacks/apiary/zeek-build/Containerfile \
+    #       /opt/stacks/apiary/zeek-build'
+    #
+    # Duplicating the Containerfile into this directory would be the other
+    # option, and would guarantee the two sensors drift apart.
     image: xore-zeek:local
     container_name: hp-zeek-proxy
     restart: unless-stopped
@@ -612,7 +623,7 @@ services:
           echo "zeek-proxy: interface $$iface does not exist -- honeynet may have been recreated" >&2
           exit 1
         fi
-        exec /opt/zeek/bin/zeek -i "af_packet::$$iface" \
+        exec /usr/local/zeek/bin/zeek -i "af_packet::$$iface" \
              /usr/local/share/zeek-site/proxy-local.zeek
     environment:
       - TZ=Europe/Berlin
