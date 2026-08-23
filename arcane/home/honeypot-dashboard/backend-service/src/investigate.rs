@@ -104,6 +104,89 @@ pub struct IpProfile {
     /// with the same single-IP filter the rest of this handler already
     /// built.
     pub correlation: Correlation,
+    /// #1689: ips.html's "confirmed malicious (sandbox)" badge. True when
+    /// this address was both *carried* by a analysed sample and *reached* by
+    /// a sandbox detonation of that same sample. See confirmed_malicious().
+    pub confirmed_malicious: bool,
+}
+
+/// #1689: is this address confirmed malicious by the floss/sandbox join?
+///
+/// The signal is the agreement of two independent pipelines about the same
+/// sample (matched by SHA-256): Ghidra's floss decoded a reference to this
+/// address out of the binary, *and* a Windows/Linux sandbox detonation of
+/// that sample actually connected to it. Either alone is weak — a string in
+/// a binary may be dead config, and a contacted address may be unrelated
+/// infrastructure — together they are the strongest statement this fleet can
+/// make about an address.
+///
+/// Two queries, not a corpus scan. The Go original
+/// (dashboard/ioc_correlation.go's confirmedMaliciousIPs) loaded *both*
+/// entire corpora — every sandbox result and every Ghidra result, up to
+/// 10,000 documents each — recomputed the whole cross-product, and then
+/// asked whether one IP was in it, on every single profile view. Inverting
+/// it costs one term query plus one lookup of the matching samples, and gets
+/// slower with the number of sandbox runs that touched *this* address rather
+/// than with the size of the corpus.
+///
+/// Deliberately advisory. docs/dashboard-manual-ip-block-design.md decision
+/// 1 keeps the manual block action ungated on this — an operator's judgement
+/// decides, this only informs it — so a false negative here costs nothing
+/// and is far preferable to a false positive.
+async fn confirmed_malicious(state: &AppState, ip: &str) -> bool {
+    // Which sandbox runs actually contacted this address? sandbox.iocs is
+    // written by both exporters (sandbox/export-result.py for Linux since
+    // #1689, sandbox/windows/orchestrate/export_result.py for Windows).
+    let runs = state
+        .es
+        .search_index(
+            &["sandbox-analysis-v1"],
+            json!({
+                "size": 50,
+                "query": {"term": {"sandbox.iocs.remote_ips": ip}},
+                "_source": ["sandbox.sha256"],
+            }),
+        )
+        .await;
+    let Ok(runs) = runs else { return false };
+    let samples: Vec<String> = runs["hits"]["hits"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|hit| hit["_source"]["sandbox"]["sha256"].as_str().map(str::to_string))
+        .collect();
+    if samples.is_empty() {
+        return false;
+    }
+    // Did floss decode this same address out of any of those samples? The
+    // match is on the raw string content: floss emits whole strings, and an
+    // address is typically embedded in a larger one ("http://1.2.3.4/x"), so
+    // this is a substring query rather than a term query. Bounded to the
+    // handful of samples the first query returned.
+    let hits = state
+        .es
+        .search_index(
+            &["ghidra-analysis-v1"],
+            json!({
+                "size": 0,
+                "track_total_hits": true,
+                "query": {"bool": {"filter": [
+                    {"terms": {"sha256": samples}},
+                    {"query_string": {
+                        "query": format!("\"{ip}\""),
+                        "fields": [
+                            "ghidra.floss.decoded_strings",
+                            "ghidra.floss.static_strings",
+                            "ghidra.floss.stack_strings",
+                            "ghidra.floss.tight_strings"
+                        ],
+                        "default_operator": "AND"
+                    }}
+                ]}}
+            }),
+        )
+        .await;
+    hits.map(|value| value["hits"]["total"]["value"].as_u64().unwrap_or(0) > 0).unwrap_or(false)
 }
 
 fn kv(result: &serde_json::Value, agg: &str) -> Vec<Kv> {
@@ -209,7 +292,9 @@ pub async fn ip(
         .map(|hits| hits.iter().map(|hit| crate::events::row_from_source(&hit["_source"])).collect())
         .unwrap_or_default();
 
+    let is_confirmed = confirmed_malicious(&state, &ip).await;
     Ok(Json(IpProfile {
+        confirmed_malicious: is_confirmed,
         ip,
         total,
         first: text(&aggs["aggregations"]["first"]["value_as_string"]),

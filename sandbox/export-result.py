@@ -196,6 +196,152 @@ def dns_pcap_summary(path: Path):
     return summary
 
 
+# --- IOC extraction (#1689) -------------------------------------------------
+#
+# The Windows orchestrator has distilled IOCs out of its runs since #482
+# (sandbox/windows/orchestrate/extract_iocs.py), and the dashboard's
+# floss/sandbox cross-referencing is written against that shape. The Linux
+# exporter never produced them, so `sandbox.iocs` and
+# `network_summary.remote_ips` were absent from every document this pipeline
+# wrote -- 0 of 11 in the live index -- which left that correlation with one
+# side permanently empty.
+#
+# The patterns are a port of extract_iocs.py's RE_IP/RE_URL/RE_DOMAIN/
+# RE_UNC/PRIVATE. They are duplicated rather than imported because the two
+# exporters ship in different units -- the Linux one must not grow a
+# dependency on the Windows orchestrator's tree just for five regexes.
+#
+# Duplication is exactly how the two drift apart, and drift here is silent:
+# a value spelled the same way by both pipelines has to be recognised as the
+# same IOC, or the cross-pipeline join in #1689 quietly stops matching
+# without anything failing. test_export_result_iocs.py imports both modules
+# and asserts they extract identically, so the copies are pinned together by
+# a test rather than by a comment asking the next reader to be careful.
+RE_IOC_IP = re.compile(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b")
+RE_IOC_URL = re.compile(r"https?://[^\s'\"<>)\]]+", re.IGNORECASE)
+RE_IOC_DOMAIN = re.compile(r"\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b")
+RE_IOC_UNC = re.compile(r"\\\\[a-zA-Z0-9_.-]+\\[^\s\\\"'<>|*?]+(?:\\[^\s\\\"'<>|*?]+)*")
+RE_IOC_PRIVATE = re.compile(
+    r"^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|127\.|0\.0\.0\.0|255\.255)"
+)
+MAX_IOCS = 500
+
+
+def _ioc_scan(strings):
+    """extract_iocs.py's parse_sample_binary(), over already-extracted strings.
+
+    run-linux-sample.sh writes strings-ascii.txt/strings-utf16le.txt during
+    the run, so unlike the Windows path there is no need to re-read the
+    sample binary -- which this pipeline does not retain anyway (only
+    sample.sha256 survives).
+    """
+    found = {"remote_ips": set(), "dns_domains": set(), "download_urls": set(), "unc_paths": set()}
+    for value in strings:
+        for ip in RE_IOC_IP.findall(value):
+            if not RE_IOC_PRIVATE.match(ip):
+                found["remote_ips"].add(ip)
+        for url in RE_IOC_URL.findall(value):
+            found["download_urls"].add(url)
+        for domain in RE_IOC_DOMAIN.findall(value):
+            found["dns_domains"].add(domain)
+        for unc in RE_IOC_UNC.findall(value):
+            found["unc_paths"].add(unc)
+    return {key: sorted(value)[:MAX_IOCS] for key, value in found.items()}
+
+
+def zeek_records(path: Path, limit=5000):
+    """Zeek's JSON-lines logs. A malformed line is skipped, not fatal -- this
+    parses untrusted-guest-derived output."""
+    out = []
+    for line in lines(path, limit):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            record = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(record, dict):
+            out.append(record)
+    return out
+
+
+def dynamic_iocs(result: Path, dns_queries):
+    """What the run actually contacted, as opposed to what the sample merely
+    contains. zeek's conn.log is preferred over the raw tcpdump lines because
+    it already resolves each connection's responder and marks whether it was
+    local (`local_resp`), so link-local and host-side chatter does not get
+    reported as a remote destination.
+    """
+    ips, domains, urls = set(), set(), set()
+    for record in zeek_records(result / "zeek_logs" / "conn.log"):
+        host = str(record.get("id.resp_h") or "")
+        # local_resp is zeek's own judgement against its site network
+        # definition; the private-range check catches the rest. IPv6
+        # link-local (fe80::, ff02::) never matches RE_IOC_IP at all, which
+        # is why isolated runs yield nothing here rather than noise.
+        if not host or record.get("local_resp") is True:
+            continue
+        if RE_IOC_IP.fullmatch(host) and not RE_IOC_PRIVATE.match(host):
+            ips.add(host)
+    for record in zeek_records(result / "zeek_logs" / "dns.log"):
+        query = str(record.get("query") or "").rstrip(".")[:253]
+        if query and RE_IOC_DOMAIN.fullmatch(query):
+            domains.add(query)
+    for record in zeek_records(result / "zeek_logs" / "http.log"):
+        host = str(record.get("host") or "").strip()
+        uri = str(record.get("uri") or "")
+        if host:
+            urls.add(f"http://{host}{uri}"[:2048])
+            if RE_IOC_DOMAIN.fullmatch(host):
+                domains.add(host)
+    # The DNS names tcpdump already recovered count as observed too; zeek
+    # only sees what its own pass parsed, and dns_pcap_summary runs over both
+    # the host and guest captures.
+    for query in dns_queries:
+        if RE_IOC_DOMAIN.fullmatch(str(query)):
+            domains.add(str(query))
+    return {
+        "remote_ips": sorted(ips)[:MAX_IOCS],
+        "dns_domains": sorted(domains)[:MAX_IOCS],
+        "download_urls": sorted(urls)[:MAX_IOCS],
+    }
+
+
+def build_iocs(result: Path, dns_queries):
+    """extract_iocs.py's `summary` block, same key names, so a consumer does
+    not have to know which sandbox produced the document."""
+    static = _ioc_scan(
+        lines(result / "strings-ascii.txt", 20000) + lines(result / "strings-utf16le.txt", 20000)
+    )
+    dynamic = dynamic_iocs(result, dns_queries)
+    static_ips = set(static["remote_ips"])
+    static_domains = set(static["dns_domains"])
+    static_urls = set(static["download_urls"])
+    seen_ips = set(dynamic["remote_ips"])
+    seen_domains = set(dynamic["dns_domains"])
+    seen_urls = set(dynamic["download_urls"])
+    return {
+        "remote_ips": dynamic["remote_ips"],
+        "dns_domains": dynamic["dns_domains"],
+        "download_urls": dynamic["download_urls"],
+        "static_remote_ips": static["remote_ips"],
+        "static_dns_domains": static["dns_domains"],
+        "static_download_urls": static["download_urls"],
+        "static_unc_paths": static["unc_paths"],
+        # The interesting column: a capability the sample carries that this
+        # run never exercised -- an unmet trigger, a short window, or simply
+        # an isolated run with no network at all (the default here).
+        "static_only_remote_ips": sorted(static_ips - seen_ips)[:MAX_IOCS],
+        "static_only_dns_domains": sorted(static_domains - seen_domains)[:MAX_IOCS],
+        "static_only_download_urls": sorted(static_urls - seen_urls)[:MAX_IOCS],
+        # Both sides agreed: the sample contains it AND the run reached it.
+        # The strongest signal this correlation produces, and what
+        # /investigate/ip/{ip}'s "confirmed malicious" badge reads (#1689).
+        "confirmed_remote_ips": sorted(static_ips & seen_ips)[:MAX_IOCS],
+    }
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--request", required=True)
@@ -235,6 +381,10 @@ def main():
     network["dns_queries"] = dns_queries
     network["dns_events"] = dns_events
     network["attempts"] = network_syscalls[:100]
+    iocs = build_iocs(result, dns_queries)
+    # #1689: also surfaced on network_summary, which is where the dashboard's
+    # per-IP correlation looks for what a run actually contacted.
+    network["remote_ips"] = iocs["remote_ips"]
     windows = pe_forensics(result / "pe-forensics.json")
     classification = json_object(result / "classification.json")
     if windows:
@@ -349,6 +499,7 @@ def main():
         "sockets_after": lines(result / "sockets-after.txt", 100),
         "top_syscalls": [{"name": name, "count": count} for name, count in calls.most_common(30)],
         "network_summary": network,
+        "iocs": iocs,
         "windows_forensics": windows,
         "artifacts": {
             "kernel": text(result / "kernel.txt", 4096),
