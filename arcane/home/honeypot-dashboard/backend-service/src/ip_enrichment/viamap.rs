@@ -21,10 +21,6 @@ pub struct ViaEntry {
     pub ip: String,
     /// portbridge's dial time (epoch seconds), 0 when the line carried none.
     pub at: i64,
-    /// The public port the connection arrived on, 0 when unknown. A second
-    /// discriminator for the common reuse case where the same ephemeral port
-    /// is later dialled for a different service.
-    pub dest_port: i64,
 }
 
 /// via_port -> the recent connections that used it, oldest first.
@@ -79,7 +75,6 @@ pub fn parse_portbridge_line(line: &[u8], m: &mut ViaMap) {
     let entry = ViaEntry {
         ip: ip.to_string(),
         at: e.get("time").and_then(Value::as_str).and_then(parse_time).unwrap_or(0),
-        dest_port: e.get("port").and_then(Value::as_f64).unwrap_or(0.0) as i64,
     };
     let slot = m.entry(via_port as i64).or_default();
     // portbridge ships each connection once; the duplicate-shipping bug that
@@ -101,24 +96,30 @@ fn parse_time(value: &str) -> Option<i64> {
 
 /// The address that was behind `via_port` when a sensor line timestamped
 /// `line_at` (epoch seconds; 0 when the line carried no usable timestamp)
-/// was written, for a connection to `dest_port` (0 when unknown).
+/// was written.
 ///
 /// Returns None rather than a best guess: an unattributed event is honest,
 /// a confidently wrong attacker is not.
-pub fn lookup(m: &ViaMap, via_port: i64, line_at: i64, dest_port: i64) -> Option<&str> {
+///
+/// Deliberately does *not* cross-check the destination port. It looks like an
+/// obvious second discriminator and it cannot work here: one connection
+/// carries three different port numbers through this topology. A telnet
+/// session is `portbridge.port` 23 (what the attacker dialled), forwarded to
+/// `portbridge.target` 10.8.0.2:19023 (what the host publishes), and logged
+/// by cowrie as dst_port 2223 (what it binds inside its container). Comparing
+/// any two of those rejects every port-shifted service -- measured live, it
+/// left all 3,046 of cowrie's hourly events unattributed while resolving
+/// nothing extra. Causality below is what actually separates two connections
+/// that shared an ephemeral port.
+pub fn lookup(m: &ViaMap, via_port: i64, line_at: i64) -> Option<&str> {
     let slot = m.get(&via_port)?;
     slot.iter()
         .rev()
-        .find(|entry| plausible(entry, line_at, dest_port))
+        .find(|entry| plausible(entry, line_at))
         .map(|entry| entry.ip.as_str())
 }
 
-fn plausible(entry: &ViaEntry, line_at: i64, dest_port: i64) -> bool {
-    // A connection to a different service is a different connection, whatever
-    // the timestamps say. Only applied when both sides know their port.
-    if entry.dest_port != 0 && dest_port != 0 && entry.dest_port != dest_port {
-        return false;
-    }
+fn plausible(entry: &ViaEntry, line_at: i64) -> bool {
     // Without usable timestamps on both sides there is nothing to check, so
     // keep the pre-#1771 behaviour rather than dropping the join entirely.
     if entry.at == 0 || line_at == 0 {
@@ -214,7 +215,7 @@ mod tests {
     #[test]
     fn resolves_the_connection_that_was_open_when_the_line_was_written() {
         let m = feed(&[line("1.1.1.1", "2026-08-23T14:07:47Z", 1025)]);
-        assert_eq!(lookup(&m, 4000, T + 1, 1025), Some("1.1.1.1"));
+        assert_eq!(lookup(&m, 4000, T + 1), Some("1.1.1.1"));
     }
 
     #[test]
@@ -227,7 +228,7 @@ mod tests {
             line("1.1.1.1", "2026-08-23T14:07:47Z", 1025),
             line("2.2.2.2", "2026-08-23T14:08:05Z", 1025),
         ]);
-        assert_eq!(lookup(&m, 4000, T, 1025), Some("1.1.1.1"));
+        assert_eq!(lookup(&m, 4000, T), Some("1.1.1.1"));
     }
 
     #[test]
@@ -236,15 +237,20 @@ mod tests {
             line("1.1.1.1", "2026-08-23T14:07:47Z", 1025),
             line("2.2.2.2", "2026-08-23T14:08:05Z", 1025),
         ]);
-        assert_eq!(lookup(&m, 4000, T + 30, 1025), Some("2.2.2.2"));
+        assert_eq!(lookup(&m, 4000, T + 30), Some("2.2.2.2"));
     }
 
     #[test]
-    fn a_different_service_on_the_same_port_is_a_different_connection() {
-        // Reuse across services was the common shape in the live log: the
-        // same via_port dialled for 445, then 8443, then 5900, then 23.
+    fn the_destination_port_is_not_used_to_discriminate() {
+        // It looks like a free second discriminator and it is not: one
+        // connection carries three different port numbers through this
+        // topology (public 23 -> host-published 19023 -> cowrie's container
+        // 2223). Cross-checking any two of them rejects every port-shifted
+        // service; measured live it left all 3,046 of cowrie's hourly events
+        // unattributed while resolving nothing extra. A join must not depend
+        // on ports agreeing across that boundary.
         let m = feed(&[line("1.1.1.1", "2026-08-23T14:07:47Z", 23)]);
-        assert_eq!(lookup(&m, 4000, T + 1, 1025), None);
+        assert_eq!(lookup(&m, 4000, T + 1), Some("1.1.1.1"));
     }
 
     #[test]
@@ -253,7 +259,7 @@ mod tests {
         // writes has to keep resolving. The guard must not turn those into
         // misses -- that would trade one bug for another.
         let m = feed(&[line("1.1.1.1", "2026-08-23T14:07:47Z", 22)]);
-        assert_eq!(lookup(&m, 4000, T + 3000, 22), Some("1.1.1.1"));
+        assert_eq!(lookup(&m, 4000, T + 3000), Some("1.1.1.1"));
     }
 
     #[test]
@@ -261,7 +267,7 @@ mod tests {
         // #1770's 45-hour outage recovery: lines processed long after the
         // fact, against entries for entirely unrelated connections.
         let m = feed(&[line("1.1.1.1", "2026-08-23T14:07:47Z", 22)]);
-        assert_eq!(lookup(&m, 4000, T + 45 * 3600, 22), None);
+        assert_eq!(lookup(&m, 4000, T + 45 * 3600), None);
     }
 
     #[test]
@@ -291,13 +297,13 @@ mod tests {
         // tftp-relay's session map carries neither, and an unparseable
         // sensor timestamp yields 0 -- neither should start dropping joins.
         let m = feed(&[r#"{"sensor":"portbridge","src_ip":"1.1.1.1","via_port":4000}"#.to_string()]);
-        assert_eq!(lookup(&m, 4000, 0, 0), Some("1.1.1.1"));
-        assert_eq!(lookup(&m, 4000, T, 1025), Some("1.1.1.1"));
+        assert_eq!(lookup(&m, 4000, 0), Some("1.1.1.1"));
+        assert_eq!(lookup(&m, 4000, T), Some("1.1.1.1"));
     }
 
     #[test]
     fn an_unknown_port_is_still_a_miss() {
         let m = feed(&[line("1.1.1.1", "2026-08-23T14:07:47Z", 22)]);
-        assert_eq!(lookup(&m, 4001, T, 22), None);
+        assert_eq!(lookup(&m, 4001, T), None);
     }
 }

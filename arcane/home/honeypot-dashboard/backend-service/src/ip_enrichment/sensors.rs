@@ -69,19 +69,6 @@ fn extract_src_port(e: &Value) -> i64 {
     0
 }
 
-/// The public port the connection came in on, for cross-checking a via_port
-/// entry against the service it was actually dialled for (#1771). 0 when the
-/// line does not say.
-fn extract_dest_port(e: &Value) -> i64 {
-    if let Some(p) = e.get("dst_port").and_then(Value::as_f64).filter(|p| *p != 0.0) {
-        return p as i64;
-    }
-    if let Some(p) = e.get("connection").and_then(|c| c.get("local_port")).and_then(Value::as_f64) {
-        return p as i64;
-    }
-    0
-}
-
 /// When the sensor says the event happened, as epoch seconds; 0 when it says
 /// nothing this can read.
 ///
@@ -193,8 +180,7 @@ pub fn enrich_line(line: &[u8], vm: &ViaMap, tftp_vm: &ViaMap, persona: &str) ->
     // line -- dialled before it, for the same service, and not so long before
     // that we are joining a replayed backlog against a live map.
     let line_at = extract_line_time(&e);
-    let dest_port = extract_dest_port(&e);
-    let Some(real) = super::viamap::lookup(lookup, port, line_at, dest_port) else {
+    let Some(real) = super::viamap::lookup(lookup, port, line_at) else {
         return (marshal_if_changed(line, &e, fields_changed), false); // via_port miss — retry later
     };
     e["src_ip"] = Value::from(real.to_string());
@@ -216,11 +202,7 @@ fn rewrite_dionaea_connections(v: &mut Value, vm: &ViaMap, line_at: i64) -> (usi
             if let Some(Value::String(ip)) = map.get("remote_ip") {
                 if ip == TUNNEL_PEER_IP {
                     if let Some(port) = map.get("remote_port").and_then(Value::as_f64) {
-                        // local_port on the same embedded object is the service
-                        // this connection reached, so the #1771 cross-check has
-                        // both sides here too.
-                        let dest = map.get("local_port").and_then(Value::as_f64).unwrap_or(0.0) as i64;
-                        if let Some(real) = super::viamap::lookup(vm, port as i64, line_at, dest) {
+                        if let Some(real) = super::viamap::lookup(vm, port as i64, line_at) {
                             map.insert("remote_ip".to_string(), Value::from(real.to_string()));
                             changed += 1;
                         } else {
@@ -317,7 +299,7 @@ pub fn enrich_beelzebub_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _perso
         return (marshal_if_changed(line, &e, changed), true);
     };
 
-    let Some(real) = super::viamap::lookup(vm, port, extract_line_time(&e), extract_dest_port(&e)) else {
+    let Some(real) = super::viamap::lookup(vm, port, extract_line_time(&e)) else {
         changed |= set_if_changed(&mut e, "src_ip", ip);
         return (marshal_if_changed(line, &e, changed), false);
     };
@@ -367,7 +349,7 @@ pub fn enrich_hellpot_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _persona
         return (marshal_if_changed(line, &e, changed), true);
     };
 
-    let Some(real) = super::viamap::lookup(vm, port, extract_line_time(&e), extract_dest_port(&e)) else {
+    let Some(real) = super::viamap::lookup(vm, port, extract_line_time(&e)) else {
         changed |= set_if_changed(&mut e, "src_ip", ip);
         return (marshal_if_changed(line, &e, changed), false);
     };
@@ -425,7 +407,7 @@ pub fn enrich_galah_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _persona: 
         return (marshal_if_changed(line, &e, changed), true);
     };
 
-    let Some(real) = super::viamap::lookup(vm, port, extract_line_time(&e), extract_dest_port(&e)) else {
+    let Some(real) = super::viamap::lookup(vm, port, extract_line_time(&e)) else {
         changed |= set_if_changed(&mut e, "src_ip", ip);
         return (marshal_if_changed(line, &e, changed), false);
     };
@@ -470,7 +452,7 @@ pub fn enrich_sentrypeer_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _pers
         return (marshal_if_changed(line, &e, changed), true);
     };
 
-    let Some(real) = super::viamap::lookup(vm, port, extract_line_time(&e), extract_dest_port(&e)) else {
+    let Some(real) = super::viamap::lookup(vm, port, extract_line_time(&e)) else {
         changed |= set_if_changed(&mut e, "src_ip", ip);
         return (marshal_if_changed(line, &e, changed), false);
     };
@@ -570,7 +552,7 @@ pub fn enrich_wordpot_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _persona
         return (marshal_if_changed(line, &e, changed), true);
     };
 
-    let Some(real) = super::viamap::lookup(vm, port, extract_line_time(&e), extract_dest_port(&e)) else {
+    let Some(real) = super::viamap::lookup(vm, port, extract_line_time(&e)) else {
         changed |= set_if_changed(&mut e, "src_ip", ip);
         return (marshal_if_changed(line, &e, changed), false);
     };
@@ -644,10 +626,10 @@ mod tests {
 
     fn vm_with(port: i64, ip: &str) -> ViaMap {
         let mut m = ViaMap::new();
-        // at/dest_port 0 so these keep exercising the join itself rather than
+        // at 0 so these keep exercising the join itself rather than
         // #1771's plausibility checks, which have their own tests in viamap.
         m.insert(port, vec![super::super::viamap::ViaEntry {
-            ip: ip.to_string(), at: 0, dest_port: 0,
+            ip: ip.to_string(), at: 0,
         }]);
         m
     }
