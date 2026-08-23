@@ -691,6 +691,13 @@ function icsSeverityBadgeClass(severity: string): string {
   return 'badge--muted'
 }
 
+// `/tty-replay/<shasum>` -> `<shasum>`, empty for anything that does not
+// look like one so a malformed pivot cannot become a download URL.
+function recordingShasum(ttyReplay: string): string {
+  const last = ttyReplay.split('/').pop() ?? ''
+  return /^[0-9a-fA-F]{32,64}$/.test(last) ? last : ''
+}
+
 function EventMeta({
   row,
   onPivot,
@@ -808,6 +815,30 @@ function EventMeta({
           <a className="lnk" href={p.tty_replay} title="watch the session play back in-browser">
             view recording
           </a>
+          {/* events.html:27 offered all three; the port kept only the
+              viewer, so a session could be watched but never taken out of
+              the dashboard. The shasum is the last segment of the replay
+              route — pivots.shasum is deliberately blank for a
+              cowrie.log.closed event, because that hash identifies the
+              recording, not a captured payload. */}
+          {recordingShasum(p.tty_replay) ? (
+            <>
+              <a
+                className="lnk"
+                href={`/api/recording/${encodeURIComponent(recordingShasum(p.tty_replay))}/cast`}
+                title="download as an asciinema-compatible .cast file"
+              >
+                .cast
+              </a>
+              <a
+                className="lnk"
+                href={`/api/recording/${encodeURIComponent(recordingShasum(p.tty_replay))}/raw`}
+                title="download the raw cowrie TTY log"
+              >
+                raw
+              </a>
+            </>
+          ) : null}
         </div>
       ) : null}
       {p.shasum || openIn.kibana || openIn.evebox || openIn.arkime ? (
@@ -815,39 +846,139 @@ function EventMeta({
           <span className="eventmeta__label" title="Actions available for this event">
             actions
           </span>
-          {p.shasum ? (
-            <>
-              <a className="lnk" href={`/payload-analysis/${encodeURIComponent(p.shasum)}`} title="static analysis of the captured payload">
-                static analysis
-              </a>
-              <a
-                className="lnk"
-                href={`https://www.virustotal.com/gui/file/${encodeURIComponent(p.shasum)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                VirusTotal
-              </a>
-            </>
-          ) : null}
-          {openIn.evebox ? (
-            <a className="lnk" href={openIn.evebox} target="_blank" rel="noopener noreferrer" title="Filtered alert inbox">
-              open in EveBox
-            </a>
-          ) : null}
-          {openIn.kibana ? (
-            <a className="lnk" href={openIn.kibana} target="_blank" rel="noopener noreferrer" title="Search historical telemetry">
-              open in Kibana
-            </a>
-          ) : null}
-          {openIn.arkime ? (
-            <a className="lnk" href={openIn.arkime} target="_blank" rel="noopener noreferrer" title="Inspect packets and sessions">
-              open in Arkime
-            </a>
-          ) : null}
+          <ActionsMenu shasum={p.shasum} openIn={openIn} />
         </div>
       ) : null}
     </div>
+  )
+}
+
+// events.html:28's actions menu. The port flattened it into a row of bare
+// `.lnk` text — five links with no grouping and no indication which are
+// local pages and which leave the dashboard. theme.css still carries the
+// whole `.hp-open-in` disclosure (its outside-click-close and
+// close-siblings-on-toggle come from theme.js for free), so this is a
+// markup restoration, not new design: an "Analysis" group for the local
+// payload pages, an "Open in" group for the external tools, each external
+// item carrying its own mark, a one-line description of what that tool is
+// for, and a corner arrow saying it opens elsewhere.
+const OPEN_IN_TOOLS = [
+  {
+    key: 'evebox' as const,
+    name: 'EveBox',
+    description: 'Filtered alert inbox',
+    icon: (
+      <>
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+        <polyline points="9 12 11 14 15 10" />
+      </>
+    ),
+  },
+  {
+    key: 'kibana' as const,
+    name: 'Kibana',
+    description: 'Search historical telemetry',
+    icon: (
+      <>
+        <line x1="12" y1="20" x2="12" y2="10" />
+        <line x1="18" y1="20" x2="18" y2="4" />
+        <line x1="6" y1="20" x2="6" y2="16" />
+      </>
+    ),
+  },
+  {
+    key: 'arkime' as const,
+    name: 'Arkime',
+    description: 'Inspect packets and sessions',
+    icon: (
+      <>
+        <circle cx="18" cy="5" r="3" />
+        <circle cx="6" cy="12" r="3" />
+        <circle cx="18" cy="19" r="3" />
+        <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+        <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+      </>
+    ),
+  },
+]
+
+const GLYPH_PROPS = {
+  width: 15,
+  height: 15,
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 2,
+  strokeLinecap: 'round',
+  strokeLinejoin: 'round',
+  'aria-hidden': true,
+} as const
+
+const ExternalGlyph = (
+  <svg {...GLYPH_PROPS}>
+    <line x1="7" y1="17" x2="17" y2="7" />
+    <polyline points="7 7 17 7 17 17" />
+  </svg>
+)
+
+function ActionsMenu({
+  shasum,
+  openIn,
+}: {
+  shasum: string
+  openIn: { kibana?: string; evebox?: string; arkime?: string }
+}) {
+  const tools = OPEN_IN_TOOLS.filter((tool) => openIn[tool.key])
+  return (
+    <details className="hp-open-in action-menu">
+      <summary title="Actions for this event">&#8942;</summary>
+      <div className="dropdown hp-open-in-menu" role="menu">
+        {shasum ? (
+          <>
+            <div className="hp-open-in-heading">Analysis</div>
+            <a
+              className="hp-open-in-item"
+              href={`/payload-analysis/${encodeURIComponent(shasum)}`}
+              role="menuitem"
+              title="static analysis of the captured payload"
+            >
+              <span>Static analysis</span>
+            </a>
+            <a
+              className="hp-open-in-item"
+              href={`https://www.virustotal.com/gui/file/${encodeURIComponent(shasum)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              role="menuitem"
+            >
+              <span>VirusTotal</span>
+            </a>
+          </>
+        ) : null}
+        {tools.length > 0 ? (
+          <>
+            <div className="hp-open-in-heading">Open in</div>
+            {tools.map((tool) => (
+              <a
+                key={tool.key}
+                className="hp-open-in-item"
+                href={openIn[tool.key]}
+                target="_blank"
+                rel="noopener noreferrer"
+                role="menuitem"
+              >
+                <svg {...GLYPH_PROPS}>{tool.icon}</svg>
+                <span>
+                  <strong>{tool.name}</strong>
+                  <small>{tool.description}</small>
+                </span>
+                {ExternalGlyph}
+              </a>
+            ))}
+          </>
+        ) : null}
+      </div>
+    </details>
   )
 }
 

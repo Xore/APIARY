@@ -63,6 +63,7 @@ import { Route as InvestigateCidrCidrRouteImport } from './routes/investigate.ci
 import { Route as InvestigateIpIpRouteImport } from './routes/investigate.ip.$ip'
 import { Route as ApiCanarytokenIdDownloadRouteImport } from './routes/api/canarytoken.$id.download'
 import { Route as ApiPayloadHashDownloadRouteImport } from './routes/api/payload.$hash.download'
+import { Route as ApiRecordingShasumFormatRouteImport } from './routes/api/recording.$shasum.$format'
 import { Route as ApiReportIdPdfRouteImport } from './routes/api/report.$id.pdf'
 import { Route as ApiArtifactKindKeyFilenameRouteImport } from './routes/api/artifact.$kind.$key.$filename'
 
@@ -338,6 +339,12 @@ const ApiPayloadHashDownloadRoute = ApiPayloadHashDownloadRouteImport.update({
   path: '/api/payload/$hash/download',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiRecordingShasumFormatRoute =
+  ApiRecordingShasumFormatRouteImport.update({
+    id: '/api/recording/$shasum/$format',
+    path: '/api/recording/$shasum/$format',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiReportIdPdfRoute = ApiReportIdPdfRouteImport.update({
   id: '/api/report/$id/pdf',
   path: '/api/report/$id/pdf',
@@ -405,6 +412,7 @@ export interface FileRoutesByFullPath {
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
   '/api/payload/$hash/download': typeof ApiPayloadHashDownloadRoute
+  '/api/recording/$shasum/$format': typeof ApiRecordingShasumFormatRoute
   '/api/report/$id/pdf': typeof ApiReportIdPdfRoute
   '/api/artifact/$kind/$key/$filename': typeof ApiArtifactKindKeyFilenameRoute
 }
@@ -463,6 +471,7 @@ export interface FileRoutesByTo {
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
   '/api/payload/$hash/download': typeof ApiPayloadHashDownloadRoute
+  '/api/recording/$shasum/$format': typeof ApiRecordingShasumFormatRoute
   '/api/report/$id/pdf': typeof ApiReportIdPdfRoute
   '/api/artifact/$kind/$key/$filename': typeof ApiArtifactKindKeyFilenameRoute
 }
@@ -522,6 +531,7 @@ export interface FileRoutesById {
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
   '/api/payload/$hash/download': typeof ApiPayloadHashDownloadRoute
+  '/api/recording/$shasum/$format': typeof ApiRecordingShasumFormatRoute
   '/api/report/$id/pdf': typeof ApiReportIdPdfRoute
   '/api/artifact/$kind/$key/$filename': typeof ApiArtifactKindKeyFilenameRoute
 }
@@ -582,6 +592,7 @@ export interface FileRouteTypes {
     | '/investigate/ip/$ip'
     | '/api/canarytoken/$id/download'
     | '/api/payload/$hash/download'
+    | '/api/recording/$shasum/$format'
     | '/api/report/$id/pdf'
     | '/api/artifact/$kind/$key/$filename'
   fileRoutesByTo: FileRoutesByTo
@@ -640,6 +651,7 @@ export interface FileRouteTypes {
     | '/investigate/ip/$ip'
     | '/api/canarytoken/$id/download'
     | '/api/payload/$hash/download'
+    | '/api/recording/$shasum/$format'
     | '/api/report/$id/pdf'
     | '/api/artifact/$kind/$key/$filename'
   id:
@@ -698,6 +710,7 @@ export interface FileRouteTypes {
     | '/investigate/ip/$ip'
     | '/api/canarytoken/$id/download'
     | '/api/payload/$hash/download'
+    | '/api/recording/$shasum/$format'
     | '/api/report/$id/pdf'
     | '/api/artifact/$kind/$key/$filename'
   fileRoutesById: FileRoutesById
@@ -754,6 +767,7 @@ export interface RootRouteChildren {
   InvestigateIpIpRoute: typeof InvestigateIpIpRoute
   ApiCanarytokenIdDownloadRoute: typeof ApiCanarytokenIdDownloadRoute
   ApiPayloadHashDownloadRoute: typeof ApiPayloadHashDownloadRoute
+  ApiRecordingShasumFormatRoute: typeof ApiRecordingShasumFormatRoute
   ApiReportIdPdfRoute: typeof ApiReportIdPdfRoute
   ApiArtifactKindKeyFilenameRoute: typeof ApiArtifactKindKeyFilenameRoute
 }
@@ -1138,6 +1152,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPayloadHashDownloadRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/recording/$shasum/$format': {
+      id: '/api/recording/$shasum/$format'
+      path: '/api/recording/$shasum/$format'
+      fullPath: '/api/recording/$shasum/$format'
+      preLoaderRoute: typeof ApiRecordingShasumFormatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/report/$id/pdf': {
       id: '/api/report/$id/pdf'
       path: '/api/report/$id/pdf'
@@ -1241,18 +1262,10 @@ const rootRouteChildren: RootRouteChildren = {
   InvestigateIpIpRoute: InvestigateIpIpRoute,
   ApiCanarytokenIdDownloadRoute: ApiCanarytokenIdDownloadRoute,
   ApiPayloadHashDownloadRoute: ApiPayloadHashDownloadRoute,
+  ApiRecordingShasumFormatRoute: ApiRecordingShasumFormatRoute,
   ApiReportIdPdfRoute: ApiReportIdPdfRoute,
   ApiArtifactKindKeyFilenameRoute: ApiArtifactKindKeyFilenameRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { createStart } from '@tanstack/react-start'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-  }
-}
