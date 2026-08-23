@@ -48,10 +48,15 @@ QUEUE_INDEX = "gpu-job-queue"
 _RUNNING_IN_CONTAINER = os.path.exists("/.dockerenv")
 
 # Statuses: queued -> running -> (completed | failed | aborted).
-# abort_requested only has an effect while a job is still "queued" -- once a
-# drainer has committed to calling Ollama for it, cancelling that in-flight
-# HTTP call is out of scope here (see README's "what abort does and doesn't
-# do" section).
+#
+# abort_requested is honoured in two places (#1698). gpu-queue-drain.py checks
+# it once before it starts, and ghidra-worker.py checks it again between
+# streamed chunks while the model is generating -- abandoning that stream is
+# what frees the GPU, because ollama cancels the inference task when the
+# client disconnects (verified against 0.32.13: `srv stop: cancel task`).
+#
+# Setting the flag on a job that has already finished is still a harmless
+# no-op, which is why nothing here refuses based on status.
 
 
 def _raw_request(es_host: str, method: str, path: str, data: bytes | None) -> tuple[int, bytes]:

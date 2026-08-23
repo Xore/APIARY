@@ -1146,13 +1146,15 @@ const gpuQueueColumns = (onAbort: (job: GpuJob) => void): Column<GpuJob>[] => [
   { header: 'error', detail: true, render: (row) => row.error || '—' },
   { header: 'job id', detail: true, render: (row) => <code>{row.job_id}</code> },
   {
-    // Only queued jobs can be aborted, so only they get the control —
-    // offering it on a running or finished row would promise something the
-    // flag cannot deliver. `abort_requested` already-set collapses to the
-    // existing badge rather than a second, useless button.
+    // #1698: queued *and* running. The drainer checks the flag before it
+    // starts, and the worker checks it again between streamed chunks, so a
+    // job that is already generating can now be stopped too — abandoning the
+    // stream is what frees the GPU. Finished rows still get no control, and
+    // `abort_requested` already-set collapses to the existing badge rather
+    // than a second, useless button.
     header: '',
     render: (row) =>
-      row.status === 'queued' && !row.abort_requested ? (
+      (row.status === 'queued' || row.status === 'running') && !row.abort_requested ? (
         <button type="button" className="btn btn-danger btn-sm" onClick={() => onAbort(row)}>
           Abort
         </button>
@@ -1196,9 +1198,9 @@ function Results() {
   const onAbortGpuJob = useCallback((job: GpuJob) => {
     confirmAction({
       title: 'Abort this queued job?',
-      description: `${job.job_type} job for ${job.ref || 'an unnamed reference'}, queued for model ${job.model || 'unknown'}.`,
+      description: `${job.job_type} job for ${job.ref || 'an unnamed reference'}, ${job.status} on model ${job.model || 'unknown'}.`,
       warning:
-        'The job will not run and its AI triage will be skipped. Only queued jobs can be aborted — if the drainer has already started this one, the request has no effect. The rest of that analysis is unaffected.',
+        'The job stops and its AI triage is skipped. A job that is already generating is cut off mid-answer and the GPU freed. The rest of that analysis is unaffected.',
       confirmLabel: 'Abort job',
       onConfirm: async () => {
         const result = await abortGpuJob({ data: { job_id: job.job_id } })

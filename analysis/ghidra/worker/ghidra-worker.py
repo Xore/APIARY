@@ -1519,7 +1519,91 @@ def _prompt_was_truncated(usage: object, prompt_chars: int) -> bool:
     return tokens * TRIAGE_MIN_CHARS_PER_TOKEN < prompt_chars
 
 
-def _ask_model(workflow: str, evidence: str) -> dict | None:
+def _read_streamed_completion(response, poll_abort) -> dict:
+    """Reassemble an OpenAI-style SSE stream into the non-streamed shape.
+
+    The rest of _ask_model is written against a single completion object, and
+    #1698 should not change how the answer is parsed or validated -- only when
+    the call can be given up on. So the chunks are folded back into
+    `{"choices":[{"message":{"content": ...}}], "usage": ...}` and everything
+    downstream (including the truncated-prompt check, which needs `usage`) is
+    untouched.
+
+    Aborting is a plain `raise` out of the `with` block: that closes the
+    connection, which is the signal Ollama acts on.
+    """
+    content: list[str] = []
+    usage = None
+    for raw in response:
+        if poll_abort():
+            raise TriageAborted()
+        line = raw.decode("utf-8", "replace").strip()
+        if not line.startswith("data:"):
+            continue
+        payload = line[5:].strip()
+        if payload == "[DONE]":
+            break
+        try:
+            chunk = json.loads(payload)
+        except ValueError:
+            continue
+        # usage arrives on its own final chunk on servers that send it at all.
+        if isinstance(chunk.get("usage"), dict):
+            usage = chunk["usage"]
+        for choice in chunk.get("choices") or []:
+            piece = (choice.get("delta") or {}).get("content")
+            if isinstance(piece, str):
+                content.append(piece)
+    resp: dict = {"choices": [{"message": {"content": "".join(content)}}]}
+    if usage is not None:
+        resp["usage"] = usage
+    return resp
+
+
+class TriageAborted(Exception):
+    """#1698: an operator asked for this job to stop while it was generating."""
+
+
+# How often the abort check may actually hit its backing store. The check is
+# consulted between streamed chunks, which arrive many times a second -- an
+# unthrottled poll would be an Elasticsearch query per token. Two seconds is
+# far below the human timescale of "I clicked abort and it stopped" while
+# costing at most one query per two seconds of generation.
+TRIAGE_ABORT_POLL_SECONDS = 2.0
+
+
+def _throttled(check, seconds: float = TRIAGE_ABORT_POLL_SECONDS):
+    """Wrap an abort predicate so it is only really evaluated every `seconds`.
+
+    Returns None for a None check, so callers that do not support aborting
+    (the live ghidra-worker path) pay nothing at all.
+    """
+    if check is None:
+        return None
+    state = {"at": 0.0, "value": False}
+
+    def poll() -> bool:
+        if state["value"]:
+            return True
+        now = time.monotonic()
+        if now - state["at"] < seconds:
+            return False
+        state["at"] = now
+        try:
+            state["value"] = bool(check())
+        except Exception as e:  # noqa: BLE001
+            # An unreachable queue must not kill a job that is generating
+            # fine. Not aborting is the safe answer: the worst case is a job
+            # that runs to completion after someone asked it to stop, which
+            # is exactly the behaviour this feature replaces.
+            log(f"  [!] triage: abort check failed, continuing: {e!r}")
+            state["value"] = False
+        return state["value"]
+
+    return poll
+
+
+def _ask_model(workflow: str, evidence: str, should_abort=None) -> dict | None:
     """One chat completion. Returns the parsed object, or None on any failure."""
     user = (f"{TRIAGE_WORKFLOWS[workflow]}\n\n"
             f"=== EVIDENCE ===\n{evidence}\n=== END EVIDENCE ===")
@@ -1536,7 +1620,13 @@ def _ask_model(workflow: str, evidence: str) -> dict | None:
         "temperature": 0,
         "max_tokens": TRIAGE_OUTPUT_TOKENS,
         "seed": TRIAGE_SEED,
-        "stream": False,
+        # #1698: streamed so the response can be abandoned mid-generation.
+        # Ollama treats the client disconnect as cancellation of the inference
+        # task itself -- verified against 0.32.13 on the deployed GPU box,
+        # which logs `srv stop: cancel task, id_task = N` the moment the
+        # connection closes -- so closing this stream is what actually frees
+        # the card, not merely what stops us waiting for it.
+        "stream": should_abort is not None,
         # Ollama enables thinking by default for Qwen 3/3.5. Triage is a
         # bounded JSON extraction task, not a chain-of-thought consumer; make
         # it return the answer inside the timeout instead of spending the
@@ -1552,9 +1642,18 @@ def _ask_model(workflow: str, evidence: str) -> dict | None:
     # Ollama ignores it; llama.cpp and vLLM want a bearer token present even
     # when they are not checking it.
     req.add_header("Authorization", "Bearer not-used")
+    poll_abort = _throttled(should_abort)
     try:
         with urllib.request.urlopen(req, timeout=TRIAGE_TIMEOUT) as r:
-            resp = json.loads(r.read())
+            if poll_abort is None:
+                resp = json.loads(r.read())
+            else:
+                resp = _read_streamed_completion(r, poll_abort)
+    except TriageAborted:
+        # Propagated, not swallowed: the caller has to tell the difference
+        # between "the model had nothing useful" (None, job failed) and "an
+        # operator stopped this on purpose" (aborted, not a failure).
+        raise
     except urllib.error.HTTPError as e:
         log(f"  [!] triage {workflow}: HTTP {e.code}: {e.read()[:200]!r}")
         return None
@@ -1647,7 +1746,7 @@ def _triage(parts: dict, sha: str) -> dict | None:
     return run_triage_workflows(evidence, note)
 
 
-def run_triage_workflows(evidence: str, note: str) -> dict | None:
+def run_triage_workflows(evidence: str, note: str, should_abort=None) -> dict | None:
     """Ask the model both workflows and assemble the ai_triage result.
 
     Split out from _triage so gpu-queue-drain.py (a separate process,
@@ -1658,7 +1757,7 @@ def run_triage_workflows(evidence: str, note: str) -> dict | None:
     results: dict = {}
     ran: list[str] = []
     for workflow in ("program_triage", "suspicious_behavior"):
-        answer = _ask_model(workflow, evidence)
+        answer = _ask_model(workflow, evidence, should_abort)
         if answer is None:
             continue
         results.update(answer)
