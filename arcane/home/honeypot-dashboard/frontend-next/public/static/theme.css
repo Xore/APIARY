@@ -1106,6 +1106,15 @@ select.form-input { cursor: pointer; }
     font-weight: 500;
   }
   .data-table--responsive td:empty { display: none; }
+  /* Row quick-actions (copy IP / replay session / attacker profile,
+     etc.) reveal on tr:hover / tr.selected in the desktop table -- hover
+     has no touch equivalent, so at this width the cell was pure empty
+     dead space on every card until a row happened to get selected. The
+     same actions are already reachable from the row's own visible
+     content or the opened detail pane once tapped. */
+  .data-table--responsive .hp-row-actions-cell {
+    display: none;
+  }
   /* .card.wide table's own min-width:720px (below, a desktop-only
      "don't let a wide card's table get too cramped" rule) otherwise
      wins here too, since it targets the same <table> element -- found
@@ -1374,6 +1383,14 @@ pre {
   transition: background var(--transition-fast), border-color var(--transition-fast);
 }
 .chip:hover { background: var(--surface-hover); border-color: var(--border-strong); }
+/* Selected/applied state, same accent-outline treatment .segmented and the
+   reports gallery already use for their own pressed controls. Two selectors
+   because chips carry this state for two different reasons: a real toggle
+   sets aria-pressed, while a chip that merely *represents* something already
+   applied -- an active filter scope, a count that is non-zero -- is not a
+   toggle and must not claim to be one, so it opts in with .is-active. */
+.chip[aria-pressed="true"], .chip.is-active { background: var(--accent-soft); border-color: var(--accent); }
+.chip[aria-pressed="true"]:hover, .chip.is-active:hover { background: var(--accent-soft); border-color: var(--accent); }
 .chip svg { width: 14px; height: 14px; opacity: 0.75; }
 
 /* ── Onboarding card — first-run checklist with progress ─────────── */
