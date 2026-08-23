@@ -44,7 +44,8 @@ type EventRow = {
   record: JsonRecord
 }
 
-type EventsPage = { total: number; offset: number; rows: EventRow[] }
+type CorrelatedIp = { ip: string; count: number; checked: boolean }
+type EventsPage = { total: number; offset: number; rows: EventRow[]; fingerprint_ips: CorrelatedIp[] | null }
 
 export type EventFilters = {
   ip?: string
@@ -71,6 +72,10 @@ export type EventFilters = {
   provider?: string
   sig?: string
   cat?: string
+  /** #1682: the "Isolate IP…" checklist's comma-separated narrowing —
+   * distinct from `ip` (single-IP attack-chain view), applies alongside
+   * `fingerprint`. */
+  ips?: string
 }
 
 const PIVOT_KEYS = [
@@ -180,6 +185,7 @@ export const Route = createFileRoute('/events')({
       proto: pick('proto'),
       kind: pick('kind'),
       since: pick('since'),
+      ips: pick('ips'),
     }
     for (const key of PIVOT_KEYS) filters[key] = pick(key)
     return filters
@@ -221,6 +227,7 @@ function Events() {
   const [values, setValues] = useState<FilterValues | null>(null)
   const [rows, setRows] = useState<EventRow[] | null>(null)
   const [total, setTotal] = useState(0)
+  const [fingerprintIps, setFingerprintIps] = useState<CorrelatedIp[] | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
   const [selected, setSelected] = useState<number | null>(null)
   const filtersActive = Boolean(
@@ -285,6 +292,7 @@ function Events() {
       if (cancelled || !page) return
       setRows(page.rows)
       setTotal(page.total)
+      setFingerprintIps(page.fingerprint_ips)
     })
     return () => {
       cancelled = true
@@ -390,6 +398,9 @@ function Events() {
             {key}: {(search[key] as string).length > 40 ? `${(search[key] as string).slice(0, 37)}…` : search[key]} ×
           </button>
         ))}
+        {fingerprintIps && fingerprintIps.length >= 2 ? (
+          <IsolateIpMenu ips={fingerprintIps} onApply={(value) => setFilter('ips', value)} />
+        ) : null}
         {filtersActive ? (
           <button className="chip" type="button" onClick={() => void navigate({ search: {} })}>
             × clear filters
@@ -534,6 +545,85 @@ function Events() {
  * .eventmeta block: decoy identity, shared-value pivots, network origin,
  * sensor detection, session recording, and the payload actions menu. A
  * group renders only when it has at least one value. */
+// #1682: events.html:76-99's "Isolate IP…" checklist — check/uncheck IPs
+// to narrow a fingerprint match down to one attacker among several
+// sharing it. .action-menu/.hp-open-in-menu (theme.css) give the
+// disclosure its outside-click-close and close-siblings-on-toggle for
+// free (theme.js); the checklist rows themselves have no bespoke class in
+// theme.css to reuse (the Go template's .hp-ip-filter-* was never a
+// generic pattern), so they're plain labeled checkboxes.
+function IsolateIpMenu({ ips, onApply }: { ips: CorrelatedIp[]; onApply: (value: string) => void }) {
+  const [pending, setPending] = useState<Set<string>>(() => new Set(ips.filter((entry) => entry.checked).map((entry) => entry.ip)))
+  const anyUnchecked = ips.some((entry) => !pending.has(entry.ip))
+  return (
+    <details className="hp-open-in action-menu">
+      <summary title="Check or uncheck IPs to isolate one attacker among several sharing this fingerprint">
+        Isolate IP…
+      </summary>
+      <div className="dropdown hp-open-in-menu" role="menu" style={{ width: 260 }}>
+        <div className="hp-open-in-heading">
+          IPs behind this fingerprint <span className="tw:text-muted">({pending.size}/{ips.length})</span>
+        </div>
+        <div style={{ display: 'flex', gap: 6, padding: '2px 10px 6px' }}>
+          <button
+            className="btn btn-sm btn-secondary"
+            type="button"
+            onClick={() => setPending(new Set(ips.map((entry) => entry.ip)))}
+          >
+            All
+          </button>
+          <button className="btn btn-sm btn-secondary" type="button" onClick={() => setPending(new Set())}>
+            None
+          </button>
+        </div>
+        <div style={{ maxHeight: 260, overflowY: 'auto', padding: '0 10px' }}>
+          {ips.map((entry) => (
+            <label key={entry.ip} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={pending.has(entry.ip)}
+                onChange={(event) => {
+                  setPending((current) => {
+                    const next = new Set(current)
+                    if (event.target.checked) next.add(entry.ip)
+                    else next.delete(entry.ip)
+                    return next
+                  })
+                }}
+              />
+              <span className="mono" style={{ flex: 1 }}>
+                {entry.ip}
+              </span>
+              <span className="tw:text-muted">{entry.count.toLocaleString('en-US')}</span>
+            </label>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 6, padding: '8px 10px 4px' }}>
+          <button
+            className="btn btn-sm btn-primary"
+            type="button"
+            onClick={() => onApply(anyUnchecked ? Array.from(pending).join(',') : '')}
+          >
+            Apply
+          </button>
+          {ips.some((entry) => !entry.checked) || anyUnchecked ? (
+            <button
+              className="btn btn-sm btn-secondary"
+              type="button"
+              onClick={() => {
+                setPending(new Set(ips.map((entry) => entry.ip)))
+                onApply('')
+              }}
+            >
+              Reset
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </details>
+  )
+}
+
 function EventMeta({
   row,
   onPivot,

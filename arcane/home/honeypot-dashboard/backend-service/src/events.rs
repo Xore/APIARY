@@ -13,13 +13,19 @@ use serde_json::{json, Value};
 
 use crate::{event_detail::detail_for, AppState};
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct EventsQuery {
     #[serde(default)]
     pub offset: u64,
     #[serde(default = "default_size")]
     pub size: u64,
     pub ip: Option<String>,
+    /// #1682: comma-separated source IPs to narrow to — the "Isolate
+    /// IP…" checklist (events.html:76-99) applies this alongside
+    /// `fingerprint` to pick one attacker among several sharing it.
+    /// Distinct from `ip` (the single-IP attack-chain view): this can
+    /// carry more than one address.
+    pub ips: Option<String>,
     pub sensor: Option<String>,
     pub country: Option<String>,
     pub port: Option<String>,
@@ -177,11 +183,69 @@ pub struct EventRow {
     pub record: Value,
 }
 
+/// One distinct source IP behind the current fingerprint match (#278 /
+/// #1682's "Isolate IP…" checklist).
+#[derive(Serialize)]
+pub struct CorrelatedIp {
+    pub ip: String,
+    pub count: u64,
+    pub checked: bool,
+}
+
 #[derive(Serialize)]
 pub struct EventsPage {
     pub total: u64,
     pub offset: u64,
     pub rows: Vec<EventRow>,
+    /// The distinct IPs behind `fingerprint`, pre-checked to match `ips`
+    /// — absent unless a fingerprint filter is active AND more than one
+    /// IP is behind it (nothing to isolate otherwise). Evaluated against
+    /// every other active filter, but never `ips` itself, so narrowing
+    /// the selection doesn't also shrink the checklist to just what's
+    /// still checked (pages_data.go's fingerprintIPCorrelation).
+    pub fingerprint_ips: Option<Vec<CorrelatedIp>>,
+}
+
+/// Distinct source IPs sharing the active fingerprint filter, most
+/// frequent first (ties broken by IP for a stable order) — an ES terms
+/// aggregation standing in for the Go tier's in-memory count-and-sort
+/// over its full per-request event slice.
+async fn fingerprint_ip_correlation(state: &AppState, q: &EventsQuery) -> Option<Vec<CorrelatedIp>> {
+    if q.fingerprint.as_deref().unwrap_or("").is_empty() {
+        return None;
+    }
+    let mut base = q.clone();
+    base.ips = None;
+    let filters = build_filters(&base);
+    let body = json!({
+        "size": 0,
+        "query": {"bool": {"filter": filters, "must_not": suricata_noise_exclusion()}},
+        "aggs": {"ips": {"terms": {"field": "source.ip", "size": 50, "order": [{"_count": "desc"}, {"_key": "asc"}]}}}
+    });
+    let result = state.es.search(body).await.ok()?;
+    let buckets = result["aggregations"]["ips"]["buckets"].as_array()?;
+    if buckets.len() < 2 {
+        return None;
+    }
+    let selected: Vec<&str> = q
+        .ips
+        .as_deref()
+        .unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .collect();
+    Some(
+        buckets
+            .iter()
+            .filter_map(|bucket| {
+                let ip = bucket["key"].as_str()?.to_string();
+                let count = bucket["doc_count"].as_u64().unwrap_or(0);
+                let checked = selected.is_empty() || selected.contains(&ip.as_str());
+                Some(CorrelatedIp { ip, count, checked })
+            })
+            .collect(),
+    )
 }
 
 /// Excludes suricata's high-volume, low-signal event types (flow/netflow/
@@ -251,6 +315,12 @@ pub fn build_filters(q: &EventsQuery) -> Vec<Value> {
     let mut filters = vec![json!({"range": {"@timestamp": {"gte": since_to_range(&q.since)}}})];
     if let Some(ip) = q.ip.as_deref().filter(|v| !v.is_empty()) {
         filters.push(json!({"term": {"source.ip": ip}}));
+    }
+    if let Some(ips) = q.ips.as_deref().filter(|v| !v.is_empty()) {
+        let values: Vec<&str> = ips.split(',').map(str::trim).filter(|v| !v.is_empty()).collect();
+        if !values.is_empty() {
+            filters.push(json!({"terms": {"source.ip": values}}));
+        }
     }
     if let Some(sensor) = q.sensor.as_deref().filter(|v| !v.is_empty()) {
         filters.push(json!({"term": {"event.sensor": sensor}}));
@@ -363,5 +433,6 @@ pub async fn list(
         .map(|hits| hits.iter().map(|hit| row_from_source(&hit["_source"])).collect())
         .unwrap_or_default();
 
-    Ok(Json(EventsPage { total, offset, rows }))
+    let fingerprint_ips = fingerprint_ip_correlation(&state, &q).await;
+    Ok(Json(EventsPage { total, offset, rows, fingerprint_ips }))
 }
