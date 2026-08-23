@@ -36,6 +36,15 @@ pub struct EventsQuery {
     /// linking back to "related events") — same honeypot.shasum field
     /// fusion.rs's own "Payload hash" pivot already filters on.
     pub shasum: Option<String>,
+    /// #1783: one flow, across every sensor that saw it.
+    ///
+    /// network.community_id is the same v1 hash computed independently by
+    /// Zeek, huginn, Suricata and portbridge, so filtering on it collapses a
+    /// single TCP connection's records from all of them into one view. That
+    /// is a different question from the src_ip filter above: an address
+    /// answers "what else did this host do", a community_id answers "what
+    /// happened on this connection".
+    pub community_id: Option<String>,
     /// Free-text query_string search (the /history page's q=), same
     /// semantics as the Go tier's ES q= passthrough.
     pub q: Option<String>,
@@ -348,6 +357,12 @@ pub fn build_filters(q: &EventsQuery) -> Vec<Value> {
     }
     if let Some(shasum) = q.shasum.as_deref().filter(|v| !v.is_empty()) {
         filters.push(json!({"term": {"honeypot.shasum": shasum}}));
+    }
+    if let Some(flow) = q.community_id.as_deref().filter(|v| !v.is_empty()) {
+        // Promoted to a real keyword field by the ingest pipeline on every
+        // sensor family, so an exact term works and no per-sensor special
+        // casing is needed.
+        filters.push(json!({"term": {"network.community_id": flow}}));
     }
     if let Some(text) = q.q.as_deref().filter(|v| !v.is_empty()) {
         // lenient: a malformed user query returns no matches instead of a
