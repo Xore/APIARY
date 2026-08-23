@@ -7,10 +7,15 @@ into download.dir:
     os.link(p, n)
 
 A hardlink is a second name for an existing inode. Permissions and ACLs live on
-the inode, so the file in download.dir carries whatever the temporary file had
--- and a directory's *default* ACL is applied when a file is created in it, not
-when a link to an existing inode is added. The default ACL on the binaries
-directory is therefore never applied to a single captured sample.
+the inode, so the file in download.dir carries whatever the temporary file had.
+A directory's default ACL is applied when a file is created in it, never when a
+link to an existing inode is added -- so a hardlink would not inherit one even
+if it existed.
+
+On this deployment it does not exist. Measured: the binaries directory carries
+an *access* ACL granting user:nobody:r-x and no `default:` entries at all, so
+there has never been anything for a captured sample to inherit by any route.
+That is why every capture arrived unreadable, not merely the hardlinked ones.
 
 That matters because the ACL is the only thing granting access. The payload
 store is owned 1000:1000 and the inventory worker runs as `nobody`, so it reads
@@ -76,17 +81,40 @@ def _apply_download_dir_acl(path):
         )
         if listing.returncode != 0:
             return
-        entries = [
-            line[len("default:"):]
-            for line in listing.stdout.splitlines()
-            if line.startswith("default:") and not line.startswith("default:mask")
-        ]
-        # Only named-user/named-group entries are meaningful on a file; the
-        # owner/group/other triple is already carried by the mode.
-        entries = [
-            e for e in entries
-            if e.startswith(("user:", "group:")) and not e.startswith(("user::", "group::"))
-        ]
+        def _named(lines, prefix=""):
+            """Named user/group entries only. The owner/group/other triple is
+            already carried by the file mode, and mask is recomputed by
+            setfacl from the entries it is given."""
+            out = []
+            for line in lines:
+                if prefix and not line.startswith(prefix):
+                    continue
+                entry = line[len(prefix):] if prefix else line
+                entry = entry.split("\t")[0].strip()   # drop "#effective:..."
+                if entry.startswith("mask"):
+                    continue
+                if entry.startswith(("user:", "group:")) and not entry.startswith(
+                    ("user::", "group::")
+                ):
+                    out.append(entry)
+            return out
+
+        lines = listing.stdout.splitlines()
+        # A default ACL is the right source when one exists -- it states what
+        # the directory intends new files to carry.
+        entries = _named(lines, "default:")
+        if not entries:
+            # This store has no default ACL. Measured on the live deployment:
+            # the binaries directory carries an *access* ACL granting
+            # user:nobody:r-x and no default entries at all, so there has never
+            # been anything for a new file to inherit -- which is why every
+            # capture arrived unreadable rather than only the hardlinked ones.
+            #
+            # Fall back to the directory's own named access entries. "Who may
+            # read this directory" is the same intent, expressed the only way
+            # this deployment expresses it, and copying it is still reading
+            # policy off the filesystem rather than inventing it here.
+            entries = [e for e in _named(lines) if not e.startswith("default:")]
         if not entries:
             return
         subprocess.run(

@@ -186,6 +186,45 @@ class ApplyAcl(unittest.TestCase):
                  if l.startswith("user:") and not l.startswith("user::")]
         self.assertTrue(named, f"expected a named user entry after the fix, got:\n{after}")
 
+    def test_falls_back_to_the_directory_access_acl(self):
+        """The live payload store has no default ACL -- only an access ACL
+        naming the reader. Copying defaults alone found nothing there, which
+        is why every capture stayed unreadable. The named access entry is the
+        same intent expressed the only way this deployment expresses it."""
+        binaries = self.dir / "access-only"
+        binaries.mkdir()
+        who = "nobody"
+        # Access ACL only. No -d, so no default entries exist at all.
+        rc = subprocess.run(["setfacl", "-m", f"u:{who}:r-x", str(binaries)],
+                            capture_output=True)
+        if rc.returncode != 0:
+            self.skipTest("cannot set an ACL on this filesystem")
+
+        listing = subprocess.run(["getfacl", "-p", str(binaries)],
+                                 capture_output=True, text=True).stdout
+        self.assertNotIn("default:", listing,
+                         "precondition: this directory must have no default ACL")
+
+        source = self.dir / "acc-src"
+        source.write_bytes(b"MZ")
+        source.chmod(0o600)
+        linked = binaries / "cafebabe"
+        os.link(source, linked)
+
+        self.apply(str(linked))
+
+        after = subprocess.run(["getfacl", "-p", str(linked)],
+                               capture_output=True, text=True).stdout
+        named = [l for l in after.splitlines()
+                 if l.startswith(f"user:{who}")]
+        self.assertTrue(
+            named,
+            f"expected the directory's access entry to be copied onto the file, got:\n{after}",
+        )
+        # An entry the mask clamps to nothing grants nothing -- it must be
+        # effective, not merely present.
+        self.assertNotIn("#effective:---", named[0])
+
     def test_a_store_without_a_default_acl_is_left_alone(self):
         plain = self.dir / "plain"
         plain.mkdir()
