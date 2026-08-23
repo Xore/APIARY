@@ -77,3 +77,8 @@ redef Site::local_nets = { 172.16.0.0/12, 10.0.0.0/8, 192.168.0.0/16 };
 # harvester follows the rename to EOF and then picks up the fresh file.
 redef Log::default_rotation_interval = 1hr;
 redef Log::default_rotation_postprocessor_cmd = "";
+
+# #1738: wire-level file extraction, decoy-side only. Loaded from its own
+# script so what it does -- and the posture it commits to -- is readable
+# without wading through the sensor config.
+@load /usr/local/share/zeek-site/proxy-extract.zeek
