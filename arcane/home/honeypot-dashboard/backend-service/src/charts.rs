@@ -436,6 +436,60 @@ pub async fn decoy_requests(State(state): State<AppState>) -> Result<Json<Bar>, 
     fingerprint_bar(&state, &["traefik-v1-*"], body, "paths").await.map(Json).map_err(bad_gateway)
 }
 
+/// /api/v1/charts/decoy-client-fingerprints — the JA4 of clients that actually
+/// reached a TLS-terminated decoy (#1765).
+///
+/// This is the payoff for the wire-tuple join. Traefik terminates TLS for the
+/// Host-routed decoys, so it knows the request but never the ClientHello;
+/// huginn-sidecar sniffs the ClientHello but never learns which request it
+/// became. Neither can answer "what was the TLS client that hit wordpot"
+/// alone. They meet on `network.community_id`, which for Traefik records is
+/// derived from `ClientAddr` — the address the connection was accepted from,
+/// which is what the sniffer saw — rather than from the resolved client.
+///
+/// Two round trips rather than one: Elasticsearch has no join, so the decoy
+/// flows are collected first and used as a filter. Bounded at 1000 flows,
+/// which is far more than the decoy surface sees in a week (96 of 14 164
+/// connections in a measured sample) but keeps a busy week from building an
+/// unbounded terms query.
+pub async fn decoy_client_fingerprints(
+    State(state): State<AppState>,
+) -> Result<Json<Bar>, (StatusCode, String)> {
+    let flows_body = json!({
+        "size": 0,
+        "query": {"range": {"@timestamp": {"gte": WEEK}}},
+        "aggs": {"flows": {"terms": {"field": "network.community_id", "size": 1000}}}
+    });
+    let flows = state
+        .es
+        .search_index(&["traefik-v1-*"], flows_body)
+        .await
+        .map_err(bad_gateway)?;
+    let ids: Vec<&str> = flows["aggregations"]["flows"]["buckets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|bucket| bucket["key"].as_str())
+        .collect();
+
+    // No decoy traffic in the window is a normal state, not an error, and an
+    // empty terms filter would match everything rather than nothing.
+    if ids.is_empty() {
+        return Ok(Json(Bar { categories: Vec::new(), values: Vec::new() }));
+    }
+
+    let body = json!({
+        "size": 0,
+        "query": {"bool": {"filter": [
+            {"range": {"@timestamp": {"gte": WEEK}}},
+            {"term": {"event.category": "tls_client"}},
+            {"terms": {"network.community_id": ids}}
+        ]}},
+        "aggs": {"ja4": {"terms": {"field": "huginn.observation.sig.ja4", "size": 15}}}
+    });
+    fingerprint_bar(&state, &["huginn-v1-*"], body, "ja4").await.map(Json).map_err(bad_gateway)
+}
+
 /// /api/v1/charts/tls-fingerprints — JA4 counts, excluding dest_port 443
 /// (the deployment's own operator HTTPS; see scanner_fingerprints.go).
 pub async fn tls_fingerprints(State(state): State<AppState>) -> Result<Json<Bar>, (StatusCode, String)> {

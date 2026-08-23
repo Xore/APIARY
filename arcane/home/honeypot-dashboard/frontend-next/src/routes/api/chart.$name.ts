@@ -17,6 +17,7 @@ const CHARTS = new Set([
   'tcp-stack-clusters',
   'ics-functions',
   'decoy-requests',
+  'decoy-client-fingerprints',
   'tls-fingerprints',
   'ssh-fingerprints',
   'endlessh-held-histogram',

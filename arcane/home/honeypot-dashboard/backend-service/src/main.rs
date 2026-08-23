@@ -253,6 +253,9 @@ async fn main() -> anyhow::Result<()> {
         // #1736/#1739: two surfaces for data that currently has no view at all.
         .route("/api/v1/charts/ics-functions", get(charts::ics_functions))
         .route("/api/v1/charts/decoy-requests", get(charts::decoy_requests))
+        // #1765: the wire-tuple join in use -- Traefik requests meeting the
+        // ClientHello fingerprints only the passive sniffer can see.
+        .route("/api/v1/charts/decoy-client-fingerprints", get(charts::decoy_client_fingerprints))
         .route("/api/v1/charts/tls-fingerprints", get(charts::tls_fingerprints))
         .route("/api/v1/charts/ssh-fingerprints", get(charts::ssh_fingerprints))
         .route("/api/v1/charts/endlessh-held-histogram", get(charts::endlessh_histogram))

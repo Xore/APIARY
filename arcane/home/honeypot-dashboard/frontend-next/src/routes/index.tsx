@@ -681,6 +681,16 @@ function Overview() {
             </p>
             <EChart kind="barh" url="/api/chart/decoy-requests" height={360} />
           </div>
+          <div className="card wide" id="decoy-client-fingerprints-card">
+            <h2>Who reached the decoys (JA4)</h2>
+            <p className="note">
+              The TLS client behind each decoy request. Neither sensor can answer this alone — Traefik knows the
+              request but has already discarded the handshake, and the passive sniffer sees the handshake but never
+              learns which request it became. They meet on the connection, not the client address, which is what makes
+              this work even when the request arrived through a proxy.
+            </p>
+            <EChart kind="barh" url="/api/chart/decoy-client-fingerprints" height={360} />
+          </div>
           <div className="card wide" id="tls-fingerprints-card">
             <h2>TLS scanner fingerprints (JA4) — wire-level, last 7 days</h2>
             <p className="note">Every TLS handshake against a non-dashboard port, alert or not. Click a bar to copy the full hash.</p>
