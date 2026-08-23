@@ -363,6 +363,9 @@ jobs:
           - name: "Sensor event-kind coverage audit (#789) [disabled, issue 1665]"
             run: echo "skipped -- classify.go retired with the Go dashboard (issue 1659), see issue 1665"
 
+          - name: Shared GPU job queue
+            run: analysis/gpu-queue/test_gpu_queue.py
+
           - name: Payload/artifact dedupe (#481/#528)
             run: |
               # test_dedupe_payloads.py and test_cdc_dedup_prototype.py had

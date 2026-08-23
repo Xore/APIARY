@@ -186,11 +186,23 @@ def enqueue(
 
 
 def list_queue(es_host: str, status: str | None = None, job_type: str | None = None, size: int = 100) -> list[dict]:
+    # .keyword: status/job_type have no explicit index mapping, so ES's
+    # dynamic mapping gave them "text" (analyzed) with a ".keyword"
+    # sub-field, same as any other unmapped string. A term query against
+    # the bare (analyzed) field name never matched job_type values
+    # containing a hyphen ("ghidra-triage" tokenizes to "ghidra"/"triage",
+    # neither of which equals the literal string) -- confirmed live: three
+    # ghidra-triage jobs sat "queued" for up to 11 days, gpu-queue-drain.py
+    # silently found zero matches on every single tick (main() only prints
+    # once it has a job in hand, so this failure mode produced no log
+    # output at all). status values happen to be single words with no
+    # analyzer-relevant punctuation, so that filter accidentally worked --
+    # not something to rely on, fixed the same way for both.
     filters = []
     if status is not None:
-        filters.append({"term": {"status": status}})
+        filters.append({"term": {"status.keyword": status}})
     if job_type is not None:
-        filters.append({"term": {"job_type": job_type}})
+        filters.append({"term": {"job_type.keyword": job_type}})
     query = {"bool": {"filter": filters}} if filters else {"match_all": {}}
     result = _request(es_host, "POST", f"/{QUEUE_INDEX}/_search", {
         "size": size, "sort": [{"requested_at": "asc"}], "query": query,
