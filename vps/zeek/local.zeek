@@ -7,6 +7,35 @@
 # Every zkg-installed package: JA4+, HASSH, and the ICSNPP parsers.
 @load packages
 
+# Do not discard packets whose TCP/UDP checksum looks wrong.
+#
+# Both sensors capture on interfaces where the checksum is computed after the
+# packet is handed to the kernel -- NIC transmit offload on the VPS NIC, and
+# the tunnel on wg0 -- so outbound packets are seen before the checksum exists.
+# Zeek validates by default and silently drops the payload of anything that
+# fails, which meant it was discarding almost everything the *responder* sent.
+#
+# Measured over six hours before this was set:
+#
+#   sensor        flows    responder bad-checksum   responder data   responder SYN-ACK
+#   zeek (VPS)   58,153            66.4%                 0.7%              0.0%
+#   zeek-proxy   15,483            94.5%                 0.9%              0.0%
+#
+# ('c' and 'd' and 'h' in conn.log's history string; lowercase is the
+# responder.) A sensor that sees one side of every conversation is not a
+# partial sensor, it is a misleading one: server banners never appeared, so
+# ssh.log carried a client version and nothing else and HASSH could never fire
+# (#1730); resp_bytes was ~0, so any byte total counted a single direction;
+# and conn_state was dominated by SH/S0, which reads as "no response" rather
+# than "response discarded".
+#
+# This is the standard treatment for live capture off an offloading NIC. The
+# cost is that genuinely corrupt packets are now analysed too -- acceptable
+# here, because on this perimeter a malformed packet is far more likely to be
+# our own offload artifact than a real transmission error, and the alternative
+# is not seeing the honeypots answer at all.
+redef ignore_checksums = T;
+
 # JSON, one object per line, so Filebeat's ndjson parser reads it directly.
 @load policy/tuning/json-logs
 
