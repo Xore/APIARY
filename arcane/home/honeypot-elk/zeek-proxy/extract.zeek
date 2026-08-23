@@ -66,20 +66,24 @@ export {
     } &redef;
 }
 
-event file_sniff(f: fa_file, meta: fa_metadata)
+event file_over_new_connection(f: fa_file, c: connection, is_orig: bool)
     {
-    # Zeek needs somewhere to put it and something to call it. Without a file
-    # id there is no safe name, so there is no extraction.
+    # Decided here rather than in file_sniff because file_sniff fires before
+    # the file is reliably associated with a connection: f$conns was empty for
+    # roughly half the files, so a port filter there let our own dashboard
+    # traffic through anyway (measured: 3 of 6 still landed from port 19090).
+    # file_over_new_connection hands us the connection directly, and fires
+    # early enough that no payload has been missed.
     if ( ! f?$id || f$id == "" )
         return;
 
     # Skip our own services. Without this the store fills with the dashboard
     # talking to itself, which costs disk and buries the files that matter.
-    if ( f?$conns )
-        for ( cid in f$conns )
-            if ( cid$resp_p in skip_dest_ports )
-                return;
+    if ( c$id$resp_p in skip_dest_ports )
+        return;
 
+    # add_analyzer is idempotent per file, so a file seen over several
+    # connections is not extracted repeatedly.
     Files::add_analyzer(f, Files::ANALYZER_EXTRACT,
                         [$extract_filename = fmt("%s.bin", f$id),
                          $extract_limit = max_file_bytes]);
