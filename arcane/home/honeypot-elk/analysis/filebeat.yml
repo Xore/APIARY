@@ -128,6 +128,29 @@ filebeat.inputs:
       logset: portbridge
     fields_under_root: true
 
+  # #1739: Traefik access log. Traefik terminates TLS for the Host-routed
+  # decoys (hellpot, galah, wordpot), so this is the only place their requests
+  # exist in cleartext -- a wire sensor sees the ClientHello and then
+  # ciphertext. Until now the log went to container stdout with no filePath
+  # and no input here, so zero Traefik records reached Elasticsearch.
+  #
+  # Only the live file is tailed, not access.json.1: same copytruncate
+  # reasoning as the portbridge input above -- the rotation target is
+  # overwritten wholesale each cycle, which a filestream input would re-ingest
+  # in full every time.
+  - type: filestream
+    id: traefik-access
+    paths:
+      - /logs/traefik/access.json
+    parsers:
+      - ndjson:
+          target: "traefik"
+          overwrite_keys: true
+          add_error_key: true
+    fields:
+      logset: traefik
+    fields_under_root: true
+
   # Suricata IDS events (alerts, http, dns, tls, flow).
   # #79: eve.json now rotates hourly server-side (vps/suricata/suricata.yaml)
   # into eve-<timestamp>.json instead of growing forever, so this can no
@@ -340,6 +363,14 @@ output.elasticsearch:
     - index: "dionaea-incidents-v1-%{+yyyy.MM.dd}"
       when.equals:
         logset: "dionaea-incidents"
+    # #1739: its own index family rather than honeypot-v2-*. These are HTTP
+    # request records with a field set that overlaps nothing else here, and
+    # they need their own retention: the decoys behind Traefik are quiet
+    # (96 of 14 164 connections in a measured sample) but every one of those
+    # requests is invisible to every other sensor.
+    - index: "traefik-v1-%{+yyyy.MM.dd}"
+      when.equals:
+        logset: "traefik"
 
   # Preserve the original event if Elasticsearch ever rejects it despite the
   # flattened mapping. This prevents silent data loss and records the cause.

@@ -127,6 +127,10 @@ services:
       - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
       - ./traefik/certs:/etc/traefik/certs:ro
+      # #1739: the access log now goes to a file so Filebeat can ship it.
+      # Same logs/ tree as portbridge and Suricata, so the existing
+      # homeserver-side mount picks it up with no new transport.
+      - /opt/stacks/apiary/logs/traefik:/var/log/traefik
     networks:
       - proxy
       - oidc-kibana
@@ -154,6 +158,33 @@ services:
         limits:
           cpus: "0.5"
           memory: 128M
+
+  # #1739: Traefik has no log rotation of its own, and an unrotated access log
+  # on a 116 GB VPS that is also holding ~50 GB of pcap is a slow outage.
+  # Same copy-truncate approach and cadence as portbridge-log-rotate rather
+  # than a second mechanism -- Filebeat already tolerates it for that log.
+  traefik-log-rotate:
+    image: busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
+    container_name: hp-traefik-log-rotate
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - |
+        while true; do
+          f=/logs/traefik/access.json
+          if [ -f "$$f" ] && [ $$(stat -c %s "$$f") -gt 33554432 ]; then
+            cp "$$f" "$$f.1" 2>/dev/null && : > "$$f"
+          fi
+          sleep 60
+        done
+    volumes:
+      - /opt/stacks/apiary/logs/traefik:/logs/traefik
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 32M
 
   socat-python-api:
     image: alpine/socat:latest
