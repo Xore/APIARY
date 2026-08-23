@@ -87,6 +87,54 @@ class ApplyPatch(unittest.TestCase):
             ns["main"]()
 
 
+class RuntimeCompatibility(unittest.TestCase):
+    """The injected code runs under dionaea's embedded Python, not ours.
+
+    That interpreter is 3.6. This suite runs on whatever CI has, so a 3.7+ API
+    in the helper passes here and then fails silently in production -- the
+    helper's own broad `except` swallows the TypeError, so it appears to run
+    and does nothing. That is exactly what happened on first deploy with
+    subprocess.run(capture_output=...), which is why this guard exists.
+    """
+
+    FORBIDDEN = (
+        ("capture_output", "subprocess.run(capture_output=) is 3.7+"),
+        ("text=True", "subprocess.run(text=) is 3.7+"),
+        (":=", "the walrus operator is 3.8+"),
+    )
+
+    @staticmethod
+    def _code_only(text):
+        """Strip comments, so a note *about* a forbidden API is not
+        mistaken for a use of it -- the first version of this guard failed
+        on its own explanatory comment."""
+        import io
+        import tokenize
+
+        kept = []
+        try:
+            for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+                if tok.type != tokenize.COMMENT:
+                    kept.append(tok.string)
+        except tokenize.TokenError:
+            return text
+        return " ".join(kept)
+
+    def test_helper_avoids_apis_newer_than_python_36(self):
+        source = PATCH.read_text()
+        # Only the injected helper matters; the patch driver itself runs at
+        # build time under the image's own python, not dionaea's.
+        start = source.index("def _apply_download_dir_acl")
+        end = source.index("'''", start)
+        helper = self._code_only(source[start:end])
+        for needle, why in self.FORBIDDEN:
+            self.assertNotIn(
+                needle, helper,
+                f"{needle} appears in the injected helper -- {why}, and dionaea "
+                f"embeds 3.6, so this would fail silently at runtime",
+            )
+
+
 class ApplyAcl(unittest.TestCase):
     """The injected helper, executed for real against a directory ACL."""
 
