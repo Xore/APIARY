@@ -274,7 +274,7 @@ pub async fn source_health(State(state): State<AppState>) -> Result<Json<SourceH
         // healthchecks rather than tunnel-delivered traffic (312,685 of
         // 514,696 over 24h, measured 2026-08-23). It is also why the totals
         // here are smaller than the raw index size the storage pane reports.
-        "query": {"bool": {"must_not": [{"term": {"internal_probe": true}}]}},
+        "query": {"bool": {"must_not": [{"term": {"honeypot.internal_probe": true}}]}},
         "aggs": {
             "sensors": {
                 "terms": {"field": "event.sensor", "size": 60, "order": {"last": "desc"}},

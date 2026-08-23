@@ -696,7 +696,7 @@ impl Notifier {
                     "track_total_hits": false,
                     "query": {"bool": {
                         "filter": [{"range": {"@timestamp": {"gte": INGEST_LOOKBACK}}}],
-                        "must_not": [{"term": {"internal_probe": true}}]
+                        "must_not": [{"term": {"honeypot.internal_probe": true}}]
                     }},
                     "aggs": {
                         "newest": {"max": {"field": "@timestamp"}},
