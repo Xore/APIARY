@@ -1183,6 +1183,24 @@ step_provision_arcane_oidc_secret() {
     "$REPO_DIR/keycloak/provision-arcane-oidc-secret.sh"
 }
 
+step_provision_account_console_scopes() {
+  # #1697: Keycloak's built-in account-console client is created by
+  # --import-realm with no client scopes at all, which makes the account
+  # console 403 on its own REST call (#1690). It cannot be fixed in the realm
+  # JSON -- see provision-account-console-scopes.sh's header for the two
+  # reasons and the measurements behind them -- so it is reconciled here,
+  # alongside the sibling provisioners that also exist because the realm
+  # format cannot express what they set.
+  local secrets_dir="/var/dockge/stacks/honeypot-keycloak/secrets"
+  [[ -f "$secrets_dir/bootstrap-admin-password" ]] || {
+    echo "no bootstrap-admin-password at $secrets_dir -- was provision-keycloak-secrets skipped?" >&2
+    return 1
+  }
+  KEYCLOAK_ADMIN_USERNAME="${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}" \
+  KEYCLOAK_ADMIN_PASSWORD="$(< "$secrets_dir/bootstrap-admin-password")" \
+    "$REPO_DIR/keycloak/provision-account-console-scopes.sh"
+}
+
 step_fix_apiary_backend_permissions() {
   # apiary-backend's image runs USER nobody (uid 65534) -- deliberately
   # unprivileged, unlike the retired Go dashboard which ran as root and (its
@@ -1830,6 +1848,7 @@ run_step provision-events-poller-secrets "Grant auth-events-poller view-events +
 run_step provision-dashboard-oidc-secret "Write dashboard's OIDC client secret from Keycloak" step_provision_dashboard_oidc_secret
 run_step fix-apiary-backend-permissions "Grant apiary-backend's nobody uid ACL access to dashboard-state/dionaea-lib/services-adapter-socket" step_fix_apiary_backend_permissions
 run_step provision-arcane-oidc-secret "Sync Arcane's real OIDC client secret from Keycloak, re-up" step_provision_arcane_oidc_secret
+run_step provision-account-console-scopes "Give Keycloak's account-console client its default scopes (#1697)" step_provision_account_console_scopes
 run_step auth-events-worker-start "Start auth-events-worker" step_auth_events_worker_start
 
 run_step sshfs-install         "Install sshfs, place VPS key"        step_sshfs_install
