@@ -1,0 +1,26 @@
+[Unit]
+Description=APIARY essentials backup (secrets, keys, identity DB, config) to all three locations
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Runs as the workstation's own user, not root: the SSH aliases, the
+# ~/.ssh/id_ed25519_honeypot identity and the udisks USB mount are all that
+# user's, and a system unit with User= does not need lingering enabled the way
+# a --user unit would.
+User=xore
+Group=xore
+EnvironmentFile=-/etc/default/apiary-backup-essentials
+ExecStart=/usr/local/libexec/apiary-backup-essentials.sh
+# The archive holds every secret in the fleet. Keep it 0600 all the way
+# through, on every filesystem that can express it.
+UMask=0077
+# The run is entirely network + read-only-remote; it writes only to its
+# destinations and a private temp dir.
+PrivateTmp=false
+NoNewPrivileges=true
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=multi-user.target

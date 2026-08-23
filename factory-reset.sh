@@ -13,9 +13,15 @@ set -euo pipefail
 # Every destructive step is opt-in and requires --apply, matching this
 # repo's own git-safety conventions (never a blind --hard/-f by default).
 # Run with no flags and this only takes a backup -- analysis/backup-honeypot.sh
-# runs against the live stack (Elasticsearch's own snapshot API, no stack
-# downtime needed), so a routine "get me a snapshot" run never has to stop
-# anything.
+# runs against the live stack with no downtime, so a routine "get me a
+# snapshot" run never has to stop anything.
+#
+# Know what that backup covers before trusting it ahead of a --wipe: config,
+# secrets, the Keycloak identity database and small config-bearing volumes --
+# NOT Elasticsearch data, captured payloads, PCAP or sandbox images. --wipe
+# then restore brings the stack back configured and authenticated with an
+# empty event history. docs/BACKUP-ESSENTIALS.md has the full in/out list and
+# the off-host equivalent (scripts/backup-essentials.sh).
 #
 # Usage:
 #   ./factory-reset.sh                          # backup only, nothing else touched
@@ -100,7 +106,7 @@ WIPE_VOLUMES=(
 )
 
 run_backup() {
-  log "backing up via analysis/backup-honeypot.sh (stack stays live)"
+  log "backing up via analysis/backup-honeypot.sh (config/secrets/identity, stack stays live)"
   "$STACK_DIR"/analysis/backup-honeypot.sh
 }
 
