@@ -94,6 +94,14 @@ services:
     environment:
       - LISTEN_ADDR=0.0.0.0:8081
       - ELASTICSEARCH_URL=http://elasticsearch:9200
+      # #1677: addresses belonging to this fleet, excluded from the
+      # dashboard's attacker aggregations. Suricata records `source.ip` as
+      # whichever end it saw as the source, so our own hosts appear as
+      # "attackers" for both halves of every attacker session and for their
+      # own outbound traffic -- the VPS's public address was the #2 attacker
+      # at 607,288 events over 48h. The tunnel peer is always excluded
+      # whether or not it is listed here. Comma-separated.
+      - HONEYPOT_SELF_IPS=${HONEYPOT_SELF_IPS:-}
       - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
       - CANARYTOKENS_API_URL=${CANARYTOKENS_API_URL:-}
       # #1612 misc write paths: honeyfs-implant credential provisioning/

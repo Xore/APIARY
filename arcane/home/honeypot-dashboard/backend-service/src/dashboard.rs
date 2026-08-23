@@ -16,6 +16,41 @@ use crate::{es::logins_filter, AppState};
 
 const WINDOW: &str = "now-48h";
 
+/// The WireGuard tunnel endpoint. Never an attacker: it is what a sensor
+/// records when the via_port join could not recover the real client.
+const TUNNEL_PEER_IP: &str = "10.8.0.1";
+
+/// Addresses that belong to this fleet, and so can never be an attacker in
+/// its own data.
+///
+/// #1677: `source.ip` on suricata-v2-* is whichever end Suricata saw as the
+/// source, and for the honeypot's own machines that is *both* halves of an
+/// attacker's session and the host's own outbound traffic. Measured live,
+/// the VPS's own public address was the second-highest "attacker" on the
+/// dashboard at 607,288 events over 48h -- reply packets to the real top
+/// attacker, plus things like the host's own `apt update` to a Debian
+/// mirror, which Suricata alerts on. Every one of those also contributed a
+/// phantom entry to `countries`, `asns` and `map_points`, attributed to our
+/// own hosting provider.
+///
+/// Configured rather than hardcoded: which addresses the fleet answers on
+/// is a property of a deployment, not of this code. The tunnel peer is
+/// always included, which preserves the exclusion this handler has always
+/// had.
+fn self_addresses() -> Vec<String> {
+    let mut addresses: Vec<String> = std::env::var("HONEYPOT_SELF_IPS")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(String::from)
+        .collect();
+    if !addresses.iter().any(|value| value == TUNNEL_PEER_IP) {
+        addresses.push(TUNNEL_PEER_IP.to_string());
+    }
+    addresses
+}
+
 #[derive(Serialize)]
 pub struct Kv {
     pub key: String,
@@ -136,7 +171,11 @@ pub async fn dashboard(State(state): State<AppState>) -> Result<Json<Dashboard>,
         // events in 24 hours, 13.5% of everything ingested.
         "query": {"bool": {
             "filter": [{"range": {"@timestamp": {"gte": WINDOW}}}],
-            "must_not": [{"term": {"honeypot.internal_probe": true}}]
+            "must_not": [
+                {"term": {"honeypot.internal_probe": true}},
+                // #1677: and the fleet's own traffic -- see self_addresses().
+                {"terms": {"source.ip": self_addresses()}}
+            ]
         }},
         "aggs": {
             "sensors": {
@@ -151,22 +190,14 @@ pub async fn dashboard(State(state): State<AppState>) -> Result<Json<Dashboard>,
                 "terms": {"field": "source.as.asn", "size": 12},
                 "aggs": {"org": {"terms": {"field": "source.as.organization_name", "size": 1}}}
             },
-            // #1677: 10.8.0.1 only. The two loopback addresses used to be
-            // excluded here as well, because the documents carried no way to
-            // tell a Docker healthcheck apart from an attack -- the sensors
-            // log both identically. They now do: ip_enrichment marks
-            // self-generated traffic `internal_probe`, and this handler's own
-            // query filters it out, so hiding the address is no longer
-            // standing in for classifying the event.
-            //
-            // The tunnel peer stays excluded because it is a different
-            // problem, not a solved one. Those are real attackers whose
-            // via_port join against portbridge missed, so the document is
-            // genuinely wrong rather than genuinely internal. Enriching them
-            // is the remaining half of #1677; until that lands, showing the
-            // tunnel endpoint as a top attacker would be a lie of a different
-            // kind.
-            "top_ips": {"terms": {"field": "source.ip", "size": 15, "exclude": ["10.8.0.1"]}},
+            // #1677: no per-agg exclusion any more. Hiding an address here
+            // only ever fixed this one list while `countries`, `asns` and
+            // `map_points` -- which aggregate the same documents -- kept
+            // counting them. Both classes of non-attacker are now filtered
+            // by the query above instead: self-generated healthchecks by
+            // their `internal_probe` mark, and the fleet's own addresses,
+            // tunnel endpoint included, by self_addresses().
+            "top_ips": {"terms": {"field": "source.ip", "size": 15}},
             "paths": {"terms": {"field": "url.path", "size": 15}},
             "logins": {"filter": logins_filter()},
             "heatmap": {
@@ -205,7 +236,11 @@ pub async fn dashboard(State(state): State<AppState>) -> Result<Json<Dashboard>,
         // events in 24 hours, 13.5% of everything ingested.
         "query": {"bool": {
             "filter": [{"range": {"@timestamp": {"gte": WINDOW}}}],
-            "must_not": [{"term": {"honeypot.internal_probe": true}}]
+            "must_not": [
+                {"term": {"honeypot.internal_probe": true}},
+                // #1677: and the fleet's own traffic -- see self_addresses().
+                {"terms": {"source.ip": self_addresses()}}
+            ]
         }},
         "aggs": {
             "creds": {"multi_terms": {
@@ -393,4 +428,42 @@ pub async fn dashboard(State(state): State<AppState>) -> Result<Json<Dashboard>,
         map_points,
         sensors,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The env var is process-global, so these run as one test rather than
+    /// racing each other through the same variable.
+    #[test]
+    fn self_addresses_reads_config_and_always_keeps_the_tunnel() {
+        // Unset: the exclusion this handler has always had, and nothing else.
+        unsafe { std::env::remove_var("HONEYPOT_SELF_IPS") };
+        assert_eq!(self_addresses(), vec![TUNNEL_PEER_IP.to_string()]);
+
+        // Configured: the deployment's own addresses, tunnel still included.
+        unsafe { std::env::set_var("HONEYPOT_SELF_IPS", "203.0.113.7, 198.51.100.2") };
+        assert_eq!(
+            self_addresses(),
+            vec!["203.0.113.7".to_string(), "198.51.100.2".to_string(), TUNNEL_PEER_IP.to_string()]
+        );
+
+        // Naming the tunnel explicitly must not list it twice -- a duplicated
+        // term is harmless to Elasticsearch but the operator would have to
+        // wonder whether it meant something.
+        unsafe { std::env::set_var("HONEYPOT_SELF_IPS", "10.8.0.1,203.0.113.7") };
+        assert_eq!(
+            self_addresses(),
+            vec![TUNNEL_PEER_IP.to_string(), "203.0.113.7".to_string()]
+        );
+
+        // Empty and whitespace-only entries are operator typos, not addresses.
+        unsafe { std::env::set_var("HONEYPOT_SELF_IPS", " , ,203.0.113.7, ") };
+        assert_eq!(
+            self_addresses(),
+            vec!["203.0.113.7".to_string(), TUNNEL_PEER_IP.to_string()]
+        );
+        unsafe { std::env::remove_var("HONEYPOT_SELF_IPS") };
+    }
 }
