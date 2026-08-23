@@ -40,6 +40,7 @@ for spec in "suricata-7d:${suricata_days}d" \
             "dionaea-incidents-30d:${retention_days}d" \
             "traefik-30d:${retention_days}d" \
             "zeek-30d:${retention_days}d" "zeek-proxy-30d:${retention_days}d" "huginn-30d:${retention_days}d" \
+            "extracted-files-30d:${retention_days}d" \
             "analysis-results-180d:$(( retention_days * 6 ))d"; do
   name=${spec%%:*}
   age=${spec#*:}
@@ -514,6 +515,71 @@ curl -fsS -X PUT "$es_url/_index_template/zeek-proxy-events" \
           "protocol": { "type": "keyword" },
           "community_id": { "type": "keyword" },
           "session_id": { "type": "keyword" }
+        } }
+      }
+    }
+  }
+}
+JSON
+
+# #1738 decision 5: the bytes of wire-extracted files, not just their hashes.
+#
+# The ES store is the record and local disk is transient, so an artefact has
+# to survive the VPS being wiped or rebuilt -- which disk-only storage does
+# not. Bounded by the extraction policy's own 16 MB per-file cap, so this
+# index cannot grow faster than that policy allows.
+#
+# Stated plainly because it is unusual: this puts attacker-controlled binaries
+# inside the search cluster. They are stored as `binary`, which Elasticsearch
+# accepts as base64 and does NOT index, analyse or make searchable -- the
+# bytes are retrievable and nothing more, with doc_values off so they never
+# enter the columnar store either. Nothing in the pipeline decompresses or
+# executes them. The searchable half is the metadata beside them: hashes, mime
+# type, size, and the connection this came from.
+curl -fsS -X PUT "$es_url/_index_template/extracted-files" \
+  -H 'Content-Type: application/json' \
+  --data-binary @- <<'JSON'
+{
+  "index_patterns": ["extracted-files-v1-*"],
+  "priority": 470,
+  "template": {
+    "settings": {
+      "index.default_pipeline": "geoip-honeypot",
+      "index.lifecycle.name": "extracted-files-30d",
+      "index.number_of_replicas": 0,
+      "index.mapping.total_fields.limit": 100,
+      "index.refresh_interval": "30s"
+    },
+    "mappings": {
+      "properties": {
+        "@timestamp": { "type": "date" },
+        "event": { "properties": { "sensor": { "type": "keyword" }, "category": { "type": "keyword" } } },
+        "file": { "properties": {
+          "hash": { "properties": {
+            "sha256": { "type": "keyword" },
+            "md5": { "type": "keyword" },
+            "sha1": { "type": "keyword" }
+          } },
+          "size": { "type": "long" },
+          "mime_type": { "type": "keyword" },
+          "source": { "type": "keyword" },
+          "extracted_name": { "type": "keyword" },
+          "bytes": { "type": "binary", "doc_values": false }
+        } },
+        "network": { "properties": {
+          "community_id": { "type": "keyword" },
+          "session_id": { "type": "keyword" },
+          "transport": { "type": "keyword" }
+        } },
+        "source": { "properties": {
+          "ip": { "type": "ip", "ignore_malformed": true },
+          "port": { "type": "integer", "ignore_malformed": true },
+          "geo": { "properties": { "location": { "type": "geo_point" }, "country_iso_code": { "type": "keyword" } } },
+          "as": { "properties": { "asn": { "type": "long" }, "organization_name": { "type": "keyword" } } }
+        } },
+        "destination": { "properties": {
+          "ip": { "type": "ip", "ignore_malformed": true },
+          "port": { "type": "integer", "ignore_malformed": true }
         } }
       }
     }
