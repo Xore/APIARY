@@ -154,6 +154,44 @@ function SourceHealthPage() {
           ) : undefined
         }
       />
+      {/* source_health.html:24-33's KPI strip. All four values were already
+          on the API response; only the tiles were missing, so the page
+          opened with no at-a-glance verdict at all. The two in-page
+          anchors match the ids further down, same as the Go tier. */}
+      {health ? (
+        <div className="tw:grid tw:grid-cols-2 tw:sm:grid-cols-4 tw:gap-3 tw:mb-6">
+          <a className="metric" href="#sensor-feeds" title="Jump to the per-sensor feed table">
+            <div className="metric__value">{health.sensors.length.toLocaleString('en-US')}</div>
+            <div className="metric__label">Configured feeds</div>
+          </a>
+          <Link className="metric" to="/history" title="Browse all indexed documents in Elasticsearch history">
+            <div className="metric__value">{health.total_documents.toLocaleString('en-US')}</div>
+            <div className="metric__label">Indexed documents</div>
+          </Link>
+          <a className="metric" href="#pipeline-status" title="Jump to the Filebeat pipeline status card">
+            <div className="metric__value">{health.pipeline?.state ?? 'unknown'}</div>
+            <div className="metric__label">Filebeat</div>
+          </a>
+          <Link className="metric" to="/dead-letters" title="Inspect rejected documents">
+            <div className="metric__value">{health.dead_letters.toLocaleString('en-US')}</div>
+            <div className="metric__label">Dead letters</div>
+          </Link>
+        </div>
+      ) : null}
+      {/* source_health.html:35 — the page's two organising headings were
+          dropped, leaving eight cards in a flat run with nothing saying
+          where the ingestion story ends and the platform story begins.
+          Reworded from "sensor log tail to indexed document": this tier
+          reads Elasticsearch only, and there is no log tail to describe. */}
+      <div className="section-heading">
+        <div>
+          <h2>Ingestion pipeline detail</h2>
+          <p>Every stage from sensor to indexed document, with freshness and failure counters.</p>
+        </div>
+        <Link className="section-link" to="/dead-letters">
+          Inspect dead letters →
+        </Link>
+      </div>
       {health ? (
         <div className="tw:grid tw:grid-cols-12 tw:gap-3.5 tw:mb-6">
           <div className="card wide">
@@ -182,6 +220,20 @@ function SourceHealthPage() {
             </table>
             <p className="note">Delayed means the newest indexed event is over two minutes old; stale means over fifteen minutes.</p>
           </div>
+        </div>
+      ) : null}
+      {/* source_health.html:44. The Go tier's "Prometheus metrics →"
+          section-link is deliberately not restored: neither this frontend
+          nor backend-service exposes a /metrics route, so it would be a
+          link to nothing. */}
+      <div className="section-heading">
+        <div>
+          <h2>Platform services</h2>
+          <p>The scanner, the backend process itself, and the end-to-end pipeline verdict.</p>
+        </div>
+      </div>
+      {health ? (
+        <div className="tw:grid tw:grid-cols-12 tw:gap-3.5 tw:mb-6">
           <div className="card half">
             <h2>YARA scanner</h2>
             <CardRow label="enabled" value={String(yara?.enabled ?? false)} />
@@ -200,7 +252,7 @@ function SourceHealthPage() {
             <CardRow label="Elasticsearch cluster" value={health.cluster_status} />
             <p className="note">The Rust backend service's own process, from /proc/self — the legacy card's Go heap and goroutines have no equivalent here.</p>
           </div>
-          <div className="card half">
+          <div className="card half" id="pipeline-status">
             <h2>Pipeline status</h2>
             <CardRow label="Filebeat" value={pipeline?.state ?? 'unknown'} />
             <CardRow label="acknowledged" value={(pipeline?.acked ?? 0).toLocaleString('en-US')} />
@@ -218,6 +270,12 @@ function SourceHealthPage() {
           </div>
         </div>
       ) : null}
+      <div className="section-heading" id="sensor-feeds">
+        <div>
+          <h2>Per-sensor feeds</h2>
+          <p>Document counts and freshness per sensor, ordered by most recent event.</p>
+        </div>
+      </div>
       <MasterDetailTable
         rows={health ? health.sensors : null}
         columns={COLUMNS}
