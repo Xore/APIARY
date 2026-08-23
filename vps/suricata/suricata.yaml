@@ -100,6 +100,26 @@ outputs:
             force-magic: yes
         - smtp: {}
         - ssh: {}
+        # #1741: these two are 80.1% of Suricata's entire document volume
+        # (netflow 3,665,604 + flow 1,931,139 of 6,984,568 over 7 days) and
+        # the thinnest records it writes -- packets and bytes. Zeek's conn.log
+        # covers the same ground with duration, bidirectional bytes and
+        # packets, conn_state, the history string, inferred service and six
+        # fingerprints, so they are slated for removal.
+        #
+        # They are still enabled here ON PURPOSE. Deleting them before Zeek is
+        # deployed and writing conn.log into Elasticsearch would blank the
+        # front-page traffic chart, which now prefers Zeek but falls back to
+        # these. The cutover, in order:
+        #
+        #   1. Deploy Zeek; confirm zeek-v1-conn-* is filling.
+        #   2. Confirm the netflow-bytes/netflow-packets charts render from
+        #      Zeek (they switch over on their own once Zeek has data).
+        #   3. Confirm ml-worker has retrained with zeek-v1-conn-* in its
+        #      input without tripping its holdout gate.
+        #   4. Only then delete the two lines below and restart Suricata.
+        #
+        # Doing 4 before 1-3 is the failure this comment exists to prevent.
         - flow: {}
         - netflow: {}
         - dhcp:
