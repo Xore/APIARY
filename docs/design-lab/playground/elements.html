@@ -1,0 +1,700 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Design Picker — APIARY Design Lab</title>
+<link rel="stylesheet" href="http://127.0.0.1:19201/static/theme.css">
+<style>
+  body{margin:0;background:var(--app-bg,#20201f);color:var(--text-primary,#e9e6df);font-family:var(--font-sans,sans-serif);padding:30px 34px}
+  .lab-head h1{margin:0 0 4px;font-size:24px}
+  .lab-head h1 em{color:var(--accent);font-style:normal}
+  .lab-head p{color:var(--text-secondary);margin:0 0 10px}
+  .lab-head a{color:var(--text-link)}
+  #picks{position:sticky;top:0;z-index:50;background:var(--surface-2);border:1px solid var(--border-strong);border-radius:12px;padding:10px 16px;margin:14px 0 26px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  #picks b{color:var(--accent)}
+  #picks button{cursor:pointer}
+  section.el{margin:0 0 40px}
+  section.el>h2{font-size:14px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-secondary);border-bottom:1px solid var(--border-subtle);padding-bottom:6px;margin:0 0 14px}
+  .opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px}
+  .opt{border:1px solid var(--border-subtle);border-radius:14px;background:var(--surface-0);padding:14px;cursor:pointer;position:relative;transition:border-color .15s}
+  .opt:hover{border-color:var(--border-strong)}
+  .opt.picked{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+  .opt .tag{position:absolute;top:10px;right:12px;font-size:11px;color:var(--text-muted)}
+  .opt h3{margin:0 0 2px;font-size:13.5px;padding-right:86px}
+  .opt p.why{color:var(--text-muted);font-size:12px;margin:0 0 12px;padding-right:86px}
+  .demo{pointer-events:none}
+  .demo .card{margin-bottom:0}
+  /* ————— element option styles (scoped) ————— */
+  /* cards */
+  .cardB .card{border-color:transparent;box-shadow:0 1px 2px rgba(0,0,0,.14),0 10px 32px rgba(0,0,0,.18);border-radius:18px}
+  .cardC .card{border-top:2px solid var(--accent);border-radius:10px}
+  .cardD .card{padding:0;overflow:hidden}
+  .cardD .card h2{margin:0;padding:12px 18px;background:var(--surface-2);border-bottom:1px solid var(--border-subtle);font-size:13px}
+  .cardD .card .inner{padding:16px 18px}
+  /* skeletons */
+  @keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
+  @keyframes skpulse{0%,100%{opacity:.45}50%{opacity:1}}
+  .skB .skeleton-line{background:linear-gradient(90deg,var(--surface-2) 25%,var(--surface-3) 37%,var(--surface-2) 63%);background-size:800px 100%;animation:shimmer 1.4s linear infinite}
+  .skC .skeleton-line{animation:skpulse 1.6s ease-in-out infinite}
+  .skD .ghost-tile{height:54px;border-radius:10px;background:var(--surface-2);animation:skpulse 1.6s ease-in-out infinite}
+  .skD .ghost-row{height:12px;border-radius:6px;background:var(--surface-2);margin:8px 0;animation:skpulse 1.6s ease-in-out infinite}
+  /* KPI tiles */
+  .kpi{border:1px solid var(--border-subtle);border-radius:12px;padding:14px 18px;background:var(--surface-1)}
+  .kpi .num{font-size:26px;font-weight:700}
+  .kpi .lbl{color:var(--text-secondary);font-size:12px}
+  .kpiB .kpi .delta{display:inline-block;margin-left:8px;font-size:11px;border-radius:999px;padding:1px 8px;background:var(--success-soft);color:var(--success-text-on-soft);vertical-align:4px}
+  .kpiB .spark{margin-top:6px;height:22px;display:flex;align-items:flex-end;gap:2px}
+  .kpiB .spark i{flex:1;background:var(--accent-soft);border-radius:2px 2px 0 0}
+  .kpiB .spark i:nth-child(7){background:var(--accent)}
+  .kpiC .kpi{display:flex;align-items:center;gap:14px}
+  .kpiC .ic{width:38px;height:38px;border-radius:10px;background:var(--accent-soft);display:grid;place-items:center;color:var(--accent-text-on-soft);font-size:18px}
+  .kpiD .kpi{padding:10px 14px;border-radius:6px}
+  .kpiD .kpi .lbl{text-transform:uppercase;letter-spacing:.08em;font-size:10px;order:-1}
+  .kpiD .kpi .num{font-family:var(--font-mono);font-size:22px}
+  .kpiD .kpi{display:flex;flex-direction:column}
+  /* tables */
+  .tblB .data-table tbody tr:nth-child(odd) td{background:var(--surface-0)}
+  .tblC .data-table{border-collapse:separate;border-spacing:0 8px}
+  .tblC .data-table td{background:var(--surface-2);border:0;padding:10px 12px}
+  .tblC .data-table td:first-child{border-radius:10px 0 0 10px}
+  .tblC .data-table td:last-child{border-radius:0 10px 10px 0}
+  .tblC .data-table th{border:0}
+  .tblD .data-table td{font-family:var(--font-mono);font-size:12px;padding:4px 8px;border-right:1px solid var(--border-subtle)}
+  .tblD .data-table td:last-child{border-right:0}
+  /* badges */
+  .bdgB .badge{background:transparent;border:1px solid currentColor}
+  .bdgC .badge{background:transparent;padding-left:0}
+  .bdgC .badge::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:currentColor;margin-right:6px}
+  .bdgD .badge--info{background:var(--info);color:#14202b}
+  .bdgD .badge--success{background:var(--success);color:#0f2418}
+  .bdgD .badge--warning{background:var(--warning);color:#2a2008}
+  .bdgD .badge--danger{background:var(--danger);color:#2b1413}
+  /* buttons */
+  .btn-demo button{margin-right:8px}
+  .btnB button{border-radius:999px}
+  .btnC button{border-radius:5px;padding:4px 12px;font-size:12.5px}
+  .btnD button{background:transparent;border-color:transparent}
+  .btnD button:hover{background:var(--surface-2)}
+  .btnD button.primary{background:transparent;color:var(--accent);border:1px solid var(--accent)}
+  /* tabs */
+  .tabs{display:flex;gap:4px}
+  .tabsA .tabs{background:var(--surface-1);border:1px solid var(--border-subtle);border-radius:12px;padding:4px}
+  .tabsA .t{padding:5px 14px;border-radius:9px;font-size:13px;color:var(--text-secondary)}
+  .tabsA .t.on{background:var(--accent);color:var(--text-on-accent);font-weight:600}
+  .tabsB .tabs{border-bottom:1px solid var(--border-subtle);gap:18px}
+  .tabsB .t{padding:7px 2px;font-size:13px;color:var(--text-secondary);border-bottom:2px solid transparent}
+  .tabsB .t.on{color:var(--text-primary);border-bottom-color:var(--accent)}
+  .tabsC .tabs{border:1px solid var(--border-strong);border-radius:9px;overflow:hidden;gap:0}
+  .tabsC .t{padding:6px 16px;font-size:12.5px;color:var(--text-secondary);border-right:1px solid var(--border-strong)}
+  .tabsC .t:last-child{border-right:0}
+  .tabsC .t.on{background:var(--surface-3);color:var(--text-primary)}
+  .tabsD .tabs{flex-direction:column;width:170px;gap:2px}
+  .tabsD .t{padding:6px 12px;border-radius:8px;font-size:13px;color:var(--text-secondary);border-left:2px solid transparent}
+  .tabsD .t.on{background:var(--surface-1);color:var(--text-primary);border-left-color:var(--accent);border-radius:0 8px 8px 0}
+  /* empty states */
+  .empty-demo{min-height:110px;display:grid;place-items:center;border-radius:10px}
+  .empA .empty-demo{font-family:var(--font-mono);font-size:13px;color:var(--text-muted)}
+  .empB .empty-demo{text-align:center}
+  .empB .ic{font-size:22px;opacity:.6}
+  .empB b{display:block;margin:6px 0 2px}
+  .empB small{color:var(--text-muted)}
+  .empB .act{margin-top:10px;display:inline-block;border:1px solid var(--border-strong);border-radius:999px;padding:4px 14px;font-size:12.5px}
+  .empC .empty-demo{border:1.5px dashed var(--border-strong);color:var(--text-muted);font-size:13px}
+  .empD .empty-demo{min-height:0;padding:8px 12px;background:var(--info-soft);color:var(--info-text-on-soft);border-radius:8px;font-size:12.5px;place-items:start}
+  /* scroll affordances */
+  .scr{height:120px;overflow:auto;border:1px solid var(--border-subtle);border-radius:10px;padding:0 12px}
+  .scr div{padding:8px 0;border-bottom:1px solid var(--border-subtle);font-size:13px;color:var(--text-secondary)}
+  .scrB .scr{background:
+    linear-gradient(var(--surface-1) 33%,rgba(0,0,0,0)) top/100% 24px no-repeat local,
+    linear-gradient(rgba(0,0,0,0),var(--surface-1) 66%) bottom/100% 24px no-repeat local,
+    radial-gradient(farthest-side at 50% 0,rgba(0,0,0,.3),rgba(0,0,0,0)) top/100% 10px no-repeat scroll,
+    radial-gradient(farthest-side at 50% 100%,rgba(0,0,0,.3),rgba(0,0,0,0)) bottom/100% 10px no-repeat scroll}
+  .scrC .wrapx{position:relative}
+  .scrC .more{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);background:var(--surface-3);border:1px solid var(--border-strong);border-radius:999px;font-size:11px;padding:2px 10px;color:var(--text-secondary)}
+  /* nav items */
+  .nav-demo{width:190px;display:flex;flex-direction:column;gap:2px}
+  .nav-demo a{display:flex;align-items:center;gap:9px;padding:6px 10px;font-size:13.5px;color:var(--text-secondary);text-decoration:none}
+  .nav-demo a .i{width:15px;text-align:center;opacity:.8}
+  .navA a.on{color:var(--text-primary);background:var(--surface-2);border-radius:8px}
+  .navB a{border-radius:999px}
+  .navB a:hover{background:var(--surface-1)}
+  .navB a.on{background:var(--surface-2);color:var(--text-primary)}
+  .navC a{border-left:2px solid transparent;border-radius:0}
+  .navC a.on{border-left-color:var(--accent);color:var(--text-primary);background:linear-gradient(90deg,var(--accent-soft),transparent 70%)}
+  .navD a{padding:4px 8px;font-size:12.5px}
+  .navD a.on{color:var(--accent)}
+
+  .vtag{position:absolute;top:30px;right:12px;font-size:10px;letter-spacing:.04em;border-radius:999px;padding:1px 8px;background:var(--surface-2);border:1px solid var(--border-subtle);color:var(--text-secondary)}
+  .vtag.base{color:var(--text-muted)}
+  .vtag.new{background:var(--accent-soft);color:var(--accent-text-on-soft);border-color:transparent}
+
+.prev{height:430px;overflow:hidden;border-radius:10px;border:1px solid var(--border-subtle);background:var(--app-bg);position:relative}
+  .prev .mock{width:1600px;transform:scale(.36);transform-origin:top left;pointer-events:none;position:absolute;top:0;left:0}
+  @media (min-width:1400px){.prev .mock{transform:scale(.42)}}
+  /* ————— mock building blocks ————— */
+  .mock{font-size:15px;padding:26px 34px;box-sizing:border-box}
+  .mock *{box-sizing:border-box}
+  .m-title{font-size:30px;font-weight:700;margin:0 0 4px}
+  .m-serif{font-family:Georgia,"Times New Roman",serif;font-weight:500}
+  .m-sub{color:var(--text-secondary);font-size:14.5px;margin:0 0 18px}
+  .m-row{display:flex;gap:14px;align-items:center}
+  .m-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:16px}
+  .m-kpi{border:1px solid var(--border-subtle);background:var(--surface-1);border-radius:12px;padding:14px 16px}
+  .m-kpi b{font-size:22px;display:block}
+  .m-kpi span{color:var(--text-secondary);font-size:12px}
+  .m-card{border:1px solid var(--border-subtle);background:var(--surface-1);border-radius:14px;padding:16px 18px;margin-bottom:14px}
+  .m-card h4{margin:0 0 10px;font-size:14px}
+  .m-tabs{display:inline-flex;gap:4px;background:var(--surface-1);border:1px solid var(--border-subtle);border-radius:12px;padding:4px;margin-bottom:16px}
+  .m-tabs i{font-style:normal;padding:5px 14px;border-radius:9px;font-size:13px;color:var(--text-secondary)}
+  .m-tabs i.on{background:var(--accent);color:var(--text-on-accent);font-weight:600}
+  .m-heat{display:grid;grid-template-columns:repeat(24,1fr);gap:3px}
+  .m-heat i{aspect-ratio:1;border-radius:3px;background:var(--accent-soft)}
+  .m-heat i:nth-child(3n){background:rgba(217,119,87,.45)}
+  .m-heat i:nth-child(7n){background:var(--accent)}
+  .m-map{background:radial-gradient(ellipse at 35% 40%,rgba(217,119,87,.35) 0 6%,transparent 7%),radial-gradient(ellipse at 55% 35%,rgba(217,119,87,.5) 0 4%,transparent 5%),radial-gradient(ellipse at 70% 55%,rgba(217,119,87,.4) 0 5%,transparent 6%),radial-gradient(ellipse at 25% 60%,rgba(217,119,87,.3) 0 4%,transparent 5%),var(--surface-2);border-radius:10px}
+  .m-tbl{width:100%;border-collapse:collapse;font-size:13px}
+  .m-tbl th{text-align:left;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;padding:6px 10px;border-bottom:1px solid var(--border-strong)}
+  .m-tbl td{padding:8px 10px;border-bottom:1px solid var(--border-subtle);color:var(--text-secondary)}
+  .m-tbl td:first-child{font-family:var(--font-mono);font-size:12px}
+  .m-tbl tr.sel td{background:var(--accent-soft)}
+  .m-chip{display:inline-block;border-radius:999px;padding:2px 10px;font-size:11.5px;background:var(--info-soft);color:var(--info-text-on-soft);margin-right:4px}
+  .m-chip.ok{background:var(--success-soft);color:var(--success-text-on-soft)}
+  .m-chip.warn{background:var(--warning-soft);color:var(--warning-text-on-soft)}
+  .m-mono{font-family:var(--font-mono);font-size:12px}
+  .m-btn{display:inline-block;border-radius:999px;padding:6px 16px;font-size:13px;background:var(--accent);color:var(--text-on-accent);font-weight:600}
+  .m-btn.sec{background:var(--surface-2);color:var(--text-primary);font-weight:400;border:1px solid var(--border-subtle)}
+  .m-json{background:var(--surface-2);border-radius:10px;padding:12px;font-family:var(--font-mono);font-size:11.5px;color:var(--text-secondary);line-height:1.5}
+  .m-spark{display:flex;align-items:flex-end;gap:3px;height:46px}
+  .m-spark i{flex:1;background:var(--accent-soft);border-radius:2px 2px 0 0}
+  .m-spark i:nth-child(2n){background:rgba(217,119,87,.4)}
+  .m-bar{height:8px;border-radius:4px;background:var(--accent);opacity:.75}
+  .m-ghostbtn{color:var(--text-link);font-size:13px}
+  .m-toolrow{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
+  .m-railstep{padding:8px 14px;border-left:2px solid transparent;color:var(--text-secondary);font-size:13.5px}
+  .m-railstep.on{border-left-color:var(--accent);color:var(--text-primary);background:var(--surface-1);border-radius:0 8px 8px 0}
+
+
+  /* shell mock helpers */
+  .sh-top{display:flex;align-items:center;gap:12px;border:1px solid var(--border-subtle);border-radius:10px;padding:8px 14px;background:var(--surface-0);font-size:12.5px;color:var(--text-secondary)}
+  .sh-top .grow{flex:1}
+  .sh-ic{width:22px;height:22px;border-radius:6px;background:var(--surface-2);display:inline-grid;place-items:center;font-size:11px}
+  .sh-live{border-radius:999px;background:var(--success-soft);color:var(--success-text-on-soft);padding:1px 10px;font-size:11px}
+  .sh-avatar{width:22px;height:22px;border-radius:50%;background:var(--accent);color:var(--text-on-accent);display:inline-grid;place-items:center;font-size:10px;font-weight:700}
+  .sh-search{flex:1;max-width:340px;background:var(--surface-2);border:1px solid var(--border-subtle);border-radius:999px;padding:4px 14px;color:var(--text-muted)}
+  .sh-side{width:210px;border:1px solid var(--border-subtle);border-radius:12px;background:var(--surface-0);padding:10px;font-size:13px}
+  .sh-side .lbl{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);margin:10px 4px 4px}
+  .sh-side a{display:flex;gap:8px;align-items:center;padding:5px 9px;color:var(--text-secondary);border-radius:8px;text-decoration:none}
+  .sh-side a.on{color:var(--text-primary);background:var(--surface-2)}
+  .sh-side .cnt{margin-left:auto;font-size:10px;background:var(--danger-soft);color:var(--danger-text-on-soft);border-radius:999px;padding:0 7px}
+  .sh-seg{display:flex;background:var(--surface-2);border-radius:999px;padding:3px;margin-bottom:8px}
+  .sh-seg i{flex:1;text-align:center;font-style:normal;font-size:11.5px;padding:3px 0;border-radius:999px;color:var(--text-secondary)}
+  .sh-seg i.on{background:var(--surface-raised);color:var(--text-primary)}
+  .sh-new{display:block;text-align:center;background:var(--accent);color:var(--text-on-accent);border-radius:999px;padding:6px 0;font-weight:600;font-size:12.5px;margin-bottom:10px}
+  .sh-rail{width:52px;border:1px solid var(--border-subtle);border-radius:12px;background:var(--surface-0);padding:8px 0;display:flex;flex-direction:column;align-items:center;gap:6px}
+  .sh-rail .sh-ic{width:30px;height:30px;font-size:13px}
+  .sh-rail .sh-ic.on{background:var(--accent-soft);color:var(--accent-text-on-soft)}
+  .sh-fly{border:1px solid var(--border-strong);border-radius:10px;background:var(--surface-2);padding:8px 12px;font-size:12.5px;box-shadow:var(--shadow-raised)}
+  .sh-modal{border:1px solid var(--border-strong);border-radius:14px;background:var(--surface-1);box-shadow:var(--shadow-dialog);overflow:hidden}
+  .sh-drawer{border:1px solid var(--border-strong);border-radius:14px 0 0 14px;background:var(--surface-1);box-shadow:var(--shadow-dialog)}
+  .sh-dd{border:1px solid var(--border-strong);border-radius:12px;background:var(--surface-2);box-shadow:var(--shadow-raised);padding:6px;width:210px;font-size:12.5px}
+  .sh-dd .hd{font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-muted);padding:5px 8px 3px}
+  .sh-dd a{display:flex;gap:8px;align-items:center;padding:6px 8px;border-radius:8px;color:var(--text-secondary);text-decoration:none}
+  .sh-dd a:hover{background:var(--surface-3)}
+  .sh-rowact{display:flex;gap:6px}
+  .sh-rowact .sh-ic{opacity:.85}
+  .sh-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:8px;border:1px solid var(--border-strong);border-radius:12px;background:var(--surface-2);box-shadow:var(--shadow-raised);width:230px}
+  .sh-grid a{display:grid;place-items:center;gap:4px;padding:8px 4px;border-radius:8px;color:var(--text-secondary);font-size:10.5px;text-decoration:none}
+  .sh-grid a:hover{background:var(--surface-3)}
+  .sh-split{display:inline-flex;border:1px solid var(--accent);border-radius:10px;overflow:hidden;font-size:12.5px}
+  .sh-split b{padding:5px 12px;color:var(--accent)}
+  .sh-split i{font-style:normal;padding:5px 8px;border-left:1px solid var(--accent);color:var(--accent)}
+
+
+  /* ————— E/F additions: claude pure + claude × v3 dense ————— */
+  .vtag.mix{background:var(--warning-soft);color:var(--warning-text-on-soft);border-color:transparent}
+  .cardE .card{border:0;background:var(--surface-1);border-radius:20px;box-shadow:0 2px 6px rgba(0,0,0,.12),0 16px 40px rgba(0,0,0,.16);padding:20px 22px}
+  .cardE .card h2{font-family:Georgia,serif;font-weight:500}
+  .cardF .card{border:0;background:var(--surface-1);border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.16);padding:12px 14px}
+  .cardF .card h2{font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.09em;color:var(--text-muted)}
+  .skE .ghost-card{border:0;border-radius:20px;background:var(--surface-1);box-shadow:0 2px 6px rgba(0,0,0,.1);padding:18px;animation:skpulse 2s ease-in-out infinite}
+  .skE .ghost-title{width:40%;height:13px;border-radius:7px;background:var(--surface-3);margin-bottom:12px}
+  .skE .ghost-line{height:10px;border-radius:5px;background:var(--surface-2);margin:8px 0}
+  .skF .scanrow{display:flex;gap:6px;margin:6px 0;animation:skpulse 1.2s ease-in-out infinite}
+  .skF .scanrow i{height:8px;border-radius:2px;background:var(--surface-2);flex:1}
+  .skF .scanrow i:first-child{flex:0 0 58px;background:var(--surface-3)}
+  .krow{display:flex}
+  .krow .k{flex:1;padding:6px 18px;border-left:1px solid var(--border-subtle)}
+  .krow .k:first-child{border-left:0;padding-left:0}
+  .kpiE .k b{font-family:Georgia,serif;font-weight:500;font-size:26px;display:block}
+  .kpiE .k span{color:var(--text-muted);font-size:12px}
+  .kpiF .k{display:flex;flex-direction:column}
+  .kpiF .k b{font-family:var(--font-mono);font-size:21px}
+  .kpiF .k b i{font-style:normal;color:var(--success);font-size:11px;margin-left:7px}
+  .kpiF .k span{order:-1;text-transform:uppercase;letter-spacing:.08em;font-size:9.5px;color:var(--text-muted);margin-bottom:2px}
+  .tblE .data-table th{border:0;font-size:11px;color:var(--text-muted)}
+  .tblE .data-table td{border:0;border-bottom:1px solid var(--border-subtle);padding:11px 12px;font-size:13px}
+  .tblE .data-table tbody tr:hover td{background:var(--surface-2)}
+  .tblE .data-table tbody tr:hover td:first-child{border-radius:8px 0 0 8px}
+  .tblE .data-table tbody tr:hover td:last-child{border-radius:0 8px 8px 0}
+  .tblF .data-table th{border:0;font-size:9.5px;letter-spacing:.09em}
+  .tblF .data-table td{border:0;border-bottom:1px solid var(--border-subtle);font-family:var(--font-mono);font-size:11.5px;padding:5px 10px}
+  .tblF .data-table tbody tr:hover td{background:var(--surface-2)}
+  .bdgE .badge{background:var(--surface-2);border:0;border-radius:999px}
+  .bdgE .badge::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;margin-right:6px}
+  .bdgF .badge{background:transparent;border:0;font-family:var(--font-mono);font-size:10.5px;padding:0}
+  .bdgF .badge::before{content:"[ "}
+  .bdgF .badge::after{content:" ]"}
+  .btnE button{border-radius:999px;border:1px solid transparent;background:var(--surface-2)}
+  .btnE button.primary{background:var(--accent);color:var(--text-on-accent);font-weight:600}
+  .btnF button{border-radius:999px;border:1px solid transparent;background:var(--surface-2);font-family:var(--font-mono);font-size:11.5px;padding:4px 13px}
+  .btnF button.primary{background:var(--accent);color:var(--text-on-accent)}
+  .tabsE .tabs{gap:6px}
+  .tabsE .t{padding:6px 15px;border-radius:999px;font-size:13px;color:var(--text-secondary)}
+  .tabsE .t.on{background:var(--surface-raised);color:var(--text-primary);box-shadow:0 1px 4px rgba(0,0,0,.18)}
+  .tabsF .tabs{gap:16px;border-bottom:1px solid var(--border-subtle)}
+  .tabsF .t{padding:5px 1px;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--text-muted);border-bottom:2px solid transparent}
+  .tabsF .t.on{color:var(--accent);border-bottom-color:var(--accent)}
+  .empE .empty-demo{text-align:center}
+  .empE .serif{font-family:Georgia,serif;font-size:16px;color:var(--text-secondary)}
+  .empE small{color:var(--text-muted);display:block;margin:4px 0 10px}
+  .empE .act{display:inline-block;background:var(--surface-2);border-radius:999px;padding:5px 16px;font-size:12.5px}
+  .empF .empty-demo{min-height:0;place-items:start;font-family:var(--font-mono);font-size:11.5px;color:var(--text-muted);padding:10px 12px;background:var(--surface-0);border-radius:8px}
+  .scrE .wrapx,.scrF .wrapx{position:relative}
+  .scrE .scr{background:
+    linear-gradient(var(--surface-1) 33%,rgba(0,0,0,0)) top/100% 24px no-repeat local,
+    linear-gradient(rgba(0,0,0,0),var(--surface-1) 66%) bottom/100% 24px no-repeat local;
+    background-color:var(--surface-1)}
+  .scrE .dl{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);width:26px;height:26px;border-radius:50%;background:var(--surface-raised);box-shadow:0 2px 8px rgba(0,0,0,.25);display:grid;place-items:center;font-size:13px;color:var(--text-primary)}
+  .scrF .cnt{position:absolute;right:8px;bottom:8px;font-family:var(--font-mono);font-size:10px;color:var(--accent);background:var(--surface-0);border:1px solid var(--border-subtle);border-radius:4px;padding:1px 6px}
+  .navE a{border-radius:10px}
+  .navE a.on{background:var(--surface-raised);color:var(--text-primary);box-shadow:0 1px 4px rgba(0,0,0,.16)}
+  .navF a{padding:4px 8px;font-family:var(--font-mono);font-size:11.5px}
+  .navF a.on{color:var(--accent)}
+
+</style>
+</head>
+<body>
+<div class="lab-head">
+  <h1>Design <em>Picker</em></h1>
+  <p>Elements AND page layouts in one place. The small tag on each option shows where it comes from (base = current design, v1–v4 = a lab variant, new = drafted here). Click to pick one per row. Picks persist in this browser — hit “copy picks” and paste the result back to Claude. <a href="index.html">← back to lab</a></p>
+</div>
+<div id="picks"><b>Picks:</b><span id="picklist">none yet</span><button class="secondary" id="copy">copy picks</button><button class="secondary" id="clear">clear</button></div>
+
+<section class="el" data-el="card"><h2>1 · Card container</h2><div class="opts">
+  <div class="opt" data-opt="A"><span class="tag">1A</span><span class="vtag base">base / v1</span><h3>Stock</h3><p class="why">Hairline border, flat surface — current theme.</p>
+    <div class="demo"><div class="card"><h2 style="font-size:14px;margin:0 0 6px">Sensor feeds</h2><p style="color:var(--text-secondary);font-size:13px;margin:0">29 sensors reporting. Active = recent traffic.</p></div></div></div>
+  <div class="opt" data-opt="B"><span class="tag">1B</span><span class="vtag ">v2 · v4</span><h3>Soft elevated</h3><p class="why">Borderless, larger radius, layered shadow (v2/claude feel).</p>
+    <div class="demo cardB"><div class="card"><h2 style="font-size:14px;margin:0 0 6px">Sensor feeds</h2><p style="color:var(--text-secondary);font-size:13px;margin:0">29 sensors reporting. Active = recent traffic.</p></div></div></div>
+  <div class="opt" data-opt="C"><span class="tag">1C</span><span class="vtag new">new</span><h3>Accent-top</h3><p class="why">2px accent keyline marks every card; tighter radius.</p>
+    <div class="demo cardC"><div class="card"><h2 style="font-size:14px;margin:0 0 6px">Sensor feeds</h2><p style="color:var(--text-secondary);font-size:13px;margin:0">29 sensors reporting. Active = recent traffic.</p></div></div></div>
+  <div class="opt" data-opt="D"><span class="tag">1D</span><span class="vtag new">new</span><h3>Header strip</h3><p class="why">Title in a contrasting header band — stronger card anatomy.</p>
+    <div class="demo cardD"><div class="card"><h2>Sensor feeds</h2><div class="inner"><p style="color:var(--text-secondary);font-size:13px;margin:0">29 sensors reporting. Active = recent traffic.</p></div></div></div></div>
+  <div class="opt" data-opt="E"><span class="tag">1E</span><span class="vtag new">new · claude</span><h3>Claude floating</h3><p class="why">Borderless, big radius, soft layered shadow, serif title — pure claude surface.</p>
+    <div class="demo cardE"><div class="card"><h2 style="font-size:16px;margin:0 0 6px">Sensor feeds</h2><p style="color:var(--text-secondary);font-size:13px;margin:0">29 sensors reporting. Active = recent traffic.</p></div></div></div>
+  <div class="opt" data-opt="F"><span class="tag">1F</span><span class="vtag mix">claude × v3</span><h3>Floating dense</h3><p class="why">Claude’s shadowed borderless slab at v3 density: tight padding, mono micro-caps title.</p>
+    <div class="demo cardF"><div class="card"><h2 style="font-size:10.5px;margin:0 0 6px">sensor feeds</h2><p style="color:var(--text-secondary);font-size:12px;margin:0">29 sensors reporting. Active = recent traffic.</p></div></div></div>
+</div></section>
+
+<section class="el" data-el="skeleton"><h2>2 · Skeleton / loading card</h2><div class="opts">
+  <div class="opt" data-opt="A"><span class="tag">2A</span><span class="vtag base">base</span><h3>Static lines</h3><p class="why">Current: plain gray bars, no motion.</p>
+    <div class="demo"><div class="card"><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:85%"></div><div class="skeleton-line" style="width:72%"></div></div></div></div>
+  <div class="opt" data-opt="B"><span class="tag">2B</span><span class="vtag new">new</span><h3>Shimmer</h3><p class="why">Light sweep signals active loading.</p>
+    <div class="demo skB"><div class="card"><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:85%"></div><div class="skeleton-line" style="width:72%"></div></div></div></div>
+  <div class="opt" data-opt="C"><span class="tag">2C</span><span class="vtag new">new</span><h3>Pulse</h3><p class="why">Gentle opacity breathing; calmer than shimmer, still alive.</p>
+    <div class="demo skC"><div class="card"><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:85%"></div><div class="skeleton-line" style="width:72%"></div></div></div></div>
+  <div class="opt" data-opt="D"><span class="tag">2D</span><span class="vtag new">new</span><h3>Content-shaped ghost</h3><p class="why">Ghost mirrors the final layout (tiles + rows) — zero layout shift.</p>
+    <div class="demo skD"><div class="card"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px"><div class="ghost-tile"></div><div class="ghost-tile"></div><div class="ghost-tile"></div></div><div class="ghost-row" style="width:90%"></div><div class="ghost-row" style="width:76%"></div><div class="ghost-row" style="width:83%"></div></div></div></div>
+  <div class="opt" data-opt="E"><span class="tag">2E</span><span class="vtag new">new · claude</span><h3>Breathing card ghost</h3><p class="why">The whole placeholder card breathes gently — claude’s thinking rhythm, serif-sized title bar.</p>
+    <div class="demo skE"><div class="ghost-card"><div class="ghost-title"></div><div class="ghost-line" style="width:85%"></div><div class="ghost-line" style="width:70%"></div><div class="ghost-line" style="width:55%"></div></div></div></div>
+  <div class="opt" data-opt="F"><span class="tag">2F</span><span class="vtag mix">claude × v3</span><h3>Mono scanlines</h3><p class="why">Label-column + value bars per row — dense table ghost at v3 rhythm, quick pulse.</p>
+    <div class="demo skF"><div class="card"><div class="scanrow"><i></i><i></i><i></i><i></i></div><div class="scanrow"><i></i><i></i><i></i><i></i></div><div class="scanrow"><i></i><i></i><i></i><i></i></div><div class="scanrow"><i></i><i></i><i></i><i></i></div></div></div></div>
+</div></section>
+
+<section class="el" data-el="kpi"><h2>3 · KPI stat tile</h2><div class="opts">
+  <div class="opt" data-opt="A"><span class="tag">3A</span><span class="vtag base">base</span><h3>Stock</h3><p class="why">Big number, quiet label below.</p>
+    <div class="demo"><div class="kpi"><div class="num">3,076,059</div><div class="lbl">Events in 24h</div></div></div></div>
+  <div class="opt" data-opt="B"><span class="tag">3B</span><span class="vtag new">new</span><h3>Delta + sparkline</h3><p class="why">Trend at a glance: change chip and 24h micro-trend.</p>
+    <div class="demo kpiB"><div class="kpi"><div class="num">3,076,059<span class="delta">+21%</span></div><div class="lbl">Events in 24h</div><div class="spark"><i style="height:30%"></i><i style="height:45%"></i><i style="height:38%"></i><i style="height:62%"></i><i style="height:55%"></i><i style="height:74%"></i><i style="height:100%"></i></div></div></div></div>
+  <div class="opt" data-opt="C"><span class="tag">3C</span><span class="vtag new">new</span><h3>Icon-led</h3><p class="why">Category icon anchors the tile; friendlier scan.</p>
+    <div class="demo kpiC"><div class="kpi"><div class="ic">⚡</div><div><div class="num">3,076,059</div><div class="lbl">Events in 24h</div></div></div></div></div>
+  <div class="opt" data-opt="D"><span class="tag">3D</span><span class="vtag ">v3</span><h3>Dense mono</h3><p class="why">Label-first micro-caps, mono numerals (terminal).</p>
+    <div class="demo kpiD"><div class="kpi"><div class="num">3,076,059</div><div class="lbl">Events · 24h</div></div></div></div>
+  <div class="opt" data-opt="E"><span class="tag">3E</span><span class="vtag new">new · claude</span><h3>Boxless serif strip</h3><p class="why">No tiles at all: serif numerals over quiet labels, hairline dividers — claude stat strip.</p>
+    <div class="demo kpiE"><div class="card"><div class="krow"><div class="k"><b>3,076,059</b><span>Events · 24h</span></div><div class="k"><b>13,334</b><span>Attack sources</span></div><div class="k"><b>1,286</b><span>Payloads</span></div></div></div></div></div>
+  <div class="opt" data-opt="F"><span class="tag">3F</span><span class="vtag mix">claude × v3</span><h3>Boxless mono strip</h3><p class="why">Same open strip, v3 data treatment: micro-caps labels first, mono numerals, inline delta.</p>
+    <div class="demo kpiF"><div class="card"><div class="krow"><div class="k"><span>events 24h</span><b>3,076,059<i>+12%</i></b></div><div class="k"><span>sources</span><b>13,334</b></div><div class="k"><span>payloads</span><b>1,286</b></div></div></div></div></div>
+</div></section>
+
+<section class="el" data-el="table"><h2>4 · Data table rows</h2><div class="opts">
+  <div class="opt" data-opt="A"><span class="tag">4A</span><span class="vtag base">base / v1</span><h3>Stock</h3><p class="why">Hairline row separators.</p>
+    <div class="demo"><table class="data-table"><thead><tr><th>time</th><th>sensor</th><th>source ip</th></tr></thead><tbody><tr><td>00:28:23</td><td><span class="badge badge--info">cowrie</span></td><td>203.0.113.122</td></tr><tr><td>00:27:11</td><td><span class="badge badge--info">dionaea</span></td><td>123.188.73.228</td></tr><tr><td>00:26:40</td><td><span class="badge badge--info">multipot</span></td><td>213.176.26.114</td></tr></tbody></table></div></div>
+  <div class="opt" data-opt="B"><span class="tag">4B</span><span class="vtag new">new</span><h3>Zebra</h3><p class="why">Alternating row wash for long-row tracking.</p>
+    <div class="demo tblB"><table class="data-table"><thead><tr><th>time</th><th>sensor</th><th>source ip</th></tr></thead><tbody><tr><td>00:28:23</td><td><span class="badge badge--info">cowrie</span></td><td>203.0.113.122</td></tr><tr><td>00:27:11</td><td><span class="badge badge--info">dionaea</span></td><td>123.188.73.228</td></tr><tr><td>00:26:40</td><td><span class="badge badge--info">multipot</span></td><td>213.176.26.114</td></tr></tbody></table></div></div>
+  <div class="opt" data-opt="C"><span class="tag">4C</span><span class="vtag new">new</span><h3>Card rows</h3><p class="why">Each row its own rounded slab — modern SaaS lists.</p>
+    <div class="demo tblC"><table class="data-table"><thead><tr><th>time</th><th>sensor</th><th>source ip</th></tr></thead><tbody><tr><td>00:28:23</td><td><span class="badge badge--info">cowrie</span></td><td>203.0.113.122</td></tr><tr><td>00:27:11</td><td><span class="badge badge--info">dionaea</span></td><td>123.188.73.228</td></tr><tr><td>00:26:40</td><td><span class="badge badge--info">multipot</span></td><td>213.176.26.114</td></tr></tbody></table></div></div>
+  <div class="opt" data-opt="D"><span class="tag">4D</span><span class="vtag ">v3</span><h3>Dense mono grid</h3><p class="why">Column rules + mono cells; maximum rows per screen.</p>
+    <div class="demo tblD"><table class="data-table"><thead><tr><th>time</th><th>sensor</th><th>source ip</th></tr></thead><tbody><tr><td>00:28:23</td><td><span class="badge badge--info">cowrie</span></td><td>203.0.113.122</td></tr><tr><td>00:27:11</td><td><span class="badge badge--info">dionaea</span></td><td>123.188.73.228</td></tr><tr><td>00:26:40</td><td><span class="badge badge--info">multipot</span></td><td>213.176.26.114</td></tr></tbody></table></div></div>
+  <div class="opt" data-opt="E"><span class="tag">4E</span><span class="vtag new">new · claude</span><h3>Open rows + hover pill</h3><p class="why">No chrome: airy padding, hairline separators, whole row lifts on hover — claude list feel.</p>
+    <div class="demo tblE"><div class="card"><table class="data-table"><thead><tr><th>time</th><th>sensor</th><th>source ip</th></tr></thead><tbody><tr><td>00:28:23</td><td>mailoney</td><td>203.0.113.122</td></tr><tr><td>00:28:19</td><td>cowrie</td><td>123.188.73.228</td></tr><tr><td>00:28:11</td><td>dionaea</td><td>213.176.26.114</td></tr></tbody></table></div></div></div>
+  <div class="opt" data-opt="F"><span class="tag">4F</span><span class="vtag mix">claude × v3</span><h3>Open dense mono</h3><p class="why">Same chrome-free rows at v3 density: mono cells, 5px padding, micro-caps headers.</p>
+    <div class="demo tblF"><div class="card"><table class="data-table"><thead><tr><th>time</th><th>sensor</th><th>source ip</th></tr></thead><tbody><tr><td>00:28:23</td><td>mailoney</td><td>203.0.113.122</td></tr><tr><td>00:28:19</td><td>cowrie</td><td>123.188.73.228</td></tr><tr><td>00:28:11</td><td>dionaea</td><td>213.176.26.114</td></tr></tbody></table></div></div></div>
+</div></section>
+
+<section class="el" data-el="badge"><h2>5 · Badges & status</h2><div class="opts">
+  <div class="opt" data-opt="A"><span class="tag">5A</span><span class="vtag base">base</span><h3>Stock soft</h3><p class="why">Tinted background chips.</p>
+    <div class="demo"><span class="badge badge--success">ACTIVE</span> <span class="badge badge--info">cowrie</span> <span class="badge badge--warning">stale</span> <span class="badge badge--danger">open</span></div></div>
+  <div class="opt" data-opt="B"><span class="tag">5B</span><span class="vtag new">new</span><h3>Outline</h3><p class="why">Transparent, current-color ring — lighter surface noise.</p>
+    <div class="demo bdgB"><span class="badge badge--success">ACTIVE</span> <span class="badge badge--info">cowrie</span> <span class="badge badge--warning">stale</span> <span class="badge badge--danger">open</span></div></div>
+  <div class="opt" data-opt="C"><span class="tag">5C</span><span class="vtag new">new</span><h3>Dot + label</h3><p class="why">Status dot, no chip at all — quietest option.</p>
+    <div class="demo bdgC"><span class="badge badge--success">ACTIVE</span> <span class="badge badge--info">cowrie</span> <span class="badge badge--warning">stale</span> <span class="badge badge--danger">open</span></div></div>
+  <div class="opt" data-opt="D"><span class="tag">5D</span><span class="vtag new">new</span><h3>Solid</h3><p class="why">Full-strength fills — loudest, best for few statuses.</p>
+    <div class="demo bdgD"><span class="badge badge--success">ACTIVE</span> <span class="badge badge--info">cowrie</span> <span class="badge badge--warning">stale</span> <span class="badge badge--danger">open</span></div></div>
+  <div class="opt" data-opt="E"><span class="tag">5E</span><span class="vtag new">new · claude</span><h3>Neutral chip + dot</h3><p class="why">One quiet surface chip everywhere; only the dot carries the status color — claude’s restraint.</p>
+    <div class="demo bdgE"><div class="card"><span class="badge badge--success">healthy</span> <span class="badge badge--info">tcp/445</span> <span class="badge badge--warning">quiet</span> <span class="badge badge--danger">critical</span></div></div></div>
+  <div class="opt" data-opt="F"><span class="tag">5F</span><span class="vtag mix">claude × v3</span><h3>Bracket mono</h3><p class="why">No chip at all: [ bracketed ] mono words in the status color — terminal-dense.</p>
+    <div class="demo bdgF"><div class="card"><span class="badge badge--success">healthy</span> <span class="badge badge--info">tcp/445</span> <span class="badge badge--warning">quiet</span> <span class="badge badge--danger">critical</span></div></div></div>
+</div></section>
+
+<section class="el" data-el="button"><h2>6 · Buttons</h2><div class="opts">
+  <div class="opt" data-opt="A"><span class="tag">6A</span><span class="vtag base">base</span><h3>Stock</h3><p class="why">Rounded-9 controls.</p>
+    <div class="demo btn-demo"><button class="primary">Generate now</button><button class="secondary">Save definition</button><button>Reset</button></div></div>
+  <div class="opt" data-opt="B"><span class="tag">6B</span><span class="vtag ">v2 · v4</span><h3>Pill</h3><p class="why">Fully rounded (claude.ai feel).</p>
+    <div class="demo btn-demo btnB"><button class="primary">Generate now</button><button class="secondary">Save definition</button><button>Reset</button></div></div>
+  <div class="opt" data-opt="C"><span class="tag">6C</span><span class="vtag ">v3</span><h3>Compact square</h3><p class="why">Tight radius + smaller hit area (dense/terminal).</p>
+    <div class="demo btn-demo btnC"><button class="primary">Generate now</button><button class="secondary">Save definition</button><button>Reset</button></div></div>
+  <div class="opt" data-opt="D"><span class="tag">6D</span><span class="vtag new">new</span><h3>Ghost + outline primary</h3><p class="why">Minimal chrome; only the primary carries color.</p>
+    <div class="demo btn-demo btnD"><button class="primary">Generate now</button><button class="secondary">Save definition</button><button>Reset</button></div></div>
+  <div class="opt" data-opt="E"><span class="tag">6E</span><span class="vtag new">new · claude</span><h3>Claude solid pill</h3><p class="why">claude.ai’s actual buttons: solid accent pill primary, quiet surface pills for the rest, zero borders.</p>
+    <div class="demo btn-demo btnE"><div class="card"><button class="primary">Generate report</button><button>Export CSV</button><button>Reset</button></div></div></div>
+  <div class="opt" data-opt="F"><span class="tag">6F</span><span class="vtag mix">claude × v3</span><h3>Compact mono pill</h3><p class="why">Pill silhouette at v3 scale: shorter, mono labels — dense toolbars stay calm.</p>
+    <div class="demo btn-demo btnF"><div class="card"><button class="primary">generate</button><button>export csv</button><button>reset</button></div></div></div>
+</div></section>
+
+<section class="el" data-el="tabs"><h2>7 · Tabs / section switcher</h2><div class="opts">
+  <div class="opt" data-opt="A"><span class="tag">7A</span><span class="vtag base">base</span><h3>Stock pills</h3><p class="why">Numbered pills in a container (current Overview).</p>
+    <div class="demo tabsA"><div class="tabs"><span class="t on">Live operations</span><span class="t">Threat landscape</span><span class="t">Attacker behavior</span></div></div></div>
+  <div class="opt" data-opt="B"><span class="tag">7B</span><span class="vtag new">new</span><h3>Underline</h3><p class="why">Browser-classic; lightest visual weight.</p>
+    <div class="demo tabsB"><div class="tabs"><span class="t on">Live operations</span><span class="t">Threat landscape</span><span class="t">Attacker behavior</span></div></div></div>
+  <div class="opt" data-opt="C"><span class="tag">7C</span><span class="vtag new">new</span><h3>Segmented</h3><p class="why">One bordered control, macOS-style.</p>
+    <div class="demo tabsC"><div class="tabs"><span class="t on">Live operations</span><span class="t">Threat landscape</span><span class="t">Attacker behavior</span></div></div></div>
+  <div class="opt" data-opt="D"><span class="tag">7D</span><span class="vtag new">new</span><h3>Vertical rail</h3><p class="why">Left rail with accent bar — suits many-tab pages (settings).</p>
+    <div class="demo tabsD"><div class="tabs"><span class="t on">Live operations</span><span class="t">Threat landscape</span><span class="t">Attacker behavior</span></div></div></div>
+  <div class="opt" data-opt="E"><span class="tag">7E</span><span class="vtag new">new · claude</span><h3>Floating pills</h3><p class="why">Free-standing pills, active one raised with a soft shadow — no container box (claude toggle feel).</p>
+    <div class="demo tabsE"><div class="tabs"><span class="t on">Live operations</span><span class="t">Threat landscape</span><span class="t">Attacker behavior</span></div></div></div>
+  <div class="opt" data-opt="F"><span class="tag">7F</span><span class="vtag mix">claude × v3</span><h3>Mono micro underline</h3><p class="why">v3 micro-caps mono labels with an accent underline — smallest possible switcher.</p>
+    <div class="demo tabsF"><div class="tabs"><span class="t on">live ops</span><span class="t">threat landscape</span><span class="t">attacker behavior</span></div></div></div>
+</div></section>
+
+<section class="el" data-el="empty"><h2>8 · Empty state</h2><div class="opts">
+  <div class="opt" data-opt="A"><span class="tag">8A</span><span class="vtag base">base</span><h3>Stock mono</h3><p class="why">Terminal one-liner (current).</p>
+    <div class="demo empA"><div class="card"><div class="empty-demo">No canarytokens created yet — use the Create bait tab.</div></div></div></div>
+  <div class="opt" data-opt="B"><span class="tag">8B</span><span class="vtag new">new</span><h3>Icon + action</h3><p class="why">Explains and offers the next step.</p>
+    <div class="demo empB"><div class="card"><div class="empty-demo"><div><div class="ic">🪤</div><b>No canarytokens yet</b><small>Plant tokens outside the honeypot and track what fires.</small><br><span class="act">Create bait →</span></div></div></div></div></div>
+  <div class="opt" data-opt="C"><span class="tag">8C</span><span class="vtag new">new</span><h3>Dashed invite</h3><p class="why">Dropzone-style: the emptiness itself looks intentional.</p>
+    <div class="demo empC"><div class="card"><div class="empty-demo">No canarytokens yet — create your first from the Create bait tab.</div></div></div></div>
+  <div class="opt" data-opt="D"><span class="tag">8D</span><span class="vtag new">new</span><h3>Inline note</h3><p class="why">Compact info banner; no vertical cost.</p>
+    <div class="demo empD"><div class="card"><div class="empty-demo">ℹ No canarytokens yet — use the Create bait tab.</div></div></div></div>
+  <div class="opt" data-opt="E"><span class="tag">8E</span><span class="vtag new">new · claude</span><h3>Serif sentence</h3><p class="why">A calm serif sentence and one quiet pill — claude’s empty-conversation tone.</p>
+    <div class="demo empE"><div class="card"><div class="empty-demo"><div><div class="serif">Nothing captured yet.</div><small>Canarytokens report here the moment one fires.</small><span class="act">Create bait →</span></div></div></div></div></div>
+  <div class="opt" data-opt="F"><span class="tag">8F</span><span class="vtag mix">claude × v3</span><h3>Prompt line</h3><p class="why">One mono line with a prompt chevron — costs a single row of space.</p>
+    <div class="demo empF"><div class="card"><div class="empty-demo">&gt; no canarytokens — create bait to begin</div></div></div></div>
+</div></section>
+
+<section class="el" data-el="scroll"><h2>9 · Scrollable region affordance</h2><div class="opts">
+  <div class="opt" data-opt="A"><span class="tag">9A</span><span class="vtag base">base</span><h3>Thin scrollbar</h3><p class="why">Current: always-rendered thin bar.</p>
+    <div class="demo"><div class="scr"><div>dionaea — 3,149,755</div><div>suricata — 1,462,592</div><div>cowrie — 768,107</div><div>multipot — 131,279</div><div>conpot-kamstrup — 11,610</div><div>endlessh — 11,501</div><div>conpot — 8,981</div></div></div></div>
+  <div class="opt" data-opt="B"><span class="tag">9B</span><span class="vtag ">v1</span><h3>Edge fades</h3><p class="why">Content visibly dissolves at the cut — universally readable.</p>
+    <div class="demo scrB"><div class="scr" style="background-color:var(--surface-1)"><div>dionaea — 3,149,755</div><div>suricata — 1,462,592</div><div>cowrie — 768,107</div><div>multipot — 131,279</div><div>conpot-kamstrup — 11,610</div><div>endlessh — 11,501</div><div>conpot — 8,981</div></div></div></div>
+  <div class="opt" data-opt="C"><span class="tag">9C</span><span class="vtag new">new</span><h3>“More” pill</h3><p class="why">Explicit count of hidden rows; disappears at the end.</p>
+    <div class="demo scrC"><div class="wrapx"><div class="scr"><div>dionaea — 3,149,755</div><div>suricata — 1,462,592</div><div>cowrie — 768,107</div><div>multipot — 131,279</div><div>conpot-kamstrup — 11,610</div><div>endlessh — 11,501</div><div>conpot — 8,981</div></div><span class="more">22 more ↓</span></div></div></div>
+  <div class="opt" data-opt="D"><span class="tag">9D</span><span class="vtag new">new · claude</span><h3>Fade + jump button</h3><p class="why">Edge fade plus claude’s floating circular ↓ — click scrolls a page.</p>
+    <div class="demo scrE"><div class="wrapx"><div class="scr"><div>dionaea — 3,149,755</div><div>suricata — 1,462,592</div><div>cowrie — 768,107</div><div>multipot — 131,279</div><div>conpot-kamstrup — 11,610</div><div>endlessh — 11,501</div><div>conpot — 8,981</div></div><span class="dl">↓</span></div></div></div>
+  <div class="opt" data-opt="E"><span class="tag">9E</span><span class="vtag mix">claude × v3</span><h3>Corner counter</h3><p class="why">Tiny mono +N counter pinned to the corner — dense, precise, zero overlay on content.</p>
+    <div class="demo scrF"><div class="wrapx"><div class="scr"><div>dionaea — 3,149,755</div><div>suricata — 1,462,592</div><div>cowrie — 768,107</div><div>multipot — 131,279</div><div>conpot-kamstrup — 11,610</div><div>endlessh — 11,501</div><div>conpot — 8,981</div></div><span class="cnt">+22</span></div></div></div>
+</div></section>
+
+<section class="el" data-el="nav"><h2>10 · Sidebar nav item</h2><div class="opts">
+  <div class="opt" data-opt="A"><span class="tag">10A</span><span class="vtag base">base</span><h3>Stock</h3><p class="why">Underlined links, filled active block.</p>
+    <div class="demo navA"><div class="nav-demo"><a class="on"><span class="i">🏠</span>Overview</a><a><span class="i">🧠</span>ML anomalies</a><a><span class="i">💬</span>LLM analysis</a></div></div></div>
+  <div class="opt" data-opt="B"><span class="tag">10B</span><span class="vtag ">v4</span><h3>Pills</h3><p class="why">Rounded hover/active (claude.ai sidebar).</p>
+    <div class="demo navB"><div class="nav-demo"><a class="on"><span class="i">🏠</span>Overview</a><a><span class="i">🧠</span>ML anomalies</a><a><span class="i">💬</span>LLM analysis</a></div></div></div>
+  <div class="opt" data-opt="C"><span class="tag">10C</span><span class="vtag new">new</span><h3>Accent bar</h3><p class="why">Left keyline + soft gradient marks the active page.</p>
+    <div class="demo navC"><div class="nav-demo"><a class="on"><span class="i">🏠</span>Overview</a><a><span class="i">🧠</span>ML anomalies</a><a><span class="i">💬</span>LLM analysis</a></div></div></div>
+  <div class="opt" data-opt="D"><span class="tag">10D</span><span class="vtag ">v3</span><h3>Compact text</h3><p class="why">Smallest footprint; active = accent text only.</p>
+    <div class="demo navD"><div class="nav-demo"><a class="on"><span class="i">🏠</span>Overview</a><a><span class="i">🧠</span>ML anomalies</a><a><span class="i">💬</span>LLM analysis</a></div></div></div>
+  <div class="opt" data-opt="E"><span class="tag">10E</span><span class="vtag new">new · claude</span><h3>Raised pill active</h3><p class="why">Active page floats on a raised pill with a soft shadow — claude sidebar’s current-chat look.</p>
+    <div class="demo navE"><div class="nav-demo"><a class="on"><span class="i">🏠</span>Overview</a><a><span class="i">🧠</span>ML anomalies</a><a><span class="i">💬</span>LLM analysis</a></div></div></div>
+  <div class="opt" data-opt="F"><span class="tag">10F</span><span class="vtag mix">claude × v3</span><h3>Mono chevron</h3><p class="why">v3 compact mono; active = accent text with a ▸ chevron, no fills anywhere.</p>
+    <div class="demo navF"><div class="nav-demo"><a class="on"><span class="i">▸</span>overview</a><a><span class="i">·</span>ml-anomalies</a><a><span class="i">·</span>llm-analysis</a></div></div></div>
+</div></section>
+
+
+<h2 style="font-size:16px;margin:40px 0 4px">Page layouts</h2>
+<p style="color:var(--text-secondary);margin:0 0 16px;font-size:13.5px">Different ordering and structure per page — claude.ai-inspired patterns. Same picking mechanism.</p>
+<section class="el" data-el="overview"><h2>Overview page</h2><div class="opts">
+
+<div class="opt" data-opt="A"><span class="tag">OV-A</span><span class="vtag base">base</span><h3>Current — KPI row, tabs, stacked cards</h3><p class="why">What ships today: 5 tiles, tab pills, then every card full-width below the fold.</p>
+<div class="prev"><div class="mock">
+  <div class="m-title">Honeypot command center</div>
+  <p class="m-sub">Live attack telemetry, captured evidence, correlated campaigns.</p>
+  <div class="m-kpis"><div class="m-kpi"><b>5,613,591</b><span>All events</span></div><div class="m-kpi"><b>3,076,059</b><span>Events 24h</span></div><div class="m-kpi"><b>13,334</b><span>Attack sources</span></div><div class="m-kpi"><b>28,722</b><span>Login attempts</span></div><div class="m-kpi"><b>1,286</b><span>Payloads</span></div></div>
+  <div class="m-tabs"><i class="on">Live operations</i><i>Collection health</i><i>Threat landscape</i><i>Attacker behavior</i><i>Evidence</i></div>
+  <div class="m-card"><h4>Activity — last 24h</h4><div class="m-heat">""" </div></div>
+  <div class="m-card"><h4>Attack origins</h4><div class="m-map" style="height:120px"></div></div>
+</div></div></div>
+
+<div class="opt" data-opt="B"><span class="tag">OV-B</span><span class="vtag new">new · claude</span><h3>Claude focus — greeting + command bar</h3><p class="why">claude.ai home translated: a humane serif status line, one investigate bar as the centerpiece, the rest tucked below as quiet chips and one live feed.</p>
+<div class="prev"><div class="mock" style="text-align:center;padding-top:70px">
+  <div class="m-title m-serif" style="font-size:34px">☀ Quiet night, Xore — nothing needs you.</div>
+  <p class="m-sub">3.1M events in 24h (+21%, normal) · 29/29 sensors active · 0 open incidents</p>
+  <div class="m-card" style="max-width:760px;margin:26px auto 14px;text-align:left;border-radius:16px">
+    <div style="color:var(--text-muted);font-size:14px;margin-bottom:14px">Investigate anything — IP, session, hash, credential, country…</div>
+    <div class="m-row" style="justify-content:space-between"><div><span class="m-chip">recent: 203.0.113.122</span><span class="m-chip">sess 76439b93</span></div><span class="m-btn">Investigate</span></div>
+  </div>
+  <div style="margin:8px 0 22px"><span class="m-ghostbtn">Threat landscape</span> · <span class="m-ghostbtn">Attacker behavior</span> · <span class="m-ghostbtn">Evidence</span> · <span class="m-ghostbtn">Collection health</span></div>
+  <div class="m-card" style="max-width:980px;margin:0 auto;text-align:left"><h4>Happening now</h4>
+    <table class="m-tbl"><tr><td>00:28:23</td><td><span class="m-chip">mailoney</span></td><td>203.0.113.122</td><td>DATA: 6 bytes saved</td></tr><tr><td>00:28:19</td><td><span class="m-chip">cowrie</span></td><td>123.188.73.228</td><td>login.success: root/juantech</td></tr><tr><td>00:28:11</td><td><span class="m-chip">dionaea</span></td><td>213.176.26.114</td><td>smb connect :445</td></tr></table></div>
+</div></div></div>
+
+<div class="opt" data-opt="C"><span class="tag">OV-C</span><span class="vtag new">new</span><h3>Bento grid — everything above the fold</h3><p class="why">Mixed-size tile mosaic: hero stat with trend, map and heatmap as tiles, live stream as a tall cell. One screen, no scrolling, no tabs.</p>
+<div class="prev"><div class="mock">
+  <div class="m-toolrow"><div class="m-title m-serif" style="font-size:26px">Command center</div><span class="m-ghostbtn">last 24h ▾</span></div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);grid-auto-rows:118px;gap:12px">
+    <div class="m-card" style="grid-column:span 2;grid-row:span 2;margin:0"><h4>Events · 24h</h4><b style="font-size:40px">3,076,059</b><div style="color:var(--success-text-on-soft);font-size:13px">+21% vs previous · normal</div><div class="m-spark" style="margin-top:14px"><i style="height:30%"></i><i style="height:52%"></i><i style="height:44%"></i><i style="height:66%"></i><i style="height:58%"></i><i style="height:80%"></i><i style="height:100%"></i><i style="height:72%"></i></div></div>
+    <div class="m-card" style="grid-column:span 2;grid-row:span 2;margin:0"><h4>Attack origins</h4><div class="m-map" style="height:150px"></div></div>
+    <div class="m-card" style="margin:0"><h4>Sources</h4><b style="font-size:24px">13,334</b></div>
+    <div class="m-card" style="margin:0"><h4>Logins</h4><b style="font-size:24px">28,722</b></div>
+    <div class="m-card" style="grid-column:span 2;grid-row:span 2;margin:0"><h4>Live stream</h4><table class="m-tbl"><tr><td>00:28</td><td>mailoney</td><td>203.0.113.122</td></tr><tr><td>00:28</td><td>cowrie</td><td>123.188.73.228</td></tr><tr><td>00:27</td><td>dionaea</td><td>213.176.26.114</td></tr></table></div>
+    <div class="m-card" style="margin:0"><h4>Payloads</h4><b style="font-size:24px">1,286</b></div>
+    <div class="m-card" style="margin:0"><h4>Alerts</h4><b style="font-size:24px;color:var(--warning-text-on-soft)">200 open</b></div>
+  </div>
+</div></div></div>
+
+<div class="opt" data-opt="D"><span class="tag">OV-D</span><span class="vtag new">new</span><h3>Main + live rail</h3><p class="why">Charts own the left 2/3; a sticky right rail carries what changes second-to-second: live stream, open alerts, sensor status. Monitoring-wall feel.</p>
+<div class="prev"><div class="mock">
+  <div style="display:grid;grid-template-columns:2fr 1fr;gap:14px">
+    <div>
+      <div class="m-kpis" style="grid-template-columns:repeat(3,1fr)"><div class="m-kpi"><b>3,076,059</b><span>Events 24h · +21%</span></div><div class="m-kpi"><b>13,334</b><span>Sources</span></div><div class="m-kpi"><b>1,286</b><span>Payloads</span></div></div>
+      <div class="m-card"><h4>Activity — last 24h</h4><div class="m-heat">""" </div></div>
+      <div class="m-card"><h4>Attack origins</h4><div class="m-map" style="height:110px"></div></div>
+    </div>
+    <div>
+      <div class="m-card" style="border-color:var(--border-strong)"><h4>● Live</h4><table class="m-tbl"><tr><td>00:28</td><td>mailoney</td></tr><tr><td>00:28</td><td>cowrie</td></tr><tr><td>00:27</td><td>dionaea</td></tr><tr><td>00:27</td><td>suricata</td></tr></table></div>
+      <div class="m-card"><h4>Open alerts</h4><div class="m-sub" style="margin:0">YARA dionaea <span class="m-chip warn">200</span></div></div>
+      <div class="m-card"><h4>Sensors</h4><span class="m-chip ok">29/29 active</span></div>
+    </div>
+  </div>
+</div></div></div>
+  <div class="opt" data-opt="E"><span class="tag">OV-E</span><span class="vtag new">new · claude</span><h3>Focus column</h3><p class="why">Everything in one centered 900px column: serif greeting, boxless stat strip, then a single feed — claude conversation geometry.</p>
+    <div class="prev"><div class="mock" style="max-width:940px;margin:0 auto"><div class="m-title m-serif" style="font-size:30px;text-align:center;margin-top:10px">Good morning — traffic is at its usual rhythm.</div><p class="m-sub" style="text-align:center">3,076,059 events in 24h · 13,334 sources · 1,286 payloads</p><div class="m-card" style="border:0;box-shadow:0 2px 10px rgba(0,0,0,.16)"><div class="krow"><div class="k"><b style="font-family:Georgia,serif;font-size:24px;display:block">3,076,059</b><span style="color:var(--text-muted);font-size:12px">Events 24h</span></div><div class="k"><b style="font-family:Georgia,serif;font-size:24px;display:block">13,334</b><span style="color:var(--text-muted);font-size:12px">Sources</span></div><div class="k"><b style="font-family:Georgia,serif;font-size:24px;display:block">28,722</b><span style="color:var(--text-muted);font-size:12px">Logins</span></div></div></div><div class="m-card" style="border:0;box-shadow:0 2px 10px rgba(0,0,0,.16)"><h4>Live stream</h4><table class="m-tbl"><tr><td>00:28:23</td><td>mailoney</td><td>203.0.113.122</td><td>DATA: 6 bytes saved</td></tr><tr><td>00:28:19</td><td>cowrie</td><td>123.188.73.228</td><td>login.success</td></tr></table></div></div></div></div>
+  <div class="opt" data-opt="F"><span class="tag">OV-F</span><span class="vtag mix">claude × v3</span><h3>Focus column × dense grid</h3><p class="why">Serif greeting stays, but below it a two-column mono card grid packs heatmap, stream, sensors and map on one screen.</p>
+    <div class="prev"><div class="mock"><div class="m-title m-serif" style="font-size:26px">Good morning.</div><p class="m-sub" style="margin-bottom:12px"><span class="m-mono">3,076,059 ev/24h · 13,334 src · 28,722 logins · 1,286 payloads</span></p><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div class="m-card" style="margin:0;border:0;box-shadow:0 1px 3px rgba(0,0,0,.18)"><h4 class="m-mono" style="text-transform:uppercase;font-size:10px;letter-spacing:.08em;color:var(--text-muted)">activity 24h</h4><div class="m-heat"></div></div><div class="m-card" style="margin:0;border:0;box-shadow:0 1px 3px rgba(0,0,0,.18)"><h4 class="m-mono" style="text-transform:uppercase;font-size:10px;letter-spacing:.08em;color:var(--text-muted)">live stream</h4><table class="m-tbl"><tr><td>00:28:23</td><td>mailoney</td><td>203.0.113.122</td></tr><tr><td>00:28:19</td><td>cowrie</td><td>123.188.73.228</td></tr><tr><td>00:28:11</td><td>dionaea</td><td>213.176.26.114</td></tr></table></div><div class="m-card" style="margin:0;border:0;box-shadow:0 1px 3px rgba(0,0,0,.18)"><h4 class="m-mono" style="text-transform:uppercase;font-size:10px;letter-spacing:.08em;color:var(--text-muted)">attack origins</h4><div class="m-map" style="height:90px"></div></div><div class="m-card" style="margin:0;border:0;box-shadow:0 1px 3px rgba(0,0,0,.18)"><h4 class="m-mono" style="text-transform:uppercase;font-size:10px;letter-spacing:.08em;color:var(--text-muted)">sensors</h4><div class="m-mono" style="font-size:11px;color:var(--text-secondary)">dionaea 3.1M · suricata 1.4M · cowrie 768k · multipot 131k · +25</div></div></div></div></div></div>
+</div></section>
+<section class="el" data-el="events"><h2>Event explorer page</h2><div class="opts">
+
+<div class="opt" data-opt="A"><span class="tag">EV-A</span><span class="vtag base">base</span><h3>Current — inline JSON per row</h3><p class="why">Every row carries its full normalized record inline (#1447). Total evidence, but one event fills the screen.</p>
+<div class="prev"><div class="mock">
+  <div class="m-title">event explorer</div><p class="m-sub">297,122 events · filter · export CSV</p>
+  <div class="m-card"><table class="m-tbl"><tr><th>time</th><th>sensor</th><th>source ip</th><th>detail</th></tr><tr><td>00:28:23</td><td>mailoney</td><td>203.0.113.122</td><td>DATA: 6 bytes saved</td></tr></table>
+  <div class="m-json" style="margin-top:10px">{"Time":"2026-08-17 00:28:23","Sensor":"mailoney","SrcIP":"203.0.113.122",<br>"Country":"DE","Proto":"smtp","Port":"25","Detail":"DATA: 6 bytes saved…",<br>"Kibana":"https://…","EveBox":"https://…","Arkime":"https://…"}</div>
+  <div style="margin-top:8px"><span class="m-chip">persona nexusai-gpu01</span><span class="m-chip">session 76439b93</span><span class="m-chip">AS4837</span></div></div>
+</div></div></div>
+
+<div class="opt" data-opt="B"><span class="tag">EV-B</span><span class="vtag new">new · claude</span><h3>Master–detail — list + sticky record pane</h3><p class="why">Dense table left, full normalized record permanently open on the right (claude's artifact-panel pattern). Keeps #1447's "no click to see evidence" while restoring table density.</p>
+<div class="prev"><div class="mock">
+  <div class="m-toolrow"><div class="m-title m-serif" style="font-size:26px">Events</div><div><span class="m-chip">297,122</span><span class="m-btn sec">Filter</span> <span class="m-btn sec">Export</span></div></div>
+  <div style="display:grid;grid-template-columns:1.1fr 1fr;gap:14px">
+    <div class="m-card" style="margin:0"><table class="m-tbl"><tr><th>time</th><th>sensor</th><th>source ip</th><th>detail</th></tr><tr class="sel"><td>00:28:23</td><td>mailoney</td><td>203.0.113.122</td><td>DATA: 6 bytes…</td></tr><tr><td>00:28:19</td><td>cowrie</td><td>123.188.73.228</td><td>login.success</td></tr><tr><td>00:28:11</td><td>dionaea</td><td>213.176.26.114</td><td>smb :445</td></tr><tr><td>00:27:58</td><td>suricata</td><td>45.156.87.34</td><td>ET SCAN</td></tr><tr><td>00:27:41</td><td>multipot</td><td>172.98.32.65</td><td>vnc probe</td></tr></table></div>
+    <div class="m-card" style="margin:0;border-color:var(--border-strong)"><h4>Normalized event</h4><div class="m-json">{"Time":"2026-08-17 00:28:23",<br>"Sensor":"mailoney","SrcIP":"203.0.113.122",<br>"Country":"DE","Proto":"smtp","Port":"25"}</div><div style="margin-top:10px"><span class="m-chip">attacker profile</span><span class="m-chip">session replay</span><span class="m-chip">Kibana ↗</span></div></div>
+  </div>
+</div></div></div>
+
+<div class="opt" data-opt="C"><span class="tag">EV-C</span><span class="vtag new">new</span><h3>Compact rows + evidence drawer</h3><p class="why">Table stays a table; the selected row opens a structured drawer (meta groups + pivots, JSON behind a toggle). Most rows per screen with evidence one keystroke away.</p>
+<div class="prev"><div class="mock">
+  <div class="m-toolrow"><div class="m-title m-serif" style="font-size:26px">Events</div><span class="m-btn sec">Filter</span></div>
+  <div class="m-card"><table class="m-tbl">
+    <tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th></tr>
+    <tr><td>00:28:23</td><td>mailoney</td><td>203.0.113.122</td><td>25</td><td>DATA: 6 bytes saved</td></tr>
+    <tr class="sel"><td>00:28:19</td><td>cowrie</td><td>123.188.73.228</td><td>23</td><td>login.success: root/juantech</td></tr>
+  </table>
+  <div style="border-left:2px solid var(--accent);margin:0 0 0 10px;padding:12px 16px;background:var(--surface-2);border-radius:0 10px 10px 0">
+    <div class="m-row" style="gap:26px;font-size:12.5px">
+      <div><b style="font-size:11px;color:var(--text-muted)">DECOY</b><br>nexusai-gpu01 · berlin-ml</div>
+      <div><b style="font-size:11px;color:var(--text-muted)">PIVOT</b><br>session 76439b93 · credentials</div>
+      <div><b style="font-size:11px;color:var(--text-muted)">ORIGIN</b><br>AS4837 China Unicom · CN</div>
+      <div><b style="font-size:11px;color:var(--text-muted)">ACTIONS</b><br>replay · Kibana · Arkime · JSON ▾</div>
+    </div></div>
+  <table class="m-tbl"><tr><td>00:28:11</td><td>dionaea</td><td>213.176.26.114</td><td>445</td><td>smb connect</td></tr><tr><td>00:27:58</td><td>suricata</td><td>45.156.87.34</td><td>22</td><td>ET SCAN</td></tr></table></div>
+</div></div></div>
+
+<div class="opt" data-opt="D"><span class="tag">EV-D</span><span class="vtag new">new · claude</span><h3>Timeline stream — chat-style grouping</h3><p class="why">Events as a time-grouped feed (claude conversation rhythm): minute headers, event cards under each. Reads as a story; best for tailing, not for bulk triage.</p>
+<div class="prev"><div class="mock" style="max-width:900px;margin:0 auto">
+  <div class="m-title m-serif" style="font-size:26px;margin-bottom:16px">Event stream</div>
+  <div style="color:var(--text-muted);font-size:12px;margin:12px 0 6px">— 00:28 —</div>
+  <div class="m-card" style="margin-bottom:8px"><div class="m-row" style="justify-content:space-between"><div><span class="m-chip">mailoney</span> <b>203.0.113.122</b> <span style="color:var(--text-secondary)">DATA: 6 bytes saved → .eml</span></div><span class="m-mono" style="color:var(--text-muted)">:23s</span></div></div>
+  <div class="m-card" style="margin-bottom:8px"><div class="m-row" style="justify-content:space-between"><div><span class="m-chip">cowrie</span> <b>123.188.73.228</b> <span style="color:var(--text-secondary)">login.success root/juantech · session 76439b93</span></div><span class="m-mono" style="color:var(--text-muted)">:19s</span></div></div>
+  <div style="color:var(--text-muted);font-size:12px;margin:12px 0 6px">— 00:27 —</div>
+  <div class="m-card" style="margin-bottom:8px"><div class="m-row" style="justify-content:space-between"><div><span class="m-chip">dionaea</span> <b>213.176.26.114</b> <span style="color:var(--text-secondary)">smb connect :445</span></div><span class="m-mono" style="color:var(--text-muted)">:58s</span></div></div>
+</div></div></div>
+  <div class="opt" data-opt="E"><span class="tag">EV-E</span><span class="vtag new">new · claude</span><h3>Floating inspector overlay</h3><p class="why">Full-width table; the selected record opens as a floating claude-style panel overlapping the right edge — table width never shrinks.</p>
+    <div class="prev"><div class="mock"><div class="m-toolrow"><div class="m-title m-serif" style="font-size:26px">Events</div><span class="m-btn sec">Filter</span></div><div style="position:relative"><div class="m-card"><table class="m-tbl"><tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th></tr><tr class="sel"><td>00:28:23</td><td>mailoney</td><td>203.0.113.122</td><td>25</td><td>DATA: 6 bytes saved</td></tr><tr><td>00:28:19</td><td>cowrie</td><td>123.188.73.228</td><td>23</td><td>login.success</td></tr><tr><td>00:28:11</td><td>dionaea</td><td>213.176.26.114</td><td>445</td><td>smb connect</td></tr><tr><td>00:27:58</td><td>suricata</td><td>45.156.87.34</td><td>22</td><td>ET SCAN</td></tr></table></div><div style="position:absolute;top:-8px;right:-6px;width:340px;border-radius:16px;background:var(--surface-raised);box-shadow:0 12px 44px rgba(0,0,0,.4);padding:14px"><b style="font-size:13px">Normalized event</b><span style="float:right;opacity:.6">✕</span><div class="m-json" style="margin-top:8px">{"Sensor":"mailoney","SrcIP":"203.0.113.122","Proto":"smtp"}</div></div></div></div></div></div>
+  <div class="opt" data-opt="F"><span class="tag">EV-F</span><span class="vtag mix">claude × v3</span><h3>Dense mono + bottom drawer</h3><p class="why">v3 mono table on top; the selected record expands a pinned bottom drawer with mono field groups — vertical, never side-by-side.</p>
+    <div class="prev"><div class="mock"><div class="m-toolrow"><div class="m-title m-serif" style="font-size:26px">Events</div><span class="m-chip">297,122</span></div><div class="m-card" style="border:0;box-shadow:0 1px 3px rgba(0,0,0,.18)"><table class="m-tbl" style="font-family:var(--font-mono)"><tr><th>time</th><th>sensor</th><th>src</th><th>port</th><th>detail</th></tr><tr><td>00:28:23</td><td>mailoney</td><td>203.0.113.122</td><td>25</td><td>DATA saved</td></tr><tr class="sel"><td>00:28:19</td><td>cowrie</td><td>123.188.73.228</td><td>23</td><td>login.success</td></tr><tr><td>00:28:11</td><td>dionaea</td><td>213.176.26.114</td><td>445</td><td>smb</td></tr></table></div><div class="m-card" style="border:0;box-shadow:0 -2px 12px rgba(0,0,0,.22);border-top:2px solid var(--accent);margin-top:2px"><div class="m-mono" style="font-size:11px;color:var(--text-secondary)"><span style="color:var(--text-muted)">SESSION</span> 76439b93 · <span style="color:var(--text-muted)">CREDS</span> root/juantech · <span style="color:var(--text-muted)">ORIGIN</span> AS4837 CN · <span style="color:var(--accent)">[replay] [profile] [kibana] [json]</span></div></div></div></div></div>
+</div></section>
+<section class="el" data-el="sources"><h2>Attack sources page</h2><div class="opts">
+
+<div class="opt" data-opt="A"><span class="tag">AS-A</span><span class="vtag base">base</span><h3>Current — flat table</h3><p class="why">One sortable table: events, ip, cc, logins, sessions, sensors hit, first/last seen.</p>
+<div class="prev"><div class="mock">
+  <div class="m-title">Source IPs</div><p class="m-sub">1,676 unique IPs · export CSV · filter</p>
+  <div class="m-card"><table class="m-tbl"><tr><th>events</th><th>source ip</th><th>cc</th><th>logins</th><th>sensors hit</th><th>last seen</th></tr>
+  <tr><td>73,829</td><td>123.188.73.228</td><td>CN</td><td>14,319</td><td>beelzebub cisco-asa conpot cowrie dionaea +5</td><td>00:15</td></tr>
+  <tr><td>27,263</td><td>172.110.223.159</td><td>HK</td><td>0</td><td>dionaea</td><td>21:49</td></tr>
+  <tr><td>6,977</td><td>203.0.113.122</td><td>DE</td><td>1,589</td><td>beelzebub conpot cowrie mailoney +4</td><td>00:28</td></tr></table></div>
+</div></div></div>
+
+<div class="opt" data-opt="B"><span class="tag">AS-B</span><span class="vtag new">new · claude</span><h3>Leaderboard cards</h3><p class="why">Ranked slabs with share-bars and chips (claude projects-card feel). Instantly shows the whales; less columnar data per row.</p>
+<div class="prev"><div class="mock" style="max-width:1000px;margin:0 auto">
+  <div class="m-toolrow"><div class="m-title m-serif" style="font-size:26px">Attack sources</div><span class="m-ghostbtn">Sort by events ▾</span></div>
+  <div class="m-card"><div class="m-row" style="justify-content:space-between"><div><b class="m-mono" style="font-size:16px">#1 · 123.188.73.228</b> <span class="m-chip">CN</span> <span class="m-chip warn">14,319 logins</span> <span class="m-chip">12 sensors</span></div><b>73,829</b></div><div class="m-bar" style="width:92%;margin-top:10px"></div></div>
+  <div class="m-card"><div class="m-row" style="justify-content:space-between"><div><b class="m-mono" style="font-size:16px">#2 · 172.110.223.159</b> <span class="m-chip">HK</span> <span class="m-chip">dionaea only</span></div><b>27,263</b></div><div class="m-bar" style="width:34%;margin-top:10px;opacity:.5"></div></div>
+  <div class="m-card"><div class="m-row" style="justify-content:space-between"><div><b class="m-mono" style="font-size:16px">#3 · 203.0.113.122</b> <span class="m-chip">DE</span> <span class="m-chip warn">1,589 logins</span> <span class="m-chip">8 sensors</span></div><b>6,977</b></div><div class="m-bar" style="width:9%;margin-top:10px;opacity:.5"></div></div>
+</div></div></div>
+
+<div class="opt" data-opt="C"><span class="tag">AS-C</span><span class="vtag new">new</span><h3>Map-first split</h3><p class="why">Geography as the hero, table beneath it. Where-then-who ordering; the map finally earns its size.</p>
+<div class="prev"><div class="mock">
+  <div class="m-toolrow"><div class="m-title m-serif" style="font-size:26px">Attack sources</div><span class="m-chip">1,676 IPs</span></div>
+  <div class="m-card"><div class="m-map" style="height:180px"></div></div>
+  <div class="m-card"><table class="m-tbl"><tr><th>events</th><th>source ip</th><th>cc</th><th>last seen</th></tr><tr><td>73,829</td><td>123.188.73.228</td><td>CN</td><td>00:15</td></tr><tr><td>27,263</td><td>172.110.223.159</td><td>HK</td><td>21:49</td></tr></table></div>
+</div></div></div>
+  <div class="opt" data-opt="D"><span class="tag">AS-D</span><span class="vtag new">new · claude</span><h3>Profile card grid</h3><p class="why">Every source is a project-style card in a 3-across grid — claude’s projects page applied to attackers.</p>
+    <div class="prev"><div class="mock"><div class="m-toolrow"><div class="m-title m-serif" style="font-size:26px">Attack sources</div><span class="m-ghostbtn">Sort ▾</span></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px"><div class="m-card" style="margin:0;border:0;box-shadow:0 2px 10px rgba(0,0,0,.16)"><b class="m-mono">123.188.73.228</b><p class="m-sub" style="margin:4px 0 8px;font-size:12px">73,829 events · 12 sensors</p><span class="m-chip">CN</span><span class="m-chip warn">14,319 logins</span></div><div class="m-card" style="margin:0;border:0;box-shadow:0 2px 10px rgba(0,0,0,.16)"><b class="m-mono">172.110.223.159</b><p class="m-sub" style="margin:4px 0 8px;font-size:12px">27,263 events · dionaea only</p><span class="m-chip">HK</span></div><div class="m-card" style="margin:0;border:0;box-shadow:0 2px 10px rgba(0,0,0,.16)"><b class="m-mono">203.0.113.122</b><p class="m-sub" style="margin:4px 0 8px;font-size:12px">6,977 events · 8 sensors</p><span class="m-chip">DE</span><span class="m-chip warn">1,589 logins</span></div></div></div></div></div>
+  <div class="opt" data-opt="E"><span class="tag">AS-E</span><span class="vtag mix">claude × v3</span><h3>Mono leaderboard</h3><p class="why">Ranked mono rows with inline share bars — v3 density with claude’s single calm column.</p>
+    <div class="prev"><div class="mock" style="max-width:1000px;margin:0 auto"><div class="m-title m-serif" style="font-size:26px;margin-bottom:14px">Attack sources</div><div class="m-card" style="border:0;box-shadow:0 1px 3px rgba(0,0,0,.18)"><table class="m-tbl" style="font-family:var(--font-mono)"><tr><th>#</th><th>source</th><th>cc</th><th>events</th><th>share</th></tr><tr><td>1</td><td>123.188.73.228</td><td>CN</td><td>73,829</td><td><div class="m-bar" style="width:92%"></div></td></tr><tr><td>2</td><td>172.110.223.159</td><td>HK</td><td>27,263</td><td><div class="m-bar" style="width:34%;opacity:.5"></div></td></tr><tr><td>3</td><td>203.0.113.122</td><td>DE</td><td>6,977</td><td><div class="m-bar" style="width:9%;opacity:.5"></div></td></tr></table></div></div></div></div>
+</div></section>
+<section class="el" data-el="reports"><h2>Reports studio page</h2><div class="opts">
+
+<div class="opt" data-opt="A"><span class="tag">RP-A</span><span class="vtag base">base</span><h3>Current — numbered tabs + stacked sections</h3><p class="why">Horizontal step tabs, all sections stacked, sticky action bar at the bottom.</p>
+<div class="prev"><div class="mock">
+  <div class="m-title">Reports studio</div><p class="m-sub">Design themed, branded PDF reports from live telemetry.</p>
+  <div class="m-tabs"><i class="on">01 Design</i><i>02 Scope</i><i>03 Schedule</i><i>04 Branding</i><i>05 Library</i></div>
+  <div class="m-card"><h4>Start from a template</h4><div class="m-row"><span class="m-chip">Executive report</span><span class="m-chip">Full security</span><span class="m-chip">Threat landscape</span><span class="m-chip">+6 more</span></div></div>
+  <div class="m-card"><h4>Report basics</h4><div class="m-row"><span class="m-chip">name</span><span class="m-chip">window: 24h</span><span class="m-chip ok">PDF: dark</span></div></div>
+  <div class="m-card" style="border-color:var(--border-strong)"><span class="m-btn">Save definition</span> <span class="m-btn sec">Generate now</span> <span class="m-btn sec">Reset</span></div>
+</div></div></div>
+
+<div class="opt" data-opt="B"><span class="tag">RP-B</span><span class="vtag new">new · claude</span><h3>Settings-rail — vertical steps left</h3><p class="why">claude.ai settings pattern: steps as a left rail, one section at a time on the right, actions pinned top-right. Calmer, more room per section.</p>
+<div class="prev"><div class="mock">
+  <div class="m-toolrow"><div class="m-title m-serif" style="font-size:26px">Reports</div><div><span class="m-btn sec">Save</span> <span class="m-btn">Generate</span></div></div>
+  <div style="display:grid;grid-template-columns:200px 1fr;gap:18px">
+    <div><div class="m-railstep on">Design</div><div class="m-railstep">Scope</div><div class="m-railstep">Schedule</div><div class="m-railstep">Branding</div><div class="m-railstep">Library</div></div>
+    <div class="m-card" style="margin:0"><h4>Start from a template</h4><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px"><div class="m-card" style="margin:0"><b style="font-size:13px">Executive report</b><p class="m-sub" style="margin:4px 0 0;font-size:12px">Management-ready summary…</p></div><div class="m-card" style="margin:0"><b style="font-size:13px">Full security</b><p class="m-sub" style="margin:4px 0 0;font-size:12px">Complete defensive picture…</p></div><div class="m-card" style="margin:0"><b style="font-size:13px">Custom</b><p class="m-sub" style="margin:4px 0 0;font-size:12px">Blank canvas…</p></div></div></div>
+  </div>
+</div></div></div>
+
+<div class="opt" data-opt="C"><span class="tag">RP-C</span><span class="vtag new">new</span><h3>Wizard — one decision per screen</h3><p class="why">Centered single step with progress dots and a big next action (claude onboarding feel). Slowest but most guided; good for rarely-used flows.</p>
+<div class="prev"><div class="mock" style="max-width:760px;margin:0 auto;text-align:center;padding-top:40px">
+  <div style="color:var(--text-muted);font-size:12px;letter-spacing:.1em">STEP 1 OF 4 · ● ○ ○ ○</div>
+  <div class="m-title m-serif" style="font-size:30px;margin:14px 0 6px">What kind of report?</div>
+  <p class="m-sub">Pick the closest starting point — everything stays adjustable.</p>
+  <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;text-align:left;margin:20px 0">
+    <div class="m-card" style="margin:0;border-color:var(--accent)"><b>Executive report</b><p class="m-sub" style="margin:4px 0 0;font-size:12.5px">Headline metrics, assessment, findings, recommendations.</p></div>
+    <div class="m-card" style="margin:0"><b>Full security report</b><p class="m-sub" style="margin:4px 0 0;font-size:12.5px">Every metric, ranking, alert and a bounded evidence appendix.</p></div>
+  </div>
+  <span class="m-btn">Continue →</span>
+</div></div></div>
+  <div class="opt" data-opt="D"><span class="tag">RP-D</span><span class="vtag new">new · claude</span><h3>Document editor</h3><p class="why">The report definition reads as a claude-style document: serif section headings in one scrolling column, outline rail left, actions top-right.</p>
+    <div class="prev"><div class="mock"><div class="m-toolrow"><div class="m-title m-serif" style="font-size:26px">Executive report</div><div><span class="m-btn sec">Save</span> <span class="m-btn">Generate</span></div></div><div style="display:grid;grid-template-columns:170px 1fr;gap:18px"><div><div class="m-railstep on">Design</div><div class="m-railstep">Scope</div><div class="m-railstep">Schedule</div><div class="m-railstep">Branding</div></div><div style="max-width:760px"><div class="m-title m-serif" style="font-size:19px">Design</div><p class="m-sub" style="font-size:12.5px">Management-ready summary. Dark PDF theme.</p><div class="m-title m-serif" style="font-size:19px;margin-top:14px">Scope</div><p class="m-sub" style="font-size:12.5px">Last 24h · all sensors · include evidence appendix.</p><div class="m-title m-serif" style="font-size:19px;margin-top:14px">Schedule</div><p class="m-sub" style="font-size:12.5px">Every Monday 06:00 → email to ops@…</p></div></div></div></div></div>
+  <div class="opt" data-opt="E"><span class="tag">RP-E</span><span class="vtag mix">claude × v3</span><h3>Split live preview</h3><p class="why">Mono config summary left, an actual page preview right — every change repaints the thumbnail (v3 precision, claude calm).</p>
+    <div class="prev"><div class="mock"><div class="m-toolrow"><div class="m-title m-serif" style="font-size:26px">Reports</div><span class="m-btn">Generate</span></div><div style="display:grid;grid-template-columns:1fr 320px;gap:16px"><div class="m-card" style="margin:0;border:0;box-shadow:0 1px 3px rgba(0,0,0,.18)"><div class="m-mono" style="font-size:11.5px;line-height:2;color:var(--text-secondary)">template: <span style="color:var(--accent)">executive</span><br>window: 24h · sensors: all<br>theme: dark · logo: apiary.svg<br>schedule: mon 06:00 UTC<br>sections: metrics, findings, recs</div></div><div class="m-card" style="margin:0;border:0;box-shadow:0 2px 12px rgba(0,0,0,.25);background:var(--surface-2)"><div style="background:var(--surface-0);border-radius:8px;height:200px;padding:12px"><div class="m-bar" style="width:55%;margin-bottom:8px"></div><div class="m-spark" style="height:30px"><i style="height:40%"></i><i style="height:70%"></i><i style="height:55%"></i><i style="height:90%"></i><i style="height:35%"></i></div><div style="margin-top:10px" class="m-mono"><div class="m-bar" style="width:90%;opacity:.25;height:5px;margin:5px 0"></div><div class="m-bar" style="width:84%;opacity:.25;height:5px;margin:5px 0"></div><div class="m-bar" style="width:88%;opacity:.25;height:5px;margin:5px 0"></div></div></div></div></div></div></div></div>
+</div></section>
+
+
+<h2 style="font-size:16px;margin:40px 0 4px">Shell components</h2>
+<p style="color:var(--text-secondary);margin:0 0 16px;font-size:13.5px">Top bar, navbar, settings surface and action pop-outs.</p>
+
+<section class="el" data-el="topbar"><h2>11 · Top bar</h2><div class="opts">
+  <div class="opt" data-opt="A"><span class="tag">11A</span><span class="vtag base">base</span><h3>Stock</h3><p class="why">Bordered bar: sidebar toggle, search, centered page title, icon cluster + LIVE right.</p>
+    <div class="demo"><div class="sh-top"><span class="sh-ic">☰</span><span class="sh-ic">🔍</span><span class="grow" style="text-align:center;color:var(--text-primary)">Overview</span><span class="sh-ic">🕐</span><span class="sh-ic">📈</span><span class="sh-ic">🔔</span><span class="sh-ic">🖥</span><span class="sh-live">● LIVE</span></div></div></div>
+  <div class="opt" data-opt="B"><span class="tag">11B</span><span class="vtag new">new · claude</span><h3>Minimal breadcrumb</h3><p class="why">Transparent, blends into the page: breadcrumb left, LIVE + avatar right. Icons move into the sidebar/page.</p>
+    <div class="demo"><div class="sh-top" style="border-color:transparent;background:transparent"><span>Monitor <span style="opacity:.5">/</span> <b style="color:var(--text-primary)">Overview</b></span><span class="grow"></span><span class="sh-live">● LIVE</span><span class="sh-avatar">XO</span></div></div></div>
+  <div class="opt" data-opt="C"><span class="tag">11C</span><span class="vtag new">new · claude</span><h3>Command bar</h3><p class="why">Global search/jump front and center (⌘K energy); title lives in the page, icons right.</p>
+    <div class="demo"><div class="sh-top"><span class="sh-ic">☰</span><span class="grow" style="display:flex;justify-content:center"><span class="sh-search">🔍 Search or jump to… <span style="float:right;opacity:.6">⌘K</span></span></span><span class="sh-ic">🔔</span><span class="sh-live">● LIVE</span><span class="sh-avatar">XO</span></div></div></div>
+  <div class="opt" data-opt="D"><span class="tag">11D</span><span class="vtag new">new · claude</span><h3>No top bar</h3><p class="why">claude.ai-style: no bar at all. LIVE + alerts live in the sidebar; each page carries its own serif title row with actions.</p>
+    <div class="demo"><div style="display:flex;gap:12px"><div class="sh-side" style="width:150px;padding:8px"><a class="on">🏠 Overview</a><a>🔔 Alerts <span class="cnt">200</span></a><div style="margin-top:8px;padding:6px 9px;font-size:11px" class="sh-live">● LIVE · 29 sensors</div></div><div style="flex:1"><div class="m-title m-serif" style="font-size:22px">Overview</div><p class="m-sub" style="margin:2px 0 0">Page owns its title + actions — nothing above it.</p></div></div></div></div>
+  <div class="opt" data-opt="E"><span class="tag">11E</span><span class="vtag new">new · claude</span><h3>Floating pill bar</h3><p class="why">Detached rounded bar floating over the page: breadcrumb, LIVE, avatar — nothing else.</p>
+    <div class="demo"><div class="sh-top" style="border:0;border-radius:999px;box-shadow:0 2px 10px rgba(0,0,0,.22);background:var(--surface-1)"><span>Monitor <span style="opacity:.5">/</span> <b style="color:var(--text-primary)">Overview</b></span><span class="grow"></span><span class="sh-live">● LIVE</span><span class="sh-avatar">XO</span></div></div></div>
+  <div class="opt" data-opt="F"><span class="tag">11F</span><span class="vtag mix">claude × v3</span><h3>Mono status strip</h3><p class="why">One thin terminal strip: path, sensor count, live dot, UTC clock — maximum content height.</p>
+    <div class="demo"><div class="sh-top" style="border:0;background:var(--surface-0);border-radius:6px;padding:4px 12px;font-family:var(--font-mono);font-size:11px"><span style="color:var(--accent)">apiary</span><span style="opacity:.6">/overview</span><span class="grow"></span><span>29 sensors</span><span style="color:var(--success)">● live</span><span>13:37:02Z</span></div></div></div>
+</div></section>
+
+<section class="el" data-el="navbar"><h2>12 · Navbar (sidebar)</h2><div class="opts">
+  <div class="opt" data-opt="A"><span class="tag">12A</span><span class="vtag base">base</span><h3>Stock</h3><p class="why">Brand, MONITOR/INVESTIGATE/… labels, flat links, profile card bottom.</p>
+    <div class="demo"><div class="sh-side"><div style="padding:4px 6px"><b>🐝 APIARY</b></div><div class="lbl">Monitor</div><a class="on">Overview</a><a>ML anomalies</a><div class="lbl">Investigate</div><a>Event explorer</a><a>Attack sources</a><div style="border-top:1px solid var(--border-subtle);margin-top:8px;padding:6px 6px 0;font-size:12px">XO xore · admin</div></div></div></div>
+  <div class="opt" data-opt="B"><span class="tag">12B</span><span class="vtag new">new · claude</span><h3>Claude rail</h3><p class="why">Segmented mode toggle, one primary action ("Investigate…"), quiet pills, recents; profile bottom.</p>
+    <div class="demo"><div class="sh-side"><div class="sh-seg"><i class="on">Monitor</i><i>Hunt</i></div><span class="sh-new">+ Investigate…</span><a class="on">🏠 Overview</a><a>⚡ Events</a><a>🌍 Sources</a><div class="lbl">Recent</div><a style="font-size:12px">203.0.113.122</a><a style="font-size:12px">session 76439b93</a></div></div></div>
+  <div class="opt" data-opt="C"><span class="tag">12C</span><span class="vtag new">new</span><h3>Icon rail + flyout</h3><p class="why">52px icon-only rail; group flyout on hover. Maximum content width all the time.</p>
+    <div class="demo"><div style="display:flex;gap:10px;align-items:flex-start"><div class="sh-rail"><span class="sh-ic on">🏠</span><span class="sh-ic">⚡</span><span class="sh-ic">🌍</span><span class="sh-ic">📄</span><span class="sh-ic">⚙</span></div><div class="sh-fly">Investigate ▸<br><span style="opacity:.7;font-size:11.5px">Events · Sources · Campaigns · Clusters</span></div></div></div></div>
+  <div class="opt" data-opt="D"><span class="tag">12D</span><span class="vtag new">new</span><h3>Accordion groups + counts</h3><p class="why">Collapsible sections with live count chips (alerts, anomalies) — nav doubles as status.</p>
+    <div class="demo"><div class="sh-side"><a><b style="color:var(--text-primary)">▾ Monitor</b></a><a class="on" style="margin-left:10px">Overview</a><a style="margin-left:10px">Alerts <span class="cnt">200</span></a><a><b style="color:var(--text-primary)">▸ Investigate</b></a><a><b style="color:var(--text-primary)">▸ Evidence</b><span class="cnt" style="background:var(--info-soft);color:var(--info-text-on-soft)">1,286</span></a></div></div></div>
+  <div class="opt" data-opt="E"><span class="tag">12E</span><span class="vtag new">new · claude</span><h3>Claude minimal rail</h3><p class="why">Borderless rail: serif brand, raised-pill active, recents — the quietest possible sidebar.</p>
+    <div class="demo"><div class="sh-side" style="border:0;background:transparent"><div style="padding:4px 6px;font-family:Georgia,serif;font-size:15px">Apiary</div><a class="on" style="border-radius:10px;background:var(--surface-raised);box-shadow:0 1px 4px rgba(0,0,0,.16)">🏠 Overview</a><a>⚡ Events</a><a>🌍 Sources</a><div class="lbl">Recents</div><a style="font-size:12px">203.0.113.122</a><a style="font-size:12px">session 76439b93</a></div></div></div>
+  <div class="opt" data-opt="F"><span class="tag">12F</span><span class="vtag mix">claude × v3</span><h3>Mono tree</h3><p class="why">Terminal tree: lowercase mono labels, accent chevron marks the active node, group micro-caps.</p>
+    <div class="demo"><div class="sh-side" style="font-family:var(--font-mono);font-size:11.5px"><div style="padding:2px 6px;color:var(--accent)">apiary//ops</div><div class="lbl">monitor</div><a class="on" style="color:var(--accent);padding:3px 9px">▸ overview</a><a style="padding:3px 9px">ml-anomalies</a><div class="lbl">investigate</div><a style="padding:3px 9px">events</a><a style="padding:3px 9px">sources</a></div></div></div>
+</div></section>
+
+<section class="el" data-el="settings"><h2>13 · Dashboard settings surface</h2><div class="opts">
+  <div class="opt" data-opt="A"><span class="tag">13A</span><span class="vtag base">base</span><h3>Stock modal</h3><p class="why">Centered overlay dialog, left rail (Personal/Administration), content right.</p>
+    <div class="demo"><div class="sh-modal" style="display:flex;max-width:420px"><div style="width:130px;border-right:1px solid var(--border-subtle);padding:10px;font-size:12px"><div class="lbl" style="font-size:9px;letter-spacing:.08em;color:var(--text-muted)">PERSONAL</div><div style="background:var(--surface-2);border-radius:6px;padding:3px 8px;margin:3px 0">Appearance</div><div style="padding:3px 8px">Account</div><div class="lbl" style="font-size:9px;letter-spacing:.08em;color:var(--text-muted);margin-top:6px">ADMIN</div><div style="padding:3px 8px">Users</div></div><div style="flex:1;padding:12px"><b style="font-size:13px">Appearance</b><p class="m-sub" style="font-size:11.5px;margin:4px 0 8px">Theme, density, motion.</p><span class="m-chip">System</span><span class="m-chip ok">Dark</span><span class="m-chip">Light</span></div></div></div></div>
+  <div class="opt" data-opt="B"><span class="tag">13B</span><span class="vtag new">new · claude</span><h3>Full settings page</h3><p class="why">claude.ai pattern: /settings is a normal page in the shell — deep-linkable, no overlay, more room.</p>
+    <div class="demo"><div style="display:flex;gap:12px"><div class="sh-side" style="width:120px;font-size:12px"><a class="on">Appearance</a><a>Navigation</a><a>Time & live</a><a>Users</a><a>Services</a></div><div style="flex:1"><div class="m-title m-serif" style="font-size:20px">Settings</div><div class="m-card" style="margin-top:8px;padding:12px"><b style="font-size:12.5px">Color theme</b><div style="margin-top:6px"><span class="m-chip">System</span><span class="m-chip ok">Dark</span><span class="m-chip">Light</span></div></div></div></div></div></div>
+  <div class="opt" data-opt="C"><span class="tag">13C</span><span class="vtag new">new</span><h3>Right drawer</h3><p class="why">Slide-over from the right; the page stays visible behind — quick tweaks without losing context.</p>
+    <div class="demo"><div style="display:flex;justify-content:flex-end;background:linear-gradient(90deg,var(--surface-0),transparent);border-radius:10px"><div class="sh-drawer" style="width:220px;padding:12px"><b style="font-size:13px">Settings</b><div class="lbl" style="margin-top:8px">Appearance ▾</div><div style="font-size:12px;padding:4px 0">Theme · Density · Motion</div><div class="lbl">Navigation ▸</div><div class="lbl">Live data ▸</div></div></div></div></div>
+  <div class="opt" data-opt="D"><span class="tag">13D</span><span class="vtag new">new · claude</span><h3>Search-first palette</h3><p class="why">Type to jump to any setting (the modal already has search — make it the primary way in).</p>
+    <div class="demo"><div class="sh-modal" style="max-width:380px;padding:12px"><div class="sh-search" style="max-width:none;margin-bottom:10px">🔍 theme…</div><div style="font-size:12.5px;color:var(--text-secondary)"><div style="background:var(--surface-2);border-radius:8px;padding:6px 10px;margin-bottom:4px;color:var(--text-primary)">🎨 Appearance → Color theme</div><div style="padding:6px 10px">📄 Report Studio → PDF theme</div><div style="padding:6px 10px">🗺 Map → Basemap style</div></div></div></div></div>
+  <div class="opt" data-opt="E"><span class="tag">13E</span><span class="vtag new">new · claude</span><h3>Airy settings page</h3><p class="why">Full page, serif title, floating borderless section cards, pill rail — claude.ai/settings verbatim.</p>
+    <div class="demo"><div style="display:flex;gap:12px"><div class="sh-side" style="width:110px;border:0;background:transparent;font-size:12px"><a class="on" style="border-radius:999px">Appearance</a><a>Navigation</a><a>Users</a></div><div style="flex:1"><div class="m-title m-serif" style="font-size:20px">Settings</div><div class="m-card" style="border:0;box-shadow:0 2px 10px rgba(0,0,0,.16);margin-top:8px;padding:12px;border-radius:14px"><b style="font-size:12.5px">Color theme</b><div style="margin-top:6px"><span class="m-chip">System</span><span class="m-chip ok">Dark</span><span class="m-chip">Light</span></div></div></div></div></div></div>
+  <div class="opt" data-opt="F"><span class="tag">13F</span><span class="vtag mix">claude × v3</span><h3>Dense config grid</h3><p class="why">All knobs on one screen as mono key:value tiles — v3’s everything-at-once philosophy.</p>
+    <div class="demo"><div class="sh-modal" style="max-width:430px;padding:10px;font-family:var(--font-mono);font-size:11px"><b style="color:var(--accent)">settings</b><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px"><div style="background:var(--surface-2);border-radius:6px;padding:6px 8px">theme: dark ▾</div><div style="background:var(--surface-2);border-radius:6px;padding:6px 8px">density: compact ▾</div><div style="background:var(--surface-2);border-radius:6px;padding:6px 8px">tz: UTC ▾</div><div style="background:var(--surface-2);border-radius:6px;padding:6px 8px">live: on ▾</div><div style="background:var(--surface-2);border-radius:6px;padding:6px 8px">clock: 24h ▾</div><div style="background:var(--surface-2);border-radius:6px;padding:6px 8px">motion: off ▾</div></div></div></div></div>
+</div></section>
+
+<section class="el" data-el="actions"><h2>14 · Action buttons (pop-out)</h2><div class="opts">
+  <div class="opt" data-opt="A"><span class="tag">14A</span><span class="vtag base">base</span><h3>Stock ⋮ dropdown</h3><p class="why">Kebab opens a headed list (Analysis / Open in) with icons and external targets.</p>
+    <div class="demo"><div style="display:flex;gap:10px;align-items:flex-start"><span class="sh-ic">⋮</span><div class="sh-dd"><div class="hd">Analysis</div><a>🧬 Static analysis</a><a>🛡 VirusTotal ↗</a><div class="hd">Open in</div><a>📊 Kibana ↗</a><a>📦 Arkime ↗</a></div></div></div></div>
+  <div class="opt" data-opt="B"><span class="tag">14B</span><span class="vtag new">new · claude</span><h3>Hover row actions</h3><p class="why">claude message pattern: icons fade in on row hover — copy, replay, profile, open-in. No menu for the common three.</p>
+    <div class="demo"><table class="m-tbl"><tr><td>00:28:23</td><td>cowrie</td><td>123.188.73.228</td><td><div class="sh-rowact"><span class="sh-ic" title="copy">⧉</span><span class="sh-ic" title="replay">▶</span><span class="sh-ic" title="profile">👤</span><span class="sh-ic" title="more">⋮</span></div></td></tr></table></div></div>
+  <div class="opt" data-opt="C"><span class="tag">14C</span><span class="vtag new">new</span><h3>Icon-grid sheet</h3><p class="why">Click opens a compact labeled grid — faster to scan than a list, still one target per tool.</p>
+    <div class="demo"><div class="sh-grid"><a>🧬<span>Static</span></a><a>🛡<span>VirusTotal</span></a><a>▶<span>Replay</span></a><a>📊<span>Kibana</span></a><a>🛰<span>EveBox</span></a><a>📦<span>Arkime</span></a></div></div></div>
+  <div class="opt" data-opt="D"><span class="tag">14D</span><span class="vtag new">new</span><h3>Split button</h3><p class="why">Most-likely action visible (Investigate), caret for the rest — one click for the 90% case.</p>
+    <div class="demo"><div class="sh-split"><b>Investigate</b><i>▾</i></div>&nbsp;&nbsp;<span style="color:var(--text-muted);font-size:12px">▾ opens: replay · static analysis · Kibana · Arkime</span></div></div>
+  <div class="opt" data-opt="E"><span class="tag">14E</span><span class="vtag new">new · claude</span><h3>Floating toolbar</h3><p class="why">claude’s hover toolbar: a raised pill of icons floats above the hovered row.</p>
+    <div class="demo"><div style="display:inline-flex;gap:2px;background:var(--surface-raised);border-radius:999px;box-shadow:0 4px 16px rgba(0,0,0,.28);padding:4px 6px"><span class="sh-ic" style="background:transparent">⧉</span><span class="sh-ic" style="background:transparent">▶</span><span class="sh-ic" style="background:transparent">👤</span><span class="sh-ic" style="background:transparent">📊</span><span class="sh-ic" style="background:transparent">⋮</span></div><div style="margin-top:6px;color:var(--text-muted);font-size:11.5px">floats above the hovered row</div></div></div>
+  <div class="opt" data-opt="F"><span class="tag">14F</span><span class="vtag mix">claude × v3</span><h3>Inline mono verbs</h3><p class="why">Actions as [ bracketed ] mono verbs in the row itself — zero chrome, zero popups for the common three.</p>
+    <div class="demo"><table class="m-tbl"><tr><td>00:28:23</td><td>cowrie</td><td>123.188.73.228</td><td class="m-mono" style="font-size:11px"><span style="color:var(--accent)">[copy]</span> <span style="color:var(--accent)">[replay]</span> <span style="color:var(--accent)">[profile]</span> <span style="color:var(--accent)">[+4]</span></td></tr></table></div></div>
+</div></section>
+
+<script>
+const KEY='apiary-design-picks';
+const picks=JSON.parse(localStorage.getItem(KEY)||'{}');
+const render=()=>{
+  document.querySelectorAll('section.el').forEach(sec=>{
+    const el=sec.dataset.el;
+    sec.querySelectorAll('.opt').forEach(o=>o.classList.toggle('picked',picks[el]===o.dataset.opt));
+  });
+  const list=Object.entries(picks).map(([k,v])=>`${k}:${v}`).join('  ');
+  document.getElementById('picklist').textContent=list||'none yet';
+};
+document.querySelectorAll('section.el').forEach(sec=>{
+  sec.querySelectorAll('.opt').forEach(o=>o.addEventListener('click',()=>{
+    const el=sec.dataset.el;
+    picks[el]=picks[el]===o.dataset.opt?undefined:o.dataset.opt;
+    if(!picks[el])delete picks[el];
+    localStorage.setItem(KEY,JSON.stringify(picks));render();
+  }));
+});
+document.getElementById('copy').onclick=()=>{navigator.clipboard.writeText('design picks → '+JSON.stringify(picks));};
+document.getElementById('clear').onclick=()=>{localStorage.removeItem(KEY);Object.keys(picks).forEach(k=>delete picks[k]);render();};
+render();
+</script>
+</body>
+</html>
