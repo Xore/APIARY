@@ -19,6 +19,9 @@
 //! `threat-intel` (#1659) — Tor-exit/reputation-blocklist CIDR
 //! classification, ported from geoip.go's intel matching; see
 //! threat_intel.rs's own doc comment.
+//! #1750 adds ingestion-lag alerting to `alert-notifier` — the one signal
+//! the Go tier never had, and the one that would have caught a 45-hour
+//! blackout nothing else noticed. See INGEST_FEEDS below.
 
 use serde_json::{json, Value};
 use std::path::Path;
@@ -33,6 +36,153 @@ const GHIDRA_INDEX: &str = "ghidra-analysis-v1";
 const GITHUB_ANALYSIS_INDEX: &str = "github-analysis-v1";
 const SPOOL_STALE_AFTER: Duration = Duration::from_secs(30 * 60);
 const HANDOFF_STALE_AFTER: Duration = Duration::from_secs(5 * 60);
+
+// ---------------------------------------------------------------------------
+// #1750 — ingestion-lag alerting.
+//
+// #1678's stall was silent for three days: `hp-filebeat` was up, the container
+// has no healthcheck that tests ingestion, and other Suricata sub-types kept
+// flowing, so every "is it running" check passed while `suricata-v2-alert-*`
+// received nothing. The signal has to come from the data.
+//
+// Two signals, because neither alone is enough — measured against this fleet's
+// own history rather than assumed:
+//
+//   * Freshness. Newest real document older than the index's threshold. This
+//     catches total silence, and it is what #1750 proposed.
+//
+//   * Volume collapse. Last hour far below the index's own recent baseline.
+//     This is the one #1750 did not ask for, and the one that matters most.
+//     Between 2026-08-20 21:00 and 2026-08-22 18:00 honeypot-v2-* fell from
+//     ~100k events/hour to ~9, for 45 hours, and nobody noticed. Freshness
+//     would not have caught a second of it: a handful of sensors kept
+//     trickling, so the longest gap in real traffic across those 45 hours was
+//     1h20m — inside normal variation. Volume collapse fires on the first
+//     hour, on 3 events against a 102,956/h baseline.
+//
+// Both signals ignore `internal_probe` traffic (#1677/#1767). That is not a
+// refinement, it is what makes the check work at all: during those same 45
+// hours the index kept receiving a loopback healthcheck every nine seconds, so
+// anything counting raw documents saw a perfectly healthy index.
+//
+// Thresholds are per index because rates differ by three orders of magnitude,
+// and each was read off 14 days of that index's own history (2026-08-09 to
+// 2026-08-23, probes excluded) rather than guessed. Over that window, at 90
+// minutes, the only index that fires on natural variation is
+// suricata-v2-dns-*, and the only fire anywhere else is dionaea's real 47-hour
+// outage. The two indices with longer thresholds are the two that needed them:
+//
+//   index                     longest natural gap    threshold
+//   honeypot-v2-*                          1h20m           90m
+//   dionaea-incidents-v1-*                     -           90m
+//   portbridge-v2-*                            -           90m
+//   suricata-v2-alert-* and peers              -           90m
+//   suricata-v2-smtp-*                     1h00m          120m
+//   suricata-v2-dns-*                      2h00m          180m
+//
+// Alerting is per feed rather than per index: the ten Suricata sub-types come
+// from one eve input, and an input dying should page once naming the ten, not
+// ten times. The message names which members are stalled, so #1678's shape
+// (one starved index while its nine siblings flow) still reads clearly.
+const INGEST_LOOKBACK: &str = "now-30d";
+const INGEST_BASELINE_FROM: &str = "now-8d";
+const INGEST_BASELINE_TO: &str = "now-1d";
+const INGEST_BASELINE_HOURS: f64 = 7.0 * 24.0;
+/// Each check aggregates a week of documents per index; running that on the
+/// 60s notifier tick would be waste, and an outage caught 9 minutes later is
+/// still 45 hours earlier than the last one.
+const INGEST_CHECK_EVERY: Duration = Duration::from_secs(10 * 60);
+
+struct IngestIndex {
+    pattern: &'static str,
+    /// Newest real document older than this counts as stalled.
+    stale_after: Duration,
+}
+
+/// One independent ingestion path, and the indices it feeds.
+struct IngestFeed {
+    /// Alert key suffix, and how the feed is named in the message.
+    name: &'static str,
+    indices: &'static [IngestIndex],
+}
+
+const fn minutes(n: u64) -> Duration {
+    Duration::from_secs(n * 60)
+}
+
+const INGEST_FEEDS: &[IngestFeed] = &[
+    IngestFeed {
+        name: "sensor",
+        indices: &[IngestIndex { pattern: "honeypot-v2-*", stale_after: minutes(90) }],
+    },
+    IngestFeed {
+        name: "dionaea",
+        indices: &[IngestIndex { pattern: "dionaea-incidents-v1-*", stale_after: minutes(90) }],
+    },
+    IngestFeed {
+        name: "portbridge",
+        indices: &[IngestIndex { pattern: "portbridge-v2-*", stale_after: minutes(90) }],
+    },
+    IngestFeed {
+        name: "suricata",
+        indices: &[
+            IngestIndex { pattern: "suricata-v2-alert-*", stale_after: minutes(90) },
+            IngestIndex { pattern: "suricata-v2-flow-*", stale_after: minutes(90) },
+            IngestIndex { pattern: "suricata-v2-netflow-*", stale_after: minutes(90) },
+            IngestIndex { pattern: "suricata-v2-http-*", stale_after: minutes(90) },
+            IngestIndex { pattern: "suricata-v2-tls-*", stale_after: minutes(90) },
+            IngestIndex { pattern: "suricata-v2-ssh-*", stale_after: minutes(90) },
+            IngestIndex { pattern: "suricata-v2-fileinfo-*", stale_after: minutes(90) },
+            IngestIndex { pattern: "suricata-v2-anomaly-*", stale_after: minutes(90) },
+            IngestIndex { pattern: "suricata-v2-smtp-*", stale_after: minutes(120) },
+            IngestIndex { pattern: "suricata-v2-dns-*", stale_after: minutes(180) },
+        ],
+    },
+];
+
+/// What one index pattern's real (non-probe) ingestion looks like right now.
+struct IngestSample {
+    newest_age_seconds: i64,
+    /// Real documents in the last hour.
+    recent: u64,
+    /// Mean real documents per hour over the reference window.
+    baseline_hourly: f64,
+}
+
+/// Why this index counts as stalled, or None when it is keeping up.
+///
+/// Split out of the query so the thresholds above can be tested against the
+/// numbers this fleet actually produced, rather than only against a live
+/// cluster that happens to be healthy at the time.
+fn ingest_stall(
+    index: &IngestIndex,
+    sample: &IngestSample,
+    floor_percent: u64,
+    min_baseline: f64,
+) -> Option<String> {
+    if sample.newest_age_seconds >= index.stale_after.as_secs() as i64 {
+        return Some(format!(
+            "{} has had no data for {}",
+            index.pattern,
+            format_go_duration(Duration::from_secs(sample.newest_age_seconds as u64))
+        ));
+    }
+    // Below min_baseline an hour's count is too small for a percentage of it
+    // to mean anything: suricata-v2-smtp-* legitimately drops to 6% of its
+    // median hour, so a floor that suits honeypot-v2-* would page nightly.
+    // Those indices are covered by freshness alone, which their history shows
+    // is enough — none of them has ever been silent for as long as its
+    // threshold.
+    if sample.baseline_hourly >= min_baseline
+        && (sample.recent as f64) < sample.baseline_hourly * floor_percent as f64 / 100.0
+    {
+        return Some(format!(
+            "{} is down to {}/h against a {:.0}/h baseline",
+            index.pattern, sample.recent, sample.baseline_hourly
+        ));
+    }
+    None
+}
 
 /// Ports payloads_data.go's humanBytes: binary-prefix size, one decimal.
 fn human_bytes(n: u64) -> String {
@@ -147,6 +297,9 @@ struct Notifier {
     webhook: String,
     client: reqwest::Client,
     messages: Vec<String>,
+    /// #1750's ingestion check aggregates a week of documents per index, so
+    /// it runs on INGEST_CHECK_EVERY rather than on every 60s pass.
+    last_ingest_check: Option<std::time::Instant>,
 }
 
 impl Notifier {
@@ -528,6 +681,88 @@ impl Notifier {
         }
     }
 
+
+    /// One search per index pattern: newest real document, last hour, and the
+    /// reference week. None when the query failed, or when the pattern has no
+    /// real documents in the whole lookback window — a feed that was never
+    /// deployed has nothing to be late about, and staying quiet is the safe
+    /// direction for a check whose job is to be believed.
+    async fn ingest_sample(&self, pattern: &str) -> Option<IngestSample> {
+        let result = self
+            .search(
+                &[pattern],
+                json!({
+                    "size": 0,
+                    "track_total_hits": false,
+                    "query": {"bool": {
+                        "filter": [{"range": {"@timestamp": {"gte": INGEST_LOOKBACK}}}],
+                        "must_not": [{"term": {"internal_probe": true}}]
+                    }},
+                    "aggs": {
+                        "newest": {"max": {"field": "@timestamp"}},
+                        "recent": {"filter": {"range": {"@timestamp": {"gte": "now-1h"}}}},
+                        "baseline": {"filter": {"range": {"@timestamp": {
+                            "gte": INGEST_BASELINE_FROM, "lt": INGEST_BASELINE_TO}}}}
+                    }
+                }),
+            )
+            .await?;
+        let aggs = &result["aggregations"];
+        // null when the pattern matched no documents at all.
+        let newest_ms = aggs["newest"]["value"].as_f64()?;
+        let now_ms = chrono::Utc::now().timestamp_millis() as f64;
+        Some(IngestSample {
+            newest_age_seconds: ((now_ms - newest_ms) / 1000.0).max(0.0) as i64,
+            recent: aggs["recent"]["doc_count"].as_u64().unwrap_or(0),
+            baseline_hourly: aggs["baseline"]["doc_count"].as_u64().unwrap_or(0) as f64
+                / INGEST_BASELINE_HOURS,
+        })
+    }
+
+    /// #1750 — one alert per ingestion path, naming the indices that stalled.
+    async fn ingest_lag_alerts(&mut self, mark_only: bool) {
+        let floor_percent: u64 = env_or("ALERT_INGEST_FLOOR_PERCENT", "10")
+            .parse()
+            .unwrap_or(10)
+            .clamp(1, 90);
+        let min_baseline: f64 = env_or("ALERT_INGEST_MIN_BASELINE", "1000")
+            .parse()
+            .unwrap_or(1000.0);
+
+        for feed in INGEST_FEEDS {
+            let mut checked = 0usize;
+            let mut stalls: Vec<String> = Vec::new();
+            for index in feed.indices {
+                let Some(sample) = self.ingest_sample(index.pattern).await else { continue };
+                checked += 1;
+                if let Some(reason) = ingest_stall(index, &sample, floor_percent, min_baseline) {
+                    stalls.push(reason);
+                }
+            }
+            if stalls.is_empty() {
+                continue;
+            }
+            let scope = if checked > 1 {
+                format!(" ({} of {} indices)", stalls.len(), checked)
+            } else {
+                String::new()
+            };
+            let message = format!(
+                "{} ingestion stalled: {}{}",
+                feed.name,
+                stalls.join("; "),
+                scope
+            );
+            self.observe(
+                &format!("pipeline:ingest-lag:{}", feed.name),
+                message,
+                "/source-health",
+                mark_only,
+            )
+            .await;
+        }
+    }
+
     async fn pass(&mut self, mark_only: bool) {
         self.messages.clear();
 
@@ -707,6 +942,11 @@ impl Notifier {
         self.github_analysis_alerts(mark_only).await;
         // 13. Filebeat ingestion health via FILEBEAT_URL.
         self.filebeat_alerts(mark_only).await;
+        // 14. Ingestion lag per index (#1750), on its own slower cadence.
+        if self.last_ingest_check.is_none_or(|at| at.elapsed() >= INGEST_CHECK_EVERY) {
+            self.last_ingest_check = Some(std::time::Instant::now());
+            self.ingest_lag_alerts(mark_only).await;
+        }
 
         // Webhook fan-out for everything that newly notified.
         if !mark_only && !self.webhook.is_empty() {
@@ -950,6 +1190,7 @@ async fn alert_notifier_loop(state: AppState) {
             .build()
             .expect("reqwest client"),
         messages: Vec::new(),
+        last_ingest_check: None,
     };
     // Baseline pass: mark existing conditions without paging about
     // history at boot (same posture as the Go loop's current(true)).
@@ -959,5 +1200,73 @@ async fn alert_notifier_loop(state: AppState) {
     loop {
         ticker.tick().await;
         notifier.pass(false).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn index(minutes_stale: u64) -> IngestIndex {
+        IngestIndex { pattern: "honeypot-v2-*", stale_after: minutes(minutes_stale) }
+    }
+
+    fn sample(age_seconds: i64, recent: u64, baseline_hourly: f64) -> IngestSample {
+        IngestSample { newest_age_seconds: age_seconds, recent, baseline_hourly }
+    }
+
+    #[test]
+    fn a_keeping_up_index_is_silent() {
+        assert!(ingest_stall(&index(90), &sample(30, 98_000, 100_000.0), 10, 1000.0).is_none());
+    }
+
+    #[test]
+    fn total_silence_past_the_threshold_is_a_stall() {
+        let reason = ingest_stall(&index(90), &sample(3 * 3600, 0, 100_000.0), 10, 1000.0);
+        assert!(reason.unwrap().contains("no data for 3h"));
+    }
+
+    #[test]
+    fn the_2026_08_20_outage_is_caught_in_its_first_hour() {
+        // The 45-hour blackout freshness could not see: a trickle of sensors
+        // kept the index warm, so the newest document was never more than
+        // minutes old, but real volume was 3 events against ~103k/h.
+        let reason = ingest_stall(&index(90), &sample(120, 3, 102_956.0), 10, 1000.0);
+        assert!(reason.unwrap().contains("down to 3/h against a 102956/h baseline"));
+    }
+
+    #[test]
+    fn a_quiet_but_not_collapsed_hour_is_not_a_stall() {
+        // The lowest hour any high-volume index recorded across two healthy
+        // weeks was 37% of its own median. The floor has to sit well under
+        // that or the check pages on a quiet night.
+        assert!(ingest_stall(&index(90), &sample(60, 36_398, 98_614.0), 10, 1000.0).is_none());
+    }
+
+    #[test]
+    fn low_rate_indices_are_exempt_from_the_volume_floor() {
+        // suricata-v2-smtp-* really does fall to 4 events in an hour against
+        // a 66/h median. Freshness still covers it; a percentage does not.
+        assert!(ingest_stall(&index(120), &sample(60, 4, 66.0), 10, 1000.0).is_none());
+    }
+
+    #[test]
+    fn freshness_still_applies_below_the_volume_floor() {
+        let reason = ingest_stall(&index(120), &sample(5 * 3600, 0, 66.0), 10, 1000.0);
+        assert!(reason.unwrap().contains("no data for"));
+    }
+
+    #[test]
+    fn every_feed_index_is_named_once() {
+        // A duplicated pattern would double-count "n of m indices" and make
+        // the message lie about how much of a feed is down.
+        let mut seen: Vec<&str> = INGEST_FEEDS
+            .iter()
+            .flat_map(|feed| feed.indices.iter().map(|index| index.pattern))
+            .collect();
+        let total = seen.len();
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), total);
     }
 }

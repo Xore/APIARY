@@ -265,6 +265,16 @@ pub async fn source_health(State(state): State<AppState>) -> Result<Json<SourceH
     let body = json!({
         "size": 0,
         "track_total_hits": true,
+        // #1677/#1767: self-generated healthcheck probes are excluded from
+        // every figure on this page. They are not an observation, and counting
+        // them made this page actively misleading -- through the 45-hour
+        // ingestion blackout that began 2026-08-20 21:00 a loopback probe
+        // landed every nine seconds, so "ingestion freshness" read healthy the
+        // whole way, and 61% of the "unattributed" count below was
+        // healthchecks rather than tunnel-delivered traffic (312,685 of
+        // 514,696 over 24h, measured 2026-08-23). It is also why the totals
+        // here are smaller than the raw index size the storage pane reports.
+        "query": {"bool": {"must_not": [{"term": {"internal_probe": true}}]}},
         "aggs": {
             "sensors": {
                 "terms": {"field": "event.sensor", "size": 60, "order": {"last": "desc"}},
