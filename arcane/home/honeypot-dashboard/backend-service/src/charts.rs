@@ -215,7 +215,7 @@ async fn traffic_sum(
 pub async fn netflow_bytes(State(state): State<AppState>) -> Result<Json<Vec<Series>>, (StatusCode, String)> {
     traffic_sum(
         &state,
-        &["zeek.orig_ip_bytes", "zeek.resp_ip_bytes"],
+        &["source.bytes", "destination.bytes"],
         "suricata.eve.netflow.bytes",
         "bytes",
     )
