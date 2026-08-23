@@ -6,8 +6,21 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-pcap_dir="${here}/var/pcap"
-log_dir="${here}/var/logs"
+
+# PCAP_DIR/LOG_DIR select which sample to parse, so the ICS sample
+# (fetch-ics-sample.sh, #1736) and the general one can coexist and be compared
+# without either overwriting the other's logs. Relative paths resolve against
+# the lab directory so `PCAP_DIR=var/pcap-ics ./run-zeek.sh` reads naturally.
+pcap_dir="${PCAP_DIR:-var/pcap}"
+log_dir="${LOG_DIR:-}"
+[[ "$pcap_dir" = /* ]] || pcap_dir="${here}/${pcap_dir}"
+if [[ -z "$log_dir" ]]; then
+    # Default the log directory to match the sample, so var/pcap-ics parses
+    # into var/logs-ics rather than silently mixing with the general run.
+    suffix="$(basename "$pcap_dir")"; suffix="${suffix#pcap}"
+    log_dir="${here}/var/logs${suffix}"
+fi
+[[ "$log_dir" = /* ]] || log_dir="${here}/${log_dir}"
 
 IMAGE="${IMAGE:-apiary-sensing-lab:zeek8}"
 LOGS_MAX_BYTES="${LOGS_MAX_BYTES:-$((500 * 1024 * 1024))}"
@@ -18,9 +31,16 @@ if [[ ! -d "$pcap_dir" ]] || [[ -z "$(ls -A "$pcap_dir" 2>/dev/null)" ]]; then
     exit 1
 fi
 
-used=$(du -sb "$log_dir" 2>/dev/null | cut -f1 || echo 0)
+# Budget against ALL logs* directories, not just this run's. With more than
+# one sample in play (var/logs and var/logs-ics), a per-directory check would
+# let the aggregate drift past the cap while each half looked fine.
+used=0
+for d in "${here}"/var/logs*; do
+    [[ -d "$d" ]] || continue
+    used=$(( used + $(du -sb "$d" 2>/dev/null | cut -f1 || echo 0) ))
+done
 if (( used >= LOGS_MAX_BYTES )); then
-    echo "sensing-lab: var/logs is at $((used / 1024 / 1024)) MB, over the" \
+    echo "sensing-lab: var/logs* total $((used / 1024 / 1024)) MB, over the" \
          "$((LOGS_MAX_BYTES / 1024 / 1024)) MB cap. Run ./clean.sh." >&2
     exit 1
 fi

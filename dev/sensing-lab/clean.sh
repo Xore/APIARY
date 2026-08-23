@@ -7,5 +7,5 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 before=$(du -sb "${here}/var" 2>/dev/null | cut -f1 || echo 0)
-rm -rf "${here}/var/pcap" "${here}/var/logs"
+rm -rf "${here}"/var/pcap* "${here}"/var/logs*
 echo "sensing-lab: reclaimed $((before / 1024 / 1024)) MB"
