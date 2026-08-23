@@ -11,3 +11,8 @@ target/
 # that cannot recur.
 __pycache__/
 *.py[cod]
+
+# Playwright MCP writes accessibility snapshots and screenshots into the
+# directory a browser session was driven from; they are session scratch, not
+# source, and one already reached main inside a backend-service commit.
+.playwright-mcp/
