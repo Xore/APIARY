@@ -14,7 +14,43 @@ use serde_json::Value;
 use std::collections::HashSet;
 use std::time::Duration;
 
-pub const EVENT_INDICES: &[&str] = &["honeypot-v2-*", "suricata-v2-*"];
+/// Every index family that carries sensor events, keyed by `event.sensor`.
+///
+/// This is what `Es::search` targets, so it decides what the whole dashboard
+/// can see: the source-health feed list, the sensor filter values, the
+/// overview KPIs and the event explorer all read through it. An index absent
+/// here is invisible everywhere, silently -- the page renders fine, it just
+/// never mentions the sensor. #1742's sensors were missing for exactly that
+/// reason, 573,463 documents of them, and portbridge had been missing since
+/// long before that.
+///
+/// Each family here was checked for what `source.ip` actually means on it,
+/// because an index whose source is our own infrastructure would re-create
+/// #1677 by attributing its events to us:
+///
+///   portbridge-v2-*   real attacker address (zero fleet-sourced documents)
+///   zeek-v1-*         real attacker address -- it sniffs the public NIC
+///   traefik-v1-*      real client address
+///   huginn-v1-*       often OUR VPS: it records the responder's SYN-ACK and
+///                     server-uptime observations as well as the client's SYN
+///   zeek-proxy-v1-*   usually the tunnel peer: it watches the relay side, so
+///                     the originator is our own VPS forwarding inward
+///
+/// The last two are still included, because the exclusion that makes them
+/// safe already exists and is applied at query level: dashboard.rs's
+/// `self_addresses()` (#1677/#1779) drops the tunnel peer and everything in
+/// HONEYPOT_SELF_IPS from the attacker-ranking aggregations, and charts.rs
+/// inherits it. Their event counts and freshness are still worth surfacing --
+/// "is this sensor alive" is the question source-health exists to answer.
+pub const EVENT_INDICES: &[&str] = &[
+    "honeypot-v2-*",
+    "suricata-v2-*",
+    "portbridge-v2-*",
+    "zeek-v1-*",
+    "zeek-proxy-v1-*",
+    "huginn-v1-*",
+    "traefik-v1-*",
+];
 
 /// The "is this a login/auth attempt" query fragment (#1611 workstream C),
 /// shared by every login-counting aggregation (aggregates.rs's sources
