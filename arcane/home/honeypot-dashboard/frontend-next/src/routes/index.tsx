@@ -654,6 +654,16 @@ function Overview() {
             </p>
             <EChart kind="pie" url="/api/chart/os-distribution" height={360} />
           </div>
+          <div className="card wide" id="tcp-stack-clusters-card">
+            <h2>Attacker TCP-stack clusters (JA4T)</h2>
+            <p className="note">
+              Unique attackers per TCP handshake fingerprint, from Zeek. Deliberately not an OS name — it groups hosts
+              that share a network stack without guessing which one, so it does not go stale as operating systems move on.
+              Read it alongside the OS chart above: p0f resolves three quarters of connections here to a Linux kernel
+              retired in 2017.
+            </p>
+            <EChart kind="pie" url="/api/chart/tcp-stack-clusters" height={360} />
+          </div>
           <div className="card wide" id="tls-fingerprints-card">
             <h2>TLS scanner fingerprints (JA4) — wire-level, last 7 days</h2>
             <p className="note">Every TLS handshake against a non-dashboard port, alert or not. Click a bar to copy the full hash.</p>

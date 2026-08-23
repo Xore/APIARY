@@ -248,6 +248,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/charts/anomaly-trend", get(charts::anomaly_trend))
         .route("/api/v1/charts/dionaea-cves", get(charts::dionaea_cves))
         .route("/api/v1/charts/os-distribution", get(charts::os_distribution))
+        // #1727 §7: JA4T stack clusters, the successor to the p0f OS chart above.
+        .route("/api/v1/charts/tcp-stack-clusters", get(charts::tcp_stack_clusters))
         .route("/api/v1/charts/tls-fingerprints", get(charts::tls_fingerprints))
         .route("/api/v1/charts/ssh-fingerprints", get(charts::ssh_fingerprints))
         .route("/api/v1/charts/endlessh-held-histogram", get(charts::endlessh_histogram))

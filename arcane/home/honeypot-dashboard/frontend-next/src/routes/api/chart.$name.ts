@@ -14,6 +14,7 @@ const CHARTS = new Set([
   'anomaly-trend',
   'dionaea-cves',
   'os-distribution',
+  'tcp-stack-clusters',
   'tls-fingerprints',
   'ssh-fingerprints',
   'endlessh-held-histogram',

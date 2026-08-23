@@ -315,6 +315,56 @@ pub async fn os_distribution(State(state): State<AppState>) -> Result<Json<Vec<P
     Ok(Json(points))
 }
 
+/// /api/v1/charts/tcp-stack-clusters — unique attacker IPs per JA4T TCP-stack
+/// fingerprint (`zeek-v1-conn-*`).
+///
+/// #1727 §7's replacement for the p0f OS-distribution chart above. Measured on
+/// 14 days of this deployment's own traffic, p0f resolves 76.2% of connections
+/// to a Linux kernel at or below 3.10 -- a version line that went EOL in 2017 --
+/// produces zero Windows 10 labels in 2.69 M labelled connections, and finds
+/// two Android hosts. It is a three-way Linux/Windows/other classifier wearing
+/// version numbers, and the chart renders those numbers as if they meant
+/// something.
+///
+/// JA4T does not name the OS, which is the point: it is a hash of the observed
+/// TCP handshake parameters, so it clusters hosts that share a stack without
+/// asserting what that stack is. Coverage is comparable (88.7% of connections
+/// carry one, against p0f's 95.1% label rate) and it does not decay as the
+/// signature database ages, because there is no database.
+///
+/// Both charts coexist while p0f still runs. Retiring p0f is what removes the
+/// other one.
+pub async fn tcp_stack_clusters(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<PiePoint>>, (StatusCode, String)> {
+    let body = json!({
+        "size": 0,
+        "query": {"range": {"@timestamp": {"gte": OVERVIEW_WINDOW}}},
+        "aggs": {"stacks": {
+            "terms": {"field": "zeek.ja4t", "size": 20},
+            "aggs": {"ips": {"cardinality": {"field": "source.ip"}}}
+        }}
+    });
+    let result = state
+        .es
+        .search_index(&["zeek-v1-conn-*"], body)
+        .await
+        .map_err(bad_gateway)?;
+    let points = result["aggregations"]["stacks"]["buckets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        // Zeek writes an empty ja4t for connections it never saw a SYN for --
+        // a mid-stream capture start, or a scan that only ever sent a RST.
+        .filter(|bucket| !bucket["key"].as_str().unwrap_or("").is_empty())
+        .map(|bucket| PiePoint {
+            name: bucket["key"].as_str().unwrap_or("").to_string(),
+            value: bucket["ips"]["value"].as_u64().unwrap_or(0),
+        })
+        .collect();
+    Ok(Json(points))
+}
+
 async fn fingerprint_bar(state: &AppState, indices: &[&str], body: Value, agg: &str) -> anyhow::Result<Bar> {
     let result = state.es.search_index(indices, body).await?;
     let mut bar = Bar { categories: Vec::new(), values: Vec::new() };
