@@ -74,7 +74,14 @@ def main() -> int:
     gpu_queue.increment_attempts(ES_HOST, job_id)
     try:
         payload = job.get("payload") or {}
-        ai_triage = worker.run_triage_workflows(payload.get("evidence", ""), payload.get("note", ""))
+        # #1698: the pre-flight check above only catches a job aborted while
+        # it was still queued. Hand the worker a predicate so an operator can
+        # also stop one that is already generating -- it is consulted between
+        # streamed chunks, and abandoning the stream is what actually frees
+        # the GPU (ollama cancels the inference task on client disconnect).
+        ai_triage = worker.run_triage_workflows(
+            payload.get("evidence", ""), payload.get("note", ""),
+            should_abort=lambda: gpu_queue.is_abort_requested(ES_HOST, job_id))
         if ai_triage is None:
             gpu_queue.update_status(ES_HOST, job_id, "failed", error="model produced no usable answer")
             print(f"[gpu-queue-drain] {job_id} ({ref}): model produced no usable answer")
@@ -83,6 +90,13 @@ def main() -> int:
             gpu_queue.update_status(ES_HOST, job_id, "failed", error="result no longer exists to patch")
             print(f"[gpu-queue-drain] {job_id} ({ref}): result file is gone, nothing to patch")
             return 1
+    except worker.TriageAborted:
+        # Not a failure: somebody asked for this. Terminal state is `aborted`,
+        # the same one the pre-flight path uses, so the queue reads the same
+        # whether the abort landed before or during the run.
+        gpu_queue.update_status(ES_HOST, job_id, "aborted")
+        print(f"[gpu-queue-drain] {job_id} ({ref}): aborted mid-generation on operator request")
+        return 0
     except Exception as e:  # noqa: BLE001
         gpu_queue.update_status(ES_HOST, job_id, "failed", error=repr(e))
         print(f"[gpu-queue-drain] {job_id} ({ref}): failed unexpectedly: {e!r}")
