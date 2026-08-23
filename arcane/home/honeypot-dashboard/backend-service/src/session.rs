@@ -33,6 +33,9 @@ pub struct Sequence {
 #[derive(Serialize)]
 pub struct Technique {
     pub id: String,
+    pub name: String,
+    pub domain: String,
+    pub evidence: String,
     pub count: u64,
     pub url: String,
 }
@@ -52,6 +55,34 @@ pub struct SessionDetail {
     pub techniques: Vec<Technique>,
     pub sequences: Vec<Sequence>,
     pub events: Vec<EventRow>,
+}
+
+/// (name, domain, evidence) for the technique IDs
+/// ip_enrichment/attck.rs's promote_attck_technique_fields actually
+/// emits into canonical_attck_techniques — the ES document only ever
+/// carries the bare ID (#1611 workstream D promoted it at ingest time,
+/// intentionally not duplicating the derived text), so the session
+/// detail pane's MITRE table (session.html's "techniques" template) needs
+/// this restored here. Static, not a network lookup: this dashboard's own
+/// evidence-derived annotation is a fixed set tied 1:1 to the classifier
+/// rules in attck.rs, mirroring dashboard/intelligence.go's original
+/// technique() call sites exactly. An ID outside this set (a future
+/// classifier rule added without updating this table) falls back to the
+/// bare ID as its own name rather than panicking.
+fn technique_meta(id: &str) -> (&str, &'static str, &'static str) {
+    match id {
+        "T1110" => ("Brute Force", "Enterprise", "credential attempt"),
+        "T1059" => ("Command and Scripting Interpreter", "Enterprise", "command captured"),
+        "T1059.001" => ("PowerShell", "Enterprise", "command captured"),
+        "T1059.003" => ("Windows Command Shell", "Enterprise", "command captured"),
+        "T1059.004" => ("Unix Shell", "Enterprise", "command captured"),
+        "T1105" => ("Ingress Tool Transfer", "Enterprise", "payload transfer or downloader"),
+        "T1190" => ("Exploit Public-Facing Application", "Enterprise", "web exploit or probing evidence"),
+        "T1595" => ("Active Scanning", "Enterprise", "scanner/client fingerprint"),
+        "T0886" => ("Remote Services", "ICS", "industrial protocol interaction"),
+        "T1692.001" => ("Unauthorized Message: Command Message", "ICS", "control command or write attempt"),
+        other => (other, "Enterprise", ""),
+    }
 }
 
 fn top_n(map: HashMap<String, u64>, n: usize) -> Vec<Kv> {
@@ -181,10 +212,17 @@ pub async fn detail(
 
     let mut technique_rows: Vec<Technique> = techniques
         .into_iter()
-        .map(|(id, count)| Technique {
-            url: format!("https://attack.mitre.org/techniques/{}/", id.replace('.', "/")),
-            id,
-            count,
+        .map(|(id, count)| {
+            let (name, domain, evidence) = technique_meta(&id);
+            let (name, domain, evidence) = (name.to_string(), domain.to_string(), evidence.to_string());
+            Technique {
+                url: format!("https://attack.mitre.org/techniques/{}/", id.replace('.', "/")),
+                id,
+                name,
+                domain,
+                evidence,
+                count,
+            }
         })
         .collect();
     technique_rows.sort_by(|a, b| b.count.cmp(&a.count).then(a.id.cmp(&b.id)));

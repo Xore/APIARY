@@ -9,7 +9,7 @@ import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
 
 type Kv = { key: string; count: number }
-type Technique = { id: string; count: number; url: string }
+type Technique = { id: string; name: string; domain: string; evidence: string; count: number; url: string }
 type Sequence = { name: string; severity: string; summary: string }
 
 type EventRow = {
@@ -305,12 +305,37 @@ function SessionPage() {
         </div>
       ))}
       {detail && detail.techniques.length > 0 ? (
-        <div className="filters">
-          {detail.techniques.map((technique) => (
-            <a className="chip" key={technique.id} href={technique.url} target="_blank" rel="noopener noreferrer">
-              {technique.id} × {technique.count.toLocaleString('en-US')}
-            </a>
-          ))}
+        <div className="card wide">
+          <h2>MITRE ATT&amp;CK behavior mapping</h2>
+          <p className="note">Evidence-based behavioral context only; this does not identify or attribute an actor.</p>
+          <div className="card__scroll">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>domain</th>
+                  <th>technique</th>
+                  <th>observations</th>
+                  <th>evidence</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detail.techniques.map((technique) => (
+                  <tr key={technique.id}>
+                    <td>
+                      <span className="badge badge--muted">{technique.domain}</span>
+                    </td>
+                    <td className="v">
+                      <a href={technique.url} target="_blank" rel="noopener noreferrer">
+                        {technique.id} — {technique.name}
+                      </a>
+                    </td>
+                    <td className="n">{technique.count.toLocaleString('en-US')}</td>
+                    <td className="v">{technique.evidence}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : null}
       {detail ? (
