@@ -1046,6 +1046,26 @@ step_create_shared_resources() {
   install -d -m 777 "$REPO_DIR/state/init-markers"
 }
 
+step_build_zeek_image() {
+  # honeypot-elk's zeek-proxy runs the same Zeek build as the VPS sensor, so
+  # both load an identical parser set -- a divergence there would quietly make
+  # the two sensors disagree about the same traffic.  The build context stays
+  # in vps/zeek rather than being copied into the elk stack, because two
+  # copies drift.
+  #
+  # Arcane syncs one directory per project, so the elk compose cannot use a
+  # build: context that escapes its own directory.  It names the local tag
+  # with pull_policy: never instead, which means nothing in that compose
+  # builds it -- and without pull_policy Arcane tries to `docker pull
+  # xore-zeek:local` and fails the entire project deploy on a tag that exists
+  # in no registry.  Building it here is what makes that reference resolve on
+  # a clean install.
+  local ctx="$REPO_DIR/vps/zeek"
+  [[ -d "$ctx" ]] || { echo "missing Zeek build context: $ctx" >&2; return 1; }
+  docker build -f "$ctx/Containerfile" -t xore-zeek:local "$ctx"
+  docker image inspect xore-zeek:local >/dev/null
+}
+
 step_start_elasticsearch_first() {
   (cd /var/dockge/stacks/honeypot-elk && with_retry 3 15 docker compose -f compose.yml up -d --wait)
 }
@@ -1863,6 +1883,7 @@ run_step bootstrap-missing-envs "Bootstrap any still-missing .env from .example"
 run_step provision-keycloak-secrets "Generate Keycloak secrets, reset bootstrap admin to admin/admin123" step_provision_keycloak_secrets
 
 run_step shared-resources      "Create honeynet + placeholder volumes" step_create_shared_resources
+run_step build-zeek-image      "Build xore-zeek:local for zeek-proxy" step_build_zeek_image
 run_step start-elasticsearch   "Start honeypot-elk, wait healthy"   step_start_elasticsearch_first
 run_step start-init            "Start honeypot-init, wait for one-shots" step_start_init
 run_step start-remaining       "Start remaining sensor/dashboard stacks" step_start_remaining_stacks

@@ -604,6 +604,12 @@ services:
     # Duplicating the Containerfile into this directory would be the other
     # option, and would guarantee the two sensors drift apart.
     image: xore-zeek:local
+    # Built by install-homeserver.sh from vps/zeek, the same context the VPS
+    # sensor uses, so both Zeeks load an identical parser set.  Arcane's deploy
+    # pulls every image it does not know how to build, and a local-only tag
+    # exists in no registry -- without this the pull fails and takes the whole
+    # honeypot-elk deploy down with it, Elasticsearch included, not just Zeek.
+    pull_policy: never
     container_name: hp-zeek-proxy
     restart: unless-stopped
     network_mode: host
