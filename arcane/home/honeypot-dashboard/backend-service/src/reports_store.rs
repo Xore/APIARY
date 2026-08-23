@@ -767,6 +767,14 @@ pub async fn add_generated(
     Ok(meta)
 }
 
+/// Deletes one generated-report artifact by its own `id` (the ES `_id`,
+/// per `add_generated`'s `index_doc(GENERATED_INDEX, &meta.id, doc)`) —
+/// the per-report delete reports.html's Library grid had (#1682) and the
+/// port dropped. `delete_doc` is already idempotent on a missing id.
+pub async fn delete_generated(state: &AppState, id: &str) -> anyhow::Result<()> {
+    state.es.delete_doc(GENERATED_INDEX, id).await
+}
+
 async fn prune_generated(state: &AppState) {
     let Ok(all) = list_generated(state).await else {
         return;

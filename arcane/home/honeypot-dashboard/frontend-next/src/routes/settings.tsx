@@ -206,6 +206,7 @@ type Prefs = {
   auto_refresh?: boolean
   refresh_interval_seconds?: number
   live_toasts?: boolean
+  live_toast_interval_seconds?: number
   map_basemap?: string
   map_clustering?: boolean
   map_animation?: boolean
@@ -723,7 +724,7 @@ function Segmented({
 // hp-settings.js's collectPatch/requestSave (:559-596).
 const PREF_PANES = {
   navigation: ['landing_page', 'collapsed_sidebar', 'remember_filters', 'open_details_new_tab', 'rows_per_page', 'wrap_long_values'],
-  time: ['timezone', 'clock', 'timestamps', 'auto_refresh', 'refresh_interval_seconds', 'live_toasts'],
+  time: ['timezone', 'clock', 'timestamps', 'auto_refresh', 'refresh_interval_seconds', 'live_toasts', 'live_toast_interval_seconds'],
   notifications: ['notify_severity', 'notify_sound', 'notify_desktop'],
   map: ['map_basemap', 'map_clustering', 'map_animation', 'default_event_window', 'preserve_filters'],
   appearance: ['density', 'reduced_motion', 'high_contrast', 'large_evidence_text'],
@@ -792,6 +793,16 @@ const TZ_SUGGESTIONS: [string, string][] = [
 const REFRESH_INTERVALS: [number, string][] = [
   [10, 'Every 10 seconds'],
   [15, 'Every 15 seconds'],
+  [30, 'Every 30 seconds'],
+  [60, 'Every minute'],
+  [120, 'Every 2 minutes'],
+  [300, 'Every 5 minutes'],
+]
+
+// #1684: the toast used to fire on a fixed 3s batch regardless of volume —
+// on a busy sensor that's a popup every few seconds around the clock.
+const TOAST_INTERVALS: [number, string][] = [
+  [3, 'Every new batch (3 seconds)'],
   [30, 'Every 30 seconds'],
   [60, 'Every minute'],
   [120, 'Every 2 minutes'],
@@ -1177,6 +1188,28 @@ function PersonalPanes({
                 checked={form.live_toasts ?? true}
                 onChange={(value) => patch('live_toasts', value)}
               />
+              {form.live_toasts ?? true ? (
+                <div className="settings-field">
+                  <label className="form-label" htmlFor="hp-pref-toast-interval">
+                    Toast frequency
+                  </label>
+                  <select
+                    className="form-input"
+                    id="hp-pref-toast-interval"
+                    value={String(form.live_toast_interval_seconds ?? 3)}
+                    onChange={(event) => patch('live_toast_interval_seconds', Number(event.target.value))}
+                  >
+                    {TOAST_INTERVALS.map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="settings-field__desc">
+                    Events still accumulate in the background — this only controls how often the popup itself appears.
+                  </div>
+                </div>
+              ) : null}
               {saveButton('time', setTimeStatus)}
             </>
           ) : (

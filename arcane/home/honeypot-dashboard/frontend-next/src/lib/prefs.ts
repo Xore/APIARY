@@ -131,6 +131,37 @@ export function applyPalette(palette: string, options?: { sync?: boolean }) {
   }
 }
 
+export type LiveToastPrefs = { enabled: boolean; intervalSeconds: number }
+
+// #1684: the "N new honeypot events" toast used to fire on a hardcoded 3s
+// batch regardless of volume. Read the operator's saved cadence the same
+// best-effort way pullServerTheme does — LiveToasts.tsx has no loader of
+// its own (it's mounted unconditionally in AppShell, not a route), so this
+// is its only way to see the server-side preference.
+const fetchLiveToastPrefs = createServerFn({ method: 'GET' }).handler(async (): Promise<LiveToastPrefs> => {
+  const { getSessionUser } = await import('./auth')
+  const user = await getSessionUser()
+  if (!user) return { enabled: true, intervalSeconds: 3 }
+  const { serviceJSON } = await import('./backend.server')
+  const params = new URLSearchParams({ subject: user.sub, username: user.username, role: user.role })
+  const result = await serviceJSON<{
+    preferences?: { live_toasts?: boolean; live_toast_interval_seconds?: number }
+  }>(`/api/v1/preferences?${params.toString()}`)
+  const prefs = result?.preferences
+  return {
+    enabled: prefs?.live_toasts ?? true,
+    intervalSeconds: prefs?.live_toast_interval_seconds ?? 3,
+  }
+})
+
+export async function pullLiveToastPrefs(): Promise<LiveToastPrefs> {
+  try {
+    return await fetchLiveToastPrefs()
+  } catch {
+    return { enabled: true, intervalSeconds: 3 }
+  }
+}
+
 export function useThemeMode(): ThemeMode {
   return useSyncExternalStore(
     (listener) => {

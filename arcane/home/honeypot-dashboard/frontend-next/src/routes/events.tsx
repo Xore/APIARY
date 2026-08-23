@@ -44,7 +44,8 @@ type EventRow = {
   record: JsonRecord
 }
 
-type EventsPage = { total: number; offset: number; rows: EventRow[] }
+type CorrelatedIp = { ip: string; count: number; checked: boolean }
+type EventsPage = { total: number; offset: number; rows: EventRow[]; fingerprint_ips: CorrelatedIp[] | null }
 
 export type EventFilters = {
   ip?: string
@@ -71,6 +72,10 @@ export type EventFilters = {
   provider?: string
   sig?: string
   cat?: string
+  /** #1682: the "Isolate IP…" checklist's comma-separated narrowing —
+   * distinct from `ip` (single-IP attack-chain view), applies alongside
+   * `fingerprint`. */
+  ips?: string
 }
 
 const PIVOT_KEYS = [
@@ -108,6 +113,65 @@ const fetchFilterValues = createServerFn({ method: 'GET' }).handler(async (): Pr
   return serviceJSON<FilterValues>('/api/v1/filter-values')
 })
 
+type InvestigationConfig = { kibana: string; evebox: string; arkime: string }
+
+// #1682: events.html's "Open in Kibana/EveBox/Arkime" menu
+// (dashboard/links.go's investigationURL/investigationBase), dropped in
+// the port even though these tools are actually deployed
+// (arcane/home/honeypot-elk). Per-tool env var wins outright; otherwise
+// derived from HONEYPOT_DOMAIN as https://{kibana,evebox,arkime}.<domain>
+// (the common subdomain-per-tool layout). Neither set = no link, same as
+// the Go tier — an absent menu entry over a guess. Doesn't need a
+// session, just deployment config, so this is a plain fetch rather than
+// running through lib/auth.ts.
+const fetchInvestigationConfig = createServerFn({ method: 'GET' }).handler(async (): Promise<InvestigationConfig> => {
+  const domain = (process.env.HONEYPOT_DOMAIN ?? '').trim().replace(/\.+$/, '')
+  const base = (kind: string, explicit: string | undefined) => {
+    const trimmed = (explicit ?? '').trim()
+    if (trimmed) return trimmed
+    return domain ? `https://${kind}.${domain}` : ''
+  }
+  return {
+    kibana: base('kibana', process.env.KIBANA_PUBLIC_URL),
+    evebox: base('evebox', process.env.EVEBOX_PUBLIC_URL),
+    arkime: base('arkime', process.env.ARKIME_PUBLIC_URL),
+  }
+})
+
+// notfound.example./.example is RFC 2606's reserved "definitely not a
+// real deployment" TLD — the same placeholder-host guard links.go's
+// isPlaceholderHost used, so a doc-example value left in .env by mistake
+// renders as absent rather than a working-looking link to nowhere.
+function isPlaceholderHost(base: string): boolean {
+  try {
+    const host = new URL(base).hostname.toLowerCase()
+    return host === 'example' || host.endsWith('.example')
+  } catch {
+    return true
+  }
+}
+
+function investigationLinks(row: EventRow, config: InvestigationConfig): { kibana?: string; evebox?: string; arkime?: string } {
+  const ip = row.src_ip
+  if (!ip) return {}
+  const links: { kibana?: string; evebox?: string; arkime?: string } = {}
+  if (config.evebox && !isPlaceholderHost(config.evebox)) {
+    links.evebox = `${config.evebox.replace(/\/+$/, '')}/#/inbox?q=${encodeURIComponent(ip)}`
+  }
+  if (config.kibana && !isPlaceholderHost(config.kibana)) {
+    const when = new Date(row.time)
+    const from = new Date(when.getTime() - 5 * 60_000).toISOString()
+    const to = new Date(when.getTime() + 5 * 60_000).toISOString()
+    const g = encodeURIComponent(`(time:(from:'${from}',to:'${to}'))`)
+    const a = encodeURIComponent(`(query:(language:kuery,query:'${ip}'))`)
+    links.kibana = `${config.kibana.replace(/\/+$/, '')}/app/discover#/?_g=${g}&_a=${a}`
+  }
+  if (config.arkime && !isPlaceholderHost(config.arkime)) {
+    links.arkime = `${config.arkime.replace(/\/+$/, '')}/sessions?date=-1&expression=${encodeURIComponent(`ip == ${ip}`)}`
+  }
+  return links
+}
+
 export const Route = createFileRoute('/events')({
   // Pivot links across the dashboard land here with filters in the URL
   // (/events?ip=…, ?kind=login, ?country=CN, ?since=24h).
@@ -121,12 +185,16 @@ export const Route = createFileRoute('/events')({
       proto: pick('proto'),
       kind: pick('kind'),
       since: pick('since'),
+      ips: pick('ips'),
     }
     for (const key of PIVOT_KEYS) filters[key] = pick(key)
     return filters
   },
   loaderDeps: ({ search }) => search,
-  loader: async ({ deps }) => ({ first: fetchEvents({ data: { offset: 0, filters: deps } }) }),
+  loader: async ({ deps }) => ({
+    first: fetchEvents({ data: { offset: 0, filters: deps } }),
+    investigationConfig: await fetchInvestigationConfig(),
+  }),
   component: Events,
 })
 
@@ -153,12 +221,13 @@ function SkeletonRows({ count }: { count: number }) {
 }
 
 function Events() {
-  const { first } = Route.useLoaderData()
+  const { first, investigationConfig } = Route.useLoaderData()
   const search = Route.useSearch()
   const navigate = Route.useNavigate()
   const [values, setValues] = useState<FilterValues | null>(null)
   const [rows, setRows] = useState<EventRow[] | null>(null)
   const [total, setTotal] = useState(0)
+  const [fingerprintIps, setFingerprintIps] = useState<CorrelatedIp[] | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
   const [selected, setSelected] = useState<number | null>(null)
   const filtersActive = Boolean(
@@ -223,6 +292,7 @@ function Events() {
       if (cancelled || !page) return
       setRows(page.rows)
       setTotal(page.total)
+      setFingerprintIps(page.fingerprint_ips)
     })
     return () => {
       cancelled = true
@@ -328,6 +398,9 @@ function Events() {
             {key}: {(search[key] as string).length > 40 ? `${(search[key] as string).slice(0, 37)}…` : search[key]} ×
           </button>
         ))}
+        {fingerprintIps && fingerprintIps.length >= 2 ? (
+          <IsolateIpMenu ips={fingerprintIps} onApply={(value) => setFilter('ips', value)} />
+        ) : null}
         {filtersActive ? (
           <button className="chip" type="button" onClick={() => void navigate({ search: {} })}>
             × clear filters
@@ -456,7 +529,7 @@ function Events() {
                   ) : null}
                 </p>
               ) : null}
-              <EventMeta row={rows[selected]} onPivot={setFilter} />
+              <EventMeta row={rows[selected]} onPivot={setFilter} investigationConfig={investigationConfig} />
               <div className="card__scroll">
                 <pre className="code">{JSON.stringify(rows[selected].record, null, 2)}</pre>
               </div>
@@ -472,8 +545,96 @@ function Events() {
  * .eventmeta block: decoy identity, shared-value pivots, network origin,
  * sensor detection, session recording, and the payload actions menu. A
  * group renders only when it has at least one value. */
-function EventMeta({ row, onPivot }: { row: EventRow; onPivot: (key: keyof EventFilters, value: string) => void }) {
+// #1682: events.html:76-99's "Isolate IP…" checklist — check/uncheck IPs
+// to narrow a fingerprint match down to one attacker among several
+// sharing it. .action-menu/.hp-open-in-menu (theme.css) give the
+// disclosure its outside-click-close and close-siblings-on-toggle for
+// free (theme.js); the checklist rows themselves have no bespoke class in
+// theme.css to reuse (the Go template's .hp-ip-filter-* was never a
+// generic pattern), so they're plain labeled checkboxes.
+function IsolateIpMenu({ ips, onApply }: { ips: CorrelatedIp[]; onApply: (value: string) => void }) {
+  const [pending, setPending] = useState<Set<string>>(() => new Set(ips.filter((entry) => entry.checked).map((entry) => entry.ip)))
+  const anyUnchecked = ips.some((entry) => !pending.has(entry.ip))
+  return (
+    <details className="hp-open-in action-menu">
+      <summary title="Check or uncheck IPs to isolate one attacker among several sharing this fingerprint">
+        Isolate IP…
+      </summary>
+      <div className="dropdown hp-open-in-menu" role="menu" style={{ width: 260 }}>
+        <div className="hp-open-in-heading">
+          IPs behind this fingerprint <span className="tw:text-muted">({pending.size}/{ips.length})</span>
+        </div>
+        <div style={{ display: 'flex', gap: 6, padding: '2px 10px 6px' }}>
+          <button
+            className="btn btn-sm btn-secondary"
+            type="button"
+            onClick={() => setPending(new Set(ips.map((entry) => entry.ip)))}
+          >
+            All
+          </button>
+          <button className="btn btn-sm btn-secondary" type="button" onClick={() => setPending(new Set())}>
+            None
+          </button>
+        </div>
+        <div style={{ maxHeight: 260, overflowY: 'auto', padding: '0 10px' }}>
+          {ips.map((entry) => (
+            <label key={entry.ip} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={pending.has(entry.ip)}
+                onChange={(event) => {
+                  setPending((current) => {
+                    const next = new Set(current)
+                    if (event.target.checked) next.add(entry.ip)
+                    else next.delete(entry.ip)
+                    return next
+                  })
+                }}
+              />
+              <span className="mono" style={{ flex: 1 }}>
+                {entry.ip}
+              </span>
+              <span className="tw:text-muted">{entry.count.toLocaleString('en-US')}</span>
+            </label>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 6, padding: '8px 10px 4px' }}>
+          <button
+            className="btn btn-sm btn-primary"
+            type="button"
+            onClick={() => onApply(anyUnchecked ? Array.from(pending).join(',') : '')}
+          >
+            Apply
+          </button>
+          {ips.some((entry) => !entry.checked) || anyUnchecked ? (
+            <button
+              className="btn btn-sm btn-secondary"
+              type="button"
+              onClick={() => {
+                setPending(new Set(ips.map((entry) => entry.ip)))
+                onApply('')
+              }}
+            >
+              Reset
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </details>
+  )
+}
+
+function EventMeta({
+  row,
+  onPivot,
+  investigationConfig,
+}: {
+  row: EventRow
+  onPivot: (key: keyof EventFilters, value: string) => void
+  investigationConfig: InvestigationConfig
+}) {
   const p = row.pivots
+  const openIn = investigationLinks(row, investigationConfig)
   const link = (key: keyof EventFilters, value: string, label: string, title: string) => (
     <a
       className="lnk"
@@ -565,22 +726,41 @@ function EventMeta({ row, onPivot }: { row: EventRow; onPivot: (key: keyof Event
           </a>
         </div>
       ) : null}
-      {p.shasum ? (
+      {p.shasum || openIn.kibana || openIn.evebox || openIn.arkime ? (
         <div className="eventmeta__group">
           <span className="eventmeta__label" title="Actions available for this event">
             actions
           </span>
-          <a className="lnk" href={`/payload-analysis/${encodeURIComponent(p.shasum)}`} title="static analysis of the captured payload">
-            static analysis
-          </a>
-          <a
-            className="lnk"
-            href={`https://www.virustotal.com/gui/file/${encodeURIComponent(p.shasum)}`}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            VirusTotal
-          </a>
+          {p.shasum ? (
+            <>
+              <a className="lnk" href={`/payload-analysis/${encodeURIComponent(p.shasum)}`} title="static analysis of the captured payload">
+                static analysis
+              </a>
+              <a
+                className="lnk"
+                href={`https://www.virustotal.com/gui/file/${encodeURIComponent(p.shasum)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                VirusTotal
+              </a>
+            </>
+          ) : null}
+          {openIn.evebox ? (
+            <a className="lnk" href={openIn.evebox} target="_blank" rel="noopener noreferrer" title="Filtered alert inbox">
+              open in EveBox
+            </a>
+          ) : null}
+          {openIn.kibana ? (
+            <a className="lnk" href={openIn.kibana} target="_blank" rel="noopener noreferrer" title="Search historical telemetry">
+              open in Kibana
+            </a>
+          ) : null}
+          {openIn.arkime ? (
+            <a className="lnk" href={openIn.arkime} target="_blank" rel="noopener noreferrer" title="Inspect packets and sessions">
+              open in Arkime
+            </a>
+          ) : null}
         </div>
       ) : null}
     </div>

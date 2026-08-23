@@ -4,7 +4,7 @@
 // server-side (backend-service/src/reports_api.rs, reports_store.rs).
 import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { getSessionUser } from '../lib/auth'
 import { pathString, type JsonRecord } from '../lib/json'
@@ -191,6 +191,18 @@ const deleteDefinition = createServerFn({ method: 'POST' })
     return { ok: false, error: await response.text() }
   })
 
+const deleteGenerated = createServerFn({ method: 'POST' })
+  .inputValidator((input: { id: string }) => input)
+  .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
+    const { getSessionUser } = await import('../lib/auth')
+    const user = await getSessionUser()
+    if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
+    const { serviceFetch } = await import('../lib/backend.server')
+    const response = await serviceFetch(`/api/v1/reports/generated/${encodeURIComponent(data.id)}`, { method: 'DELETE' })
+    if (response.ok) return { ok: true }
+    return { ok: false, error: await response.text() }
+  })
+
 const generateDefinition = createServerFn({ method: 'POST' })
   .inputValidator((input: { id: string }) => input)
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
@@ -223,32 +235,108 @@ export const Route = createFileRoute('/reports')({
 const str = (row: StoreRow, key: string): string => (typeof row[key] === 'string' ? (row[key] as string) : '')
 const num = (row: StoreRow, key: string): number => (typeof row[key] === 'number' ? (row[key] as number) : 0)
 
-const COLUMNS: Column<StoreRow>[] = [
-  { header: 'created', render: (row) => formatTimestamp(str(row, 'created_at')) },
-  {
-    header: 'title',
-    className: 'v',
-    primary: true,
-    render: (row) => str(row, 'title') || str(row, 'name') || <span className="tw:text-muted">(untitled report)</span>,
-  },
-  { header: 'template', render: (row) => <span className="badge badge--muted">{str(row, 'template')}</span> },
-  { header: 'origin', render: (row) => str(row, 'origin') },
-  { header: 'size', className: 'n', render: (row) => `${(num(row, 'size_bytes') / 1024).toFixed(0)} KB` },
-  {
-    header: 'pdf',
-    render: (row) => (
-      <a
-        className="lnk"
-        href={`/api/report/${encodeURIComponent(str(row, 'id'))}/pdf`}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={(event) => event.stopPropagation()}
-      >
-        open PDF →
-      </a>
-    ),
-  },
-]
+// reports.html's #hp-rp-viewer was an in-app focus-trapped modal + iframe;
+// the port reduced this to a plain new-tab link. buildGeneratedColumns
+// restores the inline viewer plus the per-report delete the Library grid
+// never had client-side support for.
+function buildGeneratedColumns(
+  onView: (row: StoreRow) => void,
+  onDelete: (row: StoreRow) => void,
+  busyId: string | null,
+): Column<StoreRow>[] {
+  return [
+    { header: 'created', render: (row) => formatTimestamp(str(row, 'created_at')) },
+    {
+      header: 'title',
+      className: 'v',
+      primary: true,
+      render: (row) => str(row, 'title') || str(row, 'name') || <span className="tw:text-muted">(untitled report)</span>,
+    },
+    { header: 'template', render: (row) => <span className="badge badge--muted">{str(row, 'template')}</span> },
+    { header: 'origin', render: (row) => str(row, 'origin') },
+    { header: 'size', className: 'n', render: (row) => `${(num(row, 'size_bytes') / 1024).toFixed(0)} KB` },
+    {
+      header: 'pdf',
+      render: (row) => (
+        <div
+          style={{ display: 'flex', gap: 12, alignItems: 'center' }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <button className="lnk" type="button" onClick={() => onView(row)}>
+            view →
+          </button>
+          <a className="lnk" href={`/api/report/${encodeURIComponent(str(row, 'id'))}/pdf`} target="_blank" rel="noopener noreferrer">
+            download
+          </a>
+          <button
+            className="lnk text-danger"
+            type="button"
+            disabled={busyId === str(row, 'id')}
+            onClick={() => onDelete(row)}
+          >
+            delete
+          </button>
+        </div>
+      ),
+    },
+  ]
+}
+
+// Same application-managed .modal.pdf-viewer-modal overlay as
+// payload-analysis.$hash.tsx's PayloadReportViewer / github-analysis's
+// ReportViewer — focus moves to the close button on open, Tab cycles
+// inside the dialog, Escape and backdrop clicks close, focus returns to
+// the trigger on unmount.
+function ReportViewerModal({ id, title, onClose }: { id: string; title: string; onClose: () => void }) {
+  const closeRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLElement>(null)
+  const url = `/api/report/${encodeURIComponent(id)}/pdf`
+  useEffect(() => {
+    const previous = document.activeElement
+    closeRef.current?.focus()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onClose()
+        return
+      }
+      if (event.key !== 'Tab' || !panelRef.current) return
+      const focusables = panelRef.current.querySelectorAll<HTMLElement>('button, a[href], iframe')
+      if (!focusables.length) return
+      const first = focusables[0]
+      const last = focusables[focusables.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus()
+    }
+  }, [onClose])
+  return (
+    <>
+      <div className="modal-backdrop open" aria-hidden="true" onClick={onClose} />
+      <section className="modal pdf-viewer-modal open" role="dialog" aria-modal="true" aria-label="Report" ref={panelRef}>
+        <button className="modal__close" type="button" aria-label="Close report viewer" onClick={onClose} ref={closeRef}>
+          ✕
+        </button>
+        <h2 className="pdf-viewer-title">
+          {title || 'Report'}{' '}
+          <a className="lnk" href={url} target="_blank" rel="noopener noreferrer">
+            open in new tab ↗
+          </a>
+        </h2>
+        <iframe className="pdf-viewer-frame" title={title || 'Report'} src={url} />
+      </section>
+    </>
+  )
+}
 
 // reports.html:38-43's wizard steps — the studio reads as five views:
 // four form steps plus the Library of saved definitions and finished PDFs.
@@ -1088,6 +1176,8 @@ function Reports() {
   const [step, setStep] = useState<StepId>('design')
   const [editing, setEditing] = useState<ReportDefinition | null>(null)
   const [formSeed, setFormSeed] = useState(0)
+  const [viewingReport, setViewingReport] = useState<StoreRow | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   // Design pick 7D: the studio's five step-tabs relocate into the sidebar
   // rail (inline below 520px, where the sidebar is off-canvas).
   const viewTabs = useSidebarViewTabs({
@@ -1129,6 +1219,18 @@ function Reports() {
   const refreshGenerated = async () => {
     const page = await fetchGenerated({ data: { offset: 0 } })
     if (page) setGenerated(page)
+  }
+
+  const removeGenerated = async (row: StoreRow) => {
+    const id = str(row, 'id')
+    if (typeof window !== 'undefined' && !window.confirm('Delete this generated report? This cannot be undone.')) return
+    setDeletingId(id)
+    try {
+      const result = await deleteGenerated({ data: { id } })
+      if (result.ok) await refreshGenerated()
+    } finally {
+      setDeletingId(null)
+    }
   }
 
   const startEdit = (definition: ReportDefinition) => {
@@ -1191,13 +1293,20 @@ function Reports() {
         <h2 className="label-section">Generated reports</h2>
         <MasterDetailTable
           rows={generated ? generated.rows : null}
-          columns={COLUMNS}
+          columns={buildGeneratedColumns(setViewingReport, (row) => void removeGenerated(row), deletingId)}
           rowKey={(row, index) => `${str(row, 'id')}-${index}`}
           inspectorTitle="Report details"
           layout="cards"
           gridId="hp-rp-generated"
         />
       </div>
+      {viewingReport ? (
+        <ReportViewerModal
+          id={str(viewingReport, 'id')}
+          title={str(viewingReport, 'title') || str(viewingReport, 'name')}
+          onClose={() => setViewingReport(null)}
+        />
+      ) : null}
     </>
   )
 }

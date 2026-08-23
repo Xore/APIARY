@@ -36,6 +36,7 @@ use std::net::IpAddr;
 
 use crate::{
     events::{row_from_source, EventRow},
+    session::{technique_row, Technique},
     AppState,
 };
 
@@ -85,9 +86,24 @@ pub struct IpProfile {
     pub credentials: Vec<Kv>,
     pub commands: Vec<Kv>,
     pub sessions: Vec<Kv>,
-    pub techniques: Vec<Kv>,
+    /// ips.html's "techniques" partial (session.html's own, ips.html
+    /// shares it) — same domain/name/evidence enrichment session.rs uses.
+    pub techniques: Vec<Technique>,
+    /// #1682: ips.html's "Indicators" tab leaderboards, dropped in the
+    /// port along with the tabbed layout itself.
+    pub payloads: Vec<Kv>,
+    pub alerts: Vec<Kv>,
+    pub fingerprints: Vec<Kv>,
+    pub paths: Vec<Kv>,
     pub events: Vec<EventRow>,
     pub portbridge: Option<PortbridgeProfile>,
+    /// #1682: the "Correlation & timeline" tab (ips.html's
+    /// attacker-correlation-body) — everything ES has seen for this IP,
+    /// not bounded to the in-memory-window `events` above. build_correlation
+    /// already existed for the CIDR/cluster drill-downs; this reuses it
+    /// with the same single-IP filter the rest of this handler already
+    /// built.
+    pub correlation: Correlation,
 }
 
 fn kv(result: &serde_json::Value, agg: &str) -> Vec<Kv> {
@@ -141,7 +157,11 @@ pub async fn ip(
                 {"field": "honeypot.username"}, {"field": "honeypot.password"}], "size": 20}},
             "commands": {"terms": {"field": "honeypot.canonical_command", "size": 20}},
             "sessions": {"terms": {"field": "honeypot.session", "size": 20}},
-            "techniques": {"terms": {"field": "honeypot.canonical_attck_techniques", "size": 20}}
+            "techniques": {"terms": {"field": "honeypot.canonical_attck_techniques", "size": 20}},
+            "payloads": {"terms": {"field": "honeypot.canonical_shasum", "size": 20}},
+            "alerts": {"terms": {"field": "suricata.eve.alert.signature", "size": 20}},
+            "fingerprints": {"terms": {"field": "honeypot.canonical_fingerprint", "size": 20}},
+            "paths": {"terms": {"field": "honeypot.path", "size": 20}}
         }
     });
     let events_body = json!({
@@ -169,6 +189,15 @@ pub async fn ip(
         state.es.search_index(&["portbridge-v2-*"], portbridge_body)
     )
     .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?;
+
+    // #1682: the "Correlation & timeline" tab — everything ES has seen for
+    // this IP, unbounded by the `events` window above. Not run inside the
+    // try_join! above: build_correlation does 3 of its own ES calls
+    // internally and this page's own doc comment already treats this data
+    // as "purely informational context", not hot-path.
+    let correlation = build_correlation(&state, filter.clone(), portbridge_filter.clone())
+        .await
+        .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?;
 
     let total = aggs["hits"]["total"]["value"].as_u64().unwrap_or(0);
     if total == 0 {
@@ -200,7 +229,11 @@ pub async fn ip(
             .collect(),
         commands: kv(&aggs, "commands"),
         sessions: kv(&aggs, "sessions"),
-        techniques: kv(&aggs, "techniques"),
+        techniques: kv(&aggs, "techniques").into_iter().map(|row| technique_row(row.key, row.count)).collect(),
+        payloads: kv(&aggs, "payloads"),
+        alerts: kv(&aggs, "alerts"),
+        fingerprints: kv(&aggs, "fingerprints"),
+        paths: kv(&aggs, "paths"),
         events: rows,
         portbridge: {
             let os = kv(&portbridge, "os").first().map(|row| row.key.clone()).unwrap_or_default();
@@ -213,6 +246,7 @@ pub async fn ip(
                 Some(PortbridgeProfile { os, first, last, ports_touched })
             }
         },
+        correlation,
     }))
 }
 

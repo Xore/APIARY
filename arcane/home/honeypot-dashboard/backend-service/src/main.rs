@@ -12,7 +12,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{get, patch, post},
+    routing::{delete, get, patch, post},
     Json, Router,
 };
 use serde::Serialize;
@@ -234,6 +234,7 @@ async fn main() -> anyhow::Result<()> {
                 .delete(reports_api::delete_definition),
         )
         .route("/api/v1/reports/definitions/{id}/generate", post(reports_api::generate))
+        .route("/api/v1/reports/generated/{id}", delete(reports_api::delete_generated))
         .route("/api/v1/artifacts/{kind}/{key}", get(artifacts::list))
         .route("/api/v1/artifacts/{kind}/{key}/{filename}", get(artifacts::download))
         .route("/api/v1/charts/kill-chain-sankey", get(kill_chain::sankey))

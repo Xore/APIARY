@@ -1,14 +1,17 @@
 // Per-IP investigation — one source address's whole profile: summary
-// chips, technique tags, behavior leaderboards, session links, and the
-// newest events with the record inspector.
+// chips, tabbed Activity/Indicators/Correlation views (ips.html's
+// attacker-profile layout, #1682), and the newest events with the record
+// inspector.
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { Tabs, TabPanel } from '../components/Tabs'
 import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
 
 type Kv = { key: string; count: number }
+type Technique = { id: string; name: string; domain: string; evidence: string; count: number; url: string }
 
 type EventRow = {
   time: string
@@ -20,6 +23,15 @@ type EventRow = {
   detail: string
   session: string
   record: JsonRecord
+}
+
+type Correlation = {
+  total: number
+  truncated: boolean
+  sensors: Kv[]
+  tunnel_connections: number
+  tunnel_os_guesses: string[]
+  records: EventRow[]
 }
 
 type IpProfile = {
@@ -35,8 +47,13 @@ type IpProfile = {
   credentials: Kv[]
   commands: Kv[]
   sessions: Kv[]
-  techniques: Kv[]
+  techniques: Technique[]
+  payloads: Kv[]
+  alerts: Kv[]
+  fingerprints: Kv[]
+  paths: Kv[]
   events: EventRow[]
+  correlation: Correlation
 }
 
 type BlockState = { IP: string; Blocked: boolean; Active: boolean; BlockedBy?: string; ExpiresAt?: string }
@@ -151,10 +168,125 @@ function MiniTable({ title, rows, linkTo }: { title: string; rows: Kv[]; linkTo?
   )
 }
 
+function TechniquesTable({ techniques }: { techniques: Technique[] }) {
+  if (techniques.length === 0) return null
+  return (
+    <div className="card wide">
+      <h2>MITRE ATT&amp;CK behavior mapping</h2>
+      <p className="note">Evidence-based behavioral context only; this does not identify or attribute an actor.</p>
+      <div className="card__scroll">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>domain</th>
+              <th>technique</th>
+              <th>observations</th>
+              <th>evidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            {techniques.map((technique) => (
+              <tr key={technique.id}>
+                <td>
+                  <span className="badge badge--muted">{technique.domain}</span>
+                </td>
+                <td className="v">
+                  <a href={technique.url} target="_blank" rel="noopener noreferrer">
+                    {technique.id} — {technique.name}
+                  </a>
+                </td>
+                <td className="n">{technique.count.toLocaleString('en-US')}</td>
+                <td className="v">{technique.evidence}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+const CORRELATION_COLUMNS: Column<EventRow>[] = [
+  { header: 'time', render: (row) => formatTimestamp(row.time) },
+  { header: 'sensor', render: (row) => <span className="badge badge--muted">{row.sensor}</span> },
+  { header: 'summary', className: 'v', render: (row) => row.detail || row.proto },
+]
+
+function CorrelationPanel({ correlation }: { correlation: Correlation }) {
+  return (
+    <>
+      <div className="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:gap-3 tw:mb-4">
+        <div className="metric">
+          <div className="metric__value">{correlation.total.toLocaleString('en-US')}</div>
+          <div className="metric__label">Total ES matches</div>
+        </div>
+        <div className="metric">
+          <div className="metric__value">{correlation.tunnel_connections.toLocaleString('en-US')}</div>
+          <div className="metric__label">Tunnel connections</div>
+        </div>
+        <div className="metric">
+          <div className="metric__value">{correlation.sensors.length}</div>
+          <div className="metric__label">Distinct sensors</div>
+        </div>
+      </div>
+      <div className="card wide">
+        <h2>Elasticsearch correlation</h2>
+        <p className="note">
+          Everything the backend has seen for this IP across honeypot, Suricata, and portbridge tunnel records — not
+          limited to the in-memory window above.
+          {correlation.truncated
+            ? ` Showing the ${correlation.records.length.toLocaleString('en-US')} most recent of ${correlation.total.toLocaleString('en-US')} total matches.`
+            : ''}
+        </p>
+        {correlation.tunnel_os_guesses.length > 0 ? (
+          <p>
+            <strong>p0f OS guesses seen over this tunnel:</strong> {correlation.tunnel_os_guesses.join(', ')}
+          </p>
+        ) : null}
+        {correlation.records.length > 0 ? (
+          <div className="card__scroll">
+            <table className="recent data-table">
+              <thead>
+                <tr>
+                  <th>time</th>
+                  <th>sensor</th>
+                  <th>summary</th>
+                </tr>
+              </thead>
+              <tbody>
+                {correlation.records.map((record, index) => (
+                  <tr key={`${record.time}-${index}`}>
+                    <td>{formatTimestamp(record.time)}</td>
+                    <td>{record.sensor}</td>
+                    <td className="v">{record.detail || record.proto}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="empty">No Elasticsearch correlation records were found for this IP.</p>
+        )}
+      </div>
+      <div className="card wide">
+        <h2>Attack progression</h2>
+        <p className="note">Chronological, oldest to newest; capped to the latest 250 matching records.</p>
+        <MasterDetailTable
+          rows={[...correlation.records].reverse()}
+          columns={CORRELATION_COLUMNS}
+          rowKey={(row, index) => `progression-${row.time}-${index}`}
+          inspectorTitle="Event record"
+        />
+      </div>
+    </>
+  )
+}
+
 function InvestigateIp() {
   const { first } = Route.useLoaderData()
   const { ip } = Route.useParams()
   const [profile, setProfile] = useState<IpProfile | null | 'missing'>(null)
+  const [tab, setTab] = useState('activity')
   useEffect(() => {
     let cancelled = false
     first.then((result) => {
@@ -187,44 +319,58 @@ function InvestigateIp() {
                 {formatTimestamp(profile.first)} → {formatTimestamp(profile.last)}
               </span>
               <Link className="chip" to="/events" search={{ ip }}>
-                open in explorer →
+                all matching events →
               </Link>
+              <Link className="chip" to="/recordings" search={{ ip }} title="TTY session recordings from this IP, if any">
+                session recordings
+              </Link>
+              <a className="chip" href={`/api/export/events.csv?ip=${encodeURIComponent(ip)}`}>
+                export CSV ↓
+              </a>
               <BlockControl ip={ip} />
             </>
           ) : undefined
         }
       />
-      {profile && profile.techniques.length > 0 ? (
-        <div className="filters">
-          {profile.techniques.map((technique) => (
-            <a
-              className="chip"
-              key={technique.key}
-              href={`https://attack.mitre.org/techniques/${technique.key.replace('.', '/')}/`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {technique.key} × {technique.count.toLocaleString('en-US')}
-            </a>
-          ))}
-        </div>
-      ) : null}
       {profile ? (
         <>
-          <MiniTable title="Sensors" rows={profile.sensors} />
-          <MiniTable title="Targeted ports" rows={profile.ports} />
-          <MiniTable title="Protocols" rows={profile.protos} />
-          <MiniTable title="Credentials tried" rows={profile.credentials} />
-          <MiniTable title="Commands" rows={profile.commands} />
-          <MiniTable title="Sessions" rows={profile.sessions} linkTo={(key) => `/sessions/${encodeURIComponent(key)}`} />
+          <Tabs
+            tabs={[
+              { id: 'activity', label: 'Activity' },
+              { id: 'indicators', label: 'Indicators' },
+              { id: 'correlation', label: 'Correlation & timeline' },
+            ]}
+            active={tab}
+            onSelect={setTab}
+            label="Attacker profile views"
+            idPrefix="attacker-profile"
+          />
+          <TabPanel id="activity" active={tab} idPrefix="attacker-profile" className="dashboard-panel">
+            <div className="tw:grid tw:grid-cols-12 tw:gap-3.5">
+              <MiniTable title="Sensors contacted" rows={profile.sensors} />
+              <MiniTable title="Credentials attempted" rows={profile.credentials} />
+              <MiniTable title="Commands" rows={profile.commands} />
+              <MiniTable title="HTTP paths" rows={profile.paths} />
+              <MiniTable title="Targeted ports" rows={profile.ports} />
+              <MiniTable title="Protocols" rows={profile.protos} />
+              <MiniTable title="Sessions" rows={profile.sessions} linkTo={(key) => `/sessions/${encodeURIComponent(key)}`} />
+            </div>
+          </TabPanel>
+          <TabPanel id="indicators" active={tab} idPrefix="attacker-profile" className="dashboard-panel">
+            <div className="tw:grid tw:grid-cols-12 tw:gap-3.5">
+              <MiniTable title="Payload hashes" rows={profile.payloads} linkTo={(key) => `/payload-analysis/${encodeURIComponent(key)}`} />
+              <MiniTable title="Alerts" rows={profile.alerts} />
+              <MiniTable title="Fingerprints" rows={profile.fingerprints} />
+            </div>
+            <TechniquesTable techniques={profile.techniques} />
+          </TabPanel>
+          <TabPanel id="correlation" active={tab} idPrefix="attacker-profile" className="dashboard-panel">
+            <CorrelationPanel correlation={profile.correlation} />
+          </TabPanel>
         </>
-      ) : null}
-      <MasterDetailTable
-        rows={profile ? profile.events : null}
-        columns={EVENT_COLUMNS}
-        rowKey={(row, index) => `${row.time}-${index}`}
-        inspectorTitle="Event record"
-      />
+      ) : (
+        <MasterDetailTable rows={null} columns={EVENT_COLUMNS} rowKey={(row, index) => `${row.time}-${index}`} inspectorTitle="Event record" />
+      )}
     </>
   )
 }
