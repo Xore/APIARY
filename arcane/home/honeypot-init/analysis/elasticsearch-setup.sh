@@ -666,7 +666,7 @@ curl -fsS -X PUT "$es_url/_index_template/traefik-access" \
           "response": { "properties": { "status_code": { "type": "integer" } } }
         } },
         "user_agent": { "properties": { "original": { "type": "keyword", "ignore_above": 1024 } } },
-        "network": { "properties": { "protocol": { "type": "keyword" } } }
+        "network": { "properties": { "protocol": { "type": "keyword" }, "transport": { "type": "keyword" }, "community_id": { "type": "keyword" } } }
       }
     }
   }
