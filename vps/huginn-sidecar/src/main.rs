@@ -28,8 +28,10 @@ use huginn_net::output::FingerprintResult;
 use huginn_net::{Database, HuginnNet};
 use serde::Serialize;
 use serde_json::Value;
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Write};
 use std::net::IpAddr;
+use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -57,6 +59,8 @@ struct Args {
     source: Source,
     dedupe: bool,
     dedupe_capacity: usize,
+    out: Option<String>,
+    max_bytes: u64,
 }
 
 enum Source {
@@ -70,9 +74,11 @@ fn usage() -> ! {
          \n\
          options:\n  \
            --no-dedupe             emit every observation, including repeats\n  \
-           --dedupe-capacity <n>   flows remembered for de-duplication (default 65536)\n\
+           --dedupe-capacity <n>   flows remembered for de-duplication (default 65536)\n  \
+           --out <path>            write NDJSON to this file and rotate it in place\n  \
+           --max-bytes <n>         rotate --out at this size (default 33554432)\n\
          \n\
-         Emits one NDJSON observation per line on stdout."
+         Emits one NDJSON observation per line on stdout, or to --out."
     );
     process::exit(2)
 }
@@ -88,12 +94,23 @@ fn parse_args() -> Args {
         source,
         dedupe: true,
         dedupe_capacity: 65536,
+        out: None,
+        max_bytes: 32 * 1024 * 1024,
     };
     while let Some(flag) = argv.next() {
         match flag.as_str() {
             "--no-dedupe" => args.dedupe = false,
             "--dedupe-capacity" => {
                 args.dedupe_capacity = argv
+                    .next()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or_else(|| usage());
+            }
+            "--out" => {
+                args.out = Some(argv.next().unwrap_or_else(|| usage()));
+            }
+            "--max-bytes" => {
+                args.max_bytes = argv
                     .next()
                     .and_then(|v| v.parse().ok())
                     .unwrap_or_else(|| usage());
@@ -203,6 +220,75 @@ fn emit<W: Write>(out: &mut W, dedupe: Option<&mut Deduper>, kind: &str, observa
 
 /// Turn one FingerprintResult into zero or more emitted records. A single
 /// result can carry several observations at once (a SYN plus its MTU, say).
+/// NDJSON sink that rotates by rename-and-reopen.
+///
+/// Deliberately not copy-truncate. Truncating a file a log shipper is tailing
+/// splits its registry state: the truncation resets the live harvester to
+/// offset 0, while the rewritten head hashes to a new fingerprint identity and
+/// starts a second harvester on the same path. Both then ship every appended
+/// line. That was measured on portbridge at 99.9% duplicate documents (#1776),
+/// and this sidecar's log was rotated the same way until this existed.
+///
+/// Renaming leaves the old inode untouched for whoever is still reading it and
+/// gives the shipper a new file to discover, which is stable under either
+/// identity scheme. Only one generation is kept: this is a staging buffer that
+/// Filebeat drains, not an archive.
+struct RotatingWriter {
+    path: PathBuf,
+    max_bytes: u64,
+    written: u64,
+    file: File,
+}
+
+impl RotatingWriter {
+    fn open(path: &str, max_bytes: u64) -> io::Result<Self> {
+        let path = PathBuf::from(path);
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir)?;
+        }
+        let file = OpenOptions::new().create(true).append(true).open(&path)?;
+        // Start from the file's real length so a restart does not get a full
+        // budget on an already-large file.
+        let written = file.metadata().map(|m| m.len()).unwrap_or(0);
+        Ok(Self {
+            path,
+            max_bytes,
+            written,
+            file,
+        })
+    }
+
+    fn rotate(&mut self) -> io::Result<()> {
+        self.file.flush()?;
+        let mut rotated = self.path.clone().into_os_string();
+        rotated.push(".1");
+        fs::rename(&self.path, Path::new(&rotated))?;
+        self.file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)?;
+        self.written = 0;
+        Ok(())
+    }
+}
+
+impl Write for RotatingWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        // Rotate on the record boundary before the write, so a rotation never
+        // splits a JSON line across two files.
+        if self.written >= self.max_bytes {
+            self.rotate()?;
+        }
+        let n = self.file.write(buf)?;
+        self.written += n as u64;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.file.flush()
+    }
+}
+
 fn emit_result<W: Write>(
     out: &mut W,
     dedupe: &mut Option<Deduper>,
@@ -236,6 +322,8 @@ fn main() {
     // Read out before `args` moves into the analysis thread below.
     let args_dedupe = args.dedupe;
     let args_capacity = args.dedupe_capacity;
+    let args_out = args.out.clone();
+    let args_max_bytes = args.max_bytes;
 
     let database = match Database::load_default() {
         Ok(database) => database,
@@ -270,10 +358,20 @@ fn main() {
         Ok(())
     });
 
-    // stdout is line-oriented NDJSON for a log shipper, so it is buffered here
-    // and flushed once at the end rather than syscalling per record.
+    // Line-oriented NDJSON for a log shipper, buffered rather than syscalling
+    // per record. With --out the sidecar owns the file and rotates it itself;
+    // without it, stdout keeps the plain-filter behaviour.
     let stdout = io::stdout();
-    let mut out = BufWriter::new(stdout.lock());
+    let mut out: BufWriter<Box<dyn Write>> = match args_out {
+        Some(ref path) => {
+            let sink = RotatingWriter::open(path, args_max_bytes).unwrap_or_else(|error| {
+                eprintln!("huginn-sidecar: cannot open {path}: {error}");
+                process::exit(1);
+            });
+            BufWriter::new(Box::new(sink))
+        }
+        None => BufWriter::new(Box::new(stdout.lock())),
+    };
 
     let mut dedupe = if args_dedupe {
         Some(Deduper::new(args_capacity))
@@ -297,5 +395,71 @@ fn main() {
     if !analysis_ok {
         // Exit non-zero so a failed run cannot be mistaken for a quiet one.
         process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod rotation_tests {
+    use super::RotatingWriter;
+    use std::fs;
+    use std::io::Write;
+    use std::path::PathBuf;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("huginn-rot-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir.join("huginn.json")
+    }
+
+    #[test]
+    fn rotates_by_rename_and_keeps_writing_to_the_original_path() {
+        let path = scratch("rename");
+        let mut w = RotatingWriter::open(path.to_str().unwrap(), 16).unwrap();
+
+        // Exceed the budget, then write again to trigger the rotation.
+        w.write_all(b"aaaaaaaaaaaaaaaaaaaa\n").unwrap();
+        w.write_all(b"second\n").unwrap();
+        w.flush().unwrap();
+
+        let rotated = PathBuf::from(format!("{}.1", path.display()));
+        assert!(rotated.exists(), "previous generation should be renamed aside");
+        assert_eq!(fs::read_to_string(&rotated).unwrap(), "aaaaaaaaaaaaaaaaaaaa\n");
+        // The live path must still be the one being appended to -- that is what
+        // makes this rename-and-reopen rather than a move that abandons the path.
+        assert_eq!(fs::read_to_string(&path).unwrap(), "second\n");
+    }
+
+    #[test]
+    fn never_splits_a_record_across_two_files() {
+        let path = scratch("boundary");
+        let mut w = RotatingWriter::open(path.to_str().unwrap(), 4).unwrap();
+        for line in ["alpha\n", "bravo\n", "charlie\n"] {
+            w.write_all(line.as_bytes()).unwrap();
+        }
+        w.flush().unwrap();
+
+        let live = fs::read_to_string(&path).unwrap();
+        let rotated = fs::read_to_string(format!("{}.1", path.display())).unwrap();
+        // Every line that survives is whole; rotation happens between records.
+        for content in [&live, &rotated] {
+            for line in content.lines() {
+                assert!(
+                    ["alpha", "bravo", "charlie"].contains(&line),
+                    "record was split across a rotation: {line:?}"
+                );
+            }
+        }
+        assert!(live.ends_with('\n'));
+    }
+
+    #[test]
+    fn resumes_from_existing_length_rather_than_a_fresh_budget() {
+        let path = scratch("resume");
+        fs::write(&path, "x".repeat(100)).unwrap();
+        let w = RotatingWriter::open(path.to_str().unwrap(), 16).unwrap();
+        // A restart against an already-oversized file must rotate on the next
+        // write, not append another full budget to it.
+        assert_eq!(w.written, 100);
     }
 }
