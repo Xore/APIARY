@@ -7,6 +7,7 @@ import os
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -254,6 +255,77 @@ class ProductionCanaryTests(unittest.TestCase):
         self.assertEqual(result["sessions"], 1)
         self.assertEqual(result["payloads"], 0)
         self.assertEqual(result["reports"], 0)
+
+
+class CycleStageIsolationTests(unittest.TestCase):
+    """#1748: one failing stage must not discard the others' work.
+
+    Before this, a stage raising aborted run_once() entirely -- the sessions
+    and payloads already analysed were lost from the status document, which
+    reported only the exception type. That made a broken daily report
+    indistinguishable from a broken worker, and disabling the report was the
+    only way to get the other two pipelines running again.
+    """
+
+    def _worker(self):
+        w = worker.LLMWorker.__new__(worker.LLMWorker)
+        w.es = unittest.mock.Mock()
+        w.es.ping.return_value = True
+        w.model = unittest.mock.Mock()
+        w.config = unittest.mock.Mock(
+            dry_run=False, session_enabled=True, payload_enabled=True, daily_report_enabled=True
+        )
+        w.ensure_indices = lambda: None
+        w.collect_session_events = lambda: 7
+        w.analyze_ready_sessions = lambda: 3
+        w.analyze_payloads = lambda: 2
+        return w
+
+    def test_a_failing_stage_keeps_the_others_results(self):
+        w = self._worker()
+
+        def boom():
+            raise RuntimeError("grammar rejected")
+
+        w.analyze_daily_report = boom
+        result = w.run_once()
+        self.assertEqual(result["sessions"], 3, "session work must survive the report failing")
+        self.assertEqual(result["payloads"], 2, "payload work must survive it too")
+        self.assertEqual(result["reports"], 0)
+        self.assertEqual(result["stage_errors"], {"daily_report": "RuntimeError"})
+
+    def test_a_healthy_cycle_reports_no_stage_errors(self):
+        w = self._worker()
+        w.analyze_daily_report = lambda: 1
+        result = w.run_once()
+        self.assertNotIn("stage_errors", result)
+        self.assertEqual(result["reports"], 1)
+
+    def test_only_the_exception_type_is_recorded_never_its_message(self):
+        # These exceptions come from a model fed attacker-controlled text; a
+        # message can carry that text back out into the status file.
+        w = self._worker()
+
+        def boom():
+            raise ValueError("payload said: <script>alert(1)</script>")
+
+        w.analyze_daily_report = boom
+        errors = w.run_once()["stage_errors"]
+        self.assertEqual(errors, {"daily_report": "ValueError"})
+        self.assertNotIn("script", json.dumps(errors))
+
+    def test_every_stage_is_isolated_not_just_the_report(self):
+        w = self._worker()
+
+        def boom():
+            raise RuntimeError("es unavailable")
+
+        w.analyze_payloads = boom
+        w.analyze_daily_report = lambda: 1
+        result = w.run_once()
+        self.assertEqual(result["payloads"], 0)
+        self.assertEqual(result["reports"], 1, "the report still runs after payloads fail")
+        self.assertEqual(result["stage_errors"], {"payloads": "RuntimeError"})
 
 
 class GPUQueueVendoringTests(unittest.TestCase):
