@@ -116,7 +116,25 @@ filebeat.inputs:
   # the active file. buildViaMap's own file-tail join is unaffected by any
   # of this and keeps running exactly as before -- this input is additive.
   - type: filestream
-    id: portbridge-json
+    # #1776: renamed from portbridge-json to abandon the split registry state
+    # that made every line arrive twice. Two harvester states existed for this
+    # one path -- one carrying a fingerprint identity and one predating it --
+    # and both shipped every appended line, so 99.9% of portbridge documents
+    # were exact duplicate pairs differing only in log.file.fingerprint.
+    #
+    # The cause was a copytruncate sidecar (removed in vps/docker-compose.yml)
+    # rotating a file this input tails: truncation reset the live harvester to
+    # offset 0 while the rewritten head produced a new fingerprint and a second
+    # state. portbridge rotates itself by rename-and-reopen, which is stable
+    # under either identity scheme, so nothing recreates the split now.
+    #
+    # file_identity is pinned rather than left to the default: this input was
+    # written when filestream defaulted to inode+device, and Filebeat 9 changed
+    # that default to fingerprint underneath it. An identity scheme is not a
+    # detail to leave implicit for a file that rotates.
+    id: portbridge-json-v2
+    file_identity.fingerprint: ~
+    prospector.scanner.fingerprint.enabled: true
     paths:
       - /logs/portbridge/portbridge.json
     parsers:
