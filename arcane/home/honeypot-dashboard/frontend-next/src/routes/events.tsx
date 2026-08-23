@@ -108,6 +108,65 @@ const fetchFilterValues = createServerFn({ method: 'GET' }).handler(async (): Pr
   return serviceJSON<FilterValues>('/api/v1/filter-values')
 })
 
+type InvestigationConfig = { kibana: string; evebox: string; arkime: string }
+
+// #1682: events.html's "Open in Kibana/EveBox/Arkime" menu
+// (dashboard/links.go's investigationURL/investigationBase), dropped in
+// the port even though these tools are actually deployed
+// (arcane/home/honeypot-elk). Per-tool env var wins outright; otherwise
+// derived from HONEYPOT_DOMAIN as https://{kibana,evebox,arkime}.<domain>
+// (the common subdomain-per-tool layout). Neither set = no link, same as
+// the Go tier — an absent menu entry over a guess. Doesn't need a
+// session, just deployment config, so this is a plain fetch rather than
+// running through lib/auth.ts.
+const fetchInvestigationConfig = createServerFn({ method: 'GET' }).handler(async (): Promise<InvestigationConfig> => {
+  const domain = (process.env.HONEYPOT_DOMAIN ?? '').trim().replace(/\.+$/, '')
+  const base = (kind: string, explicit: string | undefined) => {
+    const trimmed = (explicit ?? '').trim()
+    if (trimmed) return trimmed
+    return domain ? `https://${kind}.${domain}` : ''
+  }
+  return {
+    kibana: base('kibana', process.env.KIBANA_PUBLIC_URL),
+    evebox: base('evebox', process.env.EVEBOX_PUBLIC_URL),
+    arkime: base('arkime', process.env.ARKIME_PUBLIC_URL),
+  }
+})
+
+// notfound.example./.example is RFC 2606's reserved "definitely not a
+// real deployment" TLD — the same placeholder-host guard links.go's
+// isPlaceholderHost used, so a doc-example value left in .env by mistake
+// renders as absent rather than a working-looking link to nowhere.
+function isPlaceholderHost(base: string): boolean {
+  try {
+    const host = new URL(base).hostname.toLowerCase()
+    return host === 'example' || host.endsWith('.example')
+  } catch {
+    return true
+  }
+}
+
+function investigationLinks(row: EventRow, config: InvestigationConfig): { kibana?: string; evebox?: string; arkime?: string } {
+  const ip = row.src_ip
+  if (!ip) return {}
+  const links: { kibana?: string; evebox?: string; arkime?: string } = {}
+  if (config.evebox && !isPlaceholderHost(config.evebox)) {
+    links.evebox = `${config.evebox.replace(/\/+$/, '')}/#/inbox?q=${encodeURIComponent(ip)}`
+  }
+  if (config.kibana && !isPlaceholderHost(config.kibana)) {
+    const when = new Date(row.time)
+    const from = new Date(when.getTime() - 5 * 60_000).toISOString()
+    const to = new Date(when.getTime() + 5 * 60_000).toISOString()
+    const g = encodeURIComponent(`(time:(from:'${from}',to:'${to}'))`)
+    const a = encodeURIComponent(`(query:(language:kuery,query:'${ip}'))`)
+    links.kibana = `${config.kibana.replace(/\/+$/, '')}/app/discover#/?_g=${g}&_a=${a}`
+  }
+  if (config.arkime && !isPlaceholderHost(config.arkime)) {
+    links.arkime = `${config.arkime.replace(/\/+$/, '')}/sessions?date=-1&expression=${encodeURIComponent(`ip == ${ip}`)}`
+  }
+  return links
+}
+
 export const Route = createFileRoute('/events')({
   // Pivot links across the dashboard land here with filters in the URL
   // (/events?ip=…, ?kind=login, ?country=CN, ?since=24h).
@@ -126,7 +185,10 @@ export const Route = createFileRoute('/events')({
     return filters
   },
   loaderDeps: ({ search }) => search,
-  loader: async ({ deps }) => ({ first: fetchEvents({ data: { offset: 0, filters: deps } }) }),
+  loader: async ({ deps }) => ({
+    first: fetchEvents({ data: { offset: 0, filters: deps } }),
+    investigationConfig: await fetchInvestigationConfig(),
+  }),
   component: Events,
 })
 
@@ -153,7 +215,7 @@ function SkeletonRows({ count }: { count: number }) {
 }
 
 function Events() {
-  const { first } = Route.useLoaderData()
+  const { first, investigationConfig } = Route.useLoaderData()
   const search = Route.useSearch()
   const navigate = Route.useNavigate()
   const [values, setValues] = useState<FilterValues | null>(null)
@@ -456,7 +518,7 @@ function Events() {
                   ) : null}
                 </p>
               ) : null}
-              <EventMeta row={rows[selected]} onPivot={setFilter} />
+              <EventMeta row={rows[selected]} onPivot={setFilter} investigationConfig={investigationConfig} />
               <div className="card__scroll">
                 <pre className="code">{JSON.stringify(rows[selected].record, null, 2)}</pre>
               </div>
@@ -472,8 +534,17 @@ function Events() {
  * .eventmeta block: decoy identity, shared-value pivots, network origin,
  * sensor detection, session recording, and the payload actions menu. A
  * group renders only when it has at least one value. */
-function EventMeta({ row, onPivot }: { row: EventRow; onPivot: (key: keyof EventFilters, value: string) => void }) {
+function EventMeta({
+  row,
+  onPivot,
+  investigationConfig,
+}: {
+  row: EventRow
+  onPivot: (key: keyof EventFilters, value: string) => void
+  investigationConfig: InvestigationConfig
+}) {
   const p = row.pivots
+  const openIn = investigationLinks(row, investigationConfig)
   const link = (key: keyof EventFilters, value: string, label: string, title: string) => (
     <a
       className="lnk"
@@ -565,22 +636,41 @@ function EventMeta({ row, onPivot }: { row: EventRow; onPivot: (key: keyof Event
           </a>
         </div>
       ) : null}
-      {p.shasum ? (
+      {p.shasum || openIn.kibana || openIn.evebox || openIn.arkime ? (
         <div className="eventmeta__group">
           <span className="eventmeta__label" title="Actions available for this event">
             actions
           </span>
-          <a className="lnk" href={`/payload-analysis/${encodeURIComponent(p.shasum)}`} title="static analysis of the captured payload">
-            static analysis
-          </a>
-          <a
-            className="lnk"
-            href={`https://www.virustotal.com/gui/file/${encodeURIComponent(p.shasum)}`}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            VirusTotal
-          </a>
+          {p.shasum ? (
+            <>
+              <a className="lnk" href={`/payload-analysis/${encodeURIComponent(p.shasum)}`} title="static analysis of the captured payload">
+                static analysis
+              </a>
+              <a
+                className="lnk"
+                href={`https://www.virustotal.com/gui/file/${encodeURIComponent(p.shasum)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                VirusTotal
+              </a>
+            </>
+          ) : null}
+          {openIn.evebox ? (
+            <a className="lnk" href={openIn.evebox} target="_blank" rel="noopener noreferrer" title="Filtered alert inbox">
+              open in EveBox
+            </a>
+          ) : null}
+          {openIn.kibana ? (
+            <a className="lnk" href={openIn.kibana} target="_blank" rel="noopener noreferrer" title="Search historical telemetry">
+              open in Kibana
+            </a>
+          ) : null}
+          {openIn.arkime ? (
+            <a className="lnk" href={openIn.arkime} target="_blank" rel="noopener noreferrer" title="Inspect packets and sessions">
+              open in Arkime
+            </a>
+          ) : null}
         </div>
       ) : null}
     </div>
