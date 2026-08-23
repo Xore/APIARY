@@ -159,6 +159,64 @@ services:
           cpus: "0.5"
           memory: 128M
 
+  # #1742/S5: per-flow fingerprinting sidecar. Sniffs the same public
+  # interface Suricata and Zeek do -- passively, so it sees blackholed
+  # scanners that never reach portbridge, which an inline fingerprinter
+  # could not.
+  #
+  # host networking because it needs the real interface, and NET_RAW/NET_ADMIN
+  # for the capture. Everything else is dropped: this parses hostile traffic
+  # for a living, so it gets the capability it needs and nothing more.
+  #
+  # Output is already de-duplicated per flow by the sidecar (raw output ran
+  # 193x redundant on tcp_syn_ack against real capture), so this writes what
+  # survives that filter, not the raw stream.
+  huginn-sidecar:
+    build: ./huginn-sidecar
+    image: xore-huginn-sidecar:local
+    container_name: hp-huginn-sidecar
+    restart: unless-stopped
+    network_mode: host
+    command: ["--interface", "${CAPTURE_INTERFACE:-ens6}"]
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [NET_RAW, NET_ADMIN]
+    volumes:
+      - /opt/stacks/apiary/logs/huginn:/logs/huginn
+    # The binary writes NDJSON to stdout; the shell redirect is what puts it
+    # where Filebeat looks. Kept here rather than as a --out flag so the
+    # sidecar stays a plain filter that composes with anything.
+    entrypoint: ["/bin/sh", "-c", "exec /usr/local/bin/huginn-sidecar \"$$@\" >> /logs/huginn/huginn.json", "--"]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  huginn-log-rotate:
+    image: busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
+    container_name: hp-huginn-log-rotate
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - |
+        while true; do
+          f=/logs/huginn/huginn.json
+          if [ -f "$$f" ] && [ $$(stat -c %s "$$f") -gt 33554432 ]; then
+            cp "$$f" "$$f.1" 2>/dev/null && : > "$$f"
+          fi
+          sleep 60
+        done
+    volumes:
+      - /opt/stacks/apiary/logs/huginn:/logs/huginn
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 32M
+
   # #1739: Traefik has no log rotation of its own, and an unrotated access log
   # on a 116 GB VPS that is also holding ~50 GB of pcap is a slow outage.
   # Same copy-truncate approach and cadence as portbridge-log-rotate rather

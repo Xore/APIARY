@@ -39,6 +39,7 @@ for spec in "suricata-7d:${suricata_days}d" \
             "dead-letter-60d:$(( retention_days * 2 ))d" "portbridge-30d:${retention_days}d" \
             "dionaea-incidents-30d:${retention_days}d" \
             "traefik-30d:${retention_days}d" \
+            "zeek-7d:${suricata_days}d" "huginn-30d:${retention_days}d" \
             "analysis-results-180d:$(( retention_days * 6 ))d"; do
   name=${spec%%:*}
   age=${spec#*:}
@@ -118,7 +119,7 @@ geoip_pipeline_body="$(cat <<'JSON'
         "lang": "painless",
         "ignore_failure": true,
         "params": {"home_net": __ES_HOME_NET_JSON__},
-        "source": "if (ctx.event == null) ctx.event = new HashMap(); if (ctx.source == null) ctx.source = new HashMap(); if (ctx.destination == null) ctx.destination = new HashMap(); if (ctx.network == null) ctx.network = new HashMap(); if (ctx.honeypot != null) { def h = ctx.honeypot; if (h.sensor != null) ctx.event.sensor = h.sensor; else if (h.eventid != null && h.eventid.toString().startsWith('cowrie.')) ctx.event.sensor = 'cowrie'; if (h.src_ip != null && h.src_ip != '') ctx.source.ip = h.src_ip; else if (h.data != null && h.data.connection != null && h.data.connection.remote_ip != null && h.data.connection.remote_ip != '') { ctx.source.ip = h.data.connection.remote_ip; if (h.data.connection.local_port != null) ctx.destination.port = h.data.connection.local_port; if (h.data.connection.transport != null) ctx.network.protocol = h.data.connection.transport; } if (h.dst_ip != null && h.dst_ip != '') ctx.destination.ip = h.dst_ip; if (h.dst_port != null) ctx.destination.port = h.dst_port; else if (h.port != null) ctx.destination.port = h.port; if (h.proto != null) ctx.network.protocol = h.proto; else if (h.protocol != null) ctx.network.protocol = h.protocol; else if (h.data_type != null) ctx.network.protocol = h.data_type; if (h.username != null) { if (ctx.user == null) ctx.user = new HashMap(); ctx.user.name = h.username; } if (h.password != null) { if (ctx.user == null) ctx.user = new HashMap(); ctx.user.password = h.password; } if (h.command != null || h.input != null) { if (ctx.process == null) ctx.process = new HashMap(); ctx.process.command_line = h.command != null ? h.command : h.input; } if (h.path != null) { if (ctx.url == null) ctx.url = new HashMap(); ctx.url.path = h.path; } else if (h.url != null) { if (ctx.url == null) ctx.url = new HashMap(); ctx.url.path = h.url; } if (h.shasum != null && (h.eventid == 'cowrie.session.file_download' || h.eventid == 'cowrie.session.file_upload')) { if (ctx.file == null) ctx.file = new HashMap(); if (ctx.file.hash == null) ctx.file.hash = new HashMap(); ctx.file.hash.sha256 = h.shasum; } if (h.category != null) ctx.event.category = h.category; if (h.held_ms != null) ctx.held_ms = h.held_ms; } if (ctx.log != null && ctx.log.file != null && ctx.log.file.path != null) { String p = ctx.log.file.path; if (ctx.event.sensor == null && p.contains('/conpot')) { int a = p.indexOf('/conpot') + 1; int b = p.indexOf('/', a); if (b > a) { ctx.event.sensor = p.substring(a, b); } else { String base = p.substring(a); ctx.event.sensor = base.endsWith('.json') ? base.substring(0, base.length() - 5) : base; } } if (ctx.event.sensor == null && p.contains('/dionaea')) { ctx.event.sensor = 'dionaea'; } if (ctx.event.sensor != null && ctx.event.sensor.toString().startsWith('conpot')) { if (ctx.ot == null) ctx.ot = new HashMap(); ctx.ot.persona = ctx.event.sensor; } } if (ctx.suricata != null && ctx.suricata.eve != null) { def s = ctx.suricata.eve; ctx.event.sensor = 'suricata'; if (s.event_type != null) ctx.event.category = s.event_type; String sip; String dip; def dport; if (s.flow != null && s.flow.src_ip != null && s.flow.dest_ip != null) { sip = s.flow.src_ip; dip = s.flow.dest_ip; dport = s.flow.dest_port; } else { sip = s.src_ip; dip = s.dest_ip; dport = s.dest_port; if (sip != null && params.home_net.contains(sip) && dip != null && !params.home_net.contains(dip)) { String tmp = sip; sip = dip; dip = tmp; dport = s.src_port; } } if (sip != null) ctx.source.ip = sip; if (dip != null) ctx.destination.ip = dip; if (dport != null) ctx.destination.port = dport; if (s.proto != null) ctx.network.transport = s.proto.toString().toLowerCase(); if (s.community_id != null && s.community_id != '') ctx.network.community_id = s.community_id; } if (ctx.portbridge != null) { def pb = ctx.portbridge; ctx.event.sensor = 'portbridge'; ctx.event.category = pb.event != null ? pb.event.toString() : 'connect'; if (pb.src_ip != null && pb.src_ip != '') ctx.source.ip = pb.src_ip; if (pb.port != null) ctx.destination.port = pb.port; if (pb.proto != null) ctx.network.transport = pb.proto; if (pb.community_id != null && pb.community_id != '') ctx.network.community_id = pb.community_id; } if (ctx.traefik != null) { def t = ctx.traefik; ctx.event.sensor = 'traefik'; ctx.event.category = 'http_request'; if (t.ClientHost != null && t.ClientHost != '') ctx.source.ip = t.ClientHost; if (t.RequestPath != null) { if (ctx.url == null) ctx.url = new HashMap(); ctx.url.path = t.RequestPath; } if (t.RequestHost != null) { if (ctx.url == null) ctx.url = new HashMap(); ctx.url.domain = t.RequestHost; } if (t.RequestMethod != null) { if (ctx.http == null) ctx.http = new HashMap(); if (ctx.http.request == null) ctx.http.request = new HashMap(); ctx.http.request.method = t.RequestMethod; } if (t.DownstreamStatus != null) { if (ctx.http == null) ctx.http = new HashMap(); if (ctx.http.response == null) ctx.http.response = new HashMap(); ctx.http.response.status_code = t.DownstreamStatus; } if (t.RequestProtocol != null) ctx.network.protocol = t.RequestProtocol; if (t['request_User-Agent'] != null) { if (ctx.user_agent == null) ctx.user_agent = new HashMap(); ctx.user_agent.original = t['request_User-Agent']; } } if (ctx.source.ip != null && (ctx.source.ip == '127.0.0.1' || ctx.source.ip == '::1')) { ctx.source.remove('ip'); }"
+        "source": "if (ctx.event == null) ctx.event = new HashMap(); if (ctx.source == null) ctx.source = new HashMap(); if (ctx.destination == null) ctx.destination = new HashMap(); if (ctx.network == null) ctx.network = new HashMap(); if (ctx.honeypot != null) { def h = ctx.honeypot; if (h.sensor != null) ctx.event.sensor = h.sensor; else if (h.eventid != null && h.eventid.toString().startsWith('cowrie.')) ctx.event.sensor = 'cowrie'; if (h.src_ip != null && h.src_ip != '') ctx.source.ip = h.src_ip; else if (h.data != null && h.data.connection != null && h.data.connection.remote_ip != null && h.data.connection.remote_ip != '') { ctx.source.ip = h.data.connection.remote_ip; if (h.data.connection.local_port != null) ctx.destination.port = h.data.connection.local_port; if (h.data.connection.transport != null) ctx.network.protocol = h.data.connection.transport; } if (h.dst_ip != null && h.dst_ip != '') ctx.destination.ip = h.dst_ip; if (h.dst_port != null) ctx.destination.port = h.dst_port; else if (h.port != null) ctx.destination.port = h.port; if (h.proto != null) ctx.network.protocol = h.proto; else if (h.protocol != null) ctx.network.protocol = h.protocol; else if (h.data_type != null) ctx.network.protocol = h.data_type; if (h.username != null) { if (ctx.user == null) ctx.user = new HashMap(); ctx.user.name = h.username; } if (h.password != null) { if (ctx.user == null) ctx.user = new HashMap(); ctx.user.password = h.password; } if (h.command != null || h.input != null) { if (ctx.process == null) ctx.process = new HashMap(); ctx.process.command_line = h.command != null ? h.command : h.input; } if (h.path != null) { if (ctx.url == null) ctx.url = new HashMap(); ctx.url.path = h.path; } else if (h.url != null) { if (ctx.url == null) ctx.url = new HashMap(); ctx.url.path = h.url; } if (h.shasum != null && (h.eventid == 'cowrie.session.file_download' || h.eventid == 'cowrie.session.file_upload')) { if (ctx.file == null) ctx.file = new HashMap(); if (ctx.file.hash == null) ctx.file.hash = new HashMap(); ctx.file.hash.sha256 = h.shasum; } if (h.category != null) ctx.event.category = h.category; if (h.held_ms != null) ctx.held_ms = h.held_ms; } if (ctx.log != null && ctx.log.file != null && ctx.log.file.path != null) { String p = ctx.log.file.path; if (ctx.event.sensor == null && p.contains('/conpot')) { int a = p.indexOf('/conpot') + 1; int b = p.indexOf('/', a); if (b > a) { ctx.event.sensor = p.substring(a, b); } else { String base = p.substring(a); ctx.event.sensor = base.endsWith('.json') ? base.substring(0, base.length() - 5) : base; } } if (ctx.event.sensor == null && p.contains('/dionaea')) { ctx.event.sensor = 'dionaea'; } if (ctx.event.sensor != null && ctx.event.sensor.toString().startsWith('conpot')) { if (ctx.ot == null) ctx.ot = new HashMap(); ctx.ot.persona = ctx.event.sensor; } } if (ctx.suricata != null && ctx.suricata.eve != null) { def s = ctx.suricata.eve; ctx.event.sensor = 'suricata'; if (s.event_type != null) ctx.event.category = s.event_type; String sip; String dip; def dport; if (s.flow != null && s.flow.src_ip != null && s.flow.dest_ip != null) { sip = s.flow.src_ip; dip = s.flow.dest_ip; dport = s.flow.dest_port; } else { sip = s.src_ip; dip = s.dest_ip; dport = s.dest_port; if (sip != null && params.home_net.contains(sip) && dip != null && !params.home_net.contains(dip)) { String tmp = sip; sip = dip; dip = tmp; dport = s.src_port; } } if (sip != null) ctx.source.ip = sip; if (dip != null) ctx.destination.ip = dip; if (dport != null) ctx.destination.port = dport; if (s.proto != null) ctx.network.transport = s.proto.toString().toLowerCase(); if (s.community_id != null && s.community_id != '') ctx.network.community_id = s.community_id; } if (ctx.portbridge != null) { def pb = ctx.portbridge; ctx.event.sensor = 'portbridge'; ctx.event.category = pb.event != null ? pb.event.toString() : 'connect'; if (pb.src_ip != null && pb.src_ip != '') ctx.source.ip = pb.src_ip; if (pb.port != null) ctx.destination.port = pb.port; if (pb.proto != null) ctx.network.transport = pb.proto; if (pb.community_id != null && pb.community_id != '') ctx.network.community_id = pb.community_id; } if (ctx.traefik != null) { def t = ctx.traefik; ctx.event.sensor = 'traefik'; ctx.event.category = 'http_request'; if (t.ClientHost != null && t.ClientHost != '') ctx.source.ip = t.ClientHost; if (t.RequestPath != null) { if (ctx.url == null) ctx.url = new HashMap(); ctx.url.path = t.RequestPath; } if (t.RequestHost != null) { if (ctx.url == null) ctx.url = new HashMap(); ctx.url.domain = t.RequestHost; } if (t.RequestMethod != null) { if (ctx.http == null) ctx.http = new HashMap(); if (ctx.http.request == null) ctx.http.request = new HashMap(); ctx.http.request.method = t.RequestMethod; } if (t.DownstreamStatus != null) { if (ctx.http == null) ctx.http = new HashMap(); if (ctx.http.response == null) ctx.http.response = new HashMap(); ctx.http.response.status_code = t.DownstreamStatus; } if (t.RequestProtocol != null) ctx.network.protocol = t.RequestProtocol; if (t['request_User-Agent'] != null) { if (ctx.user_agent == null) ctx.user_agent = new HashMap(); ctx.user_agent.original = t['request_User-Agent']; } } if (ctx.zeek != null) { def z = ctx.zeek; ctx.event.sensor = 'zeek'; if (z['id.orig_h'] != null) ctx.source.ip = z['id.orig_h']; if (z['id.orig_p'] != null) { if (ctx.source == null) ctx.source = new HashMap(); ctx.source.port = z['id.orig_p']; } if (z['id.resp_h'] != null) ctx.destination.ip = z['id.resp_h']; if (z['id.resp_p'] != null) ctx.destination.port = z['id.resp_p']; if (z.proto != null) ctx.network.transport = z.proto; if (z.service != null) ctx.network.protocol = z.service; if (z.community_id != null && z.community_id != '') ctx.network.community_id = z.community_id; if (z.uid != null && z.uid != '') ctx.network.session_id = z.uid; if (ctx.event.category == null && ctx.log != null && ctx.log.file != null && ctx.log.file.path != null) { String zp = ctx.log.file.path; int zs = zp.lastIndexOf('/'); String zb = zs >= 0 ? zp.substring(zs + 1) : zp; if (zb.endsWith('.log')) zb = zb.substring(0, zb.length() - 4); ctx.event.category = zb; } } if (ctx.huginn != null) { def hg = ctx.huginn; ctx.event.sensor = 'huginn'; if (hg.kind != null) ctx.event.category = hg.kind; if (hg.src_ip != null && hg.src_ip != '') ctx.source.ip = hg.src_ip; if (hg.src_port != null) ctx.source.port = hg.src_port; if (hg.dst_ip != null && hg.dst_ip != '') ctx.destination.ip = hg.dst_ip; if (hg.dst_port != null) ctx.destination.port = hg.dst_port; if (hg.proto != null) ctx.network.transport = hg.proto; if (hg.community_id != null && hg.community_id != '') ctx.network.community_id = hg.community_id; } if (ctx.source.ip != null && (ctx.source.ip == '127.0.0.1' || ctx.source.ip == '::1')) { ctx.source.remove('ip'); }"
       }
     },
     {
@@ -373,6 +374,101 @@ curl -fsS -X PUT "$es_url/_index_template/portbridge-events" \
           "as": { "properties": { "asn": { "type": "long" }, "organization_name": { "type": "keyword" }, "type": { "type": "keyword" } } }
         } },
         "destination": { "properties": { "port": { "type": "integer", "ignore_malformed": true } } },
+        "network": { "properties": { "transport": { "type": "keyword" }, "community_id": { "type": "keyword" } } }
+      }
+    }
+  }
+}
+JSON
+
+# #1742/S5: Zeek and huginn-sidecar records. Both are kept -- they are not
+# alternatives. Measured on the same web traffic, Zeek logged 4 ssl.log
+# records where the sidecar produced 29 tls_client ones, because Zeek needs a
+# completed handshake and stream reassembly while huginn-net fingerprints the
+# ClientHello packet on its own. On scan traffic that never completes a
+# handshake the packet-oriented view sees more; on traffic that does complete,
+# Zeek carries far more per record. Neither is a superset, so both ship.
+#
+# Joining, and its one wrinkle: only Zeek's conn.log carries community_id --
+# the other ~20 logs carry uid instead. So network.community_id joins Zeek's
+# conn records to Suricata, portbridge and huginn, while network.session_id
+# (Zeek's uid) joins the protocol logs back to their own conn record. Two
+# hops, not one, for a fingerprint in ssl.log; documented rather than papered
+# over. Emitting community_id on every Zeek log would remove the hop and is
+# worth doing later.
+#
+# zeek-v1-* uses the shorter Suricata-style retention: it is by far the
+# highest-volume producer in the stack.
+curl -fsS -X PUT "$es_url/_index_template/zeek-events" \
+  -H 'Content-Type: application/json' \
+  --data-binary @- <<'JSON'
+{
+  "index_patterns": ["zeek-v1-*"],
+  "priority": 470,
+  "template": {
+    "settings": {
+      "index.default_pipeline": "geoip-honeypot",
+      "index.lifecycle.name": "zeek-7d",
+      "index.number_of_replicas": 0,
+      "index.mapping.total_fields.limit": 500,
+      "index.mapping.ignore_malformed": true,
+      "index.refresh_interval": "5s"
+    },
+    "mappings": {
+      "properties": {
+        "zeek": { "type": "flattened" },
+        "event": { "properties": { "sensor": { "type": "keyword" }, "category": { "type": "keyword" } } },
+        "source": { "properties": {
+          "ip": { "type": "ip", "ignore_malformed": true },
+          "port": { "type": "integer", "ignore_malformed": true },
+          "geo": { "properties": { "location": { "type": "geo_point" }, "country_iso_code": { "type": "keyword" }, "city_name": { "type": "keyword" } } },
+          "as": { "properties": { "asn": { "type": "long" }, "organization_name": { "type": "keyword" }, "type": { "type": "keyword" } } }
+        } },
+        "destination": { "properties": {
+          "ip": { "type": "ip", "ignore_malformed": true },
+          "port": { "type": "integer", "ignore_malformed": true }
+        } },
+        "network": { "properties": {
+          "transport": { "type": "keyword" },
+          "protocol": { "type": "keyword" },
+          "community_id": { "type": "keyword" },
+          "session_id": { "type": "keyword" }
+        } }
+      }
+    }
+  }
+}
+JSON
+
+curl -fsS -X PUT "$es_url/_index_template/huginn-events" \
+  -H 'Content-Type: application/json' \
+  --data-binary @- <<'JSON'
+{
+  "index_patterns": ["huginn-v1-*"],
+  "priority": 470,
+  "template": {
+    "settings": {
+      "index.default_pipeline": "geoip-honeypot",
+      "index.lifecycle.name": "huginn-30d",
+      "index.number_of_replicas": 0,
+      "index.mapping.total_fields.limit": 300,
+      "index.mapping.ignore_malformed": true,
+      "index.refresh_interval": "5s"
+    },
+    "mappings": {
+      "properties": {
+        "huginn": { "type": "flattened" },
+        "event": { "properties": { "sensor": { "type": "keyword" }, "category": { "type": "keyword" } } },
+        "source": { "properties": {
+          "ip": { "type": "ip", "ignore_malformed": true },
+          "port": { "type": "integer", "ignore_malformed": true },
+          "geo": { "properties": { "location": { "type": "geo_point" }, "country_iso_code": { "type": "keyword" }, "city_name": { "type": "keyword" } } },
+          "as": { "properties": { "asn": { "type": "long" }, "organization_name": { "type": "keyword" }, "type": { "type": "keyword" } } }
+        } },
+        "destination": { "properties": {
+          "ip": { "type": "ip", "ignore_malformed": true },
+          "port": { "type": "integer", "ignore_malformed": true }
+        } },
         "network": { "properties": { "transport": { "type": "keyword" }, "community_id": { "type": "keyword" } } }
       }
     }
