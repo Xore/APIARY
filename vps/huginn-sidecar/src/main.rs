@@ -55,6 +55,8 @@ struct Record<'a> {
 
 struct Args {
     source: Source,
+    dedupe: bool,
+    dedupe_capacity: usize,
 }
 
 enum Source {
@@ -64,7 +66,11 @@ enum Source {
 
 fn usage() -> ! {
     eprintln!(
-        "usage: huginn-sidecar (--pcap <file> | --interface <name>)\n\
+        "usage: huginn-sidecar (--pcap <file> | --interface <name>) [options]\n\
+         \n\
+         options:\n  \
+           --no-dedupe             emit every observation, including repeats\n  \
+           --dedupe-capacity <n>   flows remembered for de-duplication (default 65536)\n\
          \n\
          Emits one NDJSON observation per line on stdout."
     );
@@ -78,7 +84,72 @@ fn parse_args() -> Args {
         (Some("--interface"), Some(name)) => Source::Interface(name),
         _ => usage(),
     };
-    Args { source }
+    let mut args = Args {
+        source,
+        dedupe: true,
+        dedupe_capacity: 65536,
+    };
+    while let Some(flag) = argv.next() {
+        match flag.as_str() {
+            "--no-dedupe" => args.dedupe = false,
+            "--dedupe-capacity" => {
+                args.dedupe_capacity = argv
+                    .next()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or_else(|| usage());
+            }
+            _ => usage(),
+        }
+    }
+    args
+}
+
+/// Suppresses repeat observations of the same kind for the same flow.
+///
+/// Measured on real capture: huginn-net emits a `tcp_syn_ack` observation per
+/// SYN+ACK *packet*, and our perimeter retransmits heavily to scanners that
+/// never complete the handshake -- 55 826 records covering just 289 distinct
+/// flows, a 193x duplication. Every other observation kind came in at 1.0x.
+/// Shipping that unfiltered would make this sidecar the largest writer in the
+/// stack while adding nothing: the 193 copies are byte-identical.
+///
+/// Bounded on purpose. In live mode this runs forever, so an unbounded set
+/// would be a slow memory leak; past the capacity the oldest flows are
+/// forgotten, which can re-emit a long-idle flow rather than grow without
+/// limit. That trade is the right way round for a sensor.
+struct Deduper {
+    seen: std::collections::HashSet<(String, String)>,
+    order: std::collections::VecDeque<(String, String)>,
+    capacity: usize,
+    suppressed: u64,
+}
+
+impl Deduper {
+    fn new(capacity: usize) -> Self {
+        Self {
+            seen: std::collections::HashSet::new(),
+            order: std::collections::VecDeque::new(),
+            capacity: capacity.max(1),
+            suppressed: 0,
+        }
+    }
+
+    /// True when this (kind, flow) has not been emitted recently.
+    fn admit(&mut self, kind: &str, community_id: &str) -> bool {
+        let key = (kind.to_string(), community_id.to_string());
+        if self.seen.contains(&key) {
+            self.suppressed += 1;
+            return false;
+        }
+        if self.order.len() >= self.capacity {
+            if let Some(oldest) = self.order.pop_front() {
+                self.seen.remove(&oldest);
+            }
+        }
+        self.order.push_back(key.clone());
+        self.seen.insert(key);
+        true
+    }
 }
 
 /// Pull the flow tuple out of a serialized observation. Every huginn-net
@@ -96,13 +167,19 @@ fn tuple_of(value: &Value) -> Option<(IpAddr, u16, IpAddr, u16)> {
     Some((src_ip, src_port, dst_ip, dst_port))
 }
 
-fn emit<W: Write>(out: &mut W, kind: &str, observation: Value) {
+fn emit<W: Write>(out: &mut W, dedupe: Option<&mut Deduper>, kind: &str, observation: Value) {
     let Some((src_ip, src_port, dst_ip, dst_port)) = tuple_of(&observation) else {
         // No tuple means nothing to join on. Dropping is better than emitting
         // an unjoinable record, but it should be visible rather than silent.
         eprintln!("huginn-sidecar: {kind} observation carried no flow tuple, dropped");
         return;
     };
+    let community = community_id(PROTO_TCP, src_ip, src_port, dst_ip, dst_port);
+    if let (Some(dedupe), Some(id)) = (dedupe, community.as_deref()) {
+        if !dedupe.admit(kind, id) {
+            return;
+        }
+    }
     // Every observation huginn-net produces is TCP-borne: SYN/SYN+ACK/MTU/
     // uptime are TCP by construction, and HTTP and TLS ride on it.
     let record = Record {
@@ -113,7 +190,7 @@ fn emit<W: Write>(out: &mut W, kind: &str, observation: Value) {
         src_port,
         dst_ip: dst_ip.to_string(),
         dst_port,
-        community_id: community_id(PROTO_TCP, src_ip, src_port, dst_ip, dst_port),
+        community_id: community,
         observation,
     };
     match serde_json::to_string(&record) {
@@ -126,12 +203,16 @@ fn emit<W: Write>(out: &mut W, kind: &str, observation: Value) {
 
 /// Turn one FingerprintResult into zero or more emitted records. A single
 /// result can carry several observations at once (a SYN plus its MTU, say).
-fn emit_result<W: Write>(out: &mut W, result: FingerprintResult) {
+fn emit_result<W: Write>(
+    out: &mut W,
+    dedupe: &mut Option<Deduper>,
+    result: FingerprintResult,
+) {
     macro_rules! forward {
         ($field:expr, $kind:literal) => {
             if let Some(value) = $field {
                 match serde_json::to_value(&value) {
-                    Ok(json) => emit(out, $kind, json),
+                    Ok(json) => emit(out, dedupe.as_mut(), $kind, json),
                     Err(error) => {
                         eprintln!("huginn-sidecar: could not encode {}: {error}", $kind)
                     }
@@ -152,6 +233,9 @@ fn emit_result<W: Write>(out: &mut W, result: FingerprintResult) {
 
 fn main() {
     let args = parse_args();
+    // Read out before `args` moves into the analysis thread below.
+    let args_dedupe = args.dedupe;
+    let args_capacity = args.dedupe_capacity;
 
     let database = match Database::load_default() {
         Ok(database) => database,
@@ -191,18 +275,25 @@ fn main() {
     let stdout = io::stdout();
     let mut out = BufWriter::new(stdout.lock());
 
+    let mut dedupe = if args_dedupe {
+        Some(Deduper::new(args_capacity))
+    } else {
+        None
+    };
+
     let mut emitted: u64 = 0;
     for result in receiver {
         if cancel.load(Ordering::Relaxed) {
             break;
         }
-        emit_result(&mut out, result);
+        emit_result(&mut out, &mut dedupe, result);
         emitted += 1;
     }
     let _ = out.flush();
 
     let analysis_ok = matches!(worker.join(), Ok(Ok(())));
-    eprintln!("huginn-sidecar: {emitted} fingerprint result(s)");
+    let suppressed = dedupe.as_ref().map(|d| d.suppressed).unwrap_or(0);
+    eprintln!("huginn-sidecar: {emitted} fingerprint result(s), {suppressed} duplicate observation(s) suppressed");
     if !analysis_ok {
         // Exit non-zero so a failed run cannot be mistaken for a quiet one.
         process::exit(1);

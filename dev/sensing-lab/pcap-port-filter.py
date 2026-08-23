@@ -19,6 +19,7 @@ Handles Ethernet II with optional 802.1Q/QinQ VLAN tags, IPv4 and IPv6,
 TCP and UDP. Anything else is skipped rather than guessed at.
 """
 
+import os
 import struct
 import sys
 
@@ -112,13 +113,24 @@ def main():
     if len(sys.argv) < 3:
         print("usage: pcap-port-filter.py <out.pcap> <ports-csv> <in.pcap>...",
               file=sys.stderr)
+        print("env: MAX_OUT_BYTES=N stops writing once the output reaches N",
+              file=sys.stderr)
         return 2
 
     out_path = sys.argv[1]
     ports = {int(p) for p in sys.argv[2].split(",") if p.strip()}
     inputs = sys.argv[3:]
 
+    # Web ports carry orders of magnitude more traffic than the ICS ports this
+    # started with -- an unbounded filter there would happily write gigabytes
+    # to a workstation that is explicitly not supposed to accumulate pcap. Stop
+    # at the cap and say so, rather than producing a "complete" sample that
+    # silently isn't.
+    max_out = int(os.environ.get("MAX_OUT_BYTES", "0"))
+
     scanned = matched = files_with_hits = unreadable = 0
+    written = 24  # the global header written below
+    truncated = False
 
     with open(out_path, "wb") as out:
         # One global header for the merged output: little-endian, microsecond,
@@ -126,14 +138,20 @@ def main():
         out.write(struct.pack("<IHHiIII", PCAP_MAGIC_LE, 2, 4, 0, 0, 262144,
                               LINKTYPE_ETHERNET))
         for path in inputs:
+            if truncated:
+                break
             hits = 0
             try:
                 for (ts_sec, ts_usec, incl, orig), data in read_pcap(path):
                     scanned += 1
                     p = packet_ports(data)
                     if p and (p[0] in ports or p[1] in ports):
+                        if max_out and written + 16 + len(data) > max_out:
+                            truncated = True
+                            break
                         out.write(struct.pack("<IIII", ts_sec, ts_usec, incl, orig))
                         out.write(data)
+                        written += 16 + len(data)
                         hits += 1
             except (OSError, PermissionError) as exc:
                 unreadable += 1
@@ -145,7 +163,11 @@ def main():
 
     print(f"scanned_packets={scanned} matched_packets={matched} "
           f"files_with_hits={files_with_hits} files_unreadable={unreadable} "
-          f"files_total={len(inputs)}", file=sys.stderr)
+          f"files_total={len(inputs)} output_bytes={written} "
+          f"truncated={truncated}", file=sys.stderr)
+    if truncated:
+        print("output cap reached -- this sample is a bounded slice, not the "
+              "complete match set", file=sys.stderr)
 
     # A run where nothing could be read is a failure, not an empty result.
     if unreadable == len(inputs) and inputs:

@@ -35,29 +35,54 @@ scripts rather than left to discipline:
 
 ```
 dev/sensing-lab/
-├── Containerfile      Zeek 8.0 + zkg packages (JA4+, HASSH, ICSNPP suite)
-├── build.sh           build the image
-├── fetch-sample.sh    pull a bounded pcap sample from the VPS
-├── run-zeek.sh        run Zeek over the sample into var/logs
-├── usage.sh           show disk consumption vs the caps
-├── clean.sh           delete everything under var/
-└── var/               git-ignored: pcap/ and logs/
+├── Containerfile         Zeek 8.0 + zkg packages (JA4+, HASSH, ICSNPP suite)
+├── build.sh              build the image
+├── fetch-sample.sh       pull a bounded, recency-ordered pcap sample
+├── fetch-port-sample.sh  pull a sample filtered to specific ports
+├── fetch-ics-sample.sh   the ICS port list, wrapping the above
+├── pcap-port-filter.py   stdlib pcap port filter, runs on the capture host
+├── run-zeek.sh           parse a sample; PCAP_DIR selects which
+├── usage.sh              disk consumption vs the caps, per directory
+├── clean.sh              delete everything under var/
+└── var/                  git-ignored: pcap*/ and logs*/
 ```
 
 ## Usage
 
 ```sh
-./build.sh                      # once, ~10 min (ICSNPP compiles C++ plugins)
-./fetch-sample.sh               # ~200 MB of real VPS traffic
-./run-zeek.sh                   # parse it; logs land in var/logs
-./usage.sh                      # confirm we are inside budget
-./clean.sh                      # reclaim everything
+./build.sh                                  # once, ~10 min (ICSNPP compiles plugins)
+./fetch-sample.sh                           # newest traffic, up to 200 MB
+./run-zeek.sh                               # parse it; logs land in var/logs
+./usage.sh                                  # confirm we are inside budget
+./clean.sh                                  # reclaim everything
 ```
+
+### Targeted samples
+
+Recency-ordered sampling only surfaces whatever dominates the wire. On this
+perimeter that is telnet, VNC and SIP scanning — measured, **ICS traffic is
+about 1 % of the telnet volume**, so the first general sample contained none
+at all. For anything that is not the loudest thing on the link, filter:
+
+```sh
+./fetch-ics-sample.sh                       # ICS ports → var/pcap-ics
+PCAP_DIR=var/pcap-ics ./run-zeek.sh         #            → var/logs-ics
+
+SAMPLE_NAME=web SAMPLE_PORTS=80,443 ./fetch-port-sample.sh
+PCAP_DIR=var/pcap-web ./run-zeek.sh
+```
+
+Filtering runs on the capture host, so scanning gigabytes there costs
+megabytes here. Every scan also runs a known-busy **control port** and prints
+both counts — a zero result is only believable next to a non-zero control.
+That distinction was not free: the first ICS scan reported "no traffic found"
+when in fact AppArmor had denied every single read.
 
 Override a cap when a specific test needs more, deliberately:
 
 ```sh
 SAMPLE_MAX_BYTES=$((500 * 1024 * 1024)) ./fetch-sample.sh
+MAX_OUT_BYTES=$((100 * 1024 * 1024)) SAMPLE_NAME=web SAMPLE_PORTS=443 ./fetch-port-sample.sh
 ```
 
 ## What to look for
