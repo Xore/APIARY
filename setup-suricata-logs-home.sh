@@ -18,9 +18,20 @@ wireguard_unit=${WIREGUARD_UNIT:-wg-quick@wg0.service}
 # failing on "Missing /etc/fstab entry" even though the mounts themselves
 # were up. See #1088 for the ~20 other files still carrying this same
 # stale path.
+# Must stay in step with SSHFS_LOG_DIRS in scripts/install-homeserver.sh --
+# that script writes the fstab entries, this one gives them WireGuard-aware
+# boot ordering. A directory in one list and not the other either has no
+# ordering (races WireGuard at boot) or no fstab entry at all (this script
+# then exits on "Missing /etc/fstab entry").
+#
+# #1742 added zeek, zeek-extract, huginn and traefik for the S5 sensing layer.
 mount_paths=(
   /opt/stacks/apiary/logs/suricata
   /opt/stacks/apiary/logs/portbridge
+  /opt/stacks/apiary/logs/zeek
+  /opt/stacks/apiary/logs/zeek-extract
+  /opt/stacks/apiary/logs/huginn
+  /opt/stacks/apiary/logs/traefik
 )
 mount_units=()
 

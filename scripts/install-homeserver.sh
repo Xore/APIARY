@@ -1306,17 +1306,29 @@ step_sshfs_install() {
   install -m 600 "$VPS_SSH_KEY" /root/.ssh/strato_vps
 }
 
+# Every VPS-side log directory Filebeat, pcap-sync or the payload pipeline
+# needs to see. One entry here is one sshfs mount; a directory missing from
+# this list is simply absent on the homeserver, and the consumer that wanted
+# it reports no error -- it just finds nothing, forever. That is the failure
+# mode #1409 and #1678 both were, so the list is the single place to add to.
+#
+# #1742 added zeek, zeek-extract, huginn and traefik for the S5 sensing layer.
+SSHFS_LOG_DIRS=(suricata portbridge zeek zeek-extract huginn traefik)
+
 step_sshfs_mounts() {
-  local suricata_dir portbridge_dir
-  suricata_dir=$(readlink -f "$REPO_DIR/logs/suricata")
-  portbridge_dir=$(readlink -f "$REPO_DIR/logs/portbridge")
-  [[ -d "$suricata_dir" && -d "$portbridge_dir" ]] || {
-    echo "logs/suricata or logs/portbridge doesn't exist yet -- honeypot-init's log-init job should have created these."
-    return 1
-  }
+  local dirs=() name dir
+  for name in "${SSHFS_LOG_DIRS[@]}"; do
+    dir=$(readlink -f "$REPO_DIR/logs/$name")
+    [[ -d "$dir" ]] || {
+      echo "logs/$name doesn't exist yet -- honeypot-init's log-init job should have created it."
+      return 1
+    }
+    dirs+=("$dir")
+  done
 
   local opts="_netdev,ro,reconnect,ServerAliveInterval=15,ServerAliveCountMax=3,IdentityFile=/root/.ssh/strato_vps,port=2222,allow_other,default_permissions,StrictHostKeyChecking=accept-new"
-  grep -q "$suricata_dir" /etc/fstab || cat >>/etc/fstab <<EOF
+  # The comment block below is written once; the per-directory lines follow.
+  grep -q "read-only VPS log mounts" /etc/fstab || cat >>/etc/fstab <<EOF
 
 # #518: read-only VPS log mounts for Suricata (eve.json + pcap/) and
 # portbridge, pulled over the WireGuard tunnel. See docs/SENSORS.md.
@@ -1327,13 +1339,24 @@ step_sshfs_mounts() {
 # now). NOTE: this same stale honeypot-stack path still appears in ~20
 # other files across the repo (docs and other scripts) -- out of scope for
 # this fix, tracked separately.
-root@${VPS_WG_ADDRESS}:/opt/stacks/apiary/logs/suricata $suricata_dir fuse.sshfs $opts 0 0
-root@${VPS_WG_ADDRESS}:/opt/stacks/apiary/logs/portbridge $portbridge_dir fuse.sshfs $opts 0 0
 EOF
 
-  mountpoint -q "$suricata_dir" || mount "$suricata_dir"
-  mountpoint -q "$portbridge_dir" || mount "$portbridge_dir"
-  mountpoint -q "$suricata_dir" && mountpoint -q "$portbridge_dir"
+  # One fstab line per directory, appended only if absent, so re-running the
+  # installer after adding a new sensor is safe and additive.
+  local i
+  for i in "${!SSHFS_LOG_DIRS[@]}"; do
+    name="${SSHFS_LOG_DIRS[$i]}"
+    dir="${dirs[$i]}"
+    grep -q " $dir " /etc/fstab || \
+      echo "root@${VPS_WG_ADDRESS}:/opt/stacks/apiary/logs/$name $dir fuse.sshfs $opts 0 0" >>/etc/fstab
+  done
+
+  local failed=0
+  for dir in "${dirs[@]}"; do
+    mountpoint -q "$dir" || mount "$dir" || failed=1
+    mountpoint -q "$dir" || { echo "sshfs mount failed: $dir" >&2; failed=1; }
+  done
+  return "$failed"
 }
 
 step_sshfs_boot_ordering() {
