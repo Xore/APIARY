@@ -258,6 +258,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/attackers", get(stores::attackers))
         .route("/api/v1/recordings", get(stores::recordings))
         .route("/api/v1/recordings/{shasum}", get(replay::replay))
+        // #1711: the two download forms the Go tier served at
+        // /tty/<shasum>.cast and .raw, which the port dropped.
+        .route("/api/v1/recordings/{shasum}/cast", get(replay::replay_cast))
+        .route("/api/v1/recordings/{shasum}/raw", get(replay::replay_raw))
         .route("/api/v1/alerts", get(stores::alerts))
         .route("/api/v1/alerts/{key}/ack", post(stores::acknowledge))
         .route("/api/v1/canarytokens/types", get(canarytokens::types))
