@@ -51,6 +51,9 @@ function SearchPage() {
         subtitle="Grouped matches across sources, sessions, payloads, commands, credentials, fingerprints and signatures."
         chips={result ? <span className="chip">{result.total.toLocaleString('en-US')} matches</span> : undefined}
       />
+      <p className="note">
+        Every source the dashboard holds, matched against your query.
+      </p>
       <form
         className="filters"
         onSubmit={(event) => {

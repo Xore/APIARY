@@ -123,7 +123,8 @@ function ProvisionForm({ onCreated }: { onCreated: () => void }) {
       <h2>Provision a new credential</h2>
       <p className="note">
         Writes the bait file live into the honeypot's filesystem via honeyfs-implant as soon as you submit — this isn't a
-        draft. Cowrie's honeyfs is the only implant target wired up today.
+        draft. Cowrie's honeyfs is the only implant target wired up today. Rotating re-implants the same path with a new
+        password — the file's location never changes.
       </p>
       <form
         className="filters"
@@ -403,6 +404,11 @@ function Page() {
           <p className="empty">No credentials provisioned yet — use the form above.</p>
         </div>
       ) : (
+        <>
+        <p className="note">
+          Newest first. Rotate plants a fresh password at the same path; linking a canarytoken is bookkeeping only —
+          opening the file itself doesn&apos;t fire anything on its own unless the linked token IS that file.
+        </p>
         <MasterDetailTable
           key={generation}
           rows={data.credentials}
@@ -416,6 +422,7 @@ function Page() {
           inspectorTitle="Credential details"
           inspectorExtra={(row) => <CredentialActions credential={row} tokens={tokens} isAdmin={isAdmin} onChanged={refresh} />}
         />
+        </>
       )}
     </>
   )

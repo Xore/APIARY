@@ -73,6 +73,9 @@ function Commands() {
           </>
         }
       />
+      <p className="note">
+        Shell commands captured during interactive honeypot sessions, deduplicated across sources.
+      </p>
       <MasterDetailTable
         rows={rows}
         columns={COLUMNS}

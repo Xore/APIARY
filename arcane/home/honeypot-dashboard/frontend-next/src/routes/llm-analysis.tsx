@@ -171,6 +171,12 @@ function Page() {
       rowKey={(row, index) => `${str(row, 'analysis_id')}-${index}`}
       inspectorTitle="Analysis details"
       chipNoun="analyses"
+      beforeTable={
+        <p className="note">
+          Session summaries and payload triage from llm-worker's guarded model — every row below is AI-generated,
+          attacker-influenced text and must be reviewed, not trusted as fact.
+        </p>
+      }
       emptyState={{
         title: 'No LLM analysis documents yet',
         hint: 'llm-worker writes one per analysed event batch.',

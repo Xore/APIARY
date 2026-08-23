@@ -335,6 +335,10 @@ function Payloads() {
           </>
         }
       />
+      <p className="note">
+        Correlated workbench runs, isolated sandbox detonations, and published GitHub scans, without losing successful
+        child results when another backend fails.
+      </p>
       <div className="card wide">
         <p className="note">
           ⚠ Unified inventory of Dionaea captures, Cowrie uploads/downloads, and retained shell, PowerShell, VBS,
