@@ -131,6 +131,14 @@ services:
       # backend-service rather than the new backend-service-mounted below.
       - PAYLOAD_DIRS=/dionaea-lib/binaries,/cowrie-downloads
       - SCRIPT_PAYLOAD_DIR=/state/script-payloads
+      # #1682: /api/v1/source-health's "Pipeline status" card reads this
+      # -- serveWhoAmI's own container (backend-service, hp-apiary-backend)
+      # actually answers /api/v1/source-health (serviceJSON() with no
+      # `{mounted: true}` routes to BACKEND_URL, not BACKEND_MOUNTED_URL),
+      # not backend-service-mounted -- a first attempt wired this onto the
+      # wrong service in honeypot-dashboard/compose.yml and it silently
+      # read empty (reported "disabled" instead of failing loudly).
+      - FILEBEAT_URL=${FILEBEAT_URL:-http://filebeat:5066}
       - TZ=Europe/Berlin
     volumes:
       - dashboard-state:/state
