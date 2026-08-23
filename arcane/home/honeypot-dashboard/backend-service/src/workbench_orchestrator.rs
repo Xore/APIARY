@@ -876,8 +876,24 @@ pub async fn child_action(
             "cancel" => {
                 let cancelable = run.children[index].cancelable;
                 let queued = run.children[index].state == "queued";
-                if !cancelable || !queued {
-                    return Err("only a queued child can be cancelled".to_string());
+                // A child that has outlived its own queue deadline is stuck by
+                // definition, and refusing to cancel it leaves the operator no
+                // way out at all. Observed live: a revdeck child sat "queued"
+                // for 24 hours against a 30-minute max_queue_age, with
+                // updated_at never advancing, because nothing reconciles a run
+                // except an explicit fetch of that run -- there is no sweeper.
+                // Cancel then compounded it: child_action reconciles first, so
+                // the same call moved the child to timed_out and *then*
+                // rejected it for no longer being queued.
+                let now = chrono::Utc::now().to_rfc3339();
+                let child_state = run.children[index].state.clone();
+                let expired = !workbench_domain::is_terminal_state(&child_state)
+                    && (now.as_str() > run.children[index].queue_deadline.as_str()
+                        || now.as_str() > run.children[index].deadline.as_str());
+                if !expired && (!cancelable || !queued) {
+                    return Err(format!(
+                        "cannot cancel a child in state \"{child_state}\""
+                    ));
                 }
                 let target_hash = if run.children[index].target_hash.is_empty() {
                     run.payload_sha256.clone()
@@ -891,10 +907,17 @@ pub async fn child_action(
                 let marker = Path::new(&dir).join(format!("{target_hash}.request"));
                 match std::fs::remove_file(&marker) {
                     Ok(()) => {}
+                    // No marker left. Normally that means a worker claimed the
+                    // request and cancelling would race it -- but once the
+                    // child has outlived its deadline, "claimed" has stopped
+                    // being a useful story: whatever took it is not coming
+                    // back, and the operator still needs the run to end.
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                        return Err(
-                            "request was already claimed and cannot be cancelled".to_string()
-                        )
+                        if !expired {
+                            return Err(
+                                "request was already claimed and cannot be cancelled".to_string()
+                            );
+                        }
                     }
                     Err(error) => return Err(error.to_string()),
                 }
@@ -975,6 +998,42 @@ mod tests {
             attempts: 1,
             ..Default::default()
         }
+    }
+
+    /// A child left queued past its own queue deadline must reconcile to a
+    /// terminal state. Observed live on a real run: a revdeck child sat
+    /// "queued" for 24 hours against a 30-minute max_queue_age with
+    /// updated_at frozen at creation, because nothing reconciles a run except
+    /// an explicit fetch of it. This pins the half that is supposed to work,
+    /// so a regression here is caught rather than only showing up as an
+    /// unabortable run.
+    #[test]
+    fn a_child_past_its_queue_deadline_reconciles_to_terminal() {
+        let past = (chrono::Utc::now() - chrono::Duration::hours(2)).to_rfc3339();
+        let mut child = new_deterministic_child();
+        child.analyzer_id = "revdeck".into();
+        child.state = "queued".into();
+        child.created_at = past.clone();
+        child.updated_at = past.clone();
+        child.queue_deadline = past.clone();
+        child.deadline = past;
+        child.cancelable = true;
+
+        let run = WorkbenchRun {
+            children: vec![child],
+            ..Default::default()
+        };
+        let (reconciled, _) = reconcile_run(run);
+        let child = &reconciled.children[0];
+
+        assert!(
+            workbench_domain::is_terminal_state(&child.state),
+            "expected a terminal state, got {:?} -- an expired child that stays \
+             queued is exactly the stuck run an operator cannot abort",
+            child.state
+        );
+        assert_eq!(child.state, "timed_out");
+        assert!(!child.cancelable, "a timed-out child is no longer cancelable");
     }
 
     /// Mirrors dashboard/workbench_test.go's
