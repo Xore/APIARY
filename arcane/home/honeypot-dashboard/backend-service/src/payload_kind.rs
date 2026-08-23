@@ -141,9 +141,18 @@ fn mostly_text(text: &[u8]) -> bool {
 fn normalized_text(data: &[u8]) -> Vec<u8> {
     let data = &data[..data.len().min(1 << 20)];
     if data.len() >= 2 && data[0] == 0xff && data[1] == 0xfe {
+        // `as_chunks::<2>()` rather than `chunks_exact(2)`: for a constant
+        // chunk size it yields `&[[u8; 2]]`, so `from_le_bytes` takes the
+        // array directly instead of re-indexing a slice whose length the
+        // compiler cannot see. clippy::chunks_exact_to_as_chunks enforces
+        // this from Rust 1.98 on (#1720). `.1` is the <2-byte remainder of
+        // an odd-length buffer, deliberately dropped — a trailing half
+        // code unit is not decodable, which is what chunks_exact did too.
         let units: Vec<u16> = data[2..]
-            .chunks_exact(2)
-            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u16::from_le_bytes(*pair))
             .collect();
         return char::decode_utf16(units)
             .map(|r| r.unwrap_or(char::REPLACEMENT_CHARACTER))
