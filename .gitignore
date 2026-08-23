@@ -5,3 +5,8 @@ node_modules/
 dist/
 .env
 target/
+
+# Playwright MCP writes accessibility snapshots and screenshots into the
+# directory a browser session was driven from; they are session scratch, not
+# source, and one already reached main inside a backend-service commit.
+.playwright-mcp/
