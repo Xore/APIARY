@@ -39,6 +39,8 @@ type SourceHealth = {
     recent_dead_letters: number
   }
   dead_letters: number
+  /** Events in the last 24h with no recoverable source address (#1723). */
+  unattributed_24h: number
   pipeline: {
     state: string
     acked: number
@@ -276,6 +278,21 @@ function SourceHealthPage() {
           <p>Document counts and freshness per sensor, ordered by most recent event.</p>
         </div>
       </div>
+      {/* source_health.html:41. Restored once the API could count these
+          (#1723). Reworded from the Go tier's "in this tail": that
+          described an in-memory log tail this stack does not have, and the
+          figure is now a 24h Elasticsearch window. Only rendered when
+          non-zero — a note explaining a discrepancy that isn't there would
+          be noise. */}
+      {health && health.unattributed_24h > 0 ? (
+        <p className="note">
+          {health.unattributed_24h.toLocaleString('en-US')} event
+          {health.unattributed_24h === 1 ? '' : 's'} in the last 24 hours arrived over the WireGuard tunnel with no
+          recoverable client address. They are counted in every total above but attributed to no source IP, because the
+          tunnel peer is our own VPS and not an attacker — so the per-sensor counts below will not add up to those totals.
+          Sensors reached over UDP, or on ports without a PROXY-protocol rule, have no way back to the real address.
+        </p>
+      ) : null}
       <MasterDetailTable
         rows={health ? health.sensors : null}
         columns={COLUMNS}

@@ -112,6 +112,13 @@ pub struct SourceHealth {
     pub ingest: IngestFreshness,
     pub dead_letters: u64,
     pub pipeline: PipelineHealth,
+    /// Events in the last 24h whose source address could not be recovered
+    /// — the same documents the events explorer renders as `unattributed`
+    /// (#1723). They are counted in every total above but belong to no
+    /// source IP, so per-source counts legitimately do not add up to the
+    /// totals beside them; without this the discrepancy reads as a bug in
+    /// the dashboard rather than a property of tunnel-delivered traffic.
+    pub unattributed_24h: u64,
 }
 
 /// Uptime + memory from /proc/self — zeroes off Linux or on parse failure
@@ -263,7 +270,19 @@ pub async fn source_health(State(state): State<AppState>) -> Result<Json<SourceH
                 "terms": {"field": "event.sensor", "size": 60, "order": {"last": "desc"}},
                 "aggs": {"last": {"max": {"field": "@timestamp"}}}
             },
-            "newest": {"max": {"field": "@timestamp"}}
+            "newest": {"max": {"field": "@timestamp"}},
+            // Same 24h window dead_letter_counts() already uses, so the
+            // two "last 24h" figures on this page mean the same thing.
+            // must_not exists rather than a term on "": a tunnel-delivered
+            // event has no source.ip field at all.
+            "unattributed": {
+                "filter": {
+                    "bool": {
+                        "filter": [{"range": {"@timestamp": {"gte": "now-24h"}}}],
+                        "must_not": [{"exists": {"field": "source.ip"}}]
+                    }
+                }
+            }
         }
     });
     let result = state
@@ -329,5 +348,6 @@ pub async fn source_health(State(state): State<AppState>) -> Result<Json<SourceH
         ingest,
         dead_letters,
         pipeline: pipeline_health(&state).await,
+        unattributed_24h: result["aggregations"]["unattributed"]["doc_count"].as_u64().unwrap_or(0),
     }))
 }
