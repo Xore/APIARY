@@ -181,11 +181,6 @@ services:
       - REVDECK_RESULTS_DIR=${REVDECK_RESULTS_DIR:-}
       - PAYLOAD_DIRS=/dionaea-lib/binaries,/cowrie-downloads
       - SCRIPT_PAYLOAD_DIR=/state/script-payloads
-      # #1682: /api/v1/source-health's "Pipeline status" card reads the
-      # same FILEBEAT_URL /stats endpoint backend-worker's filebeat_alerts
-      # already polls for alerting — this HTTP-serving container needs its
-      # own copy of the var to answer the request-time query.
-      - FILEBEAT_URL=${FILEBEAT_URL:-http://filebeat:5066}
       - TZ=Europe/Berlin
     volumes:
       - dashboard-state:/state
