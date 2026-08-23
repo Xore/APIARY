@@ -5,6 +5,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { FiltersButton, FiltersModal } from '../components/FiltersModal'
 import { copyWithFlash } from '../lib/flash'
 import { subscribeLiveEvents, useLiveState } from '../lib/live'
 import type { JsonRecord } from '../lib/json'
@@ -230,6 +231,10 @@ function Events() {
   const [fingerprintIps, setFingerprintIps] = useState<CorrelatedIp[] | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
   const [selected, setSelected] = useState<number | null>(null)
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const baseFilterCount = [search.ip, search.sensor, search.country, search.proto, search.port, search.kind].filter(
+    Boolean,
+  ).length
   const filtersActive = Boolean(
     search.ip ||
       search.sensor ||
@@ -347,43 +352,7 @@ function Events() {
         >
           {live ? '● live' : '○ paused'}
         </button>
-        <input
-          className="form-input"
-          type="search"
-          placeholder="source ip"
-          defaultValue={search.ip ?? ''}
-          aria-label="Filter by source IP"
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') setFilter('ip', (event.target as HTMLInputElement).value.trim())
-          }}
-          onBlur={(event) => {
-            if (event.target.value.trim() !== (search.ip ?? '')) setFilter('ip', event.target.value.trim())
-          }}
-        />
-        {(
-          [
-            ['sensor', values?.sensors],
-            ['country', values?.countries],
-            ['proto', values?.protos],
-            ['port', values?.ports],
-            ['kind', values?.kinds],
-          ] as const
-        ).map(([key, options]) => (
-          <select
-            key={key}
-            className="form-input"
-            aria-label={`Filter by ${key}`}
-            value={(search[key] as string | undefined) ?? ''}
-            onChange={(event) => setFilter(key, event.target.value)}
-          >
-            <option value="">{key}: all</option>
-            {(options ?? []).map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        ))}
+        <FiltersButton activeCount={baseFilterCount} onClick={() => setFiltersOpen(true)} />
         {/* Link-borne pivot scopes render as removable chips — there is no
             manual control for them, so without a chip an operator can't
             see or clear the scope they arrived with. */}
@@ -435,6 +404,69 @@ function Events() {
           ⇩ JSON
         </button>
       </div>
+      {filtersOpen ? (
+        <FiltersModal
+          onClose={() => setFiltersOpen(false)}
+          onApply={(event) => {
+            const data = new FormData(event.currentTarget)
+            const next: Record<string, string | undefined> = {}
+            for (const key of ['ip', 'sensor', 'country', 'proto', 'port', 'kind'] as const) {
+              next[key] = (data.get(key) as string | null)?.trim() || undefined
+            }
+            setRows(null)
+            setSelected(null)
+            setFiltersOpen(false)
+            void navigate({ search: (current: Record<string, unknown>) => ({ ...current, ...next }) })
+          }}
+          onClear={() => {
+            setRows(null)
+            setSelected(null)
+            setFiltersOpen(false)
+            void navigate({
+              search: (current: Record<string, unknown>) => ({
+                ...current,
+                ip: undefined,
+                sensor: undefined,
+                country: undefined,
+                proto: undefined,
+                port: undefined,
+                kind: undefined,
+              }),
+            })
+          }}
+          clearDisabled={baseFilterCount === 0}
+        >
+          <div className="settings-field">
+            <label className="form-label" htmlFor="hp-ev-filter-ip">
+              Source IP
+            </label>
+            <input className="form-input" id="hp-ev-filter-ip" name="ip" type="search" defaultValue={search.ip ?? ''} />
+          </div>
+          {(
+            [
+              ['sensor', 'Sensor', values?.sensors],
+              ['country', 'Country', values?.countries],
+              ['proto', 'Protocol', values?.protos],
+              ['port', 'Port', values?.ports],
+              ['kind', 'Kind', values?.kinds],
+            ] as const
+          ).map(([key, label, options]) => (
+            <div className="settings-field" key={key}>
+              <label className="form-label" htmlFor={`hp-ev-filter-${key}`}>
+                {label}
+              </label>
+              <select className="form-input" id={`hp-ev-filter-${key}`} name={key} defaultValue={(search[key] as string | undefined) ?? ''}>
+                <option value="">all</option>
+                {(options ?? []).map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
+        </FiltersModal>
+      ) : null}
       <div className={open ? 'hp-md hp-md--active hp-md--open wide' : 'hp-md hp-md--active wide'} id="events-grid">
         <div className="hp-md__list" ref={listRef}>
           <div className="card wide">

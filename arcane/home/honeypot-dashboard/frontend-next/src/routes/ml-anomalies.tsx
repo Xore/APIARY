@@ -10,6 +10,7 @@ import { str, num, when, type StorePage, type StoreRow } from '../components/Sto
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { confirmAction } from '../components/ConfirmDialog'
 import { EChart } from '../components/EChart'
+import { FiltersButton, FiltersModal } from '../components/FiltersModal'
 import { formatTimestamp } from '../lib/time'
 
 type AckRecord = { Acknowledged: boolean; AckedBy?: string; AckedAt?: string }
@@ -291,6 +292,8 @@ function Page() {
   const [severity, setSeverity] = useState('')
   const [eventType, setEventType] = useState('')
   const [status, setStatus] = useState('')
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const activeFilterCount = [severity, eventType, status].filter(Boolean).length
 
   const refreshAcks = () => {
     fetchAcks().then((result) => {
@@ -405,28 +408,64 @@ function Page() {
         ))}
       </div>
       <div className="filters" id="ml-filters">
-        <select className="form-input" aria-label="Filter by severity" value={severity} onChange={(event) => setSeverity(event.target.value)}>
-          <option value="">all severities</option>
-          {['critical', 'high', 'medium', 'low'].map((value) => (
-            <option key={value} value={value}>
-              {value}
-            </option>
-          ))}
-        </select>
-        <select className="form-input" aria-label="Filter by event type" value={eventType} onChange={(event) => setEventType(event.target.value)}>
-          <option value="">all event types</option>
-          {eventTypes.map((value) => (
-            <option key={value} value={value}>
-              {value}
-            </option>
-          ))}
-        </select>
-        <select className="form-input" aria-label="Filter by status" value={status} onChange={(event) => setStatus(event.target.value)}>
-          <option value="">any status</option>
-          <option value="open">open</option>
-          <option value="acknowledged">acknowledged</option>
-        </select>
+        <FiltersButton activeCount={activeFilterCount} onClick={() => setFiltersOpen(true)} />
       </div>
+      {filtersOpen ? (
+        <FiltersModal
+          onClose={() => setFiltersOpen(false)}
+          onApply={(event) => {
+            const data = new FormData(event.currentTarget)
+            setSeverity((data.get('severity') as string | null) ?? '')
+            setEventType((data.get('event_type') as string | null) ?? '')
+            setStatus((data.get('status') as string | null) ?? '')
+            setFiltersOpen(false)
+          }}
+          onClear={() => {
+            setSeverity('')
+            setEventType('')
+            setStatus('')
+            setFiltersOpen(false)
+          }}
+          clearDisabled={activeFilterCount === 0}
+        >
+          <div className="settings-field">
+            <label className="form-label" htmlFor="hp-ml-filter-severity">
+              Severity
+            </label>
+            <select className="form-input" id="hp-ml-filter-severity" name="severity" defaultValue={severity}>
+              <option value="">all severities</option>
+              {['critical', 'high', 'medium', 'low'].map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="settings-field">
+            <label className="form-label" htmlFor="hp-ml-filter-event-type">
+              Event type
+            </label>
+            <select className="form-input" id="hp-ml-filter-event-type" name="event_type" defaultValue={eventType}>
+              <option value="">all event types</option>
+              {eventTypes.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="settings-field">
+            <label className="form-label" htmlFor="hp-ml-filter-status">
+              Status
+            </label>
+            <select className="form-input" id="hp-ml-filter-status" name="status" defaultValue={status}>
+              <option value="">any status</option>
+              <option value="open">open</option>
+              <option value="acknowledged">acknowledged</option>
+            </select>
+          </div>
+        </FiltersModal>
+      ) : null}
       <div className="card wide" id="ml-anomaly-scores-card">
         <h2>Model scores over time</h2>
         <p className="note">
