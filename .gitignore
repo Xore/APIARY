@@ -5,3 +5,9 @@ node_modules/
 dist/
 .env
 target/
+
+# Python bytecode. Tracked copies got swept in by a `git add -A` after a
+# local pytest run (#1742 work) and had to be deleted again -- ignore them so
+# that cannot recur.
+__pycache__/
+*.py[cod]
