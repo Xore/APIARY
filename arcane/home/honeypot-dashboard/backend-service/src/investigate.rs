@@ -4,12 +4,15 @@
 //! /investigate/ip page over its in-memory cache, re-derived as one
 //! aggregation pass + one bounded event fetch.
 //!
-//! #1611 workstream E.2: also join portbridge-v2-* (today only feeds the
-//! os-distribution chart, charts.rs) for the p0f OS guess and per-port
-//! connect counts — the only ground truth for which ports an IP actually
-//! knocked on across tunneled sensors (cowrie et al. only see the tunnel
-//! peer address, not the real source, until portbridge's via_port join —
-//! see vps/portbridge/main.go's connLogger.log doc comment).
+//! #1611 workstream E.2: portbridge-v2-* is queried a second time, by
+//! `portbridge.src_ip`, for the OS guess and per-port connect counts — the
+//! only ground truth for which ports an IP actually knocked on across
+//! tunneled sensors, which see the tunnel peer rather than the real source.
+//!
+//! Since #1742 that family is also in EVENT_INDICES, so its documents reach
+//! the main `source.ip` pass as well. That is not a double count: the second
+//! pass produces a separate profile (OS, ports touched, first and last seen),
+//! not another copy of the same totals.
 //!
 //! #1608 workstream M: /api/v1/investigate/cidr/{cidr} and
 //! /api/v1/investigate/cluster?kind=&value= — the campaigns/clusters
@@ -42,14 +45,19 @@ use crate::{
 
 const WINDOW: &str = "now-10d";
 
-/// Records/sensors aggregation across the honeypot+Suricata event indices
-/// (crate::es::EVENT_INDICES, via `Es::search`) plus a second, separate
-/// portbridge-v2-* pass — mirroring the split investigate::ip already needs
-/// (see its own portbridge_filter/portbridge_body above): portbridge
-/// documents carry the real external source address under
-/// `portbridge.src_ip`, not `source.ip` (the tunnel-peer address the raw
-/// sensor itself sees), so it can never be folded into the same `source.ip`
-/// filter as the other two families.
+/// Records/sensors aggregation across EVENT_INDICES (via `Es::search`) plus a
+/// second, separate portbridge-v2-* pass keyed on `portbridge.src_ip`.
+///
+/// This comment used to say portbridge could never be folded into the same
+/// `source.ip` filter, because its `source.ip` was the tunnel peer. That is
+/// no longer true: the ingest pipeline promotes `portbridge.src_ip` to
+/// `source.ip`, and measured over 24h not one portbridge document is
+/// fleet-sourced — the top sources are real scanners. The family is in
+/// EVENT_INDICES as of #1742.
+///
+/// The dedicated pass stays regardless, because it answers a different
+/// question: the OS guess and the per-port connect counts live only under
+/// `portbridge.*` and have no ECS equivalent to aggregate.
 const CORRELATION_LIMIT: usize = 200;
 
 /// Bounds how many cluster-member IPs get folded into one `terms` query —
