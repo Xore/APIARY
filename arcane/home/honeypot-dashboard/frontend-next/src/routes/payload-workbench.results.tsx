@@ -4,7 +4,8 @@
 // the full result document in the inspector.
 import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { confirmAction } from '../components/ConfirmDialog'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { ArtifactList } from '../components/ArtifactList'
 import { getSessionUser } from '../lib/auth'
@@ -254,10 +255,8 @@ const childActionFn = createServerFn({ method: 'POST' })
 
 // GPU job queue (#1611 workstream E.6) — ported from dashboard/gpu_queue.go,
 // which rendered this same card on the legacy /ghidra page (now redirected
-// here). Read-only: the legacy abort action is an operator write against a
-// queue/spool, out of scope for this pass — this only closes the "can't
-// even see it" gap the issue's live audit found (2 stuck queued jobs with
-// nothing surfacing them).
+// here). The legacy abort action (ghidra.html:44's confirm-gated
+// POST /gpu-queue/abort) is restored in #1692.
 type GpuJob = {
   job_id: string
   job_type: string
@@ -277,6 +276,29 @@ const fetchGpuQueue = createServerFn({ method: 'GET' }).handler(async (): Promis
   const { serviceJSON } = await import('../lib/backend.server')
   return serviceJSON<GpuJob[]>('/api/v1/gpu-queue')
 })
+
+// #1692: restores ghidra.html:44's abort. Admin-gated like every other
+// operator write on this page. Sets the queue document's `abort_requested`,
+// which is only consulted while a job is still `queued` — the drainer checks
+// it once before committing to the Ollama call
+// (analysis/ghidra/worker/gpu-queue-drain.py:53). Cancelling an in-flight
+// generation is a separate, worker-side problem by the contract at
+// analysis/gpu-queue/gpu_queue.py:51.
+const abortGpuJob = createServerFn({ method: 'POST' })
+  .inputValidator((input: { job_id: string }) => input)
+  .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
+    const { getSessionUser } = await import('../lib/auth')
+    const user = await getSessionUser()
+    if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
+    const { serviceFetch } = await import('../lib/backend.server')
+    const response = await serviceFetch(
+      `/api/v1/gpu-queue/${encodeURIComponent(data.job_id)}/abort`,
+      { method: 'POST' },
+      { mounted: true },
+    )
+    if (!response.ok) return { ok: false, error: await response.text() }
+    return { ok: true }
+  })
 
 // "Approved local-model health" (payload_workbench.html:89 +
 // hp-workbench.js's renderModel), advisory only. The legacy model-status
@@ -1091,7 +1113,7 @@ function gpuStatusBadge(status: string) {
   return <span className={cls}>{status || 'unknown'}</span>
 }
 
-const GPU_QUEUE_COLUMNS: Column<GpuJob>[] = [
+const gpuQueueColumns = (onAbort: (job: GpuJob) => void): Column<GpuJob>[] => [
   { header: 'requested', render: (row) => (row.requested_at ? when(row.requested_at) : '—') },
   { header: 'type', className: 'v', render: (row) => row.job_type },
   { header: 'model', className: 'v', render: (row) => row.model },
@@ -1107,6 +1129,19 @@ const GPU_QUEUE_COLUMNS: Column<GpuJob>[] = [
   { header: 'finished', detail: true, render: (row) => (row.finished_at ? when(row.finished_at) : '—') },
   { header: 'error', detail: true, render: (row) => row.error || '—' },
   { header: 'job id', detail: true, render: (row) => <code>{row.job_id}</code> },
+  {
+    // Only queued jobs can be aborted, so only they get the control —
+    // offering it on a running or finished row would promise something the
+    // flag cannot deliver. `abort_requested` already-set collapses to the
+    // existing badge rather than a second, useless button.
+    header: '',
+    render: (row) =>
+      row.status === 'queued' && !row.abort_requested ? (
+        <button type="button" className="btn btn-danger btn-sm" onClick={() => onAbort(row)}>
+          Abort
+        </button>
+      ) : null,
+  },
 ]
 
 // payload_workbench.html:16-20's tablist, extended to one view per
@@ -1139,6 +1174,25 @@ function Results() {
       cancelled = true
     }
   }, [data.gpuQueue])
+  // #1692: abort a queued job. Re-reads the queue afterwards rather than
+  // patching the row locally — the drainer may have moved the job on in the
+  // meantime, and the authoritative status is worth the one extra request.
+  const onAbortGpuJob = useCallback((job: GpuJob) => {
+    confirmAction({
+      title: 'Abort this queued job?',
+      description: `${job.job_type} job for ${job.ref || 'an unnamed reference'}, queued for model ${job.model || 'unknown'}.`,
+      warning:
+        'The job will not run and its AI triage will be skipped. Only queued jobs can be aborted — if the drainer has already started this one, the request has no effect. The rest of that analysis is unaffected.',
+      confirmLabel: 'Abort job',
+      onConfirm: async () => {
+        const result = await abortGpuJob({ data: { job_id: job.job_id } })
+        if (!result.ok) throw new Error(result.error || 'Abort failed.')
+        setGpuQueue((await fetchGpuQueue()) ?? [])
+        return 'Abort requested.'
+      },
+    })
+  }, [])
+  const gpuColumns = useMemo(() => gpuQueueColumns(onAbortGpuJob), [onAbortGpuJob])
   const owner = data.user?.username ?? ''
   const [runsToken, setRunsToken] = useState(0)
   const [tab, setTab] = useState<ResultTabId>('workbench')
@@ -1260,7 +1314,7 @@ function Results() {
             </p>
             <MasterDetailTable
               rows={gpuQueue}
-              columns={GPU_QUEUE_COLUMNS}
+              columns={gpuColumns}
               rowKey={(row, i) => `gq-${row.job_id}-${i}`}
               inspectorTitle="GPU queue job"
             />

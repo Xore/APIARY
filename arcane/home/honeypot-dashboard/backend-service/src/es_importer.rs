@@ -65,6 +65,17 @@ struct Source {
     artifact_kind: Option<&'static str>,
     content_type: Option<&'static str>,
     aggregate_samples: Option<&'static str>,
+    /// #1696: only accept filenames matching this shape. cowrie_ttylog's
+    /// whole contract is "the filename already IS the content hash", but that
+    /// only becomes true when cowrie closes the session and renames the file.
+    /// While a session is live the file is called
+    /// `YYYYMMDD-HHMMSS-<session>-<pid>i.log`, and an importer pass that
+    /// lands in that window indexed it under that temporary name — creating a
+    /// truncated phantom document, keyed by a string that is not a hash of
+    /// anything, that no later pass ever cleans up. 3,521 of 3,713 documents
+    /// in the index were such phantoms when this was found. Requiring the
+    /// hash shape makes the contract enforced rather than assumed.
+    content_hash_names: bool,
     /// #1611 workstream B: a plain binary source keyed by sha256(filename)
     /// rather than the filename itself (cowrie_ttylog's own convention —
     /// its filenames already ARE a content hash, so using them directly as
@@ -86,6 +97,7 @@ const fn source(env: &'static str, label: &'static str, index: &'static str, glo
         skip: &[],
         binary: false,
         chunked: false,
+        content_hash_names: false,
         id_suffix: None,
         artifact_kind: None,
         content_type: None,
@@ -144,7 +156,11 @@ fn sources() -> Vec<Source> {
             skip: &["status.json"],
             ..source("CAPE_RESULTS_DIR", "cape", "cape-analysis-v1", "*_cape.json")
         },
-        Source { binary: true, ..source("COWRIE_TTYLOG_DIR", "cowrie_ttylog", "cowrie-ttylog-v1", "*") },
+        Source {
+            binary: true,
+            content_hash_names: true,
+            ..source("COWRIE_TTYLOG_DIR", "cowrie_ttylog", "cowrie-ttylog-v1", "*")
+        },
         // #1611 workstream B: mailoney's full .eml bodies — the ES event
         // document's own "mail-body" line carries session_id AND body_path
         // as sibling fields (mailoney/json_log_patch.py's _emit_json_event
@@ -312,6 +328,14 @@ fn mtime_secs(metadata: &fs::Metadata) -> f64 {
 /// touch `state` itself — the caller only records a file as imported once
 /// the bulk write actually confirms it, so a transient ES error retries
 /// next pass instead of being silently swallowed.
+/// #1696: a lowercase 64-character hex string, i.e. a rendered sha256 and
+/// nothing else. Deliberately strict — cowrie's in-progress ttylog names
+/// (`20260811-170124-None-48166i.log`) must not pass, and neither should any
+/// other transient the sensor happens to leave in that directory.
+fn is_content_hash_name(name: &str) -> bool {
+    name.len() == 64 && name.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 fn scan_source(source: &Source, root: &Path, state: &HashMap<String, f64>, shard_count: u64, shard_index: u64) -> Vec<Pending> {
     let mut pending = Vec::new();
     let entries = match fs::read_dir(root) {
@@ -324,6 +348,11 @@ fn scan_source(source: &Source, root: &Path, state: &HashMap<String, f64>, shard
     for path in paths {
         let Some(filename) = path.file_name().and_then(|n| n.to_str()) else { continue };
         if !path.is_file() || !glob_matches(source.glob, filename) || source.skip.contains(&filename) {
+            continue;
+        }
+        // #1696: a source whose ids are content hashes must not index a file
+        // that has not been given its hash name yet — see Source's own field.
+        if source.content_hash_names && !is_content_hash_name(filename) {
             continue;
         }
         if !owns(&path, shard_count, shard_index) {
@@ -494,6 +523,122 @@ fn advance_state_after_bulk(pending: &[Pending], failed_ids: &std::collections::
     }
 }
 
+/// #1691: denormalize attacker attribution onto `cowrie-ttylog-v1` documents
+/// at import time.
+///
+/// The recordings list pages over these documents, which natively carry only
+/// `shasum`/`size_bytes`/`imported_at`. Rendering source IP and country in
+/// the list therefore meant one `/api/v1/events` lookup per row — 25 extra ES
+/// queries per page — so the port deliberately dropped the columns rather
+/// than pay that. Joining once here, when a recording is first imported,
+/// costs two queries per import batch instead of 25 per page view, forever.
+///
+/// The join is deliberately two-hop, and it is worth saying why, because the
+/// one-hop version looks correct and is not. Cowrie's `cowrie.log.closed`
+/// event carries the `shasum` and the `session`, and usually the real
+/// attacker IP. But roughly a third of them (5,886 of 17,155 measured live
+/// 2026-08-23) carry `10.8.0.1` — the WireGuard tunnel address — because the
+/// enrichment pipeline does not rewrite src_ip on every close event. Country
+/// is worse: `source.geo.*` is only ever populated on the session's
+/// `cowrie.session.connect` event, never on the close.
+///
+/// So the close event is used only to resolve shasum → session, and the
+/// connect event for that session supplies both the address and the geo. A
+/// recording whose session never produced a connect event is left
+/// unattributed rather than attributed to the tunnel.
+async fn ttylog_attribution(
+    state: &AppState,
+    shasums: Vec<String>,
+) -> HashMap<String, (String, String, String)> {
+    if shasums.is_empty() {
+        return HashMap::new();
+    }
+    let close = state
+        .es
+        .search_index(
+            &["honeypot-v2-*"],
+            json!({
+                "size": shasums.len().min(10_000),
+                "query": {"bool": {"filter": [
+                    {"term": {"honeypot.eventid": "cowrie.log.closed"}},
+                    {"terms": {"honeypot.shasum": shasums}},
+                ]}},
+                "_source": ["honeypot.shasum", "honeypot.session"],
+            }),
+        )
+        .await;
+    let close = match close {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::warn!(%error, "ttylog attribution: close-event lookup failed, importing unattributed");
+            return HashMap::new();
+        }
+    };
+    let text = |value: &Value| value.as_str().unwrap_or("").to_string();
+    // shasum -> session
+    let mut sessions: HashMap<String, String> = HashMap::new();
+    for hit in close["hits"]["hits"].as_array().into_iter().flatten() {
+        let source = &hit["_source"]["honeypot"];
+        let (shasum, session) = (text(&source["shasum"]), text(&source["session"]));
+        if !shasum.is_empty() && !session.is_empty() {
+            sessions.insert(shasum, session);
+        }
+    }
+    if sessions.is_empty() {
+        return HashMap::new();
+    }
+    let wanted: Vec<String> = {
+        let mut v: Vec<String> = sessions.values().cloned().collect();
+        v.sort();
+        v.dedup();
+        v
+    };
+    let connect = state
+        .es
+        .search_index(
+            &["honeypot-v2-*"],
+            json!({
+                "size": wanted.len().min(10_000),
+                "query": {"bool": {"filter": [
+                    {"term": {"honeypot.eventid": "cowrie.session.connect"}},
+                    {"terms": {"honeypot.session": wanted}},
+                ]}},
+                "_source": ["honeypot.session", "honeypot.src_ip", "source.geo.country_name"],
+            }),
+        )
+        .await;
+    let connect = match connect {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::warn!(%error, "ttylog attribution: connect-event lookup failed, importing unattributed");
+            return HashMap::new();
+        }
+    };
+    // session -> (src_ip, country)
+    let mut origins: HashMap<String, (String, String)> = HashMap::new();
+    for hit in connect["hits"]["hits"].as_array().into_iter().flatten() {
+        let source = &hit["_source"];
+        let session = text(&source["honeypot"]["session"]);
+        if session.is_empty() {
+            continue;
+        }
+        origins.insert(
+            session,
+            (
+                text(&source["honeypot"]["src_ip"]),
+                text(&source["source"]["geo"]["country_name"]),
+            ),
+        );
+    }
+    sessions
+        .into_iter()
+        .filter_map(|(shasum, session)| {
+            let (src_ip, country) = origins.get(&session)?.clone();
+            Some((shasum, (session, src_ip, country)))
+        })
+        .collect()
+}
+
 async fn run_pass(state: &AppState, sources: &[Source], dedup: &mut HashMap<String, f64>, shard_count: u64, shard_index: u64) -> u64 {
     let mut total = 0u64;
     for &source in sources {
@@ -515,6 +660,21 @@ async fn run_pass(state: &AppState, sources: &[Source], dedup: &mut HashMap<Stri
         .unwrap_or_default();
         if pending.is_empty() {
             continue;
+        }
+        let mut pending = pending;
+        // #1691: cowrie recordings get their attacker attribution joined on
+        // here, once, instead of the list view paying for it per row.
+        if source.label == "cowrie_ttylog" {
+            let shasums: Vec<String> =
+                pending.iter().filter_map(|p| p.doc["shasum"].as_str().map(str::to_string)).collect();
+            let attribution = ttylog_attribution(state, shasums).await;
+            for item in pending.iter_mut() {
+                let Some(shasum) = item.doc["shasum"].as_str() else { continue };
+                let Some((session, src_ip, country)) = attribution.get(shasum) else { continue };
+                item.doc["session"] = json!(session);
+                item.doc["src_ip"] = json!(src_ip);
+                item.doc["country"] = json!(country);
+            }
         }
         let ops: Vec<(&str, &str, Value)> = pending.iter().map(|p| (p.index, p.id.as_str(), p.doc.clone())).collect();
         let failed = match state.es.bulk_index(ops).await {
@@ -642,6 +802,38 @@ mod tests {
         assert_eq!(pending[0].id, "deadbeef");
         assert_eq!(pending[0].doc["shasum"], "deadbeef");
         assert_eq!(pending[0].doc["ttylog_base64"], base64::engine::general_purpose::STANDARD.encode(b"raw ttylog bytes"));
+    }
+
+    #[test]
+    fn scan_source_content_hash_names_skips_cowries_in_progress_ttylog() {
+        // #1696: cowrie names a live session's ttylog
+        // YYYYMMDD-HHMMSS-<session>-<pid>i.log and only renames it to the
+        // content hash on close. Indexing the former produced a truncated
+        // phantom document keyed by a string that hashes nothing — 95% of the
+        // index when this was found.
+        let dir = TmpDir::new("ttylog_in_progress");
+        let closed = "a".repeat(64);
+        dir.write(&closed, b"finished recording");
+        dir.write("20260811-170124-None-48166i.log", b"still being written");
+        let src = Source {
+            binary: true,
+            content_hash_names: true,
+            ..source("X", "cowrie_ttylog", "cowrie-ttylog-v1", "*")
+        };
+        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0);
+        assert_eq!(pending.len(), 1, "only the renamed, closed recording is indexable");
+        assert_eq!(pending[0].id, closed);
+    }
+
+    #[test]
+    fn is_content_hash_name_accepts_only_lowercase_sha256() {
+        assert!(is_content_hash_name(&"0".repeat(64)));
+        assert!(is_content_hash_name(&"abcdef0123456789".repeat(4)));
+        assert!(!is_content_hash_name(&"A".repeat(64)), "uppercase is not the rendered form");
+        assert!(!is_content_hash_name(&"g".repeat(64)), "non-hex");
+        assert!(!is_content_hash_name(&"a".repeat(63)), "too short");
+        assert!(!is_content_hash_name(&"a".repeat(65)), "too long");
+        assert!(!is_content_hash_name("20260811-170124-None-48166i.log"));
     }
 
     #[test]
