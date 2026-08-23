@@ -159,6 +159,74 @@ services:
           cpus: "0.5"
           memory: 128M
 
+  # #1737 decision 1: Arkime capturing live from the public interface,
+  # replacing the Suricata pcap-log -> rsync -> offline-import chain.
+  #
+  # pcap is written to a homeserver mount, not local disk: the VPS has 63 GB
+  # free (~4.6 days at the measured rate) and the 30-day target only fits
+  # where the space is. That mount is the fragile part, and this stack has
+  # been bitten by exactly this before -- #1409, where a stale mount starved
+  # capture for five days while every container kept reporting healthy. So
+  # the healthcheck below treats the mount as the thing under test, not the
+  # process.
+  arkime-capture:
+    image: ghcr.io/arkime/arkime/arkime:v6.6.0@sha256:c43159c5b8f486c1ca0d74a7754b28df6f784e36741595bac0ec582ae93bb2ca
+    container_name: hp-arkime-capture
+    restart: unless-stopped
+    network_mode: host
+    cap_drop: [ALL]
+    cap_add: [NET_RAW, NET_ADMIN, DAC_OVERRIDE]
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        # Refuse to start against an absent or read-only pcap mount. Capturing
+        # to a path that silently is not the homeserver is the failure this
+        # whole comment block exists about.
+        if ! mountpoint -q /opt/arkime/pcap; then
+          echo "arkime-capture: /opt/arkime/pcap is not a mount point -- refusing to capture to local disk" >&2
+          exit 1
+        fi
+        if ! touch /opt/arkime/pcap/.write-test 2>/dev/null; then
+          echo "arkime-capture: /opt/arkime/pcap is not writable -- refusing to start" >&2
+          exit 1
+        fi
+        rm -f /opt/arkime/pcap/.write-test
+        exec /opt/arkime/bin/docker.sh capture \
+          --wait-for-db http://10.8.0.2:9200 \
+          --db 'http://10.8.0.2:9200 upgradenoprompt --ifneeded' \
+          -- -i "${CAPTURE_INTERFACE:-ens6}" --host honeypot-vps
+    volumes:
+      - ./arkime/config.ini:/opt/arkime/etc/config.ini:ro
+      - /opt/stacks/apiary/arkime/geo:/opt/arkime/geo:ro
+      - /opt/stacks/apiary/arkime-pcap:/opt/arkime/pcap
+    environment:
+      - TZ=Europe/Berlin
+      - ARKIME__elasticsearch=http://10.8.0.2:9200
+      - ARKIME__passwordSecret=${ARKIME_PASSWORD_SECRET:-change-me-in-env}
+    # Stateful and deliberately loud. Checks the mount is still a mount and
+    # still writable -- an sshfs mount that has gone stale usually still LOOKS
+    # like a directory, which is precisely why #1409 went unnoticed. Container
+    # liveness proves nothing here; the mount is what fails.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          mountpoint -q /opt/arkime/pcap &&
+          touch /opt/arkime/pcap/.health && rm -f /opt/arkime/pcap/.health
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    labels:
+      - autoheal=true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
   # #1742/S5: Zeek, the depth engine. Sniffs the same public interface
   # Suricata does, via AF_PACKET fanout so neither steals packets from the
   # other -- they are complementary, not alternatives (#1727 §0).

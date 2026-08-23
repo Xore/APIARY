@@ -127,6 +127,20 @@ outputs:
             extended: no
 
   # ── PCAP log — full packet capture, rotated by size ──────────────────
+  #
+  # #1737: Arkime now captures live from the interface itself, so this is a
+  # second full-packet writer for the same traffic. It stays enabled until
+  # that is verified, for the same reason flow/netflow do below: deleting the
+  # only working pcap source before its replacement is confirmed leaves no
+  # packets at all. Retire it after:
+  #
+  #   1. arkime-capture is running and its healthcheck passes (the mount is
+  #      the thing that fails, not the process).
+  #   2. A session captured AFTER the cutover can have its packets retrieved
+  #      in the Arkime viewer -- not merely indexed, retrieved.
+  #   3. pcap-sync has been stopped and nothing else reads this directory.
+  #
+  # Then delete this whole pcap-log block and restart Suricata.
   # Files land in /var/log/suricata/pcap/ on the host.
   # The pcap/ subdir must exist before the container starts — Suricata
   # will NOT create it. If missing it falls back to the root log dir.
