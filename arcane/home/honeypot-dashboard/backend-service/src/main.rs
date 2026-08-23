@@ -169,6 +169,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/mail/{session_id}", get(mail::get))
         .route("/api/v1/ml-health", get(ml_health::list))
         .route("/api/v1/gpu-queue", get(gpu_queue::list))
+        .route("/api/v1/gpu-queue/{job_id}/abort", post(gpu_queue::abort))
         .route("/api/v1/sources", get(aggregates::sources))
         .route("/api/v1/filter-values", get(aggregates::filter_values))
         .route("/api/v1/investigate/ip/{ip}", get(investigate::ip))

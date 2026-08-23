@@ -10,6 +10,14 @@ type RecordingRow = {
   shasum: string
   size_bytes: number
   imported_at: string
+  // #1691: denormalized onto the document at import time by
+  // es_importer.rs's ttylog_attribution, so the list can show attribution
+  // without an per-row events lookup. Absent on recordings imported before
+  // that landed and never backfilled, and on any recording whose session
+  // produced no connect event — both render as an em dash.
+  src_ip?: string
+  country?: string
+  session?: string
 }
 
 type Page = { total: number; rows: RecordingRow[] }
@@ -35,15 +43,18 @@ const fetchReplay = createServerFn({ method: 'GET' })
     return serviceJSON<Replay>(`/api/v1/recordings/${encodeURIComponent(data.shasum)}`)
   })
 
-/** Who produced a recording — recordings.html:30-37 listed source IP,
+/** Who produced a recording. recordings.html:30-37 listed source IP,
  * country and session per row, read off the Go tier's in-memory
- * cowrie.log.closed events. The cowrie-ttylog-v1 docs this list pages
- * over only carry shasum/size_bytes/imported_at, so the attribution is
- * joined lazily per opened row instead: the closed event's
- * honeypot.shasum IS the recording's shasum (events.rs:99-102), so one
- * filtered /api/v1/events lookup recovers it. since=365d — the events
- * default (10d) would drop attribution for older recordings the list
- * still shows. */
+ * cowrie.log.closed events.
+ *
+ * Since #1691 that attribution is denormalized onto the cowrie-ttylog-v1
+ * document at import time, so the list renders it directly. This lazy
+ * per-row lookup stays as the fallback for documents that predate the
+ * change and were not backfilled: the closed event's honeypot.shasum IS
+ * the recording's shasum (events.rs:99-102), so one filtered
+ * /api/v1/events lookup recovers it. since=365d — the events default
+ * (10d) would drop attribution for older recordings the list still
+ * shows. */
 type Provenance = { src_ip: string; country: string; session: string }
 
 const fetchProvenance = createServerFn({ method: 'GET' })
@@ -140,6 +151,10 @@ export const Route = createFileRoute('/recordings')({
 
 const COLUMNS: Column<RecordingRow>[] = [
   { header: 'imported', render: (row) => formatTimestamp(row.imported_at) },
+  // #1691: restores recordings.html:30-37's inline attribution.
+  { header: 'source', className: 'v', render: (row) => row.src_ip || '—' },
+  { header: 'country', render: (row) => row.country || '—' },
+  { header: 'session', className: 'v', render: (row) => row.session || '—' },
   { header: 'recording', className: 'v', render: (row) => row.shasum },
   { header: 'size', className: 'n', render: (row) => `${(row.size_bytes / 1024).toFixed(1)} KB` },
 ]
