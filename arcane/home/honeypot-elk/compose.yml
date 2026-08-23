@@ -593,17 +593,17 @@ services:
   zeek-proxy:
     # No build here. The context lives at vps/zeek, which is outside this
     # stack's directory -- Arcane syncs per-directory, so a relative path that
-    # escapes it does not resolve on the homeserver. The image is built there
-    # directly instead:
-    #
-    #   rsync -a vps/zeek/ homeserver:/opt/stacks/apiary/zeek-build/
-    #   ssh homeserver 'docker build -t xore-zeek:local \
-    #       -f /opt/stacks/apiary/zeek-build/Containerfile \
-    #       /opt/stacks/apiary/zeek-build'
-    #
-    # Duplicating the Containerfile into this directory would be the other
-    # option, and would guarantee the two sensors drift apart.
+    # escapes it does not resolve on the homeserver. install-homeserver.sh's
+    # build-zeek-image step builds it from that one context instead, before
+    # this stack starts. Duplicating the Containerfile into this directory
+    # would be the other option, and would guarantee the two sensors drift.
     image: xore-zeek:local
+    # Built by install-homeserver.sh from vps/zeek, the same context the VPS
+    # sensor uses, so both Zeeks load an identical parser set.  Arcane's deploy
+    # pulls every image it does not know how to build, and a local-only tag
+    # exists in no registry -- without this the pull fails and takes the whole
+    # honeypot-elk deploy down with it, Elasticsearch included, not just Zeek.
+    pull_policy: never
     container_name: hp-zeek-proxy
     restart: unless-stopped
     network_mode: host
@@ -623,7 +623,24 @@ services:
           echo "zeek-proxy: interface $$iface does not exist -- honeynet may have been recreated" >&2
           exit 1
         fi
-        exec /usr/local/zeek/bin/zeek -i "af_packet::$$iface" \
+        # af_packet is the fast path, but it assumes Ethernet framing. wg0 is
+        # ARPHRD_NONE (bare IP, no link header) and af_packet silently fails to
+        # parse it: measured live, it took 10795 packets off wg0 and reported
+        # 10790 (99.95%) "not processed", writing 10 conn records where plain
+        # libpcap wrote 71 over the same window. It does not error -- it just
+        # reports an interface it is barely reading, which is the worst way for
+        # a sensor to fail.
+        #
+        # ARPHRD_ETHER is 1; anything else here is a tunnel or point-to-point
+        # link, so fall back to libpcap, which handles the DLT correctly.
+        iftype=$$(cat "/sys/class/net/$$iface/type" 2>/dev/null || echo 0)
+        if [ "$$iftype" = "1" ]; then
+          spec="af_packet::$$iface"
+        else
+          spec="$$iface"
+          echo "zeek-proxy: $$iface is not Ethernet (type $$iftype) -- using libpcap, not af_packet" >&2
+        fi
+        exec /usr/local/zeek/bin/zeek -i "$$spec" \
              /usr/local/share/zeek-site/proxy-local.zeek
     environment:
       - TZ=Europe/Berlin

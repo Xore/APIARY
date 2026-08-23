@@ -155,7 +155,15 @@ filebeat.inputs:
   # Deliberately kept alongside Suricata rather than replacing it: the two see
   # different things on the same wire, which is the whole point of S5.
   - type: filestream
+    # #1776: pinned rather than left implicit. Filebeat 9 changed the
+    # filestream default from inode+device to fingerprint, and a path whose
+    # identity scheme can change under it is how one file ends up with two
+    # harvester states shipping every line twice. Zeek rotates by
+    # rename-and-reopen, which is stable under either scheme, so this is
+    # about never letting the scheme move rather than about Zeek.
     id: zeek-logs
+    file_identity.fingerprint: ~
+    prospector.scanner.fingerprint.enabled: true
     paths:
       - /logs/zeek/*.log
     parsers:
@@ -172,7 +180,11 @@ filebeat.inputs:
   # one's peer is the tunnel, so its source addresses mean something different
   # and must never be mistaken for attacker IPs.
   - type: filestream
+    # #1776: pinned for the same reason as the zeek input above -- the
+    # identity scheme must not change underneath a rotating file.
     id: zeek-proxy-logs
+    file_identity.fingerprint: ~
+    prospector.scanner.fingerprint.enabled: true
     paths:
       - /logs/zeek-proxy/*.log
     parsers:
@@ -189,7 +201,15 @@ filebeat.inputs:
   # raw output ran 193x redundant on tcp_syn_ack, so the volume here is what
   # survives that filter.
   - type: filestream
+    # #1776: pinned, and the copy-truncate rotation this file used to get
+    # is gone (vps/docker-compose.yml). Copy-truncate is what splits the
+    # registry: truncation resets the live harvester to offset 0 while the
+    # rewritten head hashes to a new fingerprint and starts a second one,
+    # and both then ship every appended line. huginn-sidecar now rotates
+    # itself by rename-and-reopen, the way portbridge does.
     id: huginn-sidecar
+    file_identity.fingerprint: ~
+    prospector.scanner.fingerprint.enabled: true
     paths:
       - /logs/huginn/huginn.json
     parsers:
@@ -212,7 +232,12 @@ filebeat.inputs:
   # overwritten wholesale each cycle, which a filestream input would re-ingest
   # in full every time.
   - type: filestream
+    # #1776: pinned, and copy-truncate rotation replaced with
+    # rename-then-SIGUSR1 (vps/docker-compose.yml) so Traefik reopens the
+    # path itself. Same reasoning as the huginn input above.
     id: traefik-access
+    file_identity.fingerprint: ~
+    prospector.scanner.fingerprint.enabled: true
     paths:
       - /logs/traefik/access.json
     parsers:
