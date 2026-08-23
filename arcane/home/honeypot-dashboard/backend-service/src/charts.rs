@@ -101,6 +101,30 @@ pub async fn ml_backlog(State(state): State<AppState>) -> Result<Json<Vec<Series
     Ok(Json(series))
 }
 
+/// Time-windowed query that excludes the fleet's own addresses as a source.
+///
+/// #1677 established this for the Suricata-backed handlers in dashboard.rs:
+/// our own machines can never be an attacker in our own data, yet they appear
+/// as `source.ip` for the replying half of every attacker session and for the
+/// host's own outbound traffic. The Zeek sensor sits on the VPS NIC and sees
+/// exactly the same thing, so the charts built on it inherit the same problem
+/// and need the same exclusion.
+///
+/// Applied at query level rather than per aggregation, which is the lesson of
+/// #1677: hiding an address inside one `terms` agg leaves every other
+/// aggregation on the page still counting it.
+///
+/// Measured before adding this: 1.8% of `zeek-v1-conn-*` documents were
+/// fleet-sourced. Small, but it is the same defect, and it grows with however
+/// much outbound traffic the host happens to do.
+fn attacker_window(window: &str) -> Value {
+    json!({"bool": {
+        "filter": [{"range": {"@timestamp": {"gte": window}}}],
+        "must_not": [{"terms": {"source.ip": crate::dashboard::self_addresses()}}]
+    }})
+}
+
+
 /// Hourly traffic volume, summed over whichever sensor is producing it.
 ///
 /// #1741: Suricata's `netflow` records are being retired -- they and `flow`
@@ -130,7 +154,7 @@ async fn traffic_sum(
         .collect();
     let zeek_body = json!({
         "size": 0,
-        "query": {"range": {"@timestamp": {"gte": WEEK}}},
+        "query": attacker_window(WEEK),
         "aggs": {"hourly": {
             "date_histogram": {"field": "@timestamp", "fixed_interval": "1h", "min_doc_count": 0},
             "aggs": zeek_aggs
@@ -339,7 +363,7 @@ pub async fn tcp_stack_clusters(
 ) -> Result<Json<Vec<PiePoint>>, (StatusCode, String)> {
     let body = json!({
         "size": 0,
-        "query": {"range": {"@timestamp": {"gte": OVERVIEW_WINDOW}}},
+        "query": attacker_window(OVERVIEW_WINDOW),
         "aggs": {"stacks": {
             "terms": {"field": "zeek.ja4t", "size": 20},
             "aggs": {"ips": {"cardinality": {"field": "source.ip"}}}
@@ -401,7 +425,7 @@ pub async fn ics_functions(State(state): State<AppState>) -> Result<Json<Bar>, (
     for (proto, index, field) in SOURCES {
         let body = json!({
             "size": 0,
-            "query": {"range": {"@timestamp": {"gte": WEEK}}},
+            "query": attacker_window(WEEK),
             "aggs": {"fn": {"terms": {"field": *field, "size": 8}}}
         });
         // One dead index must not blank the whole chart: a protocol nobody has
@@ -498,7 +522,7 @@ pub async fn decoy_client_fingerprints(
 pub async fn ja4h_fingerprints(State(state): State<AppState>) -> Result<Json<Bar>, (StatusCode, String)> {
     let body = json!({
         "size": 0,
-        "query": {"range": {"@timestamp": {"gte": WEEK}}},
+        "query": attacker_window(WEEK),
         "aggs": {"ja4h": {"terms": {"field": "zeek.ja4h", "size": 15}}}
     });
     fingerprint_bar(&state, &["zeek-v1-http-*"], body, "ja4h").await.map(Json).map_err(bad_gateway)
@@ -514,7 +538,7 @@ pub async fn ja4h_fingerprints(State(state): State<AppState>) -> Result<Json<Bar
 pub async fn ja4x_fingerprints(State(state): State<AppState>) -> Result<Json<Bar>, (StatusCode, String)> {
     let body = json!({
         "size": 0,
-        "query": {"range": {"@timestamp": {"gte": WEEK}}},
+        "query": attacker_window(WEEK),
         "aggs": {"ja4x": {"terms": {"field": "zeek.ja4x", "size": 15}}}
     });
     fingerprint_bar(&state, &["zeek-v1-x509-*"], body, "ja4x").await.map(Json).map_err(bad_gateway)
@@ -531,7 +555,7 @@ pub async fn ja4x_fingerprints(State(state): State<AppState>) -> Result<Json<Bar
 pub async fn ja4l_fingerprints(State(state): State<AppState>) -> Result<Json<Bar>, (StatusCode, String)> {
     let body = json!({
         "size": 0,
-        "query": {"range": {"@timestamp": {"gte": WEEK}}},
+        "query": attacker_window(WEEK),
         "aggs": {"ja4l": {"terms": {"field": "zeek.ja4l", "size": 15}}}
     });
     fingerprint_bar(&state, &["zeek-v1-conn-*"], body, "ja4l").await.map(Json).map_err(bad_gateway)
@@ -688,5 +712,32 @@ mod tests {
         assert_eq!(last["key"], "5min+");
         assert_eq!(last["from"], 300_000);
         assert!(last.get("to").is_none(), "the open-ended top bucket must not set \"to\"");
+    }
+}
+
+#[cfg(test)]
+mod fleet_filter_tests {
+    use super::attacker_window;
+
+    /// The filter has to sit on the query, not inside one aggregation. #1677's
+    /// original fix hid the address in a single `terms` agg and every other
+    /// aggregation on the page kept counting it, so this asserts the shape as
+    /// much as the contents.
+    #[test]
+    fn excludes_fleet_sources_at_query_level() {
+        let window = attacker_window("now-7d");
+
+        let filter = &window["bool"]["filter"];
+        assert_eq!(filter[0]["range"]["@timestamp"]["gte"], "now-7d");
+
+        let excluded = window["bool"]["must_not"][0]["terms"]["source.ip"]
+            .as_array()
+            .expect("must_not should exclude source.ip terms");
+        // The tunnel peer is always present, whatever HONEYPOT_SELF_IPS says --
+        // it is the exclusion the dashboard has always had.
+        assert!(
+            excluded.iter().any(|value| value == "10.8.0.1"),
+            "tunnel peer must always be excluded, got {excluded:?}"
+        );
     }
 }

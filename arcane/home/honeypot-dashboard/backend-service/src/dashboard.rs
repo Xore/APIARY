@@ -37,7 +37,7 @@ const TUNNEL_PEER_IP: &str = "10.8.0.1";
 /// is a property of a deployment, not of this code. The tunnel peer is
 /// always included, which preserves the exclusion this handler has always
 /// had.
-fn self_addresses() -> Vec<String> {
+pub(crate) fn self_addresses() -> Vec<String> {
     let mut addresses: Vec<String> = std::env::var("HONEYPOT_SELF_IPS")
         .unwrap_or_default()
         .split(',')
