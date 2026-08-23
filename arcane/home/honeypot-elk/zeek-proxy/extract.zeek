@@ -43,6 +43,27 @@ export {
     ## with room for archives, and small enough that one transfer cannot run
     ## away with the disk.
     const max_file_bytes = 25 * 1024 * 1024 &redef;
+
+    ## Our own services, reached over the same tunnel.
+    ##
+    ## This sensor watches wg0, which carries every VPS-to-homeserver flow --
+    ## not only the relayed attacker sessions. The dashboard, its API and the
+    ## internal health traffic all cross it, and "extract everything" happily
+    ## carves those too. Measured in the first five minutes after enabling
+    ## extraction: 11 of 11 indexed files came from port 19090, the dashboard.
+    ## Not one was attacker-delivered.
+    ##
+    ## Excluded by destination port because that is what actually separates
+    ## the two here -- both ends of every flow on this interface are our own
+    ## addresses, so a source/destination address filter cannot tell relayed
+    ## attacker traffic from our own service traffic.
+    const skip_dest_ports: set[port] = {
+        19090/tcp,   # dashboard
+        18080/tcp,   # dashboard API
+        9200/tcp,    # elasticsearch
+        5601/tcp,    # kibana
+        3552/tcp,    # arcane
+    } &redef;
 }
 
 event file_sniff(f: fa_file, meta: fa_metadata)
@@ -51,6 +72,13 @@ event file_sniff(f: fa_file, meta: fa_metadata)
     # id there is no safe name, so there is no extraction.
     if ( ! f?$id || f$id == "" )
         return;
+
+    # Skip our own services. Without this the store fills with the dashboard
+    # talking to itself, which costs disk and buries the files that matter.
+    if ( f?$conns )
+        for ( cid in f$conns )
+            if ( cid$resp_p in skip_dest_ports )
+                return;
 
     Files::add_analyzer(f, Files::ANALYZER_EXTRACT,
                         [$extract_filename = fmt("%s.bin", f$id),
