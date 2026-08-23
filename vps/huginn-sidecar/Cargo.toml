@@ -1,0 +1,24 @@
+[package]
+name = "huginn-sidecar"
+version = "0.1.0"
+edition = "2021"
+description = "Per-flow passive fingerprinting sidecar (#1727 S5): TCP SYN/SYN+ACK, MTU, uptime, HTTP/2 Akamai and JA4, emitted as joinable NDJSON"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+# The one component in the S5 stack that produces per-flow TCP fingerprints
+# with a confidence tier, server-side SYN+ACK fingerprints, and the Akamai
+# HTTP/2 fingerprint -- none of which Zeek or Suricata can give us.
+# "json" derives Serialize on every output type, which is what lets this
+# forward the observations verbatim instead of restating them.
+huginn-net = { version = "2.0", features = ["full", "json"] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# For Community ID (see src/community_id.rs).
+sha1 = "0.10"
+base64 = "0.22"
+
+[profile.release]
+opt-level = 3
