@@ -1,0 +1,90 @@
+# IEC 60870-5-104 parser (#1764).
+#
+# ICSNPP covers BACnet, BSAP, CIP, COTP, DNP3, EtherCAT, EtherNet/IP, GE SRTP,
+# Genisys, Modbus, OPC-UA Binary, Profinet, S7comm(+Plus) and Synchrophasor --
+# but not IEC-104. portbridge forwards 2404, so that traffic reaches a sensor
+# and lands in conn.log, and then stops: it is the only ICS port we expose
+# that never resolves to transaction detail.
+#
+# The frame format is small enough that this is bounded work. Every APDU is
+#
+#   0x68  <length>  <4 control octets>  [ASDU, I-format only]
+#
+# and the low bits of the first control octet select the format:
+#
+#   xxxxxxx0  I  information transfer, carries an ASDU
+#   xxxxxx01  S  supervisory, acknowledgement only
+#   xxxxxx11  U  unnumbered control (STARTDT / STOPDT / TESTFR)
+#
+# Scanners overwhelmingly send U-format STARTDT to see whether anything
+# answers, which is the reconnaissance worth logging -- the same shape as the
+# DNP3 traffic already measured, where 3 600 connections yielded two requests.
+#
+# Only the ASDU header is decoded. The information objects behind it are
+# type-dependent and decoding them is a lot of surface for little gain against
+# traffic that rarely gets past the handshake.
+
+module IEC104;
+
+import spicy;
+
+# Helpers are module-level rather than unit methods so the unit stays a plain
+# description of the wire format.
+public function is_i_format(ctrl1: uint8): bool { return (ctrl1 & 0x01) == 0; }
+public function is_s_format(ctrl1: uint8): bool { return (ctrl1 & 0x03) == 0x01; }
+public function is_u_format(ctrl1: uint8): bool { return (ctrl1 & 0x03) == 0x03; }
+
+public function format_name(ctrl1: uint8): string {
+    if ( is_i_format(ctrl1) ) return "I";
+    if ( is_s_format(ctrl1) ) return "S";
+    return "U";
+}
+
+# U-format function, from the high bits of the first control octet. These are
+# the values a scanner actually sends.
+public function u_function(ctrl1: uint8): string {
+    if ( ! is_u_format(ctrl1) ) return "";
+    local c = ctrl1 & 0xfc;
+    if ( c == 0x04 ) return "STARTDT_ACT";
+    if ( c == 0x08 ) return "STARTDT_CON";
+    if ( c == 0x10 ) return "STOPDT_ACT";
+    if ( c == 0x20 ) return "STOPDT_CON";
+    if ( c == 0x40 ) return "TESTFR_ACT";
+    if ( c == 0x80 ) return "TESTFR_CON";
+    return "UNKNOWN";
+}
+
+# ASDU header only -- six octets, little endian for the common address.
+public type ASDU = unit {
+    type_id:   uint8;
+    vsq:       uint8;      # variable structure qualifier: object count + SQ bit
+    cot1:      uint8;      # cause of transmission, plus P/N and T flags
+    cot2:      uint8;      # originator address
+    asdu_addr: uint16 &byte-order=spicy::ByteOrder::Little;
+};
+
+public type APDU = unit {
+    start:  uint8 &requires=($$ == 0x68);
+    length: uint8;
+    ctrl1:  uint8;
+    ctrl2:  uint8;
+    ctrl3:  uint8;
+    ctrl4:  uint8;
+
+    # length counts the four control octets plus any ASDU, so the ASDU is
+    # present exactly when the frame is I-format and longer than the control
+    # field. Bounded by the declared length so a malformed frame cannot make
+    # the parser read past it.
+    asdu: ASDU if ( is_i_format(self.ctrl1) && self.length > 4 );
+
+    # Whatever the declared length covers beyond what was decoded: the ASDU's
+    # information objects. Skipped rather than parsed, deliberately.
+    : skip bytes &size=(self.length > 10 && is_i_format(self.ctrl1)
+                        ? cast<uint64>(self.length) - 10
+                        : 0);
+};
+
+# A TCP stream is a sequence of APDUs.
+public type Messages = unit {
+    : APDU[];
+};

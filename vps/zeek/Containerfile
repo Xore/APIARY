@@ -45,6 +45,15 @@ RUN zkg install --force --skiptests \
         https://github.com/cisagov/icsnpp-opcua-binary \
         https://github.com/cisagov/icsnpp-profinet-io-cm
 
+# #1764: IEC-104. ICSNPP has no parser for it, so port 2404 -- the one ICS
+# port we expose that otherwise stops at "a connection happened" -- gets a
+# Spicy one built here. Compiled at image build time rather than loaded as
+# source so a syntax error fails the build instead of the sensor.
+COPY iec104 /usr/local/share/zeek-site/iec104
+RUN spicyz -o /usr/local/share/zeek-site/iec104/iec104.hlto \
+        /usr/local/share/zeek-site/iec104/iec104.spicy \
+        /usr/local/share/zeek-site/iec104/iec104.evt
+
 COPY local.zeek /usr/local/share/zeek-site/local.zeek
 
 WORKDIR /logs/zeek

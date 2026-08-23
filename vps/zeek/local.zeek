@@ -16,6 +16,11 @@
 # well-formed IDs that silently never match anything.
 @load policy/protocols/conn/community-id-logging
 
+# #1764: IEC-104 on 2404. ICSNPP covers every other ICS port we expose but
+# not this one, so without it 2404 produces a conn.log row and nothing else.
+@load /usr/local/share/zeek-site/iec104/iec104.hlto
+@load /usr/local/share/zeek-site/iec104/iec104.zeek
+
 # MD5/SHA1/SHA256 for every file seen on the wire, so an artefact joins to
 # honeypot.shasum and the payload pipeline by hash.
 @load base/files/hash
