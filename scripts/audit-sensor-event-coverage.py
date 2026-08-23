@@ -1,171 +1,153 @@
 #!/usr/bin/env python3
-"""Diff every event-kind string a homegrown Go sensor can emit against
-dashboard/classify.go's per-sensor section, to find kinds with no explicit
-case and no generic fallback line (#789).
+"""Report sensors whose events reach Elasticsearch without a category.
 
-Only covers the sensors this repo owns the source for (dnp3-honeypot,
-citrix-honeypot, cisco-asa-honeypot, dicompot, rdp-honeypot, dns-honeypot,
-endlessh-honeypot, http-honeypot, multipot) -- cowrie/dionaea/tanner are
-vendored upstream projects with no source in this repo to grep, and their
-coverage has to be checked against upstream's documented event vocabulary
-instead (see #789's own audit notes).
+#789 originally diffed every event-kind string a homegrown Go sensor could
+emit against `dashboard/classify.go`'s per-sensor switch, to find kinds the
+dashboard had no explicit case for. #1659 deleted that file along with the Go
+dashboard, and #1665 asked whether the concern still applies.
 
-This is a *report*, not an auto-fixer: some flagged kinds are legitimately
-covered by a generic "kind + detail" fallback line that this script cannot
-prove handles every value, only that such a line exists in the section at
-all. Read the flagged section by hand before deciding it's a real gap.
+It does — but nothing like a classifier exists any more, so the old method
+cannot be ported. Sensors now write structured JSON straight through the
+`geoip-honeypot` ingest pipeline, and that pipeline does not classify: it
+copies `honeypot.category` through to `event.category` when the sensor
+supplied one, and does nothing when it did not. There is no per-sensor case
+table left to have a gap against.
 
-Known heuristic blind spot, manually verified clean rather than fixed in
-code: rdp-honeypot's section never assigns a local `kind` variable at all --
-after its one "listening" skip-check, every other event unconditionally
-gets the same "connect" detail line. That shape has no `kind`-based
-fallback for this script to find, so it always reports rdp-honeypot's
-non-listening kind as a "GAP" even though the source shows it is handled.
-Confirmed by hand 2026-08-06 against rdp-honeypot/main.go; no real gap.
+So the question moves from "does the classifier handle this kind" to "does
+this sensor label its events at all", and that can only be answered from the
+data. `honeypot.category` is the field that matters: backend-service's
+events.rs reads it (falling back to suricata's alert category) and
+frontend-next renders and filters on it. `event.category` is set by the
+pipeline but no consumer reads it, so it is reported separately and only as
+context.
 
-Usage: scripts/audit-sensor-event-coverage.py
+This is an operational audit, not a CI check. The old one could run offline
+because it read Go source; this one needs a populated Elasticsearch, which CI
+does not have. `.github/workflows/quality.yml`'s step was removed rather than
+left disabled, with that reasoning recorded in #1665.
+
+Usage, on the homeserver where Elasticsearch is reachable:
+
+    scripts/audit-sensor-event-coverage.py
+    scripts/audit-sensor-event-coverage.py --since 7d --min-events 100
+    scripts/audit-sensor-event-coverage.py --fail-under 50
+
+Env:
+    ES_URL   Elasticsearch base URL (default: http://localhost:9200)
 """
-import re
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
 import sys
-from pathlib import Path
+import urllib.error
+import urllib.request
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-# #1502: dashboard/ and every sensor dir below moved under arcane/home/.
-CLASSIFY_GO = REPO_ROOT / "arcane/home/honeypot-dashboard/dashboard" / "classify.go"
-
-# sensor dir (also KNOWN_CLEAN's lookup key -- keep it the short name, not
-# the #1502 arcane/home/ path) -> (actual directory to scan, classify.go
-# section marker substring from the "---- name ----" comment headers
-# already used to organise that file).
-SENSORS = {
-    "dnp3-honeypot": ("arcane/home/honeypot-dnp3/dnp3-honeypot", "dnp3-honeypot"),
-    "citrix-honeypot": ("arcane/home/honeypot-citrix-honeypot/citrix-honeypot", "citrix-honeypot"),
-    "cisco-asa-honeypot": ("arcane/home/honeypot-cisco-asa-honeypot/cisco-asa-honeypot", "cisco-asa-honeypot"),
-    "dicompot": ("arcane/home/honeypot-dicompot/dicompot", "dicompot"),
-    "rdp-honeypot": ("arcane/home/honeypot-rdp-honeypot/rdp-honeypot", "rdp-honeypot"),
-    "dns-honeypot": ("arcane/home/honeypot-dns-honeypot/dns-honeypot", "dns-honeypot"),
-    "endlessh-honeypot": ("arcane/home/honeypot-endlessh/endlessh-honeypot", "endlessh"),
-    "http-honeypot": ("arcane/home/honeypot-http/http-honeypot", "http-honeypot"),
-    "multipot": ("arcane/home/honeypot-multipot/multipot", "multipot"),
-}
-
-# Matches the two literal-assignment shapes this codebase's sensors use:
-#   Event: "kind"            (struct literal field)
-#   x.Event = "kind"         (later mutation, e.g. dnp3's malformed_frame)
-EVENT_LITERAL_RE = re.compile(r'\bEvent:\s*"([a-zA-Z0-9_]+)"|\.Event\s*=\s*"([a-zA-Z0-9_]+)"')
-
-# The shared h.log2(r, "kind", path, data) helper convention (citrix,
-# cisco-asa): kind is the second positional argument.
-LOG2_LITERAL_RE = re.compile(r'\.log2\(\s*\w+\s*,\s*"([a-zA-Z0-9_]+)"')
-
-# A dynamically-built kind ("method_" + strings.ToLower(...)) cannot be
-# resolved statically -- flagged separately, not silently dropped.
-DYNAMIC_KIND_RE = re.compile(r'\.log2\(\s*\w+\s*,\s*"[a-zA-Z0-9_]*"\s*\+')
+ES_URL = os.environ.get("ES_URL", "http://localhost:9200").rstrip("/")
+INDEX = "honeypot-v2-*"
 
 
-def emitted_kinds(sensor_dir: str):
-    literal, dynamic_prefixes = set(), set()
-    base = REPO_ROOT / sensor_dir
-    for go_file in base.glob("*.go"):
-        if go_file.name.endswith("_test.go"):
-            continue
-        text = go_file.read_text()
-        for m in EVENT_LITERAL_RE.finditer(text):
-            literal.add(m.group(1) or m.group(2))
-        for m in LOG2_LITERAL_RE.finditer(text):
-            literal.add(m.group(1))
-        for m in DYNAMIC_KIND_RE.finditer(text):
-            # Report the fixed prefix before the "+" as a hint, e.g. "method_".
-            prefix = re.search(r'"([a-zA-Z0-9_]*)"\s*\+', m.group(0))
-            if prefix:
-                dynamic_prefixes.add(prefix.group(1) + "*")
-    return literal, dynamic_prefixes
+def search(body: dict) -> dict:
+    request = urllib.request.Request(
+        f"{ES_URL}/{INDEX}/_search",
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            return json.loads(response.read())
+    except urllib.error.HTTPError as e:
+        sys.exit(f"elasticsearch: {e.code} {e.read().decode(errors='replace')[:300]}")
+    except OSError as e:
+        sys.exit(f"elasticsearch unreachable at {ES_URL}: {e}")
 
 
-def classify_section(marker: str) -> str:
-    text = CLASSIFY_GO.read_text()
-    lines = text.splitlines()
-    starts = [i for i, l in enumerate(lines) if l.strip().startswith("// ----") and marker in l]
-    if not starts:
-        return ""
-    start = starts[0]
-    rest_markers = [i for i in range(start + 1, len(lines)) if lines[i].strip().startswith("// ----")]
-    end = rest_markers[0] if rest_markers else len(lines)
-    return "\n".join(lines[start:end])
+def coverage(since: str) -> list[dict]:
+    """Per sensor: how many events, and how many carry each category field."""
+    result = search({
+        "size": 0,
+        "query": {"bool": {
+            "filter": [{"range": {"@timestamp": {"gte": f"now-{since}"}}}],
+            # #1677: self-generated healthcheck traffic is not a sensor
+            # observation and must not dilute a sensor's coverage figure.
+            "must_not": [{"term": {"internal_probe": True}}],
+        }},
+        "aggs": {"sensors": {
+            "terms": {"field": "event.sensor", "size": 100},
+            "aggs": {
+                "labelled": {"filter": {"exists": {"field": "honeypot.category"}}},
+                "pipeline_labelled": {"filter": {"exists": {"field": "event.category"}}},
+                "kinds": {"terms": {"field": "honeypot.category", "size": 8}},
+            },
+        }},
+    })
+    rows = []
+    for bucket in result["aggregations"]["sensors"]["buckets"]:
+        total = bucket["doc_count"]
+        labelled = bucket["labelled"]["doc_count"]
+        rows.append({
+            "sensor": bucket["key"],
+            "events": total,
+            "labelled": labelled,
+            "percent": (100 * labelled // total) if total else 0,
+            "pipeline": bucket["pipeline_labelled"]["doc_count"],
+            "kinds": [b["key"] for b in bucket["kinds"]["buckets"]],
+        })
+    return sorted(rows, key=lambda r: (r["percent"], -r["events"]))
 
 
-def matched_kinds(section: str):
-    kinds = set()
-    for m in re.finditer(r'case\s+"([a-zA-Z0-9_]+)"', section):
-        kinds.add(m.group(1))
-    # Both `kind == "x"` (a local alias) and the unaliased
-    # `str(e["event"]) == "x"` form (e.g. rdp-honeypot's listening skip).
-    for m in re.finditer(r'(?:kind|str\(e\["event"\]\))\s*==\s*"([a-zA-Z0-9_]+)"', section):
-        kinds.add(m.group(1))
-    for m in re.finditer(r'\.Event\]\s*==\s*"([a-zA-Z0-9_]+)"', section):
-        kinds.add(m.group(1))
-    return kinds
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("--since", default="24h", help="lookback window (default: 24h)")
+    parser.add_argument("--min-events", type=int, default=1,
+                        help="ignore sensors with fewer events than this (default: 1)")
+    parser.add_argument("--fail-under", type=int, default=None,
+                        help="exit non-zero if any sensor's coverage is below this percent")
+    args = parser.parse_args()
 
+    rows = [r for r in coverage(args.since) if r["events"] >= args.min_events]
+    if not rows:
+        print(f"no sensor events in the last {args.since}")
+        return 0
 
-# Kinds manually verified handled despite tripping every heuristic above --
-# see the module docstring for why each one's shape defeats detection.
-# Keep this list to cases with a written, dated justification; it exists to
-# stop a known-clean sensor from permanently failing CI, not to silence real
-# gaps found later.
-KNOWN_CLEAN = {
-    ("rdp-honeypot", "connect"),  # no `kind` variable at all; single unconditional detail line
-}
+    total = sum(r["events"] for r in rows)
+    labelled = sum(r["labelled"] for r in rows)
+    print(f"honeypot.category coverage, last {args.since} "
+          f"({len(rows)} sensors, {total:,} events)\n")
+    print(f"  {'sensor':<24}{'events':>10}{'labelled':>10}{'cover':>7}   categories seen")
+    for row in rows:
+        kinds = ", ".join(row["kinds"][:4]) if row["kinds"] else "-"
+        print(f"  {row['sensor']:<24}{row['events']:>10,}{row['labelled']:>10,}"
+              f"{row['percent']:>6}%   {kinds[:44]}")
+    print(f"\n  {'TOTAL':<24}{total:>10,}{labelled:>10,}"
+          f"{(100 * labelled // total) if total else 0:>6}%")
 
+    uncovered = [r for r in rows if r["percent"] == 0]
+    if uncovered:
+        print(f"\n{len(uncovered)} sensor(s) label nothing at all — every event of theirs shows")
+        print("a blank category in the dashboard's events table and cannot be filtered by it:")
+        for row in uncovered:
+            print(f"  - {row['sensor']} ({row['events']:,} events)")
 
-def has_generic_fallback(section: str) -> bool:
-    # A switch's `default:` case, or a detail/action line built from the
-    # `kind` variable on either side of a "+" concatenation (citrix/cisco-asa
-    # put kind first, multipot's `ev.proto + " " + kind` puts it last).
-    # Heuristic, not exhaustive -- verify_needed rows still say "check by hand".
-    if "default:" in section:
-        return True
-    if re.search(r'kind\s*\+', section) or re.search(r'\+\s*kind\b', section):
-        return True
-    # A bare `ev.detail = kind` (or via a lookup table that itself falls
-    # back to `= kind`, e.g. dicompot's dicomEventLabels[kind]) -- every
-    # kind gets *some* detail line even with no explicit case or "+".
-    return bool(re.search(r'=\s*kind\b', section))
+    # event.category is pipeline-derived and currently has no reader; surfaced
+    # only so a future consumer does not assume it is populated.
+    orphaned = [r for r in rows if r["pipeline"] != r["labelled"]]
+    if orphaned:
+        print("\nnote: event.category differs from honeypot.category on "
+              f"{len(orphaned)} sensor(s); nothing reads event.category today.")
 
-
-def main():
-    any_gap = False
-    for sensor_dir, (actual_dir, marker) in SENSORS.items():
-        if not (REPO_ROOT / actual_dir).is_dir():
-            print(f"SKIP  {sensor_dir}: directory not found")
-            continue
-        emitted, dynamic = emitted_kinds(actual_dir)
-        section = classify_section(marker)
-        if not section:
-            print(f"SKIP  {sensor_dir}: no classify.go section found for marker {marker!r}")
-            continue
-        matched = matched_kinds(section)
-        fallback = has_generic_fallback(section)
-        known_clean = {kind for (sensor, kind) in KNOWN_CLEAN if sensor == sensor_dir}
-        gaps = sorted(emitted - matched - known_clean)
-        print(f"\n{sensor_dir} ({len(emitted)} emitted kind(s), {len(matched)} explicit case(s) in classify.go, generic fallback: {fallback})")
-        if dynamic:
-            print(f"  dynamic (not statically resolvable, check by hand): {sorted(dynamic)}")
-        if known_clean & emitted:
-            print(f"  (manually verified clean, see KNOWN_CLEAN: {sorted(known_clean & emitted)})")
-        if not gaps:
-            print("  OK -- every emitted kind has an explicit case")
-        elif fallback:
-            print(f"  no explicit case, but a generic fallback exists -- verify by hand: {gaps}")
-        else:
-            print(f"  GAP -- no explicit case and no generic fallback: {gaps}")
-            any_gap = True
-
-    print()
-    if any_gap:
-        print("Gaps found above need a human read of the classify.go section before filing anything -- this script only proves 'no case', not 'silently dropped'.")
-        sys.exit(1)
-    print("No unambiguous gaps found in the sensors this script covers.")
+    if args.fail_under is not None:
+        below = [r for r in rows if r["percent"] < args.fail_under]
+        if below:
+            print(f"\nFAIL: {len(below)} sensor(s) below {args.fail_under}% coverage")
+            return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
