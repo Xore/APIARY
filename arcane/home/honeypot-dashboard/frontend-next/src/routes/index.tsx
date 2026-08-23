@@ -664,6 +664,23 @@ function Overview() {
             </p>
             <EChart kind="pie" url="/api/chart/tcp-stack-clusters" height={360} />
           </div>
+          <div className="card wide" id="ics-functions-card">
+            <h2>ICS function codes — what they asked the PLCs to do</h2>
+            <p className="note">
+              Per-transaction detail from the ICS parsers, across Modbus, S7comm and DNP3. These events are rare and
+              the scanning around them is not — one sample held 3,600 connections to the DNP3 port and two actual DNP3
+              requests, both filesystem reconnaissance. An alert-only view loses exactly those two.
+            </p>
+            <EChart kind="barh" url="/api/chart/ics-functions" height={360} />
+          </div>
+          <div className="card wide" id="decoy-requests-card">
+            <h2>Decoy requests (TLS-terminated) — last 7 days</h2>
+            <p className="note">
+              What was requested from the Host-routed decoys behind Traefik. These exist in no other index: Traefik
+              terminates TLS for them, so a wire sensor sees the handshake and then ciphertext.
+            </p>
+            <EChart kind="barh" url="/api/chart/decoy-requests" height={360} />
+          </div>
           <div className="card wide" id="tls-fingerprints-card">
             <h2>TLS scanner fingerprints (JA4) — wire-level, last 7 days</h2>
             <p className="note">Every TLS handshake against a non-dashboard port, alert or not. Click a bar to copy the full hash.</p>

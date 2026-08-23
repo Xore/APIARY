@@ -15,6 +15,8 @@ const CHARTS = new Set([
   'dionaea-cves',
   'os-distribution',
   'tcp-stack-clusters',
+  'ics-functions',
+  'decoy-requests',
   'tls-fingerprints',
   'ssh-fingerprints',
   'endlessh-held-histogram',

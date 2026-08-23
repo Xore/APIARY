@@ -375,6 +375,67 @@ async fn fingerprint_bar(state: &AppState, indices: &[&str], body: Value, agg: &
     Ok(bar)
 }
 
+/// /api/v1/charts/ics-functions — what attackers actually asked the fake PLCs
+/// to do, by ICS function code (`zeek-v1-*`, #1736).
+///
+/// Each ICSNPP parser names its function field differently, so this runs one
+/// terms aggregation per field rather than pretending a single field spans
+/// them, and labels each bar with the protocol it came from. Only the three
+/// fields observed on real captured traffic are queried — modbus_detailed's
+/// `func`, s7comm's `function_name` and dnp3's `fc_request`. BACnet, ENIP and
+/// OPC-UA are parsed and indexed but have not yet produced a record here, so
+/// guessing their field names would add rows that can only ever read zero.
+///
+/// Worth knowing when reading this chart: the interesting ICS events are rare
+/// and the noise around them is not. One sample held 3 600 connections to
+/// port 20000 and exactly two DNP3 records — which is the argument for the
+/// chart, since an alert-only view loses those two entirely.
+pub async fn ics_functions(State(state): State<AppState>) -> Result<Json<Bar>, (StatusCode, String)> {
+    const SOURCES: &[(&str, &str, &str)] = &[
+        ("modbus", "zeek-v1-modbus_detailed-*", "zeek.func"),
+        ("s7comm", "zeek-v1-s7comm-*", "zeek.function_name"),
+        ("dnp3", "zeek-v1-dnp3-*", "zeek.fc_request"),
+    ];
+
+    let mut bar = Bar { categories: Vec::new(), values: Vec::new() };
+    for (proto, index, field) in SOURCES {
+        let body = json!({
+            "size": 0,
+            "query": {"range": {"@timestamp": {"gte": WEEK}}},
+            "aggs": {"fn": {"terms": {"field": *field, "size": 8}}}
+        });
+        // One dead index must not blank the whole chart: a protocol nobody has
+        // probed this week is a normal state, not an error.
+        let Ok(result) = state.es.search_index(&[*index], body).await else {
+            continue;
+        };
+        for bucket in result["aggregations"]["fn"]["buckets"].as_array().into_iter().flatten() {
+            let name = bucket["key"].as_str().unwrap_or("");
+            if name.is_empty() {
+                continue;
+            }
+            bar.categories.push(format!("{proto}: {name}"));
+            bar.values.push(bucket["doc_count"].as_u64().unwrap_or(0));
+        }
+    }
+    Ok(Json(bar))
+}
+
+/// /api/v1/charts/decoy-requests — what was requested from the TLS-terminated
+/// decoys (`traefik-v1-*`, #1739).
+///
+/// These requests exist nowhere else. Traefik terminates TLS for the
+/// Host-routed decoys, so a wire sensor sees the ClientHello and then
+/// ciphertext; this index is the only record that the request happened at all.
+pub async fn decoy_requests(State(state): State<AppState>) -> Result<Json<Bar>, (StatusCode, String)> {
+    let body = json!({
+        "size": 0,
+        "query": {"range": {"@timestamp": {"gte": WEEK}}},
+        "aggs": {"paths": {"terms": {"field": "url.path", "size": 15}}}
+    });
+    fingerprint_bar(&state, &["traefik-v1-*"], body, "paths").await.map(Json).map_err(bad_gateway)
+}
+
 /// /api/v1/charts/tls-fingerprints — JA4 counts, excluding dest_port 443
 /// (the deployment's own operator HTTPS; see scanner_fingerprints.go).
 pub async fn tls_fingerprints(State(state): State<AppState>) -> Result<Json<Bar>, (StatusCode, String)> {
