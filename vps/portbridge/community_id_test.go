@@ -5,17 +5,22 @@ import (
 	"testing"
 )
 
-// suricataVectors are real (tuple → Community ID) pairs lifted straight out of
-// this deployment's own Elasticsearch on 2026-08-23 — `suricata.eve.*` records
-// from `suricata-v2-flow-*`/`suricata-v2-alert-*`, where Suricata computed the
-// ID itself with `community-id-seed: 0`.
+// suricataVectors began as real (tuple → Community ID) pairs from this
+// deployment's own Elasticsearch, and the responder address has since been
+// replaced with RFC 5737 documentation space: this is a public repository and
+// the real one is deployment-specific (scripts/check-public-leaks.py enforces
+// that, and caught it).
 //
-// Testing against real Suricata output rather than the spec's published sample
-// vectors is deliberate. The point of #1728 is that a portbridge row must join
-// to a Suricata row for the same packets; the only thing that actually proves
-// is agreeing with the Suricata instance we run, on traffic it really saw.
-// 87.106.162.235 is the VPS's public address, so these are genuine inbound
-// scans against our own perimeter, in both directions.
+// Substituting the address invalidates every expected hash, so these were
+// recomputed rather than edited -- with Zeek's own community_id_v1(), not with
+// the implementation under test. That keeps the property these fixtures exist
+// for: the Go code is checked against an independent implementation of the
+// same spec, and specifically the one this stack must agree with. What is lost
+// is that the tuples are literally captured traffic; what is kept is the
+// cross-implementation guarantee, which is the half that catches bugs.
+//
+// The originator addresses are left as captured -- they are real scanners, and
+// nothing about them is specific to this deployment.
 var suricataVectors = []struct {
 	proto   string
 	srcIP   string
@@ -24,25 +29,24 @@ var suricataVectors = []struct {
 	dstPort int
 	want    string
 }{
-	{"tcp", "87.106.162.235", 23, "123.188.73.228", 42451, "1:B2A/YhgfN9pLUkjt3xU/X67cjeY="},
-	{"tcp", "87.106.162.235", 23, "123.188.73.228", 42454, "1:Cn9+LXmiXHrkejIN2apEQJ6wmFA="},
-	{"tcp", "123.188.73.228", 42482, "87.106.162.235", 23, "1:X5VoMLhACgm02hIBoeKOK6Pu2PY="},
-	{"tcp", "87.106.162.235", 23, "123.188.73.228", 42480, "1:LLBF/EfPN6/e5b/vg0qk54ziTtU="},
-	{"tcp", "123.188.73.228", 42600, "87.106.162.235", 23, "1:2K9oLyoa8vnXVOhKPxQJgYQxKrE="},
-	{"tcp", "94.131.219.245", 57806, "87.106.162.235", 23, "1:hC3F4R7XQXA0SU6UlVRM9krmdjM="},
-	{"tcp", "123.188.73.228", 42609, "87.106.162.235", 23, "1:EXEh6N0ho1RsCXXMUYJh40Q4EBM="},
-	{"tcp", "124.222.229.150", 53260, "87.106.162.235", 5900, "1:pv4jd0DGPQs3uNxCPRp6tYT7M6A="},
-	{"tcp", "124.220.77.252", 36356, "87.106.162.235", 5900, "1:OPRV9zxkEG/g7aQI60J5hxSGMAo="},
-	{"tcp", "121.196.193.173", 37440, "87.106.162.235", 5900, "1:4vP36prfoH2Eio4nFuMP2vj5fyE="},
-	{"tcp", "85.217.140.16", 60747, "87.106.162.235", 46289, "1:7rg1K9lZPSKtZgpt3/Ehi9kbw9I="},
-	{"tcp", "87.106.162.235", 23, "85.14.245.122", 56566, "1:0bXdO8Gc9HXwXWf+XPAs8La/DCk="},
-	{"tcp", "198.74.50.114", 47150, "87.106.162.235", 5003, "1:QBMfK6i3DjeD080gwbS7ahGCWjs="},
-	{"tcp", "103.183.74.72", 40380, "87.106.162.235", 5900, "1:5KGWys140555xFGCK1bqZK5Xm1Y="},
+	{"tcp", "198.51.100.20", 23, "123.188.73.228", 42451, "1:IIqFM6s6T7Q3qpPtQlcLozWAsqc="},
+	{"tcp", "198.51.100.20", 23, "123.188.73.228", 42454, "1:U7bTdnEE0KkShgNEwLj+sJ/dRQg="},
+	{"tcp", "123.188.73.228", 42482, "198.51.100.20", 23, "1:YCy2phL1VvHw/ee7ABoEJYPCcRk="},
+	{"tcp", "198.51.100.20", 23, "123.188.73.228", 42480, "1:xzaGr2HzD6xPBtKSCud1UwzsGfE="},
+	{"tcp", "123.188.73.228", 42600, "198.51.100.20", 23, "1:Zw+D+8+o/xGCYgXUbILTq5rPV80="},
+	{"tcp", "94.131.219.245", 57806, "198.51.100.20", 23, "1:b0iDcD8ZThtLhSFx7oYoSQE0l58="},
+	{"tcp", "123.188.73.228", 42609, "198.51.100.20", 23, "1:Z0uDFSDJ8BA6l5L2SE+6eqVZidc="},
+	{"tcp", "124.222.229.150", 53260, "198.51.100.20", 5900, "1:sQ1WP/gQDETidlyH4iAwiUGYyFI="},
+	{"tcp", "124.220.77.252", 36356, "198.51.100.20", 5900, "1:XcNpqUxrNFfbnALEd7M2XWpoxFI="},
+	{"tcp", "121.196.193.173", 37440, "198.51.100.20", 5900, "1:a76hEXF3PiTtuXIlehOEL+J8apA="},
+	{"tcp", "85.217.140.16", 60747, "198.51.100.20", 46289, "1:UNE6fvrvzraqUf0OLOq3jTVbauI="},
+	{"tcp", "198.51.100.20", 23, "85.14.245.122", 56566, "1:2buCQRvxuKUm447oPSsr1SO1cv0="},
+	{"tcp", "198.74.50.114", 47150, "198.51.100.20", 5003, "1:YDXfCSDYgtLn7PkRgKQywAQMYf0="},
+	{"tcp", "103.183.74.72", 40380, "198.51.100.20", 5900, "1:H2Qx8TMRgj/w88LvoVYx0ajYNEY="},
 }
 
-// zeekVectors are the same kind of fixture from a second, independent
-// implementation: Zeek 8.0's in-core community_id_v1(), run over 199 MB of
-// real VPS capture in dev/sensing-lab on 2026-08-23.
+// zeekVectors cover the UDP half. Same provenance and same substitution as
+// above.
 //
 // Two reasons this exists alongside suricataVectors. First, agreeing with one
 // implementation could mean both are wrong the same way; agreeing with two
@@ -59,18 +63,18 @@ var zeekVectors = []struct {
 	dstPort int
 	want    string
 }{
-	{"udp", "107.174.188.218", 1032, "87.106.162.235", 5060, "1:9KSKWY8fuvWMrzsNZqWWB805Mbo="},
-	{"udp", "217.160.124.58", 49692, "87.106.162.235", 5060, "1:g2oMhXrA4lN5xT78iB1oGxysb64="},
-	{"udp", "167.172.89.195", 1434, "87.106.162.235", 1900, "1:DNb+3JHdavqb5KVRR9LfcO1xo78="},
-	{"udp", "46.105.160.250", 54723, "87.106.162.235", 5060, "1:uvobwzMcT8H/nYILqAmYIodulkQ="},
-	{"udp", "217.160.124.58", 53486, "87.106.162.235", 5060, "1:bnzwMqKirpREbqazrAyRzG/jpBo="},
-	{"udp", "144.172.112.245", 50808, "87.106.162.235", 5060, "1:fKV+Jv0s1MV5KYQFWbsoF9muopg="},
-	{"udp", "46.105.160.250", 61609, "87.106.162.235", 5060, "1:FoCO2b1hMz6Sz3MuI8kpQpd6Cgg="},
-	{"udp", "138.117.127.7", 34528, "87.106.162.235", 38698, "1:p2715n4oww4D6l59v3lcMdqr5R0="},
-	{"udp", "217.160.124.58", 58271, "87.106.162.235", 5060, "1:vinD9psc7EDuWNzJaf7xAmAmKK8="},
-	{"udp", "107.189.21.227", 57423, "87.106.162.235", 5060, "1:9nvjbFy4yxzM156Dli/N/zqcmM0="},
-	{"udp", "46.105.160.250", 51604, "87.106.162.235", 5060, "1:Bd+BFuMhzCdpcDA1Gwm98KikwKA="},
-	{"udp", "217.160.124.58", 62466, "87.106.162.235", 5060, "1:ikKTllQwyQOn6x8Xr+cU0VawDVE="},
+	{"udp", "107.174.188.218", 1032, "198.51.100.20", 5060, "1:dTygMYvbdFFKpWRBgjgdXy82+ec="},
+	{"udp", "217.160.124.58", 49692, "198.51.100.20", 5060, "1:8XD/U0T0Np6Hfqm8KEiL8wFgyXo="},
+	{"udp", "167.172.89.195", 1434, "198.51.100.20", 1900, "1:UvV/ad2me9OyoAKUSWKX9jUX/+I="},
+	{"udp", "46.105.160.250", 54723, "198.51.100.20", 5060, "1:OuGHk+tSDv+eV114znY+Qo5Jqfo="},
+	{"udp", "217.160.124.58", 53486, "198.51.100.20", 5060, "1:/1l1BdLm36u+pcTN9CZ3HpD0Lmw="},
+	{"udp", "144.172.112.245", 50808, "198.51.100.20", 5060, "1:+SljFPLoBy8bhhRXRqMDyUoHBhk="},
+	{"udp", "46.105.160.250", 61609, "198.51.100.20", 5060, "1:2CXXgkGidLD54I7VGjydTgdDBeM="},
+	{"udp", "138.117.127.7", 34528, "198.51.100.20", 38698, "1:2B8cMkAxqDpzI6juGBf82Y1oDoo="},
+	{"udp", "217.160.124.58", 58271, "198.51.100.20", 5060, "1:5BKDjw2YONkfYk41DiFFZghr3BM="},
+	{"udp", "107.189.21.227", 57423, "198.51.100.20", 5060, "1:VWoJ1lAmt8unRAQNqayTWDEU8jI="},
+	{"udp", "46.105.160.250", 51604, "198.51.100.20", 5060, "1:h+VyutXo9VQ8zS/BWC5Bv1ynK3U="},
+	{"udp", "217.160.124.58", 62466, "198.51.100.20", 5060, "1:V9NkjK4Y3HdeT0B6kWu/+1JeUF0="},
 }
 
 func TestCommunityIDMatchesZeek(t *testing.T) {
@@ -172,8 +176,8 @@ func TestCommunityIDRejectsMixedAddressFamilies(t *testing.T) {
 
 func TestCommunityIDFromAddrs(t *testing.T) {
 	src := &net.TCPAddr{IP: net.ParseIP("123.188.73.228"), Port: 42482}
-	dst := &net.TCPAddr{IP: net.ParseIP("87.106.162.235"), Port: 23}
-	want := "1:X5VoMLhACgm02hIBoeKOK6Pu2PY="
+	dst := &net.TCPAddr{IP: net.ParseIP("198.51.100.20"), Port: 23}
+	want := "1:YCy2phL1VvHw/ee7ABoEJYPCcRk="
 
 	if got := communityIDFromAddrs("tcp", src, dst); got != want {
 		t.Errorf("communityIDFromAddrs = %q, want %q", got, want)

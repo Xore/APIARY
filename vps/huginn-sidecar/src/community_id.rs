@@ -88,26 +88,28 @@ fn is_ordered(src: &[u8], src_port: u16, dst: &[u8], dst_port: u16) -> bool {
 mod tests {
     use super::*;
 
-    /// Real (tuple -> Community ID) pairs captured from the live stack on
-    /// 2026-08-23: the TCP ones from Suricata's own eve records, the UDP ones
-    /// from Zeek 8.0's conn.log over 199 MB of VPS capture. Identical fixtures
-    /// to vps/portbridge/community_id_test.go, so a divergence between the Go
-    /// and Rust implementations fails here rather than silently producing two
-    /// sets of records that cannot be joined.
+    /// Identical fixtures to vps/portbridge/community_id_test.go, so a
+    /// divergence between the Go and Rust implementations fails here rather
+    /// than silently producing two sets of records that cannot be joined.
+    ///
+    /// Originally captured from the live stack; the responder address is now
+    /// RFC 5737 documentation space because this repository is public, and the
+    /// expected hashes were recomputed with Zeek's own community_id_v1()
+    /// rather than with either implementation under test.
     const VECTORS: &[(u8, &str, u16, &str, u16, &str)] = &[
         // --- Suricata, TCP ---
-        (PROTO_TCP, "87.106.162.235", 23, "123.188.73.228", 42451, "1:B2A/YhgfN9pLUkjt3xU/X67cjeY="),
-        (PROTO_TCP, "123.188.73.228", 42482, "87.106.162.235", 23, "1:X5VoMLhACgm02hIBoeKOK6Pu2PY="),
-        (PROTO_TCP, "94.131.219.245", 57806, "87.106.162.235", 23, "1:hC3F4R7XQXA0SU6UlVRM9krmdjM="),
-        (PROTO_TCP, "124.222.229.150", 53260, "87.106.162.235", 5900, "1:pv4jd0DGPQs3uNxCPRp6tYT7M6A="),
-        (PROTO_TCP, "85.217.140.16", 60747, "87.106.162.235", 46289, "1:7rg1K9lZPSKtZgpt3/Ehi9kbw9I="),
-        (PROTO_TCP, "198.74.50.114", 47150, "87.106.162.235", 5003, "1:QBMfK6i3DjeD080gwbS7ahGCWjs="),
+        (PROTO_TCP, "198.51.100.20", 23, "123.188.73.228", 42451, "1:IIqFM6s6T7Q3qpPtQlcLozWAsqc="),
+        (PROTO_TCP, "123.188.73.228", 42482, "198.51.100.20", 23, "1:YCy2phL1VvHw/ee7ABoEJYPCcRk="),
+        (PROTO_TCP, "94.131.219.245", 57806, "198.51.100.20", 23, "1:b0iDcD8ZThtLhSFx7oYoSQE0l58="),
+        (PROTO_TCP, "124.222.229.150", 53260, "198.51.100.20", 5900, "1:sQ1WP/gQDETidlyH4iAwiUGYyFI="),
+        (PROTO_TCP, "85.217.140.16", 60747, "198.51.100.20", 46289, "1:UNE6fvrvzraqUf0OLOq3jTVbauI="),
+        (PROTO_TCP, "198.74.50.114", 47150, "198.51.100.20", 5003, "1:YDXfCSDYgtLn7PkRgKQywAQMYf0="),
         // --- Zeek, UDP ---
-        (PROTO_UDP, "107.174.188.218", 1032, "87.106.162.235", 5060, "1:9KSKWY8fuvWMrzsNZqWWB805Mbo="),
-        (PROTO_UDP, "167.172.89.195", 1434, "87.106.162.235", 1900, "1:DNb+3JHdavqb5KVRR9LfcO1xo78="),
-        (PROTO_UDP, "46.105.160.250", 54723, "87.106.162.235", 5060, "1:uvobwzMcT8H/nYILqAmYIodulkQ="),
-        (PROTO_UDP, "138.117.127.7", 34528, "87.106.162.235", 38698, "1:p2715n4oww4D6l59v3lcMdqr5R0="),
-        (PROTO_UDP, "217.160.124.58", 62466, "87.106.162.235", 5060, "1:ikKTllQwyQOn6x8Xr+cU0VawDVE="),
+        (PROTO_UDP, "107.174.188.218", 1032, "198.51.100.20", 5060, "1:dTygMYvbdFFKpWRBgjgdXy82+ec="),
+        (PROTO_UDP, "167.172.89.195", 1434, "198.51.100.20", 1900, "1:UvV/ad2me9OyoAKUSWKX9jUX/+I="),
+        (PROTO_UDP, "46.105.160.250", 54723, "198.51.100.20", 5060, "1:OuGHk+tSDv+eV114znY+Qo5Jqfo="),
+        (PROTO_UDP, "138.117.127.7", 34528, "198.51.100.20", 38698, "1:2B8cMkAxqDpzI6juGBf82Y1oDoo="),
+        (PROTO_UDP, "217.160.124.58", 62466, "198.51.100.20", 5060, "1:V9NkjK4Y3HdeT0B6kWu/+1JeUF0="),
     ];
 
     #[test]

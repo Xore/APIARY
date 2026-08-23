@@ -39,14 +39,16 @@ func logOneAndDecode(t *testing.T, r rule, src, dst, via net.Addr) map[string]an
 func TestLogEmitsBothCommunityIDsForTCP(t *testing.T) {
 	r := rule{proto: "tcp", listenPort: "23", target: "10.8.0.2:19023"}
 	src := &net.TCPAddr{IP: net.ParseIP("123.188.73.228"), Port: 42482}
-	dst := &net.TCPAddr{IP: net.ParseIP("87.106.162.235"), Port: 23}
+	dst := &net.TCPAddr{IP: net.ParseIP("198.51.100.20"), Port: 23}
 	via := &net.TCPAddr{IP: net.ParseIP("10.8.0.1"), Port: 51000}
 
 	rec := logOneAndDecode(t, r, src, dst, via)
 
-	// This is the exact value Suricata recorded for this real flow.
-	if got := rec["community_id"]; got != "1:X5VoMLhACgm02hIBoeKOK6Pu2PY=" {
-		t.Errorf("community_id = %v, want the Suricata-observed value", got)
+	// Expected value recomputed with Zeek's community_id_v1() for this tuple
+	// (see community_id_test.go for why the responder address is documentation
+	// space), so this still checks against an independent implementation.
+	if got := rec["community_id"]; got != "1:YCy2phL1VvHw/ee7ABoEJYPCcRk=" {
+		t.Errorf("community_id = %v, want the independently-computed value", got)
 	}
 	relayed, ok := rec["community_id_relayed"].(string)
 	if !ok || relayed == "" {
@@ -80,17 +82,19 @@ func TestLogOmitsPublicCommunityIDForUDPWithoutPublicIP(t *testing.T) {
 	}
 }
 
-// With PUBLIC_IP configured, UDP becomes joinable — and must agree with what
-// Suricata computes for the same datagram.
+// With PUBLIC_IP configured, UDP becomes joinable. The expectation is derived
+// from the same helper rather than hardcoded: this test is about the plumbing
+// reaching the record, not about the hash, which community_id_test.go covers
+// against an independent implementation.
 func TestLogUsesPublicIPForUDP(t *testing.T) {
-	t.Setenv("PUBLIC_IP", "87.106.162.235")
+	t.Setenv("PUBLIC_IP", "198.51.100.20")
 
 	r := rule{proto: "udp", listenPort: "161", target: "10.8.0.2:19161"}
 	src := &net.UDPAddr{IP: net.ParseIP("203.0.113.9"), Port: 5353}
 
 	rec := logOneAndDecode(t, r, src, nil, nil)
 
-	want := communityIDFromParts("udp", "203.0.113.9", 5353, "87.106.162.235", 161)
+	want := communityIDFromParts("udp", "203.0.113.9", 5353, "198.51.100.20", 161)
 	if want == "" {
 		t.Fatal("test vector produced no ID")
 	}
@@ -107,11 +111,11 @@ func TestLogPrefersSocketDestinationOverPublicIP(t *testing.T) {
 
 	r := rule{proto: "tcp", listenPort: "23", target: "10.8.0.2:19023"}
 	src := &net.TCPAddr{IP: net.ParseIP("123.188.73.228"), Port: 42482}
-	dst := &net.TCPAddr{IP: net.ParseIP("87.106.162.235"), Port: 23}
+	dst := &net.TCPAddr{IP: net.ParseIP("198.51.100.20"), Port: 23}
 
 	rec := logOneAndDecode(t, r, src, dst, nil)
 
-	if got := rec["community_id"]; got != "1:X5VoMLhACgm02hIBoeKOK6Pu2PY=" {
+	if got := rec["community_id"]; got != "1:YCy2phL1VvHw/ee7ABoEJYPCcRk=" {
 		t.Errorf("community_id = %v, want the value for the real destination", got)
 	}
 }

@@ -42,4 +42,26 @@ redef Log::default_rotation_postprocessor_cmd = "";
 
 # The VPS's own addresses. Without this Zeek has no notion of inside vs
 # outside, and every scan looks like it originates locally.
-redef Site::local_nets = { 87.106.162.235/32, 10.8.0.0/24 };
+#
+# The public address is deployment-specific and this repository is public, so
+# it comes from the environment rather than being written here -- the same
+# reasoning as suricata.yaml's SURICATA_HOME_NET, which is injected at runtime
+# for exactly this. ZEEK_LOCAL_NETS is a comma-free Zeek subnet list; the
+# tunnel subnet is always ours and is safe to state.
+#
+# Unset degrades honestly: Zeek still parses every packet and every log still
+# carries the full 5-tuple, it simply cannot label a direction as inbound.
+const local_nets_env = getenv("ZEEK_LOCAL_NETS") &redef;
+
+redef Site::local_nets = { 10.8.0.0/24 };
+
+event zeek_init() &priority=10 {
+    if ( local_nets_env == "" )
+        return;
+
+    local parts = split_string(local_nets_env, / /);
+    for ( i in parts ) {
+        if ( parts[i] != "" )
+            add Site::local_nets[to_subnet(parts[i])];
+    }
+}
