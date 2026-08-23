@@ -691,6 +691,31 @@ function Overview() {
             </p>
             <EChart kind="barh" url="/api/chart/decoy-client-fingerprints" height={360} />
           </div>
+          <div className="card wide" id="ja4h-fingerprints-card">
+            <h2>HTTP client fingerprints (JA4H) — last 7 days</h2>
+            <p className="note">
+              The request&apos;s own header set and ordering. Clusters HTTP tooling that never negotiates TLS at all,
+              which on this perimeter is most of it.
+            </p>
+            <EChart kind="barh" url="/api/chart/ja4h-fingerprints" height={360} />
+          </div>
+          <div className="card wide" id="ja4l-fingerprints-card">
+            <h2>Connection-latency fingerprints (JA4L) — last 7 days</h2>
+            <p className="note">
+              Derived from handshake round-trip timing rather than anything the client sends, so unlike every other
+              family here it cannot be forged by changing what you transmit — only by changing where you are. Strongest
+              signal for spotting one host behind several addresses; it says nothing about what that host is.
+            </p>
+            <EChart kind="barh" url="/api/chart/ja4l-fingerprints" height={360} />
+          </div>
+          <div className="card wide" id="ja4x-fingerprints-card">
+            <h2>Certificate construction fingerprints (JA4X) — last 7 days</h2>
+            <p className="note">
+              Fingerprints how a certificate was built rather than what it claims — a scanner or C2 using a templated
+              generator looks the same everywhere, however the subject fields are dressed up.
+            </p>
+            <EChart kind="barh" url="/api/chart/ja4x-fingerprints" height={360} />
+          </div>
           <div className="card wide" id="tls-fingerprints-card">
             <h2>TLS scanner fingerprints (JA4) — wire-level, last 7 days</h2>
             <p className="note">Every TLS handshake against a non-dashboard port, alert or not. Click a bar to copy the full hash.</p>

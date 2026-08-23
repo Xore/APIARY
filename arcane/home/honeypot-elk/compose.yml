@@ -537,6 +537,60 @@ services:
           cpus: "1.0"
           memory: 1G
 
+  # #1742 decision 8: decoy-side Zeek. Watches the honeynet bridge, where
+  # requests to the TLS-terminated decoys arrive in plaintext -- the one
+  # surface no wire sensor on the VPS can read, because Traefik terminated
+  # the TLS before those bytes ever left it.
+  #
+  # host networking because a container attached to a docker bridge does NOT
+  # see other containers' traffic: the bridge is a switch, so unicast between
+  # two other containers never reaches a third. Sniffing has to happen on the
+  # host-side bridge interface.
+  #
+  # ZEEK_PROXY_IFACE must name that interface. It is deliberately explicit
+  # rather than auto-detected: the bridge is named br-<network-id>, which
+  # changes if honeynet is ever recreated, and a sensor that silently sniffs
+  # the wrong interface is worse than one that refuses to start. Find it with
+  #   docker network inspect honeynet -f '{{.Id}}' | cut -c1-12
+  # and the interface is br-<that>. The entrypoint fails loudly if it is
+  # absent rather than capturing nothing.
+  zeek-proxy:
+    build: ../../../vps/zeek
+    image: xore-zeek:local
+    container_name: hp-zeek-proxy
+    restart: unless-stopped
+    network_mode: host
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [NET_RAW, NET_ADMIN]
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        iface="$${ZEEK_PROXY_IFACE:-}"
+        if [ -z "$$iface" ]; then
+          echo "zeek-proxy: ZEEK_PROXY_IFACE is unset -- refusing to start rather than sniff nothing" >&2
+          exit 1
+        fi
+        if [ ! -e "/sys/class/net/$$iface" ]; then
+          echo "zeek-proxy: interface $$iface does not exist -- honeynet may have been recreated" >&2
+          exit 1
+        fi
+        exec /opt/zeek/bin/zeek -i "af_packet::$$iface" \
+             /usr/local/share/zeek-site/proxy-local.zeek
+    environment:
+      - TZ=Europe/Berlin
+      - ZEEK_PROXY_IFACE=${ZEEK_PROXY_IFACE:-}
+    volumes:
+      - ./zeek-proxy/local.zeek:/usr/local/share/zeek-site/proxy-local.zeek:ro
+      - /opt/stacks/apiary/logs/zeek-proxy:/logs/zeek
+    working_dir: /logs/zeek
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
 networks:
   # Shared with every other stack that touches it -- explicit fixed name,
   # not project-prefixed, non-external. Same mechanism as

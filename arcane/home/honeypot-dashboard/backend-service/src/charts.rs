@@ -490,6 +490,53 @@ pub async fn decoy_client_fingerprints(
     fingerprint_bar(&state, &["huginn-v1-*"], body, "ja4").await.map(Json).map_err(bad_gateway)
 }
 
+/// /api/v1/charts/ja4h-fingerprints — HTTP client fingerprints (`http.log`).
+///
+/// The HTTP counterpart to the TLS JA4 chart below: it fingerprints the
+/// request's own header set and ordering, so it clusters HTTP tooling that
+/// never negotiates TLS at all — which on this perimeter is most of it.
+pub async fn ja4h_fingerprints(State(state): State<AppState>) -> Result<Json<Bar>, (StatusCode, String)> {
+    let body = json!({
+        "size": 0,
+        "query": {"range": {"@timestamp": {"gte": WEEK}}},
+        "aggs": {"ja4h": {"terms": {"field": "zeek.ja4h", "size": 15}}}
+    });
+    fingerprint_bar(&state, &["zeek-v1-http-*"], body, "ja4h").await.map(Json).map_err(bad_gateway)
+}
+
+/// /api/v1/charts/ja4x-fingerprints — X.509 construction fingerprints
+/// (`x509.log`).
+///
+/// Fingerprints how a certificate was *built* rather than what it claims, so
+/// it identifies the tooling behind a self-signed cert — a scanner or C2 using
+/// a templated generator looks identical across every deployment it touches,
+/// however the subject fields are dressed up.
+pub async fn ja4x_fingerprints(State(state): State<AppState>) -> Result<Json<Bar>, (StatusCode, String)> {
+    let body = json!({
+        "size": 0,
+        "query": {"range": {"@timestamp": {"gte": WEEK}}},
+        "aggs": {"ja4x": {"terms": {"field": "zeek.ja4x", "size": 15}}}
+    });
+    fingerprint_bar(&state, &["zeek-v1-x509-*"], body, "ja4x").await.map(Json).map_err(bad_gateway)
+}
+
+/// /api/v1/charts/ja4l-fingerprints — connection-latency fingerprints
+/// (`conn.log`, 92.9 % coverage measured).
+///
+/// Derived from handshake round-trip timing rather than anything the client
+/// sends, so unlike every other family here it cannot be forged by changing
+/// what you transmit — only by changing where you are. That makes it the
+/// strongest signal in the set for spotting one host behind several addresses,
+/// and the weakest for identifying *what* that host is.
+pub async fn ja4l_fingerprints(State(state): State<AppState>) -> Result<Json<Bar>, (StatusCode, String)> {
+    let body = json!({
+        "size": 0,
+        "query": {"range": {"@timestamp": {"gte": WEEK}}},
+        "aggs": {"ja4l": {"terms": {"field": "zeek.ja4l", "size": 15}}}
+    });
+    fingerprint_bar(&state, &["zeek-v1-conn-*"], body, "ja4l").await.map(Json).map_err(bad_gateway)
+}
+
 /// /api/v1/charts/tls-fingerprints — JA4 counts, excluding dest_port 443
 /// (the deployment's own operator HTTPS; see scanner_fingerprints.go).
 pub async fn tls_fingerprints(State(state): State<AppState>) -> Result<Json<Bar>, (StatusCode, String)> {

@@ -149,6 +149,23 @@ filebeat.inputs:
       logset: zeek
     fields_under_root: true
 
+  # #1742 decision 8: the decoy-side Zeek on the homeserver. Same shape as the
+  # VPS sensor's logs, separate logset so the two are distinguishable -- this
+  # one's peer is the tunnel, so its source addresses mean something different
+  # and must never be mistaken for attacker IPs.
+  - type: filestream
+    id: zeek-proxy-logs
+    paths:
+      - /logs/zeek-proxy/*.log
+    parsers:
+      - ndjson:
+          target: "zeek"
+          overwrite_keys: true
+          add_error_key: true
+    fields:
+      logset: zeek-proxy
+    fields_under_root: true
+
   # #1742/S5: huginn-sidecar. Per-flow TCP/TLS/HTTP fingerprints with a
   # confidence tier, already de-duplicated per flow by the sidecar itself --
   # raw output ran 193x redundant on tcp_syn_ack, so the volume here is what
@@ -255,6 +272,13 @@ processors:
       ignore_failure: true
       when.equals:
         logset: "zeek"
+  - dissect:
+      tokenizer: "/logs/zeek-proxy/%{zeek_log}.%{_zeek_suffix}"
+      field: "log.file.path"
+      target_prefix: ""
+      ignore_failure: true
+      when.equals:
+        logset: "zeek-proxy"
 
   # Lifecycle records use an empty src_ip. Remove that field before the
   # Elasticsearch IP mapping/GeoIP processor sees it; the record remains
@@ -436,6 +460,11 @@ output.elasticsearch:
     - index: "zeek-v1-%{[zeek_log]}-%{+yyyy.MM.dd}"
       when.equals:
         logset: "zeek"
+    # Its own family: same fields, different vantage point. Mixing them would
+    # make "which sensor saw this" unanswerable at query time.
+    - index: "zeek-proxy-v1-%{[zeek_log]}-%{+yyyy.MM.dd}"
+      when.equals:
+        logset: "zeek-proxy"
     - index: "huginn-v1-%{+yyyy.MM.dd}"
       when.equals:
         logset: "huginn"
