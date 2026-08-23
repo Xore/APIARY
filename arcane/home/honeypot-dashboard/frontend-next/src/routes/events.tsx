@@ -31,6 +31,8 @@ type EventPivots = {
   alert: string
   category: string
   tty_replay: string
+  /** DNP3 control-function severity ("critical"/"high"/""). */
+  ics_severity: string
 }
 
 type EventRow = {
@@ -670,6 +672,25 @@ function IsolateIpMenu({ ips, onApply }: { ips: CorrelatedIp[]; onApply: (value:
   )
 }
 
+// Ported from dashboard/geoip.go's intelBadgeClass. The threat-intel worker
+// folds its CIDR verdict into `source.as.type` (backend-service's
+// threat_intel.rs), which is the same field this pivot reads — so a
+// blocklisted or Tor-exit source already arrives here labelled, and only
+// the colouring was missing.
+function intelBadgeClass(label: string): string {
+  if (label.startsWith('blocklist:')) return 'badge--danger'
+  if (label === 'tor-exit') return 'badge--warning'
+  return 'badge--muted'
+}
+
+// Ported from dashboard/dnp3_severity.go's icsSeverityBadgeClass — the same
+// critical/high/muted vocabulary ml-anomalies and agent-campaigns use.
+function icsSeverityBadgeClass(severity: string): string {
+  if (severity === 'critical') return 'badge--danger'
+  if (severity === 'high') return 'badge--warning'
+  return 'badge--muted'
+}
+
 function EventMeta({
   row,
   onPivot,
@@ -684,6 +705,23 @@ function EventMeta({
   const link = (key: keyof EventFilters, value: string, label: string, title: string) => (
     <a
       className="lnk"
+      href={`/events?${key}=${encodeURIComponent(value)}`}
+      title={title}
+      onClick={(event) => {
+        event.preventDefault()
+        onPivot(key, value)
+      }}
+    >
+      {label}
+    </a>
+  )
+  // Same shape as `link`, but rendered as a severity-coloured badge. The Go
+  // tier drew the origin class this way (events.html:25) so a blocklisted
+  // or Tor-exit source was visible at a glance instead of reading as one
+  // more grey pivot link.
+  const badgeLink = (key: keyof EventFilters, value: string, label: string, title: string) => (
+    <a
+      className={`badge ${intelBadgeClass(value)}`}
       href={`/events?${key}=${encodeURIComponent(value)}`}
       title={title}
       onClick={(event) => {
@@ -734,7 +772,7 @@ function EventMeta({
       items: [
         p.asn ? link('asn', p.asn, `AS${p.asn}`, 'show events from this autonomous system') : null,
         p.org ? link('org', p.org, p.org, 'show events from this network organization') : null,
-        p.provider ? link('provider', p.provider, p.provider, 'show events from this provider class') : null,
+        p.provider ? badgeLink('provider', p.provider, p.provider, 'show events with this provider classification') : null,
       ],
     },
     {
@@ -906,7 +944,19 @@ function FragmentRow({
             ''
           )}
         </td>
-        <td className="v" data-label="detail">{row.detail || row.proto}</td>
+        <td className="v" data-label="detail">
+          {row.pivots.ics_severity ? (
+            <>
+              <span
+                className={`badge ${icsSeverityBadgeClass(row.pivots.ics_severity)}`}
+                title="DNP3 control-function severity: this app_function code changes equipment or device state"
+              >
+                {row.pivots.ics_severity}
+              </span>{' '}
+            </>
+          ) : null}
+          {row.detail || row.proto}
+        </td>
         {/* Hover-revealed quick actions (design pick 14B, events.html:31-37). */}
         <td className="hp-row-actions-cell" data-label="">
           <div className="hp-row-actions">

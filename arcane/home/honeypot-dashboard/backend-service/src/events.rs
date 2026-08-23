@@ -106,6 +106,14 @@ pub struct EventPivots {
     /// hash, deliberately NOT surfaced as a payload hash; see
     /// classify.go's #638/#1266 note).
     pub tty_replay: String,
+    /// DNP3 control-function severity ("critical"/"high"/""), from the
+    /// frame's `app_function`. The Go tier carried this on
+    /// `storedEvent.ICSSeverity` and badged it in the events explorer; the
+    /// port dropped the field, so a DIRECT_OPERATE — a command that trips
+    /// physical equipment with no confirmation step — rendered
+    /// indistinguishably from a benign link-status read. See
+    /// `ics_severity.rs`.
+    pub ics_severity: String,
 }
 
 pub fn pivots_from_source(src: &Value) -> EventPivots {
@@ -159,6 +167,7 @@ pub fn pivots_from_source(src: &Value) -> EventPivots {
         } else {
             String::new()
         },
+        ics_severity: crate::ics_severity::dnp3_function_severity(&text(&hp["app_function"])).to_string(),
     }
 }
 
