@@ -216,7 +216,7 @@ export function MasterDetailTable<Row>({
               {rows === null ? (
                 <SkeletonCards count={12} />
               ) : rows.length === 0 ? (
-                <div className="tw:col-span-full">
+                <div style={{ gridColumn: '1 / -1' }}>
                   <EmptyStateBlock state={emptyState ?? DEFAULT_EMPTY} />
                 </div>
               ) : (
@@ -314,7 +314,7 @@ export function MasterDetailTable<Row>({
             </button>
             <h2>{inspectorTitle}</h2>
             {detailPage ? (
-              <a className="btn btn-sm btn-secondary tw:mb-3 tw:inline-flex" href={detailPage}>
+              <a className="btn btn-sm btn-secondary tw:mb-3" href={detailPage}>
                 Open full details →
               </a>
             ) : null}
