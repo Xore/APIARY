@@ -546,6 +546,17 @@ fn advance_state_after_bulk(pending: &[Pending], failed_ids: &std::collections::
 /// connect event for that session supplies both the address and the geo. A
 /// recording whose session never produced a connect event is left
 /// unattributed rather than attributed to the tunnel.
+///
+/// #1714: the connect event is not clean either — 184,212 of them carry the
+/// tunnel address too. Reducing the problem is not solving it, so the address
+/// is checked explicitly and dropped when it is the tunnel. An unattributed
+/// row renders as an em dash and is harmless; a row attributed to 10.8.0.1
+/// invites an operator to investigate, or block, our own infrastructure.
+/// The WireGuard tunnel endpoint. Whenever this appears as a cowrie src_ip it
+/// means enrichment did not rewrite the address, not that the tunnel attacked
+/// anything — treat it as no attribution at all (#1714).
+const TUNNEL_IP: &str = "10.8.0.1";
+
 async fn ttylog_attribution(
     state: &AppState,
     shasums: Vec<String>,
@@ -622,13 +633,9 @@ async fn ttylog_attribution(
         if session.is_empty() {
             continue;
         }
-        origins.insert(
-            session,
-            (
-                text(&source["honeypot"]["src_ip"]),
-                text(&source["source"]["geo"]["country_name"]),
-            ),
-        );
+        let src_ip = text(&source["honeypot"]["src_ip"]);
+        let src_ip = if src_ip == TUNNEL_IP { String::new() } else { src_ip };
+        origins.insert(session, (src_ip, text(&source["source"]["geo"]["country_name"])));
     }
     sessions
         .into_iter()
@@ -823,6 +830,21 @@ mod tests {
         let pending = scan_source(&src, &dir.0, &no_state(), 1, 0);
         assert_eq!(pending.len(), 1, "only the renamed, closed recording is indexable");
         assert_eq!(pending[0].id, closed);
+    }
+
+    #[test]
+    fn tunnel_ip_is_never_written_as_an_attacker_address() {
+        // #1714: the WireGuard endpoint appears as honeypot.src_ip on 184,212
+        // connect events, because enrichment does not always rewrite it. The
+        // recordings list renders src_ip as the attacker and links it to the
+        // per-IP profile, so writing the tunnel there invites an operator to
+        // investigate our own infrastructure. An em dash is the correct
+        // answer; the tunnel address is not.
+        assert_eq!(TUNNEL_IP, "10.8.0.1");
+        let keep = |ip: &str| if ip == TUNNEL_IP { String::new() } else { ip.to_string() };
+        assert_eq!(keep("10.8.0.1"), "", "the tunnel is dropped");
+        assert_eq!(keep("223.123.126.43"), "223.123.126.43", "a real attacker survives");
+        assert_eq!(keep(""), "", "already-absent stays absent");
     }
 
     #[test]
