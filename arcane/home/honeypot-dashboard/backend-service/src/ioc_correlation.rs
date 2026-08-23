@@ -78,7 +78,7 @@ impl IocKindCorrelation {
 ///   - a run exists but floss produced nothing usable (declined the sample,
 ///     or the sidecar was unavailable)
 ///   - both sides have data but share no indicator
-#[derive(Serialize, Default, Debug)]
+#[derive(Serialize, Debug)]
 pub struct IocCorrelation {
     pub has_sandbox_run: bool,
     pub has_floss_data: bool,
@@ -92,6 +92,24 @@ pub struct IocCorrelation {
     pub domains: IocKindCorrelation,
     pub urls: IocKindCorrelation,
     pub unc_paths: IocKindCorrelation,
+}
+
+/// A correlation with nothing in it: no sandbox run, no floss data, and —
+/// importantly — `is_empty: true`. The derived Default would have made that
+/// last field `false`, which would have been a lie in exactly the cases this
+/// value is returned for.
+impl Default for IocCorrelation {
+    fn default() -> Self {
+        Self {
+            has_sandbox_run: false,
+            has_floss_data: false,
+            is_empty: true,
+            ips: IocKindCorrelation::default(),
+            domains: IocKindCorrelation::default(),
+            urls: IocKindCorrelation::default(),
+            unc_paths: IocKindCorrelation::default(),
+        }
+    }
 }
 
 /// Indicators found in a set of strings. Private and loopback addresses are
@@ -183,7 +201,11 @@ pub async fn correlate(state: &AppState, sha256: &str, ghidra_source: &Value) ->
         return IocCorrelation::default();
     }
 
-    let mut out = IocCorrelation { has_sandbox_run: true, ..Default::default() };
+    // `is_empty` starts true and is narrowed once the buckets are filled:
+    // every early return below leaves a correlation with no indicators in
+    // it, and reporting `is_empty: false` there would be a lie even though
+    // the frontend reaches those cases through the two flags instead.
+    let mut out = IocCorrelation { has_sandbox_run: true, is_empty: true, ..Default::default() };
 
     // floss declining the sample (`unsupported`) is not the same as floss
     // having run and found nothing, and neither is the sidecar being
@@ -299,5 +321,7 @@ mod tests {
         let out = IocCorrelation::default();
         assert!(!out.has_sandbox_run);
         assert!(!out.has_floss_data);
+        // No run means no indicators — the flag must not claim otherwise.
+        assert!(out.is_empty);
     }
 }
