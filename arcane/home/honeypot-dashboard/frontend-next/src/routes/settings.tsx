@@ -26,7 +26,7 @@ import { str } from '../components/StoreList'
 import { applyPalette, applyTheme, pullServerTheme, useThemeMode, type ThemeMode } from '../lib/prefs'
 import type { JsonRecord } from '../lib/json'
 import { prefetchEnabled, setPrefetchEnabled } from '../lib/prefetch'
-import { getSessionUser, type User } from '../lib/auth'
+import { getSessionUser, getAccountActions, type User, type AccountActions } from '../lib/auth'
 import { formatTimestamp, writeTimePrefs } from '../lib/time'
 
 // The full presentation.* field list from the legacy settings modal's
@@ -407,6 +407,7 @@ export const Route = createFileRoute('/settings')({
   loader: async () => ({
     ...fetchSettingsData(),
     user: await getSessionUser(),
+    accountActions: await getAccountActions(),
   }),
   component: Settings,
 })
@@ -2339,13 +2340,14 @@ const PALETTES: { id: string; label: string }[] = [
 ]
 
 function Settings() {
-  const { user, ...data } = Route.useLoaderData()
+  const { user, accountActions, ...data } = Route.useLoaderData()
   const searchParams = Route.useSearch()
   const navigate = useNavigate()
   return (
     <SettingsSurface
       data={data}
       user={user ?? null}
+      accountActions={accountActions ?? null}
       pane={searchParams.pane}
       onPaneChange={(id) => void navigate({ to: '/settings', search: id === 'account' ? {} : { pane: id } })}
     />
@@ -2361,12 +2363,15 @@ function Settings() {
 export function SettingsSurface({
   data,
   user,
+  accountActions = null,
   pane,
   onPaneChange,
   onClose,
 }: {
   data: SettingsData
   user: User | null
+  /** Keycloak account-console deep links (null when OIDC is disabled). */
+  accountActions?: AccountActions
   /** Requested pane name (unvalidated — falls back to "account"). */
   pane?: string
   onPaneChange: (id: string) => void
@@ -2542,6 +2547,56 @@ export function SettingsSurface({
       ) : (
         <p className="note">No session (development mode).</p>
       )}
+      {accountActions ? (
+        <>
+          <hr className="empty-state__divider" />
+          <p className="note">
+            Password, passkeys, two-factor authentication, and sessions are managed by Keycloak. These protected pages open
+            in a new tab and are never embedded.
+          </p>
+          <div className="card__row">
+            <div>
+              <div className="card__label">Profile &amp; password</div>
+              <div className="card__value">Account details, password change, and recovery email.</div>
+            </div>
+            <a className="btn btn-secondary btn-sm" href={accountActions.profile} target="_blank" rel="noopener noreferrer">
+              Open
+            </a>
+          </div>
+          <div className="card__row">
+            <div>
+              <div className="card__label">Passkeys &amp; two-factor authentication</div>
+              <div className="card__value">Register hardware keys, authenticator apps, and WebAuthn credentials.</div>
+            </div>
+            <a className="btn btn-secondary btn-sm" href={accountActions.security} target="_blank" rel="noopener noreferrer">
+              Open
+            </a>
+          </div>
+          <div className="card__row">
+            <div>
+              <div className="card__label">Sessions &amp; devices</div>
+              <div className="card__value">Active sessions and trusted devices; revoke any of them.</div>
+            </div>
+            <a className="btn btn-secondary btn-sm" href={accountActions.sessions} target="_blank" rel="noopener noreferrer">
+              Open
+            </a>
+          </div>
+          <div className="card__row">
+            <div>
+              <div className="card__label">Security settings</div>
+              <div className="card__value">Open the Keycloak Account Console in a new tab.</div>
+            </div>
+            <a
+              className="btn btn-secondary btn-sm"
+              href={accountActions.manageAccount}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Manage account
+            </a>
+          </div>
+        </>
+      ) : null}
     </div>
   )
 

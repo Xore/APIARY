@@ -12,6 +12,13 @@ export type User = {
   role: 'admin' | 'user'
 }
 
+export type AccountActions = { manageAccount: string; profile: string; security: string; sessions: string } | null
+
+export const getAccountActions = createServerFn({ method: 'GET' }).handler(async (): Promise<AccountActions> => {
+  const { accountConsoleActions } = await import('./oidc.server')
+  return accountConsoleActions()
+})
+
 export const getSessionUser = createServerFn({ method: 'GET' }).handler(async (): Promise<User | null> => {
   const request = getRequest()
   const session = await getSession(sidFrom(request))

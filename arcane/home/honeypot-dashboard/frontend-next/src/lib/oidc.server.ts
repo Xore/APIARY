@@ -30,6 +30,25 @@ export function oidcDisabled(): boolean {
   return process.env.OIDC_DISABLED === '1'
 }
 
+// Keycloak's account console lives at <issuer>/account/ by convention (the
+// issuer is already .../realms/<realm>), so these links need no extra env
+// var beyond OIDC_ISSUER_URL. Restores settings_modal.html:58-84's "Account
+// & security" card (dashboard/authorization.go's keycloakAccountActions),
+// dropped in the frontend-next port -- Keycloak account-console v2's own
+// hash routes for the "signing in" (passkeys + 2FA) and device-activity
+// panes.
+export function accountConsoleActions(): { manageAccount: string; profile: string; security: string; sessions: string } | null {
+  if (oidcDisabled()) return null
+  const issuer = (process.env.OIDC_ISSUER_URL ?? 'https://auth.example.invalid/realms/apiary').replace(/\/$/, '')
+  const base = `${issuer}/account/`
+  return {
+    manageAccount: base,
+    profile: `${base}#/personal-info`,
+    security: `${base}#/security/signingin`,
+    sessions: `${base}#/security/device-activity`,
+  }
+}
+
 async function clientSecret(): Promise<string> {
   const file = process.env.OIDC_CLIENT_SECRET_FILE
   if (file) {

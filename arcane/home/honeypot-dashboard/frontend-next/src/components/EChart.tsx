@@ -383,7 +383,11 @@ export function EChart({ kind, url, height }: { kind: ChartKind; url: string; he
           role={state === 'error' ? 'alert' : undefined}
         />
         {state === 'loading' ? (
-          <span className="skeleton-line" aria-hidden="true" style={{ position: 'absolute', inset: 0 }} />
+          <span
+            className="skeleton-line"
+            aria-hidden="true"
+            style={{ position: 'absolute', inset: 0, height: '100%', margin: 0 }}
+          />
         ) : null}
         {state === 'empty' || state === 'error' ? (
           <p
