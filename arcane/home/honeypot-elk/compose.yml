@@ -586,16 +586,20 @@ services:
     environment:
       - TZ=Europe/Berlin
       - ES_URL=http://elasticsearch:9200
-      - ZEEK_LOG_DIR=/logs/zeek
-      - ZEEK_EXTRACT_DIR=/logs/zeek-extract
+      # #1738: extraction runs on the decoy-side sensor, not the VPS, so the
+      # importer pairs zeek-proxy's files.log with zeek-proxy's carved bytes.
+      # Pointing it at the VPS log dir instead would pair records with files
+      # that do not exist and silently import nothing.
+      - ZEEK_LOG_DIR=/logs/zeek-proxy
+      - ZEEK_EXTRACT_DIR=/logs/zeek-proxy-extract
       - STATE_PATH=/state/extracted-files.json
       - IMPORT_INTERVAL=${EXTRACT_IMPORT_INTERVAL:-60}
     volumes:
       - ./analysis/extracted-file-importer.py:/app/extracted-file-importer.py:ro
       # Both read-only: this reads artefacts, it does not manage them. The
       # pruner owns deletion.
-      - /opt/stacks/apiary/logs/zeek:/logs/zeek:ro
-      - /opt/stacks/apiary/logs/zeek-extract:/logs/zeek-extract:ro
+      - /opt/stacks/apiary/logs/zeek-proxy:/logs/zeek-proxy:ro
+      - /opt/stacks/apiary/logs/zeek-proxy-extract:/logs/zeek-proxy-extract:ro
       - /opt/stacks/apiary/state/extracted-files:/state
     networks:
       - honeynet
@@ -677,7 +681,13 @@ services:
       - ZEEK_PROXY_IFACE=${ZEEK_PROXY_IFACE:-}
     volumes:
       - ./zeek-proxy/local.zeek:/usr/local/share/zeek-site/proxy-local.zeek:ro
+      - ./zeek-proxy/extract.zeek:/usr/local/share/zeek-site/proxy-extract.zeek:ro
       - /opt/stacks/apiary/logs/zeek-proxy:/logs/zeek
+      # #1738: carved files land here. Separate from the log directory so the
+      # importer can be given the bytes read-only without also handing it a
+      # writable path, and so retention can treat payloads differently from
+      # logs.
+      - /opt/stacks/apiary/logs/zeek-proxy-extract:/logs/zeek/extract_files
     working_dir: /logs/zeek
     deploy:
       resources:
