@@ -569,8 +569,12 @@ function Overview() {
             <h2>ML classification backlog — last 7 days</h2>
             <EChart kind="line" url="/api/chart/ml-backlog" height={280} />
             <p className="note">
-              Average queue depth per hour for events awaiting ml-worker classification. A rising line means the backlog is
-              growing, not draining.
+              Average queue depth per hour for honeypot-v2-* and suricata-v2-* events awaiting ml-worker classification. A
+              rising line means the backlog is growing, not draining — see{' '}
+              <a href="https://github.com/Xore/APIARY/issues/1227" target="_blank" rel="noopener noreferrer">
+                #1227
+              </a>
+              .
             </p>
           </div>
         </div>
@@ -595,6 +599,10 @@ function Overview() {
           <Tbl title="Network/provider classes" rows={dashboard ? dashboard.providers : null} half id="overview-providers-card" />
           <div className="card wide" id="netflow-bytes-card">
             <h2>Traffic volume — bytes/hour, last 7 days</h2>
+            <p className="note">
+              Summed from every captured flow&apos;s byte count, all sensors and ports combined. A spike stands out here even
+              when it doesn&apos;t in the event-count activity heatmap above.
+            </p>
             <EChart kind="line" url="/api/chart/netflow-bytes" height={280} />
             <p className="note">
               Summed from every captured flow's byte count. A spike stands out here even when it doesn't in the event-count
@@ -615,7 +623,10 @@ function Overview() {
           </div>
           <div className="card wide" id="dionaea-cves-card">
             <h2>Top exploited CVEs / named incidents — last 7 days</h2>
-            <p className="note">Real exploit identities dionaea itself recognized in captured traffic (e.g. DoublePulsar/EternalBlue).</p>
+            <p className="note">
+              Real, human-readable exploit identities dionaea itself recognized in the traffic it captured (e.g.
+              DoublePulsar/EternalBlue), not a generic incident-kind label.
+            </p>
             <EChart kind="bar" url="/api/chart/dionaea-cves" height={320} />
           </div>
         </div>
@@ -637,7 +648,10 @@ function Overview() {
           <Tbl title="Top HTTP paths" rows={dashboard ? dashboard.top_paths : null} half hint="No web probes yet — fed by http-honeypot and tanner." />
           <div className="card wide" id="os-distribution-card">
             <h2>Attacker OS distribution</h2>
-            <p className="note">p0f's passive OS fingerprint, resolved from the portbridge tunnel join — a best-effort guess, not certainty.</p>
+            <p className="note">
+              p0f&apos;s own passive OS fingerprint, resolved from the portbridge tunnel join (#241) — a best-effort guess
+              from TCP/IP stack behavior, not a claim of certainty.
+            </p>
             <EChart kind="pie" url="/api/chart/os-distribution" height={360} />
           </div>
           <div className="card wide" id="tls-fingerprints-card">

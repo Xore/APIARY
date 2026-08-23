@@ -203,10 +203,18 @@ function Sensors() {
           ) : undefined
         }
       />
+      <p className="note">
+        Each covered sensor's own protocol-specific captured data — the mail an SMTP sensor received, the request an
+        HTTP sensor took — not just the generic normalized event line.
+      </p>
       {viewTabs}
       {tab === 'sd-mailoney' ? (
         <div className="dashboard-panel" role="tabpanel" id="sd-panel-sd-mailoney" aria-labelledby="sd-sd-mailoney">
           <h2 className="label-section">mailoney — SMTP conversations</h2>
+          <p className="card__meta">
+            Grouped by mailoney session — AUTH PLAIN credentials, the MAIL FROM / RCPT TO envelope, and a preview of
+            any submitted mail body. Newest first, last 48h.
+          </p>
           <MasterDetailTable
             rows={detail ? detail.mailoney : null}
             columns={MAILONEY_COLUMNS}
@@ -222,6 +230,10 @@ function Sensors() {
       {tab === 'sd-http' ? (
         <div className="dashboard-panel" role="tabpanel" id="sd-panel-sd-http" aria-labelledby="sd-sd-http">
           <h2 className="label-section">http-honeypot — requests</h2>
+          <p className="card__meta">
+            Every request&apos;s own method, path, headers, and body — not just the generic &quot;METHOD path&quot;
+            summary line. Newest first, last 48h.
+          </p>
           <MasterDetailTable
             rows={detail ? detail.http_requests : null}
             columns={HTTP_COLUMNS}
@@ -237,6 +249,10 @@ function Sensors() {
       {tab === 'sd-tanner' ? (
         <div className="dashboard-panel" role="tabpanel" id="sd-panel-sd-tanner" aria-labelledby="sd-sd-tanner">
           <h2 className="label-section">tanner — requests & detections</h2>
+          <p className="card__meta">
+            Every request tanner&apos;s web emulator handled — submitted POST fields, cookies, and (when one of its 10
+            emulators matched) the attack detection and captured execution result. Newest first, last 48h.
+          </p>
           <MasterDetailTable
             rows={detail ? detail.tanner : null}
             columns={TANNER_COLUMNS}

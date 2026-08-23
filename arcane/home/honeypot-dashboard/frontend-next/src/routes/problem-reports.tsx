@@ -211,6 +211,11 @@ function Page() {
       rowKey={(row, index) => `${str(row, 'id')}-${index}`}
       inspectorTitle="Report details"
       chipNoun="reports"
+      beforeTable={
+        <p className="note">
+          Reports submitted via the &quot;Report a problem&quot; button, newest first.
+        </p>
+      }
       emptyState={{
         title: 'No problem reports submitted yet',
         hint: 'Reports raised from the dashboard are collected here with their full context.',

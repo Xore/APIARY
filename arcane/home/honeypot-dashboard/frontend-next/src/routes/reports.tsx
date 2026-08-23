@@ -678,6 +678,9 @@ function DefinitionForm({
             choosing, which is backwards for a picker. theme.css still
             carries .hp-rp-templates/.hp-rp-template including the
             aria-pressed selected state. */}
+        <p className="note">
+          Pick the closest starting point, then adjust it across the steps above. Nothing is generated until you say so.
+        </p>
         <div className="hp-rp-templates" role="group" aria-label="Report template">
           {templates.length > 0 ? (
             templates.map((entry) => (
@@ -763,6 +766,7 @@ function DefinitionForm({
         {!isSpecial ? (
           <>
             <p className="note">Elements</p>
+            <p className="card__meta">Each element becomes a section of the PDF, in this order.</p>
             <div className="filters" role="group" aria-label="Report elements">
               {elements.map((element) => (
                 <button
@@ -787,6 +791,9 @@ function DefinitionForm({
       <div className="dashboard-panel" role="tabpanel" id="rp-panel-scope" aria-labelledby="rp-scope" hidden={step !== 'scope'}>
         <div className="card wide">
         <h2>Scope &amp; search criteria</h2>
+        <p className="note">
+          Leave a field empty to place no restriction on it. The report covers exactly what these criteria match.
+        </p>
         {isSpecial ? (
           // reports.html:109-125's sandbox/payload scope pickers. The old
           // blanket "not yet implemented" note is gone on purpose: the
@@ -1035,6 +1042,7 @@ function DefinitionForm({
       <div className="dashboard-panel" role="tabpanel" id="rp-panel-branding" aria-labelledby="rp-branding" hidden={step !== 'branding'}>
         <div className="card wide">
         <h2>Branding</h2>
+        <p className="note">Applied to every page of the PDF. Empty fields fall back to the template defaults.</p>
         <div className="filters">
           {brandingField('title', 'Title (defaults to template title)', 80)}
           {brandingField('author', 'Author', 60)}
@@ -1114,7 +1122,10 @@ function DefinitionsCard({
     <>
       <div className="card wide">
         <h2>Saved definitions</h2>
-        <p className="note">Definitions drive the scheduler and on-demand generation.</p>
+        <p className="note">
+          Definitions drive the scheduler and on-demand generation — saved designs you can re-generate, refine, or
+          schedule.
+        </p>
         {editable ? (
           <button className="btn btn-secondary btn-sm" type="button" onClick={onNew} style={{ marginBottom: 12 }}>
             New definition
@@ -1319,6 +1330,7 @@ function Reports() {
           onGenerated={refreshGenerated}
         />
         <h2 className="label-section">Generated reports</h2>
+        <p className="note">Newest first. Select a card to view inline, download the PDF, or delete stale artifacts.</p>
         <MasterDetailTable
           rows={generated ? generated.rows : null}
           columns={buildGeneratedColumns(setViewingReport, (row) => void removeGenerated(row), deletingId)}

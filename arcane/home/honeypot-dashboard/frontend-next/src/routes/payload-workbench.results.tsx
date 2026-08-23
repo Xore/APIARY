@@ -909,6 +909,11 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
               Run all applicable
             </button>
           </div>
+          {/* payload_workbench.html — says why an analyzer may be greyed
+              out, which is otherwise guesswork. */}
+          <p className="note">
+            Availability and applicability are derived on the server from this captured sample and operator configuration.
+          </p>
 
           <div className="table-scroll">
             <table className="data-table">
