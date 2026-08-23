@@ -4,16 +4,23 @@
 // replay — the recording source IP's whole profile, not just this one
 // session.
 //
-// Playback tradeoff: the Go tier rendered through the vendored xterm.js
-// terminal emulator (#1282) with per-frame timing off the ttylog. This
-// port cannot add npm dependencies (lockfile policy), and the Rust replay
-// endpoint (replay.rs) serves an aggregate transcript, not timed frames —
-// so playback is a timed progressive reveal of the stripped transcript,
-// paced across the recording's real duration. Genuinely exotic escape
-// sequences still round-trip via the events pipeline's .cast tooling.
+// #1682: playback now goes through a real terminal emulator (@xterm/xterm)
+// again, same as the Go tier's vendored xterm.js. replay.rs's Replay
+// struct already carried `ttylog_base64` ("raw base64 rides along for a
+// future in-browser player" — its own doc comment) even before this
+// landed; the earlier plain-text progressive-reveal fallback existed only
+// because nothing on the frontend consumed that field yet, not because
+// the raw frames were unavailable. Cowrie's own binary ttylog framing
+// (TTYSTRUCT = "<iLiiLL": op i32, tty u32 unused, length i32, direction
+// i32, sec u32, usec u32, then `length` bytes of data for OP_WRITE) is
+// decoded client-side into individually-timed frames — mirrors
+// replay.rs's own decode() exactly (OP_WRITE + DIR_OUTPUT only, same
+// byte content as `transcript`), just kept as a frame list instead of one
+// concatenated string so each frame can be `term.write()`'d with real
+// timing instead of revealed character-by-character.
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
 import { Tabs, TabPanel } from '../components/Tabs'
 import { useResolved } from '../lib/hooks'
@@ -26,6 +33,43 @@ type Replay = {
   frames: number
   duration_seconds: number
   transcript: string
+  ttylog_base64: string
+}
+
+type TtyFrame = { timestamp: number; data: Uint8Array }
+
+const TTY_OP_WRITE = 3
+const TTY_DIR_OUTPUT = 2
+const TTY_HEADER_BYTES = 24
+
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return bytes
+}
+
+/** Mirrors replay.rs's decode(): same header layout, same OP_WRITE +
+ * DIR_OUTPUT filter, so the frame bytes concatenate to exactly
+ * `replay.transcript` — just kept as individually-timestamped frames. */
+function parseTtyLog(bytes: Uint8Array): TtyFrame[] {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const frames: TtyFrame[] = []
+  let cursor = 0
+  while (cursor + TTY_HEADER_BYTES <= bytes.length) {
+    const op = view.getInt32(cursor, true)
+    const length = view.getInt32(cursor + 8, true)
+    const direction = view.getInt32(cursor + 12, true)
+    const sec = view.getUint32(cursor + 16, true)
+    const usec = view.getUint32(cursor + 20, true)
+    cursor += TTY_HEADER_BYTES
+    if (length < 0 || cursor + length > bytes.length) break
+    if (op === TTY_OP_WRITE && direction === TTY_DIR_OUTPUT) {
+      frames.push({ timestamp: sec + usec / 1_000_000, data: bytes.slice(cursor, cursor + length) })
+    }
+    cursor += length
+  }
+  return frames
 }
 
 type Kv = { key: string; count: number }
@@ -87,41 +131,124 @@ function plainTranscript(transcript: string): string {
 }
 
 // Playback controls (tty_replay.html's #tty-viewer + hp-tty-replay.js's
-// play/restart/seek/speed wiring), driving a character-position cursor
-// over the stripped transcript instead of a frame index.
-function Playback({ replay }: { replay: Replay }) {
+// play/restart/seek/speed wiring) driving a real terminal emulator.
+// Frame-indexed rather than character-indexed: seeking resets the
+// terminal and replays every frame up to the target synchronously (no
+// per-frame delay), the same fast-forward-by-replay approach asciinema's
+// own player uses, since xterm has no "undo a write" primitive.
+function TerminalPlayback({ replay }: { replay: Replay }) {
+  const frames = useMemo(() => {
+    if (!replay.ttylog_base64) return []
+    try {
+      return parseTtyLog(base64ToBytes(replay.ttylog_base64))
+    } catch {
+      return []
+    }
+  }, [replay.ttylog_base64])
   const text = useMemo(() => plainTranscript(replay.transcript), [replay.transcript])
-  const total = text.length
-  const [pos, setPos] = useState(0)
+  const total = frames.length
+
+  const containerRef = useRef<HTMLDivElement>(null)
+  const termRef = useRef<import('@xterm/xterm').Terminal | null>(null)
+  const fitRef = useRef<import('@xterm/addon-fit').FitAddon | null>(null)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const indexRef = useRef(0)
+  const speedRef = useRef(1)
+  const [index, setIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [speed, setSpeed] = useState(1)
-  const termRef = useRef<HTMLDivElement>(null)
-
-  // Pace the reveal over the recording's real duration, clamped: the old
-  // player capped each inter-frame gap at 3s (hp-tty-replay.js
-  // scheduleNext) so an idle session never stalled playback for minutes —
-  // a whole-playback clamp is this pacing model's equivalent.
-  const playSeconds = Math.min(Math.max(replay.duration_seconds, 2), 120)
 
   useEffect(() => {
-    if (!playing || total === 0) return
-    const stepMs = 80
-    const perTick = Math.max(1, Math.round((total / playSeconds) * (stepMs / 1000) * speed))
-    const timer = setInterval(() => {
-      setPos((current) => Math.min(total, current + perTick))
-    }, stepMs)
-    return () => clearInterval(timer)
-  }, [playing, speed, total, playSeconds])
+    indexRef.current = index
+  }, [index])
+  useEffect(() => {
+    speedRef.current = speed
+  }, [speed])
+
+  // Mount the terminal once frames are known — a stable instance survives
+  // play/pause/seek; only restart() ever calls term.reset().
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container || total === 0) return
+    let disposed = false
+    ;(async () => {
+      const [{ Terminal }, { FitAddon }] = await Promise.all([
+        import('@xterm/xterm'),
+        import('@xterm/addon-fit'),
+        import('@xterm/xterm/css/xterm.css'),
+      ])
+      if (disposed) return
+      const term = new Terminal({
+        convertEol: true,
+        cols: 80,
+        rows: 24,
+        disableStdin: true,
+        fontSize: 13,
+        scrollback: 5000,
+        theme: { background: '#00000000' },
+      })
+      const fit = new FitAddon()
+      term.loadAddon(fit)
+      term.open(container)
+      fit.fit()
+      termRef.current = term
+      fitRef.current = fit
+    })()
+    const onResize = () => fitRef.current?.fit()
+    window.addEventListener('resize', onResize)
+    return () => {
+      disposed = true
+      window.removeEventListener('resize', onResize)
+      if (timerRef.current) clearTimeout(timerRef.current)
+      termRef.current?.dispose()
+      termRef.current = null
+      fitRef.current = null
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- frames identity is stable per replay
+  }, [total])
+
+  const writeUpTo = useCallback(
+    (target: number) => {
+      const term = termRef.current
+      if (!term) return
+      term.reset()
+      for (let i = 0; i < target; i++) term.write(frames[i].data)
+      setIndex(target)
+    },
+    [frames],
+  )
+
+  const scheduleNext = useCallback(() => {
+    const term = termRef.current
+    if (!term) return
+    const i = indexRef.current
+    if (i >= frames.length) {
+      setPlaying(false)
+      return
+    }
+    const frame = frames[i]
+    term.write(frame.data)
+    const next = i + 1
+    setIndex(next)
+    if (next >= frames.length) {
+      setPlaying(false)
+      return
+    }
+    // Same idle cap the earlier reveal-based player used: an inter-frame
+    // gap longer than 3s (an attacker who walked away mid-session) never
+    // stalls playback for minutes.
+    const gap = Math.min(Math.max(0, frames[next].timestamp - frame.timestamp), 3)
+    timerRef.current = setTimeout(scheduleNext, (gap * 1000) / speedRef.current)
+  }, [frames])
 
   useEffect(() => {
-    if (playing && pos >= total) setPlaying(false)
-  }, [playing, pos, total])
-
-  // Follow the output like a live terminal would.
-  useEffect(() => {
-    const el = termRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [pos])
+    if (!playing) return
+    scheduleNext()
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- scheduleNext re-chains itself via indexRef
+  }, [playing])
 
   if (total === 0) {
     return (
@@ -133,7 +260,7 @@ function Playback({ replay }: { replay: Replay }) {
     )
   }
 
-  const label = playing ? 'Pause' : pos >= total ? 'Replay' : pos > 0 ? 'Resume' : 'Play'
+  const label = playing ? 'Pause' : index >= total ? 'Replay' : index > 0 ? 'Resume' : 'Play'
 
   return (
     <div className="card wide">
@@ -146,7 +273,7 @@ function Playback({ replay }: { replay: Replay }) {
               setPlaying(false)
               return
             }
-            if (pos >= total) setPos(0)
+            if (index >= total) writeUpTo(0)
             setPlaying(true)
           }}
         >
@@ -157,7 +284,7 @@ function Playback({ replay }: { replay: Replay }) {
           type="button"
           onClick={() => {
             setPlaying(false)
-            setPos(0)
+            writeUpTo(0)
           }}
         >
           Restart
@@ -166,11 +293,11 @@ function Playback({ replay }: { replay: Replay }) {
           type="range"
           min={0}
           max={total}
-          value={pos}
+          value={index}
           aria-label="Seek within the recording"
           onChange={(event) => {
             setPlaying(false)
-            setPos(Number(event.target.value))
+            writeUpTo(Number(event.target.value))
           }}
         />
         <label>
@@ -187,16 +314,9 @@ function Playback({ replay }: { replay: Replay }) {
         {replay.frames.toLocaleString('en-US')} frame(s), {replay.size_bytes.toLocaleString('en-US')} bytes recorded ·{' '}
         {replay.duration_seconds.toFixed(1)}s of terminal time.
       </div>
-      <div
-        ref={termRef}
-        className="hp-tty-term"
-        aria-label="Terminal playback"
-        style={{ maxHeight: 480, overflowY: 'auto' }}
-      >
-        {text.slice(0, pos)}
-      </div>
-      {/* The reveal is a playback affordance — the whole transcript stays
-          one disclosure away, no scrubbing to the end required. */}
+      <div ref={containerRef} className="hp-tty-term" aria-label="Terminal playback" />
+      {/* The whole transcript stays one disclosure away, searchable/
+          copyable, no scrubbing to the end required. */}
       <details className="tw:mt-3">
         <summary>Full transcript</summary>
         <pre className="code">{text}</pre>
@@ -358,7 +478,7 @@ function TtyReplay() {
       <InvestigateHeader
         label="Cowrie TTY session recording"
         title={shasum.slice(0, 40)}
-        subtitle="Replayed from the session's Elasticsearch mirror, not read off disk — timed playback of the decoded transcript."
+        subtitle="Replayed from the session's Elasticsearch mirror, not read off disk — real terminal playback, timed off the recording's own frames."
         chips={
           replay ? (
             <>
@@ -387,7 +507,7 @@ function TtyReplay() {
             <span className="skeleton-line" aria-hidden="true" />
           </div>
         ) : (
-          <Playback replay={replay} />
+          <TerminalPlayback replay={replay} />
         )}
       </TabPanel>
       <TabPanel id="attacker" active={tab} idPrefix="tty" className="dashboard-panel">
