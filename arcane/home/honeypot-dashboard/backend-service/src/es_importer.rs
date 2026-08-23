@@ -523,128 +523,17 @@ fn advance_state_after_bulk(pending: &[Pending], failed_ids: &std::collections::
     }
 }
 
-/// #1691: denormalize attacker attribution onto `cowrie-ttylog-v1` documents
-/// at import time.
-///
-/// The recordings list pages over these documents, which natively carry only
-/// `shasum`/`size_bytes`/`imported_at`. Rendering source IP and country in
-/// the list therefore meant one `/api/v1/events` lookup per row — 25 extra ES
-/// queries per page — so the port deliberately dropped the columns rather
-/// than pay that. Joining once here, when a recording is first imported,
-/// costs two queries per import batch instead of 25 per page view, forever.
-///
-/// The join is deliberately two-hop, and it is worth saying why, because the
-/// one-hop version looks correct and is not. Cowrie's `cowrie.log.closed`
-/// event carries the `shasum` and the `session`, and usually the real
-/// attacker IP. But roughly a third of them (5,886 of 17,155 measured live
-/// 2026-08-23) carry `10.8.0.1` — the WireGuard tunnel address — because the
-/// enrichment pipeline does not rewrite src_ip on every close event. Country
-/// is worse: `source.geo.*` is only ever populated on the session's
-/// `cowrie.session.connect` event, never on the close.
-///
-/// So the close event is used only to resolve shasum → session, and the
-/// connect event for that session supplies both the address and the geo. A
-/// recording whose session never produced a connect event is left
-/// unattributed rather than attributed to the tunnel.
-///
-/// #1714: the connect event is not clean either — 184,212 of them carry the
-/// tunnel address too. Reducing the problem is not solving it, so the address
-/// is checked explicitly and dropped when it is the tunnel. An unattributed
-/// row renders as an em dash and is harmless; a row attributed to 10.8.0.1
-/// invites an operator to investigate, or block, our own infrastructure.
-/// The WireGuard tunnel endpoint. Whenever this appears as a cowrie src_ip it
-/// means enrichment did not rewrite the address, not that the tunnel attacked
-/// anything — treat it as no attribution at all (#1714).
-const TUNNEL_IP: &str = "10.8.0.1";
-
-async fn ttylog_attribution(
-    state: &AppState,
-    shasums: Vec<String>,
-) -> HashMap<String, (String, String, String)> {
-    if shasums.is_empty() {
-        return HashMap::new();
-    }
-    let close = state
-        .es
-        .search_index(
-            &["honeypot-v2-*"],
-            json!({
-                "size": shasums.len().min(10_000),
-                "query": {"bool": {"filter": [
-                    {"term": {"honeypot.eventid": "cowrie.log.closed"}},
-                    {"terms": {"honeypot.shasum": shasums}},
-                ]}},
-                "_source": ["honeypot.shasum", "honeypot.session"],
-            }),
-        )
-        .await;
-    let close = match close {
-        Ok(value) => value,
-        Err(error) => {
-            tracing::warn!(%error, "ttylog attribution: close-event lookup failed, importing unattributed");
-            return HashMap::new();
-        }
-    };
-    let text = |value: &Value| value.as_str().unwrap_or("").to_string();
-    // shasum -> session
-    let mut sessions: HashMap<String, String> = HashMap::new();
-    for hit in close["hits"]["hits"].as_array().into_iter().flatten() {
-        let source = &hit["_source"]["honeypot"];
-        let (shasum, session) = (text(&source["shasum"]), text(&source["session"]));
-        if !shasum.is_empty() && !session.is_empty() {
-            sessions.insert(shasum, session);
-        }
-    }
-    if sessions.is_empty() {
-        return HashMap::new();
-    }
-    let wanted: Vec<String> = {
-        let mut v: Vec<String> = sessions.values().cloned().collect();
-        v.sort();
-        v.dedup();
-        v
-    };
-    let connect = state
-        .es
-        .search_index(
-            &["honeypot-v2-*"],
-            json!({
-                "size": wanted.len().min(10_000),
-                "query": {"bool": {"filter": [
-                    {"term": {"honeypot.eventid": "cowrie.session.connect"}},
-                    {"terms": {"honeypot.session": wanted}},
-                ]}},
-                "_source": ["honeypot.session", "honeypot.src_ip", "source.geo.country_name"],
-            }),
-        )
-        .await;
-    let connect = match connect {
-        Ok(value) => value,
-        Err(error) => {
-            tracing::warn!(%error, "ttylog attribution: connect-event lookup failed, importing unattributed");
-            return HashMap::new();
-        }
-    };
-    // session -> (src_ip, country)
-    let mut origins: HashMap<String, (String, String)> = HashMap::new();
-    for hit in connect["hits"]["hits"].as_array().into_iter().flatten() {
-        let source = &hit["_source"];
-        let session = text(&source["honeypot"]["session"]);
-        if session.is_empty() {
-            continue;
-        }
-        let src_ip = text(&source["honeypot"]["src_ip"]);
-        let src_ip = if src_ip == TUNNEL_IP { String::new() } else { src_ip };
-        origins.insert(session, (src_ip, text(&source["source"]["geo"]["country_name"])));
-    }
-    sessions
-        .into_iter()
-        .filter_map(|(shasum, session)| {
-            let (src_ip, country) = origins.get(&session)?.clone();
-            Some((shasum, (session, src_ip, country)))
-        })
-        .collect()
-}
+// #1716: the per-recording attribution join that lived here is gone.
+//
+// It denormalized src_ip/country/session onto each `cowrie-ttylog-v1`
+// document so the recordings list could render them without a per-row
+// lookup. That list now pages over `cowrie.log.closed` events instead, one
+// row per session, because the ttylog index is content-addressed and cannot
+// answer "who ran this" for a document that thousands of different sessions
+// produced (#1716). Nothing reads those fields any more, so computing them
+// on every import was two Elasticsearch queries per batch for dead data.
+//
+// The documents already written keep their fields; they are simply ignored.
 
 async fn run_pass(state: &AppState, sources: &[Source], dedup: &mut HashMap<String, f64>, shard_count: u64, shard_index: u64) -> u64 {
     let mut total = 0u64;
@@ -667,21 +556,6 @@ async fn run_pass(state: &AppState, sources: &[Source], dedup: &mut HashMap<Stri
         .unwrap_or_default();
         if pending.is_empty() {
             continue;
-        }
-        let mut pending = pending;
-        // #1691: cowrie recordings get their attacker attribution joined on
-        // here, once, instead of the list view paying for it per row.
-        if source.label == "cowrie_ttylog" {
-            let shasums: Vec<String> =
-                pending.iter().filter_map(|p| p.doc["shasum"].as_str().map(str::to_string)).collect();
-            let attribution = ttylog_attribution(state, shasums).await;
-            for item in pending.iter_mut() {
-                let Some(shasum) = item.doc["shasum"].as_str() else { continue };
-                let Some((session, src_ip, country)) = attribution.get(shasum) else { continue };
-                item.doc["session"] = json!(session);
-                item.doc["src_ip"] = json!(src_ip);
-                item.doc["country"] = json!(country);
-            }
         }
         let ops: Vec<(&str, &str, Value)> = pending.iter().map(|p| (p.index, p.id.as_str(), p.doc.clone())).collect();
         let failed = match state.es.bulk_index(ops).await {
@@ -830,21 +704,6 @@ mod tests {
         let pending = scan_source(&src, &dir.0, &no_state(), 1, 0);
         assert_eq!(pending.len(), 1, "only the renamed, closed recording is indexable");
         assert_eq!(pending[0].id, closed);
-    }
-
-    #[test]
-    fn tunnel_ip_is_never_written_as_an_attacker_address() {
-        // #1714: the WireGuard endpoint appears as honeypot.src_ip on 184,212
-        // connect events, because enrichment does not always rewrite it. The
-        // recordings list renders src_ip as the attacker and links it to the
-        // per-IP profile, so writing the tunnel there invites an operator to
-        // investigate our own infrastructure. An em dash is the correct
-        // answer; the tunnel address is not.
-        assert_eq!(TUNNEL_IP, "10.8.0.1");
-        let keep = |ip: &str| if ip == TUNNEL_IP { String::new() } else { ip.to_string() };
-        assert_eq!(keep("10.8.0.1"), "", "the tunnel is dropped");
-        assert_eq!(keep("223.123.126.43"), "223.123.126.43", "a real attacker survives");
-        assert_eq!(keep(""), "", "already-absent stays absent");
     }
 
     #[test]

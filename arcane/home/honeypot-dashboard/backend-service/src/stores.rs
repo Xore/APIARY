@@ -36,6 +36,11 @@ pub struct StoreQuery {
     /// callers that never set it.
     #[serde(default)]
     pub q: Option<String>,
+    /// #1716: restrict the recordings list to one source address. The per-IP
+    /// profile has always linked here with `?ip=`; until this it was silently
+    /// ignored, because the list had no source column to filter on.
+    #[serde(default)]
+    pub ip: Option<String>,
 }
 
 fn default_size() -> u64 {
@@ -133,31 +138,85 @@ pub async fn attackers(
         .map_err(bad_gateway)
 }
 
+/// GET /api/v1/recordings — one row per *recorded session*.
+///
+/// #1716: this used to page over `cowrie-ttylog-v1`, which is content-
+/// addressed: the document `_id` is the sha256 of the recording's bytes. Bot
+/// traffic is repetitive enough that identical sessions collapse onto one
+/// document — 111,845 distinct sessions across 171 distinct recordings when
+/// measured, one of which was produced by 28,479 sessions from 8 different
+/// source IPs. Attribution columns on that list could only ever show one
+/// arbitrarily-chosen session's address as though it were the answer.
+///
+/// The Go dashboard never had this problem because recordings.html listed one
+/// row per `cowrie.log.closed` **event**, so every row genuinely had one
+/// session and one address. Same-looking table, different unit. This restores
+/// that unit.
+///
+/// Everything the list renders is native to the close event — `shasum`,
+/// `size`, `duration_ms`, `session` — so there is no join and no per-row
+/// lookup. The replay pane still keys on `shasum` against `cowrie-ttylog-v1`,
+/// which remains the right place for the bytes: many sessions, one recording.
+/// The WireGuard tunnel endpoint. Wherever this shows up as a cowrie source
+/// address it means enrichment did not rewrite it, not that the tunnel
+/// attacked anything (#1714).
+const TUNNEL_IP: &str = "10.8.0.1";
+
 pub async fn recordings(
     State(state): State<AppState>,
     Query(q): Query<StoreQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
-    // ttylog_base64 excluded from the list (multi-KB per row); the replay
-    // endpoint fetches a single doc by shasum when the pane opens.
     let size = q.size.min(100);
+    let mut filter = vec![json!({"term": {"honeypot.eventid": "cowrie.log.closed"}})];
+    if let Some(ip) = q.ip.as_deref().filter(|value| !value.is_empty()) {
+        filter.push(json!({"term": {"source.ip": ip}}));
+    }
     let body = json!({
         "from": q.offset,
         "size": size,
         "track_total_hits": true,
-        "sort": [{"imported_at": {"order": "desc", "unmapped_type": "date"}}],
-        "_source": {"excludes": ["ttylog_base64"]},
-        "query": {"match_all": {}}
+        "sort": [{"@timestamp": {"order": "desc"}}],
+        "_source": [
+            "@timestamp", "source.ip", "source.geo.country_iso_code",
+            "honeypot.session", "honeypot.shasum", "honeypot.size", "honeypot.duration_ms"
+        ],
+        "query": {"bool": {"filter": filter}}
     });
     let result = state
         .es
-        .search_index(&["cowrie-ttylog-v1"], body)
+        .search_index(&["honeypot-v2-*"], body)
         .await
         .map_err(bad_gateway)?;
     let total = result["hits"]["total"]["value"].as_u64().unwrap_or(0);
     let rows: Vec<Value> = result["hits"]["hits"]
         .as_array()
-        .map(|hits| hits.iter().map(|hit| hit["_source"].clone()).collect())
-        .unwrap_or_default();
+        .into_iter()
+        .flatten()
+        .map(|hit| {
+            let source = &hit["_source"];
+            let honeypot = &source["honeypot"];
+            // The tunnel endpoint appears here on 18% of close events, where
+            // enrichment did not rewrite the address (#1714). Rendering it as
+            // the attacker invites an operator to investigate our own
+            // infrastructure, so it is reported as no attribution at all.
+            let src_ip = match source["source"]["ip"].as_str().unwrap_or("") {
+                TUNNEL_IP | "" => "",
+                value => value,
+            };
+            json!({
+                "when": source["@timestamp"].as_str().unwrap_or(""),
+                "src_ip": src_ip,
+                // ISO alpha-2, matching every other country badge in the
+                // dashboard: the badge shows the code, lib/country.ts resolves
+                // the full name into its tooltip (#1718).
+                "country": source["source"]["geo"]["country_iso_code"].as_str().unwrap_or(""),
+                "session": honeypot["session"].as_str().unwrap_or(""),
+                "shasum": honeypot["shasum"].as_str().unwrap_or(""),
+                "size_bytes": honeypot["size"].as_u64().unwrap_or(0),
+                "duration_ms": honeypot["duration_ms"].as_u64().unwrap_or(0),
+            })
+        })
+        .collect();
     Ok(Json(json!({"total": total, "rows": rows})))
 }
 

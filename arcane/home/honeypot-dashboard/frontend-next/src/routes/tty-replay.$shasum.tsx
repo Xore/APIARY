@@ -485,7 +485,7 @@ function TtyReplay() {
               <span className="chip">{replay.frames.toLocaleString('en-US')} frames</span>
               <span className="chip">{replay.duration_seconds.toFixed(1)}s terminal time</span>
               <span className="chip">{(replay.size_bytes / 1024).toFixed(1)} KB</span>
-              <Link className="chip" to="/recordings">← all recordings</Link>
+              <Link className="chip" to="/recordings" search={{ ip: undefined }}>← all recordings</Link>
             </>
           ) : undefined
         }
