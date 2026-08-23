@@ -1,7 +1,13 @@
 //! /api/v1/source-health — per-sensor ingestion freshness + ES cluster
-//! state, the port's version of the Go source-health page's ES half. (The
-//! filebeat/log-tail half joins with the worker port #1610, which owns
-//! host-local observability.)
+//! state, the port's version of the Go source-health page's ES half, plus
+//! (#1682) the filebeat/log-tail half this module's own doc comment used
+//! to defer to #1610 — that issue's scope turned out to be ES-native
+//! worker migrations only (attacker-identity, agent-intrusion, ip-
+//! enrichment, correlator, es-results-importer, payload-inventory) and
+//! closed without ever touching Filebeat. worker.rs's filebeat_alerts
+//! already ports elastic.go's refreshFilebeat query for alerting
+//! purposes; pipeline_health below reuses the same FILEBEAT_URL /stats
+//! shape for the read-only status card source_health.html had.
 
 use axum::{extract::State, http::StatusCode, Json};
 use serde::Serialize;
@@ -78,6 +84,24 @@ pub struct IngestFreshness {
     pub recent_dead_letters: u64,
 }
 
+/// "Pipeline status" card (source_health.html:55) — Filebeat's own
+/// libbeat output-events counters via FILEBEAT_URL's /stats endpoint,
+/// plus decode failures (filebeat-* is Filebeat's own default index for
+/// lines its json.decode processor couldn't parse at all — a distinct,
+/// earlier failure layer than dead-letter-honeypot, which only holds
+/// documents ES itself rejected).
+#[derive(Serialize)]
+pub struct PipelineHealth {
+    /// "disabled" (no FILEBEAT_URL), "unreachable", an HTTP status
+    /// string, or "healthy".
+    pub state: String,
+    pub acked: i64,
+    pub failed: i64,
+    pub dropped: i64,
+    pub active: i64,
+    pub decode_failures: u64,
+}
+
 #[derive(Serialize)]
 pub struct SourceHealth {
     pub cluster_status: String,
@@ -87,6 +111,7 @@ pub struct SourceHealth {
     pub runtime: RuntimeHealth,
     pub ingest: IngestFreshness,
     pub dead_letters: u64,
+    pub pipeline: PipelineHealth,
 }
 
 /// Uptime + memory from /proc/self — zeroes off Linux or on parse failure
@@ -187,6 +212,48 @@ async fn dead_letter_counts(state: &AppState) -> (u64, u64) {
     }
 }
 
+/// filebeat-* decode-failure count (elastic.go refresh()'s
+/// FilebeatDecodeFailures — a plain doc count, no aggregation needed).
+/// ignore_unavailable makes a missing index (no Filebeat json.decode
+/// failures ever shipped) read as 0, not an error.
+async fn filebeat_decode_failures(state: &AppState) -> u64 {
+    state
+        .es
+        .search_index(&["filebeat-*"], json!({"size": 0, "track_total_hits": true}))
+        .await
+        .ok()
+        .and_then(|result| result["hits"]["total"]["value"].as_u64())
+        .unwrap_or(0)
+}
+
+async fn pipeline_health(state: &AppState) -> PipelineHealth {
+    let decode_failures = filebeat_decode_failures(state).await;
+    let url = std::env::var("FILEBEAT_URL").unwrap_or_default();
+    if url.is_empty() {
+        return PipelineHealth { state: "disabled".into(), acked: 0, failed: 0, dropped: 0, active: 0, decode_failures };
+    }
+    let stats_url = format!("{}/stats", url.trim_end_matches('/'));
+    let client = reqwest::Client::new();
+    let (fb_state, acked, failed, dropped, active) = match client.get(&stats_url).send().await {
+        Err(_) => ("unreachable".to_string(), 0, 0, 0, 0),
+        Ok(response) if !response.status().is_success() => (response.status().to_string(), 0, 0, 0, 0),
+        Ok(response) => match response.json::<serde_json::Value>().await {
+            Ok(body) => {
+                let events = &body["libbeat"]["output"]["events"];
+                (
+                    "healthy".to_string(),
+                    events["acked"].as_i64().unwrap_or(0),
+                    events["failed"].as_i64().unwrap_or(0),
+                    events["dropped"].as_i64().unwrap_or(0),
+                    events["active"].as_i64().unwrap_or(0),
+                )
+            }
+            Err(_) => (String::new(), 0, 0, 0, 0),
+        },
+    };
+    PipelineHealth { state: fb_state, acked, failed, dropped, active, decode_failures }
+}
+
 pub async fn source_health(State(state): State<AppState>) -> Result<Json<SourceHealth>, (StatusCode, String)> {
     let body = json!({
         "size": 0,
@@ -261,5 +328,6 @@ pub async fn source_health(State(state): State<AppState>) -> Result<Json<SourceH
         runtime: runtime_health(),
         ingest,
         dead_letters,
+        pipeline: pipeline_health(&state).await,
     }))
 }

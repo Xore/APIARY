@@ -39,6 +39,14 @@ type SourceHealth = {
     recent_dead_letters: number
   }
   dead_letters: number
+  pipeline: {
+    state: string
+    acked: number
+    failed: number
+    dropped: number
+    active: number
+    decode_failures: number
+  }
 }
 
 const fetchHealth = createServerFn({ method: 'GET' }).handler(async (): Promise<SourceHealth | null> => {
@@ -126,6 +134,7 @@ function SourceHealthPage() {
   const yara = health?.yara
   const runtime = health?.runtime
   const ingest = health?.ingest
+  const pipeline = health?.pipeline
   return (
     <>
       <InvestigateHeader
@@ -190,6 +199,22 @@ function SourceHealthPage() {
             <CardRow label="virtual memory" value={formatBytes(runtime?.vm_bytes ?? 0)} />
             <CardRow label="Elasticsearch cluster" value={health.cluster_status} />
             <p className="note">The Rust backend service's own process, from /proc/self — the legacy card's Go heap and goroutines have no equivalent here.</p>
+          </div>
+          <div className="card half">
+            <h2>Pipeline status</h2>
+            <CardRow label="Filebeat" value={pipeline?.state ?? 'unknown'} />
+            <CardRow label="acknowledged" value={(pipeline?.acked ?? 0).toLocaleString('en-US')} />
+            <CardRow
+              label="failed / dropped / active"
+              value={`${(pipeline?.failed ?? 0).toLocaleString('en-US')} / ${(pipeline?.dropped ?? 0).toLocaleString('en-US')} / ${(pipeline?.active ?? 0).toLocaleString('en-US')}`}
+            />
+            <CardRow label="decode failures" value={(pipeline?.decode_failures ?? 0).toLocaleString('en-US')} />
+            <p className="note">
+              Filebeat's own fallback index for log lines its json.decode processor couldn't parse at all — a distinct,
+              earlier failure layer from dead letters above, which only holds documents Elasticsearch itself rejected after
+              Filebeat successfully shipped them. Failed/dropped counters or decode-failure growth indicate a pipeline
+              error.
+            </p>
           </div>
         </div>
       ) : null}
