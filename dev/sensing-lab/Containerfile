@@ -7,7 +7,9 @@
 # on the VPS: this image exists for the development harness only.
 FROM docker.io/zeek/zeek:8.0
 
-ENV PATH="/opt/zeek/bin:${PATH}" \
+# /usr/local/zeek is where the official image installs; /opt/zeek is the
+# source-build location and does not exist here.
+ENV PATH="/usr/local/zeek/bin:${PATH}" \
     DEBIAN_FRONTEND=noninteractive
 
 # The official Zeek image ships the runtime, not a toolchain, so every package

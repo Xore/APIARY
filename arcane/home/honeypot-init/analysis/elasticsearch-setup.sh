@@ -86,14 +86,17 @@ curl -fsS -X PUT "$es_url/_ilm/policy/honeypot-30d" \
 # so this is assembled separately and substituted in below rather than
 # interpolated inline, keeping the giant Painless string free of shell
 # quoting hazards.
+# #1765: the VPS's own public address. Traefik logs the client side of a
+# connection but never the address it accepted on, so the wire tuple needs
+# this supplied. Set unconditionally -- it was originally assigned inside the
+# ES_HOME_NET branch below, which left it unbound (and fatal under set -u)
+# whenever ES_HOME_NET was not set. Empty is safe: the painless guard skips
+# the whole wire block, so Traefik records carry no wire join key rather than
+# a wrong one.
+es_public_ip="${PUBLIC_IP:-}"
+
 es_home_net_json="[]"
 if [ -n "${ES_HOME_NET:-}" ]; then
-  # #1765: the VPS's own public address. Traefik logs the client side of a
-  # connection but never the address it accepted on, so the wire tuple needs
-  # this supplied. Empty is safe -- the painless guard skips the whole wire
-  # block, so Traefik records simply carry no wire join key rather than a
-  # wrong one.
-  es_public_ip="${PUBLIC_IP:-}"
   es_home_net_json=$(printf '%s' "$ES_HOME_NET" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | grep -v '^$' | sed 's/.*/"&"/' | paste -sd, -)
   es_home_net_json="[$es_home_net_json]"
 fi

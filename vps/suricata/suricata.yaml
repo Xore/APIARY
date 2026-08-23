@@ -128,19 +128,29 @@ outputs:
 
   # ── PCAP log — full packet capture, rotated by size ──────────────────
   #
-  # #1737: Arkime now captures live from the interface itself, so this is a
-  # second full-packet writer for the same traffic. It stays enabled until
-  # that is verified, for the same reason flow/netflow do below: deleting the
-  # only working pcap source before its replacement is confirmed leaves no
-  # packets at all. Retire it after:
+  # DO NOT DISABLE. This is the ONLY source of packets for Arkime, and the
+  # coupling is invisible from both ends: nothing here mentions Arkime, and
+  # Arkime just reads a directory with no idea Suricata fills it.
   #
-  #   1. arkime-capture is running and its healthcheck passes (the mount is
-  #      the thing that fails, not the process).
-  #   2. A session captured AFTER the cutover can have its packets retrieved
-  #      in the Arkime viewer -- not merely indexed, retrieved.
-  #   3. pcap-sync has been stopped and nothing else reads this directory.
+  # The chain (#1737):
   #
-  # Then delete this whole pcap-log block and restart Suricata.
+  #   this pcap-log  ->  /opt/stacks/apiary/logs/suricata/pcap/log.pcap.*
+  #                  ->  homeserver sshfs mount of this log dir
+  #                  ->  hp-pcap-sync (copies all but the newest, still-open file)
+  #                  ->  hp-arkime-capture -R file:///opt/arkime/raw --monitor
+  #                  ->  Elasticsearch, then hp-arkime-viewer
+  #
+  # Because Suricata runs here, on the internet-facing NIC, these captures
+  # carry real attacker addresses rather than tunnel addresses. That is why
+  # capture belongs on this host and the import belongs on the other one --
+  # only the homeserver can reach the real Elasticsearch.
+  #
+  # Turning this off does not fail loudly. The viewer stays up and simply
+  # stops gaining sessions, which can go unnoticed for weeks. Any future
+  # proposal to retire Suricata (as the S5 research floated) must first move
+  # pcap capture to another writer on this NIC and confirm Arkime is still
+  # gaining sessions.
+  #
   # Files land in /var/log/suricata/pcap/ on the host.
   # The pcap/ subdir must exist before the container starts — Suricata
   # will NOT create it. If missing it falls back to the root log dir.
