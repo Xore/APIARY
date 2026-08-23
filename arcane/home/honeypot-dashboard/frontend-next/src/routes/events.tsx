@@ -58,6 +58,10 @@ export type EventFilters = {
   port?: string
   proto?: string
   kind?: string
+  /** #1783: one flow across every sensor that saw it. Reached from an event's
+   * own record, not typed by hand — it is the shared v1 hash Zeek, huginn,
+   * Suricata and portbridge each compute for the same connection. */
+  community_id?: string
   /** Captured-payload hash pivot, arrived at via a link (e.g. RevDeck's
    * "related events") — not a manual filter control in this bar. */
   shasum?: string
@@ -83,6 +87,9 @@ export type EventFilters = {
 }
 
 const PIVOT_KEYS = [
+  // #1783: one flow across every sensor. Base64, so it must survive URL
+  // encoding intact -- an unencoded '+' becomes a space and matches nothing.
+  'community_id',
   'shasum',
   'session',
   'persona',
@@ -155,23 +162,55 @@ function isPlaceholderHost(base: string): boolean {
   }
 }
 
+// #1783: the flow key, when the record carries one.
+//
+// Every sensor added by #1742 writes network.community_id, and it agrees
+// across Zeek, huginn, Suricata and portbridge because all four compute the
+// same v1 hash of the same 5-tuple. It is a far sharper pivot than the source
+// address: a scanner opens thousands of connections, and `ip == x` answers
+// "what else did this host do", never "what happened on this connection".
+//
+// Read off the full ECS record rather than a dedicated column -- events.rs
+// already returns it there, deliberately, for exactly this use.
+function flowKey(row: EventRow): string | undefined {
+  const network = (row.record as Record<string, unknown> | undefined)?.network
+  if (!network || typeof network !== 'object') return undefined
+  const id = (network as Record<string, unknown>).community_id
+  return typeof id === 'string' && id.length > 0 ? id : undefined
+}
+
 function investigationLinks(row: EventRow, config: InvestigationConfig): { kibana?: string; evebox?: string; arkime?: string } {
   const ip = row.src_ip
-  if (!ip) return {}
+  const flow = flowKey(row)
+  // Neither key means nothing worth linking to.
+  if (!ip && !flow) return {}
   const links: { kibana?: string; evebox?: string; arkime?: string } = {}
+
+  // Community ID is base64 and contains '+', '/' and '='. Every one of these
+  // goes through encodeURIComponent already, which matters more than usual
+  // here: an unencoded '+' is read as a space by the receiving app, so the
+  // link would resolve to a valid-looking search that quietly matches nothing.
   if (config.evebox && !isPlaceholderHost(config.evebox)) {
-    links.evebox = `${config.evebox.replace(/\/+$/, '')}/#/inbox?q=${encodeURIComponent(ip)}`
+    // EveBox searches Suricata's own documents, which carry community_id.
+    const q = flow ? `community_id:"${flow}"` : ip
+    links.evebox = `${config.evebox.replace(/\/+$/, '')}/#/inbox?q=${encodeURIComponent(q)}`
   }
   if (config.kibana && !isPlaceholderHost(config.kibana)) {
     const when = new Date(row.time)
     const from = new Date(when.getTime() - 5 * 60_000).toISOString()
     const to = new Date(when.getTime() + 5 * 60_000).toISOString()
     const g = encodeURIComponent(`(time:(from:'${from}',to:'${to}'))`)
-    const a = encodeURIComponent(`(query:(language:kuery,query:'${ip}'))`)
+    // Quote the value: a bare community_id contains characters KQL treats as
+    // syntax. The IP fallback stays unquoted, matching prior behaviour.
+    const query = flow ? `network.community_id:"${flow}"` : ip
+    const a = encodeURIComponent(`(query:(language:kuery,query:'${query}'))`)
     links.kibana = `${config.kibana.replace(/\/+$/, '')}/app/discover#/?_g=${g}&_a=${a}`
   }
   if (config.arkime && !isPlaceholderHost(config.arkime)) {
-    links.arkime = `${config.arkime.replace(/\/+$/, '')}/sessions?date=-1&expression=${encodeURIComponent(`ip == ${ip}`)}`
+    // Arkime indexes Community ID natively, so this retrieves the packets for
+    // this one flow rather than every session the address ever opened.
+    const expression = flow ? `communityId == "${flow}"` : `ip == ${ip}`
+    links.arkime = `${config.arkime.replace(/\/+$/, '')}/sessions?date=-1&expression=${encodeURIComponent(expression)}`
   }
   return links
 }
