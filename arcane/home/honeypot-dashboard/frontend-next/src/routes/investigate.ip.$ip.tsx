@@ -48,6 +48,11 @@ type IpProfile = {
   commands: Kv[]
   sessions: Kv[]
   techniques: Technique[]
+  /** #1689: this address was both carried by an analysed sample (floss
+   * decoded a reference to it) and reached by a sandbox detonation of that
+   * same sample. Advisory context only — the manual block action is
+   * deliberately not gated on it. */
+  confirmed_malicious: boolean
   payloads: Kv[]
   alerts: Kv[]
   fingerprints: Kv[]
@@ -313,6 +318,17 @@ function InvestigateIp() {
           profile ? (
             <>
               <span className="chip">{profile.total.toLocaleString('en-US')} events</span>
+              {/* #1689: only rendered when true. An absent badge means "no
+                  such corroboration", not "benign" — most addresses here are
+                  hostile and simply never appeared in an analysed sample. */}
+              {profile.confirmed_malicious ? (
+                <span
+                  className="badge badge--danger"
+                  title="A sandbox detonation of a sample that references this address actually connected to it — two independent pipelines agree. Informational: the block action is not gated on this."
+                >
+                  confirmed malicious (sandbox)
+                </span>
+              ) : null}
               {profile.country ? <span className="badge badge--info">{profile.country}</span> : null}
               {profile.asn ? <span className="chip">{profile.asn}</span> : null}
               <span className="chip">
