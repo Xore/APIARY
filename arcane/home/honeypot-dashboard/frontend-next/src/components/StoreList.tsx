@@ -25,6 +25,7 @@ export function StoreListPage<Row = StoreRow>({
   layout,
   gridId,
   cardHref,
+  emptyState,
 }: {
   fetchPage: (input: { data: { offset: number } }) => Promise<StorePage<Row> | null>
   label: string
@@ -49,6 +50,10 @@ export function StoreListPage<Row = StoreRow>({
    * page instead of opening the inspector. See MasterDetailTable's own
    * doc comment. */
   cardHref?: (row: Row) => string | undefined
+  /** Rendered instead of the table once the first page has loaded and
+   * came back with zero rows — a template gallery / call-to-action
+   * instead of a bare empty table (#1575's empty-state pattern). */
+  emptyState?: React.ReactNode
 }) {
   const [rows, setRows] = useState<Row[] | null>(null)
   const [total, setTotal] = useState(0)
@@ -92,19 +97,23 @@ export function StoreListPage<Row = StoreRow>({
         }
       />
       {beforeTable}
-      <MasterDetailTable
-        rows={rows}
-        columns={columns}
-        rowKey={rowKey}
-        total={total}
-        onViewMore={viewMore}
-        loadingMore={loadingMore}
-        inspectorTitle={inspectorTitle}
-        inspectorExtra={inspectorExtra}
-        layout={layout}
-        gridId={gridId}
-        cardHref={cardHref}
-      />
+      {emptyState && rows !== null && rows.length === 0 ? (
+        emptyState
+      ) : (
+        <MasterDetailTable
+          rows={rows}
+          columns={columns}
+          rowKey={rowKey}
+          total={total}
+          onViewMore={viewMore}
+          loadingMore={loadingMore}
+          inspectorTitle={inspectorTitle}
+          inspectorExtra={inspectorExtra}
+          layout={layout}
+          gridId={gridId}
+          cardHref={cardHref}
+        />
+      )}
     </>
   )
 }

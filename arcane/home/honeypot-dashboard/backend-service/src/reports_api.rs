@@ -116,6 +116,16 @@ pub async fn delete_definition(
     Ok(Json(json!({"deleted": id})))
 }
 
+pub async fn delete_generated(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    reports_store::delete_generated(&state, &id)
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))?;
+    Ok(Json(json!({"deleted": id})))
+}
+
 fn map_store_error(message: String) -> (StatusCode, String) {
     if message.contains("no report definition with this id") {
         (StatusCode::NOT_FOUND, message)
