@@ -159,6 +159,41 @@ services:
           cpus: "0.5"
           memory: 128M
 
+  # #1742/S5: Zeek, the depth engine. Sniffs the same public interface
+  # Suricata does, via AF_PACKET fanout so neither steals packets from the
+  # other -- they are complementary, not alternatives (#1727 §0).
+  #
+  # Measured in dev/sensing-lab over 199 MB of this interface's real traffic:
+  # 21 log types and 14 285 connections, with community_id on 100% of them,
+  # ja4t on 88.7%, hassh on 98.6% of SSH, and -- against an ICS-filtered
+  # sample -- 74 267 modbus_detailed transaction records where Suricata
+  # produces a single alert row.
+  zeek:
+    build: ./zeek
+    image: xore-zeek:local
+    container_name: hp-zeek
+    restart: unless-stopped
+    network_mode: host
+    read_only: false          # Zeek writes its logs and state under /logs/zeek
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [NET_RAW, NET_ADMIN]
+    command:
+      - -i
+      - af_packet::${CAPTURE_INTERFACE:-ens6}
+      - /usr/local/share/zeek-site/local.zeek
+    volumes:
+      - /opt/stacks/apiary/logs/zeek:/logs/zeek
+    deploy:
+      resources:
+        limits:
+          # The VPS has 2 cores and Suricata already runs here. Zeek gets one
+          # of them; if it drops packets under load the fix is a fanout worker
+          # count, not an unbounded limit on a box that also fronts every
+          # honeypot.
+          cpus: "1.0"
+          memory: 1G
+
   # #1742/S5: per-flow fingerprinting sidecar. Sniffs the same public
   # interface Suricata and Zeek do -- passively, so it sees blackholed
   # scanners that never reach portbridge, which an inline fingerprinter
