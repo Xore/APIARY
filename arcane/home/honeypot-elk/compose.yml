@@ -370,9 +370,39 @@ services:
             [ -e "/dst/$$n" ] && continue
             cp -p "$$f" "/dst/$$n"
           done
-          find /dst -type f -name 'log.pcap.*' -mtime +50 -delete
+          # Retention: an age ceiling, then a size ceiling that actually
+          # binds. #1737 -- what looked like a 14-day policy was really "the
+          # store has only existed for 14 days": at ~13 GB/day the old
+          # -mtime +50 rule would not have deleted anything until the store
+          # reached roughly 650 GB, against 780 GB free. It was a limit that
+          # had never once fired.
+          #
+          # Age first, because it is what an operator reasons about. Size
+          # second, because it is what the disk enforces: a traffic spike is
+          # exactly when a day-based rule overruns, and exactly when the
+          # packets matter most, so the guard has to be the thing that cannot
+          # be outrun.
+          find /dst -type f -name 'log.pcap.*' -mtime "+$${PCAP_RETENTION_DAYS:-14}" -delete
+          # Oldest-first until under the cap. du -k for busybox portability;
+          # the loop deletes one file per pass rather than a batch so it can
+          # never overshoot into deleting a store it has already trimmed.
+          cap_kb=$$(( $${PCAP_MAX_GB:-200} * 1024 * 1024 ))
+          while [ "$$(du -sk /dst 2>/dev/null | cut -f1)" -gt "$$cap_kb" ]; do
+            oldest=$$(ls -tr /dst 2>/dev/null | head -1)
+            [ -n "$$oldest" ] || break
+            rm -f "/dst/$$oldest" || break
+          done
           sleep 30
         done
+    environment:
+      # #1737: stated retention, rather than whatever the disk happens to
+      # allow. 14 days matches what this deployment already sustains
+      # (~13 GB/day, measured), so nothing changes in practice -- it just
+      # stops being a coincidence. PCAP_MAX_GB is the ceiling that binds
+      # under a spike; keep it comfortably below free space, since Arkime's
+      # own freeSpaceG only protects Arkime's copy, not this staging store.
+      - PCAP_RETENTION_DAYS=${PCAP_RETENTION_DAYS:-14}
+      - PCAP_MAX_GB=${PCAP_MAX_GB:-200}
     volumes:
       - /opt/stacks/apiary/logs/suricata/pcap:/src:ro
       - /opt/stacks/apiary/logs/arkime-raw:/dst
