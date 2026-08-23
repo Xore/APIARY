@@ -17,16 +17,18 @@ close event resolves shasum -> session only, and the connect event for that
 session supplies the address and the geo. A recording whose session left no
 connect event stays unattributed rather than being attributed to the tunnel.
 
-Run on the homeserver, where Elasticsearch is reachable:
+Elasticsearch has no host-published port (arcane/home/honeypot-elk/
+compose.yml), so it is only reachable by name from inside the honeynet
+network -- `curl http://localhost:9200` from the host has never worked.
+Run this the way scripts/reset-logs.sh reaches ES, from a throwaway
+container joined to that network:
 
-    scripts/backfill-ttylog-attribution.py --dry-run     # report, change nothing
-    scripts/backfill-ttylog-attribution.py               # backfill
-    scripts/backfill-ttylog-attribution.py --all         # also re-do already-filled docs
-    scripts/backfill-ttylog-attribution.py --purge-temp-names   # delete #1696 phantoms
+    docker run --rm --network honeynet -v "$PWD/scripts:/s:ro" \
+      python:3-alpine python /s/backfill-ttylog-attribution.py --dry-run
 
 Env:
-    ES_URL      Elasticsearch base URL (default: http://localhost:9200)
-    BATCH       shasums per round trip (default: 500)
+    ES_URL   Elasticsearch base URL (default: http://elasticsearch:9200)
+    BATCH    shasums per round trip (default: 500)
 
 Idempotent: re-running only touches documents that are still missing
 attribution, unless --all is passed.
@@ -49,7 +51,7 @@ import sys
 import urllib.error
 import urllib.request
 
-ES_URL = os.environ.get("ES_URL", "http://localhost:9200").rstrip("/")
+ES_URL = os.environ.get("ES_URL", "http://elasticsearch:9200").rstrip("/")
 BATCH = int(os.environ.get("BATCH", "500"))
 TTYLOG_INDEX = "cowrie-ttylog-v1"
 EVENTS_INDEX = "honeypot-v2-*"

@@ -26,14 +26,17 @@ because it read Go source; this one needs a populated Elasticsearch, which CI
 does not have. `.github/workflows/quality.yml`'s step was removed rather than
 left disabled, with that reasoning recorded in #1665.
 
-Usage, on the homeserver where Elasticsearch is reachable:
+Elasticsearch has no host-published port (arcane/home/honeypot-elk/
+compose.yml), so it is only reachable by name from inside the honeynet
+network -- `curl http://localhost:9200` from the host has never worked.
+Run this the way scripts/reset-logs.sh reaches ES, from a throwaway
+container joined to that network:
 
-    scripts/audit-sensor-event-coverage.py
-    scripts/audit-sensor-event-coverage.py --since 7d --min-events 100
-    scripts/audit-sensor-event-coverage.py --fail-under 50
+    docker run --rm --network honeynet -v "$PWD/scripts:/s:ro" \
+      python:3-alpine python /s/audit-sensor-event-coverage.py --since 7d --min-events 100
 
 Env:
-    ES_URL   Elasticsearch base URL (default: http://localhost:9200)
+    ES_URL   Elasticsearch base URL (default: http://elasticsearch:9200)
 """
 
 from __future__ import annotations
@@ -45,7 +48,7 @@ import sys
 import urllib.error
 import urllib.request
 
-ES_URL = os.environ.get("ES_URL", "http://localhost:9200").rstrip("/")
+ES_URL = os.environ.get("ES_URL", "http://elasticsearch:9200").rstrip("/")
 INDEX = "honeypot-v2-*"
 
 
