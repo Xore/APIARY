@@ -1,6 +1,35 @@
 #!/bin/sh
 set -eu
 
+# backup-honeypot.sh — on-host snapshot of the state needed to bring the stack
+# back, taken on the homeserver itself.
+#
+# Scope, deliberately narrow: configuration, secrets and small config-bearing
+# volumes. NOT Elasticsearch data, NOT captured payloads or malware, NOT PCAP,
+# NOT sandbox images. A stack restored from this comes back configured and
+# authenticated with an empty event history, which is the intended trade.
+#
+# Why the Elasticsearch snapshot that used to live here is gone:
+#
+#  1. It was the "es store data" this backup is explicitly not meant to hold.
+#     The honeypot-fs repository it wrote into had itself grown to 14 GB.
+#  2. It had never once succeeded. Every scheduled run since the timer was
+#     installed on 2026-08-16 died on `curl: (22) ... error: 400` from the
+#     snapshot API, and because that call sits under `set -e`, the run aborted
+#     right there -- so the volume archives below never ran either, and
+#     neither did retention. Seven consecutive days of "backups" contained a
+#     single config tarball, an empty volumes/ directory and a zero-byte
+#     elasticsearch-snapshot.json, with the service sitting in `failed`.
+#
+# Dropping it fixes both at once. Whoever wants Elasticsearch data preserved
+# should take a real ES snapshot on its own schedule, with its own retention,
+# rather than coupling it to the config backup -- the coupling is what made a
+# broken snapshot silently take the config backup down with it.
+#
+# The off-host copy of this same material is scripts/backup-essentials.sh,
+# which runs on the workstation and fans out to three locations. This script
+# is the on-host, same-disk copy: faster to reach, useless if the box dies.
+
 stack_dir=${STACK_DIR:-/opt/stacks/apiary}
 backup_root=${BACKUP_ROOT:-/opt/backups/honeypot}
 retention_days=${RETENTION_DAYS:-14}
@@ -12,79 +41,82 @@ chmod 700 "$destination"
 cd "$stack_dir"
 docker compose -f compose.yml config -q
 
-# Config/state archive excludes event logs, PCAP, Elasticsearch data, captured
-# malware and generated databases. Those have dedicated retention/snapshot paths.
+# Config/state archive. Excludes event logs, PCAP, Elasticsearch data, captured
+# malware and generated databases.
 set -- ./compose.yml
 for candidate in ./.env ./README.md ./analysis ./dashboard ./personas ./state; do
   [ ! -e "$candidate" ] || set -- "$@" "$candidate"
 done
-# --exclude='./state/elasticsearch-snapshots' (#1413): this is the `fs`
-# repository's own live-managed blob storage, the exact data the ES
-# snapshot API call below already properly backs up -- confirmed live this
-# was never just redundant but actively unsafe: ES's own post-delete
-# repository cleanup was concurrently mutating files under here while tar
-# read it, aborting the whole run under `set -e` ("file removed before we
-# read it" / "file changed as we read it"). Snapshotting through the API is
-# already the point-in-time-correct backup; tar-ing the raw directory
-# underneath it too was never needed.
+# --exclude='./state/elasticsearch-snapshots' (#1413): the `fs` repository's
+# own live blob storage. ES's post-delete repository cleanup mutates files
+# under here concurrently, which aborted the whole run under `set -e` ("file
+# removed before we read it"). It is bulk ES data besides, so it stays
+# excluded now that nothing snapshots into it from this script at all.
 tar -czf "$destination/stack-config-state.tar.gz" \
   --exclude='./logs' --exclude='./analysis/geoip/*.mmdb' \
   --exclude='./analysis/threat-intel/*.csv' \
   --exclude='./state/elasticsearch-snapshots' \
   "$@"
 
-# Use Elasticsearch's supported snapshot API instead of copying a live data dir.
-# Index patterns must track every template analysis/elasticsearch-setup.sh
-# declares (es-data itself is covered by this snapshot too, so it does not
-# also need a volume backup below).
-#
-# ignore_unavailable:true (#1413): several of these indices are only ever
-# created by a producer that's disabled by default (github-analysis-v1's
-# publisher, e.g. -- see analysis/github/install-github-publisher.sh's own
-# GITHUB_PUBLISH_ENABLED=0 default). Confirmed live: without this flag, the
-# snapshot request 400s outright the moment ANY named index doesn't exist
-# yet, which on a real cluster is the common case, not an edge case -- this
-# is the second of two real reasons this script had never actually
-# completed a run, on top of never being scheduled at all.
-snapshot="honeypot-$stamp"
-docker exec hp-elasticsearch curl -fsS -X PUT "http://localhost:9200/_snapshot/honeypot-fs/$snapshot?wait_for_completion=true" \
-  -H 'Content-Type: application/json' --data-binary '{"indices":"honeypot-v2-*,suricata-*,portbridge-v2-*,dionaea-incidents-v1-*,ghidra-analysis-v1,sandbox-analysis-v1,github-analysis-v1,workbench-runs-v1,ghidra-report-artifacts-v1,sandbox-export-artifacts-v1,dashboard-alert-state-v1,dashboard-static-analysis-v1,dashboard-payload-inventory-v1,dashboard-generated-reports-v1,cowrie-ttylog-v1,dashboard-workbench-runs-v1,dashboard-workbench-recipes-v1,dead-letter-honeypot*","ignore_unavailable":true,"include_global_state":false}' \
-  >"$destination/elasticsearch-snapshot.json"
+# The Keycloak identity database: the realm, its clients, their secrets and
+# every user account. A pg_dump rather than a tar of the live 88 MB PGDATA --
+# that directory is only consistent with the server stopped, and a dump
+# restores into any later Postgres rather than pinning a rebuild to 18.6.
+if docker inspect hp-keycloak-postgres >/dev/null 2>&1; then
+  if docker exec hp-keycloak-postgres \
+       pg_dump -U keycloak -d keycloak --clean --if-exists 2>/dev/null \
+       | gzip -9 > "$destination/keycloak.sql.gz"; then
+    :
+  else
+    rm -f "$destination/keycloak.sql.gz"
+    echo "backup-honeypot: keycloak pg_dump failed" >&2
+  fi
+fi
 
-# Back up shared named volumes (explicit `name:` overrides in the compose
-# files, not project-scoped auto-named ones) -- these are the ones another
-# stack depends on reading/writing across stack boundaries, so they can't be
-# recreated from a single stack's own state. es-data is excluded: it's
-# covered by the Elasticsearch snapshot above, not a tar archive. Listed
-# directly by name rather than filtered by compose-project label: since
-# #258 split the stack, no single project label covers them any more (each
-# is owned by whichever stack first declares it non-external, and several
-# are `external: true` volumes created directly by
-# scripts/install-homeserver.sh, which never get any compose-project label
-# at all). Archives are inert data; restoring is intentionally a separate,
-# stopped-stack procedure documented in RECOVERY.md.
-for volume in dionaea-lib yara-results reporter-data dashboard-state snare-pages; do
+# Small config-bearing named volumes only.
+#
+# Removed from this list, with the sizes that motivated it (measured live
+# 2026-08-23): dionaea-lib (90 GB of captured malware samples), reporter-data
+# (2.8 GB of generated reports), yara-results (scan output, derived from
+# payloads) and snare-pages (a cloned site, re-clonable). None of them are
+# needed to bring the stack up, and dionaea-lib alone would have made this
+# archive unusable as a routine daily job.
+#
+# es-data was never in this list and still is not: it is the Elasticsearch
+# store.
+for volume in dashboard-state honeypot-arcane_arcane-data honeypot-elk_evebox-config \
+              honeypot-canarytokens_canarytokens-redis-data \
+              honeypot-dashboard_es-importer-state; do
   docker volume inspect "$volume" >/dev/null 2>&1 || continue
   safe=$(printf '%s' "$volume" | tr -c 'A-Za-z0-9._-' '_')
   docker run --rm --network none -v "$volume:/source:ro" -v "$destination/volumes:/backup" busybox:1.36 \
     tar -C /source -czf "/backup/$safe.tar.gz" .
 done
 
-(cd "$destination" && sha256sum stack-config-state.tar.gz elasticsearch-snapshot.json volumes/*.tar.gz >SHA256SUMS 2>/dev/null || sha256sum stack-config-state.tar.gz elasticsearch-snapshot.json >SHA256SUMS)
+# Checksum whatever actually got produced -- keycloak.sql.gz is absent if the
+# Keycloak stack is not running, and volumes/ is empty if none of the named
+# volumes exist yet, so neither can be assumed into the argument list.
+(
+  cd "$destination"
+  set -- stack-config-state.tar.gz
+  [ -f keycloak.sql.gz ] && set -- "$@" keycloak.sql.gz
+  for archive in volumes/*.tar.gz; do
+    [ -e "$archive" ] && set -- "$@" "$archive"
+  done
+  sha256sum "$@" >SHA256SUMS
+)
 chmod -R go-rwx "$destination"
 echo "$destination"
 
-# Retention: prune both the local archive directories and the ES snapshots
-# older than $retention_days -- #1413 found the original script never
-# pruned anything at all, so BACKUP_ROOT and the honeypot-fs repository
-# would have grown without bound. Directory names are the UTC timestamp
-# stamp itself, all the same fixed width (%Y%m%dT%H%M%SZ) -- stripped of
-# its non-digit T/Z separators that's a plain 14-digit number, safe to
-# compare with -lt. Deliberately not `[ "$a" \< "$b" ]`: this script is
-# #!/bin/sh, and on this fleet that's dash (confirmed: `readlink -f
-# /bin/sh` -> /usr/bin/dash), whose test/[ builtin has no </> string
-# operators at all -- that's a bash-only extension and would have failed
-# every single run.
+# Retention: prune archive directories older than $retention_days. #1413 found
+# the original script never pruned at all; it then never got the chance to,
+# since every run aborted before reaching this point. Directory names are the
+# UTC stamp itself, all the same fixed width (%Y%m%dT%H%M%SZ) -- stripped of
+# its T/Z separators that is a plain 14-digit number, safe to compare with -lt.
+# Deliberately not `[ "$a" \< "$b" ]`: this script is #!/bin/sh, and on this
+# fleet that is dash (`readlink -f /bin/sh` -> /usr/bin/dash), whose test
+# builtin has no </> string operators at all -- a bash-only extension that
+# would have failed every run.
 cutoff=$(date -u -d "-${retention_days} days" +%Y%m%dT%H%M%SZ 2>/dev/null || date -u -v-"${retention_days}"d +%Y%m%dT%H%M%SZ)
 cutoff_n=$(echo "$cutoff" | tr -d 'TZ')
 for old in "$backup_root"/*/; do
@@ -94,11 +126,3 @@ for old in "$backup_root"/*/; do
   [ "$old_n" -lt "$cutoff_n" ] || continue
   rm -rf "$old"
 done
-
-docker exec hp-elasticsearch curl -fsS "http://localhost:9200/_snapshot/honeypot-fs/_all" \
-  | grep -o '"honeypot-[0-9TZ]*"' | tr -d '"' | while read -r name; do
-    snap_n=$(echo "${name#honeypot-}" | tr -d 'TZ')
-    case $snap_n in ''|*[!0-9]*) continue ;; esac
-    [ "$snap_n" -lt "$cutoff_n" ] || continue
-    docker exec hp-elasticsearch curl -fsS -X DELETE "http://localhost:9200/_snapshot/honeypot-fs/$name" >/dev/null
-  done

@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily APIARY essentials backup
+
+[Timer]
+OnCalendar=daily
+# Persistent so a run missed while the workstation was off fires at the next
+# boot instead of being skipped -- this is a workstation, not a server, and it
+# is routinely powered down overnight.
+Persistent=true
+RandomizedDelaySec=30m
+
+[Install]
+WantedBy=timers.target

@@ -33,9 +33,15 @@ Dockge's symlinks used to point at), same as every script it composes.
 Every destructive step is opt-in and requires `--apply`, matching this
 repo's own git-safety conventions (never a blind `--hard`/`-f` by default).
 Run with no flags and it only takes a backup -- `analysis/backup-honeypot.sh`
-runs against the *live* stack (Elasticsearch's own snapshot API, no stack
-downtime needed), so a routine "get me a snapshot" run never has to stop
-anything.
+runs against the *live* stack with no downtime needed, so a routine "get me a
+snapshot" run never has to stop anything.
+
+Be clear about what that backup does and does not hold before relying on it
+ahead of a `--wipe`: it captures configuration, secrets, the Keycloak identity
+database and small config-bearing volumes, and deliberately **not**
+Elasticsearch data, captured payloads, PCAP or sandbox images. A `--wipe`
+followed by a restore brings the stack back configured and authenticated with
+an empty event history. See [`BACKUP-ESSENTIALS.md`](BACKUP-ESSENTIALS.md).
 
 ```bash
 sudo ./factory-reset.sh                          # backup only, nothing else touched
@@ -46,7 +52,7 @@ sudo ./factory-reset.sh --apply --wipe --no-restart   # backup, stop, wipe, leav
 
 | Flag | Effect |
 | --- | --- |
-| *(none)* | Back up via `analysis/backup-honeypot.sh`. Nothing is stopped. |
+| *(none)* | Back up via `analysis/backup-honeypot.sh` (config/secrets/identity only, not ES data). Nothing is stopped. |
 | `--apply --wipe` | Also stop every stack and wipe state -- sensor logs via `scripts/reset-logs.sh all` (per-sensor ownership already worked out there, see its own header for why), Filebeat's registry, the dedupe cache, init-markers, and every named Docker volume `docs/STACK-REBUILD.md` documents as wiped (`es-data`, `dionaea-lib`, `dashboard-state`, `yara-results`, `evebox-config`, `arkime-pcap`, `snare-pages`, `reporter-data`) -- all **after** the backup step already ran. |
 | `--apply --git-ref <ref>` | Also `git fetch` and `git reset --hard <ref>` against `/opt/stacks/apiary` -- never a bare `--hard` against whatever `HEAD` happens to be. |
 | `--no-restart` | Leave every stack stopped instead of starting it back up at the end. |
