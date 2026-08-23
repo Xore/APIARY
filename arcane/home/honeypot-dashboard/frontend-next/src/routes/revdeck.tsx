@@ -5,6 +5,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { StoreListPage, str, when, type StorePage, type StoreRow } from '../components/StoreList'
 import type { Column } from '../components/Investigate'
 import { pathString } from '../lib/json'
+import { CodeIcon } from '../components/CardIcons'
 
 const fetchPage = createServerFn({ method: 'GET' })
   .inputValidator((input: { offset: number }) => input)
@@ -33,7 +34,9 @@ const COLUMNS: Column<StoreRow>[] = [
       return sha ? <code>{sha.slice(0, 16)}</code> : <span className="tw:text-muted">no source hash</span>
     },
   },
-  { header: 'exit', render: (row) => <span className="badge badge--muted">{str(row, 'exit_status')}</span> },
+  // Promoted into the card's badge row (detail-only, so the card does
+  // not show the same badge twice).
+  { header: 'exit', detail: true, render: (row) => <span className="badge badge--muted">{str(row, 'exit_status')}</span> },
   {
     header: 'record',
     detail: true,
@@ -54,7 +57,16 @@ function Page() {
       rowKey={(_, index) => String(index)}
       inspectorTitle="RevDeck run"
       chipNoun="runs"
+      emptyState={{
+        title: 'No Rev·Deck runs match this view',
+        hint: 'Submit one from the analysis workbench to see its tool-calling triage here.',
+      }}
       layout="cards"
+      cardIcon={() => CodeIcon}
+      cardBadges={(row) => {
+        const exit = str(row, 'exit_status')
+        return exit ? <span className={exit === 'error' ? 'badge badge--muted tw:text-red' : 'badge badge--muted'}>{exit}</span> : null
+      }}
       cardHref={(row) => {
         const sha = revdeckSha(row)
         return sha ? `/revdeck/${encodeURIComponent(sha)}` : undefined

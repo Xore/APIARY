@@ -12,6 +12,7 @@ import { confirmAction } from '../components/ConfirmDialog'
 import { EChart } from '../components/EChart'
 import { FiltersButton, FiltersModal } from '../components/FiltersModal'
 import { formatTimestamp } from '../lib/time'
+import { countryName } from '../lib/country'
 
 type AckRecord = { Acknowledged: boolean; AckedBy?: string; AckedAt?: string }
 
@@ -246,7 +247,7 @@ function buildColumns(acks: Record<string, AckRecord>): Column<StoreRow>[] {
             <Link to="/events" search={{ ip: str(row, 'src_ip') }}>
               {str(row, 'src_ip')}
             </Link>
-            {str(row, 'src_country') ? <> <span className="badge badge--info">{str(row, 'src_country')}</span></> : null}
+            {str(row, 'src_country') ? <> <span className="badge badge--info" title={countryName(str(row, 'src_country'))}>{str(row, 'src_country')}</span></> : null}
           </>
         ) : (
           <span className="tw:text-muted">unattributed</span>
@@ -479,6 +480,10 @@ function Page() {
         rows={filtered}
         columns={columns}
         rowKey={(row, index) => `${str(row, 'source_event_id')}-${index}`}
+        emptyState={{
+          title: 'No anomalies scored above the alert threshold yet',
+          hint: 'ml-worker scores every event; only those past the threshold are listed here.',
+        }}
         total={total}
         onViewMore={viewMore}
         loadingMore={loadingMore}

@@ -211,6 +211,10 @@ function Page() {
       rowKey={(row, index) => `${str(row, 'id')}-${index}`}
       inspectorTitle="Report details"
       chipNoun="reports"
+      emptyState={{
+        title: 'No problem reports submitted yet',
+        hint: 'Reports raised from the dashboard are collected here with their full context.',
+      }}
       inspectorExtra={(row) => (
         <>
           <StatusControl row={row} onChanged={() => setRefreshKey((key) => key + 1)} />

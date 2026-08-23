@@ -6,6 +6,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { ReportIcon } from '../components/CardIcons'
 import { getSessionUser } from '../lib/auth'
 import { pathString, type JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
@@ -1295,9 +1296,18 @@ function Reports() {
           rows={generated ? generated.rows : null}
           columns={buildGeneratedColumns(setViewingReport, (row) => void removeGenerated(row), deletingId)}
           rowKey={(row, index) => `${str(row, 'id')}-${index}`}
+          emptyState={{
+            title: 'No reports generated yet',
+            hint: 'Build one above and it will be listed here with its download links.',
+          }}
           inspectorTitle="Report details"
           layout="cards"
           gridId="hp-rp-generated"
+          cardIcon={() => ReportIcon}
+          cardBadges={(row) => {
+            const format = str(row, 'format') || str(row, 'kind')
+            return format ? <span className="badge badge--muted">{format}</span> : null
+          }}
         />
       </div>
       {viewingReport ? (

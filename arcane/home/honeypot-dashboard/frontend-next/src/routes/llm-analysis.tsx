@@ -171,6 +171,10 @@ function Page() {
       rowKey={(row, index) => `${str(row, 'analysis_id')}-${index}`}
       inspectorTitle="Analysis details"
       chipNoun="analyses"
+      emptyState={{
+        title: 'No LLM analysis documents yet',
+        hint: 'llm-worker writes one per analysed event batch.',
+      }}
       layout="cards"
       />
     </>

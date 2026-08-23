@@ -77,6 +77,11 @@ function Commands() {
         rows={rows}
         columns={COLUMNS}
         rowKey={(row, index) => `${row.time}-${index}`}
+        detailHref={(row) => (row.src_ip ? `/investigate/ip/${encodeURIComponent(row.src_ip)}` : undefined)}
+        emptyState={{
+          title: 'No commands captured yet',
+          hint: 'Cowrie records these as attackers type in a shell session.',
+        }}
         total={total}
         onViewMore={viewMore}
         loadingMore={loadingMore}

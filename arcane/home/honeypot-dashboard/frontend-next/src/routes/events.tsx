@@ -10,6 +10,7 @@ import { copyWithFlash } from '../lib/flash'
 import { subscribeLiveEvents, useLiveState } from '../lib/live'
 import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
+import { countryName } from '../lib/country'
 
 /** Detail-pane pivot groups, extracted server-side (events.rs) so this
  * page never re-derives per-sensor field naming. Empty string = absent. */
@@ -470,7 +471,7 @@ function Events() {
       <div className={open ? 'hp-md hp-md--active hp-md--open wide' : 'hp-md hp-md--active wide'} id="events-grid">
         <div className="hp-md__list" ref={listRef}>
           <div className="card wide">
-            <table className="recent data-table">
+            <table className="recent data-table data-table--responsive">
               <thead>
                 <tr>
                   <th>time</th>
@@ -546,20 +547,33 @@ function Events() {
               </button>
               <h2>Normalized event</h2>
               <p className="note">Complete read-only record as stored by the pipeline.</p>
+              {/* These two pages render an event's context far more fully
+                  than the inspector's own record dump. They were here as
+                  inline `.lnk` text and read as footnotes; as buttons they
+                  are findable, which is the whole point of the pane. The
+                  address and session id stay in the tooltips (and in the
+                  table column and EventMeta below) so nothing is lost. */}
               {rows[selected].src_ip || rows[selected].session ? (
-                <p className="note">
+                <div className="tw:flex tw:flex-wrap tw:gap-2 tw:mb-3">
                   {rows[selected].src_ip ? (
-                    <a className="lnk" href={`/investigate/ip/${encodeURIComponent(rows[selected].src_ip)}`}>
-                      attacker profile for {rows[selected].src_ip}
+                    <a
+                      className="btn btn-sm btn-secondary"
+                      href={`/investigate/ip/${encodeURIComponent(rows[selected].src_ip)}`}
+                      title={`attacker profile for ${rows[selected].src_ip}`}
+                    >
+                      Open attacker profile →
                     </a>
                   ) : null}
-                  {rows[selected].src_ip && rows[selected].session ? ' • ' : null}
                   {rows[selected].session ? (
-                    <a className="lnk sess" href={`/sessions/${encodeURIComponent(rows[selected].session)}`}>
-                      replay session {rows[selected].session}
+                    <a
+                      className="btn btn-sm btn-secondary sess"
+                      href={`/sessions/${encodeURIComponent(rows[selected].session)}`}
+                      title={`replay session ${rows[selected].session}`}
+                    >
+                      Open session replay →
                     </a>
                   ) : null}
-                </p>
+                </div>
               ) : null}
               <EventMeta row={rows[selected]} onPivot={setFilter} investigationConfig={investigationConfig} />
               <div className="card__scroll">
@@ -825,8 +839,8 @@ function FragmentRow({
         </tr>
       ) : null}
       <tr className={selected ? 'selected' : undefined} onClick={onSelect}>
-        <td data-hp-time>{formatTimestamp(row.time)}</td>
-        <td>
+        <td data-hp-time data-label="time">{formatTimestamp(row.time)}</td>
+        <td data-label="sensor">
           {/* Per-sensor badge coloring (theme.css's b-{sensor} classes) +
               sensor pivot, events.html:11. */}
           <a
@@ -840,7 +854,7 @@ function FragmentRow({
             {row.sensor}
           </a>
         </td>
-        <td className="v">
+        <td className="v" data-label="source ip">
           {row.src_ip ? (
             <a
               href={`/events?ip=${encodeURIComponent(row.src_ip)}`}
@@ -865,6 +879,7 @@ function FragmentRow({
               {' '}
               <a
                 className="badge badge--info"
+                title={countryName(row.country)}
                 href={`/events?country=${encodeURIComponent(row.country)}`}
                 onClick={(event) => {
                   event.preventDefault()
@@ -876,7 +891,7 @@ function FragmentRow({
             </>
           ) : null}
         </td>
-        <td className="n">
+        <td className="n" data-label="port">
           {row.port ? (
             <a
               href={`/events?port=${encodeURIComponent(row.port)}`}
@@ -891,9 +906,9 @@ function FragmentRow({
             ''
           )}
         </td>
-        <td className="v">{row.detail || row.proto}</td>
+        <td className="v" data-label="detail">{row.detail || row.proto}</td>
         {/* Hover-revealed quick actions (design pick 14B, events.html:31-37). */}
-        <td className="hp-row-actions-cell">
+        <td className="hp-row-actions-cell" data-label="">
           <div className="hp-row-actions">
             {row.src_ip ? (
               <button

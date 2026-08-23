@@ -269,6 +269,10 @@ function Attackers() {
         rows={rows}
         columns={COLUMNS}
         rowKey={(row) => row.id}
+        emptyState={{
+          title: 'No attacker entities yet',
+          hint: 'attacker-identity-worker merges IPs sharing 2+ strong signals — fingerprint, payload hash, credential pair — into durable entities as traffic accumulates.',
+        }}
         total={total}
         onViewMore={viewMore}
         loadingMore={loadingMore}

@@ -160,6 +160,10 @@ function Page() {
         rows={rows}
         columns={COLUMNS}
         rowKey={(_, index) => String(index)}
+        emptyState={{
+          title: 'No dead letters recorded',
+          hint: 'Events that could not be parsed or indexed land here — an empty list is the healthy state.',
+        }}
         total={total}
         onViewMore={viewMore}
         loadingMore={loadingMore}

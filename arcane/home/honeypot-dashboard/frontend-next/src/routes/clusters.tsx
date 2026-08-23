@@ -106,6 +106,11 @@ function Clusters() {
         rows={rows}
         columns={COLUMNS}
         rowKey={(row) => `${row.kind}:${row.value}`}
+        detailHref={(row) => `/investigate/cluster?kind=${encodeURIComponent(row.kind)}&value=${encodeURIComponent(row.value)}`}
+        emptyState={{
+          title: 'No multi-source pivots are present in the current correlation window',
+          hint: 'Clusters appear once two or more source IPs share a strong signal.',
+        }}
         inspectorTitle="Row details"
       />
     </>

@@ -409,6 +409,10 @@ function Page() {
           columns={columns}
           rowKey={(row) => row.id}
           total={data.credentials.length}
+          emptyState={{
+            title: 'No credentials provisioned yet',
+            hint: 'Provision one above to plant it into Cowrie’s live honeyfs.',
+          }}
           inspectorTitle="Credential details"
           inspectorExtra={(row) => <CredentialActions credential={row} tokens={tokens} isAdmin={isAdmin} onChanged={refresh} />}
         />

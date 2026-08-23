@@ -180,6 +180,10 @@ function InvestigateCluster() {
         columns={RECORD_COLUMNS}
         rowKey={(row, index) => `${row.time}-${index}`}
         inspectorTitle="Correlated record"
+        emptyState={{
+          title: 'No correlated records were found for this cluster',
+          hint: 'Elasticsearch has nothing indexed against this cluster’s member IPs yet.',
+        }}
       />
     </>
   )

@@ -149,6 +149,10 @@ function Page() {
       rowKey={(row, index) => `${str(row, 'event_id')}-${index}`}
       inspectorTitle="Event details"
       chipNoun="events"
+      emptyState={{
+        title: 'No failed logins recorded yet',
+        hint: 'auth-events-worker records every rejected credential attempt as it happens.',
+      }}
       beforeTable={<AuthStats />}
       layout="cards"
     />
