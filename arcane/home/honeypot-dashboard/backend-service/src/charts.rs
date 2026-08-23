@@ -160,7 +160,19 @@ async fn traffic_sum(
             "aggs": zeek_aggs
         }}
     });
-    let zeek = state.es.search_index(&["zeek-v1-conn-*"], zeek_body).await?;
+    // Fall through to Suricata if the Zeek leg errors rather than
+    // propagating. This chart exists to show traffic; a sensor-specific
+    // failure should cost its detail, not the whole panel. Caught live:
+    // zeek is mapped flattened, so summing zeek.orig_bytes raised
+    // "not supported for aggregation [sum]" and the `?` turned a
+    // recoverable miss into a 502 on the front page.
+    let zeek = match state.es.search_index(&["zeek-v1-conn-*"], zeek_body).await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::warn!(%error, "zeek traffic aggregation failed; using suricata");
+            Value::Null
+        }
+    };
     let zeek_points: Vec<Point> = zeek["aggregations"]["hourly"]["buckets"]
         .as_array()
         .into_iter()
@@ -215,7 +227,7 @@ pub async fn netflow_bytes(State(state): State<AppState>) -> Result<Json<Vec<Ser
 pub async fn netflow_packets(State(state): State<AppState>) -> Result<Json<Vec<Series>>, (StatusCode, String)> {
     traffic_sum(
         &state,
-        &["zeek.orig_pkts", "zeek.resp_pkts"],
+        &["source.packets", "destination.packets"],
         "suricata.eve.netflow.pkts",
         "packets",
     )
