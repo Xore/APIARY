@@ -87,9 +87,26 @@ ES_UNAVAILABLE_ALERT_AFTER = int(os.getenv("ES_UNAVAILABLE_ALERT_AFTER", "3"))
 # per-event by extract_features()'s own field reads, not by index name --
 # event.sensor isn't reliably set for every sensor, see #132) plus
 # suricata-v2-<event_type>-* for network/IDS events.
+#
+# #1741/#1742: zeek-v1-conn-* is added because Suricata's flow/netflow records
+# are being retired -- they are 80.1% of its document volume, and roughly that
+# share of the Suricata input this worker trains on. Zeek's conn.log is the
+# replacement and is strictly richer per record: duration, bytes and packets in
+# both directions, conn_state, history, inferred service, and a Community ID.
+#
+# Only the conn logs, not zeek-v1-*. The protocol logs (ssl, ssh, http, the
+# ICSNPP ones) are per-transaction rather than per-connection, so including
+# them would silently reweight the training set toward whichever protocol
+# happened to be noisiest that hour.
+#
+# _resolve_flow_sides() stays necessary and gets *more* correct here, not less:
+# conn.log is bidirectional like netflow was, but its orientation is explicit
+# originator/responder rather than literal packet direction, which is the exact
+# ambiguity #174 was written to work around.
 SOURCE_INDICES = [
     "honeypot-v2-*",
     "suricata-v2-*",
+    "zeek-v1-conn-*",
 ]
 
 ANOMALY_INDEX  = "ml-anomalies"

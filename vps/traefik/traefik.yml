@@ -9,10 +9,32 @@ log:
   level: WARN
   format: json
 
+# #1739: Traefik is a sensor, not just infrastructure. It terminates TLS for
+# the Host-routed decoys (hellpot, galah, wordpot), so it is the ONLY
+# component in the stack that ever sees those requests decrypted -- a wire
+# sensor on the public interface sees the ClientHello and then ciphertext.
+#
+# Two things were wrong here. The log went to container stdout with no
+# filePath and no Filebeat input, so nothing reached Elasticsearch at all.
+# And `statusCodes: ["400-599"]` discarded every *successful* request: an
+# attacker who hit wordpot and got a 200 produced no line, so we kept the
+# failures and threw away the hits -- the inverse of what a honeypot wants.
 accessLog:
   format: json
-  filters:
-    statusCodes: ["400-599"]
+  filePath: /var/log/traefik/access.json
+  # No status-code filter: on a decoy, a 200 is the interesting case.
+  fields:
+    defaultMode: keep
+    headers:
+      defaultMode: drop
+      names:
+        # The real client address when a request arrives through a trusted
+        # proxy. Kept as a header rather than trusted blindly -- see the
+        # ClientAddr/ClientHost distinction in the index template.
+        X-Forwarded-For: keep
+        CF-Connecting-IP: keep
+        User-Agent: keep
+        Referer: keep
 
 ping:
   entryPoint: traefik-local

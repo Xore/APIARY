@@ -38,6 +38,9 @@ suricata_days=$(( retention_days * 7 / 30 ))
 for spec in "suricata-7d:${suricata_days}d" \
             "dead-letter-60d:$(( retention_days * 2 ))d" "portbridge-30d:${retention_days}d" \
             "dionaea-incidents-30d:${retention_days}d" \
+            "traefik-30d:${retention_days}d" \
+            "zeek-30d:${retention_days}d" "zeek-proxy-30d:${retention_days}d" "huginn-30d:${retention_days}d" \
+            "extracted-files-30d:${retention_days}d" \
             "analysis-results-180d:$(( retention_days * 6 ))d"; do
   name=${spec%%:*}
   age=${spec#*:}
@@ -85,6 +88,12 @@ curl -fsS -X PUT "$es_url/_ilm/policy/honeypot-30d" \
 # quoting hazards.
 es_home_net_json="[]"
 if [ -n "${ES_HOME_NET:-}" ]; then
+  # #1765: the VPS's own public address. Traefik logs the client side of a
+  # connection but never the address it accepted on, so the wire tuple needs
+  # this supplied. Empty is safe -- the painless guard skips the whole wire
+  # block, so Traefik records simply carry no wire join key rather than a
+  # wrong one.
+  es_public_ip="${PUBLIC_IP:-}"
   es_home_net_json=$(printf '%s' "$ES_HOME_NET" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | grep -v '^$' | sed 's/.*/"&"/' | paste -sd, -)
   es_home_net_json="[$es_home_net_json]"
 fi
@@ -116,8 +125,29 @@ geoip_pipeline_body="$(cat <<'JSON'
       "script": {
         "lang": "painless",
         "ignore_failure": true,
-        "params": {"home_net": __ES_HOME_NET_JSON__},
-        "source": "if (ctx.event == null) ctx.event = new HashMap(); if (ctx.source == null) ctx.source = new HashMap(); if (ctx.destination == null) ctx.destination = new HashMap(); if (ctx.network == null) ctx.network = new HashMap(); if (ctx.honeypot != null) { def h = ctx.honeypot; if (h.sensor != null) ctx.event.sensor = h.sensor; else if (h.eventid != null && h.eventid.toString().startsWith('cowrie.')) ctx.event.sensor = 'cowrie'; if (h.src_ip != null && h.src_ip != '') ctx.source.ip = h.src_ip; else if (h.data != null && h.data.connection != null && h.data.connection.remote_ip != null && h.data.connection.remote_ip != '') { ctx.source.ip = h.data.connection.remote_ip; if (h.data.connection.local_port != null) ctx.destination.port = h.data.connection.local_port; if (h.data.connection.transport != null) ctx.network.protocol = h.data.connection.transport; } if (h.dst_ip != null && h.dst_ip != '') ctx.destination.ip = h.dst_ip; if (h.dst_port != null) ctx.destination.port = h.dst_port; else if (h.port != null) ctx.destination.port = h.port; if (h.proto != null) ctx.network.protocol = h.proto; else if (h.protocol != null) ctx.network.protocol = h.protocol; else if (h.data_type != null) ctx.network.protocol = h.data_type; if (h.username != null) { if (ctx.user == null) ctx.user = new HashMap(); ctx.user.name = h.username; } if (h.password != null) { if (ctx.user == null) ctx.user = new HashMap(); ctx.user.password = h.password; } if (h.command != null || h.input != null) { if (ctx.process == null) ctx.process = new HashMap(); ctx.process.command_line = h.command != null ? h.command : h.input; } if (h.path != null) { if (ctx.url == null) ctx.url = new HashMap(); ctx.url.path = h.path; } else if (h.url != null) { if (ctx.url == null) ctx.url = new HashMap(); ctx.url.path = h.url; } if (h.shasum != null && (h.eventid == 'cowrie.session.file_download' || h.eventid == 'cowrie.session.file_upload')) { if (ctx.file == null) ctx.file = new HashMap(); if (ctx.file.hash == null) ctx.file.hash = new HashMap(); ctx.file.hash.sha256 = h.shasum; } if (h.category != null) ctx.event.category = h.category; if (h.held_ms != null) ctx.held_ms = h.held_ms; } if (ctx.log != null && ctx.log.file != null && ctx.log.file.path != null) { String p = ctx.log.file.path; if (ctx.event.sensor == null && p.contains('/conpot')) { int a = p.indexOf('/conpot') + 1; int b = p.indexOf('/', a); if (b > a) { ctx.event.sensor = p.substring(a, b); } else { String base = p.substring(a); ctx.event.sensor = base.endsWith('.json') ? base.substring(0, base.length() - 5) : base; } } if (ctx.event.sensor == null && p.contains('/dionaea')) { ctx.event.sensor = 'dionaea'; } if (ctx.event.sensor != null && ctx.event.sensor.toString().startsWith('conpot')) { if (ctx.ot == null) ctx.ot = new HashMap(); ctx.ot.persona = ctx.event.sensor; } } if (ctx.suricata != null && ctx.suricata.eve != null) { def s = ctx.suricata.eve; ctx.event.sensor = 'suricata'; if (s.event_type != null) ctx.event.category = s.event_type; String sip; String dip; def dport; if (s.flow != null && s.flow.src_ip != null && s.flow.dest_ip != null) { sip = s.flow.src_ip; dip = s.flow.dest_ip; dport = s.flow.dest_port; } else { sip = s.src_ip; dip = s.dest_ip; dport = s.dest_port; if (sip != null && params.home_net.contains(sip) && dip != null && !params.home_net.contains(dip)) { String tmp = sip; sip = dip; dip = tmp; dport = s.src_port; } } if (sip != null) ctx.source.ip = sip; if (dip != null) ctx.destination.ip = dip; if (dport != null) ctx.destination.port = dport; if (s.proto != null) ctx.network.transport = s.proto.toString().toLowerCase(); } if (ctx.portbridge != null) { def pb = ctx.portbridge; ctx.event.sensor = 'portbridge'; ctx.event.category = pb.event != null ? pb.event.toString() : 'connect'; if (pb.src_ip != null && pb.src_ip != '') ctx.source.ip = pb.src_ip; if (pb.port != null) ctx.destination.port = pb.port; if (pb.proto != null) ctx.network.transport = pb.proto; } if (ctx.source.ip != null && (ctx.source.ip == '127.0.0.1' || ctx.source.ip == '::1')) { ctx.source.remove('ip'); }"
+        "params": {"home_net": __ES_HOME_NET_JSON__, "public_ip": "__ES_PUBLIC_IP__", "entrypoint_ports": {"web": 80, "websecure": 443, "traefik-oidc": 8081, "dashboard-oidc": 8082, "traefik-local": 8080}, "zeek_tcp_logs": ["ssl", "ssh", "http", "ftp", "rdp", "rfb", "ntlm", "ldap", "mysql", "smb_mapping", "smb_files", "smb_cmd", "ja4ssh", "smtp", "irc", "modbus", "modbus_detailed", "s7comm", "cotp"]},
+        "source": "if (ctx.event == null) ctx.event = new HashMap(); if (ctx.source == null) ctx.source = new HashMap(); if (ctx.destination == null) ctx.destination = new HashMap(); if (ctx.network == null) ctx.network = new HashMap(); if (ctx.honeypot != null) { def h = ctx.honeypot; if (h.sensor != null) ctx.event.sensor = h.sensor; else if (h.eventid != null && h.eventid.toString().startsWith('cowrie.')) ctx.event.sensor = 'cowrie'; if (h.src_ip != null && h.src_ip != '') ctx.source.ip = h.src_ip; else if (h.data != null && h.data.connection != null && h.data.connection.remote_ip != null && h.data.connection.remote_ip != '') { ctx.source.ip = h.data.connection.remote_ip; if (h.data.connection.local_port != null) ctx.destination.port = h.data.connection.local_port; if (h.data.connection.transport != null) ctx.network.protocol = h.data.connection.transport; } if (h.dst_ip != null && h.dst_ip != '') ctx.destination.ip = h.dst_ip; if (h.dst_port != null) ctx.destination.port = h.dst_port; else if (h.port != null) ctx.destination.port = h.port; if (h.proto != null) ctx.network.protocol = h.proto; else if (h.protocol != null) ctx.network.protocol = h.protocol; else if (h.data_type != null) ctx.network.protocol = h.data_type; if (h.username != null) { if (ctx.user == null) ctx.user = new HashMap(); ctx.user.name = h.username; } if (h.password != null) { if (ctx.user == null) ctx.user = new HashMap(); ctx.user.password = h.password; } if (h.command != null || h.input != null) { if (ctx.process == null) ctx.process = new HashMap(); ctx.process.command_line = h.command != null ? h.command : h.input; } if (h.path != null) { if (ctx.url == null) ctx.url = new HashMap(); ctx.url.path = h.path; } else if (h.url != null) { if (ctx.url == null) ctx.url = new HashMap(); ctx.url.path = h.url; } if (h.shasum != null && (h.eventid == 'cowrie.session.file_download' || h.eventid == 'cowrie.session.file_upload')) { if (ctx.file == null) ctx.file = new HashMap(); if (ctx.file.hash == null) ctx.file.hash = new HashMap(); ctx.file.hash.sha256 = h.shasum; } if (h.category != null) ctx.event.category = h.category; if (h.held_ms != null) ctx.held_ms = h.held_ms; } if (ctx.log != null && ctx.log.file != null && ctx.log.file.path != null) { String p = ctx.log.file.path; if (ctx.event.sensor == null && p.contains('/conpot')) { int a = p.indexOf('/conpot') + 1; int b = p.indexOf('/', a); if (b > a) { ctx.event.sensor = p.substring(a, b); } else { String base = p.substring(a); ctx.event.sensor = base.endsWith('.json') ? base.substring(0, base.length() - 5) : base; } } if (ctx.event.sensor == null && p.contains('/dionaea')) { ctx.event.sensor = 'dionaea'; } if (ctx.event.sensor != null && ctx.event.sensor.toString().startsWith('conpot')) { if (ctx.ot == null) ctx.ot = new HashMap(); ctx.ot.persona = ctx.event.sensor; } } if (ctx.suricata != null && ctx.suricata.eve != null) { def s = ctx.suricata.eve; ctx.event.sensor = 'suricata'; if (s.event_type != null) ctx.event.category = s.event_type; String sip; String dip; def dport; if (s.flow != null && s.flow.src_ip != null && s.flow.dest_ip != null) { sip = s.flow.src_ip; dip = s.flow.dest_ip; dport = s.flow.dest_port; } else { sip = s.src_ip; dip = s.dest_ip; dport = s.dest_port; if (sip != null && params.home_net.contains(sip) && dip != null && !params.home_net.contains(dip)) { String tmp = sip; sip = dip; dip = tmp; dport = s.src_port; } } if (sip != null) ctx.source.ip = sip; if (dip != null) ctx.destination.ip = dip; if (dport != null) ctx.destination.port = dport; if (s.proto != null) ctx.network.transport = s.proto.toString().toLowerCase(); if (s.community_id != null && s.community_id != '') ctx.network.community_id = s.community_id; } if (ctx.portbridge != null) { def pb = ctx.portbridge; ctx.event.sensor = 'portbridge'; ctx.event.category = pb.event != null ? pb.event.toString() : 'connect'; if (pb.src_ip != null && pb.src_ip != '') ctx.source.ip = pb.src_ip; if (pb.port != null) ctx.destination.port = pb.port; if (pb.proto != null) ctx.network.transport = pb.proto; if (pb.community_id != null && pb.community_id != '') ctx.network.community_id = pb.community_id; } if (ctx.traefik != null) { def t = ctx.traefik; ctx.event.sensor = 'traefik'; ctx.event.category = 'http_request'; if (t.ClientHost != null && t.ClientHost != '') ctx.source.ip = t.ClientHost; if (t.RequestPath != null) { if (ctx.url == null) ctx.url = new HashMap(); ctx.url.path = t.RequestPath; } if (t.RequestHost != null) { if (ctx.url == null) ctx.url = new HashMap(); ctx.url.domain = t.RequestHost; } if (t.RequestMethod != null) { if (ctx.http == null) ctx.http = new HashMap(); if (ctx.http.request == null) ctx.http.request = new HashMap(); ctx.http.request.method = t.RequestMethod; } if (t.DownstreamStatus != null) { if (ctx.http == null) ctx.http = new HashMap(); if (ctx.http.response == null) ctx.http.response = new HashMap(); ctx.http.response.status_code = t.DownstreamStatus; } if (t.RequestProtocol != null) ctx.network.protocol = t.RequestProtocol; if (t['request_User-Agent'] != null) { if (ctx.user_agent == null) ctx.user_agent = new HashMap(); ctx.user_agent.original = t['request_User-Agent']; } if (t.ClientAddr != null && params.public_ip != null && params.public_ip != '' && t.entryPointName != null && params.entrypoint_ports.containsKey(t.entryPointName)) { String ca = t.ClientAddr.toString(); int ci = ca.lastIndexOf(':'); if (ci > 0) { String wip = ca.substring(0, ci); String wport = ca.substring(ci + 1); try { t.wire_src_ip = wip; t.wire_src_port = Integer.parseInt(wport); t.wire_dst_ip = params.public_ip; t.wire_dst_port = params.entrypoint_ports.get(t.entryPointName); t.wire_transport = 'tcp'; } catch (Exception e) {} } } } if (ctx.zeek != null) { def z = ctx.zeek; ctx.event.sensor = (ctx.logset != null && ctx.logset == 'zeek-proxy') ? 'zeek-proxy' : 'zeek'; if (z['id.orig_h'] != null) ctx.source.ip = z['id.orig_h']; if (z['id.orig_p'] != null) { if (ctx.source == null) ctx.source = new HashMap(); ctx.source.port = z['id.orig_p']; } if (z['id.resp_h'] != null) ctx.destination.ip = z['id.resp_h']; if (z['id.resp_p'] != null) ctx.destination.port = z['id.resp_p']; if (z.proto != null) ctx.network.transport = z.proto; if (z.service != null) ctx.network.protocol = z.service; if (z.community_id != null && z.community_id != '') ctx.network.community_id = z.community_id; if (z.uid != null && z.uid != '') ctx.network.session_id = z.uid; if (ctx.event.category == null && ctx.log != null && ctx.log.file != null && ctx.log.file.path != null) { String zp = ctx.log.file.path; int zs = zp.lastIndexOf('/'); String zb = zs >= 0 ? zp.substring(zs + 1) : zp; int zd = zb.indexOf('.'); if (zd > 0) zb = zb.substring(0, zd); ctx.event.category = zb; } if (ctx.network.transport == null && ctx.event.category != null && params.zeek_tcp_logs.contains(ctx.event.category)) { ctx.network.transport = 'tcp'; } } if (ctx.huginn != null) { def hg = ctx.huginn; ctx.event.sensor = 'huginn'; if (hg.kind != null) ctx.event.category = hg.kind; if (hg.src_ip != null && hg.src_ip != '') ctx.source.ip = hg.src_ip; if (hg.src_port != null) ctx.source.port = hg.src_port; if (hg.dst_ip != null && hg.dst_ip != '') ctx.destination.ip = hg.dst_ip; if (hg.dst_port != null) ctx.destination.port = hg.dst_port; if (hg.proto != null) ctx.network.transport = hg.proto; if (hg.community_id != null && hg.community_id != '') ctx.network.community_id = hg.community_id; } if (ctx.source.ip != null && (ctx.source.ip == '127.0.0.1' || ctx.source.ip == '::1')) { ctx.source.remove('ip'); }"
+      }
+    },
+    {
+      "community_id": {
+        "description": "#1765: Traefik's join key must describe the WIRE, not the logical client. source.ip is ClientHost -- the client Traefik resolved after applying forwardedHeaders trust -- which is the right attacker identity but is NOT what a passive sniffer saw when the request came through a proxy. The wire tuple built above uses ClientAddr (the address the connection was actually accepted from) against the VPS's own address and the entrypoint's port, so a Traefik request and huginn-sidecar's tls_client observation for the same TLS connection land on the same key. Runs before the generic processor below, which would otherwise fill this field from source.ip and produce a key matching nothing whenever the two differ -- exactly the Cloudflare case.",
+        "source_ip": "traefik.wire_src_ip",
+        "source_port": "traefik.wire_src_port",
+        "destination_ip": "traefik.wire_dst_ip",
+        "destination_port": "traefik.wire_dst_port",
+        "transport": "traefik.wire_transport",
+        "ignore_missing": true,
+        "ignore_failure": true,
+        "if": "ctx.traefik != null && ctx.traefik.wire_src_ip != null"
+      }
+    },
+    {
+      "community_id": {
+        "description": "#1742: derive network.community_id for any record that has a 5-tuple but no key of its own -- Zeek's ~20 protocol logs (ssl, ssh, http, the ICSNPP ones) carry uid but only conn.log carries community_id, so without this a fingerprint in ssl.log needs two hops (session_id -> conn -> community_id) to reach Suricata, portbridge or huginn. Elasticsearch computes the same v1 hash natively, so this needs no Zeek scripting and cannot drift from the Go and Rust implementations. Seed 0 to match suricata.yaml. Runs after the script processor above, which is what populates source/destination/network.transport from the raw namespaces.",
+        "ignore_missing": true,
+        "ignore_failure": true,
+        "if": "ctx.network == null || ctx.network.community_id == null"
       }
     },
     {
@@ -215,7 +245,9 @@ JSON
 )"
 curl -fsS -X PUT "$es_url/_ingest/pipeline/geoip-honeypot" \
   -H 'Content-Type: application/json' \
-  --data-binary "$(printf '%s' "$geoip_pipeline_body" | sed "s#__ES_HOME_NET_JSON__#$es_home_net_json#")" >/dev/null
+  --data-binary "$(printf '%s' "$geoip_pipeline_body" \
+      | sed "s#__ES_HOME_NET_JSON__#$es_home_net_json#" \
+      | sed "s#__ES_PUBLIC_IP__#$es_public_ip#")" >/dev/null
 
 echo
 
@@ -278,7 +310,7 @@ curl -fsS -X PUT "$es_url/_index_template/honeypot-events-v2" \
           "as": { "properties": { "asn": { "type": "long" }, "organization_name": { "type": "keyword" }, "type": { "type": "keyword" } } }
         } },
         "destination": { "properties": { "ip": { "type": "ip", "ignore_malformed": true }, "port": { "type": "integer", "ignore_malformed": true } } },
-        "network": { "properties": { "transport": { "type": "keyword" }, "protocol": { "type": "keyword" } } },
+        "network": { "properties": { "transport": { "type": "keyword" }, "protocol": { "type": "keyword" }, "community_id": { "type": "keyword" } } },
         "user": { "properties": { "name": { "type": "keyword" }, "password": { "type": "keyword" } } },
         "process": { "properties": { "command_line": { "type": "wildcard" } } },
         "url": { "properties": { "path": { "type": "wildcard" } } },
@@ -320,7 +352,7 @@ curl -fsS -X PUT "$es_url/_index_template/suricata-events" \
         "port": { "type": "integer", "ignore_malformed": true },
         "geo": { "properties": { "location": { "type": "geo_point" }, "country_iso_code": { "type": "keyword" }, "city_name": { "type": "keyword" } } }
       } },
-      "network": { "properties": { "transport": { "type": "keyword" }, "protocol": { "type": "keyword" } } }
+      "network": { "properties": { "transport": { "type": "keyword" }, "protocol": { "type": "keyword" }, "community_id": { "type": "keyword" } } }
     } }
   }
 }
@@ -372,7 +404,266 @@ curl -fsS -X PUT "$es_url/_index_template/portbridge-events" \
           "as": { "properties": { "asn": { "type": "long" }, "organization_name": { "type": "keyword" }, "type": { "type": "keyword" } } }
         } },
         "destination": { "properties": { "port": { "type": "integer", "ignore_malformed": true } } },
-        "network": { "properties": { "transport": { "type": "keyword" } } }
+        "network": { "properties": { "transport": { "type": "keyword" }, "community_id": { "type": "keyword" } } }
+      }
+    }
+  }
+}
+JSON
+
+# #1742/S5: Zeek and huginn-sidecar records. Both are kept -- they are not
+# alternatives. Measured on the same web traffic, Zeek logged 4 ssl.log
+# records where the sidecar produced 29 tls_client ones, because Zeek needs a
+# completed handshake and stream reassembly while huginn-net fingerprints the
+# ClientHello packet on its own. On scan traffic that never completes a
+# handshake the packet-oriented view sees more; on traffic that does complete,
+# Zeek carries far more per record. Neither is a superset, so both ship.
+#
+# Joining: network.community_id is the key across every sensor. Zeek writes it
+# only on conn.log, so the community_id ingest processor below derives it for
+# the protocol logs from the 5-tuple they already carry -- Elasticsearch
+# computes the same v1 hash natively, which also means it cannot drift from
+# the Go and Rust implementations. Verified against real data: four ssl.log
+# records resolve to exactly the community_id Zeek computed for their own conn
+# record.
+#
+# network.session_id (Zeek's uid) is still promoted and still useful -- it is
+# what ties a file, a certificate or an ICS transaction back to its specific
+# connection record, which community_id alone cannot do when one flow carries
+# several.
+#
+# zeek-v1-* retention deliberately matches the pcap window rather than
+# Suricata's shorter one. Zeek is the highest-volume producer here, but an
+# investigation that has the packets and not the metadata -- or the reverse --
+# is worse off than one missing both, because it can see that something
+# happened and not what. Zeek metadata runs roughly 1-2 GB/day against pcap's
+# ~13.8, so matching the window is cheap relative to what it protects.
+curl -fsS -X PUT "$es_url/_index_template/zeek-events" \
+  -H 'Content-Type: application/json' \
+  --data-binary @- <<'JSON'
+{
+  "index_patterns": ["zeek-v1-*", "zeek-proxy-v1-*"],
+  "priority": 470,
+  "template": {
+    "settings": {
+      "index.default_pipeline": "geoip-honeypot",
+      "index.lifecycle.name": "zeek-30d",
+      "index.number_of_replicas": 0,
+      "index.mapping.total_fields.limit": 500,
+      "index.mapping.ignore_malformed": true,
+      "index.refresh_interval": "5s"
+    },
+    "mappings": {
+      "properties": {
+        "zeek": { "type": "flattened" },
+        "event": { "properties": { "sensor": { "type": "keyword" }, "category": { "type": "keyword" } } },
+        "source": { "properties": {
+          "ip": { "type": "ip", "ignore_malformed": true },
+          "port": { "type": "integer", "ignore_malformed": true },
+          "geo": { "properties": { "location": { "type": "geo_point" }, "country_iso_code": { "type": "keyword" }, "city_name": { "type": "keyword" } } },
+          "as": { "properties": { "asn": { "type": "long" }, "organization_name": { "type": "keyword" }, "type": { "type": "keyword" } } }
+        } },
+        "destination": { "properties": {
+          "ip": { "type": "ip", "ignore_malformed": true },
+          "port": { "type": "integer", "ignore_malformed": true }
+        } },
+        "network": { "properties": {
+          "transport": { "type": "keyword" },
+          "protocol": { "type": "keyword" },
+          "community_id": { "type": "keyword" },
+          "session_id": { "type": "keyword" }
+        } }
+      }
+    }
+  }
+}
+JSON
+
+# The decoy-side sensor (#1742 decision 8) reuses the Zeek mapping but gets its
+# own template so it can carry its own ILM policy -- and so a query can tell
+# the two vantage points apart. Higher priority than zeek-events, whose
+# pattern also matches, because the more specific one must win.
+curl -fsS -X PUT "$es_url/_index_template/zeek-proxy-events" \
+  -H 'Content-Type: application/json' \
+  --data-binary @- <<'JSON'
+{
+  "index_patterns": ["zeek-proxy-v1-*"],
+  "priority": 480,
+  "template": {
+    "settings": {
+      "index.default_pipeline": "geoip-honeypot",
+      "index.lifecycle.name": "zeek-proxy-30d",
+      "index.number_of_replicas": 0,
+      "index.mapping.total_fields.limit": 500,
+      "index.mapping.ignore_malformed": true,
+      "index.refresh_interval": "5s"
+    },
+    "mappings": {
+      "properties": {
+        "zeek": { "type": "flattened" },
+        "event": { "properties": { "sensor": { "type": "keyword" }, "category": { "type": "keyword" } } },
+        "source": { "properties": {
+          "ip": { "type": "ip", "ignore_malformed": true },
+          "port": { "type": "integer", "ignore_malformed": true }
+        } },
+        "destination": { "properties": {
+          "ip": { "type": "ip", "ignore_malformed": true },
+          "port": { "type": "integer", "ignore_malformed": true }
+        } },
+        "network": { "properties": {
+          "transport": { "type": "keyword" },
+          "protocol": { "type": "keyword" },
+          "community_id": { "type": "keyword" },
+          "session_id": { "type": "keyword" }
+        } }
+      }
+    }
+  }
+}
+JSON
+
+# #1738 decision 5: the bytes of wire-extracted files, not just their hashes.
+#
+# The ES store is the record and local disk is transient, so an artefact has
+# to survive the VPS being wiped or rebuilt -- which disk-only storage does
+# not. Bounded by the extraction policy's own 16 MB per-file cap, so this
+# index cannot grow faster than that policy allows.
+#
+# Stated plainly because it is unusual: this puts attacker-controlled binaries
+# inside the search cluster. They are stored as `binary`, which Elasticsearch
+# accepts as base64 and does NOT index, analyse or make searchable -- the
+# bytes are retrievable and nothing more, with doc_values off so they never
+# enter the columnar store either. Nothing in the pipeline decompresses or
+# executes them. The searchable half is the metadata beside them: hashes, mime
+# type, size, and the connection this came from.
+curl -fsS -X PUT "$es_url/_index_template/extracted-files" \
+  -H 'Content-Type: application/json' \
+  --data-binary @- <<'JSON'
+{
+  "index_patterns": ["extracted-files-v1-*"],
+  "priority": 470,
+  "template": {
+    "settings": {
+      "index.default_pipeline": "geoip-honeypot",
+      "index.lifecycle.name": "extracted-files-30d",
+      "index.number_of_replicas": 0,
+      "index.mapping.total_fields.limit": 100,
+      "index.refresh_interval": "30s"
+    },
+    "mappings": {
+      "properties": {
+        "@timestamp": { "type": "date" },
+        "event": { "properties": { "sensor": { "type": "keyword" }, "category": { "type": "keyword" } } },
+        "file": { "properties": {
+          "hash": { "properties": {
+            "sha256": { "type": "keyword" },
+            "md5": { "type": "keyword" },
+            "sha1": { "type": "keyword" }
+          } },
+          "size": { "type": "long" },
+          "mime_type": { "type": "keyword" },
+          "source": { "type": "keyword" },
+          "extracted_name": { "type": "keyword" },
+          "bytes": { "type": "binary", "doc_values": false }
+        } },
+        "network": { "properties": {
+          "community_id": { "type": "keyword" },
+          "session_id": { "type": "keyword" },
+          "transport": { "type": "keyword" }
+        } },
+        "source": { "properties": {
+          "ip": { "type": "ip", "ignore_malformed": true },
+          "port": { "type": "integer", "ignore_malformed": true },
+          "geo": { "properties": { "location": { "type": "geo_point" }, "country_iso_code": { "type": "keyword" } } },
+          "as": { "properties": { "asn": { "type": "long" }, "organization_name": { "type": "keyword" } } }
+        } },
+        "destination": { "properties": {
+          "ip": { "type": "ip", "ignore_malformed": true },
+          "port": { "type": "integer", "ignore_malformed": true }
+        } }
+      }
+    }
+  }
+}
+JSON
+
+curl -fsS -X PUT "$es_url/_index_template/huginn-events" \
+  -H 'Content-Type: application/json' \
+  --data-binary @- <<'JSON'
+{
+  "index_patterns": ["huginn-v1-*"],
+  "priority": 470,
+  "template": {
+    "settings": {
+      "index.default_pipeline": "geoip-honeypot",
+      "index.lifecycle.name": "huginn-30d",
+      "index.number_of_replicas": 0,
+      "index.mapping.total_fields.limit": 300,
+      "index.mapping.ignore_malformed": true,
+      "index.refresh_interval": "5s"
+    },
+    "mappings": {
+      "properties": {
+        "huginn": { "type": "flattened" },
+        "event": { "properties": { "sensor": { "type": "keyword" }, "category": { "type": "keyword" } } },
+        "source": { "properties": {
+          "ip": { "type": "ip", "ignore_malformed": true },
+          "port": { "type": "integer", "ignore_malformed": true },
+          "geo": { "properties": { "location": { "type": "geo_point" }, "country_iso_code": { "type": "keyword" }, "city_name": { "type": "keyword" } } },
+          "as": { "properties": { "asn": { "type": "long" }, "organization_name": { "type": "keyword" }, "type": { "type": "keyword" } } }
+        } },
+        "destination": { "properties": {
+          "ip": { "type": "ip", "ignore_malformed": true },
+          "port": { "type": "integer", "ignore_malformed": true }
+        } },
+        "network": { "properties": { "transport": { "type": "keyword" }, "community_id": { "type": "keyword" } } }
+      }
+    }
+  }
+}
+JSON
+
+# #1739: Traefik access records. Traefik terminates TLS for the Host-routed
+# decoys, so this is the only index that holds their requests in cleartext --
+# no wire sensor can read them.
+#
+# ClientHost and ClientAddr are mapped separately and neither is promoted to
+# source.ip by default. ClientAddr is the address Traefik actually accepted the
+# connection from; ClientHost is what it resolved as the client after applying
+# forwardedHeaders trust. Those differ exactly when a request came through a
+# trusted proxy, and conflating them is how #1715 wrote a tunnel address into
+# a recording's attacker IP. Keep both, decide downstream.
+curl -fsS -X PUT "$es_url/_index_template/traefik-access" \
+  -H 'Content-Type: application/json' \
+  --data-binary @- <<'JSON'
+{
+  "index_patterns": ["traefik-v1-*"],
+  "priority": 470,
+  "template": {
+    "settings": {
+      "index.default_pipeline": "geoip-honeypot",
+      "index.lifecycle.name": "traefik-30d",
+      "index.number_of_replicas": 0,
+      "index.mapping.total_fields.limit": 300,
+      "index.mapping.ignore_malformed": true,
+      "index.refresh_interval": "5s"
+    },
+    "mappings": {
+      "properties": {
+        "traefik": { "type": "flattened" },
+        "event": { "properties": { "sensor": { "type": "keyword" }, "category": { "type": "keyword" } } },
+        "source": { "properties": {
+          "ip": { "type": "ip", "ignore_malformed": true },
+          "geo": { "properties": { "location": { "type": "geo_point" }, "country_iso_code": { "type": "keyword" }, "city_name": { "type": "keyword" } } },
+          "as": { "properties": { "asn": { "type": "long" }, "organization_name": { "type": "keyword" }, "type": { "type": "keyword" } } }
+        } },
+        "url": { "properties": { "path": { "type": "keyword" }, "domain": { "type": "keyword" } } },
+        "http": { "properties": {
+          "request": { "properties": { "method": { "type": "keyword" } } },
+          "response": { "properties": { "status_code": { "type": "integer" } } }
+        } },
+        "user_agent": { "properties": { "original": { "type": "keyword", "ignore_above": 1024 } } },
+        "network": { "properties": { "protocol": { "type": "keyword" } } }
       }
     }
   }

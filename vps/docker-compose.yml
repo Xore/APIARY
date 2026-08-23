@@ -127,6 +127,10 @@ services:
       - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
       - ./traefik/certs:/etc/traefik/certs:ro
+      # #1739: the access log now goes to a file so Filebeat can ship it.
+      # Same logs/ tree as portbridge and Suricata, so the existing
+      # homeserver-side mount picks it up with no new transport.
+      - /opt/stacks/apiary/logs/traefik:/var/log/traefik
     networks:
       - proxy
       - oidc-kibana
@@ -154,6 +158,237 @@ services:
         limits:
           cpus: "0.5"
           memory: 128M
+
+  # #1737 decision 1: Arkime capturing live from the public interface,
+  # replacing the Suricata pcap-log -> rsync -> offline-import chain.
+  #
+  # pcap is written to a homeserver mount, not local disk: the VPS has 63 GB
+  # free (~4.6 days at the measured rate) and the 30-day target only fits
+  # where the space is. That mount is the fragile part, and this stack has
+  # been bitten by exactly this before -- #1409, where a stale mount starved
+  # capture for five days while every container kept reporting healthy. So
+  # the healthcheck below treats the mount as the thing under test, not the
+  # process.
+  arkime-capture:
+    image: ghcr.io/arkime/arkime/arkime:v6.6.0@sha256:c43159c5b8f486c1ca0d74a7754b28df6f784e36741595bac0ec582ae93bb2ca
+    container_name: hp-arkime-capture
+    restart: unless-stopped
+    network_mode: host
+    cap_drop: [ALL]
+    cap_add: [NET_RAW, NET_ADMIN, DAC_OVERRIDE]
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        # Refuse to start against an absent or read-only pcap mount. Capturing
+        # to a path that silently is not the homeserver is the failure this
+        # whole comment block exists about.
+        if ! mountpoint -q /opt/arkime/pcap; then
+          echo "arkime-capture: /opt/arkime/pcap is not a mount point -- refusing to capture to local disk" >&2
+          exit 1
+        fi
+        if ! touch /opt/arkime/pcap/.write-test 2>/dev/null; then
+          echo "arkime-capture: /opt/arkime/pcap is not writable -- refusing to start" >&2
+          exit 1
+        fi
+        rm -f /opt/arkime/pcap/.write-test
+        exec /opt/arkime/bin/docker.sh capture \
+          --wait-for-db http://10.8.0.2:9200 \
+          --db 'http://10.8.0.2:9200 upgradenoprompt --ifneeded' \
+          -- -i "${CAPTURE_INTERFACE:-ens6}" --host honeypot-vps
+    volumes:
+      - ./arkime/config.ini:/opt/arkime/etc/config.ini:ro
+      - /opt/stacks/apiary/arkime/geo:/opt/arkime/geo:ro
+      - /opt/stacks/apiary/arkime-pcap:/opt/arkime/pcap
+    environment:
+      - TZ=Europe/Berlin
+      - ARKIME__elasticsearch=http://10.8.0.2:9200
+      - ARKIME__passwordSecret=${ARKIME_PASSWORD_SECRET:-change-me-in-env}
+    # Stateful and deliberately loud. Checks the mount is still a mount and
+    # still writable -- an sshfs mount that has gone stale usually still LOOKS
+    # like a directory, which is precisely why #1409 went unnoticed. Container
+    # liveness proves nothing here; the mount is what fails.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          mountpoint -q /opt/arkime/pcap &&
+          touch /opt/arkime/pcap/.health && rm -f /opt/arkime/pcap/.health
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    labels:
+      - autoheal=true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  # #1742/S5: Zeek, the depth engine. Sniffs the same public interface
+  # Suricata does, via AF_PACKET fanout so neither steals packets from the
+  # other -- they are complementary, not alternatives (#1727 §0).
+  #
+  # Measured in dev/sensing-lab over 199 MB of this interface's real traffic:
+  # 21 log types and 14 285 connections, with community_id on 100% of them,
+  # ja4t on 88.7%, hassh on 98.6% of SSH, and -- against an ICS-filtered
+  # sample -- 74 267 modbus_detailed transaction records where Suricata
+  # produces a single alert row.
+  zeek:
+    build: ./zeek
+    image: xore-zeek:local
+    container_name: hp-zeek
+    restart: unless-stopped
+    network_mode: host
+    read_only: false          # Zeek writes its logs and state under /logs/zeek
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [NET_RAW, NET_ADMIN]
+    # ZEEK_SITE_SCRIPT selects the policy. Default extracts nothing; setting
+    # it to local-extract.zeek turns on wire-level file extraction (#1738),
+    # which writes live attacker payloads to disk. Kept as a whole-file switch
+    # rather than a flag so that "are we storing malware right now?" is
+    # answerable from one line of compose config.
+    command:
+      - -i
+      - af_packet::${CAPTURE_INTERFACE:-ens6}
+      - ${ZEEK_SITE_SCRIPT:-/usr/local/share/zeek-site/local.zeek}
+    volumes:
+      - /opt/stacks/apiary/logs/zeek:/logs/zeek
+      - /opt/stacks/apiary/logs/zeek-extract:/logs/zeek-extract
+    deploy:
+      resources:
+        limits:
+          # The VPS has 2 cores and Suricata already runs here. Zeek gets one
+          # of them; if it drops packets under load the fix is a fanout worker
+          # count, not an unbounded limit on a box that also fronts every
+          # honeypot.
+          cpus: "1.0"
+          memory: 1G
+
+  # #1738: total-size cap for extracted files. extract.zeek caps each file at
+  # 16 MB, which bounds one transfer but not a slow drip -- this bounds the
+  # directory. Oldest-first, because the newest artefact is the one most likely
+  # to still be unanalysed.
+  #
+  # Behind a profile: it only makes sense alongside ZEEK_SITE_SCRIPT pointing
+  # at local-extract.zeek, and starting a pruner for a directory nothing writes
+  # to would be misleading.
+  zeek-extract-prune:
+    image: busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
+    container_name: hp-zeek-extract-prune
+    restart: unless-stopped
+    profiles: ["file-extract"]
+    command:
+      - sh
+      - -c
+      - |
+        cap=$${ZEEK_EXTRACT_MAX_BYTES:-2147483648}
+        while true; do
+          d=/logs/zeek-extract
+          if [ -d "$$d" ]; then
+            used=$$(du -sb "$$d" 2>/dev/null | cut -f1)
+            while [ "$${used:-0}" -gt "$$cap" ]; do
+              oldest=$$(ls -1tr "$$d" 2>/dev/null | head -1)
+              [ -n "$$oldest" ] || break
+              rm -f "$$d/$$oldest"
+              used=$$(du -sb "$$d" 2>/dev/null | cut -f1)
+            done
+          fi
+          sleep 120
+        done
+    volumes:
+      - /opt/stacks/apiary/logs/zeek-extract:/logs/zeek-extract
+    deploy:
+      resources:
+        limits: { cpus: "0.1", memory: 32M }
+
+  # #1742/S5: per-flow fingerprinting sidecar. Sniffs the same public
+  # interface Suricata and Zeek do -- passively, so it sees blackholed
+  # scanners that never reach portbridge, which an inline fingerprinter
+  # could not.
+  #
+  # host networking because it needs the real interface, and NET_RAW/NET_ADMIN
+  # for the capture. Everything else is dropped: this parses hostile traffic
+  # for a living, so it gets the capability it needs and nothing more.
+  #
+  # Output is already de-duplicated per flow by the sidecar (raw output ran
+  # 193x redundant on tcp_syn_ack against real capture), so this writes what
+  # survives that filter, not the raw stream.
+  huginn-sidecar:
+    build: ./huginn-sidecar
+    image: xore-huginn-sidecar:local
+    container_name: hp-huginn-sidecar
+    restart: unless-stopped
+    network_mode: host
+    command: ["--interface", "${CAPTURE_INTERFACE:-ens6}"]
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [NET_RAW, NET_ADMIN]
+    volumes:
+      - /opt/stacks/apiary/logs/huginn:/logs/huginn
+    # The binary writes NDJSON to stdout; the shell redirect is what puts it
+    # where Filebeat looks. Kept here rather than as a --out flag so the
+    # sidecar stays a plain filter that composes with anything.
+    entrypoint: ["/bin/sh", "-c", "exec /usr/local/bin/huginn-sidecar \"$$@\" >> /logs/huginn/huginn.json", "--"]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  huginn-log-rotate:
+    image: busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
+    container_name: hp-huginn-log-rotate
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - |
+        while true; do
+          f=/logs/huginn/huginn.json
+          if [ -f "$$f" ] && [ $$(stat -c %s "$$f") -gt 33554432 ]; then
+            cp "$$f" "$$f.1" 2>/dev/null && : > "$$f"
+          fi
+          sleep 60
+        done
+    volumes:
+      - /opt/stacks/apiary/logs/huginn:/logs/huginn
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 32M
+
+  # #1739: Traefik has no log rotation of its own, and an unrotated access log
+  # on a 116 GB VPS that is also holding ~50 GB of pcap is a slow outage.
+  # Same copy-truncate approach and cadence as portbridge-log-rotate rather
+  # than a second mechanism -- Filebeat already tolerates it for that log.
+  traefik-log-rotate:
+    image: busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
+    container_name: hp-traefik-log-rotate
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - |
+        while true; do
+          f=/logs/traefik/access.json
+          if [ -f "$$f" ] && [ $$(stat -c %s "$$f") -gt 33554432 ]; then
+            cp "$$f" "$$f.1" 2>/dev/null && : > "$$f"
+          fi
+          sleep 60
+        done
+    volumes:
+      - /opt/stacks/apiary/logs/traefik:/logs/traefik
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 32M
 
   socat-python-api:
     image: alpine/socat:latest

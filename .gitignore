@@ -6,6 +6,12 @@ dist/
 .env
 target/
 
+# Python bytecode. Tracked copies got swept in by a `git add -A` after a
+# local pytest run (#1742 work) and had to be deleted again -- ignore them so
+# that cannot recur.
+__pycache__/
+*.py[cod]
+
 # Playwright MCP writes accessibility snapshots and screenshots into the
 # directory a browser session was driven from; they are session scratch, not
 # source, and one already reached main inside a backend-service commit.

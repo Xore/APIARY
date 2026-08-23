@@ -1,0 +1,88 @@
+# Zeek 8.0 plus the packages the S5 decision (#1727 §0) commits to:
+# JA4+ for the fingerprint families, HASSH for SSH, and the ICSNPP parsers for
+# the OT surface we expose but currently cannot read.
+#
+# ICSNPP's parsers are Spicy/C++ plugins, so this build compiles rather than
+# just copies -- expect ~10 minutes. That cost is paid once, locally, and never
+# on the VPS: this image exists for the development harness only.
+FROM docker.io/zeek/zeek:8.0
+
+ENV PATH="/opt/zeek/bin:${PATH}" \
+    DEBIAN_FRONTEND=noninteractive
+
+# The official Zeek image ships the runtime, not a toolchain, so every package
+# with a compiled plugin fails to install. Two distinct failures, both hit
+# while building this:
+#   1. no CMake at all — "This plugin requires CMake, please install it first."
+#   2. with CMake present, ZeekPlugin.cmake's own find_dependency(OpenSSL)
+#      fails — "Could NOT find OpenSSL ... (missing: OPENSSL_CRYPTO_LIBRARY
+#      OPENSSL_INCLUDE_DIR)". Zeek links OpenSSL but the image carries only
+#      the runtime library, not the headers.
+# JA4 additionally wants a C++20 compiler; the trixie base ships GCC 14.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        cmake g++ make git python3-dev libpcap-dev libssl-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+# zkg needs a writable state dir and a non-interactive config before it will
+# install anything.
+RUN zkg autoconfig --force
+
+# --- Fingerprinting ------------------------------------------------------
+# JA4+ gives JA4/JA4S (ssl.log), JA4H (http.log), JA4SSH (ja4ssh.log),
+# JA4T/JA4TS/JA4L/JA4LS (conn.log) and JA4X (x509.log). Only JA4 itself is
+# BSD-3; the rest are FoxIO License 1.1, which permits internal security use
+# and non-commercial research and forbids monetization. APIARY qualifies --
+# recorded here so the constraint travels with the image.
+RUN zkg install --force --skiptests zeek/foxio/ja4
+
+# HASSH fingerprints the SSH handshake's algorithm lists, which the attacker
+# cannot trivially forge -- unlike the banner string that is currently our only
+# SSH client signal.
+#
+# Installed by git URL, not index name: the package is indexed under corelight
+# rather than its own repo owner, so the obvious "zeek/salesforce/hassh" is
+# "package name not found in sources". The repo carries a root zkg.meta, so
+# the URL form is unambiguous and does not depend on index naming.
+RUN zkg install --force --skiptests https://github.com/salesforce/hassh
+
+# --- ICS / OT ------------------------------------------------------------
+# One parser per ICS port portbridge already forwards:
+#   102   S7comm/COTP        502   Modbus        2404  IEC-104 (no parser yet)
+#   20000 DNP3               44818 EtherNet/IP   47808 BACnet
+# Installed individually rather than as a metapackage so a single upstream
+# breakage is obvious instead of taking the whole ICS surface down with it,
+# and by git URL rather than index name because the index names do not always
+# match the repo names -- the Profinet parser is indexed as
+# "icsnpp-profinet-io-cm", and plain "icsnpp-profinet" is a 404.
+RUN zkg install --force --skiptests \
+        https://github.com/cisagov/icsnpp-modbus \
+        https://github.com/cisagov/icsnpp-dnp3 \
+        https://github.com/cisagov/icsnpp-enip \
+        https://github.com/cisagov/icsnpp-bacnet
+RUN zkg install --force --skiptests \
+        https://github.com/cisagov/icsnpp-s7comm \
+        https://github.com/cisagov/icsnpp-opcua-binary \
+        https://github.com/cisagov/icsnpp-profinet-io-cm
+
+# mergecap, for feeding many pcap files to Zeek as one capture.
+#
+# Deliberately a late layer rather than folded into the toolchain install
+# above: that one sits below every zkg build, so extending it would discard
+# the JA4/HASSH/ICSNPP compile cache on each change. This is also why it is
+# not merged with the earlier apt step despite being the same kind of thing.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends wireshark-common && \
+    rm -rf /var/lib/apt/lists/*
+
+# Load every installed package, plus wire-level file extraction metadata.
+# Note: this loads the *hashing* side of the file framework, not
+# extract-all-files -- pulling real attacker binaries onto a workstation is a
+# deliberate act (#1738), not a side effect of running the lab.
+COPY local.zeek /usr/local/share/zeek-lab/local.zeek
+
+RUN zeek -N | sort > /usr/local/share/zeek-lab/loaded-plugins.txt && \
+    cat /usr/local/share/zeek-lab/loaded-plugins.txt
+
+WORKDIR /work
+ENTRYPOINT ["/bin/bash"]

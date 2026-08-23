@@ -101,13 +101,64 @@ pub async fn ml_backlog(State(state): State<AppState>) -> Result<Json<Vec<Series
     Ok(Json(series))
 }
 
-async fn netflow_sum(state: &AppState, field: &str, name: &str) -> anyhow::Result<Vec<Series>> {
+/// Hourly traffic volume, summed over whichever sensor is producing it.
+///
+/// #1741: Suricata's `netflow` records are being retired -- they and `flow`
+/// are 80.1% of its document volume and carry packets and bytes where Zeek's
+/// `conn.log` carries the same plus duration, conn_state, history, service and
+/// six fingerprints. This chart was the reason that removal was blocked.
+///
+/// Reads Zeek first and falls back to Suricata when Zeek has produced nothing
+/// for the window, rather than switching over in one step. Both orderings are
+/// then safe: before Zeek is deployed the chart keeps working from Suricata,
+/// after Suricata's netflow is switched off it keeps working from Zeek, and
+/// neither deploy has to happen first. Preferring one over the other rather
+/// than summing both matters -- during any overlap the two sensors are
+/// watching the same packets, so adding them would double every figure.
+async fn traffic_sum(
+    state: &AppState,
+    zeek_fields: &[&str],
+    suricata_field: &str,
+    name: &str,
+) -> anyhow::Result<Vec<Series>> {
+    // Zeek splits volume by direction, so a bucket total is the sum of its
+    // originator and responder fields.
+    let zeek_aggs: serde_json::Map<String, Value> = zeek_fields
+        .iter()
+        .enumerate()
+        .map(|(i, field)| (format!("part{i}"), json!({"sum": {"field": field}})))
+        .collect();
+    let zeek_body = json!({
+        "size": 0,
+        "query": {"range": {"@timestamp": {"gte": WEEK}}},
+        "aggs": {"hourly": {
+            "date_histogram": {"field": "@timestamp", "fixed_interval": "1h", "min_doc_count": 0},
+            "aggs": zeek_aggs
+        }}
+    });
+    let zeek = state.es.search_index(&["zeek-v1-conn-*"], zeek_body).await?;
+    let zeek_points: Vec<Point> = zeek["aggregations"]["hourly"]["buckets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|bucket| {
+            let value = (0..zeek_fields.len())
+                .map(|i| bucket[format!("part{i}")]["value"].as_f64().unwrap_or(0.0))
+                .sum();
+            Some(Point { time: bucket["key_as_string"].as_str()?.to_string(), value })
+        })
+        .collect();
+
+    if zeek_points.iter().any(|point| point.value > 0.0) {
+        return Ok(vec![Series { name: name.to_string(), points: zeek_points }]);
+    }
+
     let body = json!({
         "size": 0,
         "query": {"range": {"@timestamp": {"gte": WEEK}}},
         "aggs": {"hourly": {
             "date_histogram": {"field": "@timestamp", "fixed_interval": "1h", "min_doc_count": 0},
-            "aggs": {"total": {"sum": {"field": field}}}
+            "aggs": {"total": {"sum": {"field": suricata_field}}}
         }}
     });
     let result = state.es.search_index(&["suricata-v2-netflow-*"], body).await?;
@@ -126,11 +177,27 @@ async fn netflow_sum(state: &AppState, field: &str, name: &str) -> anyhow::Resul
 }
 
 pub async fn netflow_bytes(State(state): State<AppState>) -> Result<Json<Vec<Series>>, (StatusCode, String)> {
-    netflow_sum(&state, "suricata.eve.netflow.bytes", "bytes").await.map(Json).map_err(bad_gateway)
+    traffic_sum(
+        &state,
+        &["zeek.orig_ip_bytes", "zeek.resp_ip_bytes"],
+        "suricata.eve.netflow.bytes",
+        "bytes",
+    )
+    .await
+    .map(Json)
+    .map_err(bad_gateway)
 }
 
 pub async fn netflow_packets(State(state): State<AppState>) -> Result<Json<Vec<Series>>, (StatusCode, String)> {
-    netflow_sum(&state, "suricata.eve.netflow.pkts", "packets").await.map(Json).map_err(bad_gateway)
+    traffic_sum(
+        &state,
+        &["zeek.orig_pkts", "zeek.resp_pkts"],
+        "suricata.eve.netflow.pkts",
+        "packets",
+    )
+    .await
+    .map(Json)
+    .map_err(bad_gateway)
 }
 
 /// /api/v1/charts/anomaly-trend — protocol-conformance violations per
@@ -248,6 +315,56 @@ pub async fn os_distribution(State(state): State<AppState>) -> Result<Json<Vec<P
     Ok(Json(points))
 }
 
+/// /api/v1/charts/tcp-stack-clusters — unique attacker IPs per JA4T TCP-stack
+/// fingerprint (`zeek-v1-conn-*`).
+///
+/// #1727 §7's replacement for the p0f OS-distribution chart above. Measured on
+/// 14 days of this deployment's own traffic, p0f resolves 76.2% of connections
+/// to a Linux kernel at or below 3.10 -- a version line that went EOL in 2017 --
+/// produces zero Windows 10 labels in 2.69 M labelled connections, and finds
+/// two Android hosts. It is a three-way Linux/Windows/other classifier wearing
+/// version numbers, and the chart renders those numbers as if they meant
+/// something.
+///
+/// JA4T does not name the OS, which is the point: it is a hash of the observed
+/// TCP handshake parameters, so it clusters hosts that share a stack without
+/// asserting what that stack is. Coverage is comparable (88.7% of connections
+/// carry one, against p0f's 95.1% label rate) and it does not decay as the
+/// signature database ages, because there is no database.
+///
+/// Both charts coexist while p0f still runs. Retiring p0f is what removes the
+/// other one.
+pub async fn tcp_stack_clusters(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<PiePoint>>, (StatusCode, String)> {
+    let body = json!({
+        "size": 0,
+        "query": {"range": {"@timestamp": {"gte": OVERVIEW_WINDOW}}},
+        "aggs": {"stacks": {
+            "terms": {"field": "zeek.ja4t", "size": 20},
+            "aggs": {"ips": {"cardinality": {"field": "source.ip"}}}
+        }}
+    });
+    let result = state
+        .es
+        .search_index(&["zeek-v1-conn-*"], body)
+        .await
+        .map_err(bad_gateway)?;
+    let points = result["aggregations"]["stacks"]["buckets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        // Zeek writes an empty ja4t for connections it never saw a SYN for --
+        // a mid-stream capture start, or a scan that only ever sent a RST.
+        .filter(|bucket| !bucket["key"].as_str().unwrap_or("").is_empty())
+        .map(|bucket| PiePoint {
+            name: bucket["key"].as_str().unwrap_or("").to_string(),
+            value: bucket["ips"]["value"].as_u64().unwrap_or(0),
+        })
+        .collect();
+    Ok(Json(points))
+}
+
 async fn fingerprint_bar(state: &AppState, indices: &[&str], body: Value, agg: &str) -> anyhow::Result<Bar> {
     let result = state.es.search_index(indices, body).await?;
     let mut bar = Bar { categories: Vec::new(), values: Vec::new() };
@@ -256,6 +373,168 @@ async fn fingerprint_bar(state: &AppState, indices: &[&str], body: Value, agg: &
         bar.values.push(bucket["doc_count"].as_u64().unwrap_or(0));
     }
     Ok(bar)
+}
+
+/// /api/v1/charts/ics-functions — what attackers actually asked the fake PLCs
+/// to do, by ICS function code (`zeek-v1-*`, #1736).
+///
+/// Each ICSNPP parser names its function field differently, so this runs one
+/// terms aggregation per field rather than pretending a single field spans
+/// them, and labels each bar with the protocol it came from. Only the three
+/// fields observed on real captured traffic are queried — modbus_detailed's
+/// `func`, s7comm's `function_name` and dnp3's `fc_request`. BACnet, ENIP and
+/// OPC-UA are parsed and indexed but have not yet produced a record here, so
+/// guessing their field names would add rows that can only ever read zero.
+///
+/// Worth knowing when reading this chart: the interesting ICS events are rare
+/// and the noise around them is not. One sample held 3 600 connections to
+/// port 20000 and exactly two DNP3 records — which is the argument for the
+/// chart, since an alert-only view loses those two entirely.
+pub async fn ics_functions(State(state): State<AppState>) -> Result<Json<Bar>, (StatusCode, String)> {
+    const SOURCES: &[(&str, &str, &str)] = &[
+        ("modbus", "zeek-v1-modbus_detailed-*", "zeek.func"),
+        ("s7comm", "zeek-v1-s7comm-*", "zeek.function_name"),
+        ("dnp3", "zeek-v1-dnp3-*", "zeek.fc_request"),
+    ];
+
+    let mut bar = Bar { categories: Vec::new(), values: Vec::new() };
+    for (proto, index, field) in SOURCES {
+        let body = json!({
+            "size": 0,
+            "query": {"range": {"@timestamp": {"gte": WEEK}}},
+            "aggs": {"fn": {"terms": {"field": *field, "size": 8}}}
+        });
+        // One dead index must not blank the whole chart: a protocol nobody has
+        // probed this week is a normal state, not an error.
+        let Ok(result) = state.es.search_index(&[*index], body).await else {
+            continue;
+        };
+        for bucket in result["aggregations"]["fn"]["buckets"].as_array().into_iter().flatten() {
+            let name = bucket["key"].as_str().unwrap_or("");
+            if name.is_empty() {
+                continue;
+            }
+            bar.categories.push(format!("{proto}: {name}"));
+            bar.values.push(bucket["doc_count"].as_u64().unwrap_or(0));
+        }
+    }
+    Ok(Json(bar))
+}
+
+/// /api/v1/charts/decoy-requests — what was requested from the TLS-terminated
+/// decoys (`traefik-v1-*`, #1739).
+///
+/// These requests exist nowhere else. Traefik terminates TLS for the
+/// Host-routed decoys, so a wire sensor sees the ClientHello and then
+/// ciphertext; this index is the only record that the request happened at all.
+pub async fn decoy_requests(State(state): State<AppState>) -> Result<Json<Bar>, (StatusCode, String)> {
+    let body = json!({
+        "size": 0,
+        "query": {"range": {"@timestamp": {"gte": WEEK}}},
+        "aggs": {"paths": {"terms": {"field": "url.path", "size": 15}}}
+    });
+    fingerprint_bar(&state, &["traefik-v1-*"], body, "paths").await.map(Json).map_err(bad_gateway)
+}
+
+/// /api/v1/charts/decoy-client-fingerprints — the JA4 of clients that actually
+/// reached a TLS-terminated decoy (#1765).
+///
+/// This is the payoff for the wire-tuple join. Traefik terminates TLS for the
+/// Host-routed decoys, so it knows the request but never the ClientHello;
+/// huginn-sidecar sniffs the ClientHello but never learns which request it
+/// became. Neither can answer "what was the TLS client that hit wordpot"
+/// alone. They meet on `network.community_id`, which for Traefik records is
+/// derived from `ClientAddr` — the address the connection was accepted from,
+/// which is what the sniffer saw — rather than from the resolved client.
+///
+/// Two round trips rather than one: Elasticsearch has no join, so the decoy
+/// flows are collected first and used as a filter. Bounded at 1000 flows,
+/// which is far more than the decoy surface sees in a week (96 of 14 164
+/// connections in a measured sample) but keeps a busy week from building an
+/// unbounded terms query.
+pub async fn decoy_client_fingerprints(
+    State(state): State<AppState>,
+) -> Result<Json<Bar>, (StatusCode, String)> {
+    let flows_body = json!({
+        "size": 0,
+        "query": {"range": {"@timestamp": {"gte": WEEK}}},
+        "aggs": {"flows": {"terms": {"field": "network.community_id", "size": 1000}}}
+    });
+    let flows = state
+        .es
+        .search_index(&["traefik-v1-*"], flows_body)
+        .await
+        .map_err(bad_gateway)?;
+    let ids: Vec<&str> = flows["aggregations"]["flows"]["buckets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|bucket| bucket["key"].as_str())
+        .collect();
+
+    // No decoy traffic in the window is a normal state, not an error, and an
+    // empty terms filter would match everything rather than nothing.
+    if ids.is_empty() {
+        return Ok(Json(Bar { categories: Vec::new(), values: Vec::new() }));
+    }
+
+    let body = json!({
+        "size": 0,
+        "query": {"bool": {"filter": [
+            {"range": {"@timestamp": {"gte": WEEK}}},
+            {"term": {"event.category": "tls_client"}},
+            {"terms": {"network.community_id": ids}}
+        ]}},
+        "aggs": {"ja4": {"terms": {"field": "huginn.observation.sig.ja4", "size": 15}}}
+    });
+    fingerprint_bar(&state, &["huginn-v1-*"], body, "ja4").await.map(Json).map_err(bad_gateway)
+}
+
+/// /api/v1/charts/ja4h-fingerprints — HTTP client fingerprints (`http.log`).
+///
+/// The HTTP counterpart to the TLS JA4 chart below: it fingerprints the
+/// request's own header set and ordering, so it clusters HTTP tooling that
+/// never negotiates TLS at all — which on this perimeter is most of it.
+pub async fn ja4h_fingerprints(State(state): State<AppState>) -> Result<Json<Bar>, (StatusCode, String)> {
+    let body = json!({
+        "size": 0,
+        "query": {"range": {"@timestamp": {"gte": WEEK}}},
+        "aggs": {"ja4h": {"terms": {"field": "zeek.ja4h", "size": 15}}}
+    });
+    fingerprint_bar(&state, &["zeek-v1-http-*"], body, "ja4h").await.map(Json).map_err(bad_gateway)
+}
+
+/// /api/v1/charts/ja4x-fingerprints — X.509 construction fingerprints
+/// (`x509.log`).
+///
+/// Fingerprints how a certificate was *built* rather than what it claims, so
+/// it identifies the tooling behind a self-signed cert — a scanner or C2 using
+/// a templated generator looks identical across every deployment it touches,
+/// however the subject fields are dressed up.
+pub async fn ja4x_fingerprints(State(state): State<AppState>) -> Result<Json<Bar>, (StatusCode, String)> {
+    let body = json!({
+        "size": 0,
+        "query": {"range": {"@timestamp": {"gte": WEEK}}},
+        "aggs": {"ja4x": {"terms": {"field": "zeek.ja4x", "size": 15}}}
+    });
+    fingerprint_bar(&state, &["zeek-v1-x509-*"], body, "ja4x").await.map(Json).map_err(bad_gateway)
+}
+
+/// /api/v1/charts/ja4l-fingerprints — connection-latency fingerprints
+/// (`conn.log`, 92.9 % coverage measured).
+///
+/// Derived from handshake round-trip timing rather than anything the client
+/// sends, so unlike every other family here it cannot be forged by changing
+/// what you transmit — only by changing where you are. That makes it the
+/// strongest signal in the set for spotting one host behind several addresses,
+/// and the weakest for identifying *what* that host is.
+pub async fn ja4l_fingerprints(State(state): State<AppState>) -> Result<Json<Bar>, (StatusCode, String)> {
+    let body = json!({
+        "size": 0,
+        "query": {"range": {"@timestamp": {"gte": WEEK}}},
+        "aggs": {"ja4l": {"terms": {"field": "zeek.ja4l", "size": 15}}}
+    });
+    fingerprint_bar(&state, &["zeek-v1-conn-*"], body, "ja4l").await.map(Json).map_err(bad_gateway)
 }
 
 /// /api/v1/charts/tls-fingerprints — JA4 counts, excluding dest_port 443

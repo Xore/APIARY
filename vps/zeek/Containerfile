@@ -1,0 +1,60 @@
+# Zeek 8.0 with the packages the S5 decision commits to (#1727 §0):
+# JA4+ for the fingerprint families, HASSH for SSH, ICSNPP for the OT surface.
+#
+# Same package set as dev/sensing-lab, deliberately: what the lab measures is
+# only evidence for production if production runs the same parsers. The two
+# Containerfiles differ in what they are for (live capture vs offline replay),
+# not in what they load.
+FROM docker.io/zeek/zeek:8.0
+
+ENV PATH="/opt/zeek/bin:${PATH}" \
+    DEBIAN_FRONTEND=noninteractive
+
+# The official image ships the runtime, not a toolchain, and every package
+# below has a compiled plugin. Two distinct failures without this: no CMake at
+# all, then ZeekPlugin.cmake's own find_dependency(OpenSSL) -- the image
+# carries the OpenSSL runtime but not its headers.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        cmake g++ make git python3-dev libpcap-dev libssl-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN zkg autoconfig --force
+
+# Only JA4 itself is BSD-3; the rest of JA4+ is FoxIO License 1.1, which
+# permits internal security use and non-commercial research and forbids
+# monetization. APIARY qualifies -- recorded here so the constraint travels
+# with the image.
+RUN zkg install --force --skiptests zeek/foxio/ja4
+
+# By git URL, not index name: HASSH is indexed under corelight rather than its
+# own repo owner, so "zeek/salesforce/hassh" is "package name not found".
+RUN zkg install --force --skiptests https://github.com/salesforce/hassh
+
+# One parser per ICS port portbridge forwards. Installed individually so a
+# single upstream breakage is obvious instead of taking the whole ICS surface
+# down, and by URL because the index names do not always match the repo names
+# -- the Profinet parser is icsnpp-profinet-io-cm, and icsnpp-profinet 404s.
+RUN zkg install --force --skiptests \
+        https://github.com/cisagov/icsnpp-modbus \
+        https://github.com/cisagov/icsnpp-dnp3 \
+        https://github.com/cisagov/icsnpp-enip \
+        https://github.com/cisagov/icsnpp-bacnet
+RUN zkg install --force --skiptests \
+        https://github.com/cisagov/icsnpp-s7comm \
+        https://github.com/cisagov/icsnpp-opcua-binary \
+        https://github.com/cisagov/icsnpp-profinet-io-cm
+
+# #1764: IEC-104. ICSNPP has no parser for it, so port 2404 -- the one ICS
+# port we expose that otherwise stops at "a connection happened" -- gets a
+# Spicy one built here. Compiled at image build time rather than loaded as
+# source so a syntax error fails the build instead of the sensor.
+COPY iec104 /usr/local/share/zeek-site/iec104
+RUN spicyz -o /usr/local/share/zeek-site/iec104/iec104.hlto \
+        /usr/local/share/zeek-site/iec104/iec104.spicy \
+        /usr/local/share/zeek-site/iec104/iec104.evt
+
+COPY local.zeek /usr/local/share/zeek-site/local.zeek
+
+WORKDIR /logs/zeek
+ENTRYPOINT ["/opt/zeek/bin/zeek"]

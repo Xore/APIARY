@@ -654,6 +654,68 @@ function Overview() {
             </p>
             <EChart kind="pie" url="/api/chart/os-distribution" height={360} />
           </div>
+          <div className="card wide" id="tcp-stack-clusters-card">
+            <h2>Attacker TCP-stack clusters (JA4T)</h2>
+            <p className="note">
+              Unique attackers per TCP handshake fingerprint, from Zeek. Deliberately not an OS name — it groups hosts
+              that share a network stack without guessing which one, so it does not go stale as operating systems move on.
+              Read it alongside the OS chart above: p0f resolves three quarters of connections here to a Linux kernel
+              retired in 2017.
+            </p>
+            <EChart kind="pie" url="/api/chart/tcp-stack-clusters" height={360} />
+          </div>
+          <div className="card wide" id="ics-functions-card">
+            <h2>ICS function codes — what they asked the PLCs to do</h2>
+            <p className="note">
+              Per-transaction detail from the ICS parsers, across Modbus, S7comm and DNP3. These events are rare and
+              the scanning around them is not — one sample held 3,600 connections to the DNP3 port and two actual DNP3
+              requests, both filesystem reconnaissance. An alert-only view loses exactly those two.
+            </p>
+            <EChart kind="barh" url="/api/chart/ics-functions" height={360} />
+          </div>
+          <div className="card wide" id="decoy-requests-card">
+            <h2>Decoy requests (TLS-terminated) — last 7 days</h2>
+            <p className="note">
+              What was requested from the Host-routed decoys behind Traefik. These exist in no other index: Traefik
+              terminates TLS for them, so a wire sensor sees the handshake and then ciphertext.
+            </p>
+            <EChart kind="barh" url="/api/chart/decoy-requests" height={360} />
+          </div>
+          <div className="card wide" id="decoy-client-fingerprints-card">
+            <h2>Who reached the decoys (JA4)</h2>
+            <p className="note">
+              The TLS client behind each decoy request. Neither sensor can answer this alone — Traefik knows the
+              request but has already discarded the handshake, and the passive sniffer sees the handshake but never
+              learns which request it became. They meet on the connection, not the client address, which is what makes
+              this work even when the request arrived through a proxy.
+            </p>
+            <EChart kind="barh" url="/api/chart/decoy-client-fingerprints" height={360} />
+          </div>
+          <div className="card wide" id="ja4h-fingerprints-card">
+            <h2>HTTP client fingerprints (JA4H) — last 7 days</h2>
+            <p className="note">
+              The request&apos;s own header set and ordering. Clusters HTTP tooling that never negotiates TLS at all,
+              which on this perimeter is most of it.
+            </p>
+            <EChart kind="barh" url="/api/chart/ja4h-fingerprints" height={360} />
+          </div>
+          <div className="card wide" id="ja4l-fingerprints-card">
+            <h2>Connection-latency fingerprints (JA4L) — last 7 days</h2>
+            <p className="note">
+              Derived from handshake round-trip timing rather than anything the client sends, so unlike every other
+              family here it cannot be forged by changing what you transmit — only by changing where you are. Strongest
+              signal for spotting one host behind several addresses; it says nothing about what that host is.
+            </p>
+            <EChart kind="barh" url="/api/chart/ja4l-fingerprints" height={360} />
+          </div>
+          <div className="card wide" id="ja4x-fingerprints-card">
+            <h2>Certificate construction fingerprints (JA4X) — last 7 days</h2>
+            <p className="note">
+              Fingerprints how a certificate was built rather than what it claims — a scanner or C2 using a templated
+              generator looks the same everywhere, however the subject fields are dressed up.
+            </p>
+            <EChart kind="barh" url="/api/chart/ja4x-fingerprints" height={360} />
+          </div>
           <div className="card wide" id="tls-fingerprints-card">
             <h2>TLS scanner fingerprints (JA4) — wire-level, last 7 days</h2>
             <p className="note">Every TLS handshake against a non-dashboard port, alert or not. Click a bar to copy the full hash.</p>

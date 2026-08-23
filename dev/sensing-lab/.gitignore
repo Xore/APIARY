@@ -1,0 +1,4 @@
+# Everything the lab writes is reproducible and potentially large: a pcap
+# sample of real attacker traffic and Zeek's log set over it. Neither belongs
+# in git, and neither should ever be committed by accident.
+var/

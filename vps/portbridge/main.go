@@ -105,6 +105,13 @@ type connLogger struct {
 	size    int64
 	max     int64
 	p0fSock string // #241: empty disables the p0f query entirely
+	// #1728: the VPS's own public address, used as the Community ID
+	// destination when the socket cannot report it. TCP never needs this —
+	// an accepted connection's LocalAddr is the real receiving address — but
+	// the UDP listeners bind wildcard, so a datagram's true destination is
+	// not recoverable from the socket alone. Empty simply omits the field
+	// for UDP rather than hashing a wildcard nothing else could match.
+	publicIP string
 }
 
 func newConnLogger(path string) *connLogger {
@@ -116,7 +123,13 @@ func newConnLogger(path string) *connLogger {
 		fmt.Fprintf(os.Stderr, "portbridge: CONN_LOG %s: %v (connection logging off)\n", path, err)
 		return nil
 	}
-	c := &connLogger{f: f, path: path, max: getenvInt64("LOG_MAX_BYTES", 67108864), p0fSock: os.Getenv("P0F_API_SOCK")}
+	c := &connLogger{
+		f:        f,
+		path:     path,
+		max:      getenvInt64("LOG_MAX_BYTES", 67108864),
+		p0fSock:  os.Getenv("P0F_API_SOCK"),
+		publicIP: os.Getenv("PUBLIC_IP"),
+	}
 	if st, err := f.Stat(); err == nil {
 		c.size = st.Size()
 	}
@@ -164,7 +177,11 @@ func getenvInt64(k string, def int64) int64 {
 // back to the real src_ip recorded here via via_port. UDP has one such socket
 // per client session, so it carries a via_port too; nil only if a caller has
 // no upstream address to report.
-func (c *connLogger) log(r rule, src net.Addr, via net.Addr) {
+// dst is the address the client actually reached us on — an accepted TCP
+// connection's LocalAddr. It is nil for UDP, whose listeners bind wildcard and
+// so cannot report which of our addresses a datagram was sent to; PUBLIC_IP
+// fills that gap when configured. Only used to build the Community ID.
+func (c *connLogger) log(r rule, src net.Addr, dst net.Addr, via net.Addr) {
 	if c == nil || c.f == nil {
 		return
 	}
@@ -191,6 +208,28 @@ func (c *connLogger) log(r rule, src net.Addr, via net.Addr) {
 	if via != nil {
 		if _, vp := splitHostPort(via); vp != 0 {
 			rec["via_port"] = vp
+		}
+	}
+	// #1728: the join key. community_id hashes the tuple as it appeared on the
+	// public interface, so it equals the value Suricata stamped on the same
+	// flow (and the one Zeek computes in-core) — the attacker-facing side is
+	// the one worth joining, because it is the only place the real source IP
+	// exists. community_id_relayed hashes the tunnel-side tuple instead, so
+	// sensors on the homeserver, which only ever see the tunnel peer, can be
+	// joined too. Both are omitted rather than approximated when the tuple
+	// isn't fully known; see communityIDFromParts.
+	if id := c.attackerCommunityID(r, host, port, dst, lport); id != "" {
+		rec["community_id"] = id
+	}
+	if via != nil {
+		viaHost, viaPort := splitHostPort(via)
+		targetHost, targetPort, err := net.SplitHostPort(r.target)
+		if err == nil {
+			if tp, convErr := strconv.Atoi(targetPort); convErr == nil {
+				if id := communityIDFromParts(r.proto, viaHost, viaPort, targetHost, tp); id != "" {
+					rec["community_id_relayed"] = id
+				}
+			}
 		}
 	}
 	line, _ := json.Marshal(rec)
@@ -285,7 +324,7 @@ func pipeTCP(client net.Conn, r rule, cl *connLogger) {
 	// Log after dialing so we can record the upstream local port (via_port).
 	// It equals the src_port the honeypot sees over the tunnel, letting the
 	// dashboard join cowrie's tunnel-peer sessions back to the real attacker IP.
-	cl.log(r, client.RemoteAddr(), up.LocalAddr())
+	cl.log(r, client.RemoteAddr(), client.LocalAddr(), up.LocalAddr())
 	// The PROXY header must be the very first bytes the upstream reads.
 	if r.proxy {
 		if hdr := proxyV1Header(client); hdr != "" {
@@ -408,7 +447,10 @@ func serveUDP(ip string, r rule, cl *connLogger, bh *blackhole) {
 			// sip) have no recovery path at all: conpot's PROXY shim is TCP-only
 			// by construction, so nothing else can carry the real source across
 			// the tunnel. See issue #75.
-			cl.log(r, client, up.LocalAddr())
+			// nil destination: this socket is wildcard-bound, so the address
+			// the datagram was actually sent to is not recoverable here.
+			// PUBLIC_IP supplies it when set (#1728).
+			cl.log(r, client, nil, up.LocalAddr())
 			// Return path accepts a reply from any port on the target host. This is
 			// required by TFTP, whose server selects a new transfer-ID port after
 			// the request; subsequent client datagrams follow that selected port.

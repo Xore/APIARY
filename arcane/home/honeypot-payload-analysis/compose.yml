@@ -117,12 +117,19 @@ services:
     environment:
       - YARA_SCAN_INTERVAL=${YARA_SCAN_INTERVAL:-900}
       - YARA_MAX_BYTES=${YARA_MAX_BYTES:-67108864}
-      - YARA_PAYLOAD_ROOTS=/payloads/dionaea:/payloads/cowrie:/payloads/scripts/script-payloads
+      # #1738: Zeek's wire-extracted files. Read-only, and last in the list --
+      # it is the only root whose contents came off the wire rather than from
+      # a sensor that already handled them, and it is empty unless file
+      # extraction is explicitly enabled on the VPS.
+      - YARA_PAYLOAD_ROOTS=/payloads/dionaea:/payloads/cowrie:/payloads/scripts/script-payloads:/payloads/zeek
       - YARA_RESULTS=/results/results.json
     volumes:
       - dionaea-lib:/payloads/dionaea:ro
       - /opt/stacks/apiary/logs/cowrie/downloads:/payloads/cowrie:ro
       - dashboard-state:/payloads/scripts:ro
+      # #1738: read-only by necessity as well as intent -- this path is a
+      # read-only sshfs mount of the VPS's extract directory.
+      - /opt/stacks/apiary/logs/zeek-extract:/payloads/zeek:ro
       - yara-results:/results
       - /opt/stacks/apiary/state/init-markers:/markers:ro
     deploy:

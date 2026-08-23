@@ -1,0 +1,34 @@
+# Zeek glue for the IEC-104 parser (#1764).
+#
+# Registers the parser for TCP 2404 and raises one event per APDU. Both
+# directions share the analyzer -- an outstation's STARTDT_CON is as
+# interesting as the scanner's STARTDT_ACT, and pairing them is what
+# distinguishes "something answered" from "something was probed".
+
+protocol analyzer spicy::IEC104 over TCP:
+    parse with IEC104::Messages,
+    port 2404/tcp;
+
+import IEC104;
+
+# One event per APDU, carrying the decoded control field. The helper functions
+# are called here rather than in the Zeek script so the format/function
+# decoding stays with the wire format it describes.
+on IEC104::APDU -> event iec104::apdu(
+    $conn,
+    $is_orig,
+    IEC104::format_name(self.ctrl1),
+    IEC104::u_function(self.ctrl1),
+    self.length
+);
+
+# I-format frames carry an ASDU; this is the transaction detail that port 2404
+# currently produces none of.
+on IEC104::ASDU -> event iec104::asdu(
+    $conn,
+    $is_orig,
+    self.type_id,
+    cast<uint64>(self.cot1 & 0x3f),
+    self.asdu_addr,
+    cast<uint64>(self.vsq & 0x7f)
+);
