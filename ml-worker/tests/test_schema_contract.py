@@ -233,3 +233,59 @@ class TestNetflowReflectedDirectionResolvesToTheRealRemoteParty:
         monkeypatch.setattr(iso_mod, "HOME_NET", [ipaddress.ip_network("10.0.0.0/8")])
         assert _get_ip(self._forward_doc()) == self.ATTACKER_IP
         assert _get_port(self._forward_doc()) == 445
+
+
+class TestZeekConnRecordsResolveTheSameWayNetflowDid:
+    """#1741/#1742: Suricata's netflow records are being retired and Zeek's
+    conn.log replaces them as this worker's flow-level input.
+
+    conn.log is bidirectional in the same way netflow was, so the #174
+    home-net swap above has to keep working against it -- the failure mode
+    it guards (bucketing every external scanner under our own IP for half
+    the records) is identical. What changes is only the namespace the raw
+    record sits under: zeek.* instead of suricata.eve.*, with the same ECS
+    source/destination promoted by the ingest pipeline.
+
+    Zeek's orientation is in fact explicit (originator/responder) rather
+    than literal packet direction, so it is the better input -- but that
+    only holds if the resolution keeps being applied, which is what these
+    assert."""
+
+    HOME_IP = "203.0.113.10"
+    ATTACKER_IP = "198.51.100.23"
+
+    def _forward_doc(self):
+        return {
+            "source": {"ip": self.ATTACKER_IP, "port": 63000},
+            "destination": {"ip": self.HOME_IP, "port": 445},
+            "network": {"community_id": "1:example", "transport": "tcp"},
+            "zeek": {"uid": "CabCdE1234", "proto": "tcp"},
+        }
+
+    def _reflected_doc(self):
+        return {
+            "source": {"ip": self.HOME_IP, "port": 445},
+            "destination": {"ip": self.ATTACKER_IP, "port": 63000},
+            "network": {"community_id": "1:example", "transport": "tcp"},
+            "zeek": {"uid": "CabCdE1234", "proto": "tcp"},
+        }
+
+    def test_forward_direction_resolves_to_the_attacker(self, monkeypatch):
+        monkeypatch.setattr(iso_mod, "HOME_NET", [ipaddress.ip_network(f"{self.HOME_IP}/32")])
+        assert _get_ip(self._forward_doc()) == self.ATTACKER_IP
+        assert _get_port(self._forward_doc()) == 445
+
+    def test_reflected_direction_resolves_to_the_attacker_not_ourselves(self, monkeypatch):
+        monkeypatch.setattr(iso_mod, "HOME_NET", [ipaddress.ip_network(f"{self.HOME_IP}/32")])
+        assert _get_ip(self._reflected_doc()) == self.ATTACKER_IP
+        # Same reasoning as the netflow case: the port touched on OUR side
+        # is what unique_ports_1h needs, not the attacker's ephemeral one.
+        assert _get_port(self._reflected_doc()) == 445
+
+    def test_zeek_records_do_not_carry_a_honeypot_namespace(self):
+        # Guards the same confusion the Suricata contract test above does:
+        # extract_features() disambiguates on field shape, not index name.
+        src = self._forward_doc()
+        assert "honeypot" not in src
+        assert "suricata" not in src
+        assert src["zeek"]["proto"] == "tcp"
