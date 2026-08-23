@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
+import { countryName } from '../lib/country'
 
 type Kv = { key: string; count: number }
 type Technique = { id: string; name: string; domain: string; evidence: string; count: number; url: string }
@@ -284,7 +285,7 @@ function SessionPage() {
             {detail ? (
               <>
                 <span className="chip">{detail.total.toLocaleString('en-US')} events</span>
-                <span className="chip">{detail.ip}{detail.country ? ` · ${detail.country}` : ''}</span>
+                <span className="chip" title={countryName(detail.country)}>{detail.ip}{detail.country ? ` · ${detail.country}` : ''}</span>
                 <span className="chip">
                   {formatTimestamp(detail.first)} → {formatTimestamp(detail.last)}
                 </span>
@@ -352,6 +353,10 @@ function SessionPage() {
         columns={EVENT_COLUMNS}
         rowKey={(row, index) => `${row.time}-${index}`}
         inspectorTitle="Event record"
+        emptyState={{
+          title: 'No events were recorded for this session',
+          hint: 'The session was opened but nothing further was captured before it closed.',
+        }}
       />
     </>
   )

@@ -329,6 +329,10 @@ function Alerts() {
             rows={groups}
             columns={columns}
             rowKey={(group) => group.signature}
+            emptyState={{
+              title: 'No alerts match this filter',
+              hint: 'Nothing is open right now, or a filter above is excluding it.',
+            }}
             inspectorTitle="Alert group details"
           />
         )}

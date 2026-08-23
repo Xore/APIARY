@@ -9,6 +9,7 @@ import { InvestigateHeader, MasterDetailTable, type Column } from '../components
 import { Tabs, TabPanel } from '../components/Tabs'
 import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
+import { countryName } from '../lib/country'
 
 type Kv = { key: string; count: number }
 type Technique = { id: string; name: string; domain: string; evidence: string; count: number; url: string }
@@ -280,6 +281,10 @@ function CorrelationPanel({ correlation }: { correlation: Correlation }) {
           rows={[...correlation.records].reverse()}
           columns={CORRELATION_COLUMNS}
           rowKey={(row, index) => `progression-${row.time}-${index}`}
+          emptyState={{
+            title: 'No Elasticsearch correlation records were found for this IP',
+            hint: 'This address has been seen, but nothing correlatable has been indexed for it yet.',
+          }}
           inspectorTitle="Event record"
         />
       </div>
@@ -329,7 +334,7 @@ function InvestigateIp() {
                   confirmed malicious (sandbox)
                 </span>
               ) : null}
-              {profile.country ? <span className="badge badge--info">{profile.country}</span> : null}
+              {profile.country ? <span className="badge badge--info" title={countryName(profile.country)}>{profile.country}</span> : null}
               {profile.asn ? <span className="chip">{profile.asn}</span> : null}
               <span className="chip">
                 {formatTimestamp(profile.first)} → {formatTimestamp(profile.last)}

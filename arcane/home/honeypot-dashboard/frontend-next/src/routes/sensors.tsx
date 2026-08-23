@@ -212,6 +212,10 @@ function Sensors() {
             columns={MAILONEY_COLUMNS}
             rowKey={(row) => row.session_id}
             inspectorTitle="SMTP session"
+            emptyState={{
+              title: 'No mailoney SMTP activity in the last 48h',
+              hint: 'Nothing has talked SMTP to this sensor in the current window.',
+            }}
           />
         </div>
       ) : null}
@@ -223,6 +227,10 @@ function Sensors() {
             columns={HTTP_COLUMNS}
             rowKey={(row, index) => `${row.when}-${index}`}
             inspectorTitle="HTTP request"
+            emptyState={{
+              title: 'No http-honeypot activity in the last 48h',
+              hint: 'Nothing has hit this sensor over HTTP in the current window.',
+            }}
           />
         </div>
       ) : null}
@@ -234,6 +242,10 @@ function Sensors() {
             columns={TANNER_COLUMNS}
             rowKey={(row, index) => `${row.when}-${index}`}
             inspectorTitle="Tanner request"
+            emptyState={{
+              title: 'No tanner activity in the last 48h',
+              hint: 'Nothing has reached the tanner sensor in the current window.',
+            }}
           />
         </div>
       ) : null}

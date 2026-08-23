@@ -241,6 +241,10 @@ function Page() {
         rows={visible}
         columns={COLUMNS}
         rowKey={(row, index) => `${row.campaign_id}-${index}`}
+        emptyState={{
+          title: 'No campaign has crossed a criticality-rule threshold yet',
+          hint: 'Campaigns surface here once agent-intrusion-worker scores one past a rule.',
+        }}
         total={category ? undefined : total}
         onViewMore={category ? undefined : viewMore}
         loadingMore={loadingMore}

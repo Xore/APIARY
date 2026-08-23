@@ -5,6 +5,8 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { StoreListPage, sha256Of, str, when, type StorePage, type StoreRow } from '../components/StoreList'
 import type { Column } from '../components/Investigate'
+import { ShieldIcon } from '../components/CardIcons'
+import { pathString } from '../lib/json'
 
 const fetchPage = createServerFn({ method: 'GET' })
   .inputValidator((input: { offset: number }) => input)
@@ -15,7 +17,9 @@ const fetchPage = createServerFn({ method: 'GET' })
 
 const COLUMNS: Column<StoreRow>[] = [
   { header: 'analyzed', render: (row) => when(str(row, '@timestamp')) },
-  { header: 'status', render: (row) => <span className="badge badge--muted">{str(row, 'status') || str(row, 'exit_status')}</span> },
+  // Card layout promotes this into `.project-card__badges`; keeping it
+  // detail-only stops it rendering twice on the same card.
+  { header: 'status', detail: true, render: (row) => <span className="badge badge--muted">{str(row, 'status') || str(row, 'exit_status')}</span> },
   {
     header: 'file',
     className: 'v',
@@ -45,8 +49,30 @@ function Page() {
       rowKey={(_, index) => String(index)}
       inspectorTitle="Analysis run"
       chipNoun="runs"
+      emptyState={{
+        title: 'No GitHub analyses match this view',
+        hint: 'Runs appear here once a payload is correlated against published source.',
+      }}
       layout="cards"
       gridId="github-analysis-results"
+      cardIcon={() => ShieldIcon}
+      cardBadges={(row) => {
+        const status = str(row, 'status') || str(row, 'exit_status')
+        const family = pathString(row, 'family')
+        return (
+          <>
+            {status ? <span className={status === 'error' ? 'badge badge--muted tw:text-red' : 'badge badge--muted'}>{status}</span> : null}
+            {family ? <span className="badge badge--accent">{family}</span> : null}
+          </>
+        )
+      }}
+      cardDesc={(row) => {
+        const malicious = pathString(row, 'verdict', 'malicious')
+        const total = pathString(row, 'verdict', 'total')
+        const level = pathString(row, 'verdict', 'level')
+        if (!malicious && !total) return 'no verdict recorded'
+        return `${malicious || 0} / ${total || 0} detections${level ? ` • ${level}` : ''}`
+      }}
       cardHref={(row) => {
         const sha = sha256Of(row)
         return sha ? `/github-analysis/${encodeURIComponent(sha)}` : undefined

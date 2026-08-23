@@ -5,6 +5,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { formatTimestamp } from '../lib/time'
+import { countryName } from '../lib/country'
 
 type RecordingRow = {
   shasum: string
@@ -120,7 +121,7 @@ function ReplayPane({ shasum }: { shasum: string }) {
           ) : (
             'unattributed'
           )}
-          {who.country ? <> <span className="badge badge--info">{who.country}</span></> : null}
+          {who.country ? <> <span className="badge badge--info" title={countryName(who.country)}>{who.country}</span></> : null}
           {who.session ? (
             <>
               {' · '}
@@ -153,7 +154,7 @@ const COLUMNS: Column<RecordingRow>[] = [
   { header: 'imported', render: (row) => formatTimestamp(row.imported_at) },
   // #1691: restores recordings.html:30-37's inline attribution.
   { header: 'source', className: 'v', render: (row) => row.src_ip || '—' },
-  { header: 'country', render: (row) => row.country || '—' },
+  { header: 'country', render: (row) => (row.country ? <span title={countryName(row.country)}>{row.country}</span> : '—') },
   { header: 'session', className: 'v', render: (row) => row.session || '—' },
   { header: 'recording', className: 'v', render: (row) => row.shasum },
   { header: 'size', className: 'n', render: (row) => `${(row.size_bytes / 1024).toFixed(1)} KB` },
@@ -197,6 +198,11 @@ function Recordings() {
         rows={rows}
         columns={COLUMNS}
         rowKey={(row) => row.shasum}
+        detailHref={(row) => `/tty-replay/${encodeURIComponent(row.shasum)}`}
+        emptyState={{
+          title: 'No session recordings captured yet',
+          hint: 'Cowrie writes one per interactive shell session.',
+        }}
         total={total}
         onViewMore={viewMore}
         loadingMore={loadingMore}

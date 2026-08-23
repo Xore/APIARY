@@ -3,7 +3,7 @@
 // master-detail kit with View-more + skeleton-first. Column definitions
 // are the only per-page code.
 import { useCallback, useEffect, useState } from 'react'
-import { InvestigateHeader, MasterDetailTable, type Column } from './Investigate'
+import { InvestigateHeader, MasterDetailTable, type Column, type EmptyState } from './Investigate'
 import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
 
@@ -25,6 +25,11 @@ export function StoreListPage<Row = StoreRow>({
   layout,
   gridId,
   cardHref,
+  detailHref,
+  cardIcon,
+  cardBadges,
+  cardDesc,
+  emptyReplacement,
   emptyState,
 }: {
   fetchPage: (input: { data: { offset: number } }) => Promise<StorePage<Row> | null>
@@ -50,10 +55,22 @@ export function StoreListPage<Row = StoreRow>({
    * page instead of opening the inspector. See MasterDetailTable's own
    * doc comment. */
   cardHref?: (row: Row) => string | undefined
-  /** Rendered instead of the table once the first page has loaded and
-   * came back with zero rows — a template gallery / call-to-action
-   * instead of a bare empty table (#1575's empty-state pattern). */
-  emptyState?: React.ReactNode
+  /** Rendered *instead of* the whole table once the first page has loaded
+   * and came back with zero rows — a template gallery / call-to-action
+   * rather than a bare empty table (#1575's empty-state pattern). Only
+   * for surfaces that have something better to offer than a sentence;
+   * everything else wants `emptyState` below. */
+  emptyReplacement?: React.ReactNode
+  /** The in-table "nothing matched" sentence. See MasterDetailTable. */
+  emptyState?: EmptyState
+  /** `layout="cards"` only: the icon, badge row and description the legacy
+   * result cards carried. See MasterDetailTable's own doc comment. */
+  /** Adds an "Open full details" action to the row inspector. See
+   * MasterDetailTable's own doc comment. */
+  detailHref?: (row: Row) => string | undefined
+  cardIcon?: (row: Row) => React.ReactNode
+  cardBadges?: (row: Row) => React.ReactNode
+  cardDesc?: (row: Row) => React.ReactNode
 }) {
   const [rows, setRows] = useState<Row[] | null>(null)
   const [total, setTotal] = useState(0)
@@ -97,8 +114,8 @@ export function StoreListPage<Row = StoreRow>({
         }
       />
       {beforeTable}
-      {emptyState && rows !== null && rows.length === 0 ? (
-        emptyState
+      {emptyReplacement && rows !== null && rows.length === 0 ? (
+        emptyReplacement
       ) : (
         <MasterDetailTable
           rows={rows}
@@ -112,6 +129,11 @@ export function StoreListPage<Row = StoreRow>({
           layout={layout}
           gridId={gridId}
           cardHref={cardHref}
+          detailHref={detailHref}
+          cardIcon={cardIcon}
+          cardBadges={cardBadges}
+          cardDesc={cardDesc}
+          emptyState={emptyState}
         />
       )}
     </>

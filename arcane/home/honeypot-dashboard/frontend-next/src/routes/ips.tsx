@@ -7,6 +7,7 @@ import { InvestigateHeader } from '../components/Investigate'
 import { AttackMap, type MapPoint } from '../components/OverviewPanels'
 import { usePaginatedList, useResolved } from '../lib/hooks'
 import { formatTimestamp } from '../lib/time'
+import { countryName } from '../lib/country'
 
 type SourceRow = {
   ip: string
@@ -105,7 +106,7 @@ function Sources() {
                     {row.ip}
                   </a>
                   {row.country ? (
-                    <a className="badge badge--info" href={`/events?country=${encodeURIComponent(row.country)}`}>
+                    <a className="badge badge--info" title={countryName(row.country)} href={`/events?country=${encodeURIComponent(row.country)}`}>
                       {row.country}
                     </a>
                   ) : null}

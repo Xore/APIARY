@@ -10,6 +10,7 @@ import { Tabs, TabPanel } from '../components/Tabs'
 import { pathString, type JsonRecord } from '../lib/json'
 import { isLivePaused } from '../lib/live'
 import { formatTimestamp } from '../lib/time'
+import { countryName } from '../lib/country'
 
 type TokenType = {
   token_type: string
@@ -305,7 +306,7 @@ function FiredTokens() {
                         '—'
                       )}
                     </td>
-                    <td>{row.country ? <span className="badge badge--info">{row.country}</span> : '—'}</td>
+                    <td>{row.country ? <span className="badge badge--info" title={countryName(row.country)}>{row.country}</span> : '—'}</td>
                     <td>{tokenType || '—'}</td>
                     <td className="v">{row.detail || pathString(row.record, 'honeypot', 'memo') || '—'}</td>
                     <td>
@@ -472,7 +473,7 @@ function Page() {
           subtitle="Deployed decoy tokens — documents, URLs and hostnames that phone home the moment an attacker touches them."
           columns={COLUMNS}
           rowKey={(row, index) => `${str(row, 'id')}-${index}`}
-          emptyState={<TokenGallery onPick={pickTemplate} />}
+          emptyReplacement={<TokenGallery onPick={pickTemplate} />}
           inspectorTitle="Token details"
           chipNoun="tokens"
           layout="cards"

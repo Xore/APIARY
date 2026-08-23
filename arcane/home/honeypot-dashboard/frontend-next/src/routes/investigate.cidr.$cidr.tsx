@@ -174,6 +174,10 @@ function InvestigateCidr() {
         columns={RECORD_COLUMNS}
         rowKey={(row, index) => `${row.time}-${index}`}
         inspectorTitle="Correlated record"
+        emptyState={{
+          title: 'No correlated records were found for this network',
+          hint: 'Elasticsearch has nothing indexed against this CIDR yet.',
+        }}
       />
     </>
   )

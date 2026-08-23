@@ -13,6 +13,7 @@ import { isLivePaused } from '../lib/live'
 import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
 import { useSidebarViewTabs } from '../lib/viewTabs'
+import { countryName } from '../lib/country'
 
 type OverviewKpis = {
   total: number
@@ -249,7 +250,7 @@ function RecentEventRow({ row, open, onToggle }: { row: EventRow; open: boolean;
           {row.country ? (
             <>
               {' '}
-              <a className="badge badge--info" href={`/events?country=${encodeURIComponent(row.country)}`} onClick={stop}>
+              <a className="badge badge--info" title={countryName(row.country)} href={`/events?country=${encodeURIComponent(row.country)}`} onClick={stop}>
                 {row.country}
               </a>
             </>

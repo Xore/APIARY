@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { confirmAction } from '../components/ConfirmDialog'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { ArtifactList } from '../components/ArtifactList'
+import { CodeIcon, FileIcon, SandboxIcon, ShieldIcon, WorkbenchIcon } from '../components/CardIcons'
 import { getSessionUser } from '../lib/auth'
 import { pathString, type JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
@@ -341,6 +342,16 @@ const recordColumn: Column<StoreRow> = {
   render: (row) => <pre className="hp-md__preview">{JSON.stringify(row, null, 2)}</pre>,
 }
 
+// The legacy result cards (ui/payload_workbench.html, ui/sandbox.html,
+// ui/ghidra.html) each carried an icon, a badge row and a one-line
+// description alongside the title. Those three slots are restored here;
+// the columns they duplicate are marked detail-only so a card does not
+// print the same value twice.
+function childCount(row: StoreRow): number {
+  const children = row.children
+  return Array.isArray(children) ? children.length : 0
+}
+
 const WORKBENCH_COLUMNS: Column<StoreRow>[] = [
   {
     header: 'recipe',
@@ -348,7 +359,7 @@ const WORKBENCH_COLUMNS: Column<StoreRow>[] = [
     primary: true,
     render: (row) => pathString(row, 'recipe_name') || <span className="tw:text-muted">one-off</span>,
   },
-  { header: 'state', render: (row) => <span className="badge badge--muted">{pathString(row, 'state')}</span> },
+  { header: 'state', detail: true, render: (row) => <span className="badge badge--muted">{pathString(row, 'state')}</span> },
   { header: 'payload', className: 'v', render: (row) => <span className="mono">{pathString(row, 'payload_sha256').slice(0, 16)}</span> },
   { header: 'created', render: (row) => when(pathString(row, 'created_at')) },
   { header: 'owner', render: (row) => pathString(row, 'owner') },
@@ -362,8 +373,8 @@ const STATIC_COLUMNS: Column<StoreRow>[] = [
     primary: true,
     render: (row) => <span className="mono">{pathString(row, 'Fingerprint').slice(0, 24)}</span>,
   },
-  { header: 'kind', render: (row) => pathString(row, 'Analysis', 'Kind') },
-  { header: 'summary', className: 'v', render: (row) => pathString(row, 'Analysis', 'Summary') },
+  { header: 'kind', detail: true, render: (row) => pathString(row, 'Analysis', 'Kind') },
+  { header: 'summary', detail: true, className: 'v', render: (row) => pathString(row, 'Analysis', 'Summary') },
   recordColumn,
 ]
 
@@ -393,7 +404,7 @@ const SANDBOX_COLUMNS: Column<StoreRow>[] = [
     },
   },
   { header: 'detonated', render: (row) => when(pathString(row, '@timestamp')) },
-  { header: 'platform', render: (row) => <span className="badge badge--muted">{pathString(row, 'platform')}</span> },
+  { header: 'platform', detail: true, render: (row) => <span className="badge badge--muted">{pathString(row, 'platform')}</span> },
   {
     header: 'risk',
     render: (row) => {
@@ -408,7 +419,7 @@ const SANDBOX_COLUMNS: Column<StoreRow>[] = [
     primary: true,
     render: (row) => <code>{pathString(row, 'file', 'hash', 'sha256').slice(0, 16) || pathString(row, 'file', 'name')}</code>,
   },
-  { header: 'exit', render: (row) => pathString(row, 'exit_status') },
+  { header: 'exit', detail: true, render: (row) => pathString(row, 'exit_status') },
   recordColumn,
 ]
 
@@ -427,7 +438,7 @@ const GHIDRA_COLUMNS: Column<StoreRow>[] = [
       )
     },
   },
-  { header: 'exit', render: (row) => pathString(row, 'exit_status') },
+  { header: 'exit', detail: true, render: (row) => pathString(row, 'exit_status') },
   recordColumn,
 ]
 
@@ -1241,6 +1252,23 @@ function Results() {
           columns={WORKBENCH_COLUMNS}
           rowKey={(row, i) => `wb-${pathString(row, 'id')}-${i}`}
           inspectorTitle="Workbench run"
+          cardIcon={() => WorkbenchIcon}
+          cardBadges={(row) => {
+            const state = pathString(row, 'state')
+            return state ? <span className={`badge wb-state wb-state--${state}`}>{state}</span> : null
+          }}
+          cardDesc={(row) => {
+            const kind = pathString(row, 'payload_kind')
+            const analyzers = childCount(row)
+            const parts = []
+            if (kind) parts.push(`${kind} payload`)
+            parts.push(`${analyzers} analyzer${analyzers === 1 ? '' : 's'}`)
+            return parts.join(' • ')
+          }}
+          emptyState={{
+            title: 'No workbench runs match this view',
+            hint: 'Clear the filter above, or start a run from the workbench tab.',
+          }}
           layout="cards"
           gridId="workbench-runs-results"
           cardHref={(row) => {
@@ -1257,6 +1285,16 @@ function Results() {
           columns={STATIC_COLUMNS}
           rowKey={(row, i) => `st-${pathString(row, 'Fingerprint')}-${i}`}
           inspectorTitle="Static analysis"
+          cardIcon={() => FileIcon}
+          cardBadges={(row) => {
+            const kind = pathString(row, 'Analysis', 'Kind')
+            return kind ? <span className="badge badge--muted">{kind}</span> : null
+          }}
+          cardDesc={(row) => pathString(row, 'Analysis', 'Summary') || null}
+          emptyState={{
+            title: 'No static analyses match this view',
+            hint: 'Clear the filter above to see every static analysis on record.',
+          }}
           layout="cards"
           gridId="static-analysis-results"
           cardHref={(row) => {
@@ -1273,6 +1311,17 @@ function Results() {
           columns={YARA_COLUMNS}
           rowKey={(_, i) => `ya-${i}`}
           inspectorTitle="YARA result"
+          cardIcon={() => ShieldIcon}
+          cardBadges={(row) => {
+            const matches = Array.isArray((row.yara as StoreRow | undefined)?.matches)
+              ? ((row.yara as StoreRow).matches as unknown[]).length
+              : Number(pathString(row, 'yara', 'match_count')) || 0
+            return <span className={matches > 0 ? 'badge badge--warning' : 'badge badge--muted'}>{matches} match{matches === 1 ? '' : 'es'}</span>
+          }}
+          emptyState={{
+            title: 'No YARA results match this view',
+            hint: 'Clear the filter above to see every YARA result on record.',
+          }}
           layout="cards"
           gridId="yara-results"
           cardHref={(row) => {
@@ -1289,6 +1338,27 @@ function Results() {
           columns={SANDBOX_COLUMNS}
           rowKey={(_, i) => `sb-${i}`}
           inspectorTitle="Sandbox run"
+          cardIcon={() => SandboxIcon}
+          cardBadges={(row) => {
+            const platform = pathString(row, 'platform')
+            const exit = pathString(row, 'exit_status')
+            return (
+              <>
+                {platform ? <span className="badge badge--muted">{platform}</span> : null}
+                {exit === 'error' ? <span className="badge badge--muted tw:text-red">error</span> : null}
+              </>
+            )
+          }}
+          cardDesc={(row) => {
+            const score = pathString(row, 'risk_score')
+            const level = pathString(row, 'risk_level')
+            if (!score && !level) return null
+            return `risk ${score || '?'} / 100${level ? ` • ${level}` : ''}`
+          }}
+          emptyState={{
+            title: 'No completed sandbox exports match this view',
+            hint: 'Clear the filter above, or queue a detonation from the workbench.',
+          }}
           inspectorExtra={(row) => {
             const job = pathString(row, 'sandbox', 'job') || pathString(row, 'job')
             return job ? <ArtifactList kind="sandbox" artifactKey={job} /> : null
@@ -1327,6 +1397,15 @@ function Results() {
           columns={GHIDRA_COLUMNS}
           rowKey={(_, i) => `gh-${i}`}
           inspectorTitle="Ghidra run"
+          cardIcon={() => CodeIcon}
+          cardBadges={(row) => {
+            const exit = pathString(row, 'exit_status')
+            return exit ? <span className={exit === 'error' ? 'badge badge--muted tw:text-red' : 'badge badge--muted'}>{exit}</span> : null
+          }}
+          emptyState={{
+            title: 'No Ghidra analyses match this view',
+            hint: 'Clear the filter above to see every Ghidra run on record.',
+          }}
           inspectorExtra={(row) => {
             const sha = pathString(row, 'file', 'hash', 'sha256')
             return sha ? <ArtifactList kind="ghidra" artifactKey={sha} /> : null

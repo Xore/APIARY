@@ -155,6 +155,10 @@ function History() {
         rows={rows}
         columns={COLUMNS}
         rowKey={(row, index) => `${row.time}-${index}`}
+        emptyState={{
+          title: 'No history entries match this view',
+          hint: 'Widen the time window, or clear a filter above.',
+        }}
         total={total}
         onViewMore={viewMore}
         loadingMore={loadingMore}

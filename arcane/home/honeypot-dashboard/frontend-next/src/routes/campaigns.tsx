@@ -130,7 +130,16 @@ function Campaigns() {
         Score combines volume, unique sources, sensor and port spread, reused credentials, captured payloads, and IDS
         alerts. Select a network for its complete event chain.
       </p>
-      <MasterDetailTable rows={rows} columns={COLUMNS} rowKey={(row) => row.cidr} />
+      <MasterDetailTable
+        rows={rows}
+        columns={COLUMNS}
+        rowKey={(row) => row.cidr}
+        detailHref={(row) => `/investigate/cidr/${encodeURIComponent(row.cidr)}`}
+        emptyState={{
+          title: 'No active campaigns in the selected correlation window',
+          hint: 'Widen the window, or wait for more traffic to correlate into one.',
+        }}
+      />
     </>
   )
 }

@@ -222,6 +222,10 @@ function SourceHealthPage() {
         rows={health ? health.sensors : null}
         columns={COLUMNS}
         rowKey={(row) => row.sensor}
+        emptyState={{
+          title: 'No sensors are reporting yet',
+          hint: 'A sensor appears here once its first event reaches Elasticsearch.',
+        }}
         inspectorTitle="Sensor details"
       />
     </>
