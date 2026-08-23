@@ -39,23 +39,41 @@ RUN zkg install --force --skiptests zeek/foxio/ja4
 # HASSH fingerprints the SSH handshake's algorithm lists, which the attacker
 # cannot trivially forge -- unlike the banner string that is currently our only
 # SSH client signal.
-RUN zkg install --force --skiptests zeek/salesforce/hassh
+#
+# Installed by git URL, not index name: the package is indexed under corelight
+# rather than its own repo owner, so the obvious "zeek/salesforce/hassh" is
+# "package name not found in sources". The repo carries a root zkg.meta, so
+# the URL form is unambiguous and does not depend on index naming.
+RUN zkg install --force --skiptests https://github.com/salesforce/hassh
 
 # --- ICS / OT ------------------------------------------------------------
 # One parser per ICS port portbridge already forwards:
 #   102   S7comm/COTP        502   Modbus        2404  IEC-104 (no parser yet)
 #   20000 DNP3               44818 EtherNet/IP   47808 BACnet
 # Installed individually rather than as a metapackage so a single upstream
-# breakage is obvious instead of taking the whole ICS surface down with it.
+# breakage is obvious instead of taking the whole ICS surface down with it,
+# and by git URL rather than index name because the index names do not always
+# match the repo names -- the Profinet parser is indexed as
+# "icsnpp-profinet-io-cm", and plain "icsnpp-profinet" is a 404.
 RUN zkg install --force --skiptests \
-        zeek/cisagov/icsnpp-modbus \
-        zeek/cisagov/icsnpp-dnp3 \
-        zeek/cisagov/icsnpp-enip \
-        zeek/cisagov/icsnpp-bacnet
+        https://github.com/cisagov/icsnpp-modbus \
+        https://github.com/cisagov/icsnpp-dnp3 \
+        https://github.com/cisagov/icsnpp-enip \
+        https://github.com/cisagov/icsnpp-bacnet
 RUN zkg install --force --skiptests \
-        zeek/cisagov/icsnpp-s7comm \
-        zeek/cisagov/icsnpp-opcua-binary \
-        zeek/cisagov/icsnpp-profinet
+        https://github.com/cisagov/icsnpp-s7comm \
+        https://github.com/cisagov/icsnpp-opcua-binary \
+        https://github.com/cisagov/icsnpp-profinet-io-cm
+
+# mergecap, for feeding many pcap files to Zeek as one capture.
+#
+# Deliberately a late layer rather than folded into the toolchain install
+# above: that one sits below every zkg build, so extending it would discard
+# the JA4/HASSH/ICSNPP compile cache on each change. This is also why it is
+# not merged with the earlier apt step despite being the same kind of thing.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends wireshark-common && \
+    rm -rf /var/lib/apt/lists/*
 
 # Load every installed package, plus wire-level file extraction metadata.
 # Note: this loads the *hashing* side of the file framework, not

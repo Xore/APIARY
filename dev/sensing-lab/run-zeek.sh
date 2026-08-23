@@ -27,27 +27,45 @@ fi
 
 mkdir -p "$log_dir"
 
-# One Zeek run over the whole sample. -C skips checksum validation, which
-# matters because the VPS captures on an offload-enabled NIC and would
-# otherwise discard most packets as bad-checksum.
+# One Zeek run over the whole sample, as a single logical capture.
+#
+# The files must be *merged*, not concatenated. Every pcap carries its own
+# 24-byte global header, so `cat a.pcap b.pcap` leaves that header sitting
+# mid-stream where libpcap reads it as a packet header and derives a garbage
+# capture length from the magic number. mergecap rewrites one header and
+# orders the packets by timestamp.
+#
+# Piping it straight into Zeek keeps this within the storage budget: a merged
+# copy on disk would double the sample's footprint for the length of the run.
+#
+# Running once over the merged stream rather than once per file also matters
+# for correctness -- Suricata rotates its pcap every 4 MB, so connections
+# routinely span file boundaries. Per-file runs would cut those flows in half
+# and report each half as its own truncated connection.
+#
+# -C skips checksum validation: the VPS captures on an offload-enabled NIC, so
+# most packets carry checksums the kernel never finished computing, and Zeek
+# would otherwise discard them.
 echo "sensing-lab: running Zeek over $(ls "$pcap_dir" | wc -l) pcap file(s)"
 "$ENGINE" run --rm \
     -v "${pcap_dir}:/work/pcap:ro,Z" \
     -v "${log_dir}:/work/logs:Z" \
-    "$IMAGE" -lc '
-        set -e
+    "$IMAGE" -c '
+        set -o pipefail
+        # -c, not -lc: a login shell re-reads /etc/profile and discards the
+        # image PATH, so zeek is simply "command not found". PATH is exported
+        # again here so the entrypoint cannot silently matter.
+        export PATH=/usr/local/zeek/bin:/opt/zeek/bin:$PATH
         cd /work/logs
-        zeek -C -r <(cat /work/pcap/*) \
-             /usr/local/share/zeek-lab/local.zeek 2>&1 | tail -20 || true
-        # Fall back to per-file runs if the concatenation was rejected: pcap
-        # files with differing link types cannot be cat-ed together.
-        if [ -z "$(ls -A /work/logs 2>/dev/null)" ]; then
-            echo "sensing-lab: concatenated read produced nothing, retrying per file"
-            for f in /work/pcap/*; do
-                zeek -C -r "$f" /usr/local/share/zeek-lab/local.zeek 2>&1 | tail -5 || true
-            done
-        fi
-    '
+        mergecap -w - -F pcap /work/pcap/* \
+            | zeek -C -r - /usr/local/share/zeek-lab/local.zeek 2>&1 | tail -20
+    ' || {
+        # Fail loudly. A harness that reports success when the parse failed is
+        # worse than no harness: the record counts below would read as "this
+        # traffic contains nothing" rather than "nothing ran".
+        echo "sensing-lab: Zeek run FAILED — see output above" >&2
+        exit 1
+    }
 
 echo
 echo "sensing-lab: per-log record counts"

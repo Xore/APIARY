@@ -40,6 +40,49 @@ var suricataVectors = []struct {
 	{"tcp", "103.183.74.72", 40380, "87.106.162.235", 5900, "1:5KGWys140555xFGCK1bqZK5Xm1Y="},
 }
 
+// zeekVectors are the same kind of fixture from a second, independent
+// implementation: Zeek 8.0's in-core community_id_v1(), run over 199 MB of
+// real VPS capture in dev/sensing-lab on 2026-08-23.
+//
+// Two reasons this exists alongside suricataVectors. First, agreeing with one
+// implementation could mean both are wrong the same way; agreeing with two
+// written by different projects is much stronger evidence the hash is right.
+// Second and more practically, **every usable Suricata fixture was TCP** --
+// so without these, UDP hashing was only ever tested for the cases where it
+// declines to produce an ID, never for producing the correct one. Zeek's
+// conn.log carried 250 UDP flows, which closes that gap.
+var zeekVectors = []struct {
+	proto   string
+	srcIP   string
+	srcPort int
+	dstIP   string
+	dstPort int
+	want    string
+}{
+	{"udp", "107.174.188.218", 1032, "87.106.162.235", 5060, "1:9KSKWY8fuvWMrzsNZqWWB805Mbo="},
+	{"udp", "217.160.124.58", 49692, "87.106.162.235", 5060, "1:g2oMhXrA4lN5xT78iB1oGxysb64="},
+	{"udp", "167.172.89.195", 1434, "87.106.162.235", 1900, "1:DNb+3JHdavqb5KVRR9LfcO1xo78="},
+	{"udp", "46.105.160.250", 54723, "87.106.162.235", 5060, "1:uvobwzMcT8H/nYILqAmYIodulkQ="},
+	{"udp", "217.160.124.58", 53486, "87.106.162.235", 5060, "1:bnzwMqKirpREbqazrAyRzG/jpBo="},
+	{"udp", "144.172.112.245", 50808, "87.106.162.235", 5060, "1:fKV+Jv0s1MV5KYQFWbsoF9muopg="},
+	{"udp", "46.105.160.250", 61609, "87.106.162.235", 5060, "1:FoCO2b1hMz6Sz3MuI8kpQpd6Cgg="},
+	{"udp", "138.117.127.7", 34528, "87.106.162.235", 38698, "1:p2715n4oww4D6l59v3lcMdqr5R0="},
+	{"udp", "217.160.124.58", 58271, "87.106.162.235", 5060, "1:vinD9psc7EDuWNzJaf7xAmAmKK8="},
+	{"udp", "107.189.21.227", 57423, "87.106.162.235", 5060, "1:9nvjbFy4yxzM156Dli/N/zqcmM0="},
+	{"udp", "46.105.160.250", 51604, "87.106.162.235", 5060, "1:Bd+BFuMhzCdpcDA1Gwm98KikwKA="},
+	{"udp", "217.160.124.58", 62466, "87.106.162.235", 5060, "1:ikKTllQwyQOn6x8Xr+cU0VawDVE="},
+}
+
+func TestCommunityIDMatchesZeek(t *testing.T) {
+	for _, v := range zeekVectors {
+		got := communityIDFromParts(v.proto, v.srcIP, v.srcPort, v.dstIP, v.dstPort)
+		if got != v.want {
+			t.Errorf("communityID(%s %s:%d -> %s:%d) = %q, Zeek says %q",
+				v.proto, v.srcIP, v.srcPort, v.dstIP, v.dstPort, got, v.want)
+		}
+	}
+}
+
 func TestCommunityIDMatchesSuricata(t *testing.T) {
 	for _, v := range suricataVectors {
 		got := communityIDFromParts(v.proto, v.srcIP, v.srcPort, v.dstIP, v.dstPort)
