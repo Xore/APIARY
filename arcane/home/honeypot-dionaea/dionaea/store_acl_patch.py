@@ -65,9 +65,14 @@ def _apply_download_dir_acl(path):
 
     try:
         directory = os.path.dirname(path)
+        # dionaea embeds Python 3.6: subprocess.run gained capture_output and
+        # text only in 3.7. Using them raises TypeError, which this function's
+        # own except would swallow -- the helper would appear to run and do
+        # nothing at all.
         listing = subprocess.run(
             ["getfacl", "-p", directory],
-            capture_output=True, text=True, timeout=10, check=False,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            universal_newlines=True, timeout=10, check=False,
         )
         if listing.returncode != 0:
             return
@@ -86,7 +91,8 @@ def _apply_download_dir_acl(path):
             return
         subprocess.run(
             ["setfacl", "-m", ",".join(entries), path],
-            capture_output=True, timeout=10, check=False,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=10, check=False,
         )
     except Exception as error:  # noqa: BLE001 - never fail a capture over this
         try:
