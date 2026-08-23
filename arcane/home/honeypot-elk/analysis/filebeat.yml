@@ -242,8 +242,14 @@ processors:
   # sets server-side does not exist yet at that point. The pipeline sets
   # event.category from the same path for querying; this copy exists purely so
   # zeek-v1-<type>-* can be addressed.
+  # The tokenizer stops at the FIRST dot, not at ".log". Zeek rotates hourly
+  # by renaming conn.log to conn.2026-08-23-15-46-44.log, so a tokenizer
+  # anchored on ".log" would read the whole timestamped stem as the log type
+  # and mint a fresh index -- zeek-v1-files.2026-08-23-15-46-44-* -- on every
+  # rotation, for every log type. Caught by running the extraction fixture,
+  # whose short capture triggers a rotation on close.
   - dissect:
-      tokenizer: "/logs/zeek/%{zeek_log}.log"
+      tokenizer: "/logs/zeek/%{zeek_log}.%{_zeek_suffix}"
       field: "log.file.path"
       target_prefix: ""
       ignore_failure: true

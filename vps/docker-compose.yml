@@ -178,12 +178,18 @@ services:
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     cap_add: [NET_RAW, NET_ADMIN]
+    # ZEEK_SITE_SCRIPT selects the policy. Default extracts nothing; setting
+    # it to local-extract.zeek turns on wire-level file extraction (#1738),
+    # which writes live attacker payloads to disk. Kept as a whole-file switch
+    # rather than a flag so that "are we storing malware right now?" is
+    # answerable from one line of compose config.
     command:
       - -i
       - af_packet::${CAPTURE_INTERFACE:-ens6}
-      - /usr/local/share/zeek-site/local.zeek
+      - ${ZEEK_SITE_SCRIPT:-/usr/local/share/zeek-site/local.zeek}
     volumes:
       - /opt/stacks/apiary/logs/zeek:/logs/zeek
+      - /opt/stacks/apiary/logs/zeek-extract:/logs/zeek-extract
     deploy:
       resources:
         limits:
@@ -193,6 +199,43 @@ services:
           # honeypot.
           cpus: "1.0"
           memory: 1G
+
+  # #1738: total-size cap for extracted files. extract.zeek caps each file at
+  # 16 MB, which bounds one transfer but not a slow drip -- this bounds the
+  # directory. Oldest-first, because the newest artefact is the one most likely
+  # to still be unanalysed.
+  #
+  # Behind a profile: it only makes sense alongside ZEEK_SITE_SCRIPT pointing
+  # at local-extract.zeek, and starting a pruner for a directory nothing writes
+  # to would be misleading.
+  zeek-extract-prune:
+    image: busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
+    container_name: hp-zeek-extract-prune
+    restart: unless-stopped
+    profiles: ["file-extract"]
+    command:
+      - sh
+      - -c
+      - |
+        cap=$${ZEEK_EXTRACT_MAX_BYTES:-2147483648}
+        while true; do
+          d=/logs/zeek-extract
+          if [ -d "$$d" ]; then
+            used=$$(du -sb "$$d" 2>/dev/null | cut -f1)
+            while [ "$${used:-0}" -gt "$$cap" ]; do
+              oldest=$$(ls -1tr "$$d" 2>/dev/null | head -1)
+              [ -n "$$oldest" ] || break
+              rm -f "$$d/$$oldest"
+              used=$$(du -sb "$$d" 2>/dev/null | cut -f1)
+            done
+          fi
+          sleep 120
+        done
+    volumes:
+      - /opt/stacks/apiary/logs/zeek-extract:/logs/zeek-extract
+    deploy:
+      resources:
+        limits: { cpus: "0.1", memory: 32M }
 
   # #1742/S5: per-flow fingerprinting sidecar. Sniffs the same public
   # interface Suricata and Zeek do -- passively, so it sees blackholed
