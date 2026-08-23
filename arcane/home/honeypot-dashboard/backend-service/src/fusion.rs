@@ -30,12 +30,42 @@ pub struct Fusion {
 }
 
 /// (category label, index family, value field, ip field)
+/// #1742/S5: the Zeek and huginn rows are additive. Signals that produce
+/// nothing simply contribute a zero column, so this table is safe to extend
+/// before those sensors are deployed -- and safe to keep extended if one is
+/// later removed.
+///
+/// The `zeek.*` and `huginn.*` fields need no `.keyword` suffix: both objects
+/// are mapped `flattened`, which indexes every leaf as a keyword already.
+///
+/// JA4T is listed alongside "p0f OS" rather than replacing it. p0f still runs,
+/// and until it is actually retired (#1727 §0) dropping its row would lose a
+/// signal the entity merges were built on. The two answer different questions
+/// anyway: p0f guesses an OS name from a database whose newest Linux entry is
+/// 3.x, while JA4T is a stack hash that clusters without claiming to know what
+/// the stack is.
 const SIGNALS: &[(&str, &[&str], &str, &str)] = &[
     ("JA3", &["suricata-v2-*"], "suricata.eve.tls.ja3.hash.keyword", "source.ip"),
     ("JA4", &["suricata-v2-*"], "suricata.eve.tls.ja4.keyword", "source.ip"),
     ("p0f OS", &["portbridge-v2-*"], "portbridge.os", "portbridge.src_ip"),
     ("SSH client", &["honeypot-v2-*"], "honeypot.version", "source.ip"),
     ("Payload hash", &["honeypot-v2-*"], "honeypot.shasum", "source.ip"),
+    // Wire-level TCP stack hash. Measured 88.7% coverage of connections in
+    // dev/sensing-lab, against p0f's 95.1% label coverage -- comparable reach,
+    // but a precise hash instead of a label that resolves to a pre-2013 Linux
+    // kernel three quarters of the time.
+    ("JA4T", &["zeek-v1-conn-*"], "zeek.ja4t", "source.ip"),
+    // SSH handshake algorithm lists. 98.6% coverage of SSH sessions, and
+    // unlike the "SSH client" banner above it is not attacker-assertable.
+    ("HASSH", &["zeek-v1-ssh-*"], "zeek.hassh", "source.ip"),
+    ("JA4SSH", &["zeek-v1-ja4ssh-*"], "zeek.ja4ssh", "source.ip"),
+    // Server-side TLS fingerprint -- our own sensors as an attacker sees them,
+    // which nothing else in this table covers.
+    ("JA4S", &["zeek-v1-ssl-*"], "zeek.ja4s", "source.ip"),
+    // huginn-net's raw TCP signature. Present even when the OS match is
+    // NotMatched, which is most of the time for SYN+ACK, so it clusters where
+    // the label cannot.
+    ("TCP signature", &["huginn-v1-*"], "huginn.observation.sig", "source.ip"),
 ];
 
 pub async fn fusion(

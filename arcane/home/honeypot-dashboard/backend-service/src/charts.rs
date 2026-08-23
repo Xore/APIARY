@@ -101,13 +101,64 @@ pub async fn ml_backlog(State(state): State<AppState>) -> Result<Json<Vec<Series
     Ok(Json(series))
 }
 
-async fn netflow_sum(state: &AppState, field: &str, name: &str) -> anyhow::Result<Vec<Series>> {
+/// Hourly traffic volume, summed over whichever sensor is producing it.
+///
+/// #1741: Suricata's `netflow` records are being retired -- they and `flow`
+/// are 80.1% of its document volume and carry packets and bytes where Zeek's
+/// `conn.log` carries the same plus duration, conn_state, history, service and
+/// six fingerprints. This chart was the reason that removal was blocked.
+///
+/// Reads Zeek first and falls back to Suricata when Zeek has produced nothing
+/// for the window, rather than switching over in one step. Both orderings are
+/// then safe: before Zeek is deployed the chart keeps working from Suricata,
+/// after Suricata's netflow is switched off it keeps working from Zeek, and
+/// neither deploy has to happen first. Preferring one over the other rather
+/// than summing both matters -- during any overlap the two sensors are
+/// watching the same packets, so adding them would double every figure.
+async fn traffic_sum(
+    state: &AppState,
+    zeek_fields: &[&str],
+    suricata_field: &str,
+    name: &str,
+) -> anyhow::Result<Vec<Series>> {
+    // Zeek splits volume by direction, so a bucket total is the sum of its
+    // originator and responder fields.
+    let zeek_aggs: serde_json::Map<String, Value> = zeek_fields
+        .iter()
+        .enumerate()
+        .map(|(i, field)| (format!("part{i}"), json!({"sum": {"field": field}})))
+        .collect();
+    let zeek_body = json!({
+        "size": 0,
+        "query": {"range": {"@timestamp": {"gte": WEEK}}},
+        "aggs": {"hourly": {
+            "date_histogram": {"field": "@timestamp", "fixed_interval": "1h", "min_doc_count": 0},
+            "aggs": zeek_aggs
+        }}
+    });
+    let zeek = state.es.search_index(&["zeek-v1-conn-*"], zeek_body).await?;
+    let zeek_points: Vec<Point> = zeek["aggregations"]["hourly"]["buckets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|bucket| {
+            let value = (0..zeek_fields.len())
+                .map(|i| bucket[format!("part{i}")]["value"].as_f64().unwrap_or(0.0))
+                .sum();
+            Some(Point { time: bucket["key_as_string"].as_str()?.to_string(), value })
+        })
+        .collect();
+
+    if zeek_points.iter().any(|point| point.value > 0.0) {
+        return Ok(vec![Series { name: name.to_string(), points: zeek_points }]);
+    }
+
     let body = json!({
         "size": 0,
         "query": {"range": {"@timestamp": {"gte": WEEK}}},
         "aggs": {"hourly": {
             "date_histogram": {"field": "@timestamp", "fixed_interval": "1h", "min_doc_count": 0},
-            "aggs": {"total": {"sum": {"field": field}}}
+            "aggs": {"total": {"sum": {"field": suricata_field}}}
         }}
     });
     let result = state.es.search_index(&["suricata-v2-netflow-*"], body).await?;
@@ -126,11 +177,27 @@ async fn netflow_sum(state: &AppState, field: &str, name: &str) -> anyhow::Resul
 }
 
 pub async fn netflow_bytes(State(state): State<AppState>) -> Result<Json<Vec<Series>>, (StatusCode, String)> {
-    netflow_sum(&state, "suricata.eve.netflow.bytes", "bytes").await.map(Json).map_err(bad_gateway)
+    traffic_sum(
+        &state,
+        &["zeek.orig_ip_bytes", "zeek.resp_ip_bytes"],
+        "suricata.eve.netflow.bytes",
+        "bytes",
+    )
+    .await
+    .map(Json)
+    .map_err(bad_gateway)
 }
 
 pub async fn netflow_packets(State(state): State<AppState>) -> Result<Json<Vec<Series>>, (StatusCode, String)> {
-    netflow_sum(&state, "suricata.eve.netflow.pkts", "packets").await.map(Json).map_err(bad_gateway)
+    traffic_sum(
+        &state,
+        &["zeek.orig_pkts", "zeek.resp_pkts"],
+        "suricata.eve.netflow.pkts",
+        "packets",
+    )
+    .await
+    .map(Json)
+    .map_err(bad_gateway)
 }
 
 /// /api/v1/charts/anomaly-trend — protocol-conformance violations per
