@@ -300,9 +300,15 @@ services:
     #     (#1420) -- galah's own commonFields() trusts only r.RemoteAddr
     #     (confirmed against source), no header to strip -- same CONN_LOG-join
     #     posture as beelzebub/hellpot above (ip-enrichment-worker/galah.go)
-    #   - sentrypeer, public 5070 -> home 5060 (a port shift, not
-    #     5060->5060: dionaea already binds host 5060 tcp/udp for its own
-    #     generic SIP banner-grab) tcp+udp WITHOUT :pp (#1424) -- SIP has no
+    #   - sentrypeer, public 5070 -> home 5070 (a port shift on BOTH sides:
+    #     dionaea already binds host 5060 tcp/udp for its own generic SIP
+    #     banner-grab, so honeypot-sentrypeer/compose.yml publishes
+    #     ${HP_BIND}:5070 and shifts back to 5060 inside the container,
+    #     where SentryPeer's listener is hardcoded. Forwarding public 5070
+    #     to home *5060* -- as this rule did until #1777 -- lands every SIP
+    #     connection on dionaea instead, and SentryPeer then sees nothing
+    #     but its own healthcheck: 150,916 events over 7 days, every one
+    #     from 127.0.0.1 with an empty SIP method.) tcp+udp WITHOUT :pp (#1424) -- SIP has no
     #     HTTP-style header a proxy could set for the real client IP, and
     #     nothing PROXY-protocol-aware exists in sentrypeer's own source
     #     either -- same CONN_LOG-join posture as beelzebub/hellpot above
@@ -334,6 +340,18 @@ services:
     environment:
       - LISTEN_IP=0.0.0.0
       - CONN_LOG=/logs/portbridge/portbridge.json
+      # #1776: portbridge rotates its own connection log by rename-and-reopen
+      # (connLogger.rotate). This threshold used to live in a separate
+      # copytruncate sidecar that fired at 8 MiB while this default sat at
+      # 64 MiB, so the sidecar did nearly all the rotating -- and copytruncate
+      # on a file Filebeat is tailing made every line arrive twice: the
+      # truncation reset the existing harvester to offset 0 and the rewritten
+      # head produced a second fingerprint identity, so two harvesters shipped
+      # the same bytes (measured: 99.9% of portbridge documents were exact
+      # duplicate pairs). The sidecar is gone; keeping its 8 MiB cap here
+      # preserves the reason it was set -- the dashboard tail-reads this file,
+      # so it must not grow unbounded between rotations.
+      - LOG_MAX_BYTES=8388608
       # #241: per-connection p0f OS-guess query, folded into CONN_LOG's "os"
       # field by vps/portbridge/p0f.go. Empty/unset is a no-op (queryP0f
       # short-circuits before touching the network) so this stays optional
@@ -364,7 +382,7 @@ services:
       # confirmed free (checked `ss -tlnp` on the VPS before picking them --
       # 2222 looked free from the RULES list alone but is actually this
       # box's own real sshd, not a honeypot port).
-      - "RULES=tcp:22:10.8.0.2:19022 tcp:23:10.8.0.2:19023 tcp:25:10.8.0.2:25 tcp:5432:10.8.0.2:5432:pp tcp:5900:10.8.0.2:5900:pp tcp:6379:10.8.0.2:6379:pp tcp:9200:10.8.0.2:9200:pp tcp:2375:10.8.0.2:2375:pp tcp:110:10.8.0.2:110:pp tcp:143:10.8.0.2:143:pp tcp:1080:10.8.0.2:1080:pp tcp:2575:10.8.0.2:2575:pp tcp:5555:10.8.0.2:5555:pp tcp:11112:10.8.0.2:11112:pp tcp:4443:10.8.0.2:443:pp tcp:8443:10.8.0.2:8443:pp tcp:3389:10.8.0.2:3389:pp tcp:8888:10.8.0.2:18083:pp tcp:8081:10.8.0.2:19081:pp tcp:21:10.8.0.2:21 tcp:135:10.8.0.2:135 tcp:445:10.8.0.2:445 tcp:1433:10.8.0.2:1433 tcp:3306:10.8.0.2:3306 tcp:27017:10.8.0.2:27017 tcp:1723:10.8.0.2:1723 tcp:1883:10.8.0.2:1883 tcp:5060:10.8.0.2:5060 tcp:9100:10.8.0.2:9100 tcp:11211:10.8.0.2:11211 tcp:20000:10.8.0.2:20000:pp tcp:102:10.8.0.2:102:pp tcp:1102:10.8.0.2:1102:pp tcp:2102:10.8.0.2:2102:pp tcp:502:10.8.0.2:502:pp tcp:1502:10.8.0.2:1502:pp tcp:2502:10.8.0.2:2502:pp tcp:2404:10.8.0.2:2404:pp tcp:10001:10.8.0.2:10001:pp tcp:1025:10.8.0.2:1025:pp tcp:50100:10.8.0.2:50100:pp tcp:44818:10.8.0.2:44818:pp tcp:2200:10.8.0.2:2200 tcp:389:10.8.0.2:389 tcp:8000:10.8.0.2:8000 tcp:8880:10.8.0.2:8880 tcp:8080:10.8.0.2:8080 tcp:9201:10.8.0.2:9201 tcp:8889:10.8.0.2:8888 tcp:5070:10.8.0.2:5060 tcp:8082:10.8.0.2:8081 tcp:2022:10.8.0.2:19024:pp udp:69:10.8.0.2:1069 udp:161:10.8.0.2:19161 udp:1900:10.8.0.2:1900 udp:47808:10.8.0.2:47808 udp:623:10.8.0.2:623 udp:5060:10.8.0.2:5060 udp:5070:10.8.0.2:5060 udp:53:10.8.0.2:53 udp:500:10.8.0.2:500"
+      - "RULES=tcp:22:10.8.0.2:19022 tcp:23:10.8.0.2:19023 tcp:25:10.8.0.2:25 tcp:5432:10.8.0.2:5432:pp tcp:5900:10.8.0.2:5900:pp tcp:6379:10.8.0.2:6379:pp tcp:9200:10.8.0.2:9200:pp tcp:2375:10.8.0.2:2375:pp tcp:110:10.8.0.2:110:pp tcp:143:10.8.0.2:143:pp tcp:1080:10.8.0.2:1080:pp tcp:2575:10.8.0.2:2575:pp tcp:5555:10.8.0.2:5555:pp tcp:11112:10.8.0.2:11112:pp tcp:4443:10.8.0.2:443:pp tcp:8443:10.8.0.2:8443:pp tcp:3389:10.8.0.2:3389:pp tcp:8888:10.8.0.2:18083:pp tcp:8081:10.8.0.2:19081:pp tcp:21:10.8.0.2:21 tcp:135:10.8.0.2:135 tcp:445:10.8.0.2:445 tcp:1433:10.8.0.2:1433 tcp:3306:10.8.0.2:3306 tcp:27017:10.8.0.2:27017 tcp:1723:10.8.0.2:1723 tcp:1883:10.8.0.2:1883 tcp:5060:10.8.0.2:5060 tcp:9100:10.8.0.2:9100 tcp:11211:10.8.0.2:11211 tcp:20000:10.8.0.2:20000:pp tcp:102:10.8.0.2:102:pp tcp:1102:10.8.0.2:1102:pp tcp:2102:10.8.0.2:2102:pp tcp:502:10.8.0.2:502:pp tcp:1502:10.8.0.2:1502:pp tcp:2502:10.8.0.2:2502:pp tcp:2404:10.8.0.2:2404:pp tcp:10001:10.8.0.2:10001:pp tcp:1025:10.8.0.2:1025:pp tcp:50100:10.8.0.2:50100:pp tcp:44818:10.8.0.2:44818:pp tcp:2200:10.8.0.2:2200 tcp:389:10.8.0.2:389 tcp:8000:10.8.0.2:8000 tcp:8880:10.8.0.2:8880 tcp:8080:10.8.0.2:8080 tcp:9201:10.8.0.2:9201 tcp:8889:10.8.0.2:8888 tcp:5070:10.8.0.2:5070 tcp:8082:10.8.0.2:8081 tcp:2022:10.8.0.2:19024:pp udp:69:10.8.0.2:1069 udp:161:10.8.0.2:19161 udp:1900:10.8.0.2:1900 udp:47808:10.8.0.2:47808 udp:623:10.8.0.2:623 udp:5060:10.8.0.2:5060 udp:5070:10.8.0.2:5070 udp:53:10.8.0.2:53 udp:500:10.8.0.2:500"
     volumes:
       # portbridge connection log — ship this dir to the home stack's
       # /opt/stacks/apiary/logs/portbridge so the dashboard ingests it.
@@ -440,31 +458,6 @@ services:
   # map would blank out at once. At 8 MiB the live file is always fully
   # readable, and the dashboard also reads the .1 generation kept here, so the
   # join window spans a rotation instead of restarting from empty.
-  portbridge-log-rotate:
-    image: busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
-    container_name: hp-portbridge-log-rotate
-    restart: unless-stopped
-    command:
-      - sh
-      - -c
-      - |
-        while true; do
-          # Checked every minute rather than every five: a scan burst can add
-          # megabytes in that time, and anything written above the threshold
-          # before the next check is invisible to the dashboard's tail read.
-          f=/logs/portbridge/portbridge.json
-          if [ -f "$$f" ] && [ $$(stat -c %s "$$f") -gt 8388608 ]; then
-            cp "$$f" "$$f.1" 2>/dev/null && : > "$$f"
-          fi
-          sleep 60
-        done
-    volumes:
-      - /opt/stacks/apiary/logs/portbridge:/logs/portbridge
-    deploy:
-      resources:
-        limits:
-          cpus: "0.1"
-          memory: 32M
 
   socat-hp-http:
     image: alpine/socat:latest
