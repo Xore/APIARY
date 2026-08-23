@@ -1,0 +1,223 @@
+- generic [ref=f5e2]:
+  - banner [ref=f5e3]:
+    - button "Application menu" [ref=f5e4] [cursor=pointer]: ⌘
+    - button "Toggle navigation" [ref=f5e5] [cursor=pointer]: ☰
+    - button "Back" [ref=f5e6] [cursor=pointer]: ‹
+    - button "Forward" [ref=f5e7] [cursor=pointer]: ›
+    - generic [ref=f5e8]: Security workspace
+    - generic [ref=f5e9]: Connected
+    - button "Notifications" [ref=f5e11] [cursor=pointer]: ○
+    - link "Examples" [ref=f5e12] [cursor=pointer]:
+      - /url: ./
+  - complementary [ref=f5e13]:
+    - generic [ref=f5e14]:
+      - generic [ref=f5e15]: ⌕
+      - textbox "Search navigation" [ref=f5e16]:
+        - /placeholder: Search
+      - generic [ref=f5e17]: ⌘K
+    - generic [ref=f5e18]:
+      - generic [ref=f5e19]: Monitor
+      - button "Overview" [ref=f5e20] [cursor=pointer]
+      - button "Source health" [ref=f5e22] [cursor=pointer]
+      - button "Alerts 3" [ref=f5e24] [cursor=pointer]:
+        - generic [ref=f5e25]: Alerts
+        - generic [ref=f5e26]: "3"
+      - generic [ref=f5e27]: Investigate
+      - button "Events" [ref=f5e28] [cursor=pointer]
+      - button "Attack sources" [ref=f5e30] [cursor=pointer]
+      - button "Campaigns" [ref=f5e32] [cursor=pointer]
+      - button "Payloads" [ref=f5e34] [cursor=pointer]
+      - generic [ref=f5e36]: Recent
+      - button "203.0.113.42" [ref=f5e37] [cursor=pointer]
+      - button "SSH credential spray" [ref=f5e39] [cursor=pointer]
+    - generic [ref=f5e41]:
+      - generic [ref=f5e42]: AD
+      - generic [ref=f5e43]:
+        - generic [ref=f5e44]: admin
+        - generic [ref=f5e45]: Administrator
+  - main [ref=f5e46]:
+    - generic [ref=f5e47]:
+      - generic [ref=f5e48]:
+        - generic [ref=f5e49]:
+          - generic [ref=f5e50]:
+            - generic [ref=f5e51]: Monitor
+            - generic [ref=f5e52]: /
+            - generic [ref=f5e53]: Overview
+          - heading "Good afternoon." [level=1] [ref=f5e54]
+          - paragraph [ref=f5e55]: Here is what changed across your environment.
+        - generic [ref=f5e56]:
+          - button "Export" [ref=f5e57] [cursor=pointer]
+          - button "New investigation" [ref=f5e58] [cursor=pointer]
+      - generic [ref=f5e59]:
+        - generic [ref=f5e60]:
+          - generic [ref=f5e61]: Events · 24h
+          - generic [ref=f5e62]: 18,492
+          - generic [ref=f5e63]: 8% above previous period
+        - generic [ref=f5e64]:
+          - generic [ref=f5e65]: Unique sources
+          - generic [ref=f5e66]: "641"
+          - generic [ref=f5e67]: Across 38 countries
+        - generic [ref=f5e68]:
+          - generic [ref=f5e69]: Open alerts
+          - generic [ref=f5e70]: "3"
+          - generic [ref=f5e71]: ↓1 needs attention
+        - generic [ref=f5e72]:
+          - generic [ref=f5e73]: Pipeline
+          - generic [ref=f5e74]: 12/12
+          - generic [ref=f5e75]: All sources current
+      - generic [ref=f5e76]:
+        - generic [ref=f5e77]:
+          - generic [ref=f5e78]:
+            - generic [ref=f5e79]:
+              - generic [ref=f5e80]: Activity
+              - generic [ref=f5e81]: Events by hour
+            - generic [ref=f5e82]:
+              - button "24 hours" [ref=f5e83] [cursor=pointer]
+              - button "7 days" [ref=f5e84] [cursor=pointer]
+          - generic "Example event activity chart" [ref=f5e85]
+        - generic [ref=f5e98]:
+          - generic [ref=f5e100]:
+            - generic [ref=f5e101]: Activity by sensor
+            - generic [ref=f5e102]: Events per hour, last 12 hours
+          - generic "Example sensor activity heatmap" [ref=f5e103]:
+            - generic [ref=f5e104]:
+              - generic [ref=f5e105]: cowrie
+              - generic [ref=f5e106]:
+                - generic "09:00 — 4 events" [ref=f5e107]
+                - generic "10:00 — 9 events" [ref=f5e108]
+                - generic "11:00 — 14 events" [ref=f5e109]
+                - generic "12:00 — 22 events" [ref=f5e110]
+                - generic "13:00 — 31 events" [ref=f5e111]
+                - generic "14:00 — 44 events" [ref=f5e112]
+                - generic "15:00 — 38 events" [ref=f5e113]
+                - generic "16:00 — 27 events" [ref=f5e114]
+                - generic "17:00 — 19 events" [ref=f5e115]
+                - generic "18:00 — 12 events" [ref=f5e116]
+                - generic "19:00 — 8 events" [ref=f5e117]
+                - generic "20:00 — 6 events" [ref=f5e118]
+            - generic [ref=f5e119]:
+              - generic [ref=f5e120]: dionaea
+              - generic [ref=f5e121]:
+                - generic "09:00 — 2 events" [ref=f5e122]
+                - generic "10:00 — 3 events" [ref=f5e123]
+                - generic "11:00 — 5 events" [ref=f5e124]
+                - generic "12:00 — 8 events" [ref=f5e125]
+                - generic "13:00 — 11 events" [ref=f5e126]
+                - generic "14:00 — 9 events" [ref=f5e127]
+                - generic "15:00 — 13 events" [ref=f5e128]
+                - generic "16:00 — 10 events" [ref=f5e129]
+                - generic "17:00 — 7 events" [ref=f5e130]
+                - generic "18:00 — 5 events" [ref=f5e131]
+                - generic "19:00 — 3 events" [ref=f5e132]
+                - generic "20:00 — 2 events" [ref=f5e133]
+            - generic [ref=f5e134]:
+              - generic [ref=f5e135]: conpot
+              - generic [ref=f5e136]:
+                - generic "09:00 — 0 events" [ref=f5e137]
+                - generic "10:00 — 1 event" [ref=f5e138]
+                - generic "11:00 — 0 events" [ref=f5e139]
+                - generic "12:00 — 1 event" [ref=f5e140]
+                - generic "13:00 — 2 events" [ref=f5e141]
+                - generic "14:00 — 1 event" [ref=f5e142]
+                - generic "15:00 — 0 events" [ref=f5e143]
+                - generic "16:00 — 1 event" [ref=f5e144]
+                - generic "17:00 — 0 events" [ref=f5e145]
+                - generic "18:00 — 0 events" [ref=f5e146]
+                - generic "19:00 — 1 event" [ref=f5e147]
+                - generic "20:00 — 0 events" [ref=f5e148]
+            - generic [ref=f5e149]:
+              - generic [ref=f5e150]: tanner
+              - generic [ref=f5e151]:
+                - generic "09:00 — 1 event" [ref=f5e152]
+                - generic "10:00 — 2 events" [ref=f5e153]
+                - generic "11:00 — 3 events" [ref=f5e154]
+                - generic "12:00 — 4 events" [ref=f5e155]
+                - generic "13:00 — 6 events" [ref=f5e156]
+                - generic "14:00 — 5 events" [ref=f5e157]
+                - generic "15:00 — 7 events" [ref=f5e158]
+                - generic "16:00 — 4 events" [ref=f5e159]
+                - generic "17:00 — 3 events" [ref=f5e160]
+                - generic "18:00 — 2 events" [ref=f5e161]
+                - generic "19:00 — 1 event" [ref=f5e162]
+                - generic "20:00 — 1 event" [ref=f5e163]
+            - generic [ref=f5e164]:
+              - generic [ref=f5e165]: multipot
+              - generic [ref=f5e166]:
+                - generic "09:00 — 0 events" [ref=f5e167]
+                - generic "10:00 — 0 events" [ref=f5e168]
+                - generic "11:00 — 1 event" [ref=f5e169]
+                - generic "12:00 — 1 event" [ref=f5e170]
+                - generic "13:00 — 2 events" [ref=f5e171]
+                - generic "14:00 — 1 event" [ref=f5e172]
+                - generic "15:00 — 2 events" [ref=f5e173]
+                - generic "16:00 — 1 event" [ref=f5e174]
+                - generic "17:00 — 0 events" [ref=f5e175]
+                - generic "18:00 — 0 events" [ref=f5e176]
+                - generic "19:00 — 0 events" [ref=f5e177]
+                - generic "20:00 — 0 events" [ref=f5e178]
+          - generic [ref=f5e179]:
+            - generic [ref=f5e180]: Less
+            - generic [ref=f5e186]: More
+        - generic [ref=f5e187]:
+          - generic [ref=f5e189]:
+            - generic [ref=f5e190]: Attack origins
+            - generic [ref=f5e191]: Offline fallback -- no Leaflet on a static example page
+          - generic [ref=f5e192]:
+            - generic: showing 6 origins · last 5m
+            - generic [ref=f5e193]:
+              - generic [ref=f5e194]: Interactive map unavailable -- offline geographic fallback
+              - img "Attack origins, offline fallback map" [ref=f5e195]:
+                - generic: US
+                - generic: CN
+                - generic: DE
+                - link "Ashburn, US -- 214 IPs, 1,842 events" [ref=f5e202] [cursor=pointer]:
+                  - /url: "#"
+                - link "Shenzhen, CN -- 301 IPs, 2,910 events" [ref=f5e204] [cursor=pointer]:
+                  - /url: "#"
+                - link "Frankfurt, DE -- 96 IPs, 640 events" [ref=f5e206] [cursor=pointer]:
+                  - /url: "#"
+                - link "São Paulo, BR -- 41 IPs, 205 events" [ref=f5e208] [cursor=pointer]:
+                  - /url: "#"
+                - link "Sydney, AU -- 22 IPs, 88 events" [ref=f5e210] [cursor=pointer]:
+                  - /url: "#"
+                - link "Mumbai, IN -- 67 IPs, 512 events" [ref=f5e212] [cursor=pointer]:
+                  - /url: "#"
+        - generic [ref=f5e214]:
+          - generic [ref=f5e215]: Source health
+          - generic [ref=f5e216]: Last update less than one minute ago.
+          - generic [ref=f5e217]:
+            - generic [ref=f5e218]: Event stream
+            - generic [ref=f5e219]: Live
+          - generic [ref=f5e221]:
+            - generic [ref=f5e222]: Search archive
+            - generic [ref=f5e223]: Healthy
+          - generic [ref=f5e224]:
+            - generic [ref=f5e225]: Analysis queue
+            - generic [ref=f5e226]: 2 pending
+      - generic [ref=f5e227]:
+        - generic [ref=f5e228]:
+          - generic [ref=f5e229]:
+            - generic [ref=f5e230]: Recent events
+            - generic [ref=f5e231]: Balanced across active sources
+          - button "View all" [ref=f5e232] [cursor=pointer]
+        - generic [ref=f5e233]:
+          - generic [ref=f5e234]:
+            - generic [ref=f5e235]: 12:42:16
+            - generic [ref=f5e236]:
+              - strong [ref=f5e237]: SSH authentication attempt
+              - generic [ref=f5e238]: 203.0.113.42 · admin / password
+            - generic [ref=f5e239]: cowrie
+          - generic [ref=f5e240]:
+            - generic [ref=f5e241]: 12:41:03
+            - generic [ref=f5e242]:
+              - strong [ref=f5e243]: IDS signature matched
+              - generic [ref=f5e244]: Known scanner user agent
+            - generic [ref=f5e245]: suricata
+          - generic [ref=f5e246]:
+            - generic [ref=f5e247]: 12:38:49
+            - generic [ref=f5e248]:
+              - strong [ref=f5e249]: HTTP path probe
+              - generic [ref=f5e250]: /.env · 198.51.100.8
+            - generic [ref=f5e251]: http
+  - textbox "Investigation command" [ref=f5e253]:
+    - /placeholder: Investigate an IP, hash, session, ASN, or search term…

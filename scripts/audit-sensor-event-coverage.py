@@ -76,7 +76,9 @@ def coverage(since: str) -> list[dict]:
             "filter": [{"range": {"@timestamp": {"gte": f"now-{since}"}}}],
             # #1677: self-generated healthcheck traffic is not a sensor
             # observation and must not dilute a sensor's coverage figure.
-            "must_not": [{"term": {"internal_probe": True}}],
+            # honeypot.* because the enrichment worker writes the marker into
+            # the sensor's log line and Filebeat nests every sensor field there.
+            "must_not": [{"term": {"honeypot.internal_probe": True}}],
         }},
         "aggs": {"sensors": {
             "terms": {"field": "event.sensor", "size": 100},

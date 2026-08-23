@@ -136,7 +136,7 @@ pub async fn dashboard(State(state): State<AppState>) -> Result<Json<Dashboard>,
         // events in 24 hours, 13.5% of everything ingested.
         "query": {"bool": {
             "filter": [{"range": {"@timestamp": {"gte": WINDOW}}}],
-            "must_not": [{"term": {"internal_probe": true}}]
+            "must_not": [{"term": {"honeypot.internal_probe": true}}]
         }},
         "aggs": {
             "sensors": {
@@ -205,7 +205,7 @@ pub async fn dashboard(State(state): State<AppState>) -> Result<Json<Dashboard>,
         // events in 24 hours, 13.5% of everything ingested.
         "query": {"bool": {
             "filter": [{"range": {"@timestamp": {"gte": WINDOW}}}],
-            "must_not": [{"term": {"internal_probe": true}}]
+            "must_not": [{"term": {"honeypot.internal_probe": true}}]
         }},
         "aggs": {
             "creds": {"multi_terms": {
