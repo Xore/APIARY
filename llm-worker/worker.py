@@ -23,6 +23,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any, TypeVar
 from urllib.parse import urlsplit
 
@@ -1143,14 +1144,25 @@ class LLMWorker:
             raise RuntimeError("Elasticsearch is unavailable")
         self.ensure_indices()
         events = sessions = payloads = reports = 0
+        # #1748: each stage is isolated. They share one flaky dependency -- the
+        # model endpoint -- and before this a single stage raising aborted the
+        # whole cycle, so the sessions and payloads that had already been
+        # analysed were thrown away and the status document reported nothing
+        # but the exception type. That is what made a broken daily report look
+        # like a broken worker, and why disabling the report entirely was the
+        # only available workaround.
+        #
+        # A failing stage is still surfaced (stage_errors, and the cycle is
+        # reported not-ok) -- it just no longer takes the others with it.
+        stage_errors: dict[str, str] = {}
         if self.config.session_enabled:
-            events = self.collect_session_events()
-            sessions = self.analyze_ready_sessions()
+            events = self._run_stage("session_events", self.collect_session_events, stage_errors)
+            sessions = self._run_stage("sessions", self.analyze_ready_sessions, stage_errors)
         if self.config.payload_enabled:
-            payloads = self.analyze_payloads()
+            payloads = self._run_stage("payloads", self.analyze_payloads, stage_errors)
         if self.config.daily_report_enabled:
-            reports = self.analyze_daily_report()
-        return {
+            reports = self._run_stage("daily_report", self.analyze_daily_report, stage_errors)
+        result = {
             "mode": "captured-data",
             "selftest": False,
             "events": events,
@@ -1158,6 +1170,25 @@ class LLMWorker:
             "payloads": payloads,
             "reports": reports,
         }
+        if stage_errors:
+            result["stage_errors"] = stage_errors
+        return result
+
+    def _run_stage(self, name: str, stage: Callable[[], int], errors: dict[str, str]) -> int:
+        """Run one cycle stage, recording rather than propagating its failure.
+
+        Only the exception *type* is recorded, never its message: these come
+        from a model fed attacker-controlled text, and a message can carry that
+        text back out into the status file. Same reasoning the outer cycle
+        handler already applies.
+        """
+        try:
+            return stage()
+        except Exception as exc:  # noqa: BLE001 - deliberately broad, see docstring
+            errors[name] = type(exc).__name__
+            LOG.error("stage %s failed, continuing with the rest of the cycle: %s",
+                      name, type(exc).__name__)
+            return 0
 
 
 def write_status(result: dict[str, Any], ok: bool = True) -> None:
@@ -1400,7 +1431,12 @@ def main() -> int:
         cycle_ok = True
         try:
             result = worker.run_once()
-            write_status(result, True)
+            # A cycle that completed with a failed stage is still a cycle that
+            # did useful work -- but it is not healthy, and the healthcheck
+            # reads this file.
+            stage_ok = not result.get("stage_errors")
+            cycle_ok = stage_ok
+            write_status(result, stage_ok)
             LOG.info("cycle complete: %s", result)
         except Exception as exc:  # Keep enrichment failures isolated from ingestion.
             cycle_ok = False
