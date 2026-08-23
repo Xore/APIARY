@@ -215,8 +215,8 @@ func TestConnLoggerRotatesAtMaxBytesWithoutLosingLines(t *testing.T) {
 
 	r := rule{proto: "tcp", listenPort: "22", target: "10.8.0.2:19022"}
 	src := &net.TCPAddr{IP: net.IPv4(198, 51, 100, 1), Port: 40000}
-	cl.log(r, src, nil)
-	cl.log(r, src, nil)
+	cl.log(r, src, nil, nil)
+	cl.log(r, src, nil, nil)
 
 	dir := filepath.Dir(logPath)
 	files, err := os.ReadDir(dir)

@@ -161,7 +161,7 @@ func TestConnLoggerEmbedsP0fOSGuess(t *testing.T) {
 
 	r := rule{proto: "tcp", listenPort: "22", target: "10.8.0.2:19022"}
 	src := &net.TCPAddr{IP: net.IPv4(198, 51, 100, 7), Port: 40000}
-	cl.log(r, src, nil)
+	cl.log(r, src, nil, nil)
 
 	rec := lastConnLogRecord(t, logPath)
 	if got := rec["os"]; got != "Windows 7 or 8" {
@@ -177,7 +177,7 @@ func TestConnLoggerWithoutP0fSockOmitsOSField(t *testing.T) {
 
 	r := rule{proto: "tcp", listenPort: "22", target: "10.8.0.2:19022"}
 	src := &net.TCPAddr{IP: net.IPv4(198, 51, 100, 7), Port: 40000}
-	cl.log(r, src, nil)
+	cl.log(r, src, nil, nil)
 
 	rec := lastConnLogRecord(t, logPath)
 	if _, ok := rec["os"]; ok {
