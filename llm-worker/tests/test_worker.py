@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import contracts
 import worker  # noqa: E402
 from contracts import SessionAnalysis  # noqa: E402
 
@@ -255,6 +256,61 @@ class ProductionCanaryTests(unittest.TestCase):
         self.assertEqual(result["sessions"], 1)
         self.assertEqual(result["payloads"], 0)
         self.assertEqual(result["reports"], 0)
+
+
+class AnnotationSchemaGrammarBoundTests(unittest.TestCase):
+    """#1748: no annotation field may declare a maxLength Ollama cannot compile.
+
+    Each of these schemas is sent to Ollama as a structured-output `format`,
+    and a bounded string becomes a repetition rule in the generated GBNF. Past
+    roughly 1200 that grammar stops compiling and the request is rejected
+    outright:
+
+        400 Failed to initialize samplers: failed to parse grammar
+
+    DailyReport shipped with summary maxLength 2000 and its pipeline never
+    produced a single real output. Nothing caught it, because the failure only
+    appears when that annotation type runs against a live model -- and it was
+    only enabled long after it was written.
+
+    Bisected to that one field: `summary` alone reproduces it, all three
+    arrays together do not, and lowering it to 1200 fixes the full schema.
+    """
+
+    ANNOTATIONS = (contracts.SessionAnalysis, contracts.PayloadAnalysis, contracts.DailyReport)
+
+    def _string_bounds(self, schema, path=""):
+        """Every maxLength in a JSON schema, including inside arrays and $defs."""
+        found = []
+        if isinstance(schema, dict):
+            if schema.get("type") == "string" and "maxLength" in schema:
+                found.append((path or "<root>", schema["maxLength"]))
+            for key, value in schema.items():
+                found += self._string_bounds(value, f"{path}.{key}" if path else key)
+        elif isinstance(schema, list):
+            for i, value in enumerate(schema):
+                found += self._string_bounds(value, f"{path}[{i}]")
+        return found
+
+    def test_no_field_exceeds_the_compilable_bound(self):
+        for annotation in self.ANNOTATIONS:
+            for field, bound in self._string_bounds(annotation.model_json_schema()):
+                self.assertLessEqual(
+                    bound, contracts.MAX_ANNOTATION_STRING,
+                    f"{annotation.__name__} {field} declares maxLength={bound}; Ollama's "
+                    f"grammar compiler rejects the whole schema above "
+                    f"{contracts.MAX_ANNOTATION_STRING} (#1748)",
+                )
+
+    def test_the_bound_is_one_shared_constant(self):
+        # The point of a single constant is that raising the ceiling is a
+        # deliberate, reviewable act rather than a number someone copies.
+        self.assertEqual(contracts.MAX_ANNOTATION_STRING, 1200)
+
+    def test_daily_report_specifically(self):
+        # The regression itself, named, so a revert is unambiguous.
+        summary = contracts.DailyReport.model_json_schema()["properties"]["summary"]
+        self.assertEqual(summary["maxLength"], 1200)
 
 
 class CycleStageIsolationTests(unittest.TestCase):
