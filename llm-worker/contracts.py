@@ -113,6 +113,22 @@ def _clean_mitre(values: list[str]) -> list[str]:
     return list(dict.fromkeys(values))
 
 
+# The largest `maxLength` any annotation field may declare.
+#
+# Every one of these schemas is handed to Ollama as a structured-output
+# `format`, and Ollama compiles it into a GBNF grammar where a bounded string
+# becomes a repetition rule. Past roughly 1200 that grammar stops compiling
+# and the request fails with `400 Failed to initialize samplers: failed to
+# parse grammar` -- rejecting the schema entirely, not truncating anything.
+#
+# #1748: DailyReport shipped with 2000 and its pipeline never produced a
+# single real output. Nothing caught it, because the failure is invisible
+# until that annotation type actually runs against a live model. test_
+# contracts.py asserts this bound instead, so a future field cannot quietly
+# disable a pipeline the same way.
+MAX_ANNOTATION_STRING = 1200
+
+
 class SessionAnalysis(StrictAnnotation):
     summary: str = Field(min_length=1, max_length=1200)
     intent: Literal[
@@ -174,7 +190,17 @@ class PayloadAnalysis(StrictAnnotation):
 
 
 class DailyReport(StrictAnnotation):
-    summary: str = Field(min_length=1, max_length=2000)
+    # 1200, not 2000: Ollama's grammar compiler rejects the whole schema
+    # outright above roughly this bound, with
+    # `400 Failed to initialize samplers: failed to parse grammar` (#1748).
+    # A bounded string becomes a repetition rule in the generated GBNF, and
+    # somewhere between 1200 and 2000 that stops compiling. Bisected down to
+    # this single field: `summary` alone reproduces it, the three arrays
+    # together do not, and restoring 1200 fixes the full schema.
+    #
+    # This is a ceiling on what may be *asked of the model*, not on what is
+    # accepted -- see MAX_ANNOTATION_STRING and the validator below.
+    summary: str = Field(min_length=1, max_length=MAX_ANNOTATION_STRING)
     highlights: list[str] = Field(max_length=20)
     trends: list[str] = Field(max_length=20)
     recommended_checks: list[str] = Field(max_length=20)
