@@ -24,7 +24,17 @@ pub fn build_tftp_session_map(logs_dir: &Path) -> ViaMap {
         let Ok(e) = serde_json::from_str::<Value>(&line) else { continue };
         let Some(ip) = e.get("client_ip").and_then(Value::as_str).filter(|s| !s.is_empty()) else { continue };
         let Some(port) = e.get("relay_port").and_then(Value::as_f64).filter(|p| *p != 0.0) else { continue };
-        m.insert(port as i64, ip.to_string());
+        // tftp-relay's sessions.json carries no timestamp and no service
+        // port, so these entries opt out of #1771's checks (at/dest_port 0)
+        // and keep their previous behaviour. Relay ports are handed out per
+        // TFTP session from a small pool that turns over far more slowly
+        // than portbridge's ephemeral range, so the reuse this guards
+        // against is not a live concern here.
+        m.entry(port as i64).or_default().push(super::viamap::ViaEntry {
+            ip: ip.to_string(),
+            at: 0,
+            dest_port: 0,
+        });
     }
     m
 }

@@ -213,6 +213,16 @@ jobs:
               # rotation/data-loss behavior.
               python arcane/home/honeypot-dionaea/dionaea/tests/test_log_rotation_patch.py
 
+          - name: Dionaea SMB exploit-signature incidents (#622, #1775)
+            run: |
+              # Executes the code this patch injects into smb.py, against a
+              # stand-in connection, rather than asserting on the substituted
+              # text -- the property that matters is one incident per
+              # connection, not one per SMB packet. Reporting per packet made
+              # a single DoublePulsar connection produce ~643 documents and
+              # 47.5% of everything the fleet ingested.
+              python arcane/home/honeypot-dionaea/dionaea/tests/test_smb_exploit_patch.py
+
           - name: Ghidra worker, spool discipline and AI triage
             run: |
               # Stdlib only and stubbed on both sides, so it runs here in seconds.
