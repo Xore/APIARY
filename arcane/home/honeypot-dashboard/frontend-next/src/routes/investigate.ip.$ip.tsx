@@ -107,32 +107,75 @@ function BlockControl({ ip }: { ip: string }) {
       cancelled = true
     }
   }, [ip])
-  if (state === null) return null
-  return (
-    <button
-      className={state.Active ? 'chip is-active' : 'chip'}
-      type="button"
-      disabled={busy}
-      title={
-        state.Active
-          ? `Blocked${state.BlockedBy ? ` by ${state.BlockedBy}` : ''} — the VPS blackhole list drops this IP. Click to unblock.`
-          : 'Add this IP to the manual blackhole list (portbridge drops it within 5 minutes).'
+  const apply = async (blocked: boolean, expiresDays?: number) => {
+    setBusy(true)
+    try {
+      const ok = await setBlock({ data: { ip, blocked, ...(expiresDays ? { expires_days: expiresDays } : {}) } })
+      if (ok) {
+        const fresh = await fetchBlockState({ data: { ip } })
+        if (fresh) setState(fresh)
       }
-      onClick={async () => {
-        setBusy(true)
-        try {
-          const ok = await setBlock({ data: { ip, blocked: !state.Active } })
-          if (ok) {
-            const fresh = await fetchBlockState({ data: { ip } })
-            if (fresh) setState(fresh)
-          }
-        } finally {
-          setBusy(false)
-        }
+    } finally {
+      setBusy(false)
+    }
+  }
+  if (state === null) return null
+  // ips.html:101-102. The port collapsed both states into one `chip
+  // is-active` toggle — a class theme.css has no rule for, so blocking an
+  // address looked identical to any other inert chip, and the expiry input
+  // was dropped outright. That second part was not cosmetic: the whole
+  // pipeline behind it survived the port (the server fn validator accepts
+  // expires_days and spreads it straight through to ip_block.rs), so with
+  // no control to set it every block placed through this UI was permanent.
+  if (state.Active) {
+    return (
+      <span className="tw:inline-flex tw:items-center tw:gap-2">
+        <span className="chip badge badge--danger">
+          blocked{state.BlockedBy ? ` by ${state.BlockedBy}` : ''}
+          {state.ExpiresAt ? `, expires ${formatTimestamp(state.ExpiresAt)}` : ''}
+        </span>
+        <button
+          className="btn btn-sm btn-secondary"
+          type="button"
+          disabled={busy}
+          title="Remove this IP from the manual blackhole list."
+          onClick={() => void apply(false)}
+        >
+          {busy ? '…' : 'unblock'}
+        </button>
+      </span>
+    )
+  }
+  return (
+    <form
+      className="inline-form tw:inline-flex tw:items-center tw:gap-2"
+      onSubmit={(event) => {
+        event.preventDefault()
+        const raw = new FormData(event.currentTarget).get('expires_days')
+        const days = Number(raw)
+        void apply(true, Number.isFinite(days) && days > 0 ? days : undefined)
       }}
     >
-      {busy ? '…' : state.Active ? '⛔ blocked — unblock' : 'block this IP'}
-    </button>
+      <label htmlFor="attacker-block-expires">expire after</label>
+      <input
+        type="number"
+        id="attacker-block-expires"
+        name="expires_days"
+        min="1"
+        placeholder="never"
+        className="hp-input"
+        style={{ width: '6em' }}
+      />
+      <span>day(s)</span>
+      <button
+        className="btn btn-sm btn-danger"
+        type="submit"
+        disabled={busy}
+        title="Drop this IP's connections at portbridge going forward; does not retroactively affect anything already logged"
+      >
+        {busy ? '…' : 'block'}
+      </button>
+    </form>
   )
 }
 

@@ -104,6 +104,34 @@ const fetchPayloadsSummary = createServerFn({ method: 'GET' }).handler(async () 
   return serviceJSON<{ total: number; rows: StoreRow[] }>('/api/v1/payloads?size=15')
 })
 
+
+// overview.html:34-52's hp-hero__links. Two states, both dropped in the
+// port: a freshness line once data is in, and a warming note before the
+// first collection pass finishes. The warming half is the one that
+// matters — without it a cold index and an idle honeypot look identical,
+// which is precisely the confusion #1142 introduced this state to end.
+//
+// The Go tier printed its server-side snapshot time (.Generated). The
+// Rust overview endpoint exposes no such field, so rather than invent one
+// this reports when *this view* last pulled data — which is what the
+// reader actually wants from "updated", and is honest about being a fetch
+// time. Set in an effect so the server and client renders agree.
+function HeroFreshness({ ready, kpis }: { ready: boolean; kpis: OverviewKpis | null }) {
+  const [updated, setUpdated] = useState<Date | null>(null)
+  useEffect(() => {
+    if (ready) setUpdated(new Date())
+  }, [ready, kpis])
+  if (!ready) {
+    return (
+      <span className="gen">
+        <span className="status-dot" aria-hidden="true" /> Warming up — running the first collection pass.
+      </span>
+    )
+  }
+  if (!updated) return null
+  return <span className="gen">updated {formatTimestamp(updated.toISOString())} • refreshes automatically</span>
+}
+
 export const Route = createFileRoute('/')({
   loader: async () => ({
     kpis: fetchKpis(),
@@ -383,6 +411,24 @@ function Overview() {
         <p className="hp-hero__status">
           {presentation?.dashboard_subtitle ||
             'Live attack telemetry, captured evidence, correlated campaigns, and collection health in one operational view.'}
+          {/* overview.html:28's second line. The admin-configurable
+              subtitle survived the port but the metric sentence under it
+              did not, so the hero said what the dashboard is for without
+              ever saying what it is currently seeing. */}
+          <Suspense fallback={null}>
+            <Await promise={data.kpis}>
+              {(kpis) =>
+                kpis?.ready ? (
+                  <>
+                    <br />
+                    {kpis.last24h.toLocaleString('en-US')} events in 24h
+                    {kpis.change24h ? ` (${kpis.change24h})` : ''} • {kpis.unique_ips.toLocaleString('en-US')} attack sources
+                    {payloads ? ` • ${payloads.total.toLocaleString('en-US')} captured payloads` : ''}
+                  </>
+                ) : null
+              }
+            </Await>
+          </Suspense>
         </p>
         <button className="hp-hero__search" type="button" onClick={() => import('../components/CommandPalette').then((m) => m.openCommandPalette())}>
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -390,7 +436,15 @@ function Overview() {
             <line x1="21" y1="21" x2="16.65" y2="16.65" />
           </svg>
           <span>Investigate anything — IP, session, hash, credential, country…</span>
+          {/* CommandPalette.tsx:54 really does bind "/" — the hint was
+              dropped in the port even though the shortcut still works. */}
+          <kbd>/</kbd>
         </button>
+        <div className="hp-hero__links">
+          <Suspense fallback={null}>
+            <Await promise={data.kpis}>{(kpis) => <HeroFreshness ready={Boolean(kpis?.ready)} kpis={kpis} />}</Await>
+          </Suspense>
+        </div>
       </header>
 
       <Suspense fallback={<KpiStrip kpis={null} logins={null} payloads={null} />}>

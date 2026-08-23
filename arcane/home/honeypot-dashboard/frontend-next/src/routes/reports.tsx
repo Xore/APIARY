@@ -633,6 +633,13 @@ function DefinitionForm({
       onSubmit={async (event) => {
           event.preventDefault()
           if (busy) return
+          // The template picker is a button gallery rather than a
+          // <select required>, so its "must choose one" rule is enforced
+          // here instead of by the browser.
+          if (!template) {
+            setMessage('Pick a report template first.')
+            return
+          }
           setBusy(true)
           setMessage('')
           const payload: ReportDefinition = {
@@ -664,6 +671,31 @@ function DefinitionForm({
       <div className="dashboard-panel" role="tabpanel" id="rp-panel-design" aria-labelledby="rp-design" hidden={step !== 'design'}>
         <div className="card wide">
         <h2>{isCreate ? 'New report definition' : `Edit — ${initial.name}`}</h2>
+        {/* reports.html:47 / hp-reports.js:renderTemplates — a gallery of
+            pressable cards, each showing what the template actually
+            produces. The port reduced it to a <select> of bare names, so
+            the descriptions were only reachable one at a time after
+            choosing, which is backwards for a picker. theme.css still
+            carries .hp-rp-templates/.hp-rp-template including the
+            aria-pressed selected state. */}
+        <div className="hp-rp-templates" role="group" aria-label="Report template">
+          {templates.length > 0 ? (
+            templates.map((entry) => (
+              <button
+                key={entry.id}
+                type="button"
+                className="hp-rp-template"
+                aria-pressed={template === entry.id}
+                onClick={() => pickTemplate(entry.id)}
+              >
+                <strong>{entry.name}</strong>
+                <span>{entry.description}</span>
+              </button>
+            ))
+          ) : (
+            <p className="empty">No report templates are available.</p>
+          )}
+        </div>
         <div className="filters">
           <label className="note" style={{ display: 'block', minWidth: 200 }}>
             Name
@@ -677,28 +709,23 @@ function DefinitionForm({
               onChange={(event) => setName(event.target.value)}
             />
           </label>
-          <label className="note" style={{ display: 'block', minWidth: 200 }}>
-            Template
-            <select className="form-input" style={{ width: '100%' }} value={template} onChange={(event) => pickTemplate(event.target.value)} required>
-              <option value="" disabled>
-                Select a template…
-              </option>
-              {templates.map((entry) => (
-                <option key={entry.id} value={entry.id}>
-                  {entry.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="note" style={{ display: 'block', minWidth: 140 }}>
+          {/* reports.html:64-66 — the swatch shows what each PDF theme
+              actually looks like; a two-option <select> of the words
+              "Dark"/"Light" showed nothing. */}
+          <div className="note" style={{ display: 'block', minWidth: 140 }}>
             Theme
-            <select className="form-input" style={{ width: '100%' }} value={theme} onChange={(event) => setTheme(event.target.value)}>
-              <option value="dark">Dark</option>
-              <option value="light">Light</option>
-            </select>
-          </label>
+            <div className="hp-rp-theme" role="group" aria-label="PDF theme">
+              <button type="button" aria-pressed={theme === 'dark'} onClick={() => setTheme('dark')}>
+                <span className="hp-rp-swatch hp-rp-swatch--dark" aria-hidden="true" />
+                Dark
+              </button>
+              <button type="button" aria-pressed={theme === 'light'} onClick={() => setTheme('light')}>
+                <span className="hp-rp-swatch hp-rp-swatch--light" aria-hidden="true" />
+                Light
+              </button>
+            </div>
+          </div>
         </div>
-        {activeTemplate ? <p className="note">{activeTemplate.description}</p> : null}
         <div className="filters">
           {!isSpecial ? (
             // reports.html:61 — the observation window is a Design-step
