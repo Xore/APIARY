@@ -76,6 +76,7 @@ mod services_control;
 mod session;
 mod stores;
 mod ics_severity;
+mod ioc_correlation;
 mod threat_intel;
 mod worker;
 mod workbench_api;

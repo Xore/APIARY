@@ -67,6 +67,24 @@ type Floss = {
   truncated?: boolean
   unsupported?: string
 }
+/** #1735: the Floss/Windows-sandbox IOC correlation, computed on read by
+ * backend-service's ioc_correlation.rs and returned alongside the analysis
+ * document (not nested under `ghidra` — it is derived, not worker output). */
+type IocKind = {
+  floss_only?: string[]
+  sandbox_static_only?: string[]
+  confirmed_at_runtime?: string[]
+}
+type IocCorrelation = {
+  has_sandbox_run?: boolean
+  has_floss_data?: boolean
+  is_empty?: boolean
+  ips?: IocKind
+  domains?: IocKind
+  urls?: IocKind
+  unc_paths?: IocKind
+}
+
 type Citation = { raw?: string }
 type RevDeck = {
   workflow?: string
@@ -752,7 +770,103 @@ function DataPanel({ g }: { g: GhidraDoc }) {
   )
 }
 
-function DeepDivePanel({ g }: { g: GhidraDoc }) {
+// ghidra.html:181's card, restored by #1735. Its three "nothing to show"
+// states are kept apart deliberately: telling "no sandbox run exists" from
+// "a run exists but floss declined the sample" from "both ran and agree on
+// nothing" is most of the card's diagnostic value, and collapsing them into
+// one empty message would throw that away.
+function IocEvidence({ kind }: { kind: IocKind | undefined }) {
+  const block = (label: string, values: string[] | undefined) => (
+    <>
+      <p className="note">{label}:</p>
+      <pre className="code">{(values ?? []).join('\n')}</pre>
+    </>
+  )
+  return (
+    <>
+      {block('floss-only', kind?.floss_only)}
+      {block('sandbox-static-only', kind?.sandbox_static_only)}
+      {block('confirmed at runtime', kind?.confirmed_at_runtime)}
+    </>
+  )
+}
+
+function IocCorrelationCard({ correlation }: { correlation: IocCorrelation | null }) {
+  const rows: Array<{ label: string; kind: IocKind | undefined; dynamic: boolean }> = [
+    { label: 'IP addresses', kind: correlation?.ips, dynamic: true },
+    { label: 'Domains', kind: correlation?.domains, dynamic: true },
+    { label: 'URLs', kind: correlation?.urls, dynamic: true },
+    { label: 'UNC/SMB paths', kind: correlation?.unc_paths, dynamic: false },
+  ]
+  const count = (values: string[] | undefined) => (values ?? []).length
+  return (
+    <div className="card wide">
+      <h2>Floss / Windows-sandbox IOC correlation</h2>
+      {!correlation?.has_sandbox_run ? (
+        <p className="empty">
+          No Windows-sandbox run exists yet for this SHA-256 — nothing to correlate floss&apos;s decoded strings against.
+        </p>
+      ) : !correlation.has_floss_data ? (
+        <p className="empty">
+          A Windows-sandbox run exists for this sample, but floss declined it or the sidecar was unavailable for this
+          analysis — see Obfuscated strings above.
+        </p>
+      ) : correlation.is_empty ? (
+        <p className="empty">
+          A Windows-sandbox run exists for this sample, but floss&apos;s decoded strings and the sandbox&apos;s own IOC sets
+          share nothing in common.
+        </p>
+      ) : (
+        <>
+          <p className="note">
+            Cross-references floss&apos;s decoded/static/stack/tight strings against this sample&apos;s Windows-sandbox
+            run(s), by the same IP/URL/domain/UNC patterns <code>extract_iocs.py</code> uses. &ldquo;Confirmed at
+            runtime&rdquo; is the strongest signal here: a value floss decoded from the binary that a sandbox run also
+            actually observed happening.
+          </p>
+          <div className="card__scroll">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>kind</th>
+                  <th>floss-only</th>
+                  <th>sandbox-static-only</th>
+                  <th>confirmed at runtime</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.label}>
+                    <td>{row.label}</td>
+                    <td className="v">{count(row.kind?.floss_only)}</td>
+                    <td className="v">{count(row.kind?.sandbox_static_only)}</td>
+                    <td className={count(row.kind?.confirmed_at_runtime) > 0 ? 'v tw:text-orange' : 'v'}>
+                      {row.dynamic ? count(row.kind?.confirmed_at_runtime) : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="note">
+            UNC/SMB paths have no dynamic counterpart — the sandbox&apos;s own parsers have no SMB/UNC observation path,
+            only the static binary scan does.
+          </p>
+          <div className="card__scroll" aria-label="Full IOC correlation lists">
+            {rows.map((row) => (
+              <div key={row.label}>
+                <h3>{row.label}</h3>
+                <IocEvidence kind={row.kind} />
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function DeepDivePanel({ g, correlation }: { g: GhidraDoc; correlation: IocCorrelation | null }) {
   const chat = g.revdeck_chat_threads
   const recovery = g.revdeck_recovery
   return (
@@ -761,10 +875,7 @@ function DeepDivePanel({ g }: { g: GhidraDoc }) {
         title="Deep dive"
         sub="Everything the Ghidra REST v1 surface recovered beyond the functions/imports/strings above: recovered types, non-string globals, any analyst annotations, and the program's memory layout."
       />
-      {/* ghidra.html's "Floss / Windows-sandbox IOC correlation" card is
-          deliberately absent: the Go tier computed it fresh on every read
-          (correlateFlossSandboxIOCs in ioc_correlation.go, never stored in
-          ES), and no Rust endpoint serves that correlation yet. */}
+      <IocCorrelationCard correlation={correlation} />
       <div className="card wide">
         <h2>Recovered types</h2>
         {g.types?.length ? (
@@ -953,6 +1064,7 @@ function GhidraDetail() {
   const doc = run === null ? null : run
   const g: GhidraDoc = doc ? ((doc.ghidra ?? {}) as GhidraDoc) : {}
   const failed = doc !== null && g.exit_status === 'error'
+  const correlation = (doc?.ioc_correlation as IocCorrelation | undefined) ?? null
 
   // ghidra.html:95's Re-analyze confirm — same data-hp-confirm-* copy.
   const reanalyze = () =>
@@ -1074,7 +1186,7 @@ function GhidraDetail() {
             <DataPanel g={g} />
           </Panel>
           <Panel id="deepdive" active={tab}>
-            <DeepDivePanel g={g} />
+            <DeepDivePanel g={g} correlation={correlation} />
           </Panel>
           <Panel id="raw" active={tab}>
             <div className="card wide">
