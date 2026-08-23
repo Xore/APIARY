@@ -69,7 +69,7 @@ pub struct SessionDetail {
 /// technique() call sites exactly. An ID outside this set (a future
 /// classifier rule added without updating this table) falls back to the
 /// bare ID as its own name rather than panicking.
-fn technique_meta(id: &str) -> (&str, &'static str, &'static str) {
+pub fn technique_meta(id: &str) -> (&str, &'static str, &'static str) {
     match id {
         "T1110" => ("Brute Force", "Enterprise", "credential attempt"),
         "T1059" => ("Command and Scripting Interpreter", "Enterprise", "command captured"),
@@ -83,6 +83,16 @@ fn technique_meta(id: &str) -> (&str, &'static str, &'static str) {
         "T1692.001" => ("Unauthorized Message: Command Message", "ICS", "control command or write attempt"),
         other => (other, "Enterprise", ""),
     }
+}
+
+/// Builds one MITRE table row from a bare technique ID + observation
+/// count — shared by session.rs's own techniques and investigate.rs's
+/// per-IP profile (ips.html's "techniques" partial reuses the exact same
+/// template session.html does).
+pub fn technique_row(id: String, count: u64) -> Technique {
+    let (name, domain, evidence) = technique_meta(&id);
+    let (name, domain, evidence) = (name.to_string(), domain.to_string(), evidence.to_string());
+    Technique { url: format!("https://attack.mitre.org/techniques/{}/", id.replace('.', "/")), id, name, domain, evidence, count }
 }
 
 fn top_n(map: HashMap<String, u64>, n: usize) -> Vec<Kv> {
@@ -210,21 +220,7 @@ pub async fn detail(
         });
     }
 
-    let mut technique_rows: Vec<Technique> = techniques
-        .into_iter()
-        .map(|(id, count)| {
-            let (name, domain, evidence) = technique_meta(&id);
-            let (name, domain, evidence) = (name.to_string(), domain.to_string(), evidence.to_string());
-            Technique {
-                url: format!("https://attack.mitre.org/techniques/{}/", id.replace('.', "/")),
-                id,
-                name,
-                domain,
-                evidence,
-                count,
-            }
-        })
-        .collect();
+    let mut technique_rows: Vec<Technique> = techniques.into_iter().map(|(id, count)| technique_row(id, count)).collect();
     technique_rows.sort_by(|a, b| b.count.cmp(&a.count).then(a.id.cmp(&b.id)));
 
     let first = rows.first().map(|row| row.time.clone()).unwrap_or_default();
