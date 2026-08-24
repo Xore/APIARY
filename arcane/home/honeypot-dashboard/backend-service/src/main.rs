@@ -78,6 +78,7 @@ mod stores;
 mod ics_severity;
 mod ioc_correlation;
 mod threat_intel;
+mod zeek_proxy_attribution;
 mod worker;
 mod workbench_api;
 mod workbench_domain;
