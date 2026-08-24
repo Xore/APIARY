@@ -111,15 +111,42 @@ export function applyTheme(mode: ThemeMode, options?: { sync?: boolean }) {
   }
 }
 
+// A theme name is an identifier. Same rule as the pre-paint boot script in
+// __root.tsx and as the server (preferences.rs::theme_name), so a name cannot
+// be accepted at one layer and rejected at another.
+//
+// Checked by shape rather than against the nine themes we ship: a theme is
+// CSS in the vendored stylesheet, and vendoring a new one must be enough to
+// make it selectable. A name this does not match is not applied, and an
+// unrecognised-but-well-formed one is applied and simply matches no rule --
+// the page falls back to default tokens rather than losing the choice.
+const THEME_NAME = /^[a-z][a-z0-9-]{2,31}$/
+
+export function isThemeName(value: string): boolean {
+  return THEME_NAME.test(value)
+}
+
+/// The theme this document is currently showing.
+export function getThemeName(): string {
+  if (typeof document === 'undefined') return 'claude'
+  return document.documentElement.dataset.hpTheme || 'claude'
+}
+
 export function applyPalette(palette: string, options?: { sync?: boolean }) {
+  // Empty means "back to the default", which is a real choice and not a
+  // malformed value.
+  const name = palette || 'claude'
+  if (palette && !isThemeName(name)) return
   try {
-    if (palette && palette !== 'claude') {
-      document.documentElement.dataset.hpPalette = palette
-      localStorage.setItem('hp-palette', palette)
-    } else {
-      delete document.documentElement.dataset.hpPalette
-      localStorage.removeItem('hp-palette')
-    }
+    // Set unconditionally, including for claude. The attribute used to be
+    // deleted for the default on the grounds that :root already carries
+    // those tokens -- true for rendering, but it left the DOM unable to
+    // answer "which theme is this?", which the gallery picker (#1758) and
+    // the server reconcile (#1755) both need. Upstream's selector list
+    // names claude explicitly, so setting it changes nothing visually.
+    document.documentElement.dataset.hpTheme = name
+    document.documentElement.dataset.hpPalette = name
+    localStorage.setItem('hp-palette', name)
   } catch {
     /* storage unavailable */
   }
@@ -127,7 +154,7 @@ export function applyPalette(palette: string, options?: { sync?: boolean }) {
   // Same write-through as theme: "" stores as claude-equivalent default
   // server-side (the Go domain accepts "" as claude).
   if (options?.sync !== false && typeof window !== 'undefined') {
-    void pushAppearancePreference({ data: { palette: palette || 'claude' } }).catch(() => {})
+    void pushAppearancePreference({ data: { palette: name } }).catch(() => {})
   }
 }
 

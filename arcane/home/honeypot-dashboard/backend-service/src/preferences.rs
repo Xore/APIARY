@@ -177,9 +177,130 @@ struct PreferencesPatch {
     open_details_new_tab: Option<bool>,
 }
 
+/// Preference values the server owns outright. These mirror the option sets
+/// the settings page renders and, where one already existed, the set
+/// `config.rs` validates for the deployment-wide default -- `default_time_window`,
+/// `rows_per_page_options`, `refresh_interval_seconds_options` and
+/// `map_provider` are the same lists, deliberately, because two lists drift.
+const THEME_MODES: &[&str] = &["system", "dark", "light"];
+const DENSITIES: &[&str] = &["comfortable", "compact"];
+const MOTION: &[&str] = &["system", "on", "off"];
+const CLOCKS: &[&str] = &["h24", "h12"];
+const TIMESTAMPS: &[&str] = &["relative", "absolute"];
+const BASEMAPS: &[&str] = &["osm"];
+const SEVERITIES: &[&str] = &["low", "medium", "high", "critical"];
+const EVENT_WINDOWS: &[&str] = &["1h", "6h", "24h", "7d", "30d"];
+const ROWS_PER_PAGE: &[i64] = &[10, 25, 50, 100];
+const REFRESH_SECONDS: &[i64] = &[10, 15, 30, 60, 120, 300];
+
+fn one_of(field: &str, value: &Option<String>, allowed: &[&str], problems: &mut Vec<String>) {
+    if let Some(v) = value {
+        if !allowed.contains(&v.as_str()) {
+            problems.push(format!("{field} must be one of {}", allowed.join(", ")));
+        }
+    }
+}
+
+fn one_of_int(field: &str, value: &Option<i64>, allowed: &[i64], problems: &mut Vec<String>) {
+    if let Some(v) = value {
+        if !allowed.contains(v) {
+            let list: Vec<String> = allowed.iter().map(|n| n.to_string()).collect();
+            problems.push(format!("{field} must be one of {}", list.join(", ")));
+        }
+    }
+}
+
+/// A theme name is checked by *shape*, not against a list.
+///
+/// This is the one field that must stay open. #1753 ships themes as CSS in
+/// the vendored stylesheet, and a new one has to be selectable the moment it
+/// is vendored -- gating that on a matching backend deploy would mean the
+/// name is rejected by the API while the CSS to render it is already live.
+/// The frontend follows the same rule for the same reason (#1754), so an
+/// unrecognised-but-well-formed name is preserved and simply matches no CSS.
+///
+/// Shape-checking is still validation: it is what stops `<script>` and
+/// `'; DROP TABLE` from being stored and handed back to a browser. An
+/// identifier cannot contain anything but lowercase letters, digits and
+/// dashes, and cannot be long.
+fn theme_name(field: &str, value: &Option<String>, problems: &mut Vec<String>) {
+    let Some(v) = value else { return };
+    let shaped = (3..=32).contains(&v.len())
+        && v.starts_with(|c: char| c.is_ascii_lowercase())
+        && v.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if !shaped {
+        problems.push(format!(
+            "{field} must be 3-32 characters of lowercase letters, digits or dashes, starting with a letter"
+        ));
+    }
+}
+
+/// A landing page is a path this dashboard will navigate to on login.
+///
+/// Same trap as any other stored URL: `//evil.example` is a protocol-relative
+/// URL and `/\evil.example` is treated as one by browsers, so both send the
+/// user off-site from a value that reads like a path. Requiring a single
+/// leading slash is what makes it a path rather than a destination.
+fn landing_path(field: &str, value: &Option<String>, problems: &mut Vec<String>) {
+    let Some(v) = value else { return };
+    let ok = v.starts_with('/')
+        && !v.starts_with("//")
+        && !v.starts_with("/\\")
+        && v.len() <= 512
+        && !v.contains(|c: char| c.is_control());
+    if !ok {
+        problems.push(format!(
+            "{field} must be a same-site path: one leading slash, at most 512 characters"
+        ));
+    }
+}
+
+/// An IANA zone name, or the sentinel `browser`.
+///
+/// Not checked against the tz database -- that would make the accepted set
+/// depend on the container's tzdata version, so the same request could
+/// succeed on one host and fail on another after an unrelated base-image
+/// bump. Shape and length only.
+fn timezone_name(field: &str, value: &Option<String>, problems: &mut Vec<String>) {
+    let Some(v) = value else { return };
+    let ok = v == "browser"
+        || (v.len() <= 64
+            && v.starts_with(|c: char| c.is_ascii_alphabetic())
+            && v.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '-' | '+')));
+    if !ok {
+        problems.push(format!("{field} must be an IANA zone name such as Europe/Berlin, or browser"));
+    }
+}
+
 impl PreferencesPatch {
     fn empty(&self) -> bool {
         *self == PreferencesPatch::default()
+    }
+
+    /// Every problem with the patch, or an empty vec.
+    ///
+    /// Returns all of them rather than the first: a settings page saves the
+    /// whole form at once, and reporting one bad field per round trip makes
+    /// fixing three of them a three-request conversation.
+    ///
+    /// Booleans are not checked -- serde already rejected anything that was
+    /// not a bool before this runs.
+    fn problems(&self) -> Vec<String> {
+        let mut p = Vec::new();
+        one_of("theme", &self.theme, THEME_MODES, &mut p);
+        theme_name("palette", &self.palette, &mut p);
+        one_of("density", &self.density, DENSITIES, &mut p);
+        one_of("reduced_motion", &self.reduced_motion, MOTION, &mut p);
+        one_of("clock", &self.clock, CLOCKS, &mut p);
+        one_of("timestamps", &self.timestamps, TIMESTAMPS, &mut p);
+        one_of("map_basemap", &self.map_basemap, BASEMAPS, &mut p);
+        one_of("notify_severity", &self.notify_severity, SEVERITIES, &mut p);
+        one_of("default_event_window", &self.default_event_window, EVENT_WINDOWS, &mut p);
+        one_of_int("rows_per_page", &self.rows_per_page, ROWS_PER_PAGE, &mut p);
+        one_of_int("refresh_interval_seconds", &self.refresh_interval_seconds, REFRESH_SECONDS, &mut p);
+        landing_path("landing_page", &self.landing_page, &mut p);
+        timezone_name("timezone", &self.timezone, &mut p);
+        p
     }
 
     /// Applies every present field onto `prefs`, returning the dotted
@@ -248,6 +369,12 @@ pub async fn put(
     if body.patch.empty() {
         return Err((StatusCode::BAD_REQUEST, "patch must set at least one preference field".into()));
     }
+    // Before the document is loaded, let alone written: a rejected patch
+    // should not cost a round trip to the store.
+    let problems = body.patch.problems();
+    if !problems.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, problems.join("; ")));
+    }
     let mut doc = load_users_doc(&state).await.map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))?;
     let Some(user) = find_user(&mut doc, &body.subject) else {
         return Err((StatusCode::NOT_FOUND, "no settings record yet; GET /api/v1/preferences first".into()));
@@ -307,4 +434,119 @@ pub async fn reset(
         ..Default::default()
     });
     Ok(Json(json!({"preferences": preferences, "revision": revision})))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn patch(json_text: &str) -> PreferencesPatch {
+        serde_json::from_str(json_text).expect("patch should deserialize")
+    }
+
+    #[test]
+    fn the_payload_from_the_issue_is_rejected() {
+        // #1756 quoted this exact body as something the API accepted and
+        // stored, then handed back to a browser on the next GET.
+        let p = patch(
+            r#"{"theme": "'; DROP TABLE", "palette": "<script>", "rows_per_page": -9007199254740991}"#,
+        );
+        let problems = p.problems();
+        assert_eq!(problems.len(), 3, "each bad field reports once: {problems:?}");
+        assert!(problems.iter().any(|m| m.starts_with("theme")));
+        assert!(problems.iter().any(|m| m.starts_with("palette")));
+        assert!(problems.iter().any(|m| m.starts_with("rows_per_page")));
+    }
+
+    #[test]
+    fn every_default_value_validates() {
+        // Whatever else changes, the values the server itself writes on
+        // first contact must survive being sent back to it -- otherwise a
+        // settings page that saves an untouched form fails.
+        let defaults = default_preferences("Europe/Berlin");
+        let p: PreferencesPatch =
+            serde_json::from_value(defaults).expect("defaults should match the patch shape");
+        assert!(p.problems().is_empty(), "{:?}", p.problems());
+    }
+
+    #[test]
+    fn an_unknown_but_well_formed_theme_name_is_accepted() {
+        // The point of the open shape check: a theme ships as CSS in the
+        // vendored stylesheet and must be selectable without a backend
+        // deploy. Gating on a list would reject the name while the CSS that
+        // renders it is already live.
+        for name in ["nightwatch", "claude", "slate", "high-contrast", "ocean2"] {
+            let p = patch(&format!(r#"{{"palette": "{name}"}}"#));
+            assert!(p.problems().is_empty(), "{name} should be accepted: {:?}", p.problems());
+        }
+    }
+
+    #[test]
+    fn theme_names_that_are_not_identifiers_are_rejected() {
+        for name in [
+            "<script>",         // the stored-XSS shape
+            "Claude",           // uppercase: not an identifier we emit
+            "ab",               // too short
+            "a".repeat(33).as_str(),
+            "-leading-dash",
+            "has space",
+            "has_underscore",
+            "",
+        ] {
+            let p = patch(&format!(r#"{{"palette": {}}}"#, serde_json::to_string(name).unwrap()));
+            assert!(!p.problems().is_empty(), "{name:?} should be rejected");
+        }
+    }
+
+    #[test]
+    fn landing_page_cannot_send_the_user_off_site() {
+        // A stored landing page is navigated to on login, so the usual
+        // path-shaped escapes matter: both of these read as paths and are
+        // not.
+        for bad in ["//evil.example", "/\\evil.example", "https://evil.example", "not-a-path"] {
+            let p = patch(&format!(r#"{{"landing_page": {}}}"#, serde_json::to_string(bad).unwrap()));
+            assert!(!p.problems().is_empty(), "{bad:?} should be rejected");
+        }
+        for good in ["/", "/events", "/investigate/lookup?ip=1.2.3.4"] {
+            let p = patch(&format!(r#"{{"landing_page": {}}}"#, serde_json::to_string(good).unwrap()));
+            assert!(p.problems().is_empty(), "{good:?} should be accepted: {:?}", p.problems());
+        }
+    }
+
+    #[test]
+    fn numeric_preferences_are_bounded_to_the_offered_options() {
+        // The sharper edge in #1756: rows_per_page reaches a query.
+        for bad in [0, -1, 10_000_000, 51] {
+            let p = patch(&format!(r#"{{"rows_per_page": {bad}}}"#));
+            assert!(!p.problems().is_empty(), "{bad} should be rejected");
+        }
+        for good in ROWS_PER_PAGE {
+            let p = patch(&format!(r#"{{"rows_per_page": {good}}}"#));
+            assert!(p.problems().is_empty(), "{good} should be accepted");
+        }
+        for bad in [0, 7, 86_400] {
+            let p = patch(&format!(r#"{{"refresh_interval_seconds": {bad}}}"#));
+            assert!(!p.problems().is_empty(), "{bad} should be rejected");
+        }
+    }
+
+    #[test]
+    fn timezone_accepts_iana_names_and_the_browser_sentinel() {
+        for good in ["browser", "Europe/Berlin", "America/Argentina/Buenos_Aires", "Etc/GMT+3", "UTC"] {
+            let p = patch(&format!(r#"{{"timezone": {}}}"#, serde_json::to_string(good).unwrap()));
+            assert!(p.problems().is_empty(), "{good} should be accepted: {:?}", p.problems());
+        }
+        for bad in ["<script>", "/etc/passwd", "a".repeat(65).as_str()] {
+            let p = patch(&format!(r#"{{"timezone": {}}}"#, serde_json::to_string(bad).unwrap()));
+            assert!(!p.problems().is_empty(), "{bad:?} should be rejected");
+        }
+    }
+
+    #[test]
+    fn every_problem_is_reported_not_just_the_first() {
+        // A settings page saves the whole form at once; one bad field per
+        // round trip makes fixing three of them a three-request conversation.
+        let p = patch(r#"{"theme": "nope", "density": "nope", "clock": "nope"}"#);
+        assert_eq!(p.problems().len(), 3);
+    }
 }
