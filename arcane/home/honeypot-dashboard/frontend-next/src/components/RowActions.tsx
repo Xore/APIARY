@@ -59,6 +59,42 @@ export const RowIcons = {
       <line x1="9" y1="17" x2="13" y2="17" />
     </Icon>
   ),
+  /** Down into something. "Give me the bytes." */
+  download: (
+    <Icon>
+      <path d="M12 3v12" />
+      <polyline points="7 10 12 15 17 10" />
+      <path d="M5 20h14" />
+    </Icon>
+  ),
+  /** Instruments on a bench: the analysis you assemble yourself. */
+  workbench: (
+    <Icon>
+      <path d="M4 5h16" />
+      <path d="M9 5v6a4 4 0 0 0 6 0V5" />
+      <path d="M12 15v5" />
+      <path d="M8 20h8" />
+    </Icon>
+  ),
+  /** A list of things that happened. */
+  events: (
+    <Icon>
+      <line x1="9" y1="7" x2="20" y2="7" />
+      <line x1="9" y1="12" x2="20" y2="12" />
+      <line x1="9" y1="17" x2="20" y2="17" />
+      <circle cx="5" cy="7" r="1.2" />
+      <circle cx="5" cy="12" r="1.2" />
+      <circle cx="5" cy="17" r="1.2" />
+    </Icon>
+  ),
+  /** Out of here, to somewhere public. */
+  publish: (
+    <Icon>
+      <path d="M12 19V6" />
+      <polyline points="7 11 12 6 17 11" />
+      <path d="M5 20h14" />
+    </Icon>
+  ),
   payload: (
     <Icon>
       <path d="M21 8v8a2 2 0 0 1-1 1.73l-7 4a2 2 0 0 1-2 0l-7-4A2 2 0 0 1 3 16V8a2 2 0 0 1 1-1.73l7-4a2 2 0 0 1 2 0l7 4A2 2 0 0 1 21 8z" />
@@ -108,6 +144,12 @@ export type RowAction = {
   onClick?: () => void
   /** Opens outside the dashboard. */
   external?: boolean
+  /** Does something irreversible, and should not look like its neighbours.
+   *
+   *  Every other control in a strip navigates or copies, so they are
+   *  uniform by design -- which is exactly what makes an action that
+   *  publishes or deletes unsafe to sit among them unmarked. */
+  danger?: boolean
 }
 
 /** A named set of actions that opens beside its own icon.
@@ -126,6 +168,7 @@ function Control({ action }: { action: RowAction }) {
   const shared = {
     title: action.label,
     'aria-label': action.label,
+    ...(action.danger ? { className: 'hp-row-actions__danger' } : {}),
   }
   return action.href ? (
     <a
@@ -164,9 +207,17 @@ function Control({ action }: { action: RowAction }) {
 export function RowActions({
   actions,
   groups = [],
+  expanded = false,
 }: {
   actions: (RowAction | null | undefined)[]
   groups?: (RowActionGroup | null | undefined)[]
+  /** Show every action at rest instead of collapsing all but the first.
+   *
+   *  The collapse is a width budget, and it is a table row's budget. A card
+   *  footer has the whole card width, so collapsing there only recreates
+   *  the disclosure menu's problem -- the actions become discoverable by
+   *  accident. Same strip, same markup, budget lifted. */
+  expanded?: boolean
 }) {
   const present = actions.filter((action): action is RowAction => Boolean(action))
   const liveGroups = groups
@@ -181,7 +232,7 @@ export function RowActions({
 
   const [first, ...rest] = present
   return (
-    <div className="hp-row-actions">
+    <div className={expanded ? 'hp-row-actions hp-row-actions--expanded' : 'hp-row-actions'}>
       {first ? <Control action={first} /> : null}
       {rest.length > 0 || liveGroups.length > 0 ? (
         <span className="hp-row-actions__more">

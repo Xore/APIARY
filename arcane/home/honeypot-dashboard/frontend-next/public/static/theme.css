@@ -4240,6 +4240,42 @@ tr.selected .hp-row-actions__more,
   opacity: 1;
 }
 
+/* Every action at rest, for surfaces with room for them.
+
+   The collapse above exists because a table row has a width budget: twelve
+   icons across a row is not a strip any more, so all but the first wait for
+   the pointer. A card has no such constraint -- its actions sit in a footer
+   with the whole card width to themselves -- and there the collapse only
+   reproduces the problem the disclosure menu had, where what you can do is
+   discoverable by accident.
+
+   So this is the same strip with the budget lifted, not a second component.
+   `max-width: none` rather than a large value, so the row never wraps at a
+   width the number of actions happens to exceed. */
+.hp-row-actions--expanded .hp-row-actions__more {
+  max-width: none;
+  opacity: 1;
+  overflow: visible;
+}
+
+/* The action in a strip that does something irreversible.
+
+   Everything else in a strip navigates or copies, so the controls are
+   deliberately uniform -- which is exactly what makes an action that
+   publishes, deletes or resets dangerous to place among them: it looks like
+   its neighbours right up until it runs. This keeps the same 24px shape and
+   only changes what it says about itself, using the same danger tokens as
+   the rest of the interface so it stays contrast-checked across all nine
+   themes. */
+.hp-row-actions .hp-row-actions__danger {
+  background: var(--danger-soft);
+  color: var(--danger-text-on-soft);
+}
+.hp-row-actions .hp-row-actions__danger:hover {
+  background: var(--danger);
+  color: var(--bg-000);
+}
+
 /* A group inside the strip: one icon saying a category exists, its members
    appearing beside it rather than inside a menu. */
 .hp-row-actions__group { display: inline-flex; align-items: center; gap: 2px; }

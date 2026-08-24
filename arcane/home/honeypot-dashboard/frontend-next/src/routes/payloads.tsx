@@ -1,12 +1,15 @@
 // Captured payloads — dashboard-payload-inventory-v1 as the Go page's
 // project-card grid (payloads.html's "payloadrow" template, #1653):
 // per-source filter chips, GitHub-verdict + family badges, byte preview,
-// and the per-card "…" action menu, with View-more + skeleton-first.
+// and the per-card actions -- now the same RowActions strip every table
+// row uses rather than the Go page's "…" menu (#1899) -- with View-more
+// + skeleton-first.
 import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useState } from 'react'
 import { confirmAction } from '../components/ConfirmDialog'
 import { InvestigateHeader } from '../components/Investigate'
+import { RowActions, RowIcons } from '../components/RowActions'
 import { formatTimestamp } from '../lib/time'
 
 type PayloadRow = {
@@ -228,39 +231,52 @@ function PayloadCard({ row, badge }: { row: PayloadRow; badge: GithubBadge | und
       </section>
       <div className="project-card__meta">
         <span>{formatTimestamp(row.MtimeUTC)}</span>
-        <details className="action-menu">
-          <summary aria-label="Payload actions" title="Payload actions">⋮</summary>
-          <div className="action-menu__popover" role="menu">
-            <a className="action-menu__item" role="menuitem" href={`/payload-analysis/${encodeURIComponent(row.Hash)}`}>
-              Static analysis →
-            </a>
-            <a
-              className="action-menu__item"
-              role="menuitem"
-              href={`/payload-workbench/results?hash=${encodeURIComponent(row.Hash)}#workbench-builder`}
-            >
-              Analysis workbench →
-            </a>
-            <a className="action-menu__item" role="menuitem" href={`/api/payload/${encodeURIComponent(row.Hash)}/download`}>
-              Download sample ↓
-            </a>
-            <a className="action-menu__item" role="menuitem" href={`/events?shasum=${encodeURIComponent(row.Hash)}`}>
-              Related events →
-            </a>
-            <a
-              className="action-menu__item"
-              role="menuitem"
-              href={`https://www.virustotal.com/gui/file/${encodeURIComponent(row.Hash)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              VirusTotal ↗
-            </a>
-            <button className="action-menu__item action-menu__item--danger" role="menuitem" type="button" onClick={publish}>
-              Publish to Xore/honeypot
-            </button>
-          </div>
-        </details>
+        {/* #1899: the same strip every table row uses, with every action
+            resting on screen rather than behind a ⋮.
+
+            The disclosure menu cost a click to find out what a payload
+            could even be done with, and it was the only surface in the
+            dashboard still doing that after #1868 put the strip on rows.
+            A card footer has the whole card width, so there is no reason
+            to collapse anything here -- hence `expanded`.
+
+            The card title already links to the static analysis, so the
+            strip leads with the workbench instead of repeating it: the
+            next thing an operator does after reading a capture. Publish
+            is the one action with consequences outside this machine, so
+            it is marked rather than left looking like Download. */}
+        <RowActions
+          expanded
+          actions={[
+            {
+              label: 'Analysis workbench',
+              icon: RowIcons.workbench,
+              href: `/payload-workbench/results?hash=${encodeURIComponent(row.Hash)}#workbench-builder`,
+            },
+            {
+              label: 'Static analysis',
+              icon: RowIcons.detail,
+              href: `/payload-analysis/${encodeURIComponent(row.Hash)}`,
+            },
+            {
+              label: 'Download sample',
+              icon: RowIcons.download,
+              href: `/api/payload/${encodeURIComponent(row.Hash)}/download`,
+            },
+            {
+              label: 'Related events',
+              icon: RowIcons.events,
+              href: `/events?shasum=${encodeURIComponent(row.Hash)}`,
+            },
+            {
+              label: 'VirusTotal',
+              icon: RowIcons.openIn,
+              href: `https://www.virustotal.com/gui/file/${encodeURIComponent(row.Hash)}`,
+              external: true,
+            },
+            { label: 'Publish to Xore/honeypot', icon: RowIcons.publish, onClick: publish, danger: true },
+          ]}
+        />
       </div>
     </div>
   )
