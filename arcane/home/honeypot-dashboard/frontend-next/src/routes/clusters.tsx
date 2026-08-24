@@ -45,7 +45,9 @@ const COLUMNS: Column<ClusterRow>[] = [
   {
     header: 'coverage',
     detail: true,
-    render: (row) => `${row.sensors.length} sensors: ${row.sensors.join(' ')}`,
+    // #1566: a cluster seen on one sensor read "1 sensors:".
+    render: (row) =>
+      `${row.sensors.length} ${row.sensors.length === 1 ? 'sensor' : 'sensors'}: ${row.sensors.join(' ')}`,
   },
   {
     header: '',
