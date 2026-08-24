@@ -283,7 +283,91 @@ async fn fingerprint_ip_correlation(state: &AppState, q: &EventsQuery) -> Option
 /// smtp/dns/fileinfo detail (src/detail.rs), so only the three genuinely
 /// swamping types stay excluded here.
 pub fn suricata_noise_exclusion() -> Value {
-    json!([{"terms": {"suricata.eve.event_type": ["flow", "netflow", "stats"]}}])
+    json!([
+        {"terms": {"suricata.eve.event_type": ["flow", "netflow", "stats"]}},
+        // #1873: the fleet probing itself is not an event.
+        //
+        // dashboard.rs, health.rs and worker.rs all drop internal_probe
+        // traffic; the explorer never got the filter, so it was the one
+        // surface rendering it. Measured over six hours: 68,115 documents
+        // marked internal_probe and 68,819 sourced from 127.0.0.1, none
+        // with a source.ip -- roughly 270k rows a day of the fleet talking
+        // to itself, shown as events with no attacker. That is the bulk of
+        // what reads as "unattributed" in the explorer.
+        {"term": {"honeypot.internal_probe": true}}
+    ])
+}
+
+/// Addresses that belong to this deployment rather than to an attacker.
+///
+/// #1873: attribution recovering a real address behind the tunnel is
+/// best-effort -- 200 events a day carry no `network.community_id` at all,
+/// so the zeek-proxy worker has no join key for them and can never reach
+/// them. But failing to attribute must produce a *missing* answer, not a
+/// *wrong* one: rendering our own WireGuard peer as the attacker states
+/// something false, and it is the kind of false that gets acted on.
+///
+/// Membership is by shape, not by a list of literals, so a re-addressed
+/// tunnel or a new docker network cannot quietly start being attributed.
+/// Public addresses have no shape to match, so those come from the
+/// deployment's existing `HONEYPOT_SELF_IPS` -- the same list #1677 added
+/// for the overview aggregations, rather than a second env var that could
+/// disagree with it. The two questions are the same question: is this
+/// address ours?
+pub fn is_fleet_address(ip: &str) -> bool {
+    if ip.is_empty() {
+        return false;
+    }
+    let Ok(parsed) = ip.parse::<std::net::IpAddr>() else {
+        return false;
+    };
+    if parsed.is_loopback() || parsed.is_unspecified() {
+        return true;
+    }
+    // RFC1918 and link-local: the tunnel (10.8.0.0/24), the LAN
+    // (192.168.42.0/24) and the container networks (172.16-31.x) are all
+    // ours, and none of them can route in from outside.
+    if let std::net::IpAddr::V4(v4) = parsed {
+        if v4.is_private() || v4.is_link_local() {
+            return true;
+        }
+    }
+    if let std::net::IpAddr::V6(v6) = parsed {
+        // fc00::/7 unique-local and fe80::/10 link-local.
+        let first = v6.segments()[0];
+        if (first & 0xfe00) == 0xfc00 || (first & 0xffc0) == 0xfe80 {
+            return true;
+        }
+    }
+    crate::dashboard::self_addresses().iter().any(|own| own == ip)
+}
+
+/// The attacker address for a document, or empty when there is not one.
+///
+/// #1873: three rules, in order.
+///
+/// dionaea emits two shapes and only the flat one was ever read. The raw
+/// shape nests the peer under `data.connection.*` or `data.parent.*`, so
+/// 1,638 documents in six hours were rendered unattributed while the real
+/// address sat in the same document -- a SIP attacker at 46.19.138.10, for
+/// one. Those nested paths are checked when the promoted field is empty.
+///
+/// A fleet address is never returned. The tunnel peer is what the sensor
+/// genuinely saw, and saying so would be honest if the field were labelled
+/// "peer"; in a column headed "source ip" it reads as an accusation.
+fn attacker_ip(src: &Value) -> String {
+    let text = |v: &Value| v.as_str().unwrap_or("").to_string();
+    let candidates = [
+        text(&src["source"]["ip"]),
+        text(&src["honeypot"]["src_ip"]),
+        text(&src["honeypot"]["data"]["connection"]["remote_ip"]),
+        text(&src["honeypot"]["data"]["parent"]["remote_ip"]),
+        text(&src["honeypot"]["data"]["child"]["remote_ip"]),
+    ];
+    candidates
+        .into_iter()
+        .find(|candidate| !candidate.is_empty() && !is_fleet_address(candidate))
+        .unwrap_or_default()
 }
 
 fn since_to_range(since: &Option<String>) -> String {
@@ -318,7 +402,9 @@ pub fn row_from_source(src: &Value) -> EventRow {
         id: String::new(),
         time: text(&src["@timestamp"]),
         sensor: sensor.clone(),
-        src_ip: text(&src["source"]["ip"]),
+        // #1873: never our own address, and dionaea's nested peer when
+        // the promoted field is empty. See attacker_ip.
+        src_ip: attacker_ip(src),
         country: text(&src["source"]["geo"]["country_iso_code"]),
         port,
         proto,
@@ -478,4 +564,105 @@ pub async fn list(
 
     let fingerprint_ips = fingerprint_ip_correlation(&state, &q).await;
     Ok(Json(EventsPage { total, offset, rows, fingerprint_ips }))
+}
+
+#[cfg(test)]
+mod fleet_attribution_tests {
+    use super::*;
+
+    #[test]
+    fn a_fleet_address_is_never_an_attacker() {
+        // #1873: the tunnel peer is what the sensor genuinely saw, but in a
+        // column headed "source ip" it reads as an accusation. 200 events a
+        // day carried 10.8.0.1 here.
+        assert!(is_fleet_address("10.8.0.1"), "the VPS WireGuard peer");
+        assert!(is_fleet_address("10.8.0.2"), "the homeserver WireGuard peer");
+        assert!(is_fleet_address("127.0.0.1"), "loopback");
+        assert!(is_fleet_address("192.168.42.7"), "a LAN address");
+        assert!(is_fleet_address("172.16.10.3"), "a container network");
+        assert!(is_fleet_address("0.0.0.0"), "unspecified");
+        assert!(is_fleet_address("fe80::1"), "v6 link-local");
+        assert!(is_fleet_address("fd00::1"), "v6 unique-local");
+    }
+
+    #[test]
+    fn a_real_attacker_address_is_not_mistaken_for_ours() {
+        // The guard must not swallow the addresses it exists to preserve.
+        assert!(!is_fleet_address("46.19.138.10"));
+        // Documentation range rather than the fleet's real WAN address:
+        // this repo is public, and scripts/check-public-leaks.py rejects
+        // those literals anywhere in tree. The behaviour under test is the
+        // same either way -- a public address is ours only when configured.
+        assert!(!is_fleet_address("203.0.113.4"), "an unconfigured public address");
+        assert!(!is_fleet_address("8.8.8.8"));
+        assert!(!is_fleet_address("2606:4700::1111"));
+        assert!(!is_fleet_address(""), "absent is not ours");
+        assert!(!is_fleet_address("not-an-ip"));
+    }
+
+    #[test]
+    fn a_configured_public_address_is_recognised_as_ours() {
+        // The fleet's WAN addresses have no shape to match, so they are
+        // knowable only from configuration -- HONEYPOT_SELF_IPS, the list
+        // #1677 already introduced for the overview aggregations. This is
+        // the half of the guard that shape-matching cannot cover.
+        unsafe { std::env::set_var("HONEYPOT_SELF_IPS", "203.0.113.4,198.51.100.7") };
+        let configured = crate::dashboard::self_addresses();
+        assert!(configured.iter().any(|own| own == "203.0.113.4"), "{configured:?}");
+        unsafe { std::env::remove_var("HONEYPOT_SELF_IPS") };
+    }
+
+    #[test]
+    fn the_tunnel_peer_is_dropped_rather_than_shown_as_the_source() {
+        let doc = json!({
+            "source": {"ip": "10.8.0.1"},
+            "honeypot": {"src_ip": "10.8.0.1", "REMOTE_ADDR": "10.8.0.1:35518"}
+        });
+        assert_eq!(attacker_ip(&doc), "", "a fleet address must leave the field empty");
+    }
+
+    #[test]
+    fn dionaeas_nested_peer_is_promoted_when_the_flat_field_is_absent() {
+        // #1873: 1,638 documents in six hours read as unattributed while
+        // the real address sat in the same document under data.*.
+        let connection = json!({
+            "honeypot": {"data": {"connection": {"remote_ip": "46.19.138.10", "protocol": "smbd"}}}
+        });
+        assert_eq!(attacker_ip(&connection), "46.19.138.10");
+
+        let parent = json!({
+            "honeypot": {"data": {"parent": {"remote_ip": "46.19.138.10", "protocol": "SipSession"}}}
+        });
+        assert_eq!(attacker_ip(&parent), "46.19.138.10");
+    }
+
+    #[test]
+    fn a_nested_peer_that_is_also_ours_stays_unattributed() {
+        // dionaea's own loopback health probe nests 127.0.0.1 the same way
+        // a real attacker nests a routable address.
+        let doc = json!({
+            "honeypot": {"data": {"connection": {"remote_ip": "127.0.0.1", "protocol": "smbd"}}}
+        });
+        assert_eq!(attacker_ip(&doc), "");
+    }
+
+    #[test]
+    fn the_promoted_field_still_wins_when_it_holds_a_real_address() {
+        let doc = json!({
+            "source": {"ip": "203.0.113.7"},
+            "honeypot": {"data": {"connection": {"remote_ip": "198.51.100.9"}}}
+        });
+        assert_eq!(attacker_ip(&doc), "203.0.113.7", "source.ip is the promoted answer");
+    }
+
+    #[test]
+    fn the_explorer_excludes_the_fleet_probing_itself() {
+        // dashboard.rs, health.rs and worker.rs all drop internal_probe;
+        // the explorer was the one surface that did not, and it was
+        // rendering roughly 270k self-generated rows a day (#1873).
+        let exclusion = suricata_noise_exclusion();
+        let rendered = exclusion.to_string();
+        assert!(rendered.contains("honeypot.internal_probe"), "{rendered}");
+        assert!(rendered.contains("netflow"), "the suricata noise exclusion must survive: {rendered}");
+    }
 }
