@@ -559,7 +559,7 @@ mod fleet_attribution_tests {
         assert!(is_fleet_address("10.8.0.1"), "the VPS WireGuard peer");
         assert!(is_fleet_address("10.8.0.2"), "the homeserver WireGuard peer");
         assert!(is_fleet_address("127.0.0.1"), "loopback");
-        assert!(is_fleet_address("192.168.42.250"), "the LAN");
+        assert!(is_fleet_address("192.168.42.7"), "a LAN address");
         assert!(is_fleet_address("172.16.10.3"), "a container network");
         assert!(is_fleet_address("0.0.0.0"), "unspecified");
         assert!(is_fleet_address("fe80::1"), "v6 link-local");
@@ -570,11 +570,27 @@ mod fleet_attribution_tests {
     fn a_real_attacker_address_is_not_mistaken_for_ours() {
         // The guard must not swallow the addresses it exists to preserve.
         assert!(!is_fleet_address("46.19.138.10"));
-        assert!(!is_fleet_address("87.106.162.235"), "no HONEYPOT_SELF_IPS set in tests");
+        // Documentation range rather than the fleet's real WAN address:
+        // this repo is public, and scripts/check-public-leaks.py rejects
+        // those literals anywhere in tree. The behaviour under test is the
+        // same either way -- a public address is ours only when configured.
+        assert!(!is_fleet_address("203.0.113.4"), "an unconfigured public address");
         assert!(!is_fleet_address("8.8.8.8"));
         assert!(!is_fleet_address("2606:4700::1111"));
         assert!(!is_fleet_address(""), "absent is not ours");
         assert!(!is_fleet_address("not-an-ip"));
+    }
+
+    #[test]
+    fn a_configured_public_address_is_recognised_as_ours() {
+        // The fleet's WAN addresses have no shape to match, so they are
+        // knowable only from configuration -- HONEYPOT_SELF_IPS, the list
+        // #1677 already introduced for the overview aggregations. This is
+        // the half of the guard that shape-matching cannot cover.
+        unsafe { std::env::set_var("HONEYPOT_SELF_IPS", "203.0.113.4,198.51.100.7") };
+        let configured = crate::dashboard::self_addresses();
+        assert!(configured.iter().any(|own| own == "203.0.113.4"), "{configured:?}");
+        unsafe { std::env::remove_var("HONEYPOT_SELF_IPS") };
     }
 
     #[test]
