@@ -222,20 +222,31 @@ fn parse_seconds(value: &str) -> Option<i64> {
         .map(|parsed| parsed.timestamp())
 }
 
-/// Relayed key -> every dial seen for it. Keeping all of them is the point:
-/// collapsing to one is exactly the bug this module exists to avoid.
-fn dials_by_key(hits: &Value) -> HashMap<String, Vec<Dial>> {
+/// Relayed key -> every dial seen for it, plus how many of those records had
+/// no `portbridge.time` and fell back to the ship time.
+///
+/// That count is returned rather than swallowed because the fallback is
+/// exactly how #1834's fix came undone: `portbridge.time` was read but never
+/// requested in the query's `_source`, so every record took the fallback,
+/// the join went back to comparing ship times, and nothing anywhere said so.
+/// A silent graceful degradation on a field you have just introduced hides
+/// the case where you forgot to fetch it.
+fn dials_by_key(hits: &Value) -> (HashMap<String, Vec<Dial>>, usize) {
     let mut map: HashMap<String, Vec<Dial>> = HashMap::new();
+    let mut without_dial_time = 0usize;
     for hit in hits["hits"]["hits"].as_array().into_iter().flatten() {
         let source = &hit["_source"];
         let pb = &source["portbridge"];
         // portbridge.time is the dial; @timestamp is only when the line was
         // shipped, and is 3-4s later. Fall back to it so a record missing the
         // real field still participates rather than vanishing from the join.
-        let dialled_at = pb["time"]
-            .as_str()
-            .and_then(parse_seconds)
-            .or_else(|| source["@timestamp"].as_str().and_then(parse_seconds));
+        let dialled_at = match pb["time"].as_str().and_then(parse_seconds) {
+            Some(at) => Some(at),
+            None => {
+                without_dial_time += 1;
+                source["@timestamp"].as_str().and_then(parse_seconds)
+            }
+        };
         let (Some(relayed), Some(attacker), Some(at)) =
             (pb["community_id_relayed"].as_str(), pb["src_ip"].as_str(), dialled_at)
         else {
@@ -250,7 +261,7 @@ fn dials_by_key(hits: &Value) -> HashMap<String, Vec<Dial>> {
             attacker_key: pb["community_id"].as_str().unwrap_or_default().to_string(),
         });
     }
-    map
+    (map, without_dial_time)
 }
 
 async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
@@ -342,8 +353,14 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
                 "size": BATCH * 8,
                 "track_total_hits": false,
                 "query": {"terms": {"portbridge.community_id_relayed": keys}},
+                // portbridge.time is the dial time and is what dials_by_key
+                // actually joins on. Leaving it out of this list -- which is
+                // how it shipped in #1834 -- does not fail: the parser falls
+                // back to @timestamp and silently resumes comparing ship
+                // times, which is the bug that change existed to fix.
                 "_source": [
                     "@timestamp",
+                    "portbridge.time",
                     "portbridge.community_id_relayed",
                     "portbridge.community_id",
                     "portbridge.src_ip"
@@ -352,7 +369,14 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
         )
         .await?;
 
-    let dials = dials_by_key(&relayed);
+    let (dials, dials_without_time) = dials_by_key(&relayed);
+    if dials_without_time > 0 {
+        tracing::warn!(
+            dials_without_time,
+            "zeek-proxy-attribution: portbridge records arrived without portbridge.time, \
+             so the join fell back to ship times -- check the query's _source projection"
+        );
+    }
     let now = chrono::Utc::now().timestamp();
 
     let (mut resolved, mut marked, mut deferred) = (0usize, 0usize, 0usize);
@@ -477,7 +501,7 @@ mod tests {
             {"_source": {"@timestamp": "2026-08-24T07:05:00Z", "portbridge": {
                 "community_id_relayed": "1:same=", "community_id": "1:b=", "src_ip": "198.51.100.2"}}}
         ]}});
-        let map = dials_by_key(&hits);
+        let (map, _) = dials_by_key(&hits);
         // Both must survive -- collapsing them is precisely the bug.
         assert_eq!(map.get("1:same=").map(Vec::len), Some(2));
     }
@@ -494,7 +518,7 @@ mod tests {
                 "time": "2026-08-24T13:48:26Z",
                 "community_id_relayed": "1:same=", "community_id": "1:a=", "src_ip": "203.0.113.1"}}}
         ]}});
-        let map = dials_by_key(&hits);
+        let (map, _) = dials_by_key(&hits);
         let dial = &map.get("1:same=").expect("grouped")[0];
         let dialled = chrono::DateTime::parse_from_rfc3339("2026-08-24T13:48:26Z").unwrap().timestamp();
         assert_eq!(dial.at, dialled, "should use portbridge.time, not @timestamp");
@@ -513,8 +537,52 @@ mod tests {
             {"_source": {"@timestamp": "2026-08-24T13:48:29Z", "portbridge": {
                 "community_id_relayed": "1:same=", "community_id": "1:a=", "src_ip": "203.0.113.1"}}}
         ]}});
-        let map = dials_by_key(&hits);
+        let (map, _) = dials_by_key(&hits);
         assert_eq!(map.get("1:same=").map(Vec::len), Some(1));
+    }
+
+
+    #[test]
+    fn the_query_asks_for_every_field_the_parser_reads() {
+        // #1834 read portbridge.time and never added it to the query's
+        // _source, so every record took the fallback and the join quietly
+        // went back to comparing ship times -- the exact bug that change
+        // existed to remove. Nothing failed; the fallback was doing its job.
+        //
+        // Pin the projection against the fields dials_by_key actually
+        // touches. A future field added to the parser and forgotten here
+        // fails this rather than degrading in production.
+        let source = include_str!("zeek_proxy_attribution.rs");
+        let projection = source
+            .split("portbridge-v2-*")
+            .nth(1)
+            .and_then(|rest| rest.split("_source").nth(1))
+            .and_then(|rest| rest.split(']').next())
+            .expect("the portbridge query should have a _source list");
+
+        for field in ["portbridge.time", "portbridge.community_id_relayed", "portbridge.community_id", "portbridge.src_ip"] {
+            assert!(
+                projection.contains(field),
+                "{field} is read by dials_by_key but not requested in the query"
+            );
+        }
+    }
+
+    #[test]
+    fn a_record_without_a_dial_time_is_counted_not_hidden() {
+        // The fallback is correct -- a missing field should cost precision,
+        // not drop the record -- but it must be audible, or it hides a
+        // forgotten projection the way it did in #1834.
+        let hits = json!({"hits": {"hits": [
+            {"_source": {"@timestamp": "2026-08-24T13:48:29Z", "portbridge": {
+                "community_id_relayed": "1:a=", "community_id": "1:x=", "src_ip": "203.0.113.1"}}},
+            {"_source": {"@timestamp": "2026-08-24T13:48:29Z", "portbridge": {
+                "time": "2026-08-24T13:48:26Z",
+                "community_id_relayed": "1:b=", "community_id": "1:y=", "src_ip": "203.0.113.2"}}}
+        ]}});
+        let (map, without_time) = dials_by_key(&hits);
+        assert_eq!(map.len(), 2, "both records still join");
+        assert_eq!(without_time, 1, "the one that fell back is counted");
     }
 
     #[test]
@@ -525,6 +593,6 @@ mod tests {
             {"_source": {"@timestamp": "2026-08-24T07:00:00Z", "portbridge": {
                 "community_id_relayed": "1:y=", "src_ip": ""}}}
         ]}});
-        assert!(dials_by_key(&hits).is_empty());
+        assert!(dials_by_key(&hits).0.is_empty());
     }
 }
