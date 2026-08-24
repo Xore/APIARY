@@ -201,6 +201,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/investigate/cluster", get(investigate::cluster))
         .route("/api/v1/source-health", get(health::source_health))
         .route("/api/v1/sensors", get(sensors::detail))
+        // #1856: /catalog is registered before /{sensor} so the literal
+        // segment is not swallowed by the capture. A sensor genuinely
+        // named "catalog" would be shadowed; none is, and the alternative
+        // is a query parameter that reads worse for the common case.
+        .route("/api/v1/sensors/catalog", get(sensors::catalog))
+        .route("/api/v1/sensors/{sensor}/events", get(sensors::events))
         .route("/api/v1/sessions/{id}", get(session::detail))
         .route("/api/v1/search", get(search::search))
         .route("/api/v1/settings/storage", get(health::storage))
