@@ -45,6 +45,26 @@
 //!                                 settled, which is what stops the flow from
 //!                                 being reconsidered on every later pass
 //!
+//! # `@timestamp` is the ingest time, not the event time
+//!
+//! Both indices carry an `@timestamp` that is when the record was *shipped*,
+//! not when the thing happened. Measured on the live cluster: portbridge's
+//! `@timestamp` runs 3-4s after its own `portbridge.time`, and zeek-proxy's
+//! runs ~9.5s after `zeek.ts` for a short flow -- and **12.7 hours** after it
+//! for a long-lived one, because Zeek writes a `conn.log` record when the
+//! connection closes while `zeek.ts` is when it opened.
+//!
+//! Comparing those two ingest stamps as if they were event times breaks the
+//! ordering rule below in both directions: a dial and its own flow are
+//! shipped seconds apart in arbitrary order, so a valid dial is rejected for
+//! appearing to happen "after" the flow it opened, and for a long connection
+//! the age window is measured from a point hours away from the real one.
+//! Measured cost before the fix: roughly half of every batch deferred.
+//!
+//! So the ordering uses event time -- `portbridge.time` and `zeek.ts` -- and
+//! only the *grace* decision uses ingest time, because "has portbridge's
+//! record had time to arrive yet" is genuinely a question about shipping.
+//!
 //! # The pipeline gets the last word on source.ip
 //!
 //! `geoip-honeypot` is these indices' `default_pipeline`, and a
@@ -114,7 +134,10 @@ const MAX_DIAL_AGE_SECONDS: i64 = 6 * 3600;
 /// but does not remove it.
 const GRACE_SECONDS: i64 = 30 * 60;
 
-/// One portbridge dial: when it happened, and who was behind it.
+/// One portbridge dial: when it actually happened, and who was behind it.
+///
+/// `at` is `portbridge.time` -- the dial itself -- not the record's
+/// `@timestamp`, which is when Filebeat shipped it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Dial {
     pub at: i64,
@@ -186,11 +209,16 @@ fn dials_by_key(hits: &Value) -> HashMap<String, Vec<Dial>> {
     for hit in hits["hits"]["hits"].as_array().into_iter().flatten() {
         let source = &hit["_source"];
         let pb = &source["portbridge"];
-        let (Some(relayed), Some(attacker), Some(at)) = (
-            pb["community_id_relayed"].as_str(),
-            pb["src_ip"].as_str(),
-            source["@timestamp"].as_str().and_then(parse_seconds),
-        ) else {
+        // portbridge.time is the dial; @timestamp is only when the line was
+        // shipped, and is 3-4s later. Fall back to it so a record missing the
+        // real field still participates rather than vanishing from the join.
+        let dialled_at = pb["time"]
+            .as_str()
+            .and_then(parse_seconds)
+            .or_else(|| source["@timestamp"].as_str().and_then(parse_seconds));
+        let (Some(relayed), Some(attacker), Some(at)) =
+            (pb["community_id_relayed"].as_str(), pb["src_ip"].as_str(), dialled_at)
+        else {
             continue;
         };
         if relayed.is_empty() || attacker.is_empty() {
@@ -239,7 +267,7 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
                 // ages out having been the lowest-value part of the window
                 // rather than the only part that got attention.
                 "sort": [{"@timestamp": {"order": "desc"}}],
-                "_source": ["network.community_id", "source.ip", "@timestamp"]
+                "_source": ["network.community_id", "source.ip", "@timestamp", "zeek.ts"]
             }),
         )
         .await?;
@@ -248,7 +276,11 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
         index: String,
         id: String,
         key: String,
+        /// When the flow opened (`zeek.ts`) -- compared against dial times.
         at: i64,
+        /// When the record was shipped (`@timestamp`) -- used only to decide
+        /// whether portbridge has plausibly had time to write its side.
+        ingested_at: i64,
         observed: String,
     }
 
@@ -262,7 +294,14 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
                 index: hit["_index"].as_str()?.to_string(),
                 id: hit["_id"].as_str()?.to_string(),
                 key: source["network"]["community_id"].as_str()?.to_string(),
-                at: source["@timestamp"].as_str().and_then(parse_seconds)?,
+                // zeek.ts is epoch seconds as a float; @timestamp is the
+                // ship time and is the wrong clock for the ordering rule,
+                // but is the only one available if zeek.ts is missing.
+                at: source["zeek"]["ts"]
+                    .as_f64()
+                    .map(|ts| ts as i64)
+                    .or_else(|| source["@timestamp"].as_str().and_then(parse_seconds))?,
+                ingested_at: source["@timestamp"].as_str().and_then(parse_seconds)?,
                 observed: source["source"]["ip"].as_str().unwrap_or_default().to_string(),
             })
         })
@@ -305,7 +344,11 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
             // permanent is a question of age, not of this pass -- see
             // GRACE_SECONDS. Marking the permanent ones is what keeps the
             // candidate window from silting up.
-            match unmatched_action(doc.at, now) {
+            // Ingest time, not flow time: this asks whether portbridge has
+            // had time to ship its side, which is a question about shipping.
+            // Using the flow's start here would write off a long-lived
+            // connection the moment it closed, however recently it was shipped.
+            match unmatched_action(doc.ingested_at, now) {
                 Unmatched::Retry => deferred += 1,
                 Unmatched::Mark => {
                     let update = json!({"network": {"relay_unresolved": true}});
@@ -417,6 +460,41 @@ mod tests {
         let map = dials_by_key(&hits);
         // Both must survive -- collapsing them is precisely the bug.
         assert_eq!(map.get("1:same=").map(Vec::len), Some(2));
+    }
+
+    #[test]
+    fn the_dial_time_comes_from_portbridge_time_not_the_ship_time() {
+        // Measured on the live cluster: @timestamp runs 3-4s behind
+        // portbridge.time, because it is when Filebeat shipped the line.
+        // Using it as the dial time makes a dial look later than the flow it
+        // opened, and dial_for then refuses a perfectly good match -- which
+        // is what was deferring roughly half of every batch.
+        let hits = json!({"hits": {"hits": [
+            {"_source": {"@timestamp": "2026-08-24T13:48:29Z", "portbridge": {
+                "time": "2026-08-24T13:48:26Z",
+                "community_id_relayed": "1:same=", "community_id": "1:a=", "src_ip": "203.0.113.1"}}}
+        ]}});
+        let map = dials_by_key(&hits);
+        let dial = &map.get("1:same=").expect("grouped")[0];
+        let dialled = chrono::DateTime::parse_from_rfc3339("2026-08-24T13:48:26Z").unwrap().timestamp();
+        assert_eq!(dial.at, dialled, "should use portbridge.time, not @timestamp");
+
+        // A flow that opened one second after the dial: resolvable with the
+        // real time, rejected if the ship time were used.
+        assert!(dial_for(&map["1:same="], dialled + 1).is_some());
+    }
+
+    #[test]
+    fn a_record_without_portbridge_time_still_joins() {
+        // Falling back to @timestamp keeps an older or malformed record in
+        // the join rather than silently dropping it -- a missing field should
+        // cost precision, not the whole match.
+        let hits = json!({"hits": {"hits": [
+            {"_source": {"@timestamp": "2026-08-24T13:48:29Z", "portbridge": {
+                "community_id_relayed": "1:same=", "community_id": "1:a=", "src_ip": "203.0.113.1"}}}
+        ]}});
+        let map = dials_by_key(&hits);
+        assert_eq!(map.get("1:same=").map(Vec::len), Some(1));
     }
 
     #[test]
