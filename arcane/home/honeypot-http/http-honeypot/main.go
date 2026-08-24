@@ -29,13 +29,26 @@ import (
 )
 
 type event struct {
-	Time      string            `json:"time"`
-	Sensor    string            `json:"sensor"`
-	Persona   string            `json:"persona_id"`
-	Site      string            `json:"site_id"`
-	Asset     string            `json:"asset_id"`
-	Org       string            `json:"organization"`
-	SrcIP     string            `json:"src_ip"`
+	Time    string `json:"time"`
+	Sensor  string `json:"sensor"`
+	Persona string `json:"persona_id"`
+	Site    string `json:"site_id"`
+	Asset   string `json:"asset_id"`
+	Org     string `json:"organization"`
+	SrcIP   string `json:"src_ip"`
+	// #1889: the connection's ports, so the event can be joined to the
+	// flow every other sensor's can. Without them Community ID cannot be
+	// computed -- it needs (src_ip, src_port, dst_ip, dst_port, proto) --
+	// and measured over seven days 0 of 174,384 events here carried one.
+	// That closes off correlation with Suricata's alert for the same
+	// request, with Zeek and huginn's records of the same connection, and
+	// the flow pivot in #1783, for the highest-volume HTTP sensor there is.
+	//
+	// SrcPort is omitted rather than guessed when the peer is a relay: see
+	// clientPort. A wrong port is worse than an absent one, because a
+	// Community ID computed from it is a confident hash of the wrong tuple.
+	SrcPort   int               `json:"src_port,omitempty"`
+	DstPort   int               `json:"dst_port,omitempty"`
 	Method    string            `json:"method"`
 	Host      string            `json:"host"`
 	Path      string            `json:"path"`
@@ -181,6 +194,45 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
+// clientPort is the attacker's own source port, or 0 when this request
+// reached us through a relay that replaced it (#1889).
+//
+// The distinction is the same one clientIP makes. Behind a ":pp"
+// portbridge rule the PROXY-aware listener has rewritten RemoteAddr to the
+// real client, address and port together, so the port is genuinely theirs.
+// On the Traefik path RemoteAddr is the tunnel peer and the port belongs
+// to socat's outbound connection -- reporting that as the attacker's port
+// would produce a Community ID that hashes a tuple no packet ever had, and
+// would join this event to somebody else's flow.
+//
+// Absent is the honest answer there, so 0 and `omitempty`.
+func clientPort(r *http.Request) int {
+	host, port, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil || host == tunnelPeerIP {
+		return 0
+	}
+	value, err := strconv.Atoi(port)
+	if err != nil {
+		return 0
+	}
+	return value
+}
+
+// listenPort is the port this sensor was reached on -- the destination
+// half of the tuple. Read from the address the server was configured with
+// rather than from the request, which does not carry it.
+func listenPort(addr string) int {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return 0
+	}
+	value, err := strconv.Atoi(port)
+	if err != nil {
+		return 0
+	}
+	return value
+}
+
 func headerMap(r *http.Request) map[string]string {
 	m := make(map[string]string, len(r.Header))
 	for k, v := range r.Header {
@@ -251,6 +303,10 @@ type server struct {
 	site      string
 	asset     string
 	org       string
+	// listenPort (#1889) is the destination half of the flow tuple. Read
+	// once from the configured address rather than per request, which does
+	// not carry it.
+	listenPort int
 	// tarpitEnabled (#246): stream a slow Markov-drip response (tarpit.go)
 	// for requests classify() buckets as unrecognized scanning/exploit
 	// noise, instead of the normal fast reply. See HTTP_TARPIT in main().
@@ -280,6 +336,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Asset:     s.asset,
 		Org:       s.org,
 		SrcIP:     clientIP(r),
+		SrcPort:   clientPort(r),
+		DstPort:   s.listenPort,
 		Method:    r.Method,
 		Host:      r.Host,
 		Path:      r.URL.Path,
@@ -560,6 +618,11 @@ func main() {
 	// working too; clientIP decides per request whether XFF may be trusted.
 	proxy := getenv("PROXY_PROTOCOL", "") == "1"
 
+	// #1889: read before the server is built, so it can carry the
+	// destination half of the flow tuple. Used again below for the
+	// listener itself -- one source of truth for the address.
+	addr := getenv("LISTEN_ADDR", ":8080")
+
 	s := &server{
 		log:       newLogger(getenv("LOG_FILE", "/var/log/honeypot/http.json")),
 		sensor:    getenv("SENSOR_NAME", "http-honeypot"),
@@ -575,9 +638,9 @@ func main() {
 		// with HTTP_TARPIT=0 if a deployment wants the old fast-404
 		// behavior instead.
 		tarpitEnabled: getenv("HTTP_TARPIT", "1") != "0",
+		listenPort:    listenPort(addr),
 	}
 
-	addr := getenv("LISTEN_ADDR", ":8080")
 	srv := &http.Server{
 		Handler:           s,
 		ReadHeaderTimeout: 5 * time.Second,
