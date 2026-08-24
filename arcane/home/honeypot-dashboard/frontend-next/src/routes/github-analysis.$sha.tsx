@@ -261,7 +261,7 @@ function GithubAnalysisDetail() {
             </div>
           ) : null}
 
-          <div className="tw:grid tw:grid-cols-2 tw:sm:grid-cols-4 tw:gap-3 tw:mb-6">
+          <div className="metric-grid">
             <div className="metric">
               <div className={`metric__value${run.verdict?.malicious ? ' tw:text-red' : ''}`}>
                 {run.verdict ? `${run.verdict.malicious} / ${run.verdict.total}` : '—'}
@@ -300,7 +300,7 @@ function GithubAnalysisDetail() {
           </div>
 
           {tab === 'verdict' ? (
-            <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5">
+            <div className="dashboard-panel">
               <div className="section-heading">
                 <div>
                   <h2>What the scanners found</h2>
@@ -351,7 +351,7 @@ function GithubAnalysisDetail() {
           ) : null}
 
           {tab === 'provenance' ? (
-            <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5">
+            <div className="dashboard-panel">
               <div className="section-heading">
                 <div>
                   <h2>Where this came from</h2>
@@ -415,7 +415,7 @@ function GithubAnalysisDetail() {
           ) : null}
 
           {tab === 'artifacts' ? (
-            <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5">
+            <div className="dashboard-panel">
               <div className="section-heading">
                 <div>
                   <h2>What the pipeline produced</h2>

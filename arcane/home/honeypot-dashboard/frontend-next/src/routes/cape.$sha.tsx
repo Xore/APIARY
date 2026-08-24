@@ -161,7 +161,7 @@ function CapeDetail() {
             </div>
           ) : (
             <>
-              <div className="tw:grid tw:grid-cols-2 tw:sm:grid-cols-4 tw:gap-3 tw:mb-6">
+              <div className="metric-grid">
                 <div className="metric">
                   <div className={`metric__value${(run.score ?? 0) > 0 ? ' tw:text-red' : ''}`}>{scoreDisplay(run.score)}</div>
                   <div className="metric__label">Malscore</div>

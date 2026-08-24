@@ -149,7 +149,7 @@ function InvestigateCluster() {
         chips={backChip}
       />
       {correlation && data ? (
-        <div className="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:gap-3 tw:mb-6">
+        <div className="metric-grid">
           <div className="metric">
             <div className="metric__value">{data.ip_count.toLocaleString('en-US')}</div>
             <div className="metric__label">Member IPs</div>

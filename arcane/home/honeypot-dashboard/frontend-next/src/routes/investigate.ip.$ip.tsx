@@ -264,7 +264,7 @@ const CORRELATION_COLUMNS: Column<EventRow>[] = [
 function CorrelationPanel({ correlation }: { correlation: Correlation }) {
   return (
     <>
-      <div className="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:gap-3 tw:mb-4">
+      <div className="metric-grid">
         <div className="metric">
           <div className="metric__value">{correlation.total.toLocaleString('en-US')}</div>
           <div className="metric__label">Total ES matches</div>
@@ -410,7 +410,7 @@ function InvestigateIp() {
             idPrefix="attacker-profile"
           />
           <TabPanel id="activity" active={tab} idPrefix="attacker-profile" className="dashboard-panel">
-            <div className="tw:grid tw:grid-cols-12 tw:gap-3.5">
+            <div className="">
               <MiniTable title="Sensors contacted" rows={profile.sensors} />
               <MiniTable title="Credentials attempted" rows={profile.credentials} />
               <MiniTable title="Commands" rows={profile.commands} />
@@ -421,7 +421,7 @@ function InvestigateIp() {
             </div>
           </TabPanel>
           <TabPanel id="indicators" active={tab} idPrefix="attacker-profile" className="dashboard-panel">
-            <div className="tw:grid tw:grid-cols-12 tw:gap-3.5">
+            <div className="">
               <MiniTable title="Payload hashes" rows={profile.payloads} linkTo={(key) => `/payload-analysis/${encodeURIComponent(key)}`} />
               <MiniTable title="Alerts" rows={profile.alerts} />
               <MiniTable title="Fingerprints" rows={profile.fingerprints} />

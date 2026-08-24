@@ -143,7 +143,7 @@ function InvestigateCidr() {
         }
       />
       {correlation ? (
-        <div className="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:gap-3 tw:mb-6">
+        <div className="metric-grid">
           <div className="metric">
             <div className="metric__value">{correlation.total.toLocaleString('en-US')}</div>
             <div className="metric__label">Total matches</div>

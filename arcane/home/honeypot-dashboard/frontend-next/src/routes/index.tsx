@@ -179,7 +179,7 @@ function KpiSpark({ hourly }: { hourly: number[] | undefined }) {
 
 function KpiStrip({ kpis, logins, payloads }: { kpis: OverviewKpis | null; logins: number | null; payloads: number | null }) {
   return (
-    <div className="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:xl:grid-cols-5 tw:gap-3 tw:mb-6" id="overview-kpis">
+    <div className="metric-grid" id="overview-kpis">
       <a className="metric" href="/events" title="Open all normalized events in the current dashboard window">
         <div className="metric__value">
           <KpiValue value={kpis && kpis.ready ? kpis.total : null} />
@@ -458,7 +458,7 @@ function Overview() {
       {viewTabs}
 
       {tab === 'live' ? (
-        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel" id="ov-panel-live" aria-labelledby="ov-live">
+        <div className="dashboard-panel" role="tabpanel" id="ov-panel-live" aria-labelledby="ov-live">
           <div className="section-heading">
             <div>
               <h2>Current activity</h2>
@@ -526,7 +526,7 @@ function Overview() {
       ) : null}
 
       {tab === 'health' ? (
-        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel" id="ov-panel-health" aria-labelledby="ov-health">
+        <div className="dashboard-panel" role="tabpanel" id="ov-panel-health" aria-labelledby="ov-health">
           <div className="section-heading">
             <div>
               <h2>Collection status</h2>
@@ -581,7 +581,7 @@ function Overview() {
       ) : null}
 
       {tab === 'threats' ? (
-        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel" id="ov-panel-threats" aria-labelledby="ov-threats">
+        <div className="dashboard-panel" role="tabpanel" id="ov-panel-threats" aria-labelledby="ov-threats">
           <div className="section-heading">
             <div>
               <h2>Threat landscape</h2>
@@ -633,7 +633,7 @@ function Overview() {
       ) : null}
 
       {tab === 'behavior' ? (
-        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel" id="ov-panel-behavior" aria-labelledby="ov-behavior">
+        <div className="dashboard-panel" role="tabpanel" id="ov-panel-behavior" aria-labelledby="ov-behavior">
           <div className="section-heading">
             <div>
               <h2>Attacker behavior</h2>
@@ -735,7 +735,7 @@ function Overview() {
       ) : null}
 
       {tab === 'evidence' ? (
-        <div className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" role="tabpanel" id="ov-panel-evidence" aria-labelledby="ov-evidence">
+        <div className="dashboard-panel" role="tabpanel" id="ov-panel-evidence" aria-labelledby="ov-evidence">
           <div className="section-heading">
             <div>
               <h2>Detection and evidence</h2>
