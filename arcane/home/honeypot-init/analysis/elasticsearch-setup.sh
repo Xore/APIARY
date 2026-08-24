@@ -613,7 +613,10 @@ curl -fsS -X PUT "$es_url/_index_template/zeek-proxy-events" \
           "transport": { "type": "keyword" },
           "protocol": { "type": "keyword" },
           "community_id": { "type": "keyword" },
-          "session_id": { "type": "keyword" }
+          "session_id": { "type": "keyword" },
+          "relay_ip": { "type": "ip", "ignore_malformed": true },
+          "community_id_attacker": { "type": "keyword" },
+          "relay_unresolved": { "type": "boolean" }
         } }
       }
     }
