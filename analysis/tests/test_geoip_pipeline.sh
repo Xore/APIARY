@@ -344,5 +344,41 @@ result="$(simulate_source_ip "$tmp/dionaea_probe_peer.json")"
   fail "a loopback nested peer became source.ip (got: '$result', want empty)"
 pass "a loopback nested peer never becomes source.ip"
 
+# home_net is exact-match configuration and cannot enumerate the container
+# networks. Measured live: 172.16.10.x reaches source.ip too, so the guard
+# matches shape as well as the configured list.
+cat > "$tmp/docker_net_source.json" <<'JSON'
+{"docs":[{"_source":{"honeypot":{"sensor":"dionaea","src_ip":"172.16.10.3","dst_port":445}}}]}
+JSON
+result="$(simulate_source_ip "$tmp/docker_net_source.json")"
+[ -z "$result" ] ||
+  fail "a container-network address became source.ip (got: '$result', want empty)"
+pass "a container-network address never becomes source.ip"
+
+cat > "$tmp/rfc1918_source.json" <<'JSON'
+{"docs":[{"_source":{"honeypot":{"sensor":"cowrie","src_ip":"192.168.42.7"}}}]}
+JSON
+result="$(simulate_source_ip "$tmp/rfc1918_source.json")"
+[ -z "$result" ] ||
+  fail "a LAN address became source.ip (got: '$result', want empty)"
+pass "a LAN address never becomes source.ip"
+
+# 172.x is only private for 16-31. The guard must not swallow 172.32+.
+cat > "$tmp/public_172_source.json" <<'JSON'
+{"docs":[{"_source":{"honeypot":{"sensor":"cowrie","src_ip":"172.32.5.9"}}}]}
+JSON
+result="$(simulate_source_ip "$tmp/public_172_source.json")"
+[ "$result" = "172.32.5.9" ] ||
+  fail "a public 172.32+ address was wrongly treated as private (got: '$result')"
+pass "a public 172.32+ address survives the private-range guard"
+
+cat > "$tmp/public_11_source.json" <<'JSON'
+{"docs":[{"_source":{"honeypot":{"sensor":"cowrie","src_ip":"11.9.9.9"}}}]}
+JSON
+result="$(simulate_source_ip "$tmp/public_11_source.json")"
+[ "$result" = "11.9.9.9" ] ||
+  fail "a public 11.x address was wrongly treated as private (got: '$result')"
+pass "a public address starting 1 is not confused with 10.x"
+
 echo
 echo "all geoip-honeypot pipeline tests passed"
