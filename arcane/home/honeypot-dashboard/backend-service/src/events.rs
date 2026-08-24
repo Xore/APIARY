@@ -182,6 +182,14 @@ pub fn pivots_from_source(src: &Value) -> EventPivots {
 
 #[derive(Serialize)]
 pub struct EventRow {
+    /// The document id, so a row can link to its own full page (#1868).
+    ///
+    /// Empty where there is no hit to take it from: the SSE live stream
+    /// carries a `_source` and nothing else, and the CSV export has no use
+    /// for it. A row without an id simply offers no full-detail action,
+    /// which is honest — the alternative is a link that 404s.
+    #[serde(default)]
+    pub id: String,
     pub time: String,
     pub sensor: String,
     pub src_ip: String,
@@ -307,6 +315,7 @@ pub fn row_from_source(src: &Value) -> EventRow {
         .find(|s| !s.is_empty())
         .unwrap_or_default();
     EventRow {
+        id: String::new(),
         time: text(&src["@timestamp"]),
         sensor: sensor.clone(),
         src_ip: text(&src["source"]["ip"]),
@@ -322,6 +331,16 @@ pub fn row_from_source(src: &Value) -> EventRow {
         },
         pivots: pivots_from_source(src),
         record: src.clone(),
+    }
+}
+
+/// The same row, from a search hit rather than a bare `_source`, so it
+/// carries the document id (#1868). Every caller that has the hit should
+/// use this — the id is what makes the row's own full page reachable.
+pub fn row_from_hit(hit: &Value) -> EventRow {
+    EventRow {
+        id: hit["_id"].as_str().unwrap_or("").to_string(),
+        ..row_from_source(&hit["_source"])
     }
 }
 
@@ -454,7 +473,7 @@ pub async fn list(
     let total = result["hits"]["total"]["value"].as_u64().unwrap_or(0);
     let rows = result["hits"]["hits"]
         .as_array()
-        .map(|hits| hits.iter().map(|hit| row_from_source(&hit["_source"])).collect())
+        .map(|hits| hits.iter().map(row_from_hit).collect())
         .unwrap_or_default();
 
     let fingerprint_ips = fingerprint_ip_correlation(&state, &q).await;

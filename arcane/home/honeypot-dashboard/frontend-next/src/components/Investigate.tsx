@@ -3,6 +3,7 @@
 // inspector (outside-click + × close), skeleton-first first paint.
 // Mirrors the legacy generic inspector's semantics 1:1.
 import { useEffect, useRef, useState } from 'react'
+import { RowActions, RowIcons } from './RowActions'
 
 export function InvestigateHeader({
   label,
@@ -187,6 +188,11 @@ export function MasterDetailTable<Row>({
   const paneRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const listColumns = columns.filter((column) => !column.detail)
+  // One actions column for the whole table, present when any row has a
+  // page behind it — a column that appears and disappears per row would
+  // shift every other cell sideways as the list refreshes.
+  const anyDetailHref = Boolean(detailHref && rows?.some((row) => detailHref(row)))
+  const bodyColumnCount = listColumns.length + (anyDetailHref ? 1 : 0)
   const primaryColumn = columns.find((column) => column.primary) ?? listColumns[0]
   const metaColumns = listColumns.filter((column) => column !== primaryColumn)
 
@@ -268,29 +274,50 @@ export function MasterDetailTable<Row>({
                   {listColumns.map((column) => (
                     <th key={column.header}>{column.header}</th>
                   ))}
+                  {anyDetailHref ? <th aria-label="Row actions" /> : null}
                 </tr>
               </thead>
               <tbody>
                 {rows === null ? (
-                  <SkeletonRows count={12} cols={listColumns.length} />
+                  <SkeletonRows count={12} cols={bodyColumnCount} />
                 ) : rows.length === 0 ? (
                   <tr className="hp-table-state">
-                    <td colSpan={listColumns.length}>
+                    <td colSpan={bodyColumnCount}>
                       <EmptyStateBlock state={emptyState ?? DEFAULT_EMPTY} />
                     </td>
                   </tr>
                 ) : (
-                  rows.map((row, index) => (
-                    <tr key={rowKey(row, index)} className={selected === index ? 'selected' : undefined} onClick={onRowClick(index)}>
-                      {listColumns.map((column) => (
-                        <td key={column.header} className={column.className} data-label={column.header}>
-                          {column.render(row)}
-                        </td>
-                      ))}
-                    </tr>
-                  ))
+                  rows.map((row, index) => {
+                    // #1868: the full-detail link used to live only inside
+                    // the inspector pane, so reaching a row's own page
+                    // meant opening the pane first and finding a link in
+                    // it. It belongs on the row: that is where the
+                    // operator already is, and it is the action they came
+                    // for.
+                    const rowDetail = detailHref?.(row)
+                    return (
+                      <tr key={rowKey(row, index)} className={selected === index ? 'selected' : undefined} onClick={onRowClick(index)}>
+                        {listColumns.map((column) => (
+                          <td key={column.header} className={column.className} data-label={column.header}>
+                            {column.render(row)}
+                          </td>
+                        ))}
+                        {anyDetailHref ? (
+                          <td className="hp-row-actions-cell" data-label="">
+                            <RowActions
+                              actions={[
+                                rowDetail
+                                  ? { label: 'Open full details', icon: RowIcons.detail, href: rowDetail }
+                                  : null,
+                              ]}
+                            />
+                          </td>
+                        ) : null}
+                      </tr>
+                    )
+                  })
                 )}
-                {loadingMore ? <SkeletonRows count={5} cols={listColumns.length} /> : null}
+                {loadingMore ? <SkeletonRows count={5} cols={bodyColumnCount} /> : null}
               </tbody>
             </table>
           )}

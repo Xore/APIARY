@@ -36,6 +36,7 @@ mod decode_correlate;
 mod detail;
 mod es;
 mod event_detail;
+mod event_page;
 mod es_importer;
 mod events;
 mod exports;
@@ -200,6 +201,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/investigate/cidr/{cidr}", get(investigate::cidr))
         .route("/api/v1/investigate/cluster", get(investigate::cluster))
         .route("/api/v1/source-health", get(health::source_health))
+        .route("/api/v1/event/{id}", get(event_page::get))
         .route("/api/v1/sensors", get(sensors::detail))
         // #1856: /catalog is registered before /{sensor} so the literal
         // segment is not swallowed by the capture. A sensor genuinely

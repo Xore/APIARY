@@ -7,6 +7,7 @@ import { Await, Link, createFileRoute, useRouter } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { Suspense, useEffect, useState } from 'react'
 import { AttackMap, AttackVectors, Heatmap, Tbl, type HeatRow, type Kv, type MapPoint } from '../components/OverviewPanels'
+import { RowActions, RowIcons } from '../components/RowActions'
 import { EChart } from '../components/EChart'
 import { copyWithFlash } from '../lib/flash'
 import { isLivePaused } from '../lib/live'
@@ -52,6 +53,9 @@ type Dashboard = {
 }
 
 type EventRow = {
+  /** The document id, when the row came from a search hit. Drives the
+   *  full-detail action, which is simply absent without one (#1868). */
+  id?: string
   time: string
   sensor: string
   src_ip: string
@@ -312,31 +316,18 @@ function RecentEventRow({ row, open, onToggle }: { row: EventRow; open: boolean;
           )}
         </td>
         <td className="v">{row.detail || row.proto}</td>
+        {/* #1868: one strip, drawn by one component. This was a
+            hand-rolled copy of the event explorer's, down to the same
+            `⧁`/`▶`/emoji glyphs, so the two could -- and did -- drift. */}
         <td className="hp-row-actions-cell">
-          <div className="hp-row-actions">
-            {row.src_ip ? (
-              <button
-                type="button"
-                title="Copy source IP"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  copyWithFlash(row.src_ip)
-                }}
-              >
-                ⧁
-              </button>
-            ) : null}
-            {row.session ? (
-              <a href={`/sessions/${encodeURIComponent(row.session)}`} title="Replay session" onClick={stop}>
-                ▶
-              </a>
-            ) : null}
-            {row.src_ip ? (
-              <a href={`/investigate/ip/${encodeURIComponent(row.src_ip)}`} title="Attacker profile" onClick={stop}>
-                👤
-              </a>
-            ) : null}
-          </div>
+          <RowActions
+            actions={[
+              row.id ? { label: 'Open full details', icon: RowIcons.detail, href: `/event/${encodeURIComponent(row.id)}` } : null,
+              row.src_ip ? { label: 'Copy source IP', icon: RowIcons.copy, onClick: () => copyWithFlash(row.src_ip) } : null,
+              row.session ? { label: 'Replay session', icon: RowIcons.replay, href: `/sessions/${encodeURIComponent(row.session)}` } : null,
+              row.src_ip ? { label: 'Attacker profile', icon: RowIcons.profile, href: `/investigate/ip/${encodeURIComponent(row.src_ip)}` } : null,
+            ]}
+          />
         </td>
       </tr>
       {open ? (

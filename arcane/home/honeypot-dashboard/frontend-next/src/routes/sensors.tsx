@@ -28,6 +28,7 @@ type MailoneySession = {
 }
 
 type HttpRequest = {
+  id: string
   when: string
   ip: string
   method: string
@@ -48,6 +49,7 @@ type HttpRequest = {
 }
 
 type TannerRequest = {
+  id: string
   when: string
   ip: string
   method: string
@@ -301,6 +303,9 @@ function Sensors() {
             rows={detail ? detail.mailoney : null}
             columns={MAILONEY_COLUMNS}
             rowKey={(row) => row.session_id}
+            // A mailoney row is a whole SMTP session, so its full page is
+            // the session record rather than a single event (#1868).
+            detailHref={(row) => `/sessions/${encodeURIComponent(row.session_id)}`}
             inspectorTitle="SMTP session"
             emptyState={{
               title: 'No mailoney SMTP activity in the last 48h',
@@ -320,6 +325,7 @@ function Sensors() {
             rows={detail ? detail.http_requests : null}
             columns={HTTP_COLUMNS}
             rowKey={(row, index) => `${row.when}-${index}`}
+            detailHref={(row) => (row.id ? `/event/${encodeURIComponent(row.id)}` : undefined)}
             inspectorTitle="HTTP request"
             emptyState={{
               title: 'No http-honeypot activity in the last 48h',
@@ -339,6 +345,7 @@ function Sensors() {
             rows={detail ? detail.tanner : null}
             columns={TANNER_COLUMNS}
             rowKey={(row, index) => `${row.when}-${index}`}
+            detailHref={(row) => (row.id ? `/event/${encodeURIComponent(row.id)}` : undefined)}
             inspectorTitle="Tanner request"
             emptyState={{
               title: 'No tanner activity in the last 48h',

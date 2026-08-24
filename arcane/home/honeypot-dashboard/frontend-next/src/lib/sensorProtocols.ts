@@ -21,6 +21,8 @@
 import { type Json, type JsonRecord } from './json'
 
 export type SensorEventRow = {
+  /** The document id, so the row can open its own full page (#1868). */
+  id: string
   when: string
   src_ip: string
   src_port: number

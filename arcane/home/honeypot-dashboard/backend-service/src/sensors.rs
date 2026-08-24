@@ -35,6 +35,8 @@ pub struct MailoneySession {
 
 #[derive(Serialize, Default)]
 pub struct HttpRequest {
+    /// The document id, so the row can open its own full page (#1868).
+    pub id: String,
     pub when: String,
     pub ip: String,
     pub method: String,
@@ -56,6 +58,8 @@ pub struct HttpRequest {
 
 #[derive(Serialize, Default)]
 pub struct TannerRequest {
+    /// The document id, so the row can open its own full page (#1868).
+    pub id: String,
     pub when: String,
     pub ip: String,
     pub method: String,
@@ -180,6 +184,7 @@ fn http_requests(hits: &[Value]) -> Vec<HttpRequest> {
                 return None;
             }
             Some(HttpRequest {
+                id: s(&hit["_id"]),
                 when: s(&source["@timestamp"]),
                 ip: s(&event["src_ip"]),
                 method: s(&event["method"]),
@@ -243,6 +248,7 @@ fn tanner_requests(hits: &[Value]) -> Vec<TannerRequest> {
                 payload.push_str("(...)");
             }
             Some(TannerRequest {
+                id: s(&hit["_id"]),
                 when: s(&source["@timestamp"]),
                 ip,
                 method: s(&event["method"]),
@@ -310,6 +316,8 @@ pub struct SensorCatalog {
 /// One event, with the sensor's own fields left as the sensor wrote them.
 #[derive(Serialize)]
 pub struct SensorEvent {
+    /// The document id, so a row can link to its own full page (#1868).
+    pub id: String,
     pub when: String,
     pub src_ip: String,
     pub src_port: u64,
@@ -404,6 +412,7 @@ pub async fn events(
             let source = &hit["_source"];
             let event = &source["honeypot"];
             SensorEvent {
+                id: s(&hit["_id"]),
                 when: s(&source["@timestamp"]),
                 src_ip: s(&event["src_ip"]),
                 src_port: n(&event["src_port"]),
