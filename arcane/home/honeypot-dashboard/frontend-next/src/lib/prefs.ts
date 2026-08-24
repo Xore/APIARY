@@ -77,6 +77,50 @@ export async function pullServerTheme(): Promise<void> {
   }
 }
 
+// theme.css carries `.hp-theme-switching, .hp-theme-switching * { transition:
+// none !important; }` and, until now, nothing in this tier ever applied it --
+// the rule was dead code and the bug it was written for was live (#1761).
+//
+// The bug: the stylesheet has dozens of `transition` declarations, many on
+// `color` and `background`. Change every token at once and each property
+// interpolates independently, so text and the surface behind it cross at
+// different rates and the page renders unreadable intermediate frames --
+// black ink on a dark ground for a few hundred milliseconds.
+//
+// Suppress transitions, change the attributes, re-enable on the next frame.
+// Two nested rAF calls rather than one: the first fires *before* the pending
+// style change is painted, so removing the class there would re-enable
+// transitions in time for them to run. The second fires after that paint,
+// which is the point where there is nothing left to animate.
+//
+// Reading offsetHeight in between forces the style recalculation to happen
+// while the class is still on, rather than being batched with its removal --
+// without that, a browser is free to coalesce the whole sequence and animate
+// anyway.
+//
+// `prefers-reduced-motion` does not cover this: theme.css's blanket
+// suppressions only apply when the OS setting is on.
+//
+// Not used by the pre-paint boot script in __root.tsx, deliberately: on first
+// paint there is no previous state to transition from.
+function withoutTransitions(change: () => void) {
+  if (typeof document === 'undefined') {
+    change()
+    return
+  }
+  const root = document.documentElement
+  root.classList.add('hp-theme-switching')
+  change()
+  // Force the new values to be resolved while suppression is still active.
+  void root.offsetHeight
+  const release = () => root.classList.remove('hp-theme-switching')
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => requestAnimationFrame(release))
+  } else {
+    release()
+  }
+}
+
 export function getThemeMode(): ThemeMode {
   if (typeof document === 'undefined') return 'system'
   const t = document.documentElement.dataset.theme
@@ -90,17 +134,19 @@ export function cycleTheme() {
 }
 
 export function applyTheme(mode: ThemeMode, options?: { sync?: boolean }) {
-  try {
-    if (mode === 'system') {
-      delete document.documentElement.dataset.theme
-      localStorage.removeItem('hp-theme')
-    } else {
-      document.documentElement.dataset.theme = mode
-      localStorage.setItem('hp-theme', mode)
+  withoutTransitions(() => {
+    try {
+      if (mode === 'system') {
+        delete document.documentElement.dataset.theme
+        localStorage.removeItem('hp-theme')
+      } else {
+        document.documentElement.dataset.theme = mode
+        localStorage.setItem('hp-theme', mode)
+      }
+    } catch {
+      /* storage unavailable */
     }
-  } catch {
-    /* storage unavailable */
-  }
+  })
   emit()
   // Instant local apply above is already done and visible; the server
   // write-through happens after, fire-and-forget (options.sync === false
@@ -137,19 +183,24 @@ export function applyPalette(palette: string, options?: { sync?: boolean }) {
   // malformed value.
   const name = palette || 'claude'
   if (palette && !isThemeName(name)) return
-  try {
-    // Set unconditionally, including for claude. The attribute used to be
-    // deleted for the default on the grounds that :root already carries
-    // those tokens -- true for rendering, but it left the DOM unable to
-    // answer "which theme is this?", which the gallery picker (#1758) and
-    // the server reconcile (#1755) both need. Upstream's selector list
-    // names claude explicitly, so setting it changes nothing visually.
-    document.documentElement.dataset.hpTheme = name
-    document.documentElement.dataset.hpPalette = name
-    localStorage.setItem('hp-palette', name)
-  } catch {
-    /* storage unavailable */
-  }
+  // The larger of the two swaps since Xore/theme#104: a theme now moves the
+  // ground, the sidebar, every surface, every border and the whole text ramp
+  // at once, which is the maximal case for the flashing #1761 describes.
+  withoutTransitions(() => {
+    try {
+      // Set unconditionally, including for claude. The attribute used to be
+      // deleted for the default on the grounds that :root already carries
+      // those tokens -- true for rendering, but it left the DOM unable to
+      // answer "which theme is this?", which the gallery picker (#1758) and
+      // the server reconcile (#1755) both need. Upstream's selector list
+      // names claude explicitly, so setting it changes nothing visually.
+      document.documentElement.dataset.hpTheme = name
+      document.documentElement.dataset.hpPalette = name
+      localStorage.setItem('hp-palette', name)
+    } catch {
+      /* storage unavailable */
+    }
+  })
   emit()
   // Same write-through as theme: "" stores as claude-equivalent default
   // server-side (the Go domain accepts "" as claude).
