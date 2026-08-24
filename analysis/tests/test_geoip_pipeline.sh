@@ -380,5 +380,67 @@ result="$(simulate_source_ip "$tmp/public_11_source.json")"
   fail "a public 11.x address was wrongly treated as private (got: '$result')"
 pass "a public address starting 1 is not confused with 10.x"
 
+# #1889: a honeypot event with a full 5-tuple must get a community_id, so
+# it can join to Suricata's alert, Zeek's record and the #1783 flow pivot.
+# Measured before this: 0 of 174,384 http-honeypot events in 7 days had one,
+# because the branch promoted neither source.port nor network.transport.
+simulate_community_id() {
+  curl -fsS -X POST "$es_url/_ingest/pipeline/geoip-honeypot/_simulate" \
+    -H 'Content-Type: application/json' \
+    --data-binary "@$1" |
+    python3 -c "
+import json, sys
+doc = json.load(sys.stdin)['docs'][0]['doc']['_source']
+net = doc.get('network', {})
+src = doc.get('source', {})
+dst = doc.get('destination', {})
+print('%s|%s|%s|%s' % (net.get('community_id',''), src.get('port',''), dst.get('port',''), net.get('transport','')))
+"
+}
+
+cat > "$tmp/http_full_tuple.json" <<'JSON'
+{"docs":[{"_source":{"honeypot":{"sensor":"http-honeypot","src_ip":"198.51.100.20","src_port":54321,"dst_ip":"198.51.100.1","dst_port":8080,"method":"POST","path":"/wp-login.php"}}}]}
+JSON
+result="$(simulate_community_id "$tmp/http_full_tuple.json")"
+cid="${result%%|*}"
+rest="${result#*|}"
+[ -n "$cid" ] ||
+  fail "a full 5-tuple produced no community_id (got fields: '$result')"
+[ "$rest" = "54321|8080|tcp" ] ||
+  fail "the tuple was not promoted correctly (got source.port|destination.port|transport = '$rest')"
+pass "an http-honeypot event with a full tuple gets a community_id"
+
+# The transport must be the transport, not the application protocol -- a
+# community_id keyed on "smbd" or "HTTP" matches nothing anywhere.
+cat > "$tmp/app_proto_not_transport.json" <<'JSON'
+{"docs":[{"_source":{"honeypot":{"sensor":"elasticpot","src_ip":"198.51.100.21","src_port":40000,"dst_port":9200,"proto":"HTTP"}}}]}
+JSON
+result="$(simulate_community_id "$tmp/app_proto_not_transport.json")"
+transport="${result##*|}"
+[ "$transport" != "http" ] ||
+  fail "an application protocol was written into network.transport (got '$transport')"
+pass "an application protocol is not mistaken for a transport"
+
+# A real transport is taken.
+cat > "$tmp/udp_tuple.json" <<'JSON'
+{"docs":[{"_source":{"honeypot":{"sensor":"dns-honeypot","src_ip":"198.51.100.22","src_port":33333,"dst_ip":"198.51.100.1","dst_port":53,"proto":"udp"}}}]}
+JSON
+result="$(simulate_community_id "$tmp/udp_tuple.json")"
+[ "${result##*|}" = "udp" ] ||
+  fail "udp was not promoted to network.transport (got '${result##*|}')"
+[ -n "${result%%|*}" ] ||
+  fail "a udp 5-tuple produced no community_id"
+pass "a udp sensor event gets a community_id too"
+
+# Absent is still absent: a relayed request reports no source port (the
+# sensor omits it deliberately), and half a tuple must not produce a key.
+cat > "$tmp/no_src_port.json" <<'JSON'
+{"docs":[{"_source":{"honeypot":{"sensor":"http-honeypot","src_ip":"198.51.100.23","dst_port":8080,"method":"GET","path":"/"}}}]}
+JSON
+result="$(simulate_community_id "$tmp/no_src_port.json")"
+[ -z "${result%%|*}" ] ||
+  fail "a community_id was invented without a source port (got '${result%%|*}')"
+pass "no source port means no community_id, rather than a wrong one"
+
 echo
 echo "all geoip-honeypot pipeline tests passed"
