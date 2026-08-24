@@ -134,6 +134,8 @@ export async function pullAppearance(): Promise<void> {
 // Not used by the pre-paint boot script in __root.tsx, deliberately: on first
 // paint there is no previous state to transition from.
 function withoutTransitions(change: () => void) {
+  // Colours resolved for the old appearance are now wrong (#1853).
+  void import('./cssVar').then((m) => m.resetCssVarCache())
   if (typeof document === 'undefined') {
     change()
     return
