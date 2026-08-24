@@ -5,6 +5,11 @@
 FROM rust:1-slim-bookworm AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock* ./
+# build.rs stamps the binary with its compile time (see the file). It has to
+# be copied explicitly: cargo only runs a build script that is actually in
+# the crate root, and without it env!("APIARY_BUILD_EPOCH") is a compile
+# error rather than a missing value.
+COPY build.rs ./
 COPY src ./src
 # report_pdf.rs's two include_bytes!("../assets_pdf/...") calls need this
 # present at compile time, not just runtime -- omitting it here isn't a

@@ -132,12 +132,18 @@ async fn require_service_token(
 }
 
 
-/// When this binary was compiled, as RFC 3339.
+/// When this binary was compiled, as RFC 3339, or "unknown".
 ///
-/// Set by build.rs. Falls back to the raw value if it is ever not a number,
-/// so a broken stamp degrades to something visible rather than to a lie.
+/// Set by build.rs. `option_env!` rather than `env!` on purpose: the first
+/// attempt at this used `env!` and broke the image build outright, because
+/// the Dockerfile copies Cargo.toml and src but did not copy build.rs, so
+/// cargo never ran it. That is fixed, but the failure mode should not be a
+/// dead build for a diagnostic field -- and it must not be a lie either, so
+/// an absent stamp reads as "unknown" rather than as a plausible time.
 pub fn build_stamp() -> String {
-    let raw = env!("APIARY_BUILD_EPOCH");
+    let Some(raw) = option_env!("APIARY_BUILD_EPOCH") else {
+        return "unknown".to_string();
+    };
     match raw.parse::<i64>() {
         Ok(epoch) => chrono::DateTime::from_timestamp(epoch, 0)
             .map(|when| when.to_rfc3339())
@@ -374,6 +380,11 @@ mod build_stamp_tests {
         // merge", so a value that does not parse, or that sits in 1970,
         // would be worse than none: it reads as an answer.
         let stamp = build_stamp();
+        // "unknown" is an acceptable answer -- it is the honest one when the
+        // build script did not run. Anything else has to be a real time.
+        if stamp == "unknown" {
+            return;
+        }
         let parsed = chrono::DateTime::parse_from_rfc3339(&stamp)
             .unwrap_or_else(|error| panic!("build stamp {stamp:?} is not RFC 3339: {error}"));
 
