@@ -1220,6 +1220,32 @@ select.form-input { cursor: pointer; }
   background: transparent;
 }
 .metric:first-child { border-left: 0; padding-left: 0; }
+/* A metric that is also a filter, and is the one currently applied.
+
+   Marked with aria-current rather than a class so the selected state is one
+   fact in the DOM rather than two that can disagree, and so assistive tech
+   is told the same thing the accent stripe says. The stripe replaces the
+   hairline seam on that tile instead of sitting beside it -- the seam marks a
+   boundary between neighbours, and this marks the tile itself. */
+.metric[aria-current] {
+  border-left: 2px solid var(--accent);
+  padding-left: calc(var(--space-lg) - 1px);
+}
+.metric[aria-current]:first-child { border-left: 2px solid var(--accent); padding-left: var(--space-sm); }
+.metric[aria-current] .metric__label { color: var(--accent-text-on-soft); }
+
+/* A token URL in a table cell.
+
+   A URL has no spaces and no break opportunities, so left alone it sets the
+   cell's minimum width and pushes past the card edge -- the value decides the
+   layout instead of the layout containing the value. `anywhere` lets it break
+   mid-string, which is the only sensible place to break a URL.
+
+   The copy control sits on the same line and does not shrink: the reason a
+   token URL is on screen at all is to be pasted somewhere else. */
+.hp-token-url { display: flex; align-items: flex-start; gap: var(--space-sm); min-width: 0; }
+.hp-token-url code { min-width: 0; overflow-wrap: anywhere; }
+.hp-token-url .btn { flex: none; }
 .metric__label { color: var(--text-200); font-size: var(--font-size-xs); }
 .metric__value { margin-top: 6px; color: var(--text-000); font-family: var(--font-serif); font-size: 26px; font-weight: 500; letter-spacing: -0.01em; }
 .metric__trend { margin-top: 4px; color: var(--text-100); font-size: var(--font-size-xs); }
