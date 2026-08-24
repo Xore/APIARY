@@ -21,11 +21,13 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 type event struct {
@@ -61,6 +63,12 @@ type event struct {
 	AuthType  string            `json:"auth_type,omitempty"`
 	Status    int               `json:"status"`
 	Category  string            `json:"category"`
+	// What the request *carried*, as opposed to what it asked for (#1888).
+	// Separate from Category on purpose: a POST of an SQL injection to a
+	// WordPress bait path is both a "wordpress" request and an "sqli"
+	// payload, and collapsing them into one field loses whichever was
+	// written second.
+	PayloadClass string `json:"payload_class,omitempty"`
 	// Tarpitted (#246) marks a request that got the slow Markov-drip
 	// response (tarpit.go) instead of a normal reply. TarpitBytes/
 	// TarpitMS are only meaningful when this is true.
@@ -265,6 +273,343 @@ func headerMap(r *http.Request) map[string]string {
 	return m
 }
 
+// classifyPayload names what a request carried, from its query string and
+// body. Empty when nothing recognisable is there, which is most traffic.
+//
+// Patterns rather than a model, and that is a measurement rather than a
+// preference (#1809, #1888). Over 30 days the fleet saw 11,139 requests
+// carrying a body or a query and 583 distinct values between them -- and
+// that count is itself inflated, because ~19 events each of an otherwise
+// identical multipart probe differ only by their random
+// WebKitFormBoundary. One payload, CVE-2017-9841's PHPUnit probe, is a
+// quarter of the corpus by itself. A corpus that small and that repetitive
+// is a lookup table; the model argument only becomes real if a month ever
+// starts yielding thousands of genuinely new payloads instead of a
+// handful.
+//
+// The order is specific-to-generic, and the first match wins. Real
+// payloads nest -- the second most common body here is a <?php wrapper
+// around a base64 blob that decodes to a wget|sh chain, which is three of
+// these classes at once -- so the outermost, most identifying shape is
+// checked first. The raw body is stored regardless, so nothing is lost by
+// naming only one.
+//
+// Counts in the comments come from running this function over that whole
+// window rather than over examples, which is also how the one surprising
+// result was checked rather than assumed: command-injection labels 4,273
+// events across 270 distinct bodies, far more than anything else except
+// the PHPUnit probe. Sampling them showed it is right -- they are 5 KB
+// multipart bodies whose padding hides a `id; hostname; pwd` passed to a
+// Node child_process, so the class is one campaign rather than a leaky
+// pattern.
+//
+// A pattern that fires on ordinary traffic is worse than no pattern, since
+// it makes every event look interesting. The classes are deliberately
+// narrow and the tail is left unlabelled: 92.5% of the window is named,
+// and what remains is scanner cache-busting like "v=GyJrG" and "id=3",
+// which has no class worth giving it.
+func classifyPayload(query, body string) string {
+	// Query strings arrive percent-encoded, and attackers vary the
+	// encoding of the same probe to slip signatures -- the PHP-CGI probe
+	// below appears as %ADd, %25ADd and plain -d in the same window. Match
+	// on the decoded form, falling back to the raw one when it will not
+	// decode, so a deliberately malformed escape cannot hide a payload.
+	decoded := query
+	if unescaped, err := url.QueryUnescape(query); err == nil {
+		decoded = unescaped
+	}
+	q := strings.ToLower(decoded)
+	b := strings.ToLower(body)
+	both := q + "\n" + b
+
+	switch {
+	// --- named exploit chains, most identifying first ---
+
+	// 390 events. CVE-2012-1823 / CVE-2024-4577: turns php-cgi's argument
+	// handling into "execute the request body as PHP".
+	case strings.Contains(q, "allow_url_include") && strings.Contains(q, "auto_prepend_file"):
+		return "php-cgi-argument-injection"
+
+	// 162 events. ThinkPHP's invokefunction routing gadget: the callable
+	// and its arguments are both in the query.
+	case strings.Contains(q, "invokefunction") && strings.Contains(q, "call_user_func_array"):
+		return "thinkphp-rce"
+
+	// 81 events. Traversal to PEAR's CLI, which is then told to write a
+	// PHP file -- local file inclusion escalated to code execution.
+	case strings.Contains(q, "pearcmd") && strings.Contains(q, "config-create"):
+		return "pearcmd-rce"
+
+	// Log4Shell and its JNDI relatives; the lookup syntax is unambiguous.
+	case strings.Contains(both, "${jndi:"):
+		return "jndi-lookup"
+
+	// --- code the request wants run ---
+
+	// 390 events across two variants, both wrapping a base64 blob in a
+	// shell call. Checked before the bare <?php case, which would
+	// otherwise swallow it.
+	case containsAny(b, "shell_exec", "system(", "passthru", "popen(", "proc_open") &&
+		strings.Contains(b, "base64_decode"):
+		return "php-base64-shell"
+
+	// 2,918 events -- CVE-2017-9841's eval-stdin.php probe is a quarter of
+	// the whole corpus on its own, and it is simply PHP source in a body.
+	case strings.Contains(b, "<?php"), strings.Contains(b, "<?="):
+		return "php-code"
+
+	// 58 events. Fetch a stage-two script and pipe it straight to a shell.
+	case containsAny(both, "wget ", "curl ") && containsAny(both, "|sh", "| sh", "|bash", "| bash", "-qo-", "-so-"):
+		return "downloader"
+
+	// 45 events. A shell command reachable from the request, which needs
+	// both a way to start one and something to run -- see shellCommand.
+	case shellCommand(both):
+		return "command-injection"
+
+	// --- what the request wants to read or become ---
+
+	// 26 events. Straight to the credential files, no execution needed.
+	case containsAny(both, "/root/.aws/credentials", "/etc/passwd", "/etc/shadow", ".ssh/id_rsa", "/.env"):
+		return "secret-read"
+
+	// 81 events. Traversal on its own, once the escalations above have had
+	// their turn.
+	case strings.Contains(both, "../../"), strings.Contains(both, "..%2f"), strings.Contains(both, `..\..\`):
+		return "path-traversal"
+
+	// 171 events. Creating an administrator through an API that should not
+	// allow it -- persistence rather than a smash-and-grab.
+	case strings.Contains(b, "roleid") && strings.Contains(b, "administrator"):
+		return "admin-account-create"
+
+	// --- injection into an interpreter that is already running ---
+
+	case containsAny(b, "union select", "or 1=1", "' or '", "sleep(", "benchmark(", "waitfor delay"):
+		return "sqli"
+
+	// 19 events. React/Next.js server actions reached through a multipart
+	// body; the marker is the polluted key, not the transport.
+	case containsAny(b, "__proto__", "constructor.prototype"):
+		return "prototype-pollution"
+
+	case containsAny(b, "<!entity") && strings.Contains(b, "system"):
+		return "xxe"
+
+	// Template expression syntax paired with something worth evaluating.
+	// Deliberately narrow: braces alone are ordinary in JSON, and "{{name}}"
+	// in a template field is not an attack.
+	case containsAny(b, "{{", "${", "#{") &&
+		containsAny(b, "7*7", "runtime.", "getruntime", "class.forname", "__import__", "self.__", "process.env"):
+		return "template-injection"
+
+	// --- probes that carry a payload without exploiting anything ---
+
+	// 50 events. ONVIF device discovery -- cameras and recorders.
+	case strings.Contains(b, "soap-envelope"), strings.Contains(b, "onvif.org"):
+		return "soap-probe"
+
+	// 19 events. Cisco AnyConnect's initial exchange, aimed at a web port
+	// to find VPN concentrators.
+	case strings.Contains(b, "<config-auth"):
+		return "vpn-handshake"
+
+	// 38 events. JSON-RPC "initialize" carrying a protocolVersion is the
+	// Model Context Protocol handshake -- scanners looking for exposed MCP
+	// servers, which is new traffic rather than a legacy exploit.
+	case strings.Contains(b, `"jsonrpc"`) && strings.Contains(b, `"initialize"`) &&
+		strings.Contains(b, "protocolversion"):
+		return "mcp-probe"
+
+	// 38 events. getwork / eth_getWork -- looking for an unauthenticated
+	// miner or pool to hijack.
+	case strings.Contains(b, `"method"`) && containsAny(b, `"getwork"`, `"eth_getwork"`, `"eth_submitwork"`):
+		return "mining-rpc-probe"
+
+	// 137 events. WordPress's /batch/v1 multiplexer: one request that asks
+	// the server to make several more, including to itself.
+	case strings.Contains(b, `"requests"`) && strings.Contains(b, "["):
+		return "batch-request-probe"
+
+	// 178 events. version.bind is a DNS CHAOS query, aimed at a web port
+	// by scanners that fan the same probe across every protocol.
+	case q == "version.bind":
+		return "dns-version-probe"
+
+	// ~200 events. A query that is nothing but a hostname -- the shape of
+	// an open-resolver or open-proxy test, where the value names the thing
+	// the server is being asked to fetch or resolve on the caller's behalf.
+	case bareHostname(q):
+		return "open-resolver-probe"
+
+	// 35 events, and the name is the payload.
+	case strings.Contains(both, "androxgh0st"):
+		return "androxgh0st"
+
+	// 372 events. WordPress's REST surface, enumerated for something
+	// exploitable rather than exploited yet.
+	case strings.Contains(q, "rest_route="):
+		return "wordpress-rest-probe"
+
+	case strings.Contains(q, "phpinfo"):
+		return "info-disclosure"
+
+	// 401 events. Kilobytes of "A" behind a random boundary: a size or
+	// parser limit being tested, not an exploit. This is also why the
+	// distinct-body count reads higher than the number of real payloads.
+	case strings.Contains(b, "webkitformboundary") && strings.Contains(body, strings.Repeat("A", 64)):
+		return "multipart-padding"
+
+	// Java and PHP serialised objects, by their headers rather than their
+	// contents. rO0AB is base64 for the Java stream magic.
+	case strings.HasPrefix(body, "rO0AB"), strings.Contains(body, "\xac\xed\x00\x05"), phpSerializedObject(b):
+		return "serialized-object"
+
+	// 38 events. Anything speaking a binary protocol at an HTTP port.
+	// Checked last: it is a statement about the bytes rather than about
+	// intent, and any pattern above is more informative.
+	case binaryPayload(body):
+		return "binary-protocol"
+	}
+
+	return ""
+}
+
+// containsAny reports whether s contains any of the needles.
+func containsAny(s string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(s, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// shellCommand reports whether s looks like it is trying to start a shell
+// command, rather than merely containing characters a shell would use.
+//
+// The distinction matters because both halves are ordinary on their own:
+// "$(" is everyday JavaScript, ";" is everyday in a header, and "uname"
+// sits inside "username". So the binary has to appear *at* a command
+// position -- immediately after a separator or a substitution opener, and
+// followed by a boundary rather than more letters.
+//
+// The payloads this actually catches in the live window are Node
+// child_process calls smuggled into multipart bodies, where the command is
+// `id; hostname; pwd` and the rest is padding.
+func shellCommand(s string) bool {
+	binaries := []string{
+		"cat ", "ls ", "id;", "id ", "id\n", "pwd", "whoami", "uname ", "uname -",
+		"wget ", "curl ", "nc ", "sh ", "bash ", "chmod ", "busybox", "python", "perl ",
+	}
+	starters := []string{"$(", "`", ";", "|", "&&", "\n", "%0a"}
+
+	for _, start := range starters {
+		rest := s
+		for {
+			i := strings.Index(rest, start)
+			if i < 0 {
+				break
+			}
+			rest = rest[i+len(start):]
+			trimmed := strings.TrimLeft(rest, " \t'\"")
+			for _, bin := range binaries {
+				if strings.HasPrefix(trimmed, bin) {
+					return true
+				}
+			}
+		}
+	}
+	// cmd= and exec= style parameters name the command directly, with no
+	// separator in front of it.
+	for _, param := range []string{"cmd=", "exec=", "command=", "execute="} {
+		if i := strings.Index(s, param); i >= 0 {
+			rest := strings.TrimLeft(s[i+len(param):], " '\"")
+			for _, bin := range binaries {
+				if strings.HasPrefix(rest, bin) {
+					return true
+				}
+			}
+			// A bare `cmd=pwd` has nothing after the binary to match a
+			// trailing space, so those are checked whole.
+			for _, bare := range []string{"pwd", "id", "whoami", "ls", "uname"} {
+				if rest == bare || strings.HasPrefix(rest, bare+"&") {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// bareHostname reports whether a query string is nothing but a hostname --
+// no key, no value, just a name. Scanners testing for an open resolver or
+// open proxy send exactly that, and it cannot be confused with a normal
+// query, which has an "=" in it.
+func bareHostname(q string) bool {
+	if q == "" || len(q) > 253 || strings.ContainsAny(q, "=&/ ") {
+		return false
+	}
+	if !strings.Contains(q, ".") || strings.HasPrefix(q, ".") || strings.HasSuffix(q, ".") {
+		return false
+	}
+	for _, r := range q {
+		if !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') && r != '.' && r != '-' {
+			return false
+		}
+	}
+	// A trailing label of letters is what separates a hostname from a
+	// version string or a filename.
+	last := q[strings.LastIndex(q, ".")+1:]
+	if len(last) < 2 {
+		return false
+	}
+	for _, r := range last {
+		if r < 'a' || r > 'z' {
+			return false
+		}
+	}
+	return true
+}
+
+// binaryPayload reports whether a body is something other than text.
+//
+// utf8.ValidString alone is not the test: the 38-event probe that prompted
+// this ("\x00\x00\x00\x00\x03:\x01*") is perfectly valid UTF-8, because C0
+// control characters encode as themselves. A NUL byte, or control
+// characters beyond the ones text actually uses, is the real signal.
+func binaryPayload(body string) bool {
+	if body == "" {
+		return false
+	}
+	if !utf8.ValidString(body) || strings.ContainsRune(body, 0) {
+		return true
+	}
+	control := 0
+	for i := 0; i < len(body); i++ {
+		c := body[i]
+		if c < 0x20 && c != '\t' && c != '\n' && c != '\r' {
+			control++
+		}
+	}
+	return control*10 > len(body)
+}
+
+// phpSerializedObject matches PHP's serialize() object header -- O:<len>:"
+// -- without matching the O: that shows up in ordinary prose.
+func phpSerializedObject(s string) bool {
+	i := strings.Index(s, "o:")
+	if i < 0 {
+		return false
+	}
+	rest := s[i+2:]
+	digits := 0
+	for digits < len(rest) && rest[digits] >= '0' && rest[digits] <= '9' {
+		digits++
+	}
+	return digits > 0 && strings.HasPrefix(rest[digits:], `:"`)
+}
+
 // classify guesses the intent of a request path so logs are easy to triage.
 func classify(path string) string {
 	p := strings.ToLower(path)
@@ -353,23 +698,24 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Body.Close()
 
 	e := event{
-		Time:      time.Now().UTC().Format(time.RFC3339),
-		Sensor:    s.sensor,
-		Persona:   s.persona,
-		Site:      s.site,
-		Asset:     s.asset,
-		Org:       s.org,
-		SrcIP:     clientIP(r),
-		SrcPort:   clientPort(r),
-		DstPort:   s.listenPort,
-		Method:    r.Method,
-		Host:      r.Host,
-		Path:      r.URL.Path,
-		Query:     r.URL.RawQuery,
-		UserAgent: r.UserAgent(),
-		Headers:   headerMap(r),
-		Body:      string(body),
-		Category:  classify(r.URL.Path),
+		Time:         time.Now().UTC().Format(time.RFC3339),
+		Sensor:       s.sensor,
+		Persona:      s.persona,
+		Site:         s.site,
+		Asset:        s.asset,
+		Org:          s.org,
+		SrcIP:        clientIP(r),
+		SrcPort:      clientPort(r),
+		DstPort:      s.listenPort,
+		Method:       r.Method,
+		Host:         r.Host,
+		Path:         r.URL.Path,
+		Query:        r.URL.RawQuery,
+		UserAgent:    r.UserAgent(),
+		Headers:      headerMap(r),
+		Body:         string(body),
+		Category:     classify(r.URL.Path),
+		PayloadClass: classifyPayload(r.URL.RawQuery, string(body)),
 	}
 
 	// Pull credentials from HTTP Basic auth …
