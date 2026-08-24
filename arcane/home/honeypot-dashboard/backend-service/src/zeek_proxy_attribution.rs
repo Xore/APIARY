@@ -108,6 +108,26 @@ const BATCH: usize = 500;
 /// permanently unattributed for having been looked at once, too early.
 const LOOKBACK: &str = "now-6h";
 
+/// How recent is too recent to be worth looking at.
+///
+/// portbridge's record of a flow is not reliably visible the instant
+/// zeek-proxy's is. Measured on the live cluster: of the 500 newest
+/// unattributed flows, portbridge knew only **286** -- 57% -- while a sample
+/// of flows aged one to ten minutes came out at 88-94%. The gap closes on
+/// its own within a couple of minutes.
+///
+/// Without this bound the loop spends its batch on the newest flows
+/// precisely because they are newest (see the sort below), finds no dial for
+/// nearly half of them, defers them because they are inside the grace
+/// period, and reads the same ones again next pass. Observed: deferred=380
+/// of 500, pass after pass, while the resolvable backlog behind them went
+/// untouched.
+///
+/// Two minutes is roughly thirty times the few seconds of shipping lag
+/// actually measured between the two sensors, and costs at most one pass of
+/// latency on a flow that would have resolved anyway.
+const SETTLE: &str = "now-2m";
+
 /// How long before a relayed flow a portbridge dial may have happened and
 /// still explain it. Same bound, for the same reason, as
 /// `ip_enrichment::viamap`'s MAX_AGE_SECONDS.
@@ -243,7 +263,7 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
                 "track_total_hits": false,
                 "query": {"bool": {
                     "filter": [
-                        {"range": {"@timestamp": {"gte": LOOKBACK}}},
+                        {"range": {"@timestamp": {"gte": LOOKBACK, "lte": SETTLE}}},
                         {"exists": {"field": "network.community_id"}}
                     ],
                     "must_not": [
