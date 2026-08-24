@@ -1774,6 +1774,23 @@ select.form-input { cursor: pointer; }
 }
 .toast--slide-in-right { animation: toast-slide-in-right 200ms var(--ease-out) backwards; }
 
+/* Severity, as a left rule.
+
+   A toast that reports a condition has to say which kind at a glance --
+   "a sensor stopped reporting" and "the sensor is reporting again" are
+   opposite news in identical boxes otherwise, and an operator scanning a
+   corner of the screen reads the colour before the sentence.
+
+   A rule rather than a fill: the box already carries the surface tokens,
+   and tinting the whole thing would mean re-checking contrast for text on
+   nine themes' worth of tinted backgrounds to say something a 3px edge
+   says just as well. The tokens are the same ones badges and buttons use,
+   so the vocabulary matches the rest of the interface. */
+.toast--info { border-left: 3px solid var(--accent); }
+.toast--success { border-left: 3px solid var(--success); }
+.toast--warning { border-left: 3px solid var(--warning); }
+.toast--danger { border-left: 3px solid var(--danger); }
+
 kbd {
   padding: 2px var(--space-xs);
   border: 1px solid var(--border-200);
