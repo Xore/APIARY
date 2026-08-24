@@ -229,6 +229,16 @@ jobs:
               # rotation/data-loss behavior.
               python arcane/home/honeypot-dionaea/dionaea/tests/test_log_rotation_patch.py
 
+          - name: HellPot X-Forwarded-For trust patch (#1876)
+            run: |
+              # Two build-time patches run in sequence against the same file
+              # and the second matches on the first's output. That coupling
+              # is invisible at review time and breaks the image build with a
+              # string mismatch several layers down, so it is asserted here --
+              # along with the trust rule that makes reintroducing header
+              # trust safe after #1419 removed it as spoofable.
+              python arcane/home/honeypot-hellpot/hellpot/tests/test_xff_trust_patch.py
+
           - name: Dionaea SMB exploit-signature incidents (#622, #1775)
             run: |
               # Executes the code this patch injects into smb.py, against a
