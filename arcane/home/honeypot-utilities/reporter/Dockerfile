@@ -1,7 +1,7 @@
 # Static Go binary in a scratch image, same pattern as multipot/http-honeypot.
 # modernc.org/sqlite is pure Go (no cgo), so CGO_ENABLED=0 still holds despite
 # the SQLite dependency -- see dedup.go's import comment.
-FROM golang:1.26-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS build
+FROM golang:1.27-alpine@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS build
 WORKDIR /src
 COPY go.mod go.sum .
 RUN go mod download
