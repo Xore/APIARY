@@ -131,6 +131,21 @@ async fn require_service_token(
     next.run(request).await
 }
 
+
+/// When this binary was compiled, as RFC 3339.
+///
+/// Set by build.rs. Falls back to the raw value if it is ever not a number,
+/// so a broken stamp degrades to something visible rather than to a lie.
+pub fn build_stamp() -> String {
+    let raw = env!("APIARY_BUILD_EPOCH");
+    match raw.parse::<i64>() {
+        Ok(epoch) => chrono::DateTime::from_timestamp(epoch, 0)
+            .map(|when| when.to_rfc3339())
+            .unwrap_or_else(|| raw.to_string()),
+        Err(_) => raw.to_string(),
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -339,8 +354,34 @@ async fn main() -> anyhow::Result<()> {
         .with_state(state);
 
     let addr: SocketAddr = listen.parse()?;
-    tracing::info!(%addr, %es_url, "apiary-backend listening");
+    // `built` is the one thing that makes a deploy verifiable from outside.
+    // Compare it against the merge time; anything else -- a fresh image id, a
+    // recreated container, `{"done":true}` -- says the machinery ran, not
+    // that this code is what is running. See build.rs.
+    tracing::info!(%addr, %es_url, built = %build_stamp(), "apiary-backend listening");
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod build_stamp_tests {
+    use super::build_stamp;
+
+    #[test]
+    fn build_stamp_is_a_real_recent_timestamp() {
+        // The stamp exists to answer "is the running binary newer than the
+        // merge", so a value that does not parse, or that sits in 1970,
+        // would be worse than none: it reads as an answer.
+        let stamp = build_stamp();
+        let parsed = chrono::DateTime::parse_from_rfc3339(&stamp)
+            .unwrap_or_else(|error| panic!("build stamp {stamp:?} is not RFC 3339: {error}"));
+
+        let now = chrono::Utc::now();
+        let age = now.signed_duration_since(parsed.with_timezone(&chrono::Utc));
+        assert!(
+            age.num_days() < 3650 && age.num_seconds() > -3600,
+            "build stamp {stamp} is not a plausible build time (age {age})",
+        );
+    }
 }
