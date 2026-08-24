@@ -185,7 +185,25 @@ services:
       # #827: see elasticsearch-setup.sh's own comment above the
       # geoip-honeypot pipeline definition -- bare IPs, exact match, not
       # CIDR. Empty/unset is a safe no-op, not a startup failure.
+      #
+      # "Safe no-op" is doing a lot of work in that sentence, so: unset means
+      # the direction-swap in the Suricata and huginn blocks never fires, and
+      # every responder-side observation is attributed to whichever end the
+      # sensor happened to call the source -- which for a SYN-ACK or an HTTP
+      # response is us. It fails quietly and looks like data.
       - ES_HOME_NET=${ES_HOME_NET:-}
+      # #1765: the VPS's own public address, used to complete the wire tuple
+      # for Traefik requests -- Traefik logs the client side of a connection
+      # but never the address it accepted on, so without this there is no
+      # 5-tuple to hash and those records carry no community_id at all.
+      #
+      # This was missing from this service entirely until #1742's follow-up.
+      # The consequence was invisible in exactly the way the guard intended:
+      # re-running the setup without it silently stopped Traefik documents
+      # getting a join key, and 6,160 of them were indexed with none before
+      # anyone noticed. Failing safe is right; failing safe and unmonitored is
+      # how a regression lives for a day.
+      - PUBLIC_IP=${PUBLIC_IP:-}
     volumes:
       - ./analysis/elasticsearch-setup.sh:/usr/local/bin/elasticsearch-setup.sh:ro
       - /opt/stacks/apiary/state/init-markers:/markers
