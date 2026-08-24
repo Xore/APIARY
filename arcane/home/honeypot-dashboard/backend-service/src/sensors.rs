@@ -299,6 +299,40 @@ pub async fn detail(State(state): State<AppState>) -> Result<Json<SensorDetail>,
 // untouched, so the client can render a protocol in its own terms without
 // the backend having to know the protocol.
 
+/// The fleet checking its own sensors are alive is not attacker traffic.
+///
+/// #1902: 92,496 of these a day. They are marked, so they are recognisable
+/// everywhere -- they were simply not excluded everywhere. Left in, the
+/// catalog presented conpot-s7-1500 as the third-busiest sensor on the
+/// fleet with 65,439 of its events being the fleet knocking on its own
+/// door, which is a conclusion about attacker interest in an S7 PLC that
+/// the data does not support.
+///
+/// Several marks, because the sensors do not agree on one. A honeypot
+/// sensor sets the probe flag, or sources from loopback when it does not.
+/// zeek-proxy sets neither -- it observes the wire and has no notion of a
+/// probe -- but it says something stronger: local_orig and local_resp
+/// together mean both ends of the connection are ours, which no attacker
+/// traffic can ever be. And the dashboard's own healthcheck announces
+/// itself outright as a GET of /healthz.
+///
+/// dashboard.rs made the same choice on the honeypot side for the same
+/// reason (#1677); this is the rest of it.
+fn excluding_health_checks() -> Vec<Value> {
+    vec![
+        json!({"term": {"honeypot.internal_probe": true}}),
+        json!({"term": {"honeypot.src_ip": "127.0.0.1"}}),
+        // Both ends inside the fleet. Zeek's own judgement, from its
+        // configured local networks, so it stays correct if the addressing
+        // changes.
+        json!({"bool": {"filter": [
+            {"term": {"zeek.local_orig": true}},
+            {"term": {"zeek.local_resp": true}}
+        ]}}),
+        json!({"term": {"zeek.uri": "/healthz"}}),
+    ]
+}
+
 /// One sensor in the catalog, as the data says it exists.
 #[derive(Serialize)]
 pub struct SensorSummary {
@@ -343,7 +377,10 @@ const EVENT_LIMIT_MAX: u64 = 1000;
 pub async fn catalog(State(state): State<AppState>) -> Result<Json<SensorCatalog>, (StatusCode, String)> {
     let body = json!({
         "size": 0,
-        "query": {"range": {"@timestamp": {"gte": CATALOG_WINDOW}}},
+        "query": {"bool": {
+            "filter": [{"range": {"@timestamp": {"gte": CATALOG_WINDOW}}}],
+            "must_not": excluding_health_checks()
+        }},
         "aggs": {"sensors": {
             "terms": {"field": "event.sensor", "size": 200, "order": {"_count": "desc"}},
             "aggs": {"last_seen": {"max": {"field": "@timestamp"}}}
@@ -395,10 +432,13 @@ pub async fn events(
         "size": limit,
         "track_total_hits": true,
         "sort": [{"@timestamp": {"order": "desc"}}],
-        "query": {"bool": {"filter": [
-            {"term": {"event.sensor": sensor}},
-            {"range": {"@timestamp": {"gte": WINDOW}}}
-        ]}}
+        "query": {"bool": {
+            "filter": [
+                {"term": {"event.sensor": sensor}},
+                {"range": {"@timestamp": {"gte": WINDOW}}}
+            ],
+            "must_not": excluding_health_checks()
+        }}
     });
     let result = state
         .es
@@ -615,10 +655,13 @@ pub async fn overview(
     let body = json!({
         "size": 0,
         "track_total_hits": true,
-        "query": {"bool": {"filter": [
-            {"term": {"event.sensor": sensor}},
-            {"range": {"@timestamp": {"gte": OVERVIEW_WINDOW}}}
-        ]}},
+        "query": {"bool": {
+            "filter": [
+                {"term": {"event.sensor": sensor}},
+                {"range": {"@timestamp": {"gte": OVERVIEW_WINDOW}}}
+            ],
+            "must_not": excluding_health_checks()
+        }},
         "aggs": aggs
     });
     let result = state
