@@ -344,7 +344,7 @@ function TerminalPlayback({ replay }: { replay: Replay }) {
       <div ref={containerRef} className="hp-tty-term" aria-label="Terminal playback" />
       {/* The whole transcript stays one disclosure away, searchable/
           copyable, no scrubbing to the end required. */}
-      <details style={{ marginTop: 'var(--space-md)' }}>
+      <details className="hp-flow">
         <summary>Full transcript</summary>
         <pre className="code">{text}</pre>
       </details>

@@ -650,7 +650,7 @@ function ExternalPublicationCard({ hash, editable }: { hash: string; editable: b
   return (
     <div className="card wide">
       <div className="filters">
-        <h2 style={{ marginRight: 'auto' }}>External publication</h2>
+        <h2 className="hp-push-end">External publication</h2>
         <span className="badge badge--red">leaves local trust boundary</span>
       </div>
       <p className="note">

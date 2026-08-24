@@ -1382,11 +1382,11 @@ function PresentationCard({ initial, editable, revision, onSaved, onConflict, on
   }, [changed.length, onDirty])
   const set = (key: keyof Presentation, value: string) => setForm((current) => ({ ...current, [key]: value }))
   const field = (key: keyof Presentation, label: string, extra?: { type?: string; placeholder?: string }) => (
-    <label className="note" style={{ display: 'block' }}>
+    <label className="note hp-field">
       {label}
       <input
         className="form-input"
-        style={{ width: '100%' }}
+       
         type="text"
         value={(form[key] as string) ?? ''}
         disabled={!editable}
@@ -1396,11 +1396,11 @@ function PresentationCard({ initial, editable, revision, onSaved, onConflict, on
     </label>
   )
   const textarea = (key: keyof Presentation, label: string) => (
-    <label className="note" style={{ display: 'block' }}>
+    <label className="note hp-field">
       {label}
       <textarea
         className="form-input"
-        style={{ width: '100%' }}
+       
         rows={2}
         value={(form[key] as string) ?? ''}
         disabled={!editable}
@@ -1453,11 +1453,11 @@ function PresentationCard({ initial, editable, revision, onSaved, onConflict, on
           {field('help_link_url', 'Help link URL (https only)', { type: 'url', placeholder: 'https://' })}
           {field('footer_text', 'Footer text')}
           {field('banner_text', 'Banner text')}
-          <label className="note" style={{ display: 'block' }}>
+          <label className="note hp-field">
             Banner severity
             <select
               className="form-input"
-              style={{ width: '100%' }}
+             
               value={form.banner_severity ?? ''}
               disabled={!editable}
               onChange={(event) => set('banner_severity', event.target.value)}
@@ -1475,7 +1475,7 @@ function PresentationCard({ initial, editable, revision, onSaved, onConflict, on
         {textarea('ai_disclaimer', 'AI analysis disclaimer')}
         {textarea('privacy_notice', 'Evidence-handling / privacy notice')}
         {editable ? (
-          <button className="btn btn-secondary btn-sm" type="submit" style={{ marginTop: 8 }} disabled={changed.length === 0}>
+          <button className="btn btn-secondary btn-sm hp-flow--tight" type="submit" disabled={changed.length === 0}>
             Save presentation
           </button>
         ) : (
@@ -1516,11 +1516,11 @@ function HoneypotOperationsCard({ initial, editable, revision, onSaved, onConfli
     onDirty(changed.length > 0)
   }, [changed.length, onDirty])
   const field = (key: keyof typeof form, label: string, placeholder?: string) => (
-    <label className="note" style={{ display: 'block' }}>
+    <label className="note hp-field">
       {label}
       <input
         className="form-input"
-        style={{ width: '100%' }}
+       
         type="text"
         inputMode="numeric"
         placeholder={placeholder}
@@ -1593,7 +1593,7 @@ function HoneypotOperationsCard({ initial, editable, revision, onSaved, onConfli
           {field('payload_dedupe_interval_seconds', 'Payload dedupe interval in seconds (300–86400)')}
         </div>
         {editable ? (
-          <button className="btn btn-secondary btn-sm" type="submit" style={{ marginTop: 8 }} disabled={changed.length === 0}>
+          <button className="btn btn-secondary btn-sm hp-flow--tight" type="submit" disabled={changed.length === 0}>
             Stage changes
           </button>
         ) : (
@@ -1747,11 +1747,11 @@ function BehaviorCard({ initial, editable, revision, onSaved, onConflict, onDirt
         }}
       >
         <div className="settings-grid">
-          <label className="note" style={{ display: 'block' }}>
+          <label className="note hp-field">
             Default landing page
             <select
               className="form-input"
-              style={{ width: '100%' }}
+             
               value={form.default_landing}
               disabled={!editable}
               onChange={(event) => setForm((current) => ({ ...current, default_landing: event.target.value }))}
@@ -1763,11 +1763,11 @@ function BehaviorCard({ initial, editable, revision, onSaved, onConflict, onDirt
               ))}
             </select>
           </label>
-          <label className="note" style={{ display: 'block' }}>
+          <label className="note hp-field">
             Default time window
             <select
               className="form-input"
-              style={{ width: '100%' }}
+             
               value={form.default_time_window}
               disabled={!editable}
               onChange={(event) => setForm((current) => ({ ...current, default_time_window: event.target.value }))}
@@ -1779,11 +1779,11 @@ function BehaviorCard({ initial, editable, revision, onSaved, onConflict, onDirt
               ))}
             </select>
           </label>
-          <label className="note" style={{ display: 'block' }}>
+          <label className="note hp-field">
             Rows-per-page choices (comma-separated, from 10/25/50/100)
             <input
               className="form-input"
-              style={{ width: '100%' }}
+             
               type="text"
               placeholder="25, 50, 100"
               value={form.rows_per_page_options}
@@ -1791,11 +1791,11 @@ function BehaviorCard({ initial, editable, revision, onSaved, onConflict, onDirt
               onChange={(event) => setForm((current) => ({ ...current, rows_per_page_options: event.target.value }))}
             />
           </label>
-          <label className="note" style={{ display: 'block' }}>
+          <label className="note hp-field">
             Maximum export rows (100–100000)
             <input
               className="form-input"
-              style={{ width: '100%' }}
+             
               type="text"
               inputMode="numeric"
               value={form.max_export_rows}
@@ -1803,11 +1803,11 @@ function BehaviorCard({ initial, editable, revision, onSaved, onConflict, onDirt
               onChange={(event) => setForm((current) => ({ ...current, max_export_rows: event.target.value }))}
             />
           </label>
-          <label className="note" style={{ display: 'block' }}>
+          <label className="note hp-field">
             Refresh interval choices in seconds (from 10/15/30/60/120/300)
             <input
               className="form-input"
-              style={{ width: '100%' }}
+             
               type="text"
               placeholder="15, 30, 60, 300"
               value={form.refresh_interval_seconds_options}
@@ -1815,11 +1815,11 @@ function BehaviorCard({ initial, editable, revision, onSaved, onConflict, onDirt
               onChange={(event) => setForm((current) => ({ ...current, refresh_interval_seconds_options: event.target.value }))}
             />
           </label>
-          <label className="note" style={{ display: 'block' }}>
+          <label className="note hp-field">
             Source stale threshold in minutes (2–120)
             <input
               className="form-input"
-              style={{ width: '100%' }}
+             
               type="text"
               inputMode="numeric"
               value={form.source_stale_minutes}
@@ -1827,11 +1827,11 @@ function BehaviorCard({ initial, editable, revision, onSaved, onConflict, onDirt
               onChange={(event) => setForm((current) => ({ ...current, source_stale_minutes: event.target.value }))}
             />
           </label>
-          <label className="note" style={{ display: 'block' }}>
+          <label className="note hp-field">
             Default map provider
             <select
               className="form-input"
-              style={{ width: '100%' }}
+             
               value={form.map_provider}
               disabled={!editable}
               onChange={(event) => setForm((current) => ({ ...current, map_provider: event.target.value }))}
@@ -1839,11 +1839,11 @@ function BehaviorCard({ initial, editable, revision, onSaved, onConflict, onDirt
               <option value="osm">OpenStreetMap</option>
             </select>
           </label>
-          <label className="note" style={{ display: 'block' }}>
+          <label className="note hp-field">
             Default timezone for new users
             <input
               className="form-input"
-              style={{ width: '100%' }}
+             
               type="text"
               placeholder="utc"
               value={form.default_timezone}
@@ -1857,7 +1857,7 @@ function BehaviorCard({ initial, editable, revision, onSaved, onConflict, onDirt
         {toggle('read_only', 'Read-only mode', 'Freeze evidence-changing dashboard actions.')}
         {toggle('show_problem_report_button', '"Report a problem" button', 'Show a button on every page for reporting bugs.')}
         {editable ? (
-          <button className="btn btn-secondary btn-sm" type="submit" style={{ marginTop: 8 }} disabled={changed.length === 0}>
+          <button className="btn btn-secondary btn-sm hp-flow--tight" type="submit" disabled={changed.length === 0}>
             Save changes
           </button>
         ) : (
@@ -1938,17 +1938,17 @@ function ReportPresetsCard({
         {templates.map((template) => {
           const override = form[template.id] ?? {}
           return (
-            <div key={template.id} className="card" style={{ marginBottom: 12 }}>
+            <div key={template.id} className="card hp-flow">
               <div className="card__header">
                 <div>
                   <h3>{template.name}</h3>
                 </div>
               </div>
-              <label className="note" style={{ display: 'block' }}>
+              <label className="note hp-field">
                 Name
                 <input
                   className="form-input"
-                  style={{ width: '100%' }}
+                 
                   type="text"
                   placeholder={template.name}
                   value={override.name ?? ''}
@@ -1958,11 +1958,11 @@ function ReportPresetsCard({
                   }
                 />
               </label>
-              <label className="note" style={{ display: 'block' }}>
+              <label className="note hp-field">
                 Description
                 <textarea
                   className="form-input"
-                  style={{ width: '100%' }}
+                 
                   rows={2}
                   placeholder={template.description}
                   value={override.description ?? ''}
@@ -1979,7 +1979,7 @@ function ReportPresetsCard({
           )
         })}
         {editable ? (
-          <button className="btn btn-secondary btn-sm" type="submit" style={{ marginTop: 8 }} disabled={changed.length === 0}>
+          <button className="btn btn-secondary btn-sm hp-flow--tight" type="submit" disabled={changed.length === 0}>
             Save changes
           </button>
         ) : (

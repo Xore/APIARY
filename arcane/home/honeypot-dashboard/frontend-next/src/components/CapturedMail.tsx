@@ -47,7 +47,7 @@ export function formatAddress(address: MailAddress): string {
 export function MailMessage({ mail }: { mail: Mail }) {
   return (
     <>
-      <table className="data-table" style={{ marginTop: 12 }}>
+      <table className="data-table hp-flow">
         <tbody>
           <tr>
             <td>From</td>

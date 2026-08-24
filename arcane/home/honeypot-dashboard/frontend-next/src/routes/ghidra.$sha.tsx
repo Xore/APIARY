@@ -361,7 +361,7 @@ function RevDeckCard({ revdeck }: { revdeck: RevDeck | null | undefined }) {
                   (hp-ghidra-markdown.js, #1285); its own documented no-JS
                   fallback is literal markdown text, which is what this port
                   renders — safe, legible, and dependency-free. */}
-              <div className="hp-ai-report__body" style={{ whiteSpace: 'pre-wrap' }}>
+              <div className="hp-ai-report__body hp-pre-wrap">
                 {revdeck.answer}
               </div>
             </div>
@@ -696,7 +696,7 @@ function CodePanel({ sha, g }: { sha: string; g: GhidraDoc }) {
               <img
                 src={`/api/artifact/ghidra/${encodeURIComponent(sha)}/${encodeURIComponent(g.call_graph_svg)}`}
                 alt="Call graph of the analysed binary"
-                style={{ maxWidth: '100%', background: '#fff', borderRadius: 'var(--radius-control)' }}
+                className="hp-figure"
               />
             </a>
           </>
@@ -1005,7 +1005,7 @@ function DeepDivePanel({ g, correlation }: { g: GhidraDoc; correlation: IocCorre
                       {message.name ? <span className="hp-chat-msg__name">{message.name}</span> : null}
                     </div>
                     {message.content != null ? (
-                      <div className="hp-chat-msg__content" style={{ whiteSpace: 'pre-wrap' }}>
+                      <div className="hp-chat-msg__content hp-pre-wrap">
                         {rawText(message.content)}
                       </div>
                     ) : null}

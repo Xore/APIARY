@@ -341,7 +341,7 @@ function buildColumns(tokensById: Map<string, TokenRecord>): Column<CredentialRe
     {
       header: 'content template',
       detail: true,
-      render: (row) => <code style={{ whiteSpace: 'pre-wrap' }}>{row.content_template}</code>,
+      render: (row) => <code className="hp-pre-wrap">{row.content_template}</code>,
     },
     { header: 'linked token id', detail: true, render: (row) => row.linked_token_id ?? '' },
     { header: 'created by', detail: true, render: (row) => row.created_by },

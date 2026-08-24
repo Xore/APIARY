@@ -100,7 +100,7 @@ function EvidenceTimeline({ row }: { row: AgentCampaignRow }) {
         Evidence timeline <span className="text-muted">({events.length} event{events.length === 1 ? '' : 's'})</span>
       </h3>
       <div className="card__scroll">
-        <table className="recent data-table" style={{ marginTop: 'var(--space-sm)' }}>
+        <table className="recent data-table hp-flow--tight">
           <thead>
             <tr>
               <th>time</th>
