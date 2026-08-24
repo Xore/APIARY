@@ -94,7 +94,6 @@ jobs:
           - arcane/home/honeypot-endlessh/endlessh-honeypot
           - arcane/home/honeypot-galah/galah-llm-broker
           - arcane/home/honeypot-http/http-honeypot
-          - arcane/home/honeypot-ip-enrichment-worker/ip-enrichment-worker
           - arcane/home/honeypot-multipot/multipot
           - arcane/home/honeypot-payload-inventory-worker/payload-inventory-worker
           - arcane/home/honeypot-rdp-honeypot/rdp-honeypot

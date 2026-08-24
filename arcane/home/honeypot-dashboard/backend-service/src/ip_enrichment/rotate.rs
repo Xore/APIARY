@@ -99,4 +99,89 @@ mod tests {
         assert_eq!(rotated.len(), 1, "expected exactly one rotated generation");
         fs::remove_dir_all(&dir).ok();
     }
+
+    // ---- ported from the Go worker's rotate_test.go before that tree was
+    // ---- retired (#1890). Each covers a way rotation loses data rather
+    // ---- than a way it works, which is why they were worth keeping.
+
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir()
+            .join(format!("ip-enrich-rotate-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Every non-empty line across the original file and every rotated
+    /// generation of it.
+    fn all_lines(dir: &std::path::Path) -> Vec<String> {
+        let mut out = Vec::new();
+        for entry in fs::read_dir(dir).unwrap() {
+            let text = fs::read_to_string(entry.unwrap().path()).unwrap();
+            out.extend(text.lines().filter(|l| !l.is_empty()).map(str::to_string));
+        }
+        out
+    }
+
+    fn rotated_count(dir: &std::path::Path) -> usize {
+        fs::read_dir(dir)
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("cowrie.json.")
+            })
+            .count()
+    }
+
+    #[test]
+    fn rapid_rotations_do_not_overwrite_each_other() {
+        // The bug this exists for: the rename target was a
+        // second-granularity timestamp with no collision check, so two
+        // rotations inside the same wall-clock second renamed onto the
+        // same path and the first generation's lines vanished. Twenty
+        // writes at max=1 rotate far faster than the clock ticks.
+        let dir = temp_dir("rapid");
+        let mut w = OutputWriter::open(dir.join("cowrie.json"), 1).unwrap();
+
+        const N: usize = 20;
+        for _ in 0..N {
+            assert!(w.write_lines(&[vec![b'x'; 20]]));
+        }
+
+        assert_eq!(all_lines(&dir).len(), N, "every line survives every rotation");
+    }
+
+    #[test]
+    fn a_zero_maximum_disables_rotation_rather_than_forcing_it() {
+        // Same contract the sensor writers use for OUTPUT_MAX_BYTES=0.
+        // A naive `size >= max` would rotate on the very first write,
+        // since size starts at 0 too.
+        let dir = temp_dir("zeromax");
+        let mut w = OutputWriter::open(dir.join("cowrie.json"), 0).unwrap();
+
+        for _ in 0..5 {
+            assert!(w.write_lines(&[b"{\"a\":1}".to_vec()]));
+        }
+
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1, "no rotation with max=0");
+    }
+
+    #[test]
+    fn reopening_resumes_the_size_from_disk() {
+        // The restart path. Seeding size at 0 against a near-full file
+        // resets the rotation countdown, so the file keeps growing past
+        // the bound with nothing to show why.
+        let dir = temp_dir("resume");
+        let path = dir.join("cowrie.json");
+        fs::write(&path, b"{\"a\":1}\n").unwrap();
+
+        let mut w = OutputWriter::open(path, 1).unwrap();
+        assert!(w.size > 0, "size must come from the existing file");
+
+        assert!(w.write_lines(&[b"{\"a\":2}".to_vec()]));
+        assert_eq!(rotated_count(&dir), 1, "the pre-existing content rotates aside");
+    }
 }

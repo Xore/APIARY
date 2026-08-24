@@ -49,8 +49,6 @@ jobs:
             context: arcane/home/honeypot-endlessh/endlessh-honeypot
           - image: http-honeypot
             context: arcane/home/honeypot-http/http-honeypot
-          - image: ip-enrichment-worker
-            context: arcane/home/honeypot-ip-enrichment-worker/ip-enrichment-worker
           - image: llm-worker
             context: llm-worker
           - image: multipot

@@ -129,8 +129,8 @@ flowchart LR
     subgraph tannerStack["honeypot-tanner"]
       tannerSvcs["SNARE + TANNER analyzer/API/web<br/>+ nested Docker + Redis"]
     end
-    subgraph ipEnrichStack["honeypot-ip-enrichment-worker<br/>no network of any kind"]
-      ipEnrichSvc["ip-enrichment-worker<br/>via_port → real attacker IP,<br/>ingest-time not read-time"]
+    subgraph ipEnrichStack["honeypot-dashboard —<br/>backend-worker-enrichment<br/>no network of any kind"]
+      ipEnrichSvc["backend-service ip_enrichment<br/>via_port → real attacker IP,<br/>ingest-time not read-time"]
     end
     subgraph elkStack["honeypot-elk"]
       elkSvcs["Filebeat, Elasticsearch,<br/>Kibana, EveBox, Arkime"]
@@ -285,7 +285,7 @@ flowchart TB
     end
   end
 
-  subgraph ipEnrichStackG["honeypot-ip-enrichment-worker —<br/>networkless, no isolated-sensor-network<br/>membership at all (#37/#38)"]
+  subgraph ipEnrichStackG["honeypot-dashboard, backend-worker-enrichment —<br/>networkless, no isolated-sensor-network<br/>membership at all (#37/#38)"]
     ipEnrich["via_port -> real attacker IP,<br/>ingest time not read time.<br/>Only for sensors not PROXY-wrapped:<br/>Cowrie, Dionaea, every Conpot persona,<br/>DNS honeypot, Cisco ASA (non-WebVPN side)"]
   end
   enrichedLogs[("logs/enriched/*.json")]
@@ -692,7 +692,7 @@ flowchart TB
 
   rawJoinLogs["raw JSON logs — not PROXY-wrapped<br/>(cowrie, dionaea, every conpot<br/>persona, dns-honeypot,<br/>cisco-asa's non-WebVPN side)"]
 
-  subgraph workerEnrich["honeypot-ip-enrichment-worker —<br/>ingest time, networkless (#37/#38)"]
+  subgraph workerEnrich["backend-worker-enrichment —<br/>ingest time, networkless (#37/#38)"]
     ingestJoin["via_port -> real attacker IP,<br/>writes logs/enriched/*.json"]
   end
 
@@ -740,11 +740,17 @@ flowchart TB
 ```
 
 **The `via_port` → real attacker IP join now happens at ingest time, not
-dashboard read time.** `honeypot-ip-enrichment-worker` ([#37](https://github.com/Xore/APIARY/issues/37)/[#38](https://github.com/Xore/APIARY/issues/38))
-reads the same portbridge connection log and each affected sensor's raw JSON
-off disk — no network access of any kind, matching the dashboard's own
+dashboard read time.** `backend-service`'s `ip_enrichment` module
+([#37](https://github.com/Xore/APIARY/issues/37)/[#38](https://github.com/Xore/APIARY/issues/38)),
+running as the `backend-worker-enrichment` service of the `honeypot-dashboard`
+stack, reads the same portbridge connection log and each affected sensor's raw
+JSON off disk — no network access of any kind, matching the dashboard's own
 Docker-socket-exclusion posture — and writes an already-joined copy to
-`logs/enriched/*.json`. Filebeat tails that instead of the raw path for the
+`logs/enriched/*.json`.
+
+It began as a standalone Go stack of the same name, ported to Rust in #1610
+and retired in #1890 once the two had been confirmed to agree; the design
+below is unchanged, only where it runs. Filebeat tails that instead of the raw path for the
 five sensors that need it (cowrie, dionaea, every conpot persona,
 dns-honeypot, and cisco-asa-honeypot's non-WebVPN side; see the ingestion
 diagram above for why every other sensor never needed this join at all —
