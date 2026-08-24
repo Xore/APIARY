@@ -1,103 +1,68 @@
 #!/usr/bin/env python3
-"""Trust X-Forwarded-For from the tunnel peer only (#1876).
+"""Log the forwarded header as a fact; let the worker decide (#1876).
 
-router_patch.py (#1419) made getRealRemote() return ctx.RemoteAddr()
-verbatim, dropping upstream's unvalidated X-Real-IP trust. That was right
-and its stated reasoning was that HellPot runs "raw-port/portbridge-only
-(no Traefik hostname)", so RemoteAddr is either the attacker directly or
-the tunnel peer with a port the ip-enrichment-worker's via_port join can
-resolve against portbridge's connection log.
+The first version of this patch resolved X-Forwarded-For inside
+getRealRemote(), trusting it whenever RemoteAddr was the tunnel peer --
+the rule galah's xff_trust_patch.py uses (#1511). That rule is safe for
+galah and unsafe here, and the difference is the deployment:
 
-That statement stopped being true. #1509 added a Traefik route for HellPot
--- the bare/www/static hosts -- reaching it through socat rather than
-portbridge:
+  * galah's raw port is source-preserving, so on that path RemoteAddr is
+    the attacker. "RemoteAddr is the tunnel peer" therefore means "this
+    came through Traefik", and trusting the header follows.
 
-    honeypot-hellpot:
-      loadBalancer:
-        servers:
-          - url: "http://socat-hp-hellpot:8084"
+  * HellPot's portbridge path is *not* source-preserving -- that is the
+    entire reason enrichHellpotLine joins on the port of a tunnel-peer
+    RemoteAddr. So here RemoteAddr is the tunnel peer on *both* paths, the
+    condition cannot tell them apart, and trusting the header on the
+    portbridge path lets an attacker set their own source by sending one.
+    That is precisely the spoofing #1419 removed.
 
-portbridge never sees those connections, so it writes no record for them,
-so the via_port join has nothing to match and misses permanently. The two
-changes were never reconciled, and the result is measurable: 192 hellpot
-events a day logging the tunnel peer as REMOTE_ADDR with no way to recover
-the client. Every other sensor is attributed; these are most of what is
-left.
+There is no header HellPot can check to distinguish the paths, because
+anything Traefik adds an attacker can also send. What does distinguish
+them is something HellPot cannot see: whether portbridge relayed the
+connection. Only the enrichment worker knows that, because only it holds
+portbridge's connection log.
 
-socat does not strip headers -- it is a byte pipe and forwards the request
-verbatim -- so Traefik's X-Forwarded-For arrives intact. The address was
-never destroyed; nothing was reading it.
+So this patch stops deciding. REMOTE_ADDR keeps the true TCP peer and its
+port -- unchanged from router_patch.py, so the via_port join still works --
+and the raw header is recorded alongside it as XFF. The worker then runs
+both joins and adjudicates:
 
-Same trust rule as galah's xff_trust_patch.py (#1511), which solved exactly
-this situation for exactly this reason:
+  * via_port resolves            -> portbridge relayed it; that is ground
+                                    truth, derived from the connection
+                                    rather than from its content.
+  * via_port misses, XFF present -> Traefik path; the header is the only
+                                    evidence and portbridge never saw it.
+  * both, and they disagree      -> surfaced with a warning rather than
+                                    silently resolved. On the portbridge
+                                    path that disagreement *is* a spoof
+                                    attempt, which is worth seeing.
 
-  * X-Forwarded-For is consulted *only* when RemoteAddr is the tunnel peer.
-    On the raw-port path RemoteAddr is the attacker and the header is fully
-    attacker-controlled, so trusting it there would reintroduce precisely
-    the spoofing #1419 removed -- confirmed live at the time by sending a
-    request carrying its own header and seeing it logged.
+Recording the header rather than acting on it also means a spoofed value
+is preserved as evidence instead of being either believed or discarded.
 
-  * The *last* hop is taken, not the first. Cloudflare appends the real
-    client to whatever XFF the client already sent rather than replacing
-    it, so the leftmost hop is spoofable and the rightmost is the one
-    Cloudflare itself wrote.
-
-The port is preserved where XFF is not used, because the via_port join on
-the portbridge path depends on it -- that is the whole reason #1419 chose
-RemoteAddr() over RemoteIP(). When XFF does resolve the client, the port is
-portbridge-irrelevant and carries no meaning, so it is dropped rather than
-reported as if it were the attacker's.
-
-Same shape as router_patch.py and galah's: exact-match string replacement
-with a marker for idempotency, applied at Docker build time.
+Same shape as router_patch.py and dionaea/log_rotation_patch.py:
+exact-match string replacement with a marker for idempotency, applied at
+Docker build time. Runs after router_patch.py, which owns getRealRemote().
 """
 from pathlib import Path
 
-MARKER = "honeypot-stack: trust XFF from the tunnel peer only (#1876)"
-ROUTER_MARKER = "honeypot-stack: drop spoofable X-Real-IP trust, keep the port (#1419)"
+MARKER = "honeypot-stack: record the forwarded header, adjudicate in the worker (#1876)"
 TARGET = Path("/build/internal/http/router.go")
 
-# router_patch.py runs first and leaves exactly this.
-OLD = '''func getRealRemote(ctx *fasthttp.RequestCtx) string {
-	// --- ROUTER_MARKER ---
-	return ctx.RemoteAddr().String()
-}'''.replace("ROUTER_MARKER", ROUTER_MARKER)
+OLD = '''	slog := log.With().
+		Str("USERAGENT", string(ctx.UserAgent())).
+		Str("REMOTE_ADDR", remoteAddr).
+		Interface("URL", string(ctx.RequestURI())).Logger()'''
 
-NEW = '''func getRealRemote(ctx *fasthttp.RequestCtx) string {
-	// --- ROUTER_MARKER ---
-	// --- MARKER_PLACEHOLDER ---
-	addr := ctx.RemoteAddr().String()
-	const tunnelPeerIP = "10.8.0.1"
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil || host != tunnelPeerIP {
-		return addr
-	}
-	xff := string(ctx.Request.Header.Peek("X-Forwarded-For"))
-	if xff == "" {
-		return addr
-	}
-	hops := strings.Split(xff, ",")
-	client := strings.TrimSpace(hops[len(hops)-1])
-	if client == "" {
-		return addr
-	}
-	return client
-}'''.replace("ROUTER_MARKER", ROUTER_MARKER).replace("MARKER_PLACEHOLDER", MARKER)
-
-
-def ensure_imports(text: str) -> str:
-    """`net` and `strings` are needed by the block above.
-
-    Added only when absent: upstream may already import either, and a
-    duplicate import is a compile error rather than a no-op.
-    """
-    for pkg in ("net", "strings"):
-        if f'\n\t"{pkg}"\n' in text:
-            continue
-        marker = "import (\n"
-        index = text.index(marker) + len(marker)
-        text = text[:index] + f'\t"{pkg}"\n' + text[index:]
-    return text
+NEW = '''	// --- MARKER_PLACEHOLDER ---
+	slog := log.With().
+		Str("USERAGENT", string(ctx.UserAgent())).
+		Str("REMOTE_ADDR", remoteAddr).
+		Str("XFF", string(ctx.Request.Header.Peek("X-Forwarded-For"))).
+		Interface("URL", string(ctx.RequestURI())).Logger()'''.replace(
+    "MARKER_PLACEHOLDER", MARKER
+)
 
 
 def main():
@@ -107,11 +72,10 @@ def main():
     count = text.count(OLD)
     if count != 1:
         raise SystemExit(
-            "xff_trust_patch.py: expected exactly 1 match for router_patch.py's "
-            "getRealRemote(), found {} -- run router_patch.py first".format(count)
+            "xff_trust_patch.py: expected exactly 1 match for hellPot()'s log "
+            "builder, found {}".format(count)
         )
-    text = text.replace(OLD, NEW, 1)
-    TARGET.write_text(ensure_imports(text))
+    TARGET.write_text(text.replace(OLD, NEW, 1))
 
 
 if __name__ == "__main__":

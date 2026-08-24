@@ -364,6 +364,9 @@ fn portbridge_row(src: &Value) -> EventRow {
         detail.push_str(&format!(" · p0f: {os}"));
     }
     EventRow {
+        // A portbridge document is the relay's own record, so there is no
+        // second join to disagree with it.
+        src_ip_claimed: String::new(),
         // Synthesised from a portbridge document rather than read from a
         // hit, so it has no id and offers no full-detail action.
         id: String::new(),
