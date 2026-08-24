@@ -813,8 +813,8 @@ function Overview() {
                           <a href={row.link} title="show events for this captured artifact">{row.download}</a>
                         </td>
                         <td className="v">
-                          <a className="lnk" href={`/payload-analysis/${row.shasum}`}>static analysis →</a>{' '}
-                          <a className="lnk" href={row.vt} target="_blank" rel="noopener noreferrer">VirusTotal →</a>
+                          <a className="btn btn-ghost btn-sm" href={`/payload-analysis/${row.shasum}`}>static analysis →</a>{' '}
+                          <a className="btn btn-ghost btn-sm" href={row.vt} target="_blank" rel="noopener noreferrer">VirusTotal →</a>
                         </td>
                       </tr>
                     ))}

@@ -258,19 +258,31 @@ function buildGeneratedColumns(
     { header: 'size', className: 'n', render: (row) => `${(num(row, 'size_bytes') / 1024).toFixed(0)} KB` },
     {
       header: 'pdf',
+      // #1898: these were .lnk -- link styling on controls that act. View
+      // opens a modal and delete destroys a report, and the two read
+      // identically, which is the worst version of this: an operator cannot
+      // tell from looking which one is destructive. A control that acts is a
+      // button with the variant that says what it does; download navigates,
+      // so it stays an anchor.
+      //
+      // .hp-rp-row-actions is the theme's own class for this row, and it
+      // already carries a rule for .btn-danger inside it -- the design
+      // expected buttons here all along and the port used .lnk.
       render: (row) => (
-        <div
-          style={{ display: 'flex', gap: 12, alignItems: 'center' }}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <button className="lnk" type="button" onClick={() => onView(row)}>
-            view →
+        <div className="hp-rp-row-actions" onClick={(event) => event.stopPropagation()}>
+          <button className="btn btn-secondary btn-sm" type="button" onClick={() => onView(row)}>
+            view
           </button>
-          <a className="lnk" href={`/api/report/${encodeURIComponent(str(row, 'id'))}/pdf`} target="_blank" rel="noopener noreferrer">
+          <a
+            className="btn btn-ghost btn-sm"
+            href={`/api/report/${encodeURIComponent(str(row, 'id'))}/pdf`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
             download
           </a>
           <button
-            className="lnk text-danger"
+            className="btn btn-danger btn-sm"
             type="button"
             disabled={busyId === str(row, 'id')}
             onClick={() => onDelete(row)}
@@ -329,7 +341,7 @@ function ReportViewerModal({ id, title, onClose }: { id: string; title: string; 
         </button>
         <h2 className="pdf-viewer-title">
           {title || 'Report'}{' '}
-          <a className="lnk" href={url} target="_blank" rel="noopener noreferrer">
+          <a className="btn btn-ghost btn-sm" href={url} target="_blank" rel="noopener noreferrer">
             open in new tab ↗
           </a>
         </h2>

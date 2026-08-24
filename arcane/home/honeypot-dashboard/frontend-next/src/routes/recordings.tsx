@@ -125,7 +125,7 @@ function ReplayPane({ row }: { row: RecordingRow }) {
       </p>
       <p className="subtitle">
         {replay.frames.toLocaleString('en-US')} frames · {replay.duration_seconds.toFixed(1)}s of terminal time ·{' '}
-        <a className="lnk" href={`/tty-replay/${encodeURIComponent(row.shasum)}`}>
+        <a className="btn btn-secondary btn-sm" href={`/tty-replay/${encodeURIComponent(row.shasum)}`}>
           open replay page →
         </a>
       </p>
