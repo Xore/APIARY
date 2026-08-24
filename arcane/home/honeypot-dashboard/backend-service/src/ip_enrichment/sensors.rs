@@ -369,13 +369,74 @@ pub fn adjudicate_source(observed: &str, relayed: Option<String>, claimed: Optio
 /// leftmost entry is attacker-controlled and the rightmost is the one
 /// Cloudflare itself wrote. A value that is not an address is not evidence
 /// and must never reach a field the dashboard renders as one.
+/// Who the proxy chain in front of a sensor says the client is.
+///
+/// The obvious reading -- the last hop of X-Forwarded-For -- is wrong here,
+/// and shipped wrong for months. Each proxy *appends the peer it saw*, so on
+/// the Cloudflare -> Traefik -> sensor path the chain ends with the address
+/// Traefik saw, which is Cloudflare's edge. Measured on a live request:
+/// `X-Forwarded-For: <client>, 172.69.150.126`, the trailing address being a
+/// Cloudflare edge node. #1511 took the last hop, so every proxied galah
+/// event was filed against Cloudflare rather than against an attacker --
+/// 172.69.x sitting in the source list looking like ordinary traffic.
+///
+/// Cf-Connecting-Ip is the direct answer wherever Cloudflare set it: one
+/// value, the client, with no chain to index into. The fallback is the
+/// second-to-last hop, which is the entry Cloudflare itself appended. Both
+/// hold against a client that pre-seeds the header, because whatever an
+/// attacker writes stays to the *left* of what Cloudflare appends and so
+/// never becomes either answer.
+///
+/// This is only ever a claim. Whether it may be believed depends on the
+/// request having genuinely arrived through that chain, which is the
+/// caller's business and not this function's -- see enrich_galah_line.
 pub fn forwarded_claim(e: &Value) -> Option<String> {
-    let raw = e.get("XFF").and_then(Value::as_str).filter(|s| !s.is_empty())?;
-    let last = raw.rsplit(',').next()?.trim();
-    if last.parse::<std::net::IpAddr>().is_err() {
-        return None;
+    if let Some(cf) = header_value(e, "cf-connecting-ip").and_then(|v| valid_ip(&v)) {
+        return Some(cf);
     }
-    Some(last.to_string())
+    let raw = forwarded_header(e)?;
+    let hops: Vec<&str> = raw.split(',').map(str::trim).filter(|h| !h.is_empty()).collect();
+    // Two or more hops means a proxy appended its own peer behind the entry
+    // that identifies the client; a single hop means nothing was appended.
+    let idx = if hops.len() >= 2 { hops.len() - 2 } else { 0 };
+    valid_ip(hops.get(idx)?)
+}
+
+fn valid_ip(candidate: &str) -> Option<String> {
+    candidate.parse::<std::net::IpAddr>().ok().map(|_| candidate.to_string())
+}
+
+/// The raw X-Forwarded-For a sensor recorded, wherever it put it.
+///
+/// hellpot logs it as its own field, because it logs almost nothing else
+/// (hellpot/xff_trust_patch.py). galah already logs every request header,
+/// so it needs no patch to record one -- the value has been in
+/// httpRequest.headers the whole time, and the sensor was resolving it
+/// itself rather than leaving the decision to the worker (#1891).
+///
+/// Header names arrive in whatever case the client sent, so the lookup is
+/// case-insensitive: an attacker choosing `x-forwarded-for` should not be
+/// able to sidestep the adjudication by lowercasing it.
+fn forwarded_header(e: &Value) -> Option<String> {
+    if let Some(direct) = e.get("XFF").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+        return Some(direct.to_string());
+    }
+    header_value(e, "x-forwarded-for")
+}
+
+/// One request header out of whatever the sensor recorded, by name.
+///
+/// Header names arrive in the case the sender chose, so the match is
+/// case-insensitive: an attacker writing `x-forwarded-for` must not get
+/// different handling from one writing `X-Forwarded-For`.
+fn header_value(e: &Value, name: &str) -> Option<String> {
+    let headers = e.get("httpRequest")?.get("headers")?.as_object()?;
+    headers
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(name))
+        .and_then(|(_, value)| value.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 /// Write a verdict onto a line, so every sensor records a contradicted
@@ -542,6 +603,17 @@ pub fn enrich_hellpot_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _persona
 /// own "port" string. srcHost/tags (galah's own pre-join enrichment,
 /// looked up against the tunnel peer address) are deliberately left
 /// untouched, not deleted, not trusted.
+/// galah's Traefik-facing listen port, as it appears in the sensor's own
+/// `port` field.
+///
+/// Its whole job is to be a port portbridge never dials, so that "which
+/// door did this come through" is answerable from the log line instead of
+/// inferred. Changing it means changing galah's config.yaml `ports:` list
+/// and the socat target in vps/docker-compose.yml at the same time; leaving
+/// it merely wrong makes proxied requests fall back to the raw-port branch,
+/// where they resolve to the tunnel address rather than to anything untrue.
+const GALAH_PROXIED_PORT: &str = "8890";
+
 pub fn enrich_galah_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _persona: &str) -> (Vec<u8>, bool) {
     let Ok(mut e) = serde_json::from_slice::<Value>(line) else {
         return (line.to_vec(), true);
@@ -577,21 +649,67 @@ pub fn enrich_galah_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _persona: 
         return (marshal_if_changed(line, &e, changed), true);
     }
 
+    // Which of galah's two front doors this arrived at decides what counts
+    // as evidence, so the listen port is read before anything else.
+    //
+    // The two doors used to be one, and that is the whole defect behind
+    // #1891. Traefik and portbridge both landed on :8888 and both dial from
+    // the tunnel address, so a request that had crossed Cloudflare and one
+    // sent straight at the raw port were indistinguishable by the time a
+    // sensor or this worker saw them. Everything downstream was then a
+    // guess. galah takes a `ports:` list natively, so the doors are simply
+    // separate now (config.yaml, and the socat in vps/docker-compose.yml).
+    if e.get("port").and_then(Value::as_str) == Some(GALAH_PROXIED_PORT) {
+        // Only Traefik can reach this port. It is published on the
+        // WireGuard address, no portbridge rule targets it, and the sole
+        // dialler is socat-hp-galah -- so the Cloudflare -> Traefik chain
+        // is the only way a request arrives, and what that chain says about
+        // the client is the best evidence available. A via_port join is
+        // deliberately *not* attempted: portbridge never carried this
+        // connection, so any entry matching socat's ephemeral source port
+        // would be a coincidence, and the map keeps six hours of them.
+        let Some(client) = forwarded_claim(&e) else {
+            changed |= set_if_changed(&mut e, "src_ip", ip);
+            return (marshal_if_changed(line, &e, changed), false);
+        };
+        e["srcIP"] = Value::from(client.clone());
+        changed |= set_if_changed(&mut e, "src_ip", client);
+        return (marshal_if_changed(line, &e, changed), true);
+    }
+
     let port: Option<i64> = e.get("srcPort").and_then(Value::as_str).and_then(|s| s.parse().ok());
     let Some(port) = port.filter(|p| *p != 0) else {
         changed |= set_if_changed(&mut e, "src_ip", ip);
         return (marshal_if_changed(line, &e, changed), true);
     };
 
-    let Some(real) = super::viamap::lookup(vm, port, extract_line_time(&e)) else {
+    // The raw port: portbridge relayed this, so its connection log knows
+    // who dialled, and a forwarding header is just bytes the attacker
+    // chose to send. #1511 had it the other way round -- galah's own
+    // xff_trust_patch.py rewrote srcIP from X-Forwarded-For whenever
+    // RemoteAddr was the tunnel peer, which on this port is *always*.
+    // Confirmed against the running stack before removing it: a request to
+    // the raw port carrying `X-Forwarded-For: 198.51.100.77` was stored
+    // with that as source.ip, so anyone could file their traffic under any
+    // address they liked. Same defect as #1883, in the code #1883 was
+    // copied from.
+    //
+    // portbridge's record wins here because it is evidence *about* the
+    // connection rather than content carried inside it. A header that
+    // disagrees is kept and flagged rather than dropped: on this path a
+    // contradiction is someone trying the above, which is worth seeing.
+    let at = extract_line_time(&e);
+    let relayed = super::viamap::lookup(vm, port, at).map(|real| real.to_string());
+    let verdict = adjudicate_source(&ip, relayed, forwarded_claim(&e));
+
+    if !verdict.resolved {
         changed |= set_if_changed(&mut e, "src_ip", ip);
         return (marshal_if_changed(line, &e, changed), false);
-    };
-    let real = real.to_string();
+    }
 
-    e["srcIP"] = Value::from(real.clone());
-    e["src_ip"] = Value::from(real.clone());
+    e["srcIP"] = Value::from(verdict.ip.clone());
     e["src_port"] = Value::from(port);
+    apply_verdict(&mut e, &verdict);
     (marshal_if_changed(line, &e, true), true)
 }
 
@@ -961,10 +1079,27 @@ mod tests {
     }
 
     #[test]
-    fn the_last_forwarded_hop_wins_not_the_first() {
-        // Cloudflare appends the real client to whatever the client already
-        // sent, so an attacker's own value ends up left of the truth.
-        let e: Value = serde_json::json!({"XFF": "1.2.3.4, 198.51.100.9"});
+    fn the_hop_cloudflare_appended_wins_not_the_last_one() {
+        // This test used to assert the last hop, on the reasoning that
+        // Cloudflare appends the real client to whatever the client sent,
+        // so the attacker's own value ends up left of the truth. The first
+        // half is right and the conclusion does not follow: Traefik sits
+        // behind Cloudflare and appends the peer *it* saw, which is a
+        // Cloudflare edge node. So the chain ends one hop past the client.
+        //
+        // Not a hypothetical -- a request through the live subdomain
+        // arrived as `<client>, 172.69.150.126`, and every proxied galah
+        // event had been filed against addresses like that one.
+        let e: Value = serde_json::json!({"XFF": "1.2.3.4, 198.51.100.9, 172.69.150.126"});
+        assert_eq!(forwarded_claim(&e).as_deref(), Some("198.51.100.9"));
+    }
+
+    #[test]
+    fn a_lone_hop_is_taken_as_it_stands() {
+        // Nothing appended anything, so there is no proxy entry to skip
+        // past. hellpot's own patch records the header verbatim and can
+        // see chains this short.
+        let e: Value = serde_json::json!({"XFF": "198.51.100.9"});
         assert_eq!(forwarded_claim(&e).as_deref(), Some("198.51.100.9"));
     }
 
@@ -1046,4 +1181,173 @@ mod tests {
         assert_eq!(field(&out, "src_ip").as_deref(), Some(TUNNEL_PEER_IP));
     }
 
+    // ---- galah: which door a request came through (#1891) ----
+
+    /// A galah line as the sensor writes one, with the headers it records.
+    fn galah_line(listen_port: &str, src_port: &str, headers: Value) -> String {
+        json!({
+            "msg": "successfulResponse",
+            "srcIP": TUNNEL_PEER_IP,
+            "srcPort": src_port,
+            "port": listen_port,
+            "httpRequest": {"request": "/", "headers": headers},
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn a_forwarding_header_cannot_name_the_source_on_the_raw_port() {
+        // The bug this whole change exists for. galah's own patch rewrote
+        // srcIP from X-Forwarded-For whenever the peer was the tunnel
+        // address -- which on the raw port is every single request -- so
+        // sending the header was enough to choose your own identity.
+        // Reproduced against the running stack before the fix: a request
+        // carrying 198.51.100.77 was stored under exactly that address.
+        let line = galah_line(
+            "8888",
+            "43112",
+            json!({"X-Forwarded-For": "198.51.100.77"}),
+        );
+        let (out, resolved) = enrich_galah_line(
+            line.as_bytes(), &vm_with(43112, "203.0.113.9"), &ViaMap::new(), "galah",
+        );
+        let e: Value = serde_json::from_slice(&out).unwrap();
+
+        assert!(resolved);
+        assert_eq!(e["src_ip"], json!("203.0.113.9"), "portbridge saw who dialled");
+        // Kept rather than dropped: on this path the header is somebody
+        // trying the above, and that is worth having in the record.
+        assert_eq!(e["src_ip_claimed"], json!("198.51.100.77"));
+        assert_eq!(e["src_ip_conflict"], json!(true));
+    }
+
+    #[test]
+    fn the_raw_port_still_resolves_ordinary_traffic() {
+        // Most galah traffic carries no forwarding header at all; the join
+        // has to go on working exactly as before.
+        let line = galah_line("8888", "51982", json!({"User-Agent": "curl/7.68.0"}));
+        let (out, resolved) = enrich_galah_line(
+            line.as_bytes(), &vm_with(51982, "45.79.207.110"), &ViaMap::new(), "galah",
+        );
+        let e: Value = serde_json::from_slice(&out).unwrap();
+
+        assert!(resolved);
+        assert_eq!(e["src_ip"], json!("45.79.207.110"));
+        assert!(e.get("src_ip_conflict").is_none(), "nothing contradicted it");
+    }
+
+    #[test]
+    fn the_proxied_port_reads_the_client_not_cloudflares_edge() {
+        // Traefik appends the peer *it* saw, which is a Cloudflare edge
+        // node, so the last hop of the chain is never the attacker.
+        // Measured live: `<client>, 172.69.150.126`. #1511 took that last
+        // hop, which is why Cloudflare addresses turned up in galah's
+        // source list looking like ordinary traffic.
+        let line = galah_line(
+            GALAH_PROXIED_PORT,
+            "34228",
+            json!({"X-Forwarded-For": "203.0.113.9, 172.69.150.126"}),
+        );
+        let (out, resolved) = enrich_galah_line(
+            line.as_bytes(), &ViaMap::new(), &ViaMap::new(), "galah",
+        );
+        let e: Value = serde_json::from_slice(&out).unwrap();
+
+        assert!(resolved);
+        assert_eq!(e["src_ip"], json!("203.0.113.9"));
+    }
+
+    #[test]
+    fn a_client_cannot_prepend_its_way_into_the_answer() {
+        // Cloudflare appends the address it accepted the connection from,
+        // so anything the client wrote itself stays to the left of it and
+        // is never what gets read.
+        let line = galah_line(
+            GALAH_PROXIED_PORT,
+            "34229",
+            json!({"X-Forwarded-For": "198.51.100.77, 203.0.113.9, 172.69.150.126"}),
+        );
+        let (out, _) = enrich_galah_line(line.as_bytes(), &ViaMap::new(), &ViaMap::new(), "galah");
+        let e: Value = serde_json::from_slice(&out).unwrap();
+
+        assert_eq!(e["src_ip"], json!("203.0.113.9"), "the hop Cloudflare appended");
+    }
+
+    #[test]
+    fn cf_connecting_ip_is_preferred_where_cloudflare_set_it() {
+        let line = galah_line(
+            GALAH_PROXIED_PORT,
+            "34230",
+            json!({
+                "Cf-Connecting-Ip": "203.0.113.9",
+                "X-Forwarded-For": "198.51.100.77, 172.69.150.126",
+            }),
+        );
+        let (out, _) = enrich_galah_line(line.as_bytes(), &ViaMap::new(), &ViaMap::new(), "galah");
+        let e: Value = serde_json::from_slice(&out).unwrap();
+
+        assert_eq!(e["src_ip"], json!("203.0.113.9"));
+    }
+
+    #[test]
+    fn the_proxied_port_never_joins_against_portbridge() {
+        // portbridge does not carry this connection, so socat's ephemeral
+        // source port matching an entry is a coincidence -- and with six
+        // hours of history per port under this traffic, a likely one.
+        // Taking it would swap in an unrelated attacker's address.
+        let line = galah_line(
+            GALAH_PROXIED_PORT,
+            "34228",
+            json!({"X-Forwarded-For": "203.0.113.9, 172.69.150.126"}),
+        );
+        let (out, _) = enrich_galah_line(
+            line.as_bytes(), &vm_with(34228, "198.51.100.77"), &ViaMap::new(), "galah",
+        );
+        let e: Value = serde_json::from_slice(&out).unwrap();
+
+        assert_eq!(e["src_ip"], json!("203.0.113.9"), "the colliding entry is ignored");
+    }
+
+    #[test]
+    fn a_header_name_in_any_case_is_still_the_same_header() {
+        let line = galah_line(
+            GALAH_PROXIED_PORT,
+            "34231",
+            json!({"x-forwarded-for": "203.0.113.9, 172.69.150.126"}),
+        );
+        let (out, _) = enrich_galah_line(line.as_bytes(), &ViaMap::new(), &ViaMap::new(), "galah");
+        let e: Value = serde_json::from_slice(&out).unwrap();
+
+        assert_eq!(e["src_ip"], json!("203.0.113.9"));
+    }
+
+    #[test]
+    fn a_proxied_request_with_no_chain_is_left_unresolved() {
+        // Nothing to read and nothing to join against. Retrying later is
+        // right; inventing an address is not.
+        let line = galah_line(GALAH_PROXIED_PORT, "34232", json!({"User-Agent": "curl/8"}));
+        let (out, resolved) = enrich_galah_line(
+            line.as_bytes(), &ViaMap::new(), &ViaMap::new(), "galah",
+        );
+        let e: Value = serde_json::from_slice(&out).unwrap();
+
+        assert!(!resolved);
+        assert_eq!(e["src_ip"], json!(TUNNEL_PEER_IP));
+    }
+
+    #[test]
+    fn garbage_in_the_chain_does_not_become_a_source() {
+        let line = galah_line(
+            GALAH_PROXIED_PORT,
+            "34233",
+            json!({"X-Forwarded-For": "not-an-address, 172.69.150.126"}),
+        );
+        let (out, resolved) = enrich_galah_line(
+            line.as_bytes(), &ViaMap::new(), &ViaMap::new(), "galah",
+        );
+        let e: Value = serde_json::from_slice(&out).unwrap();
+
+        assert!(!resolved);
+        assert_eq!(e["src_ip"], json!(TUNNEL_PEER_IP));
+    }
 }

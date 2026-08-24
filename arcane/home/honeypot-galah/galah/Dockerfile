@@ -9,17 +9,29 @@
 # whenever this image happens to rebuild. GALAH_REF is the commit tagged
 # v1.1.1 (latest at integration time, confirmed via `git ls-remote --tags`).
 #
-# #1511: galah's commonFields() (internal/logger/logger.go) originally
-# resolved srcIP/srcPort purely from r.RemoteAddr via net.SplitHostPort --
-# correct standalone, since galah was raw-port/portbridge-only, resolved via
-# ip-enrichment-worker's via_port join same as beelzebub/hellpot. Now that
-# #1511 adds a Traefik-routed subdomain alongside that raw port (Cloudflare
-# doesn't proxy 8889 -- not on its allowed non-standard-port list), a
-# Traefik-routed request's RemoteAddr becomes the WireGuard tunnel peer, not
-# the attacker. xff_trust_patch.py adds the same tunnel-peer-only XFF trust
-# http-honeypot/main.go's own clientIP() already uses for exactly this gap
-# -- see that patch's own docstring for the full reasoning (last-hop-only,
-# Cloudflare append semantics).
+# #1891: there is deliberately no xff_trust_patch.py here any more, and
+# adding one back would reopen a hole. galah's commonFields()
+# (internal/logger/logger.go) resolves srcIP/srcPort from r.RemoteAddr and
+# logs every request header in httpRequest.headers -- which is all the
+# worker needs, so upstream is left alone.
+#
+# #1511 patched it to trust X-Forwarded-For whenever RemoteAddr was the
+# WireGuard tunnel peer, because that release put a Traefik-routed
+# subdomain in front of galah (Cloudflare won't proxy 8889 -- not on its
+# allowed non-standard-port list) and such requests arrive from the tunnel,
+# not the attacker. The rule was meant to fire only on that path.
+#
+# It could not tell that path apart. galah's raw port is portbridge rule
+# `tcp:8889:10.8.0.2:8888`, with no `:pp`, so portbridge relays it and
+# RemoteAddr is the tunnel peer there too -- both paths look identical to
+# the sensor. Confirmed live rather than argued: a request to 8889 carrying
+# `X-Forwarded-For: 198.51.100.77` was logged with `srcIP` 198.51.100.77.
+# Any attacker could name their own source. Same defect as #1883, found in
+# the code #1883 was copied from.
+#
+# The decision belongs to the enrichment worker, which holds portbridge's
+# connection log -- the one piece of evidence that separates the two paths.
+# See backend-service/src/ip_enrichment/sensors.rs::enrich_galah_line.
 #
 # timeout_patch.py DOES patch source (#1513): SetupServer()'s hardcoded
 # WriteTimeout: 10 * time.Second -- not exposed via any CLI flag or `env:`
@@ -56,8 +68,6 @@ RUN git clone https://github.com/0x4d31/galah /build \
  && git checkout "$GALAH_REF"
 COPY timeout_patch.py /tmp/timeout_patch.py
 RUN python3 /tmp/timeout_patch.py
-COPY xff_trust_patch.py /tmp/xff_trust_patch.py
-RUN python3 /tmp/xff_trust_patch.py
 RUN go mod download
 RUN CGO_ENABLED=1 GOOS=linux go build -trimpath \
     -ldflags "-s -w -X main.version=$GALAH_REF" \
