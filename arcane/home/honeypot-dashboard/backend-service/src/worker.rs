@@ -281,6 +281,13 @@ pub fn spawn_enabled(state: AppState) {
                 tokio::spawn(async move { crate::correlator::correlator_loop(state).await });
                 tracing::info!("worker loop enabled: correlator");
             }
+            "workbench-reconcile" => {
+                let state = state.clone();
+                tokio::spawn(async move {
+                    crate::workbench_orchestrator::workbench_reconcile_loop(state).await
+                });
+                tracing::info!("worker loop enabled: workbench-reconcile");
+            }
             "threat-intel" => {
                 let state = state.clone();
                 tokio::spawn(async move { crate::threat_intel::threat_intel_loop(state).await });

@@ -162,6 +162,22 @@ services:
     environment:
       - LISTEN_ADDR=0.0.0.0:8082
       - ELASTICSEARCH_URL=http://elasticsearch:9200
+      # #1801: reconcile workbench runs nobody is looking at.
+      #
+      # reconcile_run already times out a child that outlives its queue
+      # deadline, but it only ran inside get_run and child_action -- both
+      # request-driven -- so a run whose worker never reported back sat in its
+      # last-written state indefinitely. Measured on a real document:
+      # updated_at still equal to created_at a day later, against a 30-minute
+      # queue_deadline.
+      #
+      # It belongs on THIS tier and not on backend-worker: reconciliation
+      # reads the analyzer spool directories to decide whether a request is
+      # queued, claimed or finished, and those are mounted here. Anywhere else
+      # every marker lookup returns nothing and the sweep concludes the
+      # opposite of the truth about every run it touches.
+      - WORKER_LOOPS=workbench-reconcile
+      - WORKBENCH_RECONCILE_INTERVAL_SECONDS=${WORKBENCH_RECONCILE_INTERVAL_SECONDS:-60}
       # #1677: addresses belonging to this fleet, excluded from the
       # dashboard's attacker aggregations. Suricata records `source.ip` as
       # whichever end it saw as the source, so our own hosts appear as
