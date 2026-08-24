@@ -38,6 +38,12 @@ services:
       - TZ=Europe/Berlin
     ports:
       - ${HP_BIND:-10.8.0.2}:8080:8080
+      # #1908: the Traefik-only door. Same server and same routes -- a
+      # second listener exists purely so the two ways in stop sharing a
+      # port, which is what left the source address up to a guess. Bound to
+      # the tunnel address like 8080, and no portbridge rule points at it,
+      # so socat-hp-hellpot is its only possible caller.
+      - ${HP_BIND:-10.8.0.2}:8090:8090
     volumes:
       - /opt/stacks/apiary/logs/hellpot:/var/log/honeypot
       - /opt/stacks/apiary/state/init-markers:/markers:ro

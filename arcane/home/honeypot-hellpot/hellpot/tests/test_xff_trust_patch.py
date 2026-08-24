@@ -23,15 +23,27 @@ HERE = Path(__file__).resolve().parent
 ROUTER_PATCH = HERE.parent / "router_patch.py"
 XFF_PATCH = HERE.parent / "xff_trust_patch.py"
 
-# Upstream yunginnanet/HellPot internal/http/router.go at the pinned ref,
-# both the function router_patch.py rewrites and the log builder
-# xff_trust_patch.py adds a field to. Copied from the real file rather than
-# abbreviated: the patches match on exact text, so a fixture that is merely
-# similar would pass while the real build failed.
+# Upstream yunginnanet/HellPot internal/http/router.go at the pinned ref:
+# every region the two patches touch, copied from the real file rather than
+# abbreviated. The patches match on exact text, so a fixture that is merely
+# similar would pass while the real build failed -- and it did, when #1908
+# added two anchors this fixture had trimmed away as scenery.
 UPSTREAM = '''package http
 
 import (
+	"bufio"
+	"fmt"
+	"net/http"
+	"runtime"
+	"strings"
+	"time"
+
+	"github.com/fasthttp/router"
+	"github.com/rs/zerolog"
 	"github.com/valyala/fasthttp"
+
+	"github.com/yunginnanet/HellPot/heffalump"
+	"github.com/yunginnanet/HellPot/internal/config"
 )
 
 func getRealRemote(ctx *fasthttp.RequestCtx) string {
@@ -54,6 +66,24 @@ func hellPot(ctx *fasthttp.RequestCtx) {
 		Str("USERAGENT", string(ctx.UserAgent())).
 		Str("REMOTE_ADDR", remoteAddr).
 		Interface("URL", string(ctx.RequestURI())).Logger()
+}
+
+// Serve starts our HTTP server and request router
+func Serve() error {
+	log = config.GetLogger()
+	l := config.HTTPBind + ":" + config.HTTPPort
+
+	r := router.New()
+
+	srv := getSrv(r)
+
+	//goland:noinspection GoBoolExpressions
+	if !config.UseUnixSocket || runtime.GOOS == "windows" {
+		log.Info().Str("caller", l).Msg("Listening and serving HTTP...")
+		return srv.ListenAndServe(l)
+	}
+
+	return nil
 }
 '''
 
@@ -104,6 +134,47 @@ class XffTrustPatch(unittest.TestCase):
         load(XFF_PATCH, self.target).main()
         self.assertEqual(first, self.target.read_text())
 
+
+    def test_the_two_doors_become_separate_listeners(self):
+        # The reason the sensor can answer "which way in" at all. While
+        # both paths landed on config.HTTPPort, portbridge's connection log
+        # was the only thing that could tell them apart -- and it answers by
+        # port alone over a six-hour window, so on the proxied path a
+        # coincidental match would file a request against an unrelated
+        # attacker.
+        result = self.apply_both()
+        self.assertIn("Traefik-only second listener", result)
+        self.assertIn('proxied := config.HTTPBind + ":" + "8090"', result)
+        self.assertIn("go func() {", result)
+        # The raw listener still runs, and still returns.
+        self.assertIn("return srv.ListenAndServe(l)", result)
+
+    def test_the_listen_port_is_recorded_on_every_request(self):
+        result = self.apply_both()
+        self.assertIn('Str("DST_PORT", localPort(ctx))', result)
+        self.assertIn("func localPort(ctx *fasthttp.RequestCtx) string {", result)
+
+    def test_the_helper_is_declared_at_file_scope(self):
+        # It went inside hellPot() the first time, which Go rejects. The
+        # build catches that, but only after a full image build.
+        result = self.apply_both()
+        helper = result.index("func localPort(")
+        handler = result.index("func hellPot(")
+        self.assertLess(helper, handler, "localPort must precede hellPot, not nest in it")
+
+    def test_the_added_imports_are_in_sorted_order(self):
+        # gofmt is enforced on the real tree, and an import spliced at the
+        # top of the block would fail it long after this patch ran.
+        result = self.apply_both()
+        block = result[result.index("import ("):result.index(")", result.index("import ("))]
+        # gofmt sorts within each blank-line-separated group, not across
+        # them; the additions belong to the stdlib group, which is first.
+        stdlib = block.split("\n\n")[0]
+        names = [line.strip().strip('"') for line in stdlib.splitlines() if line.strip().startswith('"')]
+        self.assertIn("net", names)
+        self.assertIn("strconv", names)
+        self.assertEqual(names, sorted(names), "gofmt keeps the stdlib group sorted")
+
     def test_the_result_is_valid_go(self):
         self.apply_both()
         # gofmt -e parses and reports syntax errors; a patch that produces
@@ -114,15 +185,20 @@ class XffTrustPatch(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
-    def test_it_needs_no_new_imports(self):
-        # Recording the header uses only what the function already has, so
-        # the patch never touches the import block -- which is where the
-        # earlier, deciding version could have introduced a duplicate import
-        # and turned a logging change into a compile error.
+    def test_each_added_import_appears_exactly_once(self):
+        # Recording the header needed nothing new, and #1908's listen-port
+        # helper needs net and strconv. Adding an import twice is the way
+        # this turns a logging change into a compile error, and a re-run
+        # over an already-patched file is exactly how it would happen.
         result = self.apply_both()
-        before = UPSTREAM[UPSTREAM.index("import ("):UPSTREAM.index(")", UPSTREAM.index("import ("))]
-        after = result[result.index("import ("):result.index(")", result.index("import ("))]
-        self.assertEqual(before, after)
+        block = result[result.index("import ("):result.index(")", result.index("import ("))]
+        for name in ('"net"', '"strconv"'):
+            self.assertEqual(block.count(name + "\n"), 1, name)
+
+    def test_applying_twice_changes_nothing(self):
+        once = self.apply_both()
+        load(XFF_PATCH, self.target).main()
+        self.assertEqual(self.target.read_text(), once)
 
     def test_it_refuses_to_run_before_router_patch(self):
         # router_patch.py owns getRealRemote(); this one only adds a log

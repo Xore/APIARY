@@ -8,11 +8,16 @@
 # socat forwards: VPS listen port → 10.8.0.2:home-exposed-port → app
 #
 # socat container         listen  →  home exposed  →  app internal
-# socat-hp-hellpot        :8084   →  10.8.0.2:8080  (hellpot :8080,
-#                                     intentional -- #1509, catches the
-#                                     bare/www/static hosts, was a dead
-#                                     `socat-static` bridge to a "(nginx)"
-#                                     backend that hasn't existed in years)
+# socat-hp-hellpot        :8084   →  10.8.0.2:8090  (hellpot :8090 -- the
+#                                     raw port until #1908 split the two
+#                                     ways in onto separate ports, so the
+#                                     enrichment worker can tell a proxied
+#                                     request from a direct one. Fronting
+#                                     hellpot at all is intentional --
+#                                     #1509, catches the bare/www/static
+#                                     hosts, was a dead `socat-static`
+#                                     bridge to a "(nginx)" backend that
+#                                     hasn't existed in years)
 # socat-hp-galah          :8085   →  10.8.0.2:8890  (galah :8890, #1511 --
 #                                     Cloudflare doesn't proxy galah's own
 #                                     raw port, so this backs a real
@@ -21,8 +26,10 @@
 #                                     this bridge reaches is what lets the
 #                                     enrichment worker tell a proxied
 #                                     request from a direct one)
-# socat-hp-wordpot        :8086   →  10.8.0.2:8081  (wordpot :80, #1512 --
-#                                     same reasoning as socat-hp-galah)
+# socat-hp-wordpot        :8086   →  10.8.0.2:8091  (wordpot :8090, #1512 --
+#                                     same reasoning as socat-hp-galah,
+#                                     including its #1908 split onto a
+#                                     port only this bridge reaches)
 # socat-hp-http           :8081   →  10.8.0.2:19081 (http-honeypot :8080)
 # socat-hp-snare          :8082   →  10.8.0.2:19082 (snare :8080)
 # socat-hp-dashboard      :8090   →  10.8.0.2:19090 (dashboard :8080)

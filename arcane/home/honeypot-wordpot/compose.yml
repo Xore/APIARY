@@ -46,6 +46,12 @@ services:
       - TZ=Europe/Berlin
     ports:
       - ${HP_BIND:-10.8.0.2}:8081:80
+      # #1908: the Traefik-only door. Same app, same handlers -- a second
+      # listener exists purely so the two ways in stop sharing a port, which
+      # is what let a header on the raw port decide the source address.
+      # Bound to the tunnel address like 8081, and no portbridge rule points
+      # at it, so socat-hp-wordpot is its only possible caller.
+      - ${HP_BIND:-10.8.0.2}:8091:8090
     volumes:
       - /opt/stacks/apiary/logs/wordpot:/opt/wordpot/logs
       - /opt/stacks/apiary/state/init-markers:/markers:ro
