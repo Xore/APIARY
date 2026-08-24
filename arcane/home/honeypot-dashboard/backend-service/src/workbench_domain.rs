@@ -563,7 +563,10 @@ pub fn valid_run_id(id: &str) -> bool {
     }
 }
 
-const TERMINAL_STATES: &[&str] = &["completed", "skipped", "failed", "timed_out", "cancelled"];
+/// States a run or child never leaves. Public because the reconcile
+/// sweeper (#1801) excludes them in the Elasticsearch query rather than
+/// fetching every run and discarding most of them.
+pub const TERMINAL_STATES: &[&str] = &["completed", "skipped", "failed", "timed_out", "cancelled"];
 
 pub fn is_terminal_state(state: &str) -> bool {
     TERMINAL_STATES.contains(&state)

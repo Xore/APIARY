@@ -224,6 +224,9 @@ pub async fn create_or_reuse_run(
     }
 }
 
+/// Debug rather than Display: these reach a log line, never a user. The
+/// HTTP layer maps each variant to a status and its own message.
+#[derive(Debug)]
 pub enum UpdateRunError {
     NotFound,
     Mutate(String),

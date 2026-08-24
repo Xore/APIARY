@@ -974,6 +974,113 @@ pub async fn child_action(
     .await
 }
 
+/// How many runs one pass will reconcile.
+///
+/// Bounded because "every non-terminal run" is unbounded over time, and an
+/// unbounded sweep is the kind of background job that is fine until the day it
+/// is not. Oldest-first, so anything skipped is picked up on the next pass
+/// rather than starved.
+const SWEEP_LIMIT: usize = 200;
+
+fn sweep_interval() -> std::time::Duration {
+    let secs = std::env::var("WORKBENCH_RECONCILE_INTERVAL_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(60);
+    std::time::Duration::from_secs(secs)
+}
+
+/// Reconcile runs nobody is looking at.
+///
+/// #1801: `reconcile_run` is correct -- it times out a child that outlives its
+/// queue deadline, and there is a test for it -- but it only ever ran inside
+/// `get_run` and `child_action`, both request-driven. A run whose worker never
+/// reported back therefore sat in its last-written state indefinitely.
+/// Measured on a real document: `updated_at` still equal to `created_at` a
+/// full day later, against a `queue_deadline` 30 minutes after creation. The
+/// timeout that exists to prevent exactly that had never been evaluated.
+///
+/// Must run on the tier that has the analyzer spool mounts. `marker_state`
+/// reads those directories to decide whether a request is still queued,
+/// claimed or done; without them every marker lookup returns None and the
+/// sweep would conclude the opposite of the truth about every run it touches.
+///
+/// Reconciles as each run's own recorded owner rather than bypassing the
+/// ownership check, so this reuses `update_run`'s optimistic-concurrency path
+/// exactly and introduces no second way to write a run.
+pub async fn workbench_reconcile_loop(state: AppState) {
+    let mut ticker = tokio::time::interval(sweep_interval());
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        ticker.tick().await;
+        sweep_once(&state).await;
+    }
+}
+
+async fn sweep_once(state: &AppState) {
+    let body = serde_json::json!({
+        "size": SWEEP_LIMIT,
+        "query": {"bool": {"must_not": [
+            {"terms": {"state": workbench_domain::TERMINAL_STATES}}
+        ]}},
+        // Oldest first: the runs most likely to have outlived a deadline are
+        // the ones nobody has touched in longest.
+        "sort": [{"updated_at": {"order": "asc"}}],
+        "_source": ["id", "owner"]
+    });
+    let result = match state
+        .es
+        .search_index(&[crate::workbench_es::RUNS_INDEX], body)
+        .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::warn!(%error, "workbench-reconcile: query failed");
+            return;
+        }
+    };
+
+    let targets: Vec<(String, String)> = result["hits"]["hits"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|hit| {
+            let source = &hit["_source"];
+            let id = source["id"].as_str()?.to_string();
+            let owner = source["owner"].as_str().unwrap_or_default().to_string();
+            Some((id, owner))
+        })
+        .collect();
+    if targets.is_empty() {
+        return;
+    }
+
+    let mut changed = 0usize;
+    for (id, owner) in &targets {
+        match crate::workbench_es::update_run(&state.es, id, owner, |run| {
+            let (reconciled, dirty) = reconcile_run(std::mem::take(run));
+            *run = reconciled;
+            Ok(dirty)
+        })
+        .await
+        {
+            Ok(_) => changed += 1,
+            // A run that vanished or changed owner mid-sweep is not an error
+            // worth shouting about; the next pass sees the current truth.
+            Err(crate::workbench_es::UpdateRunError::NotFound) => {}
+            Err(error) => {
+                tracing::warn!(run_id = %id, ?error, "workbench-reconcile: update failed")
+            }
+        }
+    }
+    tracing::debug!(
+        scanned = targets.len(),
+        reconciled = changed,
+        "workbench-reconcile pass complete"
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
