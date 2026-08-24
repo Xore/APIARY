@@ -24,6 +24,8 @@ import { confirmAction } from '../components/ConfirmDialog'
 import { EsHistoryConsole, type EsStorage } from '../components/EsHistoryConsole'
 import { str } from '../components/StoreList'
 import { applyPalette, applyTheme, useThemeMode, type ThemeMode } from '../lib/prefs'
+import { ThemeGallery } from '../components/ThemeGallery'
+import { themeSearchTerms } from '../lib/themes'
 import type { JsonRecord } from '../lib/json'
 import { prefetchEnabled, setPrefetchEnabled } from '../lib/prefetch'
 import { getSessionUser, getAccountActions, type User, type AccountActions } from '../lib/auth'
@@ -479,7 +481,7 @@ const SEARCH_INDEX: Record<PaneId, Record<string, string>> = {
   },
   appearance: {
     theme:
-      'appearance theme dark light system color mode palette accent preset claude slate ocean sage lavender lime amber rose neon',
+      `appearance theme dark light system color mode palette accent preset theme ${themeSearchTerms()}`,
     readability:
       'appearance readability density compact comfortable rows spacing motion animation reduced accessibility high contrast vision evidence font size text larger',
   },
@@ -2377,29 +2379,6 @@ function AuditLogCard({ initial }: { initial: AuditResponse | null }) {
   )
 }
 
-// The nine themes from theme.css, in the legacy picker's order
-// (settings_modal.html:115-125); claude is the default.
-//
-// These stopped being accent presets in Xore/theme#104. Each one now owns
-// the whole surface -- ground, sidebar, toolbar, surface ramp, borders, text
-// ramp, elevation and accent -- in both light and dark. The name is written
-// to data-hp-theme (data-hp-palette stays as an accepted alias upstream and
-// is what this file has always read).
-//
-// This list is still hardcoded here and in the boot script; #1758 replaces
-// both with one manifest and a gallery that can actually preview a whole
-// surface, which a single swatch dot cannot.
-const PALETTES: { id: string; label: string }[] = [
-  { id: 'claude', label: 'Claude' },
-  { id: 'slate', label: 'Slate' },
-  { id: 'ocean', label: 'Ocean' },
-  { id: 'sage', label: 'Sage' },
-  { id: 'lavender', label: 'Lavender' },
-  { id: 'lime', label: 'Lime' },
-  { id: 'amber', label: 'Amber' },
-  { id: 'rose', label: 'Rose' },
-  { id: 'neon', label: 'Neon' },
-]
 
 function Settings() {
   const { user, accountActions, ...data } = Route.useLoaderData()
@@ -2442,7 +2421,6 @@ export function SettingsSurface({
 }) {
   const { storage, preferences, admin, services, history, audit, reporterStats } = data
   const theme = useThemeMode()
-  const [palette, setPalette] = useState('claude')
   const [prefetch, setPrefetch] = useState(true)
   const [prefsData, setPrefsData] = useState<Prefs | null | 'loading'>('loading')
   const [storageData, setStorageData] = useState<EsStorage | null>(null)
@@ -2537,7 +2515,6 @@ export function SettingsSurface({
   }, [])
 
   useEffect(() => {
-    setPalette(document.documentElement.dataset.hpTheme ?? 'claude')
     setPrefetch(prefetchEnabled())
     // The reconcile against server-stored appearance moved to the root
     // route's mount in #1755, so it now happens once per session on every
@@ -2568,11 +2545,6 @@ export function SettingsSurface({
       cancelled = true
     }
   }, [storage, preferences, admin, services, history, audit, reporterStats])
-
-  const pickPalette = (id: string) => {
-    applyPalette(id)
-    setPalette(id)
-  }
 
   const modes: { id: ThemeMode; label: string }[] = [
     { id: 'system', label: 'System' },
@@ -2682,20 +2654,11 @@ export function SettingsSurface({
         ))}
       </div>
       <p className="note">Theme</p>
-      <div className="segmented hp-palette-pick" role="group" aria-label="Theme">
-        {PALETTES.map((preset) => (
-          <button
-            key={preset.id}
-            type="button"
-            data-value={preset.id}
-            aria-pressed={palette === preset.id}
-            onClick={() => pickPalette(preset.id)}
-          >
-            <span className="dot" aria-hidden="true" />
-            {preset.label}
-          </button>
-        ))}
-      </div>
+      {/* #1758: was nine 11px dots whose colours were hardcoded dark-mode
+          accents, so in light mode they previewed colours that appeared
+          nowhere on screen. Each tile now renders that theme's real tokens
+          in the mode you are actually in. */}
+      <ThemeGallery />
     </div>
   )
 
@@ -2789,9 +2752,14 @@ export function SettingsSurface({
                   <p>{PANE_META[active].desc}</p>
                 </div>
               </header>
+              {/* onReset applies the theme rather than only moving the
+                  picker's selection: it used to call setPalette, so resetting
+                  preferences changed the highlight and left the page styled
+                  as before. The gallery follows automatically because it
+                  reads the DOM rather than a local mirror. */}
               <PersonalPanes
                 prefsState={prefsData}
-                onReset={(prefs) => setPalette(prefs.palette ?? 'claude')}
+                onReset={(prefs) => applyPalette(prefs.palette ?? 'claude')}
                 onDirty={reportDirty}
                 profileCard={profileCard}
                 appearanceLead={themeCard}
