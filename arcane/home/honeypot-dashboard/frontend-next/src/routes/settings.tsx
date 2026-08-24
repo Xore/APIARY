@@ -691,12 +691,14 @@ function Segmented({
   options,
   onChange,
   desc,
+  disabled,
 }: {
   label: string
   value: string
   options: { value: string; label: string }[]
   onChange: (value: string) => void
   desc?: string
+  disabled?: boolean
 }) {
   return (
     <div className="settings-field">
@@ -708,6 +710,7 @@ function Segmented({
             type="button"
             data-value={option.value}
             aria-pressed={value === option.value}
+            disabled={disabled}
             onClick={() => onChange(option.value)}
           >
             {option.label}
@@ -994,6 +997,19 @@ function PersonalPanes({
           {appearanceStatus}
           {loaded ? (
             <>
+              {/* #1759: these four saved cleanly, round-tripped, showed a
+                  success toast and changed nothing -- no CSS implements any
+                  of them. Two of them described a specific effect that never
+                  occurred, which is the worse half: a control that reports
+                  success and does nothing is worse than one that is not
+                  there. They stay visible and disabled rather than removed,
+                  because they are wanted; what is removed is the claim that
+                  they work. */}
+              <p className="note hp-appearance-note">
+                Density, high contrast and evidence text are not wired up yet. They are shown here because they are
+                planned, not because they work — see #1759. Motion already follows your operating system's
+                reduced-motion setting; the explicit choices below do not override it.
+              </p>
               <Segmented
                 label="Density"
                 value={form.density ?? 'comfortable'}
@@ -1002,6 +1018,8 @@ function PersonalPanes({
                   { value: 'compact', label: 'Compact' },
                 ]}
                 onChange={(value) => patch('density', value)}
+                disabled
+                desc="Not implemented — the stylesheet's spacing scale is defined but barely used, so this needs the spacing refactor in Xore/theme#105 before it can do anything."
               />
               <Segmented
                 label="Motion"
@@ -1012,18 +1030,21 @@ function PersonalPanes({
                   { value: 'off', label: 'Full' },
                 ]}
                 onChange={(value) => patch('reduced_motion', value)}
-                desc='"Reduced" minimizes non-essential animation.'
+                disabled
+                desc="Follows your operating system. The explicit Reduced and Full choices are not wired up."
               />
               <SwitchRow
                 label="High contrast"
-                desc="Strengthens borders and text separation."
+                desc="Not implemented here on purpose — contrast is a whole token set, so it ships as a theme rather than a switch (#1753)."
                 checked={form.high_contrast ?? false}
+                disabled
                 onChange={(value) => patch('high_contrast', value)}
               />
               <SwitchRow
                 label="Larger evidence text"
-                desc="Increases the font size of raw logs and payload evidence."
+                desc="Not implemented yet — needs a type-scale override scoped to tables, the terminal and payload views."
                 checked={form.large_evidence_text ?? false}
+                disabled
                 onChange={(value) => patch('large_evidence_text', value)}
               />
               {saveButton('appearance', setAppearanceStatus)}
