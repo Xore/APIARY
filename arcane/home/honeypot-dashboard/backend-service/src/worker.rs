@@ -357,6 +357,13 @@ pub fn spawn_enabled(state: AppState) {
                 });
                 tracing::info!("worker loop enabled: workbench-reconcile");
             }
+            "zeek-proxy-attribution" => {
+                let state = state.clone();
+                tokio::spawn(async move {
+                    crate::zeek_proxy_attribution::zeek_proxy_attribution_loop(state).await
+                });
+                tracing::info!("worker loop enabled: zeek-proxy-attribution");
+            }
             "threat-intel" => {
                 let state = state.clone();
                 tokio::spawn(async move { crate::threat_intel::threat_intel_loop(state).await });
