@@ -152,6 +152,10 @@ export function SensorEventsTable({
         rows={rows}
         columns={buildColumns(sensor)}
         rowKey={(row, index) => `${row.when}-${index}`}
+        // #1868: every row opens its own full page — the record, the rest
+        // of the session, the rest of the flow, and what else the source
+        // did. The inspector pane shows the row's fields and stops there.
+        detailHref={(row) => (row.id ? `/event/${encodeURIComponent(row.id)}` : undefined)}
         inspectorTitle={`${sensor} event`}
         emptyState={{
           title: `No ${sensor} activity in the last 48h`,

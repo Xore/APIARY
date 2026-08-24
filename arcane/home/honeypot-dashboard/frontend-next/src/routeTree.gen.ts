@@ -45,6 +45,7 @@ import { Route as AuthLogoutRouteImport } from './routes/auth/logout'
 import { Route as BffMountedSplatRouteImport } from './routes/bff-mounted.$'
 import { Route as BffSplatRouteImport } from './routes/bff.$'
 import { Route as CapeShaRouteImport } from './routes/cape.$sha'
+import { Route as EventIdRouteImport } from './routes/event.$id'
 import { Route as ExportPortbridgeManualBlackholeDottxtRouteImport } from './routes/export.portbridge-manual-blackhole[.]txt'
 import { Route as GhidraShaRouteImport } from './routes/ghidra.$sha'
 import { Route as GithubAnalysisShaRouteImport } from './routes/github-analysis.$sha'
@@ -247,6 +248,11 @@ const CapeShaRoute = CapeShaRouteImport.update({
   path: '/$sha',
   getParentRoute: () => CapeRoute,
 } as any)
+const EventIdRoute = EventIdRouteImport.update({
+  id: '/event/$id',
+  path: '/event/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ExportPortbridgeManualBlackholeDottxtRoute =
   ExportPortbridgeManualBlackholeDottxtRouteImport.update({
     id: '/export/portbridge-manual-blackhole.txt',
@@ -394,6 +400,7 @@ export interface FileRoutesByFullPath {
   '/bff-mounted/$': typeof BffMountedSplatRoute
   '/bff/$': typeof BffSplatRoute
   '/cape/$sha': typeof CapeShaRoute
+  '/event/$id': typeof EventIdRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/ghidra/$sha': typeof GhidraShaRoute
   '/github-analysis/$sha': typeof GithubAnalysisShaRoute
@@ -453,6 +460,7 @@ export interface FileRoutesByTo {
   '/bff-mounted/$': typeof BffMountedSplatRoute
   '/bff/$': typeof BffSplatRoute
   '/cape/$sha': typeof CapeShaRoute
+  '/event/$id': typeof EventIdRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/ghidra/$sha': typeof GhidraShaRoute
   '/github-analysis/$sha': typeof GithubAnalysisShaRoute
@@ -513,6 +521,7 @@ export interface FileRoutesById {
   '/bff-mounted/$': typeof BffMountedSplatRoute
   '/bff/$': typeof BffSplatRoute
   '/cape/$sha': typeof CapeShaRoute
+  '/event/$id': typeof EventIdRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/ghidra/$sha': typeof GhidraShaRoute
   '/github-analysis/$sha': typeof GithubAnalysisShaRoute
@@ -574,6 +583,7 @@ export interface FileRouteTypes {
     | '/bff-mounted/$'
     | '/bff/$'
     | '/cape/$sha'
+    | '/event/$id'
     | '/export/portbridge-manual-blackhole.txt'
     | '/ghidra/$sha'
     | '/github-analysis/$sha'
@@ -633,6 +643,7 @@ export interface FileRouteTypes {
     | '/bff-mounted/$'
     | '/bff/$'
     | '/cape/$sha'
+    | '/event/$id'
     | '/export/portbridge-manual-blackhole.txt'
     | '/ghidra/$sha'
     | '/github-analysis/$sha'
@@ -692,6 +703,7 @@ export interface FileRouteTypes {
     | '/bff-mounted/$'
     | '/bff/$'
     | '/cape/$sha'
+    | '/event/$id'
     | '/export/portbridge-manual-blackhole.txt'
     | '/ghidra/$sha'
     | '/github-analysis/$sha'
@@ -751,6 +763,7 @@ export interface RootRouteChildren {
   AuthLogoutRoute: typeof AuthLogoutRoute
   BffMountedSplatRoute: typeof BffMountedSplatRoute
   BffSplatRoute: typeof BffSplatRoute
+  EventIdRoute: typeof EventIdRoute
   ExportPortbridgeManualBlackholeDottxtRoute: typeof ExportPortbridgeManualBlackholeDottxtRoute
   GhidraShaRoute: typeof GhidraShaRoute
   InvestigateClusterRoute: typeof InvestigateClusterRoute
@@ -1026,6 +1039,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CapeShaRouteImport
       parentRoute: typeof CapeRoute
     }
+    '/event/$id': {
+      id: '/event/$id'
+      path: '/event/$id'
+      fullPath: '/event/$id'
+      preLoaderRoute: typeof EventIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/export/portbridge-manual-blackhole.txt': {
       id: '/export/portbridge-manual-blackhole.txt'
       path: '/export/portbridge-manual-blackhole.txt'
@@ -1245,6 +1265,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthLogoutRoute: AuthLogoutRoute,
   BffMountedSplatRoute: BffMountedSplatRoute,
   BffSplatRoute: BffSplatRoute,
+  EventIdRoute: EventIdRoute,
   ExportPortbridgeManualBlackholeDottxtRoute:
     ExportPortbridgeManualBlackholeDottxtRoute,
   GhidraShaRoute: GhidraShaRoute,

@@ -6,6 +6,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { FiltersButton, FiltersModal } from '../components/FiltersModal'
+import { RowActions, RowIcons } from '../components/RowActions'
 import { copyWithFlash } from '../lib/flash'
 import { subscribeLiveEvents, useLiveState } from '../lib/live'
 import type { JsonRecord } from '../lib/json'
@@ -36,6 +37,10 @@ type EventPivots = {
 }
 
 type EventRow = {
+  /** The document id, when the row came from a search hit — the events
+   *  list has one, the SSE live stream does not. Drives the full-detail
+   *  action, which is simply absent for a row with no id (#1868). */
+  id?: string
   time: string
   sensor: string
   src_ip: string
@@ -537,6 +542,7 @@ function Events() {
                         selected={selected === index}
                         onSelect={() => setSelected(selected === index ? null : index)}
                         onPivot={setFilter}
+                        investigationConfig={investigationConfig}
                       />
                     )
                   })
@@ -1027,13 +1033,18 @@ function FragmentRow({
   selected,
   onSelect,
   onPivot,
+  investigationConfig,
 }: {
   row: EventRow
   breakLabel: string | null
   selected: boolean
   onSelect: () => void
   onPivot: (key: keyof EventFilters | 'ip', value: string) => void
+  /** #1868: the external tool links are derived per row from the deployment's
+   *  configured tool URLs, so the row needs the config to offer them. */
+  investigationConfig: InvestigationConfig
 }) {
+  const openIn = investigationLinks(row, investigationConfig)
   // Cell pivots must not also toggle the record pane.
   const pivot = (event: React.MouseEvent, key: keyof EventFilters | 'ip', value: string) => {
     event.stopPropagation()
@@ -1127,36 +1138,36 @@ function FragmentRow({
           ) : null}
           {row.detail || row.proto}
         </td>
-        {/* Hover-revealed quick actions (design pick 14B, events.html:31-37). */}
+        {/* Hover-revealed quick actions (design pick 14B, events.html:31-37).
+            #1868: these were bare text -- `⧁`, `▶`, and an emoji `👤` --
+            which rendered live as the literal string "⧁👤" and read as
+            unfinished beside the SVG marks used everywhere else. They now
+            go through RowActions, so they are drawn the same way here and
+            on the overview, and each carries a real accessible name
+            rather than a lone glyph inside a link.
+
+            The full-detail action leads the strip because it is the one
+            an operator reaches for most, and until now there was no full
+            view of an event anywhere. The external tools follow it: they
+            were behind the ⋮ disclosure, two clicks away, while the two
+            actions that were one click away were the least useful of the
+            set. The disclosure stays -- it carries what each tool is for,
+            which an icon cannot. */}
         <td className="hp-row-actions-cell" data-label="">
-          <div className="hp-row-actions">
-            {row.src_ip ? (
-              <button
-                type="button"
-                title="Copy source IP"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  copyWithFlash(row.src_ip)
-                }}
-              >
-                ⧁
-              </button>
-            ) : null}
-            {row.session ? (
-              <a href={`/sessions/${encodeURIComponent(row.session)}`} title="Replay session" onClick={(event) => event.stopPropagation()}>
-                ▶
-              </a>
-            ) : null}
-            {row.src_ip ? (
-              <a
-                href={`/investigate/ip/${encodeURIComponent(row.src_ip)}`}
-                title="Attacker profile"
-                onClick={(event) => event.stopPropagation()}
-              >
-                👤
-              </a>
-            ) : null}
-          </div>
+          <RowActions
+            actions={[
+              row.id ? { label: 'Open full details', icon: RowIcons.detail, href: `/event/${encodeURIComponent(row.id)}` } : null,
+              row.src_ip ? { label: 'Copy source IP', icon: RowIcons.copy, onClick: () => copyWithFlash(row.src_ip) } : null,
+              row.session ? { label: 'Replay session', icon: RowIcons.replay, href: `/sessions/${encodeURIComponent(row.session)}` } : null,
+              row.src_ip ? { label: 'Attacker profile', icon: RowIcons.profile, href: `/investigate/ip/${encodeURIComponent(row.src_ip)}` } : null,
+              row.pivots.shasum
+                ? { label: 'Payload analysis', icon: RowIcons.payload, href: `/payload-analysis/${encodeURIComponent(row.pivots.shasum)}` }
+                : null,
+              openIn.evebox ? { label: 'Open in EveBox', icon: RowIcons.evebox, href: openIn.evebox, external: true } : null,
+              openIn.kibana ? { label: 'Open in Kibana', icon: RowIcons.kibana, href: openIn.kibana, external: true } : null,
+              openIn.arkime ? { label: 'Open in Arkime', icon: RowIcons.arkime, href: openIn.arkime, external: true } : null,
+            ]}
+          />
         </td>
       </tr>
     </>

@@ -173,7 +173,7 @@ pub async fn detail(
     for hit in &hits {
         let source = &hit["_source"];
         let hp = &source["honeypot"];
-        let row = crate::events::row_from_source(source);
+        let row = crate::events::row_from_hit(hit);
         *sensors.entry(row.sensor.clone()).or_insert(0) += 1;
         let command = {
             let input = text(&hp["input"]);

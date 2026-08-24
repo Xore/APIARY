@@ -297,7 +297,7 @@ pub async fn ip(
     let text = |value: &serde_json::Value| value.as_str().unwrap_or("").to_string();
     let rows: Vec<EventRow> = events["hits"]["hits"]
         .as_array()
-        .map(|hits| hits.iter().map(|hit| crate::events::row_from_source(&hit["_source"])).collect())
+        .map(|hits| hits.iter().map(crate::events::row_from_hit).collect())
         .unwrap_or_default();
 
     let is_confirmed = confirmed_malicious(&state, &ip).await;
@@ -364,6 +364,9 @@ fn portbridge_row(src: &Value) -> EventRow {
         detail.push_str(&format!(" · p0f: {os}"));
     }
     EventRow {
+        // Synthesised from a portbridge document rather than read from a
+        // hit, so it has no id and offers no full-detail action.
+        id: String::new(),
         time: text(&src["@timestamp"]),
         sensor: "portbridge".to_string(),
         src_ip: text(&src["portbridge"]["src_ip"]),
