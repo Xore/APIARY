@@ -96,7 +96,11 @@ function CaptureContext({ row }: { row: StoreRow }) {
                     <td className="v">
                       {call.request_body || call.response_body ? (
                         <details>
-                          <summary className="lnk">bodies</summary>
+                          {/* #1898: was .lnk, which promises navigation --
+                              this expands in place. A summary is a control
+                              that acts, so it takes the quietest button
+                              tone rather than link styling. */}
+                          <summary className="btn btn-sm btn-ghost">bodies</summary>
                           {call.request_body ? <pre className="hp-md__preview">{call.request_body}</pre> : null}
                           {call.response_body ? <pre className="hp-md__preview">{call.response_body}</pre> : null}
                         </details>
@@ -113,7 +117,9 @@ function CaptureContext({ row }: { row: StoreRow }) {
       ) : null}
       {snapshot ? (
         <details>
-          <summary className="lnk">DOM snapshot ({(snapshot.length / 1024).toFixed(0)} KB, redacted)</summary>
+          <summary className="btn btn-sm btn-ghost">
+            DOM snapshot ({(snapshot.length / 1024).toFixed(0)} KB, redacted)
+          </summary>
           <pre className="hp-md__preview">{snapshot}</pre>
         </details>
       ) : (
