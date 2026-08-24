@@ -277,5 +277,72 @@ result="$(simulate_hash "$tmp/log_closed_shasum.json")"
   fail "cowrie.log.closed's ttylog-derived shasum leaked into file.hash.sha256 (got: '$result', want empty)"
 pass "cowrie.log.closed's shasum is not mistaken for a real payload hash"
 
+# #1873/#1876: the fleet's own addresses must never become source.ip, and
+# dionaea's nested peer must not be thrown away.
+#
+# This pipeline is installed above with home_net=["198.51.100.1"], so that
+# address stands in for the tunnel peers and the WAN addresses the real
+# deployment configures through ES_HOME_NET.
+simulate_source_ip() {
+  # simulate_source_ip <fixture-file> -> prints the resulting source.ip
+  curl -fsS -X POST "$es_url/_ingest/pipeline/geoip-honeypot/_simulate" \
+    -H 'Content-Type: application/json' \
+    --data-binary "@$1" |
+    python3 -c "
+import json, sys
+doc = json.load(sys.stdin)['docs'][0]['doc']['_source']
+print(doc.get('source', {}).get('ip', ''))
+"
+}
+
+# A sensor behind the tunnel observes the tunnel peer as its client. Saying
+# so in a field called source.ip states that our own relay attacked us.
+cat > "$tmp/fleet_peer_source.json" <<'EOF'
+{"docs":[{"_source":{"honeypot":{"sensor":"hellpot","src_ip":"198.51.100.1","dst_ip":"172.16.10.3"}}}]}
+EOF
+result="$(simulate_source_ip "$tmp/fleet_peer_source.json")"
+[ -z "$result" ] ||
+  fail "a home_net address became source.ip (got: '$result', want empty so the event reads unattributed)"
+pass "a home_net address never becomes source.ip"
+
+# The guard must not swallow the addresses it exists to preserve.
+cat > "$tmp/real_attacker_source.json" <<'EOF'
+{"docs":[{"_source":{"honeypot":{"sensor":"hellpot","src_ip":"198.51.100.77","dst_ip":"172.16.10.3"}}}]}
+EOF
+result="$(simulate_source_ip "$tmp/real_attacker_source.json")"
+[ "$result" = "198.51.100.77" ] ||
+  fail "a real attacker address was dropped by the home_net guard (got: '$result')"
+pass "a real attacker address survives the home_net guard"
+
+# dionaea emits two shapes. The flat one was always read; the raw one nests
+# the peer, and only data.connection was handled -- a SIP session nests it
+# under data.parent, so those events read as unattributed while the address
+# sat in the same document.
+cat > "$tmp/dionaea_parent_peer.json" <<'EOF'
+{"docs":[{"_source":{"honeypot":{"name":"dionaea","data":{"parent":{"protocol":"SipSession","remote_ip":"198.51.100.88","remote_port":58459,"local_port":5060,"transport":"udp"}}}}}]}
+EOF
+result="$(simulate_source_ip "$tmp/dionaea_parent_peer.json")"
+[ "$result" = "198.51.100.88" ] ||
+  fail "dionaea's data.parent peer was not promoted to source.ip (got: '$result')"
+pass "dionaea's data.parent peer becomes source.ip"
+
+cat > "$tmp/dionaea_connection_peer.json" <<'EOF'
+{"docs":[{"_source":{"honeypot":{"name":"dionaea","data":{"connection":{"protocol":"smbd","remote_ip":"198.51.100.99","local_port":445,"transport":"tcp"}}}}}]}
+EOF
+result="$(simulate_source_ip "$tmp/dionaea_connection_peer.json")"
+[ "$result" = "198.51.100.99" ] ||
+  fail "dionaea's data.connection peer regressed (got: '$result')"
+pass "dionaea's data.connection peer still becomes source.ip"
+
+# dionaea's own loopback health probe nests its address exactly like a real
+# attacker does, so the nested path must go through the same guard.
+cat > "$tmp/dionaea_probe_peer.json" <<'EOF'
+{"docs":[{"_source":{"honeypot":{"name":"dionaea","data":{"connection":{"protocol":"smbd","remote_ip":"127.0.0.1","local_port":445,"transport":"tcp"}}}}}]}
+EOF
+result="$(simulate_source_ip "$tmp/dionaea_probe_peer.json")"
+[ -z "$result" ] ||
+  fail "a loopback nested peer became source.ip (got: '$result', want empty)"
+pass "a loopback nested peer never becomes source.ip"
+
 echo
 echo "all geoip-honeypot pipeline tests passed"
