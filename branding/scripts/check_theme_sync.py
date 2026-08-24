@@ -13,14 +13,22 @@ ROOT = Path(__file__).resolve().parents[2]
 THEME = ROOT / "arcane" / "home" / "honeypot-dashboard" / "frontend-next" / "public" / "static" / "theme.css"
 TOKENS = ROOT / "branding" / "tokens.json"
 
+# Xore/theme#104 renamed the surface and text tokens to numbered ramps and
+# moved both modes into a single light-dark() declaration. The old names on
+# the right of this map (app-bg, surface-1, text-primary, ...) no longer
+# exist. Where a rename was not one-to-one it is called out, because picking
+# the wrong rung is a silent mismatch rather than an error:
+#
+#   surface -> bg-200, not bg-100. bg-100 is the raised card tint; bg-200 is
+#   the surface the old surface-1 actually carried (#f4f2ed light).
 MAPPING = {
-    "background": "app-bg",
-    "sidebar": "sidebar-bg",
-    "surface": "surface-1",
-    "surfaceRaised": "surface-raised",
-    "text": "text-primary",
-    "textSecondary": "text-secondary",
-    "textMuted": "text-muted",
+    "background": "bg-000",
+    "sidebar": "bg-sidebar",
+    "surface": "bg-200",
+    "surfaceRaised": "bg-raised",
+    "text": "text-000",
+    "textSecondary": "text-100",
+    "textMuted": "text-200",
     "accent": "accent",
     "link": "text-link",
     "info": "info",
@@ -29,6 +37,12 @@ MAPPING = {
     "danger": "danger",
 }
 
+# The default theme's block. Its selector list is `:root, [data-hp-theme=
+# "claude"], [data-hp-palette="claude"]`, so anchoring on the palette alias
+# finds it without depending on which of the three comes first.
+DEFAULT_THEME_MARKER = '[data-hp-palette="claude"] {'
+
+
 
 def block(css: str, marker: str) -> str:
     start = css.index(marker) + len(marker)
@@ -36,29 +50,48 @@ def block(css: str, marker: str) -> str:
     return css[start:end]
 
 
-def variables(css_block: str) -> dict[str, str]:
-    return dict(re.findall(r"--([\w-]+):\s*(#[0-9a-fA-F]{6})\s*;", css_block))
+def variables(css_block: str) -> dict[str, dict[str, str]]:
+    """Both modes of every hex token in a block.
+
+    Tokens are declared once as `light-dark(#light, #dark)` rather than twice
+    in two blocks, so a single parse yields both modes. Non-hex values --
+    the rgba() borders and soft fills -- are skipped: they are not part of
+    the portable brand contract, and matching them here would mean teaching
+    this script alpha compositing to say anything useful about them.
+    """
+    pairs = re.findall(
+        r"--([\w-]+):\s*light-dark\(\s*(#[0-9a-fA-F]{6})\s*,\s*(#[0-9a-fA-F]{6})\s*\)\s*;",
+        css_block,
+    )
+    return {name: {"light": light, "dark": dark} for name, light, dark in pairs}
 
 
 def main() -> None:
     css = THEME.read_text(encoding="utf-8")
     token_data = json.loads(TOKENS.read_text(encoding="utf-8"))
-    theme_modes = {
-        "dark": variables(block(css, ":root {")),
-        "light": variables(block(css, '[data-theme="light"] {')),
-    }
+    theme_values = variables(block(css, DEFAULT_THEME_MARKER))
 
     failures: list[str] = []
-    for mode, theme_values in theme_modes.items():
-        branded = token_data["color"][mode]
-        for token_name, theme_name in MAPPING.items():
-            expected = theme_values[theme_name].lower()
-            actual = branded[token_name]["$value"].lower()
-            if actual != expected:
-                failures.append(
-                    f"color.{mode}.{token_name} is {actual}, "
-                    f"but Xore/theme --{theme_name} is {expected}"
-                )
+    missing = sorted(set(MAPPING.values()) - set(theme_values))
+    if missing:
+        # A rename upstream, not a drifted value. Say which, because the
+        # KeyError this used to raise named one token and implied a broken
+        # script rather than a moved contract.
+        failures.append(
+            "these tokens are no longer in the default theme block, so the "
+            "mapping above is stale: " + ", ".join(f"--{name}" for name in missing)
+        )
+    else:
+        for mode in ("light", "dark"):
+            branded = token_data["color"][mode]
+            for token_name, theme_name in MAPPING.items():
+                expected = theme_values[theme_name][mode].lower()
+                actual = branded[token_name]["$value"].lower()
+                if actual != expected:
+                    failures.append(
+                        f"color.{mode}.{token_name} is {actual}, "
+                        f"but Xore/theme --{theme_name} is {expected}"
+                    )
 
     font_mapping = {"sans": "font-sans", "display": "font-display", "mono": "font-mono"}
     for token_name, theme_name in font_mapping.items():

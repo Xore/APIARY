@@ -82,9 +82,19 @@ Rules:
 | Muted text | `#66615b` | metadata |
 | Copper | `#c76548` | brand accent and primary actions |
 
-Semantic colors are evidence states, not decoration. Dark mode uses link blue
-`#6da7ec`, information blue `#78a9d4`, green `#79c99e`, amber `#deb36a`, and
-red `#dc7774`; light-mode values live beside them in `tokens.json`.
+Semantic colors are evidence states, not decoration. Dark mode uses
+information blue `#78a9d4`, green `#79c99e`, amber `#deb36a`, and red
+`#dc7774`; light-mode values live beside them in `tokens.json`.
+
+Links are **not** blue. They derive from the theme's accent — `#de866b` in
+dark, `#9b4f3a` in light for the default `claude` theme. They used to be a
+standalone blue (`#6da7ec` / `#2a78d6`), and the light one measured 3.95:1
+against a card, below the AA floor for text; Xore/theme#103 fixed that by
+deriving links from the accent and tuning them like every other theme's,
+rather than keeping a brand blue that failed. A link colour is therefore
+theme-scoped, not a brand invariant — a theme is expected to move it, and
+`scripts/check-contrast.mjs` upstream asserts the result clears AA on every
+run.
 
 ## Typography and voice
 
