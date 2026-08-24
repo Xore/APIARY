@@ -277,7 +277,28 @@ function Events() {
   const [total, setTotal] = useState(0)
   const [fingerprintIps, setFingerprintIps] = useState<CorrelatedIp[] | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [selected, setSelected] = useState<number | null>(null)
+  // #1845: the open record is remembered by identity, not by position.
+  //
+  // It was an index into `rows`, which the loader refetch replaces
+  // wholesale -- so after a refresh index 3 was a different event, and the
+  // pane silently swapped which record it showed while looking unchanged.
+  // The live tail had a hand-written `index + 1` to compensate for a
+  // single prepend, which worked for that one path and could not work for
+  // the refetch, where an arbitrary number of rows appear at once.
+  //
+  // Keyed by the document id, the pane follows its event and closes on its
+  // own once that event drops off the end of the list -- and the index
+  // arithmetic disappears, because there is no position to keep in sync.
+  const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  /** A row's stable identity. The document id when the row came from a
+   *  search hit; otherwise a composite that is stable for the same event,
+   *  which is what the SSE stream can offer (it carries a _source and no
+   *  hit, so there is no id to send). */
+  const rowKey = (row: EventRow, index: number) =>
+    row.id ?? `${row.time}|${row.sensor}|${row.src_ip}|${row.session}|${index}`
+  const selectedRow = selectedKey === null || rows === null
+    ? null
+    : (rows.find((row, index) => rowKey(row, index) === selectedKey) ?? null)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const baseFilterCount = [search.ip, search.sensor, search.country, search.proto, search.port, search.kind].filter(
     Boolean,
@@ -309,7 +330,7 @@ function Events() {
   const setFilter = useCallback(
     (key: keyof EventFilters | 'since', value: string) => {
       setRows(null)
-      setSelected(null)
+      setSelectedKey(null)
       void navigate({ search: (current: Record<string, unknown>) => ({ ...current, [key]: value || undefined }) })
     },
     [navigate],
@@ -319,9 +340,10 @@ function Events() {
 
   // Live tail over the shell's shared SSE stream (lib/live.ts — one
   // connection for the whole app, #1564): new events prepend in arrival
-  // order; the selected index shifts with them so the open record stays
-  // the same row. Capped so an all-day tab doesn't grow unbounded. The
-  // shared layer owns pause/resume and connection health.
+  // order. The open record needs no adjustment as they arrive, because it
+  // is tracked by identity rather than by position (#1845). Capped so an
+  // all-day tab doesn't grow unbounded. The shared layer owns pause/resume
+  // and connection health.
   const { paused: livePaused } = useLiveState()
   useEffect(() => {
     if (!live || livePaused) return
@@ -334,7 +356,6 @@ function Events() {
       }
       setRows((current) => (current === null ? current : [row, ...current].slice(0, 500)))
       setTotal((count) => count + 1)
-      setSelected((index) => (index === null ? null : Math.min(index + 1, 499)))
     })
   }, [live, livePaused])
 
@@ -354,15 +375,15 @@ function Events() {
   // Outside-click closes the record pane (per Xore) — clicks inside the
   // pane or the list are handled by their own logic.
   useEffect(() => {
-    if (selected === null) return
+    if (selectedKey === null) return
     const onClick = (event: MouseEvent) => {
       const target = event.target as Element
       if (paneRef.current?.contains(target) || listRef.current?.contains(target)) return
-      setSelected(null)
+      setSelectedKey(null)
     }
     document.addEventListener('click', onClick)
     return () => document.removeEventListener('click', onClick)
-  }, [selected])
+  }, [selectedKey])
 
   const viewMore = useCallback(async () => {
     if (!rows || loadingMore) return
@@ -378,7 +399,7 @@ function Events() {
     }
   }, [rows, loadingMore, search])
 
-  const open = selected !== null && rows !== null
+  const open = selectedRow !== null
   return (
     <>
       <header className="overview-header">
@@ -461,13 +482,13 @@ function Events() {
               next[key] = (data.get(key) as string | null)?.trim() || undefined
             }
             setRows(null)
-            setSelected(null)
+            setSelectedKey(null)
             setFiltersOpen(false)
             void navigate({ search: (current: Record<string, unknown>) => ({ ...current, ...next }) })
           }}
           onClear={() => {
             setRows(null)
-            setSelected(null)
+            setSelectedKey(null)
             setFiltersOpen(false)
             void navigate({
               search: (current: Record<string, unknown>) => ({
@@ -539,8 +560,10 @@ function Events() {
                         key={`${row.time}-${index}`}
                         row={row}
                         breakLabel={breakLabel}
-                        selected={selected === index}
-                        onSelect={() => setSelected(selected === index ? null : index)}
+                        selected={selectedKey === rowKey(row, index)}
+                        onSelect={() =>
+                          setSelectedKey(selectedKey === rowKey(row, index) ? null : rowKey(row, index))
+                        }
                         onPivot={setFilter}
                         investigationConfig={investigationConfig}
                       />
@@ -587,9 +610,9 @@ function Events() {
           </div>
         </div>
         <div className="hp-md__pane" ref={paneRef}>
-          {open && rows[selected] ? (
+          {open && selectedRow ? (
             <div className="card">
-              <button className="hp-md__close" type="button" aria-label="Close details" title="Close details" onClick={() => setSelected(null)}>
+              <button className="hp-md__close" type="button" aria-label="Close details" title="Close details" onClick={() => setSelectedKey(null)}>
                 ×
               </button>
               <h2>Normalized event</h2>
@@ -600,31 +623,31 @@ function Events() {
                   are findable, which is the whole point of the pane. The
                   address and session id stay in the tooltips (and in the
                   table column and EventMeta below) so nothing is lost. */}
-              {rows[selected].src_ip || rows[selected].session ? (
+              {selectedRow.src_ip || selectedRow.session ? (
                 <div className="tw:flex tw:flex-wrap tw:gap-2 tw:mb-3">
-                  {rows[selected].src_ip ? (
+                  {selectedRow.src_ip ? (
                     <a
                       className="btn btn-sm btn-secondary"
-                      href={`/investigate/ip/${encodeURIComponent(rows[selected].src_ip)}`}
-                      title={`attacker profile for ${rows[selected].src_ip}`}
+                      href={`/investigate/ip/${encodeURIComponent(selectedRow.src_ip)}`}
+                      title={`attacker profile for ${selectedRow.src_ip}`}
                     >
                       Open attacker profile →
                     </a>
                   ) : null}
-                  {rows[selected].session ? (
+                  {selectedRow.session ? (
                     <a
                       className="btn btn-sm btn-secondary sess"
-                      href={`/sessions/${encodeURIComponent(rows[selected].session)}`}
-                      title={`replay session ${rows[selected].session}`}
+                      href={`/sessions/${encodeURIComponent(selectedRow.session)}`}
+                      title={`replay session ${selectedRow.session}`}
                     >
                       Open session replay →
                     </a>
                   ) : null}
                 </div>
               ) : null}
-              <EventMeta row={rows[selected]} onPivot={setFilter} investigationConfig={investigationConfig} />
+              <EventMeta row={selectedRow} onPivot={setFilter} investigationConfig={investigationConfig} />
               <div className="card__scroll">
-                <pre className="code">{JSON.stringify(rows[selected].record, null, 2)}</pre>
+                <pre className="code">{JSON.stringify(selectedRow.record, null, 2)}</pre>
               </div>
             </div>
           ) : null}
