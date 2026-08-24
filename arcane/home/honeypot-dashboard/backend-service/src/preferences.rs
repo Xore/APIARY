@@ -83,7 +83,7 @@ fn default_preferences(timezone: &str) -> Value {
         "auto_refresh": true,
         "refresh_interval_seconds": 30,
         "live_toasts": true,
-        "live_toast_interval_seconds": 3,
+        "live_toast_interval_seconds": 60,
         "map_basemap": "osm",
         "map_clustering": true,
         "map_animation": true,
@@ -196,7 +196,20 @@ const ROWS_PER_PAGE: &[i64] = &[10, 25, 50, 100];
 const REFRESH_SECONDS: &[i64] = &[10, 15, 30, 60, 120, 300];
 /// Matches TOAST_INTERVALS in settings.tsx. 3 is "every new batch"; the rest
 /// are the coarser choices an operator picks when the stream is busy.
-const TOAST_SECONDS: &[i64] = &[3, 30, 60, 120, 300];
+/// How often the shell polls for operational problems (#1900).
+///
+/// These were batching cadences for the old "N new events" toast, which is
+/// why 3 was in the list at all. That toast is gone -- the shell now
+/// reports stale sensors, stalled ingestion and cluster trouble -- and none
+/// of those move faster than minutes, so a 3-second poll would be twenty
+/// requests a minute for a figure that has not changed.
+///
+/// 3 and 30 stay accepted rather than rejected. A preference saved before
+/// this change is still on an account somewhere, and refusing it would turn
+/// an old setting into a validation error on an unrelated save. LiveToasts
+/// clamps to a one-minute floor, so an old value is honoured as "as often
+/// as it is worth asking" instead.
+const TOAST_SECONDS: &[i64] = &[3, 30, 60, 120, 300, 900];
 
 fn one_of(field: &str, value: &Option<String>, allowed: &[&str], problems: &mut Vec<String>) {
     if let Some(v) = value {

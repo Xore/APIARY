@@ -276,7 +276,7 @@ export type LiveToastPrefs = { enabled: boolean; intervalSeconds: number }
 const fetchLiveToastPrefs = createServerFn({ method: 'GET' }).handler(async (): Promise<LiveToastPrefs> => {
   const { getSessionUser } = await import('./auth')
   const user = await getSessionUser()
-  if (!user) return { enabled: true, intervalSeconds: 3 }
+  if (!user) return { enabled: true, intervalSeconds: 60 }
   const { serviceJSON } = await import('./backend.server')
   const params = new URLSearchParams({ subject: user.sub, username: user.username, role: user.role })
   const result = await serviceJSON<{
@@ -285,7 +285,7 @@ const fetchLiveToastPrefs = createServerFn({ method: 'GET' }).handler(async (): 
   const prefs = result?.preferences
   return {
     enabled: prefs?.live_toasts ?? true,
-    intervalSeconds: prefs?.live_toast_interval_seconds ?? 3,
+    intervalSeconds: prefs?.live_toast_interval_seconds ?? 60,
   }
 })
 
@@ -293,7 +293,7 @@ export async function pullLiveToastPrefs(): Promise<LiveToastPrefs> {
   try {
     return await fetchLiveToastPrefs()
   } catch {
-    return { enabled: true, intervalSeconds: 3 }
+    return { enabled: true, intervalSeconds: 60 }
   }
 }
 

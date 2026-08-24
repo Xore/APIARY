@@ -804,14 +804,22 @@ const REFRESH_INTERVALS: [number, string][] = [
   [300, 'Every 5 minutes'],
 ]
 
-// #1684: the toast used to fire on a fixed 3s batch regardless of volume —
-// on a busy sensor that's a popup every few seconds around the clock.
+// How often the shell checks for operational problems (#1900). This was a
+// batching cadence for the old "N new events" toast -- #1684 added it
+// because a fixed 3s batch meant a popup every few seconds around the
+// clock on a busy sensor. That toast is gone; what the setting controls
+// now is how often the health document is polled.
+//
+// The 3-second option came out with it. A sensor is stale after an hour
+// without traffic and ingestion after fifteen minutes, so checking every
+// three seconds cannot make a toast arrive meaningfully sooner -- it would
+// only be twenty requests a minute for a figure that has not moved.
+// LiveToasts enforces the same one-minute floor regardless.
 const TOAST_INTERVALS: [number, string][] = [
-  [3, 'Every new batch (3 seconds)'],
-  [30, 'Every 30 seconds'],
   [60, 'Every minute'],
   [120, 'Every 2 minutes'],
   [300, 'Every 5 minutes'],
+  [900, 'Every 15 minutes'],
 ]
 
 // Preference side effects other parts of this frontend read from
@@ -1206,15 +1214,15 @@ function PersonalPanes({
                 onChange={(value) => patch('auto_refresh', value)}
               />
               <SwitchRow
-                label="Live event toasts"
-                desc="Show a toast when new honeypot events arrive."
+                label="Operational alerts"
+                desc="Show a toast when a sensor stops reporting, ingestion stalls, or the cluster degrades — and again when it recovers."
                 checked={form.live_toasts ?? true}
                 onChange={(value) => patch('live_toasts', value)}
               />
               {form.live_toasts ?? true ? (
                 <div className="settings-field">
                   <label className="form-label" htmlFor="hp-pref-toast-interval">
-                    Toast frequency
+                    Check frequency
                   </label>
                   <select
                     className="form-input"
@@ -1229,7 +1237,9 @@ function PersonalPanes({
                     ))}
                   </select>
                   <div className="settings-field__desc">
-                    Events still accumulate in the background — this only controls how often the popup itself appears.
+                    How often the fleet is checked for problems. Each condition is announced once when it
+                    starts and once when it clears, so an outage that lasts all afternoon is two toasts, not
+                    one every check.
                   </div>
                 </div>
               ) : null}

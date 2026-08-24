@@ -2,6 +2,6 @@
 # scripts/check-vendored-theme.sh. frontend-next/public/static/theme.css
 # must stay byte-identical to theme.css at this commit.
 repository=https://github.com/Xore/theme
-commit=642e782fe099dec18a57e2389feeac401917c369
-date=2026-08-25T01:00:31+02:00
-sha256=231ea08bc0c3ae452c801105ba272a7af23c1614fd5f89f5b0c5b90ba42a3aed
+commit=72953bde4d5a5f71640778e2f6fe2b9c1613e5bc
+date=2026-08-25T01:06:00+02:00
+sha256=d299efe1c7bb0d0ea01690723fe07a3f7f163f520be680fd0cf34e92844505d7
