@@ -337,3 +337,188 @@ pub async fn ip_enrichment_loop(_state: crate::AppState) {
     // crashes, same posture as the original.
     futures::future::join_all(handles).await;
 }
+
+
+#[cfg(test)]
+mod tests {
+    // Ported from the Go worker's main_test.go before that tree was retired
+    // (#1890). mod.rs had no tests at all, and discovery is the one place
+    // where being wrong is silent: a source pointed at a filename that does
+    // not exist simply never produces events, and looks identical to a
+    // sensor with no traffic.
+    use super::*;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir()
+            .join(format!("ip-enrich-discover-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn discovery_finds_every_conpot_persona_and_each_sensors_real_filename() {
+        let logs = temp_dir("logs");
+        for (dir, file) in [
+            ("cowrie", "cowrie.json"),
+            ("dionaea", "dionaea.json"),
+            ("dns-honeypot", "dns-honeypot.json"),
+            ("cisco-asa-honeypot", "cisco-asa-honeypot.json"),
+            ("conpot", "conpot.json"),
+            ("conpot-s7-1200", "conpot.json"),
+            ("conpot-kamstrup", "conpot.json"),
+        ] {
+            std::fs::create_dir_all(logs.join(dir)).unwrap();
+            std::fs::write(logs.join(dir).join(file), b"").unwrap();
+        }
+
+        let sources = discover_sources(&logs, &temp_dir("out"), &temp_dir("state"));
+        let by_name: std::collections::HashMap<&str, &Source> =
+            sources.iter().map(|s| (s.name.as_str(), s)).collect();
+
+        for want in [
+            "cowrie", "dionaea", "dionaea-incident", "dns-honeypot", "cisco-asa-honeypot",
+            "conpot", "conpot-s7-1200", "conpot-kamstrup",
+            "multipot", "tanner", "http-honeypot", "citrix-honeypot", "rdp-honeypot",
+            "beelzebub", "hellpot", "elasticpot", "galah", "sentrypeer", "wordpot", "mailoney",
+        ] {
+            assert!(by_name.contains_key(want), "no source named {want:?}");
+        }
+        assert_eq!(sources.len(), 20, "no duplicates across conpot personas");
+
+        // Each conpot persona reads its own subdirectory, all under the
+        // same literal filename.
+        assert_eq!(
+            by_name["conpot-s7-1200"].input,
+            logs.join("conpot-s7-1200").join("conpot.json"),
+        );
+
+        // Several sensors' log files are not named after the sensor, and
+        // getting one wrong costs that sensor's entire event stream with
+        // no error anywhere.
+        for (name, dir, file) in [
+            ("multipot", "multipot", "multipot.json"),
+            ("tanner", "tanner", "tanner_report.json"),
+            ("http-honeypot", "http-honeypot", "http.json"),
+            ("citrix-honeypot", "citrix-honeypot", "citrix-honeypot.json"),
+            ("rdp-honeypot", "rdp-honeypot", "rdp-honeypot.json"),
+            ("hellpot", "hellpot", "HellPot.log"),
+            ("galah", "galah", "event_log.json"),
+            ("wordpot", "wordpot", "wordpot.log"),
+        ] {
+            assert_eq!(by_name[name].input, logs.join(dir).join(file), "{name} input path");
+        }
+    }
+
+    #[test]
+    fn a_logs_directory_with_no_conpot_personas_still_discovers_the_rest() {
+        let logs = temp_dir("empty-logs");
+        let sources = discover_sources(&logs, &temp_dir("empty-out"), &temp_dir("empty-state"));
+
+        // Discovery does not require the files to exist -- only conpot is
+        // glob-driven -- so the fixed list is always present.
+        assert_eq!(sources.len(), 17);
+        assert!(!sources.iter().any(|s| s.name.starts_with("conpot")));
+    }
+
+    /// Always "resolves", unchanged -- enough to drive the tick's
+    /// read/write/offset bookkeeping without depending on the join.
+    fn passthrough(line: &[u8], _vm: &ViaMap, _tftp: &ViaMap, _persona: &str) -> (Vec<u8>, bool) {
+        (line.to_vec(), true)
+    }
+
+    fn test_source(input: PathBuf, output: PathBuf, state_path: PathBuf) -> Source {
+        Source {
+            name: "test".into(),
+            input,
+            output,
+            state_path,
+            enrich: passthrough,
+            stats: Arc::new(SourceStats::default()),
+        }
+    }
+
+    // ---- #1351: the offset must never run ahead of what was durably
+    // ---- written. Both failure branches below produced the same visible
+    // ---- symptom in production -- lines that were read once and never
+    // ---- emitted -- so the control case is here too, to prove the
+    // ---- failure tests are exercising the failure branch and not a
+    // ---- no-op path.
+
+    #[test]
+    fn a_successful_tick_advances_and_persists_the_offset() {
+        let dir = temp_dir("tick-ok");
+        let input = dir.join("in.json");
+        let line = b"{\"a\":1}\n";
+        std::fs::write(&input, line).unwrap();
+
+        let mut source = test_source(input, dir.join("out.json"), dir.join("test.offset"));
+        let mut writer = OutputWriter::open(source.output.clone(), 0).unwrap();
+        let mut queue = PendingQueue::default();
+
+        let got = process_source_tick(
+            &mut source, &mut writer, &mut queue,
+            &ViaMap::new(), &ViaMap::new(), Duration::from_secs(1), 0,
+        );
+
+        assert_eq!(got, line.len() as i64);
+        assert_eq!(tail::load_offset(&source.state_path), Some(got), "and it is on disk");
+    }
+
+    #[test]
+    fn a_failed_write_leaves_the_offset_where_it_was() {
+        // /dev/full accepts the open and fails every write with ENOSPC,
+        // which is exactly the shape of the disk-full case that lost data.
+        let dir = temp_dir("tick-write-fail");
+        let input = dir.join("in.json");
+        std::fs::write(&input, b"{\"a\":1}\n").unwrap();
+
+        let mut source = test_source(input, dir.join("out.json"), dir.join("test.offset"));
+        let mut writer = OutputWriter::open(PathBuf::from("/dev/full"), 0).unwrap();
+        let mut queue = PendingQueue::default();
+
+        let got = process_source_tick(
+            &mut source, &mut writer, &mut queue,
+            &ViaMap::new(), &ViaMap::new(), Duration::from_secs(1), 0,
+        );
+
+        assert_eq!(got, 0, "unchanged, so the batch is read again next tick");
+        assert_eq!(tail::load_offset(&source.state_path), None, "and nothing was persisted");
+    }
+
+    #[test]
+    fn a_failed_offset_save_leaves_the_returned_offset_where_it_was() {
+        // The subtler half. If the in-memory offset advanced while the
+        // save failed, the next restart would read the persisted (older)
+        // offset and re-emit everything in between -- the same lines
+        // enriched and appended twice, forever.
+        let dir = temp_dir("tick-save-fail");
+        let input = dir.join("in.json");
+        std::fs::write(&input, b"{\"a\":1}\n").unwrap();
+
+        let mut source = test_source(
+            input,
+            dir.join("out.json"),
+            dir.join("does-not-exist").join("test.offset"),
+        );
+        let mut writer = OutputWriter::open(source.output.clone(), 0).unwrap();
+        let mut queue = PendingQueue::default();
+
+        let got = process_source_tick(
+            &mut source, &mut writer, &mut queue,
+            &ViaMap::new(), &ViaMap::new(), Duration::from_secs(1), 0,
+        );
+
+        assert_eq!(got, 0, "the write succeeded but the offset did not stick");
+    }
+
+    #[test]
+    fn an_offset_survives_a_save_and_load_round_trip() {
+        let dir = temp_dir("offset-roundtrip");
+        let path = dir.join("test.offset");
+        assert_eq!(tail::load_offset(&path), None, "nothing yet");
+
+        tail::save_offset(&path, 4096).unwrap();
+        assert_eq!(tail::load_offset(&path), Some(4096));
+    }
+}

@@ -484,4 +484,314 @@ mod tests {
         assert!(promote_canonical_fields("tanner", &mut e));
         assert_eq!(e["canonical_command"], "a=1&b=2");
     }
+
+    // ---- ported from the Go worker's canonical_test.go before that tree
+    // ---- was retired (#1890). It covered 34 cases here against 7, and the
+    // ---- difference was not redundancy: every per-sensor promotion below
+    // ---- had no Rust test at all, so a field silently landing in the
+    // ---- wrong place would have gone unnoticed. Field shapes come from
+    // ---- real records (#1217), not from invention.
+
+    #[test]
+    fn cowrie_rejects_a_command_shaped_password() {
+        // The same gate the dashboard applies before a pair reaches
+        // TopCreds -- a password that is really a shell fragment is a
+        // command, not a credential.
+        let mut e = json!({"eventid": "cowrie.login.failed", "username": "root", "password": "; /bin/busybox"});
+        assert!(!promote_cowrie_fields(&mut e));
+        assert!(e.get("canonical_user").is_none());
+    }
+
+    #[test]
+    fn cowrie_pubkey_login_records_the_fingerprint() {
+        let mut e = json!({
+            "eventid": "cowrie.login.success", "username": "root", "password": "",
+            "fingerprint": "aa:bb:cc",
+        });
+        assert!(promote_cowrie_fields(&mut e));
+        assert_eq!(e["canonical_fingerprint"], json!("aa:bb:cc"));
+        assert_eq!(e["canonical_fingerprint_kind"], json!("SSH pubkey"));
+        // An empty password is legitimate for a key-only attempt, so the
+        // username still promotes.
+        assert_eq!(e["canonical_user"], json!("root"));
+    }
+
+    #[test]
+    fn cowrie_client_version_and_kex_are_both_fingerprints() {
+        let mut e = json!({"eventid": "cowrie.client.version", "version": "SSH-2.0-libssh2"});
+        assert!(promote_cowrie_fields(&mut e));
+        assert_eq!(e["canonical_client_version"], json!("SSH-2.0-libssh2"));
+        assert_eq!(e["canonical_fingerprint"], json!("SSH-2.0-libssh2"));
+        assert_eq!(e["canonical_fingerprint_kind"], json!("SSH client"));
+
+        let mut kex = json!({"eventid": "cowrie.client.kex", "hassh": "deadbeef"});
+        assert!(promote_cowrie_fields(&mut kex));
+        assert_eq!(kex["canonical_fingerprint"], json!("deadbeef"));
+        assert_eq!(kex["canonical_fingerprint_kind"], json!("HASSH"));
+    }
+
+    #[test]
+    fn cowrie_file_download_promotes_its_shasum() {
+        let mut e = json!({"eventid": "cowrie.session.file_download", "shasum": "abc123"});
+        assert!(promote_cowrie_fields(&mut e));
+        assert_eq!(e["canonical_shasum"], json!("abc123"));
+    }
+
+    #[test]
+    fn cowrie_leaves_alone_what_it_has_no_case_for() {
+        let mut other = json!({"eventid": "dionaea.connection.tcp.accept"});
+        assert!(!promote_cowrie_fields(&mut other));
+        let mut connect = json!({"eventid": "cowrie.session.connect"});
+        assert!(!promote_cowrie_fields(&mut connect));
+    }
+
+    #[test]
+    fn dionaea_promotes_the_first_credential_pair() {
+        let mut e = json!({"credentials": [{"username": "admin", "password": "admin"}]});
+        assert!(promote_dionaea_fields(&mut e));
+        assert_eq!(e["canonical_user"], json!("admin"));
+        assert_eq!(e["canonical_pass"], json!("admin"));
+    }
+
+    #[test]
+    fn dionaea_without_credentials_changes_nothing() {
+        let mut e = json!({"connection": {"protocol": "smbd"}});
+        assert!(!promote_dionaea_fields(&mut e));
+    }
+
+    #[test]
+    fn dionaea_incident_login_promotes_creds() {
+        let mut e = json!({
+            "origin": "dionaea.ftp.login",
+            "data": {"username": "anon", "password": "guest"},
+        });
+        assert!(promote_dionaea_incident_fields(&mut e));
+        assert_eq!(e["canonical_user"], json!("anon"));
+        assert_eq!(e["canonical_pass"], json!("guest"));
+    }
+
+    #[test]
+    fn dionaea_incident_only_treats_a_login_origin_as_credentials() {
+        // Identical shape, but an origin that is neither a login nor an
+        // auth event -- the fields happen to be named username/password
+        // and mean something else.
+        let mut e = json!({
+            "origin": "dionaea.connection.tcp.accept",
+            "data": {"username": "anon", "password": "guest"},
+        });
+        assert!(!promote_dionaea_incident_fields(&mut e));
+    }
+
+    #[test]
+    fn dionaea_incident_takes_a_direct_sha256() {
+        let mut e = json!({
+            "origin": "dionaea.download.complete.unique",
+            "data": {"sha256": "deadbeef"},
+        });
+        assert!(promote_dionaea_incident_fields(&mut e));
+        assert_eq!(e["canonical_shasum"], json!("deadbeef"));
+    }
+
+    #[test]
+    fn dionaea_incident_recovers_a_hash_from_the_download_url() {
+        let hash = "0123456789abcdef0123456789abcdef01234567";
+        let mut e = json!({
+            "origin": "dionaea.download.complete.unique",
+            "data": {"url": format!("http://x/{hash}")},
+        });
+        assert!(promote_dionaea_incident_fields(&mut e));
+        assert_eq!(e["canonical_shasum"], json!(hash));
+    }
+
+    #[test]
+    fn dionaea_incident_ignores_a_foreign_origin() {
+        let mut e = json!({"origin": "other.thing", "data": {"sha256": "deadbeef"}});
+        assert!(!promote_dionaea_incident_fields(&mut e));
+    }
+
+    #[test]
+    fn cisco_asa_prefers_ja4_over_the_user_agent() {
+        let mut e = json!({
+            "event": "post",
+            "data": "user=admin&pass=admin",
+            "headers": {"User-Agent": "curl/8.0", "X-JA4": "t13d..."},
+        });
+        assert!(promote_cisco_asa_fields(&mut e));
+        assert_eq!(e["canonical_command"], json!("user=admin&pass=admin"));
+        assert_eq!(e["canonical_fingerprint"], json!("t13d..."));
+        assert_eq!(e["canonical_fingerprint_kind"], json!("JA4"));
+    }
+
+    #[test]
+    fn cisco_asa_falls_back_to_the_user_agent() {
+        let mut e = json!({"event": "get", "headers": {"User-Agent": "curl/8.0"}});
+        assert!(promote_cisco_asa_fields(&mut e));
+        assert_eq!(e["canonical_fingerprint"], json!("curl/8.0"));
+        assert_eq!(e["canonical_fingerprint_kind"], json!("User-Agent"));
+    }
+
+    #[test]
+    fn cisco_asa_with_nothing_to_promote_changes_nothing() {
+        let mut e = json!({"event": "https_listening"});
+        assert!(!promote_cisco_asa_fields(&mut e));
+    }
+
+    #[test]
+    fn multipot_login_promotes_creds() {
+        let mut e = json!({
+            "sensor": "multipot", "proto": "smtp", "event": "login",
+            "username": "dvr@mail01.nexusai.local", "password": "123456789",
+        });
+        assert!(promote_multipot_fields(&mut e));
+        assert_eq!(e["canonical_user"], json!("dvr@mail01.nexusai.local"));
+        assert_eq!(e["canonical_pass"], json!("123456789"));
+    }
+
+    #[test]
+    fn multipot_ignores_a_record_from_another_sensor() {
+        let mut e = json!({"sensor": "dns-honeypot", "event": "login", "username": "a", "password": "b"});
+        assert!(!promote_multipot_fields(&mut e));
+    }
+
+    #[test]
+    fn multipot_command_promotes() {
+        let mut e = json!({
+            "sensor": "multipot", "proto": "socks5", "event": "command",
+            "command": "CONNECT 10.0.0.1:80",
+        });
+        assert!(promote_multipot_fields(&mut e));
+        assert_eq!(e["canonical_command"], json!("CONNECT 10.0.0.1:80"));
+    }
+
+    #[test]
+    fn multipot_http_request_line_is_not_an_attacker_command() {
+        // Its "command" is a request line, and promoting it would fill
+        // TopCommands with "GET /..." instead of what attackers typed.
+        let mut e = json!({
+            "sensor": "multipot", "event": "http_request",
+            "command": "GET /_search HTTP/1.1",
+        });
+        assert!(!promote_multipot_fields(&mut e));
+    }
+
+    #[test]
+    fn multipot_client_banner_is_a_fingerprint() {
+        let mut e = json!({"sensor": "multipot", "event": "connect", "client": "libssh2_1.0"});
+        assert!(promote_multipot_fields(&mut e));
+        assert_eq!(e["canonical_fingerprint"], json!("libssh2_1.0"));
+        assert_eq!(e["canonical_fingerprint_kind"], json!("client banner"));
+    }
+
+    #[test]
+    fn citrix_prefers_ja4_over_ja3_and_the_user_agent() {
+        let mut e = json!({
+            "sensor": "citrix-honeypot", "event": "get", "path": "/",
+            "headers": {"User-Agent": "Mozilla/5.0 zgrab/0.x", "x-ja3": "cba7f3", "x-ja4": "t12i13"},
+        });
+        assert!(promote_citrix_fields(&mut e));
+        assert_eq!(e["canonical_fingerprint"], json!("t12i13"));
+        assert_eq!(e["canonical_fingerprint_kind"], json!("JA4"));
+    }
+
+    #[test]
+    fn citrix_cve_payload_becomes_the_command() {
+        let mut e = json!({"sensor": "citrix-honeypot", "event": "cve_2019_19781_payload", "data": "id"});
+        assert!(promote_citrix_fields(&mut e));
+        assert_eq!(e["canonical_command"], json!("id"));
+    }
+
+    #[test]
+    fn rdp_promotes_a_username_with_no_password() {
+        let mut e = json!({"sensor": "rdp-honeypot", "event": "connect", "username": "Test"});
+        assert!(promote_rdp_fields(&mut e));
+        assert_eq!(e["canonical_user"], json!("Test"));
+        assert_eq!(e["canonical_pass"], json!(""));
+    }
+
+    #[test]
+    fn rdp_without_a_username_changes_nothing() {
+        let mut e = json!({"sensor": "rdp-honeypot", "event": "listening"});
+        assert!(!promote_rdp_fields(&mut e));
+    }
+
+    #[test]
+    fn web_request_promotes_creds_and_the_user_agent() {
+        let mut e = json!({
+            "sensor": "http-honeypot", "method": "GET", "path": "/admin",
+            "username": "admin", "password": "admin123",
+            "headers": {"User-Agent": "curl/8.0"},
+        });
+        assert!(promote_web_request_fields("http-honeypot", &mut e));
+        assert_eq!(e["canonical_user"], json!("admin"));
+        assert_eq!(e["canonical_pass"], json!("admin123"));
+        assert_eq!(e["canonical_fingerprint"], json!("curl/8.0"));
+        assert_eq!(e["canonical_fingerprint_kind"], json!("User-Agent"));
+    }
+
+    #[test]
+    fn web_request_skips_a_startup_record() {
+        let mut e = json!({"category": "startup"});
+        assert!(!promote_web_request_fields("tanner", &mut e));
+    }
+
+    #[test]
+    fn web_request_skips_the_legacy_peer_shape() {
+        // No method and no category: tanner's old peer-shaped report,
+        // which carries nothing promotable.
+        let mut e = json!({"peer": {"ip": "10.8.0.2"}, "paths": []});
+        assert!(!promote_web_request_fields("tanner", &mut e));
+    }
+
+    #[test]
+    fn tanner_post_data_is_only_read_for_tanner() {
+        // http-honeypot's own POST body was never promoted into
+        // TopCommands, and reading it here would change what the dashboard
+        // shows for a sensor that has always been quiet about it.
+        let mut e = json!({"method": "POST", "path": "/login", "post_data": {"a": "b"}});
+        assert!(!promote_web_request_fields("http-honeypot", &mut e));
+    }
+
+    #[test]
+    fn canonical_dispatch_is_by_persona() {
+        let cases: Vec<(&str, Value, bool)> = vec![
+            ("cowrie", json!({"eventid": "cowrie.command.input", "input": "id"}), true),
+            ("dionaea", json!({"credentials": [{"username": "a", "password": "b"}]}), true),
+            (
+                "dionaea-incident",
+                json!({"origin": "dionaea.ftp.login", "data": {"username": "a", "password": "b"}}),
+                true,
+            ),
+            ("cisco-asa-honeypot", json!({"event": "post", "data": "x"}), true),
+            ("dns-honeypot", json!({"event": "query", "query": "example.com"}), false),
+            ("conpot", json!({"data_type": "modbus", "request": "\u{0}\u{1}"}), false),
+            // A persona with no case must not fall through to another
+            // sensor's rules just because the record looks like one.
+            (
+                "unknown-sensor",
+                json!({"eventid": "cowrie.login.success", "username": "a", "password": "b"}),
+                false,
+            ),
+        ];
+        for (persona, event, want) in cases {
+            let mut e = event.clone();
+            assert_eq!(
+                promote_canonical_fields(persona, &mut e),
+                want,
+                "promote_canonical_fields({persona:?}, {event})",
+            );
+        }
+    }
+
+    #[test]
+    fn credential_pair_validation_matches_the_dashboard() {
+        for (user, pass, want) in [
+            ("", "", false),
+            ("root", "toor", true),
+            ("root", "; /bin/busybox", false),
+            ("root ; rm -rf /", "x", false),
+            ("root", "powershell -enc ...", false),
+        ] {
+            assert_eq!(valid_credential_pair(user, pass), want, "{user:?}/{pass:?}");
+        }
+    }
 }

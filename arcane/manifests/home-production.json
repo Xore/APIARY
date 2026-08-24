@@ -216,15 +216,6 @@
     "syncInterval": 300
   },
   {
-    "syncName": "honeypot-ip-enrichment-worker",
-    "gitRepo": "apiary",
-    "branch": "main",
-    "dockerComposePath": "arcane/home/honeypot-ip-enrichment-worker/compose.yml",
-    "autoSync": false,
-    "syncDirectory": true,
-    "syncInterval": 300
-  },
-  {
     "syncName": "honeypot-agent-intrusion-worker",
     "gitRepo": "apiary",
     "branch": "main",

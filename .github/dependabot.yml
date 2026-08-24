@@ -81,7 +81,6 @@ updates:
       - /arcane/home/honeypot-dns-honeypot/dns-honeypot
       - /arcane/home/honeypot-endlessh/endlessh-honeypot
       - /arcane/home/honeypot-http/http-honeypot
-      - /arcane/home/honeypot-ip-enrichment-worker/ip-enrichment-worker
       - /llm-worker
       - /ml-worker
       - /arcane/home/honeypot-multipot/multipot
