@@ -3766,19 +3766,51 @@ div.hp-skel-batch .skeleton-line:nth-child(3) { width: 38%; }
 
 
 /* Settings palette picker: the shared .segmented contract plus a swatch
-   dot per option; the row wraps instead of forcing the pane wide. */
+   dot per option; the row wraps instead of forcing the pane wide.
+
+   Kept for consumers still rendering the old picker. The nine hardcoded dot
+   colours it used to carry are gone: every one was that theme's *dark* accent,
+   so in light mode the swatches showed colours that appeared nowhere in the
+   interface being previewed. The dot now takes var(--accent), which is
+   correct in both modes for the theme currently applied -- and the gallery
+   below is what a theme should actually be previewed with. */
 .hp-palette-pick { flex-wrap: wrap; }
 .hp-palette-pick button { display: inline-flex; align-items: center; gap: 7px; }
 .hp-palette-pick .dot { width: 11px; height: 11px; border-radius: 50%; flex: none; border: 1px solid var(--border-200); background: var(--accent); }
-.hp-palette-pick [data-value="claude"] .dot { background: #d97757; }
-.hp-palette-pick [data-value="slate"] .dot { background: #8aa2c0; }
-.hp-palette-pick [data-value="ocean"] .dot { background: #55a7d8; }
-.hp-palette-pick [data-value="sage"] .dot { background: #8fb27b; }
-.hp-palette-pick [data-value="lavender"] .dot { background: #ab93e3; }
-.hp-palette-pick [data-value="lime"] .dot { background: #b3cf5a; }
-.hp-palette-pick [data-value="amber"] .dot { background: #d9a842; }
-.hp-palette-pick [data-value="rose"] .dot { background: #d98298; }
-.hp-palette-pick [data-value="neon"] .dot { background: #3ee6c8; }
+
+/* Theme gallery.
+
+   A theme owns the ground, the sidebar, the surface ramp, the borders and the
+   text ramp, so an 11px dot previews the one part that matters least. Each
+   tile is a miniature of the shell instead.
+
+   The tile carries data-hp-theme and data-theme itself, so everything inside
+   it resolves from that theme's real tokens rather than from a copy kept in
+   this file. That works because every theme block here is an attribute
+   selector rather than a :root rule, and color-scheme is set the same way --
+   which is also why there is nothing per-theme to maintain below, and why a
+   tile cannot go stale the way the dot colours did. */
+.hp-theme-gallery { display: flex; flex-wrap: wrap; gap: var(--space-md); }
+.hp-theme-tile {
+  display: flex; flex-direction: column; gap: 6px; width: 148px; padding: 8px;
+  border: 1px solid var(--border-100); border-radius: var(--radius-control);
+  background: var(--bg-100); text-align: left; cursor: pointer;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.hp-theme-tile:hover { border-color: var(--border-200); }
+.hp-theme-tile:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.hp-theme-tile[aria-checked="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.hp-theme-tile__art {
+  display: flex; height: 62px; overflow: hidden; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-100); background: var(--bg-000);
+}
+.hp-theme-tile__sidebar { width: 26px; flex: none; background: var(--bg-sidebar); border-right: 1px solid var(--border-100); }
+.hp-theme-tile__body { display: flex; flex-direction: column; gap: 5px; flex: 1; padding: 8px; background: var(--bg-200); }
+.hp-theme-tile__line { height: 5px; width: 60%; border-radius: 3px; background: var(--text-200); }
+.hp-theme-tile__line--wide { width: 85%; background: var(--text-000); }
+.hp-theme-tile__accent { height: 9px; width: 38%; margin-top: auto; border-radius: 3px; background: var(--accent); }
+.hp-theme-tile__label { font-size: var(--font-size-footnote); font-weight: 600; color: var(--text-000); }
+.hp-theme-tile__desc { font-size: var(--font-size-xs); line-height: 1.3; color: var(--text-200); }
 
 /* Sidebar search affordance (claude.ai top-row pattern): a quiet icon
    button floated into the brand row, opening the same palette. */

@@ -198,6 +198,11 @@ jobs:
       # #1825 renamed eight tokens and 31 call sites kept rendering, wrong.
       - name: Frontend theme tokens all exist
         run: scripts/check-theme-tokens.sh
+      # The catalogue lives in the frontend, the tokens live in the vendored
+      # stylesheet. A theme in one and not the other fails silently either
+      # way -- default styling, or unpickable. #1758.
+      - name: Theme catalogue matches theme.css
+        run: scripts/check-theme-catalogue.sh
 
   scripts-and-compose:
     name: ${{ matrix.name }}
