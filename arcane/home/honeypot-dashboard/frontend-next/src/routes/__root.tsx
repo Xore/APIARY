@@ -9,6 +9,7 @@ import { AppShell } from '../components/AppShell'
 import { getSessionUser, type User } from '../lib/auth'
 import { activeBanner, type BannerView, type BehaviorConfig, type PresentationConfig } from '../lib/banner'
 import { pullAppearance } from '../lib/prefs'
+import { type Appearance } from '../lib/appearanceCookie'
 
 type ShellConfig = { banner: BannerView | null; showProblemReportButton: boolean; appName: string }
 
@@ -34,6 +35,31 @@ const fetchShellConfig = createServerFn({ method: 'GET' }).handler(async (): Pro
   }
 })
 
+// #1833: the appearance the server can know before it renders anything.
+//
+// __root rendered a bare <html lang="en"> and let an inline script mutate
+// document.documentElement afterwards. That works only because React does
+// not strip attributes it did not render, and it cannot avoid the flash:
+// on a device that has never run this dashboard there is no localStorage
+// to read, so the first frame paints the default ground and repaints once
+// pullAppearance() resolves. A theme owns the ground, the sidebar, every
+// surface and the whole text ramp, so that is a full-page flash on the
+// machine where the operator has the least context for what it should
+// look like.
+//
+// The cookie is a first-paint hint and nothing more. localStorage and the
+// server preference remain the source of truth, so cookies being blocked
+// degrades to exactly the previous behaviour rather than to a wrong one.
+const getAppearance = createServerFn({ method: 'GET' }).handler(async (): Promise<Appearance> => {
+  const { getRequest } = await import('@tanstack/react-start/server')
+  const { readAppearanceCookie } = await import('../lib/appearanceCookie')
+  try {
+    return readAppearanceCookie(getRequest().headers.get('cookie'))
+  } catch {
+    return { mode: null, theme: null }
+  }
+})
+
 export const Route = createRootRoute({
   // BFF-owned auth: every navigation resolves the redis session on the
   // server; unauthenticated requests bounce to the Keycloak flow. The
@@ -52,9 +78,15 @@ export const Route = createRootRoute({
   // Shell-wide chrome (banner, problem-report button) is fetched once here
   // rather than per-route, both because every page shares it and so
   // /auth/* skips the extra backend round-trip pre-login.
-  loader: async ({ location }): Promise<ShellConfig> => {
-    if (location.pathname.startsWith('/auth/')) return { banner: null, showProblemReportButton: false, appName: 'APIARY' }
-    return fetchShellConfig()
+  loader: async ({ location }): Promise<ShellConfig & { appearance: Appearance }> => {
+    // Signed-out pages get the appearance too: /auth/login renders before
+    // there is a session, and defaulting it there is the one flash an
+    // operator sees on every new device.
+    const appearance = await getAppearance()
+    if (location.pathname.startsWith('/auth/')) {
+      return { banner: null, showProblemReportButton: false, appName: 'APIARY', appearance }
+    }
+    return { ...(await fetchShellConfig()), appearance }
   },
   head: () => ({
     meta: [
@@ -151,14 +183,22 @@ function useStoredAppearance() {
 }
 
 function RootDocument({ children }: { children: React.ReactNode }) {
-  const { banner, showProblemReportButton, appName } = Route.useLoaderData()
+  const { banner, showProblemReportButton, appName, appearance } = Route.useLoaderData()
   // beforeLoad already resolved the session user into router context for
   // every non-/auth navigation — thread it to the shell so the sidebar
   // profile widget and topbar avatar show a real identity (#1653).
   const { user } = Route.useRouteContext() as { user?: User | null }
   useStoredAppearance()
   return (
-    <html lang="en">
+    // #1833: rendered, not scripted. Viewing source now shows the
+    // operator's theme on <html> rather than only a script that will set
+    // it. The boot script below stays as the fallback for a first visit
+    // with no cookie yet, and for a device where cookies are blocked.
+    <html
+      lang="en"
+      {...(appearance?.mode ? { 'data-theme': appearance.mode } : {})}
+      {...(appearance?.theme ? { 'data-hp-theme': appearance.theme, 'data-hp-palette': appearance.theme } : {})}
+    >
       <head>
         <HeadContent />
       </head>
