@@ -4,8 +4,9 @@
 // and therefore the same rendered pixels — as the legacy dashboard.
 // Client-only: echarts is imported dynamically inside useEffect so SSR
 // ships the skeleton and the canvas hydrates in.
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { copyWithFlash } from '../lib/flash'
+import { useAppearanceKey } from '../lib/prefs'
 
 export type ChartKind = 'sankey' | 'timeline' | 'heatmap' | 'pie' | 'line' | 'bar' | 'barh' | 'scatter' | 'radar'
 
@@ -51,7 +52,7 @@ const builders: Record<ChartKind, Builder> = {
                 data: nodes,
                 links,
                 lineStyle: { color: 'gradient', curveness: 0.5 },
-                label: { position: 'top', color: themeColor('--text-primary', '#e9e6df') },
+                label: { position: 'top', color: themeColor('--text-000', '#e9e6df') },
               },
             ],
     })
@@ -71,14 +72,14 @@ const builders: Record<ChartKind, Builder> = {
       xAxis: {
         type: 'category',
         data: tactics,
-        splitArea: { show: true, areaStyle: { color: [themeColor('--surface-1', '#2c2c2a'), themeColor('--surface-2', '#232321')] } },
-        axisLabel: { rotate: 30, color: themeColor('--text-primary', '#e9e6df') },
+        splitArea: { show: true, areaStyle: { color: [themeColor('--bg-200', '#2c2c2a'), themeColor('--bg-300', '#232321')] } },
+        axisLabel: { rotate: 30, color: themeColor('--text-000', '#e9e6df') },
       },
       yAxis: {
         type: 'category',
         data: techniques,
-        splitArea: { show: true, areaStyle: { color: [themeColor('--surface-1', '#2c2c2a'), themeColor('--surface-2', '#232321')] } },
-        axisLabel: { color: themeColor('--text-primary', '#e9e6df') },
+        splitArea: { show: true, areaStyle: { color: [themeColor('--bg-200', '#2c2c2a'), themeColor('--bg-300', '#232321')] } },
+        axisLabel: { color: themeColor('--text-000', '#e9e6df') },
       },
       visualMap: {
         min: 0,
@@ -87,7 +88,7 @@ const builders: Record<ChartKind, Builder> = {
         orient: 'horizontal',
         left: 'center',
         bottom: '0%',
-        inRange: { color: [themeColor('--surface-3', '#3d3d3b'), themeColor('--accent', '#d97757')] },
+        inRange: { color: [themeColor('--bg-400', '#3d3d3b'), themeColor('--accent', '#d97757')] },
       },
       series: [
         {
@@ -111,14 +112,14 @@ const builders: Record<ChartKind, Builder> = {
     })
     chart.setOption({
       tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      legend: { orient: 'vertical', left: 'left', textStyle: { color: themeColor('--text-primary', '#e9e6df') } },
+      legend: { orient: 'vertical', left: 'left', textStyle: { color: themeColor('--text-000', '#e9e6df') } },
       series: [
         {
           type: 'pie',
           radius: ['35%', '65%'],
           avoidLabelOverlap: true,
-          itemStyle: { borderColor: themeColor('--surface-1', '#2c2c2a'), borderWidth: 2 },
-          label: { color: themeColor('--text-primary', '#e9e6df') },
+          itemStyle: { borderColor: themeColor('--bg-200', '#2c2c2a'), borderWidth: 2 },
+          label: { color: themeColor('--text-000', '#e9e6df') },
           data: trimmed,
         },
       ],
@@ -136,9 +137,9 @@ const builders: Record<ChartKind, Builder> = {
       tooltip: { trigger: 'item' },
       radar: {
         indicator: categories.map((c) => ({ name: c, max })),
-        axisName: { color: themeColor('--text-primary', '#e9e6df') },
-        axisLine: { lineStyle: { color: themeColor('--border-strong', 'rgba(255,255,255,0.14)') } },
-        splitLine: { lineStyle: { color: themeColor('--border-subtle', 'rgba(255,255,255,0.075)') } },
+        axisName: { color: themeColor('--text-000', '#e9e6df') },
+        axisLine: { lineStyle: { color: themeColor('--border-200', 'rgba(255,255,255,0.14)') } },
+        splitLine: { lineStyle: { color: themeColor('--border-100', 'rgba(255,255,255,0.075)') } },
         splitArea: { areaStyle: { color: ['transparent'] } },
       },
       series: [
@@ -199,7 +200,7 @@ const builders: Record<ChartKind, Builder> = {
         type: 'category',
         data: categories,
         axisLabel: {
-          color: themeColor('--text-primary', '#e9e6df'),
+          color: themeColor('--text-000', '#e9e6df'),
           rotate: longLabels ? 30 : 0,
           overflow: longLabels ? 'break' : undefined,
           width: longLabels ? 200 : undefined,
@@ -225,7 +226,7 @@ const builders: Record<ChartKind, Builder> = {
         type: 'category',
         data: categories,
         inverse: true,
-        axisLabel: { color: themeColor('--text-primary', '#e9e6df'), overflow: 'truncate', width: 220 },
+        axisLabel: { color: themeColor('--text-000', '#e9e6df'), overflow: 'truncate', width: 220 },
       },
       series: [{ type: 'bar', barMaxWidth: 18, data: values, itemStyle: { color: themeColor('--accent', '#d97757') } }],
     })
@@ -315,36 +316,62 @@ export function EChart({ kind, url, height }: { kind: ChartKind; url: string; he
   const containerRef = useRef<HTMLDivElement>(null)
   const [status, setStatus] = useState('Loading…')
   const [state, setState] = useState<'loading' | 'ready' | 'empty' | 'error'>('loading')
+  // #1757: the payload is kept so an appearance change can repaint from it.
+  // Every colour in a chart is resolved from a CSS custom property into a
+  // pixel value at build time and cannot re-resolve itself, so a theme change
+  // has to rebuild -- but a theme change is not new data, and making it cost
+  // a refetch would put a network round trip behind a toggle.
+  const dataRef = useRef<unknown>(null)
+  const chartRef = useRef<import('echarts').ECharts | null>(null)
+  const observerRef = useRef<ResizeObserver | null>(null)
+  const appearance = useAppearanceKey()
 
-  useEffect(() => {
+  const teardown = useCallback(() => {
+    observerRef.current?.disconnect()
+    observerRef.current = null
+    chartRef.current?.dispose()
+    chartRef.current = null
+  }, [])
+
+  // Build (or rebuild) the chart from whatever is already in dataRef.
+  //
+  // ECharts binds its theme at init(), so re-registering does not reach an
+  // existing instance -- repainting means dispose and re-init. That is cheap
+  // next to the fetch this deliberately does not repeat.
+  const paint = useCallback(async () => {
     const container = containerRef.current
-    if (!container) return
+    if (!container || dataRef.current == null) return
+    const { echarts, chartColor, registerXoreTheme } = await import('../lib/echarts')
+    if (!containerRef.current) return
+    teardown()
+    registerXoreTheme()
+    const chart = echarts.init(container, 'xore')
+    chartRef.current = chart
+    const summary = builders[kind](chart, dataRef.current, chartColor, echarts)
+    if (summary.startsWith('No ')) {
+      teardown()
+      setState('empty')
+      setStatus(summary)
+      return
+    }
+    setState('ready')
+    setStatus(summary)
+    const observer = new ResizeObserver(() => chartRef.current?.resize())
+    observer.observe(container)
+    observerRef.current = observer
+  }, [kind, teardown])
+
+  // Data: fetch once per kind/url, then paint.
+  useEffect(() => {
     let disposed = false
-    let chart: import('echarts').ECharts | null = null
-    let observer: ResizeObserver | null = null
     ;(async () => {
       try {
-        const [{ echarts, chartColor, registerXoreTheme }, response] = await Promise.all([
-          import('../lib/echarts'),
-          fetch(url, { cache: 'no-store', headers: { Accept: 'application/json' } }),
-        ])
+        const response = await fetch(url, { cache: 'no-store', headers: { Accept: 'application/json' } })
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
         const data = await response.json()
         if (disposed) return
-        registerXoreTheme()
-        chart = echarts.init(container, 'xore')
-        const summary = builders[kind](chart, data, chartColor, echarts)
-        if (summary.startsWith('No ')) {
-          chart.dispose()
-          chart = null
-          setState('empty')
-          setStatus(summary)
-          return
-        }
-        setState('ready')
-        setStatus(summary)
-        observer = new ResizeObserver(() => chart?.resize())
-        observer.observe(container)
+        dataRef.current = data
+        await paint()
       } catch (error) {
         if (!disposed) {
           setState('error')
@@ -354,10 +381,22 @@ export function EChart({ kind, url, height }: { kind: ChartKind; url: string; he
     })()
     return () => {
       disposed = true
-      observer?.disconnect()
-      chart?.dispose()
+      teardown()
     }
-  }, [kind, url])
+  }, [kind, url, paint, teardown])
+
+  // Appearance: repaint in place, no refetch. Skipped on the first run --
+  // the data effect above has just painted, or has nothing to paint yet.
+  const paintedFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (paintedFor.current === null) {
+      paintedFor.current = appearance
+      return
+    }
+    if (paintedFor.current === appearance) return
+    paintedFor.current = appearance
+    void paint()
+  }, [appearance, paint])
 
   return (
     <>
