@@ -83,6 +83,7 @@ fn default_preferences(timezone: &str) -> Value {
         "auto_refresh": true,
         "refresh_interval_seconds": 30,
         "live_toasts": true,
+        "live_toast_interval_seconds": 3,
         "map_basemap": "osm",
         "map_clustering": true,
         "map_animation": true,
@@ -164,6 +165,7 @@ struct PreferencesPatch {
     auto_refresh: Option<bool>,
     refresh_interval_seconds: Option<i64>,
     live_toasts: Option<bool>,
+    live_toast_interval_seconds: Option<i64>,
     map_basemap: Option<String>,
     map_clustering: Option<bool>,
     map_animation: Option<bool>,
@@ -192,6 +194,9 @@ const SEVERITIES: &[&str] = &["low", "medium", "high", "critical"];
 const EVENT_WINDOWS: &[&str] = &["1h", "6h", "24h", "7d", "30d"];
 const ROWS_PER_PAGE: &[i64] = &[10, 25, 50, 100];
 const REFRESH_SECONDS: &[i64] = &[10, 15, 30, 60, 120, 300];
+/// Matches TOAST_INTERVALS in settings.tsx. 3 is "every new batch"; the rest
+/// are the coarser choices an operator picks when the stream is busy.
+const TOAST_SECONDS: &[i64] = &[3, 30, 60, 120, 300];
 
 fn one_of(field: &str, value: &Option<String>, allowed: &[&str], problems: &mut Vec<String>) {
     if let Some(v) = value {
@@ -298,6 +303,12 @@ impl PreferencesPatch {
         one_of("default_event_window", &self.default_event_window, EVENT_WINDOWS, &mut p);
         one_of_int("rows_per_page", &self.rows_per_page, ROWS_PER_PAGE, &mut p);
         one_of_int("refresh_interval_seconds", &self.refresh_interval_seconds, REFRESH_SECONDS, &mut p);
+        one_of_int(
+            "live_toast_interval_seconds",
+            &self.live_toast_interval_seconds,
+            TOAST_SECONDS,
+            &mut p,
+        );
         landing_path("landing_page", &self.landing_page, &mut p);
         timezone_name("timezone", &self.timezone, &mut p);
         p
@@ -330,6 +341,7 @@ impl PreferencesPatch {
         set!("auto_refresh", self.auto_refresh);
         set!("refresh_interval_seconds", self.refresh_interval_seconds);
         set!("live_toasts", self.live_toasts);
+        set!("live_toast_interval_seconds", self.live_toast_interval_seconds);
         set!("map_basemap", self.map_basemap);
         set!("map_clustering", self.map_clustering);
         set!("map_animation", self.map_animation);
@@ -540,6 +552,36 @@ mod tests {
             let p = patch(&format!(r#"{{"timezone": {}}}"#, serde_json::to_string(bad).unwrap()));
             assert!(!p.problems().is_empty(), "{bad:?} should be rejected");
         }
+    }
+
+    #[test]
+    fn the_toast_interval_is_accepted_and_bounded() {
+        // #1850: this field existed in the frontend and not here, and the
+        // struct is deny_unknown_fields -- so saving the Time pane was
+        // rejected outright, the value never stored, and the client fell back
+        // to its 3-second default no matter what the operator chose. The
+        // toasts then fired every 3 seconds forever.
+        for good in TOAST_SECONDS {
+            let p = patch(&format!(r#"{{"live_toast_interval_seconds": {good}}}"#));
+            assert!(p.problems().is_empty(), "{good} should be accepted: {:?}", p.problems());
+        }
+        for bad in [0, 1, 7, 3600, -1] {
+            let p = patch(&format!(r#"{{"live_toast_interval_seconds": {bad}}}"#));
+            assert!(!p.problems().is_empty(), "{bad} should be rejected");
+        }
+    }
+
+    #[test]
+    fn the_whole_time_pane_saves_in_one_patch() {
+        // The pane sends every one of its fields together. A single unknown
+        // field among them fails the lot, which is how one missing field took
+        // the other six down with it.
+        let p = patch(
+            r#"{"timezone": "Europe/Berlin", "clock": "h24", "timestamps": "relative",
+                 "auto_refresh": true, "refresh_interval_seconds": 30,
+                 "live_toasts": true, "live_toast_interval_seconds": 120}"#,
+        );
+        assert!(p.problems().is_empty(), "{:?}", p.problems());
     }
 
     #[test]
