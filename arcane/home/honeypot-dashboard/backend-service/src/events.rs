@@ -110,6 +110,14 @@ pub struct EventPivots {
     pub provider: String,
     pub alert: String,
     pub category: String,
+    /// What the request carried, as opposed to what it asked for (#1888).
+    ///
+    /// Separate from `category` because they answer different questions and
+    /// routinely disagree: an SQL injection POSTed to a WordPress bait path
+    /// is a "wordpress" request carrying an "sqli" payload, and until now
+    /// the explorer could only show one of the two. Only http-honeypot
+    /// emits it, so it is empty for most rows.
+    pub payload_class: String,
     /// Route to the in-app TTY replay when this event closed a recorded
     /// session (cowrie.log.closed — its `shasum` is the recording's own
     /// hash, deliberately NOT surfaced as a payload hash; see
@@ -167,6 +175,7 @@ pub fn pivots_from_source(src: &Value) -> EventPivots {
         org: text(&src["source"]["as"]["organization_name"]),
         provider: text(&src["source"]["as"]["type"]),
         alert: text(&src["suricata"]["eve"]["alert"]["signature"]),
+        payload_class: text(&hp["payload_class"]),
         category: {
             let sig_cat = text(&src["suricata"]["eve"]["alert"]["category"]);
             if sig_cat.is_empty() { text(&hp["category"]) } else { sig_cat }

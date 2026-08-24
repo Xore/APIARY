@@ -34,6 +34,8 @@ type EventPivots = {
   tty_replay: string
   /** DNP3 control-function severity ("critical"/"high"/""). */
   ics_severity: string
+  /** What the request carried (#1888); http-honeypot only, often empty. */
+  payload_class: string
 }
 
 type EventRow = {
@@ -1040,6 +1042,16 @@ function FragmentRow({
                 title="DNP3 control-function severity: this app_function code changes equipment or device state"
               >
                 {row.pivots.ics_severity}
+              </span>{' '}
+            </>
+          ) : null}
+          {row.pivots.payload_class ? (
+            <>
+              <span
+                className="badge badge--info"
+                title="What this request carried, as opposed to what it asked for — the path is in the category column"
+              >
+                {row.pivots.payload_class}
               </span>{' '}
             </>
           ) : null}
