@@ -143,10 +143,21 @@ function SkeletonCards({ count }: { count: number }) {
   )
 }
 
-// One payload card — payloads.html's "payloadrow": .project-card stays a
-// plain, non-linking container (a payload has several distinct actions
-// and HTML forbids interactive controls inside an <a>); the hash is the
-// one direct link, every other action lives in the "…" menu.
+// One payload card — payloads.html's "payloadrow".
+//
+// The card cannot itself be an <a>: a payload has several distinct
+// actions, and HTML forbids interactive controls inside an anchor. That
+// reasoning was right and its conclusion was not — it left the hash text
+// as the only way into a payload's analysis, so the page's primary action
+// had a target a few characters wide while the rest of the card, the part
+// the eye lands on, did nothing. The analysis-results grids have always
+// opened on a click anywhere.
+//
+// #1869: a transparent .hp-card-link overlay covers the card and the real
+// controls sit above it, so clicking the card opens the analysis, clicking
+// a control does what the control says, and the markup stays valid. The
+// hash stays a link — it is also what an operator copies, and taking that
+// away to add the overlay would trade one loss for another.
 function PayloadCard({ row, badge }: { row: PayloadRow; badge: GithubBadge | undefined }) {
   const publish = () =>
     confirmAction({
@@ -162,6 +173,14 @@ function PayloadCard({ row, badge }: { row: PayloadRow; badge: GithubBadge | und
     })
   return (
     <div className="project-card">
+      {/* Empty by design — it takes its accessible name from the label,
+          because an unlabelled link is worse than the small target it
+          replaces. */}
+      <a
+        className="hp-card-link"
+        href={`/payload-analysis/${encodeURIComponent(row.Hash)}`}
+        aria-label={`Open the analysis for payload ${row.Hash}`}
+      />
       <div className="project-card__header">
         <span className="project-card__icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

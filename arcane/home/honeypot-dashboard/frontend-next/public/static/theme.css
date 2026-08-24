@@ -3413,6 +3413,45 @@ footer {
    display/color/underline reset to lay out and read exactly like the div
    the component was designed as. */
 a.project-card { display: block; color: inherit; text-decoration: none; }
+
+/* Make a whole card open its record, on a card that also has controls.
+
+   Where a card has no interactive children it can simply be an <a>, and
+   several already are. A card that carries its own actions -- an overflow
+   menu, badge links, a copy button -- cannot: HTML forbids interactive
+   content inside an anchor, and nesting it produces a card whose menu
+   cannot be opened without also navigating away.
+
+   So the link is a transparent overlay covering the card, and the real
+   controls are lifted above it. The result is that clicking the card
+   opens its record, clicking a control does what the control says, and
+   the markup stays valid.
+
+   The overlay is empty, so it needs its accessible name from an
+   aria-label; without one the card is an unlabelled link to a screen
+   reader. */
+.project-card:has(.hp-card-link) { position: relative; }
+.hp-card-link {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+}
+.hp-card-link:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+/* Everything the reader can act on sits above the overlay. `position:
+   relative` is what puts an element on the z-axis at all -- z-index alone
+   does nothing to a statically positioned box. */
+.project-card:has(.hp-card-link) > *,
+.project-card:has(.hp-card-link) .project-card__title,
+.project-card:has(.hp-card-link) .project-card__badges a,
+.project-card:has(.hp-card-link) .action-menu {
+  position: relative;
+  z-index: 1;
+}
+.project-card:has(.hp-card-link) > .hp-card-link { z-index: 0; }
 /* A SHA-256 is far longer than any title .project-card was designed to
    hold; truncate with an ellipsis rather than wrapping a hash across
    several lines. */
