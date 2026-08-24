@@ -2949,23 +2949,22 @@ a.metric:hover { border-color: var(--border-200); background: var(--bg-300); }
   font: 700 9px var(--hp-mono);
 }
 .tabs .tab.active span { background: var(--accent); color: var(--text-on-accent); }
-/* A panel stacks its cards with real spacing.
+.dashboard-panel { animation: hp-panel-in 150ms ease-out; }
 
-   This used to rely on `.dashboard-panel > .card + .card { margin-top: 14px }`
-   alone, which is an adjacent-sibling rule on direct children only. Any card
-   inside a wrapper, or with anything at all between it and the previous card,
-   matched nothing and sat flush against its neighbour -- which is most cards
-   on most pages, so the dashboard read as one undifferentiated slab.
-   Measured on /auth-events: three cards, every one of them margin-top: 0.
+/* Cards space themselves.
 
-   A column with a gap does not care about nesting depth of siblings or what
-   sits between them, so it cannot fail the same way. */
-.dashboard-panel {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-lg);
-  animation: hp-panel-in 150ms ease-out;
-}
+   Spacing used to be the container's job, and every version of that reached
+   only cards whose parent was a .dashboard-panel. Measured on the live
+   dashboard, most cards are not: /auth-events has two in an unclassed div and
+   one inside .hp-md__list, all three computing margin-top: 0. A card that
+   relies on its container is flush wherever someone wrapped it.
+
+   Owning the margin makes it correct at any nesting depth. :last-child drops
+   the trailing one so a container does not gain a phantom gap at its end, and
+   flex/grid parents that already set their own gap are unaffected because
+   nothing here adds to a gap they control. */
+.card { margin-block-end: var(--space-lg); }
+.card:last-child { margin-block-end: 0; }
 @keyframes hp-panel-in { from { opacity: 0.35; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
 /* ── Data tables ────────────────────────────────────────────────────────
