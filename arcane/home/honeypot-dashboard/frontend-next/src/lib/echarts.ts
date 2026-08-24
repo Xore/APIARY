@@ -11,11 +11,11 @@ export { echarts }
 export const chartColor = cssVar
 
 function buildTheme() {
-  const textPrimary = chartColor('--text-primary', '#e9e6df')
-  const textMuted = chartColor('--text-muted', '#a5a9a6')
-  const border = chartColor('--border-strong', 'rgba(255,255,255,0.14)')
-  const borderSubtle = chartColor('--border-subtle', 'rgba(255,255,255,0.075)')
-  const surface = chartColor('--surface-raised', '#383835')
+  const textPrimary = chartColor('--text-000', '#e9e6df')
+  const textMuted = chartColor('--text-200', '#a5a9a6')
+  const border = chartColor('--border-200', 'rgba(255,255,255,0.14)')
+  const borderSubtle = chartColor('--border-100', 'rgba(255,255,255,0.075)')
+  const surface = chartColor('--bg-raised', '#383835')
   const accent = chartColor('--accent', '#d97757')
   const axis = {
     axisLine: { lineStyle: { color: border } },

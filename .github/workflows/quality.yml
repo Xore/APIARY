@@ -193,6 +193,11 @@ jobs:
         run: scripts/check-vendored-theme.sh
       - name: Portable APIARY tokens match Xore/theme
         run: python branding/scripts/check_theme_sync.py
+      # Canvas surfaces resolve tokens to pixels and carry dark-theme
+      # fallbacks, so a rename upstream degrades silently instead of failing.
+      # #1825 renamed eight tokens and 31 call sites kept rendering, wrong.
+      - name: Frontend theme tokens all exist
+        run: scripts/check-theme-tokens.sh
 
   scripts-and-compose:
     name: ${{ matrix.name }}

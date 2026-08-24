@@ -280,3 +280,46 @@ export function useThemeMode(): ThemeMode {
     () => 'system',
   )
 }
+
+// While the mode is `system` the rendered colours follow the OS, and nothing
+// in this module is involved -- no attribute changes, so no emit() fires.
+// A canvas that repaints on appearance changes would therefore keep the old
+// colours when someone flips their OS to dark, which looks exactly like the
+// bug #1757 is about. Bridge that into the same store.
+//
+// Registered once, lazily, and never torn down: it costs one listener for
+// the life of the document and there is no point at which the answer stops
+// mattering.
+let osThemeWatched = false
+function watchOsTheme() {
+  if (osThemeWatched || typeof window === 'undefined' || !window.matchMedia) return
+  osThemeWatched = true
+  const query = window.matchMedia('(prefers-color-scheme: dark)')
+  const onChange = () => {
+    if (getThemeMode() === 'system') emit()
+  }
+  if (typeof query.addEventListener === 'function') query.addEventListener('change', onChange)
+  else if (typeof query.addListener === 'function') query.addListener(onChange)
+}
+
+/// One value that changes whenever anything about the rendered appearance
+/// does: the mode, the theme name, or the OS preference while in `system`.
+///
+/// For canvas-rendered surfaces -- ECharts, the graphs, xterm -- which
+/// resolve CSS custom properties into pixels once and cannot re-resolve them
+/// on their own. Put it in an effect's dependency array and repaint.
+///
+/// Returns a string rather than an object so React's Object.is comparison in
+/// useSyncExternalStore sees an unchanged value as unchanged; returning a
+/// fresh object each call would re-render forever.
+export function useAppearanceKey(): string {
+  return useSyncExternalStore(
+    (listener) => {
+      watchOsTheme()
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    () => `${getThemeMode()}:${getThemeName()}`,
+    () => 'system:claude',
+  )
+}

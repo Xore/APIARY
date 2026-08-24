@@ -18,6 +18,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { Core, NodeSingular } from 'cytoscape'
 import { cssVar as cssColor } from '../lib/cssVar'
 import { useServerQuery } from '../lib/useServerQuery'
+import { useAppearanceKey } from '../lib/prefs'
 
 type GraphNode = { id: string; label: string; kind: 'function' | 'leaf' }
 type GraphEdge = { source: string; target: string }
@@ -37,6 +38,7 @@ export function GhidraCallGraph({ sha }: { sha: string }) {
   const cyRef = useRef<Core | null>(null)
   const graph = useServerQuery(fetchCallGraph, { sha }, [sha])
   const [filter, setFilter] = useState('')
+  const appearance = useAppearanceKey()
 
   useEffect(() => {
     const container = containerRef.current
@@ -47,10 +49,10 @@ export function GhidraCallGraph({ sha }: { sha: string }) {
       if (disposed) return
       const accent = cssColor('--accent', '#d97757')
       const accentText = cssColor('--text-on-accent', '#211a17')
-      const border = cssColor('--border-strong', 'rgba(255,255,255,0.14)')
-      const surface = cssColor('--surface-2', '#343432')
-      const surface1 = cssColor('--surface-1', '#2c2c2a')
-      const text = cssColor('--text-muted', '#a5a9a6')
+      const border = cssColor('--border-200', 'rgba(255,255,255,0.14)')
+      const surface = cssColor('--bg-300', '#343432')
+      const surface1 = cssColor('--bg-200', '#2c2c2a')
+      const text = cssColor('--text-200', '#a5a9a6')
       const cy = cytoscape({
         container,
         elements: [
@@ -126,7 +128,9 @@ export function GhidraCallGraph({ sha }: { sha: string }) {
       cyRef.current?.destroy()
       cyRef.current = null
     }
-  }, [graph])
+    // #1757: rebuild on an appearance change -- the colours below were
+    // resolved to pixels at build time and cannot follow a theme on their own.
+  }, [graph, appearance])
 
   useEffect(() => {
     const cy = cyRef.current

@@ -11,6 +11,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { cssVar as cssColor } from '../lib/cssVar'
 import { useServerQuery } from '../lib/useServerQuery'
+import { useAppearanceKey } from '../lib/prefs'
 
 type GraphNode = { id: string; label: string; kind: 'hub' | 'spoke' | 'overflow' }
 type GraphEdge = { source: string; target: string }
@@ -28,6 +29,11 @@ export function AttackerGraph({ id }: { id: string }) {
   const graph = useServerQuery(fetchGraph, { id }, [id])
   const navigate = useNavigate()
   const [memberCount, setMemberCount] = useState<number | null>(null)
+  // #1757: cytoscape resolves these tokens to pixel values once and cannot
+  // re-resolve them, so the graph has to be rebuilt when the appearance
+  // changes. `graph` is already in memory (useServerQuery above), so this
+  // costs a re-layout and no refetch.
+  const appearance = useAppearanceKey()
 
   useEffect(() => {
     const container = containerRef.current
@@ -39,8 +45,8 @@ export function AttackerGraph({ id }: { id: string }) {
       const cytoscape = (await import('cytoscape')).default
       if (disposed) return
       const accent = cssColor('--accent', '#d97757')
-      const muted = cssColor('--text-muted', '#a5a9a6')
-      const border = cssColor('--border-strong', 'rgba(255,255,255,0.14)')
+      const muted = cssColor('--text-200', '#a5a9a6')
+      const border = cssColor('--border-200', 'rgba(255,255,255,0.14)')
       instance = cytoscape({
         container,
         elements: [
@@ -65,7 +71,7 @@ export function AttackerGraph({ id }: { id: string }) {
               color: muted,
               'text-valign': 'bottom',
               'text-margin-y': 6,
-              'background-color': cssColor('--surface-2', '#343432'),
+              'background-color': cssColor('--bg-300', '#343432'),
               'border-color': accent,
               'border-width': 1.2,
               width: 26,
@@ -81,7 +87,7 @@ export function AttackerGraph({ id }: { id: string }) {
               'font-weight': 600,
               color: cssColor('--text-on-accent', '#211a17'),
               'background-color': accent,
-              'border-color': cssColor('--surface-1', '#2c2c2a'),
+              'border-color': cssColor('--bg-200', '#2c2c2a'),
               'border-width': 2,
               width: 56,
               height: 56,
@@ -89,7 +95,7 @@ export function AttackerGraph({ id }: { id: string }) {
           },
           {
             selector: 'node[kind = "overflow"]',
-            style: { 'background-color': cssColor('--surface-2', '#343432'), 'border-color': border, color: muted },
+            style: { 'background-color': cssColor('--bg-300', '#343432'), 'border-color': border, color: muted },
           },
           { selector: 'edge', style: { width: 1.2, 'line-color': border, 'curve-style': 'straight' } },
         ],
@@ -112,7 +118,7 @@ export function AttackerGraph({ id }: { id: string }) {
       observer?.disconnect()
       instance?.destroy()
     }
-  }, [graph, navigate])
+  }, [graph, navigate, appearance])
 
   if (graph === null) return <span className="skeleton-line" aria-hidden="true" />
   if (graph.nodes.length <= 1) return null
@@ -127,7 +133,7 @@ export function AttackerGraph({ id }: { id: string }) {
           maxHeight: '80vh',
           resize: 'vertical',
           overflow: 'hidden',
-          border: '1px solid var(--border-strong)',
+          border: '1px solid var(--border-200)',
           borderRadius: 8,
         }}
       >

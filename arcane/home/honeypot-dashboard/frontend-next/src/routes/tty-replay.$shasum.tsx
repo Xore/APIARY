@@ -25,6 +25,18 @@ import { InvestigateHeader } from '../components/Investigate'
 import { Tabs, TabPanel } from '../components/Tabs'
 import { useResolved } from '../lib/hooks'
 import { formatTimestamp } from '../lib/time'
+import { cssVar } from '../lib/cssVar'
+import { useAppearanceKey } from '../lib/prefs'
+
+// The terminal's two tokens, resolved. Background falls back to fully
+// transparent -- what this passed before -- because .hp-tty-term already
+// paints the box behind it.
+function terminalTheme(): { background: string; foreground: string } {
+  return {
+    background: cssVar('--terminal-bg', '#00000000'),
+    foreground: cssVar('--terminal-fg', '#e6e6e6'),
+  }
+}
 
 type Replay = {
   shasum: string
@@ -145,11 +157,20 @@ function TerminalPlayback({ replay }: { replay: Replay }) {
       return []
     }
   }, [replay.ttylog_base64])
+
   const text = useMemo(() => plainTranscript(replay.transcript), [replay.transcript])
   const total = frames.length
 
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<import('@xterm/xterm').Terminal | null>(null)
+  const appearance = useAppearanceKey()
+
+  // #1757: xterm swaps its theme in place, so an appearance change costs
+  // neither a remount nor a re-parse of the recording.
+  useEffect(() => {
+    const term = termRef.current
+    if (term) term.options.theme = terminalTheme()
+  }, [appearance])
   const fitRef = useRef<import('@xterm/addon-fit').FitAddon | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const indexRef = useRef(0)
@@ -185,7 +206,13 @@ function TerminalPlayback({ replay }: { replay: Replay }) {
         disableStdin: true,
         fontSize: 13,
         scrollback: 5000,
-        theme: { background: '#00000000' },
+        // #1757: xterm paints its own text, so a transparent background
+        // alone left the foreground at xterm's built-in white -- fine on the
+        // dark ground this was written against, and white-on-paper in a light
+        // theme. theme.css styles .hp-tty-term from --terminal-bg and
+        // --terminal-fg; use the same two tokens so the canvas agrees with
+        // the box drawn around it.
+        theme: terminalTheme(),
       })
       const fit = new FitAddon()
       term.loadAddon(fit)
