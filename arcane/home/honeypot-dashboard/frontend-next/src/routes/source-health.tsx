@@ -161,7 +161,7 @@ function SourceHealthPage() {
           opened with no at-a-glance verdict at all. The two in-page
           anchors match the ids further down, same as the Go tier. */}
       {health ? (
-        <div className="tw:grid tw:grid-cols-2 tw:sm:grid-cols-4 tw:gap-3 tw:mb-6">
+        <div className="metric-grid">
           <a className="metric" href="#sensor-feeds" title="Jump to the per-sensor feed table">
             <div className="metric__value">{health.sensors.length.toLocaleString('en-US')}</div>
             <div className="metric__label">Configured feeds</div>
@@ -195,7 +195,7 @@ function SourceHealthPage() {
         </Link>
       </div>
       {health ? (
-        <div className="tw:grid tw:grid-cols-12 tw:gap-3.5 tw:mb-6">
+        <div className=" tw:mb-6">
           <div className="card wide">
             <h2>Ingestion freshness</h2>
             <table className="data-table">
@@ -235,7 +235,7 @@ function SourceHealthPage() {
         </div>
       </div>
       {health ? (
-        <div className="tw:grid tw:grid-cols-12 tw:gap-3.5 tw:mb-6">
+        <div className=" tw:mb-6">
           <div className="card half">
             <h2>YARA scanner</h2>
             <CardRow label="enabled" value={String(yara?.enabled ?? false)} />

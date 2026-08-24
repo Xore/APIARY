@@ -189,7 +189,7 @@ function PageTabs({
 function Panel({ id, active, children }: { id: string; active: string; children: React.ReactNode }) {
   return (
     <div
-      className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5"
+      className="dashboard-panel"
       id={`sb-panel-${id}`}
       role="tabpanel"
       aria-labelledby={`sb-tab-${id}`}
@@ -330,7 +330,7 @@ function SandboxDetail() {
             </div>
           ) : null}
 
-          <div className="tw:grid tw:grid-cols-2 tw:sm:grid-cols-4 tw:gap-3 tw:mb-6">
+          <div className="metric-grid">
             <div className="metric">
               <div className="metric__value tw:text-red">{incomplete ? 'not rated' : `${riskScore} / 100 • ${riskLevel}`}</div>
               <div className="metric__label">Dynamic risk</div>

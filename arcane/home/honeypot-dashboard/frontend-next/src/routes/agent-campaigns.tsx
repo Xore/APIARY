@@ -230,7 +230,7 @@ function Page() {
         trust boundary via a rule in criticality_rules.py, not a model's own judgment call.
       </p>
       {kpis.length > 0 ? (
-        <div className="tw:grid tw:grid-cols-2 tw:sm:grid-cols-4 tw:gap-3 tw:mb-6">
+        <div className="metric-grid">
           {kpis.map(([cat, count]) => (
             <div className="metric" key={cat}>
               <Link to="/agent-campaigns" search={{ category: cat }}>

@@ -240,7 +240,7 @@ function PageTabs({
 function Panel({ id, active, children }: { id: string; active: string; children: React.ReactNode }) {
   return (
     <div
-      className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5"
+      className="dashboard-panel"
       id={`gh-panel-${id}`}
       role="tabpanel"
       aria-labelledby={`gh-tab-${id}`}
@@ -1144,7 +1144,7 @@ function GhidraDetail() {
             </div>
           ) : null}
 
-          <div className="tw:grid tw:grid-cols-2 tw:sm:grid-cols-4 tw:gap-3 tw:mb-6" id="ghidra-detail-stats">
+          <div className="metric-grid" id="ghidra-detail-stats">
             <div className="metric">
               <div className="metric__value">{g.functions?.length ?? 0}</div>
               <div className="metric__label">Functions</div>

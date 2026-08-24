@@ -917,7 +917,7 @@ function PayloadAnalysis() {
             </p>
           ) : null}
 
-          <div className="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:gap-3 tw:mb-6">
+          <div className="metric-grid">
             <div className="metric">
               <div className="metric__value">
                 {view?.riskScore !== null && view?.riskScore !== undefined ? `${view.riskScore} / 100 • ${view.riskLevel}` : '—'}
@@ -948,7 +948,7 @@ function PayloadAnalysis() {
           />
 
           <div
-            className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5"
+            className="dashboard-panel"
             id="pl-panel-identity"
             role="tabpanel"
             aria-labelledby="pl-tab-identity"
@@ -1216,7 +1216,7 @@ function PayloadAnalysis() {
           </div>
 
           <div
-            className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5"
+            className="dashboard-panel"
             id="pl-panel-findings"
             role="tabpanel"
             aria-labelledby="pl-tab-findings"
@@ -1311,7 +1311,7 @@ function PayloadAnalysis() {
           </div>
 
           <div
-            className="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5"
+            className="dashboard-panel"
             id="pl-panel-content"
             role="tabpanel"
             aria-labelledby="pl-tab-content"

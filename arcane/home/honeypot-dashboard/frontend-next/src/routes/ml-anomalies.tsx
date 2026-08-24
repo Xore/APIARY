@@ -393,7 +393,7 @@ function Page() {
         Composite scores from ml-worker's three unsupervised models (Isolation Forest, LSTM-AE, HBOS) — statistical
         outliers, not confirmed attacks.
       </p>
-      <div className="tw:grid tw:grid-cols-2 tw:sm:grid-cols-4 tw:gap-3 tw:mb-6" id="ml-kpis">
+      <div className="metric-grid" id="ml-kpis">
         <div className="metric">
           <div className="metric__value">{stats ? stats.total24h : <span className="skeleton-line" aria-hidden="true" />}</div>
           <div className="metric__label">Anomalies, 24h</div>

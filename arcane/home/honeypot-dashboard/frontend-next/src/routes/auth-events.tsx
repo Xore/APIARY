@@ -122,13 +122,13 @@ function AuthStats() {
   if (!stats) return null
   return (
     <>
-      <div className="tw:grid tw:grid-cols-2 tw:sm:grid-cols-4 tw:gap-3 tw:mb-6">
+      <div className="metric-grid">
         <div className="metric">
           <div className="metric__value">{stats.total.toLocaleString('en-US')}</div>
           <div className="metric__label">Failed logins, 24h</div>
         </div>
       </div>
-      <div className="tw:grid tw:grid-cols-12 tw:gap-3.5" style={{ marginBottom: 14 }}>
+      <div className="" style={{ marginBottom: 14 }}>
         <TopTable title="Failures by client, 24h" header="client" rows={stats.byClient} />
         <TopTable title="Top source IPs, 24h" header="source ip" rows={stats.byIP} />
       </div>
