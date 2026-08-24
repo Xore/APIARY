@@ -176,7 +176,25 @@ pub async fn get(
     let source = hit["_source"].clone();
 
     let sensor = first(&source, &[&["event", "sensor"], &["honeypot", "sensor"]]);
-    let src_ip = first(&source, &[&["honeypot", "src_ip"], &["source", "ip"]]);
+    // #1873: the same guard the list applies, for the same reason.
+    //
+    // Found by checking the deployed endpoint against real data rather
+    // than by reading it: the list had the guard and this page did not, so
+    // one screen said "unattributed" and the page behind it named our own
+    // tunnel peer as the attacker. Two answers to one question is worse
+    // than either answer alone.
+    let src_ip = {
+        let observed = first(
+            &source,
+            &[
+                &["honeypot", "src_ip"],
+                &["source", "ip"],
+                &["honeypot", "data", "connection", "remote_ip"],
+                &["honeypot", "data", "parent", "remote_ip"],
+            ],
+        );
+        if crate::events::is_fleet_address(&observed) { String::new() } else { observed }
+    };
     let session = first(
         &source,
         &[
@@ -204,11 +222,14 @@ pub async fn get(
         // The source relation is windowed: a busy scanner has millions of
         // events and "everything it ever did" is the attacker profile's
         // job, not this page's.
+        // Keyed on the attributed address, so "what else did this source
+        // do" cannot become "what else came through our own tunnel", which
+        // is every relayed event on the fleet.
         relation(
             &state,
             &src_ip,
             json!({"bool": {"filter": [
-                {"term": {"honeypot.src_ip": src_ip.clone()}},
+                {"term": {"source.ip": src_ip.clone()}},
                 {"range": {"@timestamp": {"gte": "now-24h"}}}
             ]}}),
             &id,
@@ -267,6 +288,32 @@ mod tests {
         let mut found = Vec::new();
         collect_hashes(&doc, &mut found);
         assert_eq!(found, vec![hash.to_string()]);
+    }
+
+    #[test]
+    fn the_full_page_agrees_with_the_list_about_a_fleet_address() {
+        // #1873: the list guarded and this page did not, so one screen said
+        // "unattributed" and the page behind it named our own tunnel peer
+        // as the attacker. Caught on the deployed endpoint, not in review.
+        let doc = json!({"honeypot": {"src_ip": "10.8.0.1"}, "source": {"ip": "10.8.0.1"}});
+        let observed = first(&doc, &[&["honeypot", "src_ip"], &["source", "ip"]]);
+        assert!(crate::events::is_fleet_address(&observed));
+    }
+
+    #[test]
+    fn the_full_page_reads_dionaeas_nested_peer() {
+        let doc = json!({"honeypot": {"data": {"parent": {"remote_ip": "198.51.100.4"}}}});
+        let observed = first(
+            &doc,
+            &[
+                &["honeypot", "src_ip"],
+                &["source", "ip"],
+                &["honeypot", "data", "connection", "remote_ip"],
+                &["honeypot", "data", "parent", "remote_ip"],
+            ],
+        );
+        assert_eq!(observed, "198.51.100.4");
+        assert!(!crate::events::is_fleet_address(&observed));
     }
 
     #[test]
