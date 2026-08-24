@@ -106,10 +106,12 @@ const MAX_DIAL_AGE_SECONDS: i64 = 6 * 3600;
 /// rather than a delay. Below the threshold the flow is left alone and looked
 /// at again next pass; above it, it is marked so it stops being a candidate.
 ///
-/// Marking matters more than it looks. Candidates are read oldest-first, so
-/// flows that can never be attributed would otherwise pile up at the head of
-/// every batch and crowd out the work the loop could actually do -- a loop
-/// that looks busy while resolving less and less.
+/// Marking matters more than it looks. Without it these flows stay candidates
+/// forever, so every pass re-reads and re-rejects the same growing set, and
+/// the share of each batch spent on work that can never succeed only rises --
+/// a loop that looks busy while resolving less and less. That is true under
+/// any sort order; reading newest-first bounds how far back the waste reaches
+/// but does not remove it.
 const GRACE_SECONDS: i64 = 30 * 60;
 
 /// One portbridge dial: when it happened, and who was behind it.
@@ -221,7 +223,22 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
                         {"exists": {"field": "network.relay_unresolved"}}
                     ]
                 }},
-                "sort": [{"@timestamp": {"order": "asc"}}],
+                // Newest first. Oldest-first is the intuitive choice and it is
+                // the wrong one: with a backlog larger than a pass, the loop
+                // pins itself to the trailing edge of the window and spends
+                // every batch on flows that are minutes from ageing out of it,
+                // while the flows someone is actually looking at on the
+                // dashboard stay unattributed. Measured that way: oldest
+                // candidate 04:45 against a newest document of 10:45, six
+                // hours of lag that would have taken most of a day to close.
+                //
+                // Capacity exceeds the arrival rate (BATCH per pass against
+                // ~9,200/hour), so newest-first attributes new flows within a
+                // pass or two of arrival and spends what is left over working
+                // backwards into the backlog. The tail still ages out, but it
+                // ages out having been the lowest-value part of the window
+                // rather than the only part that got attention.
+                "sort": [{"@timestamp": {"order": "desc"}}],
                 "_source": ["network.community_id", "source.ip", "@timestamp"]
             }),
         )
@@ -287,7 +304,7 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
             // Nothing explains this flow. Whether that is temporary or
             // permanent is a question of age, not of this pass -- see
             // GRACE_SECONDS. Marking the permanent ones is what keeps the
-            // oldest-first candidate window moving.
+            // candidate window from silting up.
             match unmatched_action(doc.at, now) {
                 Unmatched::Retry => deferred += 1,
                 Unmatched::Mark => {
@@ -383,8 +400,7 @@ mod tests {
     #[test]
     fn an_old_unmatched_flow_is_marked_so_the_window_can_move() {
         // Past the grace period a missing dial is the answer. Without the mark
-        // these flows stay candidates forever, and because candidates are read
-        // oldest-first they would crowd out attributable work.
+        // these flows stay candidates forever and crowd out attributable work.
         let now = 100_000;
         assert_eq!(unmatched_action(now - GRACE_SECONDS - 1, now), Unmatched::Mark);
         assert_eq!(unmatched_action(now - 6 * 3600, now), Unmatched::Mark);
