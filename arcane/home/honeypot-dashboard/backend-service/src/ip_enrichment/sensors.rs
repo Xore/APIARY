@@ -4,6 +4,8 @@
 //! variant, and five sensors whose raw log line doesn't match the generic
 //! src_ip/src_port shape at all.
 
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use regex::Regex;
 use serde_json::Value;
 use std::sync::LazyLock;
@@ -313,6 +315,154 @@ pub fn enrich_beelzebub_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _perso
     (marshal_if_changed(line, &e, true), true)
 }
 
+/// One rule for deciding who sent a relayed request (#1876).
+///
+/// A sensor behind the tunnel can be told who its client was by more than
+/// one mechanism, and they are not equally trustworthy:
+///
+///   * the via_port join answers from portbridge's own record of the
+///     connection it relayed -- evidence *about* the connection;
+///   * a forwarded header answers from inside the request -- content, and
+///     on a path portbridge relays it is authored by the attacker.
+///
+/// So where both speak, the connection wins. Where they disagree the
+/// disagreement is kept rather than resolved away: on a relayed path a
+/// contradicting header is an attacker claiming a different source, and
+/// discarding it erases the attempt while believing it is the bug #1419
+/// removed. Where only one speaks it is used; where neither does the line
+/// waits, because the tunnel peer is our own address and reporting it as a
+/// source states something false.
+///
+/// Sensors record, this decides. A sensor cannot tell the paths apart --
+/// both present the tunnel peer, and any header a relay adds an attacker
+/// can also send -- so the decision belongs where portbridge's connection
+/// log is, which is here.
+pub struct SourceVerdict {
+    pub ip: String,
+    /// Set only when a second mechanism contradicted `ip`.
+    pub claimed: Option<String>,
+    pub resolved: bool,
+}
+
+pub fn adjudicate_source(observed: &str, relayed: Option<String>, claimed: Option<String>) -> SourceVerdict {
+    // Not relayed: the sensor is looking straight at the client, so no join
+    // applies and no header may override what the connection shows.
+    if observed != TUNNEL_PEER_IP {
+        return SourceVerdict { ip: observed.to_string(), claimed: None, resolved: true };
+    }
+    match (relayed, claimed) {
+        (Some(relayed), Some(claimed)) if relayed != claimed => {
+            SourceVerdict { ip: relayed, claimed: Some(claimed), resolved: true }
+        }
+        (Some(relayed), _) => SourceVerdict { ip: relayed, claimed: None, resolved: true },
+        // portbridge never saw this connection, so the header is the only
+        // evidence there is.
+        (None, Some(claimed)) => SourceVerdict { ip: claimed, claimed: None, resolved: true },
+        (None, None) => SourceVerdict { ip: observed.to_string(), claimed: None, resolved: false },
+    }
+}
+
+/// The hop a forwarded header appended last, or None if nothing usable.
+///
+/// The last hop, not the first: Cloudflare appends the real client to
+/// whatever the client already sent rather than replacing it, so the
+/// leftmost entry is attacker-controlled and the rightmost is the one
+/// Cloudflare itself wrote. A value that is not an address is not evidence
+/// and must never reach a field the dashboard renders as one.
+pub fn forwarded_claim(e: &Value) -> Option<String> {
+    let raw = e.get("XFF").and_then(Value::as_str).filter(|s| !s.is_empty())?;
+    let last = raw.rsplit(',').next()?.trim();
+    if last.parse::<std::net::IpAddr>().is_err() {
+        return None;
+    }
+    Some(last.to_string())
+}
+
+/// Write a verdict onto a line, so every sensor records a contradicted
+/// claim under the same field names.
+pub fn apply_verdict(e: &mut Value, v: &SourceVerdict) -> bool {
+    let mut changed = set_if_changed(e, "src_ip", v.ip.clone());
+    if let Some(claimed) = &v.claimed {
+        changed |= set_if_changed(e, "src_ip_claimed", claimed.clone());
+        if e.get("src_ip_conflict").and_then(Value::as_bool) != Some(true) {
+            e["src_ip_conflict"] = Value::Bool(true);
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// Clients already resolved for a connection that is still open (#1876).
+///
+/// HellPot is a tarpit: it holds a connection for as long as the client will
+/// stay, then writes FINISH when it finally closes. Observed live at 26 and
+/// 60 hours. viamap only accepts a dial within MAX_AGE_SECONDS (6h), so the
+/// closing line of a long hold can never join -- the dial it needs aged out
+/// of the map long before.
+///
+/// Re-deriving per line cannot fix that. Remembering can: the port in
+/// REMOTE_ADDR is stable across NEW -> FINISH for one connection, so the
+/// answer found when it opened still applies when it closes, however much
+/// later that is.
+///
+/// Port reuse is safe because the entry is dropped when the connection
+/// closes. An operating system will not hand out a source port whose
+/// connection is still established, so the only reuse that can happen is
+/// after the FINISH that evicted the entry -- and the next NEW writes a
+/// fresh one before anything reads it.
+///
+/// Widening MAX_AGE_SECONDS was the alternative and is the wrong lever: it
+/// would loosen the join for every sensor to fix one, and a six-hour-old
+/// dial genuinely is ambiguous for anything that is not a tarpit.
+fn held_connections() -> &'static Mutex<HashMap<i64, (String, i64)>> {
+    static HELD: OnceLock<Mutex<HashMap<i64, (String, i64)>>> = OnceLock::new();
+    HELD.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// How long a remembered connection stays useful. Past this it is a leak
+/// rather than a memory -- a connection nothing has written a line for in
+/// four days is not still open.
+const HELD_TTL_SECONDS: i64 = 4 * 24 * 3600;
+
+/// Bounds the map even if closing lines are lost entirely. Ports are capped
+/// at 65535, so this is a backstop against a pathological run rather than an
+/// expected limit.
+const HELD_CAPACITY: usize = 4096;
+
+fn remember_connection(port: i64, client: &str, at: i64) {
+    let Ok(mut held) = held_connections().lock() else { return };
+    if held.len() >= HELD_CAPACITY {
+        held.retain(|_, (_, seen)| at - *seen <= HELD_TTL_SECONDS);
+        if held.len() >= HELD_CAPACITY {
+            return; // still full: drop the new entry rather than grow without bound
+        }
+    }
+    held.insert(port, (client.to_string(), at));
+}
+
+fn recall_connection(port: i64, at: i64) -> Option<String> {
+    let Ok(held) = held_connections().lock() else { return None };
+    let (client, seen) = held.get(&port)?;
+    if at - *seen > HELD_TTL_SECONDS {
+        return None;
+    }
+    Some(client.clone())
+}
+
+fn forget_connection(port: i64) {
+    if let Ok(mut held) = held_connections().lock() {
+        held.remove(&port);
+    }
+}
+
+/// Whether this line is the last one a connection will produce.
+fn closes_connection(e: &Value) -> bool {
+    matches!(
+        e.get("message").and_then(Value::as_str),
+        Some("FINISH") | Some("END_ON_ERR")
+    )
+}
+
 /// hellpot.json: REMOTE_ADDR is a single "ip:port" string (fasthttp's
 /// RemoteAddr()). No destination-port field; every event is HTTP by
 /// definition (a single-protocol tarpit).
@@ -349,15 +499,41 @@ pub fn enrich_hellpot_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _persona
         return (marshal_if_changed(line, &e, changed), true);
     };
 
-    let Some(real) = super::viamap::lookup(vm, port, extract_line_time(&e)) else {
+    // #1876: the dial first, then what this connection already resolved to.
+    //
+    // Both are the same join -- portbridge's record of who it relayed --
+    // one read live and one read from when this connection opened. The
+    // live map is preferred where it still holds the entry; the memory
+    // covers the case it cannot, which is a hold longer than the map's
+    // window.
+    // Every mechanism that can speak, then one rule to decide between them.
+    //
+    // The live dial map and this connection's remembered answer are the
+    // same join read two ways -- one current, one from when the connection
+    // opened -- so the memory is a fallback rather than a rival. The header
+    // is a different mechanism entirely, and adjudicate_source ranks it.
+    let at = extract_line_time(&e);
+    let relayed = super::viamap::lookup(vm, port, at)
+        .map(|real| real.to_string())
+        .or_else(|| recall_connection(port, at));
+    let verdict = adjudicate_source(&ip, relayed, forwarded_claim(&e));
+
+    if !verdict.resolved {
         changed |= set_if_changed(&mut e, "src_ip", ip);
         return (marshal_if_changed(line, &e, changed), false);
-    };
-    let real = real.to_string();
+    }
 
-    e["REMOTE_ADDR"] = Value::from(join_host_port(&real, &port_str));
-    e["src_ip"] = Value::from(real.clone());
+    if closes_connection(&e) {
+        // Nothing further will be written for this connection, so the
+        // entry stops being a memory and starts being a leak.
+        forget_connection(port);
+    } else {
+        remember_connection(port, &verdict.ip, at);
+    }
+
+    e["REMOTE_ADDR"] = Value::from(join_host_port(&verdict.ip, &port_str));
     e["src_port"] = Value::from(port);
+    apply_verdict(&mut e, &verdict);
     (marshal_if_changed(line, &e, true), true)
 }
 
@@ -713,4 +889,161 @@ mod tests {
         let (_out, resolved) = enrich_wordpot_line(line, &ViaMap::new(), &ViaMap::new(), "wordpot");
         assert!(resolved);
     }
+
+    // ---- #1876: the adjudication rule, and the tarpit's connection memory.
+
+    fn hellpot_line(remote: &str, xff: Option<&str>, message: &str) -> Vec<u8> {
+        let mut e = serde_json::json!({
+            "level": "info",
+            "REMOTE_ADDR": remote,
+            "URL": "/wp-login.php",
+            "USERAGENT": "curl/8.18.0",
+            "message": message,
+            "time": "2026-08-24T20:00:00Z",
+        });
+        if let Some(xff) = xff {
+            e["XFF"] = Value::from(xff);
+        }
+        serde_json::to_vec(&e).unwrap()
+    }
+
+    fn field(out: &[u8], key: &str) -> Option<String> {
+        let e: Value = serde_json::from_slice(out).unwrap();
+        e.get(key).and_then(Value::as_str).map(str::to_string)
+    }
+
+    #[test]
+    fn the_connection_wins_over_a_contradicting_header() {
+        // On a relayed path the header is attacker-authored, so a
+        // disagreement is a spoof attempt rather than a puzzle -- and it is
+        // kept, because discarding it would erase the attempt.
+        let verdict = adjudicate_source(
+            TUNNEL_PEER_IP,
+            Some("203.0.113.7".into()),
+            Some("198.51.100.9".into()),
+        );
+        assert_eq!(verdict.ip, "203.0.113.7");
+        assert_eq!(verdict.claimed.as_deref(), Some("198.51.100.9"));
+        assert!(verdict.resolved);
+    }
+
+    #[test]
+    fn agreement_is_not_recorded_as_a_conflict() {
+        let verdict = adjudicate_source(
+            TUNNEL_PEER_IP,
+            Some("203.0.113.7".into()),
+            Some("203.0.113.7".into()),
+        );
+        assert_eq!(verdict.ip, "203.0.113.7");
+        assert!(verdict.claimed.is_none());
+    }
+
+    #[test]
+    fn the_header_answers_when_portbridge_never_saw_the_connection() {
+        let verdict = adjudicate_source(TUNNEL_PEER_IP, None, Some("198.51.100.9".into()));
+        assert_eq!(verdict.ip, "198.51.100.9");
+        assert!(verdict.claimed.is_none());
+        assert!(verdict.resolved);
+    }
+
+    #[test]
+    fn nothing_answering_leaves_the_line_for_retry() {
+        let verdict = adjudicate_source(TUNNEL_PEER_IP, None, None);
+        assert!(!verdict.resolved, "the tunnel peer is our own address, not a source");
+    }
+
+    #[test]
+    fn a_source_preserved_connection_ignores_any_header() {
+        // RemoteAddr is already the attacker; no header may override what
+        // the connection itself shows.
+        let verdict = adjudicate_source("203.0.113.7", None, Some("198.51.100.9".into()));
+        assert_eq!(verdict.ip, "203.0.113.7");
+    }
+
+    #[test]
+    fn the_last_forwarded_hop_wins_not_the_first() {
+        // Cloudflare appends the real client to whatever the client already
+        // sent, so an attacker's own value ends up left of the truth.
+        let e: Value = serde_json::json!({"XFF": "1.2.3.4, 198.51.100.9"});
+        assert_eq!(forwarded_claim(&e).as_deref(), Some("198.51.100.9"));
+    }
+
+    #[test]
+    fn a_header_that_is_not_an_address_is_not_evidence() {
+        let e: Value = serde_json::json!({"XFF": "not-an-address"});
+        assert!(forwarded_claim(&e).is_none());
+        let empty: Value = serde_json::json!({});
+        assert!(forwarded_claim(&empty).is_none());
+    }
+
+    #[test]
+    fn a_tarpit_hold_longer_than_the_dial_window_still_attributes_on_close() {
+        // The residue this exists for: HellPot held connections for 26 and
+        // 60 hours, and viamap accepts a dial for six. The opening line
+        // resolves against the live map; the closing line, days later, has
+        // only what the connection already resolved to.
+        let port = 60001_i64;
+        forget_connection(port);
+        let mut vm: ViaMap = ViaMap::new();
+        super::super::viamap::parse_portbridge_line(
+            serde_json::to_vec(&serde_json::json!({
+                "sensor": "portbridge", "event": "connect",
+                "src_ip": "203.0.113.7", "via_port": port,
+                "time": "2026-08-24T20:00:00Z",
+            }))
+            .unwrap()
+            .as_slice(),
+            &mut vm,
+        );
+
+        let addr = format!("{TUNNEL_PEER_IP}:{port}");
+        let (opened, resolved) = enrich_hellpot_line(&hellpot_line(&addr, None, "NEW"), &vm, &ViaMap::new(), "hellpot");
+        assert!(resolved, "the opening line must resolve against the live map");
+        assert_eq!(field(&opened, "src_ip").as_deref(), Some("203.0.113.7"));
+
+        // The dial has aged out entirely by the time the tarpit lets go.
+        let (closed, resolved) =
+            enrich_hellpot_line(&hellpot_line(&addr, None, "FINISH"), &ViaMap::new(), &ViaMap::new(), "hellpot");
+        assert!(resolved, "the closing line must not be left unattributed");
+        assert_eq!(
+            field(&closed, "src_ip").as_deref(),
+            Some("203.0.113.7"),
+            "the closing line must carry the answer the connection already had"
+        );
+    }
+
+    #[test]
+    fn a_closed_connection_is_forgotten_so_a_reused_port_is_not_mistaken() {
+        let port = 60002_i64;
+        forget_connection(port);
+        let addr = format!("{TUNNEL_PEER_IP}:{port}");
+
+        // Drive the real path rather than seeding the memory by hand, so
+        // the remembered timestamp is the one the code itself would store.
+        let mut vm: ViaMap = ViaMap::new();
+        super::super::viamap::parse_portbridge_line(
+            serde_json::to_vec(&serde_json::json!({
+                "sensor": "portbridge", "event": "connect",
+                "src_ip": "203.0.113.7", "via_port": port,
+                "time": "2026-08-24T20:00:00Z",
+            }))
+            .unwrap()
+            .as_slice(),
+            &mut vm,
+        );
+        let (_, resolved) = enrich_hellpot_line(&hellpot_line(&addr, None, "NEW"), &vm, &ViaMap::new(), "hellpot");
+        assert!(resolved, "the opening line must resolve");
+
+        let (_, resolved) =
+            enrich_hellpot_line(&hellpot_line(&addr, None, "FINISH"), &ViaMap::new(), &ViaMap::new(), "hellpot");
+        assert!(resolved, "the closing line resolves from the memory");
+
+        // Same port, a later connection, nothing to join against: it must
+        // not inherit the previous connection's client.
+        let (out, resolved) =
+            enrich_hellpot_line(&hellpot_line(&addr, None, "NEW"), &ViaMap::new(), &ViaMap::new(), "hellpot");
+        assert!(!resolved, "a reused port must not resolve from a closed connection");
+        assert_eq!(field(&out, "src_ip").as_deref(), Some(TUNNEL_PEER_IP));
+    }
+
 }
