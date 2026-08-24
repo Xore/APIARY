@@ -14,6 +14,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { confirmAction } from '../components/ConfirmDialog'
 import { InvestigateHeader } from '../components/Investigate'
+import { RowActions, RowIcons } from '../components/RowActions'
 import { getSessionUser, type User } from '../lib/auth'
 import { flash } from '../lib/flash'
 import { useResolved } from '../lib/hooks'
@@ -855,53 +856,53 @@ function PayloadAnalysis() {
                   </div>
                 </details>
               ) : null}
-              {/* #1140: every payload action folded into one menu,
-                  matching /payloads' own payloadrow action-menu. */}
-              <details className="action-menu">
-                <summary aria-label="Payload actions" title="Payload actions">⋮</summary>
-                <div className="action-menu__popover" role="menu">
-                  <a
-                    className="action-menu__item"
-                    role="menuitem"
-                    href={`/payload-workbench/results?hash=${encodeURIComponent(detail.hash)}#workbench-builder`}
-                  >
-                    Analysis workbench →
-                  </a>
-                  <a className="action-menu__item" role="menuitem" href={`/events?shasum=${encodeURIComponent(detail.hash)}`}>
-                    Related events →
-                  </a>
-                  <a
-                    className="action-menu__item"
-                    role="menuitem"
-                    href={`https://www.virustotal.com/gui/file/${encodeURIComponent(detail.hash)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    VirusTotal ↗
-                  </a>
-                  {isAdmin ? (
-                    <a className="action-menu__item" role="menuitem" href={`/api/payload/${encodeURIComponent(detail.hash)}/download`}>
-                      Download sample ↓
-                    </a>
-                  ) : null}
-                  {/* payloads.html:223 — Generate PDF report stays a
-                      <button> (see #474's comment on why it POSTs in
-                      place rather than linking to /reports);
-                      action-menu__item styles it exactly like the <a>
-                      items around it. */}
-                  {isAdmin ? (
-                    <button
-                      className="action-menu__item"
-                      role="menuitem"
-                      type="button"
-                      disabled={reportBusy}
-                      onClick={generateReport}
-                    >
-                      {reportBusy ? 'Generating…' : 'Generate PDF report'}
-                    </button>
-                  ) : null}
-                </div>
-              </details>
+              {/* #1140 folded every payload action into one ⋮ menu,
+                  matching /payloads' card menu of the time. #1899 took that
+                  menu off the cards and #1898 takes it off here: the same
+                  RowActions strip, with everything resting on screen.
+
+                  This page is about one payload, so its actions are not
+                  competing for width with anything -- there is no reason to
+                  make them cost a click to discover.
+
+                  Generate PDF stays a <button> rather than a link to
+                  /reports because it POSTs in place (#474); RowActions
+                  draws an onClick action exactly like an href one. */}
+              <RowActions
+                expanded
+                actions={[
+                  {
+                    label: 'Analysis workbench',
+                    icon: RowIcons.workbench,
+                    href: `/payload-workbench/results?hash=${encodeURIComponent(detail.hash)}#workbench-builder`,
+                  },
+                  {
+                    label: 'Related events',
+                    icon: RowIcons.events,
+                    href: `/events?shasum=${encodeURIComponent(detail.hash)}`,
+                  },
+                  {
+                    label: 'VirusTotal',
+                    icon: RowIcons.openIn,
+                    href: `https://www.virustotal.com/gui/file/${encodeURIComponent(detail.hash)}`,
+                    external: true,
+                  },
+                  isAdmin
+                    ? {
+                        label: 'Download sample',
+                        icon: RowIcons.download,
+                        href: `/api/payload/${encodeURIComponent(detail.hash)}/download`,
+                      }
+                    : null,
+                  isAdmin
+                    ? {
+                        label: reportBusy ? 'Generating PDF report…' : 'Generate PDF report',
+                        icon: RowIcons.detail,
+                        onClick: reportBusy ? () => {} : generateReport,
+                      }
+                    : null,
+                ]}
+              />
             </>
           ) : undefined
         }
