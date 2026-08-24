@@ -277,3 +277,150 @@ pub async fn detail(State(state): State<AppState>) -> Result<Json<SensorDetail>,
         tanner: tanner_requests(&tanner),
     }))
 }
+
+// ---------------------------------------------------------------------------
+// #1856: coverage.
+//
+// The three loaders above are bespoke views of three sensors. Twenty-six
+// sensors produce events, so twenty-three of them had no detail view at
+// all -- the page named "Sensor detail" simply did not know they existed.
+//
+// The fix is deliberately not a fourth, fifth and sixth hand-written
+// loader. A hardcoded roster silently omits whatever is deployed next,
+// which is the failure mode that produced this issue. Instead: the catalog
+// is an aggregation, so every sensor that produces events appears by
+// construction, and the events endpoint returns the sensor's own fields
+// untouched, so the client can render a protocol in its own terms without
+// the backend having to know the protocol.
+
+/// One sensor in the catalog, as the data says it exists.
+#[derive(Serialize)]
+pub struct SensorSummary {
+    pub sensor: String,
+    pub events: u64,
+    pub last_seen: String,
+}
+
+#[derive(Serialize)]
+pub struct SensorCatalog {
+    pub window: String,
+    pub sensors: Vec<SensorSummary>,
+}
+
+/// One event, with the sensor's own fields left as the sensor wrote them.
+#[derive(Serialize)]
+pub struct SensorEvent {
+    pub when: String,
+    pub src_ip: String,
+    pub src_port: u64,
+    pub dst_port: u64,
+    pub fields: Value,
+}
+
+#[derive(Serialize)]
+pub struct SensorEvents {
+    pub sensor: String,
+    pub total: u64,
+    pub rows: Vec<SensorEvent>,
+}
+
+/// How far back the catalog looks. Wider than the per-sensor WINDOW on
+/// purpose: a sensor that saw nothing in the last two days is quiet, not
+/// absent, and dropping it from the list is how a roster goes stale
+/// without anyone noticing.
+const CATALOG_WINDOW: &str = "now-14d";
+const EVENT_LIMIT_DEFAULT: u64 = 200;
+const EVENT_LIMIT_MAX: u64 = 1000;
+
+pub async fn catalog(State(state): State<AppState>) -> Result<Json<SensorCatalog>, (StatusCode, String)> {
+    let body = json!({
+        "size": 0,
+        "query": {"range": {"@timestamp": {"gte": CATALOG_WINDOW}}},
+        "aggs": {"sensors": {
+            "terms": {"field": "event.sensor", "size": 200, "order": {"_count": "desc"}},
+            "aggs": {"last_seen": {"max": {"field": "@timestamp"}}}
+        }}
+    });
+    let result = state
+        .es
+        .search_index(&["honeypot-v2-*"], body)
+        .await
+        .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?;
+    let sensors = result["aggregations"]["sensors"]["buckets"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|bucket| {
+            let sensor = s(&bucket["key"]);
+            if sensor.is_empty() {
+                return None;
+            }
+            Some(SensorSummary {
+                sensor,
+                events: n(&bucket["doc_count"]),
+                // `value_as_string` is the ISO form; the bare `value` is
+                // epoch millis, which is not what the client formats.
+                last_seen: s(&bucket["last_seen"]["value_as_string"]),
+            })
+        })
+        .collect();
+    Ok(Json(SensorCatalog { window: CATALOG_WINDOW.to_string(), sensors }))
+}
+
+pub async fn events(
+    State(state): State<AppState>,
+    axum::extract::Path(sensor): axum::extract::Path<String>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> Result<Json<SensorEvents>, (StatusCode, String)> {
+    let sensor = sensor.trim().to_string();
+    if sensor.is_empty() || sensor.len() > 128 {
+        return Err((StatusCode::BAD_REQUEST, "invalid sensor name".into()));
+    }
+    let limit = params
+        .get("limit")
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(EVENT_LIMIT_DEFAULT)
+        .clamp(1, EVENT_LIMIT_MAX);
+
+    let body = json!({
+        "size": limit,
+        "track_total_hits": true,
+        "sort": [{"@timestamp": {"order": "desc"}}],
+        "query": {"bool": {"filter": [
+            {"term": {"event.sensor": sensor}},
+            {"range": {"@timestamp": {"gte": WINDOW}}}
+        ]}}
+    });
+    let result = state
+        .es
+        .search_index(&["honeypot-v2-*"], body)
+        .await
+        .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?;
+    let hits = result["hits"]["hits"].as_array().cloned().unwrap_or_default();
+    let rows = hits
+        .iter()
+        .map(|hit| {
+            let source = &hit["_source"];
+            let event = &source["honeypot"];
+            SensorEvent {
+                when: s(&source["@timestamp"]),
+                src_ip: s(&event["src_ip"]),
+                src_port: n(&event["src_port"]),
+                // Sensors disagree on the name of the port they listened
+                // on: dst_port for the network-shaped ones, plain port for
+                // the Go ones. Both mean the same thing to a reader.
+                dst_port: {
+                    let dst = n(&event["dst_port"]);
+                    if dst > 0 { dst } else { n(&event["port"]) }
+                },
+                fields: event.clone(),
+            }
+        })
+        .collect();
+    Ok(Json(SensorEvents {
+        sensor,
+        total: n(&result["hits"]["total"]["value"]),
+        rows,
+    }))
+}
