@@ -12,11 +12,19 @@
 # router_patch.py removes getRealRemote()'s X-Real-IP trust -- see that
 # file's own doc comment for why (confirmed live, not assumed: an
 # unpatched build logs an attacker-supplied X-Real-IP header verbatim as
-# REMOTE_ADDR with zero validation of which hop set it). This stack runs
-# HellPot raw-port/portbridge-only (docker-compose.hellpot.yml) and
-# resolves the real attacker IP via ip-enrichment-worker's via_port join
-# instead, the same trusted mechanism every other non-PROXY-protocol
-# sensor here already uses.
+# REMOTE_ADDR with zero validation of which hop set it).
+#
+# On the raw-port path the real attacker IP is resolved by
+# ip-enrichment-worker's via_port join against portbridge's connection log,
+# the same trusted mechanism every other non-PROXY-protocol sensor uses.
+#
+# #1876: that path is no longer the only one. #1509 added a Traefik route
+# for the bare/www/static hosts, which reaches HellPot through socat rather
+# than portbridge -- so portbridge writes no record for those connections
+# and the via_port join misses permanently. xff_trust_patch.py covers that
+# path using the same trust rule galah's own patch established for the same
+# situation (#1511): X-Forwarded-For only from the tunnel peer, last hop
+# only. It must run after router_patch.py, whose output it matches on.
 FROM golang:1.23@sha256:60deed95d3888cc5e4d9ff8a10c54e5edc008c6ae3fba6187be6fb592e19e8c0 AS build
 RUN apt-get update && apt-get install -y --no-install-recommends python3 git \
  && rm -rf /var/lib/apt/lists/*
@@ -26,6 +34,8 @@ RUN git clone https://github.com/yunginnanet/HellPot /build \
  && git checkout "$HELLPOT_REF"
 COPY router_patch.py /tmp/router_patch.py
 RUN python3 /tmp/router_patch.py
+COPY xff_trust_patch.py /tmp/xff_trust_patch.py
+RUN python3 /tmp/xff_trust_patch.py
 RUN go mod download
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
     -ldflags "-s -w -X main.version=$HELLPOT_REF" \
