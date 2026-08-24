@@ -648,7 +648,7 @@ function Events() {
                   ) : null}
                 </div>
               ) : null}
-              <EventMeta row={selectedRow} onPivot={setFilter} investigationConfig={investigationConfig} />
+              <EventMeta row={selectedRow} onPivot={setFilter} />
               <div className="card__scroll">
                 <pre className="code">{JSON.stringify(selectedRow.record, null, 2)}</pre>
               </div>
@@ -772,14 +772,11 @@ function recordingShasum(ttyReplay: string): string {
 function EventMeta({
   row,
   onPivot,
-  investigationConfig,
 }: {
   row: EventRow
   onPivot: (key: keyof EventFilters, value: string) => void
-  investigationConfig: InvestigationConfig
 }) {
   const p = row.pivots
-  const openIn = investigationLinks(row, investigationConfig)
   const link = (key: keyof EventFilters, value: string, label: string, title: string) => (
     <a
       className="lnk"
@@ -912,144 +909,12 @@ function EventMeta({
           ) : null}
         </div>
       ) : null}
-      {p.shasum || openIn.kibana || openIn.evebox || openIn.arkime ? (
-        <div className="eventmeta__group">
-          <span className="eventmeta__label" title="Actions available for this event">
-            actions
-          </span>
-          <ActionsMenu shasum={p.shasum} openIn={openIn} />
-        </div>
-      ) : null}
+      {/* #1898: the actions menu was here as well as on the row, so every
+          action existed twice and the two could drift. The row strip is the
+          one place actions live now -- it rests visible, its extras open on
+          approach, and the external tools are a group inside it rather than
+          a disclosure that costs a click to look into. */}
     </div>
-  )
-}
-
-// events.html:28's actions menu. The port flattened it into a row of bare
-// `.lnk` text — five links with no grouping and no indication which are
-// local pages and which leave the dashboard. theme.css still carries the
-// whole `.hp-open-in` disclosure (its outside-click-close and
-// close-siblings-on-toggle come from theme.js for free), so this is a
-// markup restoration, not new design: an "Analysis" group for the local
-// payload pages, an "Open in" group for the external tools, each external
-// item carrying its own mark, a one-line description of what that tool is
-// for, and a corner arrow saying it opens elsewhere.
-const OPEN_IN_TOOLS = [
-  {
-    key: 'evebox' as const,
-    name: 'EveBox',
-    description: 'Filtered alert inbox',
-    icon: (
-      <>
-        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-        <polyline points="9 12 11 14 15 10" />
-      </>
-    ),
-  },
-  {
-    key: 'kibana' as const,
-    name: 'Kibana',
-    description: 'Search historical telemetry',
-    icon: (
-      <>
-        <line x1="12" y1="20" x2="12" y2="10" />
-        <line x1="18" y1="20" x2="18" y2="4" />
-        <line x1="6" y1="20" x2="6" y2="16" />
-      </>
-    ),
-  },
-  {
-    key: 'arkime' as const,
-    name: 'Arkime',
-    description: 'Inspect packets and sessions',
-    icon: (
-      <>
-        <circle cx="18" cy="5" r="3" />
-        <circle cx="6" cy="12" r="3" />
-        <circle cx="18" cy="19" r="3" />
-        <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-        <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-      </>
-    ),
-  },
-]
-
-const GLYPH_PROPS = {
-  width: 15,
-  height: 15,
-  viewBox: '0 0 24 24',
-  fill: 'none',
-  stroke: 'currentColor',
-  strokeWidth: 2,
-  strokeLinecap: 'round',
-  strokeLinejoin: 'round',
-  'aria-hidden': true,
-} as const
-
-const ExternalGlyph = (
-  <svg {...GLYPH_PROPS}>
-    <line x1="7" y1="17" x2="17" y2="7" />
-    <polyline points="7 7 17 7 17 17" />
-  </svg>
-)
-
-function ActionsMenu({
-  shasum,
-  openIn,
-}: {
-  shasum: string
-  openIn: { kibana?: string; evebox?: string; arkime?: string }
-}) {
-  const tools = OPEN_IN_TOOLS.filter((tool) => openIn[tool.key])
-  return (
-    <details className="hp-open-in action-menu">
-      <summary title="Actions for this event">&#8942;</summary>
-      <div className="dropdown hp-open-in-menu" role="menu">
-        {shasum ? (
-          <>
-            <div className="hp-open-in-heading">Analysis</div>
-            <a
-              className="hp-open-in-item"
-              href={`/payload-analysis/${encodeURIComponent(shasum)}`}
-              role="menuitem"
-              title="static analysis of the captured payload"
-            >
-              <span>Static analysis</span>
-            </a>
-            <a
-              className="hp-open-in-item"
-              href={`https://www.virustotal.com/gui/file/${encodeURIComponent(shasum)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              role="menuitem"
-            >
-              <span>VirusTotal</span>
-            </a>
-          </>
-        ) : null}
-        {tools.length > 0 ? (
-          <>
-            <div className="hp-open-in-heading">Open in</div>
-            {tools.map((tool) => (
-              <a
-                key={tool.key}
-                className="hp-open-in-item"
-                href={openIn[tool.key]}
-                target="_blank"
-                rel="noopener noreferrer"
-                role="menuitem"
-              >
-                <svg {...GLYPH_PROPS}>{tool.icon}</svg>
-                <span>
-                  <strong>{tool.name}</strong>
-                  <small>{tool.description}</small>
-                </span>
-                {ExternalGlyph}
-              </a>
-            ))}
-          </>
-        ) : null}
-      </div>
-    </details>
   )
 }
 
@@ -1198,6 +1063,8 @@ function FragmentRow({
         <td className="hp-row-actions-cell" data-label="">
           <RowActions
             actions={[
+              // First is what rests on screen, so it is the one an operator
+              // reaches for most: everything behind this event.
               row.id ? { label: 'Open full details', icon: RowIcons.detail, href: `/event/${encodeURIComponent(row.id)}` } : null,
               row.src_ip ? { label: 'Copy source IP', icon: RowIcons.copy, onClick: () => copyWithFlash(row.src_ip) } : null,
               row.session ? { label: 'Replay session', icon: RowIcons.replay, href: `/sessions/${encodeURIComponent(row.session)}` } : null,
@@ -1205,9 +1072,32 @@ function FragmentRow({
               row.pivots.shasum
                 ? { label: 'Payload analysis', icon: RowIcons.payload, href: `/payload-analysis/${encodeURIComponent(row.pivots.shasum)}` }
                 : null,
-              openIn.evebox ? { label: 'Open in EveBox', icon: RowIcons.evebox, href: openIn.evebox, external: true } : null,
-              openIn.kibana ? { label: 'Open in Kibana', icon: RowIcons.kibana, href: openIn.kibana, external: true } : null,
-              openIn.arkime ? { label: 'Open in Arkime', icon: RowIcons.arkime, href: openIn.arkime, external: true } : null,
+            ]}
+            groups={[
+              // The external tools are a category, not four unrelated
+              // actions, and they were previously behind a ⋮ menu that
+              // duplicated the strip. One icon says they exist; they appear
+              // beside it on approach.
+              {
+                label: 'Open in',
+                icon: RowIcons.openIn,
+                actions: [
+                  openIn.evebox ? { label: 'Open in EveBox', icon: RowIcons.evebox, href: openIn.evebox, external: true } : null,
+                  openIn.kibana ? { label: 'Open in Kibana', icon: RowIcons.kibana, href: openIn.kibana, external: true } : null,
+                  openIn.arkime ? { label: 'Open in Arkime', icon: RowIcons.arkime, href: openIn.arkime, external: true } : null,
+                  // Was reachable only from the ⋮ menu. It is an external
+                  // destination like the others, so it belongs here rather
+                  // than being lost with the menu.
+                  row.pivots.shasum
+                    ? {
+                        label: 'Look up on VirusTotal',
+                        icon: RowIcons.payload,
+                        href: `https://www.virustotal.com/gui/file/${encodeURIComponent(row.pivots.shasum)}`,
+                        external: true,
+                      }
+                    : null,
+                ],
+              },
             ]}
           />
         </td>

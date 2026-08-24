@@ -344,24 +344,28 @@ function Sensors() {
               <p className="empty">No sensor has produced an event in the last 14 days.</p>
             ) : (
               <div className="metric-grid">
+                {/* #1887: a tile opens that sensor's own page, which answers
+                    what this list cannot -- volume over time, who reached it,
+                    and what they asked it for, in that protocol's own terms.
+
+                    The Link *is* the tile: theme.css styles `a.metric`, so an
+                    anchor nested inside a .metric div instead picks up the
+                    generic link rule and renders underlined in link colour,
+                    which is what it was doing. */}
                 {sensors.map((entry) => (
-                  <div className="metric" key={entry.sensor}>
-                    {/* #1887: the tile opens the sensor's own page, which
-                        answers what this list cannot -- volume over time,
-                        who reached it, and what they asked it for, in that
-                        protocol's own terms. */}
-                    <Link
-                      to="/sensors/$sensor"
-                      params={{ sensor: entry.sensor }}
-                      title={`what ${entry.sensor} has been doing`}
-                    >
-                      <div className="metric__value">{entry.events.toLocaleString('en-US')}</div>
-                      <div className="metric__label">{entry.sensor}</div>
-                      <div className="metric__trend">
-                        last seen {entry.last_seen ? formatTimestamp(entry.last_seen) : 'unknown'}
-                      </div>
-                    </Link>
-                  </div>
+                  <Link
+                    className="metric"
+                    key={entry.sensor}
+                    to="/sensors/$sensor"
+                    params={{ sensor: entry.sensor }}
+                    title={`what ${entry.sensor} has been doing`}
+                  >
+                    <div className="metric__value">{entry.events.toLocaleString('en-US')}</div>
+                    <div className="metric__label">{entry.sensor}</div>
+                    <div className="metric__trend">
+                      last seen {entry.last_seen ? formatTimestamp(entry.last_seen) : 'unknown'}
+                    </div>
+                  </Link>
                 ))}
               </div>
             )}
