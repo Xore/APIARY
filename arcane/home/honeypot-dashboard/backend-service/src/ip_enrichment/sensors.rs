@@ -391,7 +391,10 @@ pub fn adjudicate_source(observed: &str, relayed: Option<String>, claimed: Optio
 /// request having genuinely arrived through that chain, which is the
 /// caller's business and not this function's -- see enrich_galah_line.
 pub fn forwarded_claim(e: &Value) -> Option<String> {
-    if let Some(cf) = header_value(e, "cf-connecting-ip").and_then(|v| valid_ip(&v)) {
+    if let Some(cf) = recorded(e, &["cf_connecting_ip", "CF_CONNECTING_IP"])
+        .or_else(|| header_value(e, "cf-connecting-ip"))
+        .and_then(|v| valid_ip(&v))
+    {
         return Some(cf);
     }
     let raw = forwarded_header(e)?;
@@ -418,10 +421,22 @@ fn valid_ip(candidate: &str) -> Option<String> {
 /// case-insensitive: an attacker choosing `x-forwarded-for` should not be
 /// able to sidestep the adjudication by lowercasing it.
 fn forwarded_header(e: &Value) -> Option<String> {
-    if let Some(direct) = e.get("XFF").and_then(Value::as_str).filter(|s| !s.is_empty()) {
-        return Some(direct.to_string());
-    }
-    header_value(e, "x-forwarded-for")
+    recorded(e, &["XFF", "xff"]).or_else(|| header_value(e, "x-forwarded-for"))
+}
+
+/// A field a sensor recorded directly, under whichever name it uses.
+///
+/// Sensors that log their whole header map need no help -- galah is one.
+/// The ones that log almost nothing have to be given a field, and each was
+/// given one in its own house style: hellpot's patch writes `XFF` next to
+/// its bare message, wordpot's writes `xff` and `cf_connecting_ip`
+/// alongside the snake_case fields it already emits. Renaming either would
+/// orphan everything already on disk for no gain, so the spellings live
+/// here -- this is the one place that has to know all of them anyway.
+fn recorded(e: &Value, names: &[&str]) -> Option<String> {
+    names.iter().find_map(|name| {
+        e.get(*name).and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string)
+    })
 }
 
 /// One request header out of whatever the sensor recorded, by name.
@@ -527,6 +542,13 @@ fn closes_connection(e: &Value) -> bool {
 /// hellpot.json: REMOTE_ADDR is a single "ip:port" string (fasthttp's
 /// RemoteAddr()). No destination-port field; every event is HTTP by
 /// definition (a single-protocol tarpit).
+/// hellpot's Traefik-facing listen port, as its own `DST_PORT` field
+/// reports it. Same job as GALAH_PROXIED_PORT and WORDPOT_PROXIED_PORT: a
+/// port portbridge never dials, so the path is a fact rather than an
+/// inference. Kept in step with hellpot's xff_trust_patch.py and the socat
+/// target in vps/docker-compose.yml.
+const HELLPOT_PROXIED_PORT: &str = "8090";
+
 pub fn enrich_hellpot_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _persona: &str) -> (Vec<u8>, bool) {
     let Ok(mut e) = serde_json::from_slice::<Value>(line) else {
         return (line.to_vec(), true);
@@ -552,6 +574,30 @@ pub fn enrich_hellpot_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _persona
 
     if ip != TUNNEL_PEER_IP {
         changed |= set_if_changed(&mut e, "src_ip", ip);
+        return (marshal_if_changed(line, &e, changed), true);
+    }
+
+    // #1908: which door, before which evidence.
+    //
+    // #1876 left this asking portbridge and falling back to the header when
+    // portbridge had nothing -- right on the raw path, and unsound on the
+    // proxied one. The map is keyed by port alone over a six-hour window,
+    // so "portbridge has an entry for socat's ephemeral source port" is a
+    // coincidence there rather than an answer, and under this traffic a
+    // likely one. It would then quietly file the request against an
+    // unrelated attacker, which reads exactly like a correct result.
+    //
+    // The two doors are separate ports now (xff_trust_patch.py), so the
+    // question is answered rather than inferred.
+    if e.get("DST_PORT").and_then(Value::as_str) == Some(HELLPOT_PROXIED_PORT) {
+        // Cloudflare -> Traefik is the only route to this port, so the
+        // chain is the evidence, and no join is attempted at all.
+        let Some(client) = forwarded_claim(&e) else {
+            changed |= set_if_changed(&mut e, "src_ip", ip);
+            return (marshal_if_changed(line, &e, changed), false);
+        };
+        e["REMOTE_ADDR"] = Value::from(join_host_port(&client, &port_str));
+        changed |= set_if_changed(&mut e, "src_ip", client);
         return (marshal_if_changed(line, &e, changed), true);
     }
 
@@ -818,6 +864,13 @@ fn classify_wordpot_message(e: &mut Value, msg: &str) -> bool {
 /// wordpot.log: startup lines don't match WORDPOT_MESSAGE_RE (no leading
 /// "ip:port") and pass through unresolved-but-unchanged. Every event is
 /// HTTP by definition. No destination-port field.
+/// wordpot's Traefik-facing listen port, as its own `dst_port` field
+/// reports it. Same job as GALAH_PROXIED_PORT: a port portbridge never
+/// dials, so the path is a fact rather than an inference. Kept in step with
+/// wordpot_patch.py's WORDPOT_PROXIED_PORT and the socat target in
+/// vps/docker-compose.yml.
+const WORDPOT_PROXIED_PORT: &str = "8090";
+
 pub fn enrich_wordpot_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _persona: &str) -> (Vec<u8>, bool) {
     let Ok(mut e) = serde_json::from_slice::<Value>(line) else {
         return (line.to_vec(), true);
@@ -828,7 +881,17 @@ pub fn enrich_wordpot_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _persona
     let Some(caps) = WORDPOT_MESSAGE_RE.captures(&msg) else {
         return (line.to_vec(), true); // a startup log — no ip:port prefix
     };
-    let (ip, port_str, rest) = (caps[1].to_string(), caps[2].to_string(), caps[3].to_string());
+    let (mut ip, mut port_str, rest) = (caps[1].to_string(), caps[2].to_string(), caps[3].to_string());
+
+    // #1908: the sentence is wordpot's prose and the fields are the
+    // request, so the fields win where the sensor recorded them. Older
+    // lines have only the sentence and keep parsing exactly as before.
+    if let Some(recorded) = e.get("src_ip").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+        ip = recorded.to_string();
+    }
+    if let Some(recorded) = e.get("src_port").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+        port_str = recorded.to_string();
+    }
 
     let mut changed = false;
     changed |= set_if_changed(&mut e, "sensor", "wordpot");
@@ -841,20 +904,45 @@ pub fn enrich_wordpot_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _persona
         return (marshal_if_changed(line, &e, changed), true);
     }
 
+    // Which door this arrived at, exactly as for galah (#1908). wordpot
+    // binds one port by default, which is why both ways in shared one and
+    // why the sensor used to guess between them -- badly, in three separate
+    // ways at once. wordpot_patch.py opens a second listener that only
+    // socat-hp-wordpot can reach, so the question is now answered by the
+    // log line rather than inferred from it.
+    if e.get("dst_port").and_then(Value::as_str) == Some(WORDPOT_PROXIED_PORT) {
+        // Cloudflare -> Traefik is the only route here, so what that chain
+        // says about the client is the evidence. No via_port join: the
+        // connection was socat's, portbridge never carried it, and a
+        // matching entry would be a coincidence out of six hours of them.
+        let Some(client) = forwarded_claim(&e) else {
+            changed |= set_if_changed(&mut e, "src_ip", ip);
+            return (marshal_if_changed(line, &e, changed), false);
+        };
+        e["message"] = Value::from(format!("{} {}", join_host_port(&client, &port_str), rest));
+        changed |= set_if_changed(&mut e, "src_ip", client);
+        return (marshal_if_changed(line, &e, changed), true);
+    }
+
     let Ok(port) = port_str.parse::<i64>().map_err(|_| ()).and_then(|p| if p != 0 { Ok(p) } else { Err(()) }) else {
         changed |= set_if_changed(&mut e, "src_ip", ip);
         return (marshal_if_changed(line, &e, changed), true);
     };
 
-    let Some(real) = super::viamap::lookup(vm, port, extract_line_time(&e)) else {
+    // The raw port: portbridge relayed this and its log knows who dialled,
+    // so a forwarding header is just bytes the attacker chose to send. It
+    // is kept and flagged rather than dropped -- on this path a
+    // contradiction is someone trying what #1908 found working.
+    let relayed = super::viamap::lookup(vm, port, extract_line_time(&e)).map(|real| real.to_string());
+    let verdict = adjudicate_source(&ip, relayed, forwarded_claim(&e));
+    if !verdict.resolved {
         changed |= set_if_changed(&mut e, "src_ip", ip);
         return (marshal_if_changed(line, &e, changed), false);
-    };
-    let real = real.to_string();
+    }
 
-    e["message"] = Value::from(format!("{} {}", join_host_port(&real, &port_str), rest));
-    e["src_ip"] = Value::from(real.clone());
+    e["message"] = Value::from(format!("{} {}", join_host_port(&verdict.ip, &port_str), rest));
     e["src_port"] = Value::from(port);
+    apply_verdict(&mut e, &verdict);
     (marshal_if_changed(line, &e, true), true)
 }
 
@@ -1349,5 +1437,160 @@ mod tests {
 
         assert!(!resolved);
         assert_eq!(e["src_ip"], json!(TUNNEL_PEER_IP));
+    }
+
+    // ---- wordpot: the same two doors (#1908) ----
+
+    /// A wordpot line as its patched formatter writes one: wordpot's own
+    /// sentence, plus what the request actually was.
+    fn wordpot_line(dst_port: &str, src_port: &str, extra: Value) -> String {
+        let mut e = json!({
+            "time": "2026-08-24T22:06:34",
+            "level": "INFO",
+            "message": format!("{}:{} probed for the login page", TUNNEL_PEER_IP, src_port),
+            "src_ip": TUNNEL_PEER_IP,
+            "src_port": src_port,
+            "dst_port": dst_port,
+        });
+        for (k, v) in extra.as_object().unwrap() {
+            e[k] = v.clone();
+        }
+        e.to_string()
+    }
+
+    #[test]
+    fn wordpot_ignores_a_forwarding_header_on_the_raw_port() {
+        // Verified against the running stack before the fix: a request to
+        // wordpot's raw port carrying this header was logged as
+        // "198.51.100.77 probed for the login page". The header decided.
+        let line = wordpot_line("80", "53992", json!({"xff": "198.51.100.77"}));
+        let (out, resolved) = enrich_wordpot_line(
+            line.as_bytes(), &vm_with(53992, "203.0.113.9"), &ViaMap::new(), "wordpot",
+        );
+        let e: Value = serde_json::from_slice(&out).unwrap();
+
+        assert!(resolved);
+        assert_eq!(e["src_ip"], json!("203.0.113.9"), "portbridge saw who dialled");
+        assert_eq!(e["src_ip_claimed"], json!("198.51.100.77"));
+        assert_eq!(e["src_ip_conflict"], json!(true));
+        // The sentence is rewritten to agree with the verdict, since the
+        // address in it is what every downstream reader has always used.
+        assert_eq!(
+            e["message"],
+            json!("203.0.113.9:53992 probed for the login page"),
+        );
+    }
+
+    #[test]
+    fn wordpot_resolves_the_proxied_door_from_the_chain() {
+        let line = wordpot_line(
+            WORDPOT_PROXIED_PORT,
+            "41010",
+            json!({"xff": "203.0.113.9, 172.69.150.126"}),
+        );
+        let (out, resolved) = enrich_wordpot_line(
+            line.as_bytes(), &ViaMap::new(), &ViaMap::new(), "wordpot",
+        );
+        let e: Value = serde_json::from_slice(&out).unwrap();
+
+        assert!(resolved);
+        assert_eq!(e["src_ip"], json!("203.0.113.9"), "not Cloudflare's edge");
+        assert_eq!(
+            e["message"],
+            json!("203.0.113.9:41010 probed for the login page"),
+        );
+    }
+
+    #[test]
+    fn wordpot_does_not_join_the_proxied_door_against_portbridge() {
+        let line = wordpot_line(
+            WORDPOT_PROXIED_PORT,
+            "41010",
+            json!({"cf_connecting_ip": "203.0.113.9"}),
+        );
+        let (out, _) = enrich_wordpot_line(
+            line.as_bytes(), &vm_with(41010, "198.51.100.77"), &ViaMap::new(), "wordpot",
+        );
+        let e: Value = serde_json::from_slice(&out).unwrap();
+
+        assert_eq!(e["src_ip"], json!("203.0.113.9"), "the colliding entry is ignored");
+    }
+
+    #[test]
+    fn wordpot_lines_without_the_new_fields_still_parse() {
+        // Everything already on disk was written before the sensor
+        // recorded any of this, and has to keep resolving from the
+        // sentence alone.
+        let line = json!({
+            "time": "2026-08-22T09:00:00",
+            "level": "INFO",
+            "message": format!("{}:53992 probed for the login page", TUNNEL_PEER_IP),
+        })
+        .to_string();
+        let (out, resolved) = enrich_wordpot_line(
+            line.as_bytes(), &vm_with(53992, "203.0.113.9"), &ViaMap::new(), "wordpot",
+        );
+        let e: Value = serde_json::from_slice(&out).unwrap();
+
+        assert!(resolved);
+        assert_eq!(e["src_ip"], json!("203.0.113.9"));
+    }
+
+    // ---- hellpot: the same two doors (#1908) ----
+
+    #[test]
+    fn hellpot_resolves_the_proxied_door_from_the_chain() {
+        let line = json!({
+            "REMOTE_ADDR": format!("{}:44520", TUNNEL_PEER_IP),
+            "DST_PORT": HELLPOT_PROXIED_PORT,
+            "XFF": "203.0.113.9, 172.69.150.126",
+            "URL": "/",
+        })
+        .to_string();
+        let (out, resolved) = enrich_hellpot_line(
+            line.as_bytes(), &ViaMap::new(), &ViaMap::new(), "hellpot",
+        );
+        let e: Value = serde_json::from_slice(&out).unwrap();
+
+        assert!(resolved);
+        assert_eq!(e["src_ip"], json!("203.0.113.9"), "not Cloudflare's edge");
+        assert_eq!(e["REMOTE_ADDR"], json!("203.0.113.9:44520"));
+    }
+
+    #[test]
+    fn hellpot_does_not_join_the_proxied_door_against_portbridge() {
+        // The reason the door had to become a fact: this entry matches
+        // socat's ephemeral source port by coincidence, and taking it
+        // would file the request against an unrelated attacker.
+        let line = json!({
+            "REMOTE_ADDR": format!("{}:44520", TUNNEL_PEER_IP),
+            "DST_PORT": HELLPOT_PROXIED_PORT,
+            "XFF": "203.0.113.9, 172.69.150.126",
+            "URL": "/",
+        })
+        .to_string();
+        let (out, _) = enrich_hellpot_line(
+            line.as_bytes(), &vm_with(44520, "198.51.100.77"), &ViaMap::new(), "hellpot",
+        );
+        let e: Value = serde_json::from_slice(&out).unwrap();
+
+        assert_eq!(e["src_ip"], json!("203.0.113.9"), "the colliding entry is ignored");
+    }
+
+    #[test]
+    fn hellpot_still_joins_the_raw_door() {
+        let line = json!({
+            "REMOTE_ADDR": format!("{}:44521", TUNNEL_PEER_IP),
+            "DST_PORT": "8080",
+            "URL": "/",
+        })
+        .to_string();
+        let (out, resolved) = enrich_hellpot_line(
+            line.as_bytes(), &vm_with(44521, "45.79.207.110"), &ViaMap::new(), "hellpot",
+        );
+        let e: Value = serde_json::from_slice(&out).unwrap();
+
+        assert!(resolved);
+        assert_eq!(e["src_ip"], json!("45.79.207.110"));
     }
 }

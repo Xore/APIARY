@@ -45,6 +45,10 @@ COPY wordpot.conf /opt/wordpot/wordpot.conf
 RUN chown -R 65534:65534 /opt/wordpot
 
 EXPOSE 80
+# #1908: the Traefik-only listener wordpot_patch.py adds. Not a second
+# honeypot -- the same app, so that which door a request arrived at is a
+# fact in the log line instead of a guess.
+EXPOSE 8090
 
 USER 65534
 

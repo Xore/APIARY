@@ -7,24 +7,39 @@ import (
 	"testing"
 )
 
-// TestClientIPTakesRightmostXFFHop covers #1350: Cloudflare appends the
-// real client IP to any X-Forwarded-For value the client already sent
-// rather than replacing it, and socat forwards byte-for-byte with no
-// header rewriting -- so an attacker who sets their own X-Forwarded-For
-// must not be able to spoof the logged SrcIP by controlling the leftmost
-// hop.
-func TestClientIPTakesRightmostXFFHop(t *testing.T) {
+// TestClientIPTakesTheHopCloudflareAppended covers #1350 and its
+// correction in #1908. Cloudflare appends the real client to any
+// X-Forwarded-For the client already sent rather than replacing it, so an
+// attacker controlling the leftmost hop must not be able to spoof SrcIP.
+// This test asserted the *rightmost* hop for that reason, which was wrong:
+// Traefik appends the peer it saw, a Cloudflare edge node, so the chain
+// ends one past the client and proxied requests were filed against
+// Cloudflare. Live example: `<client>, 172.69.150.126`.
+func TestClientIPTakesTheHopCloudflareAppended(t *testing.T) {
 	r := httptest.NewRequest("GET", "/", nil)
 	r.RemoteAddr = tunnelPeerIP + ":12345"
-	r.Header.Set("X-Forwarded-For", "1.2.3.4, 203.0.113.9")
+	r.Header.Set("X-Forwarded-For", "1.2.3.4, 203.0.113.9, 172.69.150.126")
 
 	if got := clientIP(r); got != "203.0.113.9" {
-		t.Fatalf("clientIP() = %q, want the rightmost (Cloudflare-appended) hop %q", got, "203.0.113.9")
+		t.Fatalf("clientIP() = %q, want the hop Cloudflare appended %q", got, "203.0.113.9")
 	}
 }
 
-// TestClientIPSingleXFFHop covers the common case -- no spoofed prefix, just
-// the one hop Cloudflare appended.
+// TestClientIPPrefersCFConnectingIP covers the direct answer: one value,
+// the client, set by Cloudflare, with no chain to index into.
+func TestClientIPPrefersCFConnectingIP(t *testing.T) {
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = tunnelPeerIP + ":12345"
+	r.Header.Set("CF-Connecting-IP", "203.0.113.9")
+	r.Header.Set("X-Forwarded-For", "1.2.3.4, 172.69.150.126")
+
+	if got := clientIP(r); got != "203.0.113.9" {
+		t.Fatalf("clientIP() = %q, want %q", got, "203.0.113.9")
+	}
+}
+
+// TestClientIPSingleXFFHop covers a chain nothing appended to -- there is
+// no proxy entry to step back past, so the lone hop is the answer.
 func TestClientIPSingleXFFHop(t *testing.T) {
 	r := httptest.NewRequest("GET", "/", nil)
 	r.RemoteAddr = tunnelPeerIP + ":12345"

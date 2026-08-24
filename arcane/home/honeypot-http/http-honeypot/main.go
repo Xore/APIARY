@@ -178,17 +178,41 @@ func clientIP(r *http.Request) string {
 	// Behind a ":pp" portbridge rule the PROXY-aware listener has already
 	// rewritten RemoteAddr to the real attacker address — it wins over any
 	// header. Traefik-routed requests still show the tunnel peer, so fall
-	// back to XFF. Cloudflare APPENDS the real client IP to any XFF value
-	// the client already sent rather than replacing it, and socat does a
-	// pure byte-for-byte forward in between with no header rewriting -- so
-	// the leftmost hop is always attacker-controlled (`curl -H
-	// "X-Forwarded-For: 1.2.3.4" ...` spoofs it outright) while the
-	// rightmost hop is the one Cloudflare itself appended. Take the last
-	// hop, not the first.
+	// back to the forwarding chain there.
+	//
+	// That fallback used to take the chain's last hop, reasoning that
+	// Cloudflare APPENDS the real client to any XFF the client already
+	// sent rather than replacing it, so an attacker's own value stays
+	// leftmost and spoofable while the rightmost is Cloudflare's. The
+	// first half is right; the conclusion is not. Traefik sits between
+	// Cloudflare and this sensor and appends the peer *it* saw, which is a
+	// Cloudflare edge node -- so the chain ends one hop past the answer.
+	// Measured on a live request through the fleet's own subdomain:
+	// `X-Forwarded-For: <client>, 172.69.150.126`. Every proxied request
+	// was being filed against Cloudflare (#1908).
+	//
+	// CF-Connecting-IP is the direct answer where Cloudflare set it: one
+	// value, the client, with no chain to index into. Otherwise take the
+	// second-to-last hop, the entry Cloudflare itself appended. Both stay
+	// sound against a pre-seeded header, since whatever the client writes
+	// remains to the left of what Cloudflare appends.
+	//
+	// Unlike galah, wordpot and hellpot, the guard above is a real
+	// discriminator here rather than a guess: this sensor's raw port is a
+	// ":pp" rule, so RemoteAddr is the attacker on that path and being the
+	// tunnel peer genuinely does mean "came through Traefik". #1908 split
+	// the others onto separate ports to earn the same property.
 	if host == tunnelPeerIP {
+		if cf := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cf != "" {
+			return cf
+		}
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 			hops := strings.Split(xff, ",")
-			return strings.TrimSpace(hops[len(hops)-1])
+			idx := len(hops) - 1
+			if len(hops) >= 2 {
+				idx = len(hops) - 2
+			}
+			return strings.TrimSpace(hops[idx])
 		}
 	}
 	return host

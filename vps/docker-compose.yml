@@ -674,7 +674,13 @@ services:
     image: alpine/socat:latest
     container_name: socat-hp-hellpot
     restart: unless-stopped
-    command: TCP4-LISTEN:8084,fork,reuseaddr TCP4:10.8.0.2:8080
+    # #1908: 8090 (hellpot's Traefik-only listener), not the raw 8080 --
+    # same change and same reason as socat-hp-galah and socat-hp-wordpot.
+    # While both ways in shared a port, portbridge's connection log was the
+    # only thing that could tell them apart, and it answers by port alone
+    # over a six-hour window -- so on this path a coincidental match could
+    # attribute a request to an unrelated attacker.
+    command: TCP4-LISTEN:8084,fork,reuseaddr TCP4:10.8.0.2:8090
     networks: [proxy]
 
   # #1511: galah's own raw port (8889, RULES above) isn't on Cloudflare's
@@ -715,7 +721,11 @@ services:
     image: alpine/socat:latest
     container_name: socat-hp-wordpot
     restart: unless-stopped
-    command: TCP4-LISTEN:8086,fork,reuseaddr TCP4:10.8.0.2:8081
+    # #1908: 8091 (wordpot's Traefik-only listener), not the raw 8081 --
+    # same change and same reason as socat-hp-galah above. While both ways
+    # in shared a port, wordpot trusted X-Forwarded-For on the raw port
+    # too, so a request there could name any source address it liked.
+    command: TCP4-LISTEN:8086,fork,reuseaddr TCP4:10.8.0.2:8091
     networks: [proxy]
 
   # Isolated on oidc-dashboard (not the shared proxy network) like every
