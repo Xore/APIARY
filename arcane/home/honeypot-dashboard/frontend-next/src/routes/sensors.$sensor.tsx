@@ -11,7 +11,7 @@
 // in a fleet-wide event count it is indistinguishable from a sensor that
 // answers a request and closes. So the measures and the leaderboards here
 // are the sensor's own, chosen server-side per protocol.
-import { createFileRoute, Link } from '@tanstack/react-router'
+import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import type React from 'react'
@@ -20,6 +20,8 @@ import { SensorEventsTable } from '../components/SensorEvents'
 import { formatTimestamp } from '../lib/time'
 import { protocolFor, type SensorEventRow } from '../lib/sensorProtocols'
 import { countryName } from '../lib/country'
+import { useSidebarViewTabs } from '../lib/viewTabs'
+import { CuratedSensorView, hasCuratedView } from '../components/CuratedSensorViews'
 
 type Row = { key: string; count: number }
 type TopList = { label: string; rows: Row[] }
@@ -45,6 +47,15 @@ const fetchOverview = createServerFn({ method: 'GET' })
     return serviceJSON<Overview>(`/api/v1/sensors/${encodeURIComponent(data.sensor)}/overview`)
   })
 
+type SensorSummary = { sensor: string; events: number; last_seen: string }
+
+const fetchCatalog = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<{ sensors: SensorSummary[] } | null> => {
+    const { serviceJSON } = await import('../lib/backend.server')
+    return serviceJSON('/api/v1/sensors/catalog')
+  },
+)
+
 const fetchEvents = createServerFn({ method: 'GET' })
   .inputValidator((input: { sensor: string }) => input)
   .handler(async ({ data }): Promise<{ sensor: string; total: number; rows: SensorEventRow[] } | null> => {
@@ -56,6 +67,7 @@ export const Route = createFileRoute('/sensors/$sensor')({
   loader: async ({ params }) => ({
     overview: fetchOverview({ data: { sensor: params.sensor } }),
     events: fetchEvents({ data: { sensor: params.sensor } }),
+    catalog: fetchCatalog(),
   }),
   component: SensorPage,
 })
@@ -141,9 +153,11 @@ function TopTable({ label, rows, href }: { label: string; rows: Row[]; href?: (k
 
 function SensorPage() {
   const { sensor } = Route.useParams()
-  const { overview, events } = Route.useLoaderData()
+  const { overview, events, catalog } = Route.useLoaderData()
+  const navigate = useNavigate()
   const [view, setView] = useState<Overview | null>(null)
   const [rows, setRows] = useState<{ total: number; rows: SensorEventRow[] } | null>(null)
+  const [sensors, setSensors] = useState<SensorSummary[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -153,10 +167,27 @@ function SensorPage() {
     events.then((result) => {
       if (!cancelled && result) setRows({ total: result.total, rows: result.rows })
     })
+    catalog.then((result) => {
+      if (!cancelled && result) setSensors(result.sensors)
+    })
     return () => {
       cancelled = true
     }
-  }, [overview, events])
+  }, [overview, events, catalog])
+
+  // #1904: every sensor is an entry in the rail, and picking one opens its
+  // own page. There is no roster view: a wall of twenty-seven tiles is
+  // something to read before anything can be chosen, and it gave dionaea's
+  // 17.8M events the same weight as wordpot's 38. The rail is where this
+  // dashboard already puts "one of several views", including the three
+  // sensors that had hand-written readings long before the rest.
+  const viewTabs = useSidebarViewTabs({
+    label: 'Sensors',
+    tabs: sensors.map((entry) => ({ id: entry.sensor, label: entry.sensor })),
+    active: sensor,
+    onSelect: (id) => void navigate({ to: '/sensors/$sensor', params: { sensor: id } }),
+    idPrefix: 'sd',
+  })
 
   const spec = protocolFor(sensor)
 
@@ -180,9 +211,7 @@ function SensorPage() {
           ) : undefined
         }
       />
-      <p className="note">
-        <Link to="/sensors">← every sensor</Link>
-      </p>
+      {viewTabs}
 
       {view === null ? (
         <span className="skeleton-line" aria-hidden="true" />
@@ -247,9 +276,15 @@ function SensorPage() {
         </>
       )}
 
-      <div className="card wide">
-        <SensorEventsTable sensor={sensor} rows={rows?.rows ?? null} total={rows?.total} />
-      </div>
+      {/* A sensor with a hand-written reading gets it; the rest get the
+          generic one, which is strictly more than the nothing they had. */}
+      {hasCuratedView(sensor) ? (
+        <CuratedSensorView sensor={sensor} />
+      ) : (
+        <div className="card wide">
+          <SensorEventsTable sensor={sensor} rows={rows?.rows ?? null} total={rows?.total} />
+        </div>
+      )}
     </>
   )
 }
