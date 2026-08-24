@@ -66,6 +66,10 @@ services:
       - LLM_SERVER_URL=http://galah-llm-broker:11434
     ports:
       - ${HP_BIND:-10.8.0.2}:8888:8888
+      # #1891: the Traefik-only door (see config.yaml). Bound to the same
+      # tunnel address as 8888, so it is reachable from the VPS and from
+      # nowhere else.
+      - ${HP_BIND:-10.8.0.2}:8890:8890
     volumes:
       - /opt/stacks/apiary/logs/galah:/var/log/honeypot
       - /opt/stacks/apiary/state/init-markers:/markers:ro

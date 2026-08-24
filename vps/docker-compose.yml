@@ -681,16 +681,29 @@ services:
   # proxied non-standard-port allowlist, so it's unreachable through this
   # domain at all -- confirmed live (see #1511's own issue text). This
   # bridge backs a Traefik-routed subdomain instead, on 443 (always
-  # proxied). galah/xff_trust_patch.py makes this path safe for real IP
-  # attribution: without it, every hit through this route would silently
-  # log the WireGuard tunnel peer instead of the attacker. The raw port
-  # stays too -- unaffected by any of this, still catches IP-range
+  # proxied). The raw port stays too -- still catching the IP-range
   # scanners that never resolve a hostname at all.
+  #
+  # Attribution on this route was galah/xff_trust_patch.py's job until
+  # #1891, since a request arriving here shows the WireGuard tunnel peer as
+  # its peer rather than the attacker. That patch is gone: it could not see
+  # which route a request took, and it guessed wrong in both directions --
+  # trusting a spoofable header on the raw port, and reading the wrong hop
+  # of the chain on this one, which filed proxied hits against Cloudflare's
+  # edge addresses. The enrichment worker decides now, off the listen port
+  # below.
   socat-hp-galah:
     image: alpine/socat:latest
     container_name: socat-hp-galah
     restart: unless-stopped
-    command: TCP4-LISTEN:8085,fork,reuseaddr TCP4:10.8.0.2:8888
+    # #1891: 8890, not 8888. Both this and portbridge used to land on
+    # galah's single port, and since both dial from the tunnel address the
+    # sensor could not tell a Cloudflare-proxied request from one sent
+    # straight at the raw port -- so it trusted X-Forwarded-For on both, and
+    # a request to the raw port could name any source address it wanted.
+    # galah now listens on a second port that only this socat reaches, which
+    # makes the path a fact in the log line instead of a guess.
+    command: TCP4-LISTEN:8085,fork,reuseaddr TCP4:10.8.0.2:8890
     networks: [proxy]
 
   # #1512: same reasoning as socat-hp-galah above -- wordpot's raw port
