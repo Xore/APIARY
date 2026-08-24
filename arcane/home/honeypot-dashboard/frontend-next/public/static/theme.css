@@ -1003,8 +1003,19 @@ p { color: var(--text-100); }
   /* 6E: secondary == the quiet surface pill the base .btn already is. */
   background: var(--bg-300);
   color: var(--text-000);
+  /* The hairline is what makes it a control rather than a tinted patch.
+     .btn sets `border: 1px solid transparent`, and a secondary button's
+     fill is --bg-300 -- which is exactly what .data-table's row hover
+     paints the cell behind it. On a hovered row the two matched and the
+     button vanished outright: same fill, no edge, nothing left to see.
+
+     Bordering it rather than changing either fill keeps the quiet pill
+     quiet, and keeps it visible on any surface it is ever placed on --
+     including ones that do not exist yet, which is the point of solving it
+     here rather than at the one call site where it was noticed. */
+  border-color: var(--border-100);
 }
-.btn-secondary:hover { background: var(--bg-400); }
+.btn-secondary:hover { background: var(--bg-400); border-color: var(--border-200); }
 .btn-ghost { color: var(--text-100); }
 .btn-ghost:hover { background: var(--bg-300); color: var(--text-000); }
 .btn-danger { background: var(--danger-soft); color: var(--danger-text-on-soft); }
@@ -4171,13 +4182,20 @@ div.hp-skel-batch .skeleton-line:nth-child(3) { width: 38%; }
 /* Design refresh 2 (pick 14E): the revealed cluster reads as claude's
    floating toolbar -- one raised pill of icon buttons. */
 .hp-row-actions {
-  display: inline-flex; gap: 2px; opacity: 0;
+  /* Visible at rest, at full strength.
+     It used to be opacity: 0 until the row was hovered, which made the
+     actions discoverable only by accident -- nothing on screen suggested
+     that hovering would reveal anything, so a reader concludes the column
+     is empty. Dimming rather than hiding does not fix that: a faint
+     control still reads as decoration. What rests here is a real button,
+     and the ones that do not fit arrive when the pointer does. */
+  display: inline-flex; gap: 2px; opacity: 1;
   padding: 3px var(--space-xs); border-radius: var(--radius-pill);
   background: var(--bg-raised);
   box-shadow: var(--shadow-pill);
   transition: opacity var(--transition-fast);
 }
-tr:hover .hp-row-actions, tr.selected .hp-row-actions { opacity: 1; }
+
 .hp-row-actions a, .hp-row-actions button {
   display: inline-grid; place-items: center;
   width: 24px; height: 24px;
@@ -4187,6 +4205,59 @@ tr:hover .hp-row-actions, tr.selected .hp-row-actions { opacity: 1; }
   font-size: 12px; text-decoration: none; cursor: pointer;
 }
 .hp-row-actions a:hover, .hp-row-actions button:hover { background: var(--bg-500); color: var(--text-000); }
+
+/* Actions beyond the first, and grouped actions, open on approach.
+
+   The strip has a width budget -- it sits in a table row, and a row of
+   twelve icons is not a strip any more. The previous answer was a
+   disclosure menu, which solved the width by costing a click to discover
+   what was inside, and then the same actions existed twice: once in the
+   menu, once in the strip.
+
+   This is the middle. What rests on screen is the action reached for most,
+   so the strip is unmistakably there; the rest arrive when the pointer
+   does. Nothing sits behind a click, and nothing takes width it has not
+   earned.
+
+   Both open on focus-within as well as hover, so they are reachable by
+   keyboard. Animating max-width rather than display is what makes that
+   possible at all: a display:none child cannot be tabbed to, so it would
+   be a mouse-only control wearing an accessible shape. */
+.hp-row-actions__more,
+.hp-row-actions__items {
+  display: inline-flex;
+  gap: 2px;
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-width var(--transition-fast), opacity var(--transition-fast);
+}
+tr:hover .hp-row-actions__more,
+tr.selected .hp-row-actions__more,
+.hp-row-actions:focus-within .hp-row-actions__more,
+.hp-row-actions:hover .hp-row-actions__more {
+  max-width: 20rem;
+  opacity: 1;
+}
+
+/* A group inside the strip: one icon saying a category exists, its members
+   appearing beside it rather than inside a menu. */
+.hp-row-actions__group { display: inline-flex; align-items: center; gap: 2px; }
+.hp-row-actions__group:hover > .hp-row-actions__items,
+.hp-row-actions__group:focus-within > .hp-row-actions__items {
+  max-width: 16rem;
+  opacity: 1;
+}
+/* The group's trigger names a category rather than performing an action,
+   so it stays quiet until the group is open. */
+.hp-row-actions__group > [aria-expanded] { color: var(--text-200); }
+.hp-row-actions__group:hover > [aria-expanded],
+.hp-row-actions__group:focus-within > [aria-expanded] { color: var(--text-000); }
+
+@media (prefers-reduced-motion: reduce) {
+  .hp-row-actions__more,
+  .hp-row-actions__items { transition: none; }
+}
 
 /* Reports wizard (pick RP-C): step dots + prev/next footer. */
 .hp-wizard-progress {

@@ -79,6 +79,14 @@ export const RowIcons = {
       <line x1="6" y1="20" x2="6" y2="16" />
     </Icon>
   ),
+  /** A category of destinations, for the "open in" group. */
+  openIn: (
+    <Icon>
+      <path d="M15 3h6v6" />
+      <path d="M10 14 21 3" />
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+    </Icon>
+  ),
   arkime: (
     <Icon>
       <circle cx="18" cy="5" r="3" />
@@ -102,42 +110,102 @@ export type RowAction = {
   external?: boolean
 }
 
-/** The strip itself. Renders nothing when there is nothing to offer, so a
- *  surface never shows an empty pill on hover. */
-export function RowActions({ actions }: { actions: (RowAction | null | undefined)[] }) {
+/** A named set of actions that opens beside its own icon.
+ *
+ *  For a category rather than a single action -- "open in", with the
+ *  external tools inside it. Its members appear next to the trigger when
+ *  the pointer or focus arrives, so nothing is behind a click and nothing
+ *  claims width it is not using. */
+export type RowActionGroup = {
+  label: string
+  icon: React.ReactNode
+  actions: (RowAction | null | undefined)[]
+}
+
+function Control({ action }: { action: RowAction }) {
+  const shared = {
+    title: action.label,
+    'aria-label': action.label,
+  }
+  return action.href ? (
+    <a
+      href={action.href}
+      {...shared}
+      {...(action.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+      // The row itself opens the inspector; an action must not also do that
+      // on its way to somewhere else.
+      onClick={(event) => event.stopPropagation()}
+    >
+      {action.icon}
+    </a>
+  ) : (
+    <button
+      type="button"
+      {...shared}
+      onClick={(event) => {
+        event.stopPropagation()
+        action.onClick?.()
+      }}
+    >
+      {action.icon}
+    </button>
+  )
+}
+
+/** The strip. Renders nothing when there is nothing to offer, so a surface
+ *  never shows an empty pill.
+ *
+ *  #1898: the first action rests on screen and the rest arrive on approach.
+ *  The strip used to be `opacity: 0` until the row was hovered, which made
+ *  every action discoverable only by accident -- nothing on screen
+ *  suggested that hovering would reveal anything, so a reader concludes the
+ *  column is empty. It is solid at rest now; what collapses is the width of
+ *  the extras, not the existence of the strip. */
+export function RowActions({
+  actions,
+  groups = [],
+}: {
+  actions: (RowAction | null | undefined)[]
+  groups?: (RowActionGroup | null | undefined)[]
+}) {
   const present = actions.filter((action): action is RowAction => Boolean(action))
-  if (present.length === 0) return null
+  const liveGroups = groups
+    .filter((group): group is RowActionGroup => Boolean(group))
+    .map((group) => ({
+      ...group,
+      actions: group.actions.filter((action): action is RowAction => Boolean(action)),
+    }))
+    .filter((group) => group.actions.length > 0)
+
+  if (present.length === 0 && liveGroups.length === 0) return null
+
+  const [first, ...rest] = present
   return (
     <div className="hp-row-actions">
-      {present.map((action) =>
-        action.href ? (
-          <a
-            key={action.label}
-            href={action.href}
-            title={action.label}
-            aria-label={action.label}
-            {...(action.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
-            // The row itself opens the inspector; an action must not also
-            // do that on its way to somewhere else.
-            onClick={(event) => event.stopPropagation()}
-          >
-            {action.icon}
-          </a>
-        ) : (
-          <button
-            key={action.label}
-            type="button"
-            title={action.label}
-            aria-label={action.label}
-            onClick={(event) => {
-              event.stopPropagation()
-              action.onClick?.()
-            }}
-          >
-            {action.icon}
-          </button>
-        ),
-      )}
+      {first ? <Control action={first} /> : null}
+      {rest.length > 0 || liveGroups.length > 0 ? (
+        <span className="hp-row-actions__more">
+          {rest.map((action) => (
+            <Control key={action.label} action={action} />
+          ))}
+          {liveGroups.map((group) => (
+            <span className="hp-row-actions__group" key={group.label}>
+              {/* aria-expanded describes a set that opens on hover and
+                  focus rather than on click, so it is never false while the
+                  members are reachable -- it is the group's own state, not
+                  a button's. */}
+              <span role="img" aria-label={group.label} title={group.label} aria-expanded="false">
+                {group.icon}
+              </span>
+              <span className="hp-row-actions__items">
+                {group.actions.map((action) => (
+                  <Control key={action.label} action={action} />
+                ))}
+              </span>
+            </span>
+          ))}
+        </span>
+      ) : null}
     </div>
   )
 }
