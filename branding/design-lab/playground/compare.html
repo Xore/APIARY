@@ -52,7 +52,24 @@ const VARIANTS = [
 ];
 const q = new URLSearchParams(location.search);
 let L = +(q.get('l') || 19201), R = +(q.get('r') || 19202);
-let path = q.get('path') || '/';
+// Every value that reaches an iframe src goes through here first.
+// `path` arrives from three untrusted places -- the query string, the text
+// input, and a postMessage from either frame -- and is interpolated straight
+// after `http://127.0.0.1:${port}`. A value like `@evil.com/` turns the port
+// into a userinfo field and points the frame at another host entirely, and a
+// leading `//` does the same via a protocol-relative URL. Both look like
+// paths. CodeQL flags the assignment for this reason and it is right to.
+function safePath(raw) {
+  const s = String(raw == null ? '' : raw);
+  if (!s.startsWith('/') || s.startsWith('//') || s.startsWith('/\\')) return '/';
+  // Whitelist rather than blacklist: anything outside ordinary URL path,
+  // query and fragment characters is dropped. Notably absent are `@`, `\`
+  // and the quote and angle characters.
+  const cleaned = s.replace(/[^A-Za-z0-9/_\-.~!$&'()*+,;=:%?#\[\]]/g, '');
+  return cleaned.startsWith('/') && !cleaned.startsWith('//') ? cleaned : '/';
+}
+
+let path = safePath(q.get('path') || '/');
 
 const selL = document.getElementById('selL'), selR = document.getElementById('selR');
 for (const [port, name] of VARIANTS) {
@@ -83,8 +100,8 @@ function load(side) {
 selL.onchange = () => { L = +selL.value; load('L'); };
 selR.onchange = () => { R = +selR.value; load('R'); };
 document.getElementById('swap').onclick = () => { [L, R] = [R, L]; selL.value = L; selR.value = R; load(); };
-document.getElementById('go').onclick = () => { path = pathIn.value || '/'; load(); };
-pathIn.addEventListener('keydown', e => { if (e.key === 'Enter') { path = pathIn.value || '/'; load(); } });
+document.getElementById('go').onclick = () => { path = safePath(pathIn.value || '/'); load(); };
+pathIn.addEventListener('keydown', e => { if (e.key === 'Enter') { path = safePath(pathIn.value || '/'); load(); } });
 
 /* ── postMessage sync with the hp-app.js lab snippet inside each frame ── */
 const winOf = f => { try { return f.contentWindow; } catch { return null; } };
@@ -98,8 +115,9 @@ addEventListener('message', e => {
   if (d.type === 'scroll') {
     peer.postMessage({hpLab: 1, type: 'setScroll', frac: d.frac}, '*');
   } else if (d.type === 'nav') {
-    if (d.path !== path) {
-      path = d.path; pathIn.value = path; refreshLabels();
+    const navPath = safePath(d.path);
+    if (navPath !== path) {
+      path = navPath; pathIn.value = path; refreshLabels();
       // debounce: the peer's own load will echo a nav message; only forward fresh user navigation
       if (Date.now() - lastGoto > 400) {
         lastGoto = Date.now();
