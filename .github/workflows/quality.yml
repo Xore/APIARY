@@ -134,6 +134,12 @@ jobs:
         working-directory: arcane/home/honeypot-dashboard/frontend-next
       - run: npm run typecheck
         working-directory: arcane/home/honeypot-dashboard/frontend-next
+      # #1831: the tier's first behavioural check. typecheck and build were
+      # the only things running against it, and neither can see ordering,
+      # a pre-hydration string literal, or anything else whose correctness
+      # is a matter of what happens rather than of what shape it has.
+      - run: npm test
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
       # No live-ES smoke suite here on purpose: port-tests/ needs the real
       # cluster over an SSH tunnel to the homeserver (see its README) --
       # not reachable from a GitHub-hosted runner, and not appropriate to
