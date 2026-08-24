@@ -21,6 +21,7 @@
 // matching the Go tier's no-JS fallback (server HTML keeps the stock
 // horizontal tabs; JS moves them into the rail).
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useRouterState } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 
 export type ViewTabDef = { id: string; label: string }
@@ -214,6 +215,21 @@ export function useSidebarViewTabs({
 export function SidebarViewTabs() {
   const entry = useRegistration()
   const narrow = useNarrowViewport()
+  // #1857: hide the rail while a navigation is in flight.
+  //
+  // A registration outlives the page that made it by design: the cleanup
+  // below only clears it if this page still owns it, so a new page whose
+  // effect has already run is not clobbered. The cost is a window during
+  // navigation where the destination is rendering and the *previous* page's
+  // tabs are still registered -- so the rail advertises tabs that do not
+  // belong to the page now on screen, and clicking one does nothing sensible.
+  //
+  // Clearing the registration on navigation start instead would race the
+  // incoming page's own effect. Not rendering while pending sidesteps that
+  // entirely and does not touch ownership: the rail simply says nothing until
+  // some page owns it again. An empty rail for a moment is honest; the wrong
+  // page's tabs are not.
+  const navigating = useRouterState({ select: (state) => state.status === 'pending' })
   const ref = useRef<HTMLDivElement>(null)
   const pageLabel = entry?.config.label
 
@@ -223,7 +239,7 @@ export function SidebarViewTabs() {
     if (pageLabel) ref.current?.scrollIntoView({ block: 'nearest' })
   }, [pageLabel])
 
-  if (!entry || narrow) return null
+  if (!entry || narrow || navigating) return null
   return (
     <div ref={ref}>
       <div className="sidebar__section-label hp-views-label">Views</div>
