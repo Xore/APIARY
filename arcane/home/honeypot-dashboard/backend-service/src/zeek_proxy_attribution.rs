@@ -6,51 +6,73 @@
 //! useless as attacker attribution, and reads on the dashboard as though our
 //! infrastructure were attacking itself.
 //!
-//! The attacker is recoverable, just not by that sensor alone. portbridge
-//! logs both halves of every relayed connection: `community_id` for the
-//! attacker's tuple as it arrived on the public NIC, and
-//! `community_id_relayed` for the tunnel-side tuple it dialled inward. That
-//! second value is exactly what zeek-proxy computes for the same flow, so one
-//! is a key into the other.
+//! portbridge logs both halves of every relayed connection: `community_id`
+//! for the attacker's tuple as it arrived on the public NIC, and
+//! `community_id_relayed` for the tunnel-side tuple it dialled inward. The
+//! second is what zeek-proxy computes for the same flow, so one is a key into
+//! the other.
 //!
-//! Why a worker loop and not an ingest processor: the join needs a lookup
-//! against another index, which a painless script in a pipeline cannot do.
-//! And it cannot be done at write time in any case — the two sensors write
-//! independently and either may land first.
+//! # The key is not unique, and that is the whole difficulty
 //!
-//! What it writes:
+//! The relayed tuple is `10.8.0.1:<ephemeral> -> 10.8.0.2:<service>`, and the
+//! ephemeral port is reused within seconds under this traffic. Measured on the
+//! live cluster: one `community_id_relayed` matched four portbridge records
+//! belonging to different attackers. Joining on the key alone and taking any
+//! match attributes a flow to whoever happened to reuse that port — and a
+//! wrong attacker is indistinguishable from a right one, which is worse than
+//! leaving the tunnel address in place.
+//!
+//! This is the same trap #1771 documented for the `via_port` join, and the
+//! constraint that fixes it is the one `ip_enrichment::viamap` already uses:
+//! portbridge logs at *dial* time, strictly before the relayed flow can exist,
+//! so a candidate dialled after the flow cannot explain it. Among those that
+//! remain, the most recent opened it.
+//!
+//! Where no candidate survives, nothing is written. An unattributed flow is
+//! honest; a confidently wrong attacker is not.
+//!
+//! # What it writes
 //!
 //!   source.ip                     the attacker, replacing the tunnel address
 //!   network.relay_ip              the tunnel address, preserved
 //!   network.community_id_attacker the attacker-side key, so a zeek-proxy
-//!                                 record can be joined to the VPS sensor's
-//!                                 view of the same session
+//!                                 record can also be joined to the VPS
+//!                                 sensor's view of the same session
 //!
 //! Overwriting `source.ip` rather than adding a field is deliberate: every
 //! existing aggregation, filter and pivot already reads it, and the observed
 //! value is not lost — Zeek's own `zeek.id.orig_h` still carries it, and
-//! `network.relay_ip` records it explicitly.
+//! `network.relay_ip` records it explicitly. That field doubles as the
+//! "already attributed" marker, so the write is idempotent and fully
+//! reversible.
 
 use crate::AppState;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::time::Duration;
 
-/// zeek-proxy documents considered per pass.
-///
-/// Bounded for the same reason every sweep here is: unresolved documents
-/// accumulate while the loop is down, and a pass that tries to catch up all at
-/// once is the one that falls over. Oldest-first, so nothing is starved.
-const BATCH: usize = 500;
+/// zeek-proxy documents considered per pass. Each resolved one costs its own
+/// update, so this is deliberately smaller than a bulk-rewrite batch.
+const BATCH: usize = 200;
 
-/// How far back to look for unresolved documents.
-///
-/// portbridge and zeek-proxy write independently, so a zeek-proxy record can
-/// arrive before the portbridge record that explains it. A window well past
-/// that skew means a late partner is still picked up on a later pass, rather
-/// than the document being permanently unattributed because we looked once,
-/// too early.
+/// How far back to look for unresolved documents. portbridge and zeek-proxy
+/// write independently, so a zeek-proxy record can arrive before the
+/// portbridge record that explains it; a narrow window would leave it
+/// permanently unattributed for having been looked at once, too early.
 const LOOKBACK: &str = "now-6h";
+
+/// How long before a relayed flow a portbridge dial may have happened and
+/// still explain it. Same bound, for the same reason, as
+/// `ip_enrichment::viamap`'s MAX_AGE_SECONDS.
+const MAX_DIAL_AGE_SECONDS: i64 = 6 * 3600;
+
+/// One portbridge dial: when it happened, and who was behind it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Dial {
+    pub at: i64,
+    pub attacker: String,
+    pub attacker_key: String,
+}
 
 fn interval() -> Duration {
     let secs = std::env::var("ZEEK_PROXY_ATTRIBUTION_INTERVAL_SECONDS")
@@ -72,36 +94,53 @@ pub async fn zeek_proxy_attribution_loop(state: AppState) {
     }
 }
 
-/// Relayed-tuple key -> (attacker address, attacker-side key).
-fn relay_map(hits: &Value) -> HashMap<String, (String, String)> {
-    let mut map = HashMap::new();
+/// The dial that opened a flow seen at `flow_at`, or None.
+///
+/// Two rules, both there to refuse rather than guess:
+///   * a dial after the flow cannot have opened it — portbridge logs at dial
+///     time, strictly before the relayed connection exists;
+///   * a dial older than the window is a different session that happened to
+///     reuse the ephemeral port.
+pub fn dial_for(dials: &[Dial], flow_at: i64) -> Option<&Dial> {
+    dials
+        .iter()
+        .filter(|dial| dial.at <= flow_at && flow_at - dial.at <= MAX_DIAL_AGE_SECONDS)
+        .max_by_key(|dial| dial.at)
+}
+
+fn parse_seconds(value: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|parsed| parsed.timestamp())
+}
+
+/// Relayed key -> every dial seen for it. Keeping all of them is the point:
+/// collapsing to one is exactly the bug this module exists to avoid.
+fn dials_by_key(hits: &Value) -> HashMap<String, Vec<Dial>> {
+    let mut map: HashMap<String, Vec<Dial>> = HashMap::new();
     for hit in hits["hits"]["hits"].as_array().into_iter().flatten() {
-        let pb = &hit["_source"]["portbridge"];
-        let (Some(relayed), Some(attacker)) = (
+        let source = &hit["_source"];
+        let pb = &source["portbridge"];
+        let (Some(relayed), Some(attacker), Some(at)) = (
             pb["community_id_relayed"].as_str(),
             pb["src_ip"].as_str(),
+            source["@timestamp"].as_str().and_then(parse_seconds),
         ) else {
             continue;
         };
         if relayed.is_empty() || attacker.is_empty() {
             continue;
         }
-        map.insert(
-            relayed.to_string(),
-            (
-                attacker.to_string(),
-                pb["community_id"].as_str().unwrap_or_default().to_string(),
-            ),
-        );
+        map.entry(relayed.to_string()).or_default().push(Dial {
+            at,
+            attacker: attacker.to_string(),
+            attacker_key: pb["community_id"].as_str().unwrap_or_default().to_string(),
+        });
     }
     map
 }
 
 async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
-    // Documents this loop has not already attributed. The marker is the
-    // presence of network.relay_ip rather than a boolean, so a document that
-    // was attributed carries the evidence of it rather than a flag whose
-    // meaning has to be looked up.
     let pending = state
         .es
         .search_index(
@@ -117,31 +156,52 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
                     "must_not": [{"exists": {"field": "network.relay_ip"}}]
                 }},
                 "sort": [{"@timestamp": {"order": "asc"}}],
-                "_source": ["network.community_id"]
+                "_source": ["network.community_id", "source.ip", "@timestamp"]
             }),
         )
         .await?;
 
-    let keys: Vec<String> = pending["hits"]["hits"]
+    struct Pending {
+        index: String,
+        id: String,
+        key: String,
+        at: i64,
+        observed: String,
+    }
+
+    let docs: Vec<Pending> = pending["hits"]["hits"]
         .as_array()
         .into_iter()
         .flatten()
-        .filter_map(|hit| hit["_source"]["network"]["community_id"].as_str().map(String::from))
+        .filter_map(|hit| {
+            let source = &hit["_source"];
+            Some(Pending {
+                index: hit["_index"].as_str()?.to_string(),
+                id: hit["_id"].as_str()?.to_string(),
+                key: source["network"]["community_id"].as_str()?.to_string(),
+                at: source["@timestamp"].as_str().and_then(parse_seconds)?,
+                observed: source["source"]["ip"].as_str().unwrap_or_default().to_string(),
+            })
+        })
         .collect();
-    if keys.is_empty() {
+    if docs.is_empty() {
         return Ok(());
     }
 
-    // One lookup for the whole batch.
+    let keys: Vec<&str> = docs.iter().map(|doc| doc.key.as_str()).collect();
     let relayed = state
         .es
         .search_index(
             &["portbridge-v2-*"],
             json!({
-                "size": BATCH,
+                // Several dials per key is the normal case, not an anomaly --
+                // that is what makes the time constraint necessary -- so fetch
+                // generously and let dial_for choose.
+                "size": BATCH * 8,
                 "track_total_hits": false,
                 "query": {"terms": {"portbridge.community_id_relayed": keys}},
                 "_source": [
+                    "@timestamp",
                     "portbridge.community_id_relayed",
                     "portbridge.community_id",
                     "portbridge.src_ip"
@@ -150,45 +210,41 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
         )
         .await?;
 
-    let map = relay_map(&relayed);
-    if map.is_empty() {
-        // Nothing matched. Normal when portbridge has not written its side
-        // yet, or when the flow was not relayed at all — internal traffic on
-        // the tunnel has no attacker behind it and never will.
+    let dials = dials_by_key(&relayed);
+    if dials.is_empty() {
+        // Normal: portbridge may not have written its side yet, or the flow
+        // was never relayed at all -- internal tunnel traffic has no attacker
+        // behind it and never will.
         return Ok(());
     }
 
-    let attacker: HashMap<&str, &str> =
-        map.iter().map(|(k, v)| (k.as_str(), v.0.as_str())).collect();
-    let attacker_key: HashMap<&str, &str> =
-        map.iter().map(|(k, v)| (k.as_str(), v.1.as_str())).collect();
+    let (mut resolved, mut unattributable) = (0usize, 0usize);
+    for doc in &docs {
+        let Some(candidates) = dials.get(&doc.key) else { continue };
+        let Some(dial) = dial_for(candidates, doc.at) else {
+            // Candidates existed but none could have opened this flow.
+            // Leaving it alone is the point of the exercise.
+            unattributable += 1;
+            continue;
+        };
+        let mut network = json!({"relay_ip": doc.observed});
+        if !dial.attacker_key.is_empty() {
+            network["community_id_attacker"] = json!(dial.attacker_key);
+        }
+        let update = json!({"source": {"ip": dial.attacker}, "network": network});
+        if let Err(error) = state.es.update_doc(&doc.index, &doc.id, update).await {
+            tracing::warn!(%error, doc_id = %doc.id, "zeek-proxy-attribution: update failed");
+            continue;
+        }
+        resolved += 1;
+    }
 
-    let updated = state
-        .es
-        .update_by_query(
-            &["zeek-proxy-v1-*"],
-            json!({"bool": {
-                "filter": [{"terms": {"network.community_id": map.keys().collect::<Vec<_>>()}}],
-                "must_not": [{"exists": {"field": "network.relay_ip"}}]
-            }}),
-            // Keep what the sensor saw, then state who was actually behind it.
-            "String key = ctx._source.network.community_id;\
-             if (key == null || !params.attacker.containsKey(key)) { ctx.op = 'noop'; return; }\
-             if (ctx._source.source == null) { ctx._source.source = new HashMap(); }\
-             def observed = ctx._source.source.ip;\
-             if (observed != null) { ctx._source.network.relay_ip = observed; }\
-             ctx._source.source.ip = params.attacker.get(key);\
-             def akey = params.attacker_key.get(key);\
-             if (akey != null && akey != '') { ctx._source.network.community_id_attacker = akey; }",
-            json!({"attacker": attacker, "attacker_key": attacker_key}),
-        )
-        .await?;
-
-    if updated > 0 {
+    if resolved > 0 || unattributable > 0 {
         tracing::debug!(
-            resolved = updated,
-            candidates = keys.len(),
-            "zeek-proxy-attribution: attributed relayed flows"
+            resolved,
+            unattributable,
+            candidates = docs.len(),
+            "zeek-proxy-attribution pass complete"
         );
     }
     Ok(())
@@ -198,55 +254,66 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
 mod tests {
     use super::*;
 
-    fn hit(relayed: &str, attacker: &str, key: &str) -> Value {
-        json!({"_source": {"portbridge": {
-            "community_id_relayed": relayed,
-            "community_id": key,
-            "src_ip": attacker
-        }}})
+    fn dial(at: i64, attacker: &str) -> Dial {
+        Dial { at, attacker: attacker.into(), attacker_key: format!("key-{attacker}") }
     }
 
     #[test]
-    fn maps_the_relayed_key_to_the_attacker() {
-        let hits = json!({"hits": {"hits": [
-            hit("1:relayedAAA=", "203.0.113.9", "1:attackerAAA="),
-            hit("1:relayedBBB=", "198.51.100.4", "1:attackerBBB=")
-        ]}});
-        let map = relay_map(&hits);
-        assert_eq!(map.len(), 2);
-        assert_eq!(
-            map.get("1:relayedAAA="),
-            Some(&("203.0.113.9".to_string(), "1:attackerAAA=".to_string()))
-        );
+    fn picks_the_most_recent_dial_before_the_flow() {
+        // The live shape that broke the first attempt: one relayed key, several
+        // dials, different attackers. Taking any match attributes the flow to
+        // whoever reused the ephemeral port.
+        let dials = vec![
+            dial(1_000, "203.0.113.1"),
+            dial(2_000, "198.51.100.2"),
+            dial(3_000, "203.0.113.9"),
+        ];
+        assert_eq!(dial_for(&dials, 3_500).unwrap().attacker, "203.0.113.9");
+        assert_eq!(dial_for(&dials, 2_500).unwrap().attacker, "198.51.100.2");
     }
 
     #[test]
-    fn skips_records_that_cannot_attribute_anything() {
-        // A portbridge record with no relayed key, or no source address, tells
-        // us nothing about who was behind a tunnel flow -- keeping it would
-        // mean writing an empty attacker over a real observation.
-        let hits = json!({"hits": {"hits": [
-            json!({"_source": {"portbridge": {"community_id": "1:x="}}}),
-            hit("", "203.0.113.9", "1:y="),
-            hit("1:relayedCCC=", "", "1:z=")
-        ]}});
-        assert!(relay_map(&hits).is_empty());
+    fn refuses_a_dial_that_happened_after_the_flow() {
+        // portbridge logs at dial time, strictly before the relayed connection
+        // can exist, so a later dial cannot explain this flow.
+        let dials = vec![dial(5_000, "203.0.113.1")];
+        assert!(dial_for(&dials, 4_999).is_none());
     }
 
     #[test]
-    fn tolerates_a_missing_attacker_side_key() {
-        // community_id is the useful extra, not a requirement: the attacker
-        // address alone is still worth writing.
+    fn refuses_a_dial_older_than_the_window() {
+        // Same port, a different session hours earlier.
+        let dials = vec![dial(1_000, "203.0.113.1")];
+        assert!(dial_for(&dials, 1_000 + MAX_DIAL_AGE_SECONDS + 1).is_none());
+        assert!(dial_for(&dials, 1_000 + MAX_DIAL_AGE_SECONDS).is_some());
+    }
+
+    #[test]
+    fn no_candidates_attributes_nothing() {
+        assert!(dial_for(&[], 1_000).is_none());
+    }
+
+    #[test]
+    fn groups_dials_by_relayed_key_and_keeps_all_of_them() {
         let hits = json!({"hits": {"hits": [
-            json!({"_source": {"portbridge": {
-                "community_id_relayed": "1:relayedDDD=",
-                "src_ip": "203.0.113.7"
-            }}})
+            {"_source": {"@timestamp": "2026-08-24T07:00:00Z", "portbridge": {
+                "community_id_relayed": "1:same=", "community_id": "1:a=", "src_ip": "203.0.113.1"}}},
+            {"_source": {"@timestamp": "2026-08-24T07:05:00Z", "portbridge": {
+                "community_id_relayed": "1:same=", "community_id": "1:b=", "src_ip": "198.51.100.2"}}}
         ]}});
-        let map = relay_map(&hits);
-        assert_eq!(
-            map.get("1:relayedDDD="),
-            Some(&("203.0.113.7".to_string(), String::new()))
-        );
+        let map = dials_by_key(&hits);
+        // Both must survive -- collapsing them is precisely the bug.
+        assert_eq!(map.get("1:same=").map(Vec::len), Some(2));
+    }
+
+    #[test]
+    fn skips_portbridge_records_that_explain_nothing() {
+        let hits = json!({"hits": {"hits": [
+            {"_source": {"@timestamp": "2026-08-24T07:00:00Z", "portbridge": {"community_id": "1:a="}}},
+            {"_source": {"portbridge": {"community_id_relayed": "1:x=", "src_ip": "203.0.113.1"}}},
+            {"_source": {"@timestamp": "2026-08-24T07:00:00Z", "portbridge": {
+                "community_id_relayed": "1:y=", "src_ip": ""}}}
+        ]}});
+        assert!(dials_by_key(&hits).is_empty());
     }
 }

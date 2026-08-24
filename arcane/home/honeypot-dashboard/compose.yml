@@ -280,7 +280,17 @@ services:
       # zeek-proxy-attribution joins the list: it needs Elasticsearch and
       # nothing else -- no host mounts, no local state -- so it belongs on the
       # stateless worker tier rather than the mounted one.
+      # zeek-proxy-attribution resolves the attacker behind a relayed flow.
+      #
+      # Enabled only after the join was made time-bounded. The first version
+      # matched on the relayed key alone and attributed 12,647 documents to
+      # whoever last reused the tunnel's ephemeral port; those writes were
+      # reverted, and the rule that prevents a repeat is that a portbridge
+      # dial must precede the flow it claims to explain. Where no candidate
+      # survives that test, the tunnel address is left in place -- an
+      # unattributed flow is honest, a wrong attacker is not.
       - WORKER_LOOPS=alert-notifier,attacker-identity,agent-intrusion,correlator,threat-intel,zeek-proxy-attribution
+      - ZEEK_PROXY_ATTRIBUTION_INTERVAL_SECONDS=${ZEEK_PROXY_ATTRIBUTION_INTERVAL_SECONDS:-120}
       - ZEEK_PROXY_ATTRIBUTION_INTERVAL_SECONDS=${ZEEK_PROXY_ATTRIBUTION_INTERVAL_SECONDS:-120}
       - THREAT_CIDRS_FILE=/geoip/threat-cidrs.csv
       - EVIDENCE_WINDOW=${EVIDENCE_WINDOW:-6h}
