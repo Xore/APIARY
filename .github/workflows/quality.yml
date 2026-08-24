@@ -130,6 +130,33 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: arcane/home/honeypot-dashboard/frontend-next/package-lock.json
+      # #1816: the lockfile must install under the npm the *image* uses.
+      #
+      # setup-node above pins 24; the Dockerfile builds on node:22-alpine.
+      # Dependabot resolves with its own npm again, so a group bump can
+      # produce a lockfile that satisfies one and not the other -- and the
+      # failure then lands on whatever PR runs next, which is usually one
+      # that touches no frontend file at all. Three times so far, each
+      # costing a diagnosis before a one-line fix.
+      #
+      # Running the image's npm here makes it fail on the PR that caused
+      # it. Regenerating automatically would also work; failing loudly in
+      # the right place is better than a bot quietly rewriting a lockfile.
+      #
+      # --user matters: without it the container installs as root and
+      # leaves a root-owned node_modules the runner's own `npm ci` below
+      # cannot remove (EACCES on rmdir .bin), so the check would break the
+      # very job it is meant to protect. HOME and the cache go somewhere
+      # writable for that user for the same reason.
+      - name: lockfile installs under the image's npm
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+        run: |
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -e HOME=/tmp -e npm_config_cache=/tmp/npm-cache \
+            -v "$PWD:/app" -w /app \
+            node:22-alpine npm ci --no-audit --no-fund
+          rm -rf node_modules
       - run: npm ci
         working-directory: arcane/home/honeypot-dashboard/frontend-next
       - run: npm run typecheck
