@@ -80,7 +80,12 @@ Rules:
 | Primary text | `#2f2b27` | headings and body copy |
 | Secondary text | `#68615a` | descriptions |
 | Muted text | `#66615b` | metadata |
-| Copper | `#c76548` | brand accent and primary actions |
+| Copper | `#af593f` | brand accent and primary actions |
+
+`#c76548` is the *old* light copper and is not the accent any more. It
+survives in the stylesheet inside one alpha tint (`--accent-soft:
+rgba(199, 101, 72, 0.12)`) and in the reports light-theme preview swatch, so
+grepping for it still finds hits — those are leftovers, not the token.
 
 Semantic colors are evidence states, not decoration. Dark mode uses
 information blue `#78a9d4`, green `#79c99e`, amber `#deb36a`, and red
