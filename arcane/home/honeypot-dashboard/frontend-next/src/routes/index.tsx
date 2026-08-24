@@ -333,7 +333,7 @@ function RecentEventRow({ row, open, onToggle }: { row: EventRow; open: boolean;
       {open ? (
         <tr>
           <td colSpan={6}>
-            <article className="card wide" style={{ marginTop: 'var(--space-md)' }} aria-label="Full normalized event">
+            <article className="card wide hp-flow" aria-label="Full normalized event">
               <h3>Normalized event</h3>
               <p className="note">Complete read-only record as stored by the pipeline.</p>
               {row.src_ip || row.session ? (

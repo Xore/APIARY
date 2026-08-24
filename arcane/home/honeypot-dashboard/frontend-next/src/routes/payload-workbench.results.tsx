@@ -502,7 +502,7 @@ function RunDetail({ run, currentOwner, onChanged }: { run: WorkbenchRun; curren
 
   return (
     <div>
-      <div className="filters" style={{ marginBottom: 8 }}>
+      <div className="filters hp-flow--tight">
         <span className={stateBadgeClass(run.state)}>{run.state}</span>
         <span className="chip">recipe: {run.recipe_name || run.recipe_id || 'one-off'}</span>
         <code>{run.payload_sha256}</code>
@@ -610,7 +610,7 @@ function RecentRunsCard({ owner, refreshToken }: { owner: string; refreshToken: 
           {(() => {
             const run = runs.find((candidate) => candidate.id === selected)
             return run ? (
-              <div className="card wide" style={{ marginTop: 'var(--space-sm)' }}>
+              <div className="card wide hp-flow--tight">
                 <RunDetail run={run} currentOwner={owner} onChanged={updateRun} />
               </div>
             ) : null
@@ -637,7 +637,7 @@ function ModelHealthCard() {
   return (
     <div className="card wide">
       <div className="filters">
-        <h2 style={{ marginRight: 'auto' }}>Approved local-model health</h2>
+        <h2 className="hp-push-end">Approved local-model health</h2>
         <span className="badge badge--muted">advisory only</span>
       </div>
       {models === null ? (
@@ -867,7 +867,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
           Payload hash (sha256 or md5)
           <input
             className="form-input"
-            style={{ width: '100%' }}
+           
             type="text"
             maxLength={64}
             value={hash}
@@ -893,7 +893,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
           {(recipes?.length ?? 0) > 0 ? (
             <label className="note" style={{ display: 'block', maxWidth: 380 }}>
               Load from saved recipe
-              <select className="form-input" style={{ width: '100%' }} value={pickedRecipeId} onChange={(event) => pickRecipe(event.target.value)}>
+              <select className="form-input" value={pickedRecipeId} onChange={(event) => pickRecipe(event.target.value)}>
                 <option value="">Custom selection…</option>
                 {(recipes ?? []).map((recipe) => (
                   <option key={`${recipe.id}:${recipe.revision}`} value={recipe.id}>
@@ -1016,12 +1016,12 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
             </>
           ) : null}
 
-          <div className="filters" style={{ marginTop: 8 }}>
+          <div className="filters hp-flow--tight">
             <label className="note" style={{ display: 'block', minWidth: 220 }}>
               Run / recipe name
               <input
                 className="form-input"
-                style={{ width: '100%' }}
+               
                 type="text"
                 maxLength={80}
                 value={recipeName}
@@ -1044,16 +1044,16 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
                 Recipe description
                 <input
                   className="form-input"
-                  style={{ width: '100%' }}
+                 
                   type="text"
                   maxLength={400}
                   value={recipeDescription}
                   onChange={(event) => setRecipeDescription(event.target.value)}
                 />
               </label>
-              <label className="note" style={{ display: 'block', minWidth: 160 }}>
+              <label className="note hp-field">
                 Scope
-                <select className="form-input" style={{ width: '100%' }} value={recipeScope} onChange={(event) => setRecipeScope(event.target.value)}>
+                <select className="form-input" value={recipeScope} onChange={(event) => setRecipeScope(event.target.value)}>
                   <option value="private">Private</option>
                   <option value="shared">Shared with analysts</option>
                 </select>
@@ -1061,7 +1061,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
             </div>
           ) : null}
 
-          <div className="filters" style={{ marginTop: 8 }}>
+          <div className="filters hp-flow--tight">
             <button className="btn btn-primary btn-sm" type="button" onClick={submit} disabled={!canSubmit}>
               {busy ? 'Submitting…' : 'Start analysis run'}
             </button>

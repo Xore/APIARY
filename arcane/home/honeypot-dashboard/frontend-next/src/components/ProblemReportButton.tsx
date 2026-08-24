@@ -255,12 +255,12 @@ export function ProblemReportButton({ enabled }: { enabled: boolean }) {
                 void submit()
               }}
             >
-              <label className="note" style={{ display: 'block' }}>
+              <label className="note hp-field">
                 What did you expect to happen? *
                 <textarea
                   ref={expectedRef}
                   className="form-input"
-                  style={{ width: '100%' }}
+                 
                   rows={3}
                   required
                   value={expected}
@@ -269,7 +269,7 @@ export function ProblemReportButton({ enabled }: { enabled: boolean }) {
               </label>
               <label className="note" style={{ display: 'block', marginTop: 8 }}>
                 What actually happened?
-                <textarea className="form-input" style={{ width: '100%' }} rows={3} value={actual} onChange={(event) => setActual(event.target.value)} />
+                <textarea className="form-input" rows={3} value={actual} onChange={(event) => setActual(event.target.value)} />
               </label>
               <p className="note">
                 This report automatically includes your recent click/navigation trail, console errors, failed requests, and a

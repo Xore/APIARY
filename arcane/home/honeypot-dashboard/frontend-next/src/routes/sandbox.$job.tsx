@@ -104,9 +104,9 @@ function Row({ label, value, mono = true, danger = false }: { label: string; val
 function Evidence({ title, note, body }: { title: string; note?: string; body: string }) {
   if (!body.trim()) return null
   return (
-    <details style={{ marginTop: 'var(--space-md)' }}>
+    <details className="hp-flow">
       <summary>{title}</summary>
-      {note ? <p className="note" style={{ marginTop: 'var(--space-md)' }}>{note}</p> : null}
+      {note ? <p className="note hp-flow">{note}</p> : null}
       <div className="card__scroll">
         <pre className="code">{body}</pre>
       </div>
@@ -120,15 +120,15 @@ function DiffDetails({ diff, emptyAdded, emptyRemoved }: { diff: Diff; emptyAdde
       {diff.added.length ? (
         <details open>
           <summary>Added ({diff.added.length})</summary>
-          <pre className="code" style={{ marginTop: 'var(--space-md)' }}>{diff.added.map((entry) => `+ ${entry}`).join('\n')}</pre>
+          <pre className="code hp-flow">{diff.added.map((entry) => `+ ${entry}`).join('\n')}</pre>
         </details>
       ) : (
         <p className="empty">{emptyAdded}</p>
       )}
       {diff.removed.length ? (
-        <details open style={{ marginTop: 'var(--space-md)' }}>
+        <details open className="hp-flow">
           <summary>Removed ({diff.removed.length})</summary>
-          <pre className="code" style={{ marginTop: 'var(--space-md)' }}>{diff.removed.map((entry) => `- ${entry}`).join('\n')}</pre>
+          <pre className="code hp-flow">{diff.removed.map((entry) => `- ${entry}`).join('\n')}</pre>
         </details>
       ) : (
         <p className="empty">{emptyRemoved}</p>
@@ -559,7 +559,7 @@ function SandboxDetail() {
               )}
               {lines(network.attempts).length ? (
                 <>
-                  <p className="note" style={{ marginTop: 'var(--space-md)' }}>
+                  <p className="note hp-flow">
                     {lines(network.attempts).length} IPv4/IPv6 connect attempt{lines(network.attempts).length === 1 ? '' : 's'} observed by
                     strace.
                   </p>
@@ -729,7 +729,7 @@ function SandboxDetail() {
                 <Evidence title="ExifTool" body={str(artifacts.exiftool)} />
                 <Evidence title="objdump -x" body={str(artifacts.pe_objdump)} />
                 {!lines(windows.exports).length && !lines(windows.warnings).length ? (
-                  <p className="note" style={{ marginTop: 'var(--space-md)' }}>No exported symbols or parser warnings.</p>
+                  <p className="note hp-flow">No exported symbols or parser warnings.</p>
                 ) : null}
               </div>
               <div className="card half">
@@ -766,7 +766,7 @@ function SandboxDetail() {
                 label="processes before / after"
                 value={`${lines(artifacts.processes_before).length} / ${lines(artifacts.processes_after).length}`}
               />
-              <p className="note" style={{ marginTop: 'var(--space-md)' }}>Collected artifacts:</p>
+              <p className="note hp-flow">Collected artifacts:</p>
               <Evidence title="Guest kernel" body={str(artifacts.kernel)} />
               <Evidence title={`Processes before (${lines(artifacts.processes_before).length})`} body={lines(artifacts.processes_before).join('\n')} />
               <Evidence title={`Processes after (${lines(artifacts.processes_after).length})`} body={lines(artifacts.processes_after).join('\n')} />
@@ -798,7 +798,7 @@ function SandboxDetail() {
             </div>
           </Panel>
 
-          <p className="note" style={{ marginTop: 'var(--space-md)' }}>
+          <p className="note hp-flow">
             Guest-produced text is untrusted and size-bounded. Complete raw result directories and syscall traces remain root-only on the
             homeserver.
           </p>

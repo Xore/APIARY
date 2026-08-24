@@ -732,11 +732,11 @@ function DefinitionForm({
   }
 
   const scopeField = (key: 'ip' | 'sensor' | 'port' | 'signature' | 'job' | 'hash', label: string, maxLength: number) => (
-    <label className="note" style={{ display: 'block', minWidth: 180 }}>
+    <label className="note hp-field">
       {label}
       <input
         className="form-input"
-        style={{ width: '100%' }}
+       
         type="text"
         maxLength={maxLength}
         value={scope[key]}
@@ -746,11 +746,11 @@ function DefinitionForm({
   )
 
   const brandingField = (key: keyof ReportBranding, label: string, maxLength: number) => (
-    <label className="note" style={{ display: 'block', minWidth: 180 }}>
+    <label className="note hp-field">
       {label}
       <input
         className="form-input"
-        style={{ width: '100%' }}
+       
         type="text"
         maxLength={maxLength}
         value={branding[key]}
@@ -861,7 +861,7 @@ function DefinitionForm({
             Name
             <input
               className="form-input"
-              style={{ width: '100%' }}
+             
               type="text"
               required
               maxLength={60}
@@ -872,7 +872,7 @@ function DefinitionForm({
           {/* reports.html:64-66 — the swatch shows what each PDF theme
               actually looks like; a two-option <select> of the words
               "Dark"/"Light" showed nothing. */}
-          <div className="note" style={{ display: 'block', minWidth: 140 }}>
+          <div className="note hp-field">
             Theme
             <div className="hp-rp-theme" role="group" aria-label="PDF theme">
               <button type="button" aria-pressed={theme === 'dark'} onClick={() => setTheme('dark')}>
@@ -890,11 +890,11 @@ function DefinitionForm({
           {!isSpecial ? (
             // reports.html:61 — the observation window is a Design-step
             // basic, not a scope filter.
-            <label className="note" style={{ display: 'block', minWidth: 160 }}>
+            <label className="note hp-field">
               Window
               <select
                 className="form-input"
-                style={{ width: '100%' }}
+               
                 value={scope.window}
                 onChange={(event) => setScope((current) => ({ ...current, window: event.target.value }))}
               >
@@ -907,11 +907,11 @@ function DefinitionForm({
               </select>
             </label>
           ) : null}
-          <label className="note" style={{ display: 'block', maxWidth: 220 }}>
+          <label className="note hp-field">
             Event appendix limit
             <input
               className="form-input"
-              style={{ width: '100%' }}
+             
               type="number"
               min={0}
               max={500}
@@ -961,11 +961,11 @@ function DefinitionForm({
           // built around an unresolvable reference.
           <>
             {activeTemplate?.sandbox ? (
-              <label className="note" style={{ display: 'block', maxWidth: 480 }}>
+              <label className="note hp-field hp-field--wide">
                 Analysis job
                 <select
                   className="form-input"
-                  style={{ width: '100%' }}
+                 
                   value={scope.job}
                   onChange={(event) => setScope((current) => ({ ...current, job: event.target.value }))}
                 >
@@ -989,11 +989,11 @@ function DefinitionForm({
             ) : null}
             {wantsHash ? (
               <>
-                <label className="note" style={{ display: 'block', maxWidth: 480 }}>
+                <label className="note hp-field hp-field--wide">
                   Search captured payloads
                   <input
                     className="form-input"
-                    style={{ width: '100%' }}
+                   
                     type="search"
                     placeholder="hash or file kind…"
                     autoComplete="off"
@@ -1333,7 +1333,7 @@ function DefinitionsCard({
           schedule.
         </p>
         {editable ? (
-          <button className="btn btn-secondary btn-sm" type="button" onClick={onNew} style={{ marginBottom: 12 }}>
+          <button className="btn btn-secondary btn-sm hp-flow" type="button" onClick={onNew}>
             New definition
           </button>
         ) : null}

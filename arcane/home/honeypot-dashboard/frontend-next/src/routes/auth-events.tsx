@@ -128,7 +128,7 @@ function AuthStats() {
           <div className="metric__label">Failed logins, 24h</div>
         </div>
       </div>
-      <div className="" style={{ marginBottom: 14 }}>
+      <div className="hp-flow">
         <TopTable title="Failures by client, 24h" header="client" rows={stats.byClient} />
         <TopTable title="Top source IPs, 24h" header="source ip" rows={stats.byIP} />
       </div>

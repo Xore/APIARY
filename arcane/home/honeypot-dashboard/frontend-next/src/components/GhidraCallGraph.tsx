@@ -153,7 +153,7 @@ export function GhidraCallGraph({ sha }: { sha: string }) {
   const functionCount = graph.nodes.filter((node) => node.kind === 'function').length
   return (
     <>
-      <div className="filters" style={{ marginBottom: 8 }}>
+      <div className="filters hp-flow--tight">
         <input
           className="form-input"
           type="search"
