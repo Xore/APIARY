@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Fail when portable APIARY tokens drift from the vendored Xore/theme."""
+"""Fail when portable APIARY tokens drift from the vendored Xore/theme.
+
+Covers colours (per theme, both modes), radii and type families. Anything
+not listed here is unchecked and will drift without anyone noticing -- which
+is how the radii got three steps out of date (#1760).
+"""
 
 from __future__ import annotations
 
@@ -41,6 +46,20 @@ MAPPING = {
 # "claude"], [data-hp-palette="claude"]`, so anchoring on the palette alias
 # finds it without depending on which of the three comes first.
 DEFAULT_THEME_MARKER = '[data-hp-palette="claude"] {'
+
+# Radii are not theme-scoped -- they live in the base :root block, not in a
+# theme's token set -- so they are read from there rather than from the
+# default theme's block.
+#
+# These were drifting silently until #1760: tokens.json said 9/14/18 while
+# the stylesheet had moved to 12/16/24 in the design refresh, and this script
+# passed the whole time because it only compared colours. A check that covers
+# one kind of token reports "in sync" about everything it does not look at.
+RADIUS_MAPPING = {
+    "control": "radius-control",
+    "panel": "radius-panel",
+    "dialog": "radius-dialog",
+}
 
 
 
@@ -92,6 +111,19 @@ def main() -> None:
                         f"color.{mode}.{token_name} is {actual}, "
                         f"but Xore/theme --{theme_name} is {expected}"
                     )
+
+    radius_declared = dict(re.findall(r"--(radius-[\w-]+):\s*(\d+px)\s*;", css))
+    branded_radius = token_data.get("radius", {})
+    for token_name, theme_name in RADIUS_MAPPING.items():
+        expected = radius_declared.get(theme_name)
+        if expected is None:
+            failures.append(f"Xore/theme --{theme_name} is not declared as a plain px value")
+            continue
+        actual = branded_radius.get(token_name, {}).get("$value")
+        if actual != expected:
+            failures.append(
+                f"radius.{token_name} is {actual}, but Xore/theme --{theme_name} is {expected}"
+            )
 
     font_mapping = {"sans": "font-sans", "display": "font-display", "mono": "font-mono"}
     for token_name, theme_name in font_mapping.items():
