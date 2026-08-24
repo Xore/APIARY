@@ -157,6 +157,20 @@ function EvidenceTimeline({ row }: { row: AgentCampaignRow }) {
   )
 }
 
+/** `encoded-egress-external` -> `Encoded egress external`.
+ *
+ * The categories come from criticality_rules.py as dashed identifiers. They
+ * are readable words already; they just are not written as words. Only the
+ * separators and the first letter change, so a category added upstream reads
+ * correctly here without anyone maintaining a translation table -- and a
+ * table would silently fall back to the raw slug for anything new, which is
+ * the state this replaces.
+ */
+function categoryLabel(category: string): string {
+  const words = category.replace(/[-_]+/g, ' ').trim()
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
 export const Route = createFileRoute('/agent-campaigns')({
   // ?category= mirrors agent_campaigns.go's parseAgentCampaignFilter — the
   // KPI tiles link here with it set.
@@ -231,14 +245,30 @@ function Page() {
       </p>
       {kpis.length > 0 ? (
         <div className="metric-grid">
-          {kpis.map(([cat, count]) => (
-            <div className="metric" key={cat}>
-              <Link to="/agent-campaigns" search={{ category: cat }}>
-                <div className="metric__value">{count.toLocaleString('en-US')}</div>
-                <div className="metric__label">{cat}</div>
-              </Link>
-            </div>
-          ))}
+          {kpis.map(([cat, count]) => {
+            const selected = cat === category
+            return (
+              <div className="metric" key={cat} aria-current={selected ? 'true' : undefined}>
+                {/* #1855: this read as a bare count stacked over a raw slug,
+                    and clicking it looked inert -- it did navigate, but the
+                    tile itself never showed that it was now the active
+                    filter. It says what it counts, reads as words rather
+                    than an identifier, and marks itself when selected.
+                    Clicking the selected one clears the filter, so the tile
+                    is a toggle rather than a one-way trip. */}
+                <Link
+                  to="/agent-campaigns"
+                  search={selected ? {} : { category: cat }}
+                  title={selected ? 'clear this filter' : `show only ${categoryLabel(cat)} campaigns`}
+                >
+                  <div className="metric__value">{count.toLocaleString('en-US')}</div>
+                  <div className="metric__label">
+                    {categoryLabel(cat)} {count === 1 ? 'campaign' : 'campaigns'}
+                  </div>
+                </Link>
+              </div>
+            )
+          })}
         </div>
       ) : null}
       <MasterDetailTable
