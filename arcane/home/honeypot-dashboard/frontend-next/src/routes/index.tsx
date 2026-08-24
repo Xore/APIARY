@@ -395,7 +395,20 @@ function Overview() {
       search: (prev: OverviewSearch) => ({ ...prev, sensor: next || undefined }),
       replace: true,
     })
-  const [openEvent, setOpenEvent] = useState<number | null>(null)
+  // #1845: the expanded row is remembered by identity, not by position.
+  //
+  // It was an index into the rows array, and the array is replaced every
+  // 60s by the auto-refresh below. New events arrive at the top, so index
+  // 3 after a refresh is a different event than index 3 before it: the row
+  // stayed open and silently swapped which record it was showing, which is
+  // worse than closing it would have been.
+  //
+  // Keyed by the document id, an expanded row follows its event down the
+  // list as newer ones arrive, and closes on its own once the event falls
+  // off the end -- which is the honest outcome, because the record it was
+  // showing is no longer on screen to expand.
+  const [openEvent, setOpenEvent] = useState<string | null>(null)
+  const eventKey = (row: EventRow, index: number) => row.id ?? `${row.time}-${row.src_ip}-${index}`
   const router = useRouter()
 
   // Auto-refresh (legacy 60s replaceHoneypotPage cycle): re-run the
@@ -529,14 +542,17 @@ function Overview() {
                     <tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th><th></th></tr>
                   </thead>
                   <tbody>
-                    {recent.rows.map((row, index) => (
-                      <RecentEventRow
-                        key={`${row.time}-${index}`}
-                        row={row}
-                        open={openEvent === index}
-                        onToggle={() => setOpenEvent(openEvent === index ? null : index)}
-                      />
-                    ))}
+                    {recent.rows.map((row, index) => {
+                      const key = eventKey(row, index)
+                      return (
+                        <RecentEventRow
+                          key={key}
+                          row={row}
+                          open={openEvent === key}
+                          onToggle={() => setOpenEvent(openEvent === key ? null : key)}
+                        />
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
