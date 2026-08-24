@@ -2356,10 +2356,18 @@ function AuditLogCard({ initial }: { initial: AuditResponse | null }) {
   )
 }
 
-// The nine accent presets from theme.css (#32) in the legacy picker's
-// order (settings_modal.html:115-125): claude is the default, the rest
-// are data-hp-palette values. Swatch dots are colored by theme.css's
-// .hp-palette-pick [data-value] rules, per-theme.
+// The nine themes from theme.css, in the legacy picker's order
+// (settings_modal.html:115-125); claude is the default.
+//
+// These stopped being accent presets in Xore/theme#104. Each one now owns
+// the whole surface -- ground, sidebar, toolbar, surface ramp, borders, text
+// ramp, elevation and accent -- in both light and dark. The name is written
+// to data-hp-theme (data-hp-palette stays as an accepted alias upstream and
+// is what this file has always read).
+//
+// This list is still hardcoded here and in the boot script; #1758 replaces
+// both with one manifest and a gallery that can actually preview a whole
+// surface, which a single swatch dot cannot.
 const PALETTES: { id: string; label: string }[] = [
   { id: 'claude', label: 'Claude' },
   { id: 'slate', label: 'Slate' },
@@ -2653,8 +2661,8 @@ export function SettingsSurface({
           </button>
         ))}
       </div>
-      <p className="note">Accent palette</p>
-      <div className="segmented hp-palette-pick" role="group" aria-label="Accent palette">
+      <p className="note">Theme</p>
+      <div className="segmented hp-palette-pick" role="group" aria-label="Theme">
         {PALETTES.map((preset) => (
           <button
             key={preset.id}

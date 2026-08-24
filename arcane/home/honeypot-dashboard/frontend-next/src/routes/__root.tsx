@@ -68,8 +68,31 @@ export const Route = createRootRoute({
         // dashboard's bootstrap: same localStorage keys (hp-theme,
         // hp-palette), same data attributes — an operator switching between
         // tiers during the transition keeps their appearance.
+        //
+        // Two orthogonal axes, which is easy to misread from the key names:
+        //   hp-theme   -> data-theme      the light/dark mode; absent = system
+        //   hp-palette -> data-hp-theme   the named theme (claude, slate, …)
+        //
+        // #1754: this script no longer deletes anything. It used to remove
+        // any hp-theme it did not recognise and any hp-palette that failed
+        // its shape check, which meant an operator's stored choice was
+        // destroyed on first paint, before a line of React ran and with
+        // nothing else on the page holding a copy. A value this script
+        // cannot use is simply not applied; the page falls back to default
+        // tokens and the choice survives to be read by something that can.
+        //
+        // The shape check matches the server's rule for the same field
+        // (preferences.rs::theme_name) so a name cannot be accepted by one
+        // end and rejected by the other. It is deliberately a shape and not
+        // a list of the nine themes we ship today: a theme is CSS in the
+        // vendored stylesheet, so a new one must work the moment it is
+        // vendored, without a matching frontend deploy.
+        //
+        // Both data-hp-theme and data-hp-palette are set. Upstream treats
+        // the first as canonical and the second as an alias; this repo still
+        // reads dataset.hpPalette in settings.tsx.
         children:
-          '(function(){try{var t=localStorage.getItem("hp-theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t;}else if(t){localStorage.removeItem("hp-theme");}var p=localStorage.getItem("hp-palette");if(p&&/^[a-z]{3,16}$/.test(p)&&p!=="claude"){document.documentElement.dataset.hpPalette=p;}else if(p){localStorage.removeItem("hp-palette");}}catch(e){}})();',
+          '(function(){try{var d=document.documentElement;var t=localStorage.getItem("hp-theme");if(t==="light"||t==="dark"){d.dataset.theme=t;}var p=localStorage.getItem("hp-palette");if(p&&/^[a-z][a-z0-9-]{2,31}$/.test(p)){d.dataset.hpTheme=p;d.dataset.hpPalette=p;}}catch(e){}})();',
       },
     ],
   }),
