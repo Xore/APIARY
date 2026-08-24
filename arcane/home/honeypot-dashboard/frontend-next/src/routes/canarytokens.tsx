@@ -8,6 +8,7 @@ import { StoreListPage, str, when, type StorePage, type StoreRow } from '../comp
 import { InvestigateHeader, type Column } from '../components/Investigate'
 import { Tabs, TabPanel } from '../components/Tabs'
 import { pathString, type JsonRecord } from '../lib/json'
+import { copyWithFlash } from '../lib/flash'
 import { isLivePaused } from '../lib/live'
 import { formatTimestamp } from '../lib/time'
 import { countryName } from '../lib/country'
@@ -206,7 +207,38 @@ const COLUMNS: Column<StoreRow>[] = [
   { header: 'created', render: (row) => when(str(row, 'created_at')) },
   { header: 'type', render: (row) => <span className="badge badge--muted">{str(row, 'token_type')}</span> },
   { header: 'memo', className: 'v', primary: true, render: (row) => str(row, 'memo') || <span className="tw:text-muted">(no memo)</span> },
-  { header: 'token url', className: 'v', render: (row) => <code>{str(row, 'token_url')}</code> },
+  {
+    header: 'token url',
+    className: 'v',
+    // #1859: a token URL has no spaces and no break opportunities, so it ran
+    // straight past the card edge. `overflow-wrap: anywhere` lets it break
+    // mid-string, which is what a URL needs -- it stops deciding the card's
+    // width instead of being allowed to.
+    //
+    // A token URL exists to be pasted somewhere, so it also gets a copy
+    // control rather than leaving the operator to select wrapped text
+    // accurately.
+    render: (row) => {
+      const url = str(row, 'token_url')
+      if (!url) return '—'
+      return (
+        <span className="hp-token-url">
+          <code>{url}</code>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            title="copy the token URL"
+            onClick={(event) => {
+              event.stopPropagation()
+              copyWithFlash(url, 'token URL')
+            }}
+          >
+            copy
+          </button>
+        </span>
+      )
+    },
+  },
   { header: 'hostname', detail: true, render: (row) => str(row, 'hostname') },
   { header: 'created by', detail: true, render: (row) => str(row, 'created_by') },
   { header: 'id', detail: true, render: (row) => str(row, 'id') },
