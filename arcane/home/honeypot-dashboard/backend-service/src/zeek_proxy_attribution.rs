@@ -38,6 +38,27 @@
 //!   network.community_id_attacker the attacker-side key, so a zeek-proxy
 //!                                 record can also be joined to the VPS
 //!                                 sensor's view of the same session
+//!   network.relay_unresolved      set on a flow old enough that a missing
+//!                                 portbridge dial is an answer rather than a
+//!                                 delay: this one was never relayed. It
+//!                                 records that the question was asked and
+//!                                 settled, which is what stops the flow from
+//!                                 being reconsidered on every later pass
+//!
+//! # The pipeline gets the last word on source.ip
+//!
+//! `geoip-honeypot` is these indices' `default_pipeline`, and a
+//! `default_pipeline` runs on `_update`, not only on index. Its Zeek branch
+//! derives `source.ip` from `zeek.id.orig_h`, which on zeek-proxy is always
+//! the tunnel -- so it re-derived the tunnel address immediately after this
+//! loop wrote the attacker, and the write appeared to succeed: ES returned
+//! `"result":"updated"` with a bumped `_version` every time. Only `network.*`
+//! survived, because the pipeline does not touch those fields, which made a
+//! pipeline problem look like a join problem for a while.
+//!
+//! The pipeline now skips that assignment when `network.relay_ip` is present.
+//! If this module ever stops writing that field, the pipeline will start
+//! silently overwriting attacker attributions again.
 //!
 //! Overwriting `source.ip` rather than adding a field is deliberate: every
 //! existing aggregation, filter and pivot already reads it, and the observed
@@ -52,8 +73,14 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 /// zeek-proxy documents considered per pass. Each resolved one costs its own
-/// update, so this is deliberately smaller than a bulk-rewrite batch.
-const BATCH: usize = 200;
+/// update, so this is not a bulk-rewrite batch -- but it does have to clear
+/// the arrival rate, or the loop falls permanently behind. Measured on the
+/// live cluster: ~9,200 zeek-proxy conn records an hour, of which roughly
+/// three quarters are relayed and therefore attributable. At one pass every
+/// 120s this ceiling is 15,000/hour, which keeps pace and still drains a
+/// backlog. 200 did not: it capped the loop at 6,000/hour against 9,200
+/// arriving, and the shortfall accumulated silently.
+const BATCH: usize = 500;
 
 /// How far back to look for unresolved documents. portbridge and zeek-proxy
 /// write independently, so a zeek-proxy record can arrive before the
@@ -65,6 +92,25 @@ const LOOKBACK: &str = "now-6h";
 /// still explain it. Same bound, for the same reason, as
 /// `ip_enrichment::viamap`'s MAX_AGE_SECONDS.
 const MAX_DIAL_AGE_SECONDS: i64 = 6 * 3600;
+
+/// How long to keep re-examining a flow that nothing explains yet.
+///
+/// Two very different situations look identical on any single pass: portbridge
+/// simply has not written its side of a flow that *is* relayed, or the flow was
+/// never relayed at all. wg0 carries our own traffic too -- the dashboard's
+/// queries to Elasticsearch, the pcap sync hop, WireGuard's own keepalives --
+/// and none of that has an attacker behind it or ever will.
+///
+/// Age separates them. portbridge logs at dial time, strictly before the
+/// relayed flow exists, so once a flow is this old a missing dial is an answer
+/// rather than a delay. Below the threshold the flow is left alone and looked
+/// at again next pass; above it, it is marked so it stops being a candidate.
+///
+/// Marking matters more than it looks. Candidates are read oldest-first, so
+/// flows that can never be attributed would otherwise pile up at the head of
+/// every batch and crowd out the work the loop could actually do -- a loop
+/// that looks busy while resolving less and less.
+const GRACE_SECONDS: i64 = 30 * 60;
 
 /// One portbridge dial: when it happened, and who was behind it.
 #[derive(Debug, Clone, PartialEq)]
@@ -106,6 +152,23 @@ pub fn dial_for(dials: &[Dial], flow_at: i64) -> Option<&Dial> {
         .iter()
         .filter(|dial| dial.at <= flow_at && flow_at - dial.at <= MAX_DIAL_AGE_SECONDS)
         .max_by_key(|dial| dial.at)
+}
+
+/// What to do with a flow that no dial explains.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Unmatched {
+    /// Too recent to conclude anything -- portbridge's side may still arrive.
+    Retry,
+    /// Old enough that a missing dial is the answer: this flow was not relayed.
+    Mark,
+}
+
+pub fn unmatched_action(flow_at: i64, now: i64) -> Unmatched {
+    if now - flow_at > GRACE_SECONDS {
+        Unmatched::Mark
+    } else {
+        Unmatched::Retry
+    }
 }
 
 fn parse_seconds(value: &str) -> Option<i64> {
@@ -153,7 +216,10 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
                         {"range": {"@timestamp": {"gte": LOOKBACK}}},
                         {"exists": {"field": "network.community_id"}}
                     ],
-                    "must_not": [{"exists": {"field": "network.relay_ip"}}]
+                    "must_not": [
+                        {"exists": {"field": "network.relay_ip"}},
+                        {"exists": {"field": "network.relay_unresolved"}}
+                    ]
                 }},
                 "sort": [{"@timestamp": {"order": "asc"}}],
                 "_source": ["network.community_id", "source.ip", "@timestamp"]
@@ -211,22 +277,33 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
         .await?;
 
     let dials = dials_by_key(&relayed);
-    if dials.is_empty() {
-        // Normal: portbridge may not have written its side yet, or the flow
-        // was never relayed at all -- internal tunnel traffic has no attacker
-        // behind it and never will.
-        return Ok(());
-    }
+    let now = chrono::Utc::now().timestamp();
 
-    let (mut resolved, mut unattributable) = (0usize, 0usize);
+    let (mut resolved, mut marked, mut deferred) = (0usize, 0usize, 0usize);
     for doc in &docs {
-        let Some(candidates) = dials.get(&doc.key) else { continue };
-        let Some(dial) = dial_for(candidates, doc.at) else {
-            // Candidates existed but none could have opened this flow.
-            // Leaving it alone is the point of the exercise.
-            unattributable += 1;
+        let matched = dials.get(&doc.key).and_then(|candidates| dial_for(candidates, doc.at));
+
+        let Some(dial) = matched else {
+            // Nothing explains this flow. Whether that is temporary or
+            // permanent is a question of age, not of this pass -- see
+            // GRACE_SECONDS. Marking the permanent ones is what keeps the
+            // oldest-first candidate window moving.
+            match unmatched_action(doc.at, now) {
+                Unmatched::Retry => deferred += 1,
+                Unmatched::Mark => {
+                    let update = json!({"network": {"relay_unresolved": true}});
+                    match state.es.update_doc(&doc.index, &doc.id, update).await {
+                        Ok(()) => marked += 1,
+                        Err(error) => tracing::warn!(
+                            %error, doc_id = %doc.id,
+                            "zeek-proxy-attribution: could not mark unresolved"
+                        ),
+                    }
+                }
+            }
             continue;
         };
+
         let mut network = json!({"relay_ip": doc.observed});
         if !dial.attacker_key.is_empty() {
             network["community_id_attacker"] = json!(dial.attacker_key);
@@ -239,10 +316,11 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
         resolved += 1;
     }
 
-    if resolved > 0 || unattributable > 0 {
+    if resolved > 0 || marked > 0 || deferred > 0 {
         tracing::debug!(
             resolved,
-            unattributable,
+            marked,
+            deferred,
             candidates = docs.len(),
             "zeek-proxy-attribution pass complete"
         );
@@ -291,6 +369,25 @@ mod tests {
     #[test]
     fn no_candidates_attributes_nothing() {
         assert!(dial_for(&[], 1_000).is_none());
+    }
+
+    #[test]
+    fn a_recent_unmatched_flow_is_retried_not_written_off() {
+        // portbridge's side may still be in flight; concluding "never relayed"
+        // this early would mark a real attacker's flow as internal traffic.
+        let now = 100_000;
+        assert_eq!(unmatched_action(now - 60, now), Unmatched::Retry);
+        assert_eq!(unmatched_action(now - GRACE_SECONDS, now), Unmatched::Retry);
+    }
+
+    #[test]
+    fn an_old_unmatched_flow_is_marked_so_the_window_can_move() {
+        // Past the grace period a missing dial is the answer. Without the mark
+        // these flows stay candidates forever, and because candidates are read
+        // oldest-first they would crowd out attributable work.
+        let now = 100_000;
+        assert_eq!(unmatched_action(now - GRACE_SECONDS - 1, now), Unmatched::Mark);
+        assert_eq!(unmatched_action(now - 6 * 3600, now), Unmatched::Mark);
     }
 
     #[test]
