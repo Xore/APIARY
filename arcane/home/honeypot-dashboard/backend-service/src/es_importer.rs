@@ -85,6 +85,18 @@ struct Source {
     /// shape is also different (body_path/eml_base64, not
     /// shasum/ttylog_base64) — see scan_source's binary branch.
     mailoney_mail: bool,
+    /// Walk subdirectories instead of only the root.
+    ///
+    /// Every other source writes into a flat directory, and the scan was
+    /// written to match. mailoney does not: its mail_storage.py files land
+    /// under `<date>/<relay-ip>/<session>.eml`, so a root-only scan saw
+    /// three date directories, matched no files, and created no index --
+    /// which is why every captured message 404'd at
+    /// GET /api/v1/mail/{session_id} with "mail body not yet imported"
+    /// while 24 .eml files sat on disk (#1856). The original source's own
+    /// comment flagged this as unverified against a real deployment; it is
+    /// verified now, and it nests.
+    recursive: bool,
 }
 
 const fn source(env: &'static str, label: &'static str, index: &'static str, glob: &'static str) -> Source {
@@ -103,6 +115,7 @@ const fn source(env: &'static str, label: &'static str, index: &'static str, glo
         content_type: None,
         aggregate_samples: None,
         mailoney_mail: false,
+        recursive: false,
     }
 }
 
@@ -164,17 +177,25 @@ fn sources() -> Vec<Source> {
         // #1611 workstream B: mailoney's full .eml bodies — the ES event
         // document's own "mail-body" line carries session_id AND body_path
         // as sibling fields (mailoney/json_log_patch.py's _emit_json_event
-        // call), but body_path is a relative filename this worker resolves
-        // to actual bytes, not something derivable from the filename alone
-        // (mailoney's upstream mail_storage.py, not vendored in this repo,
-        // owns the naming — unverified against a real saved filename).
-        // src/mail.rs's GET /api/v1/mail/{session_id} does the two-step
-        // join: honeypot-v2-* for session_id -> body_path, then this index
-        // for body_path -> content. Flat directory assumed (this importer
-        // has no subdirectory recursion anywhere) — if mail_storage.py
-        // nests files under a subdirectory this won't find them; worth
-        // confirming against a real deployment.
-        Source { binary: true, mailoney_mail: true, ..source("MAILONEY_MAIL_DIR", "mailoney_mail", "mailoney-mail-v1", "*") },
+        // call), but body_path is a relative path this worker resolves to
+        // actual bytes. src/mail.rs's GET /api/v1/mail/{session_id} does
+        // the two-step join: honeypot-v2-* for session_id -> body_path,
+        // then this index for body_path -> content.
+        //
+        // #1856: the original entry assumed a flat directory and its own
+        // comment said so was unverified. It is verified now, and it is
+        // wrong: mail_storage.py writes `<date>/<relay-ip>/<session>.eml`,
+        // so the root-only scan matched nothing, the index was never
+        // created, and every captured message 404'd while the files sat on
+        // disk. `recursive` walks the tree, and the join key is the path
+        // relative to the root — which is exactly the string the sensor
+        // writes into honeypot.body_path, so the two sides now agree.
+        Source {
+            binary: true,
+            mailoney_mail: true,
+            recursive: true,
+            ..source("MAILONEY_MAIL_DIR", "mailoney_mail", "mailoney-mail-v1", "*")
+        },
         Source { id_fields: &[], ..source("REPORTER_METRICS_DIR", "reporter_metrics", "reporter-metrics-v1", "metrics.json") },
         Source {
             aggregate_samples: Some("samples"),
@@ -336,17 +357,44 @@ fn is_content_hash_name(name: &str) -> bool {
     name.len() == 64 && name.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
+/// How deep a `recursive` source is allowed to walk.
+///
+/// mailoney needs two levels (`<date>/<relay-ip>/`). The bound exists so a
+/// symlink loop or an unexpected tree in a sensor volume cannot turn one
+/// importer pass into an unbounded walk — the scan runs on a timer against
+/// directories the honeypot writes, which is exactly where a surprise
+/// directory shape shows up.
+const MAX_SCAN_DEPTH: usize = 4;
+
+/// Every file at or below `root`, sorted, bounded by `MAX_SCAN_DEPTH`.
+/// A non-recursive source stops at the root, which is what every source
+/// other than mailoney_mail wants.
+fn walk_files(root: &Path, recursive: bool, depth: usize) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let Ok(entries) = fs::read_dir(root) else { return files };
+    let mut paths: Vec<PathBuf> = entries.filter_map(|entry| entry.ok()).map(|entry| entry.path()).collect();
+    paths.sort();
+    for path in paths {
+        if path.is_dir() {
+            if recursive && depth + 1 < MAX_SCAN_DEPTH {
+                files.extend(walk_files(&path, recursive, depth + 1));
+            }
+            continue;
+        }
+        files.push(path);
+    }
+    files
+}
+
 fn scan_source(source: &Source, root: &Path, state: &HashMap<String, f64>, shard_count: u64, shard_index: u64) -> Vec<Pending> {
     let mut pending = Vec::new();
-    let entries = match fs::read_dir(root) {
-        Ok(e) => e,
-        Err(_) => return pending,
-    };
-    let mut paths: Vec<PathBuf> = entries.filter_map(|e| e.ok()).map(|e| e.path()).collect();
-    paths.sort();
+    let paths = walk_files(root, source.recursive, 0);
 
     for path in paths {
         let Some(filename) = path.file_name().and_then(|n| n.to_str()) else { continue };
+        // The join key for a nested source is the path relative to the
+        // root, because that is the string the sensor itself records.
+        let relative = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().to_string();
         if !path.is_file() || !glob_matches(source.glob, filename) || source.skip.contains(&filename) {
             continue;
         }
@@ -462,17 +510,24 @@ fn scan_source(source: &Source, root: &Path, state: &HashMap<String, f64>, shard
                     }),
                 )
             } else if source.mailoney_mail {
-                // #1611 workstream B: doc id is sha256(filename), not the
-                // filename itself — unlike cowrie's ttylog names, mailoney's
-                // saved filenames carry no content-hash guarantee, so the
-                // path is what needs hashing for a stable, idempotent id.
+                // #1611 workstream B: doc id is sha256(path), not the path
+                // itself — unlike cowrie's ttylog names, mailoney's saved
+                // filenames carry no content-hash guarantee, so the path is
+                // what needs hashing for a stable, idempotent id.
+                //
+                // #1856: that path is the one relative to the source root,
+                // not the bare filename. mailoney writes
+                // `<date>/<relay-ip>/<session>.eml` into honeypot.body_path,
+                // so hashing the basename produced an id and a body_path
+                // that mail.rs could never match even once the file was
+                // found.
                 use sha2::{Digest, Sha256};
-                let digest = Sha256::digest(filename.as_bytes());
+                let digest = Sha256::digest(relative.as_bytes());
                 let id_hash: String = digest.iter().map(|b| format!("{b:02x}")).collect();
                 (
                     id_hash,
                     json!({
-                        "body_path": filename,
+                        "body_path": relative,
                         "size_bytes": raw.len(),
                         "imported_at": now,
                         "eml_base64": base64::engine::general_purpose::STANDARD.encode(&raw),
@@ -636,6 +691,9 @@ mod tests {
         }
         fn write(&self, filename: &str, contents: &[u8]) -> PathBuf {
             let path = self.0.join(filename);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
             fs::write(&path, contents).unwrap();
             path
         }
@@ -753,6 +811,61 @@ mod tests {
         assert_eq!(pending[0].id, expected_id);
         assert_eq!(pending[0].doc["body_path"], "some-saved-mail.eml");
         assert!(pending[0].doc.get("eml_base64").is_some());
+    }
+
+    #[test]
+    fn scan_source_ignores_subdirectories_unless_the_source_is_recursive() {
+        // Every source but mailoney_mail writes flat, and a stray directory
+        // in a sensor volume must not change what a flat source indexes.
+        let dir = TmpDir::new("nested_non_recursive");
+        dir.write("top.eml", b"top");
+        dir.write("2026-08-24/nested.eml", b"nested");
+        let src = Source { binary: true, mailoney_mail: true, ..source("X", "mailoney_mail", "mailoney-mail-v1", "*") };
+        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].doc["body_path"], "top.eml");
+    }
+
+    #[test]
+    fn scan_source_recursive_mailoney_keys_by_the_path_the_sensor_records() {
+        // #1856: mailoney writes `<date>/<relay-ip>/<session>.eml` and puts
+        // that same relative path in the event's honeypot.body_path. The
+        // root-only scan found no files at all, so the index never existed
+        // and every message 404'd; keying by the basename would have found
+        // the file and still never joined. Both halves are asserted here.
+        let dir = TmpDir::new("nested_mailoney");
+        dir.write("2026-08-24/10.8.0.1/ca6c3e0e.eml", b"From: attacker@example.com\r\n\r\nbody");
+        let src = Source {
+            binary: true,
+            mailoney_mail: true,
+            recursive: true,
+            ..source("X", "mailoney_mail", "mailoney-mail-v1", "*")
+        };
+        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(
+            pending[0].doc["body_path"], "2026-08-24/10.8.0.1/ca6c3e0e.eml",
+            "the join key must be what the sensor writes, not the basename"
+        );
+        let expected_id = {
+            use sha2::{Digest, Sha256};
+            Sha256::digest(b"2026-08-24/10.8.0.1/ca6c3e0e.eml")
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
+        };
+        assert_eq!(pending[0].id, expected_id);
+    }
+
+    #[test]
+    fn walk_files_stops_at_the_depth_bound() {
+        let dir = TmpDir::new("walk_depth");
+        dir.write("a/b/c/deep.eml", b"deep");
+        dir.write("a/b/c/d/e/too-deep.eml", b"too deep");
+        let found = walk_files(&dir.0, true, 0);
+        let names: Vec<String> = found.iter().map(|p| p.to_string_lossy().to_string()).collect();
+        assert!(names.iter().any(|n| n.ends_with("deep.eml")), "{names:?}");
+        assert!(!names.iter().any(|n| n.ends_with("too-deep.eml")), "{names:?}");
     }
 
     #[test]

@@ -5,6 +5,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { CapturedMailInline } from '../components/CapturedMail'
 import { formatTimestamp } from '../lib/time'
 import { useSidebarViewTabs } from '../lib/viewTabs'
 
@@ -108,6 +109,21 @@ const MAILONEY_COLUMNS: Column<MailoneySession>[] = [
     header: 'body preview',
     detail: true,
     render: (row) => (row.body_preview ? <pre className="hp-md__preview">{row.body_preview}</pre> : ''),
+  },
+  {
+    // #1856: the preview is the first few bytes of the SMTP conversation
+    // and is usually "QUIT" -- so the mail sensor's own detail view showed
+    // an envelope and never the mail. The parsed message (headers, body,
+    // attachments with hashes) is fetched on demand, because it lives in a
+    // separate index behind a two-step join and most rows are never opened.
+    header: 'captured message',
+    detail: true,
+    render: (row) =>
+      row.body_path ? (
+        <CapturedMailInline sessionId={row.session_id} />
+      ) : (
+        <span className="note">This session never sent a DATA body.</span>
+      ),
   },
 ]
 
