@@ -197,10 +197,20 @@ fn process_source_tick(
     };
 
     let now = Instant::now();
+    // #1876: two shapes, because sensors disagree about where they put the
+    // peer. Most write src_ip; hellpot writes only REMOTE_ADDR ("ip:port")
+    // and gets src_ip added *by* the enrichment, so a marker that only
+    // looks for src_ip never matches a hellpot input line -- and hellpot
+    // reported no join statistics at all while it was in fact resolving
+    // every line. A metric that stays silent looks exactly like a metric
+    // with nothing to report.
     let tunnel_peer_marker = format!("\"src_ip\":\"{TUNNEL_PEER_IP}\"");
+    let tunnel_peer_addr_marker = format!("\"REMOTE_ADDR\":\"{TUNNEL_PEER_IP}:");
     let mut ready = Vec::new();
     for line in lines {
-        let is_tunnel_peer = String::from_utf8_lossy(&line).contains(&tunnel_peer_marker); // #1206 debug stat only
+        let raw = String::from_utf8_lossy(&line);
+        let is_tunnel_peer =
+            raw.contains(&tunnel_peer_marker) || raw.contains(&tunnel_peer_addr_marker); // #1206 debug stat only
         let (enriched, resolved) = (source.enrich)(&line, vm, tftp_vm, &source.name);
         if resolved {
             if is_tunnel_peer {

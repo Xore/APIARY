@@ -182,6 +182,19 @@ pub fn pivots_from_source(src: &Value) -> EventPivots {
 
 #[derive(Serialize)]
 pub struct EventRow {
+    /// #1876: the address the request claimed, when two joins disagreed.
+    ///
+    /// The enrichment worker resolves a relayed event two ways -- from the
+    /// connection portbridge recorded, and from the forwarded header the
+    /// request carried. Where both answer and they differ, the connection
+    /// wins (it is evidence about the connection rather than content
+    /// inside it) and the claim is kept here rather than discarded: on the
+    /// portbridge path a disagreement is an attacker setting their own
+    /// X-Forwarded-For, and dropping it would hide the attempt.
+    ///
+    /// Empty when the two agreed, or when only one of them answered.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub src_ip_claimed: String,
     /// The document id, so a row can link to its own full page (#1868).
     ///
     /// Empty where there is no hit to take it from: the SSE live stream
@@ -399,6 +412,12 @@ pub fn row_from_source(src: &Value) -> EventRow {
         .find(|s| !s.is_empty())
         .unwrap_or_default();
     EventRow {
+        src_ip_claimed: {
+            let claimed = text(&src["honeypot"]["src_ip_claimed"]);
+            // Never echo our own address as a claim, for the same reason
+            // it is never shown as a source.
+            if is_fleet_address(&claimed) { String::new() } else { claimed }
+        },
         id: String::new(),
         time: text(&src["@timestamp"]),
         sensor: sensor.clone(),

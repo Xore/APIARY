@@ -37,6 +37,9 @@ type EventPivots = {
 }
 
 type EventRow = {
+  /** #1876: the address the request claimed, when it disagrees with the
+   *  one the connection resolved to. Present only on a conflict. */
+  src_ip_claimed?: string
   /** The document id, when the row came from a search hit — the events
    *  list has one, the SSE live stream does not. Drives the full-detail
    *  action, which is simply absent for a row with no id (#1868). */
@@ -1116,6 +1119,22 @@ function FragmentRow({
               unattributed
             </span>
           )}
+          {/* #1876: two joins resolved this event to different addresses.
+              The one shown is the connection-derived answer; this is what
+              the request *claimed*, kept because on the portbridge path a
+              disagreement is an attacker setting their own
+              X-Forwarded-For, and hiding it would hide the attempt. */}
+          {row.src_ip_claimed ? (
+            <>
+              {' '}
+              <span
+                className="badge badge--warning"
+                title={`This request also claimed to come from ${row.src_ip_claimed}, which disagrees with the address portbridge recorded for the connection. The connection is the stronger evidence, so it is the one shown; the claim is likely forged.`}
+              >
+                claims {row.src_ip_claimed}
+              </span>
+            </>
+          ) : null}
           {row.country ? (
             <>
               {' '}
