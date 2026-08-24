@@ -1,4 +1,4 @@
-# APIARY dashboard design review — honeypot.xore.rocks — 2026-08-17
+# APIARY dashboard design review — the deployed dashboard — 2026-08-17
 ## Findings (running)
 - Overview (light): loads fast, authenticated. Heatmap "Activity — last 24h" dominates; lower rows (multipot, conpot-kamstrup, endlessh) appear near-empty/pale — visual weight wasted?
 - Theme toggle: monitor icon top-right (left of LIVE). Dark theme renders correctly on Overview.
@@ -52,7 +52,7 @@
 - Pages must fill viewport height/width with modest padding; Event explorer card called out as "very small, hard to see".
 - Filter fields should auto-populate on click (works, but broken by session decay; add to attack-path/since too).
 - Nav list should include hidden routes (found in routes.go, not in sidebar): /alerts, /source-health, /search, /sensors, /history, /dead-letters, /canarytokens, /ghidra, /revdeck, /cape, /github-analysis, /sandbox, /payload-workbench, /problem-reports(?), settings modal. Decide which become nav entries (grouped), which stay contextual.
-- Build local variant dashboard w/ real data (homeserver xore@192.168.42.250) for side-by-side design choices incl. PDF design.
+- Build local variant dashboard w/ real data (against the homeserver, over the `homeserver` ssh alias) for side-by-side design choices incl. PDF design.
 ## Investigate pages (rest)
 - /ips: solid table; date cols wrap to 2 lines at 1568px; source-ip wraps mid-IP occasionally.
 - /campaigns: worst column-crush — network CIDR wraps mid-value ("169.58.1/70.0/24"), provider wraps "networ/k", dates wrap "2026-/08-16", trailing "ES →" col clipped by card edge; 15 columns is too many for one table. Card shows ~4.5 rows, half viewport dead below.
