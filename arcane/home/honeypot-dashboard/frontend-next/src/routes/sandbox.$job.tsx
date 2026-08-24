@@ -93,7 +93,7 @@ function Row({ label, value, mono = true, danger = false }: { label: string; val
   return (
     <div className="card__row">
       <span className="card__label">{label}</span>
-      <span className={`card__value${mono ? ' card__value--mono' : ''}${danger ? ' tw:text-red' : ''}`}>{value}</span>
+      <span className={`card__value${mono ? ' card__value--mono' : ''}${danger ? ' text-danger' : ''}`}>{value}</span>
     </div>
   )
 }
@@ -104,9 +104,9 @@ function Row({ label, value, mono = true, danger = false }: { label: string; val
 function Evidence({ title, note, body }: { title: string; note?: string; body: string }) {
   if (!body.trim()) return null
   return (
-    <details className="tw:mt-3">
+    <details style={{ marginTop: 'var(--space-md)' }}>
       <summary>{title}</summary>
-      {note ? <p className="note tw:mt-3">{note}</p> : null}
+      {note ? <p className="note" style={{ marginTop: 'var(--space-md)' }}>{note}</p> : null}
       <div className="card__scroll">
         <pre className="code">{body}</pre>
       </div>
@@ -120,15 +120,15 @@ function DiffDetails({ diff, emptyAdded, emptyRemoved }: { diff: Diff; emptyAdde
       {diff.added.length ? (
         <details open>
           <summary>Added ({diff.added.length})</summary>
-          <pre className="code tw:mt-3">{diff.added.map((entry) => `+ ${entry}`).join('\n')}</pre>
+          <pre className="code" style={{ marginTop: 'var(--space-md)' }}>{diff.added.map((entry) => `+ ${entry}`).join('\n')}</pre>
         </details>
       ) : (
         <p className="empty">{emptyAdded}</p>
       )}
       {diff.removed.length ? (
-        <details open className="tw:mt-3">
+        <details open style={{ marginTop: 'var(--space-md)' }}>
           <summary>Removed ({diff.removed.length})</summary>
-          <pre className="code tw:mt-3">{diff.removed.map((entry) => `- ${entry}`).join('\n')}</pre>
+          <pre className="code" style={{ marginTop: 'var(--space-md)' }}>{diff.removed.map((entry) => `- ${entry}`).join('\n')}</pre>
         </details>
       ) : (
         <p className="empty">{emptyRemoved}</p>
@@ -323,7 +323,7 @@ function SandboxDetail() {
           </div>
 
           {incomplete ? (
-            <div className="tw:mb-6 tw:rounded-lg tw:border tw:border-red tw:bg-red-subtle tw:px-4 tw:py-4 tw:text-red" role="alert">
+            <div className="alert alert--danger" role="alert">
               <strong>Analysis did not run to completion.</strong> {failureReason || 'The guest returned no usable analysis artifacts.'} The
               empty evidence sections below are an infrastructure failure, not a clean payload result. Re-submit only after the sandbox
               health check passes.
@@ -332,7 +332,7 @@ function SandboxDetail() {
 
           <div className="metric-grid">
             <div className="metric">
-              <div className="metric__value tw:text-red">{incomplete ? 'not rated' : `${riskScore} / 100 • ${riskLevel}`}</div>
+              <div className="metric__value text-danger">{incomplete ? 'not rated' : `${riskScore} / 100 • ${riskLevel}`}</div>
               <div className="metric__label">Dynamic risk</div>
             </div>
             <div className="metric">
@@ -559,7 +559,7 @@ function SandboxDetail() {
               )}
               {lines(network.attempts).length ? (
                 <>
-                  <p className="note tw:mt-3">
+                  <p className="note" style={{ marginTop: 'var(--space-md)' }}>
                     {lines(network.attempts).length} IPv4/IPv6 connect attempt{lines(network.attempts).length === 1 ? '' : 's'} observed by
                     strace.
                   </p>
@@ -729,7 +729,7 @@ function SandboxDetail() {
                 <Evidence title="ExifTool" body={str(artifacts.exiftool)} />
                 <Evidence title="objdump -x" body={str(artifacts.pe_objdump)} />
                 {!lines(windows.exports).length && !lines(windows.warnings).length ? (
-                  <p className="note tw:mt-3">No exported symbols or parser warnings.</p>
+                  <p className="note" style={{ marginTop: 'var(--space-md)' }}>No exported symbols or parser warnings.</p>
                 ) : null}
               </div>
               <div className="card half">
@@ -766,7 +766,7 @@ function SandboxDetail() {
                 label="processes before / after"
                 value={`${lines(artifacts.processes_before).length} / ${lines(artifacts.processes_after).length}`}
               />
-              <p className="note tw:mt-3">Collected artifacts:</p>
+              <p className="note" style={{ marginTop: 'var(--space-md)' }}>Collected artifacts:</p>
               <Evidence title="Guest kernel" body={str(artifacts.kernel)} />
               <Evidence title={`Processes before (${lines(artifacts.processes_before).length})`} body={lines(artifacts.processes_before).join('\n')} />
               <Evidence title={`Processes after (${lines(artifacts.processes_after).length})`} body={lines(artifacts.processes_after).join('\n')} />
@@ -798,7 +798,7 @@ function SandboxDetail() {
             </div>
           </Panel>
 
-          <p className="note tw:mt-3">
+          <p className="note" style={{ marginTop: 'var(--space-md)' }}>
             Guest-produced text is untrusted and size-bounded. Complete raw result directories and syscall traces remain root-only on the
             homeserver.
           </p>

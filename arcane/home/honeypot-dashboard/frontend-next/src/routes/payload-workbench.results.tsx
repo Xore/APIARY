@@ -357,7 +357,7 @@ const WORKBENCH_COLUMNS: Column<StoreRow>[] = [
     header: 'recipe',
     className: 'v',
     primary: true,
-    render: (row) => pathString(row, 'recipe_name') || <span className="tw:text-muted">one-off</span>,
+    render: (row) => pathString(row, 'recipe_name') || <span className="text-muted">one-off</span>,
   },
   { header: 'state', detail: true, render: (row) => <span className="badge badge--muted">{pathString(row, 'state')}</span> },
   { header: 'payload', className: 'v', render: (row) => <span className="mono">{pathString(row, 'payload_sha256').slice(0, 16)}</span> },
@@ -400,7 +400,7 @@ const SANDBOX_COLUMNS: Column<StoreRow>[] = [
     className: 'v',
     render: (row) => {
       const job = sandboxJob(row)
-      return job ? <span className="mono">{job.slice(0, 28)}</span> : <span className="tw:text-muted">no job id</span>
+      return job ? <span className="mono">{job.slice(0, 28)}</span> : <span className="text-muted">no job id</span>
     },
   },
   { header: 'detonated', render: (row) => when(pathString(row, '@timestamp')) },
@@ -610,7 +610,7 @@ function RecentRunsCard({ owner, refreshToken }: { owner: string; refreshToken: 
           {(() => {
             const run = runs.find((candidate) => candidate.id === selected)
             return run ? (
-              <div className="card wide tw:mt-2">
+              <div className="card wide" style={{ marginTop: 'var(--space-sm)' }}>
                 <RunDetail run={run} currentOwner={owner} onChanged={updateRun} />
               </div>
             ) : null
@@ -636,8 +636,8 @@ function ModelHealthCard() {
 
   return (
     <div className="card wide">
-      <div className="tw:flex tw:flex-wrap tw:items-center tw:gap-2">
-        <h2 className="tw:mr-auto">Approved local-model health</h2>
+      <div className="filters">
+        <h2 style={{ marginRight: 'auto' }}>Approved local-model health</h2>
         <span className="badge badge--muted">advisory only</span>
       </div>
       {models === null ? (
@@ -1352,7 +1352,7 @@ function Results() {
             return (
               <>
                 {platform ? <span className="badge badge--muted">{platform}</span> : null}
-                {exit === 'error' ? <span className="badge badge--muted tw:text-red">error</span> : null}
+                {exit === 'error' ? <span className="badge badge--muted text-danger">error</span> : null}
               </>
             )
           }}
@@ -1407,7 +1407,7 @@ function Results() {
           cardIcon={() => CodeIcon}
           cardBadges={(row) => {
             const exit = pathString(row, 'exit_status')
-            return exit ? <span className={exit === 'error' ? 'badge badge--muted tw:text-red' : 'badge badge--muted'}>{exit}</span> : null
+            return exit ? <span className={exit === 'error' ? 'badge badge--muted text-danger' : 'badge badge--muted'}>{exit}</span> : null
           }}
           emptyState={{
             title: 'No Ghidra analyses match this view',

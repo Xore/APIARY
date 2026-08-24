@@ -129,7 +129,7 @@ function BlockControl({ ip }: { ip: string }) {
   // no control to set it every block placed through this UI was permanent.
   if (state.Active) {
     return (
-      <span className="tw:flex tw:items-center tw:gap-2">
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
         <span className="chip badge badge--danger">
           blocked{state.BlockedBy ? ` by ${state.BlockedBy}` : ''}
           {state.ExpiresAt ? `, expires ${formatTimestamp(state.ExpiresAt)}` : ''}
@@ -148,7 +148,7 @@ function BlockControl({ ip }: { ip: string }) {
   }
   return (
     <form
-      className="inline-form tw:flex tw:items-center tw:gap-2"
+      className="inline-form" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}
       onSubmit={(event) => {
         event.preventDefault()
         const raw = new FormData(event.currentTarget).get('expires_days')

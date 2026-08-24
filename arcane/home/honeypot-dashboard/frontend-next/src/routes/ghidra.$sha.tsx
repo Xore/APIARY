@@ -273,7 +273,7 @@ function SectionHeading({ title, sub }: { title: string; sub: string }) {
 
 // ghidra.html's AI-assessment advisory box (ghidra.html:125/136).
 function AIAdvisory({ children }: { children: React.ReactNode }) {
-  return <div className="tw:mb-4 tw:rounded-md tw:border tw:border-orange tw:bg-orange-subtle tw:px-4 tw:py-3">{children}</div>
+  return <div className="alert alert--warning">{children}</div>
 }
 
 // chatMessageText's port (ghidra.go #1286): a user/assistant content is a
@@ -304,7 +304,7 @@ function TriageCard({ triage }: { triage: Triage | null | undefined }) {
           {triage.behaviors?.length ? (
             <>
               <p className="note">Suggested behaviors:</p>
-              <ul className="tw:list-disc tw:pl-5">
+              <ul className="">
                 {triage.behaviors.map((behavior, index) => (
                   <li key={index}>{behavior}</li>
                 ))}
@@ -399,7 +399,7 @@ function RevDeckCard({ revdeck }: { revdeck: RevDeck | null | undefined }) {
           {revdeck.warnings?.length ? (
             <>
               <p className="note">Warnings from the run:</p>
-              <ul className="tw:list-disc tw:pl-5">
+              <ul className="">
                 {revdeck.warnings.map((warning, index) => (
                   <li key={index}>{warning}</li>
                 ))}
@@ -561,7 +561,7 @@ function OverviewPanel({ sha, g }: { sha: string; g: GhidraDoc }) {
               {g.capa.attack?.length ? (
                 <>
                   <p className="note">MITRE ATT&CK techniques:</p>
-                  <ul className="tw:list-disc tw:pl-5">
+                  <ul className="">
                     {g.capa.attack.map((a, index) => (
                       <li key={index}>
                         {a.id} — {a.tactic}
@@ -575,7 +575,7 @@ function OverviewPanel({ sha, g }: { sha: string; g: GhidraDoc }) {
               {g.capa.mbc?.length ? (
                 <>
                   <p className="note">Malware Behavior Catalog:</p>
-                  <ul className="tw:list-disc tw:pl-5">
+                  <ul className="">
                     {g.capa.mbc.map((m, index) => (
                       <li key={index}>
                         {m.id} — {m.objective}
@@ -696,7 +696,7 @@ function CodePanel({ sha, g }: { sha: string; g: GhidraDoc }) {
               <img
                 src={`/api/artifact/ghidra/${encodeURIComponent(sha)}/${encodeURIComponent(g.call_graph_svg)}`}
                 alt="Call graph of the analysed binary"
-                className="tw:max-w-full tw:bg-white tw:rounded-md"
+                style={{ maxWidth: '100%', background: '#fff', borderRadius: 'var(--radius-control)' }}
               />
             </a>
           </>
@@ -840,7 +840,7 @@ function IocCorrelationCard({ correlation }: { correlation: IocCorrelation | nul
                     <td>{row.label}</td>
                     <td className="v">{count(row.kind?.floss_only)}</td>
                     <td className="v">{count(row.kind?.sandbox_static_only)}</td>
-                    <td className={count(row.kind?.confirmed_at_runtime) > 0 ? 'v tw:text-orange' : 'v'}>
+                    <td className={count(row.kind?.confirmed_at_runtime) > 0 ? 'v text-secondary' : 'v'}>
                       {row.dynamic ? count(row.kind?.confirmed_at_runtime) : '—'}
                     </td>
                   </tr>
@@ -1138,7 +1138,7 @@ function GhidraDetail() {
             </div>
           ) : null}
           {failed ? (
-            <div className="tw:mb-6 tw:rounded-lg tw:border tw:border-red tw:bg-red-subtle tw:px-4 tw:py-4 tw:text-red" role="alert">
+            <div className="alert alert--danger" role="alert">
               <strong>This analysis did not complete.</strong> {g.error || 'The worker reported a failure with no detail.'} The
               empty sections below are an infrastructure failure, not a clean result for this binary.
             </div>
@@ -1158,7 +1158,7 @@ function GhidraDetail() {
               <div className="metric__label">Strings</div>
             </div>
             <div className="metric">
-              <div className={`metric__value${g.findcrypt?.length ? ' tw:text-orange' : ''}`}>{g.findcrypt?.length ?? 0}</div>
+              <div className={`metric__value${g.findcrypt?.length ? ' text-secondary' : ''}`}>{g.findcrypt?.length ?? 0}</div>
               <div className="metric__label">Crypto constants</div>
             </div>
           </div>

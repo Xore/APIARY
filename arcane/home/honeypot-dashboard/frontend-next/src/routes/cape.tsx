@@ -24,7 +24,7 @@ const COLUMNS: Column<StoreRow>[] = [
     primary: true,
     render: (row) => {
       const sha = sha256Of(row)
-      return sha ? <span className="mono">{sha.slice(0, 16)}</span> : <span className="tw:text-muted">no source hash</span>
+      return sha ? <span className="mono">{sha.slice(0, 16)}</span> : <span className="text-muted">no source hash</span>
     },
   },
   {
@@ -55,7 +55,7 @@ function Page() {
       cardIcon={() => SandboxIcon}
       cardBadges={(row) => {
         const status = str(row, 'status') || str(row, 'exit_status')
-        return status ? <span className={status === 'error' ? 'badge badge--muted tw:text-red' : 'badge badge--muted'}>{status}</span> : null
+        return status ? <span className={status === 'error' ? 'badge badge--muted text-danger' : 'badge badge--muted'}>{status}</span> : null
       }}
       cardHref={(row) => {
         const sha = sha256Of(row)

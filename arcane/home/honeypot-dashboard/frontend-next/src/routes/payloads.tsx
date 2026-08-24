@@ -218,7 +218,7 @@ function PayloadCard({ row, badge }: { row: PayloadRow; badge: GithubBadge | und
         {row.Copies > 1 ? ` • ${row.Copies} copies` : ''} •{' '}
         <span title={row.AnalysisPath}>{row.Dynamic ? 'dynamic route ready' : 'static-only route'}</span>
       </p>
-      <section className="tw:mt-2" aria-label="Byte preview">
+      <section style={{ marginTop: 'var(--space-sm)' }} aria-label="Byte preview">
         <p className="note">
           {row.Preview
             ? `First ${row.PreviewTruncated ? `512 of ${row.SizeH}` : row.SizeH} bytes, hex/ASCII. Read only; never interpreted or executed.`
