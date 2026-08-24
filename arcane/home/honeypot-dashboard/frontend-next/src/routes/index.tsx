@@ -132,7 +132,25 @@ function HeroFreshness({ ready, kpis }: { ready: boolean; kpis: OverviewKpis | n
   return <span className="gen">updated {formatTimestamp(updated.toISOString())} • refreshes automatically</span>
 }
 
+type OverviewSearch = { tab?: string; sensor?: string }
+
 export const Route = createFileRoute('/')({
+  // #1845: the tab and the heatmap sensor filter live in the URL, not in
+  // component state.
+  //
+  // This page re-runs its loaders every 60s (see the auto-refresh effect
+  // below). Anything held in useState is lost when that re-render tears the
+  // subtree down, so choosing a tab and a sensor and then waiting a minute
+  // put the operator back on the default view -- auto-refresh fighting the
+  // investigation it exists to support.
+  //
+  // The URL survives that by construction, and /events already works this
+  // way. It also makes a view linkable and reloadable, which is worth having
+  // regardless.
+  validateSearch: (search: Record<string, unknown>): OverviewSearch => ({
+    tab: typeof search.tab === 'string' ? search.tab : undefined,
+    sensor: typeof search.sensor === 'string' ? search.sensor : undefined,
+  }),
   loader: async () => ({
     kpis: fetchKpis(),
     dashboard: fetchDashboard(),
@@ -360,7 +378,13 @@ function Overview() {
   const campaigns = usePromise(data.campaigns)
   const payloads = usePromise(data.payloads)
   const presentation = usePromise(data.presentation)
-  const [tab, setTab] = useState<TabId>('live')
+  const search = Route.useSearch()
+  const navigate = Route.useNavigate()
+  const tab = (TABS.some((entry) => entry.id === search.tab) ? search.tab : 'live') as TabId
+  // replace: true so a refresh cycle does not push history entries, and the
+  // back button still means "the page before this one".
+  const setTab = (next: TabId) =>
+    void navigate({ search: (prev: OverviewSearch) => ({ ...prev, tab: next }), replace: true })
   // Design pick 7D: the overview's five view tabs relocate into the
   // sidebar rail below the Overview nav item; below 520px (off-canvas
   // sidebar) they render inline right here instead.
@@ -374,7 +398,12 @@ function Overview() {
   // Heatmap sensor picker (overview.html:94-120): one selection narrows
   // both the heatmap and its attack-vectors companion panel. The rows
   // already carry their sensor, so the narrowing is purely client-side.
-  const [heatSensor, setHeatSensor] = useState('')
+  const heatSensor = search.sensor ?? ''
+  const setHeatSensor = (next: string) =>
+    void navigate({
+      search: (prev: OverviewSearch) => ({ ...prev, sensor: next || undefined }),
+      replace: true,
+    })
   const [openEvent, setOpenEvent] = useState<number | null>(null)
   const router = useRouter()
 
