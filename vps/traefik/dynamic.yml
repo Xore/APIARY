@@ -372,7 +372,7 @@ http:
       service: honeypot-dashboard
       tls:
         options: modern
-      middlewares: [security-headers-dashboard-pdf]
+      middlewares: [security-headers-dashboard-frame]
 
     # Same relaxation as honeypot-dashboard-pdf above, for the GitHub-analysis
     # Report card's own inline PDF viewer (#309). serveGitHubAnalysisPDFProxy
@@ -389,7 +389,7 @@ http:
       service: honeypot-dashboard
       tls:
         options: modern
-      middlewares: [security-headers-dashboard-pdf]
+      middlewares: [security-headers-dashboard-frame]
 
     # Same relaxation again, for the Ghidra detail page's own "view report"
     # iframe (#1237). serveGhidraExport (dashboard/ghidra.go) has the
@@ -408,7 +408,7 @@ http:
       service: honeypot-dashboard
       tls:
         options: modern
-      middlewares: [security-headers-dashboard-pdf]
+      middlewares: [security-headers-dashboard-frame]
 
     # #1608 architecture addendum (2026-08-17): the frontend/BFF host split
     # requires the /bff/* proxy surface (frontend-next's routes/bff.$.ts,
@@ -464,7 +464,17 @@ http:
       # retired outright (no router has referenced it since #1026); only the
       # oidc-dashboard network remains, for socat-hp-dashboard/-b and
       # Traefik itself to reach the dashboard replicas directly.
-      middlewares: [security-headers]
+      #
+      # #1897: SAMEORIGIN rather than DENY. The dashboard frames its own
+      # PDFs and reports, and the three path-specific exceptions added for
+      # that (#211, #309, #1237) all matched Go-era URLs the port moved --
+      # so each broke silently and the modal came back with "Refused to
+      # display ... X-Frame-Options: deny". A fourth path exception would
+      # break the same way on the next rename; the framing policy is the
+      # thing to fix, not the path list. SAMEORIGIN still refuses framing
+      # from any third-party origin, which is the actual clickjacking
+      # threat -- the same reasoning #1028 already applied to Keycloak.
+      middlewares: [security-headers-dashboard-frame]
 
     # Staged/beta path for the dashboard modernization port (#1628) --
     # dashboard-next, side by side with the production honeypot-dashboard
@@ -833,11 +843,16 @@ http:
           Server: ""
 
     # Identical to security-headers except X-Frame-Options: SAMEORIGIN in
-    # place of DENY -- attached only to honeypot-dashboard-pdf above, never
-    # the general honeypot-dashboard router, so every other dashboard route
-    # keeps the stricter DENY. SAMEORIGIN still refuses framing from any
-    # third-party origin; it only allows the dashboard to frame its own PDF.
-    security-headers-dashboard-pdf:
+    # place of DENY. #1897: now attached to the general honeypot-dashboard
+    # router rather than to a list of individual PDF paths -- those paths
+    # moved with the port and every exception broke. SAMEORIGIN still
+    # refuses framing from any third-party origin, which is the threat; it
+    # only allows the dashboard to frame its own content.
+    #
+    # frame-ancestors 'self' is the CSP-level equivalent, kept for browsers
+    # that honour it preferentially, matching security-headers-keycloak-frame
+    # below.
+    security-headers-dashboard-frame:
       headers:
         customFrameOptionsValue: "SAMEORIGIN"
         contentTypeNosniff: true
@@ -846,6 +861,7 @@ http:
         stsSeconds: 31536000
         stsIncludeSubdomains: true
         stsPreload: true
+        contentSecurityPolicy: "frame-ancestors 'self'; object-src 'none'"
         customResponseHeaders:
           X-Powered-By: ""
           Server: ""

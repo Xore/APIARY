@@ -883,7 +883,7 @@ function EventMeta({
           <span className="eventmeta__label" title="Full replayable capture of this session">
             recording
           </span>
-          <a className="lnk" href={p.tty_replay} title="watch the session play back in-browser">
+          <a className="btn btn-secondary btn-sm" href={p.tty_replay} title="watch the session play back in-browser">
             view recording
           </a>
           {/* events.html:27 offered all three; the port kept only the
@@ -895,14 +895,14 @@ function EventMeta({
           {recordingShasum(p.tty_replay) ? (
             <>
               <a
-                className="lnk"
+                className="btn btn-ghost btn-sm"
                 href={`/api/recording/${encodeURIComponent(recordingShasum(p.tty_replay))}/cast`}
                 title="download as an asciinema-compatible .cast file"
               >
                 .cast
               </a>
               <a
-                className="lnk"
+                className="btn btn-ghost btn-sm"
                 href={`/api/recording/${encodeURIComponent(recordingShasum(p.tty_replay))}/raw`}
                 title="download the raw cowrie TTY log"
               >

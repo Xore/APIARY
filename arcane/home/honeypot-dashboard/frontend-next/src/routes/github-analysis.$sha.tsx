@@ -330,7 +330,7 @@ function GithubAnalysisDetail() {
                               <td className="n">{scanner.ok ? `${scanner.positives ?? 0} / ${scanner.total ?? 0}` : '—'}</td>
                               <td className="v">
                                 {scanner.permalink ? (
-                                  <a className="lnk" href={scanner.permalink} target="_blank" rel="noopener noreferrer">
+                                  <a className="btn btn-secondary btn-sm" href={scanner.permalink} target="_blank" rel="noopener noreferrer">
                                     report ↗
                                   </a>
                                 ) : (
@@ -472,7 +472,7 @@ function GithubAnalysisDetail() {
                 ) : (
                   <>
                     <p className="note">No PDF has been generated for this analysis yet — this downloads the JSON record instead.</p>
-                    <a className="lnk" href={`/api/v1/github-analysis/${encodeURIComponent(sha)}`} target="_blank" rel="noopener noreferrer">
+                    <a className="btn btn-ghost btn-sm" href={`/api/v1/github-analysis/${encodeURIComponent(sha)}`} target="_blank" rel="noopener noreferrer">
                       download JSON ↓
                     </a>
                   </>
