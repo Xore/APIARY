@@ -112,12 +112,24 @@ export function conditionsFrom(health: SourceHealth): Condition[] {
     })
   }
 
-  const cluster = (health.cluster_status ?? '').toLowerCase()
-  if (cluster === 'red' || cluster === 'yellow') {
+  // Red only. Yellow is the steady state of this deployment, not a
+  // problem: Elasticsearch runs on one node, so replica shards can never
+  // be assigned and the cluster is permanently yellow -- measured live,
+  // 408 active shards and 16 unassigned with number_of_nodes = 1.
+  //
+  // Alerting on it would recreate exactly what this component was changed
+  // to stop doing. It would fire on essentially every session, for a
+  // condition no operator can act on, and teach the eye to dismiss the
+  // corner of the screen where a red cluster would appear.
+  //
+  // The source-health page still shows the colour, which is the right
+  // place for a standing fact. If this cluster ever gains a second node,
+  // yellow becomes meaningful again and belongs back here.
+  if ((health.cluster_status ?? '').toLowerCase() === 'red') {
     conditions.push({
       key: 'cluster',
-      message: `Elasticsearch cluster is ${cluster}`,
-      severity: cluster === 'red' ? 'danger' : 'warning',
+      message: 'Elasticsearch cluster is red — shards are unavailable',
+      severity: 'danger',
       to: '/source-health',
     })
   }
