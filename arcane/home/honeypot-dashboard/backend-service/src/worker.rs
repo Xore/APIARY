@@ -123,6 +123,34 @@ const INGEST_FEEDS: &[IngestFeed] = &[
         name: "portbridge",
         indices: &[IngestIndex { pattern: "portbridge-v2-*", stale_after: minutes(90) }],
     },
+    // #1742's sensors. Thresholds picked from measured behaviour rather than
+    // rounded up from nothing: over 24 hours the longest quiet gap was 20
+    // minutes for zeek-proxy and traefik and zero for zeek and huginn, so 90
+    // minutes is the same 4-to-5x headroom the feeds above already run with.
+    IngestFeed {
+        name: "zeek",
+        indices: &[IngestIndex { pattern: "zeek-v1-conn-*", stale_after: minutes(90) }],
+    },
+    IngestFeed {
+        name: "zeek-proxy",
+        indices: &[IngestIndex { pattern: "zeek-proxy-v1-conn-*", stale_after: minutes(90) }],
+    },
+    IngestFeed {
+        name: "huginn",
+        indices: &[IngestIndex { pattern: "huginn-v1-*", stale_after: minutes(90) }],
+    },
+    IngestFeed {
+        name: "traefik",
+        indices: &[IngestIndex { pattern: "traefik-v1-*", stale_after: minutes(90) }],
+    },
+    IngestFeed {
+        name: "extracted-files",
+        // Longer, because this one is bursty by nature: it only produces when
+        // a file actually crosses the wire. Measured 20/h with a 10-minute
+        // worst gap, but a quiet night is a normal state here in a way it is
+        // not for a flow log, so freshness gets more rope.
+        indices: &[IngestIndex { pattern: "extracted-files-*", stale_after: minutes(180) }],
+    },
     IngestFeed {
         name: "suricata",
         indices: &[
@@ -182,6 +210,47 @@ fn ingest_stall(
         ));
     }
     None
+}
+
+/// How far behind the sensor's own clock delivery is allowed to fall.
+///
+/// #1770: a 45-hour ingestion stall showed up as a gap followed by a spike
+/// rather than as lag, because `@timestamp` on honeypot documents is the
+/// moment we indexed them, not the moment the sensor recorded them. The real
+/// event time sits in `honeypot.timestamp`. Measured during that stall, the
+/// two were twelve hours apart while every freshness check read green -- the
+/// documents were arriving, just describing something half a day old.
+///
+/// Freshness cannot see this by construction: it asks "when did anything last
+/// arrive", and something was always arriving. This asks the different
+/// question, "is what arrives still current".
+const DELIVERY_LAG_LIMIT: Duration = minutes(30);
+
+/// Documents sampled per check. Newest-first, so this is the current tail of
+/// the stream rather than an average over history that a long-running stall
+/// would take hours to move.
+const DELIVERY_LAG_SAMPLE: usize = 50;
+
+/// Median seconds between a sensor recording an event and us indexing it.
+///
+/// Median rather than max: one document with a skewed clock, or a single
+/// retried write, should not raise an alert. A real delivery stall moves the
+/// whole tail at once, which is exactly what the median catches and an
+/// outlier does not.
+fn delivery_lag_seconds(pairs: &[(i64, i64)]) -> Option<i64> {
+    let mut lags: Vec<i64> = pairs
+        .iter()
+        // Negative means the sensor clock is ahead of ours. That is a clock
+        // problem, not a delivery problem, and reporting it here would send
+        // someone looking at the pipeline for a thing the pipeline did not do.
+        .filter_map(|(indexed, sensed)| (indexed - sensed).checked_abs().map(|_| indexed - sensed))
+        .filter(|lag| *lag >= 0)
+        .collect();
+    if lags.is_empty() {
+        return None;
+    }
+    lags.sort_unstable();
+    Some(lags[lags.len() / 2])
 }
 
 /// Ports payloads_data.go's humanBytes: binary-prefix size, one decimal.
@@ -694,6 +763,50 @@ impl Notifier {
     /// real documents in the whole lookback window — a feed that was never
     /// deployed has nothing to be late about, and staying quiet is the safe
     /// direction for a check whose job is to be believed.
+    /// (indexed_at, sensed_at) for the newest documents that carry both.
+    ///
+    /// Only honeypot-v2-* is sampled: Suricata and Zeek documents are dated
+    /// from the event itself, so their delivery lag is already zero by
+    /// construction and asking would measure nothing.
+    async fn delivery_lag_sample(&self) -> Option<Vec<(i64, i64)>> {
+        let result = self
+            .search(
+                &["honeypot-v2-*"],
+                json!({
+                    "size": DELIVERY_LAG_SAMPLE,
+                    "track_total_hits": false,
+                    "query": {"bool": {
+                        "filter": [{"exists": {"field": "honeypot.timestamp"}}],
+                        "must_not": [{"term": {"honeypot.internal_probe": true}}]
+                    }},
+                    "sort": [{"@timestamp": {"order": "desc"}}],
+                    "_source": ["@timestamp", "honeypot.timestamp"]
+                }),
+            )
+            .await?;
+        let pairs: Vec<(i64, i64)> = result["hits"]["hits"]
+            .as_array()?
+            .iter()
+            .filter_map(|hit| {
+                let source = &hit["_source"];
+                let indexed = source["@timestamp"].as_str()?;
+                let sensed = source["honeypot"]["timestamp"].as_str()?;
+                let indexed = chrono::DateTime::parse_from_rfc3339(indexed).ok()?;
+                // The sensor's own stamp is not always zoned; assume UTC when
+                // it is not, which is what every producer here writes.
+                let sensed = chrono::DateTime::parse_from_rfc3339(sensed)
+                    .map(|value| value.timestamp())
+                    .or_else(|_| {
+                        chrono::NaiveDateTime::parse_from_str(sensed, "%Y-%m-%dT%H:%M:%S%.f")
+                            .map(|value| value.and_utc().timestamp())
+                    })
+                    .ok()?;
+                Some((indexed.timestamp(), sensed))
+            })
+            .collect();
+        (!pairs.is_empty()).then_some(pairs)
+    }
+
     async fn ingest_sample(&self, pattern: &str) -> Option<IngestSample> {
         let result = self
             .search(
@@ -767,6 +880,30 @@ impl Notifier {
                 mark_only,
             )
             .await;
+        }
+
+        // Delivery lag: is what arrives still current? Freshness cannot answer
+        // that -- through #1770's 45-hour stall documents kept arriving and
+        // every freshness check read green, while what arrived was half a day
+        // old.
+        if let Some(pairs) = self.delivery_lag_sample().await {
+            if let Some(lag) = delivery_lag_seconds(&pairs) {
+                if lag >= DELIVERY_LAG_LIMIT.as_secs() as i64 {
+                    let message = format!(
+                        "sensor events are reaching Elasticsearch {} after they were recorded \
+                         (median over the newest {} documents)",
+                        format_go_duration(Duration::from_secs(lag as u64)),
+                        pairs.len()
+                    );
+                    self.observe(
+                        "pipeline:delivery-lag",
+                        message,
+                        "/source-health",
+                        mark_only,
+                    )
+                    .await;
+                }
+            }
         }
     }
 
@@ -1207,6 +1344,40 @@ async fn alert_notifier_loop(state: AppState) {
     loop {
         ticker.tick().await;
         notifier.pass(false).await;
+    }
+}
+
+#[cfg(test)]
+mod delivery_lag_tests {
+    use super::delivery_lag_seconds;
+
+    #[test]
+    fn reports_the_median_not_the_worst_case() {
+        // One document delayed an hour among nineteen prompt ones is a retry,
+        // not a stall, and must not raise an alert on its own.
+        let mut pairs: Vec<(i64, i64)> = (0..19).map(|i| (1000 + i, 998 + i)).collect();
+        pairs.push((9999, 6399));
+        assert_eq!(delivery_lag_seconds(&pairs), Some(2));
+    }
+
+    #[test]
+    fn catches_a_stall_that_moves_the_whole_tail() {
+        // #1770's shape: everything arriving is twelve hours old.
+        let pairs: Vec<(i64, i64)> = (0..20).map(|i| (100_000 + i, 56_800 + i)).collect();
+        assert_eq!(delivery_lag_seconds(&pairs), Some(43_200));
+    }
+
+    #[test]
+    fn ignores_a_sensor_clock_running_ahead() {
+        // Negative lag is a clock problem. Reporting it as delivery lag would
+        // send someone to inspect a pipeline that did nothing wrong.
+        let pairs = vec![(100, 500), (200, 600)];
+        assert_eq!(delivery_lag_seconds(&pairs), None);
+    }
+
+    #[test]
+    fn no_samples_is_not_an_alert() {
+        assert_eq!(delivery_lag_seconds(&[]), None);
     }
 }
 
