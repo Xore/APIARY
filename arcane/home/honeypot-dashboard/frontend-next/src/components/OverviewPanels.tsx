@@ -190,7 +190,20 @@ export type MapPoint = { city: string; country: string; lat: number; lon: number
 
 // Fixed marker size regardless of event count — scaling by count made dense
 // cities' circles grow large enough to overlap and obscure neighboring markers.
-const MARKER_RADIUS_METERS = 60_000
+// #1846: pixels, not metres.
+//
+// This was `L.circle` with a 60 km radius, which is a radius on the *ground*.
+// Leaflet then scales it with the map, so zooming in to compare two cities
+// grew each marker into a 60 km disc and merged them into their neighbours --
+// worst exactly where the detail was wanted.
+//
+// `L.circleMarker` takes its radius in screen pixels, so a marker stays the
+// same size on screen and converges on its city as you zoom. No zoom handler
+// to keep in step with the zoom levels either.
+//
+// The marker means "attacks came from around here", not "this area", so a
+// ground radius was never the right unit for it.
+const MARKER_RADIUS_PX = 6
 
 export function AttackMap({ points }: { points: MapPoint[] | null }) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -210,8 +223,8 @@ export function AttackMap({ points }: { points: MapPoint[] | null }) {
         attribution: '© OpenStreetMap contributors',
       }).addTo(map)
       for (const point of points) {
-        const circle = L.circle([point.lat, point.lon], {
-          radius: MARKER_RADIUS_METERS,
+        const circle = L.circleMarker([point.lat, point.lon], {
+          radius: MARKER_RADIUS_PX,
           color: 'var(--accent)',
           weight: 1,
           fillOpacity: 0.35,
