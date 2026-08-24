@@ -153,6 +153,29 @@ function withoutTransitions(change: () => void) {
   }
 }
 
+/** Mirror the current appearance into the first-paint cookie (#1833).
+ *
+ *  Read from the DOM rather than from the caller's argument, so this
+ *  records what was actually applied and cannot drift from it. `system` is
+ *  resolved to a concrete mode here because the server has no
+ *  prefers-color-scheme to evaluate, and a cookie saying "system" would
+ *  leave it with nothing to emit -- which is the case this exists to fix.
+ *
+ *  Best-effort and last: localStorage and the server preference remain the
+ *  source of truth, so a blocked cookie costs one repaint on a new device
+ *  and nothing else. */
+function syncAppearanceCookie(): void {
+  if (typeof document === 'undefined') return
+  void import('./appearanceCookie').then(({ writeAppearanceCookie, resolveMode }) => {
+    const stored = document.documentElement.dataset.theme
+    const mode = stored === 'light' || stored === 'dark' ? stored : 'system'
+    writeAppearanceCookie({
+      mode: resolveMode(mode),
+      theme: document.documentElement.dataset.hpTheme || null,
+    })
+  })
+}
+
 export function getThemeMode(): ThemeMode {
   if (typeof document === 'undefined') return 'system'
   const t = document.documentElement.dataset.theme
@@ -179,6 +202,7 @@ export function applyTheme(mode: ThemeMode, options?: { sync?: boolean }) {
       /* storage unavailable */
     }
   })
+  syncAppearanceCookie()
   emit()
   // Instant local apply above is already done and visible; the server
   // write-through happens after, fire-and-forget (options.sync === false
@@ -233,6 +257,7 @@ export function applyPalette(palette: string, options?: { sync?: boolean }) {
       /* storage unavailable */
     }
   })
+  syncAppearanceCookie()
   emit()
   // Same write-through as theme: "" stores as claude-equivalent default
   // server-side (the Go domain accepts "" as claude).
