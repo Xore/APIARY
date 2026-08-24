@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Split compare — APIARY Design Lab</title>
+<style>
+  :root{--bg:#20201f;--text:#e9e6df;--muted:#a8a49c;--accent:#d97757;--border:rgba(255,255,255,.12);--surface:#2c2c2a}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:13px "Fira Sans",system-ui,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+  header{display:flex;gap:12px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+  header a{color:var(--accent);text-decoration:none}
+  header .lbl{color:var(--muted)}
+  select,input{background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;font:inherit}
+  input#path{width:200px}
+  button{background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 10px;cursor:pointer;font:inherit}
+  label.sync{display:flex;gap:5px;align-items:center;color:var(--muted);cursor:pointer}
+  #stage{position:relative;flex:1;overflow:hidden}
+  iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+  #rightWrap{position:absolute;inset:0;overflow:hidden}
+  #divider{position:absolute;top:0;bottom:0;width:3px;background:var(--accent);cursor:ew-resize;z-index:10;box-shadow:0 0 8px rgba(0,0,0,.6)}
+  #divider::after{content:"◂ ▸";position:absolute;top:12px;left:50%;transform:translateX(-50%);background:var(--accent);color:#211a17;font-size:11px;border-radius:999px;padding:2px 8px;white-space:nowrap}
+  .badge{position:absolute;top:10px;z-index:9;background:rgba(0,0,0,.65);border-radius:999px;padding:3px 12px;font-size:12px;pointer-events:none}
+  #lb{left:12px}#rb{right:12px}
+</style>
+</head>
+<body>
+<header>
+  <a href="index.html">← lab</a>
+  <span class="lbl">left</span><select id="selL"></select>
+  <span class="lbl">right</span><select id="selR"></select>
+  <button id="swap" title="swap sides">⇄</button>
+  <span class="lbl">path</span><input id="path" value="/">
+  <button id="go">go</button>
+  <label class="sync"><input type="checkbox" id="sync" checked>sync scroll + nav</label>
+  <span class="lbl" id="info"></span>
+</header>
+<div id="stage">
+  <iframe id="left"></iframe>
+  <div id="rightWrap"><iframe id="right"></iframe></div>
+  <div id="divider"></div>
+  <span class="badge" id="lb"></span>
+  <span class="badge" id="rb"></span>
+</div>
+<script>
+const VARIANTS = [
+  [19201, 'base (stock)'],
+  [19202, 'v1 full-bleed'],
+  [19203, 'v2 soft'],
+  [19204, 'v3 dense'],
+  [19205, 'v4 claude'],
+  [19206, 'v5 your picks'],
+];
+const q = new URLSearchParams(location.search);
+let L = +(q.get('l') || 19201), R = +(q.get('r') || 19202);
+// Every value that reaches an iframe src goes through here first.
+// `path` arrives from three untrusted places -- the query string, the text
+// input, and a postMessage from either frame -- and is interpolated straight
+// after `http://127.0.0.1:${port}`. A value like `@evil.com/` turns the port
+// into a userinfo field and points the frame at another host entirely, and a
+// leading `//` does the same via a protocol-relative URL. Both look like
+// paths. CodeQL flags the assignment for this reason and it is right to.
+function safePath(raw) {
+  const s = String(raw == null ? '' : raw);
+  if (!s.startsWith('/') || s.startsWith('//') || s.startsWith('/\\')) return '/';
+  // Whitelist rather than blacklist: anything outside ordinary URL path,
+  // query and fragment characters is dropped. Notably absent are `@`, `\`
+  // and the quote and angle characters.
+  const cleaned = s.replace(/[^A-Za-z0-9/_\-.~!$&'()*+,;=:%?#\[\]]/g, '');
+  return cleaned.startsWith('/') && !cleaned.startsWith('//') ? cleaned : '/';
+}
+
+let path = safePath(q.get('path') || '/');
+
+const selL = document.getElementById('selL'), selR = document.getElementById('selR');
+for (const [port, name] of VARIANTS) {
+  selL.add(new Option(name, port));
+  selR.add(new Option(name, port));
+}
+selL.value = L; selR.value = R;
+
+const stage = document.getElementById('stage'), wrap = document.getElementById('rightWrap'),
+      div = document.getElementById('divider'), left = document.getElementById('left'),
+      right = document.getElementById('right'), pathIn = document.getElementById('path'),
+      syncBox = document.getElementById('sync');
+const name = p => (VARIANTS.find(v => v[0] === +p) || [p, p])[1];
+
+function refreshLabels() {
+  document.getElementById('lb').textContent = name(L);
+  document.getElementById('rb').textContent = name(R);
+  document.getElementById('info').textContent = `${name(L)} ⟷ ${name(R)}`;
+  history.replaceState(null, '', `compare.html?l=${L}&r=${R}&path=${encodeURIComponent(path)}`);
+}
+function load(side) {
+  if (!side || side === 'L') left.src = `http://127.0.0.1:${L}${path}`;
+  if (!side || side === 'R') right.src = `http://127.0.0.1:${R}${path}`;
+  pathIn.value = path;
+  refreshLabels();
+}
+
+selL.onchange = () => { L = +selL.value; load('L'); };
+selR.onchange = () => { R = +selR.value; load('R'); };
+document.getElementById('swap').onclick = () => { [L, R] = [R, L]; selL.value = L; selR.value = R; load(); };
+document.getElementById('go').onclick = () => { path = safePath(pathIn.value || '/'); load(); };
+pathIn.addEventListener('keydown', e => { if (e.key === 'Enter') { path = safePath(pathIn.value || '/'); load(); } });
+
+/* ── postMessage sync with the hp-app.js lab snippet inside each frame ── */
+const winOf = f => { try { return f.contentWindow; } catch { return null; } };
+const other = src => src === winOf(left) ? winOf(right) : (src === winOf(right) ? winOf(left) : null);
+let lastGoto = 0;
+addEventListener('message', e => {
+  const d = e.data || {};
+  if (!d.hpLab || !syncBox.checked) return;
+  const peer = other(e.source);
+  if (!peer) return;
+  if (d.type === 'scroll') {
+    peer.postMessage({hpLab: 1, type: 'setScroll', frac: d.frac}, '*');
+  } else if (d.type === 'nav') {
+    const navPath = safePath(d.path);
+    if (navPath !== path) {
+      path = navPath; pathIn.value = path; refreshLabels();
+      // debounce: the peer's own load will echo a nav message; only forward fresh user navigation
+      if (Date.now() - lastGoto > 400) {
+        lastGoto = Date.now();
+        peer.postMessage({hpLab: 1, type: 'goto', path}, '*');
+      }
+    }
+  }
+});
+
+/* ── draggable clip divider ── */
+function setSplit(x) {
+  const r = stage.getBoundingClientRect();
+  const pct = Math.min(.97, Math.max(.03, (x - r.left) / r.width));
+  div.style.left = `calc(${pct * 100}% - 1.5px)`;
+  wrap.style.clipPath = `inset(0 0 0 ${pct * 100}%)`;
+}
+let drag = false;
+div.addEventListener('pointerdown', e => { drag = true; div.setPointerCapture(e.pointerId); });
+addEventListener('pointermove', e => { if (drag) setSplit(e.clientX); });
+addEventListener('pointerup', () => drag = false);
+setSplit(stage.getBoundingClientRect().width / 2 + stage.getBoundingClientRect().left);
+load();
+</script>
+</body>
+</html>
