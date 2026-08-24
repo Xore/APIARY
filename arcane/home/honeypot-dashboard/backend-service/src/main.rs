@@ -209,6 +209,7 @@ async fn main() -> anyhow::Result<()> {
         // is a query parameter that reads worse for the common case.
         .route("/api/v1/sensors/catalog", get(sensors::catalog))
         .route("/api/v1/sensors/{sensor}/events", get(sensors::events))
+        .route("/api/v1/sensors/{sensor}/overview", get(sensors::overview))
         .route("/api/v1/sessions/{id}", get(session::detail))
         .route("/api/v1/search", get(search::search))
         .route("/api/v1/settings/storage", get(health::storage))

@@ -56,6 +56,7 @@ import { Route as PayloadWorkbenchResultsRouteImport } from './routes/payload-wo
 import { Route as RevdeckShaRouteImport } from './routes/revdeck.$sha'
 import { Route as SandboxJobRouteImport } from './routes/sandbox.$job'
 import { Route as SandboxVncRouteImport } from './routes/sandbox.vnc'
+import { Route as SensorsSensorRouteImport } from './routes/sensors.$sensor'
 import { Route as SessionsIdRouteImport } from './routes/sessions.$id'
 import { Route as TtyReplayShasumRouteImport } from './routes/tty-replay.$shasum'
 import { Route as ApiChartNameRouteImport } from './routes/api/chart.$name'
@@ -304,6 +305,11 @@ const SandboxVncRoute = SandboxVncRouteImport.update({
   path: '/sandbox/vnc',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SensorsSensorRoute = SensorsSensorRouteImport.update({
+  id: '/$sensor',
+  path: '/$sensor',
+  getParentRoute: () => SensorsRoute,
+} as any)
 const SessionsIdRoute = SessionsIdRouteImport.update({
   id: '/sessions/$id',
   path: '/sessions/$id',
@@ -390,7 +396,7 @@ export interface FileRoutesByFullPath {
   '/reports': typeof ReportsRoute
   '/revdeck': typeof RevdeckRouteWithChildren
   '/search': typeof SearchRoute
-  '/sensors': typeof SensorsRoute
+  '/sensors': typeof SensorsRouteWithChildren
   '/settings': typeof SettingsRoute
   '/source-health': typeof SourceHealthRoute
   '/api/live': typeof ApiLiveRoute
@@ -411,6 +417,7 @@ export interface FileRoutesByFullPath {
   '/revdeck/$sha': typeof RevdeckShaRoute
   '/sandbox/$job': typeof SandboxJobRoute
   '/sandbox/vnc': typeof SandboxVncRoute
+  '/sensors/$sensor': typeof SensorsSensorRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
   '/api/chart/$name': typeof ApiChartNameRoute
@@ -450,7 +457,7 @@ export interface FileRoutesByTo {
   '/reports': typeof ReportsRoute
   '/revdeck': typeof RevdeckRouteWithChildren
   '/search': typeof SearchRoute
-  '/sensors': typeof SensorsRoute
+  '/sensors': typeof SensorsRouteWithChildren
   '/settings': typeof SettingsRoute
   '/source-health': typeof SourceHealthRoute
   '/api/live': typeof ApiLiveRoute
@@ -471,6 +478,7 @@ export interface FileRoutesByTo {
   '/revdeck/$sha': typeof RevdeckShaRoute
   '/sandbox/$job': typeof SandboxJobRoute
   '/sandbox/vnc': typeof SandboxVncRoute
+  '/sensors/$sensor': typeof SensorsSensorRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
   '/api/chart/$name': typeof ApiChartNameRoute
@@ -511,7 +519,7 @@ export interface FileRoutesById {
   '/reports': typeof ReportsRoute
   '/revdeck': typeof RevdeckRouteWithChildren
   '/search': typeof SearchRoute
-  '/sensors': typeof SensorsRoute
+  '/sensors': typeof SensorsRouteWithChildren
   '/settings': typeof SettingsRoute
   '/source-health': typeof SourceHealthRoute
   '/api/live': typeof ApiLiveRoute
@@ -532,6 +540,7 @@ export interface FileRoutesById {
   '/revdeck/$sha': typeof RevdeckShaRoute
   '/sandbox/$job': typeof SandboxJobRoute
   '/sandbox/vnc': typeof SandboxVncRoute
+  '/sensors/$sensor': typeof SensorsSensorRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
   '/api/chart/$name': typeof ApiChartNameRoute
@@ -594,6 +603,7 @@ export interface FileRouteTypes {
     | '/revdeck/$sha'
     | '/sandbox/$job'
     | '/sandbox/vnc'
+    | '/sensors/$sensor'
     | '/sessions/$id'
     | '/tty-replay/$shasum'
     | '/api/chart/$name'
@@ -654,6 +664,7 @@ export interface FileRouteTypes {
     | '/revdeck/$sha'
     | '/sandbox/$job'
     | '/sandbox/vnc'
+    | '/sensors/$sensor'
     | '/sessions/$id'
     | '/tty-replay/$shasum'
     | '/api/chart/$name'
@@ -714,6 +725,7 @@ export interface FileRouteTypes {
     | '/revdeck/$sha'
     | '/sandbox/$job'
     | '/sandbox/vnc'
+    | '/sensors/$sensor'
     | '/sessions/$id'
     | '/tty-replay/$shasum'
     | '/api/chart/$name'
@@ -754,7 +766,7 @@ export interface RootRouteChildren {
   ReportsRoute: typeof ReportsRoute
   RevdeckRoute: typeof RevdeckRouteWithChildren
   SearchRoute: typeof SearchRoute
-  SensorsRoute: typeof SensorsRoute
+  SensorsRoute: typeof SensorsRouteWithChildren
   SettingsRoute: typeof SettingsRoute
   SourceHealthRoute: typeof SourceHealthRoute
   ApiLiveRoute: typeof ApiLiveRoute
@@ -1116,6 +1128,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SandboxVncRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/sensors/$sensor': {
+      id: '/sensors/$sensor'
+      path: '/$sensor'
+      fullPath: '/sensors/$sensor'
+      preLoaderRoute: typeof SensorsSensorRouteImport
+      parentRoute: typeof SensorsRoute
+    }
     '/sessions/$id': {
       id: '/sessions/$id'
       path: '/sessions/$id'
@@ -1229,6 +1248,17 @@ const RevdeckRouteChildren: RevdeckRouteChildren = {
 const RevdeckRouteWithChildren =
   RevdeckRoute._addFileChildren(RevdeckRouteChildren)
 
+interface SensorsRouteChildren {
+  SensorsSensorRoute: typeof SensorsSensorRoute
+}
+
+const SensorsRouteChildren: SensorsRouteChildren = {
+  SensorsSensorRoute: SensorsSensorRoute,
+}
+
+const SensorsRouteWithChildren =
+  SensorsRoute._addFileChildren(SensorsRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentCampaignsRoute: AgentCampaignsRoute,
@@ -1256,7 +1286,7 @@ const rootRouteChildren: RootRouteChildren = {
   ReportsRoute: ReportsRoute,
   RevdeckRoute: RevdeckRouteWithChildren,
   SearchRoute: SearchRoute,
-  SensorsRoute: SensorsRoute,
+  SensorsRoute: SensorsRouteWithChildren,
   SettingsRoute: SettingsRoute,
   SourceHealthRoute: SourceHealthRoute,
   ApiLiveRoute: ApiLiveRoute,

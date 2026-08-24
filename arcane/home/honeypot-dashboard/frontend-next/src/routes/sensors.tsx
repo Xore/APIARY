@@ -1,13 +1,11 @@
 // Sensor detail (#1538) — the raw per-sensor fields the generic event
 // list collapses: mailoney SMTP conversations, http-honeypot requests,
 // tanner requests with emulator detections.
-import { createFileRoute, Link } from '@tanstack/react-router'
+import { createFileRoute, Link, redirect } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { CapturedMailInline } from '../components/CapturedMail'
-import { SensorEventsTable } from '../components/SensorEvents'
-import { type SensorEventRow } from '../lib/sensorProtocols'
 import { formatTimestamp } from '../lib/time'
 import { useSidebarViewTabs } from '../lib/viewTabs'
 
@@ -89,19 +87,22 @@ const fetchCatalog = createServerFn({ method: 'GET' }).handler(async (): Promise
   return serviceJSON<SensorCatalog>('/api/v1/sensors/catalog')
 })
 
-const fetchSensorEvents = createServerFn({ method: 'GET' })
-  .inputValidator((input: { sensor: string }) => input)
-  .handler(async ({ data }): Promise<{ sensor: string; total: number; rows: SensorEventRow[] } | null> => {
-    const { serviceJSON } = await import('../lib/backend.server')
-    return serviceJSON(`/api/v1/sensors/${encodeURIComponent(data.sensor)}/events?limit=200`)
-  })
-
 export const Route = createFileRoute('/sensors')({
   // The chosen sensor lives in the URL so a reload, a shared link and the
   // back button all land on the same sensor (#1845's reasoning, same fix).
   validateSearch: (search: Record<string, unknown>): { sensor?: string } => {
     const sensor = typeof search.sensor === 'string' ? search.sensor.trim() : ''
     return sensor && sensor.length <= 128 ? { sensor } : {}
+  },
+  // #1887: ?sensor= used to open an inline event list here. The sensor's
+  // own page answers strictly more -- volume, top talkers, its protocol's
+  // leaderboards -- so the parameter now redirects there rather than
+  // leaving two ways to see a subset of the same thing. A link someone
+  // saved keeps working.
+  beforeLoad: ({ search }) => {
+    if (search.sensor) {
+      throw redirect({ to: '/sensors/$sensor', params: { sensor: search.sensor } })
+    }
   },
   loader: async () => ({ first: fetchSensors(), catalog: fetchCatalog() }),
   component: Sensors,
@@ -216,15 +217,9 @@ type SensorTabId = (typeof SENSOR_TABS)[number]['id']
 
 function Sensors() {
   const { first, catalog } = Route.useLoaderData()
-  const search = Route.useSearch()
   const [detail, setDetail] = useState<SensorDetail | null>(null)
   const [sensors, setSensors] = useState<SensorSummary[] | null>(null)
-  const [events, setEvents] = useState<{ sensor: string; total: number; rows: SensorEventRow[] } | null>(null)
-  const [loadingEvents, setLoadingEvents] = useState(false)
-  // A sensor named in the URL means the catalog view, so a shared link
-  // opens on the sensor it names rather than on the first tab.
-  const [tab, setTab] = useState<SensorTabId>(search.sensor ? 'sd-all' : 'sd-mailoney')
-  const selected = search.sensor ?? ''
+  const [tab, setTab] = useState<SensorTabId>('sd-mailoney')
   // Design pick 7D: the page's view tabs relocate into the sidebar rail
   // (inline below 520px, where the sidebar is off-canvas).
   const viewTabs = useSidebarViewTabs({
@@ -247,26 +242,6 @@ function Sensors() {
     }
   }, [first, catalog])
 
-  // One fetch per chosen sensor. Loading every sensor's events up front
-  // would be twenty-six queries to show one.
-  useEffect(() => {
-    if (!selected) {
-      setEvents(null)
-      return
-    }
-    let cancelled = false
-    setLoadingEvents(true)
-    fetchSensorEvents({ data: { sensor: selected } })
-      .then((result) => {
-        if (!cancelled) setEvents(result)
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingEvents(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [selected])
 
 
   return (
@@ -370,18 +345,15 @@ function Sensors() {
             ) : (
               <div className="metric-grid">
                 {sensors.map((entry) => (
-                  <div className="metric" key={entry.sensor} aria-current={entry.sensor === selected ? 'true' : undefined}>
-                    {/* A Link, not a button: the tile is navigation, the
-                        chosen sensor lives in the URL, and `.metric a` is
-                        already the styled surface for exactly this. */}
+                  <div className="metric" key={entry.sensor}>
+                    {/* #1887: the tile opens the sensor's own page, which
+                        answers what this list cannot -- volume over time,
+                        who reached it, and what they asked it for, in that
+                        protocol's own terms. */}
                     <Link
-                      to="/sensors"
-                      search={entry.sensor === selected ? {} : { sensor: entry.sensor }}
-                      title={
-                        entry.sensor === selected
-                          ? 'back to the sensor list'
-                          : `show what ${entry.sensor} captured`
-                      }
+                      to="/sensors/$sensor"
+                      params={{ sensor: entry.sensor }}
+                      title={`what ${entry.sensor} has been doing`}
                     >
                       <div className="metric__value">{entry.events.toLocaleString('en-US')}</div>
                       <div className="metric__label">{entry.sensor}</div>
@@ -394,19 +366,6 @@ function Sensors() {
               </div>
             )}
           </div>
-          {selected ? (
-            <div className="card wide">
-              {loadingEvents ? (
-                <span className="skeleton-line" aria-hidden="true" />
-              ) : (
-                <SensorEventsTable
-                  sensor={selected}
-                  rows={events?.rows ?? []}
-                  total={events?.total}
-                />
-              )}
-            </div>
-          ) : null}
         </div>
       ) : null}
     </>

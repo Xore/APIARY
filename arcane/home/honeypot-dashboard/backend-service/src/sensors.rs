@@ -433,3 +433,270 @@ pub async fn events(
         rows,
     }))
 }
+
+// ---------------------------------------------------------------------------
+// #1887: what one sensor has been doing.
+//
+// The fleet overview counts every sensor's events the same way, which says
+// nothing about what any one of them is for. A tarpit whose whole job is
+// holding a connection for hours -- observed at 26 and 60 hours, single
+// connections swallowing 500 MB -- is indistinguishable there from a sensor
+// that answers a request and closes.
+//
+// So the leaderboards are the sensor's own. An HTTP sensor is asked for
+// paths, an SSH sensor is given commands, a VoIP sensor is asked to call
+// numbers, an ICS sensor receives function codes. Showing all of them the
+// same five fields would be the fleet overview again, one level down.
+
+/// One leaderboard: what this sensor saw most of, under its own name.
+#[derive(Serialize)]
+pub struct TopList {
+    /// What the list is, in the sensor's terms ("paths requested").
+    pub label: String,
+    pub rows: Vec<SensorSummaryRow>,
+}
+
+#[derive(Serialize)]
+pub struct SensorSummaryRow {
+    pub key: String,
+    pub count: u64,
+}
+
+/// A quantity the sensor measures that most sensors do not -- a tarpit's
+/// held time and swallowed bytes, a session's duration.
+#[derive(Serialize)]
+pub struct SensorMeasure {
+    pub label: String,
+    pub total: f64,
+    pub max: f64,
+    /// How to render it: "duration_ms", "duration_s", "bytes" or "count".
+    pub unit: String,
+}
+
+#[derive(Serialize)]
+pub struct SensorOverview {
+    pub sensor: String,
+    pub window: String,
+    pub events: u64,
+    pub unique_sources: u64,
+    pub first_seen: String,
+    pub last_seen: String,
+    /// Events per hour, oldest first, for the activity chart.
+    pub hourly: Vec<u64>,
+    pub top_sources: Vec<SensorSummaryRow>,
+    pub top_countries: Vec<SensorSummaryRow>,
+    /// The sensor's own leaderboards.
+    pub top_lists: Vec<TopList>,
+    /// The sensor's own units, where it has any.
+    pub measures: Vec<SensorMeasure>,
+}
+
+/// Which `honeypot.*` fields make a leaderboard for this sensor, and what
+/// to call each one.
+///
+/// Field names come from the shipped documents rather than the sensors'
+/// documentation, same as lib/sensorProtocols.ts on the client -- several
+/// sensors disagree with their own docs about what they emit.
+fn top_fields_for(sensor: &str) -> Vec<(&'static str, &'static str)> {
+    let http = vec![
+        ("honeypot.path", "paths requested"),
+        ("honeypot.user_agent", "user agents"),
+        ("honeypot.method", "methods"),
+    ];
+    match sensor {
+        "cowrie" => vec![
+            ("honeypot.canonical_command", "commands run"),
+            ("honeypot.canonical_user", "usernames tried"),
+            ("honeypot.canonical_pass", "passwords tried"),
+        ],
+        "sentrypeer" => vec![
+            ("honeypot.called_number", "numbers called"),
+            ("honeypot.sip_method", "SIP methods"),
+            ("honeypot.sip_user_agent", "SIP user agents"),
+        ],
+        "dionaea" => vec![
+            ("honeypot.origin", "what happened"),
+            ("honeypot.connection.protocol", "services reached"),
+        ],
+        "dns-honeypot" => vec![
+            ("honeypot.query", "names queried"),
+            ("honeypot.qtype", "record types"),
+        ],
+        "dnp3" => vec![
+            ("honeypot.function", "function codes"),
+            ("honeypot.app_function", "application functions"),
+        ],
+        "rdp-honeypot" => vec![
+            ("honeypot.canonical_user", "usernames tried"),
+            ("honeypot.canonical_pass", "passwords tried"),
+            ("honeypot.requested_protocols", "protocols requested"),
+        ],
+        "dicompot" => vec![
+            ("honeypot.calling_ae", "calling AE titles"),
+            ("honeypot.called_ae", "called AE titles"),
+        ],
+        "canarytokens" => vec![
+            ("honeypot.token_type", "token types"),
+            ("honeypot.memo", "tokens fired"),
+        ],
+        "mailoney" => vec![("honeypot.command", "SMTP commands")],
+        "multipot" => vec![
+            ("honeypot.proto", "protocols"),
+            ("honeypot.event", "what happened"),
+        ],
+        s if s.starts_with("conpot") => vec![
+            ("honeypot.event_type", "what happened"),
+            ("honeypot.data_type", "protocols"),
+        ],
+        "hellpot" | "http-honeypot" | "tanner" | "galah" | "wordpot" | "api-honeypot"
+        | "citrix-honeypot" | "cisco-asa-honeypot" | "snare" | "elasticpot" => http,
+        // Unrecognised: the fields nearly every sensor has, which is more
+        // than nothing and is honest about being generic.
+        _ => vec![
+            ("honeypot.event", "what happened"),
+            ("honeypot.path", "paths requested"),
+        ],
+    }
+}
+
+/// Quantities worth summing for this sensor, with how to render them.
+fn measures_for(sensor: &str) -> Vec<(&'static str, &'static str, &'static str)> {
+    match sensor {
+        // A tarpit is measured by what it wasted, not by how many events it
+        // logged. This is the whole point of running one.
+        "hellpot" => vec![
+            ("honeypot.DURATION", "time held", "duration_s"),
+            ("honeypot.BYTES", "bytes swallowed", "bytes"),
+        ],
+        "endlessh" => vec![
+            ("honeypot.held_ms", "time held", "duration_ms"),
+            ("honeypot.lines", "banner lines sent", "count"),
+        ],
+        "cowrie" => vec![("honeypot.duration_ms", "session time", "duration_ms")],
+        "http-honeypot" | "tanner" | "api-honeypot" => vec![
+            ("honeypot.tarpit_ms", "time held", "duration_ms"),
+            ("honeypot.tarpit_bytes", "bytes swallowed", "bytes"),
+        ],
+        "mailoney" => vec![("honeypot.size", "mail body bytes", "bytes")],
+        _ => vec![],
+    }
+}
+
+const OVERVIEW_WINDOW: &str = "now-7d";
+
+pub async fn overview(
+    State(state): State<AppState>,
+    axum::extract::Path(sensor): axum::extract::Path<String>,
+) -> Result<Json<SensorOverview>, (StatusCode, String)> {
+    let sensor = sensor.trim().to_string();
+    if sensor.is_empty() || sensor.len() > 128 {
+        return Err((StatusCode::BAD_REQUEST, "invalid sensor name".into()));
+    }
+
+    let mut aggs = json!({
+        "unique_sources": {"cardinality": {"field": "source.ip"}},
+        "first": {"min": {"field": "@timestamp"}},
+        "last": {"max": {"field": "@timestamp"}},
+        "hourly": {"date_histogram": {
+            "field": "@timestamp", "fixed_interval": "1h", "min_doc_count": 0,
+            "extended_bounds": {"min": "now-7d/h", "max": "now/h"}
+        }},
+        "top_sources": {"terms": {"field": "source.ip", "size": 10}},
+        "top_countries": {"terms": {"field": "source.geo.country_iso_code", "size": 10}},
+    });
+
+    for (index, (field, _)) in top_fields_for(&sensor).iter().enumerate() {
+        aggs[format!("top_{index}")] = json!({"terms": {"field": field, "size": 10}});
+    }
+    for (index, (field, _, _)) in measures_for(&sensor).iter().enumerate() {
+        aggs[format!("measure_{index}")] = json!({"stats": {"field": field}});
+    }
+
+    let body = json!({
+        "size": 0,
+        "track_total_hits": true,
+        "query": {"bool": {"filter": [
+            {"term": {"event.sensor": sensor}},
+            {"range": {"@timestamp": {"gte": OVERVIEW_WINDOW}}}
+        ]}},
+        "aggs": aggs
+    });
+    let result = state
+        .es
+        .search_index(&["honeypot-v2-*"], body)
+        .await
+        .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?;
+    let a = &result["aggregations"];
+
+    let rows_of = |node: &Value| -> Vec<SensorSummaryRow> {
+        node["buckets"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|bucket| {
+                let key = match &bucket["key"] {
+                    Value::String(text) => text.clone(),
+                    other if !other.is_null() => other.to_string(),
+                    _ => return None,
+                };
+                if key.is_empty() {
+                    return None;
+                }
+                Some(SensorSummaryRow { key, count: n(&bucket["doc_count"]) })
+            })
+            .collect()
+    };
+
+    let top_lists = top_fields_for(&sensor)
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (_, label))| {
+            let rows = rows_of(&a[format!("top_{index}")]);
+            // A leaderboard with nothing in it is noise, not information --
+            // most sensors have no value for most of these fields.
+            if rows.is_empty() {
+                return None;
+            }
+            Some(TopList { label: (*label).to_string(), rows })
+        })
+        .collect();
+
+    let measures = measures_for(&sensor)
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (_, label, unit))| {
+            let stats = &a[format!("measure_{index}")];
+            let total = stats["sum"].as_f64().unwrap_or(0.0);
+            if total <= 0.0 {
+                return None;
+            }
+            Some(SensorMeasure {
+                label: (*label).to_string(),
+                total,
+                max: stats["max"].as_f64().unwrap_or(0.0),
+                unit: (*unit).to_string(),
+            })
+        })
+        .collect();
+
+    Ok(Json(SensorOverview {
+        sensor,
+        window: OVERVIEW_WINDOW.to_string(),
+        events: n(&result["hits"]["total"]["value"]),
+        unique_sources: n(&a["unique_sources"]["value"]),
+        first_seen: s(&a["first"]["value_as_string"]),
+        last_seen: s(&a["last"]["value_as_string"]),
+        hourly: a["hourly"]["buckets"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .map(|bucket| n(&bucket["doc_count"]))
+            .collect(),
+        top_sources: rows_of(&a["top_sources"]),
+        top_countries: rows_of(&a["top_countries"]),
+        top_lists,
+        measures,
+    }))
+}
