@@ -307,7 +307,26 @@ pub fn suricata_noise_exclusion() -> Value {
         // with a source.ip -- roughly 270k rows a day of the fleet talking
         // to itself, shown as events with no attacker. That is the bulk of
         // what reads as "unattributed" in the explorer.
-        {"term": {"honeypot.internal_probe": true}}
+        {"term": {"honeypot.internal_probe": true}},
+        // #1892: a sensor's own startup and error logging, which is not an
+        // event about anybody.
+        //
+        // Narrower than it first looked. The obvious rule -- drop anything
+        // logged at debug or trace -- would have been wrong: of 9,007 such
+        // lines in seven days, 6,810 carry a real source.ip, because
+        // hellpot records a per-connection END_ON_ERR at trace level. Those
+        // are attacker traffic wearing a low log level, and dropping them
+        // would have lost real data to tidy up noise.
+        //
+        // So the rule is the conjunction: logged at debug or trace *and*
+        // carrying no source at all. That is the shape of a sensor talking
+        // about itself -- "error when serving connection", a startup
+        // banner -- and it leaves anything with an attacker attached
+        // exactly where it is.
+        {"bool": {
+            "filter": [{"terms": {"honeypot.level": ["debug", "trace"]}}],
+            "must_not": [{"exists": {"field": "source.ip"}}]
+        }}
     ])
 }
 
@@ -672,6 +691,21 @@ mod fleet_attribution_tests {
             "honeypot": {"data": {"connection": {"remote_ip": "198.51.100.9"}}}
         });
         assert_eq!(attacker_ip(&doc), "203.0.113.7", "source.ip is the promoted answer");
+    }
+
+    #[test]
+    fn a_low_log_level_alone_does_not_make_a_line_noise() {
+        // #1892: hellpot records a per-connection END_ON_ERR at trace level
+        // -- 6,810 of 9,007 debug/trace lines in seven days carry a real
+        // source.ip. Excluding by level alone would drop those. The rule
+        // has to be the conjunction, so this asserts both halves are
+        // present rather than just the level term.
+        let rendered = suricata_noise_exclusion().to_string();
+        assert!(rendered.contains("honeypot.level"), "{rendered}");
+        assert!(
+            rendered.contains("\"must_not\":[{\"exists\":{\"field\":\"source.ip\"}}]"),
+            "the level filter must be paired with the absence of a source: {rendered}"
+        );
     }
 
     #[test]
