@@ -13,13 +13,44 @@ const PENDING_TTL_SECONDS = 600
 const PENDING_PREFIX = 'bff:oidc:pending:'
 
 let redisClient: Redis | null = null
+let lastRedisError = 0
 function redis(): Redis {
   if (!redisClient) {
     redisClient = new Redis(process.env.OIDC_SESSION_REDIS_URL ?? 'redis://127.0.0.1:6379/0', {
       maxRetriesPerRequest: 2,
-      enableOfflineQueue: false,
+      // The offline queue stays ON, for the same reason session.server.ts
+      // turned it on: the PKCE/state entry this client writes is not
+      // optional, so a command issued before the socket is `ready` must
+      // wait rather than throw.
+      //
+      // With it off, beginLogin threw "Stream isn't writeable and
+      // enableOfflineQueue options is false" and the login returned 500.
+      // session.server.ts was fixed for exactly this and this client was
+      // not, so the 500 survived that fix -- the stack still named
+      // beginLogin, which is here.
+      //
+      // The window is the seconds after a worker starts, which is why it
+      // reads as "logins fail after a deploy, then stop failing": the
+      // container log shows the throw immediately after "Listening on".
+      // Redis is healthy throughout; the client simply refuses to wait for
+      // its own connection.
+      //
+      // Bounded, not unbounded: maxRetriesPerRequest and connectTimeout
+      // mean a genuinely dead redis still fails, just after trying.
+      enableOfflineQueue: true,
+      connectTimeout: 5000,
     })
-    redisClient.on('error', () => {})
+    redisClient.on('error', (error: Error) => {
+      // Not an empty handler. The empty one is why this was invisible for
+      // two rounds: the only symptom anywhere was a 500 whose stack
+      // pointed at beginLogin, and nothing ever said what redis was doing.
+      // Throttled so a reconnect loop cannot flood the log.
+      const now = Date.now()
+      if (now - lastRedisError > 30_000) {
+        lastRedisError = now
+        console.warn('[oidc] redis error:', error.message)
+      }
+    })
   }
   return redisClient
 }
