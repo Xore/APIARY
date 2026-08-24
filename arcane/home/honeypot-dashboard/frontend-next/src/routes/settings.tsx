@@ -23,7 +23,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { confirmAction } from '../components/ConfirmDialog'
 import { EsHistoryConsole, type EsStorage } from '../components/EsHistoryConsole'
 import { str } from '../components/StoreList'
-import { applyPalette, applyTheme, pullServerTheme, useThemeMode, type ThemeMode } from '../lib/prefs'
+import { applyPalette, applyTheme, useThemeMode, type ThemeMode } from '../lib/prefs'
 import type { JsonRecord } from '../lib/json'
 import { prefetchEnabled, setPrefetchEnabled } from '../lib/prefetch'
 import { getSessionUser, getAccountActions, type User, type AccountActions } from '../lib/auth'
@@ -2516,12 +2516,11 @@ export function SettingsSurface({
   }, [])
 
   useEffect(() => {
-    setPalette(document.documentElement.dataset.hpPalette ?? 'claude')
+    setPalette(document.documentElement.dataset.hpTheme ?? 'claude')
     setPrefetch(prefetchEnabled())
-    // Reconcile this device against the server-synced theme (another
-    // device may have changed it since); local storage + instant apply
-    // already happened at page load, this just catches this device up.
-    pullServerTheme()
+    // The reconcile against server-stored appearance moved to the root
+    // route's mount in #1755, so it now happens once per session on every
+    // page rather than only when this one is opened.
     let cancelled = false
     storage.then((result) => {
       if (!cancelled && result) setStorageData(result)

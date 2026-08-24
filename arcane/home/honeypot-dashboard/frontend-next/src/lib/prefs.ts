@@ -2,14 +2,18 @@
 // localStorage keys and data attributes as the Go dashboard, so theme and
 // palette follow the operator across both UIs until cutover.
 //
-// Theme also write-throughs to the real server-side per-operator
-// preference store (backend-service/src/preferences.rs's GET/PUT
-// /api/v1/preferences) — instant local apply (data attribute +
-// localStorage) always happens first and never waits on the network; the
-// server sync is fire-and-forget on top of it, so a slow or failed
-// request never blocks or reverts what's already on screen. Palette
-// syncs the same way since both patch structs accept it (Go: settings_
-// api.go via #1621; Rust: preferences.rs's PreferencesPatch).
+// Both axes write through to the real server-side per-operator preference
+// store (backend-service/src/preferences.rs's GET/PUT /api/v1/preferences).
+// Instant local apply (data attribute + localStorage) always happens first
+// and never waits on the network; the server sync is fire-and-forget on top
+// of it, so a slow or failed request never blocks or reverts what is already
+// on screen.
+//
+// Both are also read back, by pullAppearance() from the root route's mount.
+// Until #1755 only the mode was -- the palette was pushed on every change,
+// stored faithfully, and never consulted, so it silently did not follow the
+// operator between devices. This header used to say palette "syncs the same
+// way", which was true of the write and of nothing else.
 import { useSyncExternalStore } from 'react'
 import { createServerFn } from '@tanstack/react-start'
 
@@ -53,29 +57,55 @@ const pushAppearancePreference = createServerFn({ method: 'POST' })
     }
   })
 
-// Reads the operator's server-synced theme, if any, and reconciles this
-// device to it (e.g. another device changed it since). Called from
-// settings.tsx on mount — never on every page, since that's out of this
-// module's edit scope for __root.tsx's pre-hydration boot script.
-const fetchThemePreference = createServerFn({ method: 'GET' }).handler(async (): Promise<ThemeMode | null> => {
+export type Appearance = { mode: ThemeMode | null; theme: string | null }
+
+// Reads the operator's server-synced appearance and reconciles this device to
+// it -- another device changed it, or this one has never seen it.
+//
+// #1755: this used to read only `preferences.theme` and was typed
+// `Promise<ThemeMode | null>`, so the palette was write-only server state.
+// applyPalette() pushed it on every change and preferences.rs stored it
+// faithfully, and nothing anywhere read it back. An operator picked `ocean`
+// on one machine, opened the dashboard on another, and got `claude` -- no
+// error, no sign the preference existed. The module header claimed palette
+// "syncs the same way"; accepting the write is half of syncing.
+const fetchAppearance = createServerFn({ method: 'GET' }).handler(async (): Promise<Appearance> => {
   const { getSessionUser } = await import('./auth')
   const user = await getSessionUser()
-  if (!user) return null
+  if (!user) return { mode: null, theme: null }
   const { serviceJSON } = await import('./backend.server')
   const params = new URLSearchParams({ subject: user.sub, username: user.username, role: user.role })
-  const result = await serviceJSON<{ preferences?: { theme?: string } }>(`/api/v1/preferences?${params.toString()}`)
-  const theme = result?.preferences?.theme
-  return theme === 'dark' || theme === 'light' || theme === 'system' ? theme : null
+  const result = await serviceJSON<{ preferences?: { theme?: string; palette?: string } }>(
+    `/api/v1/preferences?${params.toString()}`,
+  )
+  const mode = result?.preferences?.theme
+  const theme = result?.preferences?.palette
+  return {
+    mode: mode === 'dark' || mode === 'light' || mode === 'system' ? mode : null,
+    // Shape-checked, not matched against the themes this build knows about.
+    // The server applies the same rule (preferences.rs::theme_name); a name
+    // it accepted must not be dropped here, or a theme vendored after this
+    // bundle was built would be unreachable on every device but the one that
+    // picked it.
+    theme: typeof theme === 'string' && isThemeName(theme) ? theme : null,
+  }
 })
 
-export async function pullServerTheme(): Promise<void> {
+/// Reconcile this device to the operator's stored appearance.
+///
+/// Both axes, and neither re-pushed: `sync: false` on each apply, or pulling
+/// a value would immediately write it back and every page load would cost a
+/// PUT.
+export async function pullAppearance(): Promise<void> {
   try {
-    const theme = await fetchThemePreference()
-    if (theme && theme !== getThemeMode()) applyTheme(theme, { sync: false })
+    const { mode, theme } = await fetchAppearance()
+    if (mode && mode !== getThemeMode()) applyTheme(mode, { sync: false })
+    if (theme && theme !== getThemeName()) applyPalette(theme, { sync: false })
   } catch {
     /* best-effort */
   }
 }
+
 
 // theme.css carries `.hp-theme-switching, .hp-theme-switching * { transition:
 // none !important; }` and, until now, nothing in this tier ever applied it --
@@ -150,7 +180,7 @@ export function applyTheme(mode: ThemeMode, options?: { sync?: boolean }) {
   emit()
   // Instant local apply above is already done and visible; the server
   // write-through happens after, fire-and-forget (options.sync === false
-  // is used by pullServerTheme itself, to avoid immediately re-pushing
+  // is used by pullAppearance itself, to avoid immediately re-pushing
   // the value it just pulled).
   if (options?.sync !== false && typeof window !== 'undefined') {
     void pushAppearancePreference({ data: { theme: mode } }).catch(() => {})
@@ -213,7 +243,7 @@ export type LiveToastPrefs = { enabled: boolean; intervalSeconds: number }
 
 // #1684: the "N new honeypot events" toast used to fire on a hardcoded 3s
 // batch regardless of volume. Read the operator's saved cadence the same
-// best-effort way pullServerTheme does — LiveToasts.tsx has no loader of
+// best-effort way pullAppearance does — LiveToasts.tsx has no loader of
 // its own (it's mounted unconditionally in AppShell, not a route), so this
 // is its only way to see the server-side preference.
 const fetchLiveToastPrefs = createServerFn({ method: 'GET' }).handler(async (): Promise<LiveToastPrefs> => {

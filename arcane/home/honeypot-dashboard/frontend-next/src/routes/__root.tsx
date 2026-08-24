@@ -2,11 +2,13 @@
 // markup speaks the exact class vocabulary of Xore/theme's theme.css (the
 // same vendored stylesheet the Go dashboard serves), so the port inherits
 // the claude-pure element set 1:1 — no visual drift by construction.
+import { useEffect } from 'react'
 import { HeadContent, Scripts, createRootRoute, redirect } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { AppShell } from '../components/AppShell'
 import { getSessionUser, type User } from '../lib/auth'
 import { activeBanner, type BannerView, type BehaviorConfig, type PresentationConfig } from '../lib/banner'
+import { pullAppearance } from '../lib/prefs'
 
 type ShellConfig = { banner: BannerView | null; showProblemReportButton: boolean; appName: string }
 
@@ -124,12 +126,37 @@ export const Route = createRootRoute({
   ),
 })
 
+// #1755: reconcile this device against the operator's stored appearance once
+// per session.
+//
+// This used to live in settings.tsx's mount effect, which meant a new device,
+// a new browser profile or cleared storage showed the *default* appearance on
+// every page until the operator happened to open Settings. With accent-only
+// palettes that was a wrong button colour. Now that a theme owns the ground
+// and the whole text ramp, it is the entire dashboard in the wrong theme.
+//
+// Root mount rather than per-route: the pull is one request and the answer
+// does not change while the tab is open, so doing it per navigation would be
+// a request per page for a value that cannot have moved.
+//
+// Deliberately not an SSR-time render decision. The server has the session
+// and could emit the attributes on <html> directly, which would also remove
+// the flash on a cold load -- that needs a cookie, because there is none in
+// this stack today and localStorage is per-device by definition. Tracked as
+// the remaining part of #1755 rather than smuggled in here.
+function useStoredAppearance() {
+  useEffect(() => {
+    void pullAppearance()
+  }, [])
+}
+
 function RootDocument({ children }: { children: React.ReactNode }) {
   const { banner, showProblemReportButton, appName } = Route.useLoaderData()
   // beforeLoad already resolved the session user into router context for
   // every non-/auth navigation — thread it to the shell so the sidebar
   // profile widget and topbar avatar show a real identity (#1653).
   const { user } = Route.useRouteContext() as { user?: User | null }
+  useStoredAppearance()
   return (
     <html lang="en">
       <head>
