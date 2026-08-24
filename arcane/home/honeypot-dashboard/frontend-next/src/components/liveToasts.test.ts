@@ -47,7 +47,7 @@ describe('conditionsFrom', () => {
     expect(delayed[0].key).toBe(stalled[0].key)
   })
 
-  it('reports cluster colour, an unreachable pipeline, and dead letters', () => {
+  it('reports a red cluster, an unreachable pipeline, and dead letters', () => {
     const conditions = conditionsFrom({
       ...healthy,
       cluster_status: 'RED',
@@ -60,6 +60,16 @@ describe('conditionsFrom', () => {
     expect(keys).toContain('dead-letters')
     // Case-insensitive: the endpoint has reported both spellings.
     expect(conditions.find((c) => c.key === 'cluster')?.severity).toBe('danger')
+  })
+
+  it('says nothing about a yellow cluster', () => {
+    // Yellow is this deployment's steady state, not news. Elasticsearch
+    // runs on one node, so replica shards can never be assigned --
+    // measured live: 408 active, 16 unassigned, number_of_nodes = 1.
+    // Alerting on it would fire on essentially every session for
+    // something no operator can act on, which is precisely the habit
+    // this component was changed to break.
+    expect(conditionsFrom({ ...healthy, cluster_status: 'yellow' })).toEqual([])
   })
 
   it('survives a health document with fields missing', () => {
