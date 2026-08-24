@@ -121,7 +121,7 @@ export function AppShell({
           while .hp-nav-open is on the shell (theme.css:2143-2158). */}
       <div className="app-shell__nav-scrim" aria-hidden="true" onClick={() => setNavOpen(false)} />
       <main className="app-main">
-        <div className="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
+        <div className="app-content app-content--wide" data-hp-page-content>
           {children}
         </div>
       </main>

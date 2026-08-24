@@ -195,7 +195,7 @@ function SourceHealthPage() {
         </Link>
       </div>
       {health ? (
-        <div className=" tw:mb-6">
+        <div style={{ marginBottom: 'var(--space-xl)' }}>
           <div className="card wide">
             <h2>Ingestion freshness</h2>
             <table className="data-table">
@@ -235,7 +235,7 @@ function SourceHealthPage() {
         </div>
       </div>
       {health ? (
-        <div className=" tw:mb-6">
+        <div style={{ marginBottom: 'var(--space-xl)' }}>
           <div className="card half">
             <h2>YARA scanner</h2>
             <CardRow label="enabled" value={String(yara?.enabled ?? false)} />

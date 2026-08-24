@@ -26,7 +26,7 @@ const COLUMNS: Column<StoreRow>[] = [
     primary: true,
     render: (row) => {
       const sha = sha256Of(row)
-      return sha ? <span className="mono">{sha.slice(0, 16)}</span> : <span className="tw:text-muted">no source hash</span>
+      return sha ? <span className="mono">{sha.slice(0, 16)}</span> : <span className="text-muted">no source hash</span>
     },
   },
   {
@@ -61,7 +61,7 @@ function Page() {
         const family = pathString(row, 'family')
         return (
           <>
-            {status ? <span className={status === 'error' ? 'badge badge--muted tw:text-red' : 'badge badge--muted'}>{status}</span> : null}
+            {status ? <span className={status === 'error' ? 'badge badge--muted text-danger' : 'badge badge--muted'}>{status}</span> : null}
             {family ? <span className="badge badge--accent">{family}</span> : null}
           </>
         )

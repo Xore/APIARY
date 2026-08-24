@@ -157,7 +157,7 @@ const COLUMNS: Column<StoreRow>[] = [
       <span className={str(row, 'status') === 'open' ? 'badge badge--warning' : 'badge badge--muted'}>{str(row, 'status')}</span>
     ),
   },
-  { header: 'page', className: 'v', primary: true, render: (row) => str(row, 'page') || <span className="tw:text-muted">(unknown page)</span> },
+  { header: 'page', className: 'v', primary: true, render: (row) => str(row, 'page') || <span className="text-muted">(unknown page)</span> },
   { header: 'expected', className: 'v', render: (row) => str(row, 'expected') },
   { header: 'actual', className: 'v', render: (row) => str(row, 'actual') },
   { header: 'console', className: 'n', render: (row) => (strings(row, 'console_errors').length || '—') },

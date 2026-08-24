@@ -49,7 +49,7 @@ function CitationList({ title, citations }: { title: string; citations: Citation
   return (
     <>
       <p className="note">{title}</p>
-      <ul className="tw:list-disc tw:pl-5">
+      <ul className="">
         {citations.map((citation, index) => (
           <li key={`${citation.raw}-${index}`}>{citation.raw}</li>
         ))}
@@ -121,7 +121,7 @@ function RevDeckCard({ analysis }: { analysis: RevDeckAnalysis | null }) {
         {analysis.warnings.length ? (
           <>
             <p className="note">Warnings from the run:</p>
-            <ul className="tw:list-disc tw:pl-5">
+            <ul className="">
               {analysis.warnings.map((warning, index) => (
                 <li key={index}>{warning}</li>
               ))}

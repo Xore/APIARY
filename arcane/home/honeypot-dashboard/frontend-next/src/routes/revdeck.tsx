@@ -31,7 +31,7 @@ const COLUMNS: Column<StoreRow>[] = [
     primary: true,
     render: (row) => {
       const sha = revdeckSha(row)
-      return sha ? <code>{sha.slice(0, 16)}</code> : <span className="tw:text-muted">no source hash</span>
+      return sha ? <code>{sha.slice(0, 16)}</code> : <span className="text-muted">no source hash</span>
     },
   },
   // Promoted into the card's badge row (detail-only, so the card does
@@ -65,7 +65,7 @@ function Page() {
       cardIcon={() => CodeIcon}
       cardBadges={(row) => {
         const exit = str(row, 'exit_status')
-        return exit ? <span className={exit === 'error' ? 'badge badge--muted tw:text-red' : 'badge badge--muted'}>{exit}</span> : null
+        return exit ? <span className={exit === 'error' ? 'badge badge--muted text-danger' : 'badge badge--muted'}>{exit}</span> : null
       }}
       cardHref={(row) => {
         const sha = revdeckSha(row)

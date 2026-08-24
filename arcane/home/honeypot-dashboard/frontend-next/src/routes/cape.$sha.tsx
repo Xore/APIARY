@@ -163,7 +163,7 @@ function CapeDetail() {
             <>
               <div className="metric-grid">
                 <div className="metric">
-                  <div className={`metric__value${(run.score ?? 0) > 0 ? ' tw:text-red' : ''}`}>{scoreDisplay(run.score)}</div>
+                  <div className={`metric__value${(run.score ?? 0) > 0 ? ' text-danger' : ''}`}>{scoreDisplay(run.score)}</div>
                   <div className="metric__label">Malscore</div>
                 </div>
                 <div className="metric">
@@ -328,7 +328,7 @@ function CapeDetail() {
                       the execution summary.
                     </p>
                     {summary.debug_errors.length ? (
-                      <p className="note tw:text-red">{summary.debug_errors.length} analyzer error(s) were logged.</p>
+                      <p className="note text-danger">{summary.debug_errors.length} analyzer error(s) were logged.</p>
                     ) : null}
                     {summary.debug_log ? (
                       <div className="card__scroll" aria-label="Analyzer log output">

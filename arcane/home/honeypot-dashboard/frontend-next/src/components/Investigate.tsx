@@ -248,7 +248,7 @@ export function MasterDetailTable<Row>({
                       </div>
                       {desc ? <p className="project-card__desc">{desc}</p> : null}
                       {metaColumns.length > 0 ? (
-                        <div className="project-card__meta tw:flex-wrap">
+                        <div className="project-card__meta">
                           {metaColumns.map((column) => (
                             <span key={column.header}>{column.render(row)}</span>
                           ))}
@@ -341,7 +341,7 @@ export function MasterDetailTable<Row>({
             </button>
             <h2>{inspectorTitle}</h2>
             {detailPage ? (
-              <a className="btn btn-sm btn-secondary tw:mb-3" href={detailPage}>
+              <a className="btn btn-sm btn-secondary" style={{ marginBottom: 'var(--space-md)' }} href={detailPage}>
                 Open full details →
               </a>
             ) : null}

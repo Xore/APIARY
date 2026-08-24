@@ -206,7 +206,7 @@ function MintForm({ onCreated, presetType, formRef }: { onCreated: () => void; p
 const COLUMNS: Column<StoreRow>[] = [
   { header: 'created', render: (row) => when(str(row, 'created_at')) },
   { header: 'type', render: (row) => <span className="badge badge--muted">{str(row, 'token_type')}</span> },
-  { header: 'memo', className: 'v', primary: true, render: (row) => str(row, 'memo') || <span className="tw:text-muted">(no memo)</span> },
+  { header: 'memo', className: 'v', primary: true, render: (row) => str(row, 'memo') || <span className="text-muted">(no memo)</span> },
   {
     header: 'token url',
     className: 'v',

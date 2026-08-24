@@ -166,7 +166,7 @@ function ReportViewer({ url, onClose }: { url: string; onClose: () => void }) {
 }
 
 function scannerBadge(scanner: Scanner) {
-  if (!scanner.ok) return <span className="badge badge--muted tw:text-red">failed{scanner.error ? `: ${scanner.error}` : ''}</span>
+  if (!scanner.ok) return <span className="badge badge--muted text-danger">failed{scanner.error ? `: ${scanner.error}` : ''}</span>
   if ((scanner.positives ?? 0) > 0) return <span className="badge badge--red">detected</span>
   if (scanner.suspicious) return <span className="badge badge--muted">suspicious</span>
   return <span className="badge badge--muted">clean</span>
@@ -256,14 +256,14 @@ function GithubAnalysisDetail() {
       ) : (
         <>
           {note ? (
-            <div className={`tw:mb-6 tw:rounded-lg tw:border tw:border-${note.tone} tw:bg-${note.tone}-subtle tw:px-4 tw:py-4${note.tone === 'red' ? ' tw:text-red' : ''}`} role={note.tone === 'red' ? 'alert' : 'status'}>
+            <div className={`alert alert--${note.tone === 'red' ? 'danger' : 'warning'}`} role={note.tone === 'red' ? 'alert' : 'status'}>
               {note.render(run)}
             </div>
           ) : null}
 
           <div className="metric-grid">
             <div className="metric">
-              <div className={`metric__value${run.verdict?.malicious ? ' tw:text-red' : ''}`}>
+              <div className={`metric__value${run.verdict?.malicious ? ' text-danger' : ''}`}>
                 {run.verdict ? `${run.verdict.malicious} / ${run.verdict.total}` : '—'}
               </div>
               <div className="metric__label">Detections</div>
@@ -431,7 +431,7 @@ function GithubAnalysisDetail() {
                       reference this sample's hash.
                     </p>
                     <div className="card__scroll">
-                      <ul className="tw:list-disc tw:pl-5">
+                      <ul className="">
                         {run.yara_auto_rules.map((rule) => (
                           <li key={rule}>
                             <code>{rule}</code>

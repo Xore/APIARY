@@ -97,10 +97,10 @@ function EvidenceTimeline({ row }: { row: AgentCampaignRow }) {
   return (
     <section aria-label="Evidence timeline">
       <h3>
-        Evidence timeline <span className="tw:text-muted">({events.length} event{events.length === 1 ? '' : 's'})</span>
+        Evidence timeline <span className="text-muted">({events.length} event{events.length === 1 ? '' : 's'})</span>
       </h3>
       <div className="card__scroll">
-        <table className="recent data-table tw:mt-2">
+        <table className="recent data-table" style={{ marginTop: 'var(--space-sm)' }}>
           <thead>
             <tr>
               <th>time</th>
@@ -116,7 +116,7 @@ function EvidenceTimeline({ row }: { row: AgentCampaignRow }) {
               const link = sourceLink(event)
               const sourceCell = (
                 <td className="v">
-                  {link ? <a href={link}>view source</a> : <span className="tw:text-muted">&mdash;</span>}
+                  {link ? <a href={link}>view source</a> : <span className="text-muted">&mdash;</span>}
                 </td>
               )
               const rules = event.matched_rules ?? []
@@ -125,7 +125,7 @@ function EvidenceTimeline({ row }: { row: AgentCampaignRow }) {
                   <tr key={`e${eventIndex}`}>
                     <td>{formatTimestamp(event.timestamp)}</td>
                     <td className="v" colSpan={4}>
-                      <span className="tw:text-muted">correlated into this campaign, no rule matched on its own</span>
+                      <span className="text-muted">correlated into this campaign, no rule matched on its own</span>
                     </td>
                     {sourceCell}
                   </tr>,
@@ -140,10 +140,10 @@ function EvidenceTimeline({ row }: { row: AgentCampaignRow }) {
                   <td className="v">
                     {(rule.decode_chain ?? []).length > 0 ? (
                       <small>
-                        {transformPath(rule)} <span className="tw:text-muted">sha256:{finalArtifactHash(rule)}</span>
+                        {transformPath(rule)} <span className="text-muted">sha256:{finalArtifactHash(rule)}</span>
                       </small>
                     ) : (
-                      <span className="tw:text-muted">&mdash;</span>
+                      <span className="text-muted">&mdash;</span>
                     )}
                   </td>
                   {sourceCell}

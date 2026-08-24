@@ -624,7 +624,7 @@ function Events() {
                   address and session id stay in the tooltips (and in the
                   table column and EventMeta below) so nothing is lost. */}
               {selectedRow.src_ip || selectedRow.session ? (
-                <div className="tw:flex tw:flex-wrap tw:gap-2 tw:mb-3">
+                <div className="filters">
                   {selectedRow.src_ip ? (
                     <a
                       className="btn btn-sm btn-secondary"
@@ -678,7 +678,7 @@ function IsolateIpMenu({ ips, onApply }: { ips: CorrelatedIp[]; onApply: (value:
       </summary>
       <div className="dropdown hp-open-in-menu" role="menu" style={{ width: 260 }}>
         <div className="hp-open-in-heading">
-          IPs behind this fingerprint <span className="tw:text-muted">({pending.size}/{ips.length})</span>
+          IPs behind this fingerprint <span className="text-muted">({pending.size}/{ips.length})</span>
         </div>
         <div style={{ display: 'flex', gap: 6, padding: '2px 10px 6px' }}>
           <button
@@ -710,7 +710,7 @@ function IsolateIpMenu({ ips, onApply }: { ips: CorrelatedIp[]; onApply: (value:
               <span className="mono" style={{ flex: 1 }}>
                 {entry.ip}
               </span>
-              <span className="tw:text-muted">{entry.count.toLocaleString('en-US')}</span>
+              <span className="text-muted">{entry.count.toLocaleString('en-US')}</span>
             </label>
           ))}
         </div>

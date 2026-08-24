@@ -649,8 +649,8 @@ function ExternalPublicationCard({ hash, editable }: { hash: string; editable: b
 
   return (
     <div className="card wide">
-      <div className="tw:flex tw:flex-wrap tw:items-center tw:gap-2">
-        <h2 className="tw:mr-auto">External publication</h2>
+      <div className="filters">
+        <h2 style={{ marginRight: 'auto' }}>External publication</h2>
         <span className="badge badge--red">leaves local trust boundary</span>
       </div>
       <p className="note">
@@ -658,7 +658,7 @@ function ExternalPublicationCard({ hash, editable }: { hash: string; editable: b
         scanner APIs. It is a separate administrator-only workflow with its own confirmation and audit trail, unlike the
         local analyses above, which never leave this host.
       </p>
-      <div className="tw:flex tw:flex-wrap tw:items-center tw:gap-2">
+      <div className="filters">
         <button className="btn btn-danger btn-sm" type="button" disabled={!editable || busy} onClick={publish}>
           {busy ? 'Publishing…' : 'Publish to Xore/honeypot'}
         </button>
@@ -1248,7 +1248,7 @@ function PayloadAnalysis() {
               ) : (
                 <p className="empty">{yara.scanned ? 'No YARA rules matched this sample.' : 'Waiting for the isolated YARA scanner.'}</p>
               )}
-              {yara.error ? <p className="note tw:text-red">{yara.error}</p> : null}
+              {yara.error ? <p className="note text-danger">{yara.error}</p> : null}
               {yara.scanned ? (
                 <p className="note">
                   Scanned {formatTimestamp(yara.scanned)} by the networkless YARA sidecar. A match is a triage signal, not

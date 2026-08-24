@@ -225,7 +225,7 @@ function modelScore(row: StoreRow, key: string): string {
 function sourceEventLink(row: StoreRow) {
   const id = str(row, 'source_event_id')
   const index = str(row, 'source_index')
-  if (!id || !index) return <span className="tw:text-muted">—</span>
+  if (!id || !index) return <span className="text-muted">—</span>
   return (
     <Link to="/history" search={{ q: `_id:"${id}" AND _index:"${index}"` }}>
       view source
@@ -250,7 +250,7 @@ function buildColumns(acks: Record<string, AckRecord>): Column<StoreRow>[] {
             {str(row, 'src_country') ? <> <span className="badge badge--info" title={countryName(str(row, 'src_country'))}>{str(row, 'src_country')}</span></> : null}
           </>
         ) : (
-          <span className="tw:text-muted">unattributed</span>
+          <span className="text-muted">unattributed</span>
         ),
     },
     {

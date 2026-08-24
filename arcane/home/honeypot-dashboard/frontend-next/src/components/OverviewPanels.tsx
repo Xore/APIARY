@@ -151,7 +151,7 @@ export function AttackVectors({
       </div>
       {sensor && vectors === null ? <span className="skeleton-line" aria-hidden="true" /> : null}
       {vectors ? (
-        <div className="tw:grid tw:grid-cols-2 tw:gap-3">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-md)' }}>
           {(
             [
               ['Targeted ports', vectors.ports],

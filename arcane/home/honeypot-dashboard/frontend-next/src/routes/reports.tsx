@@ -251,7 +251,7 @@ function buildGeneratedColumns(
       header: 'title',
       className: 'v',
       primary: true,
-      render: (row) => str(row, 'title') || str(row, 'name') || <span className="tw:text-muted">(untitled report)</span>,
+      render: (row) => str(row, 'title') || str(row, 'name') || <span className="text-muted">(untitled report)</span>,
     },
     { header: 'template', render: (row) => <span className="badge badge--muted">{str(row, 'template')}</span> },
     { header: 'origin', render: (row) => str(row, 'origin') },
