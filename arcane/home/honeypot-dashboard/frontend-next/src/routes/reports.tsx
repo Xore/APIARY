@@ -339,17 +339,35 @@ function ReportViewerModal({ id, title, onClose }: { id: string; title: string; 
   )
 }
 
-// reports.html:38-43's wizard steps — the studio reads as five views:
-// four form steps plus the Library of saved definitions and finished PDFs.
+// reports.html:38-43's wizard steps — the studio reads as six views: five
+// steps that build one definition, plus the Library of saved definitions
+// and finished PDFs.
+//
+// #1858: these were five equal tabs and a save button repeated on each,
+// so the studio read as one dense form split five ways rather than as the
+// click-through the redesign specified. `lede` is what the step changes,
+// stated before the controls; Review reads every choice back before
+// anything is generated. The order below is the order of the sequence,
+// and `buildSteps` is that same list minus the Library — the Library is
+// where finished work lives, not a step on the way to it.
 const STEPS = [
-  { id: 'design', label: 'Design' },
-  { id: 'scope', label: 'Scope' },
-  { id: 'schedule', label: 'Schedule' },
-  { id: 'branding', label: 'Branding' },
-  { id: 'library', label: 'Library' },
+  { id: 'design', label: 'Design', lede: 'What kind of report this is, and which sections it contains.' },
+  { id: 'scope', label: 'Scope', lede: 'Which captured activity the report covers.' },
+  { id: 'schedule', label: 'Schedule', lede: 'Whether it runs on its own, and how often.' },
+  { id: 'branding', label: 'Branding', lede: 'What appears on every page of the PDF.' },
+  { id: 'review', label: 'Review', lede: 'Everything chosen so far. Nothing has been generated yet.' },
+  { id: 'library', label: 'Library', lede: 'Saved definitions and the PDFs they have produced.' },
 ] as const
 
 type StepId = (typeof STEPS)[number]['id']
+
+/** The steps that build a definition, in order. The Library is excluded:
+ *  it is the destination, not a stage on the way there. */
+const BUILD_STEPS = STEPS.filter((entry) => entry.id !== 'library')
+
+function stepLede(id: StepId): string {
+  return STEPS.find((entry) => entry.id === id)?.lede ?? ''
+}
 
 function emptyBranding(): ReportBranding {
   return { title: '', author: '', header_left: '', header_right: '', footer_left: '', classification: '' }
@@ -403,6 +421,29 @@ function hydrateDefinition(def: ReportDefinition): ReportDefinition {
 
 function pad2(value: number): string {
   return String(value).padStart(2, '0')
+}
+
+/** The observation-window select's own option labels, so the Review step
+ *  reads back the words the operator picked rather than the wire value. */
+const WINDOW_LABELS: Record<string, string> = {
+  '': 'template default',
+  '1h': '1 hour',
+  '6h': '6 hours',
+  '24h': '24 hours',
+  '7d': '7 days',
+  '30d': '30 days',
+}
+
+/** A schedule in one line, matching the Library card's phrasing so the
+ *  same cadence does not read two different ways in the same studio. */
+function describeSchedule(schedule: ReportSchedule): string {
+  const at = `${pad2(schedule.hour)}:${pad2(schedule.minute)} UTC`
+  if (schedule.frequency === 'weekly') {
+    const day = WEEKDAYS.find(([value]) => value === schedule.weekday)?.[1] ?? 'Monday'
+    return `weekly on ${day} @ ${at}`
+  }
+  if (schedule.frequency === 'monthly') return `monthly on day ${schedule.month_day} @ ${at}`
+  return `${schedule.frequency} @ ${at}`
 }
 
 // reports.html:169's weekday select, Monday-first with Go's 0=Sunday values.
@@ -489,6 +530,7 @@ const SCHEDULE_PRESETS: SchedulePreset[] = [
 
 function DefinitionForm({
   step,
+  onStep,
   templates,
   elements,
   initial,
@@ -499,6 +541,9 @@ function DefinitionForm({
   /** Which wizard step is active — the form keeps every step mounted
    * (hidden panels) so state survives moving between steps. */
   step: StepId
+  /** Move to another step. The form owns Back/Next because only it knows
+   * the draft; the sidebar rail calls the same setter from outside. */
+  onStep: (id: StepId) => void
   templates: ReportTemplate[]
   elements: ReportElementInfo[]
   initial: ReportDefinition
@@ -523,6 +568,93 @@ function DefinitionForm({
 
   const activeTemplate = templates.find((entry) => entry.id === template)
   const isSpecial = Boolean(activeTemplate?.sandbox || activeTemplate?.payload || activeTemplate?.ghidra)
+  // Position in the sequence. Falls back to the first step rather than -1
+  // so the Library (which is not a build step) never renders "Step 0".
+  const stepIndex = Math.max(
+    0,
+    BUILD_STEPS.findIndex((entry) => entry.id === step),
+  )
+  const previousStep = stepIndex > 0 ? BUILD_STEPS[stepIndex - 1] : null
+  const nextStep = stepIndex < BUILD_STEPS.length - 1 ? BUILD_STEPS[stepIndex + 1] : null
+  const onReview = step === 'review'
+
+  // The read-back on the Review step. Every row carries the step that owns
+  // it, so "change" lands where the value was set.
+  //
+  // `unset` is deliberate: a value the operator never touched shows the
+  // word the report will actually act on -- "everything captured", "no
+  // schedule" -- rather than an empty cell, which does not distinguish a
+  // field that was skipped from one that was never offered. That
+  // distinction is the whole point of reading the definition back before
+  // generating anything from it.
+  const summaryRows: { key: string; value: string; step: StepId; unset?: boolean }[] = (() => {
+    const rows: { key: string; value: string; step: StepId; unset?: boolean }[] = []
+    rows.push({ key: 'Name', value: name.trim() || 'not named yet', step: 'design', unset: !name.trim() })
+    rows.push({
+      key: 'Template',
+      value: activeTemplate?.name || 'none chosen',
+      step: 'design',
+      unset: !activeTemplate,
+    })
+    rows.push({ key: 'PDF theme', value: theme === 'light' ? 'Light' : 'Dark', step: 'design' })
+    if (!isSpecial) {
+      rows.push({
+        key: 'Window',
+        value: WINDOW_LABELS[scope.window] ?? (scope.window || 'template default'),
+        step: 'design',
+        unset: !scope.window,
+      })
+      const chosen = elements.filter((entry) => selectedElements.includes(entry.id)).map((entry) => entry.label)
+      rows.push({
+        key: 'Sections',
+        value: chosen.length > 0 ? chosen.join(', ') : 'none selected',
+        step: 'design',
+        unset: chosen.length === 0,
+      })
+    } else {
+      rows.push({ key: 'Sections', value: 'fixed by this template', step: 'design', unset: true })
+    }
+    rows.push({ key: 'Appendix limit', value: `${appendixLimit} rows`, step: 'design' })
+
+    const scopeTerms = isSpecial
+      ? ([['job', scope.job], ['hash', scope.hash]] as [string, string][])
+      : ([
+          ['ip', scope.ip],
+          ['sensor', scope.sensor],
+          ['port', scope.port],
+          ['signature', scope.signature],
+        ] as [string, string][])
+    const active = scopeTerms.filter(([, value]) => value.trim() !== '')
+    rows.push({
+      key: 'Scope',
+      value: active.length > 0 ? active.map(([label, value]) => `${label} ${value}`).join(' · ') : 'everything captured',
+      step: 'scope',
+      unset: active.length === 0,
+    })
+
+    rows.push({
+      key: 'Schedule',
+      value: schedule.enabled ? describeSchedule(schedule) : 'no schedule — generated on demand',
+      step: 'schedule',
+      unset: !schedule.enabled,
+    })
+
+    const brandingSet = (Object.keys(branding) as (keyof ReportBranding)[]).filter(
+      (key) => branding[key].trim() !== '',
+    )
+    rows.push({
+      key: 'Branding',
+      value:
+        brandingSet.length > 0
+          ? `${branding.title.trim() || activeTemplate?.title || 'template title'}${
+              brandingSet.length > 1 ? ` (+${brandingSet.length - 1} more field${brandingSet.length > 2 ? 's' : ''})` : ''
+            }`
+          : 'template defaults',
+      step: 'branding',
+      unset: brandingSet.length === 0,
+    })
+    return rows
+  })()
 
   // Sandbox-job dropdown (hp-reports.js loadSandboxJobs): loaded once, the
   // first time a sandbox template is active; null = still loading, [] with
@@ -667,6 +799,30 @@ function DefinitionForm({
           }
       }}
     >
+      {/* #1858: where the studio is in its own sequence. The sidebar rail
+          still lets an operator jump anywhere -- useful when editing a
+          saved definition -- but five equal tabs never said which comes
+          first or how much is left. Rendered on every build step, and the
+          <ol> carries the order the tab rail cannot. */}
+      {step !== 'library' ? (
+        <div className="hp-rp-progress">
+          <span className="hp-rp-progress__position">
+            Step {stepIndex + 1} of {BUILD_STEPS.length} — {BUILD_STEPS[stepIndex]?.label}
+          </span>
+          <ol className="hp-rp-progress__steps">
+            {BUILD_STEPS.map((entry, index) => (
+              <li
+                key={entry.id}
+                aria-current={entry.id === step ? 'step' : undefined}
+                data-state={index < stepIndex ? 'done' : undefined}
+              >
+                {entry.label}
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
+
       {/* 01 Design — template, basics, theme, elements (reports.html:47-85). */}
       <div className="dashboard-panel" role="tabpanel" id="rp-panel-design" aria-labelledby="rp-design" hidden={step !== 'design'}>
         <div className="card wide">
@@ -679,7 +835,8 @@ function DefinitionForm({
             carries .hp-rp-templates/.hp-rp-template including the
             aria-pressed selected state. */}
         <p className="note">
-          Pick the closest starting point, then adjust it across the steps above. Nothing is generated until you say so.
+          {stepLede('design')} Pick the closest starting point — the steps that follow adjust it, and nothing is
+          generated until the Review step.
         </p>
         <div className="hp-rp-templates" role="group" aria-label="Report template">
           {templates.length > 0 ? (
@@ -1054,17 +1211,66 @@ function DefinitionForm({
         </div>
       </div>
 
-      {/* Shared action row — visible on every form step, hp-rp-actions
-          style: the wizard is one definition, saved once. */}
-      <div className="filters" style={{ marginTop: 8 }}>
-        <button className="btn btn-primary btn-sm" type="submit" disabled={busy || !name.trim() || !template}>
-          {busy ? 'Saving…' : isCreate ? 'Create definition' : 'Save changes'}
+      {/* 05 Review — every choice read back before anything is generated
+          (#1858). This is what made the studio a sequence rather than a
+          form split five ways: the four steps ask, this one answers, and
+          the answer is where the definition is finally committed. Each
+          row links to the step that owns the value, so a wrong-looking
+          entry is one click from where it was set rather than a hunt. */}
+      <div className="dashboard-panel" role="tabpanel" id="rp-panel-review" aria-labelledby="rp-review" hidden={!onReview}>
+        <div className="card wide">
+          <h2>Review</h2>
+          <p className="note">{stepLede('review')}</p>
+          <div className="hp-rp-review">
+            {summaryRows.map((row) => (
+              <div className="hp-rp-review__row" key={`${row.step}:${row.key}`}>
+                <span className="hp-rp-review__key">{row.key}</span>
+                <span className="hp-rp-review__value" data-unset={row.unset ? '' : undefined}>
+                  {row.value}
+                </span>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  type="button"
+                  onClick={() => onStep(row.step)}
+                  title={`Change this on the ${STEPS.find((entry) => entry.id === row.step)?.label} step`}
+                >
+                  change
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* The sequence's controls. Back and Next move through the steps;
+          the definition is committed on Review and nowhere else -- a save
+          button repeated on every step is what made this read as one page
+          of controls rather than a click-through (#1858). Cancel stays
+          available throughout, because abandoning a draft should never
+          require walking to the end of it first. */}
+      <div className="hp-rp-actions" hidden={step === 'library'}>
+        <button
+          className="btn btn-ghost btn-sm"
+          type="button"
+          disabled={!previousStep}
+          onClick={() => previousStep && onStep(previousStep.id)}
+        >
+          Back{previousStep ? ` — ${previousStep.label}` : ''}
         </button>
+        {nextStep ? (
+          <button className="btn btn-primary btn-sm" type="button" onClick={() => onStep(nextStep.id)}>
+            Next — {nextStep.label}
+          </button>
+        ) : (
+          <button className="btn btn-primary btn-sm" type="submit" disabled={busy || !name.trim() || !template}>
+            {busy ? 'Saving…' : isCreate ? 'Create definition' : 'Save changes'}
+          </button>
+        )}
         <button className="btn btn-ghost btn-sm" type="button" onClick={onCancel}>
           {isCreate ? 'Reset' : 'Cancel edit'}
         </button>
+        {message ? <span className="hp-rp-status" data-state="error">{message}</span> : null}
       </div>
-      {message ? <p className="note">{message}</p> : null}
     </form>
   )
 }
@@ -1299,6 +1505,7 @@ function Reports() {
         <DefinitionForm
           key={`${editing?.id ?? 'new'}:${formSeed}`}
           step={step}
+          onStep={setStep}
           templates={templatesData?.templates ?? []}
           elements={templatesData?.elements ?? []}
           anyScheduled={(definitions ?? []).some((definition) => definition.schedule?.enabled)}
