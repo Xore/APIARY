@@ -44,7 +44,28 @@ const LOOPBACK_IPS: [&str; 2] = ["127.0.0.1", "::1"];
 /// liveness probes were being recorded as MITRE ICS technique usage.
 fn mark_internal_probe(e: &mut Value) -> bool {
     let ip = str(e, "src_ip");
-    if !LOOPBACK_IPS.contains(&ip.as_str()) {
+    mark_probe_from(e, &ip)
+}
+
+/// The same rule, for the enrichers that derive the address themselves.
+///
+/// mark_internal_probe reads `src_ip` off the event, which is a field
+/// enrich_line has already populated by the time it runs. The per-sensor
+/// enrichers do not have that: they read the address out of their own
+/// sensor's field first -- sentrypeer's "source_ip", hellpot's
+/// REMOTE_ADDR, galah's "srcIP", wordpot's message prefix -- and only
+/// write `src_ip` at the end, on paths that vary. So they pass what they
+/// found instead of relying on a field that is not there yet.
+///
+/// This is why #1918 existed at all. Every one of those enrichers skipped
+/// the probe marking entirely, so their healthchecks were excluded from
+/// `source.ip` (loopback is not an attacker) but never flagged as probes
+/// -- landing in the unattributed residue instead. Measured over 24h:
+/// 2,879 loopback events unflagged, of which 2,864 came from these four
+/// sensors and 2,857 from sentrypeer alone, which inflated that residue
+/// roughly threefold.
+fn mark_probe_from(e: &mut Value, ip: &str) -> bool {
+    if !LOOPBACK_IPS.contains(&ip) {
         return false;
     }
     if e.get("internal_probe").and_then(Value::as_bool) == Some(true) {
@@ -571,6 +592,7 @@ pub fn enrich_hellpot_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _persona
     let Some((ip, port_str)) = split_host_port(&remote_addr) else {
         return (marshal_if_changed(line, &e, changed), true); // malformed REMOTE_ADDR
     };
+    changed |= mark_probe_from(&mut e, &ip);
 
     if ip != TUNNEL_PEER_IP {
         changed |= set_if_changed(&mut e, "src_ip", ip);
@@ -688,6 +710,7 @@ pub fn enrich_galah_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _persona: 
     changed |= super::attck::promote_attck_technique_fields("galah", &mut e);
 
     let ip = e.get("srcIP").and_then(Value::as_str).unwrap_or("").to_string();
+    changed |= mark_probe_from(&mut e, &ip);
     if ip != TUNNEL_PEER_IP {
         if !ip.is_empty() {
             changed |= set_if_changed(&mut e, "src_ip", ip);
@@ -781,6 +804,7 @@ pub fn enrich_sentrypeer_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _pers
     let Some((ip, port_str)) = split_host_port(&source_addr) else {
         return (marshal_if_changed(line, &e, changed), true);
     };
+    changed |= mark_probe_from(&mut e, &ip);
 
     if ip != TUNNEL_PEER_IP {
         changed |= set_if_changed(&mut e, "src_ip", ip);
@@ -898,6 +922,7 @@ pub fn enrich_wordpot_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _persona
     changed |= set_if_changed(&mut e, "protocol", "HTTP");
     changed |= classify_wordpot_message(&mut e, &rest);
     changed |= super::attck::promote_attck_technique_fields("wordpot", &mut e);
+    changed |= mark_probe_from(&mut e, &ip);
 
     if ip != TUNNEL_PEER_IP {
         changed |= set_if_changed(&mut e, "src_ip", ip);
@@ -949,6 +974,22 @@ pub fn enrich_wordpot_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _persona
 /// net.SplitHostPort equivalent for the plain "ip:port" shape every
 /// bespoke sensor here uses (no IPv6 brackets in any real captured line).
 fn split_host_port(addr: &str) -> Option<(String, String)> {
+    // IPv6 arrives bracketed. Go renders a v6 peer as "[::1]:1234", and
+    // rsplit_once(':') leaves the brackets welded to the address -- so the
+    // result matched no loopback constant, parsed as no IpAddr, and would
+    // have been written into src_ip as "[::1]" for everything downstream
+    // to trip over.
+    //
+    // Found by #1918's own IPv6 test rather than by a report: a v6 client
+    // is rare enough against these sensors that nothing had exercised the
+    // path, which is exactly how it stayed wrong quietly.
+    if let Some(rest) = addr.strip_prefix('[') {
+        let (ip, port) = rest.split_once("]:")?;
+        if ip.is_empty() || port.is_empty() {
+            return None;
+        }
+        return Some((ip.to_string(), port.to_string()));
+    }
     let (ip, port) = addr.rsplit_once(':')?;
     if ip.is_empty() || port.is_empty() {
         return None;
@@ -1592,5 +1633,106 @@ mod tests {
 
         assert!(resolved);
         assert_eq!(e["src_ip"], json!("45.79.207.110"));
+    }
+
+    // ---- #1918: every enricher marks its own healthchecks ----
+    //
+    // The generic enrich_line always did. The per-sensor enrichers never
+    // did, and nothing noticed because the symptom is an absence: the
+    // event is correctly kept out of source.ip, and simply never flagged,
+    // so it lands in the unattributed residue looking like a sensor that
+    // could not be attributed. 2,879 loopback events in 24h were sitting
+    // there, 2,857 of them sentrypeer's.
+    //
+    // A test per sensor rather than one on the shared helper, because the
+    // defect was never in the rule -- it was that each enricher has to opt
+    // in, and four of them had not. A helper test would have passed
+    // throughout.
+
+    #[test]
+    fn sentrypeer_healthchecks_are_marked_as_probes() {
+        // sentrypeer writes source_ip as "ip:port", and its healthcheck is
+        // a bare TCP connect: no SIP method, no message, no called number.
+        let line = json!({
+            "app_name": "sentrypeer",
+            "source_ip": "127.0.0.1:44577",
+            "destination_ip": "0.0.0.0:5060",
+            "sip_method": "",
+            "transport_type": "TCP",
+        })
+        .to_string();
+        let (out, resolved) = enrich_sentrypeer_line(
+            line.as_bytes(), &ViaMap::new(), &ViaMap::new(), "sentrypeer",
+        );
+        let e: Value = serde_json::from_slice(&out).unwrap();
+
+        assert_eq!(e["internal_probe"], json!(true));
+        assert!(resolved, "a probe is terminal, never queued for retry");
+        // The address stays: it is the evidence that this was ours.
+        assert_eq!(e["src_ip"], json!("127.0.0.1"));
+    }
+
+    #[test]
+    fn hellpot_healthchecks_are_marked_as_probes() {
+        let line = json!({"REMOTE_ADDR": "127.0.0.1:51234", "URL": "/"}).to_string();
+        let (out, _) = enrich_hellpot_line(
+            line.as_bytes(), &ViaMap::new(), &ViaMap::new(), "hellpot",
+        );
+        let e: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(e["internal_probe"], json!(true));
+    }
+
+    #[test]
+    fn galah_healthchecks_are_marked_as_probes() {
+        let line = json!({
+            "msg": "successfulResponse",
+            "srcIP": "127.0.0.1",
+            "srcPort": "51235",
+            "port": "8888",
+            "httpRequest": {"request": "/"},
+        })
+        .to_string();
+        let (out, _) = enrich_galah_line(line.as_bytes(), &ViaMap::new(), &ViaMap::new(), "galah");
+        let e: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(e["internal_probe"], json!(true));
+    }
+
+    #[test]
+    fn wordpot_healthchecks_are_marked_as_probes() {
+        let line = json!({
+            "time": "2026-08-25T06:54:08",
+            "level": "INFO",
+            "message": "127.0.0.1:51236 probed for the login page",
+        })
+        .to_string();
+        let (out, _) = enrich_wordpot_line(
+            line.as_bytes(), &ViaMap::new(), &ViaMap::new(), "wordpot",
+        );
+        let e: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(e["internal_probe"], json!(true));
+    }
+
+    #[test]
+    fn a_real_attacker_is_still_never_marked_by_the_per_sensor_enrichers() {
+        // The other half. Flagging too eagerly would delete real traffic
+        // from every view, which is worse than the bug being fixed.
+        let line = json!({"app_name": "sentrypeer", "source_ip": "203.0.113.9:5060"}).to_string();
+        let (out, _) = enrich_sentrypeer_line(
+            line.as_bytes(), &ViaMap::new(), &ViaMap::new(), "sentrypeer",
+        );
+        let e: Value = serde_json::from_slice(&out).unwrap();
+
+        assert!(e.get("internal_probe").is_none());
+        assert_eq!(e["src_ip"], json!("203.0.113.9"));
+    }
+
+    #[test]
+    fn ipv6_loopback_counts_for_the_per_sensor_enrichers_too() {
+        let line = json!({"REMOTE_ADDR": "[::1]:51237", "URL": "/"}).to_string();
+        let (out, _) = enrich_hellpot_line(
+            line.as_bytes(), &ViaMap::new(), &ViaMap::new(), "hellpot",
+        );
+        let e: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(e["internal_probe"], json!(true));
     }
 }
