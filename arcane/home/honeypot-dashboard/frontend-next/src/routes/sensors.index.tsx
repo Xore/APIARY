@@ -1,6 +1,6 @@
-// /sensors has no page of its own (#1904).
+// /sensors has no page of its own (#1904) — it picks one and goes there.
 //
-// It used to be four tabs -- three hand-written sensor readings and an
+// It used to be four tabs: three hand-written sensor readings and an
 // "All sensors" roster of twenty-seven tiles. The roster was a wall to read
 // before anything could be chosen, and it gave dionaea's 17.8M events the
 // same visual weight as wordpot's 38.
@@ -10,9 +10,29 @@
 // it is the one most likely to be worth looking at, and because landing on
 // an empty prompt teaches nothing.
 //
-// The three curated readings did not go anywhere -- they are three of the
+// The three curated readings did not go anywhere — they are three of the
 // entries, rendered by components/CuratedSensorViews on those sensors' own
 // pages.
+//
+// # Why this is an index route and not `sensors.tsx`
+//
+// It was `sensors.tsx`, and that made it the *parent layout* of
+// `sensors.$sensor.tsx` rather than a sibling. TanStack's file convention
+// nests `sensors.$sensor` under any `sensors` route that exists, so every
+// load of `/sensors/cowrie` ran this `beforeLoad` first — which threw an
+// unconditional redirect to `/sensors/cowrie`, which ran it again.
+//
+// ERR_TOO_MANY_REDIRECTS, on every sensor page, for any load that started
+// at the server: a deep link, a refresh, a tap that opens a new document.
+// A client-side transition inside an already-loaded app does not re-enter
+// the parent the same way, which is why it looked like a mobile-only fault
+// and why it survived desktop testing.
+//
+// `.index` gives `/sensors` its own leaf, so `sensors.$sensor` hangs off
+// the root beside it and nothing wraps it. The sibling routes here use the
+// same flat shape — there is no `investigate.tsx` above
+// `investigate.ip.$ip.tsx`, and no `payload-workbench.tsx` above
+// `payload-workbench.results.tsx`.
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 
@@ -25,7 +45,7 @@ const fetchCatalog = createServerFn({ method: 'GET' }).handler(
   },
 )
 
-export const Route = createFileRoute('/sensors')({
+export const Route = createFileRoute('/sensors/')({
   beforeLoad: async () => {
     const catalog = await fetchCatalog()
     // The catalog is ordered by count, so the first entry is the busiest.
