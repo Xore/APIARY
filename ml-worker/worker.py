@@ -20,7 +20,8 @@ import redis
 from elasticsearch import Elasticsearch
 from loguru import logger
 
-from models.isolation_forest import IsoForestModel, MAX_TRAIN_SAMPLES, _get_ip, _get_port, _get_transport_proto
+from models.isolation_forest import (IsoForestModel, MAX_TRAIN_SAMPLES, _get_ip, _get_port,
+                                     _get_transport_proto, is_our_own_address)
 from models.lstm_autoencoder import LSTMAEModel
 from models.session_features import SessionFeatureTracker
 
@@ -421,6 +422,7 @@ def score_and_write_events(es: Elasticsearch, rdb, iso_model, lstm_model,
     iso_scores = iso_model.score_batch(matrix)
     hbos_scores = iso_model.hbos_score_batch(matrix)  # fast pre-filter
 
+    suppressed_own_address = 0
     for (event, features, session_feats), iso_score, hbos_score in zip(extracted, iso_scores, hbos_scores):
         try:
             src = event.get("_source", {})
@@ -439,10 +441,29 @@ def score_and_write_events(es: Elasticsearch, rdb, iso_model, lstm_model,
             recent_flags.append(composite >= THRESHOLD)
 
             if composite >= THRESHOLD:
-                explanation = iso_model.explain(features, scores)
-                write_anomaly(es, rdb, event, scores, explanation)
+                # #1959: an alert about an address we own is not actionable.
+                # The event is still scored -- drift detection above stays
+                # honest, and suppressing the score too would change what the
+                # retrain gate sees -- but no operator-facing anomaly is
+                # written for our own loopback, tunnel or LAN traffic.
+                own = _get_ip(src)
+                if own and is_our_own_address(own):
+                    suppressed_own_address += 1
+                else:
+                    explanation = iso_model.explain(features, scores)
+                    write_anomaly(es, rdb, event, scores, explanation)
         except Exception as exc:
             write_malformed_event_metric(es, event, exc)
+
+    if suppressed_own_address:
+        # Logged rather than silent: a suppression that hides a real volume
+        # problem would be worse than the alerts it removes, and this is the
+        # only place the count is visible.
+        logger.info(
+            f"suppressed {suppressed_own_address} anomal"
+            f"{'y' if suppressed_own_address == 1 else 'ies'} on addresses we own "
+            f"(loopback/WireGuard/LAN/WAN) out of {len(extracted)} scored events"
+        )
 
 
 def parse_retrain_slots(raw: str) -> list:

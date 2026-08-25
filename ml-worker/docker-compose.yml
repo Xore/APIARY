@@ -60,6 +60,20 @@ services:
       # in, same reasoning as SURICATA_HOME_NET staying out of the repo).
       # Empty/unset is a safe no-op, not a startup failure.
       ML_HOME_NET: "${ML_HOME_NET:-}"
+      # #1959: every other address we own -- loopback, the WireGuard tunnel,
+      # the home LAN -- used to read as a remote party, because ML_HOME_NET
+      # carried only the public address. On the largest alert day on record,
+      # loopback was the single biggest "source": 3,204 of 6,669 alerts.
+      #
+      # Unset uses isolation_forest.py's DEFAULT_LOCAL_NETS, which covers
+      # loopback, link-local, the WireGuard /24 and RFC1918. Those are
+      # properties of this deployment shape rather than of one install, which
+      # is why they are a default instead of required configuration -- the
+      # incident happened precisely because the safe value had to be typed in.
+      #
+      # Override only for a deployment whose honeypots legitimately live
+      # inside RFC1918 and must still be scored.
+      ML_LOCAL_NETS: "${ML_LOCAL_NETS:-}"
       MODEL_DIR: /models
       LOG_LEVEL: INFO
     volumes:
