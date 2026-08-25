@@ -1150,24 +1150,22 @@ function DefinitionForm({
                 <option value="monthly">Monthly</option>
               </select>
               <input
-                className="form-input"
+                className="form-input hp-num"
                 type="number"
                 min={0}
                 max={23}
                 aria-label="Hour (UTC)"
                 value={schedule.hour}
                 onChange={(event) => setSchedule((current) => ({ ...current, hour: Number(event.target.value) }))}
-                style={{ width: 80 }}
               />
               <input
-                className="form-input"
+                className="form-input hp-num"
                 type="number"
                 min={0}
                 max={59}
                 aria-label="Minute"
                 value={schedule.minute}
                 onChange={(event) => setSchedule((current) => ({ ...current, minute: Number(event.target.value) }))}
-                style={{ width: 80 }}
               />
               {schedule.frequency === 'weekly' ? (
                 <select
@@ -1185,14 +1183,13 @@ function DefinitionForm({
               ) : null}
               {schedule.frequency === 'monthly' ? (
                 <input
-                  className="form-input"
+                  className="form-input hp-num"
                   type="number"
                   min={1}
                   max={28}
                   aria-label="Day of month"
                   value={schedule.month_day}
                   onChange={(event) => setSchedule((current) => ({ ...current, month_day: Number(event.target.value) }))}
-                  style={{ width: 80 }}
                 />
               ) : null}
             </>

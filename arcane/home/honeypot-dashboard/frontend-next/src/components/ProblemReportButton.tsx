@@ -220,9 +220,8 @@ export function ProblemReportButton({ enabled }: { enabled: boolean }) {
   return (
     <>
       <button
-        className="btn btn-secondary"
+        className="btn btn-secondary hp-fab"
         type="button"
-        style={{ position: 'fixed', right: '1rem', bottom: '1rem', zIndex: 40 }}
         onClick={() => {
           setStatus('')
           setOpen(true)
@@ -231,24 +230,15 @@ export function ProblemReportButton({ enabled }: { enabled: boolean }) {
         Report a problem
       </button>
       {open ? (
-        <div
-          className="hp-palette-overlay"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 90,
-            background: 'color-mix(in srgb, var(--bg) 55%, transparent)',
-            display: 'grid',
-            justifyItems: 'center',
-            alignItems: 'start',
-            paddingTop: '12vh',
-          }}
-          onClick={(event) => {
-            if (event.target === event.currentTarget) setOpen(false)
-          }}
-        >
-          <div className="card" role="dialog" aria-modal="true" aria-label="Report a problem" style={{ width: 'min(560px, 92vw)' }}>
-            <h2>Report a problem</h2>
+        <>
+          <div className="modal-backdrop open" aria-hidden="true" onClick={() => setOpen(false)} />
+          <div className="modal hp-pr-modal open" role="dialog" aria-modal="true" aria-label="Report a problem">
+            <div className="modal__header">
+              <h2>Report a problem</h2>
+              <button className="modal__close" type="button" aria-label="Close" onClick={() => setOpen(false)}>
+                ✕
+              </button>
+            </div>
             <form
               onSubmit={(event) => {
                 event.preventDefault()
@@ -290,7 +280,7 @@ export function ProblemReportButton({ enabled }: { enabled: boolean }) {
               ) : null}
             </form>
           </div>
-        </div>
+        </>
       ) : null}
     </>
   )

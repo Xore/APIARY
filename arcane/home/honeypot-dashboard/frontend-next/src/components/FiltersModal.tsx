@@ -86,12 +86,11 @@ export function FiltersModal({
     <>
       <div className="modal-backdrop open" aria-hidden="true" onClick={onClose} />
       <section
-        className="modal open"
+        className="modal modal--compact open"
         role="dialog"
         aria-modal="true"
         aria-label={title}
         ref={panelRef}
-        style={{ width: 'min(560px, calc(100vw - 40px))', height: 'auto', maxHeight: 'min(680px, calc(100dvh - 40px))', overflowY: 'auto' }}
       >
         <div className="modal__header">
           <h2>{title}</h2>

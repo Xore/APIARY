@@ -163,8 +163,7 @@ function BlockControl({ ip }: { ip: string }) {
         name="expires_days"
         min="1"
         placeholder="never"
-        className="hp-input"
-        style={{ width: '6em' }}
+        className="hp-input hp-num"
       />
       <span>day(s)</span>
       <button

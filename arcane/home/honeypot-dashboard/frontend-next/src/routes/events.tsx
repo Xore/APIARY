@@ -681,11 +681,11 @@ function IsolateIpMenu({ ips, onApply }: { ips: CorrelatedIp[]; onApply: (value:
       <summary title="Check or uncheck IPs to isolate one attacker among several sharing this fingerprint">
         Isolate IP…
       </summary>
-      <div className="dropdown hp-open-in-menu" role="menu" style={{ width: 260 }}>
+      <div className="dropdown hp-open-in-menu hp-ip-filter-menu" role="menu">
         <div className="hp-open-in-heading">
           IPs behind this fingerprint <span className="text-muted">({pending.size}/{ips.length})</span>
         </div>
-        <div style={{ display: 'flex', gap: 6, padding: '2px 10px 6px' }}>
+        <div className="hp-ip-filter-actions">
           <button
             className="btn btn-sm btn-secondary"
             type="button"
@@ -697,9 +697,9 @@ function IsolateIpMenu({ ips, onApply }: { ips: CorrelatedIp[]; onApply: (value:
             None
           </button>
         </div>
-        <div style={{ maxHeight: 260, overflowY: 'auto', padding: '0 10px' }}>
+        <div className="hp-ip-filter-list">
           {ips.map((entry) => (
-            <label key={entry.ip} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', fontSize: 13 }}>
+            <label key={entry.ip} className="hp-ip-filter-row">
               <input
                 type="checkbox"
                 checked={pending.has(entry.ip)}
@@ -712,14 +712,12 @@ function IsolateIpMenu({ ips, onApply }: { ips: CorrelatedIp[]; onApply: (value:
                   })
                 }}
               />
-              <span className="mono hp-grow">
-                {entry.ip}
-              </span>
-              <span className="text-muted">{entry.count.toLocaleString('en-US')}</span>
+              <span className="mono hp-ip-filter-ip">{entry.ip}</span>
+              <span className="hp-ip-filter-count">{entry.count.toLocaleString('en-US')}</span>
             </label>
           ))}
         </div>
-        <div style={{ display: 'flex', gap: 6, padding: '8px 10px 4px' }}>
+        <div className="hp-ip-filter-actions">
           <button
             className="btn btn-sm btn-primary"
             type="button"
