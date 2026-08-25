@@ -505,6 +505,29 @@ services:
       - oidc-session
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
+    # #1983: dashboard-next was the last service in this stack -- and the
+    # only one repo-wide (32 other stacks scanned, YAML anchors and inline
+    # flow-style maps accounted for) -- without any compose resource
+    # ceiling, and it is precisely the component exposed to unauthenticated
+    # internet traffic through the VPS gateway. Its RSS scales with both
+    # request load and concurrent live streams (the BFF proxies/SSE-streams
+    # backend responses), so runaway growth here previously ended at the
+    # kernel OOM-killer picking *some* victim on this shared host --
+    # possibly not this container, starving elasticsearch or postgres
+    # instead. With a ceiling, exhaustion kills THIS container
+    # (restart: unless-stopped recovers it) instead of its neighbours.
+    #
+    # Sizing is operator judgment, not a measured maximum: steady state on
+    # the homeserver is ~80MiB (docker stats, 2026-08-26) at the default
+    # WEB_CONCURRENCY=min(4, cpus) cluster workers, and the backpressure
+    # knobs in the environment block above already bound inflight requests
+    # and queue depth. 512M sits ~6x above today's footprint with room for
+    # per-worker SSR plus live-stream headroom across all four workers;
+    # if real traffic proves it tight, raise it deliberately -- the point
+    # of the number is blast-radius containment, not thrift.
+    deploy:
+      resources:
+        limits: {cpus: "1.0", memory: 512M}
 
   # #1610 worker migration: Rust port of the retired Python
   # es-results-importer (removed with the completed cutover — an older git
