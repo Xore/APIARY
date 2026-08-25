@@ -208,6 +208,9 @@ const MARKER_RADIUS_PX = 6
 export function AttackMap({ points }: { points: MapPoint[] | null }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<import('leaflet').Map | null>(null)
+  // Torn down alongside the map itself; the ResizeObserver outlives the
+  // async import that creates it, so it needs its own handle.
+  const cleanupRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     const container = containerRef.current
@@ -217,8 +220,32 @@ export function AttackMap({ points }: { points: MapPoint[] | null }) {
       const L = (await import('leaflet')).default
       await import('leaflet/dist/leaflet.css')
       if (disposed || mapRef.current) return
-      const map = L.map(container, { worldCopyJump: true, minZoom: 1 }).setView([25, 10], 2)
+      const map = L.map(container, { worldCopyJump: true, minZoom: 1 })
       mapRef.current = map
+
+      // #1565: the map is built before the card has settled at its final
+      // width, so leaflet sizes its tile grid against whatever the container
+      // measured at construction time and never revisits it. Measured at an
+      // 1854px viewport, that left six 256px tile columns covering 1536px of
+      // a 1442px container from the wrong origin -- a 92px strip of bare
+      // card down the right edge, which reads as a rendering fault rather
+      // than as ocean.
+      //
+      // invalidateSize() re-measures and recomputes the grid, which is the
+      // whole fix; the setView after it re-centres on the world at the same
+      // zoom the card has always used, so the full world stays visible
+      // rather than being cropped to fill the width.
+      const fitWorld = () => {
+        map.invalidateSize({ animate: false })
+        map.setView([25, 10], 2, { animate: false })
+      }
+      fitWorld()
+
+      // A card that changes width -- a sidebar opening, a window resize,
+      // the print stylesheet -- puts the strip straight back otherwise.
+      const observer = new ResizeObserver(fitWorld)
+      observer.observe(container)
+      cleanupRef.current = () => observer.disconnect()
       L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors',
       }).addTo(map)
@@ -259,6 +286,8 @@ export function AttackMap({ points }: { points: MapPoint[] | null }) {
     })()
     return () => {
       disposed = true
+      cleanupRef.current?.()
+      cleanupRef.current = null
       mapRef.current?.remove()
       mapRef.current = null
     }
