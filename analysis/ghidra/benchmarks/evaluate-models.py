@@ -15,6 +15,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -23,7 +24,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from transcripts import (
+# Running this as a script puts its own directory on sys.path, but
+# analysis/ghidra/worker/tests/test_ghidra_worker.py loads it through an
+# importlib spec to check the approved contract, and that does not. Set the
+# path explicitly so the sibling module resolves either way.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from transcripts import (  # noqa: E402  (path set above so the sibling module resolves)
     DEFAULT_SYNTHETIC_ROOT,
     PROVENANCES,
     PROVENANCE_SYNTHETIC,
