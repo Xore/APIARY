@@ -35,7 +35,6 @@ import { Route as RecordingsRouteImport } from './routes/recordings'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as RevdeckRouteImport } from './routes/revdeck'
 import { Route as SearchRouteImport } from './routes/search'
-import { Route as SensorsRouteImport } from './routes/sensors'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SourceHealthRouteImport } from './routes/source-health'
 import { Route as ApiLiveRouteImport } from './routes/api/live'
@@ -56,6 +55,7 @@ import { Route as PayloadWorkbenchResultsRouteImport } from './routes/payload-wo
 import { Route as RevdeckShaRouteImport } from './routes/revdeck.$sha'
 import { Route as SandboxJobRouteImport } from './routes/sandbox.$job'
 import { Route as SandboxVncRouteImport } from './routes/sandbox.vnc'
+import { Route as SensorsIndexRouteImport } from './routes/sensors.index'
 import { Route as SensorsSensorRouteImport } from './routes/sensors.$sensor'
 import { Route as SessionsIdRouteImport } from './routes/sessions.$id'
 import { Route as TtyReplayShasumRouteImport } from './routes/tty-replay.$shasum'
@@ -199,11 +199,6 @@ const SearchRoute = SearchRouteImport.update({
   path: '/search',
   getParentRoute: () => rootRouteImport,
 } as any)
-const SensorsRoute = SensorsRouteImport.update({
-  id: '/sensors',
-  path: '/sensors',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -305,10 +300,15 @@ const SandboxVncRoute = SandboxVncRouteImport.update({
   path: '/sandbox/vnc',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SensorsIndexRoute = SensorsIndexRouteImport.update({
+  id: '/sensors/',
+  path: '/sensors/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SensorsSensorRoute = SensorsSensorRouteImport.update({
-  id: '/$sensor',
-  path: '/$sensor',
-  getParentRoute: () => SensorsRoute,
+  id: '/sensors/$sensor',
+  path: '/sensors/$sensor',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const SessionsIdRoute = SessionsIdRouteImport.update({
   id: '/sessions/$id',
@@ -396,7 +396,6 @@ export interface FileRoutesByFullPath {
   '/reports': typeof ReportsRoute
   '/revdeck': typeof RevdeckRouteWithChildren
   '/search': typeof SearchRoute
-  '/sensors': typeof SensorsRouteWithChildren
   '/settings': typeof SettingsRoute
   '/source-health': typeof SourceHealthRoute
   '/api/live': typeof ApiLiveRoute
@@ -420,6 +419,7 @@ export interface FileRoutesByFullPath {
   '/sensors/$sensor': typeof SensorsSensorRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
+  '/sensors/': typeof SensorsIndexRoute
   '/api/chart/$name': typeof ApiChartNameRoute
   '/api/export/$name': typeof ApiExportNameRoute
   '/investigate/cidr/$cidr': typeof InvestigateCidrCidrRoute
@@ -457,7 +457,6 @@ export interface FileRoutesByTo {
   '/reports': typeof ReportsRoute
   '/revdeck': typeof RevdeckRouteWithChildren
   '/search': typeof SearchRoute
-  '/sensors': typeof SensorsRouteWithChildren
   '/settings': typeof SettingsRoute
   '/source-health': typeof SourceHealthRoute
   '/api/live': typeof ApiLiveRoute
@@ -481,6 +480,7 @@ export interface FileRoutesByTo {
   '/sensors/$sensor': typeof SensorsSensorRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
+  '/sensors': typeof SensorsIndexRoute
   '/api/chart/$name': typeof ApiChartNameRoute
   '/api/export/$name': typeof ApiExportNameRoute
   '/investigate/cidr/$cidr': typeof InvestigateCidrCidrRoute
@@ -519,7 +519,6 @@ export interface FileRoutesById {
   '/reports': typeof ReportsRoute
   '/revdeck': typeof RevdeckRouteWithChildren
   '/search': typeof SearchRoute
-  '/sensors': typeof SensorsRouteWithChildren
   '/settings': typeof SettingsRoute
   '/source-health': typeof SourceHealthRoute
   '/api/live': typeof ApiLiveRoute
@@ -543,6 +542,7 @@ export interface FileRoutesById {
   '/sensors/$sensor': typeof SensorsSensorRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
+  '/sensors/': typeof SensorsIndexRoute
   '/api/chart/$name': typeof ApiChartNameRoute
   '/api/export/$name': typeof ApiExportNameRoute
   '/investigate/cidr/$cidr': typeof InvestigateCidrCidrRoute
@@ -582,7 +582,6 @@ export interface FileRouteTypes {
     | '/reports'
     | '/revdeck'
     | '/search'
-    | '/sensors'
     | '/settings'
     | '/source-health'
     | '/api/live'
@@ -606,6 +605,7 @@ export interface FileRouteTypes {
     | '/sensors/$sensor'
     | '/sessions/$id'
     | '/tty-replay/$shasum'
+    | '/sensors/'
     | '/api/chart/$name'
     | '/api/export/$name'
     | '/investigate/cidr/$cidr'
@@ -643,7 +643,6 @@ export interface FileRouteTypes {
     | '/reports'
     | '/revdeck'
     | '/search'
-    | '/sensors'
     | '/settings'
     | '/source-health'
     | '/api/live'
@@ -667,6 +666,7 @@ export interface FileRouteTypes {
     | '/sensors/$sensor'
     | '/sessions/$id'
     | '/tty-replay/$shasum'
+    | '/sensors'
     | '/api/chart/$name'
     | '/api/export/$name'
     | '/investigate/cidr/$cidr'
@@ -704,7 +704,6 @@ export interface FileRouteTypes {
     | '/reports'
     | '/revdeck'
     | '/search'
-    | '/sensors'
     | '/settings'
     | '/source-health'
     | '/api/live'
@@ -728,6 +727,7 @@ export interface FileRouteTypes {
     | '/sensors/$sensor'
     | '/sessions/$id'
     | '/tty-replay/$shasum'
+    | '/sensors/'
     | '/api/chart/$name'
     | '/api/export/$name'
     | '/investigate/cidr/$cidr'
@@ -766,7 +766,6 @@ export interface RootRouteChildren {
   ReportsRoute: typeof ReportsRoute
   RevdeckRoute: typeof RevdeckRouteWithChildren
   SearchRoute: typeof SearchRoute
-  SensorsRoute: typeof SensorsRouteWithChildren
   SettingsRoute: typeof SettingsRoute
   SourceHealthRoute: typeof SourceHealthRoute
   ApiLiveRoute: typeof ApiLiveRoute
@@ -784,8 +783,10 @@ export interface RootRouteChildren {
   PayloadWorkbenchResultsRoute: typeof PayloadWorkbenchResultsRoute
   SandboxJobRoute: typeof SandboxJobRoute
   SandboxVncRoute: typeof SandboxVncRoute
+  SensorsSensorRoute: typeof SensorsSensorRoute
   SessionsIdRoute: typeof SessionsIdRoute
   TtyReplayShasumRoute: typeof TtyReplayShasumRoute
+  SensorsIndexRoute: typeof SensorsIndexRoute
   ApiChartNameRoute: typeof ApiChartNameRoute
   ApiExportNameRoute: typeof ApiExportNameRoute
   InvestigateCidrCidrRoute: typeof InvestigateCidrCidrRoute
@@ -981,13 +982,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SearchRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/sensors': {
-      id: '/sensors'
-      path: '/sensors'
-      fullPath: '/sensors'
-      preLoaderRoute: typeof SensorsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -1128,12 +1122,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SandboxVncRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/sensors/': {
+      id: '/sensors/'
+      path: '/sensors'
+      fullPath: '/sensors/'
+      preLoaderRoute: typeof SensorsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sensors/$sensor': {
       id: '/sensors/$sensor'
-      path: '/$sensor'
+      path: '/sensors/$sensor'
       fullPath: '/sensors/$sensor'
       preLoaderRoute: typeof SensorsSensorRouteImport
-      parentRoute: typeof SensorsRoute
+      parentRoute: typeof rootRouteImport
     }
     '/sessions/$id': {
       id: '/sessions/$id'
@@ -1248,17 +1249,6 @@ const RevdeckRouteChildren: RevdeckRouteChildren = {
 const RevdeckRouteWithChildren =
   RevdeckRoute._addFileChildren(RevdeckRouteChildren)
 
-interface SensorsRouteChildren {
-  SensorsSensorRoute: typeof SensorsSensorRoute
-}
-
-const SensorsRouteChildren: SensorsRouteChildren = {
-  SensorsSensorRoute: SensorsSensorRoute,
-}
-
-const SensorsRouteWithChildren =
-  SensorsRoute._addFileChildren(SensorsRouteChildren)
-
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentCampaignsRoute: AgentCampaignsRoute,
@@ -1286,7 +1276,6 @@ const rootRouteChildren: RootRouteChildren = {
   ReportsRoute: ReportsRoute,
   RevdeckRoute: RevdeckRouteWithChildren,
   SearchRoute: SearchRoute,
-  SensorsRoute: SensorsRouteWithChildren,
   SettingsRoute: SettingsRoute,
   SourceHealthRoute: SourceHealthRoute,
   ApiLiveRoute: ApiLiveRoute,
@@ -1305,8 +1294,10 @@ const rootRouteChildren: RootRouteChildren = {
   PayloadWorkbenchResultsRoute: PayloadWorkbenchResultsRoute,
   SandboxJobRoute: SandboxJobRoute,
   SandboxVncRoute: SandboxVncRoute,
+  SensorsSensorRoute: SensorsSensorRoute,
   SessionsIdRoute: SessionsIdRoute,
   TtyReplayShasumRoute: TtyReplayShasumRoute,
+  SensorsIndexRoute: SensorsIndexRoute,
   ApiChartNameRoute: ApiChartNameRoute,
   ApiExportNameRoute: ApiExportNameRoute,
   InvestigateCidrCidrRoute: InvestigateCidrCidrRoute,
