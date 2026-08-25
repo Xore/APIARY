@@ -29,7 +29,7 @@ name: honeypot-arcane
 
 services:
   arcane:
-    image: ghcr.io/getarcaneapp/manager:v2.8.0@sha256:9146935e0797ce14a340616ceab2f77b3bc61d1b10befb0718a4be7f01485e2c
+    image: ghcr.io/getarcaneapp/manager:v2.9.0@sha256:f10f95d1123d7209956ac084b52486414c09ddca58199e211794f9f6bd136229
     container_name: hp-arcane
     restart: unless-stopped
     environment:
