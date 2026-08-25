@@ -50,6 +50,16 @@ PATTERNS = (
     (re.compile(r"(?m)^[ \t]*[A-Z][A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_KEY)[ \t]*=[ \t]*(?!(?:(?i:change.?me)|DECOY_ONLY|\$[\{\(]|\"?<|$))[^#\s]{8,}"), "literal credential assignment"),
     (re.compile(r"(?i)https?://[^/\s:@]+:[^/\s@]+@"), "credential embedded in URL"),
 )
+# #1920: the VPS Traefik config is not documentation -- install-vps.sh
+# provisions the live router set straight out of it, so a real hostname
+# committed here is a smoke test that resolves somebody's production DNS
+# instead of failing loudly on a reinstall. The FORBIDDEN_LITERALS entry
+# above only catches the one domain we already know about; this catches the
+# next one. RFC 2606/6761 reserves these names for exactly this purpose.
+RESERVED_TLDS = (".example", ".test", ".invalid", ".localhost")
+GENERIC_DOMAIN_GLOBS = ("vps/traefik/*.yml", "vps/traefik/*.yaml")
+HOST_RULE = re.compile(r"Host\(`([^`]+)`\)")
+
 BINARY_SUFFIXES = {
     ".pcap", ".pcapng", ".qcow2", ".img", ".p12", ".pfx", ".key", ".pem",
 }
@@ -93,6 +103,17 @@ def main() -> int:
             for match in pattern.finditer(content):
                 line = content.count("\n", 0, match.start()) + 1
                 findings.append(f"{posix}:{line}: possible {reason}")
+        if any(relative.match(glob) for glob in GENERIC_DOMAIN_GLOBS):
+            for match in HOST_RULE.finditer(content):
+                host = match.group(1)
+                if host.endswith(RESERVED_TLDS):
+                    continue
+                line = content.count("\n", 0, match.start()) + 1
+                findings.append(
+                    f"{posix}:{line}: Host(`{host}`) is a real domain -- "
+                    "tracked VPS routers must use a reserved example domain "
+                    "so a reinstall smoke test cannot resolve live DNS"
+                )
 
     if findings:
         print("Public-repository safety check failed:", file=sys.stderr)
