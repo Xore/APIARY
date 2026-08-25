@@ -260,8 +260,21 @@ struct Entity {
     credentials: Vec<String>,
     #[serde(default)]
     sensors: Vec<String>,
+    /// Lifetime event count. NOT recomputed from source (the evidence fetch
+    /// is capped, and events age out of the sliding window) and NOT
+    /// accumulated naively either (#2040): each touched cycle advances it by
+    /// how much this cycle's evidence-window count grew past the previous
+    /// cycle's (`window_events`), so re-scanning the same still-active
+    /// window every RUN_INTERVAL adds nothing. Docs written before #2040
+    /// carry an inflated value from exactly that naive accumulation; they
+    /// self-migrate on their first touched cycle (see finalize_entity).
     #[serde(default)]
     events: i64,
+    /// This cycle's evidence-window count, persisted so the next cycle can
+    /// take the delta against it. Absent on pre-#2040 docs, whose absence
+    /// is the migration marker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    window_events: Option<i64>,
     #[serde(default)]
     first: String,
     #[serde(default)]
@@ -288,7 +301,17 @@ struct Working {
     signals: SignalSet,
     sensor_set: HashSet<String>,
     technique_set: HashSet<String>,
-    events: i64,
+    /// The persisted lifetime counter as loaded (#2040 semantics -- see
+    /// Entity::events); finalize advances it by the cycle delta.
+    events_base: i64,
+    /// Sum of this cycle's per-IP observation counts. Rebuilt from scratch
+    /// every cycle and never written straight to `events` -- that was the
+    /// #2040 inflation, where a still-active IP's window got re-absorbed
+    /// onto the persisted total once per RUN_INTERVAL.
+    cycle_events: i64,
+    /// The previous cycle's evidence-window count as persisted on the doc,
+    /// or None on pre-#2040 docs (the migration marker) and fresh entities.
+    prev_window_events: Option<i64>,
     // Formatted RFC3339 (whole-second, "Z"-suffixed) strings, compared
     // lexicographically -- matches Go's own absorb/mergeEntityInto, which
     // compares e.First/e.Last as strings (time.RFC3339, always whole-
@@ -311,7 +334,9 @@ fn working_from_entity(e: &Entity) -> Working {
         },
         sensor_set: e.sensors.iter().cloned().collect(),
         technique_set: e.techniques.iter().cloned().collect(),
-        events: e.events,
+        events_base: e.events,
+        cycle_events: 0,
+        prev_window_events: e.window_events,
         first: e.first.clone(),
         last: e.last.clone(),
         verdicts: e.verdicts.clone(),
@@ -325,7 +350,9 @@ fn new_working(id: String) -> Working {
         signals: SignalSet::default(),
         sensor_set: HashSet::new(),
         technique_set: HashSet::new(),
-        events: 0,
+        events_base: 0,
+        cycle_events: 0,
+        prev_window_events: None,
         first: String::new(),
         last: String::new(),
         verdicts: Vec::new(),
@@ -337,13 +364,14 @@ fn fmt_rfc3339_whole_seconds(t: chrono::DateTime<chrono::Utc>) -> String {
 }
 
 /// Folds one IP observation's signals/sensors/techniques/events/time-range
-/// into `e` in place.
+/// into `e` in place. The event count lands in `cycle_events` (this cycle's
+/// window sum), never straight onto the persisted lifetime counter -- #2040.
 fn absorb(e: &mut Working, o: &IpObservation) {
     e.ip_set.insert(o.ip.clone());
     e.signals.merge(&o.signals);
     e.sensor_set.extend(o.sensors.iter().cloned());
     e.technique_set.extend(o.techniques.iter().cloned());
-    e.events += o.events;
+    e.cycle_events += o.events;
     if let Some(first) = o.first {
         let first_str = fmt_rfc3339_whole_seconds(first);
         if e.first.is_empty() || first_str < e.first {
@@ -359,13 +387,23 @@ fn absorb(e: &mut Working, o: &IpObservation) {
 }
 
 /// Folds `b`'s members/signals into `a` in place -- `a` survives, `b` is
-/// discarded by the caller (the absorbed-id list).
+/// discarded by the caller (the absorbed-id list). The absorbed entity's
+/// lifetime counter and window baseline fold over too: its member IPs are
+/// about to become `a`'s, so next cycle's delta must count their activity
+/// as already-seen, not as new (#2040).
 fn merge_entity_into(a: &mut Working, b: &Working) {
     a.ip_set.extend(b.ip_set.iter().cloned());
     a.signals.merge(&b.signals);
     a.sensor_set.extend(b.sensor_set.iter().cloned());
     a.technique_set.extend(b.technique_set.iter().cloned());
-    a.events += b.events;
+    a.events_base += b.events_base;
+    a.cycle_events += b.cycle_events;
+    // Either side missing the #2040 marker makes the merged doc legacy:
+    // finalize will restart its counter once from this cycle's window.
+    a.prev_window_events = match (a.prev_window_events, b.prev_window_events) {
+        (Some(x), Some(y)) => Some(x + y),
+        _ => None,
+    };
     if !b.first.is_empty() && (a.first.is_empty() || b.first < a.first) {
         a.first = b.first.clone();
     }
@@ -506,12 +544,25 @@ fn resolve_identities(
 }
 
 /// Flattens a working entity's sets back into its persisted slice fields,
-/// sorted for stable JSON output.
+/// sorted for stable JSON output. This is also where the lifetime counter
+/// advances (#2040): by the growth of this cycle's evidence-window count
+/// over the previous cycle's, never by re-adding the whole window.
 fn finalize_entity(e: &Working) -> Entity {
     let sorted = |s: &HashSet<String>| -> Vec<String> {
         let mut v: Vec<String> = s.iter().filter(|k| !k.trim().is_empty()).cloned().collect();
         v.sort();
         v
+    };
+    // A shrinking window (events aged out faster than they arrived) must
+    // not rewind the lifetime counter -- only genuine growth advances it.
+    let events = match e.prev_window_events {
+        // Pre-#2040 doc: its `events` value accumulated whole sliding
+        // windows once per cycle and cannot be trusted. Restart from what
+        // this cycle actually observed; every touched doc migrates itself
+        // on its first touched cycle, and untouched docs keep serving
+        // their old number until there's new evidence to write them.
+        None => e.cycle_events,
+        Some(prev) => e.events_base + (e.cycle_events - prev).max(0),
     };
     Entity {
         id: e.id.clone(),
@@ -520,7 +571,8 @@ fn finalize_entity(e: &Working) -> Entity {
         payloads: sorted(&e.signals.payloads),
         credentials: sorted(&e.signals.creds),
         sensors: sorted(&e.sensor_set),
-        events: e.events,
+        events,
+        window_events: Some(e.cycle_events),
         first: e.first.clone(),
         last: e.last.clone(),
         updated: String::new(),
@@ -753,6 +805,127 @@ mod tests {
     fn new_entity_id_is_a_pure_function_of_the_seed_ip() {
         assert_eq!(new_entity_id("203.0.113.5"), new_entity_id("203.0.113.5"));
         assert_ne!(new_entity_id("203.0.113.5"), new_entity_id("203.0.113.6"));
+    }
+
+    #[test]
+    fn rescanning_the_same_sliding_window_does_not_inflate_events() {
+        // #2040: every cycle re-fetches the whole EVIDENCE_WINDOW, so an
+        // active IP's window is re-absorbed onto the persisted entity once
+        // per RUN_INTERVAL. The lifetime counter may only advance by what
+        // actually grew past the previous cycle's window count.
+        let mut observations = HashMap::new();
+        let mut o = obs("203.0.113.7", "fp-e", "sha-e", "");
+        o.events = 3;
+        observations.insert("203.0.113.7".to_string(), o);
+
+        let (first, _) = resolve_identities(Vec::new(), &observations);
+        assert_eq!(first[0].events, 3);
+        assert_eq!(first[0].window_events, Some(3));
+
+        // Next cycle: same window re-fetched (nothing new arrived).
+        let (second, _) = resolve_identities(first.clone(), &observations);
+        assert_eq!(
+            second[0].events, 3,
+            "re-absorbing an unchanged evidence window must not inflate the lifetime counter"
+        );
+
+        // The window then slides: 2 events aged out, 4 new arrived.
+        let mut observations = HashMap::new();
+        let mut o = obs("203.0.113.7", "fp-e", "sha-e", "");
+        o.events = 4;
+        observations.insert("203.0.113.7".to_string(), o);
+        let (third, _) = resolve_identities(second, &observations);
+        assert_eq!(third[0].events, 4, "only growth over the previous window advances the counter");
+
+        // And a shrinking window (everything aged out) must not rewind it.
+        let mut observations = HashMap::new();
+        let mut o = obs("203.0.113.7", "fp-e", "sha-e", "");
+        o.events = 1;
+        observations.insert("203.0.113.7".to_string(), o);
+        let (fourth, _) = resolve_identities(third, &observations);
+        assert_eq!(fourth[0].events, 4, "a shrinking window must not rewind the lifetime counter");
+        assert_eq!(fourth[0].window_events, Some(1));
+    }
+
+    #[test]
+    fn pre_2040_docs_restart_their_counter_on_first_touch() {
+        // Docs written before #2040 accumulated whole windows per cycle and
+        // carry inflated `events` with no `window_events` baseline; the
+        // missing marker migrates them exactly once.
+        let existing = vec![Entity {
+            id: "legacy".into(),
+            ips: vec!["9.9.9.9".into()],
+            fingerprints: vec!["fp-legacy".into()],
+            events: 987_654,
+            ..Default::default()
+        }];
+        let mut observations = HashMap::new();
+        let mut o = obs("9.9.9.9", "fp-legacy", "", "");
+        o.events = 2;
+        observations.insert("9.9.9.9".to_string(), o);
+
+        let (changed, absorbed) = resolve_identities(existing, &observations);
+        assert!(absorbed.is_empty());
+        assert_eq!(changed.len(), 1);
+        assert_eq!(
+            changed[0].events, 2,
+            "a legacy doc's inflated counter must be replaced by this cycle's window, not added to"
+        );
+        assert_eq!(changed[0].window_events, Some(2));
+
+        // From there on it behaves like any other doc: unchanged window,
+        // no inflation.
+        let (again, _) = resolve_identities(changed, &observations);
+        assert_eq!(again[0].events, 2);
+    }
+
+    #[test]
+    fn absorbing_an_entity_folds_its_lifetime_and_window_baseline() {
+        // A new IP sharing two signal categories with BOTH existing
+        // entities is what triggers an absorption here -- already-member
+        // IPs go straight to their own entity and never re-match. A
+        // absorbs B; B's lifetime counter and window baseline must fold
+        // into A so next cycle's delta treats B's IPs' activity as
+        // already seen, not as new (#2040).
+        let existing = vec![
+            Entity {
+                id: "entity-a".into(),
+                ips: vec!["1.1.1.1".into()],
+                fingerprints: vec!["fp-a".into()],
+                payloads: vec!["sha-a".into()],
+                events: 10,
+                window_events: Some(4),
+                ..Default::default()
+            },
+            Entity {
+                id: "entity-b".into(),
+                ips: vec!["2.2.2.2".into()],
+                fingerprints: vec!["fp-a".into()],
+                payloads: vec!["sha-a".into()],
+                events: 6,
+                window_events: Some(2),
+                ..Default::default()
+            },
+        ];
+        // Only 3.3.3.3 is active this cycle: 5 events. The merged doc's
+        // previous-window baseline is 4+2=6, so the counter must hold at
+        // the folded 16 -- absorbing must not let the shrink become a
+        // rewind, and folding must not let B's baseline be lost.
+        let mut observations = HashMap::new();
+        let mut o = obs("3.3.3.3", "fp-a", "sha-a", "");
+        o.events = 5;
+        observations.insert("3.3.3.3".to_string(), o);
+
+        let (changed, absorbed) = resolve_identities(existing, &observations);
+        assert_eq!(absorbed, vec!["entity-b"]);
+        assert_eq!(changed.len(), 1);
+        assert_eq!(changed[0].events, 16);
+        assert_eq!(changed[0].window_events, Some(5));
+        assert_eq!(
+            changed[0].ips,
+            vec!["1.1.1.1", "2.2.2.2", "3.3.3.3"],
+            "B's member IPs must land on the surviving entity"
+        );
     }
 
     #[test]
