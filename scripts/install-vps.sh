@@ -388,6 +388,28 @@ step_stage_vps_dir() {
 # VPS's single-directory layout (one .env, one certs/ pair) instead of one
 # subfolder per Dockge stack.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Phase 7b -- pin the capture NIC to whatever this machine actually calls it.
+#
+# Suricata, Zeek and huginn-sidecar all sniff a named interface, and the name
+# belongs to the provider and the kernel rather than to us. It was ens6 on
+# this VPS until a reboot brought it back as eth0: Zeek and huginn died on
+# "Could not find network interface", and Suricata kept running against an
+# interface that no longer existed -- the worse failure, because nothing in
+# `docker ps` shows it (#1929).
+#
+# So it is derived rather than assumed, at every boot, from the interface
+# carrying the default route. Ordered before docker.service, so Compose
+# interpolates a name that is already correct.
+# ---------------------------------------------------------------------------
+step_capture_interface() {
+  install -m 0755 /root/vps/detect-capture-interface.sh /usr/local/sbin/detect-capture-interface.sh
+  install -m 0644 /root/vps/apiary-capture-interface.service /etc/systemd/system/apiary-capture-interface.service
+  systemctl daemon-reload
+  systemctl enable --now apiary-capture-interface.service
+  echo "capture interface: $(sed -n 's/^CAPTURE_INTERFACE=//p' /root/vps/.env | tail -1)"
+}
+
 step_restore_env() {
   local src="${BACKUP_HOST_PATH}/vps/.env"
   if with_retry 3 5 scp -i "$BACKUP_HOST_KEY" -P 22 -o StrictHostKeyChecking=accept-new \
@@ -552,6 +574,7 @@ run_step firewall-honeypot-ports "Open honeypot ports (vps/honeypot-firewall.sh)
 run_step nic-gro-fix             "Disable virtio-net hardware GRO (#342)"  step_nic_gro_fix
 run_step stage-vps-dir           "Stage vps/ into /root/vps"               step_stage_vps_dir
 run_step restore-env             "Restore .env from LAN backup"            step_restore_env
+run_step capture-interface       "Pin the capture NIC to this host's own name" step_capture_interface
 run_step restore-certs           "Restore Traefik origin certs from LAN backup" step_restore_certs
 run_step render-traefik-dynamic  "Substitute real domain into dynamic.yml" step_render_traefik_dynamic
 run_step prepare-log-dirs        "Create host-side log/pcap directories"   step_prepare_log_dirs

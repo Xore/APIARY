@@ -190,7 +190,11 @@ services:
     # answerable from one line of compose config.
     command:
       - -i
-      - af_packet::${CAPTURE_INTERFACE:-ens6}
+      # #1929: the fallback is a last resort, not a guess worth trusting --
+      # detect-capture-interface.service should have written the real name
+      # into .env before Docker started. Zeek fails loudly on a missing
+      # interface, which is what makes this safe to have a default at all.
+      - af_packet::${CAPTURE_INTERFACE:-eth0}
       - ${ZEEK_SITE_SCRIPT:-/usr/local/share/zeek-site/local.zeek}
     volumes:
       - /opt/stacks/apiary/logs/zeek:/logs/zeek
@@ -273,7 +277,7 @@ services:
     # truncation resets the tailing harvester to offset 0 while the rewritten
     # head hashes to a new fingerprint and starts a second one. The binary now
     # rotates by rename-and-reopen, the same way portbridge does.
-    command: ["--interface", "${CAPTURE_INTERFACE:-ens6}", "--out", "/logs/huginn/huginn.json", "--max-bytes", "33554432"]
+    command: ["--interface", "${CAPTURE_INTERFACE:-eth0}", "--out", "/logs/huginn/huginn.json", "--max-bytes", "33554432"]
     deploy:
       resources:
         limits:
@@ -979,7 +983,13 @@ services:
       - "-c"
       - "/etc/suricata/suricata.yaml"
       - "-i"
-      - "${SURICATA_IFACE:-ens6}"
+      # #1929: one variable for one fact. This was SURICATA_IFACE while
+      # Zeek and huginn used CAPTURE_INTERFACE, so the two could disagree
+      # -- and on this host CAPTURE_INTERFACE was never set at all and rode
+      # a hardcoded default. detect-capture-interface.service writes the
+      # real name at boot; SURICATA_IFACE is still honoured so an existing
+      # .env keeps working.
+      - "${CAPTURE_INTERFACE:-${SURICATA_IFACE:-eth0}}"
       - "--set"
       - "vars.address-groups.HOME_NET=${SURICATA_HOME_NET:-any}"
       - "--set"

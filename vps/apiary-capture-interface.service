@@ -1,0 +1,23 @@
+# Re-derive the capture NIC name before Docker starts (#1929).
+#
+# Ordered Before=docker.service so the value is already correct in .env by
+# the time Compose interpolates it, which is what makes a NIC rename
+# self-correcting rather than a silent capture outage.
+[Unit]
+Description=Detect the capture interface for Suricata, Zeek and huginn-sidecar
+Documentation=https://github.com/Xore/APIARY/issues/1929
+After=network-online.target
+Wants=network-online.target
+Before=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/detect-capture-interface.sh /root/vps/.env
+# A failure here means the capture services would start against a stale name.
+# Better to fail visibly in `systemctl status` than to let that happen quietly.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
