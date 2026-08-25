@@ -14,7 +14,14 @@ completions call, matching worker/ghidra-worker.py's own triage() pattern)
 against the gcc-x86_64/-O0 slice of the corpus -- the same slice #160's own
 REx86 comparison used, for direct comparability.
 
+The revdeck slot has moved on since #159 recorded its 56/69, so scoring the
+currently-approved model no longer reproduces that number. Pass --model to pin
+the historical tag and --output to compare without overwriting the committed
+baseline; the digest is always read back from the runtime rather than copied
+out of the manifest, so the report cannot name a model nobody verified.
+
 Usage: python3 record_baseline.py [--api-base http://127.0.0.1:11434/v1]
+                                  [--model TAG] [--output PATH]
 """
 import argparse
 import json
@@ -80,6 +87,23 @@ def score(text: str, rubric: dict) -> dict:
     }
 
 
+def resolve_digest(api_base: str, model: str) -> str:
+    """Read the installed digest for a tag from Ollama's native /api/tags.
+
+    api_base points at the OpenAI-compatible /v1 prefix, which does not expose
+    digests, so this steps up to the native API alongside it.
+    """
+    native = api_base.rstrip("/")
+    if native.endswith("/v1"):
+        native = native[: -len("/v1")]
+    with urllib.request.urlopen(f"{native}/api/tags", timeout=30) as r:
+        tags = json.loads(r.read()).get("models", [])
+    for item in tags:
+        if model in (item.get("name"), item.get("model")):
+            return (item.get("digest") or "").removeprefix("sha256:")
+    raise SystemExit(f"model tag is not installed: {model}")
+
+
 def ask_model(
     api_base: str,
     model: str,
@@ -142,14 +166,35 @@ def main() -> int:
     parser.add_argument("--operator", default=default_operator())
     parser.add_argument("--supersedes", help="run_id this run replaces; stored transcripts are never edited")
     parser.add_argument("--no-transcripts", action="store_true")
+    parser.add_argument(
+        "--model",
+        help="Exact tag to score instead of whatever currently fills the revdeck slot. "
+             "Needed to re-measure a historical baseline: the slot has moved on since "
+             "#159 recorded 56/69, so the default no longer reproduces that number.",
+    )
+    parser.add_argument(
+        "--output", default=str(CORPUS_DIR / "baseline_results.json"),
+        help="Where the report is written. Point this elsewhere to compare against the "
+             "committed #159 baseline instead of overwriting it.",
+    )
     args = parser.parse_args()
 
     manifest = json.loads((CORPUS_DIR / "manifest.json").read_text())
     rubric = json.loads((CORPUS_DIR / "rev_cases_v2_rubric.json").read_text())["cases"]
     approved = json.loads((MODELS_DIR / "approved-models.json").read_text())
     revdeck = approved["slots"]["revdeck"]
-    model_tag = revdeck["artifact"]["tag"]
     request = revdeck["qualification_request"]
+    model_tag = args.model or revdeck["artifact"]["tag"]
+    # The digest is read back from the runtime rather than copied out of the
+    # manifest: with --model the manifest describes a different model entirely,
+    # and a report naming a tag whose digest was never checked is exactly the
+    # family-alias ambiguity #158 exists to prevent.
+    model_digest = resolve_digest(args.api_base, model_tag)
+    if not args.model and model_digest != revdeck["artifact"]["digest"]:
+        raise SystemExit(
+            f"installed {model_tag} is digest {model_digest}, but the manifest approves "
+            f"{revdeck['artifact']['digest']}; re-qualify rather than scoring a different model"
+        )
 
     slice_builds = [
         b for b in manifest["builds"]
@@ -174,7 +219,7 @@ def main() -> int:
         recorder = SlotRecorder(
             writer=writer,
             slot="revdeck",
-            model={"tag": model_tag, "digest": revdeck["artifact"]["digest"]},
+            model={"tag": model_tag, "digest": model_digest},
             reproducibility=Reproducibility(
                 tier=args.tier,
                 corpus_manifest_sha256=sha256_file(CORPUS_DIR / "manifest.json"),
@@ -204,7 +249,7 @@ def main() -> int:
     report = {
         "recorded_for_issue": 159,
         "model": model_tag,
-        "model_digest": revdeck["artifact"]["digest"],
+        "model_digest": model_digest,
         "qualification_request": request,
         "slice": {"toolchain": SLICE_TOOLCHAIN, "opt_level": SLICE_OPT},
         "case_count": len(results),
@@ -218,7 +263,7 @@ def main() -> int:
         summary = writer.close()
         report["transcript_run_id"] = summary["run_id"]
         report["transcripts_sha256"] = summary["transcripts_sha256"]
-    with open(CORPUS_DIR / "baseline_results.json", "w") as f:
+    with open(args.output, "w") as f:
         json.dump(report, f, indent=2)
 
     print(f"\n{model_tag}: {total_score}/{total_max} ({report['percent']}%) across {len(results)} cases")
