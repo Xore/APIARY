@@ -42,9 +42,10 @@ type EventRow = {
   /** #1876: the address the request claimed, when it disagrees with the
    *  one the connection resolved to. Present only on a conflict. */
   src_ip_claimed?: string
-  /** The document id, when the row came from a search hit — the events
-   *  list has one, the SSE live stream does not. Drives the full-detail
-   *  action, which is simply absent for a row with no id (#1868). */
+  /** The document id — search hits carry it (#1868), and since #1962 the
+   *  SSE live stream does too (live.rs emits via row_from_hit). Drives
+   *  the full-detail action and stable row/selection identity; simply
+   *  absent for a row from an older backend still on row_from_source. */
   id?: string
   time: string
   sensor: string
@@ -295,15 +296,18 @@ function Events() {
   // own once that event drops off the end of the list -- and the index
   // arithmetic disappears, because there is no position to keep in sync.
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
-  /** A row's stable identity. The document id when the row came from a
-   *  search hit; otherwise a composite that is stable for the same event,
-   *  which is what the SSE stream can offer (it carries a _source and no
-   *  hit, so there is no id to send). */
-  const rowKey = (row: EventRow, index: number) =>
-    row.id ?? `${row.time}|${row.sensor}|${row.src_ip}|${row.session}|${index}`
+  /** A row's stable identity. Both sources now carry the document id —
+   *  search hits always did (#1868); the SSE stream does too since #1962
+   *  (live.rs emits via row_from_hit). The id-less composite is only a
+   *  fallback for a payload from a not-yet-restarted backend: it stays
+   *  position-free so a live prepend can never shift it out from under
+   *  an open record (the old trailing index did exactly that, closing
+   *  the pane on every frame of a busy feed). */
+  const rowKey = (row: EventRow) =>
+    row.id || `${row.time}|${row.sensor}|${row.src_ip}|${row.session}`
   const selectedRow = selectedKey === null || rows === null
     ? null
-    : (rows.find((row, index) => rowKey(row, index) === selectedKey) ?? null)
+    : (rows.find((row) => rowKey(row) === selectedKey) ?? null)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const baseFilterCount = [search.ip, search.sensor, search.country, search.proto, search.port, search.kind].filter(
     Boolean,
@@ -565,9 +569,9 @@ function Events() {
                         key={`${row.time}-${index}`}
                         row={row}
                         breakLabel={breakLabel}
-                        selected={selectedKey === rowKey(row, index)}
+                        selected={selectedKey === rowKey(row)}
                         onSelect={() =>
-                          setSelectedKey(selectedKey === rowKey(row, index) ? null : rowKey(row, index))
+                          setSelectedKey(selectedKey === rowKey(row) ? null : rowKey(row))
                         }
                         onPivot={setFilter}
                         investigationConfig={investigationConfig}
