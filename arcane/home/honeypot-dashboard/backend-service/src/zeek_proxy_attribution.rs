@@ -154,6 +154,14 @@ const MAX_DIAL_AGE_SECONDS: i64 = 6 * 3600;
 /// but does not remove it.
 const GRACE_SECONDS: i64 = 30 * 60;
 
+/// The WireGuard endpoints. A flow whose source is one of these is our own
+/// relay rather than an attacker, which is the whole reason this loop exists.
+///
+/// Only the via_port arm of the query needs them named: the community_id arm
+/// identifies its candidates by having a relayed key at all, but the via_port
+/// arm would otherwise match every unattributed flow in the window.
+const TUNNEL_ADDRESSES: [&str; 2] = ["10.8.0.1", "10.8.0.2"];
+
 /// One portbridge dial: when it actually happened, and who was behind it.
 ///
 /// `at` is `portbridge.time` -- the dial itself -- not the record's
@@ -163,6 +171,37 @@ pub struct Dial {
     pub at: i64,
     pub attacker: String,
     pub attacker_key: String,
+    /// The sensor port this dial was aimed at, parsed from portbridge's
+    /// `target` ("10.8.0.2:5060" -> 5060). 0 when the record carried none.
+    ///
+    /// Only the via_port join reads it, and for that join it is not optional:
+    /// an ephemeral port is reused within seconds, so `via_port` alone can
+    /// match a dial to a different sensor entirely. The destination port
+    /// separates them -- a flow to SIP on 5060 did not come from a dial to
+    /// telnet on 19023, whatever the clock says. Same constraint
+    /// `ip_enrichment::viamap` applies for the same reason (#1917).
+    pub target_port: i64,
+}
+
+/// How a flow is joined back to portbridge.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Join {
+    /// zeek computed a community_id for the relayed tuple; portbridge logged
+    /// the same value as `community_id_relayed`.
+    Relayed(String),
+    /// zeek did not. Every per-protocol log zeek writes (sip, files, http,
+    /// ssh...) references a connection without repeating its community_id, so
+    /// the first join cannot see them at all -- measured on the live cluster,
+    /// 8,928 flows in 24h, every one of them still showing the tunnel as its
+    /// source.
+    ///
+    /// The tunnel-side tuple is the join instead: the ephemeral port zeek
+    /// sees as `source.port` is the very port portbridge dialled from and
+    /// logged as `via_port`, and `destination.port` is the sensor it aimed
+    /// at. Verified against a live pair before this was written: a SIP flow
+    /// from 10.8.0.1:54197 to :5060 matched exactly one dial -- via_port
+    /// 54197, target 10.8.0.2:5060, at the same second -- from 5.39.101.60.
+    Via { via_port: i64, target_port: i64 },
 }
 
 fn interval() -> Duration {
@@ -197,6 +236,29 @@ pub fn dial_for(dials: &[Dial], flow_at: i64) -> Option<&Dial> {
         .iter()
         .filter(|dial| dial.at <= flow_at && flow_at - dial.at <= MAX_DIAL_AGE_SECONDS)
         .max_by_key(|dial| dial.at)
+}
+
+/// The dial that opened a flow to `want_target_port`, or None.
+///
+/// dial_for's two rules, plus the one the via_port key needs: a dial aimed at
+/// a different sensor did not open this flow. A record with no target port is
+/// refused rather than allowed through -- it cannot be checked, and an
+/// unchecked candidate on a reused ephemeral port is how a flow gets
+/// confidently attributed to the wrong attacker.
+pub fn dial_for_via(dials: &[Dial], flow_at: i64, want_target_port: i64) -> Option<&Dial> {
+    dials
+        .iter()
+        .filter(|dial| dial.target_port != 0 && dial.target_port == want_target_port)
+        .filter(|dial| dial.at <= flow_at && flow_at - dial.at <= MAX_DIAL_AGE_SECONDS)
+        .max_by_key(|dial| dial.at)
+}
+
+/// The port half of portbridge's `target` ("10.8.0.2:5060" -> 5060).
+pub fn target_port_of(target: &str) -> i64 {
+    target
+        .rsplit_once(':')
+        .and_then(|(_, port)| port.parse::<i64>().ok())
+        .unwrap_or(0)
 }
 
 /// What to do with a flow that no dial explains.
@@ -259,6 +321,46 @@ fn dials_by_key(hits: &Value) -> (HashMap<String, Vec<Dial>>, usize) {
             at,
             attacker: attacker.to_string(),
             attacker_key: pb["community_id"].as_str().unwrap_or_default().to_string(),
+            target_port: target_port_of(pb["target"].as_str().unwrap_or_default()),
+        });
+    }
+    (map, without_dial_time)
+}
+
+/// via_port -> every dial seen from it, for the flows zeek gave no
+/// community_id (#1876).
+///
+/// Same shape and same time-fallback reporting as dials_by_key; the key is
+/// the tunnel-side ephemeral port instead of the relayed community_id, and a
+/// record with no via_port or no target is skipped rather than kept, because
+/// dial_for_via cannot check it.
+fn dials_by_via_port(hits: &Value) -> (HashMap<i64, Vec<Dial>>, usize) {
+    let mut map: HashMap<i64, Vec<Dial>> = HashMap::new();
+    let mut without_dial_time = 0usize;
+    for hit in hits["hits"]["hits"].as_array().into_iter().flatten() {
+        let source = &hit["_source"];
+        let pb = &source["portbridge"];
+        let dialled_at = match pb["time"].as_str().and_then(parse_seconds) {
+            Some(at) => Some(at),
+            None => {
+                without_dial_time += 1;
+                source["@timestamp"].as_str().and_then(parse_seconds)
+            }
+        };
+        let (Some(via_port), Some(attacker), Some(at)) =
+            (pb["via_port"].as_i64(), pb["src_ip"].as_str(), dialled_at)
+        else {
+            continue;
+        };
+        let target_port = target_port_of(pb["target"].as_str().unwrap_or_default());
+        if attacker.is_empty() || via_port == 0 || target_port == 0 {
+            continue;
+        }
+        map.entry(via_port).or_default().push(Dial {
+            at,
+            attacker: attacker.to_string(),
+            attacker_key: pb["community_id"].as_str().unwrap_or_default().to_string(),
+            target_port,
         });
     }
     (map, without_dial_time)
@@ -275,7 +377,29 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
                 "query": {"bool": {
                     "filter": [
                         {"range": {"@timestamp": {"gte": LOOKBACK, "lte": SETTLE}}},
-                        {"exists": {"field": "network.community_id"}}
+                        // Either join is enough to be worth fetching. This was
+                        // `exists: network.community_id` alone, which silently
+                        // excluded every per-protocol log zeek writes -- they
+                        // reference a connection without repeating its
+                        // community_id, so the loop never saw them and they
+                        // kept the tunnel as their source indefinitely
+                        // (#1876; 8,928 of them in 24h when measured).
+                        //
+                        // The second arm asks for the tunnel tuple explicitly.
+                        // Without that it would match every unattributed flow
+                        // in the window, including ones whose source is
+                        // already a real attacker and which need nothing.
+                        {"bool": {
+                            "minimum_should_match": 1,
+                            "should": [
+                                {"exists": {"field": "network.community_id"}},
+                                {"bool": {"filter": [
+                                    {"terms": {"source.ip": TUNNEL_ADDRESSES}},
+                                    {"exists": {"field": "source.port"}},
+                                    {"exists": {"field": "destination.port"}}
+                                ]}}
+                            ]
+                        }}
                     ],
                     "must_not": [
                         {"exists": {"field": "network.relay_ip"}},
@@ -298,7 +422,19 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
                 // ages out having been the lowest-value part of the window
                 // rather than the only part that got attention.
                 "sort": [{"@timestamp": {"order": "desc"}}],
-                "_source": ["network.community_id", "source.ip", "@timestamp", "zeek.ts"]
+                "_source": [
+                    "network.community_id",
+                    "source.ip",
+                    // The via_port join's key and its guard. Fetching them is
+                    // not optional in the way an unused field would be: a
+                    // missing source.port drops the flow from the join
+                    // entirely rather than degrading it, which is the failure
+                    // dials_by_key's warning exists to make loud.
+                    "source.port",
+                    "destination.port",
+                    "@timestamp",
+                    "zeek.ts"
+                ]
             }),
         )
         .await?;
@@ -306,7 +442,7 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
     struct Pending {
         index: String,
         id: String,
-        key: String,
+        join: Join,
         /// When the flow opened (`zeek.ts`) -- compared against dial times.
         at: i64,
         /// When the record was shipped (`@timestamp`) -- used only to decide
@@ -324,7 +460,17 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
             Some(Pending {
                 index: hit["_index"].as_str()?.to_string(),
                 id: hit["_id"].as_str()?.to_string(),
-                key: source["network"]["community_id"].as_str()?.to_string(),
+                // The relayed community_id when zeek computed one, the
+                // tunnel tuple when it did not. A flow offering neither is
+                // dropped here rather than carried to a join that cannot
+                // answer it.
+                join: match source["network"]["community_id"].as_str() {
+                    Some(cid) if !cid.is_empty() => Join::Relayed(cid.to_string()),
+                    _ => Join::Via {
+                        via_port: source["source"]["port"].as_i64()?,
+                        target_port: source["destination"]["port"].as_i64()?,
+                    },
+                },
                 // zeek.ts is epoch seconds as a float; @timestamp is the
                 // ship time and is the wrong clock for the ordering rule,
                 // but is the only one available if zeek.ts is missing.
@@ -341,7 +487,27 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let keys: Vec<&str> = docs.iter().map(|doc| doc.key.as_str()).collect();
+    let keys: Vec<&str> = docs
+        .iter()
+        .filter_map(|doc| match &doc.join {
+            Join::Relayed(cid) => Some(cid.as_str()),
+            Join::Via { .. } => None,
+        })
+        .collect();
+    let via_ports: Vec<i64> = {
+        let mut ports: Vec<i64> = docs
+            .iter()
+            .filter_map(|doc| match doc.join {
+                Join::Via { via_port, .. } => Some(via_port),
+                Join::Relayed(_) => None,
+            })
+            .collect();
+        // A terms query wants each value once; a busy port appears in the
+        // batch many times over.
+        ports.sort_unstable();
+        ports.dedup();
+        ports
+    };
     let relayed = state
         .es
         .search_index(
@@ -369,7 +535,50 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
         )
         .await?;
 
+    // The via_port side. Skipped entirely when the batch happens to hold no
+    // such flows, so the common case costs nothing.
+    let via_hits = if via_ports.is_empty() {
+        Value::Null
+    } else {
+        state
+            .es
+            .search_index(
+                &["portbridge-v2-*"],
+                json!({
+                    "size": BATCH * 8,
+                    "track_total_hits": false,
+                    "query": {"terms": {"portbridge.via_port": via_ports}},
+                    // portbridge.target is this join's guard, not decoration:
+                    // without it dial_for_via refuses every candidate and the
+                    // join silently resolves nothing. Same projection trap
+                    // portbridge.time hit in #1834.
+                    "_source": [
+                        "@timestamp",
+                        "portbridge.time",
+                        "portbridge.via_port",
+                        "portbridge.target",
+                        "portbridge.community_id",
+                        "portbridge.src_ip"
+                    ]
+                }),
+            )
+            .await?
+    };
+
     let (dials, dials_without_time) = dials_by_key(&relayed);
+    let (via_dials, via_without_time) = if via_hits.is_null() {
+        (HashMap::new(), 0)
+    } else {
+        dials_by_via_port(&via_hits)
+    };
+    if via_without_time > 0 {
+        tracing::warn!(
+            via_without_time,
+            "zeek-proxy-attribution: portbridge via_port records arrived without \
+             portbridge.time, so the join fell back to ship times -- check the \
+             query's _source projection"
+        );
+    }
     if dials_without_time > 0 {
         tracing::warn!(
             dials_without_time,
@@ -381,7 +590,12 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
 
     let (mut resolved, mut marked, mut deferred) = (0usize, 0usize, 0usize);
     for doc in &docs {
-        let matched = dials.get(&doc.key).and_then(|candidates| dial_for(candidates, doc.at));
+        let matched = match &doc.join {
+            Join::Relayed(cid) => dials.get(cid).and_then(|candidates| dial_for(candidates, doc.at)),
+            Join::Via { via_port, target_port } => via_dials
+                .get(via_port)
+                .and_then(|candidates| dial_for_via(candidates, doc.at, *target_port)),
+        };
 
         let Some(dial) = matched else {
             // Nothing explains this flow. Whether that is temporary or
@@ -437,7 +651,11 @@ mod tests {
     use super::*;
 
     fn dial(at: i64, attacker: &str) -> Dial {
-        Dial { at, attacker: attacker.into(), attacker_key: format!("key-{attacker}") }
+        Dial { at, attacker: attacker.into(), attacker_key: format!("key-{attacker}"), target_port: 0 }
+    }
+
+    fn dial_to(at: i64, attacker: &str, target_port: i64) -> Dial {
+        Dial { at, attacker: attacker.into(), attacker_key: format!("key-{attacker}"), target_port }
     }
 
     #[test]
@@ -553,17 +771,49 @@ mod tests {
         // touches. A future field added to the parser and forgotten here
         // fails this rather than degrading in production.
         let source = include_str!("zeek_proxy_attribution.rs");
-        let projection = source
-            .split("portbridge-v2-*")
-            .nth(1)
-            .and_then(|rest| rest.split("_source").nth(1))
-            .and_then(|rest| rest.split(']').next())
-            .expect("the portbridge query should have a _source list");
 
+        // Anchor on something unique to each query rather than on the index
+        // name: there are three queries now, two of them against
+        // portbridge-v2-*, and counting occurrences of an index name breaks
+        // the moment one is added -- or the moment this test mentions it.
+        let projection_after = |marker: &str| -> String {
+            source
+                .split(marker)
+                .nth(1)
+                .and_then(|rest| rest.split("_source").nth(1))
+                .and_then(|rest| rest.split(']').next())
+                .unwrap_or_else(|| panic!("no _source list follows {marker}"))
+                .to_string()
+        };
+
+        let relayed = projection_after("portbridge.community_id_relayed\": keys");
         for field in ["portbridge.time", "portbridge.community_id_relayed", "portbridge.community_id", "portbridge.src_ip"] {
             assert!(
-                projection.contains(field),
-                "{field} is read by dials_by_key but not requested in the query"
+                relayed.contains(field),
+                "{field} is read by dials_by_key but not requested in the relayed query"
+            );
+        }
+
+        // #1876's join has the same exposure, and one field more: without
+        // portbridge.target every candidate has target_port 0, dial_for_via
+        // refuses all of them, and the join resolves nothing at all while
+        // looking perfectly healthy.
+        let via = projection_after("portbridge.via_port\": via_ports");
+        for field in ["portbridge.time", "portbridge.via_port", "portbridge.target", "portbridge.community_id", "portbridge.src_ip"] {
+            assert!(
+                via.contains(field),
+                "{field} is read by dials_by_via_port but not requested in the via_port query"
+            );
+        }
+
+        // And the flow side: source.port is the via_port join's key and
+        // destination.port is its guard. A flow missing either is dropped
+        // from the batch entirely rather than degraded.
+        let flows = projection_after("\"lte\": SETTLE");
+        for field in ["network.community_id", "source.ip", "source.port", "destination.port", "zeek.ts"] {
+            assert!(
+                flows.contains(field),
+                "{field} is read when building Pending but not requested in the flow query"
             );
         }
     }
@@ -595,4 +845,126 @@ mod tests {
         ]}});
         assert!(dials_by_key(&hits).0.is_empty());
     }
+
+    // ── the via_port join (#1876) ────────────────────────────────────────
+
+    #[test]
+    fn the_via_port_join_recovers_the_attacker_the_relayed_key_cannot() {
+        // The live pair this was written against: a SIP flow from
+        // 10.8.0.1:54197 to :5060, and exactly one dial from that ephemeral
+        // port aimed at that sensor, at the same second, from 5.39.101.60.
+        // zeek wrote no community_id for it -- sip.log references the
+        // connection without repeating one -- so the relayed join never saw
+        // it and the flow kept the tunnel as its source.
+        let flow_at = 1_787_600_142;
+        let dials = vec![dial_to(flow_at, "5.39.101.60", 5060)];
+        assert_eq!(dial_for_via(&dials, flow_at, 5060).map(|d| d.attacker.as_str()), Some("5.39.101.60"));
+    }
+
+    #[test]
+    fn a_dial_to_a_different_sensor_is_refused() {
+        // The reason the destination port is part of the key. An ephemeral
+        // port is reused within seconds across unrelated sensors, so a
+        // via_port match alone will happily hand back whoever dialled telnet
+        // when the flow was SIP -- and a wrong attacker is indistinguishable
+        // from a right one.
+        let flow_at = 2_000;
+        let dials = vec![dial_to(flow_at, "203.0.113.9", 19023)];
+        assert_eq!(dial_for_via(&dials, flow_at, 5060), None);
+    }
+
+    #[test]
+    fn among_dials_to_the_same_sensor_the_most_recent_before_the_flow_wins() {
+        let flow_at = 5_000;
+        let dials = vec![
+            dial_to(4_000, "203.0.113.1", 5060),
+            dial_to(4_900, "203.0.113.2", 5060),
+            dial_to(4_950, "198.51.100.7", 19023), // right time, wrong sensor
+            dial_to(5_100, "203.0.113.3", 5060),   // after the flow
+        ];
+        assert_eq!(dial_for_via(&dials, flow_at, 5060).map(|d| d.attacker.as_str()), Some("203.0.113.2"));
+    }
+
+    #[test]
+    fn the_via_join_keeps_dial_for_s_own_two_rules() {
+        let flow_at = 5_000;
+        assert_eq!(dial_for_via(&[dial_to(5_001, "a", 5060)], flow_at, 5060), None, "a dial after the flow");
+        let stale = flow_at - MAX_DIAL_AGE_SECONDS - 1;
+        assert_eq!(dial_for_via(&[dial_to(stale, "a", 5060)], flow_at, 5060), None, "older than the window");
+    }
+
+    #[test]
+    fn a_dial_with_no_target_port_is_refused_rather_than_allowed_through() {
+        // It cannot be checked, and an unchecked candidate on a reused
+        // ephemeral port is exactly how a flow gets confidently misattributed.
+        let flow_at = 5_000;
+        assert_eq!(dial_for_via(&[dial_to(flow_at, "203.0.113.1", 0)], flow_at, 5060), None);
+    }
+
+    #[test]
+    fn target_port_is_parsed_off_portbridge_s_target() {
+        assert_eq!(target_port_of("10.8.0.2:5060"), 5060);
+        assert_eq!(target_port_of("10.8.0.2:19023"), 19023);
+        assert_eq!(target_port_of(""), 0, "no target at all");
+        assert_eq!(target_port_of("10.8.0.2"), 0, "host with no port");
+        assert_eq!(target_port_of("10.8.0.2:nonsense"), 0, "unparseable port");
+        // An IPv6 target still yields the port after the last colon.
+        assert_eq!(target_port_of("[fd00::2]:5060"), 5060);
+    }
+
+    #[test]
+    fn via_dials_are_grouped_by_port_and_carry_their_target() {
+        let hits = json!({"hits": {"hits": [
+            {"_source": {"portbridge": {"time": "2026-08-24T19:35:42Z", "via_port": 54197,
+                "target": "10.8.0.2:5060", "community_id": "1:a=", "src_ip": "5.39.101.60"}}},
+            {"_source": {"portbridge": {"time": "2026-08-24T19:35:43Z", "via_port": 54197,
+                "target": "10.8.0.2:19023", "community_id": "1:b=", "src_ip": "203.0.113.4"}}}
+        ]}});
+        let (map, without_time) = dials_by_via_port(&hits);
+        assert_eq!(without_time, 0);
+        let dials = map.get(&54197).expect("grouped under its via_port");
+        assert_eq!(dials.len(), 2, "both dials kept -- the target port separates them, not this step");
+        assert_eq!(dials.iter().filter(|d| d.target_port == 5060).count(), 1);
+    }
+
+    #[test]
+    fn a_via_record_that_cannot_be_checked_is_skipped() {
+        // No target, no via_port, or no attacker: each would otherwise become
+        // a candidate that dial_for_via has no way to refuse on merit.
+        let hits = json!({"hits": {"hits": [
+            {"_source": {"portbridge": {"time": "2026-08-24T19:35:42Z", "via_port": 1,
+                "community_id": "1:a=", "src_ip": "203.0.113.1"}}},
+            {"_source": {"portbridge": {"time": "2026-08-24T19:35:42Z",
+                "target": "10.8.0.2:5060", "community_id": "1:b=", "src_ip": "203.0.113.2"}}},
+            {"_source": {"portbridge": {"time": "2026-08-24T19:35:42Z", "via_port": 3,
+                "target": "10.8.0.2:5060", "community_id": "1:c=", "src_ip": ""}}}
+        ]}});
+        let (map, _) = dials_by_via_port(&hits);
+        assert!(map.is_empty(), "none of the three can be checked, so none is a candidate");
+    }
+
+    #[test]
+    fn a_via_record_without_a_dial_time_is_counted_not_hidden() {
+        let hits = json!({"hits": {"hits": [
+            {"_source": {"@timestamp": "2026-08-24T19:35:46Z", "portbridge": {"via_port": 54197,
+                "target": "10.8.0.2:5060", "community_id": "1:a=", "src_ip": "5.39.101.60"}}}
+        ]}});
+        let (map, without_time) = dials_by_via_port(&hits);
+        assert_eq!(without_time, 1, "the fallback is reported, the way #1834 taught");
+        assert_eq!(map.len(), 1, "and the record still participates");
+    }
+
+    #[test]
+    fn the_relayed_join_now_carries_the_target_port_too() {
+        // Same parser, one more field -- so a relayed dial is not silently
+        // left with target_port 0 if the two joins are ever unified.
+        let hits = json!({"hits": {"hits": [
+            {"_source": {"portbridge": {"time": "2026-08-24T19:35:42Z",
+                "community_id_relayed": "1:same=", "community_id": "1:a=",
+                "target": "10.8.0.2:5060", "src_ip": "203.0.113.1"}}}
+        ]}});
+        let (map, _) = dials_by_key(&hits);
+        assert_eq!(map["1:same="][0].target_port, 5060);
+    }
+
 }
