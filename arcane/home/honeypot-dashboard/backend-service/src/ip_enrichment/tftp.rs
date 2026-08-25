@@ -33,6 +33,11 @@ pub fn build_tftp_session_map(logs_dir: &Path) -> ViaMap {
         m.entry(port as i64).or_default().push(super::viamap::ViaEntry {
             ip: ip.to_string(),
             at: 0,
+            // tftp-relay's sessions.json records no destination port, and
+            // this map is only ever consulted for dionaea's TFTP records,
+            // so there is nothing to disambiguate against. 0 opts out of
+            // #1917's destination-port check rather than failing it.
+            target_port: 0,
         });
     }
     m

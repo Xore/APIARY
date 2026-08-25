@@ -225,10 +225,29 @@ fn rewrite_dionaea_connections(v: &mut Value, vm: &ViaMap, line_at: i64) -> (usi
             if let Some(Value::String(ip)) = map.get("remote_ip") {
                 if ip == TUNNEL_PEER_IP {
                     if let Some(port) = map.get("remote_port").and_then(Value::as_f64) {
-                        if let Some(real) = super::viamap::lookup(vm, port as i64, line_at) {
+                        // #1917: the connection object says which of its own
+                        // ports the attacker reached, and that is what makes
+                        // this join safe. Measured on live data: an mssql
+                        // connection on 1433 resolved to the client of a
+                        // telnet dial 21 minutes earlier that reused the same
+                        // ephemeral port -- inside the time window, newest
+                        // entry the map had, and a different attacker. The
+                        // destination port rules it out outright.
+                        let want_port = map
+                            .get("local_port")
+                            .and_then(Value::as_f64)
+                            .map(|p| p as i64)
+                            .unwrap_or(0);
+                        if let Some(real) =
+                            super::viamap::lookup_to_port(vm, port as i64, line_at, want_port)
+                        {
                             map.insert("remote_ip".to_string(), Value::from(real.to_string()));
                             changed += 1;
                         } else {
+                            // Better queued than answered wrongly: the right
+                            // entry usually arrives within a second, and the
+                            // pending queue flushes it unenriched if it never
+                            // does.
                             all_resolved = false;
                         }
                     }
@@ -1052,7 +1071,10 @@ mod tests {
         // at 0 so these keep exercising the join itself rather than
         // #1771's plausibility checks, which have their own tests in viamap.
         m.insert(port, vec![super::super::viamap::ViaEntry {
-            ip: ip.to_string(), at: 0,
+            // target_port 0 opts these fixtures out of #1917's
+            // destination-port check; the tests that exercise it build
+            // their own entries with a real port.
+            ip: ip.to_string(), at: 0, target_port: 0,
         }]);
         m
     }

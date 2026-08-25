@@ -21,6 +21,17 @@ pub struct ViaEntry {
     pub ip: String,
     /// portbridge's dial time (epoch seconds), 0 when the line carried none.
     pub at: i64,
+    /// The sensor port portbridge dialled, from its `target` ("host:port").
+    /// 0 when the line carried none.
+    ///
+    /// #1917: this is what tells a stale entry from the right one. An
+    /// ephemeral port is reused constantly -- via_port 54674 was dialled
+    /// six times in two days across telnet, HTTP and mssql -- and the time
+    /// window alone cannot separate them, because it has to stay wide
+    /// enough for a cowrie session that writes lines for hours. The
+    /// destination port can: a connection to mssql on 1433 did not come
+    /// from a dial to telnet on 23, whatever the clock says.
+    pub target_port: i64,
 }
 
 /// via_port -> the recent connections that used it, oldest first.
@@ -75,6 +86,12 @@ pub fn parse_portbridge_line(line: &[u8], m: &mut ViaMap) {
     let entry = ViaEntry {
         ip: ip.to_string(),
         at: e.get("time").and_then(Value::as_str).and_then(parse_time).unwrap_or(0),
+        target_port: e
+            .get("target")
+            .and_then(Value::as_str)
+            .and_then(|t| t.rsplit_once(':'))
+            .and_then(|(_, port)| port.parse().ok())
+            .unwrap_or(0),
     };
     let slot = m.entry(via_port as i64).or_default();
     // portbridge ships each connection once; the duplicate-shipping bug that
@@ -112,11 +129,38 @@ fn parse_time(value: &str) -> Option<i64> {
 /// nothing extra. Causality below is what actually separates two connections
 /// that shared an ephemeral port.
 pub fn lookup(m: &ViaMap, via_port: i64, line_at: i64) -> Option<&str> {
+    lookup_to_port(m, via_port, line_at, 0)
+}
+
+/// The same join, told which sensor port the event arrived on.
+///
+/// #1917: `lookup` alone resolved a dionaea mssql connection on port 1433
+/// to the client of a *telnet* dial 21 minutes earlier that happened to
+/// reuse the same ephemeral port. It was inside the plausibility window,
+/// it was the newest entry the map had read, and it was a different
+/// attacker entirely -- reported with no warning, because a wrong address
+/// looks exactly like a right one.
+///
+/// Widening or narrowing the time window cannot fix that. It has to stay
+/// generous for sensors that write lines throughout a long session, and no
+/// setting distinguishes "21 minutes into a cowrie session" from "21
+/// minutes stale". The destination port does, exactly and for free, since
+/// portbridge already records what it dialled.
+///
+/// `want_port` of 0 means the caller does not know, and the check is
+/// skipped -- as it is for entries whose own `target_port` is 0, so a
+/// portbridge line without a usable `target` still joins as before rather
+/// than dropping out.
+pub fn lookup_to_port(m: &ViaMap, via_port: i64, line_at: i64, want_port: i64) -> Option<&str> {
     let slot = m.get(&via_port)?;
     slot.iter()
         .rev()
-        .find(|entry| plausible(entry, line_at))
+        .find(|entry| plausible(entry, line_at) && port_matches(entry, want_port))
         .map(|entry| entry.ip.as_str())
+}
+
+fn port_matches(entry: &ViaEntry, want_port: i64) -> bool {
+    want_port == 0 || entry.target_port == 0 || entry.target_port == want_port
 }
 
 fn plausible(entry: &ViaEntry, line_at: i64) -> bool {
@@ -305,5 +349,87 @@ mod tests {
     fn an_unknown_port_is_still_a_miss() {
         let m = feed(&[line("1.1.1.1", "2026-08-23T14:07:47Z", 22)]);
         assert_eq!(lookup(&m, 4001, T), None);
+    }
+
+    // ---- #1917: the destination port separates a reused ephemeral port ----
+
+    fn entry(ip: &str, at: i64, target_port: i64) -> ViaEntry {
+        ViaEntry { ip: ip.to_string(), at, target_port }
+    }
+
+    /// The measured case, with the real numbers from the live logs.
+    ///
+    /// via_port 54674 was dialled six times in two days. At 06:28:26 it
+    /// carried a telnet connection (portbridge `port: 23`); at 06:49:57 an
+    /// mssql one (`port: 1433`). dionaea logged an mssql accept on
+    /// `local_port: 1433` at 06:49:57.935930 and the worker answered
+    /// 153.117.32.130 — the telnet client from 21 minutes earlier.
+    ///
+    /// It passed every check there was: inside the six-hour window, dialled
+    /// before the line, and the newest entry the map had read at that
+    /// moment. Nothing about it looked wrong.
+    #[test]
+    fn a_stale_entry_on_the_same_port_is_rejected_by_its_destination() {
+        let mut m = ViaMap::new();
+        m.insert(
+            54674,
+            vec![
+                entry("153.117.32.130", 1_787_639_306, 23),   // 06:28:26, telnet
+                entry("151.243.11.8", 1_787_640_597, 1433),   // 06:49:57, mssql
+            ],
+        );
+        let line_at = 1_787_640_597; // the accept, same second as the dial
+
+        assert_eq!(
+            lookup_to_port(&m, 54674, line_at, 1433),
+            Some("151.243.11.8"),
+            "the mssql dial, not the telnet one",
+        );
+    }
+
+    #[test]
+    fn the_stale_entry_is_refused_rather_than_substituted() {
+        // The case that produced the wrong answer: the correct dial has not
+        // been read yet, so only the stale telnet entry is present. Better
+        // to resolve nothing and let the pending queue retry than to answer
+        // with a different attacker.
+        let mut m = ViaMap::new();
+        m.insert(54674, vec![entry("153.117.32.130", 1_787_639_306, 23)]);
+
+        assert_eq!(lookup_to_port(&m, 54674, 1_787_640_597, 1433), None);
+    }
+
+    #[test]
+    fn a_caller_that_does_not_know_the_port_still_joins() {
+        // Most sensors do not record which of their own ports was hit.
+        // They must keep resolving exactly as before.
+        let mut m = ViaMap::new();
+        m.insert(54674, vec![entry("153.117.32.130", 0, 23)]);
+
+        assert_eq!(lookup_to_port(&m, 54674, 0, 0), Some("153.117.32.130"));
+        assert_eq!(lookup(&m, 54674, 0), Some("153.117.32.130"));
+    }
+
+    #[test]
+    fn an_entry_without_a_target_port_is_not_excluded_by_the_check() {
+        // A portbridge line whose `target` did not parse must not drop out
+        // of the join — that would trade wrong answers for missing ones.
+        let mut m = ViaMap::new();
+        m.insert(54674, vec![entry("151.243.11.8", 0, 0)]);
+
+        assert_eq!(lookup_to_port(&m, 54674, 0, 1433), Some("151.243.11.8"));
+    }
+
+    #[test]
+    fn the_target_port_is_read_off_a_real_portbridge_line() {
+        let mut m = ViaMap::new();
+        parse_portbridge_line(
+            br#"{"sensor":"portbridge","src_ip":"151.243.11.8","src_port":41804,"via_port":54674,"port":1433,"target":"10.8.0.2:1433","time":"2026-08-25T06:49:57Z"}"#,
+            &mut m,
+        );
+
+        let slot = m.get(&54674).expect("entry recorded");
+        assert_eq!(slot[0].target_port, 1433, "from `target`, not from `port`");
+        assert_eq!(slot[0].ip, "151.243.11.8");
     }
 }
