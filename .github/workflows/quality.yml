@@ -316,6 +316,13 @@ jobs:
               # pulls or loads multi-GB model weights.
               python analysis/ghidra/models/tests/test_model_governance.py
               python analysis/ghidra/models/tests/test_model_status_adapter.py
+              # Benchmark transcript records (#1805). No model involved -- this
+              # asserts the prompt is stored as sent, that a refusal or timeout
+              # is stored rather than dropped, that a stored transcript is never
+              # rewritten, and that captured real-data transcripts cannot be
+              # written inside the repo. That last one is a data-handling rule,
+              # so it is worth a gate rather than reviewer vigilance.
+              python analysis/ghidra/benchmarks/tests/test_transcripts.py
               # full_capabilities.py (#800): inventories env vars straight out of
               # the real pipeline source, so its own test runs against the real
               # tree rather than fixtures -- proving that stays true.
