@@ -4,3 +4,7 @@ node_modules/
 .tanstack/
 dist/
 .env
+
+# #1828: the design lab symlinks variant stylesheets in here at start-up
+# and clears it on exit. Never content, always disposable.
+public/static/lab/

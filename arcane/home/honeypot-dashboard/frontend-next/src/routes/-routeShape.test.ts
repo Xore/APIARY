@@ -1,3 +1,7 @@
+// Named with a leading "-" so TanStack's route generator skips it: without
+// the prefix it scans this file for a Route export, finds none, and warns on
+// every dev-server start (routeFileIgnorePrefix, see the generator's own
+// message). vitest still collects it -- its include is src/**/*.test.ts.
 // A route file that has children is a layout, and a layout that redirects
 // is an infinite loop.
 //

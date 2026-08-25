@@ -60,6 +60,11 @@ const getAppearance = createServerFn({ method: 'GET' }).handler(async (): Promis
   }
 })
 
+// #1828: an optional stylesheet layered after theme.css, for the design
+// lab's variants. Read once at module scope -- it is a property of the
+// process, not of a request, and production never sets it.
+const variantCSS = process.env.VARIANT_CSS ?? ''
+
 export const Route = createRootRoute({
   // BFF-owned auth: every navigation resolves the redis session on the
   // server; unauthenticated requests bounce to the Keycloak flow. The
@@ -95,7 +100,17 @@ export const Route = createRootRoute({
       { name: 'robots', content: 'noindex, nofollow' },
       { title: 'APIARY' },
     ],
-    links: [{ rel: 'stylesheet', href: '/static/theme.css' }],
+    links: [
+      { rel: 'stylesheet', href: '/static/theme.css' },
+      // #1828: a design-lab variant layers its token overrides on the
+      // vendored stylesheet instead of replacing it, so a variant is a diff
+      // against what ships rather than a fork of it — the authoring pattern
+      // branding/design-lab/v5-picks-override.css already documents.
+      //
+      // Absent unless VARIANT_CSS names one, so production renders exactly
+      // one stylesheet and this costs nothing.
+      ...(variantCSS ? [{ rel: 'stylesheet' as const, href: variantCSS }] : []),
+    ],
     scripts: [
       {
         // Pre-paint theme + palette boot, byte-compatible with the Go

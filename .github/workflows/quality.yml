@@ -49,6 +49,20 @@ jobs:
       - run: python scripts/check-public-leaks.py
       - run: python scripts/validate-oidc-redirects.py
 
+  design-lab-readonly:
+    # #1828: the design lab serves variants against the real captured-data
+    # Elasticsearch, so its read-only guarantee is a safety property, not a
+    # convenience. The test drives the actual harness against a recording
+    # stand-in backend and fails if a write ever reaches it.
+    name: Design lab is read-only
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.use_self_hosted_runner) && 'self-hosted' || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - run: node --test branding/design-lab/lab.test.mjs
+
   go-fmt:
     name: Go formatting
     runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.use_self_hosted_runner) && 'self-hosted' || 'ubuntu-latest' }}
