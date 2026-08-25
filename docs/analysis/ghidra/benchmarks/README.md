@@ -41,6 +41,67 @@ reproducibility metadata in the decision record. Do not adjust expected answers
 after seeing a preferred model's output. Promotion and rollback are documented
 in [`../models/README.md`](../models/README.md).
 
+## Transcripts: every run stores the full conversation
+
+Added under [issue #1805](https://github.com/Xore/APIARY/issues/1805).
+`evaluate-models.py` and `corpus/record_baseline.py` write one JSONL record per
+`(run_id, slot, case, model, workflow)` exchange, holding the exact prompt as
+sent — interpolated evidence included — the raw unparsed response, the model tag
+*and* digest, the sampling parameters, and the reproducibility keys (corpus
+manifest hash, Ghidra cache key, rubric version, claim-pool version, tier).
+
+This is not hygiene, it is load-bearing. A score is a lossy summary of an
+answer, and the questions that decide model selection — *what did this model say
+that the other missed* — live in the text. Rescoring an earlier round against a
+later, enlarged claim pool needs that round's original answers, and
+unique-contribution changes for every model whenever a new model is added. Both
+are impossible from a number. Re-running is not a substitute either: tags,
+quants, sampling and prompts drift, so a re-run answers a different question.
+
+Failures are stored with the same fidelity as successes — timeouts, refusals and
+malformed JSON are all measurements, and for a derestricted round a refusal *is*
+the measurement. A stored transcript is never edited; a misconfigured run is
+superseded by a new one that names it in `supersedes`.
+
+**This supersedes the "preserve the raw report outside the repository" rule
+above for synthetic-corpus runs.** That rule was written when the report was a
+score summary. Storage now splits by data provenance, not convenience:
+
+| Run type | Where transcripts go | What the issue carries |
+|---|---|---|
+| **Synthetic** — #159's corpus binaries and this directory's fixtures (TEST-NET addresses, reserved names, fake credentials, reviewed before commit) | Committed, `docs/benchmarks/runs/<date>-<run_id>/` | Summary table, run id, file hashes, short quoted excerpts |
+| **Captured** — runs against real honeypot data | Outside the repository, bounded retention, mode `0700` | Run id, hashes, pointer, aggregate results only — **never the transcripts** |
+
+Passing `--provenance captured` while pointing `--transcript-dir` inside the
+working tree is refused rather than left to reviewer vigilance: real session
+transcripts contain attacker IPs and payloads, and the standing prohibition on
+real addresses in issues is unchanged.
+
+```bash
+# synthetic (default): committed alongside the repo
+python3 evaluate-models.py --manifest ../models/approved-models.json \
+  --output "$HOME/model-qualification/qualification.json"
+
+# real captured data: operator-only path, outside the repo
+python3 evaluate-models.py --manifest ../models/approved-models.json \
+  --output "$HOME/model-qualification/qualification.json" \
+  --provenance captured --transcript-dir "$HOME/model-qualification/transcripts"
+```
+
+`--no-transcripts` exists but should stay unused for anything whose result gets
+quoted: scores can be recomputed later, answers cannot be recovered later.
+
+### #159's baseline answers survive, its prompts do not
+
+`corpus/baseline_results.json` stores an `answer` string per case, so the text
+behind the recorded **56/69 (81.2%)** for `qwen2.5-coder:7b-instruct-q4_K_M` is
+still on disk and is the only direct evidence of what that number meant. Its
+*prompts* were never stored and would have to be rebuilt from `build_prompt()`
+and the manifest's disassembly. They are deliberately **not** backfilled into a
+transcript run: a prompt you have to reconstruct is a prompt you cannot trust,
+and a reconstruction that looks first-class in the record is worse than an
+honest gap. Treat those answers as recoverable evidence, not as a transcript.
+
 ## GPU/model capability playbook
 
 `evaluate-models.py` (above) answers "is this model accurate enough for

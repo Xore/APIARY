@@ -18,12 +18,29 @@ Usage: python3 record_baseline.py [--api-base http://127.0.0.1:11434/v1]
 """
 import argparse
 import json
+import sys
 import time
 import urllib.request
 from pathlib import Path
 
 CORPUS_DIR = Path(__file__).resolve().parent
 MODELS_DIR = CORPUS_DIR.parent.parent / "models"
+sys.path.insert(0, str(CORPUS_DIR.parent))
+
+from transcripts import (  # noqa: E402  (path set above so the sibling module resolves)
+    DEFAULT_SYNTHETIC_ROOT,
+    PROVENANCES,
+    PROVENANCE_SYNTHETIC,
+    TIERS,
+    Reproducibility,
+    RunMetadata,
+    SlotRecorder,
+    TranscriptWriter,
+    default_operator,
+    sha256_file,
+)
+
+BENCHMARK_VERSION = "honeypot-stack-issue-159-corpus-baseline"
 
 SLICE_TOOLCHAIN = "gcc-x86_64"
 SLICE_OPT = "-O0"
@@ -63,8 +80,15 @@ def score(text: str, rubric: dict) -> dict:
     }
 
 
-def ask_model(api_base: str, model: str, request: dict, prompt: str) -> tuple[str, float]:
-    body = json.dumps({
+def ask_model(
+    api_base: str,
+    model: str,
+    request: dict,
+    prompt: str,
+    recorder=None,
+    case: str = "",
+) -> tuple[str, float]:
+    payload = {
         "model": model,
         "messages": [
             {"role": "system", "content": REV_SYSTEM},
@@ -74,20 +98,50 @@ def ask_model(api_base: str, model: str, request: dict, prompt: str) -> tuple[st
         "max_tokens": request["output_tokens"],
         "seed": request["seed"],
         "stream": False,
-    }).encode()
-    req = urllib.request.Request(f"{api_base}/chat/completions", data=body, method="POST")
+    }
+    req = urllib.request.Request(
+        f"{api_base}/chat/completions", data=json.dumps(payload).encode(), method="POST"
+    )
     req.add_header("Content-Type", "application/json")
     req.add_header("Authorization", "Bearer not-used")
     start = time.monotonic()
-    with urllib.request.urlopen(req, timeout=600) as r:
-        resp = json.loads(r.read())
+    try:
+        with urllib.request.urlopen(req, timeout=600) as r:
+            resp = json.loads(r.read())
+    except Exception as exc:
+        if recorder is not None:
+            recorder.record(case=case, workflow="rev_analysis", request_body=payload,
+                            error=f"{type(exc).__name__}: {exc}")
+        raise
     wall = time.monotonic() - start
-    return resp["choices"][0]["message"]["content"], wall
+    content = resp["choices"][0]["message"]["content"]
+    usage = resp.get("usage") or {}
+    if recorder is not None:
+        recorder.record(
+            case=case,
+            workflow="rev_analysis",
+            request_body=payload,
+            response={
+                "content": content,
+                "wall_seconds": round(wall, 3),
+                "prompt_tokens": usage.get("prompt_tokens"),
+                "output_tokens": usage.get("completion_tokens"),
+                "done_reason": (resp.get("choices") or [{}])[0].get("finish_reason"),
+            },
+        )
+    return content, wall
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--api-base", default="http://127.0.0.1:11434/v1")
+    parser.add_argument("--transcript-dir", default=str(DEFAULT_SYNTHETIC_ROOT))
+    parser.add_argument("--provenance", default=PROVENANCE_SYNTHETIC, choices=PROVENANCES)
+    parser.add_argument("--tier", default="A", choices=TIERS,
+                        help="A is this script's objdump disassembly; B/C come from the Ghidra cache")
+    parser.add_argument("--operator", default=default_operator())
+    parser.add_argument("--supersedes", help="run_id this run replaces; stored transcripts are never edited")
+    parser.add_argument("--no-transcripts", action="store_true")
     args = parser.parse_args()
 
     manifest = json.loads((CORPUS_DIR / "manifest.json").read_text())
@@ -104,6 +158,31 @@ def main() -> int:
     if not slice_builds:
         raise SystemExit(f"no builds found for {SLICE_TOOLCHAIN}/{SLICE_OPT}")
 
+    writer = None
+    recorder = None
+    if not args.no_transcripts:
+        writer = TranscriptWriter(
+            args.transcript_dir,
+            RunMetadata(
+                benchmark=BENCHMARK_VERSION,
+                provenance=args.provenance,
+                operator=args.operator,
+                supersedes=args.supersedes,
+            ),
+        )
+        print(f"transcripts: {writer.path}")
+        recorder = SlotRecorder(
+            writer=writer,
+            slot="revdeck",
+            model={"tag": model_tag, "digest": revdeck["artifact"]["digest"]},
+            reproducibility=Reproducibility(
+                tier=args.tier,
+                corpus_manifest_sha256=sha256_file(CORPUS_DIR / "manifest.json"),
+                rubric_version=sha256_file(CORPUS_DIR / "rev_cases_v2_rubric.json"),
+                prompt_contract={"prompt_contract_version": "revdeck-corpus-baseline-v1"},
+            ),
+        )
+
     results = {}
     for build in slice_builds:
         case_name = Path(build["case_source"]).stem
@@ -112,7 +191,7 @@ def main() -> int:
             print(f"SKIP {case_name}: no rubric entry")
             continue
         prompt = build_prompt(case_name, build["unstripped"]["disassembly"])
-        answer, wall = ask_model(args.api_base, model_tag, request, prompt)
+        answer, wall = ask_model(args.api_base, model_tag, request, prompt, recorder, case_name)
         result = score(answer, case_rubric)
         result["wall_seconds"] = round(wall, 1)
         result["answer"] = answer
@@ -132,8 +211,13 @@ def main() -> int:
         "total_score": total_score,
         "total_max_score": total_max,
         "percent": round(100 * total_score / total_max, 1) if total_max else 0.0,
+        "tier": args.tier,
         "cases": results,
     }
+    if writer is not None:
+        summary = writer.close()
+        report["transcript_run_id"] = summary["run_id"]
+        report["transcripts_sha256"] = summary["transcripts_sha256"]
     with open(CORPUS_DIR / "baseline_results.json", "w") as f:
         json.dump(report, f, indent=2)
 

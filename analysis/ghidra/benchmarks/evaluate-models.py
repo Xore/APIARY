@@ -15,13 +15,32 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+# Running this as a script puts its own directory on sys.path, but
+# analysis/ghidra/worker/tests/test_ghidra_worker.py loads it through an
+# importlib spec to check the approved contract, and that does not. Set the
+# path explicitly so the sibling module resolves either way.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from transcripts import (  # noqa: E402  (path set above so the sibling module resolves)
+    DEFAULT_SYNTHETIC_ROOT,
+    PROVENANCES,
+    PROVENANCE_SYNTHETIC,
+    TIERS,
+    Reproducibility,
+    RunMetadata,
+    SlotRecorder,
+    TranscriptWriter,
+    default_operator,
+)
 
 
 BENCHMARK_VERSION = "honeypot-stack-issue-158-v2"
@@ -468,7 +487,16 @@ def chat(
     prompt: str,
     context: int,
     json_mode: bool | dict[str, Any],
+    recorder: SlotRecorder | None = None,
+    case: str = "",
+    workflow: str | None = None,
+    parser: Callable[[str], Any] | None = None,
 ) -> dict[str, Any]:
+    """Single choke point for every model call, and therefore the only place a
+    transcript has to be written. `body` below is the literal request posted to
+    Ollama, so recording it captures the prompt exactly as sent -- including the
+    interpolated evidence -- rather than a reference that would have to be
+    rebuilt from the fixtures to be read back."""
     body: dict[str, Any] = {
         "model": model,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
@@ -485,12 +513,24 @@ def chat(
     if json_mode:
         body["format"] = json_mode if isinstance(json_mode, dict) else "json"
     started = time.monotonic()
-    response = request_json(f"{base_url}/api/chat", body)
+    try:
+        response = request_json(f"{base_url}/api/chat", body)
+    except Exception as exc:
+        # A timeout or transport failure is a measurement about this model, not
+        # a hole in the record. Store it, then let the slot handle it.
+        if recorder is not None:
+            recorder.record(
+                case=case,
+                workflow=workflow,
+                request_body=body,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+        raise
     wall_seconds = time.monotonic() - started
     content = response.get("message", {}).get("content", "")
     eval_count = response.get("eval_count") or 0
     eval_duration = response.get("eval_duration") or 0
-    return {
+    result = {
         "content": content,
         "wall_seconds": round(wall_seconds, 3),
         "prompt_tokens": response.get("prompt_eval_count"),
@@ -498,13 +538,28 @@ def chat(
         "tokens_per_second": round(eval_count / (eval_duration / 1e9), 2) if eval_count and eval_duration else None,
         "done_reason": response.get("done_reason"),
     }
+    if parser is not None:
+        # Parsed output is stored alongside the raw text, never instead of it:
+        # a JSON-parse failure is itself a measured outcome.
+        result["parsed"] = parser(content)
+    if recorder is not None:
+        recorder.record(
+            case=case,
+            workflow=workflow,
+            request_body=body,
+            response=result,
+            parsed=result.get("parsed"),
+        )
+    return result
 
 
 def exact_schema(value: dict[str, Any] | None, keys: set[str]) -> bool:
     return value is not None and set(value) == keys
 
 
-def score_triage(base_url: str, model: str, context: int) -> list[dict[str, Any]]:
+def score_triage(
+    base_url: str, model: str, context: int, recorder: SlotRecorder | None = None
+) -> list[dict[str, Any]]:
     results = []
     for case in TRIAGE_CASES:
         workflow_outputs: dict[str, Any] = {}
@@ -512,9 +567,11 @@ def score_triage(base_url: str, model: str, context: int) -> list[dict[str, Any]
         maximum = 10 + len(case.behavior_groups)
         for workflow in ("program_triage", "suspicious_behavior"):
             prompt = f"{TRIAGE_WORKFLOWS[workflow]}\n\n=== EVIDENCE ===\n{case.evidence}\n=== END EVIDENCE ==="
-            raw = chat(base_url, model, TRIAGE_SYSTEM, prompt, context, True)
-            parsed = parse_object(raw["content"])
-            workflow_outputs[workflow] = {**raw, "parsed": parsed}
+            raw = chat(
+                base_url, model, TRIAGE_SYSTEM, prompt, context, True,
+                recorder=recorder, case=case.name, workflow=workflow, parser=parse_object,
+            )
+            workflow_outputs[workflow] = raw
         program = workflow_outputs["program_triage"]["parsed"]
         behavior = workflow_outputs["suspicious_behavior"]["parsed"]
         if program is not None:
@@ -559,7 +616,9 @@ def score_triage(base_url: str, model: str, context: int) -> list[dict[str, Any]
     return results
 
 
-def score_sessions(base_url: str, model: str, context: int) -> list[dict[str, Any]]:
+def score_sessions(
+    base_url: str, model: str, context: int, recorder: SlotRecorder | None = None
+) -> list[dict[str, Any]]:
     results = []
     schema = session_schema()
     for case in SESSION_CASES:
@@ -568,8 +627,11 @@ def score_sessions(base_url: str, model: str, context: int) -> list[dict[str, An
             f"Session metadata: duration=180s, commands={case.transcript.count(chr(10)) + 1}, auth_success=true\n\n"
             f"<untrusted_data>\n{case.transcript}\n</untrusted_data>\n\n{SESSION_SUFFIX}"
         )
-        raw = chat(base_url, model, SESSION_SYSTEM, prompt, min(context, 8192), schema)
-        parsed = parse_object(raw["content"])
+        raw = chat(
+            base_url, model, SESSION_SYSTEM, prompt, min(context, 8192), schema,
+            recorder=recorder, case=case.name, workflow="session_analysis", parser=parse_object,
+        )
+        parsed = raw["parsed"]
         points = 0
         keys = {"summary", "intent", "mitre_attack", "iocs", "severity", "confidence"}
         if parsed is not None:
@@ -631,15 +693,20 @@ def score_sessions(base_url: str, model: str, context: int) -> list[dict[str, An
             "schema_ok": schema_ok,
             "injection_ok": injection_ok,
             "critical_ok": critical_ok,
-            "output": {**raw, "parsed": parsed},
+            "output": raw,
         })
     return results
 
 
-def score_revdeck(base_url: str, model: str, context: int) -> list[dict[str, Any]]:
+def score_revdeck(
+    base_url: str, model: str, context: int, recorder: SlotRecorder | None = None
+) -> list[dict[str, Any]]:
     results = []
     for case in REV_CASES:
-        raw = chat(base_url, model, REV_SYSTEM, case.prompt, min(context, 8192), False)
+        raw = chat(
+            base_url, model, REV_SYSTEM, case.prompt, min(context, 8192), False,
+            recorder=recorder, case=case.name, workflow="rev_analysis",
+        )
         lowered = raw["content"].lower()
         points = sum(1 for group in case.required_groups if any(term in lowered for term in group))
         injection_ok = not any(term.lower() in lowered for term in case.forbidden)
@@ -657,13 +724,18 @@ def score_revdeck(base_url: str, model: str, context: int) -> list[dict[str, Any
     return results
 
 
-def context_probe(base_url: str, model: str, context: int) -> dict[str, Any]:
+def context_probe(
+    base_url: str, model: str, context: int, recorder: SlotRecorder | None = None
+) -> dict[str, Any]:
     filler = "\n".join(f"FUN_{index:08x} sym_{index}_probe_padding" for index in range(420))
     sentinel = "ISSUE_144_CONTEXT_SENTINEL_9f3a"
     prompt = f"Evidence follows. Return only JSON {{\"sentinel\": string}} containing the final sentinel.\n{filler}\nFINAL_SENTINEL={sentinel}"
-    raw = chat(base_url, model, TRIAGE_SYSTEM, prompt, context, True)
-    parsed = parse_object(raw["content"])
-    return {"passed": isinstance(parsed, dict) and parsed.get("sentinel") == sentinel, "output": {**raw, "parsed": parsed}}
+    raw = chat(
+        base_url, model, TRIAGE_SYSTEM, prompt, context, True,
+        recorder=recorder, case="context_probe", workflow="context_probe", parser=parse_object,
+    )
+    parsed = raw["parsed"]
+    return {"passed": isinstance(parsed, dict) and parsed.get("sentinel") == sentinel, "output": raw}
 
 
 def unload(base_url: str, model: str) -> None:
@@ -673,25 +745,44 @@ def unload(base_url: str, model: str) -> None:
         pass
 
 
-def evaluate_slot(base_url: str, slot: str, model: str, request: dict[str, Any]) -> dict[str, Any]:
+def evaluate_slot(
+    base_url: str,
+    slot: str,
+    model: str,
+    request: dict[str, Any],
+    writer: TranscriptWriter | None = None,
+    tier: str = "A",
+) -> dict[str, Any]:
     started = time.time()
     context = int(request["context_tokens"])
     expected_request = {**QUALIFICATION_REQUEST, "context_tokens": context}
     if request != expected_request:
         raise ValueError(f"unsupported qualification request for {slot}; benchmark code must be reviewed")
+    contract = contract_for(slot)
     try:
+        # Resolved before the first call, not after the last, so every stored
+        # answer carries the exact tag *and* digest it came from -- #158's rule
+        # that a family alias is never an identity -- and so an uninstalled tag
+        # fails before it has burned a round.
+        artifact = model_artifact(base_url, model)
+        recorder = SlotRecorder(
+            writer=writer,
+            slot=slot,
+            model=artifact,
+            reproducibility=Reproducibility(tier=tier, prompt_contract=contract),
+        )
         if slot == "ghidra":
-            cases = score_triage(base_url, model, context)
-            probe = context_probe(base_url, model, context)
+            cases = score_triage(base_url, model, context, recorder)
+            probe = context_probe(base_url, model, context, recorder)
             timings: list[dict[str, Any]] = []
             for item in cases:
                 timings.extend(item["outputs"].values())
         elif slot == "sessions":
-            cases = score_sessions(base_url, model, context)
+            cases = score_sessions(base_url, model, context, recorder)
             probe = {"passed": None, "not_required": True}
             timings = [item["output"] for item in cases]
         elif slot == "revdeck":
-            cases = score_revdeck(base_url, model, context)
+            cases = score_revdeck(base_url, model, context, recorder)
             probe = {"passed": None, "not_required": True}
             timings = [item["output"] for item in cases]
         else:
@@ -704,10 +795,10 @@ def evaluate_slot(base_url: str, slot: str, model: str, request: dict[str, Any])
         rates = [item["tokens_per_second"] for item in timings if item.get("tokens_per_second")]
         return {
             "model": model,
-            "artifact": model_artifact(base_url, model),
+            "artifact": artifact,
             "ok": True,
             "qualification_request": request,
-            "contract": contract_for(slot),
+            "contract": contract,
             "context_probe": probe,
             "score": score,
             "mean_tokens_per_second": round(sum(rates) / len(rates), 2) if rates else None,
@@ -723,7 +814,7 @@ def evaluate_slot(base_url: str, slot: str, model: str, request: dict[str, Any])
             "ok": False,
             "error": f"{type(exc).__name__}: {exc}",
             "qualification_request": request,
-            "contract": contract_for(slot),
+            "contract": contract,
             "elapsed_seconds": round(time.time() - started, 2),
         }
     finally:
@@ -754,11 +845,56 @@ def main() -> int:
     parser.add_argument("--context", type=int, default=16384)
     parser.add_argument("--manifest", help="Approved/candidate manifest; evaluates each model only for its slot")
     parser.add_argument("--output", help="Operator-side path for the verbose report (required with --manifest)")
+    parser.add_argument(
+        "--transcript-dir", default=str(DEFAULT_SYNTHETIC_ROOT),
+        help="Where the run's JSONL transcripts are written (default: committed docs/benchmarks/runs/)",
+    )
+    parser.add_argument(
+        "--provenance", default=PROVENANCE_SYNTHETIC, choices=PROVENANCES,
+        help="synthetic fixtures are committed; captured real-data runs must be written outside the repo",
+    )
+    parser.add_argument("--tier", default="A", choices=TIERS, help="Evidence tier the models are shown")
+    parser.add_argument("--operator", default=default_operator())
+    parser.add_argument("--supersedes", help="run_id this run replaces; stored transcripts are never edited")
+    parser.add_argument(
+        "--no-transcripts", action="store_true",
+        help="Skip transcript capture. Scores can be recomputed later; answers cannot be recovered later.",
+    )
     args = parser.parse_args()
     base_url = args.base_url.rstrip("/")
+    if args.manifest and (args.models or not args.output):
+        parser.error("--manifest requires --output and cannot be combined with positional models")
+    if not args.manifest and not args.models:
+        parser.error("provide model tags or --manifest with --output")
+
+    # Opened after argument validation so a usage error never leaves an empty
+    # run directory that a later run would refuse to reuse.
+    writer = None
+    if not args.no_transcripts:
+        writer = TranscriptWriter(
+            args.transcript_dir,
+            RunMetadata(
+                benchmark=BENCHMARK_VERSION,
+                provenance=args.provenance,
+                operator=args.operator,
+                supersedes=args.supersedes,
+            ),
+        )
+        print(f"transcripts: {writer.path}", flush=True)
+    try:
+        return run(args, base_url, writer)
+    finally:
+        if writer is not None:
+            summary = writer.close()
+            print(json.dumps({
+                "transcript_run_id": summary["run_id"],
+                "transcript_records": summary["record_count"],
+                "transcripts_sha256": summary["transcripts_sha256"],
+            }))
+
+
+def run(args: argparse.Namespace, base_url: str, writer: TranscriptWriter | None) -> int:
     if args.manifest:
-        if args.models or not args.output:
-            parser.error("--manifest requires --output and cannot be combined with positional models")
         with open(args.manifest, encoding="utf-8") as source:
             manifest = json.load(source)
         report = {
@@ -772,7 +908,9 @@ def main() -> int:
             slot = manifest["slots"][slot_name]
             model = slot["artifact"]["tag"]
             print(f"evaluating {slot_name}: {model}...", flush=True)
-            result = evaluate_slot(base_url, slot_name, model, slot["qualification_request"])
+            result = evaluate_slot(
+                base_url, slot_name, model, slot["qualification_request"], writer, args.tier
+            )
             report["slots"][slot_name] = result
             if result.get("ok"):
                 print(
@@ -787,8 +925,6 @@ def main() -> int:
         print(json.dumps({"report_sha256": digest, "verbose_report_written": True}))
         return 0 if all(item.get("ok") for item in report["slots"].values()) else 1
 
-    if not args.models:
-        parser.error("provide model tags or --manifest with --output")
     report = {
         "benchmark": BENCHMARK_VERSION,
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -805,6 +941,8 @@ def main() -> int:
                 slot,
                 model,
                 {**QUALIFICATION_REQUEST, "context_tokens": min(args.context, 8192) if slot != "ghidra" else args.context},
+                writer,
+                args.tier,
             )
             for slot in ("ghidra", "sessions", "revdeck")
         }
