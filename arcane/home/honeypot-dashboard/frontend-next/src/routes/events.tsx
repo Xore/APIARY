@@ -712,7 +712,7 @@ function IsolateIpMenu({ ips, onApply }: { ips: CorrelatedIp[]; onApply: (value:
                   })
                 }}
               />
-              <span className="mono" style={{ flex: 1 }}>
+              <span className="mono hp-grow">
                 {entry.ip}
               </span>
               <span className="text-muted">{entry.count.toLocaleString('en-US')}</span>

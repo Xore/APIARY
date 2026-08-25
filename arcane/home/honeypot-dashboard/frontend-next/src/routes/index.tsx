@@ -193,7 +193,9 @@ function KpiSpark({ hourly }: { hourly: number[] | undefined }) {
   return (
     <div className="metric__spark" aria-hidden="true">
       {hourly.map((count, index) => (
-        <i key={index} style={{ height: `${Math.max(4, Math.floor((count * 100) / max))}%` }} />
+        // The height is the datum; .metric__spark owns everything about
+        // how the bar looks, and reads the value from --v (#1893).
+        <i key={index} style={{ ['--v' as string]: Math.max(4, Math.floor((count * 100) / max)) } as React.CSSProperties} />
       ))}
     </div>
   )

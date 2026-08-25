@@ -267,7 +267,7 @@ export function ProblemReportButton({ enabled }: { enabled: boolean }) {
                   onChange={(event) => setExpected(event.target.value)}
                 />
               </label>
-              <label className="note" style={{ display: 'block', marginTop: 8 }}>
+              <label className="note hp-field hp-flow--tight">
                 What actually happened?
                 <textarea className="form-input" rows={3} value={actual} onChange={(event) => setActual(event.target.value)} />
               </label>
@@ -275,7 +275,7 @@ export function ProblemReportButton({ enabled }: { enabled: boolean }) {
                 This report automatically includes your recent click/navigation trail, console errors, failed requests, and a
                 snapshot of the current page — reviewed by an admin, never shared outside this dashboard.
               </p>
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+              <div className="hp-row hp-row--end hp-flow--tight">
                 <button className="btn btn-secondary" type="button" onClick={() => setOpen(false)}>
                   Cancel
                 </button>

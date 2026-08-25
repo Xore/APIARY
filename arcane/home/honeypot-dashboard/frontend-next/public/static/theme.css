@@ -3974,7 +3974,17 @@ div.hp-skel-batch .skeleton-line:nth-child(3) { width: 38%; }
 .metric__delta--down { background: var(--danger-soft); color: var(--danger-text-on-soft); }
 .metric__spark { display: flex; align-items: flex-end; gap: 2px; height: 26px; margin-top: var(--space-sm); }
 .metric__spark i {
+  --v: 0;
   flex: 1; min-height: 2px;
+  /* The bar's height is the datum, so it arrives as a custom property
+     rather than as an inline height -- the same shape .mini-chart span and
+     .progress > span already use, and the same reason: an inline style is
+     invisible to the checks this file guarantees, and a strict CSP blocks
+     the alternatives. Consumers set --v to a unitless percentage.
+
+     Defaulting to 0 means a bar with no datum is flat rather than
+     full-height, which is the honest rendering of "no events this hour". */
+  height: calc(var(--v) * 1%);
   border-radius: 2px 2px 0 0;
   background: var(--accent-soft);
 }
@@ -4073,6 +4083,20 @@ div.hp-skel-batch .skeleton-line:nth-child(3) { width: 38%; }
    display: block -- so forty-odd of those inline styles were restating
    what the class already said and simply come out. */
 
+/* A horizontal run of controls: a label beside its input, a pair of
+   buttons, a value with its action.
+
+   Written inline in seven places before this, always as the same three
+   declarations with the gap picked by eye. The gap is the scale's, so rows
+   in different components line up with each other instead of each being
+   nearly right. */
+.hp-row { display: flex; align-items: center; gap: var(--space-sm); }
+/* The same row, ranged right -- a dialog's confirm/cancel pair. */
+.hp-row--end { justify-content: flex-end; }
+/* The member of a row that should absorb the leftover width: the value in
+   a label/value pair, the input in a search row. */
+.hp-grow { flex: 1; }
+
 /* A block that follows another block, at the scale's rhythm.
 
    Named for the relationship rather than the value, so it stays correct
@@ -4110,52 +4134,6 @@ div.hp-skel-batch .skeleton-line:nth-child(3) { width: 38%; }
    theme on purpose. */
 .hp-figure { display: block; max-width: 100%; border-radius: var(--radius-control); background: #fff; }
 
-/* Four shapes that had no class, and were being written as inline styles
-   in the components instead (Xore/APIARY#1893).
-
-   An inline style is invisible to everything this file exists to
-   guarantee: the nine themes are generated and contrast-checked here, and
-   check-space-scale.mjs enforces the spacing scale here. A literal value
-   in a component participates in none of that -- it looks right in
-   whichever theme it was written under, and no check can see it.
-
-   Deliberately four. Everything else the components were reaching for
-   already existed and is now used instead: .metric-grid is the responsive
-   auto-fit grid, .progress is the proportional bar (fill via --v),
-   .hp-data-card-list is the vertical stack, .metric__spark is the
-   sparkline, .wide is grid-column: 1 / -1, and .card already carries its
-   own bottom margin. */
-
-/* A block that follows another block, at the scale's rhythm.
-
-   Named for the relationship rather than the value, so it stays correct
-   when the scale is redefined -- which is the point of the scale, and what
-   the density control in Xore/APIARY#1759 depends on. This is what the
-   components were expressing as `marginTop: 'var(--space-md)'` on a
-   <details>, a <table>, a <pre> or a <p class="note">, none of which carry
-   a top margin of their own. */
-.hp-flow { margin-block-start: var(--space-md); }
-.hp-flow--tight { margin-block-start: var(--space-sm); }
-.hp-flow--loose { margin-block-start: var(--space-xl); }
-
-/* A heading that ranges its row-mates to the far edge -- a card title with
-   its actions on the right. The theme already does this per component
-   (.dropdown__shortcut, .project-card__meta .action-menu); this is the
-   same idea where no component owns it. */
-.hp-push-end { margin-inline-end: auto; }
-
-/* A captured screenshot or rendered artifact.
-
-   The light plate is not a theme colour and must not become one: these are
-   images that assume a white page behind them, so the plate belongs to the
-   image rather than to the surface it sits on, and it stays white in every
-   theme on purpose. */
-.hp-figure { display: block; max-width: 100%; border-radius: var(--radius-control); background: #fff; }
-
-/* A label stacked over its control, wide enough to stay readable when a
-   row of them wraps. The uppercase label styling already comes from
-   .hp-rp-field; this is the plain one for a form built out of .note. */
-.hp-field { display: block; min-width: 9rem; }
 /* Pane close control (the pane is sticky -- a positioned box -- so the
    button anchors to it) and the generic row inspector: pages without a
    dedicated per-row detail render the selected row as labelled fields. */

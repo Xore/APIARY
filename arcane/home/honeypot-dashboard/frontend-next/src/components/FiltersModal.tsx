@@ -107,7 +107,7 @@ export function FiltersModal({
           }}
         >
           {children}
-          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          <div className="hp-row hp-flow--tight">
             <button className="btn btn-primary" type="submit">
               Apply filters
             </button>

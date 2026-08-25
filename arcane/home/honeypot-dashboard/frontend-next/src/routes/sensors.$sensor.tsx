@@ -113,7 +113,7 @@ function Activity({ hourly }: { hourly: number[] }) {
       {hourly.map((count, index) => (
         // The height is the datum -- this hour against the busiest one.
         // Everything about how the bar looks belongs to .metric__spark.
-        <i key={index} style={{ height: `${Math.max(3, Math.round((count * 100) / peak))}%` }} />
+        <i key={index} style={{ ['--v' as string]: Math.max(3, Math.round((count * 100) / peak)) } as React.CSSProperties} />
       ))}
     </div>
   )
