@@ -1071,7 +1071,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
       {message ? <p className="note">{message}</p> : null}
 
       {lastRun ? (
-        <div style={{ marginTop: 16 }}>
+        <div className="hp-flow">
           <h3 className="label-section">Run {lastRun.id}</h3>
           <RunDetail run={lastRun} currentOwner={owner} onChanged={setLastRun} />
         </div>

@@ -3131,6 +3131,17 @@ td.v .eventdetail, td.v article, td.v .eventmeta { white-space: normal; }
   outline: none;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
+/* A control holding a small number -- an hour, a minute, a day of the month,
+   a retention count. Left at its natural width these stretch to the width of
+   a text field and read as though they expect a sentence.
+
+   Deliberately not .hp-input--num: this codebase has two base classes for a
+   text control, .hp-input and .form-input, and these four call sites use
+   both. A BEM modifier would claim one parent and then be worn by the other.
+
+   Added for APIARY#1893, where four such controls carried a hand-written
+   width each (80px three times, 6em once, for the same shape). */
+.hp-num { width: 5rem; }
 .hp-input::placeholder, input.search::placeholder { color: var(--text-200); }
 .hp-input:focus, input.search:focus {
   border-color: var(--border-focus);
@@ -4132,6 +4143,35 @@ div.hp-skel-batch .skeleton-line:nth-child(3) { width: 38%; }
    images that assume a white page behind them, so the plate belongs to the
    image rather than to the surface it sits on, and stays white in every
    theme on purpose. */
+/* Two equal columns that become one when there is no room for two. The
+   same shape .wb-child-grid has carried for the workbench, named for anyone.
+
+   The collapse is the point: added for APIARY#1893, where this grid existed
+   inline without it and so stayed two columns on a phone. `minmax(0, 1fr)`
+   rather than `1fr` so a long unbroken value cannot push a column wider than
+   its share.
+
+   Its own media query rather than joining the one further up: this rule sits
+   later in the file, and a same-specificity base rule after an override wins
+   over it. */
+/* A button pinned to the bottom-right of the viewport, out of the page's
+   flow -- the "report a problem" affordance and anything like it. Sits below
+   menus (70) and modals (101) deliberately: it must never cover the thing it
+   opened. Offsets come off the scale rather than the 1rem that was written
+   inline for it.
+
+   Added for APIARY#1893. */
+.hp-fab {
+  position: fixed;
+  right: var(--space-lg); bottom: var(--space-lg);
+  z-index: 40;
+}
+
+.hp-duo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-md); }
+@media (max-width: 820px) {
+  .hp-duo { grid-template-columns: 1fr; }
+}
+
 .hp-figure { display: block; max-width: 100%; border-radius: var(--radius-control); background: #fff; }
 
 /* Pane close control (the pane is sticky -- a positioned box -- so the
@@ -4488,7 +4528,29 @@ tr.selected .hp-row-actions__more,
 /* #1567: the Report-a-problem dialog -- flat header+form children need a
    column stack and content-driven height; the generic .modal box is a
    fixed-height row flexbox meant for sidebar+content compositions. */
-.hp-pr-modal { flex-direction: column; width: min(560px, calc(100vw - 40px)); height: auto; max-height: calc(100dvh - 40px); overflow: auto; }
+/* A modal sized to a short form rather than to a document. The base .modal
+   caps at 1280x840, which is right for a PDF viewer or a log and far too
+   much for six fields; height goes to auto so the panel is as tall as its
+   content and no taller, with the same viewport margin the base uses.
+
+   flex-direction is the load-bearing one: .modal.open is display:flex, so
+   without it a header and a form become side-by-side columns rather than a
+   header above a form. .modal--palette sets it for the same reason.
+
+   Two names, one rule. .hp-pr-modal is the problem-report dialog, and had
+   carried this shape alone since the Go dashboard; .modal--compact is the
+   same shape for anything else that is a short form -- added for
+   APIARY#1893, where a second dialog had written it out inline rather than
+   find this one. The 680px cap comes from that dialog and is the tighter of
+   the two, which suits a form either way. */
+.modal--compact,
+.hp-pr-modal {
+  flex-direction: column;
+  width: min(560px, calc(100vw - 40px));
+  height: auto;
+  max-height: min(680px, calc(100dvh - 40px));
+  overflow: auto;
+}
 .hp-pr-modal form { display: flex; flex-direction: column; gap: var(--space-md); padding: var(--space-lg) var(--space-xl) var(--space-xl); }
 
 /* #1565: the attack map's zoom-2 side gutters read as broken light-gray
@@ -4550,7 +4612,25 @@ tr.selected .hp-row-actions__more,
 }
 .pdf-viewer-modal{flex-direction:column;width:min(1000px,calc(100vw - 40px));height:min(860px,calc(100dvh - 48px));padding:20px 20px 0}.pdf-viewer-title{flex:none;margin:0 var(--space-3xl) var(--space-md) 0;font-size:var(--font-size-lg)}.pdf-viewer-frame{flex:1;width:100%;min-height:0;margin:0 -var(--space-xl);border:0;background:var(--bg-100)}@media(max-width:720px){.pdf-viewer-modal{width:100vw;height:100dvh;border-radius:0}}
 .hp-pl-info-popover,.hp-sb-info-popover{width:300px}.hp-pl-info-row,.hp-sb-info-row{display:flex;flex-direction:column;gap:2px;padding:var(--space-sm) var(--space-md);font-size:var(--font-size-caption)}.hp-pl-info-row .k,.hp-sb-info-row .k{color:var(--text-200);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase}.hp-pl-info-row .v,.hp-sb-info-row .v{color:var(--text-000);font-family:var(--hp-mono);word-break:break-all}.hp-pl-label-trigger.action-menu>summary{width:auto;height:auto;min-height:32px;padding:var(--space-sm) var(--space-lg);border-radius:var(--radius-pill);font-size:12.5px}#panel-identity h2 .hp-pl-label-trigger,.hp-sb-label-trigger.action-menu{margin-left:var(--space-sm);vertical-align:middle}#panel-identity h2 .hp-pl-label-trigger>summary,.hp-sb-label-trigger.action-menu>summary{width:auto;height:auto;min-height:24px;padding:3px var(--space-md);border-radius:var(--radius-pill);font-size:var(--font-size-xs)}
-.hp-vnc-canvas-wrap{overflow:hidden;border:1px solid var(--border-100);border-radius:var(--radius-panel);background:var(--framebuffer-bg)}.hp-vnc-canvas-wrap canvas{display:block;width:100%;height:auto}.hp-vnc-status{margin:var(--space-md) 0;color:var(--text-200);font-size:var(--font-size-caption)}.hp-tty-term{min-height:420px;overflow-x:auto;padding:var(--space-lg) var(--space-lg);border:1px solid var(--border-100);border-radius:var(--radius-panel);background:var(--terminal-bg);color:var(--terminal-fg);font-family:var(--font-mono);font-size:var(--font-size-footnote);line-height:1.35;white-space:pre}.hp-tty-controls{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-md);margin:12px 0}.hp-tty-controls input[type="range"]{min-width:160px;flex:1 1 260px}.hp-tty-status{color:var(--text-200);font-size:var(--font-size-caption)}
+/* Expanded out of the minified run this line is part of, because it needed
+   a declaration adding and an unreadable rule cannot be reviewed.
+
+   min-height reserves the framebuffer's box before noVNC has connected, so
+   the panel does not start as a 1px border and jump. It was written inline
+   at both call sites instead -- the same literal twice -- while the sibling
+   .hp-tty-term below sets its own min-height here in the stylesheet, which
+   is the shape this should have had. (APIARY#1893) */
+.hp-vnc-canvas-wrap {
+  min-height: 260px;
+  overflow: hidden;
+  border: 1px solid var(--border-100);
+  border-radius: var(--radius-panel);
+  background: var(--framebuffer-bg);
+}
+.hp-vnc-canvas-wrap canvas { display: block; width: 100%; height: auto; }
+/* The connecting placeholder fills the box it is standing in for. */
+.hp-vnc-canvas-wrap .skeleton-line { display: block; min-height: inherit; }
+.hp-vnc-status{margin:var(--space-md) 0;color:var(--text-200);font-size:var(--font-size-caption)}.hp-tty-term{min-height:420px;overflow-x:auto;padding:var(--space-lg) var(--space-lg);border:1px solid var(--border-100);border-radius:var(--radius-panel);background:var(--terminal-bg);color:var(--terminal-fg);font-family:var(--font-mono);font-size:var(--font-size-footnote);line-height:1.35;white-space:pre}.hp-tty-controls{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-md);margin:12px 0}.hp-tty-controls input[type="range"]{min-width:160px;flex:1 1 260px}.hp-tty-status{color:var(--text-200);font-size:var(--font-size-caption)}
 .hp-dash-settings > .settings-layout{width:100%;height:100%;min-height:0}
 .hp-dash-settings .settings-layout__sidebar{overflow-y:auto}
 .hp-dash-settings .settings-layout__content{height:100%;overflow-y:auto}

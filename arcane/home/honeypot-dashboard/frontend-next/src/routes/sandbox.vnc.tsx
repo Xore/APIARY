@@ -85,8 +85,8 @@ function VncViewer({ bridgeWs }: { bridgeWs: string }) {
         {message}
       </div>
       <div className="hp-vnc-canvas-wrap">
-        <div ref={targetRef} aria-busy={state === 'connecting'} style={{ minHeight: 260 }}>
-          {state === 'connecting' ? <span className="skeleton-line" aria-hidden="true" style={{ minHeight: 260, display: 'block' }} /> : null}
+        <div ref={targetRef} aria-busy={state === 'connecting'}>
+          {state === 'connecting' ? <span className="skeleton-line" aria-hidden="true" /> : null}
         </div>
       </div>
     </div>
