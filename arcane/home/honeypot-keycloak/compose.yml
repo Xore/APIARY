@@ -34,7 +34,18 @@ services:
         reservations: {memory: 256M}
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.7.1@sha256:f1f1f01e472c8a78df40d8f2a49a925274eda4d3d80d5f6edbb5c880ee3c01c6
+    # Unpinned on purpose: this is the identity provider for the whole stack,
+    # and staying current on it matters more here than a reproducible image id.
+    # It was pinned to 26.7.1@sha256:f1f1f01e... when CVE-2026-18963 landed --
+    # an unauthenticated account takeover through the reset-credentials flow,
+    # CVSS 9.1, fixed in 26.7.2 -- and a digest pin is exactly what keeps a
+    # known-vulnerable build running until someone edits a file.
+    #
+    # pull_policy matters as much as the tag: without it a redeploy reuses
+    # whatever ":latest" resolved to the first time it was pulled, which is a
+    # digest pin again with none of the honesty of one.
+    image: quay.io/keycloak/keycloak:latest
+    pull_policy: always
     container_name: hp-keycloak
     restart: unless-stopped
     depends_on:
