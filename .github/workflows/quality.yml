@@ -329,6 +329,12 @@ jobs:
               # a different decompiler) and the injection assertion, which must
               # report honestly that the payload never reached the evidence.
               python analysis/ghidra/benchmarks/tests/test_ghidra_cache.py
+              # Claim-pool scoring (#1805). Embedder is stubbed, so no Ollama.
+              # Covers the properties that decide whether a claim-pool score can
+              # be believed: the adjudicator cannot be a contestant, rephrasing
+              # earns nothing, unadjudicated claims never count as correct, and
+              # the pool version moves when a verdict does.
+              python analysis/ghidra/benchmarks/tests/test_claims.py
               # full_capabilities.py (#800): inventories env vars straight out of
               # the real pipeline source, so its own test runs against the real
               # tree rather than fixtures -- proving that stays true.
