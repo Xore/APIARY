@@ -261,20 +261,56 @@ Two things worth knowing when setting an override:
 
 ## Promotion workflow and change control
 
-Every sync in the manifest currently uses `branch: "main"` with
-`autoSync: false`. This is a deliberate first-pass choice, not a permanent
-one — the parent issue's own "Suggested implementation order" leaves the
-`main`-only-vs-protected-`production`-branch decision as a fast-follow once
-this migration has run under `autoSync: false` for an observation period.
-Until that decision is made:
+Decided in #1507: **release/tag promotion**, and `autoSync` enabled for
+exactly the three stacks where a sync is the whole deploy.
 
-- Every deploy to a home stack is a manual, operator-triggered sync — never
-  automatic on merge to `main`.
-- A commit that changes a home stack's compose file only takes effect on
-  the live host once someone deliberately triggers that stack's sync (or
-  re-runs `step_arcane_import_stacks`, which skips any stack whose
-  directory already has a `compose.yml`, so it won't redeploy an
-  already-imported stack on its own either).
+### Two facts the policy turns on
+
+**A sync does not build, and by default does not even redeploy.** Every sync
+in the manifest carries `redeployAfterSync: false` and
+`pullImageAfterSync: false`, so a sync materializes files onto the host and
+stops there. Confirmed operationally: syncing `honeypot-dashboard` puts new
+Rust source on the host and leaves `apiary-backend:latest` exactly as it was
+until a separate `POST /projects/{id}/build`. Without that call a redeploy
+recreates the containers from the *previous* image — green, healthy, running
+the old code.
+
+**35 of the 38 stacks build an image.** Only `honeypot-elk`,
+`honeypot-keycloak` and `pihole` pull. For the other 35, `autoSync: true`
+would mean every merge produces a deployment that looks successful and
+changes nothing — worse than a manual process, because it is unattended.
+
+### The policy
+
+- **What deploys is a tagged commit.** Releases are tagged `v*` on `main`.
+- **`production` is a pointer at the current release.** All 38 syncs track
+  `branch: "production"`.
+- **Promotion moves the pointer**: `scripts/promote-release.sh v0.1.0`.
+  Rollback is the same command naming an earlier tag. The script refuses a
+  ref that is not a tag, and refuses a tag that is not an ancestor of
+  `main`, so what reaches the pointer has always been through CI.
+- **`autoSync: true` for `honeypot-elk`, `honeypot-keycloak` and `pihole`**,
+  which follow a promotion within `syncInterval` (300s). To make that a real
+  deploy rather than a file copy, those three also need
+  `pullImageAfterSync` and `redeployAfterSync` set on the Arcane side — the
+  manifest schema has no field for either.
+- **The other 35 stay `autoSync: false`.** A promotion makes the release
+  available; an operator still runs sync → build → redeploy per stack. The
+  order matters and is not arbitrary: `honeypot-dashboard` must sync before
+  `honeypot-dashboard-backend` builds, because the Rust source lives in the
+  dashboard project's directory.
+
+### Arcane cannot track a tag
+
+`branch` accepts a tag name — the API stores it without complaint — and then
+every sync against it fails with a bare `500 Failed to perform GitOps sync`.
+Verified live on 2026-08-25 against the `pihole` sync and reverted. This is
+the same `refs/heads/` assumption documented above for the build-context
+resolver: Arcane prefixes `refs/heads/` onto whatever ref it is given.
+
+That is why the policy is a tag *promoted onto a branch* rather than a tag
+tracked directly. The deployed commit is still always a tagged one; the
+branch is only the pointer Arcane is able to follow.
 
 ## Security implications of Arcane's Docker-socket access
 
