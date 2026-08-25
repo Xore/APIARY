@@ -217,12 +217,27 @@ pub fn enrich_line(line: &[u8], vm: &ViaMap, tftp_vm: &ViaMap, persona: &str) ->
 /// by shape, not a fixed key name, since the key varies by incident
 /// origin ("connection" for most, "child"/"parent" for
 /// dionaea.connection.link).
-fn rewrite_dionaea_connections(v: &mut Value, vm: &ViaMap, line_at: i64) -> (usize, bool) {
+fn rewrite_dionaea_connections(v: &mut Value, vm: &ViaMap, line_at: i64) -> DionaeaWalk {
     let mut changed = 0usize;
     let mut all_resolved = true;
+    let mut saw_loopback = false;
     match v {
         Value::Object(map) => {
             if let Some(Value::String(ip)) = map.get("remote_ip") {
+                // #1917: dionaea's own healthcheck opens a real connection
+                // to itself -- smbd on 445 from 127.0.0.1 -- and it is
+                // logged exactly like an attacker's. Measured at 40 per ten
+                // minutes, about 5,760 a day, which was the whole of the
+                // "unattributed dionaea connections" this issue was filed
+                // for. They are not unattributable; they are ours.
+                //
+                // Same rule as #1918, reaching a shape that fix could not:
+                // the address is nested at data.connection.remote_ip, not
+                // at a top-level src_ip, so mark_internal_probe never saw
+                // it.
+                if LOOPBACK_IPS.contains(&ip.as_str()) {
+                    saw_loopback = true;
+                }
                 if ip == TUNNEL_PEER_IP {
                     if let Some(port) = map.get("remote_port").and_then(Value::as_f64) {
                         // #1917: the connection object says which of its own
@@ -254,21 +269,35 @@ fn rewrite_dionaea_connections(v: &mut Value, vm: &ViaMap, line_at: i64) -> (usi
                 }
             }
             for child in map.values_mut() {
-                let (c, r) = rewrite_dionaea_connections(child, vm, line_at);
-                changed += c;
-                all_resolved = all_resolved && r;
+                let walk = rewrite_dionaea_connections(child, vm, line_at);
+                changed += walk.changed;
+                all_resolved = all_resolved && walk.all_resolved;
+                saw_loopback = saw_loopback || walk.saw_loopback;
             }
         }
         Value::Array(arr) => {
             for child in arr {
-                let (c, r) = rewrite_dionaea_connections(child, vm, line_at);
-                changed += c;
-                all_resolved = all_resolved && r;
+                let walk = rewrite_dionaea_connections(child, vm, line_at);
+                changed += walk.changed;
+                all_resolved = all_resolved && walk.all_resolved;
+                saw_loopback = saw_loopback || walk.saw_loopback;
             }
         }
         _ => {}
     }
-    (changed, all_resolved)
+    DionaeaWalk { changed, all_resolved, saw_loopback }
+}
+
+/// What one pass over a dionaea incident's `data` found.
+struct DionaeaWalk {
+    /// How many nested remote_ip values were rewritten to a real client.
+    changed: usize,
+    /// False when a tunnel-peer address had no portbridge entry to join
+    /// against, so the line should be retried rather than shipped as-is.
+    all_resolved: bool,
+    /// Whether any peer in the record was loopback -- dionaea talking to
+    /// itself, not an attacker.
+    saw_loopback: bool,
 }
 
 /// dionaea_incident.json's own enrichLine: unlike the flat-log sensors, an
@@ -280,13 +309,15 @@ pub fn enrich_dionaea_incident_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap,
         return (line.to_vec(), true);
     };
     let line_at = extract_line_time(&e);
-    let (changed, all_resolved) = match e.get_mut("data") {
+    let walk = match e.get_mut("data") {
         Some(data) => rewrite_dionaea_connections(data, vm, line_at),
-        None => (0, true),
+        None => DionaeaWalk { changed: 0, all_resolved: true, saw_loopback: false },
     };
+    let (changed, all_resolved) = (walk.changed, walk.all_resolved);
+    let probe_marked = walk.saw_loopback && mark_probe_from(&mut e, "127.0.0.1");
     let canonicalized = promote_canonical_fields("dionaea-incident", &mut e);
     let attck_changed = super::attck::promote_attck_technique_fields("dionaea-incident", &mut e);
-    if changed == 0 && !canonicalized && !attck_changed {
+    if changed == 0 && !canonicalized && !attck_changed && !probe_marked {
         return (line.to_vec(), all_resolved);
     }
     (serde_json::to_vec(&e).unwrap_or_else(|_| line.to_vec()), all_resolved)
@@ -1756,5 +1787,92 @@ mod tests {
         );
         let e: Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(e["internal_probe"], json!(true));
+    }
+
+    // ---- #1917, second half: dionaea's own healthchecks ----
+
+    #[test]
+    fn dionaea_loopback_connections_are_marked_as_probes() {
+        // The residue that remained after the join was fixed, and the
+        // actual content of "5,700 unattributed connections a day": they
+        // are not unattributable, they are dionaea's healthcheck opening
+        // smbd on 445 from 127.0.0.1 and being logged like an attacker.
+        let line = json!({
+            "timestamp": "2026-08-25T07:40:45.123456",
+            "origin": "dionaea.connection.tcp.accept",
+            "data": {"connection": {
+                "protocol": "smbd",
+                "local_ip": "127.0.0.1", "local_port": 445,
+                "remote_ip": "127.0.0.1", "remote_port": 48894,
+                "transport": "tcp",
+            }},
+        })
+        .to_string();
+        let (out, resolved) = enrich_dionaea_incident_line(
+            line.as_bytes(), &ViaMap::new(), &ViaMap::new(), "dionaea-incident",
+        );
+        let e: Value = serde_json::from_slice(&out).unwrap();
+
+        assert_eq!(e["internal_probe"], json!(true));
+        assert!(resolved, "a probe is terminal, never queued for retry");
+        // The address is left alone: it is what shows this was ours.
+        assert_eq!(e["data"]["connection"]["remote_ip"], json!("127.0.0.1"));
+    }
+
+    #[test]
+    fn a_real_dionaea_connection_is_never_marked_as_a_probe() {
+        let line = json!({
+            "origin": "dionaea.connection.tcp.accept",
+            "data": {"connection": {
+                "local_ip": "172.16.10.2", "local_port": 445,
+                "remote_ip": "203.0.113.9", "remote_port": 44278,
+            }},
+        })
+        .to_string();
+        let (out, _) = enrich_dionaea_incident_line(
+            line.as_bytes(), &ViaMap::new(), &ViaMap::new(), "dionaea-incident",
+        );
+        let e: Value = serde_json::from_slice(&out).unwrap();
+
+        assert!(e.get("internal_probe").is_none());
+    }
+
+    #[test]
+    fn a_dionaea_connection_still_joins_on_its_destination_port() {
+        // The other half of #1917, end to end through the real enricher:
+        // two entries on one reused ephemeral port, and only the one whose
+        // destination matches may answer.
+        let mut vm = ViaMap::new();
+        vm.insert(
+            54674,
+            vec![
+                super::super::viamap::ViaEntry {
+                    ip: "153.117.32.130".into(), at: 0, target_port: 23,
+                },
+                super::super::viamap::ViaEntry {
+                    ip: "151.243.11.8".into(), at: 0, target_port: 1433,
+                },
+            ],
+        );
+        let line = json!({
+            "origin": "dionaea.connection.tcp.accept",
+            "data": {"connection": {
+                "protocol": "mssqld",
+                "local_ip": "172.16.10.2", "local_port": 1433,
+                "remote_ip": TUNNEL_PEER_IP, "remote_port": 54674,
+            }},
+        })
+        .to_string();
+        let (out, resolved) = enrich_dionaea_incident_line(
+            line.as_bytes(), &vm, &ViaMap::new(), "dionaea-incident",
+        );
+        let e: Value = serde_json::from_slice(&out).unwrap();
+
+        assert!(resolved);
+        assert_eq!(
+            e["data"]["connection"]["remote_ip"],
+            json!("151.243.11.8"),
+            "the mssql dial, not the telnet client that reused the port",
+        );
     }
 }
