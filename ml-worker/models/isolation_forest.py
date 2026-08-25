@@ -162,7 +162,42 @@ def _parse_home_net(raw: str) -> list:
 # _get_port() call keeps its pre-#174 behaviour (source=remote,
 # destination=local), which is still correct for every sensor except
 # Suricata netflow (see below).
-HOME_NET = _parse_home_net(os.getenv("ML_HOME_NET", ""))
+
+# #1959: ML_HOME_NET carried only the VPS WAN address, so every other address
+# we own -- loopback, the WireGuard tunnel between the VPS and the homeserver,
+# and the home LAN -- read as a remote party. Measured consequence: on the
+# largest alert day on record, 127.0.0.1 was the single biggest "source",
+# 3,204 of 6,669 alerts. An alert whose src_ip an operator cannot act on is
+# not an alert.
+#
+# These are defaults rather than required configuration because they are
+# properties of the deployment shape, not of a particular install: this stack
+# always has a WireGuard tunnel and a home LAN behind it, and loopback is never
+# a remote attacker anywhere. ML_LOCAL_NETS overrides the list for a deployment
+# whose honeypots legitimately live inside RFC1918 and should be scored.
+#
+# The deployment-specific public address stays in ML_HOME_NET, which the
+# install already writes from PUBLIC_IP -- kept separate so a widened default
+# here can never quietly drop it.
+DEFAULT_LOCAL_NETS = ",".join([
+    "127.0.0.0/8",      # loopback
+    "::1/128",          # loopback, v6
+    "169.254.0.0/16",   # link-local
+    "10.8.0.0/24",      # WireGuard: VPS <-> homeserver
+    "10.0.0.0/8",       # RFC1918
+    "172.16.0.0/12",    # RFC1918, and the Docker bridge ranges
+    "192.168.0.0/16",   # RFC1918, home LAN
+])
+
+# `or DEFAULT_LOCAL_NETS`, not a getenv default: compose passes
+# "${ML_LOCAL_NETS:-}", so the variable is *set to an empty string* when the
+# operator has not configured one, and os.getenv would then return "" rather
+# than the default -- silently disabling the whole exclusion. Treating empty
+# as unconfigured is what makes the safe value actually reach production.
+HOME_NET = (
+    _parse_home_net(os.getenv("ML_HOME_NET", ""))
+    + _parse_home_net(os.getenv("ML_LOCAL_NETS", "").strip() or DEFAULT_LOCAL_NETS)
+)
 
 
 def _in_home_net(ip: str) -> bool:
@@ -173,6 +208,16 @@ def _in_home_net(ip: str) -> bool:
     except ValueError:
         return False
     return any(addr in net for net in HOME_NET)
+
+
+def is_our_own_address(ip: str) -> bool:
+    """True when `ip` is an address this deployment owns.
+
+    Exposed for worker.py's alert path. Same set `_resolve_flow_sides()` uses
+    to tell our side of a flow from the remote one -- deliberately one list, so
+    the two cannot disagree about what "us" means.
+    """
+    return _in_home_net(ip)
 
 
 def _resolve_flow_sides(src: dict) -> tuple:
