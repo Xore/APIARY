@@ -20,8 +20,9 @@ pub struct SensorHealth {
     pub sensor: String,
     pub documents: u64,
     pub last_seen: String,
-    /// ACTIVE (<5m), QUIET (<1h), STALE otherwise — same thresholds the Go
-    /// page communicates.
+    /// ACTIVE / QUIET / STALE, relative to how often this sensor normally
+    /// speaks rather than a flat hour for the whole fleet — see
+    /// `sensor_state` for why (#1931).
     pub state: String,
 }
 
@@ -261,6 +262,63 @@ async fn pipeline_health(state: &AppState) -> PipelineHealth {
     PipelineHealth { state: fb_state, acked, failed, dropped, active, decode_failures }
 }
 
+/// Seven days, in seconds -- the window `recent` counts over.
+const RATE_WINDOW_S: i64 = 7 * 24 * 3600;
+
+/// How many of a sensor's own typical gaps may pass before it is stale.
+///
+/// Ten is deliberately generous. The cost of being late to call a quiet
+/// sensor stale is that somebody notices an hour later; the cost of being
+/// early is an alert that fires forever and teaches the operator to ignore
+/// the place where real ones appear.
+const STALE_GAP_MULTIPLE: i64 = 10;
+
+/// Never call a sensor stale sooner than this, however chatty it is.
+const MIN_STALE_S: i64 = 3600;
+
+/// Never wait longer than this, however quiet it is -- a sensor silent for
+/// two weeks is worth saying out loud even if it only ever spoke monthly.
+const MAX_STALE_S: i64 = 14 * 24 * 3600;
+
+/// ACTIVE / QUIET / STALE, judged against the sensor's own rate (#1931).
+///
+/// This was a flat hour for every sensor. On a fleet where cowrie sees
+/// millions of events a day and wordpot sees two, a flat hour means the
+/// quiet ones are stale roughly twenty-three hours a day while behaving
+/// perfectly -- measured live, wordpot's stale alert had re-fired 3,651
+/// times and dicompot's 2,890, for sensors that answered a probe correctly
+/// the moment they were asked.
+///
+/// So the threshold is the sensor's own median-ish gap (the 7-day window
+/// over its own count in that window) times STALE_GAP_MULTIPLE, clamped.
+/// cowrie's gap is sub-second, so it clamps to the one-hour floor and still
+/// alerts within minutes of going quiet. wordpot's is ~12h, so it is given
+/// days -- which is the point.
+///
+/// A sensor with no events in the window has no baseline to reason from and
+/// falls back to the floor: it is either new or genuinely gone, and both are
+/// worth surfacing.
+fn sensor_state(age_s: i64, recent_7d: u64) -> &'static str {
+    let stale_after = if recent_7d == 0 {
+        MIN_STALE_S
+    } else {
+        let typical_gap_s = RATE_WINDOW_S / recent_7d as i64;
+        (typical_gap_s * STALE_GAP_MULTIPLE).clamp(MIN_STALE_S, MAX_STALE_S)
+    };
+    // QUIET is the run-up to stale rather than a second fixed step, so a
+    // chatty sensor still reads QUIET within minutes and a slow one does
+    // not flap straight from ACTIVE to STALE.
+    let quiet_after = (stale_after / 12).max(300);
+
+    if age_s < quiet_after {
+        "ACTIVE"
+    } else if age_s < stale_after {
+        "QUIET"
+    } else {
+        "STALE"
+    }
+}
+
 pub async fn source_health(State(state): State<AppState>) -> Result<Json<SourceHealth>, (StatusCode, String)> {
     let body = json!({
         "size": 0,
@@ -278,7 +336,15 @@ pub async fn source_health(State(state): State<AppState>) -> Result<Json<SourceH
         "aggs": {
             "sensors": {
                 "terms": {"field": "event.sensor", "size": 60, "order": {"last": "desc"}},
-                "aggs": {"last": {"max": {"field": "@timestamp"}}}
+                "aggs": {
+                    "last": {"max": {"field": "@timestamp"}},
+                    // #1931: how often this sensor normally speaks, so
+                    // "stale" can mean "quiet for this sensor" rather than
+                    // "quiet for an hour". Seven days is long enough to
+                    // survive a slow weekend and short enough to notice a
+                    // sensor that has genuinely changed rate.
+                    "recent": {"filter": {"range": {"@timestamp": {"gte": "now-7d"}}}}
+                }
             },
             "newest": {"max": {"field": "@timestamp"}},
             // Same 24h window dead_letter_counts() already uses, so the
@@ -331,18 +397,12 @@ pub async fn source_health(State(state): State<AppState>) -> Result<Json<SourceH
                 .map(|bucket| {
                     let last_ms = bucket["last"]["value"].as_f64().unwrap_or(0.0) as i64;
                     let age_s = ((now_ms - last_ms) / 1000).max(0);
+                    let recent_7d = bucket["recent"]["doc_count"].as_u64().unwrap_or(0);
                     SensorHealth {
                         sensor: bucket["key"].as_str().unwrap_or("").to_string(),
                         documents: bucket["doc_count"].as_u64().unwrap_or(0),
                         last_seen: bucket["last"]["value_as_string"].as_str().unwrap_or("").to_string(),
-                        state: if age_s < 300 {
-                            "ACTIVE"
-                        } else if age_s < 3600 {
-                            "QUIET"
-                        } else {
-                            "STALE"
-                        }
-                        .to_string(),
+                        state: sensor_state(age_s, recent_7d).to_string(),
                     }
                 })
                 .collect()
@@ -360,4 +420,81 @@ pub async fn source_health(State(state): State<AppState>) -> Result<Json<SourceH
         pipeline: pipeline_health(&state).await,
         unattributed_24h: result["aggregations"]["unattributed"]["doc_count"].as_u64().unwrap_or(0),
     }))
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::sensor_state;
+
+    // Rates measured on the live fleet, 2026-08-25.
+    const COWRIE_7D: u64 = 2_000_000; // millions a day
+    const WORDPOT_7D: u64 = 14; // two a day
+    const DICOMPOT_7D: u64 = 112; // sixteen a day
+
+    #[test]
+    fn a_quiet_sensor_is_not_stale_while_it_is_behaving() {
+        // The bug. wordpot sees two events a day, so a flat one-hour rule
+        // called it stale roughly twenty-three hours out of every
+        // twenty-four -- its stale alert had re-fired 3,651 times for a
+        // sensor that answered a probe correctly when asked.
+        let twelve_hours = 12 * 3600;
+        assert_ne!(sensor_state(twelve_hours, WORDPOT_7D), "STALE");
+        assert_ne!(sensor_state(708 * 60, DICOMPOT_7D), "STALE", "dicompot at 708m");
+    }
+
+    #[test]
+    fn a_quiet_sensor_is_still_stale_eventually() {
+        // Generous is not infinite: silence well past its own rhythm is
+        // still worth saying.
+        assert_eq!(sensor_state(6 * 24 * 3600, WORDPOT_7D), "STALE");
+    }
+
+    #[test]
+    fn a_busy_sensor_still_alerts_within_the_hour() {
+        // The half that must not regress. cowrie's typical gap is
+        // sub-second, so it clamps to the floor and an outage surfaces as
+        // fast as it ever did.
+        assert_eq!(sensor_state(30, COWRIE_7D), "ACTIVE");
+        assert_eq!(sensor_state(3599, COWRIE_7D), "QUIET");
+        assert_eq!(sensor_state(3601, COWRIE_7D), "STALE");
+    }
+
+    #[test]
+    fn a_sensor_with_no_history_falls_back_to_the_floor() {
+        // No baseline to reason from: either brand new or genuinely gone,
+        // and both are worth surfacing rather than waiting two weeks.
+        assert_eq!(sensor_state(3601, 0), "STALE");
+        assert_eq!(sensor_state(60, 0), "ACTIVE");
+    }
+
+    #[test]
+    fn the_wait_is_bounded_at_both_ends() {
+        // One event in the whole window would otherwise mean a seventy-day
+        // threshold; and a firehose cannot push the floor below an hour.
+        assert_eq!(sensor_state(15 * 24 * 3600, 1), "STALE", "capped at two weeks");
+        assert_eq!(sensor_state(3601, u64::MAX), "STALE", "floored at one hour");
+    }
+
+    #[test]
+    fn quiet_comes_before_stale_for_every_rate() {
+        // A sensor should never jump ACTIVE -> STALE with no warning band,
+        // whatever its rate.
+        for rate in [1u64, WORDPOT_7D, DICOMPOT_7D, COWRIE_7D] {
+            let mut seen_quiet = false;
+            let mut last = "ACTIVE";
+            for age in (0..(15 * 24 * 3600)).step_by(600) {
+                let now = sensor_state(age, rate);
+                if now == "QUIET" {
+                    seen_quiet = true;
+                }
+                if now == "STALE" {
+                    assert_eq!(last, "QUIET", "rate {rate} went {last} -> STALE at {age}s");
+                    break;
+                }
+                last = now;
+            }
+            assert!(seen_quiet, "rate {rate} never passed through QUIET");
+        }
+    }
 }
