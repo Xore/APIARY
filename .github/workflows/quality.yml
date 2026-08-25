@@ -323,6 +323,12 @@ jobs:
               # written inside the repo. That last one is a data-handling rule,
               # so it is worth a gate rather than reviewer vigilance.
               python analysis/ghidra/benchmarks/tests/test_transcripts.py
+              # Tier B evidence cache (#1805). No Ghidra and no service in CI --
+              # covers the cache key (every component that shapes the evidence
+              # must change it, or a Ghidra upgrade silently reuses output from
+              # a different decompiler) and the injection assertion, which must
+              # report honestly that the payload never reached the evidence.
+              python analysis/ghidra/benchmarks/tests/test_ghidra_cache.py
               # full_capabilities.py (#800): inventories env vars straight out of
               # the real pipeline source, so its own test runs against the real
               # tree rather than fixtures -- proving that stays true.
