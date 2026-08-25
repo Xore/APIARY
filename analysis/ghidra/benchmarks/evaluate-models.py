@@ -854,6 +854,13 @@ def main() -> int:
         help="synthetic fixtures are committed; captured real-data runs must be written outside the repo",
     )
     parser.add_argument("--tier", default="A", choices=TIERS, help="Evidence tier the models are shown")
+    parser.add_argument(
+        "--slots", default="ghidra,sessions,revdeck",
+        help="Comma-separated slots to run. #1795 holds the ghidra slot back until "
+             "Tier B evidence exists (#1805), since scoring it on prose fixtures "
+             "measures a different job than production does; the session and revdeck "
+             "slots are unaffected by that and can run now.",
+    )
     parser.add_argument("--operator", default=default_operator())
     parser.add_argument("--supersedes", help="run_id this run replaces; stored transcripts are never edited")
     parser.add_argument(
@@ -862,6 +869,10 @@ def main() -> int:
     )
     args = parser.parse_args()
     base_url = args.base_url.rstrip("/")
+    args.slots = tuple(s.strip() for s in args.slots.split(",") if s.strip())
+    unknown = [s for s in args.slots if s not in ("ghidra", "sessions", "revdeck")]
+    if unknown:
+        parser.error(f"unknown slot(s): {', '.join(unknown)}")
     if args.manifest and (args.models or not args.output):
         parser.error("--manifest requires --output and cannot be combined with positional models")
     if not args.manifest and not args.models:
@@ -904,7 +915,7 @@ def run(args: argparse.Namespace, base_url: str, writer: TranscriptWriter | None
             "ollama_version": request_json(f"{base_url}/api/version").get("version"),
             "slots": {},
         }
-        for slot_name in ("ghidra", "sessions", "revdeck"):
+        for slot_name in args.slots:
             slot = manifest["slots"][slot_name]
             model = slot["artifact"]["tag"]
             print(f"evaluating {slot_name}: {model}...", flush=True)
@@ -944,7 +955,7 @@ def run(args: argparse.Namespace, base_url: str, writer: TranscriptWriter | None
                 writer,
                 args.tier,
             )
-            for slot in ("ghidra", "sessions", "revdeck")
+            for slot in args.slots
         }
         report["models"].append({"model": model, "slots": result})
     print("=== JSON REPORT ===")
