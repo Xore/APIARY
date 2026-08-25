@@ -4,7 +4,7 @@
 // skeleton-first batches. Data: server function → Rust /api/v1/events.
 import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react'
 import { FiltersButton, FiltersModal } from '../components/FiltersModal'
 import { RowActions, RowIcons } from '../components/RowActions'
 import { copyWithFlash } from '../lib/flash'
@@ -260,6 +260,17 @@ function clock(iso: string): string {
   return iso.slice(11, 16)
 }
 
+/** A row's stable identity (#1962): the document id from either source —
+ *  search hits carried it since #1868, the SSE stream since live.rs
+ *  switched to row_from_hit — else an id-less composite fallback for a
+ *  payload from a not-yet-restarted backend. Position-free by
+ *  construction: a live prepend must never shift it. Module scope because
+ *  FragmentRow's memoized rendering (#1965) derives its key with it too,
+ *  and every prop reference has to stay stable across renders. */
+function rowKey(row: EventRow): string {
+  return row.id || `${row.time}|${row.sensor}|${row.src_ip}|${row.session}`
+}
+
 function SkeletonRows({ count }: { count: number }) {
   return (
     <>
@@ -296,18 +307,28 @@ function Events() {
   // own once that event drops off the end of the list -- and the index
   // arithmetic disappears, because there is no position to keep in sync.
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
-  /** A row's stable identity. Both sources now carry the document id —
-   *  search hits always did (#1868); the SSE stream does too since #1962
-   *  (live.rs emits via row_from_hit). The id-less composite is only a
-   *  fallback for a payload from a not-yet-restarted backend: it stays
-   *  position-free so a live prepend can never shift it out from under
-   *  an open record (the old trailing index did exactly that, closing
-   *  the pane on every frame of a busy feed). */
-  const rowKey = (row: EventRow) =>
-    row.id || `${row.time}|${row.sensor}|${row.src_ip}|${row.session}`
+  // Identity itself lives in the module-scope rowKey() (shared with
+  // FragmentRow's keys, #1965).
   const selectedRow = selectedKey === null || rows === null
     ? null
     : (rows.find((row) => rowKey(row) === selectedKey) ?? null)
+  // #1965: precompute list keys once per rows change. Keys come from
+  // rowKey(row); true duplicates (possible only via the id-less fallback)
+  // get a #n suffix so React never sees a duplicate key. The minute-break
+  // labels ride along so the render below stays a pure map over stable
+  // tuples.
+  const keyedRows = useMemo(() => {
+    if (rows === null) return null
+    const seen = new Map<string, number>()
+    return rows.map((row, index) => {
+      const base = rowKey(row)
+      const n = seen.get(base) ?? 0
+      seen.set(base, n + 1)
+      const breakLabel =
+        index === 0 || minuteOf(rows[index - 1].time) !== minuteOf(row.time) ? clock(row.time) : null
+      return { row, key: n === 0 ? base : `${base}#${n}`, breakLabel }
+    })
+  }, [rows])
   const [filtersOpen, setFiltersOpen] = useState(false)
   const baseFilterCount = [search.ip, search.sensor, search.country, search.proto, search.port, search.kind].filter(
     Boolean,
@@ -344,6 +365,12 @@ function Events() {
     },
     [navigate],
   )
+  // Stable toggle for the memoized FragmentRow (#1965): identity-stable
+  // callbacks are what let unchanged rows skip re-rendering entirely
+  // during a live prepend.
+  const toggleSelect = useCallback((key: string) => {
+    setSelectedKey((current) => (current === key ? null : key))
+  }, [])
   const paneRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -354,19 +381,46 @@ function Events() {
   // all-day tab doesn't grow unbounded. The shared layer owns pause/resume
   // and connection health.
   const { paused: livePaused } = useLiveState()
+  // #1965: buffer frames and coalesce them into one setState per 250ms
+  // window instead of one render pass per SSE frame. A busy feed emits
+  // tens of events a second; each uncoalesced pass reconciled — and with
+  // the old positional keys, remounted — up to 500 rows. The buffer is
+  // flushed oldest-last so prepending preserves arrival order.
+  const liveBufferRef = useRef<EventRow[]>([])
+  const liveFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const flushLiveBuffer = useCallback(() => {
+    if (liveFlushRef.current !== null) {
+      clearTimeout(liveFlushRef.current)
+      liveFlushRef.current = null
+    }
+    const batch = liveBufferRef.current.reverse()
+    liveBufferRef.current = []
+    if (batch.length > 0) {
+      setRows((current) => (current === null ? current : [...batch, ...current].slice(0, 500)))
+      setTotal((count) => count + batch.length)
+    }
+  }, [])
   useEffect(() => {
     if (!live || livePaused) return
-    return subscribeLiveEvents((data) => {
+    const unsubscribe = subscribeLiveEvents((data) => {
       let row: EventRow
       try {
         row = JSON.parse(data) as EventRow
       } catch {
         return
       }
-      setRows((current) => (current === null ? current : [row, ...current].slice(0, 500)))
-      setTotal((count) => count + 1)
+      liveBufferRef.current.push(row)
+      if (liveFlushRef.current === null) {
+        liveFlushRef.current = setTimeout(flushLiveBuffer, 250)
+      }
     })
-  }, [live, livePaused])
+    return () => {
+      // Pause / filter change / unmount must not silently drop whatever
+      // the current window was still holding.
+      unsubscribe()
+      flushLiveBuffer()
+    }
+  }, [live, livePaused, flushLiveBuffer])
 
   useEffect(() => {
     let cancelled = false
@@ -559,25 +613,20 @@ function Events() {
                 </tr>
               </thead>
               <tbody>
-                {rows === null ? (
+                {keyedRows === null ? (
                   <SkeletonRows count={12} />
                 ) : (
-                  rows.map((row, index) => {
-                    const breakLabel = index === 0 || minuteOf(rows[index - 1].time) !== minuteOf(row.time) ? clock(row.time) : null
-                    return (
-                      <FragmentRow
-                        key={`${row.time}-${index}`}
-                        row={row}
-                        breakLabel={breakLabel}
-                        selected={selectedKey === rowKey(row)}
-                        onSelect={() =>
-                          setSelectedKey(selectedKey === rowKey(row) ? null : rowKey(row))
-                        }
-                        onPivot={setFilter}
-                        investigationConfig={investigationConfig}
-                      />
-                    )
-                  })
+                  keyedRows.map(({ row, key, breakLabel }) => (
+                    <FragmentRow
+                      key={key}
+                      row={row}
+                      breakLabel={breakLabel}
+                      selectedKey={selectedKey}
+                      onToggle={toggleSelect}
+                      onPivot={setFilter}
+                      investigationConfig={investigationConfig}
+                    />
+                  ))
                 )}
                 {loadingMore ? <SkeletonRows count={Math.min(25, Math.max(1, total - (rows?.length ?? 0)))} /> : null}
               </tbody>
@@ -922,24 +971,36 @@ function EventMeta({
   )
 }
 
-function FragmentRow({
+/** #1965: memoized so a live prepend re-renders exactly one new row
+ *  instead of reconciling all 500. That only pays off if prop references
+ *  hold steady across renders — hence module-scope rowKey, the stable
+ *  onToggle callback, and passing selectedKey down for the row to derive
+ *  its own selection instead of receiving a fresh closure per render.
+ *  Keys are non-positional (#1962/#1965), so a prepend no longer remounts
+ *  the table either. */
+const FragmentRow = memo(function FragmentRow({
   row,
   breakLabel,
-  selected,
-  onSelect,
+  selectedKey,
+  onToggle,
   onPivot,
   investigationConfig,
 }: {
   row: EventRow
   breakLabel: string | null
-  selected: boolean
-  onSelect: () => void
+  /** Derived here from the module-scope rowKey rather than passed as a
+   *  ready-made boolean: a boolean would have to be recomputed per row
+   *  through a fresh closure, which defeats memo()'s shallow compare. */
+  selectedKey: string | null
+  onToggle: (key: string) => void
   onPivot: (key: keyof EventFilters | 'ip', value: string) => void
   /** #1868: the external tool links are derived per row from the deployment's
    *  configured tool URLs, so the row needs the config to offer them. */
   investigationConfig: InvestigationConfig
 }) {
   const openIn = investigationLinks(row, investigationConfig)
+  const key = rowKey(row)
+  const selected = selectedKey === key
   // Cell pivots must not also toggle the record pane.
   const pivot = (event: React.MouseEvent, key: keyof EventFilters | 'ip', value: string) => {
     event.stopPropagation()
@@ -952,7 +1013,7 @@ function FragmentRow({
           <td colSpan={6}>— {breakLabel} —</td>
         </tr>
       ) : null}
-      <tr className={selected ? 'selected' : undefined} onClick={onSelect}>
+      <tr className={selected ? 'selected' : undefined} onClick={() => onToggle(key)}>
         <td data-hp-time data-label="time">{formatTimestamp(row.time)}</td>
         <td data-label="sensor">
           {/* Per-sensor badge coloring (theme.css's b-{sensor} classes) +
@@ -1118,4 +1179,4 @@ function FragmentRow({
       </tr>
     </>
   )
-}
+})
