@@ -81,8 +81,11 @@ pub async fn stream(
                 position = sort_tuple.clone();
             }
             for hit in &hits {
-                let source = &hit["_source"];
-                let row = events::row_from_source(source);
+                // row_from_hit rather than row_from_source (#1962): the
+                // stream's rows carry the document id, same as search-hit
+                // rows, so the events page can key selection by identity
+                // instead of a position-embedding composite.
+                let row = events::row_from_hit(hit);
                 if let Ok(data) = serde_json::to_string(&row) {
                     yield Ok(Event::default().event("event").data(data));
                 }
