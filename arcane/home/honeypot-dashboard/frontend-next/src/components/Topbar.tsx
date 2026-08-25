@@ -4,12 +4,12 @@
 // LIVE pause/resume control over the shared live layer
 // (hp-app.js:1896-1924), account avatar. Ports partials/dashboard.html's
 // topbar with its behaviors, not just its markup.
-import { useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { pageFor, sectionFor } from '../lib/nav'
 import { cycleTheme, useThemeMode } from '../lib/prefs'
-import { isLivePaused, toggleLive, useLiveState } from '../lib/live'
+import { isLivePaused, toggleLive, useLiveInterval, useLiveState } from '../lib/live'
 import type { BannerView } from '../lib/banner'
 import type { User } from '../lib/auth'
 
@@ -21,28 +21,20 @@ const fetchOpenAlertCount = createServerFn({ method: 'GET' }).handler(async (): 
 
 function useOpenAlertCount(): number {
   const [count, setCount] = useState(0)
-  useEffect(() => {
-    let cancelled = false
-    const refresh = () => {
-      if (isLivePaused()) return
-      fetchOpenAlertCount()
-        .then((value) => {
-          if (!cancelled) setCount(value)
-        })
-        .catch(() => {
-          /* transient — the badge keeps its last value */
-        })
-    }
-    refresh()
-    const interval = setInterval(refresh, 60_000)
-    // Resuming after a pause shows current data immediately.
-    window.addEventListener('hp-live-resumed', refresh)
-    return () => {
-      cancelled = true
-      clearInterval(interval)
-      window.removeEventListener('hp-live-resumed', refresh)
-    }
+  // #1973: this was a bare setInterval that kept ticking through hidden
+  // tabs — a background dashboard burned an open-alerts query every
+  // minute per open tab, forever. The shared tick adds the visibility
+  // guard; the pause guard stays here because the badge's leading fetch
+  // (unlike interval ticks) runs even while paused.
+  const refresh = useCallback(() => {
+    if (isLivePaused()) return
+    fetchOpenAlertCount()
+      .then(setCount)
+      .catch(() => {
+        /* transient — the badge keeps its last value */
+      })
   }, [])
+  useLiveInterval(refresh, 60_000, { leading: true })
   return count
 }
 

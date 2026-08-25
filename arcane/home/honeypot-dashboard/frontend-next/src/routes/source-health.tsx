@@ -3,9 +3,9 @@
 // runtime, ingestion-freshness verdict, dead letters (#1653).
 import { Link, createFileRoute, useRouter } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
-import { isLivePaused } from '../lib/live'
+import { useLiveInterval } from '../lib/live'
 import { formatTimestamp } from '../lib/time'
 
 type SensorHealth = {
@@ -120,19 +120,12 @@ function SourceHealthPage() {
     }
   }, [first])
   // The legacy page re-rendered on every visit with fresh snapshot data;
-  // here a visible-tab 60s cycle keeps the verdicts current, honoring the
-  // shell LIVE switch (resume refetches immediately).
-  useEffect(() => {
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible' && !isLivePaused()) void router.invalidate()
-    }, 60_000)
-    const onResume = () => void router.invalidate()
-    window.addEventListener('hp-live-resumed', onResume)
-    return () => {
-      clearInterval(timer)
-      window.removeEventListener('hp-live-resumed', onResume)
-    }
-  }, [router])
+  // a visible-tab 60s cycle keeps the verdicts current. #1973: that cycle
+  // is the shell's shared tick now rather than another hand-rolled copy
+  // of the guards (resume refetches immediately; loaders cover first
+  // paint, so no leading call).
+  const refresh = useCallback(() => void router.invalidate(), [router])
+  useLiveInterval(refresh, 60_000)
   const yara = health?.yara
   const runtime = health?.runtime
   const ingest = health?.ingest
