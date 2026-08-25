@@ -51,22 +51,50 @@ fn bad_gateway(error: anyhow::Error) -> (StatusCode, String) {
     (StatusCode::BAD_GATEWAY, error.to_string())
 }
 
+/// The sort every store list is paged by: the store's own field, then a
+/// deterministic tiebreak.
+///
+/// Both keys are load-bearing.
+///
+/// `unmapped_type` keeps a store whose index does not exist yet from
+/// erroring -- but it also means a *misspelled* field sorts every document
+/// as null instead of failing. That is how three lists shipped in no order
+/// at all: ml-anomalies asked for "timestamp" where the worker writes
+/// "@timestamp", auth-events asked for "last_seen" where Keycloak writes
+/// "@timestamp", and static-analysis asked for "Analysis.GeneratedUTC",
+/// which its documents do not carry in any spelling. It has to match the
+/// field's real type, or a keyword sort reintroduces the same silent no-op.
+///
+/// The tiebreak is what makes paging correct rather than merely tidy.
+/// `from`/`size` over a sort with ties leaves the order within a tie
+/// undefined, so the same document can come back on two pages while another
+/// is never shown at all -- and an all-null sort is one giant tie. `_doc` is
+/// the cheapest total order Elasticsearch offers.
+fn sort_spec(sort_field: &str, unmapped_type: &str) -> Value {
+    json!([
+        {sort_field: {"order": "desc", "unmapped_type": unmapped_type}},
+        {"_doc": {"order": "asc"}}
+    ])
+}
+
 /// Generic hits page: {"total": N, "rows": [ _source... ]}. The BFF/routes
 /// know each store's shape; this tier guarantees ordering + paging.
 async fn store_page(
     state: &AppState,
     indices: &[&str],
     sort_field: &str,
+    unmapped_type: &str,
     q: &StoreQuery,
     extra_filter: Option<Value>,
 ) -> anyhow::Result<Value> {
-    store_page_excluding(state, indices, sort_field, q, extra_filter, &[]).await
+    store_page_excluding(state, indices, sort_field, unmapped_type, q, extra_filter, &[]).await
 }
 
 async fn store_page_excluding(
     state: &AppState,
     indices: &[&str],
     sort_field: &str,
+    unmapped_type: &str,
     q: &StoreQuery,
     extra_filter: Option<Value>,
     excludes: &[&str],
@@ -83,7 +111,7 @@ async fn store_page_excluding(
         "from": q.offset,
         "size": size,
         "track_total_hits": true,
-        "sort": [{sort_field: {"order": "desc", "unmapped_type": "date"}}],
+        "sort": sort_spec(sort_field, unmapped_type),
         "query": query
     });
     if !excludes.is_empty() {
@@ -112,7 +140,7 @@ pub async fn campaigns(
     State(state): State<AppState>,
     Query(q): Query<StoreQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
-    store_page(&state, &["campaigns-v1"], "score", &q, None)
+    store_page(&state, &["campaigns-v1"], "score", "long", &q, None)
         .await
         .map(Json)
         .map_err(bad_gateway)
@@ -122,7 +150,7 @@ pub async fn clusters(
     State(state): State<AppState>,
     Query(q): Query<StoreQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
-    store_page(&state, &["attacker-clusters-v1"], "events", &q, None)
+    store_page(&state, &["attacker-clusters-v1"], "events", "long", &q, None)
         .await
         .map(Json)
         .map_err(bad_gateway)
@@ -132,7 +160,7 @@ pub async fn attackers(
     State(state): State<AppState>,
     Query(q): Query<StoreQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
-    store_page(&state, &["attackers-v1"], "events", &q, None)
+    store_page(&state, &["attackers-v1"], "events", "long", &q, None)
         .await
         .map(Json)
         .map_err(bad_gateway)
@@ -224,7 +252,7 @@ pub async fn alerts(
     State(state): State<AppState>,
     Query(q): Query<StoreQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
-    store_page(&state, &["dashboard-alert-state-v1"], "LastSeen", &q, None)
+    store_page(&state, &["dashboard-alert-state-v1"], "LastSeen", "date", &q, None)
         .await
         .map(Json)
         .map_err(bad_gateway)
@@ -234,7 +262,7 @@ pub async fn payloads(
     State(state): State<AppState>,
     Query(q): Query<StoreQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
-    store_page(&state, &["dashboard-payload-inventory-v1"], "MtimeUTC", &q, None)
+    store_page(&state, &["dashboard-payload-inventory-v1"], "MtimeUTC", "date", &q, None)
         .await
         .map(Json)
         .map_err(bad_gateway)
@@ -270,40 +298,53 @@ pub async fn generic(
     Query(q): Query<StoreQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     // (index, sort field, heavy fields excluded from list responses).
-    let (index, sort, excludes): (&str, &str, &[&str]) = match name.as_str() {
+    // (index, sort field, that field's type, heavy fields excluded from
+    // list responses). The type is not decoration -- see the sort spec in
+    // store_page_excluding for what a wrong one costs.
+    let (index, sort, sort_type, excludes): (&str, &str, &str, &[&str]) = match name.as_str() {
         // #1611 workstream E.9: `error`, `details.username`, and
         // `details.redirect_uri` are already present here (no excludes) —
         // the workstream's ask is first-class *columns* for them on the
         // auth-events.tsx table, a frontend-only change; this passthrough
         // already carries every field they'd need.
-        "auth-events" => ("auth-failure-events", "last_seen", &[]),
+        // "last_seen" is not a field these documents have -- Keycloak's
+        // event stream writes @timestamp -- so this list came back in no
+        // order at all until #1566.
+        "auth-events" => ("auth-failure-events", "@timestamp", "date", &[]),
         // llm-worker output; index may not exist yet (ignore_unavailable).
-        "llm-analysis" => ("llm-analysis", "@timestamp", &[]),
-        "ml-anomalies" => ("ml-anomalies", "timestamp", &[]),
+        "llm-analysis" => ("llm-analysis", "@timestamp", "date", &[]),
+        // Likewise "timestamp": the ml-worker writes @timestamp. Measured
+        // on the live index, the first page mixed 20:58, 20:59 and 20:57
+        // rows in that order (#1566).
+        "ml-anomalies" => ("ml-anomalies", "@timestamp", "date", &[]),
         // Matches dashboard/agent_campaigns.go's own refreshAgentCampaigns
         // sort (`sort=@timestamp:asc`) — the campaign-verdict documents
         // this index holds have no last_seen field at all (see the
         // agent-intrusion-worker port's build_campaign_verdict, #1610).
-        "agent-campaigns" => ("agent-intrusion-campaigns", "@timestamp", &[]),
-        "canarytokens" => ("dashboard-canarytokens-v1", "created_at", &[]),
-        "problem-reports" => ("dashboard-problem-reports-v1", "submitted_at", &["dom_snapshot"]),
-        "dead-letters" => ("dead-letter-honeypot", "@timestamp", &[]),
-        "yara" => ("yara-analysis-v1", "@timestamp", &[]),
-        "sandbox-runs" => ("sandbox-analysis-v1", "@timestamp", &[]),
-        "ghidra-runs" => ("ghidra-analysis-v1", "@timestamp", &[]),
-        "static-analysis" => ("dashboard-static-analysis-v1", "Analysis.GeneratedUTC", &[]),
+        "agent-campaigns" => ("agent-intrusion-campaigns", "@timestamp", "date", &[]),
+        "canarytokens" => ("dashboard-canarytokens-v1", "created_at", "date", &[]),
+        "problem-reports" => ("dashboard-problem-reports-v1", "submitted_at", "date", &["dom_snapshot"]),
+        "dead-letters" => ("dead-letter-honeypot", "@timestamp", "date", &[]),
+        "yara" => ("yara-analysis-v1", "@timestamp", "date", &[]),
+        "sandbox-runs" => ("sandbox-analysis-v1", "@timestamp", "date", &[]),
+        "ghidra-runs" => ("ghidra-analysis-v1", "@timestamp", "date", &[]),
+        // These documents carry only Analysis and Fingerprint -- there is
+        // no GeneratedUTC, and no time field at all, so there is nothing to
+        // order by chronologically. Fingerprint is the one mapped field, so
+        // it is what makes paging deterministic instead of arbitrary.
+        "static-analysis" => ("dashboard-static-analysis-v1", "Fingerprint", "keyword", &[]),
         // Result families that may not exist yet on a given deployment
         // (ignore_unavailable keeps them safe): revdeck, CAPE, GitHub.
-        "revdeck" => ("revdeck-analysis-v1", "@timestamp", &[]),
-        "cape" => ("cape-analysis-v1", "@timestamp", &[]),
-        "github-analysis" => ("github-analysis-v1", "@timestamp", &[]),
-        "workbench-runs" => ("dashboard-workbench-runs-v1", "created_at", &[]),
-        "generated-reports" => ("dashboard-generated-reports-v1", "created_at", &["pdf_base64"]),
-        "report-definitions" => ("dashboard-reports-definitions-v1", "updated", &[]),
-        "intelligence" => ("dashboard-intelligence-archive-v1", "generated", &[]),
+        "revdeck" => ("revdeck-analysis-v1", "@timestamp", "date", &[]),
+        "cape" => ("cape-analysis-v1", "@timestamp", "date", &[]),
+        "github-analysis" => ("github-analysis-v1", "@timestamp", "date", &[]),
+        "workbench-runs" => ("dashboard-workbench-runs-v1", "created_at", "date", &[]),
+        "generated-reports" => ("dashboard-generated-reports-v1", "created_at", "date", &["pdf_base64"]),
+        "report-definitions" => ("dashboard-reports-definitions-v1", "updated", "date", &[]),
+        "intelligence" => ("dashboard-intelligence-archive-v1", "generated", "date", &[]),
         _ => return Err((StatusCode::NOT_FOUND, format!("unknown store {name}"))),
     };
-    store_page_excluding(&state, &[index], sort, &q, None, excludes)
+    store_page_excluding(&state, &[index], sort, sort_type, &q, None, excludes)
         .await
         .map(Json)
         .map_err(bad_gateway)
@@ -341,4 +382,36 @@ pub async fn generic_delete(
     };
     let deleted = state.es.delete_by_query("dead-letter-honeypot", query).await.map_err(bad_gateway)?;
     Ok(Json(json!({"deleted": deleted})))
+}
+
+
+#[cfg(test)]
+mod sort_tests {
+    use super::sort_spec;
+
+    #[test]
+    fn the_store_field_leads_and_carries_its_own_type() {
+        // A date sort and a keyword sort must not both claim "date": an
+        // unmapped_type that disagrees with the field is the same silent
+        // no-op as a misspelled field name.
+        let dated = sort_spec("@timestamp", "date");
+        assert_eq!(dated[0]["@timestamp"]["order"], "desc");
+        assert_eq!(dated[0]["@timestamp"]["unmapped_type"], "date");
+
+        let keyed = sort_spec("Fingerprint", "keyword");
+        assert_eq!(keyed[0]["Fingerprint"]["unmapped_type"], "keyword");
+    }
+
+    #[test]
+    fn every_sort_has_a_tiebreak_so_paging_cannot_repeat_or_skip() {
+        // The bug this guards. from/size over a sort with ties leaves the
+        // order inside a tie undefined, so a document can appear on two
+        // pages while another never appears -- and the measured live data
+        // ties hard (48 ml-anomaly rows on one IP in a single second).
+        for (field, kind) in [("@timestamp", "date"), ("score", "long"), ("Fingerprint", "keyword")] {
+            let spec = sort_spec(field, kind);
+            assert_eq!(spec.as_array().map(Vec::len), Some(2), "{field} lost its tiebreak");
+            assert_eq!(spec[1]["_doc"]["order"], "asc", "{field}'s tiebreak is not a total order");
+        }
+    }
 }
