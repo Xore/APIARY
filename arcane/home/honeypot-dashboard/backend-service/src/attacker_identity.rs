@@ -537,71 +537,178 @@ fn sandbox_risk_worth_reporting(level: &str) -> bool {
     matches!(level, "medium" | "high" | "critical")
 }
 
-async fn ghidra_verdict(state: &AppState, sha256: &str) -> Option<String> {
-    let doc = state.es.get_doc("ghidra-analysis-v1", &format!("ghidra:{sha256}")).await.ok()??;
-    let family = doc["ghidra"]["ai_triage"]["family_guess"].as_str()?;
-    if family.is_empty() {
-        return None;
-    }
-    Some(family.to_string())
-}
+const REVDECK_ANSWER_LIMIT: usize = 80;
 
-async fn sandbox_verdict(state: &AppState, sha256: &str) -> Option<String> {
-    let body = json!({"size": 5, "query": {"term": {"sandbox.sha256": sha256}}});
-    let result = state.es.search_index(&["sandbox-analysis-v1"], body).await.ok()?;
-    let rank = |level: &str| match level {
+fn sandbox_risk_rank(level: &str) -> u8 {
+    match level {
         "medium" => 1,
         "high" => 2,
         "critical" => 3,
         _ => 0,
+    }
+}
+
+/// Every verdict label this cycle could produce, keyed by payload hash --
+/// the batched replacement for what used to be four sequential lookups per
+/// hash per entity (#2041).
+#[derive(Default)]
+struct VerdictMaps {
+    ghidra: HashMap<String, String>,
+    sandbox: HashMap<String, String>,
+    github: HashMap<String, String>,
+    revdeck: HashMap<String, String>,
+}
+
+/// Resolves the whole cycle's payload union against the four analysis
+/// stores in one query each. A store that fails to query costs its labels
+/// for the cycle (same net effect as the old per-hash `.ok()??` swallowing)
+/// but no longer takes the others down with it.
+///
+/// Label values here are stored WITHOUT the "{short-hash}: " prefix -- that
+/// formatting lives in apply_verdicts so it stays byte-identical to what
+/// the old per-hash path wrote (a different format would churn every
+/// stored verdict on the first post-deploy cycle).
+async fn load_verdict_maps(state: &AppState, hashes: &HashSet<String>) -> VerdictMaps {
+    let mut maps = VerdictMaps::default();
+    if hashes.is_empty() {
+        return maps;
+    }
+
+    // Ghidra / GitHub / RevDeck are content-addressed docs with known ids:
+    // one ids query each, keyed back by stripping the prefix off _id.
+    let id_query = |prefix: &str, source: serde_json::Value| {
+        json!({
+            "_source": source,
+            "query": {"ids": {"values": hashes.iter().map(|h| format!("{prefix}{h}")).collect::<Vec<_>>()}}
+        })
     };
-    let mut best = "";
-    for hit in result["hits"]["hits"].as_array().into_iter().flatten() {
-        let level = hit["_source"]["sandbox"]["risk_level"].as_str().unwrap_or("");
-        if !sandbox_risk_worth_reporting(level) {
-            continue;
+    let collect = |result: &serde_json::Value,
+                   prefix: &str,
+                   read: fn(&serde_json::Value) -> Option<String>|
+     -> HashMap<String, String> {
+        let mut out = HashMap::new();
+        for hit in result["hits"]["hits"].as_array().into_iter().flatten() {
+            let Some(full_id) = hit["_id"].as_str() else { continue };
+            let Some(hash) = full_id.strip_prefix(prefix) else { continue };
+            if let Some(label) = read(&hit["_source"]) {
+                out.insert(hash.to_string(), label);
+            }
         }
-        if best.is_empty() || rank(level) > rank(best) {
-            best = level;
-        }
-    }
-    if best.is_empty() {
-        None
-    } else {
-        Some(format!("sandbox: {best} risk"))
-    }
-}
-
-async fn github_verdict(state: &AppState, sha256: &str) -> Option<String> {
-    let doc = state.es.get_doc("github-analysis-v1", &format!("github_analysis:{sha256}")).await.ok()??;
-    let family = doc["github_analysis"]["family"].as_str()?;
-    if family.is_empty() {
-        return None;
-    }
-    Some(family.to_string())
-}
-
-const REVDECK_ANSWER_LIMIT: usize = 80;
-
-async fn revdeck_verdict(state: &AppState, sha256: &str) -> Option<String> {
-    let doc = state.es.get_doc("revdeck-analysis-v1", &format!("revdeck:{sha256}")).await.ok()??;
-    let inner = &doc["revdeck"]["revdeck"];
-    let status = inner["status"].as_str().unwrap_or("");
-    let answer = inner["answer"].as_str().unwrap_or("");
-    if status != "completed" || answer.is_empty() {
-        return None;
-    }
-    let truncated: String = if answer.chars().count() > REVDECK_ANSWER_LIMIT {
-        format!("{}…", answer.chars().take(REVDECK_ANSWER_LIMIT).collect::<String>())
-    } else {
-        answer.to_string()
+        out
     };
-    Some(format!("revdeck: {truncated}"))
+
+    match state
+        .es
+        .search_index(
+            &["ghidra-analysis-v1"],
+            id_query(
+                "ghidra:",
+                json!(["ghidra.ai_triage.family_guess"]),
+            ),
+        )
+        .await
+    {
+        Ok(result) => {
+            maps.ghidra = collect(&result, "ghidra:", |src| {
+                src["ghidra"]["ai_triage"]["family_guess"]
+                    .as_str()
+                    .filter(|f| !f.is_empty())
+                    .map(String::from)
+            });
+        }
+        Err(error) => tracing::warn!(%error, "attacker-identity: ghidra verdict lookup failed"),
+    }
+
+    match state
+        .es
+        .search_index(
+            &["github-analysis-v1"],
+            id_query(
+                "github_analysis:",
+                json!(["github_analysis.family"]),
+            ),
+        )
+        .await
+    {
+        Ok(result) => {
+            maps.github = collect(&result, "github_analysis:", |src| {
+                src["github_analysis"]["family"]
+                    .as_str()
+                    .filter(|f| !f.is_empty())
+                    .map(String::from)
+            });
+        }
+        Err(error) => tracing::warn!(%error, "attacker-identity: github verdict lookup failed"),
+    }
+
+    match state
+        .es
+        .search_index(
+            &["revdeck-analysis-v1"],
+            id_query("revdeck:", json!(["revdeck.revdeck.status", "revdeck.revdeck.answer"])),
+        )
+        .await
+    {
+        Ok(result) => {
+            maps.revdeck = collect(&result, "revdeck:", |src| {
+                let inner = &src["revdeck"]["revdeck"];
+                let status = inner["status"].as_str().unwrap_or("");
+                let answer = inner["answer"].as_str().unwrap_or("");
+                if status != "completed" || answer.is_empty() {
+                    return None;
+                }
+                let truncated: String = if answer.chars().count() > REVDECK_ANSWER_LIMIT {
+                    format!("{}…", answer.chars().take(REVDECK_ANSWER_LIMIT).collect::<String>())
+                } else {
+                    answer.to_string()
+                };
+                Some(format!("revdeck: {truncated}"))
+            });
+        }
+        Err(error) => tracing::warn!(%error, "attacker-identity: revdeck verdict lookup failed"),
+    }
+
+    // Sandbox runs are not content-addressed (one hash can have several
+    // run documents), so this one stays a field terms query; best
+    // worth-reporting risk level wins per hash, as before.
+    let body = json!({
+        "size": (hashes.len() * 5 + 10).min(2_000),
+        "_source": ["sandbox.sha256", "sandbox.risk_level"],
+        "query": {"terms": {"sandbox.sha256": hashes.iter().cloned().collect::<Vec<_>>()}}
+    });
+    match state.es.search_index(&["sandbox-analysis-v1"], body).await {
+        Ok(result) => {
+            // (rank, label) per hash; a hash whose runs are all below the
+            // reporting bar ends with an empty label and is dropped.
+            let mut best: HashMap<String, (u8, String)> = HashMap::new();
+            for hit in result["hits"]["hits"].as_array().into_iter().flatten() {
+                let Some(sha) = hit["_source"]["sandbox"]["sha256"].as_str() else { continue };
+                let Some(level) = hit["_source"]["sandbox"]["risk_level"].as_str() else { continue };
+                if !sandbox_risk_worth_reporting(level) {
+                    continue;
+                }
+                let entry = best.entry(sha.to_string()).or_insert((0, String::new()));
+                if sandbox_risk_rank(level) > entry.0 {
+                    *entry = (sandbox_risk_rank(level), format!("sandbox: {level} risk"));
+                }
+            }
+            maps.sandbox = best
+                .into_iter()
+                .filter(|(_, (_, label))| !label.is_empty())
+                .map(|(sha, (_, label))| (sha, label))
+                .collect();
+        }
+        Err(error) => tracing::warn!(%error, "attacker-identity: sandbox verdict lookup failed"),
+    }
+
+    maps
 }
 
-/// Looks up every payload hash on `e` against every analysis index and
-/// records any non-empty verdict found, deduplicated and sorted.
-async fn attach_verdicts(state: &AppState, e: &mut Entity) {
+/// Applies the batched verdict maps to one entity: every payload hash gets
+/// its non-empty labels, deduplicated, prefixed "{short-hash}: ". Must stay
+/// byte-identical to the pre-#2041 per-hash formatting so stored verdicts
+/// don't churn on rewrites.
+fn apply_verdicts(e: &mut Entity, maps: &VerdictMaps) {
     let mut seen: HashSet<String> = HashSet::new();
     let mut verdicts: Vec<String> = Vec::new();
     let add = |label: String, seen: &mut HashSet<String>, verdicts: &mut Vec<String>| {
@@ -611,20 +718,28 @@ async fn attach_verdicts(state: &AppState, e: &mut Entity) {
     };
     for hash in &e.payloads {
         let short = &hash[..hash.len().min(12)];
-        if let Some(family) = ghidra_verdict(state, hash).await {
+        if let Some(family) = maps.ghidra.get(hash) {
             add(format!("{short}: {family}"), &mut seen, &mut verdicts);
         }
-        if let Some(verdict) = sandbox_verdict(state, hash).await {
+        if let Some(verdict) = maps.sandbox.get(hash) {
             add(format!("{short}: {verdict}"), &mut seen, &mut verdicts);
         }
-        if let Some(family) = github_verdict(state, hash).await {
+        if let Some(family) = maps.github.get(hash) {
             add(format!("{short}: {family}"), &mut seen, &mut verdicts);
         }
-        if let Some(verdict) = revdeck_verdict(state, hash).await {
+        if let Some(verdict) = maps.revdeck.get(hash) {
             add(format!("{short}: {verdict}"), &mut seen, &mut verdicts);
         }
     }
     e.verdicts = verdicts;
+}
+
+/// True when this entity's payload set differs from the persisted doc's --
+/// the only condition under which verdict labels can change (fresh
+/// entities have no persisted baseline and always verify). A late-landing
+/// analysis result is picked up on the entity's next payload change.
+fn payloads_changed_since_persist(e: &Entity, persisted: Option<&Vec<String>>) -> bool {
+    persisted.is_none_or(|p| p != &e.payloads)
 }
 
 // --------------------------------------------------------------------
@@ -683,11 +798,39 @@ async fn run_cycle(state: &AppState, window: Duration) {
         );
     }
 
+    // #2041: verdict labels can only change when an entity's payload set
+    // changed (fresh entities have no persisted baseline), so everything
+    // else keeps its stored verdicts untouched -- re-verifying unchanged
+    // payloads every cycle was 4 sequential ES lookups x hashes x entities
+    // of pure busy-work.
+    let persisted_payloads: HashMap<String, Vec<String>> = existing
+        .iter()
+        .map(|e| (e.id.clone(), e.payloads.clone()))
+        .collect();
     let (mut changed, absorbed) = resolve_identities(existing, &observations);
 
-    for e in &mut changed {
+    let to_verify: Vec<usize> = changed
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| payloads_changed_since_persist(e, persisted_payloads.get(&e.id)))
+        .map(|(i, _)| i)
+        .collect();
+
+    let verdict_maps = if to_verify.is_empty() {
+        VerdictMaps::default()
+    } else {
+        let hashes: HashSet<String> = to_verify
+            .iter()
+            .flat_map(|&i| changed[i].payloads.iter().cloned())
+            .collect();
+        load_verdict_maps(state, &hashes).await
+    };
+
+    for (i, e) in changed.iter_mut().enumerate() {
         e.updated = start.to_rfc3339();
-        attach_verdicts(state, e).await;
+        if to_verify.binary_search(&i).is_ok() {
+            apply_verdicts(e, &verdict_maps);
+        }
         let Ok(body) = serde_json::to_value(&*e) else { continue };
         if let Err(error) = state.es.index_doc(ATTACKERS_INDEX, &e.id, body).await {
             tracing::warn!(%error, id = %e.id, "attacker-identity: index entity failed");
@@ -726,6 +869,47 @@ pub async fn attacker_identity_loop(state: AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apply_verdicts_formats_labels_exactly_as_the_per_hash_lookup_did() {
+        // #2041: the batched path must write byte-identical verdict
+        // strings to the per-hash lookups it replaced -- a different
+        // format would rewrite every stored verdict on the first cycle.
+        let mut maps = VerdictMaps::default();
+        // Map keys are FULL hashes -- load_verdict_maps keys them by doc id
+        // / sandbox.sha256; only the rendered label uses the short prefix.
+        maps.ghidra.insert("aaaaaaaa1111ffffffffffffffff".into(), "downloader".into());
+        maps.sandbox.insert("bbbbbbbb2222ffffffffffffffff".into(), "sandbox: high risk".into());
+        maps.github.insert("cccccccc3333ffffffffffffffff".into(), "ransomware".into());
+        maps.revdeck.insert("dddddddd4444ffffffffffffffff".into(), "revdeck: looks like a loader".into());
+
+        let mut e = Entity {
+            id: "entity-v".into(),
+            payloads: vec![
+                "aaaaaaaa1111ffffffffffffffff".into(),
+                "bbbbbbbb2222ffffffffffffffff".into(),
+                "cccccccc3333ffffffffffffffff".into(),
+                "dddddddd4444ffffffffffffffff".into(),
+            ],
+            ..Default::default()
+        };
+        apply_verdicts(&mut e, &maps);
+        assert_eq!(
+            e.verdicts,
+            vec![
+                "aaaaaaaa1111: downloader",
+                "bbbbbbbb2222: sandbox: high risk",
+                "cccccccc3333: ransomware",
+                "dddddddd4444: revdeck: looks like a loader",
+            ]
+        );
+
+        // A hash with no verdicts anywhere contributes nothing.
+        let quiet = VerdictMaps::default();
+        let mut bare = Entity { id: "bare".into(), payloads: vec!["eeeeeeee5555".into()], ..Default::default() };
+        apply_verdicts(&mut bare, &quiet);
+        assert!(bare.verdicts.is_empty());
+    }
 
     fn obs(ip: &str, fp: &str, payload: &str, cred: &str) -> IpObservation {
         let mut signals = SignalSet::default();
