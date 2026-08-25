@@ -98,7 +98,7 @@ mod tests {
         assert!(ready.is_empty(), "not ready before resolution or timeout");
 
         let mut vm = ViaMap::new();
-        vm.insert(1, vec![super::super::viamap::ViaEntry { ip: "203.0.113.9".into(), at: 0 }]);
+        vm.insert(1, vec![super::super::viamap::ViaEntry { ip: "203.0.113.9".into(), at: 0, target_port: 0 }]);
         let ready = q.drain(&vm, &ViaMap::new(), now + Duration::from_secs(2), "", enrich_line);
 
         assert_eq!(ready.len(), 1, "the line resolves and flushes");
@@ -122,7 +122,7 @@ mod tests {
         assert_eq!(ready.len(), 1, "flushes unenriched at its deadline");
 
         let mut vm = ViaMap::new();
-        vm.insert(1, vec![super::super::viamap::ViaEntry { ip: "203.0.113.9".into(), at: 0 }]);
+        vm.insert(1, vec![super::super::viamap::ViaEntry { ip: "203.0.113.9".into(), at: 0, target_port: 0 }]);
         let again = q.drain(&vm, &ViaMap::new(), now + Duration::from_secs(7), "", enrich_line);
         assert!(again.is_empty(), "an already-flushed line must not reappear");
     }
