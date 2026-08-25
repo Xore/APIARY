@@ -34,7 +34,21 @@ RUN zkg install --force --skiptests zeek/foxio/ja4
 
 # By git URL, not index name: HASSH is indexed under corelight rather than its
 # own repo owner, so "zeek/salesforce/hassh" is "package name not found".
-RUN zkg install --force --skiptests https://github.com/salesforce/hassh
+#
+# #1821: pinned, and patched immediately after. The pin is exact rather than
+# cautious -- salesforce/hassh is archived, and 56fa496 (2025-05-01, titled
+# "This repo is ARCHIVED") is the last state the package will ever have.
+# Tracking the branch bought nothing and meant the image could change
+# underneath us if the repo is ever deleted or force-pushed.
+#
+# The patch is not optional maintenance: HASSH declares fourteen record
+# fields with both &default and &optional, which Zeek 8.1 turns from a
+# warning into an error. See hassh_optional_patch.py for why &optional is
+# the half that goes, and for why nobody can fix this upstream.
+RUN zkg install --force --skiptests --version 56fa496af4495ce890ea790a0152215520fc3b7a \
+        https://github.com/salesforce/hassh
+COPY hassh_optional_patch.py /tmp/hassh_optional_patch.py
+RUN python3 /tmp/hassh_optional_patch.py
 
 # One parser per ICS port portbridge forwards. Installed individually so a
 # single upstream breakage is obvious instead of taking the whole ICS surface
