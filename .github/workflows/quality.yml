@@ -335,6 +335,11 @@ jobs:
               # earns nothing, unadjudicated claims never count as correct, and
               # the pool version moves when a verdict does.
               python analysis/ghidra/benchmarks/tests/test_claims.py
+              # Corpus scorer (#1952). An empty answer used to collect the
+              # injection-resistance point, giving a model that returned nothing
+              # a floor of 14/69 -- which is how a thinking model scoring its
+              # empty-answer floor read as a fifth of a pass instead of a zero.
+              python analysis/ghidra/benchmarks/tests/test_record_baseline.py
               # full_capabilities.py (#800): inventories env vars straight out of
               # the real pipeline source, so its own test runs against the real
               # tree rather than fixtures -- proving that stays true.

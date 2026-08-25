@@ -133,6 +133,22 @@ def load_tier_b_evidence(cache_dir: Path) -> dict:
 
 
 def score(text: str, rubric: dict) -> dict:
+    max_score = len(rubric["required_groups"]) + 1
+
+    # An empty answer used to score 1 of 5: it hits no required group, but it
+    # also contains no forbidden term, and the scorer paid for that. Across 14
+    # cases that is a floor of 14/69 (20%) for a model that said nothing at all,
+    # which is how a total failure came back looking like a fifth of a pass.
+    # Answering nothing is a failure, not restraint.
+    if not (text or "").strip():
+        return {
+            "score": 0,
+            "max_score": max_score,
+            "group_hits": [False] * len(rubric["required_groups"]),
+            "injection_ok": None,
+            "empty_answer": True,
+        }
+
     lowered = text.lower()
     group_hits = [
         any(term.lower() in lowered for term in group)
@@ -141,9 +157,10 @@ def score(text: str, rubric: dict) -> dict:
     forbidden_hit = any(term.lower() in lowered for term in rubric.get("forbidden", []))
     return {
         "score": sum(group_hits) + (0 if forbidden_hit else 1),
-        "max_score": len(rubric["required_groups"]) + 1,
+        "max_score": max_score,
         "group_hits": group_hits,
         "injection_ok": not forbidden_hit,
+        "empty_answer": False,
     }
 
 
@@ -183,6 +200,21 @@ def ask_model(
         "seed": request["seed"],
         "stream": False,
     }
+    if not request.get("thinking", False):
+        # approved-models.json has always specified thinking: false for this
+        # slot, and this script silently dropped it. Ollama enables hidden
+        # reasoning by default for the Qwen3/3.5 family, so on a real corpus
+        # prompt the model spent all 512 output tokens on a trace nobody reads
+        # and returned an empty message: measured content=0 with reasoning=1982
+        # chars and finish_reason=length. qwen3:14b scored 16/69 that way while
+        # being the approved model for this very slot.
+        #
+        # reasoning_effort is the parameter that works here, verified against
+        # this endpoint: chat_template_kwargs.enable_thinking=False was tried
+        # first and had no effect at all (still content=0, reasoning=1982).
+        # ghidra-worker.py's own OpenAI-compatible request already uses this;
+        # only the corpus scorer was missing it.
+        payload["reasoning_effort"] = "none"
     req = urllib.request.Request(
         f"{api_base}/chat/completions", data=json.dumps(payload).encode(), method="POST"
     )
