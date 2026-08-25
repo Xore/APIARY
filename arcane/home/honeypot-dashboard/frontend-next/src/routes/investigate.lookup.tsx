@@ -109,8 +109,7 @@ function Lookup() {
       <form className="card" onSubmit={submit}>
         <div className="filters">
           <input
-            className="search"
-            style={{ flex: 1 }}
+            className="search hp-grow"
             placeholder="203.0.113.7, 203.0.113.0/24, AS64500, a hex payload hash or fingerprint…"
             aria-label="Value to look up"
             value={value}

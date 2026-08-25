@@ -869,7 +869,7 @@ function DefinitionForm({
           )}
         </div>
         <div className="filters">
-          <label className="note" style={{ display: 'block', minWidth: 200 }}>
+          <label className="note hp-field--wide">
             Name
             <input
               className="form-input"

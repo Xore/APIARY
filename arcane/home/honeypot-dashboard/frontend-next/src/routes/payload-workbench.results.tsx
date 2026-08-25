@@ -863,7 +863,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
         safe — dynamic backends stay isolated and cannot reach the protected live VM or the internet from here.
       </p>
       <div className="filters">
-        <label className="note" style={{ display: 'block', minWidth: 320 }}>
+        <label className="note hp-field--wide">
           Payload hash (sha256 or md5)
           <input
             className="form-input"
@@ -891,7 +891,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
           </div>
 
           {(recipes?.length ?? 0) > 0 ? (
-            <label className="note" style={{ display: 'block', maxWidth: 380 }}>
+            <label className="note hp-field--wide">
               Load from saved recipe
               <select className="form-input" value={pickedRecipeId} onChange={(event) => pickRecipe(event.target.value)}>
                 <option value="">Custom selection…</option>
@@ -1017,7 +1017,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
           ) : null}
 
           <div className="filters hp-flow--tight">
-            <label className="note" style={{ display: 'block', minWidth: 220 }}>
+            <label className="note hp-field--wide">
               Run / recipe name
               <input
                 className="form-input"
@@ -1040,7 +1040,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
           </div>
           {saveAsRecipe ? (
             <div className="filters">
-              <label className="note" style={{ display: 'block', minWidth: 240 }}>
+              <label className="note hp-field--wide">
                 Recipe description
                 <input
                   className="form-input"
