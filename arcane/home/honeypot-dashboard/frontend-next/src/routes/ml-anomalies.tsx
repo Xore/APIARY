@@ -12,6 +12,7 @@ import { confirmAction } from '../components/ConfirmDialog'
 import { EChart } from '../components/EChart'
 import { FiltersButton, FiltersModal } from '../components/FiltersModal'
 import { formatTimestamp } from '../lib/time'
+import { collapseRuns, foldedCount, idsFor } from '../lib/mlGrouping'
 import { countryName } from '../lib/country'
 
 type AckRecord = { Acknowledged: boolean; AckedBy?: string; AckedAt?: string }
@@ -130,10 +131,17 @@ const ackAll = createServerFn({ method: 'POST' }).handler(async (): Promise<numb
   return typeof body.changed === 'number' ? body.changed : 0
 })
 
-function AckControl({ docId, acks, onChanged }: { docId: string; acks: Record<string, AckRecord>; onChanged: () => void }) {
+// #1566: `docIds` rather than one id, because a row may stand for a whole
+// folded run. Acknowledging only the representative would leave its siblings
+// open, and the row would come straight back as unacknowledged on the next
+// refresh -- the button would look broken while working exactly as written.
+function AckControl({ docIds, acks, onChanged }: { docIds: string[]; acks: Record<string, AckRecord>; onChanged: () => void }) {
   const [busy, setBusy] = useState(false)
-  if (!docId) return null
-  const acked = acks[docId]?.Acknowledged ?? false
+  if (!docIds.length) return null
+  // A folded run is "acknowledged" only when all of it is; a partially
+  // acknowledged run still has open findings in it.
+  const acked = docIds.every((id) => acks[id]?.Acknowledged ?? false)
+  const many = docIds.length > 1
   return (
     <button
       className="btn btn-secondary btn-sm"
@@ -142,13 +150,14 @@ function AckControl({ docId, acks, onChanged }: { docId: string; acks: Record<st
       onClick={async () => {
         setBusy(true)
         try {
-          if (await setAck({ data: { key: docId, ack: !acked } })) onChanged()
+          const results = await Promise.all(docIds.map((id) => setAck({ data: { key: id, ack: !acked } })))
+          if (results.some(Boolean)) onChanged()
         } finally {
           setBusy(false)
         }
       }}
     >
-      {busy ? '…' : acked ? 'Reopen anomaly' : 'Acknowledge anomaly'}
+      {busy ? '…' : acked ? `Reopen ${many ? `all ${docIds.length}` : 'anomaly'}` : `Acknowledge ${many ? `all ${docIds.length}` : 'anomaly'}`}
     </button>
   )
 }
@@ -235,7 +244,28 @@ function sourceEventLink(row: StoreRow) {
 
 function buildColumns(acks: Record<string, AckRecord>): Column<StoreRow>[] {
   return [
-    { header: 'time', render: (row) => when(str(row, '@timestamp')) },
+    {
+      header: 'time',
+      render: (row) => {
+        const folded = foldedCount(row)
+        return (
+          <>
+            {when(str(row, '@timestamp'))}
+            {folded > 1 ? (
+              <>
+                {' '}
+                <span
+                  className="badge badge--muted"
+                  title={`${folded} anomalies from this address within the same second, scoring within 0.01 of each other, folded into this row. Acknowledging it covers all ${folded}.`}
+                >
+                  ×{folded}
+                </span>
+              </>
+            ) : null}
+          </>
+        )
+      },
+    },
     { header: 'severity', render: (row) => severityBadge(str(row, 'severity')) },
     { header: 'score', className: 'n', render: (row) => num(row, 'composite_score').toFixed(2) },
     {
@@ -267,11 +297,19 @@ function buildColumns(acks: Record<string, AckRecord>): Column<StoreRow>[] {
     {
       header: 'status',
       render: (row) => {
-        const record = acks[str(row, '_doc_id')]
-        return record?.Acknowledged ? (
-          <span className="badge badge--muted">acknowledged{record.AckedBy ? ` by ${record.AckedBy}` : ''}</span>
-        ) : (
-          <span className="badge badge--warning">open</span>
+        // #1566: a folded row speaks for every anomaly in it. Reading only
+        // the representative's ack would show "acknowledged" over a run
+        // that still has open findings inside it.
+        const ids = idsFor(row)
+        const open = ids.filter((id) => !(acks[id]?.Acknowledged ?? false))
+        if (!open.length) {
+          const by = acks[ids[0]]?.AckedBy
+          return <span className="badge badge--muted">acknowledged{by ? ` by ${by}` : ''}</span>
+        }
+        return (
+          <span className="badge badge--warning">
+            {open.length === ids.length ? 'open' : `${open.length} of ${ids.length} open`}
+          </span>
         )
       },
     },
@@ -352,6 +390,11 @@ function Page() {
       return true
     })
   }, [rows, severity, eventType, status, acks])
+
+  // #1566: fold last, over what the filters actually left on screen. Folding
+  // first would group rows the filters then tear apart, leaving a badge
+  // counting siblings that are no longer shown.
+  const grouped = useMemo(() => (filtered ? collapseRuns(filtered) : null), [filtered])
 
   return (
     <>
@@ -481,7 +524,7 @@ function Page() {
       </div>
       <ModelHealthCard />
       <MasterDetailTable
-        rows={filtered}
+        rows={grouped}
         columns={columns}
         rowKey={(row, index) => `${str(row, 'source_event_id')}-${index}`}
         emptyState={{
@@ -500,7 +543,7 @@ function Page() {
                 {acks[str(row, '_doc_id')]?.AckedAt ? ` at ${formatTimestamp((acks[str(row, '_doc_id')]!.AckedAt as string))}` : ''}
               </p>
             ) : null}
-            <AckControl docId={str(row, '_doc_id')} acks={acks} onChanged={refreshAcks} />
+            <AckControl docIds={idsFor(row)} acks={acks} onChanged={refreshAcks} />
           </>
         )}
       />
