@@ -1,9 +1,9 @@
 // #1616: cluster-mode entrypoint for the built Nitro server
 // (.output/server/index.mjs). A single Node process has one event loop —
-// under this tier's hard "never get overwhelmed, no compose resource
-// limit" requirement, one slow synchronous stretch (a big JSON.stringify,
-// a GC pause) would stall every in-flight request on that replica, not
-// just the one that caused it. Forking WEB_CONCURRENCY worker processes,
+// under this tier's hard "never get overwhelmed" backpressure requirement,
+// one slow synchronous stretch (a big JSON.stringify, a GC pause) would
+// stall every in-flight request on that replica, not just the one that
+// caused it. Forking WEB_CONCURRENCY worker processes,
 // each running the same built server and sharing the listen port (Node's
 // cluster module round-robins accepted connections across them on Linux),
 // keeps that blast radius to one worker's share of the traffic instead of
