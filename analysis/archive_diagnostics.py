@@ -31,6 +31,16 @@ at your own risk, this module does not defend against that itself.
 rehydrate_one() reverses archive_one() exactly, verified by SHA-256
 against the value recorded at archive time -- for whenever an operator
 or tool needs the real procmon.csv content back for an archived run.
+Its failures reach the operator the same way archive failures do (#1988):
+a JSON {"path", "error"} line and a non-zero exit instead of a traceback.
+A truncated stub, a stub missing its keys, or a manifest no longer in
+the store is an expected maintenance-time condition, and machine-
+parseable output is what keeps the maintenance log greppable.
+
+main()'s archive summary distinguishes what actually happened per zip
+(#1988): zips_processed counts archives written, zips_skipped the
+no-ops (already archived / no member / empty) -- counting skips as work
+used to make every cycle's log overstate its own progress.
 
 ## Verify-before-destroy discipline
 
@@ -236,28 +246,52 @@ def main():
     with RowChunkStore(args.store_dir) as store:
         if args.command == "archive":
             total_reclaimed = 0
-            n = 0
+            archived = 0
+            skipped = 0
+            errored = 0
             for zip_path in find_archivable(args.results_dir, args.after_days):
                 try:
                     result = archive_one(zip_path, store)
                 except Exception as exc:
                     print(json.dumps({"path": str(zip_path), "error": str(exc)}))
+                    errored += 1
                     continue
                 print(json.dumps(result))
                 total_reclaimed += result.get("bytes_reclaimed", 0)
-                n += 1
+                # #1988: skips are no-ops, not work done -- counting them
+                # in zips_processed made every cycle's log overstate its
+                # own progress.
+                if "skipped" in result:
+                    skipped += 1
+                else:
+                    archived += 1
             compacted = store.compact_all()
             print(json.dumps({
-                "summary": True, "zips_processed": n,
-                "bytes_reclaimed": total_reclaimed, "packs_compacted": len(compacted),
+                "summary": True,
+                "zips_processed": archived,
+                "zips_skipped": skipped,
+                "zips_errored": errored,
+                "bytes_reclaimed": total_reclaimed,
+                "packs_compacted": len(compacted),
             }))
         elif args.command == "rehydrate":
             if not args.zip:
                 ap.error("--zip is required for rehydrate")
-            print(json.dumps(rehydrate_one(args.zip, store)))
+            try:
+                print(json.dumps(rehydrate_one(args.zip, store)))
+            except Exception as exc:
+                # Same structured shape as archive's error lines (#1988):
+                # a truncated stub (json.loads), a stub missing keys
+                # (KeyError), or a manifest absent from the store all dump
+                # a traceback today. The exit must be non-zero so a
+                # calling script notices; the JSON line keeps the output
+                # parseable like every other path through this command.
+                print(json.dumps({"path": str(args.zip), "error": str(exc)}))
+                return 1
         elif args.command == "status":
             print(json.dumps(store.stats(), indent=2))
+        return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
