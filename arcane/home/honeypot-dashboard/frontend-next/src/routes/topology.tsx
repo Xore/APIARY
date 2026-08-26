@@ -106,7 +106,7 @@ function portChip(port: ExposedPort) {
       ? `${port.host}/${port.proto} · tunnel`
       : `${port.public}/${port.proto} → ${port.host}${port.proxy ? ' +PROXY' : ''}`
   return (
-    <span className="chip" style={{ fontFamily: 'var(--mono, monospace)', fontSize: '0.78rem' }}>
+    <span className="chip" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78rem' }}>
       {label}
     </span>
   )
