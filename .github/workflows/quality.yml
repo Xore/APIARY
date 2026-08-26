@@ -198,6 +198,39 @@ jobs:
       - name: Generated route tree is current
         run: git diff --exit-code -- arcane/home/honeypot-dashboard/frontend-next/src/routeTree.gen.ts
 
+  # #2034: the browser-level acceptance net returned. The Go tier ran a
+  # 90-case Playwright matrix (#60, PR #146) until the cutover deleted it;
+  # nothing replaced it and visual/behavioural regressions have had no net
+  # since. This is its deliberately slimmed port -- theme x viewport shell
+  # smoke over every sidebar route (from lib/nav.ts), the modal core, and
+  # role-aware action visibility -- running against the BUILT production
+  # server output with hermetic fixtures (e2e/start-dashboard.mjs), not the
+  # dev server. ubuntu-latest only: needs chromium deps + redis-server,
+  # neither present on the self-hosted runner by design (#2034 follows
+  # dashboard-browser's precedent for the same reason).
+  frontend-next-browser:
+    name: Dashboard-next browser matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: arcane/home/honeypot-dashboard/frontend-next/package-lock.json
+      - run: npm ci
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+      - run: npm run build
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+      - run: npx playwright install --with-deps chromium
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+      # The session fixture spawns a real redis-server rather than
+      # reimplementing RESP (#1034's tradeoff); ubuntu-latest usually ships
+      # it, but fail loudly into install rather than obscurely later.
+      - run: command -v redis-server || sudo apt-get update && sudo apt-get install -y redis-server
+      - run: npm run test:browser
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+
   # First CI coverage for this crate (#1608's Rust service tier had none
   # until now -- a broken build or a real regression wouldn't have
   # surfaced until Arcane tried to build it live on the homeserver).
