@@ -130,7 +130,7 @@ describe('the inline-script surface', () => {
   it('renders no JSX script tags outside the framework seams', () => {
     const offenders: string[] = []
     for (const f of ['src/routes/__root.tsx', 'src/components/AppShell.tsx', 'src/router.tsx']) {
-      if (/<script[\s>]/.test(source(f))) offenders.push(f)
+      if (/<script[\s>]/i.test(source(f))) offenders.push(f)
     }
     expect(offenders).toEqual([])
   })
