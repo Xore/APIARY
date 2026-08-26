@@ -38,11 +38,13 @@ torch.set_num_threads(1)
 
 from models.isolation_forest import (
     _get_ip, _get_port, _get_transport_proto, _proto_enc, _ts_to_hour,
-    _accept_decision, _symlink, HOLDOUT_FRACTION, HOLDOUT_MIN, MAX_CMD_COUNT,
+    _accept_decision, HOLDOUT_FRACTION, HOLDOUT_MIN, MAX_CMD_COUNT,
     RetrainResult,
 )
 from models.session_features import compute_batch_session_features
-from models.lifecycle import prune_old_versions, write_version_metadata
+# _symlink comes from lifecycle directly since #2230 (it moved there so
+# rollback.py can share it); previously re-imported via isolation_forest.
+from models.lifecycle import prune_old_versions, staged_rollback_version, write_version_metadata, _symlink
 
 SEQ_LEN   = 15    # sliding window length (events per sequence)
 INPUT_DIM = 6     # features per timestep (see §5.2 in plan)
@@ -407,6 +409,15 @@ class LSTMAEModel:
         return result
 
     def _save(self, result: RetrainResult) -> None:
+        # #2230: same staged-rollback surface as IsoForestModel._save() --
+        # detect BEFORE the new version file exists (see that comment).
+        staged = staged_rollback_version(self.model_dir, "lstm_ae")
+        if staged is not None:
+            logger.warning(
+                f"lstm_ae: accepted retrain overrides a manually staged rollback "
+                f"(live pointer was v{staged}); restart will load this NEW model -- "
+                f"re-run rollback.py lstm_ae {staged} if the rollback was intended")
+
         ts   = int(time.time())
         path = os.path.join(self.model_dir, f"lstm_ae_{ts}.pt")
         os.makedirs(self.model_dir, exist_ok=True)

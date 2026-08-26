@@ -24,7 +24,7 @@ from loguru import logger
 from sklearn.ensemble import IsolationForest
 from pyod.models.hbos import HBOS
 
-from models.lifecycle import prune_old_versions, write_version_metadata
+from models.lifecycle import prune_old_versions, staged_rollback_version, write_version_metadata, _symlink
 
 # ------------------------------------------------------------------
 # Constants
@@ -672,6 +672,20 @@ class IsoForestModel:
     # ------------------------------------------------------------------
 
     def _save(self, result: RetrainResult) -> None:
+        # #2230: detect a manually staged rollback BEFORE the new version's
+        # files exist -- written-but-unpromoted, the new file would already
+        # be "newest on disk", making a legitimately-staged pointer
+        # indistinguishable from normal state. Dashboards surface retrains,
+        # not symlink churn; without this line an operator's staged
+        # rollback dies here invisibly.
+        for prefix in ("isoforest", "hbos"):
+            staged = staged_rollback_version(self.model_dir, prefix)
+            if staged is not None:
+                logger.warning(
+                    f"{prefix}: accepted retrain overrides a manually staged rollback "
+                    f"(live pointer was v{staged}); restart will load this NEW model -- "
+                    f"re-run rollback.py {prefix} {staged} if the rollback was intended")
+
         ts = int(time.time())
         iso_path  = os.path.join(self.model_dir, f"isoforest_{ts}.joblib")
         hbos_path = os.path.join(self.model_dir, f"hbos_{ts}.joblib")
@@ -699,18 +713,3 @@ class IsoForestModel:
             self.iso  = joblib.load(iso_link)
         if os.path.exists(hbos_link):
             self.hbos = joblib.load(hbos_link)
-
-
-def _symlink(target: str, link: str) -> None:
-    """Atomically point `link` at `target` (#169). Writes a temporary
-    symlink in the same directory, then os.replace()s it onto `link` --
-    os.replace is an atomic rename on POSIX when source and destination
-    share a filesystem (true here: both live directly under model_dir), so
-    a process killed between these two calls can never observe `link`
-    missing. It's either the previous target or the new one, never absent
-    -- unlike the previous remove-then-symlink sequence, which had a window
-    where `link` didn't exist at all."""
-    directory = os.path.dirname(link) or "."
-    temp_link = os.path.join(directory, f".{os.path.basename(link)}.tmp-{os.getpid()}-{time.time_ns()}")
-    os.symlink(target, temp_link)
-    os.replace(temp_link, link)
