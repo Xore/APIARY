@@ -159,50 +159,56 @@ def _same_segment(src: str, dest: str) -> bool:
 
 
 def rule_encoded_egress_external(raw: dict) -> RuleMatch | None:
-    """A verifiably-decodable payload (base64/gzip/xor, confirmed via
-    bounded_decode, not just alphabet-matching) leaving toward a
-    destination outside the source's own network segment -- the
-    exfiltration-over-ordinary-web-service shape #154 names directly.
-    Checked against both an HTTP-shaped payload field and a DNS query
-    label (the campaign's own two interchangeable exfil transports)."""
+    """A verifiably-decodable payload (confirmed via bounded_decode -- not
+    just alphabet-matching, #2087) leaving toward a destination outside the
+    source's own network segment -- the exfiltration-over-ordinary-web-
+    service shape #154 names directly. Checked against both an HTTP-shaped
+    payload field and a DNS query label (the campaign's own two
+    interchangeable exfil transports).
+
+    Each transport certifies its payload before matching, with rigor
+    matched to its encoding: the HTTP candidate goes through
+    bounded_decode itself and requires result.ok -- the same bar
+    rule_encoded_execution applies -- so a JWT segment, long hex hash, or
+    cloud key-id toward an external host (alphabet-matching but not
+    actually encoded) does NOT fire; every match's decode_chain records a
+    transform that really ran. DNS labels are base32 rather than base64 --
+    bounded_decode doesn't try base32 -- so they get the equivalent
+    treatment directly: real base32-decode of the first label, then the
+    same looks-like-text gate applied to the DECODED bytes, never the
+    label; padded to a multiple of 8 the way tests/test_decode_correlate.py's
+    own corpus-018 check does."""
     src = raw.get("src_ip")
     dest = raw.get("dest_ip")
     if not dest or not src or _same_segment(src, dest):
         return None
 
-    candidates = []
     if raw.get("payload_printable"):
         blob = dc.extract_candidate_blob(raw["payload_printable"])
         if blob:
-            candidates.append(blob)
+            result = dc.bounded_decode(blob.encode())
+            # #2087: result.ok means either a checksummed gzip/zlib/xor
+            # layer verified the payload or its final layer is real text --
+            # actual evidence. An unverified alphabet-match is neither, and
+            # no longer escalates.
+            if result.ok:
+                return RuleMatch("encoded-egress-external", f"decodable payload toward external {dest}", tuple(result.chain))
+
     dns = raw.get("dns")
     if isinstance(dns, dict) and dns.get("rrname"):
         label = dns["rrname"].split(".")[0]
-        candidates.append(label)
-
-    for blob in candidates:
-        # DNS labels are base32, not base64 -- bounded_decode only tries
-        # base64 as its first layer, so a label needs that translation
-        # first. Padded to a multiple of 8 the same way
-        # tests/test_decode_correlate.py's own corpus-018 check does.
-        # transform label is provenance shown directly to an operator (#154
-        # phase 5) -- "raw" for the HTTP-payload candidate is deliberate,
-        # not a placeholder: that branch checks the extracted blob as
-        # already-plaintext bytes (no decode actually applied), matching
-        # this rule's own "interchangeable exfil transports" framing above
-        # -- calling it "base64" here would misrepresent what happened to
-        # anyone reading the evidence trail.
-        for transform, decoder in (
-            ("raw", lambda b: b.encode()),
-            ("base32", lambda b: base64.b32decode(b.upper() + "=" * ((8 - len(b) % 8) % 8))),
-        ):
-            try:
-                data = decoder(blob)
-            except (UnicodeEncodeError, binascii.Error, ValueError):
-                continue
-            if data and dc.looks_like_text(data):
-                step = dc.DecodeStep(transform, hashlib.sha256(blob.encode()).hexdigest(), hashlib.sha256(data).hexdigest(), len(data))
-                return RuleMatch("encoded-egress-external", f"decodable payload toward external {dest}", (step,))
+        try:
+            data = base64.b32decode(label.upper() + "=" * ((8 - len(label) % 8) % 8))
+        except (binascii.Error, ValueError):
+            return None
+        if data and dc.looks_like_text(data):
+            step = dc.DecodeStep(
+                "base32",
+                hashlib.sha256(label.encode()).hexdigest(),
+                hashlib.sha256(data).hexdigest(),
+                len(data),
+            )
+            return RuleMatch("encoded-egress-external", f"decodable payload toward external {dest}", (step,))
     return None
 
 
