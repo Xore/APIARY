@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { copyWithFlash } from '../lib/flash'
 import { useAppearanceKey } from '../lib/prefs'
+import { stepZoom, zoomFromWheel } from '../lib/chartZoom'
 
 export type ChartKind = 'sankey' | 'timeline' | 'heatmap' | 'pie' | 'line' | 'bar' | 'barh' | 'scatter' | 'radar'
 
@@ -48,6 +49,11 @@ const builders: Record<ChartKind, Builder> = {
               {
                 type: 'sankey',
                 orient: 'vertical',
+                // #2130: draggable is nominally echarts' default, but the
+                // whole point here is that nodes can be pulled apart when
+                // the DAG knots up — say so instead of trusting a default
+                // nobody has heard of.
+                draggable: true,
                 emphasis: { focus: 'adjacency' },
                 data: nodes,
                 links,
@@ -312,10 +318,19 @@ const builders: Record<ChartKind, Builder> = {
   },
 }
 
-export function EChart({ kind, url, height }: { kind: ChartKind; url: string; height: number }) {
+export function EChart({ kind, url, height, zoomable }: { kind: ChartKind; url: string; height: number; zoomable?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const wrapperRef = useRef<HTMLDivElement>(null)
   const [status, setStatus] = useState('Loading…')
   const [state, setState] = useState<'loading' | 'ready' | 'empty' | 'error'>('loading')
+  // #2130: opt-in zoom for charts whose content overflows their frame.
+  // The mechanism is canvas real estate, not echarts series.zoom: the
+  // chart div grows by `zoom` inside a scrollable wrapper, so the layout
+  // engine re-spaces the diagram across more pixels (real separation
+  // between dense stages) while native scrollbars remain the pan UI —
+  // no stage can ever be pushed out of reach, which series.zoom cannot
+  // promise (sankey has no roam; a scaled view just clips).
+  const [zoom, setZoom] = useState(1)
   // #1757: the payload is kept so an appearance change can repaint from it.
   // Every colour in a chart is resolved from a CSS custom property into a
   // pixel value at build time and cannot re-resolve itself, so a theme change
@@ -398,6 +413,28 @@ export function EChart({ kind, url, height }: { kind: ChartKind; url: string; he
     void paint()
   }, [appearance, paint])
 
+  // Ctrl+wheel zooms (#2130). Non-passive listener so preventDefault can
+  // stop the browser's own page-zoom; plain wheel is left untouched — it
+  // keeps its native job of scrolling both the page and (once zoomed past
+  // the frame) the chart viewport itself.
+  useEffect(() => {
+    const wrapper = wrapperRef.current
+    if (!zoomable || !wrapper) return
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey) return
+      event.preventDefault()
+      setZoom((current) => zoomFromWheel(current, event.deltaY))
+    }
+    wrapper.addEventListener('wheel', onWheel, { passive: false })
+    return () => wrapper.removeEventListener('wheel', onWheel)
+  }, [zoomable])
+
+  // New data source, old magnification: reset rather than drop the reader
+  // into a zoomed view they did not choose for this chart.
+  useEffect(() => {
+    setZoom(1)
+  }, [kind, url])
+
   return (
     <>
       {/* echarts.init(container, ...) below injects its own DOM nodes
@@ -410,17 +447,30 @@ export function EChart({ kind, url, height }: { kind: ChartKind; url: string; he
           own DOM synchronously, inside the same effect tick as the
           setState that swaps in the "No data yet" React children --
           React's reconciler then tries to remove a sibling node echarts
-          already tore down. Loading/empty/error status is rendered as an
-          absolutely-positioned OVERLAY SIBLING instead, inside a
-          position:relative wrapper, so React never owns any node inside
-          the div echarts controls. */}
-      <div style={{ position: 'relative', width: '100%', height }}>
-        <div
-          ref={containerRef}
-          style={{ width: '100%', height }}
-          aria-busy={state === 'loading'}
-          role={state === 'error' ? 'alert' : undefined}
-        />
+          already tore down. Loading/empty/error status and the #2130
+          zoom controls are rendered OUTSIDE that div -- overlays as
+          absolutely-positioned siblings of it, controls above the
+          wrapper -- so React never owns any node inside the div echarts
+          controls. */}
+      {zoomable && state === 'ready' ? (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.4rem', marginBottom: '0.35rem' }}>
+          <span className="note" style={{ margin: 0 }}>ctrl+scroll to zoom, scroll to pan, drag nodes</span>
+          <button className="chip" type="button" aria-label="Zoom in" onClick={() => setZoom((current) => stepZoom(current, 1))}>+</button>
+          <button className="chip" type="button" aria-label="Zoom out" onClick={() => setZoom((current) => stepZoom(current, -1))}>−</button>
+          <button className="chip" type="button" onClick={() => setZoom(1)}>reset</button>
+        </div>
+      ) : null}
+      <div
+        ref={wrapperRef}
+        style={{ position: 'relative', width: '100%', height, overflow: 'auto' }}
+        aria-busy={state === 'loading'}
+        role={state === 'error' ? 'alert' : undefined}
+      >
+        {/* The sizing div is what zoom scales; at zoom=1 it is exactly the
+            box charts have always had, so non-zoomable kinds are unchanged. */}
+        <div style={{ width: `${zoom * 100}%`, minWidth: '100%', height: zoom * height }}>
+          <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+        </div>
         {state === 'loading' ? (
           <span
             className="skeleton-line"
