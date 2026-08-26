@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # sync-client-secrets.sh -- after a fresh `--import-realm` (apiary-realm.json
 # pins no client "secret", so Keycloak generates a new random one for every
-# confidential client on each import), fetches all 8 gateway clients' fresh
+# confidential client on each import), fetches the 7 gateway clients' fresh
 # secrets from Keycloak on the homeserver and writes them into the matching
 # `vps/secrets/oidc/<client>/client-secret` file on the VPS, then restarts
 # each gateway. Replaces the fully-manual per-client procedure in
@@ -22,7 +22,10 @@ KC="/opt/keycloak/bin/kcadm.sh"
 
 # client id -> vps/docker-compose.yml service/container name (not always a
 # plain "oidc-<client>" prefix -- apiary-dashboard's gateway is oidc-dashboard,
-# traefik-dashboard's is oidc-traefik).
+# traefik-dashboard's is oidc-traefik). dockge/oidc-dockge lived here until
+# #1194 decommissioned that pair two days after this script landed (#2195);
+# the pre-flight check below now keeps a leftover row like that from
+# re-breaking both halves of the script at once.
 declare -A CLIENT_CONTAINERS=(
   [apiary-dashboard]=oidc-dashboard
   [kibana]=oidc-kibana
@@ -31,7 +34,6 @@ declare -A CLIENT_CONTAINERS=(
   [tanner]=oidc-tanner
   [revdeck]=oidc-revdeck
   [traefik-dashboard]=oidc-traefik
-  [dockge]=oidc-dockge
 )
 CLIENTS=("${!CLIENT_CONTAINERS[@]}")
 
@@ -42,7 +44,30 @@ docker exec "$KC_CONTAINER" "$KC" config credentials \
   --config "$KC_CONFIG" --server http://127.0.0.1:8080 --realm master \
   --user "$KEYCLOAK_ADMIN_USERNAME" --password "$KEYCLOAK_ADMIN_PASSWORD"
 
+# #2195: validate the hand-maintained map against the realm's own client
+# list BEFORE syncing anything. A listed-but-decommissioned client used to
+# fail silently at both ends at once: every run printed "SKIP <client>",
+# set fail=1, and exited 1 forever after (so a real missing-client SKIP
+# could never stand out), while the dead gateway still rode along in the
+# recreate step and made docker compose reject it outright -- even
+# validly-synced gateways were then never restarted until someone stepped
+# in by hand. One loud abort before any writes replaces both failure modes;
+# when this fires the MAP above has drifted from the realm and needs
+# editing, not a rerun.
+realm_clients="$(docker exec "$KC_CONTAINER" "$KC" get clients -r "$REALM" \
+  --fields clientId --format csv --noquotes --config "$KC_CONFIG")"
+missing=()
+for client in "${CLIENTS[@]}"; do
+  grep -qxF "$client" <<<"$realm_clients" || missing+=("$client")
+done
+if ((${#missing[@]})); then
+  printf 'ABORT: listed in CLIENT_CONTAINERS but absent from realm %s: %s\n' \
+    "$REALM" "${missing[*]}" >&2
+  exit 2
+fi
+
 fail=0
+synced_containers=()
 for client in "${CLIENTS[@]}"; do
   uuid="$(docker exec "$KC_CONTAINER" "$KC" get clients -r "$REALM" \
     -q "clientId=${client}" --fields id --format csv --noquotes --config "$KC_CONFIG")"
@@ -72,13 +97,21 @@ for client in "${CLIENTS[@]}"; do
     umask 077 && cat > '${VPS_SECRETS_DIR}/${client}/client-secret' && \
     chown root:65532 '${VPS_SECRETS_DIR}/${client}/client-secret' && \
     chmod 440 '${VPS_SECRETS_DIR}/${client}/client-secret'"
+  synced_containers+=("${CLIENT_CONTAINERS[$client]}")
   echo "synced $client"
 done
 
 docker exec "$KC_CONTAINER" rm -f "$KC_CONFIG"
 
-containers=()
-for client in "${CLIENTS[@]}"; do containers+=("${CLIENT_CONTAINERS[$client]}"); done
-ssh "$VPS_HOST" "cd /root/vps && docker compose up -d --force-recreate ${containers[*]}"
+# #2195: recreate ONLY gateways whose secret actually changed hands this
+# run. The old always-full list is what let a stale entry turn "every sync
+# ok, restart rejected by compose" into "nothing restarted". An empty set
+# means every row skipped -- say so rather than calling compose with zero
+# services.
+if ((${#synced_containers[@]})); then
+  ssh "$VPS_HOST" "cd /root/vps && docker compose up -d --force-recreate ${synced_containers[*]}"
+else
+  echo "no secrets synced; skipping gateway recreation" >&2
+fi
 
 exit "$fail"
