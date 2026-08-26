@@ -345,7 +345,19 @@ function Events() {
   )
   // Live tail is unfiltered by design (the legacy stream is too); it
   // pauses automatically while a filter scope is active.
-  const [live, setLive] = useState(!filtersActive)
+  //
+  // #1961: that pause has to follow the *current* scope, not the URL the
+  // page happened to arrive with. `useState(!filtersActive)` captured the
+  // answer exactly once at mount — TanStack Router keeps this component
+  // instance across search-param changes, so a pivot clicked after
+  // arrival left the SSE subscription running and unfiltered events kept
+  // prepending into a filtered table, inflating rows.length past unfetched
+  // matching rows and silently skewing viewMore()'s offset paging. So the
+  // operator's on/off choice is stored (`livePreferred`) and the effective
+  // state is derived on every render; clearing the filters lets the tail
+  // pick straight back up if it was on underneath.
+  const [livePreferred, setLivePreferred] = useState(!filtersActive)
+  const live = livePreferred && !filtersActive
 
   useEffect(() => {
     let cancelled = false
@@ -478,8 +490,14 @@ function Events() {
           className={live ? 'chip is-active' : 'chip'}
           type="button"
           aria-pressed={live}
-          title={live ? 'Live tail on — new events stream in as they arrive' : 'Live tail off'}
-          onClick={() => setLive((current) => !current)}
+          title={
+            filtersActive
+              ? 'Live tail is unavailable while a filter scope is active — the stream is unfiltered, so its rows would pollute this view. Clear the filters to resume.'
+              : live
+                ? 'Live tail on — new events stream in as they arrive'
+                : 'Live tail off'
+          }
+          onClick={() => setLivePreferred((current) => !current)}
         >
           {live ? '● live' : '○ paused'}
         </button>
