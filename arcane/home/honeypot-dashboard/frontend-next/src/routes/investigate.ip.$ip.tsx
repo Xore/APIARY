@@ -6,6 +6,7 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { ErrorStateBlock } from '../components/ErrorState'
 import { Tabs, TabPanel } from '../components/Tabs'
 import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
@@ -64,11 +65,20 @@ type IpProfile = {
 
 type BlockState = { IP: string; Blocked: boolean; Active: boolean; BlockedBy?: string; ExpiresAt?: string }
 
+// #2178: serviceJSON collapsed "the request failed" into the same null the
+// route read as "No events from this address" — on the page an operator
+// consults before deciding whether to keep or lift a block, an outage
+// asserting a whole address's history was empty. Tri-state now; the
+// handler never rejects.
+type ProfileFetch = { state: 'profile'; profile: IpProfile } | { state: 'missing' } | { state: 'failed' }
+
 const fetchProfile = createServerFn({ method: 'GET' })
   .inputValidator((input: { ip: string }) => input)
-  .handler(async ({ data }): Promise<IpProfile | null> => {
-    const { serviceJSON } = await import('../lib/backend.server')
-    return serviceJSON<IpProfile>(`/api/v1/investigate/ip/${encodeURIComponent(data.ip)}`)
+  .handler(async ({ data }): Promise<ProfileFetch> => {
+    const { serviceJSONResult } = await import('../lib/backend.server')
+    const result = await serviceJSONResult<IpProfile>(`/api/v1/investigate/ip/${encodeURIComponent(data.ip)}`)
+    if (result.ok) return { state: 'profile', profile: result.body }
+    return result.status === 404 ? { state: 'missing' } : { state: 'failed' }
   })
 
 const fetchBlockState = createServerFn({ method: 'GET' })
@@ -337,23 +347,45 @@ function CorrelationPanel({ correlation }: { correlation: Correlation }) {
 function InvestigateIp() {
   const { first } = Route.useLoaderData()
   const { ip } = Route.useParams()
-  const [profile, setProfile] = useState<IpProfile | null | 'missing'>(null)
+  // #2178: `result ?? 'missing'` rendered a failed profile fetch as "No
+  // events from this address in the current window." — a confident
+  // negative about everything this IP ever did. Tri-state now: null while
+  // loading, 'missing' only for a settled not-found, 'failed' named.
+  const [fetch, setFetch] = useState<ProfileFetch | null>(null)
+  const [attempt, setAttempt] = useState(0)
   const [tab, setTab] = useState('activity')
   useEffect(() => {
     let cancelled = false
-    first.then((result) => {
-      if (!cancelled) setProfile(result ?? 'missing')
+    setFetch(null)
+    ;(attempt === 0 ? first : fetchProfile({ data: { ip } })).then((result) => {
+      if (!cancelled) setFetch(result)
     })
     return () => {
       cancelled = true
     }
-  }, [first])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- caller-owned loader stream
+  }, [first, attempt])
 
-  if (profile === 'missing') {
+  if (fetch?.state === 'failed') {
+    return (
+      <>
+        <InvestigateHeader label="Investigate" title={ip} subtitle="The profile could not be loaded." />
+        <ErrorStateBlock
+          title="This attacker profile failed to load"
+          hint="The backend request failed — this says nothing about whether the address has history. Do not treat it as an empty profile."
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
+      </>
+    )
+  }
+
+  if (fetch?.state === 'missing') {
     return (
       <InvestigateHeader label="Investigate" title={ip} subtitle="No events from this address in the current window." />
     )
   }
+
+  const profile = fetch?.state === 'profile' ? fetch.profile : null
 
   return (
     <>

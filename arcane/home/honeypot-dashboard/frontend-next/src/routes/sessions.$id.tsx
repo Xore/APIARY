@@ -6,6 +6,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { MailCard } from '../components/CapturedMail'
+import { ErrorStateBlock } from '../components/ErrorState'
 import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
 import { countryName } from '../lib/country'
@@ -42,11 +43,20 @@ type SessionDetail = {
   events: EventRow[]
 }
 
+// #2178: serviceJSON collapsed "no session has this id" (a real 404) and
+// "the request failed" into one null, so an outage rendered the terminal
+// "No events found for this session id" — asserting absence about a
+// session that may simply be unreachable. Tri-state now; the handler
+// never rejects.
+type SessionFetch = { state: 'session'; session: SessionDetail } | { state: 'missing' } | { state: 'failed' }
+
 const fetchSession = createServerFn({ method: 'GET' })
   .inputValidator((input: { id: string }) => input)
-  .handler(async ({ data }): Promise<SessionDetail | null> => {
-    const { serviceJSON } = await import('../lib/backend.server')
-    return serviceJSON<SessionDetail>(`/api/v1/sessions/${encodeURIComponent(data.id)}`)
+  .handler(async ({ data }): Promise<SessionFetch> => {
+    const { serviceJSONResult } = await import('../lib/backend.server')
+    const result = await serviceJSONResult<SessionDetail>(`/api/v1/sessions/${encodeURIComponent(data.id)}`)
+    if (result.ok) return { state: 'session', session: result.body }
+    return result.status === 404 ? { state: 'missing' } : { state: 'failed' }
   })
 
 // Captured mail (#1611 workstream B) lives in components/CapturedMail —
@@ -104,18 +114,24 @@ function MiniTable({ title, rows }: { title: string; rows: Kv[] }) {
 function SessionPage() {
   const { first } = Route.useLoaderData()
   const { id } = Route.useParams()
-  const [detail, setDetail] = useState<SessionDetail | null | 'missing'>(null)
+  // #2178: `result ?? 'missing'` conflated a failed load with the terminal
+  // not-found answer. Tri-state now: 'missing' only on the backend's own
+  // 404, 'failed' named with a retry, null while loading.
+  const [fetch, setFetch] = useState<SessionFetch | null>(null)
+  const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     let cancelled = false
-    first.then((result) => {
-      if (!cancelled) setDetail(result ?? 'missing')
+    setFetch(null)
+    ;(attempt === 0 ? first : fetchSession({ data: { id } })).then((result) => {
+      if (!cancelled) setFetch(result)
     })
     return () => {
       cancelled = true
     }
-  }, [first])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- caller-owned loader stream
+  }, [first, attempt])
 
-  if (detail === 'missing') {
+  if (fetch?.state === 'missing') {
     return (
       <InvestigateHeader
         label="Investigate"
@@ -124,6 +140,24 @@ function SessionPage() {
       />
     )
   }
+  if (fetch?.state === 'failed') {
+    return (
+      <>
+        <InvestigateHeader
+          label="Investigate"
+          title={`Session ${id.slice(0, 24)}`}
+          subtitle="The session could not be loaded."
+        />
+        <ErrorStateBlock
+          title="This session failed to load"
+          hint="The backend request failed — this says nothing about whether the session exists in the window."
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
+      </>
+    )
+  }
+
+  const detail = fetch?.state === 'session' ? fetch.session : null
 
   return (
     <>
@@ -210,7 +244,7 @@ function SessionPage() {
       ) : null}
       {detail ? (
         <>
-          {hasCapturedMail(detail.events) ? <MailCard sessionId={id} /> : null}
+          {detail && hasCapturedMail(detail.events) ? <MailCard sessionId={id} /> : null}
           <MiniTable title="Sensors" rows={detail.sensors} />
           <MiniTable title="Commands" rows={detail.commands} />
           <MiniTable title="Credentials" rows={detail.credentials} />
