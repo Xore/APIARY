@@ -22,7 +22,7 @@
 # threat-intel sharing for the same reason T-Pot's own ewsposter/hpfeeds
 # were declined; SENTRYPEER_PEER_TO_PEER/SENTRYPEER_API/SENTRYPEER_WEBHOOK
 # are simply never set.
-FROM alpine:edge AS builder
+FROM alpine:edge@sha256:020dfcbaaf4cc1078bf2d9c7ba31a8466e334061dcd2f248001d68f79e52c000 AS builder
 RUN apk add --no-cache autoconf automake autoconf-archive \
 	git sqlite-dev cmocka-dev util-linux-dev curl-dev \
 	pcre2-dev jansson-dev libmicrohttpd-dev build-base \
@@ -45,7 +45,7 @@ RUN make
 RUN make check
 RUN make install
 
-FROM alpine:edge
+FROM alpine:edge@sha256:020dfcbaaf4cc1078bf2d9c7ba31a8466e334061dcd2f248001d68f79e52c000
 RUN apk -U add --no-cache \
     libcurl \
     jansson \

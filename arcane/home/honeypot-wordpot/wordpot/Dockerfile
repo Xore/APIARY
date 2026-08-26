@@ -30,7 +30,7 @@
 # that false (see wordpot.conf's own doc comment) -- installing an unused
 # third-party git dependency for functionality this stack will never
 # enable isn't justified.
-FROM python:2.7-alpine
+FROM python:2.7-alpine@sha256:724d0540eb56ffaa6dd770aa13c3bc7dfc829dec561d87cb36b2f5b9ff8a760a
 RUN apk add --no-cache git python3 ca-certificates
 WORKDIR /opt/wordpot
 ARG WORDPOT_REF=e96889bd5a35bbdd9fb2dd4cd583475cf7d25962

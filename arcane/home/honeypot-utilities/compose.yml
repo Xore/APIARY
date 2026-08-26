@@ -123,7 +123,7 @@ services:
   # grant it.
   docker-socket-proxy:
     <<: *runtime-defaults
-    image: tecnativa/docker-socket-proxy:v0.5.0
+    image: tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
     container_name: hp-docker-socket-proxy
     restart: unless-stopped
     environment:

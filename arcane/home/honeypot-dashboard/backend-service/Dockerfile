@@ -2,7 +2,7 @@
 # release build, then a slim runtime with just the binary. rustls-only
 # (no OpenSSL); ca-certificates + curl for TLS trust and the container
 # healthcheck.
-FROM rust:1-slim-bookworm AS build
+FROM rust:1-slim-bookworm@sha256:94e9efa4033213dbb70d4f665527e7ece3944ddb7ba1dd2e43f6fd6e2490af58 AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock* ./
 # build.rs stamps the binary with its compile time (see the file). It has to
@@ -19,7 +19,7 @@ COPY src ./src
 COPY assets_pdf ./assets_pdf
 RUN cargo build --release
 
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*

@@ -57,7 +57,7 @@ name: ghosts
 
 services:
   ghosts-postgres:
-    image: postgres:16.8
+    image: postgres:16.8@sha256:301bcb60b8a3ee4ab7e147932723e3abd1cef53516ce5210b39fd9fe5e3602ae
     environment:
       POSTGRES_DB: ghosts
       POSTGRES_USER: ghosts

@@ -242,7 +242,7 @@ services:
   # overlap is with our composable template's pattern, not EveBox's.
   evebox:
     <<: *runtime-defaults
-    image: jasonish/evebox:latest
+    image: jasonish/evebox:latest@sha256:216ef6eb5bfcc1d8d9b13a41ba38eb067060e68c3970fa4579d07c8f5d5a9326
     container_name: hp-evebox
     restart: unless-stopped
     command:
@@ -351,7 +351,7 @@ services:
   # stale, instead of it silently sitting broken again.
   pcap-sync:
     <<: *runtime-defaults
-    image: busybox:latest
+    image: busybox:latest@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
     container_name: hp-pcap-sync
     restart: unless-stopped
     # #127: waits on the marker directly instead of depends_on-ing
@@ -575,7 +575,7 @@ services:
   # Networkless except for Elasticsearch: it reads two local paths and posts.
   # It never fetches anything, and it never executes what it reads.
   extracted-file-importer:
-    image: docker.io/library/python:3.12-alpine
+    image: docker.io/library/python:3.12-alpine@sha256:d09d15e60962ca365d1cd544a48773bac9d33f2fb1b00f2aa0deec78ade7dc31
     container_name: hp-extracted-file-importer
     restart: unless-stopped
     profiles: ["file-extract"]
