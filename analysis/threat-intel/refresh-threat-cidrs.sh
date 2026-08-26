@@ -19,8 +19,12 @@
 #   - Spamhaus DROP (EDROP is merged into it as of this writing): known-
 #     hijacked/leased netblocks used for spam and other abuse. Free for any
 #     use per Spamhaus's own FAQ; their stated polling-cadence rule is no
-#     more than once per hour, so the systemd timer driving this script is
-#     daily -- comfortably inside that limit, not pushing against it.
+#     more than once per hour, so the driver of this script runs daily --
+#     comfortably inside that limit, not pushing against it. The driver is
+#     not a systemd timer: it is honeypot-init's threat-cidrs-refresh
+#     compose service (an alpine sleep-loop container on the threat-intel
+#     profile, THREAT_INTEL_REFRESH_INTERVAL=86400), so auditing schedules
+#     means reading that stack's compose.yml, not systemctl list-timers.
 #   - Tor bulk exit list: anonymized-traffic signal, not inherently
 #     malicious -- gets its own "tor-exit" label rather than being lumped in
 #     with reputation-list hits.
@@ -50,7 +54,7 @@ DRY_RUN=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN=1; shift ;;
-    -h|--help) sed -n '2,39p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,45p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
