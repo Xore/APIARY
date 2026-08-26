@@ -172,6 +172,25 @@ jobs:
           rm -rf node_modules
       - run: npm ci
         working-directory: arcane/home/honeypot-dashboard/frontend-next
+      # #2180: the TanStack family is pinned spec-exact so upgrades can only
+      # be deliberate, and the route tree the family regenerates on a cache
+      # miss stays reproducible. The locked minors are still skewed, so this
+      # warns (never fails) whenever @tanstack/react-* 1.x siblings span more
+      # than one minor in one install -- exactly the state that must surface
+      # loudly now that it can only arrive through a partial family bump.
+      - name: TanStack minors diverge inside one install (#2180)
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+        run: |
+          rows="$(jq -r '[.packages | to_entries[]
+              | select(.key | test("^node_modules/@tanstack/react-"))
+              | select(.value.version | startswith("1."))
+              | "\(.key | sub("node_modules/@tanstack/"; "")) \(.value.version)"]
+            | sort | .[]' package-lock.json)"
+          echo "$rows"
+          minors="$(cut -d" " -f2 <<<"$rows" | cut -d. -f1-2 | sort -u)"
+          if [ "$(wc -l <<<"$minors")" -gt 1 ]; then
+            echo "::warning file=arcane/home/honeypot-dashboard/frontend-next/package-lock.json::@tanstack/react-* 1.x span multiple minors in one install ($(paste -sd/ <<<"$minors")) -- bump the family together and verify route-tree behaviour (#2180)"
+          fi
       - run: npm run typecheck
         working-directory: arcane/home/honeypot-dashboard/frontend-next
       # #1831: the tier's first behavioural check. typecheck and build were

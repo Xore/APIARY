@@ -45,7 +45,10 @@ a real Keycloak instance.
 
 Add route files under `src/routes/`; TanStack Router regenerates
 `src/routeTree.gen.ts` for you (`npm run generate-routes` to force it
-without a dev-server rebuild).
+without a dev-server rebuild). The TanStack packages are pinned at exact
+versions (no carets, no tags) because that generation runs from them on a
+fresh install: bumping one is a deliberate act done for the family together,
+with route-tree behaviour verified before landing (#2180).
 
 ## Build and run
 
