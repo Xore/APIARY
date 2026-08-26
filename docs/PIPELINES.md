@@ -43,7 +43,7 @@ flowchart LR
   fb["Filebeat"]
 
   subgraph es["Elasticsearch (honeypot-elk)"]
-    pipe["ingest pipeline geoip-honeypot<br/>(normalize → GeoIP → classify)"]
+    pipe["ingest pipeline geoip-honeypot<br/>(normalize → fingerprints → GeoIP → classify)"]
     rawIx[("honeypot-v2-*<br/>suricata-v2-*<br/>portbridge-v2-*")]
     dlq[("dead-letter-honeypot")]
   end
@@ -117,11 +117,21 @@ Order (1:1 with `analysis/elasticsearch-setup.sh`):
 1. Main normalization script — promotes heterogeneous sensor fields into
    the flattened `honeypot.*` map (sensor, ips/ports, protocol, user,
    command line, url path, sha256, category, persona)
-2–4. GeoIP on suricata src/dst fields (`ignore_missing` no-ops elsewhere)
-5–8. GeoIP on honeypot/portbridge src fields
-9. Dionaea incident hash extraction (plain scan, no regex)
-10. Network-type classification from ASN org (scanner/cloud/hosting)
-11. Log4Shell deobfuscation flag (bounded depth/length)
+2. Fingerprint promotion (#1970) — collapses each document's correlation
+   identity into one typed `fingerprint.kind` / `fingerprint.value` pair
+   on all three index families: honeypot docs follow events.rs'
+   `pivots_from_source` precedence exactly (canonical_fingerprint(+kind),
+   hassh → HASSH, fingerprint → SSH pubkey, client → client banner,
+   user_agent → User-Agent), Suricata TLS promotes JA4 over JA3.hash,
+   suricata HTTP keeps the User-Agent kind alive, portbridge carries the
+   p0f OS guess. Stripped/empty sources write nothing — no empty-string
+   pollution — so ES-side terms aggs reproduce what the dashboard's
+   read-time classification produced without the dashboard running.
+3–5. GeoIP on suricata src/dst fields (`ignore_missing` no-ops elsewhere)
+6–9. GeoIP on honeypot/portbridge src fields
+10. Dionaea incident hash extraction (plain scan, no regex)
+11. Network-type classification from ASN org (scanner/cloud/hosting)
+12. Log4Shell deobfuscation flag (bounded depth/length)
 
 No processor makes a network call — GeoIP reads local `.mmdb` files.
 
