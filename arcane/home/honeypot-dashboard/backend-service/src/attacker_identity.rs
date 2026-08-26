@@ -121,6 +121,18 @@ async fn fetch_recent_events(
         )
         .await?;
 
+    // search_paginated stops silently once EVENT_MAX_PAGES is reached; a
+    // completely full final page is indistinguishable from truncation by
+    // anything cheaper than this equality, so say so when this cycle may
+    // be building identities from a clipped window (#2043).
+    if hits.len() as u64 >= EVENT_PAGE_SIZE * u64::from(EVENT_MAX_PAGES) {
+        tracing::warn!(
+            events = hits.len(),
+            cap = EVENT_PAGE_SIZE * u64::from(EVENT_MAX_PAGES),
+            "attacker-identity event fetch hit its pagination cap; entities built from a truncated window"
+        );
+    }
+
     let mut out = Vec::with_capacity(hits.len());
     for hit in hits {
         let src = &hit["_source"];
@@ -412,10 +424,9 @@ fn merge_entity_into(a: &mut Working, b: &Working) {
     }
 }
 
-/// KNOWN GAP (found during #1628's worker-retirement research, not yet
-/// IP-derived only, deliberately not timestamp-seeded (fixed post-#1628
-/// worker-retirement research — see git history for the original
-/// timestamp-seeded version and the race it had). This function is only
+/// Deliberately not timestamp-seeded: that was the KNOWN GAP surfaced by
+/// #1628's worker-retirement research — see git history for the original
+/// timestamp-seeded version and the race it had. This function is only
 /// ever called once per IP for the lifetime of this index: resolve_identities
 /// looks the IP up in `ip_to_index` (populated from every existing entity's
 /// `ip_set`, loaded fresh from attackers-v1 each cycle) before ever reaching
@@ -536,7 +547,6 @@ fn resolve_identities(
         .collect();
     changed.sort_by(|a, b| a.id.cmp(&b.id));
 
-    let _ = absorbed_indices; // only used above to gate re-matching against an already-absorbed candidate
     let mut absorbed = absorbed_ids;
     absorbed.sort();
 
