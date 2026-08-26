@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# install-backup-timer.sh — enable the daily Elasticsearch snapshot +
-# stack-config backup (#1413). Modelled on sandbox/install-worker.sh and
+# install-backup-timer.sh — enable the daily stack-config backup
+# (#1413; since that removal story the script backs up config, secrets,
+# the Keycloak dump and small volumes only -- no Elasticsearch snapshot).
+# Modelled on sandbox/install-worker.sh and
 # analysis/github/install-github-publisher.sh's own unit-install shape.
 #
 # Unlike those two, backup-honeypot.sh itself is not copied out to
