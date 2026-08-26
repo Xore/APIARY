@@ -203,7 +203,10 @@ function TopologyPage() {
       {/* The DAG is drawn once from static config; stage liveness lives in
           the sections below where it can carry a verdict, not just a node. */}
       <div className="card wide">
-        <EChart kind="sankey" url="/api/topology/flow" height={820} />
+        {/* #2130: the full ingestion DAG does not fit a card legibly —
+            zoomable gives it ctrl+wheel/buttons for magnification, native
+            scrollbars as pan, and draggable nodes. */}
+        <EChart kind="sankey" url="/api/topology/flow" height={820} zoomable />
         <p className="note">
           Every path crosses the VPS: if it restarts, new attack traffic stops reaching every decoy at once, while
           already-captured logs keep indexing from disk. Canarytokens is drawn deliberately off the Filebeat artery — its
