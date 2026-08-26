@@ -64,8 +64,7 @@ sequences and identical resulting checkpoints -- behavioural parity across
 languages, the property a vendored-copy byte check cannot give you.
 """
 
-# Tuples describing where polling stopped: see fetch_events_since.
-
+# Every vendored copy of this file, canonical first, repo-root-relative.
 VENDORED_COPY_REGISTRY = (
     # Canonical location first; every following entry must match it
     # byte-for-byte. Append a consumer's copy here when vendoring.
