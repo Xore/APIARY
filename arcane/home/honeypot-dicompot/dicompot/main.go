@@ -221,26 +221,50 @@ func main() {
 		if err != nil {
 			continue
 		}
-		go func() {
-			conn := decodeProxy(conn, proxy)
-			defer conn.Close()
-			ip := srcIP(conn)
-			// #1677: the image's own Docker HEALTHCHECK is `nc -z
-			// 127.0.0.1 <port>`, a real TCP connect accepted by this same
-			// listener -- a real external connection can never present
-			// that address (it always arrives as either a real attacker
-			// IP via the ":pp" portbridge rule or the tunnel peer
-			// otherwise), so this can only be the healthcheck probe.
-			// Close it without logging a fake sensor event.
-			if ip == "127.0.0.1" || ip == "::1" {
-				return
-			}
-			log.emit(event{Port: port, SrcIP: ip, Event: "connect"})
-			conn, calledAE, callingAE := peekAETitles(conn)
-			if calledAE != "" || callingAE != "" {
-				log.emit(event{Port: port, SrcIP: ip, Event: "associate", CalledAE: calledAE, CallingAE: callingAE})
-			}
-			dicompot.RunProviderForConn(conn, paramsFor(log, aeTitle, port, ip))
-		}()
+		go handleConn(conn, log, proxy, aeTitle, port)
 	}
+}
+
+// handleConn serves one accepted connection end to end: PROXY-protocol
+// decode, the #1677 healthcheck guard, the A-ASSOCIATE peek, then the
+// vendored ServiceProvider owns the wire until the association ends.
+func handleConn(conn net.Conn, log *logger, proxy bool, aeTitle string, port int) {
+	// #2186: this goroutine is the only boundary between untrusted input and
+	// process death. Everything below parses attacker bytes without a
+	// recover of its own -- decodeProxy on a crafted ":pp" header,
+	// peekAETitles, the vendored state machine's DIMSE callbacks, and
+	// grailbio/go-dicom decoding C-FIND/C-MOVE/C-GET datasets on this very
+	// call stack (and vendored parsing may panic from goroutines we don't
+	// spawn) -- and in Go one unrecovered panic kills the whole sensor
+	// while restart: unless-stopped hands the same replayable bytes right
+	// back. http-honeypot gets this shield per request from net/http;
+	// dicompot carries it itself at the top of the per-connection
+	// goroutine: a panicking connection costs exactly one handler_panic
+	// event plus a closed socket, never the accept loop or the other
+	// in-flight associations.
+	var ip string
+	defer func() {
+		if r := recover(); r != nil {
+			log.emit(event{Port: port, SrcIP: ip, Event: "handler_panic", Data: fmt.Sprint(r)})
+		}
+	}()
+	conn = decodeProxy(conn, proxy)
+	defer conn.Close()
+	ip = srcIP(conn)
+	// #1677: the image's own Docker HEALTHCHECK is `nc -z
+	// 127.0.0.1 <port>`, a real TCP connect accepted by this same
+	// listener -- a real external connection can never present
+	// that address (it always arrives as either a real attacker
+	// IP via the ":pp" portbridge rule or the tunnel peer
+	// otherwise), so this can only be the healthcheck probe.
+	// Close it without logging a fake sensor event.
+	if ip == "127.0.0.1" || ip == "::1" {
+		return
+	}
+	log.emit(event{Port: port, SrcIP: ip, Event: "connect"})
+	conn, calledAE, callingAE := peekAETitles(conn)
+	if calledAE != "" || callingAE != "" {
+		log.emit(event{Port: port, SrcIP: ip, Event: "associate", CalledAE: calledAE, CallingAE: callingAE})
+	}
+	dicompot.RunProviderForConn(conn, paramsFor(log, aeTitle, port, ip))
 }
