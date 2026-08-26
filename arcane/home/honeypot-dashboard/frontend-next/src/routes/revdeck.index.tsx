@@ -1,3 +1,5 @@
+// .index leaf for the same reason as cape.index.tsx (#2127): a
+// component-ful revdeck.tsx swallowed revdeck.$sha whole.
 // RevDeck — reverse-engineering deck runs (revdeck-analysis-v1). The
 // empty state is normal until the ghidra-worker's drain produces output.
 import { createFileRoute } from '@tanstack/react-router'
@@ -44,7 +46,7 @@ const COLUMNS: Column<StoreRow>[] = [
   },
 ]
 
-export const Route = createFileRoute('/revdeck')({ component: Page })
+export const Route = createFileRoute('/revdeck/')({ component: Page })
 
 function Page() {
   return (

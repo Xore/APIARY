@@ -21,6 +21,15 @@
 // remembered: if `X.tsx` and any `X.<child>.tsx` both exist, `X.tsx` is a
 // layout and must not redirect. Put the redirect in `X.index.tsx`, which
 // is a leaf and has no children to drag with it.
+//
+// #2127 is the other half of the same trap. A layout that doesn't
+// redirect but declares a `component` and never renders `<Outlet/>`
+// swallows its children entirely — /cape/$sha, /github-analysis/$sha and
+// /revdeck/$sha each server-rendered their parent list forever, which
+// read as "the worker isn't producing yet" because every one of these
+// lists announces that emptiness is normal. Same mechanical rule, second
+// clause: a component-ful parent must reference Outlet, or it has no
+// children at all.
 import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -73,10 +82,54 @@ describe('route shape', () => {
     expect(layoutRoutes(['sensors.index', 'sensors.$sensor'])).toEqual([])
   })
 
+  it('no component-ful layout swallows its children', () => {
+    // #2127's half of the trap. A parent whose Route declares a component
+    // renders ONLY that component; children mount exclusively through an
+    // <Outlet/> inside it. Without one, every child URL re-renders the
+    // parent — and when that parent is a list whose empty state is normal,
+    // the swallow masquerades as a deployment status.
+    const names = routeNames()
+    const offenders: string[] = []
+
+    for (const layout of layoutRoutes(names)) {
+      const source = readFileSync(join(ROUTES, `${layout}.tsx`), 'utf8')
+      if (/component\s*:/.test(source) && !source.includes('Outlet')) {
+        offenders.push(layout)
+      }
+    }
+
+    expect(
+      offenders,
+      `${offenders.join(', ')} declares a component but never renders <Outlet/>, so its ` +
+        `child routes can never mount — each child URL silently re-renders the parent. ` +
+        `Render <Outlet/> in ${offenders[0] ?? 'X'}.tsx, or (the repo's usual answer) move ` +
+        `the page into X.index.tsx and delete the parent.`,
+    ).toEqual([])
+  })
+
+  it('recognises the swallowing shape too', () => {
+    // Guards the guard for the #2127 clause.
+    const swallows = (source: string) => /component\s*:/.test(source) && !source.includes('Outlet')
+    expect(swallows("createFileRoute('/cape')({ component: Page })")).toBe(true)
+    expect(swallows("createFileRoute('/x')({ component: () => <><Outlet/></> })")).toBe(false)
+    expect(swallows("import { Outlet } from '@tanstack/react-router'\ncreateFileRoute('/x')({})")).toBe(false)
+  })
+
   it('sensors is a leaf pair, not a layout with a child', () => {
     // The specific regression. /sensors must be an index route.
     const names = routeNames()
     expect(names).toContain('sensors.index')
     expect(names).not.toContain('sensors')
+  })
+
+  it('cape, github-analysis and revdeck are leaf pairs', () => {
+    // The specific regression of #2127: all three detail routes hung off a
+    // component-ful list and never mounted once.
+    const names = routeNames()
+    for (const family of ['cape', 'github-analysis', 'revdeck']) {
+      expect(names).toContain(`${family}.index`)
+      expect(names).not.toContain(family)
+      expect(names).toContain(`${family}.$sha`)
+    }
   })
 })
