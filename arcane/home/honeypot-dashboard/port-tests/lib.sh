@@ -95,6 +95,42 @@ ensure_ports_free() {
 
 PASS=0
 FAIL=0
+SKIPPED=0
+_SKIP_LINES=""
+
+# #2184: a conditionally-discovered key that comes up empty must not
+# silently elide its detail checks — a fresh/partially-indexed ES would
+# shrink coverage to zero while the summary stays green. announce + count
+# every skipped family instead.
+skip() { # skip <label> <kind>
+  local label="$1" kind="$2"
+  local line
+  line="SKIP  $label (no $kind found)"
+  echo "$line"
+  _SKIP_LINES="${_SKIP_LINES:+${_SKIP_LINES}
+}${line}"
+  SKIPPED=$((SKIPPED + 1))
+}
+
+# Live-key discovery, tolerant to an empty or broken ES response (#2184):
+# prints the first matching value, or '' when the index is empty, partially
+# indexed, or returns unparseable JSON. '' then either substitutes into a URL
+# whose own check fails loudly (unconditional sites) or trips an explicit
+# `skip` (conditional sites) — it never surfaces as a python stack trace
+# between PASS lines, and never as a silent coverage drop.
+discover_key() { # discover_key <url> <python-expr over parsed d>
+  curl -s --max-time 30 "$1" | python3 -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    d = {}
+try:
+    v = eval(sys.argv[1])
+except Exception:
+    v = ""
+print(v if isinstance(v, str) else "")' "$2"
+}
 
 check() { # check <label> <command...>
   local label="$1"
@@ -134,6 +170,18 @@ check_json() { # check_json <label> <url> <python-expr over parsed d>
 
 summary() {
   echo "----"
-  echo "passed=$PASS failed=$FAIL"
+  echo "passed=$PASS failed=$FAIL skipped=$SKIPPED"
+  if [ "$SKIPPED" -gt 0 ]; then
+    # #2184: a green run over a sparse ES may have exercised only a fraction
+    # of the detail surface. name every skipped family so nobody can read
+    # "failed=0" as full parity. skips stay exit-zero by design; set
+    # PORT_TESTS_MAX_SKIPS=N to turn an over-large skip count into a failure.
+    echo "route families NOT exercised this run:"
+    printf '%s\n' "$_SKIP_LINES" | sed 's/^/  /'
+    if [ -n "${PORT_TESTS_MAX_SKIPS:-}" ] && [ "$SKIPPED" -gt "$PORT_TESTS_MAX_SKIPS" ]; then
+      echo "FAIL  $SKIPPED skipped check(s) exceed PORT_TESTS_MAX_SKIPS=$PORT_TESTS_MAX_SKIPS (ES too empty to smoke?)" >&2
+      return 1
+    fi
+  fi
   [ "$FAIL" -eq 0 ]
 }

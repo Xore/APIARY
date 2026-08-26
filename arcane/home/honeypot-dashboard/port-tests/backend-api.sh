@@ -34,27 +34,51 @@ for chart in kill-chain-sankey attck-coverage campaign-timeline ml-backlog netfl
   check_http "chart $chart" 200 "$BE_URL/api/v1/charts/$chart"
 done
 
-# Detail endpoints, keys discovered live.
-SID=$(curl -s "$BE_URL/api/v1/events?kind=command&size=1" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["rows"][0]["session"] if d["rows"] else "")')
-[ -n "$SID" ] && check_json "session detail" "$BE_URL/api/v1/sessions/$SID" "d['total'] > 0"
-SHA=$(curl -s "$BE_URL/api/v1/recordings?size=1" | python3 -c 'import sys,json; print(json.load(sys.stdin)["rows"][0]["shasum"])')
+# Detail endpoints, keys discovered live. #2184: an empty discovery is not
+# allowed to silently drop the family's coverage — each conditional site
+# either runs its check or emits a counted SKIP line.
+SID=$(discover_key "$BE_URL/api/v1/events?kind=command&size=1" 'd["rows"][0]["session"] if d.get("rows") else ""')
+if [ -n "$SID" ]; then
+  check_json "session detail" "$BE_URL/api/v1/sessions/$SID" "d['total'] > 0"
+else
+  skip "session detail" "command sessions"
+fi
+SHA=$(discover_key "$BE_URL/api/v1/recordings?size=1" 'd["rows"][0]["shasum"] if d.get("rows") else ""')
 check_json "tty replay decode" "$BE_URL/api/v1/recordings/$SHA" "d['frames'] > 0 and len(d['transcript']) > 0"
-HASH=$(curl -s "$BE_URL/api/v1/payloads?size=1" | python3 -c 'import sys,json; print(json.load(sys.stdin)["rows"][0]["Hash"])')
+HASH=$(discover_key "$BE_URL/api/v1/payloads?size=1" 'd["rows"][0]["Hash"] if d.get("rows") else ""')
 check_json "payload detail" "$BE_URL/api/v1/payloads/$HASH" "len(d['hex_preview']) > 0"
-IP=$(curl -s "$BE_URL/api/v1/events?size=1" | python3 -c 'import sys,json; print(json.load(sys.stdin)["rows"][0]["src_ip"])')
+IP=$(discover_key "$BE_URL/api/v1/events?size=1" 'd["rows"][0]["src_ip"] if d.get("rows") else ""')
 check_json "investigate ip" "$BE_URL/api/v1/investigate/ip/$IP" "d['total'] > 0"
-AID=$(curl -s "$BE_URL/api/v1/attackers?size=1" | python3 -c 'import sys,json; print(json.load(sys.stdin)["rows"][0]["id"])')
+AID=$(discover_key "$BE_URL/api/v1/attackers?size=1" 'd["rows"][0]["id"] if d.get("rows") else ""')
 check_http "attacker fusion" 200 "$BE_URL/api/v1/charts/attacker-fusion?id=$AID"
-RID=$(curl -s "$BE_URL/api/v1/store/generated-reports?size=1" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["rows"][0]["id"] if d["rows"] else "")')
-[ -n "$RID" ] && check_http "report pdf" 200 "$BE_URL/api/v1/reports/$RID/pdf"
-GSHA=$(curl -s "$ES_URL/ghidra-report-artifacts-v1/_search?size=1" | python3 -c 'import sys,json; h=json.load(sys.stdin)["hits"]["hits"]; print(h[0]["_source"]["sha256"] if h else "")')
-[ -n "$GSHA" ] && check_json "ghidra artifacts" "$BE_URL/api/v1/artifacts/ghidra/$GSHA" "len(d['rows']) > 0"
+RID=$(discover_key "$BE_URL/api/v1/store/generated-reports?size=1" 'd["rows"][0]["id"] if d.get("rows") else ""')
+if [ -n "$RID" ]; then
+  check_http "report pdf" 200 "$BE_URL/api/v1/reports/$RID/pdf"
+else
+  skip "report pdf" "generated reports"
+fi
+GSHA=$(discover_key "$ES_URL/ghidra-report-artifacts-v1/_search?size=1" \
+  'd["hits"]["hits"][0]["_source"]["sha256"] if d.get("hits", {}).get("hits") else ""')
+if [ -n "$GSHA" ]; then
+  check_json "ghidra artifacts" "$BE_URL/api/v1/artifacts/ghidra/$GSHA" "len(d['rows']) > 0"
+else
+  skip "ghidra artifacts" "ghidra report artifacts"
+fi
 
 check_json "attack vectors" "$BE_URL/api/v1/attack-vectors?sensor=cowrie" "len(d['ports']) > 0"
 check_json "attackers graph" "$BE_URL/api/v1/attackers-graph?id=$AID" "len(d['nodes']) > 1 and d['nodes'][0]['kind'] == 'hub'"
-JOB=$(curl -s "$ES_URL/sandbox-export-artifacts-v1/_search?size=1" | python3 -c 'import sys,json; h=json.load(sys.stdin)["hits"]["hits"]; print(h[0]["_source"]["job"] if h else "")')
-[ -n "$JOB" ] && check_json "sandbox run detail" "$BE_URL/api/v1/sandbox/$JOB" "'_doc_id' in d"
-[ -n "$GSHA" ] && check_json "ghidra run detail" "$BE_URL/api/v1/ghidra/$GSHA" "'ghidra' in d"
+JOB=$(discover_key "$ES_URL/sandbox-export-artifacts-v1/_search?size=1" \
+  'd["hits"]["hits"][0]["_source"]["job"] if d.get("hits", {}).get("hits") else ""')
+if [ -n "$JOB" ]; then
+  check_json "sandbox run detail" "$BE_URL/api/v1/sandbox/$JOB" "'_doc_id' in d"
+else
+  skip "sandbox run detail" "sandbox export artifacts"
+fi
+if [ -n "$GSHA" ]; then
+  check_json "ghidra run detail" "$BE_URL/api/v1/ghidra/$GSHA" "'ghidra' in d"
+else
+  skip "ghidra run detail" "ghidra report artifacts"
+fi
 for store in revdeck cape github-analysis; do
   check_json "store $store (absent-index tolerant)" "$BE_URL/api/v1/store/$store?size=1" "'rows' in d"
 done
