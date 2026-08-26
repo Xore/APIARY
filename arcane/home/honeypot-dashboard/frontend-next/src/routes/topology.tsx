@@ -31,7 +31,9 @@ type SensorRow = {
 
 type StackRow = {
   stack: string
-  containers: { name: string; adapterVisible: boolean }[]
+  // serde's default naming — matches raw_index below; camelCase here made
+  // every chip take the not-observable branch (#2103).
+  containers: { name: string; adapter_visible: boolean }[]
 }
 
 type Topology = {
@@ -274,7 +276,7 @@ function TopologyPage() {
             <h2>{stack.stack}</h2>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' }}>
               {stack.containers.map((container) => (
-                <span key={container.name}>{containerBadge(containers.get(container.name), container.adapterVisible)}</span>
+                <span key={container.name}>{containerBadge(containers.get(container.name), container.adapter_visible)}</span>
               ))}
             </div>
           </div>
