@@ -4,10 +4,13 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
+import { ErrorStateBlock } from '../components/ErrorState'
 
 type Hit = { label: string; count: number; url: string }
 type Group = { title: string; hits: Hit[]; more: number; more_url: string }
 type SearchResult = { query: string; redirect: string | null; groups: Group[]; total: number }
+/** #2178: result carries 'failed' separately from the no-query idle null. */
+type Outcome = SearchResult | 'failed'
 
 const searchFn = createServerFn({ method: 'GET' })
   .inputValidator((input: { q: string }) => input)
@@ -21,7 +24,14 @@ export const Route = createFileRoute('/search')({
     q: typeof search.q === 'string' ? search.q : '',
   }),
   loaderDeps: ({ search }) => search,
-  loader: async ({ deps }) => ({ first: deps.q ? searchFn({ data: { q: deps.q } }) : Promise.resolve(null) }),
+  // #2178: a bare null used to mean three different things here -- no query,
+  // still streaming, request failed -- and the page rendered them all the
+  // same. Resolve 'failed' explicitly so the UI can tell the outage apart.
+  loader: async ({ deps }) => ({
+    first: deps.q
+      ? searchFn({ data: { q: deps.q } }).then((response): Outcome | null => (response === null ? 'failed' : response))
+      : Promise.resolve(null),
+  }),
   component: SearchPage,
 })
 
@@ -30,7 +40,7 @@ function SearchPage() {
   const { q } = Route.useSearch()
   const navigate = Route.useNavigate()
   const [query, setQuery] = useState(q)
-  const [result, setResult] = useState<SearchResult | null>(null)
+  const [result, setResult] = useState<Outcome | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -49,7 +59,7 @@ function SearchPage() {
         label="Investigate"
         title="Search results"
         subtitle="Grouped matches across sources, sessions, payloads, commands, credentials, fingerprints and signatures."
-        chips={result ? <span className="chip">{result.total.toLocaleString('en-US')} matches</span> : undefined}
+        chips={result && result !== 'failed' ? <span className="chip">{result.total.toLocaleString('en-US')} matches</span> : undefined}
       />
       <p className="note">
         Every source the dashboard holds, matched against your query.
@@ -79,7 +89,17 @@ function SearchPage() {
           <span className="skeleton-line" aria-hidden="true" />
         </div>
       ) : null}
-      {result && result.total === 0 ? (
+      {result === 'failed' ? (
+        /* #2178: an outage used to hold these skeletons exactly like a slow
+           request would. Name it; the form above is the retry. */
+        <div className="card wide">
+          <ErrorStateBlock
+            title="The search request failed"
+            hint="The backend did not answer — results here are never cached. Re-submitting the query re-runs the search."
+          />
+        </div>
+      ) : null}
+      {result && result !== 'failed' && result.total === 0 ? (
         /* The Go zero-state (search.html:57-66): explain what was searched
            and hand the operator pivots out, never a bare sentence. */
         <div className="card wide">
@@ -107,31 +127,33 @@ function SearchPage() {
           </div>
         </div>
       ) : null}
-      {result?.groups.map((group) => (
-        <div className="card half" key={group.title}>
-          <h2>{group.title}</h2>
-          <table className="data-table">
-            <tbody>
-              {group.hits.map((hit) => (
-                <tr key={hit.label}>
-                  <td className="n">{hit.count.toLocaleString('en-US')}</td>
-                  <td className="v">
-                    {hit.url.startsWith('/') ? <Link to={hit.url}>{hit.label}</Link> : hit.label}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {group.more > 0 ? (
-            /* Overflow past the 8-per-group cap (search.html:51). */
-            <p className="note">
-              <a className="lnk" href={group.more_url}>
-                {group.more.toLocaleString('en-US')} more →
-              </a>
-            </p>
-          ) : null}
-        </div>
-      ))}
+      {result && result !== 'failed'
+        ? result.groups.map((group) => (
+            <div className="card half" key={group.title}>
+              <h2>{group.title}</h2>
+              <table className="data-table">
+                <tbody>
+                  {group.hits.map((hit) => (
+                    <tr key={hit.label}>
+                      <td className="n">{hit.count.toLocaleString('en-US')}</td>
+                      <td className="v">
+                        {hit.url.startsWith('/') ? <Link to={hit.url}>{hit.label}</Link> : hit.label}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {group.more > 0 ? (
+                /* Overflow past the 8-per-group cap (search.html:51). */
+                <p className="note">
+                  <a className="lnk" href={group.more_url}>
+                    {group.more.toLocaleString('en-US')} more →
+                  </a>
+                </p>
+              ) : null}
+            </div>
+          ))
+        : null}
     </>
   )
 }
