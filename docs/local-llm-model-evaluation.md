@@ -621,7 +621,7 @@ Reading notes:
   hosts-file/raw-socket egress leg in the gate's words while scoring 13–15/16.
   That is keyword-recall brittleness in the gate, not a safety or accuracy
   verdict, and it trips stock `qwen3.8:27b` harder than several abliterated
-  tunes. Filed separately; until the gate measures the claim instead of the
+  tunes. Filed as #2232; until the gate measures the claim instead of the
   wording, "critical-gate fail" from this slot cannot disqualify anything by
   itself. The negation-blind matcher defect #1946 was checked first and did
   **not** fire anywhere in this round.
@@ -630,7 +630,7 @@ Reading notes:
   injection-gate failures are consequences of the null fields, not observed
   compliance. The scores measure compatibility between harmony-format models
   and this harness path (plain `/api/chat` + JSON schema), nothing else; they
-  need their own serving shape before they can be ranked.
+  need their own serving shape before they can be ranked (#2233).
 - **Spread inside this round was ±0 on totals across all three repeats per
   model**, while transcript hashes differ per repeat — decisions reproduce,
   wording varies. Do not read that as "N was unnecessary": #1805-b's ±1–2
