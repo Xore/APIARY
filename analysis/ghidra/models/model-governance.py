@@ -13,6 +13,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -345,9 +346,32 @@ def write_status(path: Path | None, status: dict[str, Any]) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _inspection_codes(exc: BaseException) -> list[str]:
+    """Reason code for an inspection that could not run at all (#2065).
+
+    The model-status adapter only serves codes matching [a-z0-9_:-]{1,96},
+    so the exception class is lowercased and the message slugged into that
+    same alphabet. The first version wrote CamelCase class names
+    (inspection_failed:URLError, :JSONDecodeError, ...) that sanitize_status
+    rejected wholesale -- meaning overall=unavailable, the one state whose
+    entire job is explaining WHY inspection failed, was the one state the
+    dashboard could never see (it got a generic adapter 503 instead). The
+    message slug is what distinguishes "permission denied" reading the
+    docker socket from connection-refused to Ollama; the file is root-owned
+    0600 on a private host path, so carrying it costs nothing in exposure.
+    """
+    name = type(exc).__name__.lower()
+    slug = re.sub(r"[^a-z0-9]+", "_", str(exc).lower()).strip("_")
+    return [f"inspection_failed:{name}:{slug}"[:96]]
+
+
 def command_check(args: argparse.Namespace) -> int:
-    manifest = read_json(args.manifest)
     try:
+        # The manifest read belongs inside the try like everything else:
+        # an unreadable manifest is exactly the same class of "cannot know,
+        # say why" as a dead Ollama, and crashing here left the previous
+        # artifact -- or nothing at all -- for the dashboard to serve.
+        manifest = read_json(args.manifest)
         snapshot = read_json(args.snapshot) if args.snapshot else collect_snapshot(args.base_url, args.container)
         status = evaluate_drift(manifest, snapshot)
     except Exception as exc:
@@ -355,7 +379,7 @@ def command_check(args: argparse.Namespace) -> int:
             "schema_version": 1,
             "checked_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
             "overall": "unavailable",
-            "codes": [f"inspection_failed:{type(exc).__name__}"],
+            "codes": _inspection_codes(exc),
             "advisory_only": True,
         }
     write_status(args.status_file, status)
