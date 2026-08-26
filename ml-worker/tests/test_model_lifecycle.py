@@ -322,15 +322,16 @@ class TestBatchedScoringMatchesPerRow:
 
         assert list(batched) == pytest.approx(per_row)
 
-    def test_score_batch_on_an_untrained_model_returns_the_neutral_default(self, tmp_path):
-        # No retrain() called -- self.iso/self.hbos are both None, same
-        # state score()/hbos_score() already return 0.5 for (#171's
-        # malformed-event test exercises this exact path).
+    def test_score_batch_on_an_untrained_model_abstains_as_none(self, tmp_path):
+        # No retrain() called -- self.iso/self.hbos are both None. #1969:
+        # an untrained detector has NO opinion, so the batch contract is a
+        # whole-array None the worker records per event as absent, not a
+        # placeholder 0.5 carrying its full composite weight.
         model = IsoForestModel(model_dir=str(tmp_path))
         _, matrix = self._feature_matrix(model, n=5)
 
-        assert list(model.score_batch(matrix)) == [0.5] * 5
-        assert list(model.hbos_score_batch(matrix)) == [0.5] * 5
+        assert model.score_batch(matrix) is None
+        assert model.hbos_score_batch(matrix) is None
 
     def test_score_batch_handles_a_single_row(self, tmp_path):
         # worker.py's score_and_write_events() calls this even for a

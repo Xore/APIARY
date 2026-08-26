@@ -43,18 +43,34 @@ class TestLSTMScoreTakesTheRealSourceDict:
     """#63: score()'s old contract took a slice of IsoForest's unrelated
     15-dim vector; it now takes the raw src dict, like extract_features()."""
 
-    def test_score_returns_zero_before_the_window_fills(self):
+    def test_score_abstains_before_the_window_fills(self):
+        # #1969: "no signal yet" is None (no opinion), not an exact-0.0
+        # that the composite would read as a real low score.
         model = LSTMAEModel(model_dir="/tmp/does-not-matter-1")
         src = fixtures.COWRIE_LOGIN_FAILED["_source"]
         for _ in range(SEQ_LEN - 1):
-            assert model.score(src) == 0.0
+            assert model.score(src) is None
 
     def test_score_produces_a_real_value_once_the_window_fills(self):
         model = LSTMAEModel(model_dir="/tmp/does-not-matter-2")
         src = fixtures.COWRIE_LOGIN_FAILED["_source"]
+        # #1969: score() abstains (None) on a net whose weights were never
+        # fitted or loaded -- random-weight reconstruction loss is noise,
+        # not an opinion. Flagging _trained here reproduces exactly what
+        # _load_latest()/an accepted retrain() establish, so this still
+        # exercises the featurise+forward path it always covered.
+        model._trained = True
         scores = [model.score(src) for _ in range(SEQ_LEN + 1)]
-        assert scores[:SEQ_LEN - 1] == [0.0] * (SEQ_LEN - 1)
+        assert scores[:SEQ_LEN - 1] == [None] * (SEQ_LEN - 1)
         assert 0.0 <= scores[-1] <= 1.0
+
+    def test_untrained_net_never_scores_even_with_a_full_window(self):
+        model = LSTMAEModel(model_dir="/tmp/does-not-matter-2b")
+        src = fixtures.COWRIE_LOGIN_FAILED["_source"]
+        for _ in range(SEQ_LEN + 5):  # window full and overflowing
+            assert model.score(src) is None, (
+                "random-weight output must not be presented as a score (#1969)"
+            )
 
     def test_inter_arrival_is_tracked_per_ip_across_calls(self):
         model = LSTMAEModel(model_dir="/tmp/does-not-matter-3")
@@ -69,14 +85,18 @@ class TestLSTMScoreTakesTheRealSourceDict:
 
 
 class TestBoundedCPUFallback:
-    """#63 hard requirement: inference failures must fall back to a defined
-    neutral value, never propagate and take the batch down, and never read
-    as "confirmed normal" (0.0) -- must be indistinguishable from the
-    documented pre-training neutral default (0.5) used elsewhere."""
+    """#63 hard requirement: inference failures must never propagate and take
+    the batch down. Under #1969's contract a failure abstains (None): excluded
+    from the composite by renormalisation rather than counted as the old
+    neutral 0.5 -- whose full ensemble weight made it a vote from nothing --
+    and never a low score that would read as "confirmed normal"."""
 
-    def test_inference_exception_returns_the_documented_neutral_score(self, monkeypatch):
+    def test_inference_exception_abstains_instead_of_scoring(self, monkeypatch):
         model = LSTMAEModel(model_dir="/tmp/does-not-matter-4")
         src = fixtures.COWRIE_LOGIN_FAILED["_source"]
+        # _trained plus a full window so the fault actually reaches forward()
+        # rather than being masked by an earlier abstention path.
+        model._trained = True
         for _ in range(SEQ_LEN - 1):
             model.score(src)
 
@@ -84,7 +104,7 @@ class TestBoundedCPUFallback:
             raise RuntimeError("simulated inference failure")
 
         monkeypatch.setattr(type(model.net), "forward", broken_forward)
-        assert model.score(src) == 0.5
+        assert model.score(src) is None
 
     def test_retrain_never_fits_more_than_max_train_windows(self, monkeypatch):
         import torch
@@ -126,8 +146,15 @@ class TestComputeCompositeIsTheSingleSourceOfTruth:
         expected = 0.4 * 1.0 + 0.4 * 0.5 + 0.2 * 0.25
         assert worker.compute_composite(scores) == pytest.approx(expected)
 
-    def test_missing_model_score_defaults_to_zero_not_an_error(self):
-        assert worker.compute_composite({"isolation_forest": 1.0}) == pytest.approx(0.4)
+    def test_missing_model_score_is_excluded_and_renormalised(self):
+        # #1969 flipped this contract: a missing detector used to default to
+        # 0.0 (counting as "ran and saw nothing", dragging the composite
+        # down); it is now absent from both numerator and denominator, so a
+        # lone 1.0 IsoForest opinion stands at face value instead of being
+        # silently marked 0.4.
+        scores = {"isolation_forest": 1.0, "lstm_ae": None, "hbos": None}
+        assert worker.compute_composite(scores) == pytest.approx(1.0)
+        assert worker.contributing_detectors(scores) == ["isolation_forest"]
 
 
 if __name__ == "__main__":
