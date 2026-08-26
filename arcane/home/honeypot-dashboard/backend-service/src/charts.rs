@@ -124,6 +124,20 @@ fn attacker_window(window: &str) -> Value {
     }})
 }
 
+/// The Suricata fallback leg of `traffic_sum`'s query, factored out so the
+/// fleet-source exclusion can be pinned against the same `attacker_window`
+/// builder the Zeek leg uses (#2112).
+fn suricata_traffic_body(suricata_field: &str) -> Value {
+    json!({
+        "size": 0,
+        "query": attacker_window(WEEK),
+        "aggs": {"hourly": {
+            "date_histogram": {"field": "@timestamp", "fixed_interval": "1h", "min_doc_count": 0},
+            "aggs": {"total": {"sum": {"field": suricata_field}}}
+        }}
+    })
+}
+
 
 /// Hourly traffic volume, summed over whichever sensor is producing it.
 ///
@@ -189,14 +203,12 @@ async fn traffic_sum(
         return Ok(vec![Series { name: name.to_string(), points: zeek_points }]);
     }
 
-    let body = json!({
-        "size": 0,
-        "query": {"range": {"@timestamp": {"gte": WEEK}}},
-        "aggs": {"hourly": {
-            "date_histogram": {"field": "@timestamp", "fixed_interval": "1h", "min_doc_count": 0},
-            "aggs": {"total": {"sum": {"field": suricata_field}}}
-        }}
-    });
+    // #2112: the fallback serves during exactly the windows Zeek cannot
+    // (#1741's retirement overlap, outages), and those are precisely when
+    // a silent meaning change would read as a traffic spike. Both legs
+    // share the attacker_window exclusion -- #1677's lesson applied at
+    // query level on this page, not just the Zeek leg.
+    let body = suricata_traffic_body(suricata_field);
     let result = state.es.search_index(&["suricata-v2-netflow-*"], body).await?;
     let points = result["aggregations"]["hourly"]["buckets"]
         .as_array()
@@ -729,7 +741,7 @@ mod tests {
 
 #[cfg(test)]
 mod fleet_filter_tests {
-    use super::attacker_window;
+    use super::{attacker_window, suricata_traffic_body, WEEK};
 
     /// The filter has to sit on the query, not inside one aggregation. #1677's
     /// original fix hid the address in a single `terms` agg and every other
@@ -750,6 +762,30 @@ mod fleet_filter_tests {
         assert!(
             excluded.iter().any(|value| value == "10.8.0.1"),
             "tunnel peer must always be excluded, got {excluded:?}"
+        );
+    }
+
+    /// #2112: traffic_sum's Suricata fallback used to query with a bare
+    /// timestamp range — serving fleet-sourced bytes during exactly the
+    /// windows (Zeek quiet/absent) when the fallback is the live leg. Pin
+    /// the body to the same attacker_window builder the Zeek leg uses.
+    #[test]
+    fn suricata_fallback_excludes_fleet_sources_at_query_level() {
+        let body = suricata_traffic_body("netflow.bytes");
+        assert_eq!(
+            body["query"],
+            attacker_window(WEEK),
+            "the fallback must query through attacker_window like the Zeek leg"
+        );
+
+        // Shape, not just provenance: exclusion at the QUERY level, so no
+        // aggregation on this page can count fleet sources.
+        let excluded = body["query"]["bool"]["must_not"][0]["terms"]["source.ip"]
+            .as_array()
+            .expect("fallback query should carry the source.ip must_not");
+        assert!(
+            excluded.iter().any(|value| value == "10.8.0.1"),
+            "tunnel peer must be excluded on the fallback too, got {excluded:?}"
         );
     }
 }
