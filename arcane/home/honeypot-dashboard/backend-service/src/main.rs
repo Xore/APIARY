@@ -72,6 +72,7 @@ mod reports_api;
 mod reports_data;
 mod reports_store;
 mod reporter_stats;
+mod rollups;
 mod sandbox_submit;
 mod sensors;
 mod search;

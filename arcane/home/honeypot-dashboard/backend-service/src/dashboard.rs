@@ -256,6 +256,29 @@ pub async fn dashboard(
     Query(query): Query<DashboardQuery>,
 ) -> Result<Json<Dashboard>, (StatusCode, String)> {
     let (main_allowed, behavior_allowed) = allowed_aggs(query.parts.as_deref());
+    // #2046: when a caller asks for the heatmap or map points and a rollup
+    // covers the window, the panel is served from its derived index and the
+    // corresponding agg is dropped from the live search entirely. An
+    // uncovered page (fresh deploy before the dashboard-rollups worker's
+    // backfill lands, or a disabled loop) falls through to the original
+    // aggregation slices unchanged.
+    let mut main_allowed = main_allowed;
+    let rolled_heatmap = if main_allowed.contains("heatmap") {
+        heatmap_from_rollup(&state).await
+    } else {
+        None
+    };
+    if rolled_heatmap.is_some() {
+        main_allowed.remove("heatmap");
+    }
+    let rolled_points = if main_allowed.contains("points") {
+        map_points_from_rollup(&state).await
+    } else {
+        None
+    };
+    if rolled_points.is_some() {
+        main_allowed.remove("points");
+    }
     let main_body = json!({
         "size": 0,
         // #1677: self-generated probe traffic is excluded from every figure on
@@ -458,61 +481,44 @@ pub async fn dashboard(
         .filter(|row| !row.shasum.is_empty())
         .collect();
 
-    let heatmap = main["aggregations"]["heatmap"]["sensors"]["buckets"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|sensor| {
-            let counts: Vec<(String, u64)> = sensor["hourly"]["buckets"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .map(|bucket| {
-                    (
-                        bucket["key_as_string"].as_str().unwrap_or("").to_string(),
-                        bucket["doc_count"].as_u64().unwrap_or(0),
-                    )
-                })
-                .collect();
-            let max = counts.iter().map(|(_, count)| *count).max().unwrap_or(0).max(1);
-            HeatRow {
-                sensor: sensor["key"].as_str().unwrap_or("").to_string(),
-                cells: counts
+    // #2046: primary path is the rollup (see the gated reads above); this
+    // assembly runs only on the fall-through path.
+    let heatmap = match rolled_heatmap {
+        Some(rows) => rows,
+        None => main["aggregations"]["heatmap"]["sensors"]["buckets"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|sensor| {
+                let counts: Vec<(String, u64)> = sensor["hourly"]["buckets"]
+                    .as_array()
                     .into_iter()
-                    .map(|(label, count)| HeatCell { pct: ((count * 100) / max) as u8, label, count })
-                    .collect(),
-            }
-        })
-        .collect();
-
-    let map_points = main["aggregations"]["points"]["by_place"]["buckets"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|bucket| {
-            let key = bucket["key"].as_array()?;
-            let country = key.get(1)?.as_str().unwrap_or("").to_string();
-            let city = key.first()?.as_str().unwrap_or("").to_string();
-            // #2045: the events endpoint has a city filter now, so pins
-            // drill into the exact city (falling back to just country
-            // when a doc somehow lacks one) instead of the nearest-
-            // country scope this used to document as a caveat.
-            let url = if city.is_empty() {
-                format!("/events?country={country}")
-            } else {
-                format!("/events?city={}", crate::services_control::urlencode(&city))
-            };
-            Some(MapPoint {
-                city,
-                url,
-                country,
-                lat: bucket["centroid"]["location"]["lat"].as_f64()?,
-                lon: bucket["centroid"]["location"]["lon"].as_f64()?,
-                events: bucket["doc_count"].as_u64().unwrap_or(0),
-                ips: bucket["unique_ips"]["value"].as_u64().unwrap_or(0),
+                    .flatten()
+                    .map(|bucket| {
+                        (
+                            bucket["key_as_string"].as_str().unwrap_or("").to_string(),
+                            bucket["doc_count"].as_u64().unwrap_or(0),
+                        )
+                    })
+                    .collect();
+                let max = counts.iter().map(|(_, count)| *count).max().unwrap_or(0).max(1);
+                HeatRow {
+                    sensor: sensor["key"].as_str().unwrap_or("").to_string(),
+                    cells: counts
+                        .into_iter()
+                        .map(|(label, count)| {
+                            HeatCell { pct: ((count * 100) / max) as u8, label, count }
+                        })
+                        .collect(),
+                }
             })
-        })
-        .collect();
+            .collect(),
+    };
+
+    let map_points = match rolled_points {
+        Some(points) => points,
+        None => build_live_map_points(&main),
+    };
 
     let now_ms = chrono::Utc::now().timestamp_millis();
     let sensors = main["aggregations"]["sensors"]["buckets"]
@@ -559,6 +565,127 @@ pub async fn dashboard(
         map_points,
         sensors,
     }))
+}
+
+/// The drill-in target for one map pin: the exact city since #2045 (the
+/// Go tier's mapPointEventsURL behaviour), country-only when a pin lacks
+/// the city key. Shared by both point sources below so the two can never
+/// drift apart.
+fn pin_url(country: &str, city: &str) -> String {
+    if city.is_empty() {
+        format!("/events?country={country}")
+    } else {
+        format!("/events?city={}", crate::services_control::urlencode(city))
+    }
+}
+
+/// The live multi_terms aggregation result → MapPoints: the original path,
+/// kept as #2046's fall-through when geo-rollup-v1 isn't populated yet.
+fn build_live_map_points(main: &Value) -> Vec<MapPoint> {
+    main["aggregations"]["points"]["by_place"]["buckets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|bucket| {
+            let key = bucket["key"].as_array()?;
+            let country = key.get(1)?.as_str().unwrap_or("").to_string();
+            let city = key.first()?.as_str().unwrap_or("").to_string();
+            Some(MapPoint {
+                url: pin_url(&country, &city),
+                city,
+                country,
+                lat: bucket["centroid"]["location"]["lat"].as_f64()?,
+                lon: bucket["centroid"]["location"]["lon"].as_f64()?,
+                events: bucket["doc_count"].as_u64().unwrap_or(0),
+                ips: bucket["unique_ips"]["value"].as_u64().unwrap_or(0),
+            })
+        })
+        .collect()
+}
+
+/// #2046: 24h heat rows from rolled fleet hour docs — per-hour per-sensor
+/// counts folded across 24 buckets into rows ordered by their 24h total
+/// (the live terms agg's implicit `_count desc` order), capped at the same
+/// 50 sensors the slice always carried. Cell labels reuse the date_histogram
+/// `key_as_string` format so tooltip text is byte-identical to the live path.
+async fn heatmap_from_rollup(state: &AppState) -> Option<Vec<HeatRow>> {
+    let docs = crate::rollups::fleet_hours(state, 24).await.ok()?;
+    if !crate::rollups::covered(docs.len(), 24) {
+        return None;
+    }
+    let start = crate::rollups::hour_floor(chrono::Utc::now()) - chrono::Duration::hours(23);
+    let mut totals: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    let mut cells: std::collections::HashMap<String, [u64; 24]> = std::collections::HashMap::new();
+    for (hour, doc) in &docs {
+        let offset = (*hour - start).num_hours();
+        if !(0..24).contains(&offset) {
+            continue;
+        }
+        for entry in doc["sensors"].as_array().into_iter().flatten() {
+            let sensor = entry["key"].as_str().unwrap_or("");
+            if sensor.is_empty() {
+                continue;
+            }
+            let count = entry["count"].as_u64().unwrap_or(0);
+            *totals.entry(sensor.to_string()).or_insert(0) += count;
+            cells.entry(sensor.to_string()).or_default()[offset as usize] += count;
+        }
+    }
+    let mut rows: Vec<(String, u64)> = totals.into_iter().collect();
+    rows.sort_unstable_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    Some(
+        rows.into_iter()
+            .take(50)
+            .map(|(sensor, _)| {
+                let counts = cells.remove(&sensor).unwrap_or([0; 24]);
+                // pct relative to the row's own max, same as the live path.
+                let max = counts.iter().copied().max().unwrap_or(0).max(1);
+                HeatRow {
+                    sensor,
+                    cells: counts
+                        .iter()
+                        .enumerate()
+                        .map(|(offset, count)| HeatCell {
+                            pct: ((count * 100) / max) as u8,
+                            label: crate::rollups::bucket_label(
+                                start + chrono::Duration::hours(offset as i64),
+                            ),
+                            count: *count,
+                        })
+                        .collect(),
+                }
+            })
+            .collect(),
+    )
+}
+
+/// #2046: map points from geo-rollup-v1's per-city docs. An empty/unreadable
+/// rollup index falls through to the live aggregation rather than serving an
+/// empty map — for a genuinely quiet window both paths agree on "no pins",
+/// so no coverage gate is needed here.
+async fn map_points_from_rollup(state: &AppState) -> Option<Vec<MapPoint>> {
+    let cities = crate::rollups::geo_cities(state).await.ok()?;
+    if cities.is_empty() {
+        return None;
+    }
+    Some(
+        cities
+            .iter()
+            .filter_map(|city| {
+                let country = city["country"].as_str()?;
+                let name = city["city"].as_str()?;
+                Some(MapPoint {
+                    url: pin_url(country, name),
+                    city: name.to_string(),
+                    country: country.to_string(),
+                    lat: city["lat"].as_f64()?,
+                    lon: city["lon"].as_f64()?,
+                    events: city["events"].as_u64().unwrap_or(0),
+                    ips: city["ips"].as_u64().unwrap_or(0),
+                })
+            })
+            .collect(),
+    )
 }
 
 #[cfg(test)]

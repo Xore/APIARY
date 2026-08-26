@@ -159,6 +159,15 @@ async fn traffic_sum(
     suricata_field: &str,
     name: &str,
 ) -> anyhow::Result<Vec<Series>> {
+    // #2046: the per-family hourly rollups are the primary source — two
+    // tiny index reads instead of two window aggregations per render. The
+    // query legs below stay as the fall-through for the uncovered window
+    // (fresh deploy, disabled loop); once covered, both paths agree to
+    // within the rollup's own write-time aggregation of the same fields.
+    if let Some(series) = traffic_from_rollup(state, 24 * 7, name).await {
+        return Ok(vec![series]);
+    }
+
     // Zeek splits volume by direction, so a bucket total is the sum of its
     // originator and responder fields.
     let zeek_aggs: serde_json::Map<String, Value> = zeek_fields
@@ -222,6 +231,61 @@ async fn traffic_sum(
         })
         .collect();
     Ok(vec![Series { name: name.to_string(), points }])
+}
+
+/// #2046: the rolled counterpart of the Zeek-first/Suricata-fallback rule
+/// above, reading the per-family overview docs' `bytes`/`packets`
+/// whichever `name` selects. None while either leg's window isn't covered,
+/// so callers fall through to the live aggregations rather than serving a
+/// half-populated chart.
+///
+/// Note `zeek_fields`/`suricata_field` are rollup-matched, not re-checked:
+/// write_overview_bucket sums exactly those field lists per family.
+async fn traffic_from_rollup(state: &AppState, hours: usize, name: &str) -> Option<Series> {
+    let docs = crate::rollups::netflow_hours(state, hours).await.ok()?;
+    let start =
+        crate::rollups::hour_floor(chrono::Utc::now()) - chrono::Duration::hours(hours as i64 - 1);
+    // One fixed hourly grid per family, zero-filled — superset of what the
+    // live date_histograms return between their min/max data points.
+    let collect = |family: &str| -> Option<Vec<f64>> {
+        let mut values = vec![0.0; hours];
+        let mut found = 0usize;
+        for (doc_family, hour, doc) in &docs {
+            if doc_family != family {
+                continue;
+            }
+            let offset = (*hour - start).num_hours();
+            if !(0..hours as i64).contains(&offset) {
+                continue;
+            }
+            found += 1;
+            values[offset as usize] += doc[name].as_f64().unwrap_or(0.0);
+        }
+        if crate::rollups::covered(found, hours) {
+            Some(values)
+        } else {
+            None
+        }
+    };
+    let zeek = collect(crate::rollups::FAMILY_ZEEK)?;
+    let values = if zeek.iter().any(|&value| value > 0.0) {
+        zeek
+    } else {
+        collect(crate::rollups::FAMILY_SURICATA)?
+    };
+    Some(Series {
+        name: name.to_string(),
+        points: values
+            .into_iter()
+            .enumerate()
+            .map(|(offset, value)| Point {
+                time: crate::rollups::bucket_label(
+                    start + chrono::Duration::hours(offset as i64),
+                ),
+                value,
+            })
+            .collect(),
+    })
 }
 
 pub async fn netflow_bytes(State(state): State<AppState>) -> Result<Json<Vec<Series>>, (StatusCode, String)> {
