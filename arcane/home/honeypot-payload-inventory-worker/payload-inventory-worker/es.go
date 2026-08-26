@@ -6,7 +6,8 @@ package main
 // not shared as a package: this worker and dashboard are separate Go
 // modules with no shared package today, the same boundary
 // ip-enrichment-worker's own viamap.go/enrich.go already established for
-// porting dashboard/classify.go's via_port join.
+// porting the former Go dashboard's classify.go via_port join (that join
+// now lives in backend-service/src/ip_enrichment/viamap.rs).
 
 import (
 	"bytes"

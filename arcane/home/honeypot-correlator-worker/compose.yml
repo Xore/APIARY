@@ -24,9 +24,15 @@
 # routine gitops-sync trying to restart it -- same reasoning as
 # arcane/home/honeypot-dashboard/compose.yml's own `dashboard` service.
 #
-# Whether dashboard's own correlateCampaigns/clustersData are rewired to
-# read these indices instead of recomputing in-process (redundant, not
-# wrong) is #1202, not this.
+# Rollback caveat, decided in #2105: this module is kept deliberately
+# (same disposition as the other #1649 retirements), but it is NOT a
+# drop-in twin of production. The Rust port's campaign scoring was
+# replaced under #1565/#1566 -- this writer still scores with the retired
+# additive-and-cap formula that saturated at 100 for almost any real
+# campaign -- so re-enabling this stack means campaigns-v1 documents in
+# the OLD score model until the port's scoring is backported here.
+# Document shape (fields, cluster kinds, sort, caps) still matches
+# correlator.rs field-for-field; only score values differ.
 
 name: honeypot-correlator-worker
 

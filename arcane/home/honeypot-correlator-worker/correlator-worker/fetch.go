@@ -4,9 +4,8 @@ package main
 // real Elasticsearch-native aggregations rather than paging raw documents
 // into memory and grouping in Go (correlate.go's previous approach,
 // removed by this change). That approach was fine for an on-demand HTTP
-// request (dashboard/campaigns.go's correlateCampaigns and
-// dashboard/intelligence.go's clustersData still work that way, unchanged
-// by this file); it did not scale to a continuously-refreshing background
+// request (the former Go dashboard's correlateCampaigns/clustersData
+// worked that way until the dashboard's removal, #1659); it did not scale to a continuously-refreshing background
 // job at this deployment's real volume -- confirmed live during #1198/
 // #1206/#1199's own verification: dionaea alone runs ~1.8M events/24h, so
 // a 7-day window is tens of millions of documents, nowhere near what
@@ -17,8 +16,9 @@ package main
 //
 // Campaign grouping uses Elasticsearch's own ip_prefix aggregation (source
 // .ip is mapped as ES's native `ip` type) instead of a runtime/ingest-time
-// CIDR field -- it buckets by network prefix directly, matching dashboard/
-// campaigns.go's campaignCIDR() exactly (/24 for IPv4, /64 for IPv6; two
+// CIDR field -- it buckets by network prefix directly, matching the former
+// dashboard/campaigns.go's campaignCIDR() exactly (its rule lives on as
+// backend-service/src/correlator.rs's campaign_cidr; /24 for IPv4, /64 for IPv6; two
 // separate ip_prefix aggregations are needed since ES ties is_ipv6 and
 // prefix_length to one aggregation instance, not detected per-document).
 // A CIDR bucket's routability (excluding private/loopback/link-local/the
@@ -128,8 +128,9 @@ type campaignAggBucket struct {
 	} `json:"last"`
 }
 
-// isRoutableNetwork mirrors dashboard/campaigns.go's campaignCIDR's own
-// filter, applied here to an aggregation bucket's masked network address
+// isRoutableNetwork mirrors the former dashboard/campaigns.go's
+// campaignCIDR's own filter (correlator.rs's is_routable_network is its
+// live copy), applied here to an aggregation bucket's masked network address
 // instead of a single member IP -- same policy (public, non-private,
 // non-loopback, non-link-local), see this file's header for why it isn't
 // duplicated as Elasticsearch query clauses instead.

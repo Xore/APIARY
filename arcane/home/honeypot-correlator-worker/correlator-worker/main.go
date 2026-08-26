@@ -3,14 +3,18 @@
 // cluster (fingerprint/payload/ASN/provider-grouped) correlation over a
 // rolling window of recent honeypot-v2-* events, writing the result to two
 // flat, backend-computed Elasticsearch indices -- campaigns-v1 and
-// attacker-clusters-v1 -- instead of every dashboard instance recomputing
-// the same correlation in its own process on every rebuild cycle
-// (dashboard/campaigns.go's correlateCampaigns, dashboard/intelligence.go's
-// clustersData). Wiring the dashboard to read these instead of computing
-// them itself is #1202, not this -- this worker only makes the data
-// available, running alongside the dashboard's own existing computation
-// for now, the same transition posture #1201's payload-inventory-worker
-// took.
+// attacker-clusters-v1 -- instead of the Go dashboard of the time
+// recomputing the same correlation in its own process on every rebuild
+// cycle (its correlateCampaigns/clustersData, both removed with that
+// dashboard in #1659). RETIRED since #1649: #1610 ported this exact
+// pipeline into backend-service's correlator.rs + campaign_correlator.rs,
+// live as WORKER_LOOPS=correlator on backend-worker -- this module is
+// kept only as compose's legacy-profile rollback writer, which is NOT a
+// drop-in twin of production any more (the port's scoring was deliberately
+// replaced under #1565/#1566; see correlate.go's header and compose.yml's
+// before ever re-enabling this). #1202 rewired the readers to these
+// indices -- the same transition posture #1201's payload-inventory-worker
+// took, completed on both ends now.
 //
 // #1219: the correlation itself runs as Elasticsearch-native aggregations
 // (fetch.go), not a raw-document fetch-and-group-in-Go pass -- see that
@@ -54,8 +58,10 @@ func getenvDuration(k string, def time.Duration) time.Duration {
 
 func main() {
 	esURL := getenv("ELASTICSEARCH_URL", "http://elasticsearch:9200")
-	// #1219: now the same 7-day default dashboard/intelligence.go's own
-	// defaultCorrelationWindow uses -- the ES-native aggregation approach
+	// #1219: now a 7-day default, inherited from the former Go dashboard's
+	// intelligence.go (its defaultCorrelationWindow set the expectation
+	// these indices had to match) -- backend-service's correlator loop
+	// keeps the same default today. The ES-native aggregation approach
 	// (fetch.go) is what makes the full window affordable as a
 	// continuously-refreshing background job; the previous 6h default was
 	// a scale-driven compromise forced by the raw-document-fetch approach
