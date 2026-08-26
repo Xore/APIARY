@@ -715,3 +715,256 @@ class TestDriftDetection:
         es = MagicMock()
         es.index.side_effect = ConnectionError("ES unreachable")
         worker.write_drift_metric(es, window=500, rate=0.5)  # must not raise
+
+
+class _StageWarnCapture:
+    """Collect loguru records at WARNING+ while active (#2230 tests)."""
+
+    def __init__(self):
+        from loguru import logger
+        self._logger = logger
+        self.lines = []
+        self._hid = logger.add(lambda m: self.lines.append(m), level="WARNING")
+
+    def stop(self):
+        self._logger.remove(self._hid)
+
+    def count(self, fragment: str) -> int:
+        return sum(1 for line in self.lines if fragment in line)
+
+
+def _version_ts(path) -> int:
+    """{prefix}_{ts}.{ext} -> ts (int); rsplit handles multi-segment
+    prefixes like lstm_ae."""
+    return int(path.name.rsplit("_", 1)[1].split(".")[0])
+
+
+class TestPruneProtectsTheLivePointerTarget:
+    """#2230: prune's old docstring promised it "[n]ever touches whatever
+    current_{prefix} points to ... by construction" -- true only while the
+    pointer names the newest version. rollback.py exists precisely to point
+    it at an OLDER retained version, after which the next accepted retrain's
+    prune deleted that very file group. The exemption is now explicit."""
+
+    def _make_versions(self, tmp_path, ts_list):
+        for ts in ts_list:
+            (tmp_path / f"isoforest_{ts}.joblib").write_text("x")
+            (tmp_path / f"isoforest_{ts}.meta.json").write_text("{}")
+
+    def test_prune_keeps_the_live_pointer_target_beyond_keep(self, tmp_path):
+        self._make_versions(tmp_path, [100, 200, 300, 400, 500])
+        os.symlink(tmp_path / "isoforest_100.joblib", tmp_path / "current_isoforest.joblib")
+
+        lifecycle.prune_old_versions(str(tmp_path), "isoforest", keep=2)
+
+        assert (tmp_path / "isoforest_100.joblib").exists(), \
+            "the version the live pointer is staged onto must survive pruning"
+        assert (tmp_path / "isoforest_100.meta.json").exists(), \
+            "the protected version's metadata sidecar must survive too (re-staging needs it)"
+        remaining = sorted(_version_ts(p) for p in tmp_path.glob("isoforest_*.joblib"))
+        assert remaining == [100, 400, 500], \
+            f"expected newest keep(2)=400,500 plus protected 100, got {remaining}"
+
+    def test_prune_without_a_live_pointer_is_pure_newest_n(self, tmp_path):
+        # Regression guard for the original contract: no pointer, no effect.
+        self._make_versions(tmp_path, [100, 200, 300])
+        lifecycle.prune_old_versions(str(tmp_path), "isoforest", keep=1)
+        assert sorted(_version_ts(p) for p in tmp_path.glob("isoforest_*.joblib")) == [300]
+
+    def test_staged_rollback_version_fires_only_for_manual_stages(self, tmp_path):
+        self._make_versions(tmp_path, [100, 200])
+        current = tmp_path / "current_isoforest.joblib"
+
+        assert lifecycle.staged_rollback_version(str(tmp_path), "isoforest") is None, \
+            "no pointer at all is not a staged rollback"
+
+        lifecycle._symlink(str(tmp_path / "isoforest_200.joblib"), str(current))
+        assert lifecycle.staged_rollback_version(str(tmp_path), "isoforest") is None, \
+            "pointer naming the newest version is normal state, not a stage"
+
+        lifecycle._symlink(str(tmp_path / "isoforest_100.joblib"), str(current))
+        assert lifecycle.staged_rollback_version(str(tmp_path), "isoforest") == 100, \
+            "pointer below the newest retained version is rollback.py's fingerprint"
+
+    def test_marker_protects_the_staged_target_even_after_pointer_moved_on(self, tmp_path):
+        # The steady state from the FIRST post-staging accept onward: the
+        # pointer names that accept's own new version again, so prune's
+        # pointer exemption reads "normal state". The durable stage marker
+        # is what keeps the operator's target alive (#2230).
+        self._make_versions(tmp_path, [100, 200, 300, 400, 500])
+        lifecycle.mark_staged(str(tmp_path), "isoforest", 100)
+        os.symlink(tmp_path / "isoforest_500.joblib", tmp_path / "current_isoforest.joblib")
+
+        lifecycle.prune_old_versions(str(tmp_path), "isoforest", keep=2)
+
+        remaining = sorted(_version_ts(p) for p in tmp_path.glob("isoforest_*.joblib"))
+        assert remaining == [100, 400, 500], \
+            f"marker-staged 100 must survive though pointer already moved to 500: {remaining}"
+
+
+class TestStagedRollbackSurvivesAcceptedRetrains:
+    """#2230 acceptance: rollback -> N accepted retrains keeps the staged
+    version's file on disk; the first post-staging accept says out loud
+    that it overrides the staging (dashboards surface retrains, never
+    symlink churn -- the warning is the only evidence an operator gets).
+    Non-live retention stays <= MAX_RETAINED_VERSIONS throughout."""
+
+    def _accept_retrains(self, model, sources, n, monkeypatch, start_ts):
+        # Distinct embedded timestamps per accept, or same-second saves
+        # overwrite each other instead of accumulating versions to prune.
+        counter = [start_ts]
+
+        def fake_time():
+            counter[0] += 10
+            return counter[0]
+
+        monkeypatch.setattr(iso_mod.time, "time", fake_time)
+        results = []
+        for _ in range(n):
+            result = model.retrain(sources)
+            assert result.accepted is True
+            results.append(result)
+        return counter[0]
+
+    def test_staged_file_survives_n_accepted_retrains_and_retention_stays_bounded(self,
+            tmp_path, monkeypatch):
+        model = IsoForestModel(model_dir=str(tmp_path))
+        sources = [fixtures.COWRIE_LOGIN_FAILED["_source"]] * 120
+
+        last = self._accept_retrains(model, sources, 3, monkeypatch, 1_700_000_000)
+
+        # Stage a rollback to the oldest retained version exactly as
+        # rollback.py does: atomic swap PLUS the durable stage marker.
+        oldest = min((_version_ts(p) for p in tmp_path.glob("isoforest_*.joblib")))
+        current = str(tmp_path / "current_isoforest.joblib")
+        lifecycle._symlink(str(tmp_path / f"isoforest_{oldest}.joblib"), current)
+        lifecycle.mark_staged(str(tmp_path), "isoforest", oldest)
+        assert os.path.realpath(current).endswith(f"isoforest_{oldest}.joblib")
+
+        warn = _StageWarnCapture()
+        try:
+            last = self._accept_retrains(
+                model, sources, lifecycle.MAX_RETAINED_VERSIONS + 2, monkeypatch, last)
+        finally:
+            warns_during = warn.count("overrides a manually staged rollback")
+            warn.stop()
+
+        assert (tmp_path / f"isoforest_{oldest}.joblib").exists(), \
+            "staged target survived MAX_RETAINED_VERSIONS+2 accepted retrains"
+        assert (tmp_path / f"isoforest_{oldest}.meta.json").exists(), \
+            "its sidecar survives too, so re-staging the identical rollback works"
+        deletable = sorted(_version_ts(p) for p in tmp_path.glob("isoforest_*.joblib"))
+        deletable.remove(oldest)
+        assert len(deletable) == lifecycle.MAX_RETAINED_VERSIONS, \
+            f"non-live retention bounded at {lifecycle.MAX_RETAINED_VERSIONS}, got {deletable}"
+
+    def test_first_poststaging_accept_warns_exactly_once(self, tmp_path, monkeypatch):
+        model = IsoForestModel(model_dir=str(tmp_path))
+        sources = [fixtures.COWRIE_LOGIN_FAILED["_source"]] * 120
+
+        last = self._accept_retrains(model, sources, 2, monkeypatch, 1_700_000_000)
+        oldest = min(_version_ts(p) for p in tmp_path.glob("isoforest_*.joblib"))
+        lifecycle._symlink(str(tmp_path / f"isoforest_{oldest}.joblib"),
+                           str(tmp_path / "current_isoforest.joblib"))
+
+        counter = [last]
+
+        def fake_time():
+            counter[0] += 10
+            return counter[0]
+
+        monkeypatch.setattr(iso_mod.time, "time", fake_time)
+        warn = _StageWarnCapture()
+        try:
+            r1 = model.retrain(sources)
+            first_count = warn.count("overrides a manually staged rollback")
+            r2 = model.retrain(sources)
+            second_count = warn.count("overrides a manually staged rollback")
+        finally:
+            warn.stop()
+
+        assert r1.accepted and r2.accepted
+        assert first_count == 1, "the accept overriding a staged rollback must say so loudly"
+        assert second_count == first_count, \
+            "once the pointer names this retrain's own promotion, no further warnings"
+
+    def test_lstm_save_surfaces_the_same_override_warning(self, tmp_path, monkeypatch):
+        # LSTMAEModel._save() directly rather than through retrain(): the
+        # staging-surfaces contract lives in _save either way, and this
+        # also pins lstm's _symlink/staged_rollback_version import wiring.
+        model = LSTMAEModel(model_dir=str(tmp_path))
+        result = RetrainResult(accepted=True, reason="test",
+                               train_samples=10, holdout_samples=2,
+                               anomaly_rate_new=0.01, anomaly_rate_previous=0.02)
+        for ts in (1_700_000_100, 1_700_000_200):
+            path = tmp_path / f"lstm_ae_{ts}.pt"
+            torch.save({"model": model.net.state_dict(), "threshold": 1.0}, str(path))
+        model.net.to("cpu")
+
+        from models.lifecycle import _symlink as stage_link
+
+        warn = _StageWarnCapture()
+        try:
+            model._save(result)  # current has no pointer yet -> first save, no stage warning
+            initial = warn.count("overrides a manually staged rollback")
+        finally:
+            warn.stop()
+        assert initial == 0
+
+        # Now stage backwards like rollback.py would: swap + durable marker.
+        newest_before_save = max(_version_ts(p) for p in tmp_path.glob("lstm_ae_*.pt"))
+        older = min(_version_ts(p) for p in tmp_path.glob("lstm_ae_*.pt"))
+        stage_link(str(tmp_path / f"lstm_ae_{older}.pt"),
+                   str(tmp_path / "current_lstm_ae.pt"))
+        lifecycle.mark_staged(str(tmp_path), "lstm_ae", older)
+        monkeypatch.setattr(lstm_mod.time, "time", lambda: newest_before_save + 10)
+
+        warn = _StageWarnCapture()
+        try:
+            model._save(result)
+        finally:
+            override_warnings = warn.count("overrides a manually staged rollback")
+            warn.stop()
+
+        assert override_warnings == 1
+        assert (tmp_path / f"lstm_ae_{older}.pt").exists(), \
+            "the file behind the overridden staging still isn't deleted by prune"
+
+
+class TestRollbackScriptUsesTheSharedAtomicSwap:
+    """#2230: rollback.py used remove-then-symlink -- the exact crash
+    window #169 removed everywhere else -- because it predated/lived apart
+    from models.lifecycle. It now imports the one shared implementation;
+    these pin both the mechanics and the operator-facing notes."""
+
+    def test_staging_repoints_atomically_and_notes_newer_versions(self, tmp_path, monkeypatch, capsys):
+        import rollback as rollback_mod
+        monkeypatch.setattr(rollback_mod, "MODEL_DIR", str(tmp_path))
+        for ts in (100, 200, 300):
+            (tmp_path / f"isoforest_{ts}.joblib").write_text("x")
+
+        rc = rollback_mod.main(["rollback.py", "isoforest", "100"])
+
+        captured = capsys.readouterr().out
+        assert rc == 0
+        assert os.path.realpath(tmp_path / "current_isoforest.joblib") \
+            .endswith("isoforest_100.joblib")
+        marker = tmp_path / "staged_rollback_isoforest.txt"
+        assert marker.exists(), "staging must be recorded durably for prune's exemption"
+        assert marker.read_text().strip() == "100"
+        assert "3 newer accepted version(s)" not in captured, "300 vs 100 => exactly 2 newer"
+        assert "2 newer accepted version(s) exist" in captured, \
+            "operator must know what can override their staging before restart"
+        assert "Restart ml-worker" in captured
+
+    def test_listing_marks_the_current_target(self, tmp_path, monkeypatch, capsys):
+        import rollback as rollback_mod
+        monkeypatch.setattr(rollback_mod, "MODEL_DIR", str(tmp_path))
+        for ts in (100, 200):
+            (tmp_path / f"isoforest_{ts}.joblib").write_text("x")
+        os.symlink(tmp_path / "isoforest_100.joblib", tmp_path / "current_isoforest.joblib")
+
+        rc = rollback_mod.main(["rollback.py", "isoforest"])
+
+        assert rc == 0
+        assert "(current)" in capsys.readouterr().out
