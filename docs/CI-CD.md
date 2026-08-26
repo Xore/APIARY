@@ -31,26 +31,29 @@ flowchart TB
     containerBuild["Container build<br/>(PR: build only,<br/>main/tag: build + publish to GHCR)"]
   end
 
-  subgraph ciSelfHosted["honeypot-ci — self-hosted, narrow host access,<br/>NEVER wired to pull_request"]
-    qualityHome["quality-homeserver.yml —<br/>push:main + workflow_dispatch only.<br/>Faster than GitHub-hosted for the<br/>priciest checks; not a faster path<br/>to green on a PR, doesn't gate one"]
+  subgraph ciSelfHosted["honeypot-ci — self-hosted, narrow host access,<br/>not wired to pull_request by default"]
+    qualityHome["quality.yml paired jobs —<br/>homeserver-first routing when the<br/>runner is online; automatic fallback<br/>to GitHub-hosted otherwise; not a<br/>faster path to green on a PR"]
   end
 
   prPush --> quality
   prPush -->|"PR: build only,<br/>never published"| containerBuild
   mainPush --> quality
   mainPush --> containerBuild
-  mainPush -.->|"push:main only —<br/>never pull_request, even<br/>same-repo (one compromised<br/>contributor account away<br/>from untrusted)"| qualityHome
+  mainPush -.->|"push:main + workflow_dispatch —<br/>only after passing the ci-target<br/>trust gate; pull_request needs<br/>repo variable CI_HOMESERVER_PRS,<br/>and forks can never qualify"| qualityHome
 ```
 
-**`honeypot-ci` can never see `pull_request`, by design.** A GitHub-hosted
-runner is a disposable, sandboxed VM torn down after the job; a self-hosted
-runner's job runs as a real process on real home-network infrastructure. A
-malicious test file in an unreviewed PR (`os.system(...)`, a crafted Go
-`TestMain`) would execute wherever that runner has access — the same
-reasoning `production-home`'s own deployment runner (below) already
-applies. `quality-homeserver.yml` triggers on `push: branches: [main]` and
-`workflow_dispatch` only, defense-in-depth against a compromised same-repo
-contributor account, not just fork-origin PRs.
+**`honeypot-ci` does not see `pull_request` by default, by design.** A
+GitHub-hosted runner is a disposable, sandboxed VM torn down after the
+job; a self-hosted runner's job runs as a real process on real
+home-network infrastructure. A malicious test file in an unreviewed PR
+(`os.system(...)`, a crafted Go `TestMain`) would execute wherever that
+runner has access — the same reasoning `production-home`'s own deployment
+runner (below) already applies. Quality's executor routing (`ci-target`
+in `quality.yml`) trusts push-to-main (already reviewed and merged) and
+`workflow_dispatch` (an operator's own click); same-repo pull requests
+need setting the repository variable `CI_HOMESERVER_PRS=true`, and fork
+PRs are excluded regardless of that variable — defense-in-depth against a
+compromised contributor account, not just fork-origin PRs.
 
 ## Testing conventions
 
@@ -497,35 +500,61 @@ to justify its existence, is tracked as the last step of #258.
 
 A second, separate self-hosted runner from the deployment one above --
 different labels, different systemd service, different (much narrower)
-host access -- dedicated purely to running the priciest checks in
-[Quality](#checks) faster than a GitHub-hosted runner, for pushes to `main`
-an operator has already made. It is **not** a faster path to green on a
-pull request: `quality.yml`'s own GitHub-hosted jobs remain the only checks
-any PR depends on, unchanged by any of this.
+host access. It is the PRIMARY executor for Quality's toolchain-only
+checks (`public-safety`, `design-lab-readonly`, go formatting/tests,
+`vendored-theme`, `backend-service`) whenever it is online: warm
+toolchain caches in its persistent HOME plus a warm Rust build directory
+make it cheaper per run than spinning an ephemeral GitHub-hosted VM --
+and unlike raw CPU, that warmth is most of the actual speed win.
 
 ```text
 self-hosted, linux, x64, honeypot-ci
 ```
 
-### Why this can never see pull_request
+### Executor routing (homeserver first, GitHub-hosted fallback)
+
+Actions has no "runs-on A else B" syntax, so `quality.yml` decides in two
+steps. Its `ci-target` router job asks whether this run's source may
+reach the homeserver at all (trust gate below), then whether a
+`honeypot-ci`-labelled runner is currently registered AND reporting
+online. Each eligible check ships as a PAIR of conditional jobs fed by
+that single answer -- exactly one twin runs, the other reports skipped.
+When the box is off, paused, unregistered, or the runners API itself
+errors, every pair falls back to its `(GitHub-hosted)` twin and Quality
+looks exactly like a conventional workflow run: degraded speed is the
+worst failure mode routing can produce. The `force_github_hosted`
+workflow_dispatch input forces the fallback direction manually (e.g.
+while servicing the machine); repository variable `CI_HOMESERVER_PRS=true`
+is what opts same-repo pull requests into homeserver execution -- unset by
+default so the trust posture below stands until someone reverses it
+deliberately.
+
+The old supplement `quality-homeserver.yml` (its own duplicate Go +
+shellcheck pass over pushes to main) was removed once these pairs
+superseded it: running both meant paying for the priciest checks twice on
+every merge.
+
+### Why this stays off pull_request by default
 
 A public repository's pull requests can come from forks -- attacker-
 controlled input a maintainer has not reviewed yet. A GitHub-hosted runner
 is a disposable, sandboxed VM torn down after the job; a self-hosted
 runner's job runs as a real process on real home-network infrastructure.
-Wiring an untrusted `pull_request` trigger to it would mean a malicious
-test file (`os.system(...)`, a crafted Go `TestMain`, anything) gets to
+Routing untrusted `pull_request` code to it would mean a malicious test
+file (`os.system(...)`, a crafted Go `TestMain`, anything) gets to
 execute wherever that runner happens to have access -- exactly the
 scenario GitHub's own self-hosted-runner security guidance warns against,
 and the same reasoning the deployment runner above already applies
 ("never accept pull-request code" on `production-home`).
 
-[`quality-homeserver.yml`](../.github/workflows/quality-homeserver.yml)
-only triggers on `push: branches: [main]` and `workflow_dispatch` -- never
-`pull_request`, regardless of whether the PR is same-repo or fork-origin.
-Defense in depth: even a same-repo branch is one compromised contributor
-account away from being untrusted, so the trigger boundary is push-to-
-main (already merged), not "not a fork."
+The router's trust gate allows push-to-main (reviewed on its own PR
+before merging) and `workflow_dispatch` (an operator's own choice).
+Same-repo pull_request branches are excluded even though they can only be
+pushed with write access -- defense in depth against a compromised
+contributor account, which no amount of repo-variable bookkeeping
+detects. The `CI_HOMESERVER_PRS` escape hatch exists for a deliberate,
+auditable decision to trade that margin away; fork PRs are excluded even
+from that.
 
 ### Install
 

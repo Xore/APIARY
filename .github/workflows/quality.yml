@@ -6,18 +6,15 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      use_self_hosted_runner:
+      force_github_hosted:
         description: >-
-          Route the no-sudo/no-Docker jobs to the self-hosted homeserver
-          runner (scripts/github-ci-runner) instead of GitHub-hosted, for
-          faster turnaround on already-reviewed/trusted code -- e.g. while
-          GitHub-hosted runner capacity is degraded. Manual opt-in only:
-          push/pull_request runs always use ubuntu-latest regardless of
-          this default, since github.event_name != 'workflow_dispatch'
-          there. See scripts/github-ci-runner/install-ci-runner.sh's own
-          header for why pull_request must never route here (fork PRs are
-          attacker-controlled input; a self-hosted runner is real code
-          execution on the home network, not a sandboxed ephemeral VM).
+          Send the homeserver-eligible jobs to GitHub-hosted runners even
+          when the honeypot-ci runner is online -- e.g. while servicing the
+          homeserver, or when a suspect result needs ruling out as
+          runner-specific. Homeserver-first routing itself is automatic for
+          trusted runs (push-to-main, workflow_dispatch); pull_request stays
+          GitHub-hosted unless the repository variable CI_HOMESERVER_PRS
+          opts same-repo PRs in.
         type: boolean
         default: false
 
@@ -29,18 +26,199 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # runs-on below: 'self-hosted' only on a workflow_dispatch run with the
-  # opt-in box checked; every push/pull_request run leaves
-  # inputs.use_self_hosted_runner unset (workflow_dispatch-only input), so
-  # the `||` fallback always resolves to ubuntu-latest for them -- the
-  # default, automatic path is completely unchanged. Only jobs needing
-  # nothing beyond a language toolchain (no sudo, no Docker) get this --
-  # the self-hosted runner's dedicated system user deliberately has
-  # neither (see install-ci-runner.sh), so scripts-and-compose
-  # (apt-get/docker) always stays on ubuntu-latest.
+  # -------------------------------------------------------------------------
+  # Executor routing ("homeserver first, GitHub-hosted fallback")
+  #
+  # ci-target answers two questions, and every home-executable check below
+  # ships as a PAIR of conditional jobs that take turns off that answer --
+  # exactly one twin does real work per run, the other reports skipped.
+  #
+  #   1. May this run's source code reach the homeserver at all?
+  #      Trust boundary per docs/CI-CD.md ("Why this can never see
+  #      pull_request"): fork PRs are attacker-controlled input and must
+  #      never become process execution on home-network infrastructure.
+  #      push-to-main only fires for commits reviewed on their own PR
+  #      before merging, and workflow_dispatch is an operator's own click,
+  #      so those pass. Same-repo pull_request branches stay excluded too
+  #      (one compromised contributor account away from untrusted) unless
+  #      the repository variable CI_HOMESERVER_PRS=true makes allowing them
+  #      a deliberate, auditable act.
+  #
+  #   2. Can a honeypot-ci-labelled runner ACTUALLY execute this commit
+  #      right now? Answering costs one measurement, because the obvious
+  #      ask-the-registry approach does not exist for CI tokens: GET
+  #      /actions/runners answers HTTP 403 "Resource not accessible by
+  #      integration" to GITHUB_TOKEN under every permission shape (live-
+  #      verified 2026-08-27). So ci-target dispatches the one-job
+  #      ci-heartbeat.yml canary pinned to [honeypot-ci] at THIS commit
+  #      and gives it a bounded window; success means a real box really
+  #      ran our code seconds ago. Paused, powered-off, unregistered,
+  #      network-stalled or service-wedged all fail the window ->
+  #      "GitHub-hosted". Routing infrastructure can degrade CI's speed,
+  #      never its pass/fail correctness: any router error lands on the
+  #      fallback and Quality still looks exactly like a conventional run.
+  #
+  # NOT paired, deliberately: frontend-next / frontend-next-browser need
+  # docker/sudo-apt/chromium/redis and most scripts-and-compose entries need
+  # real containers -- the runner's dedicated user has neither sudo nor a
+  # docker-group membership by design (see
+  # scripts/github-ci-runner/install-ci-runner.sh), so guessing "homeserver"
+  # for them would just relocate failures.
+  # -------------------------------------------------------------------------
+  ci-target:
+    name: Pick CI executor
+    runs-on: ubuntu-latest
+    # Must comfortably outlive the heartbeat window below
+    # (dispatch + appear-wait + terminal-wait + API slack).
+    timeout-minutes: 10
+    # actions:write exists solely to launch the ci-heartbeat canary.
+    permissions:
+      contents: read
+      actions: write
+    outputs:
+      # Always written ('true'/'false', never empty) so downstream
+      # `== 'true'` comparisons cannot misread an absent string as truthy.
+      homeserver: ${{ steps.route.outputs.homeserver }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CI_HOMESERVER_PRS: ${{ vars.CI_HOMESERVER_PRS || '' }}
+      FORCE_GITHUB_HOSTED: ${{ inputs.force_github_hosted || '' }}
+    steps:
+      - id: route
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # The runner always exposes the webhook payload natively as
+          # GITHUB_EVENT_PATH; there is no github.event_path expression to
+          # map through env (the key silently vanishes and, under set -u,
+          # reading the bare name aborts the step -- seen live on a PR run).
+          EVENT_PATH="${EVENT_PATH:-${GITHUB_EVENT_PATH:-}}"
+
+          # Defaults are the fallback path; the guards below may only set
+          # them to true.
+          trusted=false
+          online=false
+
+          case "$GITHUB_EVENT_NAME" in
+            push)
+              # This workflow's push trigger is branches:[main] only --
+              # everything arriving here was already reviewed and merged.
+              trusted=true ;;
+            workflow_dispatch)
+              trusted=true ;;
+            pull_request)
+              base="$(jq -r '.pull_request.base.repo.full_name // ""' "$EVENT_PATH")"
+              head_repo="$(jq -r '.pull_request.head.repo.full_name // ""' "$EVENT_PATH")"
+              if [[ -n "$base" && "$base" == "$head_repo" && "${CI_HOMESERVER_PRS}" == "true" ]]; then
+                trusted=true
+              fi ;;
+          esac
+
+          # Decision-window knobs: env-overridable so local unit tests run
+          # in seconds while production keeps these defaults. The two
+          # windows together bound worst-case router cost well under this
+          # job's own timeout-minutes.
+          # GH_TOKEN arrives via the job-level env mapping above and is
+          # therefore always present -- no shell-side default guard here,
+          # which scripts/check-public-leaks.py would flag as a literal
+          # credential assignment.
+
+          appear_window="${HEARTBEAT_APPEAR_SECONDS:-45}"   # event->run-object lag
+          decide_window="${HEARTBEAT_DECIDE_SECONDS:-240}"  # queue+exec budget on the box
+          poll_every="${HEARTBEAT_POLL_SECONDS:-10}"
+
+          if [[ "$trusted" == "true" && "${FORCE_GITHUB_HOSTED}" != "true" ]]; then
+            echo "heartbeat: dispatching ci-heartbeat at ${GITHUB_SHA}"
+            api="repos/$GITHUB_REPOSITORY/actions/workflows/ci-heartbeat.yml"
+            http="$(curl -fsS -o "${RUNNER_TEMP:-/tmp}/hb-disp.out" -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              "$GITHUB_API_URL/$api/dispatches" \
+              -d "{\"ref\":\"$GITHUB_SHA\"}" || echo X)"
+            [[ "$http" == "204" ]] \
+              && echo "heartbeat: dispatch accepted" \
+              || { echo "::warning::heartbeat dispatch refused (HTTP $http); routing fallback"; http=""; }
+
+            # Phase A: wait for the dispatched run to become VISIBLE as a
+            # non-completed workflow_run of this exact commit. Only this
+            # fresh object may prove liveness -- historical successes of
+            # older dispatches must never count, or one healthy heartbeat
+            # would vouch forever for a box that died five minutes later.
+            rid=""
+            deadline=$(( $(date +%s) + appear_window ))
+            while [[ "$(date +%s)" -lt "$deadline" ]]; do
+              rid="$(gh api "$api/runs?head_sha=$GITHUB_SHA&per_page=10" \
+                --jq '[.workflow_runs[] | select(.status != "completed") | .id][0] // ""' \
+                2>/dev/null || true)"
+              [[ -n "$rid" ]] && break
+              sleep "$poll_every"
+            done
+
+            # Phase B: give the found run its window to finish.
+            if [[ -n "$rid" ]]; then
+              deadline=$(( $(date +%s) + decide_window ))
+              while [[ "$(date +%s)" -lt "$deadline" ]]; do
+                line="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$rid" \
+                  --jq '"\(.status) \(.conclusion)"' 2>/dev/null || true)"
+                case "$line" in
+                  "completed success") online=true ;;
+                  completed*) : ;;                # finished badly -> stays offline
+                  # empty = transient API hiccup; anything else = still
+                  # running. Both keep polling inside the window.
+                  *) sleep "$poll_every"; continue ;;
+                esac
+                break
+              done
+            fi
+            echo "heartbeat verdict: online=$online"
+          fi
+
+          homeserver=false
+          if [[ "$trusted" == "true" && "$online" == "true"
+                && "${FORCE_GITHUB_HOSTED}" != "true" ]]; then
+            homeserver=true
+          fi
+
+          {
+            echo "trusted=$trusted"
+            echo "online=$online"
+            echo "forced_cloud=${FORCE_GITHUB_HOSTED:-<unset>}"
+            echo "executor=$( [[ "$homeserver" == true ]] && echo honeypot-ci || echo ubuntu-latest )"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+          echo "homeserver=$homeserver" >>"$GITHUB_OUTPUT"
+
+  # Naming rule for every pair below: the homeserver twin carries the
+  # canonical check name (it is what normally runs); its GitHub-hosted
+  # fallback twin appends "(GitHub-hosted)" so a degraded day reads
+  # honestly in the checks list instead of masquerading as business as
+  # usual.
+  #
+  # timeout-minutes exists ONLY on homeserver twins (plus the router): a
+  # stuck pickup wedges a real box nobody reboots promptly, whereas
+  # GitHub-hosted runners have hard platform timeouts already. Values sit
+  # far above each check's observed runtime so they fire only on hangs.
+
   public-safety:
     name: Public repository safety
-    runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.use_self_hosted_runner) && 'self-hosted' || 'ubuntu-latest' }}
+    needs: [ci-target]
+    if: needs.ci-target.outputs.homeserver == 'true'
+    runs-on: [self-hosted, linux, x64, honeypot-ci]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: python scripts/check-public-leaks.py
+      - run: python scripts/validate-oidc-redirects.py
+
+  public-safety-cloud:
+    name: Public repository safety (GitHub-hosted)
+    needs: [ci-target]
+    if: needs.ci-target.outputs.homeserver != 'true'
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -55,7 +233,22 @@ jobs:
     # convenience. The test drives the actual harness against a recording
     # stand-in backend and fails if a write ever reaches it.
     name: Design lab is read-only
-    runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.use_self_hosted_runner) && 'self-hosted' || 'ubuntu-latest' }}
+    needs: [ci-target]
+    if: needs.ci-target.outputs.homeserver == 'true'
+    runs-on: [self-hosted, linux, x64, honeypot-ci]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - run: node --test branding/design-lab/lab.test.mjs
+
+  design-lab-readonly-cloud:
+    name: Design lab is read-only (GitHub-hosted)
+    needs: [ci-target]
+    if: needs.ci-target.outputs.homeserver != 'true'
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -65,7 +258,10 @@ jobs:
 
   go-fmt:
     name: Go formatting
-    runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.use_self_hosted_runner) && 'self-hosted' || 'ubuntu-latest' }}
+    needs: [ci-target]
+    if: needs.ci-target.outputs.homeserver == 'true'
+    runs-on: [self-hosted, linux, x64, honeypot-ci]
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -81,9 +277,58 @@ jobs:
           files="$(find . -path '*/vendor' -prune -o -name '*.go' -type f -print)"
           test -z "$(gofmt -l $files)" || { gofmt -l $files; exit 1; }
 
-  go-test:
+  go-fmt-cloud:
+    name: Go formatting (GitHub-hosted)
+    needs: [ci-target]
+    if: needs.ci-target.outputs.homeserver != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          # Same floor as the homeserver twin above -- see its comment.
+          go-version: "1.26.x"
+          cache-dependency-path: "**/go.sum"
+      - name: Check formatting
+        shell: bash
+        run: |
+          files="$(find . -path '*/vendor' -prune -o -name '*.go' -type f -print)"
+          test -z "$(gofmt -l $files)" || { gofmt -l $files; exit 1; }
+
+  # Tests stay a parallel matrix on GitHub-hosted (the shape that has always
+  # run there), but consolidate into ONE sequential loop on the homeserver:
+  # 20 matrix entries would queue behind a single runner machine anyway,
+  # paying checkout+setup twenty times over for zero parallelism gained --
+  # while a warm GOCACHE in the runner user's persistent HOME makes the
+  # sequential loop cheaper than the sum of its parts after the first run.
+  # Quality-homeserver.yml ran this exact loop shape successfully until it
+  # was superseded by these pairs.
+  go-test-homeserver:
+    name: Test (all modules)
+    needs: [ci-target]
+    if: needs.ci-target.outputs.homeserver == 'true'
+    runs-on: [self-hosted, linux, x64, honeypot-ci]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.x"
+          cache-dependency-path: "**/go.sum"
+      - name: Test every Go module
+        shell: bash
+        run: |
+          while IFS= read -r module; do
+            echo "::group::${module%/go.mod}"
+            (cd "${module%/go.mod}" && go test ./...)
+            echo "::endgroup::"
+          done < <(find . -path '*/vendor' -prune -o -name go.mod -type f -print | sort)
+
+  go-test-cloud:
     name: Test (${{ matrix.module }})
-    runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.use_self_hosted_runner) && 'self-hosted' || 'ubuntu-latest' }}
+    needs: [ci-target]
+    if: needs.ci-target.outputs.homeserver != 'true'
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -126,16 +371,41 @@ jobs:
   go-modules-complete:
     name: Go formatting and tests
     if: always()
-    needs: [go-fmt, go-test]
+    needs: [go-fmt, go-fmt-cloud, go-test-homeserver, go-test-cloud]
     runs-on: ubuntu-latest
     steps:
-      - name: Fail if any module job failed
-        if: needs.go-fmt.result != 'success' || needs.go-test.result != 'success'
-        run: exit 1
+      - name: Fail unless each executor pair produced exactly one success
+        env:
+          FMT_HS: ${{ needs.go-fmt.result }}
+          FMT_CLOUD: ${{ needs.go-fmt-cloud.result }}
+          TEST_HS: ${{ needs.go-test-homeserver.result }}
+          TEST_CLOUD: ${{ needs.go-test-cloud.result }}
+        shell: bash
+        run: |
+          # Each pair is exclusive by construction (mutually exclusive `if:`),
+          # so the healthy states are: primary succeeded, or primary was
+          # skipped because routing chose fallback AND fallback succeeded.
+          # Anything else -- both skipped, both ran, a failure, a cancellation
+          # mid-flight on main-bound code -- fails loudly right here rather
+          # than letting a silently-skipped tier read as green.
+          fail=0
+          expect() {
+            local label="$1" primary="$2" fallback="$3"
+            if [[ "$primary" == "success" ]]; then return 0; fi
+            if [[ "$primary" == "skipped" && "$fallback" == "success" ]]; then return 0; fi
+            echo "::error::${label}: expected success or skip+fallback-success; got ${primary} / ${fallback}"
+            return 1
+          }
+          expect "go formatting"     "$FMT_HS"    "$FMT_CLOUD"    || fail=1
+          expect "go tests (matrix)" "$TEST_HS"   "$TEST_CLOUD"   || fail=1
+          exit "$fail"
 
+  # Stays GitHub-hosted unconditionally: needs docker (lockfile check),
+  # npm cache actions and a full vite build -- the homeserver runner user
+  # has no docker-group membership by design.
   frontend-next:
     name: Dashboard frontend (next)
-    runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.use_self_hosted_runner) && 'self-hosted' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -253,9 +523,16 @@ jobs:
   # First CI coverage for this crate (#1608's Rust service tier had none
   # until now -- a broken build or a real regression wouldn't have
   # surfaced until Arcane tried to build it live on the homeserver).
-  # ubuntu-latest only, not self-hosted-eligible like the jobs above --
-  # unlike setup-go/setup-node, there's no verified-present Rust
-  # toolchain on the self-hosted runner to fall back to yet.
+  #
+  # Homeserver-first, unlike when #1608 landed: back then the self-hosted
+  # runner had no Rust toolchain to fall back on. Instead of relying on
+  # host state (the old assumption that rustup happened to be preinstalled
+  # on GH images), the homeserver twin bootstraps rustup itself
+  # into the runner user's persistent HOME -- rustup then honours the
+  # crate's own rust-toolchain.toml (#1720 pin) exactly like every other
+  # execution path does, and `~/.cargo` + `target/` simply stay warm on
+  # disk between runs, which is why no actions/cache block exists here.
+  #
   # `cargo fmt --check` deliberately isn't part of this gate: the crate
   # predates any formatting pass and has never been run through rustfmt
   # (532 diff hunks against its default profile) -- landing that gate
@@ -263,7 +540,45 @@ jobs:
   # of a follow-up that can be reviewed on its own.
   backend-service:
     name: Dashboard backend-service (Rust)
+    needs: [ci-target]
+    if: needs.ci-target.outputs.homeserver == 'true'
+    runs-on: [self-hosted, linux, x64, honeypot-ci]
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: arcane/home/honeypot-dashboard/backend-service
+    steps:
+      - uses: actions/checkout@v7
+      - name: Bootstrap rustup into the persistent HOME (no-op after first)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --profile minimal --no-modify-path
+          fi
+          echo "$HOME/.cargo/bin" >>"$GITHUB_PATH"
+      # `rustup show` installs whatever rust-toolchain.toml pins (including
+      # its declared clippy component); explicit component add stays as a
+      # cheap idempotent safety net for toolchains whose config predates
+      # components support.
+      - name: Install pinned toolchain (rust-toolchain.toml)
+        shell: bash
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          rustup show active-toolchain
+          rustup component add clippy
+          cargo --version && rustc --version
+      - run: PATH="$HOME/.cargo/bin:$PATH" cargo build --all-targets
+      - run: PATH="$HOME/.cargo/bin:$PATH" cargo test
+      - run: PATH="$HOME/.cargo/bin:$PATH" cargo clippy --all-targets -- -D warnings
+
+  backend-service-cloud:
+    name: Dashboard backend-service (Rust) (GitHub-hosted)
+    needs: [ci-target]
+    if: needs.ci-target.outputs.homeserver != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: arcane/home/honeypot-dashboard/backend-service
@@ -284,7 +599,10 @@ jobs:
 
   vendored-theme:
     name: Vendored Xore/theme is in sync
-    runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.use_self_hosted_runner) && 'self-hosted' || 'ubuntu-latest' }}
+    needs: [ci-target]
+    if: needs.ci-target.outputs.homeserver == 'true'
+    runs-on: [self-hosted, linux, x64, honeypot-ci]
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - name: theme.css matches the pinned commit
@@ -299,6 +617,22 @@ jobs:
       # The catalogue lives in the frontend, the tokens live in the vendored
       # stylesheet. A theme in one and not the other fails silently either
       # way -- default styling, or unpickable. #1758.
+      - name: Theme catalogue matches theme.css
+        run: scripts/check-theme-catalogue.sh
+
+  vendored-theme-cloud:
+    name: Vendored Xore/theme is in sync (GitHub-hosted)
+    needs: [ci-target]
+    if: needs.ci-target.outputs.homeserver != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: theme.css matches the pinned commit
+        run: scripts/check-vendored-theme.sh
+      - name: Portable APIARY tokens match Xore/theme
+        run: python branding/scripts/check_theme_sync.py
+      - name: Frontend theme tokens all exist
+        run: scripts/check-theme-tokens.sh
       - name: Theme catalogue matches theme.css
         run: scripts/check-theme-catalogue.sh
 

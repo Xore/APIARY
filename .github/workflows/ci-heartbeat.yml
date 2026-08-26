@@ -1,0 +1,36 @@
+name: CI heartbeat
+
+# One-job canary used by quality.yml's ci-target router as its
+# homeserver-liveness proof. The runners-listing REST endpoint answers
+# 403 "Resource not accessible by integration" for GITHUB_TOKEN no matter
+# what permissions a workflow requests -- the registry cannot be asked,
+# so availability is MEASURED instead: router dispatches this workflow at
+# its own commit (needs actions: write, which GITHUB_TOKEN can carry),
+# and homeserver-first routing proceeds only if a honeypot-ci runner
+# picks it up and finishes inside the router's decision window. Anything
+# else (box off, paused, unregistered, network stalled, service wedged)
+# times out => fallback twins. Strictly stronger than registry state:
+# this observes actual end-to-end executability from Actions' side.
+#
+# Deliberately trivial -- checkout would waste minutes; empty steps are
+# legal. Never triggers itself on push/pull_request/schedule.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: none
+
+concurrency:
+  group: ci-heartbeat-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    name: homeserver reachable?
+    runs-on: [self-hosted, linux, x64, honeypot-ci]
+    timeout-minutes: 5
+    steps:
+      - name: Alive
+        shell: bash
+        run: echo "$(date -u +%FT%TZ) honeypot-ci picked up the heartbeat"
