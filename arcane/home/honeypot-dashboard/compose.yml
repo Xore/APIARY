@@ -186,7 +186,10 @@ services:
       # at 607,288 events over 48h. The tunnel peer is always excluded
       # whether or not it is listed here. Comma-separated.
       - HONEYPOT_SELF_IPS=${HONEYPOT_SELF_IPS:-}
+      # #2183: empty SERVICE_TOKEN refuses to boot with [E-SERVICE-TOKEN];
+      # the override below is the one sanctioned dev escape hatch.
       - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
+      - APIARY_ALLOW_UNAUTH_DEV=${APIARY_ALLOW_UNAUTH_DEV:-}
       - SANDBOX_REQUEST_DIR=/sandbox-requests
       - WINDOWS_SANDBOX_REQUEST_DIR=${WINDOWS_SANDBOX_REQUEST_DIR:-}
       - GHOSTS_SANDBOX_REQUEST_DIR=${GHOSTS_SANDBOX_REQUEST_DIR:-}
@@ -432,7 +435,11 @@ services:
       # `{ mounted: true }` callers resolve to this URL, not BACKEND_URL.
       - BACKEND_MOUNTED_URL=http://backend-service-mounted:8082
       - BFF_INTERNAL_URL=${BFF_INTERNAL_URL:-}
+      # #2183: empty SERVICE_TOKEN refuses to boot with [E-SERVICE-TOKEN];
+      # the override below is the one sanctioned dev escape hatch, the same
+      # env contract backend-service(-mounted) and this container share.
       - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
+      - APIARY_ALLOW_UNAUTH_DEV=${APIARY_ALLOW_UNAUTH_DEV:-}
       - OIDC_ISSUER_URL=${OIDC_ISSUER_URL:-https://auth.example.invalid/realms/apiary}
       # #1682: events.html's "Open in Kibana/EveBox/Arkime" per-event menu
       # (dashboard/links.go's investigationURL/investigationBase) — unset

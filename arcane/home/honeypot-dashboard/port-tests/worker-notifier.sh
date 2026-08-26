@@ -9,7 +9,7 @@ require_es
 BEFORE=$(curl -s "$ES_URL/dashboard-alert-state-v1/_count" | python3 -c 'import sys,json; print(json.load(sys.stdin)["count"])')
 echo "alert docs before: $BEFORE"
 (cd "$BACKEND_DIR" && env ELASTICSEARCH_URL="$ES_URL" LISTEN_ADDR="127.0.0.1:$BE_PORT" \
-  WORKER_LOOPS=alert-notifier RUST_LOG=info \
+  WORKER_LOOPS=alert-notifier RUST_LOG=info APIARY_ALLOW_UNAUTH_DEV=1 \
   timeout 30 cargo run -q 2>&1 | grep -Ei "worker loop|error" | head -5)
 sleep 2
 AFTER=$(curl -s "$ES_URL/dashboard-alert-state-v1/_count" | python3 -c 'import sys,json; print(json.load(sys.stdin)["count"])')
