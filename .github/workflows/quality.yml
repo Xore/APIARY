@@ -439,6 +439,11 @@ jobs:
               # that boolean as disqualifying (#1947 rule 4) and five of
               # eleven round models proved the old AND tripped on wording.
               python analysis/ghidra/benchmarks/tests/test_session_scoring.py
+              # Harmony-family serving adaptation (#2233). gpt-oss tags through
+              # Ollama's /api/chat need a different wire shape or `content`
+              # comes back empty; pins the dispatch so the calibrated Qwen
+              # request shape is untouched.
+              python analysis/ghidra/benchmarks/tests/test_harmony_chat.py
               # full_capabilities.py (#800): inventories env vars straight out of
               # the real pipeline source, so its own test runs against the real
               # tree rather than fixtures -- proving that stays true.

@@ -480,6 +480,28 @@ def model_artifact(base_url: str, model: str) -> dict[str, Any]:
     raise ValueError(f"model tag is not installed: {model}")
 
 
+# --- Harmony serving family (#2233) ----------------------------------------
+# gpt-oss-family tags are served through Ollama's harmony renderer, which
+# behaves differently from the Qwen family this harness was calibrated on:
+#   * the structured-output grammar (`format`) is silently not applied, so
+#     JSON compliance comes from the prompt contract every slot already
+#     carries ("Return JSON with exactly these keys");
+#   * `think: false` does not suppress analysis -- it empties it, returning
+#     content:"" with tokens burned invisibly (the #2233 raw-output signature:
+#     sessions 10/67, parsed null, done_reason often null);
+#   * greedy decoding at temperature 0 can spiral inside the analysis channel
+#     on rule-dense MITRE prompts (looping taxonomy second-guessing), which a
+#     wider anti-repetition window breaks without touching the prompt.
+HARMONY_FAMILY_MARKERS = ("gpt-oss",)
+HARMONY_SAMPLING = {"repeat_last_n": 256, "repeat_penalty": 1.3}
+HARMONY_NUM_PREDICT = 4096
+
+
+def is_harmony_served(model: str) -> bool:
+    lowered = model.lower()
+    return any(marker in lowered for marker in HARMONY_FAMILY_MARKERS)
+
+
 def chat(
     base_url: str,
     model: str,
@@ -510,7 +532,18 @@ def chat(
         "keep_alive": "10m",
         "options": {"temperature": 0, "num_ctx": context, "num_predict": 512, "seed": 144},
     }
-    if json_mode:
+    # Harmony-served checkpoints (gpt-oss family) break three of the defaults
+    # above when reached through Ollama 0.32.x's /api/chat (#2233), so they get
+    # a serving adaptation instead of silent null-field scores. Prompts stay
+    # byte-identical across families -- only the wire shape differs, and every
+    # divergence lands in the recorded request body anyway.
+    if is_harmony_served(model):
+        body["think"] = True
+        body["options"].update(HARMONY_SAMPLING)
+        # The analysis channel is spent out of the same output budget; 512 gets
+        # consumed mid-reasoning on rule-dense prompts and `final` never starts.
+        body["options"]["num_predict"] = max(512, HARMONY_NUM_PREDICT)
+    else:
         body["format"] = json_mode if isinstance(json_mode, dict) else "json"
     started = time.monotonic()
     try:
