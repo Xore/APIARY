@@ -283,28 +283,174 @@ function route(pathname) {
     };
   }
   if (pathname === "/api/v1/topology") {
-    const sensorRow = (sensor) => ({
-      sensor,
-      stack: "home",
-      containers: [`${sensor}-app`, `${sensor}-sidecar`],
-      ingress: ["traefik"],
-      hostnames: ["apiary.example.invalid"],
-      ports: [{ proto: "tcp", public: 2222, host: 22, proxy: true }],
-      raw_index: `honeypot-${sensor}`,
-    });
-    return {
-      generated_at: NOW,
-      sensors: [sensorRow("citrix"), sensorRow("cowrie"), sensorRow("dnp3")],
-      stacks: [
-        { stack: "home", containers: [{ name: "citrix-app", adapter_visible: true }, { name: "cowrie-app", adapter_visible: true }, { name: "dnp3-app", adapter_visible: false }] },
-      ],
-    };
+    return { generated_at: NOW, sensors: topologySensors(), stacks: topologyStacks(), flow: flowGraph() };
   }
   if (pathname === "/api/v1/ml-health") return [];
   if (pathname === "/api/v1/ml-anomalies/acks") return {};
   if (pathname.startsWith("/api/v1/store/")) return { rows: [], total: 0 };
   if (pathname === "/api/v1/search") return { results: [] };
   return {};
+}
+
+// --- /api/v1/topology ----------------------------------------------------
+// The response carries data.flow, which routes/api/topology.flow.ts proxies
+// to the "How a byte flows" sankey; without it that route 502s and the
+// matrix silently covers only the error state. flowGraph mirrors
+// backend-service src/topology.rs's flow_graph() -- same node names, same
+// layers, same edges -- so interaction tests run against the real DAG's
+// density (~90 nodes, layers 0-6), the exact thing the zoom/pan/drag
+// affordances of #2130 exist for.
+
+const TOPOLOGY_SENSORS = [
+  ["cowrie", ["portbridge"]],
+  ["endlessh", ["portbridge"]],
+  ["beelzebub", ["portbridge"]],
+  ["mailoney", ["portbridge"]],
+  ["dionaea", ["portbridge"]],
+  ["multipot", ["portbridge"]],
+  ["conpot", ["portbridge"]],
+  ["conpot-s7-1200", ["portbridge"]],
+  ["conpot-s7-1500", ["portbridge"]],
+  ["conpot-iec104", ["portbridge"]],
+  ["conpot-guardian", ["portbridge"]],
+  ["conpot-kamstrup", ["portbridge"]],
+  ["dnp3", ["portbridge"]],
+  ["dicompot", ["portbridge"]],
+  ["dns-honeypot", ["portbridge"]],
+  ["citrix-honeypot", ["portbridge"]],
+  ["cisco-asa-honeypot", ["portbridge"]],
+  ["rdp-honeypot", ["portbridge"]],
+  ["http-honeypot", ["traefik", "portbridge"]],
+  ["api-honeypot", ["portbridge"]],
+  ["galah", ["traefik", "portbridge"]],
+  ["hellpot", ["traefik", "portbridge"]],
+  ["wordpot", ["traefik", "portbridge"]],
+  ["snare", ["traefik"]],
+  ["sentrypeer", ["portbridge"]],
+  ["elasticpot", ["portbridge"]],
+  ["canarytokens", ["tunnel-only", "traefik"]],
+];
+
+const INGRESS_LABELS = {
+  traefik: "VPS Traefik (:443 hostnames)",
+  portbridge: "VPS portbridge (raw ports)",
+  "tunnel-only": "WireGuard tunnel only",
+};
+
+const VPS_PRODUCERS = [
+  "suricata IDS (VPS)",
+  "zeek (VPS)",
+  "zeek-proxy (relay side)",
+  "huginn JA4T sidecar",
+  "Traefik access log (VPS)",
+];
+
+const RAW_INDEX_NODES = [
+  "honeypot-v2-*",
+  "suricata-v2-*",
+  "portbridge-v2-*",
+  "zeek-v1-*",
+  "zeek-proxy-v1-*",
+  "huginn-v1-*",
+  "traefik-v1-*",
+  "cowrie-ttylog-v1",
+  "dionaea-incidents-v1",
+  "mailoney-mail-v1",
+  "extracted-files-v1",
+];
+
+const WORKER_LOOPS = [
+  // [worker, reads, writes, surfaces] -- PIPELINES.md §2 verbatim.
+  ["attacker-identity-worker", ["honeypot-v2-*", "ghidra-analysis-v1", "sandbox-analysis-v1", "github-analysis-v1", "cape-analysis-v1", "revdeck-analysis-v1"], ["attackers-v1"], ["/attackers · overview · graphs"]],
+  ["correlator-worker", ["honeypot-v2-*", "suricata-v2-*"], ["campaigns-v1", "attacker-clusters-v1"], ["/campaigns", "/clusters · kill-chain"]],
+  ["agent-intrusion loop", ["honeypot-v2-*", "suricata-v2-*"], ["agent-intrusion-campaigns"], ["/agent-campaigns"]],
+  ["zeek-proxy-attribution", ["zeek-v1-*", "portbridge-v2-*"], ["attributed flows (enriched docs)"], ["/sessions · /events"]],
+  ["ml-worker", ["suricata-v2-*", "zeek-v1-*"], ["ml-anomalies"], ["/ml-anomalies"]],
+  ["llm-worker", ["payload stores", "honeypot-v2-*"], ["llm-analysis"], ["/llm-analysis"]],
+  ["es-results-importer", ["result spools (root-owned)"], ["ghidra-analysis-v1", "sandbox-analysis-v1", "github-analysis-v1", "cape-analysis-v1", "revdeck-analysis-v1"], ["/payload-workbench/results"]],
+  ["yara scanner", ["payload stores"], ["yara-analysis-v1"], ["/investigate · charts"]],
+  ["payload-inventory-worker", ["payload stores"], ["dashboard-payload-inventory-v1", "dashboard-payload-bytes-v1"], ["/payloads · charts"]],
+  ["alert-notifier loop", ["attackers-v1", "campaigns-v1", "agent-intrusion-campaigns"], ["dashboard-alert-state-v1"], ["/alerts"]],
+  ["canarytokens-adapter", ["canarytokens"], ["dashboard-canarytokens-v1"], ["/canarytokens · settings pane"]],
+  ["reporter", ["dashboard state (backend indices)"], ["reporter-metrics-v1"], ["/settings stats"]],
+];
+
+const DEAD_LETTERS = ["ES non-indexable policy", "dead-letter-honeypot", "/dead-letters"];
+
+function flowGraph() {
+  const nodes = [];
+  const seen = new Set();
+  const declare = (name, layer) => {
+    if (!seen.has(name)) {
+      seen.add(name);
+      nodes.push({ name, layer });
+    }
+  };
+  const links = [];
+  const link = (source, target) => links.push({ source, target });
+
+  for (const label of Object.values(INGRESS_LABELS)) declare(label, 0);
+  for (const [sensor] of TOPOLOGY_SENSORS) declare(sensor, 1);
+  for (const producer of VPS_PRODUCERS) declare(producer, 1);
+  declare("portbridge conn-log (VPS)", 1);
+  declare("Filebeat", 2);
+  declare("payload stores", 2);
+  declare("result spools (root-owned)", 3);
+  declare("dashboard state (backend indices)", 3);
+  for (const family of RAW_INDEX_NODES) declare(family, 3);
+  declare("dashboard-canarytokens-v1", 5);
+  for (const [worker, , writes, surfaces] of WORKER_LOOPS) {
+    declare(worker, 4);
+    writes.forEach((w) => declare(w, 5));
+    surfaces.forEach((s) => declare(s, 6));
+  }
+  DEAD_LETTERS.forEach((name, i) => declare(name, 4 + i));
+
+  for (const [sensor, ingresses] of TOPOLOGY_SENSORS)
+    for (const via of ingresses) link(INGRESS_LABELS[via], sensor);
+  link("VPS portbridge (raw ports)", "portbridge conn-log (VPS)");
+  for (const [sensor] of TOPOLOGY_SENSORS) {
+    if (sensor !== "canarytokens") link(sensor, "Filebeat");
+  }
+  for (const captor of ["cowrie", "dionaea"]) link(captor, "payload stores");
+  for (const producer of VPS_PRODUCERS) link(producer, "Filebeat");
+  for (const family of RAW_INDEX_NODES) link("Filebeat", family);
+
+  for (const [worker, reads, writes, surfaces] of WORKER_LOOPS) {
+    reads.forEach((r) => link(r, worker));
+    writes.forEach((w) => link(worker, w));
+    for (const surface of surfaces) for (const w of writes) link(w, surface);
+  }
+  for (const verdict of ["ghidra-analysis-v1", "sandbox-analysis-v1", "github-analysis-v1", "cape-analysis-v1", "revdeck-analysis-v1"])
+    link(verdict, "attacker-identity-worker");
+
+  const [dlWorker, dlIndex, dlPage] = DEAD_LETTERS;
+  link("honeypot-v2-*", dlWorker);
+  link(dlWorker, dlIndex);
+  link(dlIndex, dlPage);
+
+  return { nodes, links };
+}
+
+function topologySensors() {
+  return TOPOLOGY_SENSORS.map(([sensor]) => ({
+    sensor,
+    stack: "home",
+    containers: [`${sensor}-app`, `${sensor}-sidecar`],
+    ingress: ["traefik"],
+    hostnames: ["apiary.example.invalid"],
+    ports: [{ proto: "tcp", public: 2222, host: 22, proxy: true }],
+    raw_index: `honeypot-${sensor}`,
+  }));
+}
+
+function topologyStacks() {
+  return [
+    {
+      stack: "home",
+      containers: TOPOLOGY_SENSORS.slice(0, 6).map(([sensor], i) => ({ name: `${sensor}-app`, adapter_visible: i % 2 === 0 })),
+    },
+  ];
 }
 
 export function startFakeBackend(port) {

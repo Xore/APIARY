@@ -40,6 +40,24 @@ const builders: Record<ChartKind, Builder> = {
     const data = (raw ?? {}) as SankeyPayload
     const nodes = data.nodes ?? []
     const links = data.links ?? []
+
+    // Two payload rewrites below are load-bearing (#2130, found by bisecting
+    // against a bare echarts page with this exact option set):
+    //
+    // - links get `value ?? 1`. topology.rs's FlowLink is unweighted
+    //   ({source, target}), but the layout sizes every bar from its summed
+    //   link values -- absent values drew each stage as a zero/negative-width
+    //   sliver that hit-testing can never land on, which is exactly why
+    //   "nothing on the graph can be dragged" survived both earlier attempts
+    //   at wiring draggable. A DAG edge is one unit wide here by definition;
+    //   no magnitude information exists upstream to fake or lose.
+    // - nodes carry `draggable` individually: SankeyView wires its drift
+    //   handler per NODE off `itemModel.get('draggable')`, and a series-level
+    //   flag does not reach those item models however correct it looks in
+    //   review (#2132 shipped precisely that and drags stayed dead).
+    const valuedLinks = links.map((l) => ({ ...l, value: l.value ?? 1 }))
+    const draggableNodes = nodes.map((n) => ({ ...n, draggable: true }))
+
     chart.setOption({
       tooltip: { trigger: 'item' },
       series:
@@ -49,16 +67,46 @@ const builders: Record<ChartKind, Builder> = {
               {
                 type: 'sankey',
                 orient: 'vertical',
-                // #2130: draggable is nominally echarts' default, but the
-                // whole point here is that nodes can be pulled apart when
-                // the DAG knots up — say so instead of trusting a default
-                // nobody has heard of.
+                // echarts 6 gives sankey a private view coordinate system
+                // wired to a RoamController, like graph/tree always had:
+                // dragging empty canvas pans the view. The controller stands
+                // down when the mousedown lands on a draggable element, so
+                // node drags win over pan without any arbitration code here.
+                // Zoom stays OUTSIDE echarts gestures -- EChart owns it as
+                // one scalar (wheel listener + buttons -> setOption) so two
+                // pathways can never disagree about the current scale.
+                roam: 'move',
                 draggable: true,
+                // Breathing room between sibling stages; also widens label
+                // columns before hideOverlap has to start hiding things.
+                nodeGap: 14,
+                // Inset the drawn DAG so first/last-column labels have room
+                // inside the canvas instead of clipping against the card.
+                left: 140,
+                right: 140,
+                top: 30,
+                bottom: 30,
                 emphasis: { focus: 'adjacency' },
-                data: nodes,
-                links,
+                data: draggableNodes,
+                links: valuedLinks,
                 lineStyle: { color: 'gradient', curveness: 0.5 },
-                label: { position: 'top', color: themeColor('--text-000', '#e9e6df') },
+                // Deliberately NO width/overflow cap on labels: measured in
+                // the bare-echarts bisect page, a fixed label.width stops
+                // hideOverlap from resolving collisions (labels kept painting
+                // through each other); uncapped text + hideOverlap is the
+                // combination that actually declutters.
+                label: {
+                  position: 'top',
+                  color: themeColor('--text-000', '#e9e6df'),
+                  fontSize: 11,
+                },
+                // At fleet density (27 sensors share one layer band) neighbour
+                // labels painted straight through each other -- the "cluttered
+                // white text" half of #2130. Hiding overlaps trades
+                // completeness for legibility; whatever got hidden is still
+                // one hover away (tooltip), and pulling knotted stages apart
+                // re-renders the band so hidden labels come back.
+                labelLayout: { hideOverlap: true },
               },
             ],
     })
@@ -320,17 +368,17 @@ const builders: Record<ChartKind, Builder> = {
 
 export function EChart({ kind, url, height, zoomable }: { kind: ChartKind; url: string; height: number; zoomable?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const wrapperRef = useRef<HTMLDivElement>(null)
   const [status, setStatus] = useState('Loading…')
   const [state, setState] = useState<'loading' | 'ready' | 'empty' | 'error'>('loading')
-  // #2130: opt-in zoom for charts whose content overflows their frame.
-  // The mechanism is canvas real estate, not echarts series.zoom: the
-  // chart div grows by `zoom` inside a scrollable wrapper, so the layout
-  // engine re-spaces the diagram across more pixels (real separation
-  // between dense stages) while native scrollbars remain the pan UI —
-  // no stage can ever be pushed out of reach, which series.zoom cannot
-  // promise (sankey has no roam; a scaled view just clips).
-  const [zoom, setZoom] = useState(1)
+  // #2130: opt-in interactivity for charts whose content overflows their
+  // frame. The sankey builder roams natively (drag pans, nodes drag); the
+  // component owns zoom as ONE scalar — wheel and +/− both go through it,
+  // so two gesture pathways can never disagree about the current scale.
+  // reset is not setOption({zoom:1}) but paint(): dispose+re-init from
+  // dataRef restores the exact baseline view including pan offset, without
+  // depending on how echarts re-centers on a roam-reset.
+  const zoomRef = useRef(1)
+  const [zoomDisplay, setZoomDisplay] = useState(1)
   // #1757: the payload is kept so an appearance change can repaint from it.
   // Every colour in a chart is resolved from a CSS custom property into a
   // pixel value at build time and cannot re-resolve itself, so a theme change
@@ -344,8 +392,19 @@ export function EChart({ kind, url, height, zoomable }: { kind: ChartKind; url: 
   const teardown = useCallback(() => {
     observerRef.current?.disconnect()
     observerRef.current = null
+    const owned = containerRef.current as (HTMLElement & { __xoreChart?: unknown }) | null
+    if (owned && owned.__xoreChart) delete owned.__xoreChart
     chartRef.current?.dispose()
     chartRef.current = null
+  }, [])
+
+  // One authority for scale changes: clamp-step the scalar, push it into the
+  // live series. Absolute (not relative to whatever echarts last drew), so
+  // repeated calls are idempotent and reset-to-1 means exactly 1.
+  const applyZoom = useCallback((next: number) => {
+    zoomRef.current = next
+    setZoomDisplay(next)
+    chartRef.current?.setOption({ series: [{ zoom: next }] })
   }, [])
 
   // Build (or rebuild) the chart from whatever is already in dataRef.
@@ -362,6 +421,12 @@ export function EChart({ kind, url, height, zoomable }: { kind: ChartKind; url: 
     registerXoreTheme()
     const chart = echarts.init(container, 'xore')
     chartRef.current = chart
+    // Diagnostic/e2e seam (#2130): the dashboard spec asserts label hiding
+    // through zrender's display list, which is reachable only off the
+    // instance. A non-rendering property on the container div -- never a
+    // child node -- keeps the #1628 contract (React owns no node inside
+    // echarts' container) intact.
+    ;(container as HTMLElement & { __xoreChart?: unknown }).__xoreChart = chart
     const summary = builders[kind](chart, dataRef.current, chartColor, echarts)
     if (summary.startsWith('No ')) {
       teardown()
@@ -371,6 +436,11 @@ export function EChart({ kind, url, height, zoomable }: { kind: ChartKind; url: 
     }
     setState('ready')
     setStatus(summary)
+    // A repaint discards #2130 interaction state: dragged node positions and
+    // the reader's chosen magnification die with the disposed instance. The
+    // scalar has to follow or the +/− buttons would step off a lie.
+    zoomRef.current = 1
+    setZoomDisplay(1)
     const observer = new ResizeObserver(() => chartRef.current?.resize())
     observer.observe(container)
     observerRef.current = observer
@@ -413,27 +483,27 @@ export function EChart({ kind, url, height, zoomable }: { kind: ChartKind; url: 
     void paint()
   }, [appearance, paint])
 
-  // Ctrl+wheel zooms (#2130). Non-passive listener so preventDefault can
-  // stop the browser's own page-zoom; plain wheel is left untouched — it
-  // keeps its native job of scrolling both the page and (once zoomed past
-  // the frame) the chart viewport itself.
+  // Wheel zooms (#2130). Native roam is pan-only ('move' in the builder), so
+  // scale has exactly one writer: this listener. Non-passive so the browser's
+  // own scroll/page-zoom stands down while the pointer is over the chart —
+  // hover-zoom is the trade the issue accepted ("zoomable"), and the note row
+  // tells the reader what to expect before their first wheel tick.
   useEffect(() => {
-    const wrapper = wrapperRef.current
-    if (!zoomable || !wrapper) return
+    const container = containerRef.current
+    if (!zoomable || !container) return
     const onWheel = (event: WheelEvent) => {
-      if (!event.ctrlKey) return
       event.preventDefault()
-      setZoom((current) => zoomFromWheel(current, event.deltaY))
+      applyZoom(zoomFromWheel(zoomRef.current, event.deltaY))
     }
-    wrapper.addEventListener('wheel', onWheel, { passive: false })
-    return () => wrapper.removeEventListener('wheel', onWheel)
-  }, [zoomable])
+    container.addEventListener('wheel', onWheel, { passive: false })
+    return () => container.removeEventListener('wheel', onWheel)
+  }, [zoomable, applyZoom])
 
   // New data source, old magnification: reset rather than drop the reader
   // into a zoomed view they did not choose for this chart.
   useEffect(() => {
-    setZoom(1)
-  }, [kind, url])
+    applyZoom(1)
+  }, [kind, url, applyZoom])
 
   return (
     <>
@@ -447,30 +517,58 @@ export function EChart({ kind, url, height, zoomable }: { kind: ChartKind; url: 
           own DOM synchronously, inside the same effect tick as the
           setState that swaps in the "No data yet" React children --
           React's reconciler then tries to remove a sibling node echarts
-          already tore down. Loading/empty/error status and the #2130
-          zoom controls are rendered OUTSIDE that div -- overlays as
-          absolutely-positioned siblings of it, controls above the
-          wrapper -- so React never owns any node inside the div echarts
-          controls. */}
+          already tore down. Loading/empty/error status is rendered as an
+          absolutely-positioned OVERLAY SIBLING inside this position:
+          relative wrapper; the #2130 control row is a sibling ABOVE the
+          wrapper entirely, so React never owns any node inside the div
+          echarts controls.
+
+          #2130 second pass: no sizing div and no overflow wrapper any
+          more. The first pass made zoom grow this box inside a scroller,
+          which re-spaced the whole DAG proportionally (magnification
+          bought nothing legible) and left native scrollbars as the only
+          pan UI. Roam and the wheel listener now do that work in-chart. */}
       {zoomable && state === 'ready' ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.4rem', marginBottom: '0.35rem' }}>
-          <span className="note" style={{ margin: 0 }}>ctrl+scroll to zoom, scroll to pan, drag nodes</span>
-          <button className="chip" type="button" aria-label="Zoom in" onClick={() => setZoom((current) => stepZoom(current, 1))}>+</button>
-          <button className="chip" type="button" aria-label="Zoom out" onClick={() => setZoom((current) => stepZoom(current, -1))}>−</button>
-          <button className="chip" type="button" onClick={() => setZoom(1)}>reset</button>
+          <span className="note" style={{ margin: 0 }}>scroll to zoom · drag to pan · drag nodes</span>
+          <button
+            className="chip"
+            type="button"
+            aria-label="Zoom out"
+            title="Zoom out"
+            onClick={() => applyZoom(stepZoom(zoomRef.current, -1))}
+          >
+            −
+          </button>
+          <span className="chip" aria-live="polite">{Math.round(zoomDisplay * 100)}%</span>
+          <button
+            className="chip"
+            type="button"
+            aria-label="Zoom in"
+            title="Zoom in"
+            onClick={() => applyZoom(stepZoom(zoomRef.current, 1))}
+          >
+            +
+          </button>
+          <button
+            className="chip"
+            type="button"
+            onClick={() => {
+              applyZoom(1)
+              void paint()
+            }}
+          >
+            reset
+          </button>
         </div>
       ) : null}
-      <div
-        ref={wrapperRef}
-        style={{ position: 'relative', width: '100%', height, overflow: 'auto' }}
-        aria-busy={state === 'loading'}
-        role={state === 'error' ? 'alert' : undefined}
-      >
-        {/* The sizing div is what zoom scales; at zoom=1 it is exactly the
-            box charts have always had, so non-zoomable kinds are unchanged. */}
-        <div style={{ width: `${zoom * 100}%`, minWidth: '100%', height: zoom * height }}>
-          <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
-        </div>
+      <div style={{ position: 'relative', width: '100%', height }}>
+        <div
+          ref={containerRef}
+          style={{ width: '100%', height }}
+          aria-busy={state === 'loading'}
+          role={state === 'error' ? 'alert' : undefined}
+        />
         {state === 'loading' ? (
           <span
             className="skeleton-line"

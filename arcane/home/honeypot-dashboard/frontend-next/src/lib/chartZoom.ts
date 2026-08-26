@@ -11,10 +11,10 @@ const STEP = 1.2
 
 /**
  * One multiplicative zoom step. 1 is "fits the card" — there is nothing to
- * gain from shrinking an already-fitting diagram below its natural size,
- * and pan UI (native scrollbars) only exists once content overflows, so
- * sub-1 zoom would strand the reader. Rounding keeps repeated steps away
- * from float drift like 1.7279999999999998.
+ * gain from shrinking an already-fitting diagram below its natural size, and
+ * the roam canvas can only be dragged where it is drawn, so sub-1 zoom would
+ * strand the reader in dead margin. Rounding keeps repeated steps away from
+ * float drift like 1.7279999999999998.
  */
 export function stepZoom(current: number, direction: 1 | -1): number {
   const raw = current * (direction === 1 ? STEP : 1 / STEP)
