@@ -83,10 +83,12 @@ RUN /cowrie/cowrie-env/bin/python3 /cowrie/cowrie-git/bin/regen-dropin.cache
 # Place both runtime scripts inside the existing cowrie-git/bin/ directory
 # so the --from=builder copy lands them in a path that is guaranteed to exist.
 COPY bin/gen-dynamic-txtcmds.py /cowrie/cowrie-git/bin/gen-dynamic-txtcmds.py
+COPY bin/healthcheck-probe.py   /cowrie/cowrie-git/bin/healthcheck-probe.py
 COPY bin/entrypoint.sh           /cowrie/cowrie-git/bin/entrypoint.sh
 RUN chmod +x \
       /cowrie/cowrie-git/bin/entrypoint.sh \
-      /cowrie/cowrie-git/bin/gen-dynamic-txtcmds.py
+      /cowrie/cowrie-git/bin/gen-dynamic-txtcmds.py \
+      /cowrie/cowrie-git/bin/healthcheck-probe.py
 
 RUN chown -R cowrie:cowrie /cowrie
 

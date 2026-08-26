@@ -119,16 +119,31 @@ services:
       - /cowrie/cowrie-git/txtcmds:uid=2000,gid=2000
     networks:
       - cowrie_net
-    # #1487: fails while honeyfs-implant's marker (var/lib/cowrie, already
-    # bind-mounted above) is present -- autoheal (honeypot-utilities'
+    # Two conjuncts, both of which must pass for a healthy verdict:
+    #
+    # 1. #1487: fails while honeyfs-implant's marker (var/lib/cowrie,
+    # already bind-mounted above) is present -- autoheal (honeypot-utilities'
     # willfarrell/autoheal, watching every autoheal=true container via
     # docker-socket-proxy, same trust boundary as everywhere else this repo
     # uses it) restarts this container on the next unhealthy check, and
     # entrypoint.sh clears the marker once it's re-synced fs.pickle. No new
     # docker.sock/proxy access needed here -- this container only ever
     # writes the marker file, autoheal does the actual restart.
+    #
+    # 2. #2107: bin/healthcheck-probe.py completes an SSH version-string
+    # exchange against 127.0.0.1:2222. Until #2107 the check was the marker
+    # stat alone, which samples nothing about process state: a Twisted
+    # reactor wedged busy-looping the way conpot's gevent loop did in #111
+    # still passes a stat test (and would pass a plain TCP connect too --
+    # the kernel backlog answers without the process). The banner exchange
+    # requires a reactor that is actually scheduling; it is the same
+    # protocol-level doctrine as honeypot-conpot/conpot/healthcheck.py.
+    # Probe cost and its log-noise accounting are documented in that
+    # script's docstring (~2880 loopback sessions/day at this interval,
+    # auto-marked honeypot.internal_probe at enrichment and excluded from
+    # every dashboard consumer by the #1677 doctrine).
     healthcheck:
-      test: ["CMD-SHELL", "test ! -f /cowrie/cowrie-git/var/lib/cowrie/.implant-pending"]
+      test: ["CMD-SHELL", "test ! -f /cowrie/cowrie-git/var/lib/cowrie/.implant-pending && /cowrie/cowrie-env/bin/python3 /cowrie/cowrie-git/bin/healthcheck-probe.py"]
       interval: 30s
       timeout: 5s
       retries: 2
