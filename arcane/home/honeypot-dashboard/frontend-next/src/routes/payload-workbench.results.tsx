@@ -133,11 +133,25 @@ const fetchGhidra = createServerFn({ method: 'GET' })
 // in operator's own username, derived server-side from getSessionUser() —
 // never accepted as client input, so one operator can't read or cancel
 // another's runs by editing the request.
+// #2178: a failed catalog request used to wear the same "not found"
+// message as a genuinely uncaptured hash — telling an operator their
+// sample doesn't exist when the mounted workbench instance was simply
+// unreachable. Tri-state now; the handler never rejects.
+type CatalogFetch =
+  | { state: 'catalog'; catalog: AnalyzersResponse }
+  | { state: 'missing' }
+  | { state: 'failed' }
+
 const fetchAnalyzerCatalog = createServerFn({ method: 'GET' })
   .inputValidator((input: { hash: string }) => input)
-  .handler(async ({ data }): Promise<AnalyzersResponse | null> => {
-    const { serviceJSON } = await import('../lib/backend.server')
-    return serviceJSON<AnalyzersResponse>(`/api/v1/workbench/analyzers?hash=${encodeURIComponent(data.hash)}`, { mounted: true })
+  .handler(async ({ data }): Promise<CatalogFetch> => {
+    const { serviceJSONResult } = await import('../lib/backend.server')
+    const result = await serviceJSONResult<AnalyzersResponse>(
+      `/api/v1/workbench/analyzers?hash=${encodeURIComponent(data.hash)}`,
+      { mounted: true },
+    )
+    if (result.ok) return { state: 'catalog', catalog: result.body }
+    return result.status === 404 ? { state: 'missing' } : { state: 'failed' }
   })
 
 const fetchRecipes = createServerFn({ method: 'GET' }).handler(async (): Promise<{ recipes: WorkbenchRecipe[] } | null> => {
@@ -718,6 +732,11 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
   const [confirmed, setConfirmed] = useState(false)
   const [recipeName, setRecipeName] = useState('')
   const [recipes, setRecipes] = useState<WorkbenchRecipe[] | null>(null)
+  // #2178: `result?.recipes ?? []` made a failed /workbench/recipes call
+  // indistinguishable from "no recipes saved" — the loader silently
+  // vanished. Named failure + retry now.
+  const [recipesFailed, setRecipesFailed] = useState(false)
+  const [recipesAttempt, setRecipesAttempt] = useState(0)
   const [pickedRecipeId, setPickedRecipeId] = useState('')
   const [saveAsRecipe, setSaveAsRecipe] = useState(false)
   const [recipeDescription, setRecipeDescription] = useState('')
@@ -728,13 +747,17 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
 
   useEffect(() => {
     let cancelled = false
+    setRecipesFailed(false)
     fetchRecipes().then((result) => {
-      if (!cancelled) setRecipes(result?.recipes ?? [])
+      if (!cancelled) {
+        if (result) setRecipes(result.recipes)
+        else setRecipesFailed(true)
+      }
     })
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [recipesAttempt])
 
   const loadCatalog = async (candidate?: string) => {
     const clean = (candidate ?? hash).trim().toLowerCase()
@@ -747,14 +770,20 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
     setCatalogError('')
     try {
       const result = await fetchAnalyzerCatalog({ data: { hash: clean } })
-      if (result) {
-        setCatalog(result)
+      if (result.state === 'catalog') {
+        setCatalog(result.catalog)
         setSelected([])
         setOptions({})
         setLastRun(null)
+      } else if (result.state === 'missing') {
+        setCatalog(null)
+        // A settled 404 is a real answer about THIS hash.
+        setCatalogError('Captured payload not found or unreadable.')
       } else {
         setCatalog(null)
-        setCatalogError('Captured payload not found or unreadable.')
+        // #2178: an unreachable workbench says so, instead of asserting
+        // the payload doesn't exist.
+        setCatalogError('The analyzer catalog request failed — the mounted workbench may be down. Load again to retry.')
       }
     } finally {
       setLoadingCatalog(false)
@@ -847,7 +876,14 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
           return
         }
         const refreshed = await fetchRecipes()
-        setRecipes(refreshed?.recipes ?? [])
+        if (refreshed) {
+          setRecipes(refreshed.recipes)
+          setRecipesFailed(false)
+        } else {
+          // #2178: a failed post-save refresh used to silently blank the
+          // list the operator just saved into.
+          setRecipesFailed(true)
+        }
       }
       const runResult = await submitRun({
         data: {
@@ -915,6 +951,13 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
                 ))}
               </select>
             </label>
+          ) : recipesFailed ? (
+            <p className="note text-danger" role="alert">
+              Saved recipes couldn't be loaded — they exist but the request failed.{' '}
+              <button type="button" className="lnk" onClick={() => setRecipesAttempt((n) => n + 1)}>
+                Retry
+              </button>
+            </p>
           ) : null}
 
           <div className="filters">

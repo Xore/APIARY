@@ -17,6 +17,7 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
+import { ErrorStateBlock } from '../components/ErrorState'
 import { copyWithFlash } from '../lib/flash'
 import { type JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
@@ -39,11 +40,19 @@ type EventPage = {
   source_events: Relation
 }
 
+// #2178: serviceJSON collapsed "no event with this id" (a real 404 — the
+// document aged out) into the same null as "the request failed", so an
+// outage rendered as confident absence prose about this specific id. The
+// union keeps the two separable; the handler never rejects.
+type EventFetch = { state: 'event'; event: EventPage } | { state: 'missing' } | { state: 'failed' }
+
 const fetchEvent = createServerFn({ method: 'GET' })
   .inputValidator((input: { id: string }) => input)
-  .handler(async ({ data }): Promise<EventPage | null> => {
-    const { serviceJSON } = await import('../lib/backend.server')
-    return serviceJSON<EventPage>(`/api/v1/event/${encodeURIComponent(data.id)}`)
+  .handler(async ({ data }): Promise<EventFetch> => {
+    const { serviceJSONResult } = await import('../lib/backend.server')
+    const result = await serviceJSONResult<EventPage>(`/api/v1/event/${encodeURIComponent(data.id)}`)
+    if (result.ok) return { state: 'event', event: result.body }
+    return result.status === 404 ? { state: 'missing' } : { state: 'failed' }
   })
 
 export const Route = createFileRoute('/event/$id')({
@@ -114,19 +123,39 @@ function RelationCard({
 function EventDetailPage() {
   const { id } = Route.useParams()
   const { first } = Route.useLoaderData()
-  const [event, setEvent] = useState<EventPage | null | 'missing'>(null)
+  // #2178: `result ?? 'missing'` collapsed a failed request into the same
+  // "this event could not be found" prose as a genuine aged-out id. The
+  // fetch now returns an explicit tri-state; 'failed' renders an error
+  // block with retry instead of asserting absence.
+  const [fetch, setFetch] = useState<EventFetch | null>(null)
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     let cancelled = false
-    first.then((result) => {
-      if (!cancelled) setEvent(result ?? 'missing')
+    setFetch(null)
+    ;(attempt === 0 ? first : fetchEvent({ data: { id } })).then((result) => {
+      if (!cancelled) setFetch(result)
     })
     return () => {
       cancelled = true
     }
-  }, [first])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- caller-owned loader stream
+  }, [first, attempt])
 
-  if (event === 'missing') {
+  if (fetch?.state === 'failed') {
+    return (
+      <>
+        <InvestigateHeader label="Investigate" title="Event" subtitle="The record could not be loaded." />
+        <ErrorStateBlock
+          title="This event failed to load"
+          hint="The backend request failed — this says nothing about whether the event exists."
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
+      </>
+    )
+  }
+
+  if (fetch?.state === 'missing') {
     return (
       <>
         <InvestigateHeader label="Investigate" title="Event" subtitle="This event could not be found." />
@@ -139,6 +168,7 @@ function EventDetailPage() {
       </>
     )
   }
+  const event = fetch?.state === 'event' ? fetch.event : null
   if (event === null) {
     return (
       <>
