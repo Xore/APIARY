@@ -80,6 +80,15 @@ class SimState:
         login_hour = (now.hour - random.randint(1, 4)) % 24
         self.login_time_str = f"{login_hour:02d}:{random.randint(0,59):02d}"
 
+        # Hugepage pool — counts are PAGES (2048 kB each, see Hugepagesize).
+        # Provisioned-but-modest, as for a sysctl vm.nr_hugepages setting;
+        # must stay far below MemTotal so meminfo cannot contradict itself.
+        # (#2108: the old constant was 2**30 mislabeled as kB, i.e. a 1 TiB
+        # pool on a 512 GB machine.)
+        self.hugepage_pages      = _r(4096, 10)
+        self.hugepage_free_pages = random.randint(self.hugepage_pages // 4,
+                                                  self.hugepage_pages)
+
 
 def _r(base: int, jitter_pct: float) -> int:
     delta = int(base * jitter_pct / 100)
@@ -160,8 +169,9 @@ def gen_proc_files(out_dir: Path, s: SimState) -> None:
     mem_free_kb   = s.mem_free_kb
     mem_avail_kb  = s.mem_avail_kb
     swap_total_kb = s.swap_total_kb
-    hugepage_kb   = 1_073_741_824
-    hugepage_free = hugepage_kb - _r(int(hugepage_kb * random.uniform(0.3, 0.7)), 2)
+    # Page counts straight from the shared SimState (2048 kB per page)
+    hugepage_pages      = s.hugepage_pages
+    hugepage_free_pages = s.hugepage_free_pages
 
     meminfo = (
         f"MemTotal:       {mem_total_kb:>12} kB\n"
@@ -206,12 +216,12 @@ def gen_proc_files(out_dir: Path, s: SimState) -> None:
         f"ShmemPmdMapped:            0 kB\n"
         f"FileHugePages:             0 kB\n"
         f"FilePmdMapped:             0 kB\n"
-        f"HugePages_Total:        {hugepage_kb // 2048:>8}\n"
-        f"HugePages_Free:         {hugepage_free // 2048:>8}\n"
+        f"HugePages_Total:        {hugepage_pages:>8}\n"
+        f"HugePages_Free:         {hugepage_free_pages:>8}\n"
         f"HugePages_Rsvd:                0\n"
         f"HugePages_Surp:                0\n"
         f"Hugepagesize:           2048 kB\n"
-        f"Hugetlb:        {hugepage_kb:>12} kB\n"
+        f"Hugetlb:        {hugepage_pages * 2048:>12} kB\n"
         f"DirectMap4k:    {_r(2_097_152, 3):>12} kB\n"
         f"DirectMap2M:    {_r(134_217_728, 2):>12} kB\n"
         f"DirectMap1G:    {_r(402_653_184, 1):>12} kB\n"
