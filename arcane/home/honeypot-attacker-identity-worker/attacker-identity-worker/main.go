@@ -53,10 +53,11 @@ func main() {
 	interval := getenvDuration("RUN_INTERVAL", 15*time.Minute)
 
 	es := newESClient(esURL)
-	for {
+	// #1980: a panicking cycle is logged with its stack and retried next
+	// interval; it no longer takes the whole worker down.
+	runLoop("attacker-identity-worker", interval, func() {
 		runCycle(es, window)
-		time.Sleep(interval)
-	}
+	})
 }
 
 func runCycle(es *esClient, window time.Duration) {

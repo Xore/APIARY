@@ -122,7 +122,10 @@ func main() {
 	tailer := newTailer(st)
 	interval := time.Duration(getenvInt("REPORTER_POLL_SECONDS", 30)) * time.Second
 
-	for {
+	// #1980: a panic anywhere in the poll pass (hostile log line, ES shape
+	// drift) is logged with its stack and retried next poll; it no longer
+	// stops abuse reporting or freezes dedup state.
+	runLoop("reporter", interval, func() {
 		for sensor, path := range logPaths {
 			sensor := sensor
 			if err := tailer.poll(path, func(line []byte) { proc.handle(sensor, line) }); err != nil {
@@ -132,6 +135,5 @@ func main() {
 		if err := tailer.pollGlob(suricataGlob, func(line []byte) { proc.handle("suricata", line) }); err != nil {
 			log.Printf("reporter: polling suricata (%s): %v", suricataGlob, err)
 		}
-		time.Sleep(interval)
-	}
+	})
 }
