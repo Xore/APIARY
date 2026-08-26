@@ -39,6 +39,12 @@ docker exec "$KC_CONTAINER" "$KC" config credentials \
   --config "$KC_CONFIG" --server http://127.0.0.1:8080 --realm master \
   --user "$KEYCLOAK_ADMIN_USERNAME" --password "$KEYCLOAK_ADMIN_PASSWORD"
 
+# #2194: from this point the config file holds the live admin access token
+# -- remove it on every exit path, not just success (a mid-run failure under
+# set -euo pipefail used to leave it in hp-keycloak:/tmp until restart).
+cleanup() { docker exec "$KC_CONTAINER" rm -f "$KC_CONFIG" >/dev/null 2>&1 || true; }
+trap cleanup EXIT
+
 client_uuid="$(docker exec "$KC_CONTAINER" "$KC" get clients -r "$REALM" \
   -q "clientId=arcane" --fields id --format csv --noquotes --config "$KC_CONFIG")"
 [[ -n "$client_uuid" ]] || { echo "arcane client not found in realm $REALM -- import the realm first" >&2; exit 1; }
@@ -62,5 +68,3 @@ echo "wrote real arcane OIDC client secret to $ENV_FILE"
 # Re-up so Arcane's container picks up the new secret (env changes only take
 # effect on recreate, not on a bare restart).
 (cd "$ARCANE_DIR" && docker compose -f compose.yml up -d)
-
-docker exec "$KC_CONTAINER" rm -f "$KC_CONFIG"

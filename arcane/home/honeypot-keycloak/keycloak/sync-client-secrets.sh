@@ -44,6 +44,14 @@ docker exec "$KC_CONTAINER" "$KC" config credentials \
   --config "$KC_CONFIG" --server http://127.0.0.1:8080 --realm master \
   --user "$KEYCLOAK_ADMIN_USERNAME" --password "$KEYCLOAK_ADMIN_PASSWORD"
 
+# #2194: from this point the config file holds the live admin access token
+# -- remove it on every exit path, not just success (a mid-run failure under
+# set -euo pipefail used to leave it in hp-keycloak:/tmp until restart).
+# Deliberately ahead of the #2195 pre-flight below so even its abort path
+# cleans up. Idiom per provision-account-console-scopes.sh.
+cleanup() { docker exec "$KC_CONTAINER" rm -f "$KC_CONFIG" >/dev/null 2>&1 || true; }
+trap cleanup EXIT
+
 # #2195: validate the hand-maintained map against the realm's own client
 # list BEFORE syncing anything. A listed-but-decommissioned client used to
 # fail silently at both ends at once: every run printed "SKIP <client>",
@@ -100,8 +108,6 @@ for client in "${CLIENTS[@]}"; do
   synced_containers+=("${CLIENT_CONTAINERS[$client]}")
   echo "synced $client"
 done
-
-docker exec "$KC_CONTAINER" rm -f "$KC_CONFIG"
 
 # #2195: recreate ONLY gateways whose secret actually changed hands this
 # run. The old always-full list is what let a stale entry turn "every sync
