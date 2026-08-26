@@ -1,11 +1,19 @@
-# Elasticsearch client. 8.19.3, not the newer 9.4.1: the client enforces
-# Elastic's N/N-1 major-version compatibility policy at the protocol level
-# (an Accept header naming its own major version), and the server this
-# talks to is pinned to 8.13.4 across the rest of the repo
-# (docker-compose.yml's elasticsearch service). A 9.x client sends
-# `compatible-with=9`, which the 8.13.4 server rejects outright with
-# media_type_header_exception -- confirmed live against a disposable 8.13.4
-# container, not just read from a compatibility table. See #62.
+# Elasticsearch client. 8.19.3, held through the fleet's server migration
+# 8.13.4 -> 8.19.20 -> 9.5.1 (#1408/#1410) and re-verified against the
+# server actually deployed today: 9.5.1, digest-pinned in
+# arcane/home/honeypot-init/compose.yml and honeypot-elk/compose.yml.
+# Re-verified live 2026-08-26 (#2090): full info/ping/index/search/delete
+# roundtrip from this exact client version against that server -- PASS,
+# recorded in docs/runtime-compatibility-record.md. Elastic's N/N-1
+# compatibility policy is symmetric: a server accepts clients one major
+# back but none forward, so the 9.x server accepts this client's
+# compatible-with=8 header, while the retired 8.13.4 server rejected a
+# 9.x client's compatible-with=9 outright
+# (media_type_header_exception) -- confirmed live at the time against a
+# disposable 8.13.4 container, not just read from a compatibility table.
+# Held at 8.19.3 deliberately rather than bumped to 9.x: nothing here
+# uses a 9.x-only API, and per .github/dependabot.yml the pin moves only
+# with a fresh recorded verification. See #62.
 #
 # #593: a Dependabot PR (build(deps): bump elasticsearch from 8.19.3 to
 # 9.4.1) bumped this to 9.4.1 anyway, directly contradicting this comment.

@@ -93,6 +93,8 @@ them. Issue #132 owns stable sensor/session/cursor promotion.
 |---|---|---|---|
 | Python worker base | clean worker builds; `python --version` | Python 3.12.13 at the digest above | PASS |
 | ES Python client | clean ML/LLM builds/imports | `elasticsearch==8.19.3` against ES 8.13.4 | PASS |
+| ES Python client 8.x, post-migration re-check (#2090, 2026-08-26) | live roundtrip from the exact pinned version (`pip install elasticsearch==8.19.3` in a throwaway `python:3.12-slim` container on the honeynet) against the deployed cluster: `info`, `ping`, index create, doc index, refresh, term search, index delete | `elasticsearch==8.19.3` against ES `9.5.1` (`docker.elastic.co/elasticsearch/elasticsearch:9.5.1@sha256:b70b3017fbd35310bc57e7e3f8c0ca42ca0b94df3331f747b7cdcfddae430a5a`), all steps OK | PASS |
+| ES Python client 9.x, post-migration check (#2090, 2026-08-26) | same live roundtrip method with `elasticsearch==9.5.0` (the `agent-intrusion-corpus` pin) against the same deployed cluster | `elasticsearch==9.5.0` against ES `9.5.1`; all steps OK | PASS |
 | ML CPU environment | clean `ml-worker` build; offline imports; `pip check` | torch 2.13.0+cpu, NumPy 2.4.6, pandas 3.0.5, scikit-learn 1.9.0, PyOD 3.6.2, Numba 0.66.0, llvmlite 0.48.0, Redis client 8.0.1, Requests 2.34.2 | PASS |
 | Planned CUDA pin | official `cu124` dry-run install | that index offers 2.4.0–2.6.0; no 2.13.0 wheel | **FAIL — superseded** |
 | Replacement CUDA | clean `cu126` install; network-disabled GPU tensor check | `torch==2.13.0+cu126`; CUDA 12.6; cuDNN 9.10.2; `sm_75`; capability 7.5 | PASS |
@@ -106,6 +108,18 @@ The CUDA check asserted one device, exact wheel version, capability `(7, 5)`,
 and a deterministic matrix checksum; it left no compute process. The embedding
 test used synthetic text, downloaded only during image build, and then encoded
 with `--network none` and a read-only runtime filesystem.
+
+The #2090 ES-client rows are the recorded re-verification that
+`.github/dependabot.yml`'s ignore-rule doctrine requires before any
+`elasticsearch` pin moves: the server had moved 8.13.4 → 8.19.20 → 9.5.1
+(#1408/#1410) with the client pins held, so every pairing actually in
+production was exercised against the live 9.5.1 cluster rather than
+assumed from the compatibility table. Both directions of Elastic's N/N-1
+policy showed up in this deployment's history: a 9.x client's
+`compatible-with=9` was rejected by the 8.x era's servers (#62/#593),
+while an 8.x client's `compatible-with=8` is accepted by today's 9.x one.
+The roundtrips used a throwaway `pin-verify-2090` index, deleted at the
+end; no production index was touched.
 
 ## Downstream decisions
 
