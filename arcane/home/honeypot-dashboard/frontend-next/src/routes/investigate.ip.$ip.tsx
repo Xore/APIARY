@@ -85,7 +85,7 @@ const setBlock = createServerFn({ method: 'POST' })
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
     // Admin-gated at the BFF, same posture as the legacy action (#914).
-    if (user && user.role !== 'admin') return false
+    if (!user || user.role !== 'admin') return false
     const { serviceFetch } = await import('../lib/backend.server')
     const response = await serviceFetch('/api/v1/ip-block', {
       method: 'POST',

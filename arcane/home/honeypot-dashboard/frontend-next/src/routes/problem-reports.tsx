@@ -24,7 +24,7 @@ const setStatus = createServerFn({ method: 'POST' })
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
     // Admin-gated at the BFF — the Rust tier itself has no admin check.
-    if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
+    if (!user || user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
     const { serviceFetch } = await import('../lib/backend.server')
     const response = await serviceFetch(`/api/v1/problem-reports/${encodeURIComponent(data.id)}`, {
       method: 'PATCH',
@@ -190,9 +190,9 @@ export const Route = createFileRoute('/problem-reports')({
 
 function Page() {
   const { user } = Route.useLoaderData()
-  // Same "no session (dev mode)" posture used everywhere else admin-gating
-  // shows up in this port: treat a missing session as admin so local/dev
-  // runs aren't blocked.
+  // UI-side gate only — the server functions behind these controls fail
+  // closed on both session and role (#2123); dev mode gets its fixture
+  // operator from getSessionUser's OIDC_DISABLED branch, not from here.
   const isAdmin = !user || user.role === 'admin'
   const [refreshKey, setRefreshKey] = useState(0)
 

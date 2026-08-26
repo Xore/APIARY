@@ -68,7 +68,7 @@ type SubmitResult = { ok: boolean; target?: string; error?: string }
 // passes it in, rather than this helper fetching its own — submitGithubAnalysis
 // needs that same user for its actor_subject/actor_username fields.
 async function submitAnalysisJob(user: User | null, path: string, body: Record<string, unknown>, failMessage: string): Promise<SubmitResult> {
-  if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
+  if (!user || user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
   const { serviceFetch } = await import('../lib/backend.server')
   const response = await serviceFetch(
     path,
@@ -132,7 +132,7 @@ const generatePdfReport = createServerFn({ method: 'POST' })
   .handler(async ({ data }): Promise<{ ok: boolean; id?: string; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
-    if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
+    if (!user || user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
     const { serviceFetch } = await import('../lib/backend.server')
     const response = await serviceFetch(
       `/api/v1/payloads/${encodeURIComponent(data.hash)}/report`,

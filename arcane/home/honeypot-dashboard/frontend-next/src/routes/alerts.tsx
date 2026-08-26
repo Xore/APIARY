@@ -92,6 +92,10 @@ const fetchAlerts = createServerFn({ method: 'GET' }).handler(async (): Promise<
 const acknowledgeAlert = createServerFn({ method: 'POST' })
   .inputValidator((input: { key: string; ack: boolean }) => input)
   .handler(async ({ data }): Promise<void> => {
+    // Session-checked here as defense in depth (#2123); the global
+    // function middleware rejects unauthenticated calls before this runs.
+    const { getSessionUser } = await import('../lib/auth')
+    if (!(await getSessionUser())) throw new Error('Sign in required.')
     const { serviceFetch } = await import('../lib/backend.server')
     const response = await serviceFetch(`/api/v1/alerts/${encodeURIComponent(data.key)}/ack`, {
       method: 'POST',
@@ -107,6 +111,9 @@ const acknowledgeAlert = createServerFn({ method: 'POST' })
 const acknowledgeKeys = createServerFn({ method: 'POST' })
   .inputValidator((input: { keys: string[]; ack: boolean }) => input)
   .handler(async ({ data }): Promise<number> => {
+    // Same defense-in-depth session check as acknowledgeAlert (#2123).
+    const { getSessionUser } = await import('../lib/auth')
+    if (!(await getSessionUser())) throw new Error('Sign in required.')
     const { serviceFetch } = await import('../lib/backend.server')
     let changed = 0
     for (const key of data.keys) {
@@ -126,6 +133,9 @@ const acknowledgeKeys = createServerFn({ method: 'POST' })
 // flips one key at a time, so walk the store beyond the board cap and ack
 // each open record, returning the changed count the confirm dialog reports.
 const acknowledgeAll = createServerFn({ method: 'POST' }).handler(async (): Promise<number> => {
+  // Same defense-in-depth session check as acknowledgeAlert (#2123).
+  const { getSessionUser } = await import('../lib/auth')
+  if (!(await getSessionUser())) throw new Error('Sign in required.')
   const { serviceJSON, serviceFetch } = await import('../lib/backend.server')
   const open: string[] = []
   for (let offset = 0; ; offset += 100) {

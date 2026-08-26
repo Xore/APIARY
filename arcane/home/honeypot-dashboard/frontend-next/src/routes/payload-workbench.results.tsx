@@ -184,7 +184,7 @@ const submitRun = createServerFn({ method: 'POST' })
   .handler(async ({ data }): Promise<RunResult> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
-    if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
+    if (!user || user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
     const { serviceFetch } = await import('../lib/backend.server')
     const response = await serviceFetch(
       '/api/v1/workbench/runs',
@@ -213,7 +213,7 @@ const saveRecipeFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }): Promise<{ ok: boolean; recipe?: WorkbenchRecipe; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
-    if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
+    if (!user || user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
     const { serviceFetch } = await import('../lib/backend.server')
     const response = await serviceFetch(
       '/api/v1/workbench/recipes',
@@ -230,7 +230,7 @@ const childActionFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }): Promise<RunResult> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
-    if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
+    if (!user || user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
     const { serviceFetch } = await import('../lib/backend.server')
     const response = await serviceFetch(
       `/api/v1/workbench/runs/${encodeURIComponent(data.runId)}/children/${encodeURIComponent(data.analyzerId)}/${encodeURIComponent(data.action)}`,
@@ -290,7 +290,7 @@ const abortGpuJob = createServerFn({ method: 'POST' })
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
-    if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
+    if (!user || user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
     const { serviceFetch } = await import('../lib/backend.server')
     const response = await serviceFetch(
       `/api/v1/gpu-queue/${encodeURIComponent(data.job_id)}/abort`,
