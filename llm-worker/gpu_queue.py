@@ -49,6 +49,16 @@ _RUNNING_IN_CONTAINER = os.path.exists("/.dockerenv")
 
 # Statuses: queued -> running -> (completed | failed | aborted).
 #
+# Crash ownership for the running state (#2075): a drainer that dies between
+# update_status("running") and any terminal write -- host reboot, OOM kill,
+# power loss mid-generation -- leaves the job "running" forever, because
+# only queued jobs are ever picked up again and nothing read started_at.
+# gpu-queue-drain.py's stale-running sweep therefore owns the
+# running -> terminal transition for jobs that outrun their drainer: past
+# the drain's staleness bound a job is requeued once (attempts < 2, via
+# requeue() below -- which is also what gives increment_attempts() its
+# reader), then failed with an honest error on any attempt after that.
+#
 # abort_requested is honoured in two places (#1698). gpu-queue-drain.py checks
 # it once before it starts, and ghidra-worker.py checks it again between
 # streamed chunks while the model is generating -- abandoning that stream is
@@ -239,6 +249,17 @@ def update_status(es_host: str, job_id: str, status: str, error: str | None = No
 def increment_attempts(es_host: str, job_id: str) -> None:
     _request(es_host, "POST", f"/{QUEUE_INDEX}/_update/{job_id}?refresh=true", {
         "script": {"source": "ctx._source.attempts += 1", "lang": "painless"},
+    })
+
+
+def requeue(es_host: str, job_id: str) -> None:
+    """Return an interrupted job to 'queued' after its drainer died
+    mid-run (#2075): clears started_at -- the marker the stale-running
+    sweep ages jobs by -- and deliberately leaves attempts alone, since
+    increment_attempts() at pickup is what bounds how many times a
+    chronically-dying job can be retried before the sweep fails it."""
+    _request(es_host, "POST", f"/{QUEUE_INDEX}/_update/{job_id}?refresh=true", {
+        "doc": {"status": "queued", "started_at": None},
     })
 
 

@@ -208,7 +208,7 @@ TRIAGE_TIMEOUT = int(os.environ.get("GHIDRA_TRIAGE_TIMEOUT", "300"))
 TRIAGE_OUTPUT_TOKENS = int(os.environ.get("GHIDRA_TRIAGE_OUTPUT_TOKENS", "512"))
 TRIAGE_SEED = int(os.environ.get("GHIDRA_TRIAGE_SEED", "144"))
 
-# GPU job queue (#637 follow-up): a queue drain (retry-triage.py) or another
+# GPU job queue (#637 follow-up): a queue drain (gpu-queue-drain.py) or another
 # GPU-bound consumer may already have the card's headroom claimed when a
 # request lands here. Checking first and enqueueing instead of just calling
 # Ollama and letting it queue/OOM internally means a slow triage never blocks
