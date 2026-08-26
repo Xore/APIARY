@@ -77,6 +77,15 @@ spawnChild("bff", process.execPath, [join(ROOT, ".output/server/index.mjs")], {
   // Sessions resolve from the fixture redis first; OIDC_DISABLED=1 is the
   // cookie-less admin fallback so unseeded contexts still navigate as an
   // operator. Production never sets either of these two vars together.
+  //
+  // #2183's E-SERVICE-TOKEN boot gate refuses an instance whose
+  // SERVICE_TOKEN is unset unless it says so out loud via this dev-consent
+  // var (#2247). A real token is NOT an option for the harness: proxyToRust
+  // then demands x-service-token on every /bff request (backend.server.ts),
+  // which no Playwright page presents. Hermetic tier stays unauthenticated,
+  // deliberately — keep this beside any future env gate so the next one
+  // cannot strand the matrix silently again.
+  APIARY_ALLOW_UNAUTH_DEV: "1",
   OIDC_DISABLED: "1",
   OIDC_SESSION_REDIS_URL: redis.url,
   BACKEND_URL: backend.url,
