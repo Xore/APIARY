@@ -17,7 +17,7 @@ from datetime import datetime, time as dt_time, timezone, timedelta
 
 import numpy as np
 import redis
-from elasticsearch import Elasticsearch
+from elasticsearch import Elasticsearch, NotFoundError
 from loguru import logger
 
 from models.isolation_forest import (IsoForestModel, MAX_TRAIN_SAMPLES, _get_ip, _get_port,
@@ -144,9 +144,27 @@ def ensure_index(es: Elasticsearch, index: str, mapping: dict) -> None:
         logger.info(f"Created index {index}")
 
 
-def load_checkpoint(es: Elasticsearch, index_pattern: str) -> dict:
-    """Return the complete checkpoint tuple for this index pattern:
-    {"last_timestamp": str, "seen_ids": [str, ...]}.
+def _bootstrap_checkpoint() -> dict:
+    """First-run default: start from 1 hour ago."""
+    return {
+        "last_timestamp": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+        "seen_ids": [],
+    }
+
+
+# #2236: last checkpoint read back cleanly from STATE_INDEX, per index
+# pattern. Doubles as (a) the fallback when a later read transiently fails,
+# and (b) the high-water mark that makes an actual rewind of stored state
+# visible instead of silent.
+_LAST_GOOD_CHECKPOINT: "dict[str, dict]" = {}
+
+
+def load_checkpoint(es: Elasticsearch, index_pattern: str) -> "tuple[dict | None, bool]":
+    """Return the complete checkpoint tuple for this index pattern as
+    (checkpoint, ok), mirroring fetch_new_events()'s convention -- the run
+    loop treats ok=False exactly like a failed fetch (#188).
+
+    The checkpoint is {"last_timestamp": str, "seen_ids": [str, ...]}.
 
     seen_ids are the document IDs already processed exactly AT
     last_timestamp (#168) -- a plain timestamp checkpoint with an exclusive
@@ -157,21 +175,61 @@ def load_checkpoint(es: Elasticsearch, index_pattern: str) -> dict:
     events." Pairing the timestamp with the set of IDs already handled at
     that exact boundary, and requerying inclusively (see fetch_new_events),
     fixes it without needing a full PIT/search_after implementation.
+
+    #2236: only elasticsearch's NotFoundError -- the state doc genuinely
+    not existing yet -- yields the 1-hour bootstrap default. Before this
+    fix ANY es.get failure (timeout, 5xx, connection refused mid-run) fell
+    into what its comment labelled the first-run default, so one flaky
+    read on an hours-old deployment silently rewound scoring to one hour
+    ago with no evidence left behind. Now:
+
+    - NotFoundError       -> bootstrap default, ok=True.
+    - anything else with  -> last in-memory copy, ok=True: ES flapping
+      a cached copy          degrades to score-from-last-known-position,
+                           which replays at most the reads ES can't serve
+                           rather than everything since N-1h.
+    - anything else with  -> ok=False. The loop skips this cycle and lets
+      no cache              the existing sustained-outage counter (#188)
+                           see it, rather than restarting from the
+                           bootstrap position every POLL_INTERVAL.
+
+    A clean read also rewinds-checks against the cache: ISO-8601 stamps
+    from our own producers compare correctly enough lexicographically for
+    a loud warning (both sort Y-m-dTH:M:S digit by digit; only the zone
+    suffix shape differs), so a regressed/deleted state doc is diagnosed
+    in the log instead of silently re-read.
     """
     try:
         doc = es.get(index=STATE_INDEX,
                      id=hashlib.md5(index_pattern.encode()).hexdigest())
         source = doc["_source"]
-        return {
+        checkpoint = {
             "last_timestamp": source["last_timestamp"],
             "seen_ids": source.get("seen_ids", []),
         }
-    except Exception:
-        # Default: start from 1 hour ago on first run
-        return {
-            "last_timestamp": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
-            "seen_ids": [],
-        }
+    except NotFoundError:
+        checkpoint = _bootstrap_checkpoint()
+    except Exception as exc:
+        cached = _LAST_GOOD_CHECKPOINT.get(index_pattern)
+        if cached is not None:
+            logger.warning(
+                f"{index_pattern}: checkpoint read failed ({exc}); continuing from "
+                f"in-memory copy at {cached['last_timestamp']} until the next clean read")
+            return dict(cached), True
+        logger.warning(
+            f"{index_pattern}: checkpoint read failed ({exc}) and no in-memory copy "
+            f"exists; failing this poll cycle like a fetch failure (#188) instead of "
+            f"silently restarting from one hour ago")
+        return None, False
+
+    previous = _LAST_GOOD_CHECKPOINT.get(index_pattern)
+    if previous is not None and checkpoint["last_timestamp"] < previous["last_timestamp"]:
+        logger.warning(
+            f"{index_pattern}: stored checkpoint moved backwards, "
+            f"{previous['last_timestamp']} -> {checkpoint['last_timestamp']}; possible "
+            f"state-index deletion or rewrite -- events between those positions will be rescored")
+    _LAST_GOOD_CHECKPOINT[index_pattern] = checkpoint
+    return checkpoint, True
 
 
 def save_checkpoint(es: Elasticsearch, index_pattern: str, last_timestamp: str, seen_ids: list) -> None:
@@ -527,6 +585,28 @@ def save_last_fired_slot(es: Elasticsearch, slot_id: str) -> None:
              document={"last_fired_slot_id": slot_id})
 
 
+def _persist_best_effort(label: str, fn, *args) -> bool:
+    """Run one persistence write inside the poll loop, warning instead of
+    raising on failure (#2236). Separated from run_worker()'s loop for the
+    same reason drift_rate_if_triggered() is: the loop itself can't be
+    unit-tested, and the non-fatal contract has to be.
+
+    Losing one of these writes costs, at worst: a checkpoint -> one batch
+    replayed next cycle (findings-safe -- write_anomaly's deterministic
+    id= overwrites instead of duplicating); save_buffers/session_tracker ->
+    a crash loses only what the next POLL_INTERVAL would have written
+    anyway; last_fired_slot -> one scheduled retrain slot may re-attempt
+    once after a restart. All bounded; none worth killing the loop over.
+    Returns True when the write went through.
+    """
+    try:
+        fn(*args)
+        return True
+    except Exception as exc:
+        logger.warning(f"{label} failed (non-fatal): {exc}")
+        return False
+
+
 def drift_rate_if_triggered(recent_flags, window: int, rate_threshold: float) -> "float | None":
     """Pure decision function (#65): given the rolling window of recent
     composite>=THRESHOLD flags, returns the observed rate if drift should
@@ -703,15 +783,22 @@ def run_worker() -> None:
         cycle_start = time.time()
 
         for index_pattern in SOURCE_INDICES:
-            checkpoint = load_checkpoint(es, index_pattern)
-            events, ok = fetch_new_events(
-                es, index_pattern, checkpoint["last_timestamp"],
-                exclude_ids=set(checkpoint["seen_ids"]),
-                max_total=MAX_POLL_BATCH,
-            )
+            # #2236: a failed read of the stored position must not silently
+            # become "start from one hour ago" -- treat it like the fetch
+            # failure it operationally is and let the #188 counter below
+            # see it, rather than opening a second accounting channel.
+            checkpoint, ckpt_ok = load_checkpoint(es, index_pattern)
+            events, ok = [], False
+            if ckpt_ok:
+                events, ok = fetch_new_events(
+                    es, index_pattern, checkpoint["last_timestamp"],
+                    exclude_ids=set(checkpoint["seen_ids"]),
+                    max_total=MAX_POLL_BATCH,
+                )
 
             # #188: distinguish a transient blip from a sustained outage --
-            # fetch_new_events() already retries next cycle either way (no
+            # both fetch_new_events() and load_checkpoint()'s read of the
+            # stored position (#2236) retry next cycle either way (no
             # separate backoff), this only tracks how many cycles in a row
             # have failed for THIS index pattern.
             if not ok:
@@ -743,7 +830,10 @@ def run_worker() -> None:
             # tuple, not just the last event's timestamp -- see
             # advance_checkpoint()'s own docstring for why.
             new_checkpoint = advance_checkpoint(events, checkpoint)
-            save_checkpoint(es, index_pattern, new_checkpoint["last_timestamp"], new_checkpoint["seen_ids"])
+            _persist_best_effort(
+                f"save_checkpoint({index_pattern})", save_checkpoint,
+                es, index_pattern,
+                new_checkpoint["last_timestamp"], new_checkpoint["seen_ids"])
 
             # #190: MAX_POLL_BATCH being exactly what came back means there's
             # very likely more behind it -- surface that now (a count query,
@@ -760,8 +850,10 @@ def run_worker() -> None:
         # though the fix exists. Cheap and bounded (MAX_PERSISTED_IPS), so
         # every POLL_INTERVAL is a fine cadence rather than needing a
         # separate timer or graceful-shutdown hook.
-        lstm_model.save_buffers()
-        session_tracker.save()  # #277: same rationale, for the cmd_count/rolling-window state
+        # #2236: the per-cycle in-memory persists went through the same
+        # non-fatal contract as every other write in this loop.
+        _persist_best_effort("lstm_model.save_buffers", lstm_model.save_buffers)
+        _persist_best_effort("session_tracker.save", session_tracker.save)  # #277: cmd_count/rolling-window state
 
         # Drift detection (#65): a full window of real scores, sustained
         # above DRIFT_ANOMALY_RATE, forces an early retrain regardless of
@@ -829,7 +921,9 @@ def run_worker() -> None:
                 # waiting for the next slot, same as the old code always
                 # resetting last_retrain even on a no-op cycle.
                 last_fired_slot_id = due_slot_id
-                save_last_fired_slot(es, due_slot_id)
+                _persist_best_effort(
+                    f"save_last_fired_slot({due_slot_id})", save_last_fired_slot,
+                    es, due_slot_id)
 
         elapsed = time.time() - cycle_start
         sleep_for = max(0, POLL_INTERVAL - elapsed)
