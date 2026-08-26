@@ -21,6 +21,7 @@ import { createFileRoute, Link, useBlocker, useNavigate } from '@tanstack/react-
 import { createServerFn } from '@tanstack/react-start'
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { confirmAction } from '../components/ConfirmDialog'
+import { ErrorStateBlock } from '../components/ErrorState'
 import { EsHistoryConsole, type EsStorage } from '../components/EsHistoryConsole'
 import { str } from '../components/StoreList'
 import { applyPalette, applyTheme, useThemeMode, type ThemeMode } from '../lib/prefs'
@@ -145,6 +146,12 @@ const fetchAdminData = createServerFn({ method: 'GET' }).handler(async (): Promi
     serviceJSON<{ users: Operator[] }>('/api/v1/users'),
     serviceJSON<{ templates: ReportTemplate[] }>('/api/v1/reports/templates'),
   ])
+  // #2178: a failed leg used to collapse into the defaults below and render
+  // as real configuration — maintenance off, an empty users roster — with a
+  // revision 0 that would poison the next save's If-Match baseline. An
+  // admin panel built from partly-dead stores lies worse than a missing
+  // one, so any failed leg fails whole; nothing manufactured reaches a card.
+  if (!config || !roster || !reports) return null
   return {
     revision: config?.revision ?? 0,
     presentation: config?.payload?.presentation ?? {},
@@ -2328,15 +2335,27 @@ function resultBadge(result: string) {
 function AuditLogCard({ initial }: { initial: AuditResponse | null }) {
   const [filter, setFilter] = useState('')
   const [data, setData] = useState<AuditResponse | null>(initial)
+  // #2178: the filter path collapsed a failed query into `{ events: [] }`,
+  // rendering "No audit events recorded yet." — erasing the audit trail on
+  // exactly the box that is failing. The initial path's settled-null sat on
+  // its skeleton line forever. Both are named now.
+  const [failed, setFailed] = useState(initial === null)
   const hidden = useFieldHidden('audit', 'audit')
 
-  useEffect(() => setData(initial), [initial])
+  useEffect(() => {
+    if (initial !== null) setData(initial)
+  }, [initial])
 
   const applyFilter = async (action: string) => {
     setFilter(action)
     setData(null)
+    setFailed(false)
     const result = await fetchAudit({ data: { action } })
-    setData(result ?? { events: [] })
+    if (!result) {
+      setFailed(true)
+      return
+    }
+    setData(result)
   }
 
   return (
@@ -2351,7 +2370,15 @@ function AuditLogCard({ initial }: { initial: AuditResponse | null }) {
           </option>
         ))}
       </select>
-      {data === null ? (
+      {data === null && failed ? (
+        // Retrying re-issues whatever scope is selected; resubmitting via
+        // the select is an equivalent retry.
+        <ErrorStateBlock
+          title="Audit log failed to load"
+          hint="The backend request failed — this says nothing about what has been recorded."
+          onRetry={() => void applyFilter(filter)}
+        />
+      ) : data === null ? (
         <span className="skeleton-line" aria-hidden="true" />
       ) : data.events.length === 0 ? (
         <p className="empty">No audit events recorded yet.</p>
@@ -2438,6 +2465,9 @@ export function SettingsSurface({
   const [servicesData, setServicesData] = useState<ServicesResponse | null>(null)
   const [historyData, setHistoryData] = useState<HistoryResponse | null>(null)
   const [auditData, setAuditData] = useState<AuditResponse | null>(null)
+  // #2178: fetchAdminData now fails whole instead of manufacturing defaults;
+  // the admin panes render this state rather than fabricated configuration.
+  const [adminFailed, setAdminFailed] = useState(false)
   const [reporterStatsData, setReporterStatsData] = useState<ReporterStats | null>(null)
 
   const isAdmin = !user || user.role === 'admin'
@@ -2521,7 +2551,14 @@ export function SettingsSurface({
   }, [])
   const reloadAdminConfig = useCallback(async () => {
     const fresh = await fetchAdminData()
-    if (fresh) setAdminData(fresh)
+    if (!fresh) {
+      // #2178: a failed reload used to be silently ignored; name it so the
+      // panes' failure state stays truthful.
+      setAdminFailed(true)
+      return
+    }
+    setAdminFailed(false)
+    setAdminData(fresh)
   }, [])
 
   useEffect(() => {
@@ -2538,6 +2575,9 @@ export function SettingsSurface({
     })
     admin.then((result) => {
       if (!cancelled && result) setAdminData(result)
+      // #2178: settled-null here used to leave every admin pane on its
+      // skeleton forever (or worse, on fabricated defaults) — name it.
+      else if (!cancelled) setAdminFailed(true)
     })
     services.then((result) => {
       if (!cancelled) setServicesData(result)
@@ -2572,6 +2612,16 @@ export function SettingsSurface({
       <span className="skeleton-line" aria-hidden="true" />
       <span className="skeleton-line" aria-hidden="true" />
     </div>
+  )
+
+  // #2178: shared across every admin pane — an outage must not read as
+  // fabricated defaults (maintenance off, empty roster) or ride skeletons.
+  const adminLoadFailure = (
+    <ErrorStateBlock
+      title="Administration settings failed to load"
+      hint="The backend request failed — nothing here reflects real configuration."
+      onRetry={() => void reloadAdminConfig()}
+    />
   )
 
   const profileCard = (
@@ -2787,6 +2837,8 @@ export function SettingsSurface({
                         onConflict={reloadAdminConfig}
                         onDirty={brandingDirty}
                       />
+                    ) : adminFailed ? (
+                      adminLoadFailure
                     ) : (
                       loadingCard
                     )}
@@ -2802,6 +2854,8 @@ export function SettingsSurface({
                         onConflict={reloadAdminConfig}
                         onDirty={presetsDirty}
                       />
+                    ) : adminFailed ? (
+                      adminLoadFailure
                     ) : (
                       loadingCard
                     )}
@@ -2816,6 +2870,8 @@ export function SettingsSurface({
                         onConflict={reloadAdminConfig}
                         onDirty={behaviorDirty}
                       />
+                    ) : adminFailed ? (
+                      adminLoadFailure
                     ) : (
                       loadingCard
                     )}
@@ -2831,6 +2887,8 @@ export function SettingsSurface({
                         onConflict={reloadAdminConfig}
                         onDirty={honeypotDirty}
                       />
+                    ) : adminFailed ? (
+                      adminLoadFailure
                     ) : (
                       loadingCard
                     )}
@@ -2855,6 +2913,10 @@ export function SettingsSurface({
                             ))}
                           </tbody>
                         </table>
+                      ) : adminFailed ? (
+                        // #2178: an outage used to render as an empty roster,
+                        // reading as "no one has ever used the dashboard".
+                        adminLoadFailure
                       ) : (
                         <span className="skeleton-line" aria-hidden="true" />
                       )}

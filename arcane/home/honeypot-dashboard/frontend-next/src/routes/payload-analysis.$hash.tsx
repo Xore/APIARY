@@ -66,9 +66,17 @@ type GoldenImageStatus = {
   error?: string
 }
 
-const fetchGoldenImageStatus = createServerFn({ method: 'GET' }).handler(async (): Promise<GoldenImageStatus | null> => {
-  const { serviceJSON } = await import('../lib/backend.server')
-  return serviceJSON<GoldenImageStatus>('/api/v1/sandbox/golden-image-status', { mounted: true })
+// #2178: serviceJSON collapsed a failed status read into the same null the
+// unconfigured-sandbox path produces downstream, so an outage rendered as
+// quiet "no news" from a report whose whole job is surfacing bad news.
+// Tagged now; a 404 keeps the legacy nil posture (no report is not an outage).
+type GoldenImageFetch = { state: 'status'; status: GoldenImageStatus } | { state: 'unavailable' }
+
+const fetchGoldenImageStatus = createServerFn({ method: 'GET' }).handler(async (): Promise<GoldenImageFetch> => {
+  const { serviceJSONResult } = await import('../lib/backend.server')
+  const result = await serviceJSONResult<GoldenImageStatus>('/api/v1/sandbox/golden-image-status', { mounted: true })
+  if (result.ok) return { state: 'status', status: result.body }
+  return result.status === 404 ? { state: 'status', status: { configured: false } } : { state: 'unavailable' }
 })
 
 type SubmitResult = { ok: boolean; target?: string; error?: string }
@@ -533,7 +541,18 @@ function SearchablePane({
   )
 }
 
-function OperatorActionsCard({ hash, golden, editable }: { hash: string; golden: GoldenImageStatus | null; editable: boolean }) {
+function OperatorActionsCard({
+  hash,
+  golden,
+  goldenUnavailable,
+  editable,
+}: {
+  hash: string
+  golden: GoldenImageStatus | null
+  /** #2178: the status read itself failed — distinct from "not configured". */
+  goldenUnavailable: boolean
+  editable: boolean
+}) {
   const [sandboxBusy, setSandboxBusy] = useState(false)
   const [sandboxMessage, setSandboxMessage] = useState('')
   const [ghidraBusy, setGhidraBusy] = useState(false)
@@ -614,6 +633,10 @@ function OperatorActionsCard({ hash, golden, editable }: { hash: string; golden:
                     <span className={goldenNote.cls}>{goldenNote.label}</span>{' '}
                     <span className="note">{goldenNote.detail}</span>
                   </>
+                ) : goldenUnavailable ? (
+                  <span className="badge badge--muted" title="#2178: the staleness report could not be loaded right now — this says so rather than implying no news is good news.">
+                    Golden-image status unavailable
+                  </span>
                 ) : (
                   <span className="note">Routes to the Windows or Linux sandbox automatically, based on classification.</span>
                 )}
@@ -783,7 +806,11 @@ function PayloadAnalysis() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- caller-owned loader stream
   }, [first, attempt])
   const detail = detailFetch?.state === 'detail' ? detailFetch.detail : null
-  const goldenStatus: GoldenImageStatus | null = useResolved(golden) ?? null
+  const goldenResolved = useResolved(golden)
+  // #2178: unavailable is rendered, not absorbed — the note cell says so
+  // rather than implying the sandbox fleet is simply fine.
+  const goldenUnavailable = goldenResolved?.state === 'unavailable'
+  const goldenStatus: GoldenImageStatus | null = goldenResolved?.state === 'status' ? goldenResolved.status : null
   const [tab, setTab] = useState('identity')
   const [correlation, setCorrelation] = useState<Correlation | null>(null)
   const [related, setRelated] = useState<RelatedEvents | null>(null)
@@ -1464,7 +1491,7 @@ function PayloadAnalysis() {
             </div>
           </div>
 
-          <OperatorActionsCard hash={detail.hash} golden={goldenStatus} editable={isAdmin} />
+          <OperatorActionsCard hash={detail.hash} golden={goldenStatus} goldenUnavailable={goldenUnavailable} editable={isAdmin} />
           <ExternalPublicationCard hash={detail.hash} editable={isAdmin} />
         </>
       )}
