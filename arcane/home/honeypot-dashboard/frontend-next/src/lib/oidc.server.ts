@@ -116,12 +116,33 @@ export function externalURL(): string {
   return (process.env.OIDC_EXTERNAL_URL ?? 'http://127.0.0.1:4173').replace(/\/$/, '')
 }
 
+// The one post-login redirect guard, shared by the OIDC flow (beginLogin)
+// and dev mode (/auth/login) (#2121). Two rules because either alone has a
+// hole: WHATWG parsing gives '\' '/'-powers for special schemes, so
+// '/\evil.example' rides past any '//'-prefix check yet every browser
+// resolves the Location header onto evil.example — while '\evil.example'
+// parses same-origin here even where browsers disagree, so parsing alone
+// is not enough either. Rejecting any backslash plus requiring the
+// candidate to resolve back to the external origin (the #472 "same-domain
+// only" contract) closes both, and absolute URLs like https://attacker
+// fail the origin match with them.
+export function safeReturnTo(returnTo: string): string {
+  if (!returnTo || returnTo.includes('\\')) return '/'
+  try {
+    const resolved = new URL(returnTo, externalURL())
+    if (resolved.origin !== new URL(externalURL()).origin) return '/'
+    return resolved.pathname + resolved.search + resolved.hash
+  } catch {
+    return '/'
+  }
+}
+
 export async function beginLogin(returnTo: string): Promise<{ redirect: string }> {
   const config = await oidcConfig()
   const verifier = oidc.randomPKCECodeVerifier()
   const challenge = await oidc.calculatePKCECodeChallenge(verifier)
   const state = randomBytes(24).toString('base64url')
-  const safeReturn = returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/'
+  const safeReturn = safeReturnTo(returnTo)
   await redis().set(
     PENDING_PREFIX + state,
     JSON.stringify({ verifier, returnTo: safeReturn }),
