@@ -599,6 +599,15 @@ jobs:
               python3 analysis/tests/test_procmon_cdc_store.py -v
               python3 analysis/tests/test_archive_diagnostics.py -v
 
+          # #1984: analyze.py prints attacker-controlled fields into an
+          # analyst's terminal -- the one place honeypot content reaches a
+          # human interactively. Every control character must leave
+          # print_table inert (<0xNN> spellings) while clean reports stay
+          # byte-identical; this is what stops an ESC payload in a password
+          # from repositioning or rewriting the reader's terminal.
+          - name: analyze.py terminal-escape sanitisation (#1984)
+            run: python3 analysis/tests/test_analyze.py -v
+
           - name: Agent-intrusion synthetic replay corpus (#154 phase 1)
             run: |
               # #154's own acceptance criteria: "CI verifies schemas, safe
