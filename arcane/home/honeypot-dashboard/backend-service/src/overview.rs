@@ -1,14 +1,18 @@
 //! /api/v1/overview/kpis — the overview KPI strip, mirroring the fields the
 //! Go dashboard's esOverview aggregation produces (es_aggregate.go): total
 //! events in the 48h window, last-24h count with the vs-previous-24h delta,
-//! unique source IPs. Login/payload counts join in a later slice once
-//! their query shapes are ported.
+//! unique source IPs. #1963 adds login attempts: the strip renders on every
+//! overview tab, and reading that one integer from /overview/dashboard used
+//! to force that endpoint's whole eighteen-slice aggregation on ticks that
+//! needed none of it. (Captured payloads stay on the store listing the
+//! frontend already reads; their count is a doc count over captured
+//! artifacts, not an event aggregation.)
 
 use axum::{extract::State, http::StatusCode, Json};
 use serde::Serialize;
 use serde_json::json;
 
-use crate::AppState;
+use crate::{es::logins_filter, AppState};
 
 #[derive(Serialize)]
 pub struct OverviewKpis {
@@ -24,6 +28,10 @@ pub struct OverviewKpis {
     /// page_hero.go's hourlySpark, which summed the heatmap's columns;
     /// here the same series comes straight from a date_histogram).
     pub hourly: Vec<u64>,
+    /// Login attempts in the 48h window (#1963). Same logins_filter() as
+    /// /overview/dashboard's slice was; this is where the KPI strip reads
+    /// it now.
+    pub logins: u64,
     pub ready: bool,
 }
 
@@ -41,7 +49,8 @@ pub async fn kpis(State(state): State<AppState>) -> Result<Json<OverviewKpis>, (
                 }}}
             },
             "previous24h": {"filter": {"range": {"@timestamp": {"gte": "now-48h", "lt": "now-24h"}}}},
-            "unique_ips": {"cardinality": {"field": "source.ip"}}
+            "unique_ips": {"cardinality": {"field": "source.ip"}},
+            "logins": {"filter": logins_filter()}
         }
     });
     let result = state
@@ -54,6 +63,7 @@ pub async fn kpis(State(state): State<AppState>) -> Result<Json<OverviewKpis>, (
     let last24h = result["aggregations"]["last24h"]["doc_count"].as_u64().unwrap_or(0);
     let previous24h = result["aggregations"]["previous24h"]["doc_count"].as_u64().unwrap_or(0);
     let unique_ips = result["aggregations"]["unique_ips"]["value"].as_u64().unwrap_or(0);
+    let logins = result["aggregations"]["logins"]["doc_count"].as_u64().unwrap_or(0);
     let hourly: Vec<u64> = result["aggregations"]["last24h"]["hourly"]["buckets"]
         .as_array()
         .into_iter()
@@ -75,6 +85,7 @@ pub async fn kpis(State(state): State<AppState>) -> Result<Json<OverviewKpis>, (
         change24h,
         unique_ips,
         hourly,
+        logins,
         ready: true,
     }))
 }

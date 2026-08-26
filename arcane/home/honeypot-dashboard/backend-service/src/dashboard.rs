@@ -7,12 +7,104 @@
 //! fields verified present in ES (multi_terms credential pairs,
 //! honeypot.canonical_command, honeypot.version client banners,
 //! honeypot.canonical_fingerprint, suricata alert signature/category).
+//!
+//! #1963: `?parts=` narrows the response to a comma-separated subset of
+//! the Dashboard fields, and only the aggregations backing those fields
+//! are sent to Elasticsearch at all. The overview page shows one tab at a
+//! time and refreshes it on the shared tick; without this every tick paid
+//! for all eighteen slices -- the most expensive aggregation sets on this
+//! fleet -- while the visible tab rendered a third of them. Absent or
+//! empty keeps the full payload; unknown names are ignored rather than
+//! rejected, so an older frontend asking for a slice this build no longer
+//! knows still gets everything it did before.
 
-use axum::{extract::State, http::StatusCode, Json};
-use serde::Serialize;
+use std::collections::HashSet;
+
+use axum::{
+    extract::{Query, State},
+    http::StatusCode,
+    Json,
+};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::{es::logins_filter, AppState};
+
+#[derive(Deserialize)]
+pub struct DashboardQuery {
+    /// Comma-separated subset of Dashboard field names (#1963). Absent or
+    /// empty means every slice, which is also what any caller that has not
+    /// learned about `parts` yet implicitly asks for.
+    pub parts: Option<String>,
+}
+
+/// Which of the two searches a slice's aggregation lives in.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Search {
+    Main,
+    Behavior,
+}
+
+/// Every response field mapped to where it comes from: the name the
+/// frontend uses in `?parts=`, the search that computes it, and the agg
+/// key inside that search. Kept next to the response assembly below so a
+/// new slice is one row here plus its assembly line, with no way to add
+/// one and forget the other.
+const SLICES: &[(&str, Search, &str)] = &[
+    ("sensors", Search::Main, "sensors"),
+    ("protocols", Search::Main, "protocols"),
+    ("top_ports", Search::Main, "ports"),
+    ("countries", Search::Main, "countries"),
+    ("asns", Search::Main, "asns"),
+    ("providers", Search::Main, "providers"),
+    ("top_ips", Search::Main, "top_ips"),
+    ("top_paths", Search::Main, "paths"),
+    ("logins", Search::Main, "logins"),
+    ("heatmap", Search::Main, "heatmap"),
+    ("map_points", Search::Main, "points"),
+    ("top_creds", Search::Behavior, "creds"),
+    ("top_commands", Search::Behavior, "commands"),
+    ("clients", Search::Behavior, "clients"),
+    ("fingerprints", Search::Behavior, "fingerprints"),
+    ("alerts", Search::Behavior, "alerts"),
+    ("alert_cats", Search::Behavior, "alert_cats"),
+    ("payloads", Search::Behavior, "payloads"),
+];
+
+/// Resolve `?parts=` into the aggregation keys each search may run.
+fn allowed_aggs(parts: Option<&str>) -> (HashSet<&'static str>, HashSet<&'static str>) {
+    let requested: Vec<&str> = parts
+        .map(|value| value.split(',').map(str::trim).filter(|name| !name.is_empty()).collect())
+        .unwrap_or_default();
+    let wants = |field: &str| requested.is_empty() || requested.contains(&field);
+    let mut main = HashSet::new();
+    let mut behavior = HashSet::new();
+    for &(field, search, agg) in SLICES {
+        if !wants(field) {
+            continue;
+        }
+        match search {
+            Search::Main => {
+                main.insert(agg);
+            }
+            Search::Behavior => {
+                behavior.insert(agg);
+            }
+        }
+    }
+    (main, behavior)
+}
+
+/// Strip every aggregation the caller didn't ask for, so Elasticsearch
+/// never computes a slice the response won't carry. An empty allow-set
+/// leaves `"aggs": {}` behind, which is fine: the handler skips that
+/// search entirely when nothing in it was requested.
+fn limit_aggs(mut body: Value, allowed: &HashSet<&str>) -> Value {
+    if let Some(aggs) = body.get_mut("aggs").and_then(Value::as_object_mut) {
+        aggs.retain(|name, _| allowed.contains(name.as_str()));
+    }
+    body
+}
 
 const WINDOW: &str = "now-48h";
 
@@ -160,7 +252,11 @@ fn clean(value: &str) -> String {
     value.chars().filter(|c| !c.is_control()).collect::<String>().replace("\\x00", "")
 }
 
-pub async fn dashboard(State(state): State<AppState>) -> Result<Json<Dashboard>, (StatusCode, String)> {
+pub async fn dashboard(
+    State(state): State<AppState>,
+    Query(query): Query<DashboardQuery>,
+) -> Result<Json<Dashboard>, (StatusCode, String)> {
+    let (main_allowed, behavior_allowed) = allowed_aggs(query.parts.as_deref());
     let main_body = json!({
         "size": 0,
         // #1677: self-generated probe traffic is excluded from every figure on
@@ -267,8 +363,34 @@ pub async fn dashboard(State(state): State<AppState>) -> Result<Json<Dashboard>,
         }
     });
 
-    let (main, behavior) = tokio::try_join!(state.es.search(main_body), state.es.search(behavior_body))
-        .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?;
+    // #1963: a tab asking only for its own slices skips the other search
+    // entirely -- the evidence tab never needed the geo_centroid sweep,
+    // and the live tab never needed the multi_terms credential pair.
+    // try_join! keeps them concurrent when both do run, as before.
+    let (main, behavior) = tokio::try_join!(
+        async {
+            if main_allowed.is_empty() {
+                Ok(json!({}))
+            } else {
+                state
+                    .es
+                    .search(limit_aggs(main_body, &main_allowed))
+                    .await
+                    .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))
+            }
+        },
+        async {
+            if behavior_allowed.is_empty() {
+                Ok(json!({}))
+            } else {
+                state
+                    .es
+                    .search(limit_aggs(behavior_body, &behavior_allowed))
+                    .await
+                    .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))
+            }
+        },
+    )?;
 
     // ASN rows: "AS<number> <org>", same label shape as the Go tier.
     let asns = main["aggregations"]["asns"]["buckets"]
@@ -465,5 +587,50 @@ mod tests {
             vec!["203.0.113.7".to_string(), TUNNEL_PEER_IP.to_string()]
         );
         unsafe { std::env::remove_var("HONEYPOT_SELF_IPS") };
+    }
+
+    #[test]
+    fn parts_absent_or_empty_means_every_slice() {
+        let main_count = SLICES.iter().filter(|(_, search, _)| *search == Search::Main).count();
+        let behavior_count = SLICES.iter().filter(|(_, search, _)| *search == Search::Behavior).count();
+
+        for parts in [None, Some(""), Some(", ")] {
+            let (main, behavior) = allowed_aggs(parts);
+            assert_eq!(main.len(), main_count, "parts={parts:?}");
+            assert_eq!(behavior.len(), behavior_count, "parts={parts:?}");
+        }
+    }
+
+    #[test]
+    fn parts_pick_only_their_own_search() {
+        // The overview live tab's three slices all come from the main
+        // search, so a tick parked there never runs the behavior side at
+        // all -- that is the whole point (#1963).
+        let (main, behavior) = allowed_aggs(Some("sensors,heatmap,map_points"));
+        assert_eq!(main, HashSet::from(["sensors", "heatmap", "points"]));
+        assert!(behavior.is_empty());
+    }
+
+    #[test]
+    fn parts_ignore_unknown_and_blank_names() {
+        // A frontend older than a renamed slice must not lose the rest of
+        // its payload for asking about it.
+        let (_, behavior) = allowed_aggs(Some("payloads,retired_slice,, "));
+        assert_eq!(behavior, HashSet::from(["payloads"]));
+    }
+
+    #[test]
+    fn limit_aggs_drops_unrequested_aggregations_but_keeps_the_rest_of_the_body() {
+        let (main_allowed, _) = allowed_aggs(Some("heatmap"));
+        let body = limit_aggs(json!({"size": 0, "query": {"match_all": {}}, "aggs": {"heatmap": {}, "points": {}}}), &main_allowed);
+        assert_eq!(body["size"], 0);
+        assert!(body["aggs"].get("heatmap").is_some());
+        assert!(body["aggs"].get("points").is_none());
+
+        // Nothing requested from this search: aggs ends up empty rather
+        // than absent -- harmless, because the handler skips the search.
+        let (_, behavior_allowed) = allowed_aggs(Some("heatmap"));
+        let body = limit_aggs(json!({"size": 0, "aggs": {"creds": {}}}), &behavior_allowed);
+        assert!(body["aggs"].as_object().unwrap().is_empty());
     }
 }
