@@ -153,7 +153,7 @@ const createDefinition = createServerFn({ method: 'POST' })
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
-    if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
+    if (!user || user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
     const { serviceFetch } = await import('../lib/backend.server')
     const response = await serviceFetch('/api/v1/reports/definitions', {
       method: 'POST',
@@ -169,7 +169,7 @@ const updateDefinition = createServerFn({ method: 'POST' })
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
-    if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
+    if (!user || user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
     const { serviceFetch } = await import('../lib/backend.server')
     const response = await serviceFetch(`/api/v1/reports/definitions/${encodeURIComponent(data.id)}`, {
       method: 'PUT',
@@ -185,7 +185,7 @@ const deleteDefinition = createServerFn({ method: 'POST' })
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
-    if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
+    if (!user || user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
     const { serviceFetch } = await import('../lib/backend.server')
     const response = await serviceFetch(`/api/v1/reports/definitions/${encodeURIComponent(data.id)}`, { method: 'DELETE' })
     if (response.ok) return { ok: true }
@@ -197,7 +197,7 @@ const deleteGenerated = createServerFn({ method: 'POST' })
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
-    if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
+    if (!user || user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
     const { serviceFetch } = await import('../lib/backend.server')
     const response = await serviceFetch(`/api/v1/reports/generated/${encodeURIComponent(data.id)}`, { method: 'DELETE' })
     if (response.ok) return { ok: true }
@@ -209,7 +209,7 @@ const generateDefinition = createServerFn({ method: 'POST' })
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
-    if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
+    if (!user || user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
     const { serviceFetch } = await import('../lib/backend.server')
     const response = await serviceFetch(`/api/v1/reports/definitions/${encodeURIComponent(data.id)}/generate`, {
       method: 'POST',

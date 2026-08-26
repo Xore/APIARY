@@ -70,6 +70,9 @@ const createToken = createServerFn({ method: 'POST' })
     const { serviceFetch } = await import('../lib/backend.server')
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
+    // The lookup used to feed attribution only — an unauthenticated caller
+    // could mint tokens with a blank created_by (#2123).
+    if (!user) return { ok: false, error: 'Sign in required.' }
     const response = await serviceFetch('/api/v1/canarytokens', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

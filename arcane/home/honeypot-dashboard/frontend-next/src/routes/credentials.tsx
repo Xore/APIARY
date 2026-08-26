@@ -55,7 +55,7 @@ const createCredential = createServerFn({ method: 'POST' })
     const user = await getSessionUser()
     // Admin-gated at the BFF — the Rust tier itself has no admin check; its
     // own doc comments say the BFF-side gate is the only one that exists.
-    if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
+    if (!user || user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
     const { serviceFetch } = await import('../lib/backend.server')
     const response = await serviceFetch('/api/v1/credentials', {
       method: 'POST',
@@ -71,7 +71,7 @@ const rotateCredential = createServerFn({ method: 'POST' })
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
-    if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
+    if (!user || user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
     const { serviceFetch } = await import('../lib/backend.server')
     const response = await serviceFetch(`/api/v1/credentials/${encodeURIComponent(data.id)}/rotate`, {
       method: 'POST',
@@ -87,7 +87,7 @@ const linkCredentialToken = createServerFn({ method: 'POST' })
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
-    if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
+    if (!user || user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
     const { serviceFetch } = await import('../lib/backend.server')
     const response = await serviceFetch(`/api/v1/credentials/${encodeURIComponent(data.id)}/link-token`, {
       method: 'POST',

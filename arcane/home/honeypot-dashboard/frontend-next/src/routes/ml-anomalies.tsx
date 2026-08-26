@@ -102,7 +102,7 @@ const setAck = createServerFn({ method: 'POST' })
   .handler(async ({ data }): Promise<boolean> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
-    if (user && user.role !== 'admin') return false
+    if (!user || user.role !== 'admin') return false
     const { serviceFetch } = await import('../lib/backend.server')
     const response = await serviceFetch('/api/v1/ml-anomalies/ack', {
       method: 'POST',
@@ -119,7 +119,7 @@ const setAck = createServerFn({ method: 'POST' })
 const ackAll = createServerFn({ method: 'POST' }).handler(async (): Promise<number | null> => {
   const { getSessionUser } = await import('../lib/auth')
   const user = await getSessionUser()
-  if (user && user.role !== 'admin') return null
+  if (!user || user.role !== 'admin') return null
   const { serviceFetch } = await import('../lib/backend.server')
   const response = await serviceFetch('/api/v1/ml-anomalies/ack-all', {
     method: 'POST',
