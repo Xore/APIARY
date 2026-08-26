@@ -1,18 +1,21 @@
 # agent-intrusion-worker — #154 phase 5: reads real sensor events from
 # Elasticsearch, correlates them into campaigns, scores each campaign
 # against the deterministic criticality rules, and writes provenance-rich
-# verdicts to the agent-intrusion-campaigns index that dashboard/agent_campaigns.go
-# (route /agent-campaigns) reads.
+# verdicts to the agent-intrusion-campaigns index that backend-service
+# reads (/api/v1/campaigns -- stores.rs's generic index store).
 #
 # Own stack, same reasoning as ml-worker/docker-compose.yml's own header:
 # this has to read Elasticsearch continuously, so it joins honeynet as an
 # external network -- arcane/home/honeypot-init/compose.yml's own established pattern
 # for reaching elasticsearch from a separate stack (#111).
 #
-# Deploy: deploy.yml's own "Synchronize honeypot-agent-intrusion-worker"
-# step copies this file to /opt/stacks/honeypot-agent-intrusion-worker/compose.yml
-# (Dockge's naming convention) on every push, same as every other #258/#560
-# split stack.
+# Deploy: not by deploy.yml -- since #1502's Arcane transition its
+# per-stack "Synchronize ..." copy steps are gone (deploy.yml's own
+# comment lists this stack among them), and the whole arcane/home/
+# honeypot-agent-intrusion-worker/ directory ships as an Arcane-managed,
+# directory-aware Git sync instead (arcane/manifests/home-production.json:
+# syncName honeypot-agent-intrusion-worker, syncDirectory), same as every
+# other #258/#560 split stack that migrated under arcane/home/.
 #
 # Retired (#1649 follow-through): backend-service's agent_intrusion.rs
 # (its own doc comment: "agent-intrusion-worker port (#1610 worker
@@ -34,13 +37,14 @@ name: honeypot-agent-intrusion-worker
 
 services:
   agent-intrusion-worker:
-    # Absolute path, not the relative "analysis/agent-intrusion-corpus" this
-    # started as -- every split stack's own build context is an absolute
-    # /opt/stacks/apiary/... path (see
-    # arcane/home/honeypot-payload-analysis/compose.yml) because deploy.yml copies *this
-    # file* into its own stack directory (/opt/stacks/honeypot-agent-intrusion-worker/),
-    # not this one -- a relative context would resolve against the wrong
-    # directory and fail to find the Dockerfile at all.
+    # Relative context, and that is deliberate: the corpus sources are
+    # vendored inside this stack directory (analysis/agent-intrusion-corpus/,
+    # carried along when #1502 moved the stack under arcane/home/), and the
+    # Arcane directory sync materializes that whole subtree on the host --
+    # compose resolves ./analysis/agent-intrusion-corpus exactly as
+    # committed, same shape as payload-analysis's yara sidecar
+    # (build: ./analysis/yara). There is no /opt/stacks/apiary/... shared
+    # checkout to point an absolute path at.
     build: ./analysis/agent-intrusion-corpus
     container_name: hp-agent-intrusion-worker
     restart: unless-stopped
