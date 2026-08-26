@@ -458,15 +458,18 @@ impl Es {
     /// advance dedup state for documents that actually made it into ES,
     /// matching the Python importer's own advance_state_after_bulk
     /// semantics on a partial batch failure.
+    /// `#1978`: documents are borrowed — the caller's pending batch (which
+    /// for chunked artifacts is hundreds of megabytes of base64 strings)
+    /// must not be duplicated just to serialize it once.
     pub async fn bulk_index(
         &self,
-        operations: Vec<(&str, &str, Value)>,
+        operations: Vec<(&str, &str, &Value)>,
     ) -> anyhow::Result<HashSet<String>> {
         if operations.is_empty() {
             return Ok(HashSet::new());
         }
         let all_ids: HashSet<String> = operations.iter().map(|(_, id, _)| id.to_string()).collect();
-        let ops: Vec<BulkOperation<Value>> = operations
+        let ops: Vec<BulkOperation<&Value>> = operations
             .into_iter()
             .map(|(index, id, doc)| BulkOperation::index(doc).index(index).id(id).into())
             .collect();
