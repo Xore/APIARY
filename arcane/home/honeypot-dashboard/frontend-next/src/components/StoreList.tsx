@@ -4,6 +4,7 @@
 // are the only per-page code.
 import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column, type EmptyState } from './Investigate'
+import { ErrorStateBlock } from './ErrorState'
 import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
 
@@ -75,19 +76,36 @@ export function StoreListPage<Row = StoreRow>({
   const [rows, setRows] = useState<Row[] | null>(null)
   const [total, setTotal] = useState(0)
   const [loadingMore, setLoadingMore] = useState(false)
+  // #1966: the server function collapses every failure mode to a null page,
+  // so a first fetch that resolves null while rows is still null can only be
+  // a failure -- a success always calls setRows. That used to leave the
+  // opening skeleton up forever; now it names itself and offers a retry.
+  const [failed, setFailed] = useState(false)
+  // Bumping this re-runs the first-page effect without changing anything else.
+  const [attempt, setAttempt] = useState(0)
+  const retryFirstPage = useCallback(() => {
+    setFailed(false)
+    setAttempt((n) => n + 1)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
     fetchPage({ data: { offset: 0 } }).then((page) => {
-      if (cancelled || !page) return
+      if (cancelled) return
+      if (!page) {
+        setFailed(true)
+        return
+      }
       setRows(page.rows)
       setTotal(page.total)
+    }).catch(() => {
+      if (!cancelled) setFailed(true)
     })
     return () => {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable server fn
-  }, [])
+  }, [attempt])
 
   const viewMore = useCallback(async () => {
     if (!rows || loadingMore) return
@@ -113,28 +131,38 @@ export function StoreListPage<Row = StoreRow>({
           </>
         }
       />
-      {beforeTable}
-      {emptyReplacement && rows !== null && rows.length === 0 ? (
-        emptyReplacement
-      ) : (
-        <MasterDetailTable
-          rows={rows}
-          columns={columns}
-          rowKey={rowKey}
-          total={total}
-          onViewMore={viewMore}
-          loadingMore={loadingMore}
-          inspectorTitle={inspectorTitle}
-          inspectorExtra={inspectorExtra}
-          layout={layout}
-          gridId={gridId}
-          cardHref={cardHref}
-          detailHref={detailHref}
-          cardIcon={cardIcon}
-          cardBadges={cardBadges}
-          cardDesc={cardDesc}
-          emptyState={emptyState}
+      {failed && rows === null ? (
+        <ErrorStateBlock
+          title="This list failed to load"
+          hint="The backend request failed — the service may be down or shedding load. Nothing here is cached."
+          onRetry={retryFirstPage}
         />
+      ) : (
+        <>
+          {beforeTable}
+          {emptyReplacement && rows !== null && rows.length === 0 ? (
+            emptyReplacement
+          ) : (
+            <MasterDetailTable
+              rows={rows}
+              columns={columns}
+              rowKey={rowKey}
+              total={total}
+              onViewMore={viewMore}
+              loadingMore={loadingMore}
+              inspectorTitle={inspectorTitle}
+              inspectorExtra={inspectorExtra}
+              layout={layout}
+              gridId={gridId}
+              cardHref={cardHref}
+              detailHref={detailHref}
+              cardIcon={cardIcon}
+              cardBadges={cardBadges}
+              cardDesc={cardDesc}
+              emptyState={emptyState}
+            />
+          )}
+        </>
       )}
     </>
   )
