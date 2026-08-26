@@ -130,14 +130,24 @@ func randomBannerLine() string {
 	n := 3 + int(randByte()%28)
 	buf := make([]byte, n)
 	for i := range buf {
-		// Printable ASCII, excluding '-' as the very first character so a
-		// short line can never accidentally start with "SSH-".
 		buf[i] = 0x20 + randByte()%(0x7e-0x20+1)
 	}
-	if buf[0] == '-' {
-		buf[0] = 'x'
-	}
+	stripAccidentalSSHPrefix(buf)
 	return string(buf)
+}
+
+// stripAccidentalSSHPrefix rewrites the '-' of any line that came out
+// spelling "SSH-", the exact prefix RFC4253 §4.2 lets a client treat as a
+// real identification-string offer (#2190). Every printable byte is an
+// ordinary draw anywhere in the line -- 'S', 'S', 'H', '-' included -- so
+// scrubbing only position 0 left bytes 1-3 free to complete the prefix
+// anyway (~1 line in 81M); a compliant client receiving one could stop
+// treating the stream as preamble and attempt version negotiation against
+// garbage, ending the pre-auth hold early.
+func stripAccidentalSSHPrefix(buf []byte) {
+	if len(buf) >= 4 && buf[0] == 'S' && buf[1] == 'S' && buf[2] == 'H' && buf[3] == '-' {
+		buf[3] = '_'
+	}
 }
 
 func randByte() byte {
