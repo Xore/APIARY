@@ -11,9 +11,18 @@ The fixture is upstream's real getRealRemote(), which is also what
 router_patch.py's own OLD constant matches, so there is no third copy of
 that text to drift.
 
+ProxiedPortAgreement additionally guards the second-door port across
+stacks (#2192): besides this patch module it is spelled in compose.yml,
+vps/docker-compose.yml and the enrichment worker's sensors.rs, and no
+language can import from the others -- so each spelling is read where it
+lives and required to equal the patch constant, instead of a keep-in-step
+comment being trusted to hold them together (#2187 documents how that
+trust worked out).
+
 Usage: hellpot/tests/test_xff_trust_patch.py
 """
 import importlib.util
+import re
 import subprocess
 import tempfile
 import unittest
@@ -22,6 +31,32 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROUTER_PATCH = HERE.parent / "router_patch.py"
 XFF_PATCH = HERE.parent / "xff_trust_patch.py"
+
+# The other homes of the port (#2192). xff_trust_patch.py's
+# HELLPOT_PROXIED_PORT is the reference spelling -- it is what HellPot
+# actually binds -- and these are read as text because none of them can
+# import it: the publishing stack's compose, the VPS bridge table, and the
+# worker's Rust constant.
+HELLPOT_COMPOSE = HERE.parents[1] / "compose.yml"
+VPS_COMPOSE = HERE.parents[4] / "vps" / "docker-compose.yml"
+WORKER_SENSORS = (
+    HERE.parents[4]
+    / "arcane/home/honeypot-dashboard/backend-service/src/ip_enrichment/sensors.rs"
+)
+
+
+def vps_service_block(service):
+    """One top-level service block out of vps/docker-compose.yml."""
+    lines = VPS_COMPOSE.read_text().splitlines()
+    starts = [i for i, l in enumerate(lines) if l.startswith("  %s:" % service)]
+    if len(starts) != 1:
+        raise AssertionError("expected one %s service, found %d" % (service, len(starts)))
+    end = next(
+        (i for i in range(starts[0] + 1, len(lines)) if re.match(r"^  \S", lines[i])),
+        len(lines),
+    )
+    return "\n".join(lines[starts[0]:end])
+
 
 # Upstream yunginnanet/HellPot internal/http/router.go at the pinned ref:
 # every region the two patches touch, copied from the real file rather than
@@ -144,7 +179,11 @@ class XffTrustPatch(unittest.TestCase):
         # attacker.
         result = self.apply_both()
         self.assertIn("Traefik-only second listener", result)
-        self.assertIn('proxied := config.HTTPBind + ":" + "8090"', result)
+        # Spelled through the patch module: this assertion was itself a
+        # fifth copy of the port until #2192, so a change there would have
+        # "passed" while guarding the old value.
+        port = load(XFF_PATCH, self.target).HELLPOT_PROXIED_PORT
+        self.assertIn('proxied := config.HTTPBind + ":" + "{}"'.format(port), result)
         self.assertIn("go func() {", result)
         # The raw listener still runs, and still returns.
         self.assertIn("return srv.ListenAndServe(l)", result)
@@ -207,6 +246,75 @@ class XffTrustPatch(unittest.TestCase):
         self.target.write_text(UPSTREAM.replace("slog := log.With().", "slog := log.Output()."))
         with self.assertRaises(SystemExit):
             load(XFF_PATCH, self.target).main()
+
+
+class ProxiedPortAgreement(unittest.TestCase):
+    """#2192: the second-door port exists as text in several stacks at once,
+    and nothing can import across them. Each copy's comment used to say
+    "Kept in step with" the others, which works until it doesn't -- #2187 is
+    what that looks like two years later -- and the failure here is silent:
+    patch says X while compose publishes Y means a TCP reset on every
+    proxied request; patch says X while the worker says Z means every
+    proxied event skips adjudication and files under the wrong source. So
+    agreement is asserted against HELLPOT_PROXIED_PORT, which is the one
+    spelling something actually listens on."""
+
+    def setUp(self):
+        # Same loading dance as XffTrustPatch, minus the fixture: only the
+        # module's constants are needed below, and main() -- the sole reader
+        # of TARGET -- never runs.
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.module = load(XFF_PATCH, Path(self.dir.name) / "router.go")
+
+    def test_the_publish_line_matches_the_listener(self):
+        port = self.module.HELLPOT_PROXIED_PORT
+        published = re.findall(
+            r"^\s*-\s*\$\{HP_BIND:[^}]*\}:(\d+):(\d+)\s*$",
+            HELLPOT_COMPOSE.read_text(),
+            re.M,
+        )
+        # Both halves: socat dials the host side while HellPot binds the
+        # container side, so drift in either direction of the mapping resets
+        # every proxied request.
+        self.assertIn(
+            (port, port),
+            published,
+            "compose.yml publishes {} but the patched listener is on {}".format(
+                published, port
+            ),
+        )
+
+    def test_the_socat_dial_matches_the_listener(self):
+        port = self.module.HELLPOT_PROXIED_PORT
+        dialed = re.findall(
+            r"TCP4:[0-9.]+:(\d+)", vps_service_block("socat-hp-hellpot")
+        )
+        # The VPS half of the same door: a dial at any other port is
+        # connection refused on the Traefik-only path, invisible to the raw
+        # path and to the healthcheck, which both stay green.
+        self.assertEqual(
+            [port],
+            dialed,
+            "socat-hp-hellpot dials {} but the patched listener is on {}".format(
+                dialed, port
+            ),
+        )
+
+    def test_the_worker_adjudicates_on_the_same_port(self):
+        port = self.module.HELLPOT_PROXIED_PORT
+        declared = re.search(
+            r'const HELLPOT_PROXIED_PORT:\s*&str\s*=\s*"(\d+)";',
+            WORKER_SENSORS.read_text(),
+        )
+        self.assertIsNotNone(declared, "HELLPOT_PROXIED_PORT missing from sensors.rs")
+        self.assertEqual(
+            port,
+            declared.group(1),
+            "sensors.rs adjudicates DST_PORT {} but the patched listener is on {}".format(
+                declared.group(1), port
+            ),
+        )
 
 
 if __name__ == "__main__":
