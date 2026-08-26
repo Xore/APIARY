@@ -1,6 +1,16 @@
-"""Tests for archive_diagnostics.py (#528)."""
+"""Tests for archive_diagnostics.py (#528).
 
+RehydrateCliAndSummaryTest (#1988) additionally covers main()'s command
+surface: rehydrate failures print the same {"path", "error"} JSON lines
+archive does and exit non-zero instead of dumping tracebacks, and the
+archive summary counts archived work separately from skips.
+"""
+
+import contextlib
 import importlib.util
+import io
+import json
+import os
 import sys
 import tempfile
 import time
@@ -285,6 +295,100 @@ class FindArchivableTest(unittest.TestCase):
             (tmp / "job1.json").write_text("{}")
             found = list(MODULE.find_archivable(tmp, after_days=0))
             self.assertEqual(found, [])
+
+
+class RehydrateCliAndSummaryTest(unittest.TestCase):
+    """#1988: main()'s error convention and summary semantics."""
+
+    def _run_main(self, argv):
+        """Drive MODULE.main() with argv/stdout swapped out; return its
+        exit code and everything it printed (stdout, as JSON lines)."""
+        out = io.StringIO()
+        old_argv = sys.argv
+        sys.argv = ["archive_diagnostics.py"] + argv
+        try:
+            with contextlib.redirect_stdout(out):
+                rc = MODULE.main()
+        finally:
+            sys.argv = old_argv
+        return rc, [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
+
+    def test_rehydrate_truncated_stub_errors_as_json_with_nonzero_exit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            zip_path = tmp / "job1.diagnostics.zip"
+            _make_diagnostics_zip(zip_path, procmon_csv=None,
+                                  extra_files={"procmon.csv.dedup-manifest-ref": b"{not json"})
+            rc, lines = self._run_main(
+                ["rehydrate", "--store-dir", str(tmp / "store"), "--zip", str(zip_path)])
+            self.assertEqual(rc, 1)
+            self.assertEqual(len(lines), 1)
+            self.assertEqual(lines[0]["path"], str(zip_path))
+            self.assertIn("error", lines[0])
+
+    def test_rehydrate_stub_missing_keys_errors_cleanly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            zip_path = tmp / "job2.diagnostics.zip"
+            stub = json.dumps({"manifest_id": "no-such-manifest",
+                               "original_sha256": "0" * 64}).encode()
+            _make_diagnostics_zip(zip_path, procmon_csv=None,
+                                  extra_files={"procmon.csv.dedup-manifest-ref": stub})
+            rc, lines = self._run_main(
+                ["rehydrate", "--store-dir", str(tmp / "store"), "--zip", str(zip_path)])
+            # Manifest absent from the (empty) store: the store's KeyError
+            # surfaces through the same JSON shape, not a traceback.
+            self.assertEqual(rc, 1)
+            self.assertEqual(lines[0]["path"], str(zip_path))
+            self.assertIn("no-such-manifest", lines[0]["error"])
+
+    def test_rehydrate_success_still_exits_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            zip_path = tmp / "job3.diagnostics.zip"
+            original = b"row\r\n" * 50
+            _make_diagnostics_zip(zip_path, procmon_csv=original)
+            store = STORE_MODULE.RowChunkStore(tmp / "store")
+            MODULE.archive_one(zip_path, store)
+            rc, lines = self._run_main(
+                ["rehydrate", "--store-dir", str(tmp / "store"), "--zip", str(zip_path)])
+            self.assertEqual(rc, 0)
+            self.assertEqual(lines[0]["rehydrated_bytes"], len(original))
+
+    def test_archive_summary_splits_archived_from_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            results = tmp / "results"
+            results.mkdir()
+            archived_zip = results / "jobA.diagnostics.zip"
+            no_member_zip = results / "jobB.diagnostics.zip"
+            already_archived_zip = results / "jobC.diagnostics.zip"
+            # Realistically sized (~300 rows): the JSON stub is a few
+            # hundred bytes on its own, so a two-row member would make the
+            # "archived" zip *grow* and bytes_reclaimed go negative --
+            # asserting on a broken fixture rather than real behaviour.
+            archived_csv = b"\r\n".join(
+                b'"9:14:00 AM","proc.exe",1000,"ReadFile",'
+                b'"C:\\Windows\\System32\\x","SUCCESS","Detail"'
+                for _ in range(300))
+            _make_diagnostics_zip(archived_zip, procmon_csv=archived_csv)  # present: archived
+            _make_diagnostics_zip(no_member_zip, procmon_csv=None)    # no member: skipped
+            _make_diagnostics_zip(already_archived_zip, procmon_csv=None,
+                                  extra_files={"procmon.csv.dedup-manifest-ref": b"{}"})
+            old = time.time() - 40 * 86400   # past the --after-days cutoff
+            for p in (archived_zip, no_member_zip, already_archived_zip):
+                os.utime(p, (old, old))
+
+            rc, lines = self._run_main(
+                ["archive", "--results-dir", str(results),
+                 "--store-dir", str(tmp / "store"), "--after-days", "30"])
+            self.assertEqual(rc, 0)
+            summary = lines[-1]
+            self.assertTrue(summary["summary"])
+            self.assertEqual(summary["zips_processed"], 1)
+            self.assertEqual(summary["zips_skipped"], 2)
+            self.assertEqual(summary["zips_errored"], 0)
+            self.assertGreater(summary["bytes_reclaimed"], 0)
 
 
 if __name__ == "__main__":
