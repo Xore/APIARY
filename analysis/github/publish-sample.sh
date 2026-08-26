@@ -31,14 +31,18 @@ git reset --quiet --hard "origin/$(git rev-parse --abbrev-ref HEAD)"
 
 # Upstream only scans Added/Renamed files (--diff-filter=AR); a re-push of an
 # already-known hash is wasted quota and produces no new run.
+#
+# #2082: hand the disposition back as exit 3 -- NOT zero. Zero reads as
+# "published" in process-github-requests.sh's log line and drops the request
+# without any record, so the analyst's click vanished: no result record (this
+# branch never wrote one), no .pending either (.pending happens only after a
+# real push, and collect-results.py's pickup is .pending globbing -- there is
+# no later pass that could "pick this up"). The caller turns exit 3 into an
+# already_known result record via its own write_result(), which also makes
+# re-submits short-circuit at its already-resolved gate.
 if [[ -f iocs/hashes.csv ]] && grep -qi "^$sha256," iocs/hashes.csv; then
   echo "already known upstream, skipping push: $sha256"
-  # Still worth a result record so the analyst sees why nothing happened,
-  # but this script's job is the push; process-github-requests.sh treats a
-  # zero exit here as "handled", so hand that disposition back on stdout
-  # for its log line and let a later collect-results.py pass, if the hash
-  # already has an upstream run, pick the result up normally.
-  exit 0
+  exit 3
 fi
 
 # 1. Classify, matching upstream's samples/{ELF,PE,Scripts,Docs,UNKNOWN}/ layout.
