@@ -42,6 +42,7 @@ function Page() {
   return (
     <StoreListPage
       fetchPage={fetchPage}
+      pageSize={25}
       label="Evidence"
       title="GitHub analysis"
       subtitle="Multi-engine verdicts for captured payloads published to the private analysis repository."

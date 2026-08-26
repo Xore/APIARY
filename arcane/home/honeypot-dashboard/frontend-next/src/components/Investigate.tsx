@@ -87,26 +87,103 @@ export function EmptyStateBlock({ state }: { state: EmptyState }) {
 
 const DEFAULT_EMPTY: EmptyState = { title: 'Nothing to show here' }
 
-export function SkeletonRows({ count, cols }: { count: number; cols: number }) {
+// Shape-true table ghosts (#1967): one bar per real column instead of a
+// single colSpan blob, so swap-in moves text rather than geometry. `wide`
+// marks the columns that carry long values (a hash, a path, an IP) and get
+// long bars; everything else gets a short one; `stub` marks row-actions
+// cells and gets a small square. Widths are deterministic per column --
+// theme.css's tr.hp-skel-batch nth-child variation is row-scoped so it
+// cannot express column shape, and it would silently change meaning under
+// any future virtualization that reorders or windows rows -- which is also
+// why these ghosts don't carry the class at all.
+export function SkeletonRows({
+  count,
+  cols,
+  wide = [],
+  stub = [],
+}: {
+  count: number
+  cols: number
+  wide?: number[]
+  stub?: number[]
+}) {
   return (
     <>
       {Array.from({ length: count }, (_, i) => (
-        <tr key={`skel-${i}`} className="hp-skel-batch" aria-hidden="true">
-          <td colSpan={cols}>
-            <span className="skeleton-line" />
-          </td>
+        <tr key={`skel-${i}`} aria-hidden="true">
+          {Array.from({ length: cols }, (_, col) => {
+            const width = stub.includes(col) ? 24 : wide.includes(col) ? '72%' : '42%'
+            return (
+              <td key={col}>
+                <span className="skeleton-line" style={{ display: 'block', width }} />
+              </td>
+            )
+          })}
         </tr>
       ))}
     </>
   )
 }
 
-export function SkeletonCards({ count }: { count: number }) {
+// Shape-true card ghosts (#1967): the five parts a hydrated .project-card
+// carries (icon slot, title, badge pill, two-line desc, meta row), each as
+// its real shell with a skeleton fill inside -- so mid-load the grid reads
+// as the result cards it becomes, and swap-in shifts text instead of box
+// positions. Every part after `count` is opt-in so a surface mirrors only
+// what its loaded cards actually render; theme.css still styles all five
+// shells whether populated or ghosted.
+export function SkeletonCards({
+  count,
+  icon = false,
+  badges = false,
+  desc = false,
+  metaCols = 0,
+}: {
+  count: number
+  icon?: boolean
+  badges?: boolean
+  desc?: boolean
+  /** How many spans the hydrated card's meta row renders. */
+  metaCols?: number
+}) {
   return (
     <>
       {Array.from({ length: count }, (_, i) => (
         <div key={`skel-${i}`} className="project-card" aria-hidden="true">
-          <span className="skeleton-line" />
+          <div className="project-card__header">
+            {icon ? (
+              // The real slot paints the accent chip; the ghost fills only
+              // where the svg will land.
+              <span className="project-card__icon">
+                <span className="skeleton-line" style={{ display: 'block', width: 16, height: 16 }} />
+              </span>
+            ) : null}
+            <span className="project-card__title">
+              <span className="skeleton-line" style={{ display: 'block', width: '68%' }} />
+            </span>
+            {badges ? (
+              <div className="project-card__badges">
+                <span className="skeleton-line" style={{ display: 'block', width: 56, height: 18, borderRadius: 999 }} />
+              </div>
+            ) : null}
+          </div>
+          {desc ? (
+            <p className="project-card__desc">
+              {/* Two lines: __desc clamps at two, so the ghost claims the
+                  same vertical budget the loaded text will. */}
+              <span className="skeleton-line" style={{ display: 'block', width: '88%' }} />
+              <span className="skeleton-line" style={{ display: 'block', width: '55%' }} />
+            </p>
+          ) : null}
+          {metaCols > 0 ? (
+            <div className="project-card__meta">
+              {Array.from({ length: metaCols }, (_, j) => (
+                <span key={j}>
+                  <span className="skeleton-line" style={{ display: 'block', width: 64 }} />
+                </span>
+              ))}
+            </div>
+          ) : null}
         </div>
       ))}
     </>
@@ -130,6 +207,7 @@ export function MasterDetailTable<Row>({
   cardBadges,
   cardDesc,
   emptyState,
+  pageSize,
 }: {
   rows: Row[] | null
   columns: Column<Row>[]
@@ -183,6 +261,12 @@ export function MasterDetailTable<Row>({
   cardIcon?: (row: Row) => React.ReactNode
   cardBadges?: (row: Row) => React.ReactNode
   cardDesc?: (row: Row) => React.ReactNode
+  /** The surface's fetch page size, when known (#1967): the first-load
+   * ghosts preview one full page instead of a hardcoded dozen. A short
+   * result set still swaps most ghosts for its empty state — that is the
+   * honest outcome, not a defect; the count exists so a full page doesn't
+   * materialize into more rows than were ever promised. */
+  pageSize?: number
 }) {
   const [selected, setSelected] = useState<number | null>(null)
   const paneRef = useRef<HTMLDivElement>(null)
@@ -195,6 +279,27 @@ export function MasterDetailTable<Row>({
   const bodyColumnCount = listColumns.length + (anyDetailHref ? 1 : 0)
   const primaryColumn = columns.find((column) => column.primary) ?? listColumns[0]
   const metaColumns = listColumns.filter((column) => column !== primaryColumn)
+  // The skeleton ghosts (#1967) mirror this exact shape while rows load:
+  // cards get their five parts, tables one bar per real column with the
+  // primary column long and the actions cell stubbed.
+  const wideIndex = listColumns.indexOf(primaryColumn)
+  const ghosts = (count: number) =>
+    layout === 'cards' ? (
+      <SkeletonCards
+        count={count}
+        icon={Boolean(cardIcon)}
+        badges={Boolean(cardBadges)}
+        desc={Boolean(cardDesc)}
+        metaCols={metaColumns.length}
+      />
+    ) : (
+      <SkeletonRows
+        count={count}
+        cols={bodyColumnCount}
+        wide={wideIndex >= 0 ? [wideIndex] : []}
+        stub={anyDetailHref ? [bodyColumnCount - 1] : []}
+      />
+    )
 
   useEffect(() => {
     if (selected === null) return
@@ -220,7 +325,7 @@ export function MasterDetailTable<Row>({
           {layout === 'cards' ? (
             <div className="project-grid" id={gridId}>
               {rows === null ? (
-                <SkeletonCards count={12} />
+                ghosts(pageSize ?? 12)
               ) : rows.length === 0 ? (
                 <div className="wide">
                   <EmptyStateBlock state={emptyState ?? DEFAULT_EMPTY} />
@@ -258,7 +363,7 @@ export function MasterDetailTable<Row>({
                   )
                 })
               )}
-              {loadingMore ? <SkeletonCards count={4} /> : null}
+              {loadingMore ? ghosts(4) : null}
             </div>
           ) : (
             <table className="recent data-table data-table--responsive">
@@ -279,7 +384,7 @@ export function MasterDetailTable<Row>({
               </thead>
               <tbody>
                 {rows === null ? (
-                  <SkeletonRows count={12} cols={bodyColumnCount} />
+                  ghosts(pageSize ?? 12)
                 ) : rows.length === 0 ? (
                   <tr className="hp-table-state">
                     <td colSpan={bodyColumnCount}>
@@ -317,7 +422,7 @@ export function MasterDetailTable<Row>({
                     )
                   })
                 )}
-                {loadingMore ? <SkeletonRows count={5} cols={bodyColumnCount} /> : null}
+                {loadingMore ? ghosts(5) : null}
               </tbody>
             </table>
           )}

@@ -32,6 +32,7 @@ export function StoreListPage<Row = StoreRow>({
   cardDesc,
   emptyReplacement,
   emptyState,
+  pageSize,
 }: {
   fetchPage: (input: { data: { offset: number } }) => Promise<StorePage<Row> | null>
   label: string
@@ -64,6 +65,10 @@ export function StoreListPage<Row = StoreRow>({
   emptyReplacement?: React.ReactNode
   /** The in-table "nothing matched" sentence. See MasterDetailTable. */
   emptyState?: EmptyState
+  /** The fetch page size, forwarded so the first-load ghosts preview one
+   * full page instead of a hardcoded dozen (#1967). All store surfaces
+   * page at 25 today, so callers pass what their server fn requests. */
+  pageSize?: number
   /** `layout="cards"` only: the icon, badge row and description the legacy
    * result cards carried. See MasterDetailTable's own doc comment. */
   /** Adds an "Open full details" action to the row inspector. See
@@ -160,6 +165,7 @@ export function StoreListPage<Row = StoreRow>({
               cardBadges={cardBadges}
               cardDesc={cardDesc}
               emptyState={emptyState}
+              pageSize={pageSize}
             />
           )}
         </>

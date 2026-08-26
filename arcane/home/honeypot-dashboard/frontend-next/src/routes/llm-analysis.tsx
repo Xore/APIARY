@@ -164,6 +164,7 @@ function Page() {
       <SemanticSearchCard />
       <StoreListPage
       fetchPage={fetchPage}
+      pageSize={25}
       label="Monitor"
       title="LLM analysis"
       subtitle="Model-annotated sessions, payloads and reports — every judgment here is AI-guessed and unverified until a human confirms it."

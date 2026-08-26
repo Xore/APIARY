@@ -210,6 +210,7 @@ function Page() {
     <StoreListPage
       key={refreshKey}
       fetchPage={fetchPage}
+      pageSize={25}
       label="Operations"
       title="Problem reports"
       subtitle="Operator-submitted UI problem reports, with the action trail and request context captured at submit time."

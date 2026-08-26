@@ -50,6 +50,7 @@ function Page() {
   return (
     <StoreListPage
       fetchPage={fetchPage}
+      pageSize={25}
       label="Evidence"
       title="RevDeck"
       subtitle="Reverse-engineering deck runs — deep binary walkthroughs produced by the ghidra worker's drain queue."

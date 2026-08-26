@@ -142,6 +142,7 @@ function Page() {
   return (
     <StoreListPage
       fetchPage={fetchPage}
+      pageSize={25}
       label="Monitor"
       title="Auth-failure events"
       subtitle="Failed logins against Keycloak, across every gateway-fronted app and the dashboard's own native OIDC — redacted, never tokens/codes/cookies."
