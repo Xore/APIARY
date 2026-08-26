@@ -15,13 +15,21 @@
 //! mounts, no local state -- runs as the `attacker-identity` WORKER_LOOPS
 //! entry on the existing (stateless-by-design) backend-worker service.
 
+use axum::{
+    extract::{Path, Query, State},
+    http::StatusCode,
+    Json,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::time::Duration;
 
-use crate::AppState;
+use crate::{
+    events::{row_from_hit, EventsPage},
+    AppState,
+};
 
 const ATTACKERS_INDEX: &str = "attackers-v1";
 const MAX_EXISTING_LOAD: u32 = 20_000;
@@ -29,6 +37,13 @@ const TUNNEL_PEER_IP: &str = "10.8.0.1";
 const MERGE_THRESHOLD: usize = 2;
 const EVENT_PAGE_SIZE: u64 = 10_000;
 const EVENT_MAX_PAGES: u32 = 50;
+/// #2045: how many event pointers an entity keeps. "A few hundred" per the
+/// proposal — enough to page real evidence behind even the noisiest
+/// identity, small enough that absorb/merge stays cheap. Every pointer
+/// comes from `honeypot-v2-*` (the only family fetch_recent_events reads),
+/// so the evidence endpoint can resolve ids with one ids query over that
+/// pattern and the persisted shape needs no per-entry index name.
+const EVIDENCE_CAP: usize = 500;
 
 fn to_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
@@ -54,6 +69,10 @@ fn env_duration(name: &str, default: Duration) -> Duration {
 // --------------------------------------------------------------------
 
 struct CorrEvent {
+    /// The event document's own `_id` (#2045): the evidence pointer the
+    /// entity persists so its page can serve exact raw events instead of
+    /// recomputing a bounded correlation per drill-in click.
+    id: String,
     when: Option<chrono::DateTime<chrono::Utc>>,
     src_ip: String,
     sensor: String,
@@ -151,6 +170,7 @@ async fn fetch_recent_events(
             .filter_map(|v| v.as_str().map(String::from))
             .collect();
         out.push(CorrEvent {
+            id: hit["_id"].as_str().unwrap_or("").to_string(),
             when,
             src_ip: ip,
             sensor: src["event"]["sensor"].as_str().unwrap_or("").to_string(),
@@ -206,11 +226,29 @@ fn shared_signal_count(a: &SignalSet, b: &SignalSet) -> usize {
     n
 }
 
+/// One persisted evidence pointer (#2045): the event's document id plus the
+/// timestamp that justifies its place in the newest-first vector — merges
+/// need both, because two workings being folded together union their
+/// pointers and then keep only the EVIDENCE_CAP most recent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct EvidencePointer {
+    id: String,
+    /// Millis since epoch. Missing parse (an event with no @timestamp) sorts
+    /// oldest and is the first dropped by the cap; harmless.
+    #[serde(default)]
+    ts: i64,
+}
+
 struct IpObservation {
     ip: String,
     signals: SignalSet,
     sensors: HashSet<String>,
+    sensor_counts: BTreeMap<String, i64>,
     techniques: HashSet<String>,
+    /// This IP's in-window events, oldest→newest, capped: once EVIDENCE_CAP
+    /// pointers sit here the earliest is dropped as each newer one arrives
+    /// (hits are fetched @timestamp-asc, so VecDeque front = least recent).
+    evidence: VecDeque<EvidencePointer>,
     first: Option<chrono::DateTime<chrono::Utc>>,
     last: Option<chrono::DateTime<chrono::Utc>>,
     events: i64,
@@ -223,7 +261,9 @@ fn build_ip_observations(events: &[CorrEvent]) -> HashMap<String, IpObservation>
             ip: e.src_ip.clone(),
             signals: SignalSet::default(),
             sensors: HashSet::new(),
+            sensor_counts: BTreeMap::new(),
             techniques: HashSet::new(),
+            evidence: VecDeque::with_capacity(EVIDENCE_CAP),
             first: None,
             last: None,
             events: 0,
@@ -231,6 +271,14 @@ fn build_ip_observations(events: &[CorrEvent]) -> HashMap<String, IpObservation>
         o.events += 1;
         if !e.sensor.is_empty() {
             o.sensors.insert(e.sensor.clone());
+            *o.sensor_counts.entry(e.sensor.clone()).or_default() += 1;
+        }
+        if !e.id.is_empty() {
+            if o.evidence.len() == EVIDENCE_CAP {
+                o.evidence.pop_front();
+            }
+            let ts = e.when.map(|d| d.timestamp_millis()).unwrap_or(0);
+            o.evidence.push_back(EvidencePointer { id: e.id.clone(), ts });
         }
         for t in &e.techniques {
             if !t.is_empty() {
@@ -307,6 +355,17 @@ struct Entity {
     verdicts_pending: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     techniques: Vec<String>,
+    /// #2045: newest-first raw-evidence pointers (capped at EVIDENCE_CAP) —
+    /// what GET /api/v1/attackers/{id}/events pages through. Absent on
+    /// pre-#2045 docs (the serde default); a touched doc self-migrates the
+    /// same way the #2040 counter does.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    evidence: Vec<EvidencePointer>,
+    /// #2045: per-sensor event counts over this cycle's evidence window,
+    /// refreshed on touch exactly like `window_events` (never accumulated —
+    /// that was #2040's inflation). Empty until first touched post-#2045.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    sensor_counts: BTreeMap<String, i64>,
 }
 
 /// The in-memory working form `resolve_identities` merges into --
@@ -322,7 +381,12 @@ struct Working {
     ip_set: HashSet<String>,
     signals: SignalSet,
     sensor_set: HashSet<String>,
+    sensor_counts: BTreeMap<String, i64>,
     technique_set: HashSet<String>,
+    /// Union of every observation's evidence pointers this cycle plus
+    /// whatever the entity persisted before — deduped and pruned to the
+    /// EVIDENCE_CAP newest in finalize_entity.
+    evidence: Vec<EvidencePointer>,
     /// The persisted lifetime counter as loaded (#2040 semantics -- see
     /// Entity::events); finalize advances it by the cycle delta.
     events_base: i64,
@@ -358,7 +422,9 @@ fn working_from_entity(e: &Entity) -> Working {
             creds: e.credentials.iter().cloned().collect(),
         },
         sensor_set: e.sensors.iter().cloned().collect(),
+        sensor_counts: e.sensor_counts.clone(),
         technique_set: e.techniques.iter().cloned().collect(),
+        evidence: e.evidence.clone(),
         events_base: e.events,
         cycle_events: 0,
         prev_window_events: e.window_events,
@@ -375,7 +441,9 @@ fn new_working(id: String) -> Working {
         ip_set: HashSet::new(),
         signals: SignalSet::default(),
         sensor_set: HashSet::new(),
+        sensor_counts: BTreeMap::new(),
         technique_set: HashSet::new(),
+        evidence: Vec::new(),
         events_base: 0,
         cycle_events: 0,
         prev_window_events: None,
@@ -398,6 +466,14 @@ fn absorb(e: &mut Working, o: &IpObservation) {
     e.signals.merge(&o.signals);
     e.sensor_set.extend(o.sensors.iter().cloned());
     e.technique_set.extend(o.techniques.iter().cloned());
+    // Evidence: union now, dedupe+prune in finalize_entity -- consecutive
+    // cycles overlap on the sliding window, so the same event id can arrive
+    // more than once across cycles; id-keyed dedup is what keeps that from
+    // ever becoming an #2040-style double count.
+    e.evidence.extend(o.evidence.iter().cloned());
+    for (sensor, count) in &o.sensor_counts {
+        *e.sensor_counts.entry(sensor.clone()).or_default() += count;
+    }
     e.cycle_events += o.events;
     if let Some(first) = o.first {
         let first_str = fmt_rfc3339_whole_seconds(first);
@@ -423,8 +499,14 @@ fn merge_entity_into(a: &mut Working, b: &Working) {
     a.signals.merge(&b.signals);
     a.sensor_set.extend(b.sensor_set.iter().cloned());
     a.technique_set.extend(b.technique_set.iter().cloned());
+    a.evidence.extend(b.evidence.iter().cloned());
     a.events_base += b.events_base;
     a.cycle_events += b.cycle_events;
+    // The merged window now spans both members' sensors (#2045), mirroring
+    // how prev_window_events sums below.
+    for (sensor, count) in &b.sensor_counts {
+        *a.sensor_counts.entry(sensor.clone()).or_default() += count;
+    }
     // Either side missing the #2040 marker makes the merged doc legacy:
     // finalize will restart its counter once from this cycle's window.
     a.prev_window_events = match (a.prev_window_events, b.prev_window_events) {
@@ -592,6 +674,16 @@ fn finalize_entity(e: &Working) -> Entity {
         None => e.cycle_events,
         Some(prev) => e.events_base + (e.cycle_events - prev).max(0),
     };
+    // #2045 evidence: consecutive cycles overlap on the sliding window, so
+    // the same event id can be absorbed more than once -- dedup by id is
+    // what keeps that from becoming an #2040-style double count. Then keep
+    // the EVIDENCE_CAP newest, persisted newest-first so the entity page
+    // pages most-recent-first without a sort step; the ts/id ordering key
+    // keeps two runs over identical input byte-identical.
+    let mut evidence = e.evidence.clone();
+    evidence.sort_by(|a, b| (b.ts, &b.id).cmp(&(a.ts, &a.id)));
+    evidence.dedup_by(|a, b| a.id == b.id);
+    evidence.truncate(EVIDENCE_CAP);
     Entity {
         id: e.id.clone(),
         ips: sorted(&e.ip_set),
@@ -607,6 +699,8 @@ fn finalize_entity(e: &Working) -> Entity {
         verdicts: e.verdicts.clone(),
         verdicts_pending: e.verdicts_pending,
         techniques: sorted(&e.technique_set),
+        evidence,
+        sensor_counts: e.sensor_counts.clone(),
     }
 }
 
@@ -990,6 +1084,76 @@ pub async fn attacker_identity_loop(state: AppState) {
 }
 
 // --------------------------------------------------------------------
+// GET /api/v1/attackers/{id}/events (#2045)
+// --------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct EntityEventsQuery {
+    #[serde(default)]
+    pub offset: u64,
+    #[serde(default = "default_page_size")]
+    pub size: u64,
+}
+
+fn default_page_size() -> u64 {
+    25
+}
+
+/// The raw evidence behind an entity: resolves the persisted evidence
+/// pointers (the newest-first event document ids the identity cycle
+/// records on `attackers-v1`) against `honeypot-v2-*` -- the same family
+/// fetch_recent_events read when it recorded them -- and pages them in
+/// @timestamp order. Events that have aged out of retention simply stop
+/// resolving, so `total` reflects what is actually retrievable right now
+/// rather than a pointer count that over-promises 404-shaped rows.
+pub async fn entity_events(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<EntityEventsQuery>,
+) -> Result<Json<EventsPage>, (StatusCode, String)> {
+    let doc = state
+        .es
+        .get_doc(ATTACKERS_INDEX, &id)
+        .await
+        .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?;
+    let Some(doc) = doc else {
+        return Err((StatusCode::NOT_FOUND, format!("no such attacker entity: {id}")));
+    };
+    let entity: Entity =
+        serde_json::from_value(doc).map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+
+    let mut page =
+        EventsPage { total: 0, offset: q.offset, rows: Vec::new(), fingerprint_ips: None };
+    if entity.evidence.is_empty() {
+        return Ok(Json(page)); // pre-#2045 doc or a quiet window: no evidence recorded yet
+    }
+
+    // Cap the page at the pointer cap itself (500): bigger requests are
+    // meaningless here, and from+size stays tiny across the wildcard.
+    let size = q.size.clamp(1, EVIDENCE_CAP as u64);
+    let result = state
+        .es
+        .search(json!({
+            "size": size,
+            "from": q.offset,
+            "track_total_hits": true,
+            "query": {"ids": {"values":
+                entity.evidence.iter().map(|pointer| pointer.id.clone()).collect::<Vec<_>>()
+            }},
+            "sort": [{"@timestamp": {"order": "desc"}}]
+        }))
+        .await
+        .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?;
+
+    page.total = result["hits"]["total"]["value"].as_u64().unwrap_or(0);
+    page.rows = result["hits"]["hits"]
+        .as_array()
+        .map(|hits| hits.iter().map(row_from_hit).collect())
+        .unwrap_or_default();
+    Ok(Json(page))
+}
+
+// --------------------------------------------------------------------
 // tests -- ported from identity_test.go
 // --------------------------------------------------------------------
 
@@ -1054,9 +1218,11 @@ mod tests {
             signals,
             sensors: HashSet::new(),
             techniques: HashSet::new(),
+            sensor_counts: BTreeMap::new(),
             first: Some(chrono::Utc::now()),
             last: Some(chrono::Utc::now()),
             events: 1,
+            evidence: VecDeque::new(),
         }
     }
 

@@ -386,6 +386,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/campaigns", get(stores::campaigns))
         .route("/api/v1/clusters", get(stores::clusters))
         .route("/api/v1/attackers", get(stores::attackers))
+        // #2045: the raw evidence behind an attacker entity.
+        .route("/api/v1/attackers/{id}/events", get(attacker_identity::entity_events))
         .route("/api/v1/recordings", get(stores::recordings))
         .route("/api/v1/recordings/{shasum}", get(replay::replay))
         // #1711: the two download forms the Go tier served at
