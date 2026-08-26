@@ -614,6 +614,24 @@ const ADAPTER_VISIBLE: &[&str] = &[
     "ghidra-ollama-1",
     "ghidra-statictools-1",
     "ghidra-revdeck-1",
+    // Post-#1418 sensor stacks, allowlisted in #2089 -- kept identical to
+    // services-adapter's ALLOWED_CONTAINERS.
+    "hp-beelzebub",
+    "hp-hellpot",
+    "hp-wordpot",
+    "hp-mailoney",
+    "hp-galah",
+    "hp-galah-llm-broker",
+    "hp-sentrypeer",
+    "hp-elasticpot",
+    "hp-endlessh",
+    "hp-honeyfs-implant",
+    "hp-zeek-proxy",
+    "hp-canarytokens-redis",
+    "hp-canarytokens-frontend",
+    "hp-canarytokens-switchboard",
+    "hp-canarytokens-http-router",
+    "hp-canarytokens-adapter",
 ];
 
 // --- Response shapes -------------------------------------------------------

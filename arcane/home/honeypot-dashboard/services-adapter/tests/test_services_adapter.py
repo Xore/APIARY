@@ -97,6 +97,32 @@ class ContainerStatusTests(unittest.TestCase):
             services = adapter.list_services()
         self.assertEqual({s["name"] for s in services}, adapter.ALLOWED_CONTAINERS)
 
+    def test_post_1418_sensor_stacks_are_observable(self):
+        # #2089: nine sensor stacks shipped after this allowlist was first
+        # written and none of them ever joined it -- /v1/services reported
+        # nothing for them at all, and "nothing" reads as healthy from the
+        # pane rather than as "not observable". Pinned so the next new stack
+        # does not repeat the drift silently.
+        for name in (
+            "hp-beelzebub",
+            "hp-hellpot",
+            "hp-wordpot",
+            "hp-mailoney",
+            "hp-galah",
+            "hp-galah-llm-broker",
+            "hp-sentrypeer",
+            "hp-elasticpot",
+            "hp-endlessh",
+            "hp-honeyfs-implant",
+            "hp-zeek-proxy",
+            "hp-canarytokens-redis",
+            "hp-canarytokens-frontend",
+            "hp-canarytokens-switchboard",
+            "hp-canarytokens-http-router",
+            "hp-canarytokens-adapter",
+        ):
+            self.assertIn(name, adapter.ALLOWED_CONTAINERS)
+
 
 class LogDemuxTests(unittest.TestCase):
     def test_demuxes_stdout_and_stderr_frames_in_order(self):

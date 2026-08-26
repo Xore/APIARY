@@ -76,6 +76,27 @@ ALLOWED_CONTAINERS = frozenset({
     "ghidra-ollama-1",
     "ghidra-statictools-1",
     "ghidra-revdeck-1",
+    # Post-#1418 sensor stacks (#2089): these shipped after the allowlist was
+    # first written and none of them ever joined it, so /v1/services reported
+    # nothing at all for them -- which reads as healthy rather than as
+    # "not observable".
+    "hp-beelzebub",
+    "hp-hellpot",
+    "hp-wordpot",
+    "hp-mailoney",
+    "hp-galah",
+    "hp-galah-llm-broker",
+    "hp-sentrypeer",
+    "hp-elasticpot",
+    "hp-endlessh",
+    "hp-honeyfs-implant",
+    "hp-zeek-proxy",
+    # The canarytokens switchboard is five containers acting as one sensor.
+    "hp-canarytokens-redis",
+    "hp-canarytokens-frontend",
+    "hp-canarytokens-switchboard",
+    "hp-canarytokens-http-router",
+    "hp-canarytokens-adapter",
 })
 
 ALLOWED_ACTIONS = frozenset({"start", "stop", "restart"})
