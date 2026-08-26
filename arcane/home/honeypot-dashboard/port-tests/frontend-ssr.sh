@@ -15,20 +15,37 @@ for page in "" events ips campaigns clusters attackers kill-chain commands senso
 done
 check_http "404 page" 404 "$FE_URL/this-does-not-exist"
 
-SHA=$(curl -s "$BE_URL/api/v1/recordings?size=1" | python3 -c 'import sys,json; print(json.load(sys.stdin)["rows"][0]["shasum"])')
+# Detail pages, keys discovered live. #2184: an empty discovery must not
+# silently drop a family's coverage — each conditional site either runs its
+# check or emits a counted SKIP line.
+SHA=$(discover_key "$BE_URL/api/v1/recordings?size=1" 'd["rows"][0]["shasum"] if d.get("rows") else ""')
 check_http "tty replay page" 200 "$FE_URL/tty-replay/$SHA"
-IP=$(curl -s "$BE_URL/api/v1/events?size=1" | python3 -c 'import sys,json; print(json.load(sys.stdin)["rows"][0]["src_ip"])')
+IP=$(discover_key "$BE_URL/api/v1/events?size=1" 'd["rows"][0]["src_ip"] if d.get("rows") else ""')
 # -L: the router 307-normalizes some encodings (IPv6 sources) first.
 check "investigate page" bash -c \
   "[ \"\$(curl -sL -o /dev/null -w '%{http_code}' --max-time 90 '$FE_URL/investigate/ip/$IP')\" = 200 ]"
-SID=$(curl -s "$BE_URL/api/v1/events?kind=command&size=1" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["rows"][0]["session"] if d["rows"] else "")')
-[ -n "$SID" ] && check_http "session page" 200 "$FE_URL/sessions/$SID"
-HASH=$(curl -s "$BE_URL/api/v1/payloads?size=1" | python3 -c 'import sys,json; print(json.load(sys.stdin)["rows"][0]["Hash"])')
+SID=$(discover_key "$BE_URL/api/v1/events?kind=command&size=1" 'd["rows"][0]["session"] if d.get("rows") else ""')
+if [ -n "$SID" ]; then
+  check_http "session page" 200 "$FE_URL/sessions/$SID"
+else
+  skip "session page" "command sessions"
+fi
+HASH=$(discover_key "$BE_URL/api/v1/payloads?size=1" 'd["rows"][0]["Hash"] if d.get("rows") else ""')
 check_http "payload analysis page" 200 "$FE_URL/payload-analysis/$HASH"
-JOB=$(curl -s "$ES_URL/sandbox-export-artifacts-v1/_search?size=1" | python3 -c 'import sys,json; h=json.load(sys.stdin)["hits"]["hits"]; print(h[0]["_source"]["job"] if h else "")')
-[ -n "$JOB" ] && check_http "sandbox detail page" 200 "$FE_URL/sandbox/$JOB"
-GSHA=$(curl -s "$ES_URL/ghidra-report-artifacts-v1/_search?size=1" | python3 -c 'import sys,json; h=json.load(sys.stdin)["hits"]["hits"]; print(h[0]["_source"]["sha256"] if h else "")')
-[ -n "$GSHA" ] && check_http "ghidra detail page" 200 "$FE_URL/ghidra/$GSHA"
+JOB=$(discover_key "$ES_URL/sandbox-export-artifacts-v1/_search?size=1" \
+  'd["hits"]["hits"][0]["_source"]["job"] if d.get("hits", {}).get("hits") else ""')
+if [ -n "$JOB" ]; then
+  check_http "sandbox detail page" 200 "$FE_URL/sandbox/$JOB"
+else
+  skip "sandbox detail page" "sandbox export artifacts"
+fi
+GSHA=$(discover_key "$ES_URL/ghidra-report-artifacts-v1/_search?size=1" \
+  'd["hits"]["hits"][0]["_source"]["sha256"] if d.get("hits", {}).get("hits") else ""')
+if [ -n "$GSHA" ]; then
+  check_http "ghidra detail page" 200 "$FE_URL/ghidra/$GSHA"
+else
+  skip "ghidra detail page" "ghidra report artifacts"
+fi
 
 # #2127: the cape/github-analysis/revdeck detail routes used to
 # server-render their parent LIST — a component-ful layout swallowed its
@@ -37,18 +54,38 @@ GSHA=$(curl -s "$ES_URL/ghidra-report-artifacts-v1/_search?size=1" | python3 -c 
 # checked for the detail page's header copy, which server-renders
 # unconditionally (the data cards hydrate client-side via useResolved,
 # so only the headers are guaranteed in SSR output).
-CAPE_SHA=$(curl -s "$ES_URL/cape-analysis-v1/_search?size=1" | python3 -c 'import sys,json; h=json.load(sys.stdin)["hits"]["hits"]; print(h[0]["_source"].get("file",{}).get("hash",{}).get("sha256","") if h else "")')
-[ -n "$CAPE_SHA" ] && check_http "cape detail page" 200 "$FE_URL/cape/$CAPE_SHA"
-[ -n "$CAPE_SHA" ] && check "cape deep link renders the run page" bash -c "curl -s --max-time 90 '$FE_URL/cape/$CAPE_SHA' | grep -q 'debugger-instrumented'"
-GHANA_SHA=$(curl -s "$ES_URL/github-analysis-v1/_search?size=1" | python3 -c 'import sys,json; h=json.load(sys.stdin)["hits"]["hits"]; print(h[0]["_source"].get("file",{}).get("hash",{}).get("sha256","") if h else "")')
-[ -n "$GHANA_SHA" ] && check_http "github-analysis detail page" 200 "$FE_URL/github-analysis/$GHANA_SHA"
-[ -n "$GHANA_SHA" ] && check "github-analysis deep link renders the run page" bash -c "curl -s --max-time 90 '$FE_URL/github-analysis/$GHANA_SHA' | grep -q 'multi-engine scanner verdict'"
-REVDECK_SHA=$(curl -s "$ES_URL/revdeck-analysis-v1/_search?size=1" | python3 -c 'import sys,json
-h=json.load(sys.stdin)["hits"]["hits"]
-s=h[0]["_source"] if h else {}
-print(s.get("revdeck",{}).get("sha256") or s.get("sha256") or "")')
-[ -n "$REVDECK_SHA" ] && check_http "revdeck detail page" 200 "$FE_URL/revdeck/$REVDECK_SHA"
-[ -n "$REVDECK_SHA" ] && check "revdeck deep link renders the run page" bash -c "curl -s --max-time 90 '$FE_URL/revdeck/$REVDECK_SHA' | grep -q 'reverse-engineering deck walkthrough'"
+# #2184: these were also the families most at risk of vacuous skips — an
+# absent key would silently elide exactly the routes born broken in #2127.
+CAPE_SHA=$(discover_key "$ES_URL/cape-analysis-v1/_search?size=1" \
+  'd["hits"]["hits"][0]["_source"].get("file", {}).get("hash", {}).get("sha256", "") if d.get("hits", {}).get("hits") else ""')
+if [ -n "$CAPE_SHA" ]; then
+  check_http "cape detail page" 200 "$FE_URL/cape/$CAPE_SHA"
+  check "cape deep link renders the run page" bash -c \
+    "curl -s --max-time 90 '$FE_URL/cape/$CAPE_SHA' | grep -q 'debugger-instrumented'"
+else
+  skip "cape detail page" "cape analyses"
+  skip "cape deep link renders the run page" "cape analyses"
+fi
+GHANA_SHA=$(discover_key "$ES_URL/github-analysis-v1/_search?size=1" \
+  'd["hits"]["hits"][0]["_source"].get("file", {}).get("hash", {}).get("sha256", "") if d.get("hits", {}).get("hits") else ""')
+if [ -n "$GHANA_SHA" ]; then
+  check_http "github-analysis detail page" 200 "$FE_URL/github-analysis/$GHANA_SHA"
+  check "github-analysis deep link renders the run page" bash -c \
+    "curl -s --max-time 90 '$FE_URL/github-analysis/$GHANA_SHA' | grep -q 'multi-engine scanner verdict'"
+else
+  skip "github-analysis detail page" "github analyses"
+  skip "github-analysis deep link renders the run page" "github analyses"
+fi
+REVDECK_SHA=$(discover_key "$ES_URL/revdeck-analysis-v1/_search?size=1" \
+  '(h[0]["_source"].get("revdeck", {}).get("sha256") or h[0]["_source"].get("sha256") or "") if (h := d.get("hits", {}).get("hits")) else ""')
+if [ -n "$REVDECK_SHA" ]; then
+  check_http "revdeck detail page" 200 "$FE_URL/revdeck/$REVDECK_SHA"
+  check "revdeck deep link renders the run page" bash -c \
+    "curl -s --max-time 90 '$FE_URL/revdeck/$REVDECK_SHA' | grep -q 'reverse-engineering deck walkthrough'"
+else
+  skip "revdeck detail page" "revdeck analyses"
+  skip "revdeck deep link renders the run page" "revdeck analyses"
+fi
 
 # BFF proxies.
 check_http "chart proxy" 200 "$FE_URL/api/chart/os-distribution"

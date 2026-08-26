@@ -32,7 +32,9 @@ its own when touching `lib/backend.server.ts`, `lib/backpressure.server.ts`,
 `server/cluster.mjs`, or any of the byte-streaming `api/*` proxy routes.
 
 Env knobs: `ES_URL`, `BE_PORT` (18081), `FE_PORT` (14173),
-`SKIP_FE_BUILD=1` to reuse the last vite build.
+`SKIP_FE_BUILD=1` to reuse the last vite build,
+`PORT_TESTS_MAX_SKIPS=N` to fail a run whose skip count exceeds N
+(default: skips stay exit-zero — but they are always counted and listed).
 
 ## Conventions for new tests
 
@@ -40,6 +42,12 @@ Env knobs: `ES_URL`, `BE_PORT` (18081), `FE_PORT` (14173),
   so scripts exit non-zero on any failure.
 - Discover test keys (session ids, hashes, report ids) from live data —
   never hardcode ids that rot.
+- Gate detail checks on discovered keys explicitly (#2184): if found, run
+  the check; if not, call `skip <label> <kind>` so the summary names the
+  unexercised family instead of shrinking silently behind
+  `[ -n "$VAR" ] &&`. Use `discover_key` for the discovery itself — it
+  tolerates empty/broken ES responses without stack-tracing between PASS
+  lines.
 - Anything that writes must use reserved/test values (TEST-NET-3 IPs) and
   restore state before exiting.
 - Never pipe a test command through `| tail` without capturing the exit
