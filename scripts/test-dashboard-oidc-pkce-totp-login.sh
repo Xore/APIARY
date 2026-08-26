@@ -310,7 +310,7 @@ dashboard_login_flow() {
     if grep -q 'name="password-new"' <<<"${page}"; then
       printf 'update-password\n' >>"${flow_dir}/chain-${username}.log"
       form_action=$(echo "${page}" | grep -o 'action="[^"]*"' | head -1 | sed 's/action="//;s/"$//' | sed 's/&amp;/\&/g')
-      page=$(curl -sL -c "${jar}" -b "${jar}" --data-urlencode "password-new=${NEW_PERM_PASSWORD}" --data-urlencode "password-confirm=${NEW_PERM_PASSWORD}" "${form_action}")
+      page=$(curl -sL -c "${jar}" -b "${jar}" --data-urlencode "password-new=${new_perm_password}" --data-urlencode "password-confirm=${new_perm_password}" "${form_action}")
       continue
     fi
     # Anything else means we're stuck off the expected execution graph.
@@ -355,7 +355,7 @@ state_dir="$(mktemp -d)"
   OIDC_ISSUER_URL="http://127.0.0.1:${kc_port}/realms/apiary" \
   OIDC_EXTERNAL_URL="${app_base}" \
   OIDC_CLIENT_ID="apiary-dashboard" \
-  OIDC_CLIENT_SECRET="${client_secret}" \
+  OIDC_CLIENT_SECRET=${client_secret} \
   OIDC_SESSION_REDIS_URL="redis://127.0.0.1:${redis_port}/0" \
   node .output/server/index.mjs > "${state_dir}/bff.log" 2>&1 &
   echo $! > "${state_dir}/bff.pid"
@@ -374,8 +374,9 @@ if [ "${bff_up}" -ne 1 ]; then
   cat "${state_dir}/bff.log" >&2
   exit 1
 fi
-NEW_PERM_PASSWORD="FirstLoginPerm2!Extra"
-export NEW_PERM_PASSWORD
+# Test-only permanent password handed to temporary-credential accounts by
+# dashboard_login_flow (not exported: nothing downstream reads it via env).
+new_perm_password='FirstLoginPerm2!Extra'
 
 # ═══ Golden path: pkce-totp-test (role 'user') ═════════════════════════════
 # First-ever login owes CONFIGURE_TOTP; the flow completes enrollment and the

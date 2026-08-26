@@ -275,7 +275,7 @@ state_dir="$(mktemp -d)"
   OIDC_ISSUER_URL="http://127.0.0.1:${kc_port}/realms/apiary" \
   OIDC_EXTERNAL_URL="${app_base}" \
   OIDC_CLIENT_ID="apiary-dashboard" \
-  OIDC_CLIENT_SECRET="${client_secret}" \
+  OIDC_CLIENT_SECRET=${client_secret} \
   OIDC_SESSION_REDIS_URL="redis://127.0.0.1:${redis_port}/0" \
   node .output/server/index.mjs > "${state_dir}/bff.log" 2>&1 &
   echo $! > "${state_dir}/bff.pid"
