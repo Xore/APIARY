@@ -9,11 +9,12 @@ retry loop at 100% CPU instead of blocking on the socket, wedging the whole
 single-threaded reactor -- the listen socket stays open and accepting, but
 nothing is ever serviced or logged again.
 
-Confirmed as the live trigger for #111: 193.46.255.112 fuzzed the COTP
-TPDU-type byte across ~40 near-simultaneous connections, settled on one
-value, and has re-hit conpot with malformed/incomplete frames roughly
-hourly since -- including reconnecting in the same minute conpot was
-manually restarted, i.e. polling for the hang to return.
+Confirmed as the live trigger for #111: the COTP-fuzzing client documented
+there fuzzed the COTP TPDU-type byte across ~40 near-simultaneous
+connections, settled on one value, and has re-hit conpot with
+malformed/incomplete frames roughly hourly since -- including reconnecting
+in the same minute conpot was manually restarted, i.e. polling for the hang
+to return.
 
 This patch replaces both MSG_WAITALL reads with a manual accumulate-until-n
 loop using plain sock.recv(), which gevent already handles correctly via
