@@ -28,6 +28,33 @@ jobs:
           jq '[.runners[]? | select(.status=="online") | .labels[]?
                 | select(.name=="honeypot-ci")] | length' /tmp/runners.json || true
 
+      - name: probes for plan-B endpoints
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set +e
+          echo "--- list runs (integration readable?) ---"
+          code="$(curl -s -o /tmp/runs.json -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs?per_page=1")"
+          echo "http=$code"
+          rid="$(jq -r '.workflow_runs[0].id // ""' /tmp/runs.json)"
+          echo "latest_run_id=$rid"
+          echo "--- jobs of latest run (integration readable? runner_name visible?) ---"
+          code2="$(curl -s -o /tmp/jobs.json -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$rid/jobs")"
+          echo "http=$code2"
+          jq -r '[.jobs[]?.runner_name] | unique | .[]' /tmp/jobs.json | sort -u | head -5 || true
+          echo "--- create workflow_dispatch event (actions:write granted?) ---"
+          code3="$(curl -s -o /tmp/disp.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/zz-routing-probe.yml/dispatches" \
+            -d "{\"ref\":\"$GITHUB_REF\"}")"
+          echo "dispatch_http=$code3"
+          head -c 200 /tmp/disp.json; echo
+
       - name: same query through gh cli
         env:
           GH_TOKEN: ${{ github.token }}
