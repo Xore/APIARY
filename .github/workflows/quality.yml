@@ -568,6 +568,17 @@ jobs:
           - name: Threat-intel CIDR refresh script (#244)
             run: analysis/threat-intel/tests/test_refresh_threat_cidrs.sh
 
+          # #2024: the Keycloak dump is the backup's most sensitive artifact,
+          # and under dash a `pg_dump | gzip` pipeline can only surface
+          # gzip's exit status -- the exact silent-truncation class behind
+          # #1413's post-mortem. Drives the real script with docker stubbed
+          # on PATH: a mid-stream dead pg_dump (and an rc-lost footer-less
+          # one) must keep no artifact, a healthy dump must be byte-exact
+          # through gzip, and a missing container must stay quiet. Runs in
+          # plain sh, because dash compliance IS the bug.
+          - name: backup-honeypot keycloak dump discipline (#2024)
+            run: sh analysis/tests/test_backup_honeypot.sh
+
           - name: honeypot-30d ILM policy rolls over and deletes (#585)
             run: analysis/tests/test_honeypot_ilm_rollover.sh
 
