@@ -1,7 +1,8 @@
 # Settings Operations Runbook
 
-Operational companion to `settings-user-configuration-roadmap.md` (Milestone
-G). Covers the settings stores owned by the dashboard:
+Covers the settings stores owned by the dashboard (the planning document
+this page once accompanied was removed as era-stale in #1662; these are
+the live stores):
 
 | Store | Location | Contents |
 | --- | --- | --- |

@@ -14,9 +14,10 @@ The one-paragraph version:
 > ingest-time enrichment worker joins tunnel-attributed events to real
 > attacker IPs via the portbridge connection log; Filebeat tails the result
 > into Elasticsearch, where one shared ingest pipeline normalizes and
-> enriches every document. Six worker loops then aggregate raw events into
+> enriches every document. Seven worker loops then aggregate raw events into
 > durable entities (attackers, clusters, campaigns, anomaly scores,
-> inventory). The dashboard reads only Elasticsearch for history, keeps a
+> inventory, derived overview/map/attack rollups). The dashboard reads only
+> Elasticsearch for history, keeps a
 > small bounded live tail for suricata/portbridge, and serves it all through
 > server functions with a 15s shared cache.
 
@@ -130,7 +131,7 @@ No processor makes a network call — GeoIP reads local `.mmdb` files.
 |---|---|---|
 | ES query (PIT + `search_after`) | every historical view | 30s timeout, ≤10k window, `_shard_doc` tie-breaker |
 | Shared serviceJSON cache | all frontend server functions | 15s TTL in-process + Redis shared layer; ConcurrencyLimiter backpressure |
-| SSE `/api/v1/live` | live tail pages | watermark = last `@timestamp`; known same-ms boundary gap tracked in #1979 |
+| SSE `/api/v1/live` | live tail pages | resume carries the full sort tuple, so same-millisecond rows are neither dropped nor duplicated (#1979 closed by #2039) |
 | Bounded local-file tail | suricata + portbridge only | the two index families without a `honeypot-v2-*` mirror (#1103 Cat. 2); every other sensor is ES-only by design |
 
 ---
@@ -152,6 +153,7 @@ flowchart TB
     intr["agent-intrusion<br/>every 300s · 10d window"]
     zpa["zeek-proxy-attribution<br/>every 120s · time-bounded join"]
     alert["alert-notifier<br/>webhook fan-out, cooldown-gated"]
+    roll["dashboard-rollups<br/>every ROLLUP_RUN_INTERVAL_SECS (default 300s)"]
   end
 
   subgraph out["Durable entities"]
@@ -160,6 +162,7 @@ flowchart TB
     clu[("attacker-clusters-v1")]
     aic[("agent-intrusion-campaigns")]
     st[("dashboard-alert-state-v1")]
+    rll[("overview-rollup-v1<br/>geo-rollup-v1<br/>attack-rollup-v1")]
   end
 
   raw --> ident --> atk
@@ -167,6 +170,7 @@ flowchart TB
   raw --> intr --> aic
   raw --> zpa
   atk & cmp & aic --> alert --> st
+  raw --> roll --> rll
 ```
 
 | Loop | Reads | Writes | Cadence | Notes |
@@ -175,13 +179,15 @@ flowchart TB
 | correlator | raw events | `campaigns-v1`, `attacker-clusters-v1` | every cycle | pure aggregations, recomputed from scratch; groups ≥2 IPs sharing fingerprint/hash/ASN/provider-class |
 | agent-intrusion | raw events | `agent-intrusion-campaigns` | 300s | deterministic criticality rules escalate; LLM never gates escalation; deterministic sha256 campaign_id ⇒ upsert not duplicate |
 | zeek-proxy-attribution | zeek flows + portbridge log | flow docs | 120s | attributes relayed flows to attackers; ordering rule above applies here too |
+| dashboard-rollups (#2046) | raw event indices (default pattern) | `overview-rollup-v1`, `geo-rollup-v1`, `attack-rollup-v1` | `ROLLUP_RUN_INTERVAL_SECS`, default 300s | pure-ES derived overviews the dashboard's overview/map/kill-chain reads slice cheaply instead of re-aggregating raw events per request |
 | ml-worker / llm-worker | payloads + events | anomaly scores + `dashboard-ml-anomaly-ack-v1` | continuous | scoring semantics tracked in #1969/#1974 |
 | payload-inventory | disk stores | `dashboard-payload-inventory-v1/-bytes-v1` | periodic scan | HEAD-exists fast path (#1221) |
 | es-results-importer | root-owned result spools | `*-analysis-v1` | continuous | read-only mirror, shard-partitionable |
 
-Operational caveat filed as #1980: these Go loops have no panic recovery —
-one malformed document kills the container until Docker restarts it, and
-sleep-inside-the-loop means the cadence drifts after every crash.
+Operational caveat from #1980 — worker panics used to kill the whole
+container on one malformed document — is fixed: every runloop carries a
+`recover()` boundary now, so a poison document fails that iteration, not
+the loop's uptime.
 
 ---
 
@@ -247,6 +253,7 @@ index has exactly one writer):
 | `mailoney-mail-v1` | Filebeat | sessions/mail views |
 | `reporter-metrics-v1` | reporter | settings stats pane |
 | `dashboard-alert-state-v1` | alert-notifier loop | alerts page |
+| `overview-rollup-v1`, `geo-rollup-v1`, `attack-rollup-v1` | dashboard-rollups loop (#2046) | overview/map/kill-chain dashboard reads |
 | anomaly score + ack indices | ml/llm workers | ml-anomalies page, composite score |
 | `dashboard-users-v1`, `dashboard-workbench-runs-v1`, report/problem-report indices | backend-service itself | their pages |
 

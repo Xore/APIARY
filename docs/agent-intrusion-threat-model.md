@@ -1,5 +1,14 @@
 # Agent-Speed Intrusion Chain: Threat Model & Applicability Matrix
 
+> **Status (2026-08-27, #1662):** research record from the Go-dashboard era;
+> references to `dashboard/*.go` describe code that no longer exists. The
+> mechanics it proposed shipped in the Rust worker loop instead:
+> `backend-service/src/agent_intrusion.rs`, `criticality_rules.rs`,
+> `campaign_correlator.rs`, with the labelled corpus and Tier 1 contract
+> benchmark under `arcane/home/honeypot-agent-intrusion-worker/`. Kept as
+> the threat-model rationale; verify current behavior against the Rust
+> modules, not the file names below.
+
 > **Status:** Research (#154), phase 1 of 5. This document is the "map the
 > published campaign to APIARY's actual trust boundaries" deliverable;
 > it does not implement anything. Phases 2-5 (synthetic replay corpus,

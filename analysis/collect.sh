@@ -7,9 +7,10 @@
 # Why deprecated: pushing a capture to Xore/honeypot publishes it to a public
 # repository and to eight third-party scanner APIs. That is an irreversible
 # external disclosure and must be a deliberate per-sample decision, not a timer.
-# The replacement is an admin-only, confirm-gated button in the dashboard backed
-# by a root-owned host publisher — see
-# docs/github-analysis-integration-roadmap.md.
+# The replacement is an admin-only, confirm-gated button in the dashboard
+# (backend-service github_analysis_submit.rs) backed by a root-owned host
+# publisher — see docs/analysis/README.md. (The roadmap doc named here
+# before was removed with #1662's stale-doc sweep.)
 #
 # Kept only for a one-time manual backfill, run by hand with the operator
 # watching. Review what it is about to publish before running it.

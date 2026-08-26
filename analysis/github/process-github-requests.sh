@@ -6,7 +6,8 @@
 # pending/rejected split, drain-to-empty. The extra gates below (dry-run,
 # denylist, daily cap) exist because this spool's worker publishes to a
 # public repository and third-party scanners, not a disposable local VM --
-# see docs/github-analysis-integration-roadmap.md section 3.
+# see docs/analysis/README.md for the gates. (The roadmap doc named here
+# before was removed with #1662's stale-doc sweep.)
 #
 # Every request gets a disposition: rejected (malformed/unresolvable, not a
 # sample the pipeline could have scored), or a result record in

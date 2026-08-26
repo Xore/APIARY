@@ -5,9 +5,10 @@ lives in a **separate repository**, [`Xore/honeypot`](https://github.com/Xore/ho
 This folder holds the honeypot-side tooling that feeds it and the local analysis
 scripts that run on the sensor host.
 
-> The integration between this repository's dashboard and that pipeline is
-> designed in [`docs/github-analysis-integration-roadmap.md`](../github-analysis-integration-roadmap.md)
-> and tracked in [#73](https://github.com/Xore/APIARY/issues/73)
+> The integration between this repository's dashboard and that pipeline was
+> planned in the github-analysis-integration-roadmap doc (removed with
+> #1662's stale-doc sweep; **built** as summarized below) and is tracked in
+> [#73](https://github.com/Xore/APIARY/issues/73)
 > (upstream YARA corpus sync — built, see [`yara/`](../../analysis/yara/)) and
 > [#74](https://github.com/Xore/APIARY/issues/74) (the manual publisher).
 > Per the roadmap's own status line: **built** — dashboard trigger/read
@@ -24,7 +25,7 @@ scripts that run on the sensor host.
 
 ```mermaid
 flowchart TB
-    subgraph HS["APIARY (this repo) -- dashboard/github_analysis_submit.go"]
+    subgraph HS["APIARY (this repo) -- backend-service github_analysis_submit.rs"]
         direction TB
         analyst["Admin analyst,<br/>same-origin request"]
         submit["POST /github-analysis/submit<br/>hash + confirm=publish required --<br/>the one submission route in this repo<br/>that needs an explicit consent field,<br/>not just admin + same-origin"]

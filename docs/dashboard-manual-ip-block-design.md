@@ -1,5 +1,12 @@
 # Operator-triggered IP block — design decision
 
+> **Status (2026-08-27, #1662):** point-in-time design record kept because
+> shipping code still cites its decisions (`vps/docker-compose.yml` and
+> `vps/portbridge-manual-blackhole-refresh.sh` reference decision 4). The
+> `dashboard/*.go` file references below describe the pre-cutover Go
+> dashboard and are historical; the binding content is the decision logic
+> that carried into the VPS scripts and their backend-service equivalents.
+
 > **Status**: Decided and implemented, first cut. Tracking: [#914](https://github.com/Xore/APIARY/issues/914).
 
 ## Why this exists

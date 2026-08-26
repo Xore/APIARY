@@ -61,19 +61,15 @@ autoinstall).
 [production canary record](llm-production-canary-record.md) /
 [synthetic canary record](llm-synthetic-canary-record.md) ·
 [ip reporting plan](ip-reporting-plan.md) ·
-[settings roadmaps](settings-user-configuration-roadmap.md) +
-[operations](settings-operations.md) ·
-[dashboard roadmap](dashboard-profile-actions-roadmap.md) ·
-[github-analysis roadmap](github-analysis-integration-roadmap.md) ·
-[community sharing policy](community-threat-intel-sharing.md) ·
-[background noise](background-noise.md)
+[settings operations](settings-operations.md) ·
+[community sharing policy](community-threat-intel-sharing.md)
 
 ## Records — audit trails
 
 [runtime compatibility record](runtime-compatibility-record.md) ·
 [security fixes](security-fixes.md) ·
-[manual ip-block design](dashboard-manual-ip-block-design.md) ·
-[canarytoken creation design](dashboard-canarytoken-creation-design.md)
+[manual ip-block design (#1662: kept for its still-binding decisions;
+era references inside are historical)](dashboard-manual-ip-block-design.md)
 
 Subdirectories (`analysis/`, `research/`, `sandbox/`, `vps/`, `autoinstall/`,
 `deploy-profiles/`, `archive/`) hold the same kinds of documents scoped to
