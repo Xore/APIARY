@@ -575,8 +575,10 @@ jobs:
           # on PATH: a mid-stream dead pg_dump (and an rc-lost footer-less
           # one) must keep no artifact, a healthy dump must be byte-exact
           # through gzip, and a missing container must stay quiet. Runs in
-          # plain sh, because dash compliance IS the bug.
-          - name: backup-honeypot keycloak dump discipline (#2024)
+          # plain sh, because dash compliance IS the bug. #2025 extends the
+          # same suite to retention running before failure-prone steps, the
+          # manual-run umask window, and no empty stamp on failed validation.
+          - name: backup-honeypot dump discipline, retention order and umask (#2024, #2025)
             run: sh analysis/tests/test_backup_honeypot.sh
 
           - name: honeypot-30d ILM policy rolls over and deletes (#585)
