@@ -624,6 +624,17 @@ jobs:
           - name: Shared GPU job queue
             run: analysis/gpu-queue/test_gpu_queue.py
 
+          # #1971: shared ES consume idioms. The canonical suite walks the
+          # vendored-copy registry (byte-for-byte vs every consumer copy,
+          # the gpu_queue.py discipline), drives the Python engine through
+          # the hand-computed cross-language fixture stream, and pins the
+          # inclusive-gte query shape -- the exact #168 boundary semantics.
+          # The Go twin of that same fixture stream runs in the go-test
+          # job (attacker-identity-worker's TestParityFixtures); disagreement
+          # between the two engines fails whichever side drifts.
+          - name: Shared ES consume patterns (#1971)
+            run: python3 analysis/es-consume/tests/test_es_consume.py
+
           - name: Payload/artifact dedupe (#481/#528)
             run: |
               # test_dedupe_payloads.py and test_cdc_dedup_prototype.py had
