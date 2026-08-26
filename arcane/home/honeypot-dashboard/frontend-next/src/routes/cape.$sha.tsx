@@ -139,7 +139,7 @@ function CapeDetail() {
               <Link className="chip" to="/events" search={{ shasum: sha }}>
                 related events →
               </Link>
-              <a className="chip" href={`/api/v1/cape/${encodeURIComponent(sha)}/raw`} target="_blank" rel="noopener noreferrer">
+              <a className="chip" href={`/api/raw-report/cape/${encodeURIComponent(sha)}`} target="_blank" rel="noopener noreferrer">
                 raw report (JSON) ↓
               </a>
               <Link className="chip" to="/cape">← all runs</Link>
