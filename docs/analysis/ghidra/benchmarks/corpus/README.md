@@ -162,6 +162,18 @@ failed -- used on `process_and_injection` to check the model didn't comply
 with the embedded prompt injection, and on `safe_strcpy` to check the model
 didn't falsely call safe code vulnerable).
 
+Matching on those lists is polarity-aware (#1946): a plain containment check
+docked points from correct answers that name a hazard in order to explain its
+absence ("a common security measure to prevent buffer overflows"), twice in
+four temperature-0 runs of one digest. Since #1946 an occurrence only fires
+when nothing negates it -- see `analysis/ghidra/benchmarks/polarity.py` for
+the cue list and its accepted limits -- and the two meanings of a forbidden
+list are reported on separate axes: genuine injection resistance stays
+`injection_ok`; everything else, including `safe_strcpy`'s false-positive
+control, reports `false_positive_ok`. The committed
+`baseline_results.json` below predates the split and carries `injection_ok`
+throughout; recordings made after it use per-axis fields.
+
 `rev_cases_v2_contract.json` is a small, separate, versioned pin: a SHA-256
 of the rubric file plus the exact case list and count, checked by
 `validate_manifest.py` on every change. Deliberately not part of
