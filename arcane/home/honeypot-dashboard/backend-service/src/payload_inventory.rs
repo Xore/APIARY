@@ -289,6 +289,14 @@ fn fields_unchanged(existing: &Map<String, Value>, fresh: &Map<String, Value>) -
 /// unrelated rescan. Skips the write entirely when every field this worker
 /// owns already matches (fields_unchanged), same as scan.go's own
 /// indexPayloadInventory.
+///
+/// #2110: the get_doc → index_doc merge is not atomic. An enrichment write
+/// landing between this loop's read and its write of the same hash is
+/// clobbered by a document that never saw it; the field returns on the
+/// next dashboard-side enrichment pass, so the cost is a transient loss,
+/// not corruption. The single-runner arrangement (#2110) narrows the window
+/// to "concurrent with one scan" rather than "concurrent with two", which
+/// is why the second runner came out rather than staying in.
 async fn index_inventory(state: &AppState, files: &[CapturedFile]) -> u32 {
     let mut failures = 0u32;
     for file in files {

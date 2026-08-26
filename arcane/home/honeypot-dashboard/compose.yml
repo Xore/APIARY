@@ -672,13 +672,18 @@ services:
   # #1610 worker migration, closing the last unwired gap: payload_inventory.rs
   # (payload-inventory-worker's Rust port) has existed since #1610 and even
   # had its own worker.rs match arm, but nothing ever set
-  # WORKER_LOOPS=payload-inventory anywhere in this file -- so the code
-  # shipped, compiled, and was dead the whole time, and the standalone Go
-  # worker below stayed the only thing actually keeping
-  # dashboard-payload-inventory-v1/dashboard-payload-bytes-v1 current.
-  # Found auditing #1630's "still-Go, not yet ported" follow-up (#1649) —
-  # attacker-identity/correlator/ip-enrichment were already live via the
-  # services above; this one alone wasn't.
+  # WORKER_LOOPS=payload-inventory anywhere in THIS file -- so within this
+  # stack the code shipped, compiled, and was dead, and the standalone Go
+  # worker below stayed the only thing keeping dashboard-payload-inventory-v1/
+  # dashboard-payload-bytes-v1 current. Found auditing #1630's "still-Go,
+  # not yet ported" follow-up (#1649).
+  #
+  # That audit was scoped to this file and missed what ccc4cb61 (#1622) had
+  # already done three days earlier: the sibling honeypot-dashboard-backend
+  # stack wired the same loop into backend-service's WORKER_LOOPS. Both ran
+  # until #2110 removed the sibling copy -- this dedicated service is now
+  # the fleet's ONLY payload-inventory runner (isolated resource limits,
+  # off the request/response tier), which is exactly where the loop belongs.
   #
   # Needs its own service rather than an entry bolted onto backend-worker,
   # same reasoning as backend-worker-importer/-enrichment above:
