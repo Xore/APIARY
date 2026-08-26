@@ -18,12 +18,8 @@ on:
         type: boolean
         default: false
 
-# administration: read lets the ci-target router list this repository's
-# registered self-hosted runners and their online status -- the only
-# elevated read anything in this workflow performs.
 permissions:
   contents: read
-  administration: read
 
 concurrency:
   group: quality-${{ github.ref }}
