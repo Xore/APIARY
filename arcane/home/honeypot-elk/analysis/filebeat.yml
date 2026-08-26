@@ -109,7 +109,8 @@ filebeat.inputs:
   # every tunnel connection instead. Only the live, actively-growing file
   # is tailed -- portbridge.json.1 (the copytruncate rotation target) is
   # deliberately not globbed here: unlike a rename-on-rotate pattern
-  # (inode-stable, see the suricata-eve comment below), copytruncate
+  # (stable under either identity scheme -- a rename keeps both the inode
+  # and the leading bytes; see the suricata-eve comment below), copytruncate
   # overwrites .1 wholesale on every rotation, which a filestream input
   # would see as a brand-new file each time and re-ingest in full,
   # duplicating everything already shipped while portbridge.json was still
@@ -250,14 +251,32 @@ filebeat.inputs:
     fields_under_root: true
 
   # Suricata IDS events (alerts, http, dns, tls, flow).
-  # #79: eve.json now rotates hourly server-side (vps/suricata/suricata.yaml)
-  # into eve-<timestamp>.json instead of growing forever, so this can no
-  # longer be a single literal filename. file_identity defaults to
-  # inode/device (not path), so a harvester already attached to a file stays
-  # attached through Suricata's rename-on-rotate and reads it to EOF; this
-  # glob only needs to pick up each newly created file.
+  # #79: eve output rotates hourly server-side (vps/suricata/suricata.yaml's
+  # rotate-interval) into eve-<timestamp>.json instead of growing forever,
+  # so this can no longer be a single literal filename.
   - type: filestream
+    # #1776/#2189: file_identity is pinned rather than left to the default.
+    # This comment spent years justifying rotation safety with "file_identity
+    # defaults to inode/device" -- Filebeat 9 changed that default to
+    # fingerprint underneath it (the same drift that split portbridge's
+    # registry into two harvester states above), leaving suricata the one
+    # rotating family whose identity scheme was still implicit, defended by
+    # text describing pre-FB9 behavior.
+    #
+    # fingerprint is pinned here because it is both correct for how suricata
+    # rotates and what has actually been running since Filebeat 9 landed:
+    # rotate-interval closes the finished hour and opens the next timestamped
+    # name -- nothing ever truncates an existing generation, so a file's
+    # leading bytes (the whole fingerprint) are fixed once written and survive
+    # unchanged through renames and beat restarts while this glob picks up
+    # each newly created hourly file. Pinning native/inode instead would
+    # orphan every fingerprint registry entry already in use and re-ingest
+    # each retained hourly generation from offset 0; path identity was never
+    # viable either way, since every renamed hour would look like a brand-new
+    # path and double-ship its already-read lines.
     id: suricata-eve
+    file_identity.fingerprint: ~
+    prospector.scanner.fingerprint.enabled: true
     paths:
       - /var/log/suricata/eve-*.json
     parsers:
@@ -344,10 +363,14 @@ processors:
   # anywhere for cowrie or conpot before this fix. Matching against the
   # enriched filename instead (ip-enrichment-worker/main.go's discoverSources
   # names each output "<persona>.json") fixes all of them in one pass.
-  # dionaea's own dionaea_incident.json is NOT rewritten by ip-enrichment-worker
-  # (a separate filestream input below tails it from its real raw path) --
-  # that block stays as-is and this adds a second one for dionaea's normal,
-  # enriched connection-log events.
+  # #2189 correction: dionaea's own dionaea_incident.json IS rewritten by
+  # ip-enrichment-worker too (#623 -- src_ip is buried under a data.* key
+  # that varies by incident origin, so its enrich function walks the whole
+  # record) and the corrected copy lands at /logs/enriched/dionaea-incident.json,
+  # tailed by the separate dionaea-incidents input above. That filename does
+  # not contain "enriched/dionaea.json", so incident records deliberately stay
+  # outside the dionaea persona rule just below -- that rule attaches identity
+  # to dionaea's normal, enriched connection-log events only.
   - add_fields:
       target: honeypot
       fields: {persona_id: nexusai-gpu01, site_id: nexusai-berlin-ml, asset_id: gpu01, organization: NexusAI Research GmbH}
@@ -355,10 +378,10 @@ processors:
   - add_fields:
       target: honeypot
       fields: {persona_id: meridian-legacy, site_id: meridian-hamburg-dc1, asset_id: legacy-svc-02, organization: Meridian Retail Systems Ltd.}
-      when.contains: {log.file.path: "/logs/dionaea/"}
-  - add_fields:
-      target: honeypot
-      fields: {persona_id: meridian-legacy, site_id: meridian-hamburg-dc1, asset_id: legacy-svc-02, organization: Meridian Retail Systems Ltd.}
+      # #2189: a twin of this rule matching log.file.path "/logs/dionaea/" --
+      # written back when dionaea events were expected from the raw per-service
+      # directory -- was deleted here: no input has tailed /logs/dionaea/* since
+      # ip-enrichment-worker took over (#37/#38), so it could never fire.
       when.contains: {log.file.path: "enriched/dionaea.json"}
   - add_fields:
       target: honeypot
