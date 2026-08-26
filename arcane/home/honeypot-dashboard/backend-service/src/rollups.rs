@@ -471,7 +471,9 @@ async fn write_overview_bucket(state: &AppState, hour: DateTime<Utc>) -> anyhow:
         .bulk_index(
             operations
                 .iter()
-                .map(|(index, id, doc)| (index.as_str(), id.as_str(), doc.clone()))
+                // #2345: pass the staged docs as borrows per #1978's
+                // contract — no clone, no inference ambiguity downstream.
+                .map(|(index, id, doc)| (index.as_str(), id.as_str(), doc))
                 .collect(),
         )
         .await?;
@@ -574,7 +576,9 @@ async fn write_attack_bucket(state: &AppState, hour: DateTime<Utc>) -> anyhow::R
         .bulk_index(
             operations
                 .iter()
-                .map(|(index, id, doc)| (index.as_str(), id.as_str(), doc.clone()))
+                // #2345: pass the staged docs as borrows per #1978's
+                // contract — no clone, no inference ambiguity downstream.
+                .map(|(index, id, doc)| (index.as_str(), id.as_str(), doc))
                 .collect(),
         )
         .await?;
@@ -654,7 +658,9 @@ async fn write_geo_cycle(state: &AppState) -> anyhow::Result<()> {
         .bulk_index(
             operations
                 .iter()
-                .map(|(index, id, doc)| (index.as_str(), id.as_str(), doc.clone()))
+                // #2345: pass the staged docs as borrows per #1978's
+                // contract — no clone, no inference ambiguity downstream.
+                .map(|(index, id, doc)| (index.as_str(), id.as_str(), doc))
                 .collect(),
         )
         .await?;
