@@ -653,25 +653,18 @@ mod fleet_attribution_tests {
         assert!(!is_fleet_address("46.19.138.10"));
         // Documentation range rather than the fleet's real WAN address:
         // this repo is public, and scripts/check-public-leaks.py rejects
-        // those literals anywhere in tree. The behaviour under test is the
-        // same either way -- a public address is ours only when configured.
-        assert!(!is_fleet_address("203.0.113.4"), "an unconfigured public address");
+        // those literals anywhere in tree.
+        //
+        // #2113: the two configuration-dependent cases (203.0.113.4 unconfigured
+        // vs configured) live in dashboard.rs's single serialized HONEYPOT_SELF_IPS
+        // test now -- this module asserting on them here raced that module's env
+        // mutations on parallel test threads. Everything asserted below is a value
+        // no test ever writes into the variable, so these reads are indifferent to
+        // whatever any other test is doing to it.
         assert!(!is_fleet_address("8.8.8.8"));
         assert!(!is_fleet_address("2606:4700::1111"));
         assert!(!is_fleet_address(""), "absent is not ours");
         assert!(!is_fleet_address("not-an-ip"));
-    }
-
-    #[test]
-    fn a_configured_public_address_is_recognised_as_ours() {
-        // The fleet's WAN addresses have no shape to match, so they are
-        // knowable only from configuration -- HONEYPOT_SELF_IPS, the list
-        // #1677 already introduced for the overview aggregations. This is
-        // the half of the guard that shape-matching cannot cover.
-        unsafe { std::env::set_var("HONEYPOT_SELF_IPS", "203.0.113.4,198.51.100.7") };
-        let configured = crate::dashboard::self_addresses();
-        assert!(configured.iter().any(|own| own == "203.0.113.4"), "{configured:?}");
-        unsafe { std::env::remove_var("HONEYPOT_SELF_IPS") };
     }
 
     #[test]

@@ -557,7 +557,10 @@ mod tests {
     use super::*;
 
     /// The env var is process-global, so these run as one test rather than
-    /// racing each other through the same variable.
+    /// racing each other through the same variable. #2113: this is also the
+    /// only test in the crate allowed to mutate HONEYPOT_SELF_IPS -- any
+    /// assertion whose outcome depends on the variable's value lives inside
+    /// this body, so parallel threads never observe a half-state.
     #[test]
     fn self_addresses_reads_config_and_always_keeps_the_tunnel() {
         // Unset: the exclusion this handler has always had, and nothing else.
@@ -585,6 +588,27 @@ mod tests {
         assert_eq!(
             self_addresses(),
             vec!["203.0.113.7".to_string(), TUNNEL_PEER_IP.to_string()]
+        );
+
+        // #2113: the configuration-dependent halves of events.rs's
+        // fleet-attribution coverage moved here, into this module's one
+        // serialized env test -- a public address is ours ONLY when it is
+        // configured, and that fact is observable only relative to the same
+        // process-global variable this test owns. Every other test in the
+        // crate asserts exclusively on values no test ever writes, so their
+        // reads are indifferent to these mutations.
+        unsafe { std::env::remove_var("HONEYPOT_SELF_IPS") };
+        assert!(
+            !crate::events::is_fleet_address("203.0.113.4"),
+            "an unconfigured public address must not count as ours"
+        );
+
+        unsafe { std::env::set_var("HONEYPOT_SELF_IPS", "203.0.113.4,198.51.100.7") };
+        let configured = self_addresses();
+        assert!(configured.iter().any(|own| own == "203.0.113.4"), "{configured:?}");
+        assert!(
+            crate::events::is_fleet_address("203.0.113.4"),
+            "the same address configured is ours"
         );
         unsafe { std::env::remove_var("HONEYPOT_SELF_IPS") };
     }
