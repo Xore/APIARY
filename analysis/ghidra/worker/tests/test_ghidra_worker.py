@@ -627,8 +627,7 @@ def triage_run(tmp, name, ghidra, extra):
            # Off by default: this helper tests triage's own behavior against
            # ModelStub, not GPU-queue deferral, and a real host's actual free
            # VRAM at test time would otherwise make these tests flaky --
-           # test_triage_gpu_queue_defers_when_no_headroom below turns it
-           # back on deliberately.
+           # the GPU-queue tests below turn it back on deliberately.
            "GPU_QUEUE_ENABLED": "false"}
     env.update(extra)
     r = run(env)
@@ -755,6 +754,167 @@ def test_triage_gpu_queue_falls_back_when_enqueue_fails(ghidra, model):
     # denied, ...) -- the behavioral contract above is what matters and is
     # already verified; don't also pin the exact exception text/path,
     # which is what actually varied between this box and CI here.
+
+
+class QueueESStub(BaseHTTPRequestHandler):
+    """Serves just enough of Elasticsearch for gpu_queue.enqueue (#2077):
+    PUT /<index>/_doc/<job_id> records the document verbatim instead of
+    storing it, so a queued job can be inspected for its payload shape
+    without a real ES. Paired with GPU_QUEUE_TRANSPORT=direct (see
+    analysis/gpu-queue/gpu_queue.py -- host-side requests otherwise bridge
+    through a docker container that can never reach this runner's
+    loopback, which is why the enqueue-success path had zero coverage).
+
+    The deferred tests below never touch it directly from this process;
+    the worker subprocess hits it over HTTP like production does.
+    """
+
+    docs = []
+
+    def log_message(self, *a): pass
+
+    def do_HEAD(self):  # ensure_index's exists-check, when anything runs it
+        self.send_response(200)
+        self.end_headers()
+
+    def do_PUT(self):
+        raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        QueueESStub.docs.append(json.loads(raw))
+        body = b'{"result": "created"}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def test_triage_gpu_queue_defers_when_headroom_exhausted(model):
+    """The enqueue-success half of the deferral branch, without a process
+    boundary: with headroom forced false and a cooperative queue, _triage()
+    must return None -- leaving ai_triage null until gpu-queue-drain.py
+    patches the result back later -- rather than calling the model itself,
+    and the job it hands off must carry everything the drainer will need:
+    the model, the VRAM estimate behind the decision, and above all the
+    evidence block, since the deferred run re-runs run_triage_workflows()
+    from exactly that text. Until #2077 only this branch's fallback twin
+    (enqueue fails -> model direct) was exercised; the stale comment in
+    triage_run() cited a test like this one that never existed. Uses the
+    same unit-import seam as test_unit(), with the queue module swapped
+    for a recorder.
+    """
+    w = load_worker()
+    original = vars(w).get("gpu_queue")
+    requested = []
+    jobs = []
+
+    class RecorderQueue:
+        @staticmethod
+        def has_headroom(needed_mib, safety_margin_mib=1024):
+            requested.append(needed_mib)
+            return False
+
+        @staticmethod
+        def enqueue(es_host, job_type, ref, mdl, estimated_vram_mib, payload=None):
+            jobs.append({"es_host": es_host, "job_type": job_type, "ref": ref,
+                         "model": mdl, "estimated_vram_mib": estimated_vram_mib,
+                         "payload": payload})
+            return "defer-unit-job-id"
+
+    parts = {"strings": ["hello", "evil.example"],
+             "imports": ["kernel32.dll!CreateProcessA"],
+             "functions": [{"address": "0x401000", "name": "sub_401000",
+                            "signature": "int f()", "size": 120}]}
+    w.TRIAGE_API_BASE = f"{model}/v1"
+    w.TRIAGE_MODEL = "stub-model"
+    w.gpu_queue = RecorderQueue
+    try:
+        result = w.triage(parts, "b" * 64)
+    finally:
+        if original is not None:
+            w.gpu_queue = original
+
+    check(requested == [w.GHIDRA_TRIAGE_ESTIMATED_VRAM_MIB],
+          "headroom was asked about exactly this sample's VRAM estimate")
+    check(result is None, "deferral returns None, leaving ai_triage null "
+                          "for gpu-queue-drain to patch back")
+    check(len(jobs) == 1, "exactly one job was queued")
+    if len(jobs) != 1:
+        return
+    j = jobs[0]
+    check(j["job_type"] == "ghidra-triage", "queued under the ghidra-triage type")
+    check(j["ref"] == "b" * 64, "the sample sha is the queue reference")
+    check(j["model"] == "stub-model", "the drainer learns which model to use")
+    check(j["estimated_vram_mib"] == w.GHIDRA_TRIAGE_ESTIMATED_VRAM_MIB,
+          "the estimate the deferral decided on rides along")
+    check("kernel32.dll!CreateProcessA" in j["payload"].get("evidence", ""),
+          "the evidence block made it into the queued job intact")
+    check(bool(j["payload"].get("note")),
+          "the evidence budget note survives, keeping the account honest")
+
+
+def test_triage_gpu_queue_defers_end_to_end(ghidra, model):
+    """Same branch as the unit test above, through the real subprocess:
+    headroom forced false, the queue endpoint reachable (a loopback stub
+    behind GPU_QUEUE_TRANSPORT=direct, exactly the seam that made this
+    path testable at all, #2077).
+
+    Forcing headroom false hermetically takes two layers, and both are
+    needed because of how has_headroom() works: an impossible VRAM
+    estimate covers hosts where nvidia-smi WORKS (free < estimate+margin),
+    but on a host with no GPU at all nvidia-smi fails and has_headroom()
+    deliberately fails OPEN -- so there a fake nvidia-smi on PATH
+    reporting a sliver of free VRAM provides the deterministic answer
+    instead. The deployed default is GPU_QUEUE_ENABLED=true and card-busy
+    is precisely when triage runs, so this is the one path every deferred
+    sample flows through; the result must still complete cleanly,
+    empty-handed but honest.
+    """
+    QueueESStub.docs.clear()
+    tmp = Path(tempfile.mkdtemp())
+    es = serve(QueueESStub)
+
+    fake_smi_bin = tmp / "deferred-e2e-bin"
+    fake_smi_bin.mkdir(exist_ok=True)
+    fake_smi = fake_smi_bin / "nvidia-smi"
+    fake_smi.write_text("#!/bin/sh\necho 100\n")
+    fake_smi.chmod(0o755)
+
+    r, d = triage_run(tmp, "deferred-e2e", ghidra, {
+        "GHIDRA_TRIAGE_API_BASE": f"{model}/v1",
+        "GHIDRA_TRIAGE_MODEL": "stub-model",
+        "GPU_QUEUE_ENABLED": "true",
+        "GHIDRA_TRIAGE_ESTIMATED_VRAM_MIB": "999999999",
+        "GPU_QUEUE_ES_HOST": es,
+        "GPU_QUEUE_TRANSPORT": "direct",
+        "PATH": f"{fake_smi_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+    })
+    check(r.returncode == 0, "exit 0 when triage defers to the GPU queue")
+    check(d is not None and d["exit_status"] == "ok",
+          "the analysis still completes cleanly on defer")
+    check(d is not None and d["ai_triage"] is None,
+          f"ai_triage left null pending the drain (got {d and d['ai_triage']!r})")
+    check("queued as" in r.stderr and "enqueue failed" not in r.stderr,
+          "the deferral itself is what got logged")
+
+    check(len(QueueESStub.docs) == 1,
+          f"exactly one job landed on the queue index (got {len(QueueESStub.docs)})")
+    if len(QueueESStub.docs) != 1:
+        return
+    j = QueueESStub.docs[0]
+    check(j.get("job_type") == "ghidra-triage", "queued as ghidra-triage")
+    check(j.get("ref") == d["sha256"], "the job references this sample's sha")
+    check(j.get("model") == "stub-model", "the model rode along")
+    check(j.get("estimated_vram_mib") == 999999999,
+          "the estimate behind the deferral decision is recorded")
+    check(j.get("status") == "queued" and j.get("attempts") == 0
+          and j.get("abort_requested") is False,
+          "the job is born freshly queued")
+    check(isinstance(j.get("requested_at"), str) and j["requested_at"].endswith("Z"),
+          "requested_at is a UTC timestamp")
+    payload = j.get("payload") or {}
+    check("kernel32.dll!CreateProcessA" in payload.get("evidence", ""),
+          "the evidence reached the queued job through the real transport")
+    check(bool(payload.get("note")), "so did the evidence note")
 
 
 def test_statictools(ghidra, statictools):
@@ -1100,6 +1260,8 @@ def main():
     test_spool(ghidra)
     test_triage(ghidra, model, truncating)
     test_triage_gpu_queue_falls_back_when_enqueue_fails(ghidra, model)
+    test_triage_gpu_queue_defers_when_headroom_exhausted(model)
+    test_triage_gpu_queue_defers_end_to_end(ghidra, model)
     test_statictools(ghidra, statictools)
     test_revdeck(ghidra, revdeck)
     test_revdeck_standalone(revdeck)
