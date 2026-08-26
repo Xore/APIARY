@@ -165,6 +165,12 @@ async fn main() -> anyhow::Result<()> {
     let es_url = std::env::var("ELASTICSEARCH_URL").unwrap_or_else(|_| "http://127.0.0.1:9200".into());
     let listen = std::env::var("LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:8081".into());
     let service_token = std::env::var("SERVICE_TOKEN").ok().filter(|t| !t.is_empty());
+    if service_token.is_none() {
+        // Deliberately not fatal — the loopback/dev deployment runs without
+        // it — but say so loudly: require_service_token lets every request
+        // through when no token is configured (#2044).
+        tracing::warn!("SERVICE_TOKEN is unset; every /api/v1 route accepts unauthenticated requests");
+    }
     let audit_path =
         std::env::var("DASHBOARD_AUDIT_FILE").unwrap_or_else(|_| "/state/dashboard-audit.jsonl".into());
     let config_history_path = std::env::var("DASHBOARD_CONFIG_HISTORY_FILE")
