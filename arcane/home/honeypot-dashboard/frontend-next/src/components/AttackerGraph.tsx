@@ -10,6 +10,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useNavigate } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { cssVar as cssColor } from '../lib/cssVar'
+import { ErrorStateBlock } from './ErrorState'
 import { useServerQuery } from '../lib/useServerQuery'
 import { useAppearanceKey } from '../lib/prefs'
 
@@ -26,7 +27,9 @@ const fetchGraph = createServerFn({ method: 'GET' })
 
 export function AttackerGraph({ id }: { id: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const graph = useServerQuery(fetchGraph, { id }, [id])
+  // #1966: tri-state -- an error is no longer a forever-skeleton.
+  const query = useServerQuery(fetchGraph, { id }, [id])
+  const graph = query.status === 'ready' ? query.data : null
   const navigate = useNavigate()
   const [memberCount, setMemberCount] = useState<number | null>(null)
   // #1757: cytoscape resolves these tokens to pixel values once and cannot
@@ -120,6 +123,15 @@ export function AttackerGraph({ id }: { id: string }) {
     }
   }, [graph, navigate, appearance])
 
+  if (query.status === 'error') {
+    return (
+      <ErrorStateBlock
+        title="The attacker graph failed to load"
+        hint="The identity graph endpoint was not reachable."
+        onRetry={query.retry}
+      />
+    )
+  }
   if (graph === null) return <span className="skeleton-line" aria-hidden="true" />
   if (graph.nodes.length <= 1) return null
   return (

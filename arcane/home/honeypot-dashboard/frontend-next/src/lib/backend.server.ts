@@ -140,17 +140,39 @@ async function cacheRedis(): Promise<import('ioredis').Redis | null> {
   }
 }
 
-/** JSON convenience over serviceFetch; null on any failure so routes can
- * fall back to skeleton/error states without try/catch noise. Pass
- * `{ mounted: true }` for a backend-service-mounted-only route, same as
- * serviceFetch — the cache key is prefixed by target, not just `path`,
- * since backendURL() and backendMountedURL() can disagree on the same
- * path (confirmed live: without the prefix, whichever target answered
- * first poisons the cache for the other for PAYLOAD_TTL_MS). */
-export async function serviceJSON<T>(path: string, opts?: { mounted?: boolean }): Promise<T | null> {
+/** Why a call failed, as far as this wrapper can know. `status` is present
+ * when there was an HTTP response at all (a shed request is a 503); the
+ * remaining cases — timeout, socket failure, limiter throw — carry nothing
+ * but the fact of the failure. `retryAfterSeconds` mirrors the shedder's
+ * retry-after when one came back (#1966). */
+export type ServiceFailure = { ok: false; status?: number; retryAfterSeconds?: number }
+
+/** Either the parsed body or a ServiceFailure — never null-as-both (#1966). */
+export type ServiceResult<T> = { ok: true; body: T } | ServiceFailure
+
+/** retry-after is seconds by contract in this stack (backpressure.server's
+ * overloadedResponse writes an integer); anything unparsable degrades to
+ * "no hint" rather than to zero, which would read as "retry instantly". */
+export function parseRetryAfter(value: string | null): number | undefined {
+  if (!value) return undefined
+  const seconds = Number(value)
+  return Number.isFinite(seconds) ? seconds : undefined
+}
+
+/** serviceJSON without the collapse: same caching, same target rules, but
+ * the caller learns whether a null-ish answer was a real body or a
+ * failure. Pass `{ mounted: true }` for a backend-service-mounted-only
+ * route, same as serviceFetch — the cache key is prefixed by target, not
+ * just `path`, since backendURL() and backendMountedURL() can disagree on
+ * the same path (confirmed live: without the prefix, whichever target
+ * answered first poisons the cache for the other for PAYLOAD_TTL_MS).
+ *
+ * Only successes are cached, exactly as before — a failure must never turn
+ * into fifteen seconds of cached certainty. */
+export async function serviceJSONResult<T>(path: string, opts?: { mounted?: boolean }): Promise<ServiceResult<T>> {
   const cacheKey = opts?.mounted ? `mounted:${path}` : path
   const cached = payloadCache.get(cacheKey)
-  if (cached && Date.now() - cached.at < PAYLOAD_TTL_MS) return cached.body as T
+  if (cached && Date.now() - cached.at < PAYLOAD_TTL_MS) return { ok: true, body: cached.body as T }
   const redis = await cacheRedis()
   if (redis) {
     try {
@@ -158,7 +180,7 @@ export async function serviceJSON<T>(path: string, opts?: { mounted?: boolean })
       if (shared) {
         const body = JSON.parse(shared) as T
         payloadCache.set(cacheKey, { at: Date.now(), body })
-        return body
+        return { ok: true, body }
       }
     } catch {
       /* fall through to the live fetch */
@@ -166,7 +188,13 @@ export async function serviceJSON<T>(path: string, opts?: { mounted?: boolean })
   }
   try {
     const response = await serviceFetch(path, undefined, opts)
-    if (!response.ok) return null
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        retryAfterSeconds: parseRetryAfter(response.headers.get('retry-after')),
+      }
+    }
     const body = (await response.json()) as T
     payloadCache.set(cacheKey, { at: Date.now(), body })
     if (payloadCache.size > 500) {
@@ -176,10 +204,20 @@ export async function serviceJSON<T>(path: string, opts?: { mounted?: boolean })
     if (redis) {
       redis.set(REDIS_PREFIX + cacheKey, JSON.stringify(body), 'PX', PAYLOAD_TTL_MS).catch(() => {})
     }
-    return body
+    return { ok: true, body }
   } catch {
-    return null
+    return { ok: false }
   }
+}
+
+/** JSON convenience over serviceFetch; null on any failure so routes can
+ * fall back to skeleton/error states without try/catch noise. The collapse
+ * is now a thin wrapper over serviceJSONResult (#1966): callers that need
+ * to distinguish "empty" from "down" use that directly instead of trying
+ * to un-collapse this one. */
+export async function serviceJSON<T>(path: string, opts?: { mounted?: boolean }): Promise<T | null> {
+  const result = await serviceJSONResult<T>(path, opts)
+  return result.ok ? result.body : null
 }
 
 const PROXY_BODY_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])

@@ -17,6 +17,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useRef, useState } from 'react'
 import type { Core, NodeSingular } from 'cytoscape'
 import { cssVar as cssColor } from '../lib/cssVar'
+import { ErrorStateBlock } from './ErrorState'
 import { useServerQuery } from '../lib/useServerQuery'
 import { useAppearanceKey } from '../lib/prefs'
 
@@ -36,7 +37,10 @@ const DIM_CLASS = 'hp-gh-dim'
 export function GhidraCallGraph({ sha }: { sha: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
-  const graph = useServerQuery(fetchCallGraph, { sha }, [sha])
+  // #1966: the query is tri-state now -- a failed load shows an error with
+  // a Retry button instead of a skeleton that never resolves.
+  const query = useServerQuery(fetchCallGraph, { sha }, [sha])
+  const graph = query.status === 'ready' ? query.data : null
   const [filter, setFilter] = useState('')
   const appearance = useAppearanceKey()
 
@@ -145,6 +149,15 @@ export function GhidraCallGraph({ sha }: { sha: string }) {
     matches.removeClass(DIM_CLASS)
   }, [filter])
 
+  if (query.status === 'error') {
+    return (
+      <ErrorStateBlock
+        title="The call graph failed to load"
+        hint="Ghidra's recovered cross-references were not reachable."
+        onRetry={query.retry}
+      />
+    )
+  }
   if (graph === null) return <span className="skeleton-line" aria-hidden="true" />
   if (graph.nodes.length === 0) {
     return <p className="empty">No caller/callee cross-references were recovered for this binary's deep-dived functions.</p>
