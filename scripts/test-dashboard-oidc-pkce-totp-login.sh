@@ -65,6 +65,12 @@ bad()  { printf '  FAIL  %s\n' "$*"; fail=1; }
 redact_code() { printf '%s' "$1" | sed -E 's/([?&]code=)[^&]*/\1REDACTED/'; }
 
 cleanup() {
+  # Post-mortem aid: the BFF log is where /auth/login failures actually speak;
+  # keep it visible when DEBUG_BFF_LOG=1 before the temp dirs vanish.
+  if [ "${DEBUG_BFF_LOG:-0}" = "1" ] && [ -n "${state_dir:-}" ] && [ -f "${state_dir}/bff.log" ]; then
+    printf '── bff.log ──\n' >&2
+    cat "${state_dir}/bff.log" >&2
+  fi
   [ -n "${bff_pid}" ] && kill "${bff_pid}" >/dev/null 2>&1 || true
   docker rm -f "${redis}" "${kc}" "${pg}" >/dev/null 2>&1 || true
   docker network rm "${network}" >/dev/null 2>&1 || true
@@ -139,17 +145,17 @@ client_secret=$(kcadm get "clients/${client_id}/client-secret" -r apiary --field
 # which is precisely the #1656 mapping under test.
 kcadm create users -r apiary -s username=pkce-totp-test -s enabled=true -s emailVerified=true >/dev/null
 kcadm set-password -r apiary --username pkce-totp-test --new-password 'PkceTotpTest9!Extra' >/dev/null
-kcadm add-roles -r apiary --uusername pkce-totp-test --cclient apiary-dashboard access >/dev/null
+kcadm add-roles -r apiary --uusername pkce-totp-test --cclientid apiary-dashboard --rolename access >/dev/null
 pkce_user_kc_id=$(kcadm get users -r apiary -q username=pkce-totp-test --fields id --format csv --noquotes | tail -1)
 kcadm create users -r apiary -s username=pkce-admin-test -s enabled=true -s emailVerified=true >/dev/null
 kcadm set-password -r apiary --username pkce-admin-test --new-password 'PkceAdminTest9!Extra' >/dev/null
-kcadm add-roles -r apiary --uusername pkce-admin-test --cclient apiary-dashboard access admin >/dev/null
+kcadm add-roles -r apiary --uusername pkce-admin-test --cclientid apiary-dashboard --rolename access --rolename admin >/dev/null
 kcadm create users -r apiary -s username=first-login-test -s enabled=true -s emailVerified=true >/dev/null
 # set-password -t makes Keycloak insert its own UPDATE_PASSWORD required
 # action (see retired suite's note: kcadm's generic update 404s on
 # reset-password -- a write-only endpoint with no GET for GET-then-PUT).
 kcadm set-password -r apiary --username first-login-test --new-password 'TempOneTime1!Extra' --temporary >/dev/null
-kcadm add-roles -r apiary --uusername first-login-test --cclient apiary-dashboard access >/dev/null
+kcadm add-roles -r apiary --uusername first-login-test --cclientid apiary-dashboard --rolename access >/dev/null
 
 flow_dir="$(mktemp -d)"
 chmod 777 "${flow_dir}"
@@ -349,9 +355,14 @@ fi
 [ -f "${dist_js}" ] || { printf 'FAIL: build produced no .output/server/index.mjs\n' >&2; exit 1; }
 
 state_dir="$(mktemp -d)"
+# The #2183 boot gate refuses to start without SERVICE_TOKEN (or the explicit
+# dev override, which would muzzle the very tier this suite exercises) -- hand
+# the server a throwaway test token so it boots with enforcement ON.
+service_token='pkce-suite-local-token-not-a-secret'
 (
   cd "${repo_root}/arcane/home/honeypot-dashboard/frontend-next"
   PORT="${dash_port}" HOST=127.0.0.1 \
+  SERVICE_TOKEN=${service_token} \
   OIDC_ISSUER_URL="http://127.0.0.1:${kc_port}/realms/apiary" \
   OIDC_EXTERNAL_URL="${app_base}" \
   OIDC_CLIENT_ID="apiary-dashboard" \
@@ -382,7 +393,12 @@ new_perm_password='FirstLoginPerm2!Extra'
 # First-ever login owes CONFIGURE_TOTP; the flow completes enrollment and the
 # OTP challenge inside one dashboard-initiated round trip.
 jar="${flow_dir}/jar-golden.txt"
-auth_location=$(curl -s -c "${jar}" -D - -o /dev/null "${app_base}/auth/login" | grep -i '^location:' | sed 's/^[Ll]ocation: //' | tr -d '\r')
+login_start_headers=$(curl -s -c "${jar}" -D - -o "${flow_dir}/login-start-body.html" "${app_base}/auth/login" || true)
+auth_location=$(grep -i '^location:' <<<"${login_start_headers}" | sed 's/^[Ll]ocation: //' | tr -d '\r' || true)
+if [ -z "${auth_location}" ]; then
+  printf 'DIAG /auth/login did not redirect -- status line + headers:\n%s\nbody (first 400B):\n' "${login_start_headers}" >&2
+  head -c 400 "${flow_dir}/login-start-body.html" >&2
+fi
 case "${auth_location}" in
   "http://127.0.0.1:${kc_port}/realms/apiary/protocol/openid-connect/auth?"*"client_id=apiary-dashboard"*"code_challenge_method=S256"*"state="*)
     ok "/auth/login redirects to the real Keycloak authorize endpoint with PKCE S256 + state" ;;

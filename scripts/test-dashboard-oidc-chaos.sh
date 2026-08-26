@@ -116,7 +116,7 @@ client_secret=$(kcadm get "clients/${client_id}/client-secret" -r apiary --field
 
 kcadm create users -r apiary -s username=chaos-totp-test -s enabled=true -s emailVerified=true >/dev/null
 kcadm set-password -r apiary --username chaos-totp-test --new-password 'ChaosTotpTest9!Extra' >/dev/null
-kcadm add-roles -r apiary --uusername chaos-totp-test --cclient apiary-dashboard access >/dev/null
+kcadm add-roles -r apiary --uusername chaos-totp-test --cclientid apiary-dashboard --rolename access >/dev/null
 
 flow_dir="$(mktemp -d)"
 chmod 777 "${flow_dir}"
@@ -269,9 +269,13 @@ fi
 [ -f "${dist_js}" ] || { printf 'FAIL: build produced no .output/server/index.mjs\n' >&2; exit 1; }
 
 state_dir="$(mktemp -d)"
+# Throwaway token so the #2183 boot gate lets the server up with enforcement
+# ON -- the chaos scenarios rotate what Keycloak knows, never this tier.
+service_token='chaos-suite-local-token-not-a-secret'
 (
   cd "${repo_root}/arcane/home/honeypot-dashboard/frontend-next"
   PORT="${dash_port}" HOST=127.0.0.1 \
+  SERVICE_TOKEN=${service_token} \
   OIDC_ISSUER_URL="http://127.0.0.1:${kc_port}/realms/apiary" \
   OIDC_EXTERNAL_URL="${app_base}" \
   OIDC_CLIENT_ID="apiary-dashboard" \
