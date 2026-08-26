@@ -189,10 +189,21 @@ while true; do
       continue
     fi
 
-    if output=$("$script_dir/publish-sample.sh" "$sha" "$sample" 2>&1); then
+    rc=0
+    output=$("$script_dir/publish-sample.sh" "$sha" "$sample" 2>&1) || rc=$?
+    if [[ $rc == 0 ]]; then
       rm -f "$request"
       published_this_drain=1
       logger -t honeypot-github "published $sha: $output"
+    elif [[ $rc == 3 ]]; then
+      # #2082: upstream already has this hash. Terminal but explained --
+      # the same shape #993 gave dry_run. Without the record the request
+      # used to vanish (no result, no .pending, nothing to poll) while the
+      # zero exit logged "published" for a push that never happened; and
+      # since hashes.csv only grows, re-submitting would land here forever.
+      write_result "$sha" "already_known"
+      rm -f "$request"
+      logger -t honeypot-github "already known upstream, skipping push: $sha"
     else
       write_result "$sha" "error" "\"error\":$(jq -Rn --arg e "$output" '$e')"
       mv -f "$request" "$rejected/$name"
