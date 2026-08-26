@@ -25,7 +25,12 @@ gate every other v1 route already uses.
 """
 
 SCHEMA_VERSION = "1"
-SCORER_VERSION = "1"
+# "2" (#2068): coverage.components.decompile moved from a budget ratio
+# (decompile cap / function census -- reads 1.0 for any job at or under the
+# cap regardless of how many attempts failed) to a success ratio read from
+# decompiled.json's own per-function error bookkeeping. Same inputs
+# otherwise; scores only move where the old number was lying.
+SCORER_VERSION = "2"
 WEIGHTS_VERSION = "1"
 
 BANDS = ("critical", "high", "medium", "low")
@@ -199,9 +204,45 @@ def score_function(fn, xrefs_entry, import_names_lower):
     }
 
 
-def build_security_index(functions, imports, xrefs, max_decompile_functions=None):
+def _decompile_coverage(total_functions, max_decompile_functions, decompiled_data):
+    """Pseudocode availability: the share of this sample's functions whose
+    decompilation actually succeeded (#2068).
+
+    Read off decompiled.json's per-function entries -- an entry carrying
+    "error" is an attempt that failed or timed out. The exporter's own
+    decompiled_count cannot be the numerator: it is incremented *before*
+    the attempt (it caps attempts at GHIDRA_MAX_DECOMPILE_FUNCTIONS), so it
+    counts attempts, not successes. The previous budget ratio
+    (max_decompile_functions / function census) read 1.0 for every job at or
+    under the cap no matter how many of those attempts failed -- pinning
+    this trust dial at maximum exactly on packed samples, where pseudocode
+    is least trustworthy and most attempts fail. Falls back to that budget
+    ratio only when decompiled.json is missing or predates its per-function
+    mapping, so legacy jobs score exactly as they always did rather than on
+    a success rate we do not actually have.
+    """
+    if isinstance(decompiled_data, dict) and isinstance(decompiled_data.get("functions"), dict):
+        denominator = decompiled_data.get("total_functions")
+        if not isinstance(denominator, int) or isinstance(denominator, bool) or denominator <= 0:
+            denominator = total_functions
+        if denominator > 0:
+            succeeded = sum(
+                1 for entry in decompiled_data["functions"].values()
+                if isinstance(entry, dict) and "error" not in entry
+            )
+            return min(1.0, succeeded / float(denominator))
+    coverage = 1.0
+    if max_decompile_functions is not None and total_functions > 0:
+        coverage = min(1.0, max_decompile_functions / float(total_functions))
+    return coverage
+
+
+def build_security_index(functions, imports, xrefs, max_decompile_functions=None,
+                         decompiled_data=None, functions_total=None):
     """Build the full security index from a job's own already-exported
-    artifacts (functions.json's "functions" list, imports.json, xrefs.json).
+    artifacts (functions.json's "functions" list, imports.json, xrefs.json,
+    and -- for the coverage block (#2068) -- decompiled.json plus the
+    functions.json envelope's uncapped "total").
     Returns {"scored": [...], "summary": {...}, "coverage": {...},
     "metadata": {...}} -- server.py's routes slice/paginate/look up by addr
     from "scored" and pass "summary"/"coverage"/"metadata" straight through
@@ -230,9 +271,19 @@ def build_security_index(functions, imports, xrefs, max_decompile_functions=None
             root_count += 1
 
     total_functions = len(functions or [])
-    decompile_coverage = 1.0
-    if max_decompile_functions is not None and total_functions > 0:
-        decompile_coverage = min(1.0, max_decompile_functions / float(total_functions))
+    decompile_coverage = _decompile_coverage(
+        total_functions, max_decompile_functions, decompiled_data)
+    # Truncation flags from the artifacts themselves (#2068), not constants:
+    # functions.json's envelope "total" is the uncapped census, so the
+    # exporter capped its list whenever that exceeds what it exported;
+    # decompiled.json's own truncated flag is the cap cutting the decompile
+    # budget short. edges/strings have no truncating caps upstream today.
+    functions_truncated = bool(
+        isinstance(functions_total, int) and not isinstance(functions_total, bool)
+        and functions_total > total_functions
+    )
+    decompile_truncated = bool(
+        isinstance(decompiled_data, dict) and decompiled_data.get("truncated"))
 
     return {
         "scored": scored,
@@ -246,9 +297,10 @@ def build_security_index(functions, imports, xrefs, max_decompile_functions=None
         },
         "coverage": {
             "score": round((1.0 + decompile_coverage) / 2.0, 3),
-            "functions_truncated": False,
+            "functions_truncated": functions_truncated,
             "edges_truncated": False,
             "strings_truncated": False,
+            "decompile_truncated": decompile_truncated,
             "legacy_artifacts": False,
             "scorer_downgraded": False,
             "invalid_functions": 0,

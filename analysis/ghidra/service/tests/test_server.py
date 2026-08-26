@@ -91,6 +91,20 @@ sleep 30
 exit 0
 """
 
+# #2068: the same artifacts as FAKE_HEADLESS, except decompiled.json records
+# one failed attempt -- exactly what the real export_json.py writes when
+# decompileFunction does not complete or times out ({"error": ...}; its
+# decompiled_count still counts the attempt) -- and functions.json's envelope
+# total exceeds what was actually exported. The security index's coverage
+# block must read those outcomes instead of reporting full coverage because
+# the job is under the decompile cap.
+FAKE_HEADLESS_LOW_DECOMPILE = FAKE_HEADLESS.replace(
+    '{"total": 2, "offset": 0', '{"total": 3, "offset": 0').replace(
+    '"truncated": false, "functions"', '"truncated": true, "functions"').replace(
+    '"0x401100": {"pseudocode": "void FUN_00401100(void) { return; }", '
+    '"signature": "void FUN_00401100(void)"}',
+    '"0x401100": {"error": "decompilation did not complete"}')
+
 
 def get(url):
     with urllib.request.urlopen(url, timeout=10) as r:
@@ -507,6 +521,112 @@ def test_v1_security_index():
             proc.wait(timeout=5)
 
 
+def test_v1_security_index_low_decompile_success():
+    # #2068: coverage.components.decompile must read pseudocode availability
+    # out of decompiled.json's own per-function error bookkeeping, not out of
+    # the decompile cap. FAKE_HEADLESS_LOW_DECOMPILE exports 2 functions where
+    # 1 attempt failed; the old budget ratio reported component 1.0 and
+    # coverage.score 1.0 for any job at or under the cap, no matter how many
+    # decompiles actually failed.
+    with tempfile.TemporaryDirectory() as tmp:
+        port = 19200
+        proc = run_server(FAKE_HEADLESS_LOW_DECOMPILE, port, tmp)
+        try:
+            base = f"http://127.0.0.1:{port}"
+            wait_health(base)
+
+            submit = post_file(f"{base}/analyze", b"sample for low-decompile-coverage test")
+            job_id = submit["job_id"]
+            wait_status(base, job_id)
+
+            summary = get(f"{base}/v1/results/{job_id}/security/summary")
+            check(summary["coverage"]["components"]["decompile"] == 0.5,
+                  "coverage decompile component is the success ratio (1 of 2 attempts), not the cap ratio")
+            check(summary["coverage"]["score"] == 0.75,
+                  "coverage.score drops below 1.0 when attempts failed")
+            check(summary["coverage"]["decompile_truncated"] is True,
+                  "decompile truncation flag passes through from the artifact verbatim")
+            check(summary["coverage"]["functions_truncated"] is True,
+                  "functions_truncated reads the functions.json envelope total vs exported length (3 vs 2)")
+            check(summary["scorer_version"] == "2",
+                  "scorer_version bumped with the coverage methodology change (#2068)")
+
+            try:
+                get(f"{base}/v1/results/{job_id}/security/functions/0x401100")
+            except urllib.error.HTTPError:
+                pass  # zero-signal either way -- not what this test asserts
+        finally:
+            proc.terminate()
+            proc.wait(timeout=5)
+
+
+def test_security_index_coverage_unit():
+    # Scorer-level edge cases behind #2068 that one HTTP scenario cannot
+    # cover: every attempt failing, the legacy fallback ladder, and an
+    # over-cap sample whose failures used to be invisible under the cap.
+    if str(SERVICE_DIR) not in sys.path:
+        sys.path.insert(0, str(SERVICE_DIR))
+    import security_index
+
+    def build(functions, **kw):
+        return security_index.build_security_index(
+            functions, [], {}, max_decompile_functions=500, **kw)
+
+    ok_entry = {"pseudocode": "int F(void) { return 0; }", "signature": "int F(void)"}
+    err_entry = {"error": "decompilation timed out"}
+
+    six_fns = [{"addr": f"0x{i:06x}", "name": f"F_{i}"} for i in range(6)]
+
+    all_failed = {"decompiled_count": 6, "total_functions": 6, "truncated": False,
+                  "functions": {fn["addr"]: err_entry for fn in six_fns}}
+    idx = build(six_fns, decompiled_data=all_failed)
+    check(idx["coverage"]["components"]["decompile"] == 0.0,
+          "a job whose every attempt failed scores decompile component 0.0")
+    check(idx["coverage"]["score"] == 0.5,
+          "all-failed coverage.score is the midpoint floor, not 1.0")
+
+    half_failed = dict(all_failed, functions={
+        fn["addr"]: (ok_entry if i % 2 else err_entry) for i, fn in enumerate(six_fns)})
+    idx = build(six_fns, decompiled_data=half_failed)
+    check(idx["coverage"]["components"]["decompile"] == 0.5 and idx["coverage"]["score"] == 0.75,
+          "half the attempts succeeding lands exactly on 0.5 / 0.75")
+
+    over_cap_fns = [{"addr": f"0x{i:07x}", "name": f"G_{i}"} for i in range(3000)]
+    over_cap = {"decompiled_count": 500, "total_functions": 3000, "truncated": True,
+                "functions": {**{f"0x{i:07x}": ok_entry for i in range(450)},
+                              **{f"0x{i:07x}": err_entry for i in range(450, 500)}}}
+    idx = build(over_cap_fns, decompiled_data=over_cap)
+    check(idx["coverage"]["components"]["decompile"] == 0.15,
+          "over-cap sample scores real pseudocode availability (450/3000), not the cap ratio")
+    check(idx["coverage"]["decompile_truncated"] is True,
+          "over-cap artifact's truncated flag passes through verbatim")
+
+    idx = build(six_fns)
+    check(idx["coverage"]["components"]["decompile"] == 1.0 and idx["coverage"]["score"] == 1.0,
+          "missing decompiled.json falls back to the legacy budget ratio (under cap -> 1.0)")
+    idx = build([{"addr": f"0x{i:06x}", "name": "F"} for i in range(3000)])
+    check(idx["coverage"]["components"]["decompile"] == round(500 / 3000, 3),
+          "legacy fallback keeps the old budget ratio for an over-cap census")
+
+    pre_mapping = {"decompiled_count": 4, "total_functions": 6}
+    idx = build(six_fns, decompiled_data=pre_mapping)
+    check(idx["coverage"]["components"]["decompile"] == 1.0,
+          "a decompiled.json predating its per-function mapping falls back too, not to a fake rate")
+
+    bad_total = {"decompiled_count": 6, "total_functions": None, "truncated": False,
+                 "functions": {fn["addr"]: err_entry for fn in six_fns}}
+    idx = build(six_fns, decompiled_data=bad_total)
+    check(idx["coverage"]["components"]["decompile"] == 0.0,
+          "an unusable envelope total falls back to the exported census as denominator")
+
+    idx = build(six_fns, functions_total=10)
+    check(idx["coverage"]["functions_truncated"] is True,
+          "envelope total above exported length marks functions_truncated")
+    idx = build(six_fns, functions_total=6)
+    check(idx["coverage"]["functions_truncated"] is False,
+          "matching envelope total does not claim truncation")
+
+
 def test_v1_annotations():
     with tempfile.TemporaryDirectory() as tmp:
         port = 19200
@@ -744,6 +864,8 @@ if __name__ == "__main__":
     test_v1_decompile_xrefs_query_graph()
     test_v1_types_globals_hexdump()
     test_v1_security_index()
+    test_v1_security_index_low_decompile_success()
+    test_security_index_coverage_unit()
     test_v1_annotations()
     test_v1_job_lifecycle_and_dedup()
     test_v1_job_cancel()
