@@ -1,11 +1,25 @@
 package main
 
 // correlate.go -- scoring/threshold logic over fetch.go's aggregation
-// results (campaignBucket/clusterBucket), matching dashboard/campaigns.go's
-// correlateCampaigns and dashboard/intelligence.go's clustersData exactly
-// (same 100-point score cap, same >=2-unique-IP cluster threshold) so
-// campaigns-v1/attacker-clusters-v1 read the same as the in-process
-// versions they're meant to replace (#1202, not this). #1219 moved the
+// results (campaignBucket/clusterBucket). RETIRED along with this whole
+// module (#1649/#1610 ported it into backend-service/src/correlator.rs,
+// live as WORKER_LOOPS=correlator) and kept only as compose's legacy-
+// profile rollback writer -- read compose.yml's header before ever re-
+// enabling it, because this file is no longer what production computes:
+// #1565/#1566 deliberately replaced the port's campaign scoring after
+// this additive-and-cap formula proved to saturate at 100 for almost any
+// real campaign, so a rollback here resurrects the retired scoring model.
+// Document shape still matches production field-for-field (same campaign
+// fields, same four cluster kinds, same sort keys and 50/250 caps --
+// verified against correlator.rs when this module's fate was decided,
+// #2105); score values do not, by design.
+//
+// Provenance: originally written to match the then-live Go dashboard's
+// correlateCampaigns/clustersData exactly (same 100-point score cap, same
+// >=2-unique-IP cluster threshold) so campaigns-v1/attacker-clusters-v1
+// read the same as the in-process versions they replaced (#1202 -- which
+// did wire the readers to these indices; both of those dashboard files
+// are gone with the dashboard itself, #1659). #1219 moved the
 // grouping itself from a raw-document Go loop to real Elasticsearch
 // aggregations (see fetch.go); this file is now pure functions over
 // already-aggregated structs, kept that way deliberately so the scoring
@@ -42,8 +56,9 @@ func validCredentialPair(user, pass string) bool {
 	return true
 }
 
-// campaignCIDR mirrors dashboard/campaigns.go's function of the same
-// name -- still needed here (not just in fetch.go's isRoutableNetwork) to
+// campaignCIDR mirrors the former dashboard/campaigns.go's function of
+// the same name (its live successor is correlator.rs's campaign_cidr) --
+// still needed here (not just in fetch.go's isRoutableNetwork) to
 // bucket fetchSuricataAlertCounts' flat per-IP result back into whichever
 // CIDR group each alerting IP belongs to, since the aggregation-based
 // campaign fetch no longer carries a per-group member-IP list to look
@@ -62,7 +77,8 @@ func campaignCIDR(ip string) string {
 }
 
 // campaignDoc is one campaigns-v1 document -- field names match
-// dashboard/campaigns.go's campaignRow where the same signal exists here.
+// the former dashboard/campaigns.go's campaignRow, and still match
+// correlator.rs's campaign JSON today, wherever the same signal exists.
 type campaignDoc struct {
 	CIDR         string   `json:"cidr"`
 	Score        int      `json:"score"`
@@ -100,10 +116,13 @@ func alertCountsByCIDR(alertCounts map[string]int) map[string]int {
 	return out
 }
 
-// scoreCampaigns mirrors dashboard/campaigns.go's correlateCampaigns:
-// same score formula, same top-50 cap. alertCounts is
-// fetchSuricataAlertCounts' own per-source-IP result (nil/empty is fine --
-// every group's alert term is just 0).
+// scoreCampaigns is this module's original additive-and-cap scorer --
+// the formula production's correlator.rs replaced under #1565/#1566 (see
+// this file's header), kept as-is here because a rollback writer that
+// quietly re-scored campaigns with a different model would be worse than
+// one that documents its own obsolescence. Same top-50 cap as the Rust
+// side. alertCounts is fetchSuricataAlertCounts' own per-source-IP
+// result (nil/empty is fine -- every group's alert term is just 0).
 func scoreCampaigns(buckets []campaignBucket, now time.Time, alertCounts map[string]int) []campaignDoc {
 	byCIDR := alertCountsByCIDR(alertCounts)
 	docs := make([]campaignDoc, 0, len(buckets))
@@ -157,12 +176,13 @@ func scoreCampaigns(buckets []campaignBucket, now time.Time, alertCounts map[str
 	return docs
 }
 
-// clusterDoc is one attacker-clusters-v1 document -- mirrors dashboard/
-// intelligence.go's clusterRow's four grouping kinds (Fingerprint/Payload/
-// Autonomous system/Provider class), lowercased (kind/asn/provider, not
-// "Autonomous system"/"Provider class") matching this worker's own
-// existing "fingerprint"/"payload" convention rather than dashboard's
-// display-string labels.
+// clusterDoc is one attacker-clusters-v1 document -- mirrors the former
+// dashboard/intelligence.go's clusterRow's four grouping kinds
+// (Fingerprint/Payload/Autonomous system/Provider class), lowercased
+// (kind/asn/provider, not "Autonomous system"/"Provider class") matching
+// this worker's own existing "fingerprint"/"payload" convention rather
+// than the dashboard's display-string labels -- the same lowercased kinds
+// correlator.rs's finalize_clusters writes today.
 type clusterDoc struct {
 	Kind      string   `json:"kind"`
 	Value     string   `json:"value"`
@@ -183,10 +203,13 @@ type clusterBucket struct {
 	Sensors   []string
 }
 
-// finalizeClusters mirrors dashboard/intelligence.go's clustersData: same
-// top-250 cap (the >=2-unique-IP threshold itself is enforced by
-// fetch.go's fetchClusterAggregates, against each bucket's own
-// cardinality sub-aggregation).
+// finalizeClusters mirrors the former dashboard/intelligence.go's
+// clustersData -- unchanged by the Rust port (correlator.rs's
+// finalize_clusters has the same sort keys and top-250 cap), so cluster
+// documents stay fully interchangeable between this writer and production.
+// The >=2-unique-IP threshold itself is enforced by fetch.go's
+// fetchClusterAggregates, against each bucket's own cardinality
+// sub-aggregation.
 func finalizeClusters(buckets []clusterBucket, now time.Time) []clusterDoc {
 	docs := make([]clusterDoc, 0, len(buckets))
 	for _, b := range buckets {

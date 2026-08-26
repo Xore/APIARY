@@ -2,10 +2,12 @@ package main
 
 // fetch.go -- reads recent events from honeypot-v2-*, same PIT +
 // search_after pattern and the same canonical_*-field scope as
-// correlator-worker/fetch.go (ported there from dashboard/events_es.go's
-// pagination; not shared as a package here either -- see that file's own
-// doc comment for the full reasoning, including why the window is much
-// shorter than dashboard's own 7-day default). identity.go turns these
+// correlator-worker/fetch.go (both descend from the former Go dashboard's
+// events_es.go pagination, removed with that dashboard in #1659; the
+// idiom's live home now is backend-service/src/es.rs's paged PIT search --
+// not shared as a package here either, see that file's own doc comment
+// for the full reasoning, including why the window is much shorter than
+// the old 7-day dashboard default). identity.go turns these
 // into per-IP signal sets; unlike correlator-worker, this worker's own
 // output (attackers-v1) is durable and accumulates across cycles even
 // though each cycle's own event fetch only covers a short recent window --
@@ -40,8 +42,9 @@ type corrEvent struct {
 	// Techniques (#1260) is ip-enrichment-worker's canonical_attck_techniques
 	// (#1261) -- a per-event ATT&CK technique-ID array promoted from the
 	// same canonical_user/pass/shasum/fingerprint/command fields this
-	// worker already reads, ported from dashboard/kill_chain.go's
-	// techniquesForEvent. identity.go folds these into each entity's own
+	// worker already reads, ported from the former Go dashboard's
+	// kill_chain.go techniquesForEvent (now backend-service/src/kill_chain.rs).
+	// identity.go folds these into each entity's own
 	// durable Techniques field so an entity's technique coverage persists
 	// once observed instead of only ever existing as a per-request,
 	// per-dashboard-instance computation (see identity.go's own comment

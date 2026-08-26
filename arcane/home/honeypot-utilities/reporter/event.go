@@ -8,7 +8,8 @@ import (
 
 // event is one normalized hit read from a sensor's JSON log line. Only the
 // fields the reporter actually needs -- this is not a general-purpose event
-// model like dashboard/classify.go's storedEvent, it exists to answer one
+// model like the former Go dashboard's storedEvent (its classify() logic
+// lives on in backend-service/src/event_detail.rs), it exists to answer one
 // question per line: "is there a reportable source IP here, and what kind of
 // abuse does it look like."
 type event struct {
@@ -25,9 +26,12 @@ type event struct {
 }
 
 // ipOf hunts for a source address across the field names honeypot sensors
-// actually use. Mirrors dashboard/classify.go's ipOf -- same sensors, same
-// inconsistent field naming, kept as a separate copy rather than a shared
-// import because this module is standalone by the same convention every
+// actually use. Descends from the former Go dashboard's classify.go ipOf;
+// production's evolved successor is backend-service/src/events.rs's
+// attacker_ip (#1873 added fleet-address exclusion and dionaea's nested
+// shapes) -- same sensors, same inconsistent field naming, kept as a
+// separate copy rather than a shared import because this module is
+// standalone by the same convention every
 // other Go service in this repo already follows (multipot, http-honeypot,
 // portbridge each vendor their own small normalizer rather than sharing one).
 func ipOf(e map[string]any) string {

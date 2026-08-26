@@ -1,10 +1,10 @@
 package main
 
 // es.go -- a minimal Elasticsearch client for this worker's two needs:
-// paginated read of honeypot-v2-* (ported from dashboard/events_es.go's
-// PIT + search_after pattern, the same one classify.go's buildViaMap and
-// es_aggregate.go all use) and idempotent upsert + full-replace write of
-// its own two output indices. Not shared as a package with dashboard or
+// paginated read of honeypot-v2-* (the PIT + search_after pattern the
+// former Go dashboard's events_es.go originated; that idiom's live home
+// is now backend-service/src/es.rs's paged PIT search) and idempotent
+// upsert + full-replace write of its own two output indices. Not shared as a package with any other
 // the other workers -- same module-boundary trade-off ip-enrichment-worker
 // and payload-inventory-worker already made.
 
