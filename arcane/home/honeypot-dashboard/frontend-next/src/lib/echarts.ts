@@ -28,6 +28,7 @@ import {
   ScatterChart,
 } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } from 'echarts/components'
+import { LabelLayout } from 'echarts/features'
 import { CanvasRenderer } from 'echarts/renderers'
 
 import { cssVar } from './cssVar'
@@ -49,6 +50,13 @@ echarts.use([
   TooltipComponent,
   VisualMapComponent,
   CanvasRenderer,
+  // #2130: LabelLayout is the feature that implements labelLayout's
+  // hideOverlap/moveOverlap -- a lifecycle hook, not a component, so no
+  // chart or component registration above pulls it in. Missing from this
+  // list, any `labelLayout` option is silently ignored and sankey labels
+  // overprint each other; the full-barrel builds of echarts happen to
+  // keep it, which is why labs never reproduced the app behavior.
+  LabelLayout,
 ])
 
 export { echarts }

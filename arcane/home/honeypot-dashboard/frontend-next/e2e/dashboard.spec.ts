@@ -144,3 +144,124 @@ test.describe("role-aware action visibility", () => {
     await context.close();
   });
 });
+
+// #2130: "How a byte flows" on /topology is the one chart readers need to
+// magnify and rearrange, so it gets roam (drag-to-pan), a component-owned
+// zoom scalar (wheel + buttons), and draggable nodes -- while every other
+// chart kind, kill-chain's sankey included, stays hands-off. These tests
+// drive the real echarts canvas through the hermetic fixture; gesture
+// assertions compare canvas screenshots because zrender draws to pixels
+// and exposes no view-state API a test could read instead.
+test.describe("topology sankey roam (#2130)", () => {
+  const SETTLE = 1_500; // layout animation + the labelLayout reflow pass
+  const zoomPct = (page: Page) => page.locator(".chip[aria-live]").innerText();
+  const canvasShot = (page: Page) => page.locator("canvas").first().screenshot();
+
+  // zrender marks elements it considers draggable by putting move/grab on
+  // the chart root's cursor; hovering a coarse grid until that appears
+  // finds a grabbable node without knowing fixture coordinates.
+  async function findDraggablePoint(page: Page, box: { x: number; y: number; width: number; height: number }) {
+    for (let gy = 1; gy <= 30; gy++) {
+      for (let gx = 1; gx <= 12; gx++) {
+        const x = box.x + (box.width * gx) / 13;
+        const y = box.y + (box.height * gy) / 31;
+        await page.mouse.move(x, y);
+        const cursor = await page.evaluate(() => {
+          const cv = document.querySelector("canvas") as HTMLCanvasElement;
+          return `${cv.style.cursor}|${(cv.parentElement as HTMLElement).style.cursor}`;
+        });
+        if (/move|grab|pointer/.test(cursor)) return { x, y };
+      }
+    }
+    throw new Error("no draggable element found under cursor grid");
+  }
+
+  async function openTopology(page: Page) {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto("/topology");
+    await page.getByText("scroll to zoom").waitFor({ state: "visible", timeout: 20_000 });
+    await page.waitForTimeout(SETTLE);
+    return (await page.locator("canvas").first().boundingBox())!;
+  }
+
+  test("wheel zooms without scrolling the page; buttons and reset agree with the readout", async ({ page }) => {
+    const box = await openTopology(page);
+    expect(await zoomPct(page)).toBe("100%");
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.waitForTimeout(300);
+    const scrollBefore = await page.evaluate(() => window.scrollY);
+    await page.mouse.wheel(0, -240);
+    await page.mouse.wheel(0, -240);
+    await page.waitForTimeout(400);
+    // The wheel listener preventDefaults: hovering the chart must never
+    // steal a page scroll the reader did not aim at the chart.
+    expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
+    expect(await zoomPct(page)).toBe("144%");
+    await page.getByRole("button", { name: "Zoom out" }).click();
+    expect(await zoomPct(page)).toBe("120%");
+    await page.getByRole("button", { name: "reset" }).click();
+    await page.waitForTimeout(SETTLE);
+    expect(await zoomPct(page)).toBe("100%");
+  });
+
+  test("dragging background pans; node drags displace and persist; reset restores", async ({ page }) => {
+    const box = await openTopology(page);
+    await page.mouse.move(box.x + 30, box.y + 20);
+    await page.waitForTimeout(300);
+    const prePan = await canvasShot(page);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 190, box.y + 140, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(400);
+    expect((await canvasShot(page)).equals(prePan)).toBe(false);
+
+    // Node drag must move MORE than hover-emphasis alone does and survive
+    // mouseup -- the #2132 regression was drags that looked alive under the
+    // cursor but were only emphasis highlights.
+    const aim = await findDraggablePoint(page, box);
+    await page.waitForTimeout(300);
+    const beforeDrag = await canvasShot(page);
+    await page.mouse.down();
+    await page.mouse.move(aim.x + 70, aim.y + 55, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+    const afterDrag = await canvasShot(page);
+    expect(afterDrag.equals(beforeDrag)).toBe(false);
+    await page.waitForTimeout(600);
+    expect((await canvasShot(page)).equals(afterDrag)).toBe(true);
+
+    await page.getByRole("button", { name: "reset" }).click();
+    await page.waitForTimeout(SETTLE);
+    expect(await zoomPct(page)).toBe("100%");
+  });
+
+  test("sankey labels hide overlap instead of overprinting the fleet band", async ({ page }) => {
+    await openTopology(page);
+    // Ground truth for the "cluttered white text" half of #2130: with the
+    // LabelLayout feature registered, hideOverlap marks colliding labels
+    // ignored, so the display list holds fewer visible text spans than node
+    // rects. When the feature silently drops out of the bundle (the way it
+    // did before echarts/features was use()d), every label paints and this
+    // count goes equal -- that equality is the regression signature.
+    const counts = await page.evaluate(() => {
+      const host = document.querySelector("[_echarts_instance_]") as (HTMLElement & { __xoreChart?: { getZr: () => { storage: { getDisplayList: (b: boolean) => { type: string }[] } } } }) | null;
+      if (!host || !host.__xoreChart) throw new Error("chart seam missing");
+      const list = host.__xoreChart.getZr().storage.getDisplayList(false);
+      return {
+        rects: list.filter((el) => el.type === "rect").length,
+        visibleLabels: list.filter((el) => el.type === "tspan").length,
+      };
+    });
+    expect(counts.rects).toBeGreaterThan(50); // fixture density guard
+    expect(counts.visibleLabels).toBeLessThan(counts.rects);
+  });
+
+  test("other charts stay control-free: kill-chain sankey has no zoom UI", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto("/kill-chain");
+    await page.getByRole("heading", { level: 1 }).waitFor();
+    await page.waitForTimeout(SETTLE);
+    expect(await page.locator(".chip[aria-live]").count()).toBe(0);
+    expect(await page.getByText("scroll to zoom").count()).toBe(0);
+  });
+});
