@@ -126,6 +126,9 @@ fn bad_gateway(error: anyhow::Error) -> (StatusCode, String) {
 pub struct FilterValues {
     pub sensors: Vec<String>,
     pub countries: Vec<String>,
+    /// City names over the event window (#2045) — the drill-in target the
+    /// overview map pins now filter events by.
+    pub cities: Vec<String>,
     pub protos: Vec<String>,
     pub ports: Vec<String>,
     pub kinds: Vec<String>,
@@ -141,6 +144,10 @@ pub async fn filter_values(State(state): State<AppState>) -> Result<Json<FilterV
         "aggs": {
             "sensors": {"terms": {"field": "event.sensor", "size": 60}},
             "countries": {"terms": {"field": "source.geo.country_iso_code", "size": 200}},
+            // Same field the map's multi_terms buckets on; a city term is
+            // only useful alongside its country, so the size follows the
+            // map pin cap (dashboard.rs, 500) rather than a bar-length one.
+            "cities": {"terms": {"field": "source.geo.city_name", "size": 500}},
             "protos": {"terms": {"field": "network.protocol", "size": 60}},
             "ports": {"terms": {"field": "destination.port", "size": 60}},
             "kinds": {"terms": {"field": "honeypot.event", "size": 40}}
@@ -161,10 +168,12 @@ pub async fn filter_values(State(state): State<AppState>) -> Result<Json<FilterV
     let mut values = FilterValues {
         sensors: keys("sensors"),
         countries: keys("countries"),
+        cities: keys("cities"),
         protos: keys("protos"),
         ports: keys("ports"),
         kinds: keys("kinds"),
     };
     values.countries.sort();
+    values.cities.sort();
     Ok(Json(values))
 }
