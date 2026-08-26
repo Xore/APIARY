@@ -59,10 +59,11 @@ func main() {
 	}
 
 	es := newESClient(esURL)
-	for {
+	// #1980: a panicking cycle is logged with its stack and retried next
+	// interval; it no longer takes the whole worker down.
+	runLoop("payload-inventory-worker", interval, func() {
 		runScan(es, dirs)
-		time.Sleep(interval)
-	}
+	})
 }
 
 func runScan(es *esClient, dirs []string) {

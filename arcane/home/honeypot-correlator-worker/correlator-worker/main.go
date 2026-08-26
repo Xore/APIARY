@@ -71,10 +71,11 @@ func main() {
 	interval := getenvDuration("RUN_INTERVAL", 15*time.Minute)
 
 	es := newESClient(esURL)
-	for {
+	// #1980: a panicking cycle is logged with its stack and retried next
+	// interval; it no longer takes the whole worker down.
+	runLoop("correlator-worker", interval, func() {
 		runCorrelation(es, window)
-		time.Sleep(interval)
-	}
+	})
 }
 
 func runCorrelation(es *esClient, window time.Duration) {
