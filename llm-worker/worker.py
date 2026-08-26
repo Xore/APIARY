@@ -1199,14 +1199,73 @@ def write_status(result: dict[str, Any], ok: bool = True) -> None:
     temporary.replace(STATUS_PATH)
 
 
+def healthcheck_failure(status: dict[str, Any], maximum_age: int) -> str:
+    """One-line reason this status document means unhealthy (#2234).
+
+    Only bounded first-party values are surfaced: booleans, integers, stage
+    names and exception *type* names -- never model output text. Same
+    discipline the cycle handler already applies to what it lets into the
+    status file.
+    """
+    if status.get("ok") is not True:
+        failure = f"last cycle reported ok={status.get('ok')!r}"
+    else:
+        updated = datetime.fromisoformat(str(status["updated_at"]).replace("Z", "+00:00"))
+        age = int((utcnow() - updated).total_seconds())
+        failure = f"status is {age}s old (limit {maximum_age}s)"
+    if "error" in status:
+        failure += f", error={status['error']}"
+    stage_errors = status.get("stage_errors")
+    if isinstance(stage_errors, dict) and stage_errors:
+        failure += ", failing stages=" + ",".join(sorted(stage_errors))
+    return failure
+
+
 def healthcheck(config: Config) -> int:
+    maximum_age = max(90, config.poll_interval * 3)
     try:
         status = json.loads(STATUS_PATH.read_text(encoding="utf-8"))
         updated = datetime.fromisoformat(str(status["updated_at"]).replace("Z", "+00:00"))
-        maximum_age = max(90, config.poll_interval * 3)
-        return 0 if status.get("ok") is True and (utcnow() - updated).total_seconds() <= maximum_age else 1
-    except (OSError, ValueError, KeyError, TypeError):
+        fresh = (utcnow() - updated).total_seconds() <= maximum_age
+        if status.get("ok") is True and fresh:
+            return 0
+        # #2234: a silent exit 1 left `unhealthy` with no output to inspect;
+        # docker exposes the healthcheck's stdout on failure, so say why.
+        print(f"healthcheck failed: {healthcheck_failure(status, maximum_age)}")
         return 1
+    except (OSError, ValueError, KeyError, TypeError):
+        print(f"healthcheck failed: no readable status document at {STATUS_PATH}")
+        return 1
+
+
+def es_preflight(config: Config) -> None:
+    """Refuse captured-data mode when Elasticsearch has no route (#2234).
+
+    The #66 base compose deliberately attaches only the internal
+    synthetic-only network, but the stack directory's production flags travel
+    with any bring-up via env_file -- so bare base-compose up produced a
+    worker that crash-looped every POLL_INTERVAL on NameResolutionError,
+    surfacing nothing but buried log lines and an empty-output unhealthy.
+    One explicit probe before the first cycle turns that into a single named
+    startup failure that says which overlay supplies the missing route.
+    """
+    if config.dry_run:
+        return
+    es = Elasticsearch(config.es_host, request_timeout=5)
+    try:
+        reachable = bool(es.ping())
+    finally:
+        es.close()
+    if reachable:
+        return
+    raise RuntimeError(
+        f"Elasticsearch unreachable at {config.es_host}: captured-data mode is "
+        "enabled but this deployment has no route to it. The #66 base compose "
+        "attaches only the internal synthetic-only network; start through the "
+        "captured-data/canary overlays that attach the production networks "
+        "(docker-compose.captured-data-deploy.yml), or clear the captured-data "
+        "flags in .env. See issue #2234."
+    )
 
 
 def run_selftest() -> None:
@@ -1426,6 +1485,15 @@ def main() -> int:
         print(json.dumps(result, sort_keys=True))
         return 0
     worker = LLMWorker(config)
+    # #2234: before the loop, so the failure names its cause once at startup
+    # and the status document carries it for the healthcheck to repeat,
+    # instead of a crashloop whose only symptom is generic cycle errors.
+    try:
+        es_preflight(config)
+    except RuntimeError as exc:
+        write_status({"mode": "captured-data", "error": "elasticsearch-unreachable-at-startup"}, False)
+        print(f"startup preflight failed: {exc}", file=sys.stderr)
+        return 1
     while True:
         started = time.monotonic()
         cycle_ok = True

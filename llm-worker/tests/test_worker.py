@@ -8,6 +8,10 @@ import sys
 import tempfile
 import unittest
 import unittest.mock
+from contextlib import redirect_stderr, redirect_stdout
+from datetime import timedelta, timezone
+from datetime import datetime as dt
+from io import StringIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -382,6 +386,104 @@ class CycleStageIsolationTests(unittest.TestCase):
         self.assertEqual(result["payloads"], 0)
         self.assertEqual(result["reports"], 1, "the report still runs after payloads fail")
         self.assertEqual(result["stage_errors"], {"payloads": "RuntimeError"})
+
+
+class ElasticsearchPreflightTests(unittest.TestCase):
+    """#2234: captured-data mode without an ES route fails named, once, at boot."""
+
+    def _captured_config(self):
+        with patch.dict(
+            os.environ,
+            {
+                "LLM_DRY_RUN": "false",
+                "LLM_ENABLED": "true",
+                "LLM_ALLOW_CAPTURED_DATA": "true",
+                "LLM_SESSION_ENABLED": "true",
+                "LLM_EXPECTED_MODEL_DIGEST": "a" * 64,
+            },
+            clear=True,
+        ):
+            return worker.Config.from_env()
+
+    def test_dry_run_never_touches_elasticsearch(self):
+        cfg = config()  # dry_run=True is the default
+        with patch("worker.Elasticsearch") as factory:
+            worker.es_preflight(cfg)
+        factory.assert_not_called()
+
+    def test_unreachable_es_names_the_route_and_the_overlay(self):
+        cfg = self._captured_config()
+        client = MagicMock()
+        client.ping.return_value = False
+        with patch("worker.Elasticsearch", return_value=client) as factory:
+            with self.assertRaisesRegex(RuntimeError, "synthetic-only|#2234"):
+                worker.es_preflight(cfg)
+        factory.assert_called_once()
+        self.assertEqual(factory.call_args.args[0], cfg.es_host)
+
+    def test_reachable_es_passes_without_output(self):
+        cfg = self._captured_config()
+        client = MagicMock()
+        client.ping.return_value = True
+        with patch("worker.Elasticsearch", return_value=client):
+            out = StringIO()
+            with redirect_stdout(out), redirect_stderr(out):
+                worker.es_preflight(cfg)
+        self.assertEqual(out.getvalue(), "")
+
+
+class HealthcheckDiagnosticsTests(unittest.TestCase):
+    """#2234: the healthcheck's exit 1 carries a reason on stdout."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.status_path = Path(tmp.name) / "llm-worker-status.json"
+        patcher = patch.object(worker, "STATUS_PATH", self.status_path)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.cfg = config()
+
+    def _stamp(self, age_seconds):
+        moment = dt.now(timezone.utc) - timedelta(seconds=age_seconds)
+        return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def test_healthy_recent_status_is_quiet_success(self):
+        status = {"updated_at": self._stamp(0), "ok": True, "mode": "captured-data"}
+        self.status_path.write_text(json.dumps(status), encoding="utf-8")
+        out = StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(worker.healthcheck(self.cfg), 0)
+        self.assertEqual(out.getvalue(), "")
+
+    def test_failed_cycle_prints_named_error_type(self):
+        status = {"updated_at": self._stamp(0), "ok": False, "mode": "captured-data", "error": "RuntimeError"}
+        self.status_path.write_text(json.dumps(status), encoding="utf-8")
+        out = StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(worker.healthcheck(self.cfg), 1)
+        self.assertIn("error=RuntimeError", out.getvalue())
+        self.assertIn("ok=False", out.getvalue())
+
+    def test_stale_status_names_failing_stages_from_last_cycles(self):
+        status = {
+            "updated_at": self._stamp(600),
+            "ok": True,
+            "mode": "captured-data",
+            "stage_errors": {"daily_report": "ModelResponseError"},
+        }
+        self.status_path.write_text(json.dumps(status), encoding="utf-8")
+        out = StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(worker.healthcheck(self.cfg), 1)
+        self.assertIn("failing stages=daily_report", out.getvalue())
+        self.assertIn("old", out.getvalue())
+
+    def test_missing_status_document_is_not_silent(self):
+        out = StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(worker.healthcheck(self.cfg), 1)
+        self.assertIn("no readable status document", out.getvalue())
 
 
 class GPUQueueVendoringTests(unittest.TestCase):
