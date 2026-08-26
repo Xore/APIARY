@@ -1,0 +1,190 @@
+{
+  "_comment": [
+    "Cross-language behavioural fixture stream for the incremental-checkpoint",
+    "(pattern 1) ES consume engine -- issue #1971.",
+    "",
+    "Consumed identically by:",
+    "  - analysis/es-consume/tests/test_es_consume.py   (Python engine, canonical)",
+    "  - ml-worker/es_consume.py's own contract suite   (vendored copy)",
+    "  - arcane/home/honeypot-attacker-identity-worker/",
+    "    attacker-identity-worker/esconsume_test.go     (Go reference engine)",
+    "",
+    "Same fixture stream in -> same consumed event sequence and same resulting",
+    "checkpoint out, in both languages. Every expectation here was computed by",
+    "hand from the documented semantics (docs/ES-CONSUME-PATTERNS.md pattern 1)",
+    "and ml-worker/worker.py's #168/#188/#190 behaviour -- NOT generated from",
+    "either implementation, which is what makes disagreement between them a",
+    "real signal.",
+    "",
+    "Harness protocol shared by both adapters:",
+    "  - pages model transport responses in order. The FIRST page is served by",
+    "    the search() call, each subsequent page by scroll_next(); a page whose",
+    "    \"ok\" is false makes the adapter raise instead of returning, i.e. it",
+    "    simulates a mid-scroll transport failure at exactly that point.",
+    "  - exclude_ids passed to the engine is ALWAYS the initial checkpoint's",
+    "    seen_ids -- that identity is the poll-loop contract itself (#168), not",
+    "    a per-case option.",
+    "  - expected_final_checkpoint = advance_checkpoint(returned_events,",
+    "    initial_checkpoint) -- the caller-visible next position. When ok is",
+    "    false this encodes the partial-scroll safety property (#168/#190):",
+    "    persisting that position is safe because every returned event sorts at",
+    "    or before everything not yet read."
+  ],
+  "case_semantics": {
+    "exclude_ids": "= initial_checkpoint.seen_ids",
+    "final_checkpoint": "= advance_checkpoint(events_returned, initial_checkpoint)"
+  },
+  "cases": [
+    {
+      "name": "#168 equal-timestamp sibling arriving after the checkpoint was saved is not lost",
+      "initial_checkpoint": {
+        "last_timestamp": "2026-08-01T10:00:05Z",
+        "seen_ids": ["b"]
+      },
+      "max_total": null,
+      "pages": [
+        {
+          "ok": true,
+          "hits": [
+            { "_id": "b", "_source": { "@timestamp": "2026-08-01T10:00:05Z" } },
+            { "_id": "c", "_source": { "@timestamp": "2026-08-01T10:00:05Z" } }
+          ]
+        },
+        { "ok": true, "hits": [] }
+      ],
+      "expected_ok": true,
+      "expected_consumed_ids": ["c"],
+      "expected_final_checkpoint": {
+        "last_timestamp": "2026-08-01T10:00:05Z",
+        "seen_ids": ["c"]
+      }
+    },
+    {
+      "name": "checkpoint advances to the batch's maximum timestamp keeping only IDs at that timestamp",
+      "initial_checkpoint": {
+        "last_timestamp": "2026-08-01T10:00:00Z",
+        "seen_ids": []
+      },
+      "max_total": null,
+      "pages": [
+        {
+          "ok": true,
+          "hits": [
+            { "_id": "a", "_source": { "@timestamp": "2026-08-01T10:00:00Z" } },
+            { "_id": "b2", "_source": { "@timestamp": "2026-08-01T10:00:05Z" } },
+            { "_id": "d", "_source": { "@timestamp": "2026-08-01T10:00:10Z" } }
+          ]
+        },
+        { "ok": true, "hits": [] }
+      ],
+      "expected_ok": true,
+      "expected_consumed_ids": ["a", "b2", "d"],
+      "expected_final_checkpoint": {
+        "last_timestamp": "2026-08-01T10:00:10Z",
+        "seen_ids": ["d"]
+      }
+    },
+    {
+      "name": "batch cap keeps the earliest prefix only -- checkpoint never moves past unconsumed events",
+      "initial_checkpoint": {
+        "last_timestamp": "1970-01-01T00:00:00Z",
+        "seen_ids": []
+      },
+      "max_total": 3,
+      "pages": [
+        {
+          "ok": true,
+          "hits": [
+            { "_id": "h1", "_source": { "@timestamp": "2026-08-01T10:00:00Z" } },
+            { "_id": "h2", "_source": { "@timestamp": "2026-08-01T10:00:05Z" } },
+            { "_id": "h3", "_source": { "@timestamp": "2026-08-01T10:00:05Z" } },
+            { "_id": "h4", "_source": { "@timestamp": "2026-08-01T10:00:05Z" } },
+            { "_id": "h5", "_source": { "@timestamp": "2026-08-01T10:00:10Z" } }
+          ]
+        },
+        { "ok": true, "hits": [] }
+      ],
+      "expected_ok": true,
+      "expected_consumed_ids": ["h1", "h2", "h3"],
+      "expected_final_checkpoint": {
+        "last_timestamp": "2026-08-01T10:00:05Z",
+        "seen_ids": ["h2", "h3"]
+      }
+    },
+    {
+      "name": "#188 mid-scroll failure returns the pages already read with ok=false -- and that partial position is safe to checkpoint",
+      "initial_checkpoint": {
+        "last_timestamp": "2026-08-01T09:59:55Z",
+        "seen_ids": []
+      },
+      "max_total": null,
+      "pages": [
+        {
+          "ok": true,
+          "hits": [
+            { "_id": "x1", "_source": { "@timestamp": "2026-08-01T10:00:00Z" } },
+            { "_id": "x2", "_source": { "@timestamp": "2026-08-01T10:00:00Z" } },
+            { "_id": "x3", "_source": { "@timestamp": "2026-08-01T10:00:05Z" } }
+          ]
+        },
+        { "ok": false, "error": "injected scroll failure" }
+      ],
+      "expected_ok": false,
+      "expected_consumed_ids": ["x1", "x2", "x3"],
+      "expected_final_checkpoint": {
+        "last_timestamp": "2026-08-01T10:00:05Z",
+        "seen_ids": ["x3"]
+      }
+    },
+    {
+      "name": "#188 requery that contains only already-seen siblings is a successful empty poll, not a failure -- checkpoint unchanged",
+      "initial_checkpoint": {
+        "last_timestamp": "2026-08-01T10:00:05Z",
+        "seen_ids": ["b"]
+      },
+      "max_total": null,
+      "pages": [
+        {
+          "ok": true,
+          "hits": [
+            { "_id": "b", "_source": { "@timestamp": "2026-08-01T10:00:05Z" } }
+          ]
+        },
+        { "ok": true, "hits": [] }
+      ],
+      "expected_ok": true,
+      "expected_consumed_ids": [],
+      "expected_final_checkpoint": {
+        "last_timestamp": "2026-08-01T10:00:05Z",
+        "seen_ids": ["b"]
+      }
+    },
+    {
+      "name": "#168 seen_ids is replaced, not appended: bounded by one timestamp's collision count",
+      "initial_checkpoint": {
+        "last_timestamp": "2026-08-01T10:00:00Z",
+        "seen_ids": ["p", "q"]
+      },
+      "max_total": null,
+      "pages": [
+        {
+          "ok": true,
+          "hits": [
+            { "_id": "r", "_source": { "@timestamp": "2026-08-01T10:00:05Z" } },
+            { "_id": "s", "_source": { "@timestamp": "2026-08-01T10:00:05Z" } },
+            { "_id": "t", "_source": { "@timestamp": "2026-08-01T10:00:05Z" } },
+            { "_id": "u", "_source": { "@timestamp": "2026-08-01T10:00:05Z" } },
+            { "_id": "v", "_source": { "@timestamp": "2026-08-01T10:00:05Z" } }
+          ]
+        },
+        { "ok": true, "hits": [] }
+      ],
+      "expected_ok": true,
+      "expected_consumed_ids": ["r", "s", "t", "u", "v"],
+      "expected_final_checkpoint": {
+        "last_timestamp": "2026-08-01T10:00:05Z",
+        "seen_ids": ["r", "s", "t", "u", "v"]
+      }
+    }
+  ]
+}
