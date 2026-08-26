@@ -662,7 +662,17 @@ pub async fn es_importer_loop(state: AppState) {
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         ticker.tick().await;
-        let indexed = run_pass(&state, &all_sources, &mut dedup, shard_count, shard_index).await;
+        // #2181: scan_source already isolates per source (spawn_blocking +
+        // JoinHandle default), so this boundary covers everything around it
+        // — the bulk-index phase and the in-memory dedup updates. A panicked
+        // pass loses only progress since the last save; documents are keyed
+        // by stable ids and re-import overwrites rather than duplicates.
+        let indexed = crate::isolate::cycle(
+            "es-results-importer",
+            run_pass(&state, &all_sources, &mut dedup, shard_count, shard_index),
+        )
+        .await
+        .unwrap_or(0);
         if indexed > 0 {
             save_state(&state_path, &dedup);
         }

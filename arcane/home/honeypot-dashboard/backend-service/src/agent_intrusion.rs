@@ -344,8 +344,21 @@ pub async fn agent_intrusion_loop(state: AppState) {
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         ticker.tick().await;
-        let written = run_cycle(&state, fetch_window, max_events_per_source).await;
-        tracing::info!(written, "agent-intrusion: cycle complete");
+        // #2181: per-event compute was already isolated — the correlation
+        // pass runs in spawn_blocking and reads its JoinHandle with
+        // unwrap_or_default, so a panicked event pipeline degrades to zero
+        // verdicts for that cycle instead of ending anything. This boundary
+        // takes the fetch phase, which runs inline on this task, out of the
+        // blast radius too; None just means isolate::cycle already logged
+        // the panic and the poll cadence retries next tick.
+        if let Some(written) = crate::isolate::cycle(
+            "agent-intrusion",
+            run_cycle(&state, fetch_window, max_events_per_source),
+        )
+        .await
+        {
+            tracing::info!(written, "agent-intrusion: cycle complete");
+        }
     }
 }
 

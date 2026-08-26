@@ -78,6 +78,9 @@ struct SourceStats {
     resolved_first: AtomicI64,
     resolved_retry: AtomicI64,
     timed_out: AtomicI64,
+    /// #2181: lines whose enricher panicked — skipped rather than allowed
+    /// to kill run_source's task and strand the tail offset.
+    poisoned: AtomicI64,
 }
 
 struct Source {
@@ -173,7 +176,32 @@ async fn run_source(
         ticker.tick().await;
         let snapshot_vm = vm.read().await.clone();
         let snapshot_tftp = tftp_vm.read().await.clone();
-        offset = process_source_tick(&mut source, &mut writer, &mut queue, &snapshot_vm, &snapshot_tftp, pending_timeout, offset);
+        // #2181 backstop: the per-line boundary above is where poison is
+        // expected (attacker bytes), but the tick itself stays synchronous,
+        // so one std boundary keeps any other surprise from ending this
+        // source's task. Holding the old offset on panic means the file
+        // resummons cleanly from its last durable position next tick.
+        let tick = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            process_source_tick(
+                &mut source,
+                &mut writer,
+                &mut queue,
+                &snapshot_vm,
+                &snapshot_tftp,
+                pending_timeout,
+                offset,
+            )
+        }));
+        match tick {
+            Ok(new_offset) => offset = new_offset,
+            Err(payload) => {
+                tracing::warn!(
+                    source = %source.name,
+                    detail = %crate::isolate::panic_detail(payload),
+                    "ip-enrichment: source tick panicked; nothing advanced -- retried next tick (#2181)"
+                );
+            }
+        }
     }
 }
 
@@ -207,11 +235,40 @@ fn process_source_tick(
     let tunnel_peer_marker = format!("\"src_ip\":\"{TUNNEL_PEER_IP}\"");
     let tunnel_peer_addr_marker = format!("\"REMOTE_ADDR\":\"{TUNNEL_PEER_IP}:");
     let mut ready = Vec::new();
+    // Byte position of the line being processed, for poison attribution:
+    // lines were read from `offset`, so numbering within the batch pins the
+    // poisoned record without a second pass to re-derive exact offsets.
+    let mut line_no = 0usize;
     for line in lines {
+        line_no += 1;
         let raw = String::from_utf8_lossy(&line);
         let is_tunnel_peer =
             raw.contains(&tunnel_peer_marker) || raw.contains(&tunnel_peer_addr_marker); // #1206 debug stat only
-        let (enriched, resolved) = (source.enrich)(&line, vm, tftp_vm, &source.name);
+        // #2181: enrichers work on attacker-shaped bytes. A panicked line
+        // used to unwind run_source's task AND strand this file — the offset
+        // only advances after a successful write, so every restart tick hit
+        // the same record again, forever. Isolation gives the poisoned line
+        // this pipeline's native ack/skip semantics: no output row is
+        // produced for it, but the offset still advances past it because the
+        // healthy lines still write. Preview truncated hard; content is
+        // attacker-controlled.
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            (source.enrich)(&line, vm, tftp_vm, &source.name)
+        }));
+        let (enriched, resolved) = match outcome {
+            Ok(pair) => pair,
+            Err(payload) => {
+                source.stats.poisoned.fetch_add(1, Ordering::Relaxed);
+                tracing::warn!(
+                    source = %source.name,
+                    line_no,
+                    preview = %String::from_utf8_lossy(&line[..line.len().min(120)]),
+                    detail = %crate::isolate::panic_detail(payload),
+                    "ip-enrichment: line panicked its enricher; skipped, offset advances past it (#2181)"
+                );
+                continue;
+            }
+        };
         if resolved {
             if is_tunnel_peer {
                 source.stats.resolved_first.fetch_add(1, Ordering::Relaxed);
@@ -254,7 +311,8 @@ async fn log_stats(sources: &[Arc<SourceStats>], names: &[String], interval: Dur
             let first = stats.resolved_first.swap(0, Ordering::Relaxed);
             let retry = stats.resolved_retry.swap(0, Ordering::Relaxed);
             let timed_out = stats.timed_out.swap(0, Ordering::Relaxed);
-            if attempted == 0 && first == 0 {
+            let poisoned = stats.poisoned.swap(0, Ordering::Relaxed);
+            if attempted == 0 && first == 0 && poisoned == 0 {
                 continue; // nothing seen for this source this interval
             }
             tracing::info!(
@@ -263,6 +321,7 @@ async fn log_stats(sources: &[Arc<SourceStats>], names: &[String], interval: Dur
                 resolved_first = first,
                 resolved_retry = retry,
                 timed_out,
+                poisoned,
                 "ip-enrichment: tunnel-peer join stats"
             );
         }
@@ -510,6 +569,91 @@ mod tests {
         );
 
         assert_eq!(got, 0, "the write succeeded but the offset did not stick");
+    }
+
+    // ---- #2181: a panicked enricher is a skip, not a death. The offset's
+    // ---- ack/skip contract stays intact — the poisoned line produces no
+    // ---- output but is still consumed — and the task keeps tailing.
+
+    /// panics on any line carrying POISON, otherwise behaves exactly like
+    /// the happy passthrough: resolved, unchanged.
+    fn poison_on_marker(line: &[u8], vm: &ViaMap, tftp_vm: &ViaMap, persona: &str) -> (Vec<u8>, bool) {
+        if line.windows(6).any(|w| w == b"POISON") {
+            panic!("synthetic poisoned capture");
+        }
+        passthrough(line, vm, tftp_vm, persona)
+    }
+
+    fn poison_test_source(input: PathBuf, output: PathBuf, state_path: PathBuf) -> Source {
+        Source {
+            enrich: poison_on_marker,
+            ..test_source(input, output, state_path)
+        }
+    }
+
+    #[test]
+    fn a_panicking_line_is_skipped_but_still_acked_by_the_offset() {
+        let dir = temp_dir("tick-poison-line");
+        let input = dir.join("in.json");
+        std::fs::write(&input, b"{\"a\":1}\n{\"bad\":\"POISON\"}\n{\"a\":2}\n").unwrap();
+
+        let mut source = poison_test_source(input.clone(), dir.join("out.json"), dir.join("test.offset"));
+        let mut writer = OutputWriter::open(source.output.clone(), 0).unwrap();
+        let mut queue = PendingQueue::default();
+
+        let got = process_source_tick(
+            &mut source, &mut writer, &mut queue,
+            &ViaMap::new(), &ViaMap::new(), Duration::from_secs(1), 0,
+        );
+
+        let file_len = std::fs::metadata(&input).unwrap().len() as i64;
+        assert_eq!(
+            got, file_len,
+            "the poisoned middle line is skipped for OUTPUT but still consumed by the offset"
+        );
+        assert_eq!(source.stats.poisoned.load(Ordering::Relaxed), 1, "and counted for diagnostics");
+
+        let shipped = std::fs::read_to_string(dir.join("out.json")).unwrap();
+        assert!(shipped.contains("{\"a\":1}"), "healthy sibling one shipped");
+        assert!(shipped.contains("{\"a\":2}"), "healthy sibling two shipped");
+        assert!(!shipped.contains("POISON"), "no output row exists for the poisoned line");
+    }
+
+    #[test]
+    fn the_tail_continues_after_a_poisoned_line_on_the_next_tick() {
+        let dir = temp_dir("tick-poison-continues");
+        let input = dir.join("in.json");
+        std::fs::write(&input, b"{\"bad\":\"POISON\"}\n").unwrap();
+
+        let mut source = poison_test_source(input.clone(), dir.join("out.json"), dir.join("test.offset"));
+        let mut writer = OutputWriter::open(source.output.clone(), 0).unwrap();
+        let mut queue = PendingQueue::default();
+
+        let got = process_source_tick(
+            &mut source, &mut writer, &mut queue,
+            &ViaMap::new(), &ViaMap::new(), Duration::from_secs(1), 0,
+        );
+        assert_eq!(
+            got,
+            std::fs::metadata(&input).unwrap().len() as i64,
+            "first tick survives and acks past the poison"
+        );
+
+        use std::io::Write as _;
+        let mut append = std::fs::OpenOptions::new().append(true).open(&input).unwrap();
+        writeln!(append, "{{\"later\":\"good\"}}").unwrap();
+        append.flush().unwrap();
+
+        let got2 = process_source_tick(
+            &mut source, &mut writer, &mut queue,
+            &ViaMap::new(), &ViaMap::new(), Duration::from_secs(1), got,
+        );
+        assert_eq!(got2, std::fs::metadata(&input).unwrap().len() as i64);
+        let shipped = std::fs::read_to_string(dir.join("out.json")).unwrap();
+        assert!(
+            shipped.contains("{\"later\":\"good\"}"),
+            "the loop processes later lines after the poisoned one"
+        );
     }
 
     #[test]
