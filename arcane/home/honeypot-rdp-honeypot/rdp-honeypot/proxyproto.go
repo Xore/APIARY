@@ -1,6 +1,6 @@
 package main
 
-// PROXY-protocol decoding. When multipot sits behind portbridge (which
+// PROXY-protocol decoding. When this honeypot sits behind portbridge (which
 // terminates the attacker's TCP connection on the VPS and re-dials over
 // WireGuard), every connection would otherwise appear to come from the tunnel
 // peer 10.8.0.1. If portbridge is told to prepend a HAProxy PROXY header

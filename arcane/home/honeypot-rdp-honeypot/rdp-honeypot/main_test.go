@@ -181,3 +181,31 @@ func TestServeIgnoresEmptyReadWithoutLogging(t *testing.T) {
 		t.Fatal("serve did not return after client closed without sending data")
 	}
 }
+
+// TestSpawnServeDoesNotBlockOnSilentPeer covers #2099: the PROXY-header
+// decode must run inside the spawned goroutine, never in the accept loop.
+// spawnServe's previous equivalent -- `go serve(decodeProxy(c, proxy), ...)`
+// -- looks like the safe shape but is not: a go statement's arguments are
+// evaluated synchronously on the calling goroutine, so the 5s-bounded
+// decode ran before serve ever started and one silent connection stalled
+// admission of every other connection. The test calls spawnServe directly
+// with a peer that never sends a header; the call itself must return long
+// before that deadline would expire if the decode were synchronous.
+func TestSpawnServeDoesNotBlockOnSilentPeer(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+	// Deliberately send nothing from the client side.
+
+	done := make(chan struct{}, 1)
+	go func() {
+		spawnServe(server, true, newLogger(""), 3389)
+		done <- struct{}{}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("spawnServe blocked on a silent peer -- the decode ran outside its goroutine")
+	}
+}

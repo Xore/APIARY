@@ -4,8 +4,10 @@ package main
 // terminates the attacker's TCP connection on the VPS and re-dials over
 // WireGuard), every connection would otherwise appear to come from the tunnel
 // peer 10.8.0.1. If portbridge prepends a HAProxy PROXY header (rule flag
-// ":pp") we strip it at Accept() time and rewrite the connection's RemoteAddr
-// to the real attacker address.
+// ":pp") we wrap each accepted connection so its first Read or RemoteAddr
+// call strips the header and rewrites the connection's RemoteAddr to the
+// real attacker address. (#2099: the decode itself must never run on the
+// shared accept-loop goroutine.)
 //
 // Both v1 (text) and v2 (binary) headers are accepted; portbridge emits v1.
 // Enabled by PROXY_PROTOCOL=1 (see main). Stdlib only.
@@ -19,13 +21,21 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 var proxyV2Sig = []byte("\r\n\r\n\x00\r\nQUIT\n") // 12-byte v2 signature
 
-// proxyListener strips a PROXY header from each accepted connection so the
-// connection handler sees the real client address.
+// proxyListener wraps each accepted connection so a PROXY header, if
+// present, is decoded before the connection handler reads from it -- but
+// not here in Accept(). main's own loop calls l.Accept() one connection at
+// a time and only spawns the per-connection serve() goroutine after
+// Accept() returns; decoding the PROXY header synchronously inside Accept()
+// (the previous behavior) blocked that shared loop for up to the decode's
+// own 5s deadline on every connection, including a slow/silent one -- a
+// trivial, near-zero-bandwidth DoS against the whole listener (#1346 fixed
+// this in cisco-asa; #2099 ports it here).
 type proxyListener struct{ net.Listener }
 
 func (l *proxyListener) Accept() (net.Conn, error) {
@@ -33,40 +43,43 @@ func (l *proxyListener) Accept() (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return decodeProxy(c, true), nil
+	return &proxyConn{Conn: c, r: bufio.NewReader(c)}, nil
 }
 
-// proxyConn wraps a net.Conn whose PROXY header has been consumed, buffering
-// the bytes read past the header and reporting the real remote address.
+// proxyConn decodes the PROXY header (once, via sync.Once) on first use --
+// triggered by either Read or RemoteAddr, whichever the handler calls
+// first. It must be resolved by the time RemoteAddr() returns -- not
+// deferred past it the way a lazy-Read-only peek would be -- or remote
+// logging would report the tunnel peer address instead of the real
+// attacker IP for the connection's entire lifetime. Either trigger point
+// still runs in the per-connection serve() goroutine (spawned after
+// Accept() returns), never the shared accept loop.
 type proxyConn struct {
 	net.Conn
 	r      *bufio.Reader
+	once   sync.Once
 	remote net.Addr
 }
 
-func (p *proxyConn) Read(b []byte) (int, error) { return p.r.Read(b) }
+func (p *proxyConn) decode() {
+	p.once.Do(func() {
+		p.Conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		p.remote = parseProxy(p.r)
+		p.Conn.SetReadDeadline(time.Time{}) // clear; serve() sets its own deadline
+	})
+}
+
+func (p *proxyConn) Read(b []byte) (int, error) {
+	p.decode()
+	return p.r.Read(b)
+}
 
 func (p *proxyConn) RemoteAddr() net.Addr {
+	p.decode()
 	if p.remote != nil {
 		return p.remote
 	}
 	return p.Conn.RemoteAddr()
-}
-
-// decodeProxy consumes a PROXY header if one is present and returns a conn that
-// reports the real client address. If no header is found the original transport
-// address is kept, so plain connections (healthchecks, direct probes) still
-// work. A short read deadline guards against a client that connects but never
-// sends the promised header.
-func decodeProxy(c net.Conn, enabled bool) net.Conn {
-	if !enabled {
-		return c
-	}
-	r := bufio.NewReader(c)
-	c.SetReadDeadline(time.Now().Add(5 * time.Second))
-	remote := parseProxy(r)
-	c.SetReadDeadline(time.Time{}) // clear; serve() sets its own deadline
-	return &proxyConn{Conn: c, r: r, remote: remote}
 }
 
 // parseProxy peeks for a v1 or v2 header, consumes it if found, and returns the
