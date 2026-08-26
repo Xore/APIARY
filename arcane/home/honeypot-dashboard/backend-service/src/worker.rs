@@ -351,6 +351,11 @@ pub fn spawn_enabled(state: AppState) {
                 tokio::spawn(async move { crate::correlator::correlator_loop(state).await });
                 tracing::info!("worker loop enabled: correlator");
             }
+            "dashboard-rollups" => {
+                let state = state.clone();
+                tokio::spawn(async move { crate::rollups::dashboard_rollups_loop(state).await });
+                tracing::info!("worker loop enabled: dashboard-rollups");
+            }
             "workbench-reconcile" => {
                 let state = state.clone();
                 tokio::spawn(async move {

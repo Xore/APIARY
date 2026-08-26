@@ -35,7 +35,9 @@ pub const TACTICS: &[&str] = &[
     "Impair Process Control",
 ];
 
-fn tactic_for(technique: &str) -> Option<&'static str> {
+/// Shared with rollups.rs, whose worker materializes the same per-hour
+/// grouping semantics these endpoints used to compute per request (#2046).
+pub(crate) fn tactic_for(technique: &str) -> Option<&'static str> {
     Some(match technique {
         "T1595" => "Reconnaissance",
         "T1190" => "Initial Access",
@@ -64,7 +66,7 @@ fn technique_name(technique: &str) -> &'static str {
     }
 }
 
-fn tactic_index(tactic: &str) -> usize {
+pub(crate) fn tactic_index(tactic: &str) -> usize {
     TACTICS.iter().position(|candidate| *candidate == tactic).unwrap_or(usize::MAX)
 }
 
@@ -113,8 +115,36 @@ pub struct AttckGrid {
     pub cells: Vec<AttckCell>,
 }
 
+/// #2046: per-technique counts folded from the rollup's hourly `tech`
+/// docs. None while #2046's shared presence probe says the 48h window
+/// isn't covered yet.
+async fn coverage_counts(state: &AppState) -> Option<HashMap<String, u64>> {
+    if !crate::rollups::window_covered(state, 48).await {
+        return None;
+    }
+    let docs = crate::rollups::attack_hours(state, 48).await.ok()?;
+    let mut counts: HashMap<String, u64> = HashMap::new();
+    for doc in &docs {
+        if doc["kind"].as_str().unwrap_or("") != "tech" {
+            continue;
+        }
+        let technique = doc["technique"].as_str().unwrap_or("");
+        if technique.is_empty() {
+            continue;
+        }
+        *counts.entry(technique.to_string()).or_insert(0) += doc["count"].as_u64().unwrap_or(0);
+    }
+    Some(counts)
+}
+
 pub async fn attck_coverage(State(state): State<AppState>) -> Result<Json<AttckGrid>, (StatusCode, String)> {
-    let counts = technique_counts(&state).await.map_err(bad_gateway)?;
+    // #2046: summed tech docs are the primary path; the plain terms
+    // aggregation below remains the fall-through while coverage is missing.
+    // The rows pipeline after this branch is byte-identical either way.
+    let counts = match coverage_counts(&state).await {
+        Some(counts) => counts,
+        None => technique_counts(&state).await.map_err(bad_gateway)?,
+    };
     let mut rows: Vec<(String, u64, usize)> = counts
         .into_iter()
         .filter_map(|(id, count)| tactic_for(&id).map(|tactic| (id, count, tactic_index(tactic))))
@@ -148,7 +178,54 @@ pub struct SankeyData {
     pub links: Vec<SankeyLink>,
 }
 
+/// #2046: the sankey rebuilt from the rollup's hourly `link`/`touch` docs.
+/// Summing per-hour link counts reproduces the live group-flow totals
+/// except at hour boundaries, where a group (session or IP burst)
+/// straddling two hours contributes once per hour instead of once — a
+/// documented divergence of precomputing on an hourly grid. Touchedness
+/// is "any touch doc with count > 0", matching the live path's presence
+/// check.
+async fn sankey_from_rollup(state: &AppState) -> Option<SankeyData> {
+    let docs = crate::rollups::attack_hours(state, 48).await.ok()?;
+    let mut flows: HashMap<(String, String), u64> = HashMap::new();
+    let mut touched: HashMap<String, u64> = HashMap::new();
+    for doc in &docs {
+        match doc["kind"].as_str().unwrap_or("") {
+            "link" => {
+                let source = doc["source"].as_str()?;
+                let target = doc["target"].as_str()?;
+                *flows.entry((source.to_string(), target.to_string())).or_insert(0) +=
+                    doc["count"].as_u64().unwrap_or(0);
+            }
+            "touch" => {
+                let tactic = doc["tactic"].as_str()?;
+                *touched.entry(tactic.to_string()).or_insert(0) += doc["count"].as_u64().unwrap_or(0);
+            }
+            _ => {}
+        }
+    }
+    let nodes: Vec<SankeyNode> = TACTICS
+        .iter()
+        .filter(|tactic| touched.get(**tactic).copied().unwrap_or(0) > 0)
+        .map(|tactic| SankeyNode { name: tactic.to_string() })
+        .collect();
+    let mut links: Vec<SankeyLink> = flows
+        .into_iter()
+        .map(|((source, target), value)| SankeyLink { source, target, value })
+        .collect();
+    links.sort_by_key(|link| (tactic_index(&link.source), tactic_index(&link.target)));
+    Some(SankeyData { nodes, links })
+}
+
 pub async fn sankey(State(state): State<AppState>) -> Result<Json<SankeyData>, (StatusCode, String)> {
+    // #2046: rolled links/touches are the primary path; the two-level
+    // grouping aggregation below remains the fall-through while coverage
+    // is missing. Node/link assembly is identical either way.
+    if crate::rollups::window_covered(&state, 48).await {
+        if let Some(data) = sankey_from_rollup(&state).await {
+            return Ok(Json(data));
+        }
+    }
     // Per-session (or per-IP for sessionless sensors) technique sets, each
     // group flowing one unit between consecutive touched tactics — same
     // grouping fallback as buildKillChainSankey.

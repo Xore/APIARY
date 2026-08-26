@@ -292,8 +292,11 @@ services:
       # dial must precede the flow it claims to explain. Where no candidate
       # survives that test, the tunnel address is left in place -- an
       # unattributed flow is honest, a wrong attacker is not.
-      - WORKER_LOOPS=alert-notifier,attacker-identity,agent-intrusion,correlator,threat-intel,zeek-proxy-attribution
-      - ZEEK_PROXY_ATTRIBUTION_INTERVAL_SECONDS=${ZEEK_PROXY_ATTRIBUTION_INTERVAL_SECONDS:-120}
+      # dashboard-rollups (#2046): same pure-ES shape — writes the three
+      # derived rollup indices the overview/map/kill-chain endpoints read;
+      # nothing mounted, nothing local, fully disposable/rebuildable.
+      - WORKER_LOOPS=alert-notifier,attacker-identity,agent-intrusion,correlator,dashboard-rollups,threat-intel,zeek-proxy-attribution
+      - ROLLUP_RUN_INTERVAL_SECS=${ROLLUP_RUN_INTERVAL_SECS:-300}
       - ZEEK_PROXY_ATTRIBUTION_INTERVAL_SECONDS=${ZEEK_PROXY_ATTRIBUTION_INTERVAL_SECONDS:-120}
       - THREAT_CIDRS_FILE=/geoip/threat-cidrs.csv
       - EVIDENCE_WINDOW=${EVIDENCE_WINDOW:-6h}
