@@ -102,7 +102,13 @@ retirement calls for you.
    currently defaulting to empty in both `honeypot-dashboard` and
    `honeypot-dashboard-backend` — `DASHBOARD_SERVICE_TOKEN` above all;
    an empty value there means the two tiers trust every request from
-   anything else on `honeynet`, not just each other.
+   anything else on `honeynet`, not just each other. As of #2183 that
+   consequence is mechanical, not prose-only: both tiers refuse to boot
+   over an unset/empty token (`[E-SERVICE-TOKEN]` in the logs); the only
+   sanctioned way around it is the dev-only
+   `APIARY_ALLOW_UNAUTH_DEV=1` (documented in each stack's
+   `.env.example` and frontend-next/README.md). The preflight check in
+   step 3 below remains as the belt to this suspenders.
 3. **Bring the new tiers up without touching Traefik**:
    `./scripts/cutover-dashboard.sh preflight` — brings up the `next`
    profile in both stacks (idempotent), hard-fails if

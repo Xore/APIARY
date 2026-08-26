@@ -3,9 +3,10 @@
 //! Serves /api/v1 JSON to the Nitro BFF. This is the foundation slice:
 //! health, build info, and the first ES-backed endpoint (overview KPIs).
 //! Auth model: the BFF is the only caller and authenticates with a shared
-//! service token (SERVICE_TOKEN env; empty disables the check for local
-//! dev), mirroring how the Go dashboard introspects today. Browsers never
-//! reach this service directly.
+//! service token (SERVICE_TOKEN env), mirroring how the Go dashboard
+//! introspects today. Browsers never reach this service directly. An unset
+//! SERVICE_TOKEN refuses to boot (#2183) unless APIARY_ALLOW_UNAUTH_DEV=1
+//! says otherwise — see resolve_service_token below.
 
 use axum::{
     extract::State,
@@ -107,6 +108,69 @@ async fn healthz(State(state): State<AppState>) -> Json<Health> {
     Json(Health { ok: true, es: es_ok })
 }
 
+/// A boot refusal carries the code the cutover doc and dashboards grep
+/// for, plus the exact remedy — the whole point of #2183 is that a
+/// misconfigured instance explains itself instead of silently opening
+/// every route. `std::fmt::Display` rather than deriving Debug on an enum:
+/// anyhow prints this through `Error: {}` at exit, one line, no nesting.
+#[derive(Debug)]
+pub struct ServiceTokenRefusal {
+    message: String,
+}
+
+impl ServiceTokenRefusal {
+    fn new() -> Self {
+        Self {
+            message: concat!(
+                "[E-SERVICE-TOKEN] refusing to start: SERVICE_TOKEN is unset or empty, ",
+                "which would leave every /api/v1 route open to unauthenticated requests ",
+                "(the BFF proxy tier mirrors this check). ",
+                "Set SERVICE_TOKEN to a shared secret — see docs/DASHBOARD-CUTOVER.md step 2 — ",
+                "or, for local development only, set APIARY_ALLOW_UNAUTH_DEV=1 explicitly (#2183).",
+            )
+            .to_string(),
+        }
+    }
+}
+
+impl std::fmt::Display for ServiceTokenRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ServiceTokenRefusal {}
+
+/// The single decision behind #2183's boot gate, kept pure so tests can pin
+/// its truth table without env-var races between parallel test threads.
+///
+/// - Ok(Some(token)) — a real token is configured; require_service_token
+///   enforces it below.
+/// - Ok(None) — SERVICE_TOKEN unset/empty AND APIARY_ALLOW_UNAUTH_DEV=1:
+///   an explicitly opted-in unauthenticated dev instance, announced loudly.
+/// - Err — otherwise: main refuses before binding, replacing #2044's
+///   warn-only posture (a warning sat next to a listen socket that silently
+///   accepted everything).
+///
+/// The override never weakens a configured token: with both set, the token
+/// wins and the middleware enforces it as usual.
+pub fn resolve_service_token(
+    service_token: Option<&str>,
+    allow_unauth_dev: bool,
+) -> Result<Option<&str>, ServiceTokenRefusal> {
+    match service_token.filter(|token| !token.is_empty()) {
+        Some(token) => Ok(Some(token)),
+        None if allow_unauth_dev => Ok(None),
+        None => Err(ServiceTokenRefusal::new()),
+    }
+}
+
+/// Exactly "1" enables the override — no truthiness zoo where someone's
+/// `APIARY_ALLOW_UNAUTH_DEV=0` or `=false` quietly reads as consent.
+fn allow_unauth_dev_from_env(raw: Option<&str>) -> bool {
+    raw == Some("1")
+}
+
 /// Every /api/v1 route requires the BFF's service token (constant-time
 /// comparison; header X-Service-Token). /healthz stays open for the
 /// container healthcheck, same as the Go dashboard's -healthcheck probe.
@@ -166,13 +230,26 @@ async fn main() -> anyhow::Result<()> {
 
     let es_url = std::env::var("ELASTICSEARCH_URL").unwrap_or_else(|_| "http://127.0.0.1:9200".into());
     let listen = std::env::var("LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:8081".into());
-    let service_token = std::env::var("SERVICE_TOKEN").ok().filter(|t| !t.is_empty());
-    if service_token.is_none() {
-        // Deliberately not fatal — the loopback/dev deployment runs without
-        // it — but say so loudly: require_service_token lets every request
-        // through when no token is configured (#2044).
-        tracing::warn!("SERVICE_TOKEN is unset; every /api/v1 route accepts unauthenticated requests");
-    }
+    let raw_service_token = std::env::var("SERVICE_TOKEN").ok();
+    let allow_unauth_dev =
+        allow_unauth_dev_from_env(std::env::var("APIARY_ALLOW_UNAUTH_DEV").ok().as_deref());
+    let service_token = match resolve_service_token(raw_service_token.as_deref(), allow_unauth_dev)
+    {
+        Ok(Some(token)) => Some(token.to_string()),
+        Ok(None) => {
+            // Loud even in the sanctioned case: an operator who set the
+            // override should still see exactly what it bought them, and a
+            // grep of any container log for E-SERVICE-TOKEN finds both
+            // flavors — refusal and opted-in dev — with no green case that
+            // merely looks like one (#2183).
+            tracing::warn!(
+                "[E-SERVICE-TOKEN] SERVICE_TOKEN is unset and APIARY_ALLOW_UNAUTH_DEV=1 is set: \
+                 every /api/v1 route accepts unauthenticated requests. Local development only."
+            );
+            None
+        }
+        Err(refusal) => return Err(refusal.into()),
+    };
     let audit_path =
         std::env::var("DASHBOARD_AUDIT_FILE").unwrap_or_else(|_| "/state/dashboard-audit.jsonl".into());
     let config_history_path = std::env::var("DASHBOARD_CONFIG_HISTORY_FILE")
@@ -412,5 +489,66 @@ mod build_stamp_tests {
             age.num_days() < 3650 && age.num_seconds() > -3600,
             "build stamp {stamp} is not a plausible build time (age {age})",
         );
+    }
+}
+
+#[cfg(test)]
+mod service_token_tests {
+    use super::{allow_unauth_dev_from_env, resolve_service_token};
+
+    #[test]
+    fn unset_token_without_override_refuses() {
+        // #2183's whole point: the default posture for a copied/partial
+        // compose or a bare `cargo run` used to be "open, quietly". It must
+        // be a refusal carrying the code and the remedy instead.
+        let err = resolve_service_token(None, false).expect_err("unset token must refuse");
+        assert!(err.to_string().contains("E-SERVICE-TOKEN"), "{err}");
+        assert!(err.to_string().contains("SERVICE_TOKEN"), "{err}");
+        assert!(
+            err.to_string().contains("APIARY_ALLOW_UNAUTH_DEV=1"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn empty_token_counts_as_unset() {
+        // compose ships `${DASHBOARD_SERVICE_TOKEN:-}`; a copied/partial
+        // env produces exactly this empty string, not an absent variable.
+        // The filter lives inside the decision, so that state can't slip
+        // past it if main()'s own pre-filter ever moves.
+        let err = resolve_service_token(Some(""), false).expect_err("empty token must refuse");
+        assert!(err.to_string().contains("E-SERVICE-TOKEN"), "{err}");
+    }
+
+    #[test]
+    fn override_with_unset_token_is_sanctioned_dev() {
+        let resolved = resolve_service_token(None, true).expect("override must boot");
+        assert_eq!(resolved, None);
+    }
+
+    #[test]
+    fn override_accepts_the_bare_literal_one_only() {
+        // "1", not a truthiness zoo: a future `APIARY_ALLOW_UNAUTH_DEV=0`
+        // must read as refusal, and `=true` as a typo to fix, not consent.
+        assert!(!allow_unauth_dev_from_env(Some("")));
+        assert!(!allow_unauth_dev_from_env(Some("0")));
+        assert!(!allow_unauth_dev_from_env(Some("true")));
+        assert!(!allow_unauth_dev_from_env(Some("yes")));
+        assert!(allow_unauth_dev_from_env(Some("1")));
+    }
+
+    #[test]
+    fn present_token_boots_without_override() {
+        let resolved = resolve_service_token(Some("s3cret"), false).expect("token must boot");
+        assert_eq!(resolved, Some("s3cret"));
+    }
+
+    #[test]
+    fn override_never_weakens_a_present_token() {
+        // Both set: the middleware enforces the real token. The override
+        // exists only to sanction the token's absence, never to disable
+        // enforcement alongside it.
+        let resolved = resolve_service_token(Some("s3cret"), true).expect("must boot");
+        assert_eq!(resolved, Some("s3cret"));
     }
 }
