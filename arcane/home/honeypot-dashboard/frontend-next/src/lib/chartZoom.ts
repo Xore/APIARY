@@ -22,8 +22,12 @@ export function stepZoom(current: number, direction: 1 | -1): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, rounded))
 }
 
-/** Wheel deltas vary by device/platform; only the sign is meaningful. */
-export function zoomFromWheel(current: number, deltaY: number, deltaMode = 0): number {
+/**
+ * Wheel deltas vary by device/platform — mouse wheels emit large pixel
+ * deltas, trackpads small ones, line-mode deltas differ again (deltaMode).
+ * Only the sign carries intent, so magnitude and mode are ignored alike.
+ */
+export function zoomFromWheel(current: number, deltaY: number): number {
   if (!Number.isFinite(deltaY)) return current
   return stepZoom(current, deltaY < 0 ? 1 : -1)
 }
