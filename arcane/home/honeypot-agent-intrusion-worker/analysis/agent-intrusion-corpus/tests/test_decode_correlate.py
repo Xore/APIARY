@@ -130,6 +130,102 @@ class TestBoundedDecode(unittest.TestCase):
         self.assertEqual(result.chain[-1].output_sha256, hashlib.sha256(payload).hexdigest())
 
 
+def _gzip_bomb(expansion_bytes: int) -> bytes:
+    """Builds a real high-ratio gzip member without ever holding its
+    expansion in memory -- compressobj streams the zeros in."""
+    comp = zlib.compressobj(9, zlib.DEFLATED, 31)  # 31 = gzip framing
+    blob = bytearray()
+    zeros = b"\0" * (1024 * 1024)
+    for _ in range(expansion_bytes // len(zeros)):
+        blob += comp.compress(zeros)
+    blob += comp.flush()
+    return bytes(blob)
+
+
+class TestBoundedDecompressionMemory(unittest.TestCase):
+    """#2088: the decompress paths must enforce max_output DURING
+    inflation -- the old post-hoc check only ran after
+    gzip.decompress/zlib.decompress had allocated the entire expansion,
+    so a ~200KB bomb expanded past 10 GiB before being rejected. These
+    tests bound tracemalloc's peak during the decode: the expansion never
+    exists, on all three paths."""
+
+    EXPANSION = 320 * 1024 * 1024
+
+    def _peak_during_decode(self, blob: bytes):
+        import tracemalloc
+        tracemalloc.start()
+        try:
+            result = dc.bounded_decode(blob)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        return result, peak
+
+    def _assert_rejected_bounded(self, result, peak, expected_reason):
+        self.assertFalse(result.ok)
+        self.assertTrue(result.truncated)
+        self.assertEqual(result.reason, expected_reason)
+        # Cap is 10 MiB; allow the working-set noise (chunk buffer +
+        # bytearray growth + the final copy) an order of magnitude below
+        # the 320 MiB expansion this input would have materialized under
+        # the old decompress-then-check order.
+        self.assertLess(peak, 32 * 1024 * 1024)
+
+    def test_gzip_bomb_is_rejected_without_materializing_expansion(self):
+        bomb = _gzip_bomb(self.EXPANSION)
+        self.assertLess(len(bomb), 1024 * 1024, "sanity: the compressed input is tiny")
+        result, peak = self._peak_during_decode(bomb)
+        self._assert_rejected_bounded(result, peak, "gzip output exceeds max_output")
+
+    def test_zlib_bomb_shares_the_bounded_path(self):
+        comp = zlib.compressobj(9)
+        blob = bytearray()
+        zeros = b"\0" * (1024 * 1024)
+        for _ in range(self.EXPANSION // len(zeros)):
+            blob += comp.compress(zeros)
+        blob += comp.flush()
+        result, peak = self._peak_during_decode(bytes(blob))
+        self._assert_rejected_bounded(result, peak, "zlib output exceeds max_output")
+
+    def test_xor_obfuscated_gzip_bomb_shares_the_bounded_path(self):
+        key = 0x37
+        bomb = _gzip_bomb(self.EXPANSION)
+        xored = bytes(b ^ key for b in bomb)
+        result, peak = self._peak_during_decode(xored)
+        self._assert_rejected_bounded(result, peak, "xor+gzip output exceeds max_output")
+
+
+class TestDecompressionFramingParity(unittest.TestCase):
+    """#2088 moved gzip/zlib handling onto zlib.decompressobj; these pin
+    the framing behaviors the old gzip.decompress/zlib.decompress calls
+    provided, which callers may implicitly rely on."""
+
+    def test_concatenated_gzip_members_still_concatenate_output(self):
+        a, b = b"first member", b"second member"
+        blob = base64.b64encode(gzip.compress(a) + gzip.compress(b))
+        result = dc.bounded_decode(blob)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.output, a + b)
+
+    def test_trailing_non_gzip_bytes_after_a_member_fail_cleanly(self):
+        blob = gzip.compress(b"hello") + b"junk"
+        result = dc.bounded_decode(blob)
+        self.assertIsInstance(result, dc.DecodeResult)
+        self.assertFalse(result.ok, "gzip's own BadGzipFile on trailing junk maps to 'not gzip', not a crash")
+
+    def test_zlib_stream_with_trailing_bytes_still_decodes(self):
+        # Payload deliberately isn't pure base64 alphabet (the space), so
+        # bounded_decode's iterative peeling stops at this layer instead of
+        # "decoding" it further -- that behavior is pre-existing and
+        # unchanged; what's under test here is only the ignored tail.
+        payload = b"real final layer with spaces"
+        blob = base64.b64encode(zlib.compress(payload) + b"ignored-tail")
+        result = dc.bounded_decode(blob)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.output, payload)
+
+
 class TestExtractCandidateBlob(unittest.TestCase):
     def test_extracts_data_field(self):
         text = "type=exfil&channel=c9f2&seq=1&chk=b12e&data=SGVsbG8="

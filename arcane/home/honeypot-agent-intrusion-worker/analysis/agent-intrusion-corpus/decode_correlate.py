@@ -19,16 +19,16 @@ Two pieces:
   a chunked payload is even decodable -- a lone chunk's base64 is usually
   truncated mid-stream and correctly fails to decode on its own.
 
-No third-party dependencies (stdlib gzip/zlib/base64 only), matching this
-directory's own validate_corpus.py and analysis/ghidra/models/*.py's
-stated "one less supply-chain surface" convention.
+No third-party dependencies (stdlib zlib/base64 only -- gzip framing is
+handled through zlib.decompressobj, #2088), matching this directory's own
+validate_corpus.py and analysis/ghidra/models/*.py's stated "one less
+supply-chain surface" convention.
 """
 from __future__ import annotations
 
 import base64
 import binascii
 import dataclasses
-import gzip
 import hashlib
 import re
 import zlib
@@ -82,33 +82,99 @@ def _try_base64(data: bytes) -> bytes | None:
     return None
 
 
-def _try_decompress(data: bytes) -> tuple[bytes, str] | None:
+class _OutputCapExceeded(Exception):
+    """Raised by _bounded_inflate when a *valid* stream's cumulative output
+    would pass the caller's cap (#2088). Carries the transform label so
+    bounded_decode can produce the same reason string the old post-hoc
+    check did -- but without the full expansion ever existing in memory."""
+
+    def __init__(self, transform: str):
+        super().__init__(transform)
+        self.transform = transform
+
+
+_DECOMP_CHUNK = 64 * 1024
+_GZIP_WBITS = 16 + zlib.MAX_WBITS  # gzip framing only
+
+
+def _bounded_inflate(data: bytes, wbits: int, max_output: int, transform: str) -> bytes:
+    """Inflates `data` one chunk at a time, raising _OutputCapExceeded the
+    moment cumulative output crosses max_output -- so a gzip bomb's
+    gigabytes never get allocated before the cap says no (#2088). Raises
+    zlib.error for corrupt/truncated/unexpected-framing input, which every
+    caller maps to "not this transform", exactly as the old unbounded
+    gzip.decompress/zlib.decompress exceptions were mapped.
+
+    Framing parity with what it replaced, confirmed empirically:
+    - gzip framing follows concatenated members like gzip.decompress does,
+      and trailing bytes that aren't another gzip member raise (gzip's own
+      BadGzipFile, also an OSError);
+    - zlib framing stops at the end of the first stream, ignoring any
+      trailing bytes like zlib.decompress does.
+    """
+    out = bytearray()
+    view = memoryview(data)
+    while True:
+        d = zlib.decompressobj(wbits)
+        while True:
+            # max_length throttles OUTPUT, not consumption: input that
+            # didn't get to produce output comes back in unconsumed_tail
+            # and must be fed back in -- draining with b"" only yields
+            # what's already pending (#2088 follow-on to the original bug).
+            chunk = d.decompress(view, _DECOMP_CHUNK)
+            if chunk:
+                out += chunk
+                if len(out) > max_output:
+                    raise _OutputCapExceeded(transform)
+            if d.eof:
+                break
+            view = d.unconsumed_tail
+            if not chunk and not view:
+                raise zlib.error("incomplete or corrupt deflate stream")
+        if wbits != _GZIP_WBITS:
+            break  # zlib: one stream; trailing bytes are ignored, as before
+        view = memoryview(d.unused_data)
+        if not view:
+            break
+        if bytes(view[:2]) != GZIP_MAGIC:
+            raise zlib.error("trailing bytes after gzip member are not another member")
+    return bytes(out)
+
+
+def _try_decompress(data: bytes, max_output: int) -> tuple[bytes, str] | None:
+    """Returns (output, transform), or None when `data` isn't valid under
+    either framing. Valid-but-over-cap raises _OutputCapExceeded instead --
+    callers must let that propagate to bounded_decode (#2088)."""
     if data[:2] == GZIP_MAGIC:
         try:
-            return gzip.decompress(data), "gzip"
-        except (OSError, EOFError):
+            return _bounded_inflate(data, _GZIP_WBITS, max_output, "gzip"), "gzip"
+        except zlib.error:
             return None
     try:
-        return zlib.decompress(data), "zlib"
+        return _bounded_inflate(data, zlib.MAX_WBITS, max_output, "zlib"), "zlib"
     except zlib.error:
         return None
 
 
-def _try_xor_then_decompress(data: bytes) -> tuple[bytes, str, int] | None:
+def _try_xor_then_decompress(data: bytes, max_output: int) -> tuple[bytes, str, int] | None:
     """Brute-forces every single-byte XOR key (256 candidates -- tractable
     and a real, standard technique for exactly this shape of light
     obfuscation, not a shortcut) looking for one that reveals a gzip magic
     header. Stops at the first match; a corpus/campaign that XORs with
     anything longer than one byte would need a different technique this
     function deliberately does not attempt (see module docstring: this is
-    the *bounded* decoder, not an exhaustive cryptanalysis tool)."""
+    the *bounded* decoder, not an exhaustive cryptanalysis tool).
+
+    Decompression goes through _bounded_inflate like every other path --
+    an XOR-obfuscated bomb is still a bomb (#2088); over-cap propagates as
+    _OutputCapExceeded, corrupt candidates just try the next key."""
     for key in range(256):
         candidate = bytes(b ^ key for b in data[:2])
         if candidate == GZIP_MAGIC:
             unxored = bytes(b ^ key for b in data)
             try:
-                return gzip.decompress(unxored), "gzip", key
-            except (OSError, EOFError):
+                return _bounded_inflate(unxored, _GZIP_WBITS, max_output, "gzip"), "gzip", key
+            except zlib.error:
                 continue
     return None
 
@@ -137,20 +203,27 @@ def bounded_decode(data: bytes, max_depth: int = MAX_DEPTH, max_output: int = MA
             current = decoded
             continue
 
-        decompressed = _try_decompress(current)
+        # #2088: the decompress paths enforce max_output *during* inflation
+        # (_bounded_inflate), so a valid-but-oversized stream aborts with a
+        # few chunks allocated instead of materializing its full expansion
+        # first. The reason strings are unchanged from the old post-hoc
+        # check; only when the memory is (never) allocated differs.
+        try:
+            decompressed = _try_decompress(current, max_output)
+        except _OutputCapExceeded as exc:
+            return DecodeResult(False, b"", chain, True, f"{exc.transform} output exceeds max_output")
         if decompressed is not None:
             out, transform = decompressed
-            if len(out) > max_output:
-                return DecodeResult(False, b"", chain, True, f"{transform} output exceeds max_output")
             chain.append(DecodeStep(transform, input_hash, _sha256(out), len(out)))
             current = out
             continue
 
-        xor_result = _try_xor_then_decompress(current)
+        try:
+            xor_result = _try_xor_then_decompress(current, max_output)
+        except _OutputCapExceeded as exc:
+            return DecodeResult(False, b"", chain, True, f"xor+{exc.transform} output exceeds max_output")
         if xor_result is not None:
             out, transform, key = xor_result
-            if len(out) > max_output:
-                return DecodeResult(False, b"", chain, True, f"xor+{transform} output exceeds max_output")
             chain.append(DecodeStep(f"xor:0x{key:02x}+{transform}", input_hash, _sha256(out), len(out)))
             current = out
             continue
