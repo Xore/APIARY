@@ -30,6 +30,7 @@ use base64::Engine;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -386,11 +387,39 @@ fn walk_files(root: &Path, recursive: bool, depth: usize) -> Vec<PathBuf> {
     files
 }
 
-fn scan_source(source: &Source, root: &Path, state: &HashMap<String, f64>, shard_count: u64, shard_index: u64) -> Vec<Pending> {
+/// Rough resident size of a base64-encoded payload held as a JSON string —
+/// 4 chars per 3 bytes. Exact for STANDARD (no line wrapping); used only
+/// for #1978's pending-byte budget, where a constant-factor nudge is noise.
+fn encoded_estimate(bytes: usize) -> usize {
+    bytes.div_ceil(3).max(1) * 4
+}
+
+/// #1978: how much bulk payload one scan pass may hold resident before
+/// further files are deferred to the next pass. mtime dedup makes deferral
+/// free — an unclaimed file's key was never recorded, so it retries whole
+/// next pass. 0 disables the cap. Defaults above any single guarded file
+/// (chunked artifacts cap at MAX_CHUNKED_ARTIFACT_BYTES ≈ 341 MB encoded,
+/// ttylogs at ~27 MB), so the budget only ever trims *aggregates* of large
+/// artifacts landing in one pass, never one file by itself.
+const DEFAULT_MAX_PENDING_BYTES: u64 = 512 * 1024 * 1024;
+
+fn max_pending_bytes_from_env() -> u64 {
+    env_u64("IMPORTER_MAX_PENDING_BYTES", DEFAULT_MAX_PENDING_BYTES)
+}
+
+fn scan_source(
+    source: &Source,
+    root: &Path,
+    state: &HashMap<String, f64>,
+    shard_count: u64,
+    shard_index: u64,
+    max_pending_bytes: u64,
+) -> Vec<Pending> {
     let mut pending = Vec::new();
+    let mut pending_bytes = 0usize;
     let paths = walk_files(root, source.recursive, 0);
 
-    for path in paths {
+    'file_pass: for path in paths {
         let Some(filename) = path.file_name().and_then(|n| n.to_str()) else { continue };
         // The join key for a nested source is the path relative to the
         // root, because that is the string the sensor itself records.
@@ -413,8 +442,22 @@ fn scan_source(source: &Source, root: &Path, state: &HashMap<String, f64>, shard
             continue;
         }
 
+        // #1978: claimed-before-budget means a single oversized file still
+        // goes through (the per-source byte guards bound it); the cap only
+        // stops further files from piling onto an already-heavy pass.
+        if max_pending_bytes > 0 && pending_bytes >= max_pending_bytes as usize {
+            tracing::info!(
+                source = source.label,
+                path = %path.display(),
+                budget = max_pending_bytes,
+                "deferring file past the pending-byte budget to the next pass"
+            );
+            continue;
+        }
+
         if let Some(samples_key) = source.aggregate_samples {
             let Ok(text) = fs::read_to_string(&path) else { continue };
+            pending_bytes += text.len();
             let Ok(payload) = serde_json::from_str::<Value>(&text) else {
                 tracing::warn!(source = source.label, path = %path.display(), "skipping unreadable file");
                 continue;
@@ -454,19 +497,47 @@ fn scan_source(source: &Source, root: &Path, state: &HashMap<String, f64>, shard
                 tracing::warn!(source = source.label, path = %path.display(), size, "skipping oversized chunked artifact");
                 continue;
             }
-            let Ok(data) = fs::read(&path) else {
-                tracing::warn!(source = source.label, path = %path.display(), "skipping unreadable file");
-                continue;
-            };
+            // #1978: chunking exists to keep residency bounded, so the file
+            // itself must never be buffered — one CHUNK_BYTES window is read
+            // at a time and encoded straight into its own document. A short
+            // read means the writer shrank or replaced the file mid-scan;
+            // none of its chunks may be indexed (a partial set reassembles
+            // into corrupt content client-side), and its dedup state was
+            // never recorded, so a later pass retries the file whole.
             let suffix = source.id_suffix.unwrap_or("");
             let job = filename.strip_suffix(suffix).unwrap_or(filename).to_string();
             let kind = source.artifact_kind.unwrap_or("");
-            let total_chunks = data.len().div_ceil(CHUNK_BYTES).max(1);
+            let expected_bytes = size as usize;
+            let total_chunks = expected_bytes.div_ceil(CHUNK_BYTES).max(1);
             let now = chrono::Utc::now().to_rfc3339();
+            let Ok(mut file) = fs::File::open(&path) else {
+                tracing::warn!(source = source.label, path = %path.display(), "skipping unreadable file");
+                continue 'file_pass;
+            };
+            let mut buffer = vec![0u8; CHUNK_BYTES];
+            // Collected separately so an aborted read drops only this
+            // file's documents, whatever earlier artifacts already put in
+            // `pending`.
+            let mut file_pendings = Vec::with_capacity(total_chunks);
+            let mut truncated = false;
             for index in 0..total_chunks {
-                let start = index * CHUNK_BYTES;
-                let end = (start + CHUNK_BYTES).min(data.len());
-                let chunk = &data[start..end];
+                let expected_chunk = (expected_bytes - index * CHUNK_BYTES).min(CHUNK_BYTES);
+                let mut filled = 0usize;
+                while filled < expected_chunk {
+                    match file.read(&mut buffer[filled..expected_chunk]) {
+                        Ok(0) => break,
+                        Ok(n) => filled += n,
+                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                        Err(_) => {
+                            truncated = true;
+                            break;
+                        }
+                    }
+                }
+                if filled != expected_chunk {
+                    truncated = true;
+                    break;
+                }
                 let doc = json!({
                     "job": job,
                     "kind": kind,
@@ -474,12 +545,20 @@ fn scan_source(source: &Source, root: &Path, state: &HashMap<String, f64>, shard
                     "content_type": source.content_type,
                     "chunk_index": index,
                     "total_chunks": total_chunks,
-                    "size_bytes": data.len(),
+                    "size_bytes": expected_bytes,
                     "imported_at": now,
-                    "data_base64": base64::engine::general_purpose::STANDARD.encode(chunk),
+                    "data_base64": base64::engine::general_purpose::STANDARD.encode(&buffer[..filled]),
                 });
-                pending.push(Pending { key: key.clone(), mtime, index: source.index, id: format!("{job}:{kind}:{index}"), doc });
+                file_pendings.push(Pending { key: key.clone(), mtime, index: source.index, id: format!("{job}:{kind}:{index}"), doc });
             }
+            if truncated {
+                tracing::warn!(source = source.label, path = %path.display(), "artifact shrank mid-scan, will retry next pass");
+                continue 'file_pass;
+            }
+            // #1978: count the encoded chunks, not the raw file — they are
+            // what actually sits in memory until the bulk fires.
+            pending_bytes += encoded_estimate(expected_bytes);
+            pending.append(&mut file_pendings);
             continue;
         }
 
@@ -493,6 +572,8 @@ fn scan_source(source: &Source, root: &Path, state: &HashMap<String, f64>, shard
                 tracing::warn!(source = source.label, path = %path.display(), "skipping unreadable file");
                 continue;
             };
+            // #1978: the encoded ttylog/report string is the resident cost.
+            pending_bytes += encoded_estimate(raw.len());
             let now = chrono::Utc::now().to_rfc3339();
             let (id, doc) = if let Some(suffix) = source.id_suffix {
                 let sha256 = filename.strip_suffix(suffix).unwrap_or(filename).to_string();
@@ -590,7 +671,7 @@ fn advance_state_after_bulk(pending: &[Pending], failed_ids: &std::collections::
 //
 // The documents already written keep their fields; they are simply ignored.
 
-async fn run_pass(state: &AppState, sources: &[Source], dedup: &mut HashMap<String, f64>, shard_count: u64, shard_index: u64) -> u64 {
+async fn run_pass(state: &AppState, sources: &[Source], dedup: &mut HashMap<String, f64>, shard_count: u64, shard_index: u64, max_pending_bytes: u64) -> u64 {
     let mut total = 0u64;
     for &source in sources {
         let root = env_or(source.env, "");
@@ -605,14 +686,17 @@ async fn run_pass(state: &AppState, sources: &[Source], dedup: &mut HashMap<Stri
         let dedup_snapshot = dedup.clone();
         let pending = tokio::task::spawn_blocking({
             let root_path = root_path.clone();
-            move || scan_source(&source, &root_path, &dedup_snapshot, shard_count, shard_index)
+            move || scan_source(&source, &root_path, &dedup_snapshot, shard_count, shard_index, max_pending_bytes)
         })
         .await
         .unwrap_or_default();
         if pending.is_empty() {
             continue;
         }
-        let ops: Vec<(&str, &str, Value)> = pending.iter().map(|p| (p.index, p.id.as_str(), p.doc.clone())).collect();
+        // #1978: borrow the documents instead of cloning every Value — a
+        // full pass of large artifacts used to be duplicated wholesale for
+        // one serialization call.
+        let ops: Vec<(&str, &str, &Value)> = pending.iter().map(|p| (p.index, p.id.as_str(), &p.doc)).collect();
         let failed = match state.es.bulk_index(ops).await {
             Ok(f) => f,
             Err(error) => {
@@ -652,6 +736,7 @@ fn save_state(path: &Path, state: &HashMap<String, f64>) {
 pub async fn es_importer_loop(state: AppState) {
     let interval = Duration::from_secs(env_u64("IMPORT_INTERVAL", 300));
     let state_path = PathBuf::from(env_or("IMPORTER_STATE", "/state-importer/es-results-importer.json"));
+    let max_pending_bytes = max_pending_bytes_from_env();
     let shard_count = env_u64("SHARD_COUNT", 1).max(1);
     let shard_index = std::env::var("SHARD_INDEX").ok().and_then(|v| v.parse().ok()).unwrap_or_else(shard_index_default) % shard_count;
 
@@ -669,7 +754,7 @@ pub async fn es_importer_loop(state: AppState) {
         // by stable ids and re-import overwrites rather than duplicates.
         let indexed = crate::isolate::cycle(
             "es-results-importer",
-            run_pass(&state, &all_sources, &mut dedup, shard_count, shard_index),
+            run_pass(&state, &all_sources, &mut dedup, shard_count, shard_index, max_pending_bytes),
         )
         .await
         .unwrap_or(0);
@@ -723,7 +808,7 @@ mod tests {
         let dir = TmpDir::new("plain_json");
         dir.write("abc_ghidra.json", br#"{"sha256": "abc", "completed_at": "2026-01-01T00:00:00Z"}"#);
         let src = Source { id_fields: &["sha256"], ..source("X", "ghidra", "ghidra-analysis-v1", "*_ghidra.json") };
-        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0);
+        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0, u64::MAX);
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].id, "ghidra:abc");
         assert_eq!(pending[0].doc["@timestamp"], "2026-01-01T00:00:00Z");
@@ -738,7 +823,7 @@ mod tests {
         let src = Source { id_fields: &["sha256"], ..source("X", "ghidra", "ghidra-analysis-v1", "*_ghidra.json") };
         let mut state = no_state();
         state.insert(path.to_string_lossy().to_string(), mtime);
-        assert!(scan_source(&src, &dir.0, &state, 1, 0).is_empty());
+        assert!(scan_source(&src, &dir.0, &state, 1, 0, u64::MAX).is_empty());
     }
 
     #[test]
@@ -746,7 +831,7 @@ mod tests {
         let dir = TmpDir::new("binary_ttylog");
         dir.write("deadbeef", b"raw ttylog bytes");
         let src = Source { binary: true, ..source("X", "cowrie_ttylog", "cowrie-ttylog-v1", "*") };
-        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0);
+        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0, u64::MAX);
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].id, "deadbeef");
         assert_eq!(pending[0].doc["shasum"], "deadbeef");
@@ -769,7 +854,7 @@ mod tests {
             content_hash_names: true,
             ..source("X", "cowrie_ttylog", "cowrie-ttylog-v1", "*")
         };
-        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0);
+        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0, u64::MAX);
         assert_eq!(pending.len(), 1, "only the renamed, closed recording is indexable");
         assert_eq!(pending[0].id, closed);
     }
@@ -796,7 +881,7 @@ mod tests {
             content_type: Some("text/html"),
             ..source("X", "ghidra_report_html", "ghidra-report-artifacts-v1", "*_ghidra_report.html")
         };
-        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0);
+        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0, u64::MAX);
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].id, "abc123:report");
         assert_eq!(pending[0].doc["sha256"], "abc123");
@@ -812,7 +897,7 @@ mod tests {
         let dir = TmpDir::new("binary_mailoney");
         dir.write("some-saved-mail.eml", b"From: attacker@example.com\r\n\r\nbody");
         let src = Source { binary: true, mailoney_mail: true, ..source("X", "mailoney_mail", "mailoney-mail-v1", "*") };
-        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0);
+        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0, u64::MAX);
         assert_eq!(pending.len(), 1);
         let expected_id = {
             use sha2::{Digest, Sha256};
@@ -831,7 +916,7 @@ mod tests {
         dir.write("top.eml", b"top");
         dir.write("2026-08-24/nested.eml", b"nested");
         let src = Source { binary: true, mailoney_mail: true, ..source("X", "mailoney_mail", "mailoney-mail-v1", "*") };
-        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0);
+        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0, u64::MAX);
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].doc["body_path"], "top.eml");
     }
@@ -851,7 +936,7 @@ mod tests {
             recursive: true,
             ..source("X", "mailoney_mail", "mailoney-mail-v1", "*")
         };
-        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0);
+        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0, u64::MAX);
         assert_eq!(pending.len(), 1);
         assert_eq!(
             pending[0].doc["body_path"], "2026-08-24/10.8.0.1/ca6c3e0e.eml",
@@ -889,13 +974,75 @@ mod tests {
             content_type: Some("application/vnd.tcpdump.pcap"),
             ..source("X", "sandbox_export", "sandbox-export-artifacts-v1", "*.host.pcap")
         };
-        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0);
+        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0, u64::MAX);
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].id, "abc:host_pcap:0");
         assert_eq!(pending[0].doc["job"], "abc");
         assert_eq!(pending[0].doc["kind"], "host_pcap");
         assert_eq!(pending[0].doc["chunk_index"], 0);
         assert_eq!(pending[0].doc["total_chunks"], 1);
+        assert_eq!(
+            pending[0].doc["data_base64"],
+            base64::engine::general_purpose::STANDARD.encode(b"small pcap bytes"),
+            "#1978: the streamed read must encode the same bytes the buffered read did"
+        );
+    }
+
+    #[test]
+    fn scan_source_defers_files_past_the_pending_byte_budget() {
+        // #1978: once a pass's payload budget is spent, further files stay
+        // unclaimed — their dedup keys never advance, so the next pass
+        // retries them whole. A burst of large artifacts spreads across
+        // passes instead of stacking into an OOM.
+        let dir = TmpDir::new("budget_spill");
+        dir.write("aaa.host.pcap", b"first artifact bytes");
+        dir.write("bbb.host.pcap", b"second artifact bytes");
+        let src = Source {
+            chunked: true,
+            id_suffix: Some(".host.pcap"),
+            artifact_kind: Some("host_pcap"),
+            content_type: Some("application/vnd.tcpdump.pcap"),
+            ..source("X", "sandbox_export", "sandbox-export-artifacts-v1", "*.host.pcap")
+        };
+        // Enough budget for exactly the first file (walk order is
+        // alphabetical): the second must be deferred.
+        let first_bytes = b"first artifact bytes";
+        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0, encoded_estimate(first_bytes.len()) as u64);
+        assert_eq!(pending.len(), 1);
+        assert!(pending[0].id.starts_with("aaa:host_pcap"), "{}", pending[0].id);
+    }
+
+    #[test]
+    fn scan_source_claims_a_file_even_when_it_alone_exceeds_the_budget() {
+        // The cap trims aggregates, never single files — the per-source
+        // byte guards bound one artifact by itself.
+        let dir = TmpDir::new("budget_single");
+        dir.write("aaa.host.pcap", b"bytes far beyond a one-byte budget");
+        let src = Source {
+            chunked: true,
+            id_suffix: Some(".host.pcap"),
+            artifact_kind: Some("host_pcap"),
+            content_type: Some("application/vnd.tcpdump.pcap"),
+            ..source("X", "sandbox_export", "sandbox-export-artifacts-v1", "*.host.pcap")
+        };
+        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0, 1);
+        assert_eq!(pending.len(), 1);
+    }
+
+    #[test]
+    fn scan_source_zero_budget_disables_deferral() {
+        let dir = TmpDir::new("budget_zero");
+        dir.write("aaa.host.pcap", b"first");
+        dir.write("bbb.host.pcap", b"second");
+        let src = Source {
+            chunked: true,
+            id_suffix: Some(".host.pcap"),
+            artifact_kind: Some("host_pcap"),
+            content_type: Some("application/vnd.tcpdump.pcap"),
+            ..source("X", "sandbox_export", "sandbox-export-artifacts-v1", "*.host.pcap")
+        };
+        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0, 0);
+        assert_eq!(pending.len(), 2);
     }
 
     #[test]
@@ -906,7 +1053,7 @@ mod tests {
             br#"{"updated_at": "2026-01-01T00:00:00Z", "samples": {"s1": {"sha256": "aaa", "match": "rule1"}, "s2": {"sha256": "bbb", "match": "rule2"}}}"#,
         );
         let src = Source { aggregate_samples: Some("samples"), ..source("X", "yara", "yara-analysis-v1", "results.json") };
-        let mut pending = scan_source(&src, &dir.0, &no_state(), 1, 0);
+        let mut pending = scan_source(&src, &dir.0, &no_state(), 1, 0, u64::MAX);
         pending.sort_by(|a, b| a.id.cmp(&b.id));
         assert_eq!(pending.len(), 2);
         assert_eq!(pending[0].id, "yara:s1");
@@ -925,7 +1072,7 @@ mod tests {
         let dir = TmpDir::new("aggregate_no_sha");
         dir.write("results.json", br#"{"samples": {"s1": {"match": "rule1"}}}"#);
         let src = Source { aggregate_samples: Some("samples"), ..source("X", "yara", "yara-analysis-v1", "results.json") };
-        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0);
+        let pending = scan_source(&src, &dir.0, &no_state(), 1, 0, u64::MAX);
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].doc["file"]["hash"]["sha256"], "s1");
     }
