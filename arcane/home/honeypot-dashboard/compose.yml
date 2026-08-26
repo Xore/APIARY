@@ -254,6 +254,10 @@ services:
     container_name: hp-apiary-worker
     restart: unless-stopped
     environment:
+      # The #2183 boot gate is unconditional in worker mode too: without a
+      # token these containers refuse to start on any fresh recreation
+      # (#2360), even though they never bind a public socket.
+      - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
       - LISTEN_ADDR=127.0.0.1:8099
       - ELASTICSEARCH_URL=http://elasticsearch:9200
       # #1677: addresses belonging to this fleet, excluded from the
@@ -561,6 +565,8 @@ services:
     container_name: hp-apiary-worker-importer
     restart: unless-stopped
     environment:
+      # See the backend-worker note above: the #2183 gate fires here too (#2360).
+      - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
       - LISTEN_ADDR=127.0.0.1:8098
       - ELASTICSEARCH_URL=http://elasticsearch:9200
       # #1677: addresses belonging to this fleet, excluded from the
@@ -644,6 +650,8 @@ services:
     restart: unless-stopped
     network_mode: none
     environment:
+      # See the backend-worker note above: the #2183 gate fires here too (#2360).
+      - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
       - WORKER_LOOPS=ip-enrichment
       - LOGS_DIR=/logs
       - OUT_DIR=/logs/enriched
@@ -711,6 +719,8 @@ services:
     container_name: hp-apiary-worker-payload-inventory
     restart: unless-stopped
     environment:
+      # See the backend-worker note above: the #2183 gate fires here too (#2360).
+      - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
       - LISTEN_ADDR=127.0.0.1:8097
       - ELASTICSEARCH_URL=http://elasticsearch:9200
       # #1677: addresses belonging to this fleet, excluded from the
