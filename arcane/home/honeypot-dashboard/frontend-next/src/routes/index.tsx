@@ -24,6 +24,9 @@ type OverviewKpis = {
   unique_ips: number
   /** Per-hour counts, oldest first — the 24h tile's sparkline (3B). */
   hourly: number[]
+  /** #1963: login attempts, served here since this strip renders on every
+   *  tab; it used to come from /overview/dashboard's aggregation. */
+  logins: number
   ready: boolean
 }
 
@@ -88,10 +91,15 @@ const fetchPresentation = createServerFn({ method: 'GET' }).handler(async (): Pr
   return config?.payload?.presentation ?? null
 })
 
-const fetchDashboard = createServerFn({ method: 'GET' }).handler(async (): Promise<Dashboard | null> => {
-  const { serviceJSON } = await import('../lib/backend.server')
-  return serviceJSON<Dashboard>('/api/v1/overview/dashboard')
-})
+const fetchDashboard = createServerFn({ method: 'GET' })
+  .inputValidator((parts: string[]) => parts)
+  .handler(async ({ data }): Promise<Dashboard | null> => {
+    const { serviceJSON } = await import('../lib/backend.server')
+    // Empty list = the whole payload (#1963); otherwise only those slices
+    // are computed server-side at all.
+    const query = data.length > 0 ? `?parts=${data.join(',')}` : ''
+    return serviceJSON<Dashboard>(`/api/v1/overview/dashboard${query}`)
+  })
 
 const fetchRecent = createServerFn({ method: 'GET' }).handler(async () => {
   const { serviceJSON } = await import('../lib/backend.server')
@@ -138,6 +146,34 @@ function HeroFreshness({ ready, kpis }: { ready: boolean; kpis: OverviewKpis | n
 
 type OverviewSearch = { tab?: string; sensor?: string }
 
+const TABS = [
+  { id: 'live', label: 'Live operations' },
+  { id: 'health', label: 'Collection health' },
+  { id: 'threats', label: 'Threat landscape' },
+  { id: 'behavior', label: 'Attacker behavior' },
+  { id: 'evidence', label: 'Evidence & campaigns' },
+] as const
+
+type TabId = (typeof TABS)[number]['id']
+
+function activeTab(tab?: string): TabId {
+  return (TABS.some((entry) => entry.id === tab) ? tab : 'live') as TabId
+}
+
+// #1963: which /overview/dashboard slices each tab actually renders. The
+// endpoint's `?parts=` skips the aggregations behind unlisted fields, so
+// a tick parked on one tab stops paying for the other four tabs' tables.
+// Kept beside the loader that consumes it; the backend answers an unknown
+// name with everything-except-it rather than an error, so a frontend and
+// backend that disagree about this list degrade instead of breaking.
+const TAB_DASHBOARD_PARTS: Record<TabId, string[]> = {
+  live: ['sensors', 'heatmap', 'map_points'],
+  health: ['sensors', 'protocols'],
+  threats: ['top_ips', 'top_ports', 'countries', 'asns', 'providers'],
+  behavior: ['top_creds', 'top_commands', 'clients', 'fingerprints', 'top_paths'],
+  evidence: ['alerts', 'alert_cats', 'payloads'],
+}
+
 export const Route = createFileRoute('/')({
   // #1845: the tab and the heatmap sensor filter live in the URL, not in
   // component state.
@@ -155,14 +191,26 @@ export const Route = createFileRoute('/')({
     tab: typeof search.tab === 'string' ? search.tab : undefined,
     sensor: typeof search.sensor === 'string' ? search.sensor : undefined,
   }),
-  loader: async () => ({
-    kpis: fetchKpis(),
-    dashboard: fetchDashboard(),
-    recent: fetchRecent(),
-    campaigns: fetchCampaignsSummary(),
-    payloads: fetchPayloadsSummary(),
-    presentation: fetchPresentation(),
-  }),
+  // #1963: loaderDeps puts the active tab into the loader's inputs, so a
+  // tab switch re-runs it (fresh data on entry, not whenever the next tick
+  // lands) and the shared tick's invalidate() re-runs only this tab's
+  // queries instead of all six endpoints for all five tabs.
+  loaderDeps: ({ search }) => ({ tab: search.tab }),
+  loader: async ({ deps }) => {
+    const tab = activeTab(deps.tab)
+    return {
+      // Rendered on every tab: the hero and the KPI strip.
+      kpis: fetchKpis(),
+      presentation: fetchPresentation(),
+      payloads: fetchPayloadsSummary(),
+      // One aggregation call, narrowed to this tab's slices.
+      dashboard: fetchDashboard({ data: TAB_DASHBOARD_PARTS[tab] }),
+      // Tab-owned data: resolved null elsewhere so the shape stays uniform
+      // without paying for a query the visible panel cannot render.
+      recent: tab === 'live' ? fetchRecent() : Promise.resolve(null),
+      campaigns: tab === 'evidence' ? fetchCampaignsSummary() : Promise.resolve(null),
+    }
+  },
   component: Overview,
 })
 
@@ -201,7 +249,7 @@ function KpiSpark({ hourly }: { hourly: number[] | undefined }) {
   )
 }
 
-function KpiStrip({ kpis, logins, payloads }: { kpis: OverviewKpis | null; logins: number | null; payloads: number | null }) {
+function KpiStrip({ kpis, payloads }: { kpis: OverviewKpis | null; payloads: number | null }) {
   return (
     <div className="metric-grid" id="overview-kpis">
       <a className="metric" href="/events" title="Open all normalized events in the current dashboard window">
@@ -233,7 +281,11 @@ function KpiStrip({ kpis, logins, payloads }: { kpis: OverviewKpis | null; login
       </a>
       <a className="metric" href="/events?kind=login" title="Authentication attempts captured by interactive honeypots">
         <div className="metric__value">
-          <KpiValue value={logins} />
+          {/* #1963: from the kpis endpoint, not /overview/dashboard -- this
+              strip renders on every tab, and reading one integer from the
+              dashboard aggregation used to drag all eighteen slices onto
+              every tick. */}
+          <KpiValue value={kpis && kpis.ready ? kpis.logins : null} />
         </div>
         <div className="metric__label">Login attempts</div>
       </a>
@@ -246,16 +298,6 @@ function KpiStrip({ kpis, logins, payloads }: { kpis: OverviewKpis | null; login
     </div>
   )
 }
-
-const TABS = [
-  { id: 'live', label: 'Live operations' },
-  { id: 'health', label: 'Collection health' },
-  { id: 'threats', label: 'Threat landscape' },
-  { id: 'behavior', label: 'Attacker behavior' },
-  { id: 'evidence', label: 'Evidence & campaigns' },
-] as const
-
-type TabId = (typeof TABS)[number]['id']
 
 function usePromise<T>(promise: Promise<T | null>): T | null {
   const [value, setValue] = useState<T | null>(null)
@@ -373,7 +415,12 @@ function Overview() {
   const presentation = usePromise(data.presentation)
   const search = Route.useSearch()
   const navigate = Route.useNavigate()
-  const tab = (TABS.some((entry) => entry.id === search.tab) ? search.tab : 'live') as TabId
+  // The tab comes from the URL rather than the loader data so switching
+  // tabs swaps panels immediately (#1963): the loader for the new tab may
+  // still be in flight, and the panel's own pieces fill in as their
+  // promises resolve — the same skeleton-first contract the page opens
+  // with.
+  const tab = activeTab(search.tab)
   // replace: true so a refresh cycle does not push history entries, and the
   // back button still means "the page before this one".
   const setTab = (next: TabId) =>
@@ -418,6 +465,14 @@ function Overview() {
   // the tick, the shared LIVE switch pauses it entirely, and resume
   // refetches now. No leading call: the route loaders already fetch on
   // navigation.
+  //
+  // #1963: invalidate() re-runs a tab-scoped loader, so a tick pays only
+  // for what the visible tab renders instead of all six endpoints for all
+  // five tabs. The EChart panels are deliberately outside this cycle:
+  // they chart 7-day windows where a minute of staleness is invisible,
+  // they already refetch whenever a tab switch remounts them, and adding
+  // them here would re-run those endpoints every minute against data that
+  // has not moved.
   const refresh = useCallback(() => void router.invalidate(), [router])
   useLiveInterval(refresh, 60_000)
 
@@ -475,11 +530,9 @@ function Overview() {
         </div>
       </header>
 
-      <Suspense fallback={<KpiStrip kpis={null} logins={null} payloads={null} />}>
+      <Suspense fallback={<KpiStrip kpis={null} payloads={null} />}>
         <Await promise={data.kpis}>
-          {(kpis) => (
-            <KpiStrip kpis={kpis} logins={dashboard ? dashboard.logins : null} payloads={payloads ? payloads.total : null} />
-          )}
+          {(kpis) => <KpiStrip kpis={kpis} payloads={payloads ? payloads.total : null} />}
         </Await>
       </Suspense>
 

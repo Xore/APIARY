@@ -32,9 +32,11 @@ const fetchSources = createServerFn({ method: 'GET' })
 // /api/v1/sources rows carry only a country code, no coordinates, so the
 // map reuses /api/v1/overview/dashboard's map_points — the same geolocated
 // origins the overview map plots (ips.html:56-64 shares the overview map).
+// ?parts=map_points (#1963): this page wants one slice of eighteen, and
+// there is no reason to sweep every leaderboard aggregation for it.
 const fetchMapPoints = createServerFn({ method: 'GET' }).handler(async (): Promise<MapPoint[] | null> => {
   const { serviceJSON } = await import('../lib/backend.server')
-  const dashboard = await serviceJSON<{ map_points: MapPoint[] }>('/api/v1/overview/dashboard')
+  const dashboard = await serviceJSON<{ map_points: MapPoint[] }>('/api/v1/overview/dashboard?parts=map_points')
   return dashboard ? dashboard.map_points : null
 })
 
