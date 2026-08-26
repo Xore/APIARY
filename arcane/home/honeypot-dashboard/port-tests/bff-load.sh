@@ -29,6 +29,7 @@ fi
 # forks, since children inherit their parent's group — its own session,
 # so it can be killed as a unit without collateral damage.
 (cd "$FRONTEND_DIR" && setsid env OIDC_DISABLED=1 BACKEND_URL="$BE_URL" PORT="$CLUSTER_PORT" WEB_CONCURRENCY=3 \
+  APIARY_ALLOW_UNAUTH_DEV=1 \
   node server/cluster.mjs >"${TMPDIR:-/tmp}/port-tests-cluster.log" 2>&1) &
 for _ in $(seq 1 30); do
   curl -sf --max-time 2 "http://127.0.0.1:$CLUSTER_PORT/static/theme.css" >/dev/null 2>&1 && break

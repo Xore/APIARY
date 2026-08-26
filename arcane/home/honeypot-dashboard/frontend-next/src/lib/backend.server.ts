@@ -22,6 +22,16 @@
 // anything past that sheds with 503 rather than growing without bound.
 import { Agent, setGlobalDispatcher } from 'undici'
 import { ConcurrencyLimiter, envInt, Overloaded, overloadedResponse, releaseOnFinish } from './backpressure.server'
+import { assertServiceTokenPolicy, SERVICE_TOKEN_GATE_CODE, serviceTokenPolicy } from './serviceToken.server'
+
+// #2183: the boot half of the shared token contract. An unset/empty
+// SERVICE_TOKEN used to silently switch off this file's inbound
+// x-service-token check in proxyToRust exactly as it silently switched off
+// backend-service's require_service_token. The route tree statically
+// imports every route module into the server bundle, so this throws while
+// Nitro boots — the process never listens misconfigured; see
+// serviceToken.server.ts for the one decision both tiers render.
+assertServiceTokenPolicy()
 
 setGlobalDispatcher(
   new Agent({
@@ -239,6 +249,18 @@ export async function proxyToRust(request: Request, splat: string | undefined, b
     return new Response('not the bff tier', { status: 404 })
   }
   const token = process.env.SERVICE_TOKEN ?? ''
+  const policy = serviceTokenPolicy()
+  if (policy.kind === 'refuse') {
+    // The boot assertion above makes this unreachable in a correctly
+    // started process; kept as the mechanical backstop for #2183's seam-2
+    // hazard — this proxy must never be the one open path when the token
+    // went missing (HMR edge, env stripped after boot, a test importing
+    // this module cold). Fails closed loudly instead of passing through.
+    return new Response(`${SERVICE_TOKEN_GATE_CODE}: refusing to proxy without SERVICE_TOKEN`, {
+      status: 503,
+      headers: { 'content-type': 'text/plain' },
+    })
+  }
   if (token && request.headers.get('x-service-token') !== token) {
     return new Response('unauthorized', { status: 401 })
   }

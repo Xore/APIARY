@@ -34,8 +34,12 @@ start_backend() {
   ensure_ports_free
   # Extra env for worker-loop tests can be passed as arguments (VAR=val).
   # Defaults first, caller args last so they can override.
+  # APIARY_ALLOW_UNAUTH_DEV=1 (#2183): this harness is exactly the sanctioned
+  # dev case — a tokenless local boot that is meant to serve anything on
+  # loopback. Without it the tier refuses to start with [E-SERVICE-TOKEN].
   (cd "$BACKEND_DIR" && env \
-    ELASTICSEARCH_URL="$ES_URL" LISTEN_ADDR="127.0.0.1:$BE_PORT" "$@" \
+    ELASTICSEARCH_URL="$ES_URL" LISTEN_ADDR="127.0.0.1:$BE_PORT" \
+    APIARY_ALLOW_UNAUTH_DEV=1 "$@" \
     cargo run -q >"${TMPDIR:-/tmp}/port-tests-backend.log" 2>&1) &
   _BE_PID=$!
   for _ in $(seq 1 60); do
@@ -59,7 +63,8 @@ start_frontend() {
   # Defaults first, caller args last so they can override (auth-flow.sh
   # passes OIDC_DISABLED=0).
   (cd "$FRONTEND_DIR" && env \
-    OIDC_DISABLED=1 BACKEND_URL="$BE_URL" PORT="$FE_PORT" "$@" \
+    OIDC_DISABLED=1 BACKEND_URL="$BE_URL" PORT="$FE_PORT" \
+    APIARY_ALLOW_UNAUTH_DEV=1 "$@" \
     node .output/server/index.mjs >"${TMPDIR:-/tmp}/port-tests-frontend.log" 2>&1) &
   _FE_PID=$!
   for _ in $(seq 1 30); do

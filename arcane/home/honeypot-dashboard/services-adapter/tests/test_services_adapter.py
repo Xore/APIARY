@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
 """#197: allowlist enforcement and response handling for services-adapter.py.
 
-Every test mocks docker_request()/docker_request_raw() -- these tests must
-run without a real Docker socket, and more importantly, the allowlist tests
-specifically assert the mock is never called at all for a disallowed name,
-proving the rejection happens before any Docker API call, not just that the
-result looks right.
+Most tests mock docker_request()/docker_request_raw() -- these must run
+without a real Docker socket, and the allowlist ones specifically assert the
+mock is never called at all for a disallowed name, proving the rejection
+happens before any Docker API call, not just that the result looks right.
+FullAdapterPathTests (#2185) goes one layer wider instead: a stub Engine
+socket stands in for docker.sock while the real handler serves requests over
+a second unix socket, so idempotent-success responses are pinned through the
+full adapter path. Still no real Docker anywhere.
 """
+import http.client
 import importlib.util
+import json
+import os
+import socket
+import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -54,6 +63,42 @@ class AllowlistEnforcementTests(unittest.TestCase):
         with mock.patch.object(adapter, "docker_request", return_value=(500, None)):
             status, _ = adapter.perform_action("hp-cowrie", "stop")
         self.assertEqual(status, 502)
+
+    # #2185: the Engine answers 304 Not Modified when the requested state
+    # already holds -- these are idempotent successes, not failures.
+    def test_perform_action_start_on_a_running_container_succeeds_with_noop_flag(self):
+        with mock.patch.object(adapter, "docker_request", return_value=(304, None)) as mocked:
+            status, payload = adapter.perform_action("hp-cowrie", "start")
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["noop"])
+        self.assertEqual(payload["action"], "start")
+        self.assertEqual(payload["name"], "hp-cowrie")
+        mocked.assert_called_once_with("POST", "/containers/hp-cowrie/start")
+
+    def test_perform_action_stop_on_a_stopped_container_succeeds_with_noop_flag(self):
+        with mock.patch.object(adapter, "docker_request", return_value=(304, None)) as mocked:
+            status, payload = adapter.perform_action("hp-dionaea", "stop")
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["noop"])
+        self.assertEqual(payload["action"], "stop")
+        mocked.assert_called_once_with("POST", "/containers/hp-dionaea/stop")
+
+    def test_perform_action_restart_accepts_304_as_idempotent_success(self):
+        with mock.patch.object(adapter, "docker_request", return_value=(304, None)):
+            status, payload = adapter.perform_action("hp-cowrie", "restart")
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+
+    def test_502_error_body_carries_no_upstream_numerals(self):
+        # #2185: the raw engine status used to leak straight into the body
+        # ("docker engine returned 304"); 5xx bodies stay free of upstream
+        # numerals even for genuine anomalies.
+        for upstream_status in (409, 500, 503):
+            with mock.patch.object(adapter, "docker_request", return_value=(upstream_status, None)):
+                _, payload = adapter.perform_action("hp-cowrie", "start")
+            self.assertEqual(payload["error"], "docker engine returned an error")
 
     def test_fetch_logs_rejects_disallowed_name_without_calling_docker(self):
         with mock.patch.object(adapter, "docker_request_raw") as mocked:
@@ -122,6 +167,127 @@ class ContainerStatusTests(unittest.TestCase):
             "hp-canarytokens-adapter",
         ):
             self.assertIn(name, adapter.ALLOWED_CONTAINERS)
+
+
+class _UnixHTTPConnection(http.client.HTTPConnection):
+    """Minimal AF_UNIX HTTP client used to drive the real handler end to end."""
+
+    def __init__(self, sock_path: str) -> None:
+        super().__init__("localhost", timeout=10)
+        self._sock_path = sock_path
+
+    def connect(self) -> None:
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(self.timeout)
+        self.sock.connect(self._sock_path)
+
+
+class _FakeDockerEngine:
+    """Stands in for the Engine socket, answering a fixed status line, so the
+    full adapter path (handler -> perform_action -> docker_request) runs
+    against an AF_UNIX listener instead of /var/run/docker.sock."""
+
+    def __init__(self) -> None:
+        self.status_line = b"HTTP/1.1 304 Not Modified"
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmpdir.name, "docker.sock")
+        self._stop = threading.Event()
+        self.thread = threading.Thread(target=self._serve, daemon=True)
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(self.path)
+        listener.listen(8)
+        self._listener = listener
+
+    def start(self) -> None:
+        self.thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        self.thread.join(timeout=2)
+        self._listener.close()
+        self.tmpdir.cleanup()
+
+    def _serve(self) -> None:
+        self._listener.settimeout(0.25)
+        while not self._stop.is_set():
+            try:
+                conn, _ = self._listener.accept()
+            except TimeoutError:
+                continue
+            except OSError:
+                return
+            try:
+                conn.settimeout(5)
+                conn.recv(65536)
+                conn.sendall(self.status_line + b"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            except OSError:
+                pass
+            finally:
+                conn.close()
+
+
+@unittest.skipUnless(hasattr(socket, "AF_UNIX"), "requires an AF_UNIX-capable platform")
+class FullAdapterPathTests(unittest.TestCase):
+    """#2185 acceptance path: the Engine's 304 becomes a 200 success over the
+    real HTTP handler, not only through perform_action() in isolation -- and
+    genuine engine failures still surface as 502 through that same path."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.engine = _FakeDockerEngine()
+        cls.engine.start()
+        cls.patcher = mock.patch.object(adapter, "DOCKER_SOCK", cls.engine.path)
+        cls.patcher.start()
+        cls.server_dir = tempfile.TemporaryDirectory()
+        control_path = os.path.join(cls.server_dir.name, "control.sock")
+        cls.server = adapter.ServicesServer(control_path, adapter.ServicesHandler)
+        cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.server_thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.server_thread.join(timeout=2)
+        cls.patcher.stop()
+        cls.engine.stop()
+        cls.server_dir.cleanup()
+
+    def _post_action(self, name: str, action: str) -> tuple[int, dict]:
+        conn = _UnixHTTPConnection(self.server.server_address)
+        try:
+            conn.request(
+                "POST",
+                f"/v1/services/{name}/{action}",
+                body=b"{}",
+                headers={"Host": "services-adapter"},
+            )
+            resp = conn.getresponse()
+            raw = resp.read()
+            return resp.status, json.loads(raw)
+        finally:
+            conn.close()
+
+    def test_start_on_a_running_container_returns_success_through_the_handler(self):
+        status, payload = self._post_action("hp-cowrie", "start")
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["noop"])
+
+    def test_stop_on_a_stopped_container_returns_success_through_the_handler(self):
+        status, payload = self._post_action("hp-dionaea", "stop")
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["noop"])
+
+    def test_a_genuine_engine_failure_still_surfaces_as_502_without_numerals(self):
+        self.engine.status_line = b"HTTP/1.1 503 Service Unavailable"
+        try:
+            status, payload = self._post_action("hp-cowrie", "start")
+        finally:
+            self.engine.status_line = b"HTTP/1.1 304 Not Modified"
+        self.assertEqual(status, 502)
+        self.assertFalse(any(char.isdigit() for char in payload["error"]))
 
 
 class LogDemuxTests(unittest.TestCase):

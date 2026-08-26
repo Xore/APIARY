@@ -18,6 +18,25 @@
 import cluster from 'node:cluster'
 import os from 'node:os'
 
+// #2183: checked here as well as inside the server bundle (server/plugins/
+// service-token-gate.ts -> src/lib/serviceToken.server.ts) because the
+// primary does not evaluate that bundle itself — without this, a tokenless
+// boot would not refuse but crashloop-respawn every worker it forks, which
+// is loud but reads as breakage, not as the deliberate refusal it is. Keep
+// this truth table identical to serviceTokenPolicy() there and to
+// backend-service/src/main.rs's resolve_service_token: one contract,
+// rendered where each runtime can act on it.
+const tokenIsSet = typeof process.env.SERVICE_TOKEN === 'string' && process.env.SERVICE_TOKEN.length > 0
+if (!tokenIsSet && process.env.APIARY_ALLOW_UNAUTH_DEV !== '1') {
+  console.error(
+    '[E-SERVICE-TOKEN] refusing to start: SERVICE_TOKEN is unset or empty, which would leave ' +
+      'every /bff/* proxy route open to unauthenticated requests. Set SERVICE_TOKEN to the ' +
+      'shared secret the Rust tier also carries — see docs/DASHBOARD-CUTOVER.md step 2 — or, ' +
+      'for local development only, set APIARY_ALLOW_UNAUTH_DEV=1 explicitly (#2183).',
+  )
+  process.exit(1)
+}
+
 const workerCount = Math.max(1, Number(process.env.WEB_CONCURRENCY) || Math.min(4, os.cpus().length))
 
 if (workerCount === 1 || !cluster.isPrimary) {

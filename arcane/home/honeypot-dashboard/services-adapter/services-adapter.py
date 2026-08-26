@@ -192,8 +192,19 @@ def perform_action(name: str, action: str) -> tuple[int, dict[str, Any]]:
     status, _ = docker_request("POST", f"/containers/{name}/{action}")
     if status == 404:
         return 404, {"error": "container not found"}
+    if status == 304:
+        # #2185: the Engine answers 304 Not Modified when the requested state
+        # already holds -- start on an already-running container, stop on an
+        # already-stopped one. That is idempotent success, not a failure;
+        # reporting it as 502 made an operator who clicked Start on a running
+        # service see "failed" with nothing having gone wrong. The noop flag
+        # lets the UI say "already running/stopped" instead of pretending the
+        # action just happened.
+        return 200, {"ok": True, "action": action, "name": name, "noop": True}
     if status not in (200, 204):
-        return 502, {"error": f"docker engine returned {status}"}
+        # Deliberately no upstream numerals here (#2185): the raw engine
+        # status must not leak into a user-facing body.
+        return 502, {"error": "docker engine returned an error"}
     return 200, {"ok": True, "action": action, "name": name}
 
 

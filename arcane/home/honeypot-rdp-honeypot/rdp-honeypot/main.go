@@ -233,6 +233,20 @@ func main() {
 		if err != nil {
 			continue
 		}
-		go serve(decodeProxy(c, proxy), log, port)
+		spawnServe(c, proxy, log, port)
 	}
+}
+
+// spawnServe launches the per-connection handler with the PROXY-header
+// decode INSIDE the spawned goroutine (#2099). A go statement's arguments
+// are evaluated synchronously on the calling goroutine, so the previous
+// `go serve(decodeProxy(c, proxy), log, port)` form ran the 5s-bounded
+// decode on the shared accept loop before serve ever started -- one
+// silent connection stalled admission of every other connection for up
+// to 5s each (the same defect #1346 fixed in cisco-asa and #2099 ports
+// into citrix/endlessh/http/dnp3).
+func spawnServe(c net.Conn, proxy bool, log *logger, port int) {
+	go func() {
+		serve(decodeProxy(c, proxy), log, port)
+	}()
 }

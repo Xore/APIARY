@@ -218,9 +218,21 @@ pub async fn zeek_proxy_attribution_loop(state: AppState) {
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         ticker.tick().await;
-        if let Err(error) = resolve_once(&state).await {
-            tracing::warn!(%error, "zeek-proxy-attribution: pass failed");
-        }
+        // #2181: the join-side parsers (dials_by_key/dials_by_via_port)
+        // digest portbridge records inline above the per-flow writes, so a
+        // drifted shape poisons every flow's join rather than one record —
+        // hence one cycle-level boundary instead of per-flow splits (the
+        // flow rows themselves are built from total constructors, nothing
+        // recoverable to carve off). Skip semantics stay queue-honest:
+        // unmatched candidates defer until grace ages them into
+        // relay_unresolved, so even repeated degraded passes empty
+        // naturally instead of pinning the candidate window open forever.
+        crate::isolate::cycle("zeek-proxy-attribution", async {
+            if let Err(error) = resolve_once(&state).await {
+                tracing::warn!(%error, "zeek-proxy-attribution: pass failed");
+            }
+        })
+        .await;
     }
 }
 
