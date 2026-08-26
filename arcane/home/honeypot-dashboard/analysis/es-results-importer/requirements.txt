@@ -1,5 +1,8 @@
-# Pinned to match ml-worker/requirements.txt -- the ES server
-# (docker-compose.yml's elasticsearch service) is 8.x; a 9.x client sends
-# request headers the 8.x server rejects.
+# Pinned to match ml-worker/requirements.txt (both 8.19.3): held through
+# the server's 8.13.4 -> 9.5.1 migration (#1408/#1410) and re-verified
+# live against the deployed 9.5.1 server on 2026-08-26 (#2090): full
+# info/ping/index/search/delete roundtrip PASS -- a server accepts
+# clients one major back, so this client's compatible-with=8 header stays
+# valid (recorded in docs/runtime-compatibility-record.md).
 elasticsearch==8.19.3
 loguru==0.7.2
