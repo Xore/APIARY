@@ -304,6 +304,17 @@ pub struct ReportSchedule {
     pub last_run_at: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub next_run_at: String,
+    /// Consecutive scheduled runs that ended in Err or panic (#2181),
+    /// cleared by any success. At SCHEDULE_QUARANTINE_FAILURES the schedule
+    /// parks itself by flipping `enabled` (persisted — the marker survives
+    /// restarts) so a permanently poisoned definition stops being recycled
+    /// due every interval; an operator re-arms it via the normal API.
+    #[serde(default, skip_serializing_if = "failures_is_zero")]
+    pub failures: u32,
+}
+
+fn failures_is_zero(failures: &u32) -> bool {
+    *failures == 0
 }
 
 /// Computes the first fire time strictly after `from`, mirroring
@@ -695,7 +706,12 @@ pub async fn due_definitions(state: &AppState) -> anyhow::Result<Vec<ReportDefin
 }
 
 /// Records one scheduled run's outcome: next_run_at always advances (a
-/// failing definition must not hot-loop); last_run_at only on success.
+/// failing definition must not hot-loop); last_run_at only on success; and
+/// a definition that fails or panics repeatedly parks itself behind its own
+/// disabled schedule (#2181) rather than being recycled due every interval
+/// forever — the same way mark_scheduled_run is what keeps a panicked
+/// render from pinning the scheduler to it tick after tick now that
+/// worker.rs isolates per-definition panics.
 pub async fn mark_scheduled_run(
     state: &AppState,
     id: &str,
@@ -715,11 +731,17 @@ pub async fn mark_scheduled_run(
     for def in definitions.iter_mut() {
         if def.id == id {
             if let Some(schedule) = def.schedule.as_mut() {
-                if success {
-                    schedule.last_run_at = ran_at.to_rfc3339();
-                }
-                schedule.next_run_at = next_schedule_run(schedule, ran_at).to_rfc3339();
                 changed = true;
+                if apply_scheduled_outcome(schedule, ran_at, success) {
+                    // Logged here, where the definition's name is at hand:
+                    // this is the diagnostics line quarantine exists for.
+                    tracing::warn!(
+                        id,
+                        name = %def.name,
+                        failures = schedule.failures,
+                        "scheduled report quarantined: schedule disabled after consecutive failures; fix the render and re-enable it via the reports API (#2181)"
+                    );
+                }
             }
             break;
         }
@@ -729,6 +751,39 @@ pub async fn mark_scheduled_run(
     }
     doc["payload"]["definitions"] = json!(definitions);
     let _ = save_definitions_doc(state, doc).await;
+}
+
+/// Consecutive failed scheduled runs before a definition quarantines itself
+/// out of due_definitions (#2181). Five is high enough that a blip-day
+/// daily report survives nearly a week of retries, low enough that a
+/// permanently poisoned one stops cycling within five intervals.
+pub(crate) const SCHEDULE_QUARANTINE_FAILURES: u32 = 5;
+
+/// The exact bookkeeping one scheduled run applies to a schedule in place:
+/// next_run_at always advances, success stamps last_run_at and clears the
+/// failure streak, failure advances it. Returns true only when THIS failure
+/// crossed the quarantine line (the persisted `enabled=false` is what keeps
+/// a parked definition out of due_definitions' primary queue).
+///
+/// Kept pure so the quarantine policy stays testable without Elasticsearch.
+pub(crate) fn apply_scheduled_outcome(
+    schedule: &mut ReportSchedule,
+    ran_at: chrono::DateTime<chrono::Utc>,
+    success: bool,
+) -> bool {
+    let mut parked_now = false;
+    if success {
+        schedule.last_run_at = ran_at.to_rfc3339();
+        schedule.failures = 0;
+    } else {
+        schedule.failures += 1;
+        if schedule.failures >= SCHEDULE_QUARANTINE_FAILURES && schedule.enabled {
+            schedule.enabled = false;
+            parked_now = true;
+        }
+    }
+    schedule.next_run_at = next_schedule_run(schedule, ran_at).to_rfc3339();
+    parked_now
 }
 
 // ---------------------------------------------------------------------------
@@ -808,6 +863,99 @@ pub async fn list_generated(state: &AppState) -> anyhow::Result<Vec<GeneratedRep
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn daily_schedule() -> ReportSchedule {
+        ReportSchedule {
+            enabled: true,
+            frequency: "daily".into(),
+            hour: 5,
+            minute: 30,
+            weekday: 0,
+            month_day: 1,
+            last_run_at: String::new(),
+            next_run_at: "2026-08-26T05:30:00+00:00".into(),
+            failures: 0,
+        }
+    }
+
+    fn ran_at(days_from_now: i64) -> chrono::DateTime<chrono::Utc> {
+        chrono::Utc::now() + chrono::Duration::days(days_from_now)
+    }
+
+    #[test]
+    fn a_successful_scheduled_run_resets_the_failure_streak() {
+        // Two stale failures, then the definition renders fine again — it
+        // must carry zero history into its next run.
+        let mut schedule = daily_schedule();
+        apply_scheduled_outcome(&mut schedule, ran_at(0), false);
+        apply_scheduled_outcome(&mut schedule, ran_at(1), false);
+
+        assert!(!apply_scheduled_outcome(&mut schedule, ran_at(2), true));
+        assert_eq!(schedule.failures, 0);
+        assert!(schedule.enabled, "a healthy schedule is never parked");
+        assert!(!schedule.last_run_at.is_empty(), "success stamps last_run_at");
+        let next = chrono::DateTime::parse_from_rfc3339(&schedule.next_run_at).unwrap();
+        assert!(next > ran_at(2), "next_run_at still advances");
+    }
+
+    #[test]
+    fn failures_below_the_threshold_never_park_the_schedule() {
+        let mut schedule = daily_schedule();
+        for day in 0..(SCHEDULE_QUARANTINE_FAILURES - 1) as i64 {
+            assert!(
+                !apply_scheduled_outcome(&mut schedule, ran_at(day), false),
+                "failure {} must not quarantine yet",
+                day + 1
+            );
+            assert!(schedule.enabled);
+            assert_eq!(schedule.failures, (day + 1) as u32);
+        }
+    }
+
+    #[test]
+    fn crossing_the_threshold_parks_the_schedule_behind_its_own_disabled_flag() {
+        // The poisoned definition's durable marker IS persisted `enabled`:
+        // due_definitions filters on it, so the record leaves the primary
+        // queue instead of being recycled every interval forever.
+        let mut schedule = daily_schedule();
+        for day in 0..SCHEDULE_QUARANTINE_FAILURES {
+            apply_scheduled_outcome(&mut schedule, ran_at(day as i64), false);
+        }
+        assert_eq!(schedule.failures, SCHEDULE_QUARANTINE_FAILURES);
+        assert!(!schedule.enabled, "crossing the threshold disables the schedule");
+        let next = chrono::DateTime::parse_from_rfc3339(&schedule.next_run_at).unwrap();
+        assert!(
+            next > ran_at((SCHEDULE_QUARANTINE_FAILURES - 1) as i64),
+            "even the parking run advances next_run_at so re-enablement starts from now"
+        );
+    }
+
+    #[test]
+    fn an_already_parked_schedule_does_not_repark_on_later_failures() {
+        // Once parked (enabled=false), later bookkeeping must keep reporting
+        // parked_now=false — that flag drives exactly one loud warn line,
+        // and only at the transition.
+        let mut schedule = daily_schedule();
+        for _ in 0..SCHEDULE_QUARANTINE_FAILURES {
+            apply_scheduled_outcome(&mut schedule, ran_at(0), false);
+        }
+        assert!(!schedule.enabled);
+        assert!(!apply_scheduled_outcome(&mut schedule, ran_at(1), false));
+        assert_eq!(schedule.failures, SCHEDULE_QUARANTINE_FAILURES + 1);
+    }
+
+    #[test]
+    fn a_reenabled_quarantined_schedule_recovers_cleanly() {
+        let mut schedule = daily_schedule();
+        for _ in 0..SCHEDULE_QUARANTINE_FAILURES {
+            apply_scheduled_outcome(&mut schedule, ran_at(0), false);
+        }
+        // Operator fixed the render and re-armed via the API.
+        schedule.enabled = true;
+        assert!(!apply_scheduled_outcome(&mut schedule, ran_at(1), true));
+        assert_eq!(schedule.failures, 0, "recovery clears the streak entirely");
+        assert!(schedule.enabled);
+    }
 
     fn custom_definition() -> ReportDefinition {
         ReportDefinition {

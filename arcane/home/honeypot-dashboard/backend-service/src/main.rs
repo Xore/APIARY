@@ -45,6 +45,7 @@ mod ghidra_submit;
 mod github_analysis_submit;
 mod gpu_queue;
 mod health;
+mod isolate;
 mod honeyfs_implant;
 mod investigate;
 mod ip_block;

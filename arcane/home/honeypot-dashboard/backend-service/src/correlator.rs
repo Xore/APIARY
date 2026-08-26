@@ -564,7 +564,11 @@ pub async fn correlator_loop(state: AppState) {
     let window = env_duration("CORRELATION_WINDOW", Duration::from_secs(7 * 24 * 3600));
     let interval = env_duration("CORRELATOR_RUN_INTERVAL", Duration::from_secs(15 * 60));
     loop {
-        run_correlation(&state, window).await;
+        // #2181: the full recompute runs inline in this task — writes below
+        // it already fail per document, but a panicked ES response shape
+        // used to end the worker until compose restarted it. A lost cycle
+        // self-heals by construction (recomputed from scratch next time).
+        crate::isolate::cycle("correlator", run_correlation(&state, window)).await;
         tokio::time::sleep(interval).await;
     }
 }
