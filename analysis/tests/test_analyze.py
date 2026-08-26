@@ -10,12 +10,20 @@ to stdout, that payloads stay visible as evidence (<0xNN> spellings), that
 clean values render byte-identically, and that counts -- the only column
 an operator eyeballs numerically -- keep their formatting.
 
+TestHygieneBatch1985 covers #1985: malformed lines are reported instead of
+silently dropped, print_table carries no dead parameters, generic events
+count toward the total with or without an IP, foreign category-bearing
+events stay out of the http tables, and multipot's VNC auth attempts show
+up in the login-failed figure.
+
 Stdlib only, like analyze.py itself: runs plain `python3 test_analyze.py`.
 """
 
 import contextlib
+import inspect
 import io
 import sys
+import tempfile
 import unittest
 from collections import Counter
 from pathlib import Path
@@ -24,6 +32,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import analyze  # noqa: E402
 
 ALL_CONTROLS = [chr(c) for c in list(range(0x20)) + [0x7F] + list(range(0x80, 0xA0))]
+
+
+def exhaust_with_stderr(it):
+    """Drain an iter_events generator with stderr captured.
+
+    The skip summary prints when iteration ends -- exhausting here is what
+    fires it, so this is both the drive mechanism and the assertion source.
+    """
+    buf = io.StringIO()
+    with contextlib.redirect_stderr(buf):
+        items = list(it)
+    return items, buf.getvalue()
 
 
 def render(counter):
@@ -104,6 +124,94 @@ class TestEndToEnd(unittest.TestCase):
             "category": "scan",
         })
         self.assertEqual(st.http_paths.most_common(1)[0][0], "/\x1b[2Jprobe")
+
+
+class TestHygieneBatch1985(unittest.TestCase):
+    """#1985: silent malformed-line skips, dead code, total undercount,
+    category catch-all, and the missing VNC login counter."""
+
+    def test_unparsable_lines_reported_per_file_on_stderr(self):
+        with tempfile.TemporaryDirectory() as d:
+            good = Path(d, "cowrie.json")
+            bad = Path(d, "truncated.json")
+            clean = Path(d, "clean.json")
+            good.write_text(
+                '{"eventid": "cowrie.login.failed"}\n'
+                '{"eventid": "cowrie.login.success"}\n', encoding="utf-8")
+            bad.write_text(
+                '{"eventid": "cowrie.command.input", "input": "id"}\n'
+                '{"eventid": "cowrie.comm\n'          # rotation mid-write
+                'not json at all\n'
+                '\n'                                   # blank: not a skip
+                '{"eventid": "x"}\n', encoding="utf-8")
+            clean.write_text('{"sensor": "multipot"}\n', encoding="utf-8")
+
+            events, err = exhaust_with_stderr(analyze.iter_events([d]))
+
+            self.assertEqual(len(events), 5)  # everything except the 2 bad lines
+            self.assertIn("! skipped 2 unparsable line(s) in " + str(bad), err)
+            for name in (str(good), str(clean)):
+                self.assertNotIn(name, err)
+
+    def test_zero_skips_print_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "a.json").write_text('{"ok": true}\n', encoding="utf-8")
+            _events, err = exhaust_with_stderr(analyze.iter_events([d]))
+            self.assertEqual(err, "")
+
+    def test_print_table_has_no_dead_parameters(self):
+        # The cols=("count", "value") parameter and the computed-then-unused
+        # width were dead since the table's first revision (#1985).
+        params = list(inspect.signature(analyze.print_table).parameters)
+        self.assertEqual(params, ["title", "counter", "top"])
+
+    def test_generic_event_without_ip_counts_toward_total(self):
+        st = analyze.Stats()
+        st.add_generic({"sensor": "dionaea", "connection": {"protocol": "smb"}})
+        self.assertEqual(st.total, 1)
+        self.assertEqual(st.other_sensors["dionaea"], 1)
+        self.assertEqual(len(st.src_ips), 0)
+
+    def test_foreign_sensor_with_category_lands_in_generic(self):
+        e = {"sensor": "third-party-sensor", "category": "scan",
+             "src_ip": "203.0.113.9"}
+        # Same dispatch order main() uses.
+        if analyze.is_cowrie(e):
+            analyze.Stats().add_cowrie(e)
+        elif analyze.is_multipot(e):
+            pass
+        elif analyze.is_http(e):
+            self.fail("category-bearing foreign event claimed by is_http")
+        else:
+            st = analyze.Stats()
+            st.add_generic(e)
+            self.assertEqual(st.src_ips["203.0.113.9"], 1)
+            self.assertEqual(st.other_sensors["third-party-sensor"], 1)
+            self.assertEqual(st.http_paths, Counter())
+
+    def test_legacy_unstamped_http_records_still_route_to_http(self):
+        # The fallback survives, keyed on real HTTP fields rather than a
+        # bare category (#1985).
+        self.assertTrue(analyze.is_http({"path": "/admin"}))
+        self.assertTrue(analyze.is_http({"user_agent": "curl/8"}))
+        self.assertFalse(analyze.is_http({"category": "scan"}))
+        self.assertTrue(analyze.is_http({"sensor": "http-honeypot",
+                                         "category": "probe"}))
+
+    def test_vnc_auth_attempt_counts_as_failed_login(self):
+        st = analyze.Stats()
+        st.add_multipot({"sensor": "multipot", "event": "auth_attempt",
+                         "proto": "vnc", "src_ip": "203.0.113.5",
+                         "username": "admin", "password": ""})
+        self.assertEqual(st.login_failed, 1)
+        self.assertEqual(st.total, 1)
+        self.assertEqual(st.creds["admin / "], 1)
+        self.assertEqual(st.protos["vnc"], 1)
+        # Plain logins keep counting as before.
+        st.add_multipot({"sensor": "multipot", "event": "login",
+                         "proto": "ssh", "src_ip": "203.0.113.5",
+                         "username": "root", "password": "toor"})
+        self.assertEqual(st.login_failed, 2)
 
 
 if __name__ == "__main__":
