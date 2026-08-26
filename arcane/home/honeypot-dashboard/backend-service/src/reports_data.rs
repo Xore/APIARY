@@ -114,10 +114,12 @@ fn scope_filters(scope: &ReportScope) -> Vec<Value> {
         filters.push(json!({"term": {"honeypot.event": scope.kind}}));
     }
     if !scope.session.is_empty() {
-        filters.push(json!({"bool": {"should": [
-            {"term": {"honeypot.session": scope.session}},
-            {"term": {"session.id": scope.session}}
-        ], "minimum_should_match": 1}}));
+        // The crate-wide session vocabulary, shared with events.rs and the
+        // session pane (#2119): this clause used to match only two of the
+        // three id fields, so a report scoped to a mailoney/tanner session
+        // — whose events carry honeypot.session_id — silently came back
+        // with zero matching telemetry.
+        filters.push(crate::events::any_of(crate::events::SESSION_FIELDS, &scope.session));
     }
     if !scope.text.is_empty() {
         filters.push(json!({"query_string": {"query": scope.text, "lenient": true}}));
