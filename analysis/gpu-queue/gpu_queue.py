@@ -77,7 +77,14 @@ def _raw_request(es_host: str, method: str, path: str, data: bytes | None) -> tu
     (curl doesn't) -- keeping one status-handling convention for both.
     """
     url = f"{es_host.rstrip('/')}{path}"
-    if _RUNNING_IN_CONTAINER:
+    # GPU_QUEUE_TRANSPORT=direct (#2077): force the plain-urllib branch below
+    # even outside a container. The docker bridge further down can only reach
+    # hosts on the `honeynet` network -- never the runner's own loopback --
+    # so pointing GPU_QUEUE_ES_HOST at a test-local ES-shaped stub silently
+    # failed enqueue and re-tested the enqueue-failure path instead. This is
+    # the documented injection point that makes hermetic tests of
+    # transport-reachable queue calls possible; production never sets it.
+    if _RUNNING_IN_CONTAINER or os.environ.get("GPU_QUEUE_TRANSPORT") == "direct":
         req = urllib.request.Request(url, data=data, method=method)
         if data is not None:
             req.add_header("Content-Type", "application/json")
