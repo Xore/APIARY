@@ -46,6 +46,7 @@ import struct
 import subprocess
 import sys
 import time
+import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -128,6 +129,19 @@ LOCK_FILE = Path(os.environ.get(
 ANALYSIS_TIMEOUT = int(os.environ.get("GHIDRA_ANALYSIS_TIMEOUT", "4200"))
 POLL_INTERVAL = int(os.environ.get("GHIDRA_POLL_INTERVAL", "10"))
 HTTP_TIMEOUT = int(os.environ.get("GHIDRA_HTTP_TIMEOUT", "60"))
+
+# #2246: a claim (*.request.running) abandoned by a dead drain -- OOM kill,
+# SIGKILL, power loss -- older than this is converted to .failed plus an
+# interrupted-error result on the next drain start, instead of sitting in
+# the spool invisible forever (no *.request glob sees it again, write_status()
+# counts it as running until someone rm's it by hand). Deliberately 2x
+# ANALYSIS_TIMEOUT rather than exactly it: mtime survives claim-by-rename,
+# so age measures time since the request was written, not since someone
+# actually picked it up. A live drain holds LOCK_FILE across its run and
+# overlapping path-unit triggers collapse onto it, so past two full analysis
+# budgets nothing living can own the claim anymore. Mirrors cape-worker.py.
+STALE_RUNNING_SECS = int(os.environ.get(
+    "GHIDRA_STALE_RUNNING_SECS", str(ANALYSIS_TIMEOUT * 2)))
 
 # /results/{job}/functions is paged and defaults to limit=100. Ask for larger
 # pages to cut round trips, and stop at MAX_FUNCTIONS so one enormous binary
@@ -1985,6 +1999,131 @@ def write_revdeck_result(results_dir: Path, sha: str, payload: dict) -> None:
     final.chmod(0o600)
 
 
+def ghidra_failure_result(sha: str, requested_at: str, error: str) -> dict:
+    """The embedded-analysis error envelope, one constructor for all paths.
+
+    #2246: so the anticipated-GhidraError path, the unexpected-exception
+    catch-all in drain_ghidra_one(), and the stranded-claim sweep cannot
+    drift apart, they all build on this -- only "error" differs. Field set
+    is exactly what drain()'s except block wrote before #2246; consumers
+    (dashboard/ghidra.go) keep reading the same shape.
+    """
+    return {
+        "version": RESULT_VERSION,
+        "sha256": sha,
+        "requested_at": requested_at,
+        "started_at": now(),
+        "completed_at": now(),
+        "exit_status": "error",
+        "error": error,
+        "functions": [], "strings": [], "imports": [], "findcrypt": [],
+        "functions_deepened": 0, "functions_deepened_truncated": False,
+        "call_graph_svg": None, "ai_triage": None,
+        "types": [], "globals": [], "annotations": None, "memory_map": [],
+        "fuzzy_hashes": None, "lief": None, "capa": None, "floss": None,
+        "revdeck": None, "revdeck_chat_threads": None, "revdeck_recovery": None,
+        "report_pdf": None,
+    }
+
+
+def revdeck_failure_result(sha: str, requested_at: str, error: str) -> dict:
+    """Same idea for a standalone Rev·Deck request (#2246): the error
+    envelope drain_revdeck()'s fail branch writes, centralized."""
+    return {
+        "version": REVDECK_STANDALONE_RESULT_VERSION,
+        "sha256": sha,
+        "requested_at": requested_at,
+        "started_at": now(),
+        "completed_at": now(),
+        "exit_status": "error",
+        "error": error,
+        "revdeck": None,
+        "revdeck_chat_threads": None,
+        "revdeck_recovery": None,
+    }
+
+
+def sweep_stranded_claims(request_dir: Path, on_stranded) -> int:
+    """Convert claims abandoned by dead drains into legible failures (#2246).
+
+    Claim-before-work is deliberate (a crash must not replay the same sample)
+    but it left no record behind -- crash-no-replay engaged while recording
+    silently didn't. This runs at every drain start of BOTH spools this
+    worker serves, including when Ghidra is unreachable, since recovering
+    stale claims needs nothing external. Each stale claim moves to .failed
+    plus whatever result on_stranded() writes, so the queue un-jams itself
+    and status.json's running count returns to 0 without manual rm, while no
+    *.request ever reappears (the crash-no-replay contract holds). Mirrors
+    cape-worker.py's sweep of the same name.
+
+    Staleness threshold is STALE_RUNNING_SECS (see its own comment for why
+    2x ANALYSIS_TIMEOUT rather than one).
+    """
+    recovered = 0
+    cutoff = time.time() - STALE_RUNNING_SECS
+    for claimed in sorted(request_dir.glob("*.request.running")):
+        base = claimed.name[: -len(".running")]
+        sha = base[: -len(".request")] if base.endswith(".request") else ""
+        if not SHA256_RE.match(sha):
+            # Not recognizable as a claim of ours (hand-created probe file?);
+            # leave it alone rather than hide someone else's state.
+            log(f"sweep skipping unrecognized running claim: {claimed.name}")
+            continue
+        try:
+            age = time.time() - claimed.stat().st_mtime
+            if age < STALE_RUNNING_SECS:
+                continue
+            mtime = claimed.stat().st_mtime
+        except OSError:
+            continue
+        requested_at = datetime.fromtimestamp(
+            mtime, timezone.utc).isoformat(timespec="seconds")
+        log(f"  [!] {claimed.name}: stranded claim recovered "
+            f"(no owner for {int(age)}s > {STALE_RUNNING_SECS}s)")
+        on_stranded(sha, requested_at, age)
+        claimed.rename(claimed.with_suffix(".failed"))
+        recovered += 1
+    if recovered:
+        log(f"swept {recovered} stranded claim(s) from {request_dir}")
+    return recovered
+
+
+def drain_ghidra_one(client: GhidraClient, sha: str, sample: Path,
+                     claimed: Path, requested_at: str) -> bool:
+    """Analyse one sample and dispose of its claim. True when it completed.
+
+    Both failure layers live here (#2246): the anticipated GhidraError path,
+    then a deliberately blanket except for everything else -- malformed JSON
+    from a proxy error page shipped as application/json, OSError mid-report
+    fetch, MemoryError on a huge pseudocode body. Before #2246 any of those
+    escaped the loop, killed the process, and stranded the claim as eternal
+    .request.running with no failure record and half the queue unprocessed;
+    now each gets the identical error-result envelope and its siblings still
+    complete. Blanket-catch-with-comment is repo precedent --
+    generate_report()'s own `except Exception: # noqa: BLE001` fail-soft.
+    """
+    try:
+        result = analyse_one(client, sha, sample, requested_at)
+        write_result(sha, result)
+        claimed.unlink()
+        log(f"  [+] {sha} done")
+        return True
+    except GhidraError as e:
+        # Record the failure as a result too. A dashboard that shows
+        # "failed, because X" is far more useful than one where the job
+        # silently never appears.
+        log(f"  [!] {sha} failed: {e}")
+        write_result(sha, ghidra_failure_result(sha, requested_at, str(e)))
+        claimed.rename(claimed.with_suffix(".failed"))
+    except Exception as e:  # noqa: BLE001 -- see docstring: deliberate
+        log(f"  [!] {sha} unexpected {type(e).__name__}; recorded, continuing")
+        traceback.print_exc()
+        write_result(sha, ghidra_failure_result(
+            sha, requested_at, f"unexpected {type(e).__name__}: {e}"))
+        claimed.rename(claimed.with_suffix(".failed"))
+    return False
+
+
 def drain_revdeck() -> int:
     """Drain the standalone Rev·Deck request spool (#78).
 
@@ -2007,6 +2146,17 @@ def drain_revdeck() -> int:
     results_dir.mkdir(parents=True, exist_ok=True)
     _reassert_dir_perms(request_dir)
     os.chmod(results_dir, 0o700)
+
+    # #2246: same stranded-claim recovery the embedded spool gets; needs no
+    # Rev·Deck reachability and runs even when this spool looks empty.
+    def _stranded_revdeck(sha: str, requested_at: str, age: int) -> None:
+        write_revdeck_result(results_dir, sha, revdeck_failure_result(
+            sha, requested_at,
+            f"stranded .request.running claim swept after {int(age)}s with no "
+            f"living drain (threshold {STALE_RUNNING_SECS}s); the owning worker "
+            f"died before writing any result (#2246)"))
+
+    sweep_stranded_claims(request_dir, _stranded_revdeck)
 
     processed = 0
     for request in sorted(request_dir.glob("*.request")):
@@ -2040,7 +2190,22 @@ def drain_revdeck() -> int:
         else:
             reason = None
 
-        revdeck_info = None if reason else revdeck_triage(sample)
+        # #2246: revdeck_triage() negotiates with an external service and
+        # parses its answers -- exactly where an unanticipated exception used
+        # to escape drain_revdeck() entirely (which has NO per-request try at
+        # all), killing the process and stranding this claim as eternal
+        # .request.running. Recorded into the same error-result shape the
+        # deliberate-fail branches below write instead.
+        if reason:
+            revdeck_info = None
+        else:
+            try:
+                revdeck_info = revdeck_triage(sample)
+            except Exception as e:  # noqa: BLE001 -- see comment above
+                log(f"  [!] revdeck {sha} unexpected {type(e).__name__}; recorded")
+                traceback.print_exc()
+                reason = f"unexpected {type(e).__name__}: {e}"
+                revdeck_info = None
         # #1193: see the matching comment in analyse_one() -- pop chat_threads/
         # recovery into their own top-level fields so revdeck_info (once
         # popped) stays exactly the shape revdeckStandaloneResult.RevDeck
@@ -2069,19 +2234,8 @@ def drain_revdeck() -> int:
                           "worker logs for the specific reason (unreachable, "
                           "refused, or an empty/discarded answer)")
             log(f"  [!] revdeck {sha}: {reason}")
-            write_revdeck_result(results_dir, sha, {
-                "version": REVDECK_STANDALONE_RESULT_VERSION,
-                "sha256": sha,
-                "requested_at": requested_at,
-                "started_at": started,
-                "completed_at": now(),
-                "exit_status": "error",
-                "error": reason,
-                "revdeck": None,
-                "revdeck_chat_threads": None,
-                "revdeck_recovery": None,
-            })
-            claimed.rename(claimed.with_suffix(".failed"))
+            write_revdeck_result(results_dir, sha, revdeck_failure_result(
+                sha, requested_at, reason))
         processed += 1
 
     log(f"drained {processed} standalone revdeck request(s)")
@@ -2200,6 +2354,18 @@ def drain() -> int:
     _reassert_dir_perms(REQUEST_DIR)
     os.chmod(RESULTS_DIR, 0o700)
 
+    # #2246: recover claims stranded by dead drains before anything else.
+    # Needs no Ghidra reachability; runs before the empty-queue early return
+    # so an otherwise quiet spool still gets its leftovers made legible.
+    def _stranded_ghidra(sha: str, requested_at: str, age: int) -> None:
+        write_result(sha, ghidra_failure_result(
+            sha, requested_at,
+            f"stranded .request.running claim swept after {int(age)}s with no "
+            f"living drain (threshold {STALE_RUNNING_SECS}s); the owning worker "
+            f"died before writing any result (#2246)"))
+
+    sweep_stranded_claims(REQUEST_DIR, _stranded_ghidra)
+
     pending = sorted(REQUEST_DIR.glob("*.request"))
     client = GhidraClient(API_BASE)
     if pending and not client.ready():
@@ -2246,36 +2412,9 @@ def drain() -> int:
         request.rename(claimed)
         write_status()
 
-        try:
-            result = analyse_one(client, sha, sample, requested_at)
-            write_result(sha, result)
-            claimed.unlink()
+        if drain_ghidra_one(client, sha, sample, claimed, requested_at):
             processed += 1
-            log(f"  [+] {sha} done")
-        except GhidraError as e:
-            log(f"  [!] {sha} failed: {e}")
-            # Record the failure as a result too. A dashboard that shows
-            # "failed, because X" is far more useful than one where the job
-            # silently never appears.
-            write_result(sha, {
-                "version": RESULT_VERSION,
-                "sha256": sha,
-                "requested_at": requested_at,
-                "started_at": now(),
-                "completed_at": now(),
-                "exit_status": "error",
-                "error": str(e),
-                "functions": [], "strings": [], "imports": [], "findcrypt": [],
-                "functions_deepened": 0, "functions_deepened_truncated": False,
-                "call_graph_svg": None, "ai_triage": None,
-                "types": [], "globals": [], "annotations": None, "memory_map": [],
-                "fuzzy_hashes": None, "lief": None, "capa": None, "floss": None,
-                "revdeck": None, "revdeck_chat_threads": None, "revdeck_recovery": None,
-                "report_pdf": None,
-            })
-            claimed.rename(claimed.with_suffix(".failed"))
-        finally:
-            write_status()
+        write_status()
 
     write_status()
     log(f"drained {processed} request(s)")
