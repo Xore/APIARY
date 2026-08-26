@@ -471,7 +471,10 @@ async fn write_overview_bucket(state: &AppState, hour: DateTime<Utc>) -> anyhow:
         .bulk_index(
             operations
                 .iter()
-                .map(|(index, id, doc)| (index.as_str(), id.as_str(), doc.clone()))
+                // Borrows, not clones: bulk_index only serializes the docs,
+                // and the cloned owned-Value item shape stops unifying with
+                // its Vec<(&str,&str,&Value)> bound under newer rustc.
+                .map(|(index, id, doc)| (index.as_str(), id.as_str(), doc))
                 .collect(),
         )
         .await?;
@@ -574,7 +577,10 @@ async fn write_attack_bucket(state: &AppState, hour: DateTime<Utc>) -> anyhow::R
         .bulk_index(
             operations
                 .iter()
-                .map(|(index, id, doc)| (index.as_str(), id.as_str(), doc.clone()))
+                // Borrows, not clones: bulk_index only serializes the docs,
+                // and the cloned owned-Value item shape stops unifying with
+                // its Vec<(&str,&str,&Value)> bound under newer rustc.
+                .map(|(index, id, doc)| (index.as_str(), id.as_str(), doc))
                 .collect(),
         )
         .await?;
@@ -654,7 +660,10 @@ async fn write_geo_cycle(state: &AppState) -> anyhow::Result<()> {
         .bulk_index(
             operations
                 .iter()
-                .map(|(index, id, doc)| (index.as_str(), id.as_str(), doc.clone()))
+                // Borrows, not clones: bulk_index only serializes the docs,
+                // and the cloned owned-Value item shape stops unifying with
+                // its Vec<(&str,&str,&Value)> bound under newer rustc.
+                .map(|(index, id, doc)| (index.as_str(), id.as_str(), doc))
                 .collect(),
         )
         .await?;
