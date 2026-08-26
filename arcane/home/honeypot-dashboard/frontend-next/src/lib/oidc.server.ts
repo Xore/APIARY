@@ -89,6 +89,16 @@ async function clientSecret(): Promise<string> {
   return process.env.OIDC_CLIENT_SECRET ?? ''
 }
 
+// Dev/test only: openid-client refuses every fetch to a plain-HTTP issuer
+// ("only requests to HTTPS are allowed"), which is right in production and
+// an instant dead end for the disposable-Keycloak integration suites and any
+// local BFF run, whose issuers are http://127.0.0.1:<port>. OIDC_ALLOW_INSECURE=1
+// is the explicit opt-in (same shape as #2183's APIARY_ALLOW_UNAUTH_DEV:
+// exactly "1", never truthy-adjacent); absent it, HTTPS stays mandatory.
+function allowInsecureOidc(): boolean {
+  return process.env.OIDC_ALLOW_INSECURE === '1'
+}
+
 export async function oidcConfig(): Promise<oidc.Configuration> {
   if (!configPromise) {
     // A failed attempt must not stick: `configPromise` held a permanently-
@@ -103,7 +113,19 @@ export async function oidcConfig(): Promise<oidc.Configuration> {
     // cached error forever.
     configPromise = (async () => {
       const issuer = new URL(process.env.OIDC_ISSUER_URL ?? 'https://auth.example.invalid/realms/apiary')
-      return oidc.discovery(issuer, process.env.OIDC_CLIENT_ID ?? 'apiary-dashboard', await clientSecret())
+      return oidc.discovery(
+        issuer,
+        process.env.OIDC_CLIENT_ID ?? 'apiary-dashboard',
+        await clientSecret(),
+        undefined, // clientAuthentication unchanged from the pre-seam call
+        // Marking the configuration here also clears authorizationCodeGrant's
+        // token-endpoint requests -- one switch covers discovery + exchange.
+        // Arg order matters: this rides in the FIFTH position (options);
+        // a fourth-arg options object silently lands in the
+        // clientAuthentication slot instead -- which is exactly why the
+        // first attempt of this seam refused plain HTTP anyway.
+        allowInsecureOidc() ? { execute: [oidc.allowInsecureRequests] } : {},
+      )
     })().catch((err) => {
       configPromise = null
       throw err
