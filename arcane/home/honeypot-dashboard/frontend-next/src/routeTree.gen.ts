@@ -37,6 +37,7 @@ import { Route as RevdeckRouteImport } from './routes/revdeck'
 import { Route as SearchRouteImport } from './routes/search'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SourceHealthRouteImport } from './routes/source-health'
+import { Route as TopologyRouteImport } from './routes/topology'
 import { Route as ApiLiveRouteImport } from './routes/api/live'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
 import { Route as AuthLoginRouteImport } from './routes/auth/login'
@@ -61,6 +62,7 @@ import { Route as SessionsIdRouteImport } from './routes/sessions.$id'
 import { Route as TtyReplayShasumRouteImport } from './routes/tty-replay.$shasum'
 import { Route as ApiChartNameRouteImport } from './routes/api/chart.$name'
 import { Route as ApiExportNameRouteImport } from './routes/api/export.$name'
+import { Route as ApiTopologyFlowRouteImport } from './routes/api/topology.flow'
 import { Route as InvestigateCidrCidrRouteImport } from './routes/investigate.cidr.$cidr'
 import { Route as InvestigateIpIpRouteImport } from './routes/investigate.ip.$ip'
 import { Route as ApiCanarytokenIdDownloadRouteImport } from './routes/api/canarytoken.$id.download'
@@ -209,6 +211,11 @@ const SourceHealthRoute = SourceHealthRouteImport.update({
   path: '/source-health',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TopologyRoute = TopologyRouteImport.update({
+  id: '/topology',
+  path: '/topology',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiLiveRoute = ApiLiveRouteImport.update({
   id: '/api/live',
   path: '/api/live',
@@ -330,6 +337,11 @@ const ApiExportNameRoute = ApiExportNameRouteImport.update({
   path: '/api/export/$name',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiTopologyFlowRoute = ApiTopologyFlowRouteImport.update({
+  id: '/api/topology/flow',
+  path: '/api/topology/flow',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const InvestigateCidrCidrRoute = InvestigateCidrCidrRouteImport.update({
   id: '/investigate/cidr/$cidr',
   path: '/investigate/cidr/$cidr',
@@ -398,6 +410,7 @@ export interface FileRoutesByFullPath {
   '/search': typeof SearchRoute
   '/settings': typeof SettingsRoute
   '/source-health': typeof SourceHealthRoute
+  '/topology': typeof TopologyRoute
   '/api/live': typeof ApiLiveRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
@@ -422,6 +435,7 @@ export interface FileRoutesByFullPath {
   '/sensors/': typeof SensorsIndexRoute
   '/api/chart/$name': typeof ApiChartNameRoute
   '/api/export/$name': typeof ApiExportNameRoute
+  '/api/topology/flow': typeof ApiTopologyFlowRoute
   '/investigate/cidr/$cidr': typeof InvestigateCidrCidrRoute
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
@@ -459,6 +473,7 @@ export interface FileRoutesByTo {
   '/search': typeof SearchRoute
   '/settings': typeof SettingsRoute
   '/source-health': typeof SourceHealthRoute
+  '/topology': typeof TopologyRoute
   '/api/live': typeof ApiLiveRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
@@ -483,6 +498,7 @@ export interface FileRoutesByTo {
   '/sensors': typeof SensorsIndexRoute
   '/api/chart/$name': typeof ApiChartNameRoute
   '/api/export/$name': typeof ApiExportNameRoute
+  '/api/topology/flow': typeof ApiTopologyFlowRoute
   '/investigate/cidr/$cidr': typeof InvestigateCidrCidrRoute
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
@@ -521,6 +537,7 @@ export interface FileRoutesById {
   '/search': typeof SearchRoute
   '/settings': typeof SettingsRoute
   '/source-health': typeof SourceHealthRoute
+  '/topology': typeof TopologyRoute
   '/api/live': typeof ApiLiveRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
@@ -545,6 +562,7 @@ export interface FileRoutesById {
   '/sensors/': typeof SensorsIndexRoute
   '/api/chart/$name': typeof ApiChartNameRoute
   '/api/export/$name': typeof ApiExportNameRoute
+  '/api/topology/flow': typeof ApiTopologyFlowRoute
   '/investigate/cidr/$cidr': typeof InvestigateCidrCidrRoute
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
@@ -584,6 +602,7 @@ export interface FileRouteTypes {
     | '/search'
     | '/settings'
     | '/source-health'
+    | '/topology'
     | '/api/live'
     | '/auth/callback'
     | '/auth/login'
@@ -608,6 +627,7 @@ export interface FileRouteTypes {
     | '/sensors/'
     | '/api/chart/$name'
     | '/api/export/$name'
+    | '/api/topology/flow'
     | '/investigate/cidr/$cidr'
     | '/investigate/ip/$ip'
     | '/api/canarytoken/$id/download'
@@ -645,6 +665,7 @@ export interface FileRouteTypes {
     | '/search'
     | '/settings'
     | '/source-health'
+    | '/topology'
     | '/api/live'
     | '/auth/callback'
     | '/auth/login'
@@ -669,6 +690,7 @@ export interface FileRouteTypes {
     | '/sensors'
     | '/api/chart/$name'
     | '/api/export/$name'
+    | '/api/topology/flow'
     | '/investigate/cidr/$cidr'
     | '/investigate/ip/$ip'
     | '/api/canarytoken/$id/download'
@@ -706,6 +728,7 @@ export interface FileRouteTypes {
     | '/search'
     | '/settings'
     | '/source-health'
+    | '/topology'
     | '/api/live'
     | '/auth/callback'
     | '/auth/login'
@@ -730,6 +753,7 @@ export interface FileRouteTypes {
     | '/sensors/'
     | '/api/chart/$name'
     | '/api/export/$name'
+    | '/api/topology/flow'
     | '/investigate/cidr/$cidr'
     | '/investigate/ip/$ip'
     | '/api/canarytoken/$id/download'
@@ -768,6 +792,7 @@ export interface RootRouteChildren {
   SearchRoute: typeof SearchRoute
   SettingsRoute: typeof SettingsRoute
   SourceHealthRoute: typeof SourceHealthRoute
+  TopologyRoute: typeof TopologyRoute
   ApiLiveRoute: typeof ApiLiveRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
   AuthLoginRoute: typeof AuthLoginRoute
@@ -789,6 +814,7 @@ export interface RootRouteChildren {
   SensorsIndexRoute: typeof SensorsIndexRoute
   ApiChartNameRoute: typeof ApiChartNameRoute
   ApiExportNameRoute: typeof ApiExportNameRoute
+  ApiTopologyFlowRoute: typeof ApiTopologyFlowRoute
   InvestigateCidrCidrRoute: typeof InvestigateCidrCidrRoute
   InvestigateIpIpRoute: typeof InvestigateIpIpRoute
   ApiCanarytokenIdDownloadRoute: typeof ApiCanarytokenIdDownloadRoute
@@ -996,6 +1022,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SourceHealthRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/topology': {
+      id: '/topology'
+      path: '/topology'
+      fullPath: '/topology'
+      preLoaderRoute: typeof TopologyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/live': {
       id: '/api/live'
       path: '/api/live'
@@ -1164,6 +1197,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiExportNameRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/topology/flow': {
+      id: '/api/topology/flow'
+      path: '/api/topology/flow'
+      fullPath: '/api/topology/flow'
+      preLoaderRoute: typeof ApiTopologyFlowRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/investigate/cidr/$cidr': {
       id: '/investigate/cidr/$cidr'
       path: '/investigate/cidr/$cidr'
@@ -1278,6 +1318,7 @@ const rootRouteChildren: RootRouteChildren = {
   SearchRoute: SearchRoute,
   SettingsRoute: SettingsRoute,
   SourceHealthRoute: SourceHealthRoute,
+  TopologyRoute: TopologyRoute,
   ApiLiveRoute: ApiLiveRoute,
   AuthCallbackRoute: AuthCallbackRoute,
   AuthLoginRoute: AuthLoginRoute,
@@ -1300,6 +1341,7 @@ const rootRouteChildren: RootRouteChildren = {
   SensorsIndexRoute: SensorsIndexRoute,
   ApiChartNameRoute: ApiChartNameRoute,
   ApiExportNameRoute: ApiExportNameRoute,
+  ApiTopologyFlowRoute: ApiTopologyFlowRoute,
   InvestigateCidrCidrRoute: InvestigateCidrCidrRoute,
   InvestigateIpIpRoute: InvestigateIpIpRoute,
   ApiCanarytokenIdDownloadRoute: ApiCanarytokenIdDownloadRoute,
