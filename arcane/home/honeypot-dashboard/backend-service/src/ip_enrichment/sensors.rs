@@ -616,8 +616,10 @@ fn closes_connection(e: &Value) -> bool {
 /// hellpot's Traefik-facing listen port, as its own `DST_PORT` field
 /// reports it. Same job as GALAH_PROXIED_PORT and WORDPOT_PROXIED_PORT: a
 /// port portbridge never dials, so the path is a fact rather than an
-/// inference. Kept in step with hellpot's xff_trust_patch.py and the socat
-/// target in vps/docker-compose.yml.
+/// inference. Also spelled in hellpot's xff_trust_patch.py, hellpot's
+/// compose.yml, and the socat dial target in vps/docker-compose.yml;
+/// hellpot/tests/test_xff_trust_patch.py asserts those agree with this one
+/// (#2192) instead of a keep-in-step comment hoping they do.
 const HELLPOT_PROXIED_PORT: &str = "8090";
 
 pub fn enrich_hellpot_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _persona: &str) -> (Vec<u8>, bool) {
