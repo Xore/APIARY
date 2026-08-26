@@ -349,6 +349,18 @@ jobs:
               # stays with --selftest --round-trip (#318) instead.
               python sandbox/cape/worker/tests/test_cape_worker.py
 
+          - name: Statictools lief contract (#2072)
+            run: |
+              # lief_parse() is the structural read on PE/Mach-O/ELF samples,
+              # and lief was the one unpinned install in an image whose whole
+              # point is that nothing drifts underneath it silently (#2072).
+              # CI installs the version the Dockerfile pins -- read back out
+              # of that Dockerfile, so the tested pin and the shipped pin
+              # cannot diverge.
+              LIEF_PIN=$(grep -om1 'lief==[0-9.]*' analysis/ghidra/statictools/Dockerfile | cut -d '=' -f3)
+              python -m pip install -q "lief==${LIEF_PIN}"
+              python analysis/ghidra/statictools/tests/test_lief_parse.py
+
           - name: Guarded LLM worker contracts
             run: |
               python -m pip install -r llm-worker/requirements.txt
