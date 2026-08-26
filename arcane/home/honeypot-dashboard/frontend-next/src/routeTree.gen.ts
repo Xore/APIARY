@@ -16,13 +16,11 @@ import { Route as AttackersRouteImport } from './routes/attackers'
 import { Route as AuthEventsRouteImport } from './routes/auth-events'
 import { Route as CampaignsRouteImport } from './routes/campaigns'
 import { Route as CanarytokensRouteImport } from './routes/canarytokens'
-import { Route as CapeRouteImport } from './routes/cape'
 import { Route as ClustersRouteImport } from './routes/clusters'
 import { Route as CommandsRouteImport } from './routes/commands'
 import { Route as CredentialsRouteImport } from './routes/credentials'
 import { Route as DeadLettersRouteImport } from './routes/dead-letters'
 import { Route as EventsRouteImport } from './routes/events'
-import { Route as GithubAnalysisRouteImport } from './routes/github-analysis'
 import { Route as HealthzRouteImport } from './routes/healthz'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as IpsRouteImport } from './routes/ips'
@@ -33,7 +31,6 @@ import { Route as PayloadsRouteImport } from './routes/payloads'
 import { Route as ProblemReportsRouteImport } from './routes/problem-reports'
 import { Route as RecordingsRouteImport } from './routes/recordings'
 import { Route as ReportsRouteImport } from './routes/reports'
-import { Route as RevdeckRouteImport } from './routes/revdeck'
 import { Route as SearchRouteImport } from './routes/search'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SourceHealthRouteImport } from './routes/source-health'
@@ -44,15 +41,18 @@ import { Route as AuthLoginRouteImport } from './routes/auth/login'
 import { Route as AuthLogoutRouteImport } from './routes/auth/logout'
 import { Route as BffMountedSplatRouteImport } from './routes/bff-mounted.$'
 import { Route as BffSplatRouteImport } from './routes/bff.$'
+import { Route as CapeIndexRouteImport } from './routes/cape.index'
 import { Route as CapeShaRouteImport } from './routes/cape.$sha'
 import { Route as EventIdRouteImport } from './routes/event.$id'
 import { Route as ExportPortbridgeManualBlackholeDottxtRouteImport } from './routes/export.portbridge-manual-blackhole[.]txt'
 import { Route as GhidraShaRouteImport } from './routes/ghidra.$sha'
+import { Route as GithubAnalysisIndexRouteImport } from './routes/github-analysis.index'
 import { Route as GithubAnalysisShaRouteImport } from './routes/github-analysis.$sha'
 import { Route as InvestigateClusterRouteImport } from './routes/investigate.cluster'
 import { Route as InvestigateLookupRouteImport } from './routes/investigate.lookup'
 import { Route as PayloadAnalysisHashRouteImport } from './routes/payload-analysis.$hash'
 import { Route as PayloadWorkbenchResultsRouteImport } from './routes/payload-workbench.results'
+import { Route as RevdeckIndexRouteImport } from './routes/revdeck.index'
 import { Route as RevdeckShaRouteImport } from './routes/revdeck.$sha'
 import { Route as SandboxJobRouteImport } from './routes/sandbox.$job'
 import { Route as SandboxVncRouteImport } from './routes/sandbox.vnc'
@@ -107,11 +107,6 @@ const CanarytokensRoute = CanarytokensRouteImport.update({
   path: '/canarytokens',
   getParentRoute: () => rootRouteImport,
 } as any)
-const CapeRoute = CapeRouteImport.update({
-  id: '/cape',
-  path: '/cape',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ClustersRoute = ClustersRouteImport.update({
   id: '/clusters',
   path: '/clusters',
@@ -135,11 +130,6 @@ const DeadLettersRoute = DeadLettersRouteImport.update({
 const EventsRoute = EventsRouteImport.update({
   id: '/events',
   path: '/events',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const GithubAnalysisRoute = GithubAnalysisRouteImport.update({
-  id: '/github-analysis',
-  path: '/github-analysis',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HealthzRoute = HealthzRouteImport.update({
@@ -192,11 +182,6 @@ const ReportsRoute = ReportsRouteImport.update({
   path: '/reports',
   getParentRoute: () => rootRouteImport,
 } as any)
-const RevdeckRoute = RevdeckRouteImport.update({
-  id: '/revdeck',
-  path: '/revdeck',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const SearchRoute = SearchRouteImport.update({
   id: '/search',
   path: '/search',
@@ -247,10 +232,15 @@ const BffSplatRoute = BffSplatRouteImport.update({
   path: '/bff/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CapeIndexRoute = CapeIndexRouteImport.update({
+  id: '/cape/',
+  path: '/cape/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CapeShaRoute = CapeShaRouteImport.update({
-  id: '/$sha',
-  path: '/$sha',
-  getParentRoute: () => CapeRoute,
+  id: '/cape/$sha',
+  path: '/cape/$sha',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const EventIdRoute = EventIdRouteImport.update({
   id: '/event/$id',
@@ -268,10 +258,15 @@ const GhidraShaRoute = GhidraShaRouteImport.update({
   path: '/ghidra/$sha',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GithubAnalysisIndexRoute = GithubAnalysisIndexRouteImport.update({
+  id: '/github-analysis/',
+  path: '/github-analysis/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const GithubAnalysisShaRoute = GithubAnalysisShaRouteImport.update({
-  id: '/$sha',
-  path: '/$sha',
-  getParentRoute: () => GithubAnalysisRoute,
+  id: '/github-analysis/$sha',
+  path: '/github-analysis/$sha',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const InvestigateClusterRoute = InvestigateClusterRouteImport.update({
   id: '/investigate/cluster',
@@ -293,10 +288,15 @@ const PayloadWorkbenchResultsRoute = PayloadWorkbenchResultsRouteImport.update({
   path: '/payload-workbench/results',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RevdeckIndexRoute = RevdeckIndexRouteImport.update({
+  id: '/revdeck/',
+  path: '/revdeck/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RevdeckShaRoute = RevdeckShaRouteImport.update({
-  id: '/$sha',
-  path: '/$sha',
-  getParentRoute: () => RevdeckRoute,
+  id: '/revdeck/$sha',
+  path: '/revdeck/$sha',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const SandboxJobRoute = SandboxJobRouteImport.update({
   id: '/sandbox/$job',
@@ -395,13 +395,11 @@ export interface FileRoutesByFullPath {
   '/auth-events': typeof AuthEventsRoute
   '/campaigns': typeof CampaignsRoute
   '/canarytokens': typeof CanarytokensRoute
-  '/cape': typeof CapeRouteWithChildren
   '/clusters': typeof ClustersRoute
   '/commands': typeof CommandsRoute
   '/credentials': typeof CredentialsRoute
   '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
-  '/github-analysis': typeof GithubAnalysisRouteWithChildren
   '/healthz': typeof HealthzRoute
   '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
@@ -412,7 +410,6 @@ export interface FileRoutesByFullPath {
   '/problem-reports': typeof ProblemReportsRoute
   '/recordings': typeof RecordingsRoute
   '/reports': typeof ReportsRoute
-  '/revdeck': typeof RevdeckRouteWithChildren
   '/search': typeof SearchRoute
   '/settings': typeof SettingsRoute
   '/source-health': typeof SourceHealthRoute
@@ -438,6 +435,9 @@ export interface FileRoutesByFullPath {
   '/sensors/$sensor': typeof SensorsSensorRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
+  '/cape/': typeof CapeIndexRoute
+  '/github-analysis/': typeof GithubAnalysisIndexRoute
+  '/revdeck/': typeof RevdeckIndexRoute
   '/sensors/': typeof SensorsIndexRoute
   '/api/chart/$name': typeof ApiChartNameRoute
   '/api/export/$name': typeof ApiExportNameRoute
@@ -459,13 +459,11 @@ export interface FileRoutesByTo {
   '/auth-events': typeof AuthEventsRoute
   '/campaigns': typeof CampaignsRoute
   '/canarytokens': typeof CanarytokensRoute
-  '/cape': typeof CapeRouteWithChildren
   '/clusters': typeof ClustersRoute
   '/commands': typeof CommandsRoute
   '/credentials': typeof CredentialsRoute
   '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
-  '/github-analysis': typeof GithubAnalysisRouteWithChildren
   '/healthz': typeof HealthzRoute
   '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
@@ -476,7 +474,6 @@ export interface FileRoutesByTo {
   '/problem-reports': typeof ProblemReportsRoute
   '/recordings': typeof RecordingsRoute
   '/reports': typeof ReportsRoute
-  '/revdeck': typeof RevdeckRouteWithChildren
   '/search': typeof SearchRoute
   '/settings': typeof SettingsRoute
   '/source-health': typeof SourceHealthRoute
@@ -502,6 +499,9 @@ export interface FileRoutesByTo {
   '/sensors/$sensor': typeof SensorsSensorRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
+  '/cape': typeof CapeIndexRoute
+  '/github-analysis': typeof GithubAnalysisIndexRoute
+  '/revdeck': typeof RevdeckIndexRoute
   '/sensors': typeof SensorsIndexRoute
   '/api/chart/$name': typeof ApiChartNameRoute
   '/api/export/$name': typeof ApiExportNameRoute
@@ -524,13 +524,11 @@ export interface FileRoutesById {
   '/auth-events': typeof AuthEventsRoute
   '/campaigns': typeof CampaignsRoute
   '/canarytokens': typeof CanarytokensRoute
-  '/cape': typeof CapeRouteWithChildren
   '/clusters': typeof ClustersRoute
   '/commands': typeof CommandsRoute
   '/credentials': typeof CredentialsRoute
   '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
-  '/github-analysis': typeof GithubAnalysisRouteWithChildren
   '/healthz': typeof HealthzRoute
   '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
@@ -541,7 +539,6 @@ export interface FileRoutesById {
   '/problem-reports': typeof ProblemReportsRoute
   '/recordings': typeof RecordingsRoute
   '/reports': typeof ReportsRoute
-  '/revdeck': typeof RevdeckRouteWithChildren
   '/search': typeof SearchRoute
   '/settings': typeof SettingsRoute
   '/source-health': typeof SourceHealthRoute
@@ -567,6 +564,9 @@ export interface FileRoutesById {
   '/sensors/$sensor': typeof SensorsSensorRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/tty-replay/$shasum': typeof TtyReplayShasumRoute
+  '/cape/': typeof CapeIndexRoute
+  '/github-analysis/': typeof GithubAnalysisIndexRoute
+  '/revdeck/': typeof RevdeckIndexRoute
   '/sensors/': typeof SensorsIndexRoute
   '/api/chart/$name': typeof ApiChartNameRoute
   '/api/export/$name': typeof ApiExportNameRoute
@@ -590,13 +590,11 @@ export interface FileRouteTypes {
     | '/auth-events'
     | '/campaigns'
     | '/canarytokens'
-    | '/cape'
     | '/clusters'
     | '/commands'
     | '/credentials'
     | '/dead-letters'
     | '/events'
-    | '/github-analysis'
     | '/healthz'
     | '/history'
     | '/ips'
@@ -607,7 +605,6 @@ export interface FileRouteTypes {
     | '/problem-reports'
     | '/recordings'
     | '/reports'
-    | '/revdeck'
     | '/search'
     | '/settings'
     | '/source-health'
@@ -633,6 +630,9 @@ export interface FileRouteTypes {
     | '/sensors/$sensor'
     | '/sessions/$id'
     | '/tty-replay/$shasum'
+    | '/cape/'
+    | '/github-analysis/'
+    | '/revdeck/'
     | '/sensors/'
     | '/api/chart/$name'
     | '/api/export/$name'
@@ -654,13 +654,11 @@ export interface FileRouteTypes {
     | '/auth-events'
     | '/campaigns'
     | '/canarytokens'
-    | '/cape'
     | '/clusters'
     | '/commands'
     | '/credentials'
     | '/dead-letters'
     | '/events'
-    | '/github-analysis'
     | '/healthz'
     | '/history'
     | '/ips'
@@ -671,7 +669,6 @@ export interface FileRouteTypes {
     | '/problem-reports'
     | '/recordings'
     | '/reports'
-    | '/revdeck'
     | '/search'
     | '/settings'
     | '/source-health'
@@ -697,6 +694,9 @@ export interface FileRouteTypes {
     | '/sensors/$sensor'
     | '/sessions/$id'
     | '/tty-replay/$shasum'
+    | '/cape'
+    | '/github-analysis'
+    | '/revdeck'
     | '/sensors'
     | '/api/chart/$name'
     | '/api/export/$name'
@@ -718,13 +718,11 @@ export interface FileRouteTypes {
     | '/auth-events'
     | '/campaigns'
     | '/canarytokens'
-    | '/cape'
     | '/clusters'
     | '/commands'
     | '/credentials'
     | '/dead-letters'
     | '/events'
-    | '/github-analysis'
     | '/healthz'
     | '/history'
     | '/ips'
@@ -735,7 +733,6 @@ export interface FileRouteTypes {
     | '/problem-reports'
     | '/recordings'
     | '/reports'
-    | '/revdeck'
     | '/search'
     | '/settings'
     | '/source-health'
@@ -761,6 +758,9 @@ export interface FileRouteTypes {
     | '/sensors/$sensor'
     | '/sessions/$id'
     | '/tty-replay/$shasum'
+    | '/cape/'
+    | '/github-analysis/'
+    | '/revdeck/'
     | '/sensors/'
     | '/api/chart/$name'
     | '/api/export/$name'
@@ -783,13 +783,11 @@ export interface RootRouteChildren {
   AuthEventsRoute: typeof AuthEventsRoute
   CampaignsRoute: typeof CampaignsRoute
   CanarytokensRoute: typeof CanarytokensRoute
-  CapeRoute: typeof CapeRouteWithChildren
   ClustersRoute: typeof ClustersRoute
   CommandsRoute: typeof CommandsRoute
   CredentialsRoute: typeof CredentialsRoute
   DeadLettersRoute: typeof DeadLettersRoute
   EventsRoute: typeof EventsRoute
-  GithubAnalysisRoute: typeof GithubAnalysisRouteWithChildren
   HealthzRoute: typeof HealthzRoute
   HistoryRoute: typeof HistoryRoute
   IpsRoute: typeof IpsRoute
@@ -800,7 +798,6 @@ export interface RootRouteChildren {
   ProblemReportsRoute: typeof ProblemReportsRoute
   RecordingsRoute: typeof RecordingsRoute
   ReportsRoute: typeof ReportsRoute
-  RevdeckRoute: typeof RevdeckRouteWithChildren
   SearchRoute: typeof SearchRoute
   SettingsRoute: typeof SettingsRoute
   SourceHealthRoute: typeof SourceHealthRoute
@@ -811,18 +808,24 @@ export interface RootRouteChildren {
   AuthLogoutRoute: typeof AuthLogoutRoute
   BffMountedSplatRoute: typeof BffMountedSplatRoute
   BffSplatRoute: typeof BffSplatRoute
+  CapeShaRoute: typeof CapeShaRoute
   EventIdRoute: typeof EventIdRoute
   ExportPortbridgeManualBlackholeDottxtRoute: typeof ExportPortbridgeManualBlackholeDottxtRoute
   GhidraShaRoute: typeof GhidraShaRoute
+  GithubAnalysisShaRoute: typeof GithubAnalysisShaRoute
   InvestigateClusterRoute: typeof InvestigateClusterRoute
   InvestigateLookupRoute: typeof InvestigateLookupRoute
   PayloadAnalysisHashRoute: typeof PayloadAnalysisHashRoute
   PayloadWorkbenchResultsRoute: typeof PayloadWorkbenchResultsRoute
+  RevdeckShaRoute: typeof RevdeckShaRoute
   SandboxJobRoute: typeof SandboxJobRoute
   SandboxVncRoute: typeof SandboxVncRoute
   SensorsSensorRoute: typeof SensorsSensorRoute
   SessionsIdRoute: typeof SessionsIdRoute
   TtyReplayShasumRoute: typeof TtyReplayShasumRoute
+  CapeIndexRoute: typeof CapeIndexRoute
+  GithubAnalysisIndexRoute: typeof GithubAnalysisIndexRoute
+  RevdeckIndexRoute: typeof RevdeckIndexRoute
   SensorsIndexRoute: typeof SensorsIndexRoute
   ApiChartNameRoute: typeof ApiChartNameRoute
   ApiExportNameRoute: typeof ApiExportNameRoute
@@ -888,13 +891,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CanarytokensRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/cape': {
-      id: '/cape'
-      path: '/cape'
-      fullPath: '/cape'
-      preLoaderRoute: typeof CapeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/clusters': {
       id: '/clusters'
       path: '/clusters'
@@ -928,13 +924,6 @@ declare module '@tanstack/react-router' {
       path: '/events'
       fullPath: '/events'
       preLoaderRoute: typeof EventsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/github-analysis': {
-      id: '/github-analysis'
-      path: '/github-analysis'
-      fullPath: '/github-analysis'
-      preLoaderRoute: typeof GithubAnalysisRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/healthz': {
@@ -1007,13 +996,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ReportsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/revdeck': {
-      id: '/revdeck'
-      path: '/revdeck'
-      fullPath: '/revdeck'
-      preLoaderRoute: typeof RevdeckRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/search': {
       id: '/search'
       path: '/search'
@@ -1084,12 +1066,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BffSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cape/': {
+      id: '/cape/'
+      path: '/cape'
+      fullPath: '/cape/'
+      preLoaderRoute: typeof CapeIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/cape/$sha': {
       id: '/cape/$sha'
-      path: '/$sha'
+      path: '/cape/$sha'
       fullPath: '/cape/$sha'
       preLoaderRoute: typeof CapeShaRouteImport
-      parentRoute: typeof CapeRoute
+      parentRoute: typeof rootRouteImport
     }
     '/event/$id': {
       id: '/event/$id'
@@ -1112,12 +1101,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GhidraShaRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/github-analysis/': {
+      id: '/github-analysis/'
+      path: '/github-analysis'
+      fullPath: '/github-analysis/'
+      preLoaderRoute: typeof GithubAnalysisIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/github-analysis/$sha': {
       id: '/github-analysis/$sha'
-      path: '/$sha'
+      path: '/github-analysis/$sha'
       fullPath: '/github-analysis/$sha'
       preLoaderRoute: typeof GithubAnalysisShaRouteImport
-      parentRoute: typeof GithubAnalysisRoute
+      parentRoute: typeof rootRouteImport
     }
     '/investigate/cluster': {
       id: '/investigate/cluster'
@@ -1147,12 +1143,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PayloadWorkbenchResultsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/revdeck/': {
+      id: '/revdeck/'
+      path: '/revdeck'
+      fullPath: '/revdeck/'
+      preLoaderRoute: typeof RevdeckIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/revdeck/$sha': {
       id: '/revdeck/$sha'
-      path: '/$sha'
+      path: '/revdeck/$sha'
       fullPath: '/revdeck/$sha'
       preLoaderRoute: typeof RevdeckShaRouteImport
-      parentRoute: typeof RevdeckRoute
+      parentRoute: typeof rootRouteImport
     }
     '/sandbox/$job': {
       id: '/sandbox/$job'
@@ -1276,39 +1279,6 @@ declare module '@tanstack/react-router' {
   }
 }
 
-interface CapeRouteChildren {
-  CapeShaRoute: typeof CapeShaRoute
-}
-
-const CapeRouteChildren: CapeRouteChildren = {
-  CapeShaRoute: CapeShaRoute,
-}
-
-const CapeRouteWithChildren = CapeRoute._addFileChildren(CapeRouteChildren)
-
-interface GithubAnalysisRouteChildren {
-  GithubAnalysisShaRoute: typeof GithubAnalysisShaRoute
-}
-
-const GithubAnalysisRouteChildren: GithubAnalysisRouteChildren = {
-  GithubAnalysisShaRoute: GithubAnalysisShaRoute,
-}
-
-const GithubAnalysisRouteWithChildren = GithubAnalysisRoute._addFileChildren(
-  GithubAnalysisRouteChildren,
-)
-
-interface RevdeckRouteChildren {
-  RevdeckShaRoute: typeof RevdeckShaRoute
-}
-
-const RevdeckRouteChildren: RevdeckRouteChildren = {
-  RevdeckShaRoute: RevdeckShaRoute,
-}
-
-const RevdeckRouteWithChildren =
-  RevdeckRoute._addFileChildren(RevdeckRouteChildren)
-
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentCampaignsRoute: AgentCampaignsRoute,
@@ -1317,13 +1287,11 @@ const rootRouteChildren: RootRouteChildren = {
   AuthEventsRoute: AuthEventsRoute,
   CampaignsRoute: CampaignsRoute,
   CanarytokensRoute: CanarytokensRoute,
-  CapeRoute: CapeRouteWithChildren,
   ClustersRoute: ClustersRoute,
   CommandsRoute: CommandsRoute,
   CredentialsRoute: CredentialsRoute,
   DeadLettersRoute: DeadLettersRoute,
   EventsRoute: EventsRoute,
-  GithubAnalysisRoute: GithubAnalysisRouteWithChildren,
   HealthzRoute: HealthzRoute,
   HistoryRoute: HistoryRoute,
   IpsRoute: IpsRoute,
@@ -1334,7 +1302,6 @@ const rootRouteChildren: RootRouteChildren = {
   ProblemReportsRoute: ProblemReportsRoute,
   RecordingsRoute: RecordingsRoute,
   ReportsRoute: ReportsRoute,
-  RevdeckRoute: RevdeckRouteWithChildren,
   SearchRoute: SearchRoute,
   SettingsRoute: SettingsRoute,
   SourceHealthRoute: SourceHealthRoute,
@@ -1345,19 +1312,25 @@ const rootRouteChildren: RootRouteChildren = {
   AuthLogoutRoute: AuthLogoutRoute,
   BffMountedSplatRoute: BffMountedSplatRoute,
   BffSplatRoute: BffSplatRoute,
+  CapeShaRoute: CapeShaRoute,
   EventIdRoute: EventIdRoute,
   ExportPortbridgeManualBlackholeDottxtRoute:
     ExportPortbridgeManualBlackholeDottxtRoute,
   GhidraShaRoute: GhidraShaRoute,
+  GithubAnalysisShaRoute: GithubAnalysisShaRoute,
   InvestigateClusterRoute: InvestigateClusterRoute,
   InvestigateLookupRoute: InvestigateLookupRoute,
   PayloadAnalysisHashRoute: PayloadAnalysisHashRoute,
   PayloadWorkbenchResultsRoute: PayloadWorkbenchResultsRoute,
+  RevdeckShaRoute: RevdeckShaRoute,
   SandboxJobRoute: SandboxJobRoute,
   SandboxVncRoute: SandboxVncRoute,
   SensorsSensorRoute: SensorsSensorRoute,
   SessionsIdRoute: SessionsIdRoute,
   TtyReplayShasumRoute: TtyReplayShasumRoute,
+  CapeIndexRoute: CapeIndexRoute,
+  GithubAnalysisIndexRoute: GithubAnalysisIndexRoute,
+  RevdeckIndexRoute: RevdeckIndexRoute,
   SensorsIndexRoute: SensorsIndexRoute,
   ApiChartNameRoute: ApiChartNameRoute,
   ApiExportNameRoute: ApiExportNameRoute,

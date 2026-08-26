@@ -1,3 +1,5 @@
+// .index leaf for the same reason as cape.index.tsx (#2127): a
+// component-ful github-analysis.tsx swallowed github-analysis.$sha whole.
 // GitHub analysis — VirusTotal-style multi-engine results for payloads
 // published to the analysis repo (github-analysis-v1). Empty until the
 // publisher is armed; submissions land with #1612.
@@ -36,7 +38,7 @@ const COLUMNS: Column<StoreRow>[] = [
   },
 ]
 
-export const Route = createFileRoute('/github-analysis')({ component: Page })
+export const Route = createFileRoute('/github-analysis/')({ component: Page })
 
 function Page() {
   return (
