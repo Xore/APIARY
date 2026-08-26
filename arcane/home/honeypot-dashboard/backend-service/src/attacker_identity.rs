@@ -295,6 +295,16 @@ struct Entity {
     updated: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     verdicts: Vec<String>,
+    /// #2094: set when a cycle owed this entity a verdict refresh but an
+    /// analysis-store lookup failed — applying freshly-built labels from a
+    /// partial map is exactly how stored history used to get erased (one
+    /// ES blip during a rewrite downgraded `["abc123: mirai"]` to `[]`,
+    /// permanently for entities that then went quiet). Flagged docs are
+    /// re-verified on the next cycle even though their payload set will by
+    /// then compare unchanged, and the flag clears once labels apply from
+    /// fully-successful lookups.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    verdicts_pending: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     techniques: Vec<String>,
 }
@@ -333,6 +343,9 @@ struct Working {
     first: String,
     last: String,
     verdicts: Vec<String>,
+    /// Carried through merge/finalize so a pending marker set on a merged
+    /// entity survives onto the document written this cycle (#2094).
+    verdicts_pending: bool,
 }
 
 fn working_from_entity(e: &Entity) -> Working {
@@ -352,6 +365,7 @@ fn working_from_entity(e: &Entity) -> Working {
         first: e.first.clone(),
         last: e.last.clone(),
         verdicts: e.verdicts.clone(),
+        verdicts_pending: e.verdicts_pending,
     }
 }
 
@@ -368,6 +382,7 @@ fn new_working(id: String) -> Working {
         first: String::new(),
         last: String::new(),
         verdicts: Vec::new(),
+        verdicts_pending: false,
     }
 }
 
@@ -416,6 +431,9 @@ fn merge_entity_into(a: &mut Working, b: &Working) {
         (Some(x), Some(y)) => Some(x + y),
         _ => None,
     };
+    // #2094: a pending verdict refresh survives absorption -- either side
+    // owing one means the now-larger payload set is still owed its labels.
+    a.verdicts_pending = a.verdicts_pending || b.verdicts_pending;
     if !b.first.is_empty() && (a.first.is_empty() || b.first < a.first) {
         a.first = b.first.clone();
     }
@@ -587,6 +605,7 @@ fn finalize_entity(e: &Working) -> Entity {
         last: e.last.clone(),
         updated: String::new(),
         verdicts: e.verdicts.clone(),
+        verdicts_pending: e.verdicts_pending,
         techniques: sorted(&e.technique_set),
     }
 }
@@ -622,18 +641,21 @@ struct VerdictMaps {
 }
 
 /// Resolves the whole cycle's payload union against the four analysis
-/// stores in one query each. A store that fails to query costs its labels
-/// for the cycle (same net effect as the old per-hash `.ok()??` swallowing)
-/// but no longer takes the others down with it.
+/// stores in one query each. Returns None when ANY store query failed:
+/// labels built from a partial map would be written over persisted history
+/// wholesale by apply_verdicts, erasing verdicts that are still true — the
+/// transient-ES-blip erase #2094 documents. Callers defer the refresh
+/// instead (verdicts_pending keeps it scheduled); a store failing no longer
+/// takes the others down with it either — each arm logs its own warning.
 ///
 /// Label values here are stored WITHOUT the "{short-hash}: " prefix -- that
 /// formatting lives in apply_verdicts so it stays byte-identical to what
 /// the old per-hash path wrote (a different format would churn every
 /// stored verdict on the first post-deploy cycle).
-async fn load_verdict_maps(state: &AppState, hashes: &HashSet<String>) -> VerdictMaps {
+async fn load_verdict_maps(state: &AppState, hashes: &HashSet<String>) -> Option<VerdictMaps> {
     let mut maps = VerdictMaps::default();
     if hashes.is_empty() {
-        return maps;
+        return Some(maps);
     }
 
     // Ghidra / GitHub / RevDeck are content-addressed docs with known ids:
@@ -678,7 +700,12 @@ async fn load_verdict_maps(state: &AppState, hashes: &HashSet<String>) -> Verdic
                     .map(String::from)
             });
         }
-        Err(error) => tracing::warn!(%error, "attacker-identity: ghidra verdict lookup failed"),
+        Err(error) => {
+            tracing::warn!(%error, "attacker-identity: ghidra verdict lookup failed");
+            // #2094: a partial map must never reach apply_verdicts — the
+            // labels it didn't see would be written over as if gone.
+            return None;
+        }
     }
 
     match state
@@ -700,7 +727,10 @@ async fn load_verdict_maps(state: &AppState, hashes: &HashSet<String>) -> Verdic
                     .map(String::from)
             });
         }
-        Err(error) => tracing::warn!(%error, "attacker-identity: github verdict lookup failed"),
+        Err(error) => {
+            tracing::warn!(%error, "attacker-identity: github verdict lookup failed");
+            return None; // #2094: never write over persisted verdicts from a partial map
+        }
     }
 
     match state
@@ -727,7 +757,10 @@ async fn load_verdict_maps(state: &AppState, hashes: &HashSet<String>) -> Verdic
                 Some(format!("revdeck: {truncated}"))
             });
         }
-        Err(error) => tracing::warn!(%error, "attacker-identity: revdeck verdict lookup failed"),
+        Err(error) => {
+            tracing::warn!(%error, "attacker-identity: revdeck verdict lookup failed");
+            return None; // #2094: never write over persisted verdicts from a partial map
+        }
     }
 
     // Sandbox runs are not content-addressed (one hash can have several
@@ -760,10 +793,13 @@ async fn load_verdict_maps(state: &AppState, hashes: &HashSet<String>) -> Verdic
                 .map(|(sha, (_, label))| (sha, label))
                 .collect();
         }
-        Err(error) => tracing::warn!(%error, "attacker-identity: sandbox verdict lookup failed"),
+        Err(error) => {
+            tracing::warn!(%error, "attacker-identity: sandbox verdict lookup failed");
+            return None; // #2094: never write over persisted verdicts from a partial map
+        }
     }
 
-    maps
+    Some(maps)
 }
 
 /// Applies the batched verdict maps to one entity: every payload hash gets
@@ -802,6 +838,15 @@ fn apply_verdicts(e: &mut Entity, maps: &VerdictMaps) {
 /// analysis result is picked up on the entity's next payload change.
 fn payloads_changed_since_persist(e: &Entity, persisted: Option<&Vec<String>>) -> bool {
     persisted.is_none_or(|p| p != &e.payloads)
+}
+
+/// The #2041 verify gate plus #2094's second arm: an entity whose previous
+/// refresh was deferred by a failed analysis-store query (verdicts_pending)
+/// stays in the verify set even though its payloads stopped changing --
+/// without that, a blip-cycle entity would settle into "unchanged" forever
+/// and never get its verdicts back.
+fn needs_verdict_refresh(e: &Entity, persisted: Option<&Vec<String>>) -> bool {
+    payloads_changed_since_persist(e, persisted) || e.verdicts_pending
 }
 
 // --------------------------------------------------------------------
@@ -865,6 +910,11 @@ async fn run_cycle(state: &AppState, window: Duration) {
     // else keeps its stored verdicts untouched -- re-verifying unchanged
     // payloads every cycle was 4 sequential ES lookups x hashes x entities
     // of pure busy-work.
+    //
+    // #2094: an entity whose last refresh was deferred by a failed store
+    // query (verdicts_pending) stays in the verify set even though its
+    // payloads stopped changing -- without that, a blip-cycle entity would
+    // settle into "unchanged" forever and never get its verdicts back.
     let persisted_payloads: HashMap<String, Vec<String>> = existing
         .iter()
         .map(|e| (e.id.clone(), e.payloads.clone()))
@@ -874,12 +924,15 @@ async fn run_cycle(state: &AppState, window: Duration) {
     let to_verify: Vec<usize> = changed
         .iter()
         .enumerate()
-        .filter(|(_, e)| payloads_changed_since_persist(e, persisted_payloads.get(&e.id)))
+        .filter(|(_, e)| needs_verdict_refresh(e, persisted_payloads.get(&e.id)))
         .map(|(i, _)| i)
         .collect();
 
+    // None = at least one analysis-store query failed this cycle; applying a
+    // partial map would erase persisted verdicts that are still true (#2094),
+    // so every to_verify entity defers instead and carries verdicts_pending.
     let verdict_maps = if to_verify.is_empty() {
-        VerdictMaps::default()
+        Some(VerdictMaps::default())
     } else {
         let hashes: HashSet<String> = to_verify
             .iter()
@@ -891,7 +944,13 @@ async fn run_cycle(state: &AppState, window: Duration) {
     for (i, e) in changed.iter_mut().enumerate() {
         e.updated = start.to_rfc3339();
         if to_verify.binary_search(&i).is_ok() {
-            apply_verdicts(e, &verdict_maps);
+            match &verdict_maps {
+                Some(maps) => {
+                    apply_verdicts(e, maps);
+                    e.verdicts_pending = false;
+                }
+                None => e.verdicts_pending = true,
+            }
         }
         let Ok(body) = serde_json::to_value(&*e) else { continue };
         if let Err(error) = state.es.index_doc(ATTACKERS_INDEX, &e.id, body).await {
@@ -1220,5 +1279,84 @@ mod tests {
         b.fingerprints.insert("fp-1".into());
         b.payloads.insert("sha-2".into());
         assert_eq!(shared_signal_count(&a, &b), 1, "only fingerprints overlap");
+    }
+
+    /// #2094: the whole point of the pending marker -- an entity whose
+    /// payloads stopped changing but whose last refresh was deferred by a
+    /// failed store lookup goes back into the verify set; an entity that
+    /// was refreshed normally does not.
+    #[test]
+    fn needs_verdict_refresh_requeues_a_deferred_entity() {
+        let payloads = vec!["aaaaaaaa1111ffffffffffffffff".to_string()];
+        let mut e = Entity { id: "e".into(), payloads: payloads.clone(), ..Default::default() };
+
+        // Unchanged payloads, nothing deferred: the #2041 quiet path.
+        assert!(!needs_verdict_refresh(&e, Some(&payloads)));
+
+        // Same unchanged payloads, but the last cycle owed this entity a
+        // refresh and couldn't run it.
+        e.verdicts_pending = true;
+        assert!(needs_verdict_refresh(&e, Some(&payloads)));
+
+        // Changed payloads verify regardless of the marker.
+        e.verdicts_pending = false;
+        let other = vec!["bbbbbbbb2222ffffffffffffffff".to_string()];
+        assert!(needs_verdict_refresh(&e, Some(&other)));
+        // Fresh entities (no persisted baseline) always verify.
+        assert!(needs_verdict_refresh(&e, None));
+    }
+
+    /// #2094: the marker must survive the Working roundtrip so it lands on
+    /// the document written the cycle it was set -- and on merged entities
+    /// that inherit it from one of their sources.
+    #[test]
+    fn verdicts_pending_survives_the_working_roundtrip() {
+        let mut e = Entity {
+            id: "entity-p".into(),
+            payloads: vec!["aaaaaaaa1111ffffffffffffffff".into()],
+            first: "2026-01-01T00:00:00Z".into(),
+            last: "2026-01-01T00:00:00Z".into(),
+            verdicts_pending: true,
+            ..Default::default()
+        };
+        assert!(finalize_entity(&working_from_entity(&e)).verdicts_pending);
+
+        // A freshly built working form starts clean.
+        assert!(!new_working("entity-n".to_string()).verdicts_pending);
+
+        // And clearing it on a later successful refresh persists too.
+        e.verdicts_pending = false;
+        assert!(!finalize_entity(&working_from_entity(&e)).verdicts_pending);
+
+        // Absorption propagates it: an entity merged into one that owed a
+        // refresh keeps the debt on the surviving document (#2094).
+        let mut debtor = new_working("debtor".into());
+        debtor.verdicts_pending = true;
+        let mut survivor = new_working("survivor".into());
+        merge_entity_into(&mut survivor, &debtor);
+        assert!(survivor.verdicts_pending);
+    }
+
+    /// #2094: pre-fix documents have no verdicts_pending field at all --
+    /// serde default keeps them deserializing as false, and a false flag
+    /// stays out of the written JSON so the stored docs don't grow a
+    /// permanent new key.
+    #[test]
+    fn verdicts_pending_is_defaulted_on_old_docs_and_omitted_when_false() {
+        let old_doc = json!({
+            "id": "entity-old",
+            "payloads": ["aaaaaaaa1111ffffffffffffffff"],
+            "verdicts": ["aaaaaaaa1111: downloader"]
+        });
+        let parsed: Entity = serde_json::from_value(old_doc).expect("pre-#2094 doc parses");
+        assert!(!parsed.verdicts_pending);
+
+        let mut flagged = Entity { id: "f".into(), ..Default::default() };
+        let without = serde_json::to_value(&flagged).unwrap();
+        assert!(without.get("verdicts_pending").is_none(), "false flag is not serialized");
+
+        flagged.verdicts_pending = true;
+        let with = serde_json::to_value(&flagged).unwrap();
+        assert_eq!(with["verdicts_pending"], json!(true));
     }
 }
