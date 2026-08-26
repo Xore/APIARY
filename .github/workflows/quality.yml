@@ -414,6 +414,12 @@ jobs:
               # a floor of 14/69 -- which is how a thinking model scoring its
               # empty-answer floor read as a fifth of a pass instead of a zero.
               python analysis/ghidra/benchmarks/tests/test_record_baseline.py
+              # Session-slot critical gate (#2232). The rubric-vocabulary leg
+              # no longer gates: only MITRE correctness, forbidden content,
+              # and severity can fail critical_ok, since governance treats
+              # that boolean as disqualifying (#1947 rule 4) and five of
+              # eleven round models proved the old AND tripped on wording.
+              python analysis/ghidra/benchmarks/tests/test_session_scoring.py
               # full_capabilities.py (#800): inventories env vars straight out of
               # the real pipeline source, so its own test runs against the real
               # tree rather than fixtures -- proving that stays true.
