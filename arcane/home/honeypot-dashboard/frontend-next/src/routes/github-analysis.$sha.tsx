@@ -211,7 +211,7 @@ function GithubAnalysisDetail() {
                   Actions run ↗
                 </a>
               ) : null}
-              <a className="chip" href={`/api/v1/github-analysis/${encodeURIComponent(sha)}`} target="_blank" rel="noopener noreferrer">
+              <a className="chip" href={`/api/raw-report/github-analysis/${encodeURIComponent(sha)}`} target="_blank" rel="noopener noreferrer">
                 report ↓
               </a>
               <Link className="chip" to="/github-analysis">← all runs</Link>
@@ -472,7 +472,7 @@ function GithubAnalysisDetail() {
                 ) : (
                   <>
                     <p className="note">No PDF has been generated for this analysis yet — this downloads the JSON record instead.</p>
-                    <a className="btn btn-ghost btn-sm" href={`/api/v1/github-analysis/${encodeURIComponent(sha)}`} target="_blank" rel="noopener noreferrer">
+                    <a className="btn btn-ghost btn-sm" href={`/api/raw-report/github-analysis/${encodeURIComponent(sha)}`} target="_blank" rel="noopener noreferrer">
                       download JSON ↓
                     </a>
                   </>
