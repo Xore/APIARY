@@ -74,8 +74,50 @@ func TestServeSkipsLoggingOwnHealthcheck(t *testing.T) {
 	}
 }
 
+// TestStripAccidentalSSHPrefixBlocksEverySSHShape asserts the #2190 guard at
+// the construction level instead of by sampling (the old byte-0-only check
+// survived a 500-sample loop because p(a given line draws "SSH-") is about
+// (1/95)^4 ~= 1.2e-8). Every printable byte is substituted into each of the
+// four decisive positions of the worst-case shape -- so only the exact
+// "SSH-" bytes in all four positions can ever match the guard, and nothing
+// that survives it starts an identification string.
+func TestStripAccidentalSSHPrefixBlocksEverySSHShape(t *testing.T) {
+	prefix := []byte("SSH-")
+	for pos := 0; pos < len(prefix); pos++ {
+		for c := byte(0x20); c <= 0x7e; c++ {
+			cand := append([]byte(nil), prefix...)
+			cand[pos] = c
+			stripAccidentalSSHPrefix(cand)
+			if cand[0] == 'S' && cand[1] == 'S' && cand[2] == 'H' && cand[3] == '-' {
+				t.Fatalf("stripAccidentalSSHPrefix left %q for candidate %d/%q", string(cand[:4]), pos, string(c))
+			}
+			for _, r := range string(cand) {
+				if r < 0x20 || r > 0x7e {
+					t.Fatalf("scrubbed candidate must stay printable ASCII, got %q", string(cand))
+				}
+			}
+		}
+	}
+
+	// Lines shorter than the prefix can't carry one and must come back
+	// untouched; 3 is the minimum randomBannerLine can produce.
+	for _, s := range []string{"", "S", "SS", "SSH"} {
+		cand := []byte(s)
+		stripAccidentalSSHPrefix(cand)
+		if string(cand) != s {
+			t.Fatalf("stripAccidentalSSHPrefix(%q) changed it to %q", s, string(cand))
+		}
+	}
+}
+
+// TestRandomBannerLineNeverStartsWithSSHPrefix rides on top of the
+// construction-level proof in TestStripAccidentalSSHPrefixBlocksEverySSHShape:
+// the sweep here verifies the end-to-end plumbing (#2190) rather than being
+// the only thing standing between the invariant and a bug.
 func TestRandomBannerLineNeverStartsWithSSHPrefix(t *testing.T) {
-	for i := 0; i < 500; i++ {
+	lengths := map[int]bool{}
+	const samples = 20000 // was 500, small enough to miss "SSH-" forever (#2190)
+	for i := 0; i < samples; i++ {
 		line := randomBannerLine()
 		if len(line) < 3 || len(line) > 30 {
 			t.Fatalf("line length %d out of [3,30]: %q", len(line), line)
@@ -88,6 +130,13 @@ func TestRandomBannerLineNeverStartsWithSSHPrefix(t *testing.T) {
 				t.Fatalf("line must be printable ASCII, got %q", line)
 			}
 		}
+		lengths[len(line)] = true
+	}
+	// Every attainable length in [3,30] should have appeared long before
+	// this many draws ((27/28)^20000 ~= e^-700); a gap means the length
+	// generator's range broke rather than luck skipping one.
+	if len(lengths) != 28 {
+		t.Fatalf("sampled %d distinct lengths over %d lines, want all 28 in [3,30]: %v", len(lengths), samples, lengths)
 	}
 }
 
