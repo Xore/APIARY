@@ -1362,12 +1362,21 @@ def normalise_risk(value: object) -> str:
         "none": "low", "benign": "low", "clean": "low", "informational": "low",
         "info": "low", "minimal": "low", "moderate": "medium", "med": "medium",
         "elevated": "high", "severe": "critical", "very high": "critical",
-        "extreme": "critical",
+        "extremely high": "critical", "extreme": "critical",
     }
     if text in synonyms:
         return synonyms[text]
-    # "high risk", "Risk: MEDIUM" and similar. Longest first so "very high"
-    # cannot be decided by the "high" it contains.
+    # #2074: qualified phrases before single words -- "Risk: VERY HIGH" must
+    # resolve via its multi-word synonym, because the word scan below can
+    # never see the qualifier: neither "critical" nor "medium" occurs in
+    # that string, so the scan landed on the bare "high" it contains -- one
+    # band below what the model said, on the field that drives dashboard
+    # alerts. Longest first so nested phrases decide by their own longest
+    # match.
+    for phrase in sorted((p for p in synonyms if " " in p), key=len, reverse=True):
+        if re.search(rf"\b{re.escape(phrase)}\b", text):
+            return synonyms[phrase]
+    # "high risk", "Risk: MEDIUM" and similar.
     for level in ("critical", "medium", "high", "low"):
         if re.search(rf"\b{level}\b", text):
             return level
