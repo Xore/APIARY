@@ -1,5 +1,12 @@
 # ML Worker — Implementation Plan
 
+> **Status (2026-08-27, #1662):** the plan largely executed as written:
+> `ml-worker/worker.py` runs the ensemble described here from the same
+> repo-root compose files. What moved: consumers of its output live in the
+> backend-service tier now, not `dashboard/ml_anomalies.go` (deleted).
+> Open scoring-semantics defects are tracked in issues #1946/#1969 under
+> epic #1974 rather than here.
+
 > **Status:** `ml-worker/` has its own Dockge stack
 > ([`docker-compose.yml`](../ml-worker/docker-compose.yml) +
 > [`docker-compose.ml-worker.gpu.yml`](../ml-worker/docker-compose.ml-worker.gpu.yml),

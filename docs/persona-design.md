@@ -107,7 +107,8 @@ attacker cross-references what the org is supposed to do.
 you're deciding where a new persona belongs.
 
 **Background noise.** Ambient traffic (DNS lookups, NTP syncs, low-rate
-outbound chatter) makes a host look occupied rather than dead-silent — see
-[`docs/background-noise.md`](background-noise.md), currently research/not
-implemented ([#71](https://github.com/Xore/APIARY/issues/71)), for
-the technique reference and why it isn't built yet.
+outbound chatter) makes a host look occupied rather than dead-silent —
+researched and deliberately left unbuilt here
+([#71](https://github.com/Xore/APIARY/issues/71); the old technique
+reference doc was removed with #1662's stale-doc sweep after its tooling
+never landed).

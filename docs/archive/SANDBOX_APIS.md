@@ -9,7 +9,10 @@
 > Any.run are now integrated, and the "not currently integrated" table below is
 > therefore wrong. Retained for the design rationale in the final section.
 >
-> Current plan: [`docs/github-analysis-integration-roadmap.md`](../github-analysis-integration-roadmap.md).
+> Current surface: [`analysis/github/`](../../analysis/github/) (the host
+> publisher) and the `github-analysis-v1` index the dashboard importer
+> mirrors; the roadmap doc that used to live at this link was removed with
+> #1662's stale-doc sweep.
 
 Comparison of sandbox/analysis services usable for automated honeypot payload submission.
 

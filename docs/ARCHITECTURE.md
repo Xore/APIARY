@@ -116,7 +116,7 @@ flowchart TB
     fe["frontend-next :19090<br/>TanStack Start (Node cluster)<br/>server functions · SSE hub · BFF cookie"]
     bs["backend-service :8081<br/>Rust axum — the API surface<br/>100+ routes under /api/v1"]
     bsm["backend-service-mounted :8082<br/>same route table + host spool mounts<br/>write-capable instance"]
-    loops["backend-worker loops<br/>role picked by WORKER_LOOPS:<br/>alert-notifier · attacker-identity ·<br/>agent-intrusion · correlator ·<br/>threat-intel · zeek-proxy-attribution"]
+    loops["backend-worker loops<br/>role picked by WORKER_LOOPS:<br/>alert-notifier · attacker-identity ·<br/>agent-intrusion · correlator · dashboard-rollups ·<br/>threat-intel · zeek-proxy-attribution"]
     imp["backend-worker importer<br/>es-results-importer, shard-partitionable"]
     enr["backend-worker-enrichment<br/>network_mode: none — via_port join"]
     redis[("oidc-sessions<br/>valkey")]
@@ -154,7 +154,7 @@ Division of labor:
 - **Worker containers**: importer mirrors root-owned result spools into
   `*-analysis-v1` indices (read-only, never writes back — local JSON stays
   authoritative); enrichment does the ingest-time source-IP join with no
-  network at all; the loop container runs the six aggregation workers
+  network at all; the loop container runs the seven aggregation workers
   (cadences and outputs in [PIPELINES.md](PIPELINES.md#2-derived-intelligence-the-worker-loops)).
 - **services-adapter** remains the Services pane's only path to Docker:
   frozenset allowlist checked before any Engine call, three actions plus
