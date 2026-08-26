@@ -1,5 +1,5 @@
 [Unit]
-Description=Daily Elasticsearch snapshot + stack-config backup
+Description=Daily stack-config backup for the honeypot stack (config tarball, Keycloak dump, small volumes)
 
 [Timer]
 OnCalendar=daily
