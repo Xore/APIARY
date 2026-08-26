@@ -30,6 +30,7 @@ mod config_history;
 mod agent_intrusion;
 mod campaign_correlator;
 mod correlator;
+mod correlations;
 mod credentials;
 mod criticality_rules;
 mod dashboard;
@@ -287,6 +288,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/investigate/cluster", get(investigate::cluster))
         .route("/api/v1/source-health", get(health::source_health))
         .route("/api/v1/event/{id}", get(event_page::get))
+        // #2047: materialized cross-sensor correlations — the event page's
+        // same-flow summary and the re-used-wordlist edges.
+        .route("/api/v1/event/{id}/connections", get(correlations::event_connections))
+        .route("/api/v1/connections/{community_id}", get(correlations::flow_by_id))
+        .route("/api/v1/cred-reuse", get(correlations::cred_reuse))
         .route("/api/v1/sensors", get(sensors::detail))
         // #1856: /catalog is registered before /{sensor} so the literal
         // segment is not swallowed by the capture. A sensor genuinely

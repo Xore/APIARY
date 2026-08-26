@@ -67,6 +67,11 @@ pub struct EventPage {
     pub flow_events: Relation,
     /// What else this source address did, inside the recent window.
     pub source_events: Relation,
+    /// #2047: the materialized cross-family summary for this event's
+    /// connection (`flow-links-v1`), when the correlator has seen the flow
+    /// from at least two sensor families. Absent otherwise — most flows
+    /// never qualify, and that is a normal answer rather than an error.
+    pub flow_link: Option<Value>,
 }
 
 fn text(value: &Value) -> String {
@@ -207,7 +212,9 @@ pub async fn get(
     let mut hashes = Vec::new();
     collect_hashes(&source, &mut hashes);
 
-    let (session_events, flow_events, source_events) = tokio::join!(
+    // The materialized link is a point lookup, so it rides the same join
+    // as the three live relations instead of serializing behind them.
+    let (session_events, flow_events, source_events, flow_link) = tokio::join!(
         relation(
             &state,
             &session,
@@ -234,6 +241,18 @@ pub async fn get(
             ]}}),
             &id,
         ),
+        async {
+            if community_id.is_empty() {
+                return None;
+            }
+            // A correlator hiccup must not take the event page down; the
+            // page simply renders without the summary.
+            state
+                .es
+                .get_doc(crate::correlations::FLOW_INDEX, &format!("flv1-{community_id}"))
+                .await
+                .unwrap_or_default()
+        },
     );
 
     Ok(Json(EventPage {
@@ -249,6 +268,7 @@ pub async fn get(
         session_events,
         flow_events,
         source_events,
+        flow_link,
     }))
 }
 

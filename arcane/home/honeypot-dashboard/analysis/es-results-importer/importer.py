@@ -284,6 +284,169 @@ MAX_TTYLOG_BYTES = int(os.getenv("MAX_TTYLOG_BYTES", str(20 * 1024 * 1024)))
 CHUNK_BYTES = int(os.getenv("SANDBOX_ARTIFACT_CHUNK_BYTES", str(8 * 1024 * 1024)))
 MAX_CHUNKED_ARTIFACT_BYTES = int(os.getenv("MAX_CHUNKED_ARTIFACT_BYTES", str(256 * 1024 * 1024)))
 
+# #2047: ioc-verdicts-v1 -- a materialized per-sample verdict projection,
+# written by THIS importer as a side-effect of the four analysis sources
+# whose results carry verdicts (ghidra / sandbox / github_analysis /
+# revdeck). The dashboard's attacker-identity cycle used to resolve every
+# payload hash against all four analysis stores with one query each, every
+# cycle; this projection turns that into a single ids lookup per cycle.
+#
+# Deliberately a projection of RAW facts, not of formatted labels: values
+# here are stored exactly as the analysis stores carry them and the Rust
+# side rebuilds its user-facing label strings from them through the same
+# reader functions it uses for live queries -- so the two paths can never
+# drift apart in wording or truncation.
+IOC_VERDICTS_INDEX = "ioc-verdicts-v1"
+VERDICT_SOURCES = {"ghidra", "sandbox", "github_analysis", "revdeck"}
+
+# The best worth-reporting sandbox run wins per hash -- same bar the Rust
+# reader applies to live queries. Values below these ranks simply never
+# make it into the projection ("informational"/"low" risk runs are real
+# data but not verdicts).
+SANDBOX_RISK_RANK = {"medium": 1, "high": 2, "critical": 3}
+
+
+def extract_verdict_sample(label: str, body: dict):
+    """One indexed document body -> (sha256, {field: value}) for the raw
+    verdict inputs that document carries, or None when it carries none.
+
+    Field names are the projection's own flat vocabulary; nesting mirrors
+    what build_document() emitted for each source so nothing is re-parsed.
+    """
+    sha256 = (body.get("file") or {}).get("hash", {}).get("sha256")
+    if not sha256:
+        return None
+    if label == "ghidra":
+        family = ((body.get("ghidra") or {}).get("ai_triage") or {}).get("family_guess") or ""
+        return sha256, {"ghidra_family": family}
+    if label == "github_analysis":
+        family = (body.get("github_analysis") or {}).get("family") or ""
+        return sha256, {"github_family": family}
+    if label == "revdeck":
+        inner = body.get("revdeck") or {}
+        return sha256, {
+            "revdeck_status": inner.get("status") or "",
+            "revdeck_answer": inner.get("answer") or "",
+        }
+    if label == "sandbox":
+        # Sandbox builds one document PER RUN JOB, several jobs can exist
+        # for the same sample; merge_verdict_fragments() keeps the best
+        # worth-reporting level across everything the pass re-imported.
+        inner = body.get("sandbox") or {}
+        level = inner.get("risk_level") or body.get("risk_level") or ""
+        return sha256, {"_sandbox_level": level}
+    return None
+
+
+def verdict_touched(label: str, pending: list, failed_ids: set) -> list:
+    """The (sha, fragment) pairs carried by THIS pass's SUCCESSFUL bulk
+    actions for a verdict source. Failed documents stay out on purpose --
+    claiming a verdict whose document didn't land would project knowledge
+    the stores don't have."""
+    touched = []
+    for _, _, action in pending:
+        if action["_id"] in failed_ids:
+            continue
+        sample = extract_verdict_sample(label, action["_source"])
+        if sample:
+            touched.append(sample)
+    return touched
+
+
+def merge_verdict_fragments(prev: dict, label: str, fragments: list) -> dict:
+    """Collapse one refresh's fragments (plus the prior doc) into the next
+    projection body.
+
+    Single-document sources replace their own keys outright -- the just-
+    imported result IS that analysis's latest word. Sandbox takes the max
+    rank across prev and fresh instead of replacing: one pass only sees
+    the RUN FILES that changed since last time (state-keyed by mtime), so
+    replacement would let an unrelated job import silently downgrade a
+    sample whose older high-risk run didn't happen to change on disk.
+    Never writing a lower level over a higher one is also the same spirit
+    as the partial-map rule (#2094): a partial view must not erase.
+    """
+    merged = {
+        "ghidra_family": prev.get("ghidra_family", ""),
+        "github_family": prev.get("github_family", ""),
+        "revdeck_status": prev.get("revdeck_status", ""),
+        "revdeck_answer": prev.get("revdeck_answer", ""),
+        "sandbox_risk_level": prev.get("sandbox_risk_level", ""),
+    }
+    if label == "ghidra":
+        for _, frag in fragments:
+            merged["ghidra_family"] = frag.get("ghidra_family", "")
+    elif label == "github_analysis":
+        for _, frag in fragments:
+            merged["github_family"] = frag.get("github_family", "")
+    elif label == "revdeck":
+        for _, frag in fragments:
+            merged["revdeck_status"] = frag.get("revdeck_status", "")
+            merged["revdeck_answer"] = frag.get("revdeck_answer", "")
+    elif label == "sandbox":
+        for _, frag in fragments:
+            fresh = SANDBOX_RISK_RANK.get(frag.get("_sandbox_level", ""), 0)
+            current = SANDBOX_RISK_RANK.get(merged["sandbox_risk_level"], 0)
+            if fresh > current:
+                merged["sandbox_risk_level"] = frag["_sandbox_level"]
+    return merged
+
+
+def contributing_analyses(body: dict) -> list:
+    """Which analyses currently have something to say about this hash."""
+    return sorted(name for name, present in [
+        ("ghidra", body["ghidra_family"]),
+        ("github_analysis", body["github_family"]),
+        ("revdeck", body["revdeck_status"] or body["revdeck_answer"]),
+        ("sandbox", body["sandbox_risk_level"]),
+    ] if present)
+
+
+def verdict_docs_for(existing: dict, label: str, touched: list, now: str) -> list:
+    """Pure core of write_verdict_docs(): the projection actions one
+    refresh should index. `existing` maps sha -> prior projection doc
+    (missing shas simply start empty); kept separate from Elasticsearch
+    so it unit-tests without a connection."""
+    by_sha = {}
+    for sha, fragment in touched:
+        by_sha.setdefault(sha, []).append((sha, fragment))
+    actions = []
+    for sha, fragments in sorted(by_sha.items()):
+        body = merge_verdict_fragments(existing.get(sha) or {}, label, fragments)
+        actions.append({
+            "_op_type": "index",
+            "_index": IOC_VERDICTS_INDEX,
+            "_id": sha,
+            "_source": dict(
+                body,
+                sha256=sha,
+                contributing_analyses=contributing_analyses(body),
+                updated=now,
+            ),
+        })
+    return actions
+
+
+def write_verdict_docs(es, label: str, touched: list) -> int:
+    """Refresh the projection docs `touched` speaks for. Side-write only:
+    any failure here logs and returns 0 rather than failing the importing
+    pass -- the projection lags a pass behind at worst."""
+    try:
+        shas = sorted({sha for sha, _ in touched})
+        existing = {}
+        response = es.mget(index=IOC_VERDICTS_INDEX, body={"ids": shas})
+        for doc in response.get("docs") or []:
+            if doc.get("found"):
+                existing[doc["_id"]] = doc["_source"]
+        actions = verdict_docs_for(existing, label, touched, datetime.now(timezone.utc).isoformat())
+        if not actions:
+            return 0
+        bulk(es, actions, stats_only=False, raise_on_error=False)
+        return len(actions)
+    except Exception as exc:
+        logger.warning(f"{label}: ioc-verdicts projection update failed (side-write, ignored): {exc}")
+        return 0
+
 
 def load_state() -> dict:
     try:
@@ -586,6 +749,13 @@ def run_pass(es: Elasticsearch, state: dict) -> int:
         advance_state_after_bulk(pending, failed_ids, state)
         total += ok
         logger.info(f"{source['label']}: indexed {ok} document(s)")
+        # #2047: a successful analysis import is the moment its sample's
+        # materialized verdict projection can change -- refresh it now,
+        # riding the same pass instead of a second worker.
+        if source["label"] in VERDICT_SOURCES:
+            touched = verdict_touched(source["label"], pending, failed_ids)
+            if touched:
+                write_verdict_docs(es, source["label"], touched)
     return total
 
 
