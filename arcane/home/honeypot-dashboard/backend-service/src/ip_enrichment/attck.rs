@@ -129,18 +129,30 @@ fn is_ics_interaction(persona: &str, e: &Value) -> bool {
 }
 
 /// True when an ICS interaction (already confirmed by is_ics_interaction)
-/// is a write/command, not just a read/probe — dnp3's own app_function
-/// (e.g. direct_operate) being present, a conpot request that isn't empty
-/// (the decoy only ever populates "request" for an actual protocol
-/// request, not a bare connection), or an explicit command/write event
-/// kind on any other ICS-tagged persona (multipot's own ICS protocol
-/// handlers included).
+/// escalates to a write/command, not just a read/probe — T1692.001 is the
+/// highest-consequence technique this pipeline emits and must claim
+/// evidence of commanding equipment, not of speaking the protocol (#2116).
+///
+/// - dnp3: the sensor emits `app_function` for EVERY decodable
+///   application-layer frame, `read`/`confirm` included, so presence alone
+///   tagged a scanner walking read codes as having issued unauthorized
+///   command messages. Gate on ics_severity's bands instead — the badge
+///   tier already drew exactly this read/write line, and reusing it keeps
+///   one vocabulary across both tiers. Unknown codes (`app_function_%d`
+///   fallback) band empty and stay unclaimed.
+/// - conpot: its `request` field holds raw protocol bytes (a modbus PDU
+///   fragment), populated for read polls and write commands alike, with
+///   nothing to tell them apart. Rather than promote a command-message
+///   technique on any poll, conpot interactions stay at T0886 — a
+///   documented limitation, not an oversight.
+/// - any other ICS-tagged persona: an explicit command/write event kind
+///   (multipot's own ICS protocol handlers included).
 fn is_ics_write(persona: &str, e: &Value) -> bool {
     if persona == "dnp3" {
-        return !str(e, "app_function").is_empty();
+        return !crate::ics_severity::dnp3_function_severity(&str(e, "app_function")).is_empty();
     }
     if persona.starts_with("conpot") {
-        return !str(e, "request").is_empty();
+        return false;
     }
     let kind = str(e, "event");
     kind == "command" || kind == "write"
@@ -265,12 +277,14 @@ mod tests {
     }
 
     #[test]
-    fn conpot_with_nonempty_request_promotes_t1692_001_too() {
-        let mut e = json!({"data_type": "modbus", "request": "write_coil"});
+    fn conpot_request_stays_at_t0886_only() {
+        // #2116 decision, tested: conpot's `request` holds raw protocol
+        // bytes for read polls and write commands alike — nothing to tell
+        // them apart — so conpot never claims T1692.001 rather than
+        // promoting a command-message technique on any poll.
+        let mut e = json!({"data_type": "modbus", "request": "\u{0}\u{1}"});
         assert!(promote_attck_technique_fields("conpot", &mut e));
-        let ids = e["canonical_attck_techniques"].as_array().unwrap();
-        assert!(ids.iter().any(|v| v == "T0886"));
-        assert!(ids.iter().any(|v| v == "T1692.001"));
+        assert_eq!(e["canonical_attck_techniques"], json!(["T0886"]));
     }
 
     #[test]
@@ -280,6 +294,48 @@ mod tests {
         let ids = e["canonical_attck_techniques"].as_array().unwrap();
         assert!(ids.iter().any(|v| v == "T0886"));
         assert!(ids.iter().any(|v| v == "T1692.001"));
+    }
+
+    #[test]
+    fn dnp3_select_and_config_writes_also_promote_both() {
+        // The high band is state-changing too (select-then-operate arms
+        // the operate; restarts and config writes touch the RTU itself).
+        for app_function in ["select", "operate", "cold_restart", "save_configuration"] {
+            let mut e = json!({ "function": "app", "app_function": app_function });
+            promote_attck_technique_fields("dnp3", &mut e);
+            let ids = e["canonical_attck_techniques"].as_array().unwrap();
+            assert!(
+                ids.iter().any(|v| v == "T1692.001"),
+                "{app_function} must escalate to T1692.001"
+            );
+        }
+    }
+
+    #[test]
+    fn dnp3_read_frames_do_not_claim_command_message() {
+        // #2116's core case: the sensor populates app_function for every
+        // decodable application-layer frame — a scanner walking read
+        // codes used to light up as having issued unauthorized command
+        // messages, indistinguishable from direct_operate.
+        for app_function in ["read", "confirm", "request_link_status", "response", "assign_class"] {
+            let mut e = json!({ "function": "app", "app_function": app_function });
+            promote_attck_technique_fields("dnp3", &mut e);
+            assert_eq!(
+                e["canonical_attck_techniques"],
+                json!(["T0886"]),
+                "{app_function} must stay at T0886"
+            );
+        }
+    }
+
+    #[test]
+    fn dnp3_unknown_app_function_code_stays_at_t0886() {
+        // The decoder's app_function_%d fallback for codes outside its
+        // map bands empty in ics_severity — an unclassifiable frame must
+        // not claim the highest-consequence technique either way.
+        let mut e = json!({"function": "app", "app_function": "app_function_63"});
+        promote_attck_technique_fields("dnp3", &mut e);
+        assert_eq!(e["canonical_attck_techniques"], json!(["T0886"]));
     }
 
     #[test]
