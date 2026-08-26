@@ -173,10 +173,9 @@ pub struct MapPoint {
     pub lon: f64,
     pub events: u64,
     pub ips: u64,
-    /// Marker drill-down target (hp-app.js:519-533's events_url). The Go
-    /// tier's mapPointEventsURL also carried the city; this events
-    /// endpoint has no city filter yet, so country is the nearest
-    /// supported scope.
+    /// Marker drill-down target. Since #2045 the events endpoint takes a
+    /// city filter, so pins drill to the exact city (the Go tier's
+    /// mapPointEventsURL behaviour); country-only when the city is empty.
     pub url: String,
 }
 
@@ -493,9 +492,19 @@ pub async fn dashboard(
         .filter_map(|bucket| {
             let key = bucket["key"].as_array()?;
             let country = key.get(1)?.as_str().unwrap_or("").to_string();
+            let city = key.first()?.as_str().unwrap_or("").to_string();
+            // #2045: the events endpoint has a city filter now, so pins
+            // drill into the exact city (falling back to just country
+            // when a doc somehow lacks one) instead of the nearest-
+            // country scope this used to document as a caveat.
+            let url = if city.is_empty() {
+                format!("/events?country={country}")
+            } else {
+                format!("/events?city={}", crate::services_control::urlencode(&city))
+            };
             Some(MapPoint {
-                city: key.first()?.as_str().unwrap_or("").to_string(),
-                url: format!("/events?country={country}"),
+                city,
+                url,
                 country,
                 lat: bucket["centroid"]["location"]["lat"].as_f64()?,
                 lon: bucket["centroid"]["location"]["lon"].as_f64()?,

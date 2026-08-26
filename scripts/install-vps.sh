@@ -179,7 +179,7 @@ done
 # stays untouched), set it here and skip the round-trip.
 
 mkdir -p "$LOG_DIR" "$MARKER_DIR"
-RUN_LOG="$LOG_DIR/install-$(date +%Y%m%dT%H%M%SZ).log"
+RUN_LOG="$LOG_DIR/install-$(date -u +%Y%m%dT%H%M%SZ).log"
 : >"$RUN_LOG"
 
 # ---------------------------------------------------------------------------
