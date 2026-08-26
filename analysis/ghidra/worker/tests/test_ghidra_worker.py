@@ -427,6 +427,14 @@ def test_unit():
                       ("High Risk", "high"), ("risk: MEDIUM", "medium"),
                       ("very high", "critical"), ("moderate", "medium"),
                       ("benign", "low"), ("Highly Suspicious", ""),
+                      # #2074: qualifiers wrapped in prose must resolve through
+                      # their multi-word synonym, not the bare "high" inside
+                      # them -- and a vague phrase with no level word in it
+                      # stays unrated.
+                      ("Risk: VERY HIGH", "critical"),
+                      ("risk level: very high", "critical"),
+                      ("extremely high severity", "critical"),
+                      ("somewhat elevated", ""),
                       ("", ""), (None, ""), (7, "")]:
         got = w.normalise_risk(raw)
         check(got == want, f"normalise_risk({raw!r}) -> {got!r} (want {want!r})")
