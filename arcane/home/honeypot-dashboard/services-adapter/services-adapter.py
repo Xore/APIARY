@@ -288,13 +288,14 @@ def main() -> int:
         server = ServicesServer(str(args.socket), ServicesHandler)
     finally:
         os.umask(old_umask)
-    # 0660, not 0600 (#2100): chmod sets an inherited ACL's mask to the
-    # mode's group-class bits, so 0600 zeroed the mask and silently revoked
-    # the volume's deliberate default-ACL grant to the non-root backend --
-    # on every start, since each bind makes a fresh socket. The group class
-    # here IS the ACL mask channel; other stays 0, so on a deployment with
-    # no default ACL this grants nothing beyond root's own group.
-    os.chmod(args.socket, 0o660)
+    # Deliberately no post-bind chmod (#2100). A tight one (0600) zeroes an
+    # inherited default ACL's mask -- deployments grant the non-root backend
+    # access through exactly that channel, and every restart mints a fresh
+    # socket, so the grant died each time. A wider one would be flagged as
+    # overly permissive outright. The umask above already binds the socket
+    # srw-rw----: owner rw, other nothing, and the group class left intact
+    # as the ACL-mask channel that makes the volume's default-ACL grant
+    # ("user:nobody:rw-") actually effective.
     try:
         server.serve_forever()
     finally:
