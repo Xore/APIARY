@@ -76,6 +76,12 @@ struct CorrEvent {
     when: Option<chrono::DateTime<chrono::Utc>>,
     src_ip: String,
     sensor: String,
+    /// #2047: destination shape — what makes "many hosts on few ports"
+    /// vs "few hosts, many ports" distinguishable per IP without any
+    /// query-time cardinality work.
+    dst_ip: String,
+    dst_port: String,
+    protocol: String,
     user: String,
     pass: String,
     shasum: String,
@@ -86,6 +92,20 @@ struct CorrEvent {
 /// Ported verbatim from dashboard/links.go via fetch.go's own copy -- gates
 /// which canonical_user/canonical_pass pairs count as a real credential
 /// signal for entity merging.
+/// #2047: destination.port arrives numeric or string depending on which
+/// pipeline produced the doc; flatten both to their string form.
+fn any_to_string(v: &serde_json::Value) -> String {
+    if let Some(s) = v.as_str() {
+        s.to_string()
+    } else if let Some(n) = v.as_i64() {
+        n.to_string()
+    } else if let Some(f) = v.as_f64() {
+        format!("{}", f as i64)
+    } else {
+        String::new()
+    }
+}
+
 fn valid_credential_pair(user: &str, pass: &str) -> bool {
     if (user.is_empty() && pass.is_empty()) || user.len() > 128 || pass.len() > 512 {
         return false;
@@ -126,6 +146,7 @@ async fn fetch_recent_events(
                     ]}},
                     "_source": [
                         "@timestamp", "source.ip", "event.sensor",
+                        "destination.ip", "destination.port", "network.protocol",
                         "honeypot.canonical_user", "honeypot.canonical_pass", "honeypot.canonical_shasum",
                         "honeypot.canonical_fingerprint", "honeypot.canonical_attck_techniques"
                     ]
@@ -174,6 +195,9 @@ async fn fetch_recent_events(
             when,
             src_ip: ip,
             sensor: src["event"]["sensor"].as_str().unwrap_or("").to_string(),
+            dst_ip: src["destination"]["ip"].as_str().unwrap_or("").to_string(),
+            dst_port: any_to_string(&src["destination"]["port"]),
+            protocol: src["network"]["protocol"].as_str().unwrap_or("").to_string(),
             user: src["honeypot"]["canonical_user"].as_str().unwrap_or("").to_string(),
             pass: src["honeypot"]["canonical_pass"].as_str().unwrap_or("").to_string(),
             shasum: src["honeypot"]["canonical_shasum"].as_str().unwrap_or("").to_string(),
@@ -249,9 +273,34 @@ struct IpObservation {
     /// pointers sit here the earliest is dropped as each newer one arrives
     /// (hits are fetched @timestamp-asc, so VecDeque front = least recent).
     evidence: VecDeque<EvidencePointer>,
+    /// #2047 scan shape: the distinct targets/ports/protocols this IP
+    /// touched inside the evidence window.
+    dst_ips: HashSet<String>,
+    ports: HashSet<String>,
+    protocols: HashSet<String>,
     first: Option<chrono::DateTime<chrono::Utc>>,
     last: Option<chrono::DateTime<chrono::Utc>>,
     events: i64,
+}
+
+/// Horizontal vs vertical scan classification from an IP's (or entity's)
+/// touched sets. Pure so the thresholds stay in one tested place:
+///   - "horizontal": swept >=25 distinct hosts (worm behaviour; port count
+///     irrelevant — sweeping 25 hosts with one probe each is still a sweep)
+///   - "vertical": >=25 distinct ports across <=5 distinct hosts
+///   - "" everything else, which is ordinary service traffic by these
+///     windows and must not grow a badge it doesn't mean.
+pub(crate) fn scan_shape(dst_ips: usize, ports: usize) -> &'static str {
+    const HORIZONTAL_HOSTS: usize = 25;
+    const VERTICAL_PORTS: usize = 25;
+    const VERTICAL_HOSTS_MAX: usize = 5;
+    if dst_ips >= HORIZONTAL_HOSTS {
+        "horizontal"
+    } else if ports >= VERTICAL_PORTS && dst_ips <= VERTICAL_HOSTS_MAX {
+        "vertical"
+    } else {
+        ""
+    }
 }
 
 fn build_ip_observations(events: &[CorrEvent]) -> HashMap<String, IpObservation> {
@@ -264,10 +313,25 @@ fn build_ip_observations(events: &[CorrEvent]) -> HashMap<String, IpObservation>
             sensor_counts: BTreeMap::new(),
             techniques: HashSet::new(),
             evidence: VecDeque::with_capacity(EVIDENCE_CAP),
+            dst_ips: HashSet::new(),
+            ports: HashSet::new(),
+            protocols: HashSet::new(),
             first: None,
             last: None,
             events: 0,
         });
+        // Missing destination on session-oriented records is normal (some
+        // sensors only report their own address); skip empties rather than
+        // counting a phantom "" host or port.
+        if !e.dst_ip.is_empty() {
+            o.dst_ips.insert(e.dst_ip.clone());
+        }
+        if !e.dst_port.is_empty() && e.dst_port != "0" {
+            o.ports.insert(e.dst_port.clone());
+        }
+        if !e.protocol.is_empty() {
+            o.protocols.insert(e.protocol.clone());
+        }
         o.events += 1;
         if !e.sensor.is_empty() {
             o.sensors.insert(e.sensor.clone());
@@ -366,6 +430,18 @@ struct Entity {
     /// that was #2040's inflation). Empty until first touched post-#2045.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     sensor_counts: BTreeMap<String, i64>,
+    /// #2047 scan shape over the evidence window as of the last touched
+    /// cycle: distinct destinations/ports/protocols plus the derived
+    /// horizontal/vertical label ("" when neither window applies).
+    /// Absent on pre-#2047 docs, defaulted on load.
+    #[serde(default)]
+    ports_touched: usize,
+    #[serde(default)]
+    dest_ips: usize,
+    #[serde(default)]
+    protocols_touched: usize,
+    #[serde(default, skip_serializing_if = "str::is_empty")]
+    scan: String,
 }
 
 /// The in-memory working form `resolve_identities` merges into --
@@ -382,6 +458,12 @@ struct Working {
     signals: SignalSet,
     sensor_set: HashSet<String>,
     sensor_counts: BTreeMap<String, i64>,
+    /// #2047: this cycle's destination-shape evidence, folded like the
+    /// signal sets (persisted docs keep counts only; a touched entity's
+    /// shape is recomputed from the current window every cycle).
+    dst_ip_set: HashSet<String>,
+    port_set: HashSet<String>,
+    protocol_set: HashSet<String>,
     technique_set: HashSet<String>,
     /// Union of every observation's evidence pointers this cycle plus
     /// whatever the entity persisted before — deduped and pruned to the
@@ -425,6 +507,12 @@ fn working_from_entity(e: &Entity) -> Working {
         sensor_counts: e.sensor_counts.clone(),
         technique_set: e.techniques.iter().cloned().collect(),
         evidence: e.evidence.clone(),
+        // Scan-shape sets rebuild from the current window only — matching
+        // cycle_events semantics, an untouched entity keeps whatever its
+        // document says until new evidence writes it again.
+        dst_ip_set: HashSet::new(),
+        port_set: HashSet::new(),
+        protocol_set: HashSet::new(),
         events_base: e.events,
         cycle_events: 0,
         prev_window_events: e.window_events,
@@ -444,6 +532,9 @@ fn new_working(id: String) -> Working {
         sensor_counts: BTreeMap::new(),
         technique_set: HashSet::new(),
         evidence: Vec::new(),
+        dst_ip_set: HashSet::new(),
+        port_set: HashSet::new(),
+        protocol_set: HashSet::new(),
         events_base: 0,
         cycle_events: 0,
         prev_window_events: None,
@@ -474,6 +565,9 @@ fn absorb(e: &mut Working, o: &IpObservation) {
     for (sensor, count) in &o.sensor_counts {
         *e.sensor_counts.entry(sensor.clone()).or_default() += count;
     }
+    e.dst_ip_set.extend(o.dst_ips.iter().cloned());
+    e.port_set.extend(o.ports.iter().cloned());
+    e.protocol_set.extend(o.protocols.iter().cloned());
     e.cycle_events += o.events;
     if let Some(first) = o.first {
         let first_str = fmt_rfc3339_whole_seconds(first);
@@ -500,6 +594,9 @@ fn merge_entity_into(a: &mut Working, b: &Working) {
     a.sensor_set.extend(b.sensor_set.iter().cloned());
     a.technique_set.extend(b.technique_set.iter().cloned());
     a.evidence.extend(b.evidence.iter().cloned());
+    a.dst_ip_set.extend(b.dst_ip_set.iter().cloned());
+    a.port_set.extend(b.port_set.iter().cloned());
+    a.protocol_set.extend(b.protocol_set.iter().cloned());
     a.events_base += b.events_base;
     a.cycle_events += b.cycle_events;
     // The merged window now spans both members' sensors (#2045), mirroring
@@ -684,6 +781,10 @@ fn finalize_entity(e: &Working) -> Entity {
     evidence.sort_by(|a, b| (b.ts, &b.id).cmp(&(a.ts, &a.id)));
     evidence.dedup_by(|a, b| a.id == b.id);
     evidence.truncate(EVIDENCE_CAP);
+    let dest_ips = e.dst_ip_set.len();
+    let ports_touched = e.port_set.len();
+    let protocols_touched = e.protocol_set.len();
+    let scan = scan_shape(dest_ips, ports_touched);
     Entity {
         id: e.id.clone(),
         ips: sorted(&e.ip_set),
@@ -691,6 +792,10 @@ fn finalize_entity(e: &Working) -> Entity {
         payloads: sorted(&e.signals.payloads),
         credentials: sorted(&e.signals.creds),
         sensors: sorted(&e.sensor_set),
+        ports_touched,
+        dest_ips,
+        protocols_touched,
+        scan: scan.to_string(),
         events,
         window_events: Some(e.cycle_events),
         first: e.first.clone(),
@@ -708,6 +813,11 @@ fn finalize_entity(e: &Working) -> Entity {
 // verdicts.go
 // --------------------------------------------------------------------
 
+/// #2047: the es-results-importer's materialized per-sample verdict
+/// projection -- one doc per sha256, raw fields mirroring the four live
+/// stores, read through the same label builders as those stores.
+const IOC_VERDICTS_INDEX: &str = "ioc-verdicts-v1";
+
 fn sandbox_risk_worth_reporting(level: &str) -> bool {
     matches!(level, "medium" | "high" | "critical")
 }
@@ -721,6 +831,53 @@ fn sandbox_risk_rank(level: &str) -> u8 {
         "critical" => 3,
         _ => 0,
     }
+}
+
+// The label builders below take a document source (a live analysis doc's
+// or the #2047 projection's) and produce EXACTLY the label string the live
+// path has always produced. Both readers go through them, so the
+// materialized fast path and the legacy queries cannot drift apart in
+// wording or truncation.
+
+fn ghidra_label(src: &serde_json::Value) -> Option<String> {
+    src["ghidra"]["ai_triage"]["family_guess"]
+        .as_str()
+        .filter(|f| !f.is_empty())
+        .map(String::from)
+}
+
+fn github_label(src: &serde_json::Value) -> Option<String> {
+    src["github_analysis"]["family"]
+        .as_str()
+        .filter(|f| !f.is_empty())
+        .map(String::from)
+}
+
+fn revdeck_label(src: &serde_json::Value) -> Option<String> {
+    let inner = &src["revdeck"]["revdeck"];
+    let status = inner["status"].as_str().unwrap_or("");
+    let answer = inner["answer"].as_str().unwrap_or("");
+    if status != "completed" || answer.is_empty() {
+        return None;
+    }
+    Some(format!("revdeck: {}", truncate_revdeck_answer(answer)))
+}
+
+fn truncate_revdeck_answer(answer: &str) -> String {
+    if answer.chars().count() > REVDECK_ANSWER_LIMIT {
+        format!("{}…", answer.chars().take(REVDECK_ANSWER_LIMIT).collect::<String>())
+    } else {
+        answer.to_string()
+    }
+}
+
+/// The materialized form carries the already-reduced best level rather
+/// than one document per run; only the worth-reporting bar applies.
+fn sandbox_projection_label(src: &serde_json::Value) -> Option<String> {
+    src["sandbox"]["risk_level"]
+        .as_str()
+        .filter(|level| sandbox_risk_worth_reporting(level))
+        .map(|level| format!("sandbox: {level} risk"))
 }
 
 /// Every verdict label this cycle could produce, keyed by payload hash --
@@ -750,6 +907,60 @@ async fn load_verdict_maps(state: &AppState, hashes: &HashSet<String>) -> Option
     let mut maps = VerdictMaps::default();
     if hashes.is_empty() {
         return Some(maps);
+    }
+
+    // #2047 fast path: the es-results-importer keeps ioc-verdicts-v1, a
+    // per-sample projection of exactly the fields these four queries are
+    // after. When it covers EVERY hash this cycle cares about, one ids
+    // query replaces all four below. Coverage must be total to count:
+    // falling back per-hash would mix a hash whose import predates the
+    // projection (zero labels -- wrongly erasing still-true verdicts,
+    // the exact #2094 hazard) with ones that genuinely have none.
+    // Staleness between an analysis landing and its projection refresh is
+    // bounded by the importer's own pass interval and self-heals on that
+    // source's next trigger; cycles in between simply take the slow path.
+    let mut projected = VerdictMaps::default();
+    let mut covered: HashSet<String> = HashSet::new();
+    let projection_body = json!({
+        "query": {"ids": {"values": hashes.iter().cloned().collect::<Vec<_>>()}}
+    });
+    match state
+        .es
+        .search_index(&[IOC_VERDICTS_INDEX], projection_body)
+        .await
+    {
+        Ok(result) => {
+            for hit in result["hits"]["hits"].as_array().into_iter().flatten() {
+                let Some(hash) = hit["_id"].as_str() else { continue };
+                covered.insert(hash.to_string());
+                let src = &hit["_source"];
+                if let Some(family) = ghidra_label(src) {
+                    projected.ghidra.insert(hash.to_string(), family);
+                }
+                if let Some(label) = sandbox_projection_label(src) {
+                    projected.sandbox.insert(hash.to_string(), label);
+                }
+                if let Some(family) = github_label(src) {
+                    projected.github.insert(hash.to_string(), family);
+                }
+                if let Some(verdict) = revdeck_label(src) {
+                    projected.revdeck.insert(hash.to_string(), verdict);
+                }
+            }
+            if covered.len() == hashes.len() && !hashes.is_empty() {
+                return Some(projected);
+            }
+            tracing::debug!(
+                covered = covered.len(),
+                wanted = hashes.len(),
+                "verdict projection incomplete; falling back to live stores"
+            );
+        }
+        Err(error) => {
+            // A missing/failing projection is the normal pre-first-import
+            // state and changes nothing downstream -- take the slow path.
+            tracing::debug!(%error, "verdict projection lookup failed; using live stores");
+        }
     }
 
     // Ghidra / GitHub / RevDeck are content-addressed docs with known ids:
@@ -787,12 +998,7 @@ async fn load_verdict_maps(state: &AppState, hashes: &HashSet<String>) -> Option
         .await
     {
         Ok(result) => {
-            maps.ghidra = collect(&result, "ghidra:", |src| {
-                src["ghidra"]["ai_triage"]["family_guess"]
-                    .as_str()
-                    .filter(|f| !f.is_empty())
-                    .map(String::from)
-            });
+            maps.ghidra = collect(&result, "ghidra:", ghidra_label);
         }
         Err(error) => {
             tracing::warn!(%error, "attacker-identity: ghidra verdict lookup failed");
@@ -814,12 +1020,7 @@ async fn load_verdict_maps(state: &AppState, hashes: &HashSet<String>) -> Option
         .await
     {
         Ok(result) => {
-            maps.github = collect(&result, "github_analysis:", |src| {
-                src["github_analysis"]["family"]
-                    .as_str()
-                    .filter(|f| !f.is_empty())
-                    .map(String::from)
-            });
+            maps.github = collect(&result, "github_analysis:", github_label);
         }
         Err(error) => {
             tracing::warn!(%error, "attacker-identity: github verdict lookup failed");
@@ -836,20 +1037,7 @@ async fn load_verdict_maps(state: &AppState, hashes: &HashSet<String>) -> Option
         .await
     {
         Ok(result) => {
-            maps.revdeck = collect(&result, "revdeck:", |src| {
-                let inner = &src["revdeck"]["revdeck"];
-                let status = inner["status"].as_str().unwrap_or("");
-                let answer = inner["answer"].as_str().unwrap_or("");
-                if status != "completed" || answer.is_empty() {
-                    return None;
-                }
-                let truncated: String = if answer.chars().count() > REVDECK_ANSWER_LIMIT {
-                    format!("{}…", answer.chars().take(REVDECK_ANSWER_LIMIT).collect::<String>())
-                } else {
-                    answer.to_string()
-                };
-                Some(format!("revdeck: {truncated}"))
-            });
+            maps.revdeck = collect(&result, "revdeck:", revdeck_label);
         }
         Err(error) => {
             tracing::warn!(%error, "attacker-identity: revdeck verdict lookup failed");
@@ -1219,6 +1407,9 @@ mod tests {
             sensors: HashSet::new(),
             techniques: HashSet::new(),
             sensor_counts: BTreeMap::new(),
+            dst_ips: HashSet::new(),
+            ports: HashSet::new(),
+            protocols: HashSet::new(),
             first: Some(chrono::Utc::now()),
             last: Some(chrono::Utc::now()),
             events: 1,
@@ -1435,6 +1626,19 @@ mod tests {
     }
 
     #[test]
+    fn scan_shape_classifies_sweeps_and_port_rakes_only() {
+        assert_eq!(scan_shape(30, 2), "horizontal");
+        assert_eq!(scan_shape(25, 40), "horizontal"); // host count wins
+        assert_eq!(scan_shape(4, 60), "vertical");
+        assert_eq!(scan_shape(5, 25), "vertical");
+        // Ordinary traffic never earns the badge.
+        assert_eq!(scan_shape(3, 4), "");
+        assert_eq!(scan_shape(24, 24), ""); // under both windows
+        // Port-heavy but spread past the vertical host cap reads as neither.
+        assert_eq!(scan_shape(6, 60), "");
+    }
+
+    #[test]
     fn valid_credential_pair_rejects_shell_markers() {
         assert!(!valid_credential_pair("root", "/bin/sh"));
         assert!(!valid_credential_pair("root", "powershell -enc AAAA"));
@@ -1530,5 +1734,52 @@ mod tests {
         flagged.verdicts_pending = true;
         let with = serde_json::to_value(&flagged).unwrap();
         assert_eq!(with["verdicts_pending"], json!(true));
+    }
+
+    /// #2047: the projection reader and the live readers share these label
+    /// builders -- pin their wording so a refactor can't make the fast path
+    /// emit labels the slow path would never have written.
+    #[test]
+    fn projection_label_builders_match_the_live_wording() {
+        assert_eq!(
+            ghidra_label(&json!({"ghidra": {"ai_triage": {"family_guess": "win.lumma"}}})),
+            Some("win.lumma".to_string())
+        );
+        assert_eq!(ghidra_label(&json!({"ghidra": {"ai_triage": {"family_guess": ""}}})), None);
+
+        assert_eq!(
+            github_label(&json!({"github_analysis": {"family": "apk.dropper"}})),
+            Some("apk.dropper".to_string())
+        );
+
+        // Only completed runs with a non-empty answer count, truncated at
+        // REVDECK_ANSWER_LIMIT by chars, never bytes.
+        assert_eq!(
+            revdeck_label(&json!({"revdeck": {"revdeck": {"status": "completed", "answer": "credential stealer"}}})),
+            Some("revdeck: credential stealer".to_string())
+        );
+        assert_eq!(
+            revdeck_label(&json!({"revdeck": {"revdeck": {"status": "failed", "answer": "nope"}}})),
+            None
+        );
+        let long = "x".repeat(REVDECK_ANSWER_LIMIT + 10);
+        if let Some(label) = revdeck_label(&json!({"revdeck": {"revdeck": {"status": "completed", "answer": long}}})) {
+            let answer = label.strip_prefix("revdeck: ").unwrap();
+            assert_eq!(answer.chars().count(), REVDECK_ANSWER_LIMIT + 1); // + ellipsis
+            assert!(answer.ends_with('…'));
+        } else {
+            panic!("completed run with an answer must produce a label");
+        }
+
+        // The projection carries one reduced level; sub-threshold levels
+        // are present data but not verdicts.
+        assert_eq!(
+            sandbox_projection_label(&json!({"sandbox": {"risk_level": "high"}})),
+            Some("sandbox: high risk".to_string())
+        );
+        assert_eq!(
+            sandbox_projection_label(&json!({"sandbox": {"risk_level": "low"}})),
+            None
+        );
     }
 }

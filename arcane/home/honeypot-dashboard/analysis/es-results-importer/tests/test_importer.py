@@ -442,5 +442,134 @@ class AdvanceStateAfterBulkTest(unittest.TestCase):
         self.assertEqual(state, {"keyB": 2.0})
 
 
+class VerdictProjectionTest(unittest.TestCase):
+    """#2047: the ioc-verdicts-v1 projection the importer side-writes --
+    raw facts per sample only, with the Rust readers rebuilding their own
+    label wording through shared functions. These tests pin extraction
+    from each source's emitted document body, the merge rules (replace for
+    single-doc sources, never-downgrade-max for sandbox), and the pure
+    doc-building core."""
+
+    def ghidra_body(self, family, sha=None):
+        return {
+            "file": {"hash": {"sha256": sha or SHA}},
+            "ghidra": {"ai_triage": {"family_guess": family}},
+        }
+
+    def test_extracts_raw_facts_from_each_verdict_source(self):
+        ghidra = MODULE.extract_verdict_sample("ghidra", self.ghidra_body("win.lumma"))
+        self.assertEqual(ghidra, (SHA, {"ghidra_family": "win.lumma"}))
+
+        github = MODULE.extract_verdict_sample(
+            "github_analysis",
+            {"file": {"hash": {"sha256": SHA}}, "github_analysis": {"family": "apk.dropper"}},
+        )
+        self.assertEqual(github, (SHA, {"github_family": "apk.dropper"}))
+
+        revdeck = MODULE.extract_verdict_sample(
+            "revdeck",
+            {
+                "file": {"hash": {"sha256": SHA}},
+                "revdeck": {"status": "completed", "answer": "credential stealer"},
+            },
+        )
+        self.assertEqual(revdeck, (SHA, {"revdeck_status": "completed", "revdeck_answer": "credential stealer"}))
+
+        sandbox = MODULE.extract_verdict_sample(
+            "sandbox",
+            {
+                "file": {"hash": {"sha256": SHA}},
+                "sandbox": {"risk_level": "high"},
+                "risk_level": "high",
+            },
+        )
+        self.assertEqual(sandbox, (SHA, {"_sandbox_level": "high"}))
+
+    def test_non_verdict_sources_and_hashless_docs_yield_nothing(self):
+        self.assertIsNone(MODULE.extract_verdict_sample("yara", {"yara": {}}))
+        self.assertIsNone(MODULE.extract_verdict_sample("cowrie_ttylog", {"shasum": "x"}))
+        # A ghidra document without a resolvable hash can't speak for a
+        # sample -- drop it rather than guessing.
+        self.assertIsNone(MODULE.extract_verdict_sample("ghidra", {"ghidra": {"ai_triage": {"family_guess": "f"}}}))
+
+    def test_failed_documents_never_reach_the_projection(self):
+        pending = [
+            ("a_ghidra.json", 1.0, {"_id": f"ghidra:{SHA}", "_source": self.ghidra_body("win.lumma")}),
+            ("b_ghidra.json", 2.0, {"_id": "ghidra:" + "b" * 64, "_source": self.ghidra_body("win.redux", sha="b" * 64)}),
+        ]
+        touched = MODULE.verdict_touched("ghidra", pending, failed_ids={f"ghidra:{SHA}"})
+        self.assertEqual(len(touched), 1)
+        self.assertEqual(touched[0][0], "b" * 64)
+
+    def test_single_document_sources_replace_only_their_own_keys(self):
+        prev = {
+            "ghidra_family": "win.old",
+            "github_family": "apk.dropper",
+            "revdeck_status": "",
+            "revdeck_answer": "",
+            "sandbox_risk_level": "medium",
+        }
+        merged = MODULE.merge_verdict_fragments(
+            prev, "ghidra", [(SHA, {"ghidra_family": "win.lumma"})]
+        )
+        self.assertEqual(merged["ghidra_family"], "win.lumma")
+        # The analyses this refresh doesn't speak for keep their prior state
+        # exactly -- a partial pass must not erase (#2094's rule, applied here).
+        self.assertEqual(merged["github_family"], "apk.dropper")
+        self.assertEqual(merged["sandbox_risk_level"], "medium")
+
+    def test_sandbox_refresh_never_downgrades_the_best_level(self):
+        prev = {"sandbox_risk_level": "critical"}
+        merged = MODULE.merge_verdict_fragments(prev, "sandbox", [(SHA, {"_sandbox_level": "low"})])
+        self.assertEqual(merged["sandbox_risk_level"], "critical")
+
+        fresh_best = MODULE.merge_verdict_fragments({}, "sandbox", [
+            (SHA, {"_sandbox_level": "informational"}),
+            (SHA, {"_sandbox_level": "critical"}),
+        ])
+        self.assertEqual(fresh_best["sandbox_risk_level"], "critical")
+
+        # Sub-threshold-only runs stay out of the projection entirely --
+        # real data, but not verdicts (same bar the Rust reader applies).
+        quiet = MODULE.merge_verdict_fragments({}, "sandbox", [(SHA, {"_sandbox_level": "informational"})])
+        self.assertEqual(quiet["sandbox_risk_level"], "")
+
+    def test_contributing_analyses_lists_present_sources_sorted(self):
+        body = {
+            "ghidra_family": "",
+            "github_family": "apk.dropper",
+            "revdeck_status": "completed",
+            "revdeck_answer": "stealer",
+            "sandbox_risk_level": "high",
+        }
+        self.assertEqual(MODULE.contributing_analyses(body), ["github_analysis", "revdeck", "sandbox"])
+
+    def test_verdict_docs_for_groups_by_sha_and_merges_prior_state(self):
+        existing = {
+            SHA: {
+                "ghidra_family": "win.old",
+                "github_family": "",
+                "revdeck_status": "",
+                "revdeck_answer": "",
+                "sandbox_risk_level": "high",
+                "sha256": SHA,
+                "contributing_analyses": ["ghidra", "sandbox"],
+                "updated": "2026-01-01T00:00:00+00:00",
+            }
+        }
+        actions = MODULE.verdict_docs_for(
+            existing, "ghidra", [(SHA, {"ghidra_family": "win.lumma"})], now="2026-08-26T12:00:00+00:00"
+        )
+        self.assertEqual(len(actions), 1)
+        action = actions[0]
+        self.assertEqual(action["_index"], "ioc-verdicts-v1")
+        self.assertEqual(action["_id"], SHA)
+        source = action["_source"]
+        self.assertEqual(source["ghidra_family"], "win.lumma")
+        self.assertEqual(source["sandbox_risk_level"], "high")
+        self.assertEqual(source["contributing_analyses"], ["ghidra", "sandbox"])
+        self.assertEqual(source["updated"], "2026-08-26T12:00:00+00:00")
+
+
 if __name__ == "__main__":
     unittest.main()

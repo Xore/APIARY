@@ -22,7 +22,7 @@ use crate::AppState;
 
 const CAMPAIGNS_INDEX: &str = "campaigns-v1";
 const CLUSTERS_INDEX: &str = "attacker-clusters-v1";
-const HONEYPOT_INDEX_PATTERN: &str = "honeypot-v2-*";
+pub(crate) const HONEYPOT_INDEX_PATTERN: &str = "honeypot-v2-*";
 const SURICATA_ALERT_INDEX_PATTERN: &str = "suricata-v2-alert-*";
 const TUNNEL_PEER_IP: &str = "10.8.0.1";
 const ALERT_BUCKET_CAP: u64 = 10_000;
@@ -48,7 +48,7 @@ fn env_duration(name: &str, default: Duration) -> Duration {
 /// attacker_identity.rs's private copy of the same logic) -- both ported
 /// from the same Go source, kept as two small independent copies rather
 /// than introducing a shared module for one ~15-line function.
-fn valid_credential_pair(user: &str, pass: &str) -> bool {
+pub(crate) fn valid_credential_pair(user: &str, pass: &str) -> bool {
     if (user.is_empty() && pass.is_empty()) || user.len() > 128 || pass.len() > 512 {
         return false;
     }
@@ -176,6 +176,10 @@ struct CampaignBucket {
     unique_ips: i64,
     sensors: Vec<String>,
     ports: Vec<String>,
+    /// #2047 scan shape over the /24 window.
+    dst_ips_touched: i64,
+    ports_counted: i64,
+    protocols_counted: i64,
     creds: i64,
     payloads: i64,
     fingerprints: i64,
@@ -201,6 +205,11 @@ fn campaign_sub_aggs() -> Value {
         "payloads": {"cardinality": {"field": "honeypot.canonical_shasum"}},
         "fingerprints": {"cardinality": {"field": "honeypot.canonical_fingerprint"}},
         "providers": {"terms": {"field": "source.as.type", "size": 10}},
+        // #2047 scan shape: the dest-side cardinalities the live ports
+        // terms list only hints at, plus the protocol spread.
+        "dst_ips_touched": {"cardinality": {"field": "destination.ip"}},
+        "ports_touched": {"cardinality": {"field": "destination.port"}},
+        "protocols_touched": {"cardinality": {"field": "network.protocol"}},
         "first": {"min": {"field": "@timestamp"}},
         "last": {"max": {"field": "@timestamp"}}
     })
@@ -219,6 +228,9 @@ fn to_bucket(key: &str, prefix_length: i64, b: &Value) -> CampaignBucket {
         cidr: format!("{key}/{prefix_length}"),
         events: b["doc_count"].as_i64().unwrap_or(0),
         unique_ips: b["unique_ips"]["value"].as_i64().unwrap_or(0),
+        dst_ips_touched: b["dst_ips_touched"]["value"].as_i64().unwrap_or(0),
+        ports_counted: b["ports_touched"]["value"].as_i64().unwrap_or(0),
+        protocols_counted: b["protocols_touched"]["value"].as_i64().unwrap_or(0),
         sensors: str_terms(b["sensors"]["buckets"].as_array().unwrap_or(&vec![]), 6),
         ports: port_terms(b["ports"]["buckets"].as_array().unwrap_or(&vec![])),
         creds,
@@ -434,13 +446,29 @@ fn score_campaigns(buckets: Vec<CampaignBucket>, now: chrono::DateTime<chrono::U
         .into_iter()
         .map(|b| {
             let alerts = *by_cidr.get(&b.cidr).unwrap_or(&0);
-            let score = (0.28 * saturating(b.events, 200.0)
-                + 0.18 * saturating(b.sensors.len() as i64, 3.0)
-                + 0.14 * saturating(b.unique_ips, 10.0)
-                + 0.14 * saturating(b.payloads, 3.0)
+            // #2047: scan shape joins the blend at 0.05, taken off the
+            // events term (the shape is evidence about HOW the volume was
+            // produced, not new volume) — a worm sweeping /24s no longer
+            // scores identically to credential-stuffing one service.
+            let scan = crate::attacker_identity::scan_shape(
+                b.dst_ips_touched.max(0) as usize,
+                b.ports_counted.max(0) as usize,
+            );
+            let scan_dim = if scan == "horizontal" {
+                saturating(b.dst_ips_touched, 40.0)
+            } else if scan == "vertical" {
+                saturating(b.ports_counted, 20.0)
+            } else {
+                0.0
+            };
+            let score = (0.26 * saturating(b.events, 200.0)
+                + 0.17 * saturating(b.sensors.len() as i64, 3.0)
+                + 0.13 * saturating(b.unique_ips, 10.0)
+                + 0.13 * saturating(b.payloads, 3.0)
                 + 0.09 * saturating(b.creds, 3.0)
                 + 0.07 * saturating(alerts, 20.0)
                 + 0.05 * saturating(b.fingerprints, 5.0)
+                + 0.05 * scan_dim
                 + 0.05 * saturating(b.providers.len() as i64, 2.0))
             .round() as i64;
             let mut why = Vec::new();
@@ -456,6 +484,17 @@ fn score_campaigns(buckets: Vec<CampaignBucket>, now: chrono::DateTime<chrono::U
             if b.creds > 0 {
                 why.push(format!("{} reused credentials", b.creds));
             }
+            match scan {
+                "horizontal" => why.push(format!(
+                    "horizontal scan across {} hosts",
+                    b.dst_ips_touched
+                )),
+                "vertical" => why.push(format!(
+                    "vertical scan hitting {} ports",
+                    b.ports_counted
+                )),
+                _ => {}
+            }
             if alerts > 0 {
                 why.push(format!("{alerts} IDS alerts"));
             }
@@ -467,6 +506,8 @@ fn score_campaigns(buckets: Vec<CampaignBucket>, now: chrono::DateTime<chrono::U
             }
             let doc = json!({
                 "cidr": b.cidr, "score": score, "events": b.events, "unique_ips": b.unique_ips,
+                "dst_ips_touched": b.dst_ips_touched, "ports_touched_counted": b.ports_counted,
+                "protocols_touched": b.protocols_counted, "scan": scan,
                 "sensors": b.sensors, "ports": b.ports, "creds": b.creds, "payloads": b.payloads,
                 "alerts": alerts, "providers": b.providers, "fingerprints": b.fingerprints,
                 "first": b.first, "last": b.last, "generated": now.to_rfc3339(),
@@ -552,6 +593,11 @@ async fn run_correlation(state: &AppState, window: Duration) {
         tracing::warn!(%error, "correlator: clean up stale clusters failed");
     }
 
+    // #2047: flow links and credential co-use ride the same cadence —
+    // they read the same windows and their costs are the same class of
+    // aggregation, so a separate worker would only duplicate the tuning.
+    crate::correlations::run_passes(state).await;
+
     tracing::info!(
         campaigns = campaigns.len(),
         clusters = clusters.len(),
@@ -592,6 +638,9 @@ mod tests {
             creds,
             payloads,
             fingerprints,
+            dst_ips_touched: 0,
+            ports_counted: 0,
+            protocols_counted: 0,
             providers: (0..providers).map(|i| format!("provider{i}")).collect(),
             first: "2026-01-01T00:00:00Z".to_string(),
             last: "2026-01-01T01:00:00Z".to_string(),
@@ -611,9 +660,41 @@ mod tests {
     #[test]
     fn score_approaches_ceiling_only_for_a_large_diverse_campaign() {
         let now = chrono::Utc::now();
-        let docs = score_campaigns(vec![bucket("203.0.113.0/24", 90_000, 5, 500, 20, 15, 25, 4)], now, &std::collections::HashMap::new());
+        // Diverse across EVERY dimension — #2047 made observed scan shape
+        // one of them, so the fixture sweeps hosts too.
+        let mut wide = bucket("203.0.113.0/24", 90_000, 5, 500, 20, 15, 25, 4);
+        wide.dst_ips_touched = 40;
+        let docs = score_campaigns(vec![wide], now, &std::collections::HashMap::new());
         let score = docs[0]["score"].as_i64().unwrap();
         assert!(score > 75, "expected a large, diverse campaign to score high, got {score}");
+    }
+
+    #[test]
+    fn scan_shape_separates_a_sweep_from_a_stuffer_at_equal_volume() {
+        let now = chrono::Utc::now();
+        // Same events/ips/sensors — the only difference is that one bucket's
+        // traffic touched 40 distinct destination hosts (horizontal sweep)
+        // and the other stayed pinned to one host (#2047: shape is worth
+        // 5 points of blend on its own).
+        let mut sweep = bucket("203.0.113.0/24", 120, 2, 4, 0, 0, 0, 0);
+        sweep.dst_ips_touched = 40;
+        let stuffer = bucket("198.51.100.0/24", 120, 2, 4, 0, 0, 0, 0);
+        let docs = score_campaigns(vec![sweep, stuffer], now, &std::collections::HashMap::new());
+        let scores: std::collections::HashMap<&str, i64> = docs
+            .iter()
+            .map(|d| (d["cidr"].as_str().unwrap(), d["score"].as_i64().unwrap()))
+            .collect();
+        assert!(
+            scores["203.0.113.0/24"] > scores["198.51.100.0/24"],
+            "horizontal sweep should outscore equal-volume stuffing: {scores:?}"
+        );
+        // Delta pinned from the blend: shared base rounds to 20; the sweep
+        // adds 0.05 * saturating(40, 40) = 2.5 → 23.
+        assert_eq!(scores["203.0.113.0/24"] - scores["198.51.100.0/24"], 3);
+        assert!(docs.iter().any(|d| d["explanation"]
+            .as_str()
+            .unwrap()
+            .contains("horizontal scan across 40 hosts")));
     }
 
     #[test]
