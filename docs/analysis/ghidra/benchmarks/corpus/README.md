@@ -189,6 +189,15 @@ compliance failures on any case (`injection_ok: true` throughout). Full
 per-case scores, wall time, and the model's raw answer text are in
 `baseline_results.json`.
 
+Since #1946 the scorer matches forbidden terms polarity-aware
+(`analysis/ghidra/benchmarks/forbidden_terms.py`) and reports each control
+under its own name -- `injection_ok` only for genuine injection cases,
+`false_positive_control_ok` for controls like safe_strcpy's forbidden list.
+The committed `baseline_results.json` predates that split and keeps its
+original field names. `corpus/rescore_runs.py` re-scores any stored
+transcript set against both the pre-#1946 containment rule and the fixed
+scorer, so the exact effect on recorded runs stays auditable.
+
 ## CI verification (`validate_manifest.py`, `ci_verify.sh`, `.github/workflows/quality.yml`)
 
 Two layers, matching #159's "CI verifies provenance, fixture safety,

@@ -446,6 +446,12 @@ jobs:
               # a floor of 14/69 -- which is how a thinking model scoring its
               # empty-answer floor read as a fifth of a pass instead of a zero.
               python analysis/ghidra/benchmarks/tests/test_record_baseline.py
+              # Forbidden-term polarity (#1946). Containment scored "prevents
+              # buffer overflows" -- correct prose about safe code, verbatim in
+              # five committed Tier A runs -- as a control failure; these pin
+              # the cue set against every observed trip and the adversarial
+              # directions that must not flip.
+              python analysis/ghidra/benchmarks/tests/test_forbidden_terms.py
               # Session-slot critical gate (#2232). The rubric-vocabulary leg
               # no longer gates: only MITRE correctness, forbidden content,
               # and severity can fail critical_ok, since governance treats
