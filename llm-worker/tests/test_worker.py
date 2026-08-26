@@ -445,8 +445,7 @@ class HealthcheckDiagnosticsTests(unittest.TestCase):
         self.cfg = config()
 
     def _stamp(self, age_seconds):
-        moment = dt.now(timezone.utc) - timedelta(seconds=age_seconds)
-        return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+        return (dt.now(timezone.utc) - timedelta(seconds=age_seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def test_healthy_recent_status_is_quiet_success(self):
         status = {"updated_at": self._stamp(0), "ok": True, "mode": "captured-data"}
