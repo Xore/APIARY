@@ -149,6 +149,46 @@ class TestValidatorCatchesCorruption(unittest.TestCase):
         errors = validate_corpus.validate_event(broken, 1)
         self.assertTrue(any("TEST-NET" in e for e in errors))
 
+    # #2092: the free-text fallback scan used to be IPv4-only, so a
+    # global-unicast IPv6 planted in exactly the fields this helper's
+    # docstring names slipped through. Both families are now exercised --
+    # free text AND keyed -- against public (must fail) and documentation
+    # (must pass) literals.
+
+    def test_catches_free_text_public_ipv6(self):
+        broken = copy.deepcopy(self.events[0])
+        broken["raw"]["process_args"] = ["--server", "2606:4700::1111"]
+        errors = validate_corpus.validate_event(broken, 1)
+        self.assertTrue(
+            any("TEST-NET" in e and "2606:4700::1111" in e for e in errors),
+            f"free-text IPv6 escaped the address gate: {errors}",
+        )
+
+    def test_catches_keyed_public_ipv6(self):
+        broken = copy.deepcopy(self.events[0])
+        broken["raw"]["dest_ip"] = "2a00:1450:4001:81b::200e"
+        errors = validate_corpus.validate_event(broken, 1)
+        self.assertTrue(
+            any("TEST-NET" in e and "2a00:1450" in e for e in errors),
+            f"keyed IPv6 escaped the address gate: {errors}",
+        )
+
+    def test_documentation_ipv6_passes_cleanly(self):
+        broken = copy.deepcopy(self.events[0])
+        broken["raw"]["dest_ip"] = "2001:db8::dead"
+        broken["raw"]["process_args"] = ["--peer", "[2001:db8::1]:443"]
+        errors = [
+            e for e in validate_corpus.validate_event(broken, 1)
+            if "TEST-NET" in e
+        ]
+        self.assertEqual(errors, [], f"RFC 3849 addresses wrongly flagged: {errors}")
+
+    def test_no_duplicate_address_errors_for_keyed_value_matching_regex(self):
+        broken = copy.deepcopy(self.events[0])
+        broken["raw"]["src_ip"] = "8.8.8.8"
+        errors = [e for e in validate_corpus.validate_event(broken, 1) if "8.8.8.8" in e]
+        self.assertEqual(len(errors), 1, f"same address reported twice: {errors}")
+
     def test_catches_benign_escalation_contradiction(self):
         broken = copy.deepcopy(self.events[0])
         broken["is_benign"] = True
@@ -172,6 +212,55 @@ class TestValidatorCatchesCorruption(unittest.TestCase):
         broken[-1]["notes"] += " see corpus-999 for details"
         errors = validate_corpus.validate_corpus(broken)
         self.assertTrue(any("corpus-999" in e for e in errors))
+
+
+class TestSchemaParity(unittest.TestCase):
+    """#2092: validate_corpus.py re-states four parts of schema.json's
+    contract by hand. Nothing programmatically enforced schema.json before,
+    so a tightening of schema.json's `required` (or an enum/pattern edit)
+    could land without any change in what the gate actually enforces --
+    contract doc and validator disagreeing from that commit forward.
+    Mirrors tests/test_worker.py's window-drift guard: pin the pair, force
+    future edits to touch both or fail CI."""
+
+    @classmethod
+    def setUpClass(cls):
+        import json
+        cls.schema = json.loads(validate_corpus.SCHEMA_PATH.read_text(encoding="utf-8"))
+        cls.props = cls.schema["properties"]
+
+    def test_required_fields_match_schema(self):
+        self.assertEqual(
+            set(validate_corpus.REQUIRED_FIELDS), set(self.schema["required"]),
+            "schema.json's required[] and validate_corpus.REQUIRED_FIELDS disagree -- "
+            "update both (a schema-only tightening would otherwise silently lose enforcement)",
+        )
+
+    def test_phase_enum_matches_schema(self):
+        self.assertEqual(
+            sorted(self.props["phase"]["enum"]), sorted(validate_corpus.PHASES),
+            "schema.json's phase enum and validate_corpus.PHASES disagree -- update both",
+        )
+
+    def test_encoding_layer_enum_matches_schema(self):
+        self.assertEqual(
+            sorted(self.props["encoding_layer"]["enum"]), sorted(validate_corpus.ENCODING_LAYERS),
+            "schema.json's encoding_layer enum and validate_corpus.ENCODING_LAYERS disagree -- update both",
+        )
+
+    def test_event_id_pattern_matches_schema(self):
+        self.assertEqual(
+            validate_corpus.EVENT_ID_RE.pattern, self.props["event_id"]["pattern"],
+            "schema.json's event_id pattern and validate_corpus.EVENT_ID_RE disagree -- update both",
+        )
+
+    def test_expected_findings_required_match_schema(self):
+        self.assertEqual(
+            set(validate_corpus.EXPECTED_FINDINGS_FIELDS),
+            set(self.props["expected_findings"]["required"]),
+            "schema.json's expected_findings.required and validate_corpus.EXPECTED_FINDINGS_FIELDS "
+            "disagree -- update both",
+        )
 
 
 if __name__ == "__main__":

@@ -31,6 +31,7 @@ REQUIRED_FIELDS = (
     "event_id", "timestamp", "phase", "trust_boundary", "sensor",
     "encoding_layer", "is_benign", "raw", "expected_findings", "notes",
 )
+EXPECTED_FINDINGS_FIELDS = ("should_escalate", "decoded_summary", "matched_rule")
 PHASES = {
     "recon", "secret_discovery", "encoded_dropper_c2", "exfiltration",
     "persistence_self_migration", "cloud_k8s_identity_probe",
@@ -39,18 +40,20 @@ PHASES = {
 ENCODING_LAYERS = {"none", "base64", "gzip+base64", "chunked+xor+gzip+base64", "jinja2-template"}
 REQUIRED_PHASES = PHASES - {"benign"}
 
-# RFC 5737 documentation ranges -- the only address space this corpus may
-# use. Real WireGuard tunnel range (10.8.0.0/24, APIARY's own real
-# production range per docs/honeypot-network-isolation.md) is intentionally
-# ALSO allowed: corpus-007's benign WireGuard-handshake baseline event
-# names the stack's real tunnel peer address on purpose, to give phase 3's
-# criticality rules a genuine "known good" contrast against corpus-023's
-# unexpected mesh client -- it is not attacker-controlled or secret, so it
-# carries none of the risk the TEST-NET-only rule below exists to prevent.
+# Documentation-use address ranges -- the only address space this corpus may
+# use: RFC 5737's TEST-NET blocks plus RFC 3849's IPv6 analogue. Real
+# WireGuard tunnel range (10.8.0.0/24, APIARY's own real production range per
+# docs/honeypot-network-isolation.md) is intentionally ALSO allowed:
+# corpus-007's benign WireGuard-handshake baseline event names the stack's
+# real tunnel peer address on purpose, to give phase 3's criticality rules a
+# genuine "known good" contrast against corpus-023's unexpected mesh client
+# -- it is not attacker-controlled or secret, so it carries none of the risk
+# the documentation-ranges-only rule below exists to prevent.
 TEST_NET_RANGES = [
     ipaddress.ip_network("192.0.2.0/24"),
     ipaddress.ip_network("198.51.100.0/24"),
     ipaddress.ip_network("203.0.113.0/24"),
+    ipaddress.ip_network("2001:db8::/32"),  # RFC 3849, the IPv6 TEST-NET (#2092)
 ]
 ALLOWED_NON_TEST_NET_IPS = {
     "10.8.0.1",  # corpus-007: APIARY's own real WireGuard tunnel peer -- see above.
@@ -68,11 +71,21 @@ IP_KEYS = {"src_ip", "dest_ip", "dst_ip", "peer", "host"}
 
 def _find_ips(value) -> list[str]:
     """Recursively pulls every string under an IP-shaped key, plus every
-    bare dotted-quad found anywhere else in the structure (covers dns.rrname
-    labels, process_args, and other free-text fields the fixed key list
-    above wouldn't catch)."""
+    bare dotted-quad or IPv6-shaped run found anywhere else in the
+    structure (covers dns.rrname labels, process_args, and other
+    free-text fields the fixed key list above wouldn't catch).
+
+    #2092: this fallback used to be IPv4-only, so a global-unicast IPv6
+    planted in exactly those free-text fields passed the gate while the
+    docstring claimed otherwise. The IPv6 pass deliberately over-collects
+    -- any run of hex/colon/dot characters is a candidate -- because the
+    actual authority is ipaddress.ip_address() at the call site: parseable
+    or not decides it. Returns de-duplicated candidates in first-seen
+    order (an IP-keyed value that also matches a regex used to yield its
+    error twice)."""
     found: list[str] = []
     ip_literal_re = re.compile(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b")
+    v6_candidate_re = re.compile(r"[0-9A-Fa-f:.]{2,}")
 
     def walk(v, key=None):
         if isinstance(v, dict):
@@ -86,9 +99,13 @@ def _find_ips(value) -> list[str]:
                 found.append(v)
             for m in ip_literal_re.findall(v):
                 found.append(m)
+            if ":" in v:
+                for m in v6_candidate_re.findall(v):
+                    if ":" in m:
+                        found.append(m)
 
     walk(value)
-    return found
+    return list(dict.fromkeys(found))
 
 
 def validate_event(event: dict, index: int) -> list[str]:
@@ -123,7 +140,7 @@ def validate_event(event: dict, index: int) -> list[str]:
     if not isinstance(ef, dict):
         errors.append(f"event {index}: expected_findings must be an object")
     else:
-        for f in ("should_escalate", "decoded_summary", "matched_rule"):
+        for f in EXPECTED_FINDINGS_FIELDS:
             if f not in ef:
                 errors.append(f"event {index}: expected_findings missing {f!r}")
         if "should_escalate" in ef and not isinstance(ef["should_escalate"], bool):
@@ -131,19 +148,22 @@ def validate_event(event: dict, index: int) -> list[str]:
         if event.get("is_benign") and ef.get("should_escalate"):
             errors.append(f"event {index}: is_benign=true but expected_findings.should_escalate=true (contradiction -- #154 requires benign near-neighbors to never be the reason to escalate)")
 
-    # Safety constraint: TEST-NET-only addressing (#154: "Do not copy live
-    # indicators... All replay input must be synthetic and non-routable").
+    # Safety constraint: documentation-ranges-only addressing (#154: "Do not
+    # copy live indicators... All replay input must be synthetic and
+    # non-routable").
     for ip in _find_ips(event.get("raw", {})):
         if ip in ALLOWED_NON_TEST_NET_IPS:
             continue
         try:
             addr = ipaddress.ip_address(ip)
         except ValueError:
-            continue  # not actually an IP literal (a version string, a hash fragment, etc.)
+            continue  # not an address after all (a timestamp or hex-run fragment). A dotted-quad
+            # version string DOES parse as IPv4 and must then sit inside the ranges below --
+            # erroring there is the conservative direction (#2092).
         if not any(addr in net for net in TEST_NET_RANGES):
             errors.append(
-                f"event {index} ({event['event_id']}): address {ip!r} is not in a TEST-NET range "
-                f"(192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24) and not on the allowed-exceptions list"
+                f"event {index} ({event['event_id']}): address {ip!r} is not in a TEST-NET/documentation range "
+                f"(192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24, 2001:db8::/32) and not on the allowed-exceptions list"
             )
 
     return errors
@@ -226,7 +246,7 @@ def main() -> int:
             print(f"  - {err}", file=sys.stderr)
         return 1
 
-    print(f"OK: {len(events)} events, all required phases present, all addresses TEST-NET-safe")
+    print(f"OK: {len(events)} events, all required phases present, addresses TEST-NET/document-IPv6-safe")
     return 0
 
 
