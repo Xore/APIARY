@@ -794,11 +794,17 @@ def _build_security_index(job_id: str):
     xrefs_data = _read_job_artifact(job_id, "xrefs.json")
     if functions_data is None or imports_data is None or xrefs_data is None:
         return None
+    # decompiled.json + the uncapped envelope total feed the coverage block's
+    # success ratio and truncation flags (#2068) -- the scorer needs the
+    # attempts' outcomes, not just the cap. Missing decompiled.json (a job
+    # old enough to predate it) scores via the legacy budget-ratio fallback.
     return security_index.build_security_index(
         functions_data.get("functions", []),
         imports_data if isinstance(imports_data, list) else [],
         xrefs_data,
         max_decompile_functions=GHIDRA_MAX_DECOMPILE_FUNCTIONS,
+        decompiled_data=_read_job_artifact(job_id, "decompiled.json"),
+        functions_total=functions_data.get("total"),
     )
 
 
