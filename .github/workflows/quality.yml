@@ -323,6 +323,28 @@ jobs:
               # trust safe after #1419 removed it as spoofable.
               python arcane/home/honeypot-hellpot/hellpot/tests/test_xff_trust_patch.py
 
+          - name: "Mailoney JSON-line sink patches (#1422, #2197)"
+            run: |
+              # Exact-text build-time patches over vendored core.py. The suite
+              # execs the injected helper block under the container's own
+              # TZ=Europe/Berlin pin to prove emitted Z-suffixed stamps are
+              # true UTC (#2197: Berlin wall clock used to wear a Z, shifting
+              # ip-enrichment-worker's portbridge join by the DST offset),
+              # that every match target still fits upstream verbatim, and
+              # that AUTH PLAIN capture survives unpadded or hostile base64.
+              python arcane/home/honeypot-mailoney/mailoney/tests/test_json_log_patch.py
+
+          - name: Sensor timestamps carry explicit UTC sources (#2197)
+            run: |
+              # Repo-wide grep-level guard for the class behind #2197: any
+              # emitter of a %SZ stamp must pass an explicit UTC source
+              # (gmtime/timezone.utc/date -u) on the same line, or carry a
+              # `utc-verified:` waiver with its reason inline. Parse-side
+              # formats are exempt by construction; Rust .format() calls are
+              # out of scope by design -- the zone rides on the value's type,
+              # not the template.
+              python scripts/check-timestamp-utc.py
+
           - name: Dionaea SMB exploit-signature incidents (#622, #1775)
             run: |
               # Executes the code this patch injects into smb.py, against a
