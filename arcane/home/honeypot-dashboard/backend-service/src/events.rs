@@ -478,6 +478,23 @@ pub fn row_from_hit(hit: &Value) -> EventRow {
 }
 
 /// Shared between the paginated list below and exports.rs's full-scope CSV
+/// The should-of-terms shape for one concept recorded under several keys
+/// (the sensors disagree about vocabulary; any match is the semantics the
+/// Go in-memory filter had). Module-level so every reader of a given id —
+/// events, session detail, report scopes (#2119) — calls the same helper
+/// instead of inlining its own field list and drifting.
+pub fn any_of(fields: &[&str], value: &str) -> Value {
+    let should: Vec<Value> = fields.iter().map(|f| json!({"term": {*f: value}})).collect();
+    json!({"bool": {"should": should, "minimum_should_match": 1}})
+}
+
+/// Every field a user-supplied session id can live in. The mailoney/tanner/
+/// http-honeypot family writes `honeypot.session_id` (mail.rs queries it to
+/// fetch message bodies), most other sensors `honeypot.session`, ECS-shaped
+/// sources `session.id` — a reader that matches only two of the three drops
+/// exactly the sessions an operator copied an id off a page for.
+pub const SESSION_FIELDS: &[&str] = &["honeypot.session", "honeypot.session_id", "session.id"];
+
 /// export — same filter fields, same semantics, so an export always
 /// matches exactly what the equivalent list view is currently showing
 /// (#513's own "never a silently different scope than the page" rule).
@@ -524,10 +541,8 @@ pub fn build_filters(q: &EventsQuery) -> Vec<Value> {
     // ── Pivot filters (#1653). A multi-field pivot is a should-of-terms:
     // the sensors record the same concept under different keys, and any
     // match is the semantics the Go in-memory filter had.
-    let any_of = |fields: &[&str], value: &str| -> Value {
-        let should: Vec<Value> = fields.iter().map(|f| json!({"term": {*f: value}})).collect();
-        json!({"bool": {"should": should, "minimum_should_match": 1}})
-    };
+    // (#2119: any_of moved to module level so report scopes and the
+    // session pane share this crate's one field vocabulary.)
     if let Some(persona) = q.persona.as_deref().filter(|v| !v.is_empty()) {
         filters.push(json!({"term": {"honeypot.persona_id": persona}}));
     }
@@ -562,7 +577,7 @@ pub fn build_filters(q: &EventsQuery) -> Vec<Value> {
         filters.push(any_of(&["honeypot.path", "honeypot.url"], path));
     }
     if let Some(session) = q.session.as_deref().filter(|v| !v.is_empty()) {
-        filters.push(any_of(&["honeypot.session", "honeypot.session_id", "session.id"], session));
+        filters.push(any_of(SESSION_FIELDS, session));
     }
     if let Some(asn) = q.asn.as_deref().filter(|v| !v.is_empty()) {
         filters.push(json!({"term": {"source.as.asn": asn}}));
@@ -726,5 +741,48 @@ mod fleet_attribution_tests {
         let rendered = exclusion.to_string();
         assert!(rendered.contains("honeypot.internal_probe"), "{rendered}");
         assert!(rendered.contains("netflow"), "the suricata noise exclusion must survive: {rendered}");
+    }
+}
+
+#[cfg(test)]
+mod session_scope_tests {
+    use super::*;
+
+    fn filters_for(session: &str) -> Vec<Value> {
+        let q: EventsQuery = serde_json::from_value(json!({"session": session})).unwrap();
+        build_filters(&q)
+    }
+
+    #[test]
+    fn the_session_clause_matches_all_three_id_fields() {
+        // #2119: the report scope matched only two of the three and
+        // silently dropped mailoney/tanner sessions, whose events carry
+        // honeypot.session_id — an incident report scoped to such an id
+        // came back reading as "no matching telemetry".
+        let rendered = filters_for("sess-abc")
+            .iter()
+            .find(|f| f.to_string().contains("honeypot.session"))
+            .expect("a session clause is emitted")
+            .to_string();
+        for field in SESSION_FIELDS {
+            assert!(rendered.contains(field), "the session clause must match {field}: {rendered}");
+        }
+        assert!(rendered.contains("\"minimum_should_match\":1"), "{rendered}");
+    }
+
+    #[test]
+    fn no_session_clause_is_emitted_when_the_scope_is_empty() {
+        let q: EventsQuery = serde_json::from_value(json!({})).unwrap();
+        let rendered = build_filters(&q).iter().map(|f| f.to_string()).collect::<String>();
+        assert!(!rendered.contains("honeypot.session"), "{rendered}");
+        assert!(!rendered.contains("session.id"), "{rendered}");
+    }
+
+    #[test]
+    fn every_reader_shares_one_vocabulary() {
+        // The whole point of #2119: the field list lives in exactly one
+        // place, and events.rs, session.rs and reports_data.rs all call
+        // through it. A fourth id field lands here once or nowhere.
+        assert_eq!(SESSION_FIELDS, &["honeypot.session", "honeypot.session_id", "session.id"]);
     }
 }

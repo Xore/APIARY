@@ -141,14 +141,12 @@ pub async fn detail(
     if id.is_empty() || id.len() > 256 {
         return Err((StatusCode::BAD_REQUEST, "invalid session id".into()));
     }
+    // The pane that hands out session ids matches the same vocabulary
+    // every other reader uses (#2119).
     let body = json!({
         "size": 1000,
         "sort": [{"@timestamp": {"order": "asc"}}],
-        "query": {"bool": {"should": [
-            {"term": {"honeypot.session": id}},
-            {"term": {"honeypot.session_id": id}},
-            {"term": {"session.id": id}}
-        ], "minimum_should_match": 1}}
+        "query": crate::events::any_of(crate::events::SESSION_FIELDS, &id)
     });
     let result = state
         .es
