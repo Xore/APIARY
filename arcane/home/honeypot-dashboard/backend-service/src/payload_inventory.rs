@@ -204,20 +204,55 @@ fn scan_dirs(dirs: &[String]) -> (Vec<CapturedFile>, HashMap<String, (PathBuf, u
                 ("".to_string(), "".to_string(), "".to_string(), "".to_string(), false);
             let mut preview = String::new();
 
-            if let Ok(mut file) = std::fs::File::open(&path) {
+            // #2118: classify each file fault-isolated. A panic in any
+            // heuristic used to unwind out of scan_dirs entirely — aborting
+            // the whole cycle, with every later tick re-reaching the same
+            // poisoned capture and aborting again until someone deleted the
+            // file by hand. Now one bad file costs itself only: the entry
+            // stands on binary defaults and the log names the file.
+            let classified = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 use std::io::Read;
+                let mut file = std::fs::File::open(&path)?;
                 let mut head = vec![0u8; HEAD_BYTES];
-                if let Ok(n) = file.read(&mut head) {
-                    head.truncate(n);
-                    let classification = classify_payload(&head);
-                    mime = mime_for(&classification.category, &head);
-                    kind = classification.label;
-                    kind_code = classification.code;
-                    platform = classification.platform;
-                    analysis_path = classification.analysis_path;
-                    dynamic = classification.dynamic;
-                    let preview_bytes = &head[..head.len().min(PREVIEW_CAP)];
-                    preview = hex_dump(preview_bytes);
+                let n = file.read(&mut head)?;
+                head.truncate(n);
+                let classification = classify_payload(&head);
+                let preview = hex_dump(&head[..head.len().min(PREVIEW_CAP)]);
+                Ok::<_, std::io::Error>((
+                    mime_for(&classification.category, &head),
+                    classification.label,
+                    classification.code,
+                    classification.platform,
+                    classification.analysis_path,
+                    classification.dynamic,
+                    preview,
+                ))
+            }));
+            match classified {
+                Ok(Ok((read_mime, read_kind, read_code, read_platform, read_analysis, read_dynamic, dumped))) => {
+                    mime = read_mime;
+                    kind = read_kind;
+                    kind_code = read_code;
+                    platform = read_platform;
+                    analysis_path = read_analysis;
+                    dynamic = read_dynamic;
+                    preview = dumped;
+                }
+                // Vanished or unreadable mid-walk — benign silent skip of
+                // the content fields, matching Go's posture for the same case.
+                Ok(Err(_)) => {}
+                Err(panic) => {
+                    let detail = panic
+                        .downcast_ref::<&str>()
+                        .map(|s| (*s).to_string())
+                        .or_else(|| panic.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "non-string panic payload".to_string());
+                    tracing::warn!(
+                        hash,
+                        file = %path.display(),
+                        detail = %detail,
+                        "payload-inventory: classify panicked; entry kept on binary defaults"
+                    );
                 }
             }
 
