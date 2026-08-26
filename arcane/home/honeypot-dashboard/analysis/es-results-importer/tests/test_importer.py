@@ -318,6 +318,81 @@ class ScanSourceChunkedTest(unittest.TestCase):
             MODULE.MAX_CHUNKED_ARTIFACT_BYTES = original_max
 
 
+class DispatchBulkTest(unittest.TestCase):
+    """#2109: bulk() batches by action count, never by bytes, so a chunked
+    artifact's ~11MB documents all rode in ONE HTTP request -- anything
+    past ~9 chunks exceeded ES's ~100MB body cap and the identical
+    oversized request was rebuilt and rejected every pass, permanently.
+    dispatch_bulk() is the seam that fixes it; these tests pin the sizing
+    contract without a live Elasticsearch."""
+
+    def _record(self):
+        calls = []
+
+        def fake_bulk(es, actions, **kwargs):
+            calls.append({"actions": list(actions), "kwargs": kwargs})
+            return len(actions), []
+
+        return fake_bulk, calls
+
+    def test_chunked_source_is_dispatched_one_action_per_request(self):
+        original = MODULE.bulk
+        fake_bulk, calls = self._record()
+        MODULE.bulk = fake_bulk
+        try:
+            source = {"label": "sandbox_export_host_pcap", "chunked": True}
+            pending = [
+                ("job.pcap", 1.0, {"_id": "job:host_pcap:0"}),
+                ("job.pcap", 1.0, {"_id": "job:host_pcap:1"}),
+                ("job.pcap", 1.0, {"_id": "job:host_pcap:2"}),
+            ]
+            ok, errors = MODULE.dispatch_bulk(None, pending, source)
+        finally:
+            MODULE.bulk = original
+
+        self.assertEqual((ok, errors), (3, []))
+        # chunk_size=1 is the whole fix: one ~11MB chunk per request,
+        # independent of how many chunks the artifact produced.
+        self.assertEqual(calls[0]["kwargs"].get("chunk_size"), 1)
+        self.assertEqual(len(calls[0]["actions"]), 3)
+
+    def test_plain_sources_keep_the_default_batching(self):
+        original = MODULE.bulk
+        fake_bulk, calls = self._record()
+        MODULE.bulk = fake_bulk
+        try:
+            source = {"label": "ghidra"}
+            pending = [("a.json", 1.0, {"_id": "ghidra:x"})]
+            MODULE.dispatch_bulk(None, pending, source)
+        finally:
+            MODULE.bulk = original
+
+        self.assertNotIn("chunk_size", calls[0]["kwargs"])
+
+    def test_largest_single_chunk_action_stays_well_under_the_es_body_cap(self):
+        """The invariant #2109 leaves standing: with one action per
+        request, no request can exceed one chunk's serialized size -- pin
+        that even a full CHUNK_BYTES of incompressible data plus its
+        envelope sits far below Elasticsearch's ~100MB default."""
+        import json as _json
+        import tempfile
+
+        source = next(
+            s for s in MODULE.SOURCES
+            if s["env"] == "SANDBOX_RESULTS_DIR" and s["label"] == "sandbox_export_host_pcap"
+        )
+        chunk = bytes(range(256)) * (MODULE.CHUNK_BYTES // 256 + 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / f"{JOB}.host.pcap").write_bytes(chunk[: MODULE.CHUNK_BYTES])
+            pending = MODULE.scan_source(source, root, {})
+
+        self.assertEqual(len(pending), 1)
+        largest = max(len(_json.dumps(action).encode()) for _, _, action in pending)
+        self.assertLess(largest, MODULE.CHUNK_BYTES * 4 // 3 + 4096)
+        self.assertLess(largest, 50 * 1024 * 1024)
+
+
 class AdvanceStateAfterBulkTest(unittest.TestCase):
     def test_single_action_key_advances_on_success_only(self):
         state = {}
