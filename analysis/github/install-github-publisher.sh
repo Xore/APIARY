@@ -11,9 +11,21 @@
 set -euo pipefail
 
 [[ ${EUID} -eq 0 ]] || { echo "Run as root" >&2; exit 1; }
-for cmd in git jq zip file; do
-  command -v "$cmd" >/dev/null || { echo "$cmd is required" >&2; exit 1; }
+# #2083: each of these is load-bearing downstream -- setfacl is what
+# re-grants uid 65534 write access to the spool on every drain run
+# (process-github-requests.sh; without the 'acl' package that grant
+# silently no-ops and dashboard submissions never land), and
+# honeypot-github-collect.service hardcodes /usr/bin/python3 as its
+# interpreter. Fail here, with names, rather than at runtime far away.
+for cmd in git jq zip file setfacl; do
+  if ! command -v "$cmd" >/dev/null; then
+    echo "$cmd is required" >&2
+    [[ $cmd == setfacl ]] && echo "  (install the 'acl' package)" >&2
+    exit 1
+  fi
 done
+[[ -x /usr/bin/python3 ]] || { echo "/usr/bin/python3 is required" \
+  "(honeypot-github-collect.service hardcodes that path)" >&2; exit 1; }
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 target=/usr/local/libexec/honeypot-github
@@ -47,10 +59,24 @@ clone_dir=${GITHUB_CLONE:-/var/lib/honeypot-github/repo}
 repo=${GITHUB_REPO:-Xore/honeypot}
 if [[ ! -d $clone_dir/.git ]]; then
   install -d -m 0700 -o root -g root "$(dirname "$clone_dir")"
-  git clone --quiet "https://github.com/$repo.git" "$clone_dir"
-  echo "Cloned $repo to $clone_dir. Wire GH_PAT into its push credentials" \
-       "(a credential helper or an https remote carrying the token) before" \
-       "setting GITHUB_PUBLISH_ENABLED=1 -- an anonymous clone can fetch but not push."
+  # #2083: use the GH_PAT this script just sourced, if it is already armed
+  # -- an anonymous clone fails outright on a private results repo, which
+  # is what this pipeline feeds. The tokened URL is normalized immediately
+  # after the clone so the PAT never persists in .git/config; a credential
+  # helper passed via `git clone -c` was rejected because clone PERSISTS
+  # -c key=value into the new repository's config (it is --config).
+  if [[ -n ${GH_PAT:-} ]]; then
+    git clone --quiet "https://x-access-token:${GH_PAT}@github.com/$repo.git" "$clone_dir"
+    git -C "$clone_dir" remote set-url origin "https://github.com/$repo.git"
+    echo "Cloned $repo to $clone_dir using the GH_PAT from /etc/honeypot-github.env" \
+         "(remote URL normalized -- the token is not stored in the clone)."
+  else
+    git clone --quiet "https://github.com/$repo.git" "$clone_dir"
+    echo "Cloned $repo to $clone_dir anonymously -- works only for a public repo." \
+         "If GITHUB_REPO is private, arm GH_PAT in /etc/honeypot-github.env and re-run" \
+         "this script; either way wire push credentials (a credential helper or an" \
+         "https remote carrying the token) before setting GITHUB_PUBLISH_ENABLED=1."
+  fi
 fi
 
 systemctl daemon-reload
