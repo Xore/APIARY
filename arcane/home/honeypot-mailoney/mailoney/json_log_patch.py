@@ -68,7 +68,7 @@ import binascii
 import sys
 import uuid
 import argparse
-from time import strftime
+from time import gmtime, strftime
 from typing import Optional, Tuple, Dict, Any, List
 
 from .db import create_session, update_session_data, log_credential, init_db
@@ -85,7 +85,17 @@ def _emit_json_event(event, addr, dest_ip, dest_port, server_name, **fields):
     sensor_name override established the same pattern for #1423)."""
     path = os.environ.get("MAILONEY_JSON_LOG", "/var/log/honeypot/mailoney.json")
     record = {
-        "timestamp": strftime("%Y-%m-%dT%H:%M:%SZ"),
+        # Explicit-UTC stamp: strftime renders process-local wall clock, and
+        # this container pins TZ=Europe/Berlin (compose.yml), so a bare
+        # "%Y-%m-%dT%H:%M:%SZ" emits Berlin time wearing a Z -- off by the
+        # DST offset (2h summer / 1h winter) while claiming UTC. The
+        # ip-enrichment-worker parses exactly this field as RFC3339 UTC for
+        # its portbridge join (sensors.rs), so that skew directly widened
+        # the time-since-dial window and re-created the wrong-attribution
+        # ambiguity #1917 shrank. gmtime() is the deliberate UTC source;
+        # do not "derive" it from the TZ env var, which is set to Berlin
+        # here on purpose (#2197).
+        "timestamp": strftime("%Y-%m-%dT%H:%M:%SZ", gmtime()),
         "sensor": "mailoney",
         "event": event,
         "src_ip": addr[0],

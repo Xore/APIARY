@@ -228,7 +228,10 @@ class TestBuildCampaignVerdict(unittest.TestCase):
 class TestRunCycle(unittest.TestCase):
     def test_end_to_end_writes_only_escalating_campaigns(self):
         now = datetime.now(timezone.utc)
-        ts_recent = (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        # utc-verified below: the zone lives in `now`, an aware UTC
+        # datetime, so this stamp renders true UTC -- but the zone sits
+        # one line up where grep cannot see it, hence the waiver.
+        ts_recent = (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")  # utc-verified: now is timezone.utc-aware (line above)
         es = FakeElasticsearch({
             "honeypot-v2-2026": [
                 _cowrie_doc("high1", ts_recent, "sess-danger", "203.0.113.10", "cat /proc/self/environ"),
