@@ -16,14 +16,19 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
+
+// errOut stands in for os.Stderr so tests can capture diagnostics (#2240).
+var errOut io.Writer = os.Stderr
 
 type rule struct {
 	proto      string
@@ -124,13 +129,98 @@ func serveTCP(ip string, r rule) {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "portbridge: tcp %s -> %s\n", addr, r.target)
+	acceptLoop(ln, addr, func(c net.Conn) { go pipeTCP(c, r.target, idleTimeout()) },
+		acceptOptions{backoffMin: defaultAcceptBackoffMin, backoffMax: defaultAcceptBackoffMax})
+}
+
+// #2240 tuneables for the accept loop and UDP session table. The accept
+// backoff starts small so a transient blip costs almost nothing, but caps at
+// a value that keeps a persistently failing listener from spinning (the old
+// bare `continue` pegged one core per affected rule while producing zero
+// diagnostics -- most acute exactly when the process is already at its fd
+// limit, which is when Accept fails every call). The session cap bounds the
+// per-client socket table; the churn that needs it is slow by design
+// (10 fresh ports/s against an open UDP rule), so even 512 buys hours of
+// legitimate steady state before shedding ever engages.
+const (
+	defaultAcceptBackoffMin = 5 * time.Millisecond
+	defaultAcceptBackoffMax = time.Second
+	defaultUDPMaxSessions   = 512
+	logThrottleInterval     = 10 * time.Second
+)
+
+type acceptOptions struct {
+	backoffMin time.Duration
+	backoffMax time.Duration
+	// logEvery picks how often a persistent failure re-logs its progress;
+	// 0 selects the default cadence. Exposed for tests.
+	logEvery int
+}
+
+func acceptLoop(ln net.Listener, addr string, spawn func(net.Conn), opts acceptOptions) {
+	backoff := opts.backoffMin
+	failures := 0
+	logEvery := opts.logEvery
+	if logEvery == 0 {
+		logEvery = 50
+	}
 	for {
 		c, err := ln.Accept()
 		if err != nil {
+			// A closed listener is the only clean way out -- anything else
+			// gets backoff-and-retry, not bail-out (see below).
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+			failures++
+			// Never bail out of the loop entirely: exiting here would take
+			// this rule's forwarding down until the whole process restarted,
+			// which turns a transient EMFILE burst into a manual outage. A
+			// capped backoff is "restart" semantics at negligible cost.
+			if failures == 1 || failures%logEvery == 0 {
+				fmt.Fprintf(errOut,
+					"portbridge: tcp %s accept failed %d times in a row (still retrying): %v\n",
+					addr, failures, err)
+			}
+			time.Sleep(backoff)
+			backoff *= 2
+			if backoff > opts.backoffMax {
+				backoff = opts.backoffMax
+			}
 			continue
 		}
-		go pipeTCP(c, r.target, idleTimeout())
+		failures = 0
+		backoff = opts.backoffMin
+		spawn(c)
 	}
+}
+
+// rateLimitedLog lets a pathological path (a full table shedding every fresh
+// datagram, say) complain loudly without the complaining itself becoming a
+// new CPU or stderr-flooding problem: at most one line per interval.
+type rateLimitedLog struct {
+	interval time.Duration
+	mu       sync.Mutex
+	last     time.Time
+}
+
+func (l *rateLimitedLog) allow(now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if now.Sub(l.last) >= l.interval {
+		l.last = now
+		return true
+	}
+	return false
+}
+
+func udpMaxSessions() int {
+	if v := os.Getenv("UDP_MAX_SESSIONS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultUDPMaxSessions
 }
 
 func pipeTCP(client net.Conn, target string, idle time.Duration) {
@@ -148,8 +238,36 @@ func pipeTCP(client net.Conn, target string, idle time.Duration) {
 	<-done
 }
 
-// serveUDP forwards datagrams with a small per-client session table so replies
-// find their way back.
+// udpReplyWindow is how long a per-client session sits idle before its
+// return goroutine's read deadline evicts it -- unchanged from the original
+// design; #2240 only adds a ceiling the forward path participates in, so a
+// scanner cycling source ports cannot walk fd count to the wall faster than
+// silence can expire sessions (which it previously could: a held session
+// only needed one datagram per 30s window to live forever).
+const udpReplyWindow = 30 * time.Second
+
+type udpSession struct {
+	up      *net.UDPConn
+	lastUse time.Time // guarded by serveUDP's mu; consulted for LRU eviction
+}
+
+// udpForwarder is serveUDP's per-rule state: one front listener, the capped
+// per-client session table, and the upstream target every session dials to.
+type udpForwarder struct {
+	label   string // listen addr, for log lines
+	conn    *net.UDPConn
+	target  *net.UDPAddr
+	max     int
+	shedLog *rateLimitedLog
+
+	mu       sync.Mutex
+	sessions map[string]*udpSession
+
+	// now is injectable so tests can fast-forward session ages instead of
+	// waiting out the real reply window.
+	now func() time.Time
+}
+
 func serveUDP(ip string, r rule) {
 	laddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(ip, r.listenPort))
 	if err != nil {
@@ -165,44 +283,128 @@ func serveUDP(ip string, r rule) {
 	if err != nil {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "portbridge: udp %s -> %s\n", laddr, r.target)
+	f := &udpForwarder{
+		label:    laddr.String(),
+		conn:     conn,
+		target:   target,
+		max:      udpMaxSessions(),
+		shedLog:  &rateLimitedLog{interval: logThrottleInterval},
+		sessions: map[string]*udpSession{},
+		now:      time.Now,
+	}
+	fmt.Fprintf(os.Stderr, "portbridge: udp %s -> %s (max %d sessions)\n",
+		laddr, r.target, f.max)
+	f.run()
+}
 
-	var mu sync.Mutex
-	sessions := map[string]*net.UDPConn{}
+func (f *udpForwarder) run() {
 	buf := make([]byte, 64*1024)
 	for {
-		n, client, err := conn.ReadFromUDP(buf)
+		n, client, err := f.conn.ReadFromUDP(buf)
 		if err != nil {
 			continue
 		}
-		key := client.String()
-		mu.Lock()
-		up, ok := sessions[key]
-		if !ok {
-			up, err = net.DialUDP("udp", nil, target)
-			if err != nil {
-				mu.Unlock()
-				continue
-			}
-			sessions[key] = up
-			// Return path: copy replies from target back to this client.
-			go func(up *net.UDPConn, client *net.UDPAddr, key string) {
-				rbuf := make([]byte, 64*1024)
-				for {
-					up.SetReadDeadline(time.Now().Add(30 * time.Second))
-					rn, err := up.Read(rbuf)
-					if err != nil {
-						mu.Lock()
-						delete(sessions, key)
-						mu.Unlock()
-						up.Close()
-						return
-					}
-					conn.WriteToUDP(rbuf[:rn], client)
-				}
-			}(up, client, key)
+		f.forward(client, buf[:n]) // forwarded or deliberately dropped (#2240)
+	}
+}
+
+// forward routes one datagram, enforcing the session ceiling (#2240). Returns
+// the number of bytes sent upstream -- dropped datagrams return 0.
+func (f *udpForwarder) forward(client *net.UDPAddr, payload []byte) int {
+	key := client.String()
+
+	f.mu.Lock()
+
+	// Enforce the ceiling before minting a new socket. First let genuinely-
+	// expired sessions go (their reply goroutine is usually about to reap
+	// them anyway); if the table is still full of flows seen inside the last
+	// reply window, shed the NEW client rather than evicting established
+	// ones -- replies must keep working for live flows, and a shed here is
+	// exactly the signal that someone is cycling source ports.
+	for len(f.sessions) >= f.max {
+		victimKey, victimAge := f.oldestSessionLocked()
+		if victimAge < udpReplyWindow {
+			break
 		}
-		mu.Unlock()
-		up.Write(buf[:n])
+		f.sessions[victimKey].up.Close()
+		delete(f.sessions, victimKey)
+		if f.shedLog.allow(f.now()) {
+			fmt.Fprintf(errOut,
+				"portbridge: udp %s evicted stale session %q (%ds idle, cap %d)\n",
+				f.label, victimKey, int(victimAge.Seconds()), f.max)
+		}
+	}
+
+	s, ok := f.sessions[key]
+	if !ok && len(f.sessions) >= f.max {
+		if f.shedLog.allow(f.now()) {
+			fmt.Fprintf(errOut,
+				"portbridge: udp %s session table full (%d), dropping datagram from fresh client %q -- if this repeats, something is cycling source ports\n",
+				f.label, len(f.sessions), key)
+		}
+		f.mu.Unlock()
+		return 0
+	}
+	if !ok {
+		up, derr := net.DialUDP("udp", nil, f.target)
+		if derr != nil {
+			if f.shedLog.allow(f.now()) {
+				fmt.Fprintf(errOut, "portbridge: udp %s dial upstream for %q failed: %v\n",
+					f.label, key, derr)
+			}
+			f.mu.Unlock()
+			return 0
+		}
+		s = &udpSession{up: up, lastUse: f.now()}
+		f.sessions[key] = s
+		// Return path: copy replies from target back to this client.
+		go udpReplyLoop(f.conn, up, client, key, &f.mu, f.sessions)
+	}
+	s.lastUse = f.now()
+	up := s.up
+	f.mu.Unlock()
+
+	// Deliberate fire-and-forget on the data write itself (#2240): a UDP
+	// write fails transiently whenever the peer's socket queue is momentarily
+	// full and that carries no operational meaning worth a log line; what
+	// WOULD be meaningful (dial failures, cap pressure) logs above.
+	up.Write(payload)
+	return len(payload)
+}
+
+// oldestSessionLocked finds the least-recently-used entry and its age.
+// Called with the mutex held; O(n) over a table capped at
+// defaultUDPMaxSessions is cheap.
+func (f *udpForwarder) oldestSessionLocked() (string, time.Duration) {
+	var oldestKey string
+	var oldest time.Time
+	first := true
+	for k, s := range f.sessions {
+		if first || s.lastUse.Before(oldest) {
+			oldestKey, oldest, first = k, s.lastUse, false
+		}
+	}
+	return oldestKey, f.now().Sub(oldest)
+}
+
+func udpReplyLoop(conn *net.UDPConn, up *net.UDPConn, client *net.UDPAddr,
+	key string, mu *sync.Mutex, sessions map[string]*udpSession) {
+	rbuf := make([]byte, 64*1024)
+	for {
+		up.SetReadDeadline(time.Now().Add(udpReplyWindow))
+		rn, err := up.Read(rbuf)
+		if err != nil {
+			mu.Lock()
+			// Only reap the session this loop actually owns: if the same
+			// client tuple reconnected after eviction, sessions[key] now
+			// points at a live replacement that must survive.
+			if cur, ok := sessions[key]; ok && cur.up == up {
+				delete(sessions, key)
+			}
+			mu.Unlock()
+			up.Close()
+			return
+		}
+		conn.WriteToUDP(rbuf[:rn], client)
 	}
 }
