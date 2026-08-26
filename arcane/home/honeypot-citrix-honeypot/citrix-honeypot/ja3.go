@@ -1,8 +1,10 @@
 package main
 
-// JA3 TLS ClientHello fingerprinting (#609): dashboard/classify.go has
+// JA3 TLS ClientHello fingerprinting (#609): the enrichment pipeline has
 // checked for an x-ja3/x-ja4 header on every citrix-honeypot request since
-// #553, but nothing in this stack ever computed one -- confirmed by
+// #553 -- originally dashboard/classify.go, now maintained in
+// honeypot-dashboard/backend-service/src/ip_enrichment/canonical.rs -- but
+// nothing in this stack ever computed one -- confirmed by
 // repo-wide grep, the branch was dead code. citrix-honeypot terminates its
 // own TLS handshake in-process (tls.go's selfSignedCert + main.go's
 // tls.NewListener), which makes it the right place to compute a real JA3
@@ -10,14 +12,17 @@ package main
 // (single) cipher/version via tls.ConnectionState, never the full list the
 // client offered, which is what JA3/JA4 actually fingerprint.
 //
-// JA3 only, not JA4, on purpose: JA4's hash-input string format (exact
-// delimiters/ordering feeding the two truncated-SHA256 components) has
-// enough real-world implementation variance that landing it here without a
-// way to cross-verify against a reference implementation risked shipping a
-// wrong hash as if it were reliable security telemetry. JA3's format is
-// simple and unambiguous (decimal fields, original wire order, single MD5)
-// and is verified below against hand-computed vectors. JA4 is tracked
-// separately (see the issue filed alongside this commit).
+// Both fingerprints ship: JA3 landed first (#609). JA4 was initially
+// deferred from that fix -- its hash-input string format (exact
+// delimiters/ordering feeding the two truncated-SHA256 components) had
+// enough real-world implementation variance that landing it without a way
+// to cross-verify against a reference implementation risked shipping a
+// wrong hash as if it were reliable security telemetry -- and then
+// implemented anyway under #759 once that verification existed: ja4.go
+// builds against FoxIO's own reference implementation, with test vectors
+// derived independently of this Go code. JA3's format is simple and
+// unambiguous (decimal fields, original wire order, single MD5) and is
+// verified below against hand-computed vectors.
 //
 // Reference: Salesforce's original JA3 spec -- MD5 of
 // "TLSVersion,Ciphers,Extensions,EllipticCurves,EllipticCurvePointFormats",
