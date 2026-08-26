@@ -44,34 +44,48 @@ const fetchPayloads = createServerFn({ method: 'GET' })
     return serviceJSON<Page>(`/api/v1/payloads?offset=${data.offset}&size=12${filter}`)
   })
 
-// Per-source totals for the filter chips (payloads.html:93-96). The Go
-// tier counted these during its inventory scan; here each named source
-// costs one size=1 count query against the same index.
-const fetchSourceCounts = createServerFn({ method: 'GET' })
-  .inputValidator((input: { sources: string[] }) => input)
-  .handler(async ({ data }): Promise<Record<string, number>> => {
-    const { serviceJSON } = await import('../lib/backend.server')
-    const counts = await Promise.all(
-      data.sources.map(async (source) => {
-        const page = await serviceJSON<Page>(`/api/v1/payloads?offset=0&size=1&q=${encodeURIComponent(sourceQuery(source))}`)
-        return [source, page?.total ?? 0] as const
-      }),
-    )
-    return Object.fromEntries(counts)
-  })
+// Per-source filter chips (#2179): one opt-in terms agg over the whole
+// inventory (`aggs=sources`) replaces both halves of the old discovery, which
+// seeded chips from CANONICAL_SOURCES plus whatever the loaded page happened
+// to hold — a rarer source deeper in the store was captured but had no chip,
+// and was therefore unfilterable — while every chip's count cost its own
+// extra size=1 round-trip. Buckets arrive exact and count-ordered straight
+// from the store; `other` carries ES's sum_other_doc_count so the UI can
+// still disclose "+N docs in rarer sources" if the terms size itself ever
+// becomes the bound. (CANONICAL_SOURCES used to seed the chip list here; the
+// whole-store census makes that seed obsolete — a source either has docs and
+// its bucket shows it, or it has none and never earned a chip.)
+type SourceCensus = { counts: Record<string, number>; other: number }
+
+const fetchSourceCounts = createServerFn({ method: 'GET' }).handler(async (): Promise<SourceCensus | null> => {
+  const { serviceJSON } = await import('../lib/backend.server')
+  type SourcesPage = Page & { source_buckets?: { key: string; doc_count: number }[]; source_other?: number }
+  const page = await serviceJSON<SourcesPage>('/api/v1/payloads?offset=0&size=1&aggs=sources')
+  if (!page) return null
+  const counts: Record<string, number> = {}
+  for (const bucket of page.source_buckets ?? []) counts[bucket.key] = bucket.doc_count
+  return { counts, other: page.source_other ?? 0 }
+})
 
 // GitHub-analysis verdict + family badges (payloads.html:13-15), the
 // ported attachGitHubAnalysisVerdicts (payloads_data.go): one whole-store
 // fetch, matched to cards by sha256 — only sha256-named captures
 // (cowrie/scripts) can carry a badge, same as the Go map keyed by SHA256.
 type GithubBadge = { sha256: string; label: string; family: string }
+type VerdictScan = { badges: GithubBadge[]; scanned: number; total: number }
 
-const fetchGithubVerdicts = createServerFn({ method: 'GET' }).handler(async (): Promise<GithubBadge[]> => {
-  const { serviceJSON } = await import('../lib/backend.server')
-  type StorePage = { total: number; rows: Record<string, unknown>[] }
-  const page = await serviceJSON<StorePage>('/api/v1/store/github-analysis?offset=0&size=100')
+// #2179: the store endpoint clamps a single page to 100 rows server-side, so
+// the original one-shot `size=100` request quietly shrank the badge map to
+// the 100 newest analyzed samples — deeper samples rendered without their
+// verdict badge, contrary to the "whole-store fetch" contract this ports
+// from the Go tier. Page through to the real total instead; the ceiling
+// keeps a pathological store bounded, and when it binds, the shortfall is
+// disclosed next to the grid rather than silently absorbed.
+const VERDICT_SCAN_CEILING = 1000
+
+function collectBadges(rows: Record<string, unknown>[]): GithubBadge[] {
   const badges: GithubBadge[] = []
-  for (const row of page?.rows ?? []) {
+  for (const row of rows) {
     const result = (row.github_analysis ?? row) as Record<string, unknown>
     const sha256 = typeof result.sha256 === 'string' ? result.sha256.toLowerCase() : ''
     if (!sha256) continue
@@ -86,6 +100,23 @@ const fetchGithubVerdicts = createServerFn({ method: 'GET' }).handler(async (): 
     badges.push({ sha256, label, family: typeof result.family === 'string' ? result.family : '' })
   }
   return badges
+}
+
+const fetchGithubVerdicts = createServerFn({ method: 'GET' }).handler(async (): Promise<VerdictScan | null> => {
+  const { serviceJSON } = await import('../lib/backend.server')
+  type StorePage = { total: number; rows: Record<string, unknown>[] }
+  let badges: GithubBadge[] = []
+  let scanned = 0
+  let total = 0
+  for (;;) {
+    const page = await serviceJSON<StorePage>(`/api/v1/store/github-analysis?offset=${scanned}&size=100`)
+    if (!page) break
+    total = Math.max(total, page.total)
+    badges = badges.concat(collectBadges(page.rows))
+    scanned += page.rows.length
+    if (page.rows.length === 0 || scanned >= Math.min(page.total, VERDICT_SCAN_CEILING)) break
+  }
+  return { badges, scanned, total }
 })
 
 // The action menu's Publish item — same admin gate, `confirm: "publish"`
@@ -123,8 +154,6 @@ export const Route = createFileRoute('/payloads')({
   loader: async () => ({ first: fetchPayloads({ data: { offset: 0 } }) }),
   component: Payloads,
 })
-
-const CANONICAL_SOURCES = ['dionaea', 'cowrie', 'scripts']
 
 // Family display bounded like Go's boundedFamily; the pivot link carries
 // the full value (truncating first would let two long names collide).
@@ -318,7 +347,8 @@ function Payloads() {
   const [uniqueTotal, setUniqueTotal] = useState(0)
   const [source, setSource] = useState('')
   const [counts, setCounts] = useState<Record<string, number> | null>(null)
-  const [badges, setBadges] = useState<GithubBadge[]>([])
+  const [sourceOther, setSourceOther] = useState(0)
+  const [verdictScan, setVerdictScan] = useState<VerdictScan | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
 
   useEffect(() => {
@@ -328,13 +358,18 @@ function Payloads() {
       setRows(page.rows)
       setTotal(page.total)
       setUniqueTotal(page.total)
-      const discovered = [...new Set([...CANONICAL_SOURCES, ...page.rows.flatMap((row) => row.Sources)])]
-      fetchSourceCounts({ data: { sources: discovered } }).then((result) => {
-        if (!cancelled && result) setCounts(result)
-      })
+    })
+    // #2179: the census is no longer seeded from the loaded page's rows --
+    // chips come from the whole-store terms agg, independent of what page 1
+    // happens to show.
+    fetchSourceCounts().then((result) => {
+      if (!cancelled && result) {
+        setCounts(result.counts)
+        setSourceOther(result.other)
+      }
     })
     fetchGithubVerdicts().then((result) => {
-      if (!cancelled && result) setBadges(result)
+      if (!cancelled && result) setVerdictScan(result)
     })
     return () => {
       cancelled = true
@@ -362,7 +397,7 @@ function Payloads() {
     }
   }, [rows, loadingMore, source])
 
-  const badgeFor = (hash: string) => badges.find((badge) => badge.sha256 === hash.toLowerCase())
+  const badgeFor = (hash: string) => verdictScan?.badges.find((badge) => badge.sha256 === hash.toLowerCase())
   const sourceNames = counts ? Object.keys(counts).filter((name) => counts[name] > 0) : []
 
   return (
@@ -392,6 +427,9 @@ function Payloads() {
                 </button>
               ),
             )}
+            {sourceOther > 0 ? (
+              <span className="chip">…{sourceOther.toLocaleString('en-US')} docs in rarer sources</span>
+            ) : null}
             <span className="chip">
               {(rows?.length ?? 0).toLocaleString('en-US')} loaded of {total.toLocaleString('en-US')} matching •{' '}
               {uniqueTotal.toLocaleString('en-US')} unique total
@@ -409,6 +447,15 @@ function Payloads() {
           Python, JavaScript and other script artifacts. Files are inert on disk but <strong>hostile</strong> — handle
           only in an isolated analysis VM.
         </p>
+        {/* #2179: badge coverage is whole-store after pagination; only when
+            the scan ceiling binds is the shortfall disclosed here instead of
+            silently rendering older captures without their badges. */}
+        {verdictScan && verdictScan.scanned < verdictScan.total ? (
+          <p className="note">
+            Verdict badges cover the {verdictScan.scanned.toLocaleString('en-US')} most recent analyzed samples of{' '}
+            {verdictScan.total.toLocaleString('en-US')} on record.
+          </p>
+        ) : null}
         <div className="project-grid" id="payloads-results">
           {rows === null ? (
             <SkeletonCards count={12} />

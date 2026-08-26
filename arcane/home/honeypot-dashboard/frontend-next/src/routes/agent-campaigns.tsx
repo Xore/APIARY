@@ -243,6 +243,16 @@ function Page() {
         Correlated, deterministically-scored campaigns from agent-intrusion-worker — every entry here crossed a named
         trust boundary via a rule in criticality_rules.py, not a model's own judgment call.
       </p>
+      {/* #2179: the per-category tiles count the campaigns that have loaded,
+          which lags the store until every page is fetched — say so next to
+          the numbers they count rather than presenting a prefix as the
+          fleet-wide breakdown. */}
+      {rows !== null && rows.length < total ? (
+        <p className="note">
+          Category counts cover the {rows.length.toLocaleString('en-US')} loaded campaigns of{' '}
+          {total.toLocaleString('en-US')} on record — view more to widen them.
+        </p>
+      ) : null}
       {kpis.length > 0 ? (
         <div className="metric-grid">
           {kpis.map(([cat, count]) => {

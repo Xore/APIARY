@@ -41,7 +41,18 @@ pub struct StoreQuery {
     /// ignored, because the list had no source column to filter on.
     #[serde(default)]
     pub ip: Option<String>,
+    /// #2179: set to "sources" on /api/v1/payloads to append a whole-store
+    /// per-source census (`source_buckets` + `source_other`) to the page.
+    /// Other routes ignore this; the payloads handler is the only consumer,
+    /// matching how `q`/`ip` grew here before it.
+    #[serde(default)]
+    pub aggs: Option<String>,
 }
+
+/// Terms-agg bucket count for payloads' source census. Larger than any
+/// realistic distinct-source population (dionaea/cowrie/scripts plus
+/// per-directory labels), with `source_other` disclosed on top (#2179).
+const SOURCES_AGG_TERMS: usize = 50;
 
 fn default_size() -> u64 {
     25
@@ -262,10 +273,33 @@ pub async fn payloads(
     State(state): State<AppState>,
     Query(q): Query<StoreQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
-    store_page(&state, &["dashboard-payload-inventory-v1"], "MtimeUTC", "date", &q, None)
+    let mut page = store_page(&state, &["dashboard-payload-inventory-v1"], "MtimeUTC", "date", &q, None)
         .await
-        .map(Json)
-        .map_err(bad_gateway)
+        .map_err(bad_gateway)?;
+    // #2179: opt-in whole-store source census (`?aggs=sources`) behind one
+    // terms aggregation. The filter chips used to discover sources from the
+    // first loaded page only -- a source that appeared nowhere in page 1 got
+    // no chip at all, so rarer captures were present but unfilterable -- and
+    // each chip cost its own size=1 round-trip. The agg returns every
+    // Sources value on record with its exact count; `source_other` carries
+    // sum_other_doc_count so the UI can still say "+N more" if the terms
+    // size itself ever becomes the bound.
+    if q.aggs.as_deref() == Some("sources") {
+        let result = state
+            .es
+            .search_index(
+                &["dashboard-payload-inventory-v1"],
+                json!({
+                    "size": 0,
+                    "aggs": {"sources": {"terms": {"field": "Sources", "size": SOURCES_AGG_TERMS}}}
+                }),
+            )
+            .await
+            .map_err(bad_gateway)?;
+        page["source_buckets"] = result["aggregations"]["sources"]["buckets"].clone();
+        page["source_other"] = result["aggregations"]["sources"]["sum_other_doc_count"].clone();
+    }
+    Ok(Json(page))
 }
 
 #[derive(Deserialize)]

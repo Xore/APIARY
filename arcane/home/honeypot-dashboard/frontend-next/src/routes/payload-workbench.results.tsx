@@ -1088,6 +1088,22 @@ function filterRows(rows: StoreRow[] | null, query: string): StoreRow[] | null {
   return rows.filter((row) => JSON.stringify(row).toLowerCase().includes(needle))
 }
 
+// #2179: the header chips always show store-wide totals, but this filter is
+// client-side over the fetched page only (25 rows) — so with an active query
+// and a partially-loaded store, the table can never account for the chips'
+// number and silently filters "what has loaded" as if it were everything.
+// Saying so next to the input keeps the two figures honest. Renders nothing
+// while no query is active or the whole store is already loaded.
+function FilterScopeNote({ page, query, matched }: { page: Page | null; query: string; matched: number }) {
+  if (query.trim() === '' || !page || page.total <= page.rows.length) return null
+  return (
+    <p className="note">
+      Filter matches {matched.toLocaleString('en-US')} of {page.rows.length.toLocaleString('en-US')} loaded rows —{' '}
+      {page.total.toLocaleString('en-US')} in the store.
+    </p>
+  )
+}
+
 function FilterInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
     <div className="filters">
@@ -1231,6 +1247,14 @@ function Results() {
   const [sandboxQuery, setSandboxQuery] = useState('')
   const [ghidraQuery, setGhidraQuery] = useState('')
 
+  // #2179: filtered views are computed once here so the table and its
+  // scope-disclosure note always describe the same list.
+  const workbenchFiltered = filterRows(workbench ? workbench.rows : null, workbenchQuery)
+  const staticFiltered = filterRows(statics ? statics.rows : null, staticQuery)
+  const yaraFiltered = filterRows(yara ? yara.rows : null, yaraQuery)
+  const sandboxFiltered = filterRows(sandbox ? sandbox.rows : null, sandboxQuery)
+  const ghidraFiltered = filterRows(ghidra ? ghidra.rows : null, ghidraQuery)
+
   return (
     <>
       <InvestigateHeader
@@ -1254,8 +1278,9 @@ function Results() {
         <RecentRunsCard owner={owner} refreshToken={runsToken} />
         <h2 className="label-section">Workbench runs</h2>
         <FilterInput label="workbench runs" value={workbenchQuery} onChange={setWorkbenchQuery} />
+        <FilterScopeNote page={workbench} query={workbenchQuery} matched={workbenchFiltered?.length ?? 0} />
         <MasterDetailTable
-          rows={filterRows(workbench ? workbench.rows : null, workbenchQuery)}
+          rows={workbenchFiltered}
           columns={WORKBENCH_COLUMNS}
           rowKey={(row, i) => `wb-${pathString(row, 'id')}-${i}`}
           inspectorTitle="Workbench run"
@@ -1287,8 +1312,9 @@ function Results() {
       <div className="dashboard-panel" role="tabpanel" id="wb-panel-static" aria-labelledby="wb-static" hidden={tab !== 'static'}>
         <h2 className="label-section">Static analysis</h2>
         <FilterInput label="static analyses" value={staticQuery} onChange={setStaticQuery} />
+        <FilterScopeNote page={statics} query={staticQuery} matched={staticFiltered?.length ?? 0} />
         <MasterDetailTable
-          rows={filterRows(statics ? statics.rows : null, staticQuery)}
+          rows={staticFiltered}
           columns={STATIC_COLUMNS}
           rowKey={(row, i) => `st-${pathString(row, 'Fingerprint')}-${i}`}
           inspectorTitle="Static analysis"
@@ -1313,8 +1339,9 @@ function Results() {
       <div className="dashboard-panel" role="tabpanel" id="wb-panel-yara" aria-labelledby="wb-yara" hidden={tab !== 'yara'}>
         <h2 className="label-section">YARA</h2>
         <FilterInput label="YARA results" value={yaraQuery} onChange={setYaraQuery} />
+        <FilterScopeNote page={yara} query={yaraQuery} matched={yaraFiltered?.length ?? 0} />
         <MasterDetailTable
-          rows={filterRows(yara ? yara.rows : null, yaraQuery)}
+          rows={yaraFiltered}
           columns={YARA_COLUMNS}
           rowKey={(_, i) => `ya-${i}`}
           inspectorTitle="YARA result"
@@ -1340,8 +1367,9 @@ function Results() {
       <div className="dashboard-panel" role="tabpanel" id="wb-panel-sandbox" aria-labelledby="wb-sandbox" hidden={tab !== 'sandbox'}>
         <h2 className="label-section">Sandbox detonations</h2>
         <FilterInput label="sandbox detonations" value={sandboxQuery} onChange={setSandboxQuery} />
+        <FilterScopeNote page={sandbox} query={sandboxQuery} matched={sandboxFiltered?.length ?? 0} />
         <MasterDetailTable
-          rows={filterRows(sandbox ? sandbox.rows : null, sandboxQuery)}
+          rows={sandboxFiltered}
           columns={SANDBOX_COLUMNS}
           rowKey={(_, i) => `sb-${i}`}
           inspectorTitle="Sandbox run"
@@ -1399,8 +1427,9 @@ function Results() {
         ) : null}
         <h2 className="label-section">Ghidra decompilation</h2>
         <FilterInput label="Ghidra runs" value={ghidraQuery} onChange={setGhidraQuery} />
+        <FilterScopeNote page={ghidra} query={ghidraQuery} matched={ghidraFiltered?.length ?? 0} />
         <MasterDetailTable
-          rows={filterRows(ghidra ? ghidra.rows : null, ghidraQuery)}
+          rows={ghidraFiltered}
           columns={GHIDRA_COLUMNS}
           rowKey={(_, i) => `gh-${i}`}
           inspectorTitle="Ghidra run"
