@@ -61,15 +61,27 @@ if [[ ! -d $clone_dir/.git ]]; then
   install -d -m 0700 -o root -g root "$(dirname "$clone_dir")"
   # #2083: use the GH_PAT this script just sourced, if it is already armed
   # -- an anonymous clone fails outright on a private results repo, which
-  # is what this pipeline feeds. The tokened URL is normalized immediately
-  # after the clone so the PAT never persists in .git/config; a credential
-  # helper passed via `git clone -c` was rejected because clone PERSISTS
-  # -c key=value into the new repository's config (it is --config).
+  # is what this pipeline feeds. Auth goes through a one-shot GIT_ASKPASS
+  # helper, deliberately NOT a user:pass@ remote: a credential-in-URL is
+  # exactly the shape scripts/check-public-leaks.py's :51 pattern exists to
+  # catch, env-var placeholder or not. A `git clone -c credential.helper`
+  # was also rejected because clone PERSISTS -c key=value into the new
+  # repository's config (--config). The helper lives only for this one
+  # clone (root-owned 0700 temp file) and reads the PAT from its inherited
+  # environment, so the token never appears in any URL, any persisted
+  # config, or any process argv.
   if [[ -n ${GH_PAT:-} ]]; then
-    git clone --quiet "https://x-access-token:${GH_PAT}@github.com/$repo.git" "$clone_dir"
-    git -C "$clone_dir" remote set-url origin "https://github.com/$repo.git"
+    export GH_PAT
+    askpass=$(mktemp /tmp/honeypot-clone-askpass.XXXXXX)
+    trap 'rm -f "$askpass"' EXIT
+    printf '#!/bin/sh\ncase $1 in *Username*) echo x-access-token ;; *) printf "%%s\\n" "$GH_PAT" ;; esac\n' >"$askpass"
+    chmod 0700 "$askpass"
+    GIT_TERMINAL_PROMPT=0 GIT_ASKPASS="$askpass" \
+      git clone --quiet "https://github.com/$repo.git" "$clone_dir"
+    rm -f "$askpass"
+    trap - EXIT
     echo "Cloned $repo to $clone_dir using the GH_PAT from /etc/honeypot-github.env" \
-         "(remote URL normalized -- the token is not stored in the clone)."
+         "(via a one-shot askpass helper; nothing credential-bearing persists)."
   else
     git clone --quiet "https://github.com/$repo.git" "$clone_dir"
     echo "Cloned $repo to $clone_dir anonymously -- works only for a public repo." \
