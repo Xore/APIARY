@@ -345,6 +345,18 @@ jobs:
               # not the template.
               python scripts/check-timestamp-utc.py
 
+          - name: "JSON sink retention parity (#120, #2196)"
+            run: |
+              # Every self-rotating JSON directory under /logs must have BOTH
+              # halves of the #120 contract present -- a writer that actually
+              # rotates (proven by its rotation token in source) and a pruner
+              # glob line in log-maintenance.sh -- plus every find line there
+              # must belong to a ledgered sink. #2196 shipped because mailoney
+              # lacked both halves at once and nothing structural connected
+              # compose volumes to vendored writers to this script; adding a
+              # sensor now means adding one reviewable ledger row instead.
+              python scripts/check-json-sink-retention-parity.py
+
           - name: Dionaea SMB exploit-signature incidents (#622, #1775)
             run: |
               # Executes the code this patch injects into smb.py, against a

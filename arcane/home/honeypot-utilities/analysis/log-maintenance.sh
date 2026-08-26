@@ -96,6 +96,23 @@ while true; do
   # glob shape covers it).
   find /logs/dionaea -maxdepth 1 -name 'dionaea.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
   find /logs/dionaea -maxdepth 1 -name 'dionaea_incident.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  # #2196 part 1: mailoney/json_log_patch.py now self-rotates too, under
+  # MAILONEY_JSON_MAX_BYTES (0 disables) -- same digit-leading suffix
+  # contract (mailoney.json.<stamp>, plus .2/.3/... on same-second
+  # collisions), so the sibling glob shape covers it.
+  find /logs/mailoney -maxdepth 1 -name 'mailoney.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  # #2196 part 2: the opt-in captured SMTP bodies under mail/ are ingest
+  # staging only now -- backend-service indexes full .eml bytes into ES
+  # (mailoney-mail-v1, es_importer.rs) and src/mail.rs serves reads from
+  # that index, so the disk copy only needs to outlive the importer's lag.
+  # Same reasoning as json_retention_min above: default to the #261
+  # knob's 1/10-of-retention window rather than inventing a day count.
+  # MAILONEY_MAIL_RETENTION_DAYS overrides directly.
+  mail_retention_days="${MAILONEY_MAIL_RETENTION_DAYS:-$(( ${HONEYPOT_RETENTION_DAYS:-30} / 10 ))}"
+  find /logs/mailoney/mail -type f -name '*.eml' -mtime "+${mail_retention_days}" -print -delete 2>/dev/null || true
+  # Empty <date>/<relay-ip> leaves add nothing once their bodies are gone;
+  # -delete walks depth-first and mindepth 1 keeps mail/ itself.
+  find /logs/mailoney/mail -mindepth 1 -type d -empty -delete 2>/dev/null || true
 
   sleep "$interval"
 done

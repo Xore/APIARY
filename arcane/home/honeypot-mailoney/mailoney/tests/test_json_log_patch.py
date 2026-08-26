@@ -242,6 +242,117 @@ class PatchApplication(unittest.TestCase):
             mod.main()
 
 
+class JsonLogRotation(unittest.TestCase):
+    """The #2196 writer half: rename-aside generations a pruner can glob."""
+
+    def setUp(self):
+        self.module = load_patch()
+        self.ns = exec_injected_header(self.module)
+
+    @staticmethod
+    def generations(path: Path):
+        return sorted(p.name for p in path.parent.glob(path.name + ".*")
+                      if p.name[len(path.name) + 1:].startswith(tuple("0123456789")))
+
+    def emit(self, log_path, big=0):
+        filler = "x" * big
+        saved = os.environ.get("MAILONEY_JSON_LOG")
+        os.environ["MAILONEY_JSON_LOG"] = str(log_path)
+        try:
+            self.ns["_emit_json_event"](
+                "envelope", ("192.0.2.10", 50321), "172.23.0.5", 25, "mx.example",
+                session_id="s1", command=f"MAIL FROM:<{filler}@example.org>",
+            )
+        finally:
+            if saved is None:
+                os.environ.pop("MAILONEY_JSON_LOG", None)
+            else:
+                os.environ["MAILONEY_JSON_LOG"] = saved
+        return log_path
+
+    def test_rotates_at_threshold_and_the_sink_survives_rotation(self):
+        saved = os.environ.get("MAILONEY_JSON_MAX_BYTES")
+        os.environ["MAILONEY_JSON_MAX_BYTES"] = "800"
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                log_path = Path(d) / "mailoney.json"
+                # ~700 byte records: rotation expected between 2nd and 4th
+                # emission, then the fresh active file keeps taking events.
+                for _ in range(8):
+                    self.emit(log_path, big=300)
+                    gens = self.generations(log_path)
+                    if gens:
+                        break
+                self.assertTrue(gens,
+                                "no generation appeared past the threshold")
+                for name in gens:
+                    self.assertRegex(
+                        name.replace("mailoney.json.", ""),
+                        r"\d{8}-\d{6}(\.\d+)?",
+                        f"generation {name} breaks the pruner-glob contract "
+                        f"(digit-leading suffix required)",
+                    )
+                self.emit(log_path, big=300)
+                post = log_path.read_text().count('"event"')
+                self.assertGreaterEqual(post, 1,
+                                        "sink stopped recording after rotating")
+        finally:
+            if saved is None:
+                os.environ.pop("MAILONEY_JSON_MAX_BYTES", None)
+            else:
+                os.environ["MAILONEY_JSON_MAX_BYTES"] = saved
+
+    def test_zero_disables_rotation(self):
+        saved = os.environ.get("MAILONEY_JSON_MAX_BYTES")
+        os.environ["MAILONEY_JSON_MAX_BYTES"] = "0"
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                log_path = Path(d) / "mailoney.json"
+                for _ in range(20):
+                    self.emit(log_path, big=600)
+                self.assertEqual(self.generations(log_path), [],
+                                 "max_bytes=0 must mean unbounded")
+                self.assertTrue(log_path.exists(), "live sink must persist")
+        finally:
+            if saved is None:
+                os.environ.pop("MAILONEY_JSON_MAX_BYTES", None)
+            else:
+                os.environ["MAILONEY_JSON_MAX_BYTES"] = saved
+
+    def test_same_second_collision_gets_a_numeric_suffix(self):
+        # The dionaea patch learned this one live (#1389): two rotates in
+        # one wall-clock second silently replaced the first generation.
+        # Pin the .2 suffix by freezing the injected namespace's clock --
+        # the helpers resolve strftime through their exec globals dict.
+        frozen = "20260826-000000"
+        self.ns["strftime"] = lambda fmt=None, t=None: frozen
+        with tempfile.TemporaryDirectory() as d:
+            log_path = Path(d) / "mailoney.json"
+            log_path.write_text("{}\n")
+            first = Path(d) / f"mailoney.json.{frozen}"
+            first.write_text("first\n")
+            self.ns["_rotate_json_log"](str(log_path))
+            self.assertTrue(first.with_name(first.name + ".2").exists(),
+                            "collision was not suffixed .2")
+            self.assertFalse(log_path.exists(), "live file must be gone post-rename")
+
+    def test_garbage_env_value_does_not_kill_emission(self):
+        saved = os.environ.get("MAILONEY_JSON_MAX_BYTES")
+        os.environ["MAILONEY_JSON_MAX_BYTES"] = "banana"
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                log_path = Path(d) / "mailoney.json"
+                record_line = None
+                self.emit(log_path)
+                record_line = log_path.read_text().splitlines()[0]
+                self.assertIn('"sensor": "mailoney"', record_line)
+        finally:
+            if saved is None:
+                os.environ.pop("MAILONEY_JSON_MAX_BYTES", None)
+            else:
+                os.environ["MAILONEY_JSON_MAX_BYTES"] = saved
+
+
 class AuthPlainDecode(unittest.TestCase):
     """Injected into every capture path; the base64 alphabet quirk lives."""
 

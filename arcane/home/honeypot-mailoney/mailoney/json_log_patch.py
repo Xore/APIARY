@@ -31,6 +31,11 @@ observing decode failure before this fix, success after). The receive-line
 patch below keeps a case-preserved copy specifically for this extraction;
 every other command match still uses the lowercased line as before.
 
+Since #2196 the injected sink also self-rotates (MAILONEY_JSON_MAX_BYTES,
+default 64MiB, 0 disables): rename-aside as mailoney.json.<utcstamp>[.N],
+digit-leading suffix per the #120 pruner contract that
+analysis/log-maintenance.sh's glob family matches.
+
 Same shape as dionaea/log_rotation_patch.py and hellpot/router_patch.py:
 exact-match string replacement with a marker for idempotency, applied at
 Docker build time.
@@ -78,12 +83,50 @@ from .mail_storage import store_mail_body
 logger = logging.getLogger(__name__)
 
 # --- MARKER_PLACEHOLDER ---
+def _rotate_json_log(path):
+    """Rename mailoney.json aside as <path>.<utcstamp>[.N] (#120, #2196).
+
+    Same rotation contract as dionaea/log_rotation_patch.py's FileHandler
+    and multipot/http-honeypot's logger.rotate(): generations get a
+    digit-leading suffix so analysis/log-maintenance.sh's pruner family
+    ('mailoney.json.[0-9]*', -mmin json_retention_min) deletes them once
+    aged out. This sink opens per event instead of holding one fd (as
+    dionaea's does), so "close/rename/reopen" collapses to rename-aside;
+    the next event's open(path, "a") recreates the live file. A same-
+    second collision appends .2/.3 like dionaea -- without it a rapid
+    second rotate silently replaces the first generation and loses it.
+    Two handlers racing one rename is possible under core.py's threading;
+    the loser's OSError is swallowed, which is the same tolerance every
+    other rotating writer here already accepts.
+    """
+    stamp = strftime("%Y%m%d-%H%M%S", gmtime())
+    target = path + "." + stamp
+    if os.path.exists(target):
+        n = 2
+        while os.path.exists(target + "." + str(n)):
+            n += 1
+        target = target + "." + str(n)
+    try:
+        os.rename(path, target)
+    except OSError:
+        pass
+
+
 def _emit_json_event(event, addr, dest_ip, dest_port, server_name, **fields):
     """Append one flat JSON line, matching enrichLine's expected shape
     (top-level "src_ip" string + "src_port" number) and this repo's
     "sensor" literal convention (elasticpot/honeypot.cfg's own
     sensor_name override established the same pattern for #1423)."""
     path = os.environ.get("MAILONEY_JSON_LOG", "/var/log/honeypot/mailoney.json")
+    # Same "0 means unbounded" env-knob contract as DIONAEA_LOG_MAX_BYTES
+    # and the Go writers' LOG_MAX_BYTES. Port 25 is continuously probed and
+    # every connection emits at least an envelope event, so an unbounded
+    # flat append filled the bind mount on the live host (#120, #2196) --
+    # which takes out neighbors sharing /logs, not just this sensor.
+    try:
+        max_bytes = int(os.environ.get("MAILONEY_JSON_MAX_BYTES", "67108864"))
+    except ValueError:
+        max_bytes = 67108864  # a hostile/garbage env must not kill SMTP sessions
     record = {
         # Explicit-UTC stamp: strftime renders process-local wall clock, and
         # this container pins TZ=Europe/Berlin (compose.yml), so a bare
@@ -106,6 +149,16 @@ def _emit_json_event(event, addr, dest_ip, dest_port, server_name, **fields):
     }
     record.update(fields)
     try:
+        if max_bytes > 0:
+            # Probe is isolated: a not-yet-existing live file (first event
+            # after boot or a previous rotation) must read as "nothing to
+            # rotate", not fall into the write-failure path below.
+            try:
+                needs_rotate = os.path.getsize(path) >= max_bytes
+            except OSError:
+                needs_rotate = False
+            if needs_rotate:
+                _rotate_json_log(path)
         with open(path, "a") as f:
             f.write(json.dumps(record) + "\\n")
     except OSError as e:

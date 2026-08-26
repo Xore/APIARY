@@ -62,7 +62,19 @@ services:
       - START_DELAY=120
       # #261: JSON_RETENTION_MINUTES derives from this by default; set
       # JSON_RETENTION_MINUTES directly to override just this service.
+      # Both overrides must be interpolated here explicitly -- compose
+      # only forwards what it names -- otherwise setting them in .env
+      # changes nothing inside the container (#2196 found exactly that:
+      # the comment above promised an override the environment below
+      # never delivered). Empty fallback keeps the script's own derived
+      # defaults authoritative; sh's ${VAR:-default} treats empty as
+      # unset, and the stack .env simply omits them by default.
       - HONEYPOT_RETENTION_DAYS=${HONEYPOT_RETENTION_DAYS:-30}
+      - JSON_RETENTION_MINUTES=${JSON_RETENTION_MINUTES:-}
+      # #2196: direct override for the mailoney mail-body (.eml) window;
+      # default derives from HONEYPOT_RETENTION_DAYS at the same 1/10
+      # ratio (see log-maintenance.sh).
+      - MAILONEY_MAIL_RETENTION_DAYS=${MAILONEY_MAIL_RETENTION_DAYS:-}
     volumes:
       - ./analysis/log-maintenance.sh:/usr/local/bin/log-maintenance.sh:ro
       - /opt/stacks/apiary/logs:/logs
