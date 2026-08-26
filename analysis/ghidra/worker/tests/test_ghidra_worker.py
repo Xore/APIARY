@@ -1249,6 +1249,50 @@ def test_gpu_queue_vendored_copy_matches_canonical():
           "analysis/ghidra/worker/gpu_queue.py matches analysis/gpu-queue/gpu_queue.py byte-for-byte")
 
 
+def test_sweep_stranded_claims():
+    """#2246: the shared sweeper converts stale .request.running claims to
+    .failed, calls back for the legible failure record only for those it
+    sweeps, and leaves fresh claims strictly alone.
+    """
+    import time as time_mod
+
+    w = load_worker()
+    print("--- sweep_stranded_claims (#2246) ---")
+    with tempfile.TemporaryDirectory() as td:
+        req_dir = Path(td) / "req"
+        req_dir.mkdir()
+
+        stale_sha, fresh_sha = "a" * 64, "b" * 64
+        stale = req_dir / f"{stale_sha}.request.running"
+        fresh = req_dir / f"{fresh_sha}.request.running"
+        for p in (stale, fresh):
+            p.write_text("")
+        old = time_mod.time() - 10_000
+        os.utime(stale, (old, old))
+
+        swept = []
+        n = w.sweep_stranded_claims(
+            req_dir,
+            lambda sha, requested_at, age: swept.append((sha, requested_at, age)))
+
+        check(n == 1, f"one stale claim swept: {n}")
+        check(swept and swept[0][0] == stale_sha,
+              f"callback got the swept sha: {swept}")
+        check(not stale.exists(), "stale claim left the spool")
+        check((req_dir / f"{stale_sha}.request.failed").exists(),
+              "stale claim renamed to .failed")
+        check(fresh.exists(), "fresh claim untouched")
+
+        # A name that isn't a sha claim must be reported, not hidden.
+        stray = req_dir / "probe.request.running"
+        stray.write_text("")
+        seen = []
+        w.sweep_stranded_claims(req_dir,
+                                lambda sha, r, age: seen.append(sha))
+        check(stray.exists(),
+              "unrecognized running file is skipped, not consumed")
+
+
 def main():
     ghidra = serve(Stub)
     model = serve(ModelStub)
@@ -1256,6 +1300,7 @@ def main():
     statictools = serve(StaticToolsStub)
     revdeck = serve(RevDeckStub)
     test_unit()
+    test_sweep_stranded_claims()
     test_resolve_sample()
     test_spool(ghidra)
     test_triage(ghidra, model, truncating)

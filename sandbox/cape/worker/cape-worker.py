@@ -67,6 +67,7 @@ import os
 import re
 import sys
 import time
+import traceback
 import urllib.error
 import urllib.request
 import uuid
@@ -110,6 +111,19 @@ ANALYSIS_TIMEOUT = int(os.environ.get("CAPE_ANALYSIS_TIMEOUT", "1200"))
 POLL_INTERVAL = int(os.environ.get("CAPE_POLL_INTERVAL", "10"))
 HTTP_TIMEOUT = int(os.environ.get("CAPE_HTTP_TIMEOUT", "60"))
 SUBMIT_TIMEOUT = int(os.environ.get("CAPE_SUBMIT_TIMEOUT", "120"))
+
+# #2246: a claim (*.request.running) abandoned by a dead drain -- OOM kill,
+# SIGKILL, power loss -- is older than this on the next drain start and gets
+# converted to .failed plus an interrupted-error result instead of sitting in
+# the spool invisible: no *.request glob ever sees it again, write_status()
+# counts it as running forever, and recovery was a manual rm. Deliberately
+# 2x ANALYSIS_TIMEOUT rather than exactly it: the mtime survives
+# claim-by-rename, so age measures time since the request file was written,
+# not since someone actually picked it up. A live drain holds LOCK_FILE for
+# its whole run and overlapping path-unit triggers collapse onto it, so
+# anything still .running past two full analysis budgets has no living owner.
+STALE_RUNNING_SECS = int(os.environ.get(
+    "CAPE_STALE_RUNNING_SECS", str(ANALYSIS_TIMEOUT * 2)))
 
 # Routing-mode decision (#316): internet/VPN are ruled out by this repo's
 # blanket no-outbound-network posture. drop is the default, matching every
@@ -338,6 +352,115 @@ def write_result(sha: str, result: dict) -> None:
     tmp.rename(final)
 
 
+def failure_result(sha: str, requested_at: str, error: str) -> dict:
+    """The error-result envelope every failure path writes (#2246).
+
+    One constructor so the legible-failure taxonomy cannot drift between the
+    anticipated-CapeError path, the unexpected-exception catch-all, and the
+    stranded-claim sweep: all three produce this exact shape, only "error"
+    differs. Field set matches what drain()'s except block wrote before
+    #2246; a dashboard reading exit_status/error keeps working unchanged.
+    """
+    return {
+        "version": RESULT_VERSION,
+        "sha256": sha,
+        "requested_at": requested_at,
+        "started_at": now(),
+        "completed_at": now(),
+        "exit_status": "error",
+        "error": error,
+        "task_id": None,
+        "cape_status": None,
+        "route": ROUTE,
+        "score": None,
+        "category": None,
+        "signatures": [],
+        "report": {},
+    }
+
+
+def sweep_stranded_claims(request_dir: Path) -> int:
+    """Convert claims abandoned by dead drains into legible failures (#2246).
+
+    Claim-before-work is deliberate (a crash must not replay the same sample
+    forever) but it left no record behind: the crash-no-replay half of that
+    discipline engaged while the recording half silently didn't. This runs at
+    every drain start -- including an otherwise-empty queue and an unreachable
+    CAPE, since recovering stale claims needs neither -- and moves each stale
+    claim to .failed with a synthetic interrupted-error result, exactly as if
+    the worker had caught the death itself. The spool never hands a swept
+    sample back (no *.request reappears), so the crash-no-replay contract is
+    intact; what changes is that the queue un-jams itself and status.json's
+    "running" count returns to 0 without manual rm.
+
+    Staleness threshold is STALE_RUNNING_SECS (see its own comment for why
+    2x ANALYSIS_TIMEOUT rather than one).
+    """
+    recovered = 0
+    cutoff = time.time() - STALE_RUNNING_SECS
+    for claimed in sorted(request_dir.glob("*.request.running")):
+        base = claimed.name[: -len(".running")]
+        sha = base[: -len(".request")] if base.endswith(".request") else ""
+        if not SHA256_RE.match(sha):
+            # Not recognizable as a claim of ours (hand-created probe file?);
+            # leave it alone rather than hide someone else's state.
+            log(f"sweep skipping unrecognized running claim: {claimed.name}")
+            continue
+        try:
+            age = time.time() - claimed.stat().st_mtime
+            if age < STALE_RUNNING_SECS:
+                continue
+            requested_at = datetime.fromtimestamp(
+                claimed.stat().st_mtime, timezone.utc).isoformat(timespec="seconds")
+        except OSError:
+            continue
+        log(f"  [!] {sha}: stranded claim recovered "
+            f"(no owner for {int(age)}s > {STALE_RUNNING_SECS}s)")
+        write_result(sha, failure_result(
+            sha, requested_at,
+            f"stranded .request.running claim swept after {int(age)}s with no "
+            f"living drain (threshold {STALE_RUNNING_SECS}s); the owning worker "
+            f"died before writing any result (#2246)"))
+        claimed.rename(claimed.with_suffix(".failed"))
+        recovered += 1
+    if recovered:
+        log(f"swept {recovered} stranded claim(s)")
+    return recovered
+
+
+def drain_cape_one(client: 'CapeClient', sha: str, sample: Path, claimed: Path,
+                   requested_at: str) -> bool:
+    """Analyse one sample and dispose of its claim. True when it completed.
+
+    Both failure layers live here (#2246): the anticipated CapeError path
+    (same shape it always wrote), then a deliberately blanket except for
+    everything else -- json.JSONDecodeError from a proxy error page shipped
+    with a JSON content type, MemoryError on a huge report body, OSError mid
+    write. Before #2246 any of those escaped the loop, killed the process,
+    and stranded the claim as eternal .request.running with no failure
+    record; now they get the identical error-result envelope and the rest of
+    the queue still drains. Blanket-catch-with-comment is repo precedent:
+    ghidra-worker.py's generate_report does the same fail-soft move.
+    """
+    try:
+        result = analyse_one(client, sha, sample, requested_at)
+        write_result(sha, result)
+        claimed.unlink()
+        log(f"  [+] {sha} done")
+        return True
+    except CapeError as e:
+        log(f"  [!] {sha} failed: {e}")
+        write_result(sha, failure_result(sha, requested_at, str(e)))
+        claimed.rename(claimed.with_suffix(".failed"))
+    except Exception as e:  # noqa: BLE001 -- see docstring: deliberate
+        log(f"  [!] {sha} unexpected {type(e).__name__}; recorded, continuing")
+        traceback.print_exc()
+        write_result(sha, failure_result(
+            sha, requested_at, f"unexpected {type(e).__name__}: {e}"))
+        claimed.rename(claimed.with_suffix(".failed"))
+    return False
+
+
 def write_status() -> None:
     """Queue counts, shaped for a future loadCapeStatus() to read (#319
     follow-up) -- identical field names and glob conventions to
@@ -366,6 +489,11 @@ def drain() -> int:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     os.chmod(REQUEST_DIR, 0o700)
     os.chmod(RESULTS_DIR, 0o700)
+
+    # #2246: recover claims stranded by dead drains before anything else.
+    # Runs unconditionally -- an otherwise-empty queue and an unreachable
+    # CAPE both still want their leftovers legible (see sweep's docstring).
+    sweep_stranded_claims(REQUEST_DIR)
 
     pending = sorted(REQUEST_DIR.glob("*.request"))
     if not pending:
@@ -411,33 +539,9 @@ def drain() -> int:
         request.rename(claimed)
         write_status()
 
-        try:
-            result = analyse_one(client, sha, sample, requested_at)
-            write_result(sha, result)
-            claimed.unlink()
+        if drain_cape_one(client, sha, sample, claimed, requested_at):
             processed += 1
-            log(f"  [+] {sha} done")
-        except CapeError as e:
-            log(f"  [!] {sha} failed: {e}")
-            write_result(sha, {
-                "version": RESULT_VERSION,
-                "sha256": sha,
-                "requested_at": requested_at,
-                "started_at": now(),
-                "completed_at": now(),
-                "exit_status": "error",
-                "error": str(e),
-                "task_id": None,
-                "cape_status": None,
-                "route": ROUTE,
-                "score": None,
-                "category": None,
-                "signatures": [],
-                "report": {},
-            })
-            claimed.rename(claimed.with_suffix(".failed"))
-        finally:
-            write_status()
+        write_status()
 
     write_status()
     log(f"drained {processed} request(s)")
