@@ -89,6 +89,12 @@ jobs:
         run: |
           set -euo pipefail
 
+          # The runner always exposes the webhook payload natively as
+          # GITHUB_EVENT_PATH; there is no github.event_path expression to
+          # map through env (the key silently vanishes and, under set -u,
+          # reading the bare name aborts the step -- seen live on a PR run).
+          EVENT_PATH="${EVENT_PATH:-${GITHUB_EVENT_PATH:-}}"
+
           # Defaults are the fallback path; the guards below may only set
           # them to true.
           trusted=false
