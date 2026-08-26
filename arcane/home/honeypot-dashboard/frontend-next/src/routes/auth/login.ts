@@ -1,7 +1,15 @@
 // GET /auth/login — begins the Keycloak PKCE flow (same path the Go tier
 // registered, so the realm's redirect config is untouched at cutover).
+//
+// #1942: a beginLogin throw used to escape the handler and surface as the
+// framework's bare 53-byte 500 with nothing of ours in the log. The
+// offline-queue and non-poisoning-discovery fixes in oidc.server.ts
+// address the two known live causes; this catch is what keeps any future
+// cause visible (logged with its reason) and actionable (rendered page
+// with status 503) instead of an anonymous 500.
 import { createFileRoute } from '@tanstack/react-router'
 import { beginLogin, oidcDisabled, safeReturnTo } from '../../lib/oidc.server'
+import { authErrorPage } from '../../lib/oidcErrors.server'
 import { createSession, sessionCookie } from '../../lib/session.server'
 
 export const Route = createFileRoute('/auth/login')({
@@ -25,8 +33,20 @@ export const Route = createFileRoute('/auth/login')({
           }
           return new Response(null, { status: 303, headers })
         }
-        const { redirect } = await beginLogin(returnTo)
-        return new Response(null, { status: 303, headers: { location: redirect } })
+        try {
+          const { redirect } = await beginLogin(returnTo)
+          return new Response(null, { status: 303, headers: { location: redirect } })
+        } catch (error) {
+          console.error('[auth] /auth/login could not start sign-in:', error)
+          return authErrorPage({
+            status: 503,
+            heading: 'Sign-in is temporarily unavailable',
+            detail:
+              'The identity provider or session store did not answer, so this ' +
+              'sign-in could not start. Reload to retry; if it persists the ' +
+              'Keycloak tier may be degraded.',
+          })
+        }
       },
     },
   },
