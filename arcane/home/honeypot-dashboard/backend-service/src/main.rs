@@ -79,6 +79,7 @@ mod stores;
 mod ics_severity;
 mod ioc_correlation;
 mod threat_intel;
+mod topology;
 mod zeek_proxy_attribution;
 mod worker;
 mod workbench_api;
@@ -218,6 +219,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/sensors/{sensor}/overview", get(sensors::overview))
         .route("/api/v1/sessions/{id}", get(session::detail))
         .route("/api/v1/search", get(search::search))
+        .route("/api/v1/topology", get(topology::topology))
         .route("/api/v1/settings/storage", get(health::storage))
         .route("/api/v1/config", get(config::get_config))
         .route(

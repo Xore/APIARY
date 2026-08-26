@@ -44,6 +44,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: 'Alerts', to: '/alerts', icon: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>' },
       { label: 'Source & pipeline health', to: '/source-health', icon: '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>' },
+      { label: 'Fleet topology', to: '/topology', icon: '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>' },
       { label: 'Event history', to: '/history', icon: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>' },
     ],
   },
