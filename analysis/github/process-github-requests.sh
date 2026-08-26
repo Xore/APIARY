@@ -73,16 +73,45 @@ write_result() {
   mv -f "$tmp" "$results/$sha.json"
 }
 
-# Count today's real (non-dry-run) publishes by reading the .pending records
-# publish-sample.sh writes on success -- the same count collect-results.py
-# will eventually resolve, so there is exactly one source of truth for "how
-# many did we push today", not a separate counter that can drift from it.
+# Count today's real (non-dry-run) publication attempts against
+# GITHUB_ANALYSIS_DAILY_CAP: quota is consumed when Actions actually ran,
+# which shows up as exactly one of two record classes --
+#
+#   - a .pending record publish-sample.sh writes on successful push and
+#     collect-results.py has not resolved yet; or
+#   - a result record with exit_status ok/failed/timeout whose completed_at
+#     falls today -- the states that mean the run concluded.
+#
+# Counting only live .pending records was #2081's second break:
+# collect-results.py deletes every pending it resolves (done, failed, or
+# timeout), so each resolution handed the quota slot back and "per UTC day"
+# decayed into "at most N unresolved right now". dry_run / denylist_blocked /
+# quota_exceeded / error results are excluded -- no Actions run backed them.
+# status.json lives in the same directory but carries no exit_status field,
+# so the case below skips it.
+#
+# The increment is a plain assignment, not ((count++)): under set -e the
+# post-increment evaluates to the pre-increment value, so the very first
+# same-day record made the whole $( ) subshell exit nonzero -- and an empty
+# left operand inside this function caller's if-condition read as "under
+# cap" (#2081's first break: the counter could never return nonzero).
 publishes_today() {
-  local count=0 f requested
+  local count=0 f stamp status requested
   shopt -s nullglob
   for f in "$GITHUB_ANALYSIS_PENDING_DIR"/*.pending; do
     requested=$(jq -r '.requested_at // empty' "$f" 2>/dev/null || true)
-    [[ ${requested:0:10} == "$(today)" ]] && ((count++))
+    [[ ${requested:0:10} == "$(today)" ]] || continue
+    count=$((count + 1))
+  done
+  for f in "$results"/*.json; do
+    status=$(jq -r '.exit_status // empty' "$f" 2>/dev/null || true)
+    case $status in
+      ok | failed | timeout) ;;
+      *) continue ;;
+    esac
+    stamp=$(jq -r '.completed_at // empty' "$f" 2>/dev/null || true)
+    [[ ${stamp:0:10} == "$(today)" ]] || continue
+    count=$((count + 1))
   done
   shopt -u nullglob
   printf '%s\n' "$count"
