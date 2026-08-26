@@ -67,9 +67,39 @@ curl -fsS -X PUT "$es_url/_cluster/settings" -H 'Content-Type: application/json'
 # then substitute in fast rollover/delete ages for this test only -- stays
 # in sync with the real policy's *shape* (still has a rollover action in
 # the hot phase) automatically, without waiting real days for it to fire.
-policy_line=$(grep -n '_ilm/policy/honeypot-30d"' "$src_root/arcane/home/honeypot-init/analysis/elasticsearch-setup.sh" | head -1 | cut -d: -f1)
-policy_body=$(sed -n "$((policy_line + 2))p" "$src_root/arcane/home/honeypot-init/analysis/elasticsearch-setup.sh" |
-  sed -e "s/--data-binary '//" -e "s/' >\/dev\/null$//")
+# Quote-style agnostic since #2193 moved the body to the loop's
+# escaped-double-quote idiom (the single-quoted literal was itself the
+# bug: it silently blocked ${retention_days} expansion).
+setup="$src_root/arcane/home/honeypot-init/analysis/elasticsearch-setup.sh"
+policy_line=$(grep -n '_ilm/policy/honeypot-30d"' "$setup" | head -1 | cut -d: -f1)
+[ -n "$policy_line" ] || fail "cannot locate the honeypot-30d PUT in elasticsearch-setup.sh"
+policy_body=$(sed -n "$((policy_line + 2))p" "$setup" |
+  sed -e 's/^ *--data-binary //' -e 's/ *>\/dev\/null$//' \
+      -e 's/^"\(.*\)"$/\1/' -e 's/\\"/"/g')
+
+case "$(printf '%s' "$policy_body" | grep -cF '${retention_days}')" in
+  1)
+    pass "honeypot-30d delete.min_age is wired to \${retention_days}, not hardcoded (#2193)"
+    ;;
+  *)
+    fail "honeypot-30d min_age no longer derives from retention_days -- the #2193 hardcode crept back"
+    ;;
+esac
+
+# Exercise the derivation without booting a second Elasticsearch: expand
+# the knob textually through the REAL source line and check the resulting
+# JSON deletes at the expected age both ways (unset default stays 30d --
+# byte-equivalent to the pre-#2193 literal -- and a lowered knob shrinks
+# the dominant stream along with everything else).
+age_for() {
+  printf '%s' "$policy_body" |
+    awk -v repl="$1" '{ gsub(/\$\{retention_days\}/, repl); printf "%s", $0 }' |
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["policy"]["phases"]["delete"]["min_age"])'
+}
+[ "$(age_for 30)" = "30d" ] || fail "default run must keep deleting at 30d (got $(age_for 30))"
+pass "unset HONEYPOT_RETENTION_DAYS preserves today's exact 30d behavior"
+[ "$(age_for 7)" = "7d" ] || fail "HONEYPOT_RETENTION_DAYS=7 must yield delete.min_age 7d (got $(age_for 7))"
+pass "HONEYPOT_RETENTION_DAYS=7 propagates to honeypot-30d delete.min_age"
 
 echo "$policy_body" | grep -q '"rollover"' ||
   fail "honeypot-30d policy has no rollover action -- this is exactly the #585 bug, still present"
