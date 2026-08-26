@@ -22,7 +22,10 @@
 //! value rather than two near-misses. Rust's `regex` crate is RE2-family
 //! like Go's, so `\b` and the character classes behave the same; the one
 //! difference is that `regex` rejects backreferences and lookaround, and
-//! none of these patterns use them.
+//! none of these patterns use them. Flags count as part of "identical":
+//! extract_iocs.py compiles RE_URL with re.IGNORECASE, so this port must
+//! carry (?i) on the same pattern (#2115 — losing it made the sandbox side
+//! recognise uppercase-scheme URLs the floss side could not see).
 //!
 //! Three buckets per indicator kind:
 //!   - `floss_only`: floss decoded it and no sandbox run saw it, statically
@@ -43,7 +46,12 @@ use serde_json::Value;
 use crate::AppState;
 
 static RE_IP: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b").expect("static ip pattern"));
-static RE_URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"https?://[^\s'"<>)\]]+"#).expect("static url pattern"));
+// #2115: the (?i) is load-bearing parity, not style — extract_iocs.py
+// compiles this same pattern with re.IGNORECASE, and the two extractors
+// must agree on what a URL is or a floss-decoded `HTTPS://…` string lands
+// in sandbox_static_only (or nowhere) instead of confirmed_at_runtime.
+static RE_URL: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?i)https?://[^\s'"<>)\]]+"#).expect("static url pattern"));
 static RE_DOMAIN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b").expect("static domain pattern"));
 static RE_UNC: LazyLock<Regex> = LazyLock::new(|| {
@@ -281,6 +289,46 @@ mod tests {
         let strings = vec!["10.0.0.5 192.168.1.1 172.16.4.4 127.0.0.1 8.8.8.8".to_string()];
         let (ips, ..) = extract_ioc_patterns(&strings);
         assert_eq!(ips, set(&["8.8.8.8"]));
+    }
+
+    #[test]
+    fn uppercase_scheme_urls_are_still_urls() {
+        // #2115 regression: extract_iocs.py compiles RE_URL with
+        // re.IGNORECASE, so the sandbox side of this join already
+        // recognises `HTTPS://…`; the Rust side lost the flag in port and
+        // manufactured exactly the disagreement the shared patterns exist
+        // to prevent. Malware upper-cases schemes to defeat naive
+        // signatures — this is not hypothetical input.
+        let strings = vec!["HTTPS://STAGE.EXAMPLE/PAYLOAD.BIN".to_string(), "HtTp://Mixed.Example/x".to_string()];
+        let (.., urls, _) = extract_ioc_patterns(&strings);
+        assert!(urls.contains("HTTPS://STAGE.EXAMPLE/PAYLOAD.BIN"));
+        assert!(urls.contains("HtTp://Mixed.Example/x"));
+    }
+
+    /// Fixture parity with the Python original (#2115's acceptance
+    /// criterion): each pattern below is exercised against the same
+    /// fixtures extract_iocs.py's own tests/docs pin, so a future pattern
+    /// edit that breaks cross-tier agreement fails here rather than in a
+    /// correlation card that quietly stops confirming.
+    #[test]
+    fn patterns_agree_with_the_python_originals_fixtures() {
+        let strings = vec![
+            "203.0.113.7".to_string(),
+            "10.0.0.5".to_string(),                       // PRIVATE: dropped
+            "https://evil.example.com/payload.bin".to_string(),
+            r"\\fileserver\share\tool.exe".to_string(),
+            "evil.example.com".to_string(),
+        ];
+        let (ips, domains, urls, uncs) = extract_ioc_patterns(&strings);
+        assert_eq!(ips, set(&["203.0.113.7"]));
+        assert_eq!(urls, set(&["https://evil.example.com/payload.bin"]));
+        // The domain pattern's known overlap — `payload.bin` inside the
+        // URL and `tool.exe` inside the UNC path read as two-level
+        // domains. extract_iocs.py produces exactly the same set (its
+        // RE_DOMAIN is byte-identical), and the correlation compares
+        // like-for-like, so this is parity, not a bug to fix here.
+        assert_eq!(domains, set(&["evil.example.com", "payload.bin", "tool.exe"]));
+        assert_eq!(uncs, set(&[r"\\fileserver\share\tool.exe"]));
     }
 
     #[test]
