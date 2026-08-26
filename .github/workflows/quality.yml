@@ -452,6 +452,11 @@ jobs:
               # that boolean as disqualifying (#1947 rule 4) and five of
               # eleven round models proved the old AND tripped on wording.
               python analysis/ghidra/benchmarks/tests/test_session_scoring.py
+              # Harmony-family serving adaptation (#2233). gpt-oss tags through
+              # Ollama's /api/chat need a different wire shape or `content`
+              # comes back empty; pins the dispatch so the calibrated Qwen
+              # request shape is untouched.
+              python analysis/ghidra/benchmarks/tests/test_harmony_chat.py
               # full_capabilities.py (#800): inventories env vars straight out of
               # the real pipeline source, so its own test runs against the real
               # tree rather than fixtures -- proving that stays true.
@@ -576,6 +581,17 @@ jobs:
           - name: Threat-intel CIDR refresh script (#244)
             run: analysis/threat-intel/tests/test_refresh_threat_cidrs.sh
 
+          # #2024: the Keycloak dump is the backup's most sensitive artifact,
+          # and under dash a `pg_dump | gzip` pipeline can only surface
+          # gzip's exit status -- the exact silent-truncation class behind
+          # #1413's post-mortem. Drives the real script with docker stubbed
+          # on PATH: a mid-stream dead pg_dump (and an rc-lost footer-less
+          # one) must keep no artifact, a healthy dump must be byte-exact
+          # through gzip, and a missing container must stay quiet. Runs in
+          # plain sh, because dash compliance IS the bug.
+          - name: backup-honeypot keycloak dump discipline (#2024)
+            run: sh analysis/tests/test_backup_honeypot.sh
+
           - name: honeypot-30d ILM policy rolls over and deletes (#585)
             run: analysis/tests/test_honeypot_ilm_rollover.sh
 
@@ -617,6 +633,15 @@ jobs:
               python3 analysis/tests/test_cdc_dedup_prototype.py -v
               python3 analysis/tests/test_procmon_cdc_store.py -v
               python3 analysis/tests/test_archive_diagnostics.py -v
+
+          # #1984: analyze.py prints attacker-controlled fields into an
+          # analyst's terminal -- the one place honeypot content reaches a
+          # human interactively. Every control character must leave
+          # print_table inert (<0xNN> spellings) while clean reports stay
+          # byte-identical; this is what stops an ESC payload in a password
+          # from repositioning or rewriting the reader's terminal.
+          - name: analyze.py terminal-escape sanitisation (#1984)
+            run: python3 analysis/tests/test_analyze.py -v
 
           - name: Agent-intrusion synthetic replay corpus (#154 phase 1)
             run: |

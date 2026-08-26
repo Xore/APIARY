@@ -37,7 +37,13 @@ or tool needs the real procmon.csv content back for an archived run.
 archive_one() reconstructs from the chunk store and compares against the
 original bytes before touching the zip at all, matching
 dedupe-payloads.py's own inode-check-before-hardlink discipline: a
-destructive step never runs on an unverified assumption.
+destructive step never runs on an unverified assumption. The same
+discipline covers its own bookkeeping (#1987): any failure between
+store_bytes() and the final atomic replace releases the manifest it just
+committed (abandoned manifests hold chunk refcounts up permanently), and
+the rewrite re-checks that its second read of the zip still matches the
+members verification saw -- a file changed in between must abort, never
+promote a half-old half-new archive.
 """
 
 import argparse
@@ -76,41 +82,78 @@ def archive_one(zip_path: Path, store: RowChunkStore) -> dict:
         if TARGET_MEMBER not in names:
             return {"path": str(zip_path), "skipped": "no procmon.csv member"}
         original = zf.read(TARGET_MEMBER)
+        # Per-member fingerprint of the verified view (#1987): the
+        # rewrite pass below re-reads the zip through a second open, and
+        # its copied members must be these exact bytes.
+        first_view = {i.filename: (i.file_size, i.CRC) for i in zf.infolist()}
 
     if not original:
         return {"path": str(zip_path), "skipped": "procmon.csv empty"}
 
     manifest_id = store.store_bytes(original)
-    reconstructed = store.reconstruct(manifest_id)
-    if reconstructed != original:
-        # Should be unreachable if store_bytes()/reconstruct() are
-        # correct, but this is exactly the class of bug that must never
-        # reach a destructive step unverified -- release what was just
-        # stored rather than leaving a manifest nothing points to.
-        store.release_manifest(manifest_id)
-        raise RuntimeError(
-            f"{zip_path}: chunk-store round-trip did not match the original "
-            f"procmon.csv bytes -- refusing to touch the zip"
-        )
 
-    stub = json.dumps({
-        "manifest_id": manifest_id,
-        "original_size": len(original),
-        "original_sha256": hashlib.sha256(original).hexdigest(),
-        "archived_at": datetime.now(timezone.utc).isoformat(),
-    }).encode()
-
+    # From here until tmp_path.replace() succeeds, every failure must
+    # release what store_bytes() just committed (#1987): an abandoned
+    # manifest holds every chunk's refcount up permanently --
+    # compact_pack() only reclaims refcount<=0 chunks -- so stats()
+    # would report leaked capacity as live forever.
     tmp_path = zip_path.with_name(zip_path.name + ".archiving.tmp")
-    with zipfile.ZipFile(zip_path, "r") as src, \
-            zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as dst:
-        for info in src.infolist():
-            if info.filename == TARGET_MEMBER:
-                continue
-            dst.writestr(info, src.read(info.filename))
-        dst.writestr(_stub_name(TARGET_MEMBER), stub)
+    replaced = False
+    try:
+        reconstructed = store.reconstruct(manifest_id)
+        if reconstructed != original:
+            # Should be unreachable if store_bytes()/reconstruct() are
+            # correct, but this is exactly the class of bug that must
+            # never reach a destructive step unverified -- the finally
+            # below releases what was just stored rather than leaving a
+            # manifest nothing points to.
+            raise RuntimeError(
+                f"{zip_path}: chunk-store round-trip did not match the original "
+                f"procmon.csv bytes -- refusing to touch the zip"
+            )
 
-    before_size = zip_path.stat().st_size
-    tmp_path.replace(zip_path)
+        stub = json.dumps({
+            "manifest_id": manifest_id,
+            "original_size": len(original),
+            "original_sha256": hashlib.sha256(original).hexdigest(),
+            "archived_at": datetime.now(timezone.utc).isoformat(),
+        }).encode()
+
+        with zipfile.ZipFile(zip_path, "r") as src, \
+                zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as dst:
+            # This is a second, separate read of the zip; the verified
+            # bytes came from the first one (#1987). If the file changed
+            # between the two opens, copying from here would promote a
+            # mixture -- surviving members from the new version while the
+            # stub pins old procmon.csv bytes in the store, losing the
+            # new content outright. Refuse instead; cold-only posture or
+            # not, concurrent modification is exactly what round-trip
+            # verification claims to defend against.
+            if src.namelist() != names:
+                raise RuntimeError(
+                    f"{zip_path}: zip changed between the verification read "
+                    f"and the rewrite read -- refusing to archive a mixture"
+                )
+            for info in src.infolist():
+                if info.filename == TARGET_MEMBER:
+                    # Replaced by the stub below, never copied.
+                    continue
+                if (info.file_size, info.CRC) != first_view[info.filename]:
+                    raise RuntimeError(
+                        f"{zip_path}: member {info.filename} changed between "
+                        f"the verification read and the rewrite read -- "
+                        f"refusing to archive a mixture"
+                    )
+                dst.writestr(info, src.read(info.filename))
+            dst.writestr(_stub_name(TARGET_MEMBER), stub)
+
+        before_size = zip_path.stat().st_size
+        tmp_path.replace(zip_path)
+        replaced = True
+    finally:
+        if not replaced:
+            store.release_manifest(manifest_id)
+            tmp_path.unlink(missing_ok=True)
     after_size = zip_path.stat().st_size
 
     return {

@@ -547,6 +547,17 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
         )
         .await?;
 
+    // #2179: "fetch generously" is still finite, and with track_total_hits
+    // false a full page is the only truncation signal ES hands back -- so say
+    // so rather than letting those keys resolve thin this pass and converge
+    // again only by retry luck.
+    if relayed["hits"]["hits"].as_array().is_some_and(|a| a.len() >= BATCH * 8) {
+        tracing::warn!(
+            cap = BATCH * 8,
+            "zeek-proxy-attribution: relayed-dial candidate fetch filled its size cap this pass, some keys may resolve on a later pass"
+        );
+    }
+
     // The via_port side. Skipped entirely when the batch happens to hold no
     // such flows, so the common case costs nothing.
     let via_hits = if via_ports.is_empty() {
@@ -581,6 +592,13 @@ async fn resolve_once(state: &AppState) -> anyhow::Result<()> {
     let (via_dials, via_without_time) = if via_hits.is_null() {
         (HashMap::new(), 0)
     } else {
+        // #2179: same full-page disclosure as the relayed side above.
+        if via_hits["hits"]["hits"].as_array().is_some_and(|a| a.len() >= BATCH * 8) {
+            tracing::warn!(
+                cap = BATCH * 8,
+                "zeek-proxy-attribution: via-port dial candidate fetch filled its size cap this pass, some keys may resolve on a later pass"
+            );
+        }
         dials_by_via_port(&via_hits)
     };
     if via_without_time > 0 {

@@ -63,13 +63,31 @@ tar -czf "$destination/stack-config-state.tar.gz" \
 # that directory is only consistent with the server stopped, and a dump
 # restores into any later Postgres rather than pinning a rebuild to 18.6.
 if docker inspect hp-keycloak-postgres >/dev/null 2>&1; then
-  if docker exec hp-keycloak-postgres \
-       pg_dump -U keycloak -d keycloak --clean --if-exists 2>/dev/null \
-       | gzip -9 > "$destination/keycloak.sql.gz"; then
-    :
+  # Two steps, not a pipe. This script is #!/bin/sh -> dash on this fleet
+  # (same constraint the retention comment documents below), so a pipeline's
+  # exit status could only ever reflect gzip's half: a pg_dump dying midway
+  # -- container restart, OOM, dropped connection -- still exited 0 through
+  # gzip and kept a silently truncated identity-database backup, whose
+  # SHA256SUMS entry then vouches for exactly the wrong bytes. #1413's
+  # post-mortem above is the same failure class from the other direction.
+  #
+  # Split stages make both exit statuses observable; the plaintext also gets
+  # checked non-empty AND terminated by pg_dump's completion footer before
+  # anything compressed is allowed to exist at rest. pg_dump's stderr is no
+  # longer discarded while we're here -- a reason was being hidden from the
+  # humans checking a failed run. umask 077 keeps the temporary plaintext
+  # keyed at 0600 for its short life; the final chmod below tightens the
+  # rest of the archive set.
+  if (umask 077 && exec docker exec hp-keycloak-postgres \
+         pg_dump -U keycloak -d keycloak --clean --if-exists \
+         > "$destination/keycloak.sql") &&
+     [ -s "$destination/keycloak.sql" ] &&
+     grep -q "PostgreSQL database dump complete" "$destination/keycloak.sql" &&
+     gzip -9 < "$destination/keycloak.sql" > "$destination/keycloak.sql.gz"; then
+    rm -f "$destination/keycloak.sql"
   else
-    rm -f "$destination/keycloak.sql.gz"
-    echo "backup-honeypot: keycloak pg_dump failed" >&2
+    rm -f "$destination/keycloak.sql" "$destination/keycloak.sql.gz"
+    echo "backup-honeypot: keycloak backup failed (pg_dump, truncation/footer check, or gzip)" >&2
   fi
 fi
 

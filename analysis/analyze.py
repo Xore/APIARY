@@ -7,6 +7,12 @@ tried, what commands they ran, and what URLs they probed.
 
 Stdlib only — runs anywhere Python 3.8+ is installed, no pip needed.
 
+Human-readable output renders control characters visibly (<0x1b> and
+friends) instead of emitting them: everything summarised here came off
+the wire (#1984), and an attacker-supplied ESC sequence must not be able
+to reposition or rewrite the analyst's terminal when the report runs.
+The JSON export keeps the raw values — json.dump already escapes them.
+
 Usage:
     python3 analyze.py /path/to/logdir
     python3 analyze.py cowrie.json http.json
@@ -48,6 +54,23 @@ def iter_events(paths):
                         continue
         except OSError as e:
             print(f"! skipping {fn}: {e}", file=sys.stderr)
+
+
+# Every counted field is attacker-controlled (#1984): Cowrie records the
+# username/password/command bytes clients actually send, http-honeypot the
+# paths/user-agents they probe with. Printing any of these raw lets an ESC
+# sequence execute against the *analyst's* terminal emulator — cursor moves,
+# screen erasure, title rewriting, OSC 52 clipboard overwrite. Rendering
+# each control character as its <0xNN> spelling keeps them visible as
+# evidence while making them inert; plain <0xNN> text also survives
+# terminals running under non-UTF-8 locales, unlike prettier glyphs.
+_CONTROLS = "".join(map(chr, list(range(0x20)) + [0x7F] + list(range(0x80, 0xA0))))
+_CONTROL_RENDERING = {ord(c): f"<0x{ord(c):02x}>" for c in _CONTROLS}
+
+
+def _sanitize(value):
+    """Render C0/C1 control characters as visible <0xNN> text."""
+    return str(value).translate(_CONTROL_RENDERING)
 
 
 class Stats:
@@ -191,9 +214,9 @@ def print_table(title, counter, top, cols=("count", "value")):
     if not counter:
         print("  (none)")
         return
-    width = max(len(str(v)) for v, _ in counter.most_common(top))
+    width = max(len(str(_sanitize(v))) for v, _ in counter.most_common(top))
     for value, count in counter.most_common(top):
-        print(f"  {count:>6}  {value}")
+        print(f"  {count:>6}  {_sanitize(value)}")
 
 
 def main():

@@ -172,10 +172,13 @@ const fetchPage = createServerFn({ method: 'GET' })
 // 24h KPI/aggregation stats, ported from ml_anomalies.go's
 // mlAnomalyStatsFrom. total24h is exact (track_total_hits on the filtered
 // store query); the severity/IP breakdowns are computed over the newest
-// 200 rows of the window — the same cap Go's polled snapshot
-// (mlAnomalyCacheCap) imposed on these very numbers.
+// rows of the window — capped at 200 by the two size=100 pages this fetches,
+// the same cap Go's polled snapshot (mlAnomalyCacheCap) imposed on these
+// very numbers. #2179: `scanned` rides along so the UI can disclose that
+// bound next to the buckets instead of presenting a prefix as fleet-wide.
 type KpiStats = {
   total24h: number
+  scanned: number
   bySeverity: { key: string; count: number }[]
   topSrcIPs: { key: string; count: number }[]
 }
@@ -205,7 +208,7 @@ const fetchStats = createServerFn({ method: 'GET' }).handler(async (): Promise<K
     .map(([key, count]) => ({ key, count }))
     .sort((a, b) => (a.count !== b.count ? b.count - a.count : a.key < b.key ? -1 : 1))
     .slice(0, 10)
-  return { total24h: first.total, bySeverity, topSrcIPs }
+  return { total24h: first.total, scanned: rows.length, bySeverity, topSrcIPs }
 })
 
 function severityBadge(severity: string) {
@@ -455,6 +458,16 @@ function Page() {
           </div>
         ))}
       </div>
+      {/* #2179: severity buckets are computed over the newest rows of the
+          24h window (bounded by this fetch's 200-row cap), while the total24h
+          tile above is exact — disclose when the two can disagree instead of
+          letting a quiet prefix stand in for the window. */}
+      {stats && stats.scanned < stats.total24h ? (
+        <p className="note">
+          Severity buckets cover the {stats.scanned.toLocaleString('en-US')} newest anomalies of{' '}
+          {stats.total24h.toLocaleString('en-US')} in the 24h window.
+        </p>
+      ) : null}
       <div className="filters" id="ml-filters">
         <FiltersButton activeCount={activeFilterCount} onClick={() => setFiltersOpen(true)} />
       </div>

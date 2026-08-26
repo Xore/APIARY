@@ -73,6 +73,27 @@ for how a commit actually reaches the live host.
 `backend-api.sh`, `bff-load.sh`) — see `../port-tests/README.md`. Run
 against a real build, not `npm run dev`'s HMR server.
 
+## New-page review checklist (capped-truth discipline, #2179)
+
+When authoring or reviewing a page, check the ways a number can quietly lie.
+Every bounded fetch must either reach reality or disclose its bound, bound
+to the same state that applies the cap:
+
+- **Counts over partial loads** — any KPI/badge/chip computed from fetched
+  rows while more exist in the store either paginates to completion or says
+  "X of Y" next to itself. In-repo exemplars: the ips route's
+  `{rows.length} of {total} entries`, payloads' verdict-badge note.
+- **Filters over loaded pages** — a client-side filter whose table shows
+  fewer than the header chips' store-wide total must say what it filtered
+  within (see `FilterScopeNote` in payload-workbench.results).
+- **Backend scans** — no unsorted size-bounded scan; sort freshest-first,
+  warn on cap hit (worker.rs alert loops, per #2179), and surface ES's
+  `sum_other_doc_count` where a terms agg is the bound (search.rs,
+  stores.rs source census).
+
+The sibling census (#2178) covers the same pages for error-surface
+null-collapse; check both when adding a new list page.
+
 ## Scaling (#1616)
 
 The Dockerfile runs `server/cluster.mjs`, not `.output/server/index.mjs`

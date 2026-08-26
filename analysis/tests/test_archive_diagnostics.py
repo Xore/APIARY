@@ -118,6 +118,151 @@ class ArchiveRoundTripTest(unittest.TestCase):
                 MODULE.rehydrate_one(zip_path, store)
 
 
+class ArchiveFailureDisciplineTest(unittest.TestCase):
+    """#1987: archive_one() stores the manifest (and holds every chunk's
+    refcount) before anything destructive happens. Both failure paths
+    below used to leak that manifest permanently -- compact_pack() only
+    reclaims refcount<=0 chunks, so orphaned manifests looked live to
+    stats() forever. Verify-before-destroy must cover the destroy *and*
+    the bookkeeping."""
+
+    def _pre_stats(self, store):
+        s = store.stats()
+        return s["manifests"], s["live_chunk_bytes"]
+
+    def test_reconstruct_failure_releases_the_stored_manifest(self):
+        # A chunk vanished from the index between store_bytes() and
+        # reconstruct(): the round-trip verification raise path (#1987
+        # hole 1). The manifest must go back, or its chunks are stranded.
+        real_reconstruct = STORE_MODULE.RowChunkStore.reconstruct
+
+        def broken(self, manifest_id):
+            raise KeyError("no such chunk in packs")
+
+        STORE_MODULE.RowChunkStore.reconstruct = broken
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp = Path(tmp)
+                zip_path = tmp / "job1.diagnostics.zip"
+                original_csv = b"\r\n".join(
+                    f'"9:{i % 60:02d} AM","proc.exe",{1000 + i},"ReadFile","C:\\x","OK","d"'.encode()
+                    for i in range(500)
+                )
+                _make_diagnostics_zip(zip_path, procmon_csv=original_csv)
+                store = STORE_MODULE.RowChunkStore(tmp / "store")
+
+                before = self._pre_stats(store)
+                with self.assertRaises(KeyError):
+                    MODULE.archive_one(zip_path, store)
+                after = store.stats()
+                self.assertEqual(after["manifests"], before[0],
+                                 "manifest left stored with nothing pointing at it")
+                self.assertEqual(after["live_chunk_bytes"], before[1],
+                                 "chunk refcounts leaked by the failed archive")
+
+                # The zip itself was never touched by any pass.
+                with zipfile.ZipFile(zip_path) as zf:
+                    self.assertIn("procmon.csv", zf.namelist())
+        finally:
+            STORE_MODULE.RowChunkStore.reconstruct = real_reconstruct
+
+    def test_zip_mutated_between_reads_aborts_with_nothing_stored(self):
+        # #1987 hole 2: the verified bytes come from open #1 of the zip;
+        # the destructive rewrite copies members from a second open. If
+        # the file changed in between, promoting the rewrite silently
+        # drops whatever the concurrent writer added (including new
+        # procmon.csv content, while the stub pins the OLD bytes in the
+        # store). archive_one() must detect the divergence and abort
+        # before tmp_path.replace(), releasing the stored manifest.
+        import unittest.mock
+        import types
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            zip_path = tmp / "job1.diagnostics.zip"
+            _make_diagnostics_zip(zip_path, procmon_csv=b"ORIGINAL ROWS\r\n" * 400)
+
+            # What a concurrent writer leaves behind between the reads:
+            # different procmon.csv content AND an extra member.
+            mutated = tmp / ".concurrent.zip"
+            with zipfile.ZipFile(mutated, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("procmon.csv", b"TAMPERED NEW CONTENT\r\n" * 400)
+                zf.writestr("metadata.json", b'{"job": "abc123"}')
+                zf.writestr("sneaky-late-member.txt", b"written mid-archive")
+
+            reads = {"count": 0}
+            real_zipfile_cls = zipfile.ZipFile
+
+            class FlippingOnFirstReadClose(real_zipfile_cls):
+                """Replay of the race: when the verification read handle
+                (open #1) closes, swap the on-disk zip for the writer's
+                version, so the copy loop's open (#2) sees different
+                bytes than were verified."""
+
+                def __init__(self, file, mode="r", *args, **kw):
+                    super().__init__(file, mode, *args, **kw)
+                    self._is_target_read = (
+                        mode == "r" and str(file) == str(zip_path))
+
+                def __exit__(self, *exc):
+                    out = super().__exit__(*exc)
+                    if self._is_target_read:
+                        reads["count"] += 1
+                        if reads["count"] == 1:
+                            mutated.replace(zip_path)
+                    return out
+
+            shim = types.SimpleNamespace(
+                ZipFile=FlippingOnFirstReadClose,
+                ZIP_DEFLATED=zipfile.ZIP_DEFLATED)
+
+            store = STORE_MODULE.RowChunkStore(tmp / "store")
+            before = self._pre_stats(store)
+            # The copy pass now reads different members than open #1
+            # verified; the divergence must be detected before replace.
+            with unittest.mock.patch.object(MODULE, "zipfile", shim):
+                with self.assertRaises(RuntimeError):
+                    MODULE.archive_one(zip_path, store)
+
+            after = store.stats()
+            self.assertEqual(after["manifests"], before[0],
+                             "manifest left stored after the aborted archive")
+            self.assertEqual(after["live_chunk_bytes"], before[1],
+                             "chunk refcounts leaked by the aborted archive")
+
+            # No mixture ever took zip_path's place: the surviving bytes
+            # are the concurrent writer's, complete with its new member.
+            with zipfile.ZipFile(zip_path) as zf:
+                names = zf.namelist()
+                self.assertIn("sneaky-late-member.txt", names)
+                self.assertIn("procmon.csv", names)
+                self.assertNotIn("procmon.csv.dedup-manifest-ref", names)
+            residue = [p.name for p in tmp.iterdir()
+                       if p.name.endswith(".archiving.tmp")]
+            self.assertEqual(residue, [], "aborted pass left .archiving.tmp behind")
+
+    def test_no_tmp_residue_after_a_failed_archive(self):
+        real_reconstruct = STORE_MODULE.RowChunkStore.reconstruct
+
+        def broken(self, manifest_id):
+            raise RuntimeError("store io exploded mid-verify")
+
+        STORE_MODULE.RowChunkStore.reconstruct = broken
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp = Path(tmp)
+                zip_path = tmp / "job1.diagnostics.zip"
+                _make_diagnostics_zip(zip_path)
+                store = STORE_MODULE.RowChunkStore(tmp / "store")
+                with self.assertRaises(RuntimeError):
+                    MODULE.archive_one(zip_path, store)
+                residue = [p.name for p in tmp.iterdir()
+                           if p.name.endswith(".archiving.tmp")]
+                self.assertEqual(residue, [], "failed pass left .archiving.tmp behind")
+        finally:
+            STORE_MODULE.RowChunkStore.reconstruct = real_reconstruct
+
+
 class FindArchivableTest(unittest.TestCase):
     def test_respects_age_cutoff(self):
         with tempfile.TemporaryDirectory() as tmp:
