@@ -76,7 +76,7 @@ flowchart TB
 | `es-results-importer/` | Ships Ghidra/sandbox/GitHub-analysis/workbench-run results into Elasticsearch, read-only, alongside the raw event stream ([#378](https://github.com/Xore/APIARY/issues/378)) |
 | `elasticsearch-setup.sh`, `honeypot-kibana-setup.sh`, `filebeat.yml`, `evebox.yaml` | Log pipeline and search UI provisioning |
 | `backup-honeypot.sh`, `verify-backup.sh`, `log-maintenance.sh`, `RECOVERY.md` | Retention and recovery |
-| `verify-stack.py` | Post-deploy health check |
+| `verify-stack.py` | Post-deploy/recovery health gate over the backend's `/api/v1/source-health` ([#2086](https://github.com/Xore/APIARY/issues/2086)) |
 
 The GitHub Actions workflow itself lives at
 [`Xore/honeypot/.github/workflows/analyze.yml`](https://github.com/Xore/honeypot/blob/main/.github/workflows/analyze.yml).

@@ -212,7 +212,9 @@ Then, onto a rebuilt host:
 Then follow [`STACK-REBUILD.md`](STACK-REBUILD.md)'s start order —
 `honeypot-elk` healthy before `honeypot-init`, everything else after.
 
-Verify with `analysis/verify-stack.py`.
+Verify with `analysis/verify-stack.py` — `DASHBOARD_SERVICE_TOKEN` from the
+stack's `.env`; it judges source-health through dashboard-next's `/bff`
+passthrough and exits nonzero when anything is wrong.
 
 ## The on-host copy
 

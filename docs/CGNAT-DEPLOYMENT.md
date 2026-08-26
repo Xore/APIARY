@@ -125,7 +125,8 @@ the only internet-facing component.
    (log paths, Elasticsearch templates, Arkime schema) until `honeypot-init`
    has run at least once. See the root `README.md`'s "Home container
    interaction map" for why these are two stacks.
-8. Run `python3 analysis/verify-stack.py` and inspect `/source-health`.
+8. Run `python3 analysis/verify-stack.py` (with `DASHBOARD_SERVICE_TOKEN`
+   from `honeypot-dashboard/.env`) and inspect `/source-health`.
 
 Each stack is a folder under your Arcane stacks dir (default `/opt/stacks/`).
 Upload the whole home folder via SFTP — compose **and** the build
