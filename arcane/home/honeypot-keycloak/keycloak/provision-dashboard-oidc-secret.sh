@@ -32,6 +32,12 @@ docker exec "$KC_CONTAINER" "$KC" config credentials \
   --config "$KC_CONFIG" --server http://127.0.0.1:8080 --realm master \
   --user "$KEYCLOAK_ADMIN_USERNAME" --password "$KEYCLOAK_ADMIN_PASSWORD"
 
+# #2194: from this point the config file holds the live admin access token
+# -- remove it on every exit path, not just success (a mid-run failure under
+# set -euo pipefail used to leave it in hp-keycloak:/tmp until restart).
+cleanup() { docker exec "$KC_CONTAINER" rm -f "$KC_CONFIG" >/dev/null 2>&1 || true; }
+trap cleanup EXIT
+
 client_uuid="$(docker exec "$KC_CONTAINER" "$KC" get clients -r "$REALM" \
   -q "clientId=apiary-dashboard" --fields id --format csv --noquotes --config "$KC_CONFIG")"
 [[ -n "$client_uuid" ]] || { echo "apiary-dashboard client not found in realm $REALM -- import the realm first" >&2; exit 1; }
@@ -50,5 +56,3 @@ printf '%s' "$secret" > "$SECRETS_DIR/oidc-client-secret"
 chown root:root "$SECRETS_DIR/oidc-client-secret"
 chmod 440 "$SECRETS_DIR/oidc-client-secret"
 echo "wrote client secret to $SECRETS_DIR/oidc-client-secret"
-
-docker exec "$KC_CONTAINER" rm -f "$KC_CONFIG"
