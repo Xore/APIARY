@@ -67,6 +67,9 @@ export type EventFilters = {
   ip?: string
   sensor?: string
   country?: string
+  /** #2045: city drill-in from an overview map pin — reached via links
+   * only (the backend now buckets map pins per-city), rendered as a chip. */
+  city?: string
   port?: string
   proto?: string
   kind?: string
@@ -118,7 +121,7 @@ const PIVOT_KEYS = [
   'cat',
 ] as const
 
-type FilterValues = { sensors: string[]; countries: string[]; protos: string[]; ports: string[]; kinds: string[] }
+type FilterValues = { sensors: string[]; countries: string[]; cities?: string[]; protos: string[]; ports: string[]; kinds: string[] }
 
 const fetchEvents = createServerFn({ method: 'GET' })
   .inputValidator((input: { offset: number; filters?: EventFilters }) => input)
@@ -236,6 +239,7 @@ export const Route = createFileRoute('/events')({
       ip: pick('ip'),
       sensor: pick('sensor'),
       country: pick('country'),
+      city: pick('city'),
       port: pick('port'),
       proto: pick('proto'),
       kind: pick('kind'),
@@ -317,13 +321,14 @@ function Events() {
     })
   }, [rows])
   const [filtersOpen, setFiltersOpen] = useState(false)
-  const baseFilterCount = [search.ip, search.sensor, search.country, search.proto, search.port, search.kind].filter(
+  const baseFilterCount = [search.ip, search.sensor, search.country, search.city, search.proto, search.port, search.kind].filter(
     Boolean,
   ).length
   const filtersActive = Boolean(
     search.ip ||
       search.sensor ||
       search.country ||
+      search.city ||
       search.port ||
       search.proto ||
       search.kind ||
@@ -546,7 +551,7 @@ function Events() {
           onApply={(event) => {
             const data = new FormData(event.currentTarget)
             const next: Record<string, string | undefined> = {}
-            for (const key of ['ip', 'sensor', 'country', 'proto', 'port', 'kind'] as const) {
+            for (const key of ['ip', 'sensor', 'country', 'city', 'proto', 'port', 'kind'] as const) {
               next[key] = (data.get(key) as string | null)?.trim() || undefined
             }
             setRows(null)
@@ -564,6 +569,7 @@ function Events() {
                 ip: undefined,
                 sensor: undefined,
                 country: undefined,
+                city: undefined,
                 proto: undefined,
                 port: undefined,
                 kind: undefined,
@@ -582,6 +588,7 @@ function Events() {
             [
               ['sensor', 'Sensor', values?.sensors],
               ['country', 'Country', values?.countries],
+              ['city', 'City', values?.cities],
               ['proto', 'Protocol', values?.protos],
               ['port', 'Port', values?.ports],
               ['kind', 'Kind', values?.kinds],

@@ -28,6 +28,12 @@ pub struct EventsQuery {
     pub ips: Option<String>,
     pub sensor: Option<String>,
     pub country: Option<String>,
+    /// City drill-in from the overview map pins (#2045): dashboard.rs's
+    /// map_points bucket on `multi_terms(source.geo.city_name,
+    /// source.geo.country_iso_code)`, so a pin click can now narrow to the
+    /// exact city instead of the nearest-country fallback this endpoint
+    /// previously documented as a caveat.
+    pub city: Option<String>,
     pub port: Option<String>,
     pub proto: Option<String>,
     /// honeypot.event kind filter ("command", "login", ...).
@@ -514,6 +520,11 @@ pub fn build_filters(q: &EventsQuery) -> Vec<Value> {
     }
     if let Some(country) = q.country.as_deref().filter(|v| !v.is_empty()) {
         filters.push(json!({"term": {"source.geo.country_iso_code": country}}));
+    }
+    if let Some(city) = q.city.as_deref().filter(|v| !v.is_empty()) {
+        // Keyword field written by ip-enrichment; exact match matches the
+        // multi_terms key dashboard.rs buckets map pins by (#2045).
+        filters.push(json!({"term": {"source.geo.city_name": city}}));
     }
     if let Some(port) = q.port.as_deref().filter(|v| !v.is_empty()) {
         filters.push(json!({"term": {"destination.port": port}}));
