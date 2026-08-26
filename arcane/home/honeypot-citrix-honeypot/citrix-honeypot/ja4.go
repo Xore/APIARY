@@ -1,7 +1,9 @@
 package main
 
-// JA4 TLS ClientHello fingerprinting (#759, split from #609 -- see ja3.go's
-// own header for why JA4 was deliberately left out of that fix). Builds on
+// JA4 TLS ClientHello fingerprinting (#759, split from #609 -- ja3.go's
+// own header tells the full story: JA4 was initially deferred from that
+// fix over implementation-variance concerns, and landed here once FoxIO's
+// reference implementation made cross-verification possible). Builds on
 // parseClientHello/peekClientHelloBody, adding the two fields JA3 doesn't
 // need: the first ALPN protocol name and the signature_algorithms list.
 //
