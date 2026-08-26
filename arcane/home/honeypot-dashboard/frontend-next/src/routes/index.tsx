@@ -5,12 +5,12 @@
 // promise.
 import { Await, Link, createFileRoute, useRouter } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useState } from 'react'
 import { AttackMap, AttackVectors, Heatmap, Tbl, type HeatRow, type Kv, type MapPoint } from '../components/OverviewPanels'
 import { RowActions, RowIcons } from '../components/RowActions'
 import { EChart } from '../components/EChart'
 import { copyWithFlash } from '../lib/flash'
-import { isLivePaused } from '../lib/live'
+import { useLiveInterval } from '../lib/live'
 import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
 import { useSidebarViewTabs } from '../lib/viewTabs'
@@ -414,19 +414,12 @@ function Overview() {
   const router = useRouter()
 
   // Auto-refresh (legacy 60s replaceHoneypotPage cycle): re-run the
-  // loaders while the tab is visible; hidden tabs skip the tick, and the
-  // shell's shared LIVE switch pauses it entirely (resume refetches now).
-  useEffect(() => {
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible' && !isLivePaused()) void router.invalidate()
-    }, 60_000)
-    const onResume = () => void router.invalidate()
-    window.addEventListener('hp-live-resumed', onResume)
-    return () => {
-      clearInterval(timer)
-      window.removeEventListener('hp-live-resumed', onResume)
-    }
-  }, [router])
+  // loaders through the shell's shared tick (#1973) — hidden tabs skip
+  // the tick, the shared LIVE switch pauses it entirely, and resume
+  // refetches now. No leading call: the route loaders already fetch on
+  // navigation.
+  const refresh = useCallback(() => void router.invalidate(), [router])
+  useLiveInterval(refresh, 60_000)
 
   const str = (row: StoreRow, key: string) => (typeof row[key] === 'string' ? (row[key] as string) : '')
   const num = (row: StoreRow, key: string) => (typeof row[key] === 'number' ? (row[key] as number) : 0)

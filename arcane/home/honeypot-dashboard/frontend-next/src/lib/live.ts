@@ -109,3 +109,44 @@ export function useLiveState(): LiveState {
     () => serverSnapshot,
   )
 }
+
+/**
+ * The shell's one polling discipline (#1973): run `fn` on an interval,
+ * but only while the tab is visible AND the shared LIVE switch isn't
+ * paused — plus one catch-up call the moment live resumes. Before this
+ * existed the guarded tick was hand-rolled three times (overview,
+ * source-health, canarytokens) and skipped entirely twice: the Topbar
+ * alert-badge polled through hidden tabs, and LiveToasts polled through
+ * both, toasting "sensor went stale" against data the rest of the UI had
+ * agreed not to refresh — the exact split-brain the switch exists to
+ * prevent.
+ *
+ * `fn` must be referentially stable where it matters (wrap in useCallback);
+ * the effect resubscribes when it, `ms`, or `enabled` change. `leading`
+ * fires `fn` once at mount/effect-start, preserving the "first paint
+ * fetches now" behavior of the call sites that relied on it (the ones
+ * whose route loaders already fetch leave it off to avoid doubling the
+ * request). `enabled: false` tears the interval down entirely, for
+ * consumers whose polling is preference-gated.
+ */
+export function useLiveInterval(
+  fn: () => void,
+  ms: number,
+  options: { leading?: boolean; enabled?: boolean } = {},
+) {
+  const { leading = false, enabled = true } = options
+  useEffect(() => {
+    if (!enabled) return
+    if (leading) fn()
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible' && !isLivePaused()) fn()
+    }, ms)
+    // Resuming after a pause shows current data rather than whatever went
+    // stale while updates were suppressed.
+    window.addEventListener('hp-live-resumed', fn)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('hp-live-resumed', fn)
+    }
+  }, [fn, ms, enabled, leading])
+}

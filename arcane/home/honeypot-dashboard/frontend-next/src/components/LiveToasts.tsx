@@ -27,9 +27,10 @@
 // Recovery is reported too, because an operator who saw the outage needs to
 // know it ended without going to look. Those are the only toasts that will
 // appear on a healthy fleet, and only after something was wrong.
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
+import { useLiveInterval } from '../lib/live'
 import { pullLiveToastPrefs, type LiveToastPrefs } from '../lib/prefs'
 
 type Severity = 'warning' | 'danger' | 'success'
@@ -189,56 +190,64 @@ export function LiveToasts() {
     }
   }, [])
 
+  // #1973: this was a hand-rolled setInterval plus a bare `void poll()` --
+  // no visibility guard, no LIVE-paused guard -- so a background tab kept
+  // querying source-health forever and could toast "sensor went stale"
+  // against data the rest of the shell had agreed not to refresh. The
+  // shared tick owns the cadence now.
+  //
+  // `alive` covers the async tail: a poll already in flight when the
+  // component unmounts must not raise toasts afterwards.
+  const alive = useRef(true)
   useEffect(() => {
-    if (!prefs.enabled) return
-    let cancelled = false
-
-    const show = (condition: Condition, message: string, severity: Severity) => {
-      const id = nextId.current++
-      setToasts((current) => [...current, { id, key: condition.key, message, severity, to: condition.to }])
-      setTimeout(() => setToasts((current) => current.filter((toast) => toast.id !== id)), TOAST_MS)
-    }
-
-    const poll = async () => {
-      let health: SourceHealth | null
-      try {
-        health = await fetchSourceHealth()
-      } catch {
-        // The dashboard's own backend being unreachable is not something to
-        // toast about -- the page would already be failing to load, and a
-        // toast raised from a failed call would fire on every transient
-        // blip during a deploy.
-        return
-      }
-      if (cancelled || !health) return
-
-      const current = conditionsFrom(health)
-      const { raised, cleared } = transitions(known.current, current)
-
-      // The first poll establishes what is already true rather than
-      // announcing it. Opening the dashboard during a known outage should
-      // not fire a toast per stale sensor -- the source-health page is
-      // where that belongs, and the toast is for changes since you looked.
-      if (primed.current) {
-        for (const condition of raised) show(condition, condition.message, condition.severity)
-        for (const condition of cleared) show(condition, `Resolved: ${condition.message}`, 'success')
-      }
-      primed.current = true
-      known.current = new Map(current.map((condition) => [condition.key, condition]))
-    }
-
-    void poll()
-    const timer = setInterval(poll, Math.max(MIN_POLL_MS, prefs.intervalSeconds * 1000))
     return () => {
-      cancelled = true
-      clearInterval(timer)
+      alive.current = false
     }
-    // Deliberately not scoped to a route: an outage is worth knowing about
-    // on every page, including /events. The old toast was suppressed there
-    // because the arriving rows were themselves the notification -- but a
-    // sensor that stopped reporting shows up as rows that never arrive,
-    // which is exactly what nobody notices.
-  }, [prefs])
+  }, [])
+
+  const show = useCallback((condition: Condition, message: string, severity: Severity) => {
+    const id = nextId.current++
+    setToasts((current) => [...current, { id, key: condition.key, message, severity, to: condition.to }])
+    setTimeout(() => setToasts((current) => current.filter((toast) => toast.id !== id)), TOAST_MS)
+  }, [])
+
+  const poll = useCallback(async () => {
+    let health: SourceHealth | null
+    try {
+      health = await fetchSourceHealth()
+    } catch {
+      // The dashboard's own backend being unreachable is not something to
+      // toast about -- the page would already be failing to load, and a
+      // toast raised from a failed call would fire on every transient
+      // blip during a deploy.
+      return
+    }
+    if (!alive.current || !health) return
+
+    const current = conditionsFrom(health)
+    const { raised, cleared } = transitions(known.current, current)
+
+    // The first poll establishes what is already true rather than
+    // announcing it. Opening the dashboard during a known outage should
+    // not fire a toast per stale sensor -- the source-health page is
+    // where that belongs, and the toast is for changes since you looked.
+    if (primed.current) {
+      for (const condition of raised) show(condition, condition.message, condition.severity)
+      for (const condition of cleared) show(condition, `Resolved: ${condition.message}`, 'success')
+    }
+    primed.current = true
+    known.current = new Map(current.map((condition) => [condition.key, condition]))
+  }, [show])
+
+  // Deliberately not scoped to a route: an outage is worth knowing about
+  // on every page, including /events. The old toast was suppressed there
+  // because the arriving rows were themselves the notification -- but a
+  // sensor that stopped reporting shows up as rows that never arrive,
+  // which is exactly what nobody notices.
+  useLiveInterval(poll, Math.max(MIN_POLL_MS, prefs.intervalSeconds * 1000), {
+    leading: true,
+    enabled: prefs.enabled,
+  })
 
   if (toasts.length === 0) return null
   return (

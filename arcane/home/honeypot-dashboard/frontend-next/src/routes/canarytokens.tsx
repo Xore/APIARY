@@ -9,7 +9,7 @@ import { InvestigateHeader, type Column } from '../components/Investigate'
 import { Tabs, TabPanel } from '../components/Tabs'
 import { pathString, type JsonRecord } from '../lib/json'
 import { copyWithFlash } from '../lib/flash'
-import { isLivePaused } from '../lib/live'
+import { useLiveInterval } from '../lib/live'
 import { formatTimestamp } from '../lib/time'
 import { countryName } from '../lib/country'
 
@@ -278,18 +278,11 @@ function FiredTokens() {
       setError(err instanceof Error ? err.message : 'Fired-token history unavailable.')
     }
   }, [])
-  useEffect(() => {
-    void load()
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible' && !isLivePaused()) void load()
-    }, 60_000)
-    const onResume = () => void load()
-    window.addEventListener('hp-live-resumed', onResume)
-    return () => {
-      clearInterval(timer)
-      window.removeEventListener('hp-live-resumed', onResume)
-    }
-  }, [load])
+  // #1973: the shared tick replaces the hand-rolled guarded interval —
+  // same visible-tab + LIVE-paused guards, resume refetch included.
+  // Leading, because unlike the routes above this tab owns its own
+  // initial fetch; there is no loader to cover first paint.
+  useLiveInterval(load, 60_000, { leading: true })
   const rows = page?.rows ?? null
   return (
     <div className="card wide">
