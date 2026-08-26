@@ -100,15 +100,39 @@ jobs:
           fi
 
           section "Sensor to Elasticsearch to Dashboard"
-          report 'The dashboard derives these from its own tail plus a live Elasticsearch query,'
+          # #2096: the Go dashboard's Prometheus /metrics died with it
+          # (#1659) -- frontend-next owns :19090 now and answers 307
+          # there, so this lane had silently reported "metrics
+          # unavailable" on every run since. The same end-to-end evidence
+          # comes from backend-service's source-health (total_documents,
+          # per-sensor counts, cluster status, dead letters, filebeat,
+          # unattributed) through the BFF, authenticated with the service
+          # token from the dashboard stack's own .env -- the exact seam
+          # verify-stack.py uses. The token is read into a variable and
+          # sent as a header; it is never echoed.
+          report 'The backend derives these from its own tail plus a live Elasticsearch query,'
           report 'so a coherent set here is the end-to-end pipeline check Gate 0 asks for.'
           report '```'
-          curl -fsS --max-time 15 "http://$bind:19090/metrics" 2>/dev/null \
-            | grep -E '^honeypot_(events|unique_sources|unattributed|sensor_events|elasticsearch|dead_letters|filebeat)' \
-            | tee -a "$GITHUB_STEP_SUMMARY" || report "metrics unavailable"
+          token=$(sed -n 's/^DASHBOARD_SERVICE_TOKEN=//p' /opt/stacks/honeypot-dashboard/.env 2>/dev/null | head -1)
+          if [ -z "$token" ]; then
+            report "metrics unavailable: no DASHBOARD_SERVICE_TOKEN in /opt/stacks/honeypot-dashboard/.env"
+          elif source_health=$(curl -fsS --max-time 15 -H "X-Service-Token: $token" \
+                 "http://$bind:19090/bff/api/v1/source-health" 2>/dev/null) \
+               && printf '%s' "$source_health" | jq -e . >/dev/null 2>&1; then
+            printf '%s' "$source_health" | jq -r '
+              "total_documents: \(.total_documents)",
+              "cluster_status: \(.cluster_status)",
+              (.sensors[] | "sensor \(.sensor): \(.documents) docs [\(.state)], last \(.last_seen // "?")"),
+              "dead_letters: \(.dead_letters)",
+              "filebeat: \(.pipeline.state)",
+              "unattributed_24h: \(.unattributed_24h)"' | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            report "metrics unavailable: source-health unreachable or unauthorized (401 = wrong/missing service token)"
+          fi
           report '```'
-          report 'honeypot_elasticsearch_state: 1 green, 2 yellow, 3 red, 0 unknown.'
-          report 'honeypot_unattributed_events: events carried over the tunnel that could not be'
+          report 'cluster_status: 1 green, 2 yellow, 3 red. sensor state ACTIVE means the feed'
+          report 'is fresh; STALE means it stopped logging.'
+          report 'unattributed_24h: events carried over the tunnel that could not be'
           report 'joined back to a real source — the recovery gap #54 measured and #75 closes.'
 
           section "Elasticsearch cluster"
