@@ -124,6 +124,22 @@ fn has_any(value: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| value.contains(needle))
 }
 
+/// Byte-capped prefix of `s`, cut at a character boundary (#2118). Rust
+/// panics on a str slice whose end offset splits a character, so a fixed
+/// cap must walk back to the nearest boundary — at most three steps for
+/// UTF-8. The Go original sliced raw bytes, which cannot fail; this keeps
+/// the port in the same total order.
+fn capped_prefix(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 fn mostly_text(text: &[u8]) -> bool {
     if text.is_empty() {
         return false;
@@ -212,11 +228,19 @@ pub fn classify_payload(data: &[u8]) -> PayloadClassification {
         );
     }
 
+    // #2118: cap in BYTES before lossy conversion. Slicing the decoded
+    // String at a fixed byte offset panics unless that offset lands on a
+    // character boundary, and attacker-controlled multibyte text straddles
+    // those offsets routinely (one CJK character across offset 256 was
+    // enough to crash classification — and through it the whole inventory
+    // scan cycle, the workbench analyzers route, and sandbox routing).
+    // Cutting raw bytes first means from_utf8_lossy absorbs any split
+    // character exactly as its contract intends.
     let text_bytes = normalized_text(data);
-    let text = String::from_utf8_lossy(&text_bytes).to_string();
-    let lower = text.to_lowercase();
-    let head = &lower[..lower.len().min(65536)];
-    let first = &head[..head.len().min(256)];
+    let head_bytes = &text_bytes[..text_bytes.len().min(65536)];
+    let lower = String::from_utf8_lossy(head_bytes).to_lowercase();
+    let head = capped_prefix(&lower, 65536);
+    let first = capped_prefix(head, 256);
     let first_trimmed = first.trim();
 
     if first_trimmed.starts_with("<?php") {
@@ -437,4 +461,56 @@ pub fn classify_payload(data: &[u8]) -> PayloadClassification {
         "Static binary metadata, strings, hashes, and YARA analysis",
         false,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #2118 regression: U+4E00 encodes to 3 bytes, so character boundaries
+    /// sit at multiples of three — and byte offset 256 ≡ 1 (mod 3). A file
+    /// beginning with enough CJK text (script comments are a common carrier)
+    /// used to panic on the fixed-offset slice of the decoded string before
+    /// any heuristic ran, taking down the inventory scan, the workbench
+    /// analyzers route, and sandbox routing for that sample.
+    #[test]
+    fn multibyte_text_across_the_256_byte_cut_does_not_panic() {
+        let data = "\u{4e00}".repeat(300);
+        let classification = classify_payload(data.as_bytes());
+        assert_eq!(classification.code, "binary");
+    }
+
+    #[test]
+    fn multibyte_text_across_the_64k_cut_does_not_panic() {
+        // Same defect at the second cap: 'a' * 65535 puts a 3-byte
+        // character exactly across offset 65536 (65536 ≡ 1 mod 3).
+        let mut data = "a".repeat(65535);
+        data.push_str(&"\u{4e00}".repeat(5));
+        let classification = classify_payload(data.as_bytes());
+        assert_eq!(classification.code, "text");
+    }
+
+    #[test]
+    fn utf16_decoded_text_split_by_the_byte_cap_still_classifies() {
+        // The UTF-16LE BOM path decodes to UTF-8 inside normalized_text, so
+        // the byte cap cuts already-decoded bytes; a split character must
+        // come back as replacement text via from_utf8_lossy, not a panic.
+        let mut units = vec![0xff, 0xfe];
+        for _ in 0..40000 {
+            units.extend_from_slice(&0x4e00u16.to_le_bytes());
+        }
+        let classification = classify_payload(&units);
+        assert_eq!(classification.code, "binary");
+    }
+
+    #[test]
+    fn capped_prefix_cuts_at_boundaries_without_losing_more_than_one_char() {
+        assert_eq!(capped_prefix("abcde", 3), "abc");
+        // Walks back to the nearest boundary rather than panicking.
+        assert_eq!(capped_prefix("a\u{4e00}b", 2), "a");
+        assert_eq!(capped_prefix("a\u{4e00}b", 4), "a\u{4e00}");
+        // Under the cap is a no-op; over-long ASCII loses nothing.
+        assert_eq!(capped_prefix("", 256), "");
+        assert_eq!(capped_prefix("ab", 100), "ab");
+    }
 }
