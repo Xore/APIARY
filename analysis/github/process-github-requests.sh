@@ -51,7 +51,9 @@ export GITHUB_ANALYSIS_PENDING_DIR
 # chmod on a dir with an ACL recomputes the mask from the requested group
 # bits), silently reverting the grant below on this script's very next
 # invocation if it isn't reasserted every time alongside it.
-setfacl -m u:65534:rwx,mask::rwx "$pending" 2>/dev/null || true
+setfacl -m u:65534:rwx,mask::rwx "$pending" 2>/dev/null \
+  || echo "WARNING: could not grant uid 65534 rwx on $pending -- is setfacl installed ('acl' package)?" \
+          "Dashboard submissions will fail to land in the spool until this grant succeeds. (#2083)" >&2
 
 exec 9>"$GITHUB_ANALYSIS_LOCK"
 flock -n 9 || exit 0
