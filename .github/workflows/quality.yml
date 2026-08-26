@@ -639,8 +639,11 @@ jobs:
           # human interactively. Every control character must leave
           # print_table inert (<0xNN> spellings) while clean reports stay
           # byte-identical; this is what stops an ESC payload in a password
-          # from repositioning or rewriting the reader's terminal.
-          - name: analyze.py terminal-escape sanitisation (#1984)
+          # from repositioning or rewriting the reader's terminal. #1985
+          # extends the same suite to the stats-hygiene batch (silent
+          # malformed-line skips, dead parameters, total undercount, the
+          # category catch-all, multipot VNC login counting).
+          - name: analyze.py sanitisation and stats hygiene (#1984, #1985)
             run: python3 analysis/tests/test_analyze.py -v
 
           - name: Agent-intrusion synthetic replay corpus (#154 phase 1)

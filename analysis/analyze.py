@@ -41,19 +41,28 @@ def iter_events(paths):
             files.append(p)
     if not files:
         sys.exit("no .json log files found in: " + ", ".join(paths))
-    for fn in sorted(set(files)):
-        try:
-            with open(fn, encoding="utf-8", errors="replace") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        yield fn, json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-        except OSError as e:
-            print(f"! skipping {fn}: {e}", file=sys.stderr)
+    # Unparsable lines are counted, never silently dropped (#1985): a
+    # truncated log used to shrink every table with no signal, reading
+    # exactly like a quiet day. The summary prints once iteration ends --
+    # the finally also catches an early exit -- so zero skips stay silent.
+    skipped: dict[str, int] = {}
+    try:
+        for fn in sorted(set(files)):
+            try:
+                with open(fn, encoding="utf-8", errors="replace") as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            yield fn, json.loads(line)
+                        except json.JSONDecodeError:
+                            skipped[fn] = skipped.get(fn, 0) + 1
+            except OSError as e:
+                print(f"! skipping {fn}: {e}", file=sys.stderr)
+    finally:
+        for fn, n in sorted(skipped.items()):
+            print(f"! skipped {n} unparsable line(s) in {fn}", file=sys.stderr)
 
 
 # Every counted field is attacker-controlled (#1984): Cowrie records the
@@ -173,7 +182,10 @@ class Stats:
                     self.usernames[u] += 1
                 if p:
                     self.passwords[p] += 1
-            if e.get("event") == "login":
+            # "login" (ssh/telnet/...) and "auth_attempt" (VNC et al -- see
+            # multipot's protocols.go) are both failures by construction;
+            # counting only the first hid every VNC attempt (#1985).
+            if e.get("event") in ("login", "auth_attempt"):
                 self.login_failed += 1
         cmd = e.get("command")
         if cmd:
@@ -182,11 +194,14 @@ class Stats:
 
     def add_generic(self, e):
         """Third-party sensors (Dionaea, Conpot, …) — count by source IP."""
+        # Every parsed event counts toward the header total, even records
+        # with no address (#1985): other_sensors below already counts them,
+        # so excluding them here made the two figures disagree.
+        self.total += 1
         ip = (e.get("src_ip") or e.get("remote_host") or e.get("source_ip")
               or e.get("src_ip_addr") or e.get("peer_ip"))
         if ip:
             self.src_ips[ip] += 1
-            self.total += 1
         conn = e.get("connection")
         label = e.get("sensor")
         if not label and isinstance(conn, dict):
@@ -206,15 +221,21 @@ def is_multipot(e):
 
 
 def is_http(e):
-    return e.get("sensor") == "http-honeypot" or "category" in e
+    s = e.get("sensor")
+    if s:
+        return s == "http-honeypot"
+    # Unstamped legacy records fall back on actual HTTP fields -- never on
+    # a bare "category", which any foreign sensor's event can carry (#1985).
+    # That catch-all used to route the foreign event's IP into the http
+    # column of ips_by_source and leak its values into three http tables.
+    return "path" in e or "user_agent" in e
 
 
-def print_table(title, counter, top, cols=("count", "value")):
+def print_table(title, counter, top):
     print(f"\n== {title} ==")
     if not counter:
         print("  (none)")
         return
-    width = max(len(str(_sanitize(v))) for v, _ in counter.most_common(top))
     for value, count in counter.most_common(top):
         print(f"  {count:>6}  {_sanitize(value)}")
 
