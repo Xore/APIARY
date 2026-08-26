@@ -80,6 +80,11 @@ spawnChild("bff", process.execPath, [join(ROOT, ".output/server/index.mjs")], {
   OIDC_DISABLED: "1",
   OIDC_SESSION_REDIS_URL: redis.url,
   BACKEND_URL: backend.url,
+  // #2183's boot gate refuses a BFF with no SERVICE_TOKEN — and setting a
+  // real one is no good here either, because proxyToRust then demands the
+  // same token from the browser caller, which no Playwright page sends.
+  // The gate's own sanctioned hermetic path is the explicit dev override.
+  APIARY_ALLOW_UNAUTH_DEV: "1",
 });
 
 async function waitForHealth(deadlineMs = 60_000) {
