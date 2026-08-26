@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { confirmAction } from '../components/ConfirmDialog'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { ArtifactList } from '../components/ArtifactList'
+import { ErrorStateBlock } from '../components/ErrorState'
 import { CodeIcon, FileIcon, SandboxIcon, ShieldIcon, WorkbenchIcon } from '../components/CardIcons'
 import { getSessionUser } from '../lib/auth'
 import { pathString, type JsonRecord } from '../lib/json'
@@ -564,12 +565,22 @@ function RunDetail({ run, currentOwner, onChanged }: { run: WorkbenchRun; curren
 
 function RecentRunsCard({ owner, refreshToken }: { owner: string; refreshToken: number }) {
   const [runs, setRuns] = useState<WorkbenchRun[] | null>(null)
+  // #2178: `result?.runs ?? []` let a failed fetch answer "No workbench
+  // runs submitted yet." -- a run history an operator may act on.
+  const [failed, setFailed] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
+    setRuns(null)
+    setFailed(false)
     fetchOwnRuns().then((result) => {
-      if (!cancelled) setRuns(result?.runs ?? [])
+      if (cancelled) return
+      if (!result) {
+        setFailed(true)
+        return
+      }
+      setRuns(result.runs)
     })
     return () => {
       cancelled = true
@@ -585,7 +596,9 @@ function RecentRunsCard({ owner, refreshToken }: { owner: string; refreshToken: 
   return (
     <div className="card wide">
       <h2>My recent runs</h2>
-      {runs === null ? (
+      {runs === null && failed ? (
+        <ErrorStateBlock title="Run history failed to load" hint="The backend request failed — nothing here is cached." />
+      ) : runs === null ? (
         <span className="skeleton-line" aria-hidden="true" />
       ) : runs.length === 0 ? (
         <p className="empty">No workbench runs submitted yet.</p>
@@ -1119,18 +1132,41 @@ function FilterInput({ label, value, onChange }: { label: string; value: string;
   )
 }
 
-function usePage(promise: Promise<Page | null>): Page | null {
+/** One streamed first page behind a workbench tab (#2178). Besides the
+ *  page itself it reports whether that stream failed outright -- a bare
+ *  null meant both "still streaming" and "the store read died", which used
+ *  to hold five tabs' ghost rows forever -- and hands back a retry. */
+function usePage(
+  promise: Promise<Page | null>,
+  refetch?: (offset: number) => Promise<Page | null>,
+): { page: Page | null; failed: boolean; retry: () => void } {
   const [page, setPage] = useState<Page | null>(null)
+  const [failed, setFailed] = useState(false)
+  // Retrying swaps in a fresh promise when the caller supplied the tab's
+  // own paging fn; otherwise the error block simply omits its button.
+  const [source, setSource] = useState(promise)
+  useEffect(() => setSource(promise), [promise])
   useEffect(() => {
     let cancelled = false
-    promise.then((result) => {
-      if (!cancelled && result) setPage(result)
+    setPage(null)
+    setFailed(false)
+    source.then((result) => {
+      if (cancelled) return
+      if (!result) {
+        setFailed(true)
+        return
+      }
+      setPage(result)
     })
     return () => {
       cancelled = true
     }
-  }, [promise])
-  return page
+  }, [source])
+  const retry = useCallback(() => {
+    if (!refetch) return
+    setSource(refetch(0))
+  }, [refetch])
+  return { page, failed, retry }
 }
 
 function gpuStatusBadge(status: string) {
@@ -1193,21 +1229,46 @@ type ResultTabId = (typeof RESULT_TABS)[number]['id']
 
 function Results() {
   const data = Route.useLoaderData()
-  const workbench = usePage(data.workbench)
-  const statics = usePage(data.statics)
-  const yara = usePage(data.yara)
-  const sandbox = usePage(data.sandbox)
-  const ghidra = usePage(data.ghidra)
+  // #2178: the five tabs' first pages stream through one hook; keep each
+  // query object (page + failure flag + retry) beside its old alias so every
+  // downstream reference stays put while failures become renderable.
+  const workbenchQ = usePage(data.workbench, (offset) => fetchWorkbench({ data: { offset } }))
+  const staticsQ = usePage(data.statics, (offset) => fetchStatic({ data: { offset } }))
+  const yaraQ = usePage(data.yara, (offset) => fetchYara({ data: { offset } }))
+  const sandboxQ = usePage(data.sandbox, (offset) => fetchSandbox({ data: { offset } }))
+  const ghidraQ = usePage(data.ghidra, (offset) => fetchGhidra({ data: { offset } }))
+  const workbench = workbenchQ.page
+  const statics = staticsQ.page
+  const yara = yaraQ.page
+  const sandbox = sandboxQ.page
+  const ghidra = ghidraQ.page
   const [gpuQueue, setGpuQueue] = useState<GpuJob[] | null>(null)
+  // #2178: `?? []` turned a dead /api/v1/gpu-queue into an empty board --
+  // indistinguishable from "nothing queued".
+  const [gpuFailed, setGpuFailed] = useState(false)
+  // First paint streams straight off the loader; Retry swaps in a live fetch.
+  const [gpuSource, setGpuSource] = useState(() => data.gpuQueue)
   useEffect(() => {
     let cancelled = false
-    data.gpuQueue.then((result) => {
-      if (!cancelled) setGpuQueue(result ?? [])
-    })
+    setGpuQueue(null)
+    setGpuFailed(false)
+    gpuSource
+      .then((result) => {
+        if (cancelled) return
+        if (!result) {
+          setGpuFailed(true)
+          return
+        }
+        setGpuQueue(result)
+      })
+      .catch(() => {
+        if (!cancelled) setGpuFailed(true)
+      })
     return () => {
       cancelled = true
     }
-  }, [data.gpuQueue])
+  }, [gpuSource])
+  const retryGpuQueue = useCallback(() => setGpuSource(fetchGpuQueue()), [])
   // #1692: abort a queued job. Re-reads the queue afterwards rather than
   // patching the row locally — the drainer may have moved the job on in the
   // meantime, and the authoritative status is worth the one extra request.
@@ -1221,7 +1282,12 @@ function Results() {
       onConfirm: async () => {
         const result = await abortGpuJob({ data: { job_id: job.job_id } })
         if (!result.ok) throw new Error(result.error || 'Abort failed.')
-        setGpuQueue((await fetchGpuQueue()) ?? [])
+        // #2178: `?? []` cleared real rows when the follow-up read failed;
+        // keeping them beats presenting an empty board after a successful
+        // abort.
+        const refreshed = await fetchGpuQueue()
+        if (!refreshed) return 'Abort requested — the queue refresh failed, so the row may linger until reload.'
+        setGpuQueue(refreshed)
         return 'Abort requested.'
       },
     })
@@ -1263,11 +1329,11 @@ function Results() {
         subtitle="Build and submit a workbench recipe against a captured payload, then follow every analyzer's verdict — static analysis, YARA, sandbox detonations, and Ghidra decompilation."
         chips={
           <>
-            <span className="chip">{(workbench?.total ?? 0).toLocaleString('en-US')} workbench runs</span>
-            <span className="chip">{(statics?.total ?? 0).toLocaleString('en-US')} static analyses</span>
-            <span className="chip">{(yara?.total ?? 0).toLocaleString('en-US')} YARA results</span>
-            <span className="chip">{(sandbox?.total ?? 0).toLocaleString('en-US')} detonations</span>
-            <span className="chip">{(ghidra?.total ?? 0).toLocaleString('en-US')} ghidra runs</span>
+            <span className="chip">{workbenchQ.failed ? 'load failed' : `${(workbench?.total ?? 0).toLocaleString('en-US')} workbench runs`}</span>
+            <span className="chip">{staticsQ.failed ? 'load failed' : `${(statics?.total ?? 0).toLocaleString('en-US')} static analyses`}</span>
+            <span className="chip">{yaraQ.failed ? 'load failed' : `${(yara?.total ?? 0).toLocaleString('en-US')} YARA results`}</span>
+            <span className="chip">{sandboxQ.failed ? 'load failed' : `${(sandbox?.total ?? 0).toLocaleString('en-US')} detonations`}</span>
+            <span className="chip">{ghidraQ.failed ? 'load failed' : `${(ghidra?.total ?? 0).toLocaleString('en-US')} ghidra runs`}</span>
           </>
         }
       />
@@ -1279,6 +1345,15 @@ function Results() {
         <h2 className="label-section">Workbench runs</h2>
         <FilterInput label="workbench runs" value={workbenchQuery} onChange={setWorkbenchQuery} />
         <FilterScopeNote page={workbench} query={workbenchQuery} matched={workbenchFiltered?.length ?? 0} />
+        {workbenchQ.failed && !workbench ? (
+          /* #2178: ghost cards forever were how a dead store presented --
+             name it instead of letting the tab look merely slow. */
+          <ErrorStateBlock
+            title="Workbench store failed to load"
+            hint="The backend request failed — nothing here is cached."
+            onRetry={workbenchQ.retry}
+          />
+        ) : null}
         <MasterDetailTable
           rows={workbenchFiltered}
           columns={WORKBENCH_COLUMNS}
@@ -1313,6 +1388,13 @@ function Results() {
         <h2 className="label-section">Static analysis</h2>
         <FilterInput label="static analyses" value={staticQuery} onChange={setStaticQuery} />
         <FilterScopeNote page={statics} query={staticQuery} matched={staticFiltered?.length ?? 0} />
+        {staticsQ.failed && !statics ? (
+          <ErrorStateBlock
+            title="Static-analysis store failed to load"
+            hint="The backend request failed — nothing here is cached."
+            onRetry={staticsQ.retry}
+          />
+        ) : null}
         <MasterDetailTable
           rows={staticFiltered}
           columns={STATIC_COLUMNS}
@@ -1340,6 +1422,13 @@ function Results() {
         <h2 className="label-section">YARA</h2>
         <FilterInput label="YARA results" value={yaraQuery} onChange={setYaraQuery} />
         <FilterScopeNote page={yara} query={yaraQuery} matched={yaraFiltered?.length ?? 0} />
+        {yaraQ.failed && !yara ? (
+          <ErrorStateBlock
+            title="YARA store failed to load"
+            hint="The backend request failed — nothing here is cached."
+            onRetry={yaraQ.retry}
+          />
+        ) : null}
         <MasterDetailTable
           rows={yaraFiltered}
           columns={YARA_COLUMNS}
@@ -1368,6 +1457,13 @@ function Results() {
         <h2 className="label-section">Sandbox detonations</h2>
         <FilterInput label="sandbox detonations" value={sandboxQuery} onChange={setSandboxQuery} />
         <FilterScopeNote page={sandbox} query={sandboxQuery} matched={sandboxFiltered?.length ?? 0} />
+        {sandboxQ.failed && !sandbox ? (
+          <ErrorStateBlock
+            title="Sandbox store failed to load"
+            hint="The backend request failed — nothing here is cached."
+            onRetry={sandboxQ.retry}
+          />
+        ) : null}
         <MasterDetailTable
           rows={sandboxFiltered}
           columns={SANDBOX_COLUMNS}
@@ -1410,6 +1506,15 @@ function Results() {
         {/* GPU queue lives with Ghidra — the legacy /ghidra page rendered
             this card (dashboard/gpu_queue.go), and that page folded in
             here. */}
+        {gpuFailed ? (
+          /* #2178: the old `?? []` made a dead queue read look like an
+             empty queue; the section names itself instead. */
+          <ErrorStateBlock
+            title="GPU queue failed to load"
+            hint="The backend request failed — nothing here is cached."
+            onRetry={retryGpuQueue}
+          />
+        ) : null}
         {gpuQueue === null || gpuQueue.length > 0 ? (
           <>
             <h2 className="label-section">GPU queue</h2>
@@ -1428,6 +1533,13 @@ function Results() {
         <h2 className="label-section">Ghidra decompilation</h2>
         <FilterInput label="Ghidra runs" value={ghidraQuery} onChange={setGhidraQuery} />
         <FilterScopeNote page={ghidra} query={ghidraQuery} matched={ghidraFiltered?.length ?? 0} />
+        {ghidraQ.failed && !ghidra ? (
+          <ErrorStateBlock
+            title="Ghidra store failed to load"
+            hint="The backend request failed — nothing here is cached."
+            onRetry={ghidraQ.retry}
+          />
+        ) : null}
         <MasterDetailTable
           rows={ghidraFiltered}
           columns={GHIDRA_COLUMNS}
