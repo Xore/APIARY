@@ -3,8 +3,53 @@
 // resolved to its literal value via getComputedStyle at init time, and
 // the "xore" theme is re-registered on each chart init so a live theme
 // toggle is picked up by the next chart. Client-only module.
-import * as echarts from 'echarts'
+//
+// #1964: this is the app's only echarts entry point, and it goes through
+// echarts/core with explicit registration instead of the full barrel.
+// EChart.tsx draws nine kinds (sankey, timeline, heatmap, pie, line, bar,
+// barh, scatter, radar); the barrel also shipped gl stubs, treemap,
+// sunburst, themeRiver, funnel, gauge and friends that no builder will
+// ever ask for -- roughly two thirds of the chunk a browser parses before
+// the first chart card hydrates. Registration lives here rather than at
+// the call sites so the builders stay declarative about options only:
+// adding a tenth kind means one import above and nowhere else. The
+// component set below is exactly what those builders' options reference;
+// TooltipComponent installs the axis pointer its trigger:'axis' needs, so
+// nothing else is required for parity with the barrel import.
+import * as echarts from 'echarts/core'
+import {
+  BarChart,
+  CustomChart,
+  HeatmapChart,
+  LineChart,
+  PieChart,
+  RadarChart,
+  SankeyChart,
+  ScatterChart,
+} from 'echarts/charts'
+import { GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+
 import { cssVar } from './cssVar'
+
+echarts.use([
+  // sankey/timeline/heatmap/pie/line/bar/barh/scatter/radar: bar covers
+  // both bar orientations, and CustomChart is the campaign timeline's
+  // custom-series renderer.
+  BarChart,
+  CustomChart,
+  HeatmapChart,
+  LineChart,
+  PieChart,
+  RadarChart,
+  SankeyChart,
+  ScatterChart,
+  GridComponent,
+  LegendComponent,
+  TooltipComponent,
+  VisualMapComponent,
+  CanvasRenderer,
+])
 
 export { echarts }
 
