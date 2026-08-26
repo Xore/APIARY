@@ -256,13 +256,55 @@ def write_status(counts: dict) -> None:
     os.replace(tmp, RESULTS_DIR / "status.json")
 
 
+def _retire_timeout(sha256: str, requested_at: str, started_at: str, error: str) -> None:
+    """Terminal timeout record for inputs that could never reach the
+    MAX_WAIT deadline through aging alone (#2079): a timestamp that cannot
+    be parsed, or a record that cannot be read at all, would otherwise sit
+    in the spool retrying forever."""
+    write_result(sha256, {
+        "version": RESULT_VERSION, "sha256": sha256, "requested_at": requested_at,
+        "started_at": started_at, "completed_at": now(), "exit_status": "timeout",
+        "error": error,
+    })
+
+
 def process_one(pending_file: Path) -> str:
-    pending = json.loads(pending_file.read_text())
-    sha256 = pending["sha256"]
+    # The record filename is {sha256}.pending -- the one identity that
+    # survives even a record too corrupt to yield its own sha256 field.
+    fallback_sha = pending_file.stem
+    try:
+        pending = json.loads(pending_file.read_text())
+        sha256 = pending["sha256"]
+    except (OSError, ValueError, KeyError) as e:
+        # Same no-terminal-state class as the bad-timestamp guard below
+        # (#2079): every other outcome requires reading the record first,
+        # so an unreadable one retried forever under drain()'s blanket
+        # handler. Retire it on the spot instead.
+        log(f"  [!] {fallback_sha}: unreadable pending record ({e!r}) -- retiring")
+        _retire_timeout(fallback_sha, "", "", f"pending record unreadable: {e!r}")
+        pending_file.unlink()
+        return "timeout"
+
     commit = pending.get("commit", "")
     requested_at = pending.get("requested_at", now())
 
-    elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(requested_at.replace("Z", "+00:00"))).total_seconds()
+    try:
+        started = datetime.fromisoformat(requested_at.replace("Z", "+00:00"))
+    except ValueError:
+        # This parse used to run before the MAX_WAIT check, so an
+        # unparseable timestamp could never age out: it raised past the
+        # deadline into drain()'s blanket handler every tick, forever
+        # (#2079). The deadline must be unreachable by no input -- retire
+        # immediately, naming the offending value.
+        log(f"  [!] {sha256}: requested_at is not parseable ({requested_at!r}) -- retiring")
+        _retire_timeout(
+            sha256, requested_at, requested_at,
+            f"requested_at is not a parseable timestamp: {requested_at!r}",
+        )
+        pending_file.unlink()
+        return "timeout"
+
+    elapsed = (datetime.now(timezone.utc) - started).total_seconds()
     if elapsed > MAX_WAIT:
         write_result(sha256, {
             "version": RESULT_VERSION, "sha256": sha256, "requested_at": requested_at,
@@ -296,10 +338,40 @@ def process_one(pending_file: Path) -> str:
 
     try:
         report_commit = git_pull()
+    except (subprocess.SubprocessError, OSError) as e:
+        # Transport-class trouble (fetch/reset failure, git missing):
+        # genuinely transient -- the next tick plausibly differs -- so stay
+        # on the retry path without a terminal state (#2079). CalledProcess-
+        # Error used to fall through to drain()'s blanket handler and
+        # eventually retire as a misleading "timeout".
+        log(f"  [.] {sha256}: git transport error: {e!r} (will retry)")
+        return "running"
+
+    try:
         result = build_result(pending, run, report_commit)
     except CollectError as e:
-        log(f"  [!] {sha256}: {e}")
+        # Scanner artifacts not committed yet: plausibly a race between the
+        # run concluding and its objects being visible -- retryable.
+        log(f"  [.] {sha256}: {e} (will retry)")
         return "running"
+    except (ValueError, TypeError, KeyError) as e:
+        # Results are present but unusable (corrupt committed scanner JSON,
+        # unexpected field shapes): deterministic, so retrying only burns
+        # MAX_WAIT before mislabeling itself a timeout (#2079). Record the
+        # real failure instead -- diagnosis starts at the clone on disk,
+        # not at "was Actions slow?".
+        log(f"  [!] {sha256}: committed results present but unusable: {e!r}")
+        write_result(sha256, {
+            "version": RESULT_VERSION, "sha256": sha256,
+            "requested_at": pending.get("requested_at", ""),
+            "started_at": pending.get("requested_at", ""),
+            "completed_at": now(), "exit_status": "failed",
+            "commit": pending.get("commit", ""), "run_id": run.get("id"),
+            "run_url": run.get("html_url", ""),
+            "error": f"committed results unreadable: {e!r}",
+        })
+        pending_file.unlink()
+        return "failed"
 
     write_result(sha256, result)
     pending_file.unlink()
