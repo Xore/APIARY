@@ -28,6 +28,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::audit::AuditEvent;
+use crate::es::WriteError;
 use crate::AppState;
 
 const ALERT_INDEX: &str = "dashboard-alert-state-v1";
@@ -385,42 +386,79 @@ struct Notifier {
     last_ingest_check: Option<std::time::Instant>,
 }
 
+/// Read-modify-write attempts before an alert upsert gives up (#2044).
+const OBSERVE_CAS_ATTEMPTS: usize = 3;
+
 impl Notifier {
-    /// Ported alertManager.observe: upsert the alert record, return
-    /// whether this observation should notify. Single-notifier deployment
-    /// — plain get→index, no seq_no fencing (the Go loop's retries guard
-    /// against its own web handlers; acks racing a 60s pass lose at most
-    /// one count increment).
+    /// Ported alertManager.observe: upsert the alert record, deciding
+    /// whether this observation should notify. Compare-and-swap on the
+    /// record's seq_no/primary_term (#2044): the dashboard's ack endpoint
+    /// patches Acknowledged on the same document this loop rewrites
+    /// wholesale, so the old unfenced get→index could resurrect an
+    /// acknowledged alert from a pre-ack read or lose a count increment.
     async fn observe(&mut self, key: &str, message: String, link: &str, mark_only: bool) {
         let now = chrono::Utc::now().to_rfc3339();
-        let existing = self.state.es.get_doc(ALERT_INDEX, key).await.ok().flatten();
-        let mut record = existing.unwrap_or_else(|| {
-            json!({"Key": key, "FirstSeen": now, "Count": 0, "Acknowledged": false, "LastNotified": null})
-        });
-        let acknowledged = record["Acknowledged"].as_bool().unwrap_or(false);
-        let last_notified = record["LastNotified"]
-            .as_str()
-            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok());
-        let cooled_down = match last_notified {
-            None => true,
-            Some(at) => (chrono::Utc::now() - at.with_timezone(&chrono::Utc)).num_seconds() as u64
-                >= self.cooldown.as_secs(),
-        };
-        let notify = !mark_only && !acknowledged && cooled_down;
-        record["Message"] = json!(message);
-        record["Link"] = json!(link);
-        record["LastSeen"] = json!(now);
-        record["Count"] = json!(record["Count"].as_u64().unwrap_or(0) + 1);
-        if notify || (mark_only && last_notified.is_none()) {
-            record["LastNotified"] = json!(now);
+        for _ in 0..OBSERVE_CAS_ATTEMPTS {
+            let current = match self.state.es.get_doc_meta(ALERT_INDEX, key).await {
+                Ok(found) => found,
+                // A failed read used to fall through to a fresh record and
+                // silently reset Count; skipping this observation is honest.
+                Err(error) => {
+                    tracing::warn!(%error, key, "alert state read failed; observation skipped");
+                    return;
+                }
+            };
+            let existed = current.is_some();
+            let (mut record, seq_no, primary_term) = current.unwrap_or_else(|| {
+                (
+                    json!({"Key": key, "FirstSeen": now, "Count": 0, "Acknowledged": false, "LastNotified": null}),
+                    0,
+                    0,
+                )
+            });
+            let acknowledged = record["Acknowledged"].as_bool().unwrap_or(false);
+            let last_notified = record["LastNotified"]
+                .as_str()
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok());
+            let cooled_down = match last_notified {
+                None => true,
+                Some(at) => (chrono::Utc::now() - at.with_timezone(&chrono::Utc)).num_seconds() as u64
+                    >= self.cooldown.as_secs(),
+            };
+            let notify = !mark_only && !acknowledged && cooled_down;
+            record["Message"] = json!(message.clone());
+            record["Link"] = json!(link);
+            record["LastSeen"] = json!(now);
+            record["Count"] = json!(record["Count"].as_u64().unwrap_or(0) + 1);
+            if notify || (mark_only && last_notified.is_none()) {
+                record["LastNotified"] = json!(now);
+            }
+            let result = if existed {
+                self.state
+                    .es
+                    .index_doc_cas(ALERT_INDEX, key, record, seq_no, primary_term)
+                    .await
+            } else {
+                // op_type=create makes concurrent first sightings of one
+                // key deterministic: the loser's 409 loops back into a
+                // fenced update of the winner instead of clobbering it.
+                self.state.es.index_doc_create(ALERT_INDEX, key, record).await
+            };
+            match result {
+                Ok(()) => {
+                    if notify {
+                        self.messages.push(message);
+                    }
+                    return;
+                }
+                Err(WriteError::Conflict) => continue, // ack (or another pass) won; re-read and retry
+                Err(WriteError::Other(error)) => {
+                    tracing::warn!(%error, key, "alert upsert failed");
+                    return;
+                }
+            }
         }
-        if let Err(error) = self.state.es.index_doc(ALERT_INDEX, key, record).await {
-            tracing::warn!(%error, key, "alert upsert failed");
-            return;
-        }
-        if notify {
-            self.messages.push(message);
-        }
+        tracing::warn!(key, "alert upsert kept losing races; observation dropped");
     }
 
     async fn search(&self, indices: &[&str], body: Value) -> Option<Value> {

@@ -47,6 +47,9 @@ pub struct SourceRow {
 #[derive(Serialize)]
 pub struct SourcesPage {
     pub total_unique: u64,
+    /// True when the terms aggregation hit its 1000-bucket request
+    /// ceiling and `total_unique` counts IPs that no row shows (#2044).
+    pub truncated: bool,
     pub rows: Vec<SourceRow>,
 }
 
@@ -101,7 +104,18 @@ pub async fn sources(
                 .collect()
         })
         .unwrap_or_default();
-    Ok(Json(SourcesPage { total_unique, rows }))
+    // The cardinality agg counts the whole window while the terms agg
+    // silently stops at its size ceiling; when they disagree, IPs exist
+    // that no row shows (#2044).
+    let listed = result["aggregations"]["ips"]["buckets"]
+        .as_array()
+        .map(|buckets| buckets.len())
+        .unwrap_or(0);
+    Ok(Json(SourcesPage {
+        total_unique,
+        truncated: total_unique > listed as u64,
+        rows,
+    }))
 }
 
 fn bad_gateway(error: anyhow::Error) -> (StatusCode, String) {
