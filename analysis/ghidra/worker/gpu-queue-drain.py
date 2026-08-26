@@ -10,6 +10,10 @@ docstring for why: a `docker run` background service every other honeypot
 component already avoids). Processes at most one job per invocation:
 simple, and the next timer tick picks up wherever this one left off, the
 same reasoning honeypot-ghidra-worker.path's own single-flock drain uses.
+Every tick also opens with a stale-running sweep (#2075): a drainer death
+mid-generation used to strand its job as an eternally-running zombie --
+requeued once, then failed, per the semantics recorded next to
+gpu_queue.py's status list.
 
 Imports ghidra-worker.py as a module (same technique its own test suite
 already uses, see tests/test_ghidra_worker.py) to reuse run_triage_workflows()
@@ -23,6 +27,8 @@ from __future__ import annotations
 import importlib.util
 import os
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -30,6 +36,64 @@ sys.path.insert(0, str(HERE))
 import gpu_queue  # noqa: E402
 
 ES_HOST = os.environ.get("GPU_QUEUE_ES_HOST", "http://elasticsearch:9200")
+
+# Staleness bound for the crash-recovery sweep below (#2075): well past the
+# longest legitimate run. run_triage_workflows() makes one TRIAGE_TIMEOUT-
+# bounded request per workflow (two today), so 2x TRIAGE_TIMEOUT plus fixed
+# slack can only be exceeded by a drainer that is never coming back. Same
+# default and env var as ghidra-worker.py's own TRIAGE_TIMEOUT -- read here
+# directly rather than by loading the worker module, so the sweep stays
+# cheap enough to sit ahead of the early return in main().
+TRIAGE_TIMEOUT = int(os.environ.get("GHIDRA_TRIAGE_TIMEOUT", "300"))
+STALE_RUNNING_SECONDS = 2 * TRIAGE_TIMEOUT + 600
+
+
+def _parse_ts(value) -> float | None:
+    try:
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def sweep_stale_running() -> int:
+    """Crash recovery for the running state (#2075): a drainer that died
+    between update_status('running') and any terminal write left its job
+    'running' forever -- only queued jobs are picked up again, and nothing
+    ever consulted started_at. Runs at the head of every tick; returns how
+    many zombies were cleaned up."""
+    try:
+        running = gpu_queue.list_queue(ES_HOST, status="running", job_type="ghidra-triage")
+    except Exception as e:  # noqa: BLE001 - ES down must not fail the whole tick
+        print(f"[gpu-queue-drain] stale-running sweep skipped ({e!r})")
+        return 0
+
+    now = time.time()
+    cleaned = 0
+    for job in running:
+        job_id = job["_id"]
+        started = _parse_ts(job.get("started_at"))
+        if started is None:
+            # update_status("running") always stamps started_at, so a
+            # running job without one is already corrupt bookkeeping --
+            # age it out now rather than leaving it unowned.
+            age_text = "no usable started_at"
+        else:
+            age = now - started
+            if age <= STALE_RUNNING_SECONDS:
+                continue  # legitimately generating; not the sweep's business
+            age_text = f"running for {int(age)}s"
+
+        if int(job.get("attempts") or 0) < 2:
+            gpu_queue.requeue(ES_HOST, job_id)
+            print(f"[gpu-queue-drain] {job_id} ({job['ref']}): {age_text} -- "
+                  f"drainer died mid-run; requeued (attempt {int(job.get('attempts') or 0) + 1})")
+        else:
+            gpu_queue.update_status(ES_HOST, job_id, "failed",
+                                    error="drainer died mid-generation (recovered by stale-running sweep)")
+            print(f"[gpu-queue-drain] {job_id} ({job['ref']}): {age_text} -- "
+                  f"drainer died mid-run again; marked failed instead of retrying forever")
+        cleaned += 1
+    return cleaned
 
 
 def _load_ghidra_worker():
@@ -42,6 +106,8 @@ def _load_ghidra_worker():
 
 
 def main() -> int:
+    sweep_stale_running()
+
     queued = gpu_queue.list_queue(ES_HOST, status="queued", job_type="ghidra-triage", size=1)
     if not queued:
         return 0

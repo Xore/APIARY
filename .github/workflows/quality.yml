@@ -308,6 +308,13 @@ jobs:
               # sample-derived text to a non-local model endpoint — a rule that is
               # only worth anything if something checks it on every change.
               python analysis/ghidra/worker/tests/test_ghidra_worker.py
+              # GPU-queue drain crash recovery (#2075): a drainer death
+              # mid-generation used to strand its job as an eternally-running
+              # zombie. Stubbed queue, no ES/docker/nvidia-smi -- the sweep
+              # must requeue-once-then-fail past the staleness bound, never
+              # touch a legitimately-running job, and run before the queued
+              # early return that used to hide the problem.
+              python analysis/ghidra/worker/tests/test_gpu_queue_drain.py
               # Replacement Ghidra REST service (#245): fake analyzeHeadless, no
               # real Ghidra/JVM in CI -- verifies server.py's HTTP/queue layer
               # only, same "stub both sides" reasoning as the worker test above.

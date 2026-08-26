@@ -69,9 +69,30 @@ def test_list_queue_omits_filters_that_were_not_requested():
           "no status/job_type given -> match_all, not an empty filter list")
 
 
+def test_requeue_clears_started_at_and_keeps_attempts():
+    # #2075: the stale-running sweep ages jobs by started_at, so a requeued
+    # job must have it cleared -- otherwise the next sweep pass would see an
+    # ancient started_at on the freshly-requeued job. attempts is left to
+    # increment_attempts() at pickup, which is what bounds retries.
+    captured = {}
+
+    def fake_request(es_host, method, path, body=None):
+        captured["path"], captured["body"] = path, body
+        return {}
+
+    gpu_queue._request = fake_request
+    gpu_queue.requeue("http://es.invalid:9200", "job-1")
+
+    check("/gpu-job-queue/_update/job-1" in captured["path"],
+          "requeue targets the job's update endpoint")
+    check(captured["body"] == {"doc": {"status": "queued", "started_at": None}},
+          "requeue resets status and started_at, touching nothing else")
+
+
 if __name__ == "__main__":
     test_list_queue_filters_use_keyword_subfield()
     test_list_queue_omits_filters_that_were_not_requested()
+    test_requeue_clears_started_at_and_keeps_attempts()
     if fails:
         print(f"\n{len(fails)} failure(s)")
         sys.exit(1)
