@@ -3,9 +3,11 @@
 // timeline mirror dashboard/ui/agent_campaigns.html + agent_campaigns.go.
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { ErrorStateBlock } from '../components/ErrorState'
 import type { StorePage } from '../components/StoreList'
+import { useServerQuery } from '../lib/useServerQuery'
 import { formatTimestamp } from '../lib/time'
 
 // Matches build_campaign_verdict's document shape
@@ -182,28 +184,24 @@ export const Route = createFileRoute('/agent-campaigns')({
 
 function Page() {
   const { category } = Route.useSearch()
-  const [rows, setRows] = useState<AgentCampaignRow[] | null>(null)
-  const [total, setTotal] = useState(0)
   const [loadingMore, setLoadingMore] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    fetchPage({ data: { offset: 0 } }).then((page) => {
-      if (cancelled || !page) return
-      setRows(page.rows)
-      setTotal(page.total)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  // #2178: a failed first page used to leave rows unset forever -- the table
+  // sat in its opening ghosts with no explanation. Tri-state now separates
+  // "still loading", "backend said no" (error), and rows.
+  const pageQuery = useServerQuery(fetchPage, { offset: 0 }, [])
+  // useServerQuery owns the first page; View-more pages accumulate beside
+  // it because the hook's result is not caller-mutable.
+  const [appended, setAppended] = useState<AgentCampaignRow[]>([])
+  const baseRows = pageQuery.status === 'ready' ? pageQuery.data.rows : null
+  const rows = baseRows ? [...baseRows, ...appended] : null
+  const total = pageQuery.status === 'ready' ? pageQuery.data.total : 0
 
   const viewMore = useCallback(async () => {
     if (!rows || loadingMore) return
     setLoadingMore(true)
     try {
       const page = await fetchPage({ data: { offset: rows.length } })
-      if (page) setRows((current) => [...(current ?? []), ...page.rows])
+      if (page) setAppended((current) => [...current, ...page.rows])
     } finally {
       setLoadingMore(false)
     }
@@ -281,20 +279,29 @@ function Page() {
           })}
         </div>
       ) : null}
-      <MasterDetailTable
-        rows={visible}
-        columns={COLUMNS}
-        rowKey={(row, index) => `${row.campaign_id}-${index}`}
-        emptyState={{
-          title: 'No campaign has crossed a criticality-rule threshold yet',
-          hint: 'Campaigns surface here once agent-intrusion-worker scores one past a rule.',
-        }}
-        total={category ? undefined : total}
-        onViewMore={category ? undefined : viewMore}
-        loadingMore={loadingMore}
-        inspectorTitle="Campaign details"
-        inspectorExtra={(row) => <EvidenceTimeline row={row} />}
-      />
+      {pageQuery.status === 'error' ? (
+        // #2178: the loader failed outright — say so instead of ghosting.
+        <ErrorStateBlock
+          title="Agent campaigns failed to load"
+          hint="The backend request failed — nothing here is cached."
+          onRetry={pageQuery.retry}
+        />
+      ) : (
+        <MasterDetailTable
+          rows={visible}
+          columns={COLUMNS}
+          rowKey={(row, index) => `${row.campaign_id}-${index}`}
+          emptyState={{
+            title: 'No campaign has crossed a criticality-rule threshold yet',
+            hint: 'Campaigns surface here once agent-intrusion-worker scores one past a rule.',
+          }}
+          total={category ? undefined : total}
+          onViewMore={category ? undefined : viewMore}
+          loadingMore={loadingMore}
+          inspectorTitle="Campaign details"
+          inspectorExtra={(row) => <EvidenceTimeline row={row} />}
+        />
+      )}
     </>
   )
 }

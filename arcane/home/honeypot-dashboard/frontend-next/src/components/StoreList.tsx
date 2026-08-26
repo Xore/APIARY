@@ -81,6 +81,9 @@ export function StoreListPage<Row = StoreRow>({
   const [rows, setRows] = useState<Row[] | null>(null)
   const [total, setTotal] = useState(0)
   const [loadingMore, setLoadingMore] = useState(false)
+  // #2178: a failed View-more page used to vanish -- rows just stayed short
+  // while the header still promised the full total. Named below the table.
+  const [moreFailed, setMoreFailed] = useState(false)
   // #1966: the server function collapses every failure mode to a null page,
   // so a first fetch that resolves null while rows is still null can only be
   // a failure -- a success always calls setRows. That used to leave the
@@ -115,9 +118,15 @@ export function StoreListPage<Row = StoreRow>({
   const viewMore = useCallback(async () => {
     if (!rows || loadingMore) return
     setLoadingMore(true)
+    setMoreFailed(false)
     try {
       const page = await fetchPage({ data: { offset: rows.length } })
-      if (page) setRows((current) => [...(current ?? []), ...page.rows])
+      // #2178: a null page here is a failed read, not the end of the list.
+      if (page) {
+        setRows((current) => [...(current ?? []), ...page.rows])
+      } else {
+        setMoreFailed(true)
+      }
     } finally {
       setLoadingMore(false)
     }
@@ -168,6 +177,13 @@ export function StoreListPage<Row = StoreRow>({
               pageSize={pageSize}
             />
           )}
+          {moreFailed ? (
+            /* #2178: the click succeeded from the UI's point of view while
+               the read behind it failed -- say so instead of a no-op. */
+            <p className="note" role="alert">
+              Loading more {chipNoun} failed — <button className="copy" type="button" onClick={() => void viewMore()}>retry</button>
+            </p>
+          ) : null}
         </>
       )}
     </>

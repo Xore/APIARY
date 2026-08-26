@@ -3,6 +3,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { ErrorStateBlock } from '../components/ErrorState'
 import { usePaginatedList } from '../lib/hooks'
 import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
@@ -57,7 +58,7 @@ const COLUMNS: Column<EventRow>[] = [
 
 function Commands() {
   const { first } = Route.useLoaderData()
-  const { rows, total, loadingMore, viewMore } = usePaginatedList(first, (offset) => fetchCommands({ data: { offset } }))
+  const { rows, total, loadingMore, viewMore, failed, retry } = usePaginatedList(first, (offset) => fetchCommands({ data: { offset } }))
   return (
     <>
       <InvestigateHeader
@@ -66,7 +67,7 @@ function Commands() {
         subtitle="Every shell command attackers typed into interactive honeypots, newest first."
         chips={
           <>
-            <span className="chip">{total.toLocaleString('en-US')} commands</span>
+            <span className="chip">{failed ? 'load failed' : `${total.toLocaleString('en-US')} commands`}</span>
             <a className="chip" title="Download every executed command as CSV" href="/api/export/commands.csv">
               ⇩ CSV
             </a>
@@ -76,20 +77,28 @@ function Commands() {
       <p className="note">
         Shell commands captured during interactive honeypot sessions, deduplicated across sources.
       </p>
-      <MasterDetailTable
-        rows={rows}
-        columns={COLUMNS}
-        rowKey={(row, index) => `${row.time}-${index}`}
-        detailHref={(row) => (row.src_ip ? `/investigate/ip/${encodeURIComponent(row.src_ip)}` : undefined)}
-        emptyState={{
-          title: 'No commands captured yet',
-          hint: 'Cowrie records these as attackers type in a shell session.',
-        }}
-        total={total}
-        onViewMore={viewMore}
-        loadingMore={loadingMore}
-        inspectorTitle="Command details"
-      />
+      {failed ? (
+        <ErrorStateBlock
+          title="Executed commands failed to load"
+          hint="The backend request failed — nothing here is cached."
+          onRetry={retry}
+        />
+      ) : (
+        <MasterDetailTable
+          rows={rows}
+          columns={COLUMNS}
+          rowKey={(row, index) => `${row.time}-${index}`}
+          detailHref={(row) => (row.src_ip ? `/investigate/ip/${encodeURIComponent(row.src_ip)}` : undefined)}
+          emptyState={{
+            title: 'No commands captured yet',
+            hint: 'Cowrie records these as attackers type in a shell session.',
+          }}
+          total={total}
+          onViewMore={viewMore}
+          loadingMore={loadingMore}
+          inspectorTitle="Command details"
+        />
+      )}
     </>
   )
 }
