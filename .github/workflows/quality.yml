@@ -376,6 +376,20 @@ jobs:
               # sensor now means adding one reviewable ledger row instead.
               python scripts/check-json-sink-retention-parity.py
 
+          # #1982: compose.yml is the only place a stack's knobs are exercised,
+          # .env.example is what a deployer copies when standing the stack up
+          # manually -- drift between them means a variable exists at runtime
+          # but can't be discovered at setup time (that's how ZEEK_PROXY_IFACE
+          # shipped as refuse-to-start-by-default and CANARY_PUBLIC_HOSTNAME as
+          # silent placeholder-domain). Two rules: every ${VAR} interpolated in
+          # arcane/home/<stack>/compose.yml must appear as a KEY= line in that
+          # stack's own .env.example (per-stack, pointers to a sibling don't
+          # count -- each file is copied on its own), and no key may be listed
+          # twice within one environment: block (the ZEEK_PROXY_ATTRIBUTION_
+          # INTERVAL_SECONDS dup meant tuning line one silently changed nothing).
+          - name: Compose interpolation documented per stack (#1982)
+            run: python scripts/check-compose-env-docs.py
+
           - name: Dionaea SMB exploit-signature incidents (#622, #1775)
             run: |
               # Executes the code this patch injects into smb.py, against a
@@ -385,7 +399,6 @@ jobs:
               # a single DoublePulsar connection produce ~643 documents and
               # 47.5% of everything the fleet ingested.
               python arcane/home/honeypot-dionaea/dionaea/tests/test_smb_exploit_patch.py
-
           - name: Ghidra worker, spool discipline and AI triage
             run: |
               # Stdlib only and stubbed on both sides, so it runs here in seconds.
