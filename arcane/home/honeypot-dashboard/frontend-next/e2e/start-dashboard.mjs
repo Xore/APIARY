@@ -77,6 +77,14 @@ spawnChild("bff", process.execPath, [join(ROOT, ".output/server/index.mjs")], {
   // Sessions resolve from the fixture redis first; OIDC_DISABLED=1 is the
   // cookie-less admin fallback so unseeded contexts still navigate as an
   // operator. Production never sets either of these two vars together.
+  //
+  // APIARY_ALLOW_UNAUTH_DEV=1 (#2243): this e2e harness predates #2206's
+  // SERVICE_TOKEN boot gate and got missed when the shell port-tests were
+  // plumbed for it -- since then every Playwright run died pre-listen when
+  // cluster.mjs refused to start a tokenless server. Same sanctioned opt-in
+  // as port-tests/lib.sh (#2183 contract): no real-token path added here,
+  // production semantics untouched.
+  APIARY_ALLOW_UNAUTH_DEV: "1",
   OIDC_DISABLED: "1",
   OIDC_SESSION_REDIS_URL: redis.url,
   BACKEND_URL: backend.url,
