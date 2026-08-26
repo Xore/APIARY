@@ -12,10 +12,13 @@ not by noticing a gap months later.
 
 The variable list is not hand-maintained: it comes from grepping every
 pipeline source file (below) for `os.environ.get(...)`/`os.getenv(...)`
-calls, so it stays accurate as the pipeline grows. Descriptions come from
-the comment block immediately above each assignment, since that convention
-is already followed throughout this pipeline (see e.g. REVDECK_API_BASE in
-worker/ghidra-worker.py).
+calls, so it stays accurate as the pipeline grows. That claim is enforced,
+not aspirational: tests/test_full_capabilities.py re-scans the same files
+with an independently written pattern and fails when either side sees a
+name the other doesn't (this module once missed 8 of 59 real reads that
+way -- #2064). Descriptions come from the comment block immediately above
+each assignment, since that convention is already followed throughout this
+pipeline (see e.g. REVDECK_API_BASE in worker/ghidra-worker.py).
 
 Usage:
     analysis/ghidra/full_capabilities.py                     show current state
@@ -53,39 +56,97 @@ SOURCE_FILES = [
 
 DEFAULT_ENV_FILE = "/etc/default/honeypot-ghidra"
 
-# getenv("NAME", default) or getenv("NAME") -- default may be a quoted
-# string, a call like os.environ.get(...).rstrip("/"), or absent entirely.
-# Matched non-greedily across the assignment's own line; the value on the
-# right of "=" is kept as source text, not evaluated, so python-only
-# constructs are never eval()'d against an operator's own environment.
+# Two extraction passes (#2064: a single narrow assignment shape silently
+# hid 8 of 59 real reads -- Path()-wrapped paths, underscore-named module
+# vars, kwargs-nested argparse defaults).
+#
+# Pass 1 (ASSIGN_RE): the classic `VAR = os.environ.get(...)` statement,
+# generalized -- underscore-leading variable names are allowed, and instead
+# of whitelisting int(/float( individually, any chain of simple call
+# wrappers between "=" and the read is consumed (`Path(`, `int(`,
+# `.rstrip(...) callers' variable assignments, `os.path.join(` nesting and
+# friends all appear in this pipeline). \s inside the chain/argument gaps
+# spans newlines, so a one-var-per-call site wrapped across lines still
+# attributes to its preceding comment block. The default may be a quoted
+# string or absent; the value is kept as source text, never evaluated --
+# python-only constructs are never eval()'d against an operator's own
+# environment.
 ASSIGN_RE = re.compile(
-    r'^(?P<var>[A-Z][A-Z0-9_]*)\s*=\s*'
-    r'(?:int\(|float\(|)\s*'
+    r'^(?P<var>[A-Za-z_][A-Za-z0-9_.]*)\s*=\s*'
+    r'(?:[A-Za-z_][A-Za-z0-9_.]*\(\s*)*'
     r'os\.(?:environ\.get|getenv)\(\s*["\'](?P<name>[A-Z][A-Z0-9_]*)["\']'
     r'(?:\s*,\s*(?P<default>"[^"]*"|\'[^\']*\'))?',
     re.MULTILINE,
 )
 
+# Pass 2 (BARE_RE fallback): every remaining literal read whose opening the
+# assignment-shaped pass couldn't reach -- e.g. a kwarg default deep inside
+# an argparse parser.add_argument(default=os.environ.get("GHIDRA_RESULTS_DIR",
+# ...)) spanning lines, or a ternary buried mid-expression. It contributes
+# name + code-default only (the enclosing statement isn't a clean
+# VAR = read), attributed to whatever comment block precedes the site; a
+# name already caught by pass 1 is skipped so nothing yields twice.
+BARE_RE = re.compile(
+    r'os\.(?:environ\.get|getenv)\(\s*["\'](?P<name>[A-Z][A-Z0-9_]*)["\']'
+    r'(?:\s*,\s*(?P<default>"[^"]*"|\'[^\']*\'))?'
+)
+
+
+def _source_label(path: Path):
+    """Repo-relative attribution for pipeline sources; anything extracted
+    from outside the tree (tests probing miss shapes against synthetic
+    files) keeps its own absolute path rather than raising."""
+    try:
+        return str(path.relative_to(PIPELINE_DIR.parent.parent))
+    except ValueError:
+        return str(path)
+
+
+def _comment_block(lines, line_no):
+    """Comment lines immediately above zero-based index line_no, joined --
+    the description convention used throughout the pipeline."""
+    out = []
+    i = line_no - 1
+    while i >= 0 and lines[i].strip().startswith("#"):
+        out.insert(0, lines[i].strip().lstrip("#").strip())
+        i -= 1
+    return " ".join(out)
+
 
 def extract(path: Path):
     """Yield (name, default_literal, description, source_file) for every
-    os.environ.get(...)/os.getenv(...) call in path, reading the comment
-    block immediately preceding the assignment as its description."""
+    os.environ.get(...)/os.getenv(...) call in path: pass-1 assignment
+    shapes first (full wrapper/var context), then pass-2 fallback for any
+    literal read site the assignment shape can't reach. A fallback hit whose
+    opening overlaps a pass-1 match contributes nothing twice; hits inside
+    '#' comment lines are ignored so documented examples never invent keys."""
     if not path.is_file():
         return
     lines = path.read_text().splitlines()
     text = "\n".join(lines)
+
+    spans = []
     for match in ASSIGN_RE.finditer(text):
         name = match.group("name")
         default_raw = match.group("default")
         default = default_raw[1:-1] if default_raw else ""
+        spans.append((match.start(), match.end()))
         line_no = text.count("\n", 0, match.start())
-        comment_lines = []
-        i = line_no - 1
-        while i >= 0 and lines[i].strip().startswith("#"):
-            comment_lines.insert(0, lines[i].strip().lstrip("#").strip())
-            i -= 1
-        yield name, default, " ".join(comment_lines), path.relative_to(PIPELINE_DIR.parent.parent)
+        yield name, default, _comment_block(lines, line_no), \
+            _source_label(path)
+
+    for match in BARE_RE.finditer(text):
+        start = match.start()
+        if any(lo <= start < hi for lo, hi in spans):
+            continue
+        hit_line = text.count("\n", 0, start)
+        if lines[hit_line].strip().startswith("#"):
+            continue
+        name = match.group("name")
+        default_raw = match.group("default")
+        default = default_raw[1:-1] if default_raw else ""
+        yield name, default, _comment_block(lines, hit_line), \
+            _source_label(path)
 
 
 def load_env_file(path: Path):
@@ -177,23 +238,56 @@ PRESETS = {
 }
 
 
+def _write_env_file(env_file: Path, lines):
+    """Land env-file contents atomically (#2064): systemd reads this file's
+    directory as its EnvironmentFile, and a plain write_text can leave it
+    truncated mid-write at exactly the moment the worker restarts -- observed
+    as a half-applied override that looks like a feature silently flipping.
+    tmp + os.replace is the same treatment evaluate-models.py already uses;
+    the temp file inherits the original file's mode so 0600 secrets don't
+    get widened to 0644 by a rewrite."""
+    tmp = env_file.with_name("." + env_file.name + ".tmp")
+    try:
+        tmp.write_text("\n".join(lines) + ("\n" if lines else ""))
+        try:
+            os.chmod(tmp, os.stat(env_file).st_mode & 0o777)
+        except FileNotFoundError:
+            pass  # creating a brand-new env file -- sensible default applies
+        os.replace(tmp, env_file)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
 def apply(env_file: Path, overrides: dict):
     if not overrides:
         return
-    lines = env_file.read_text().splitlines() if env_file.is_file() else []
+    original = env_file.read_text().splitlines() if env_file.is_file() else []
     remaining = dict(overrides)
-    for i, raw in enumerate(lines):
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key = line.split("=", 1)[0].strip()
+    lines = []
+    # First occurrence of a managed key is rewritten in place; any LATER
+    # duplicate is dropped outright. Leaving one behind replicates the bug
+    # this fixes: systemd's EnvironmentFile lets the last line win, so a
+    # stale duplicate below the freshly-written value would silently keep
+    # overriding the intended setting forever.
+    dropped_dupes = False
+    for raw in original:
+        stripped = raw.strip()
+        is_assign = bool(stripped) and not stripped.startswith("#") and "=" in stripped
+        key = stripped.split("=", 1)[0].strip() if is_assign else None
         if key in remaining:
-            lines[i] = f"{key}={remaining.pop(key)}"
+            lines.append(f"{key}={remaining.pop(key)}")
+        elif is_assign and key in overrides:
+            dropped_dupes = True
+        else:
+            lines.append(raw)
     for key, value in remaining.items():
         lines.append(f"{key}={value}")
-    env_file.write_text("\n".join(lines) + "\n")
+    _write_env_file(env_file, lines)
     for key, value in overrides.items():
         print(f"  {key}={value or '(empty)'}")
+    if dropped_dupes:
+        print("  (removed stale duplicate lines; EnvironmentFile last-one-wins let them outrank the rewrite)")
     print(f"\nWrote {env_file}. Restart the worker for this to take effect:")
     print("  sudo systemctl restart honeypot-ghidra-worker.service")
 
@@ -213,7 +307,7 @@ def main():
         gate_names = {name for name, meta in inv.items() if meta["gate"]}
         remaining = [line for line in (env_file.read_text().splitlines() if env_file.is_file() else [])
                      if line.split("=", 1)[0].strip() not in gate_names]
-        env_file.write_text("\n".join(remaining) + ("\n" if remaining else ""))
+        _write_env_file(env_file, remaining)
         print(f"Removed overrides for: {', '.join(sorted(gate_names))}")
         return
     if args.preset:

@@ -3,14 +3,31 @@
 tree -- not fixtures, since the whole point of this script is that its
 inventory stays accurate as the real files change.
 
+#2064 adds two enforce-what-you-claim layers here:
+
+* a census-parity check -- an independently-written scan of the same six
+  SOURCE_FILES must find exactly the names the module's own extraction
+  finds, so the docstring's accuracy claim is enforced rather than
+  aspirational (the original narrow assignment shape hid 8 of 59 real
+  reads); and
+* apply() write-safety checks -- the env file must land atomically
+  (systemd reads it as EnvironmentFile=) with stale duplicates collapsed,
+  since last-one-wins semantics used to let a leftover line outrank a
+  fresh rewrite indefinitely.
+
 Usage: analysis/ghidra/tests/test_full_capabilities.py
 """
+import os
+import re
+import stat
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent.parent / "full_capabilities.py"
+sys.path.insert(0, str(SCRIPT.parent))
+import full_capabilities as fc  # noqa: E402
 
 fails = []
 
@@ -67,10 +84,159 @@ def test_set_overrides_existing_line_in_place():
         check(lines.count("REVDECK_API_BASE=http://new:2") == 1, "no duplicate line is appended")
 
 
+# --- #2064: inventory coverage -------------------------------------------
+
+HISTORICAL_MISSES = [
+    # The 8 census misses behind #2064 -- one per miss class, kept explicit
+    # so deleting any of them from the sources fails loudly rather than
+    # quietly shrinking the gate's reach back toward its old blind spot.
+    ("GHIDRA_REQUEST_DIR", "analysis/ghidra/worker/ghidra-worker.py"),
+    ("GHIDRA_RESULTS_DIR", "analysis/ghidra/worker/ghidra-worker.py"),
+    ("GHIDRA_SAMPLES_DIR", "analysis/ghidra/worker/ghidra-worker.py"),
+    ("GHIDRA_COWRIE_DOWNLOADS_DIR", "analysis/ghidra/worker/ghidra-worker.py"),
+    ("GHIDRA_LOCK", "analysis/ghidra/worker/ghidra-worker.py"),
+    ("GHIDRA_DATA_DIR", "analysis/ghidra/service/server.py"),
+    ("GHIDRA_QUERY_TIMEOUT_SECONDS", "analysis/ghidra/service/server.py"),
+    ("HOME", "analysis/ghidra/service/export_json.py"),
+]
+
+CENSUS_RE = re.compile(r'''os\.(?:environ\.get|getenv)\(\s*["']([A-Z][A-Z0-9_]*)["']''')
+
+
+def census_names():
+    """Independent scan of the same six SOURCE_FILES: strips '#' comment
+    lines so documented examples can't inflate either side, then collects
+    every literal read opening it finds. Written against the module rather
+    than through it on purpose -- if extraction ever regresses to missing a
+    shape again, this function is what still sees it."""
+    names = set()
+    for path in fc.SOURCE_FILES:
+        body = "\n".join(
+            line for line in path.read_text().splitlines()
+            if not line.strip().startswith("#")
+        )
+        names |= set(CENSUS_RE.findall(body))
+    return names
+
+
+def test_inventory_matches_independent_census():
+    inv = fc.inventory()
+    names = census_names()
+    check(not names - set(inv),
+          f"census finds {sorted(names - set(inv))} that inventory misses")
+    check(not set(inv) - names,
+          f"inventory inventories {sorted(set(inv) - names)} that no source actually reads")
+
+
+def test_historical_misses_attributed_to_their_own_file():
+    inv = fc.inventory()
+    for name, source in HISTORICAL_MISSES:
+        check(name in inv, f"{name} discovered at all (#2064)")
+        meta = inv.get(name)
+        if meta:
+            check(meta["source"] == source,
+                  f"{name} attributed to {source}, got {meta['source']} "
+                  "(first-seen file must be where the read really lives)")
+
+
+def test_show_lists_the_eight():
+    result = run("--env-file", "/nonexistent-on-purpose")
+    for name, _source in HISTORICAL_MISSES:
+        check(name in result.stdout, f"show() output lists {name}")
+
+
+def test_extraction_shapes_on_synthetic_file(tmpdir=None):
+    """Hermetic unit for every miss class from #2064, independent of whether
+    the real sources keep carrying examples of each."""
+    with tempfile.TemporaryDirectory() as tmp:
+        probe = Path(tmp) / "probe.py"
+        probe.write_text('''
+# wrapped-path one-liner
+REQUEST = Path(os.environ.get("PROBE_REQUEST", "/req"))
+# multi-line site keeps attribution even though the name sits below the fold
+RESULTS = Path(os.environ.get(
+    "PROBE_RESULTS", "/res"))
+_TIMEOUT = float(os.environ.get("PROBE_TIMEOUT", "2"))
+out = args[0] if args else os.path.join(os.environ.get("PROBE_HOME", "/tmp"), "x")
+FOO=os.getenv("PROBE_BARE")
+''')
+        found = {}
+        for name, default, description, _src in fc.extract(probe):
+            found.setdefault(name, (default, description))
+        check(set(found) == {"PROBE_REQUEST", "PROBE_RESULTS",
+                             "PROBE_TIMEOUT", "PROBE_HOME", "PROBE_BARE"},
+              f"all five synthetic shapes extracted, got {sorted(found)}")
+        check(found.get("PROBE_REQUEST", ("", ""))[1] == "wrapped-path one-liner",
+              f"Path()-wrapped shape keeps its comment, got {found.get('PROBE_REQUEST')}")
+        check(found.get("PROBE_RESULTS", ("", ""))[1].endswith("below the fold"),
+              f"multi-line site attributes preceding comment, got {found.get('PROBE_RESULTS')}")
+
+
+def test_apply_collapses_stale_duplicates():
+    # EnvironmentFile= semantics: the LAST occurrence of a key wins. Before
+    # #2064 apply() rewrote only the first line, so a stale duplicate below
+    # it kept outranking every rewrite forever.
+    with tempfile.TemporaryDirectory() as tmp:
+        env_file = Path(tmp) / "env"
+        env_file.write_text(
+            "GHIDRA_API_BASE=http://old:1\nOTHER=kept\nGHIDRA_API_BASE=http://stale:9\n")
+
+        run("--env-file", str(env_file), "--set", "GHIDRA_API_BASE=http://new:2")
+        lines = env_file.read_text().splitlines()
+        check(lines.count("GHIDRA_API_BASE=http://new:2") == 1,
+              f"exactly one assignment survives, got {lines}")
+        check(lines == ["GHIDRA_API_BASE=http://new:2", "OTHER=kept"],
+              f"duplicate is dropped, unrelated lines keep order: {lines}")
+
+
+def test_apply_preserves_file_mode_on_rewrite():
+    with tempfile.TemporaryDirectory() as tmp:
+        env_file = Path(tmp) / "env"
+        env_file.write_text("REVDECK_API_BASE=http://old\n")
+        os.chmod(env_file, 0o600)
+
+        run("--env-file", str(env_file), "--set", "REVDECK_API_BASE=http://new")
+        check(stat.S_IMODE(env_file.stat().st_mode) == 0o600,
+              "atomic rewrite keeps 0600 -- a widened mode would leak overrides")
+
+
+def test_apply_is_atomic_under_write_failure():
+    # Simulate the crash window the plain write_text version had: if the
+    # process dies mid-write (or rename fails), the operator's env file must
+    # be byte-identical to before and no .env.tmp residue may remain.
+    with tempfile.TemporaryDirectory() as tmp:
+        env_file = Path(tmp) / "env"
+        env_file.write_text("REVDECK_API_BASE=http://old\n")
+        original = env_file.read_text()
+
+        real_replace = os.replace
+        def exploding_replace(src, dst):
+            raise OSError(28, "simulated ENOSPC")
+        os.replace = exploding_replace
+        try:
+            fc.apply(env_file, {"REVDECK_API_BASE": "http://new"})
+        except OSError:
+            pass
+        else:
+            fails.append("apply() did not propagate the simulated rename failure")
+        finally:
+            os.replace = real_replace
+
+        check(env_file.read_text() == original, "original env file untouched after failed write")
+        check(not (Path(tmp) / ".env.tmp").exists(), "no temp residue after failed write")
+
+
 if __name__ == "__main__":
     test_show_finds_known_gates()
     test_preset_all_on_then_minimal()
     test_set_overrides_existing_line_in_place()
+    test_inventory_matches_independent_census()
+    test_historical_misses_attributed_to_their_own_file()
+    test_show_lists_the_eight()
+    test_extraction_shapes_on_synthetic_file()
+    test_apply_collapses_stale_duplicates()
+    test_apply_preserves_file_mode_on_rewrite()
+    test_apply_is_atomic_under_write_failure()
     if fails:
         print(f"\n{len(fails)} check(s) failed: {fails}")
         sys.exit(1)
