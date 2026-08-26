@@ -102,14 +102,49 @@ def _section_entropy(section) -> float | None:
         return None
 
 
+# lief never had one uniform "which CPU is this for" accessor across its
+# three object formats: ELF exposes header.machine_type, PE exposes
+# header.machine, Mach-O exposes header.cpu_type. The single
+# binary.header.machine_type.name read this endpoint used before #2072
+# therefore only ever worked for ELF -- on PE/Mach-O it raised AttributeError
+# into the catch below, so those formats lost their architecture field under
+# lief 0.x exactly as much as under 1.0 (verified against synthetic fixtures
+# on both 0.17.6 and 1.0.0; the accessor surface is identical across that
+# boundary). Looked up per format instead.
+_HEADER_MACHINE_ATTR = {
+    "ELF": "machine_type",
+    "PE": "machine",
+    "MACHO": "cpu_type",
+}
+
+
+def _architecture(fmt: str, header) -> str | None:
+    attr = _HEADER_MACHINE_ATTR.get(fmt)
+    if attr is None:
+        return None
+    machine = getattr(header, attr, None)
+    if machine is None or not hasattr(machine, "name"):
+        return None
+    return machine.name
+
+
 def _elf_extra(b: "lief.ELF.Binary") -> dict:
-    return {
-        "libraries": sorted(set(b.libraries))[:MAX_LIBRARIES],
+    # Per-field guards (same shape as _pe_extra below): one rotten accessor
+    # must not take its neighbours down with it, which is what a single
+    # whole-block try would do (#2072).
+    out = {}
+    try:
+        out["libraries"] = sorted(set(b.libraries))[:MAX_LIBRARIES]
+    except Exception:  # noqa: BLE001
+        pass
+    try:
         # No static symbol table is the ordinary stripped-binary signal for
         # ELF; dynamic_symbols (imports/exports via the PLT/GOT) survive
         # stripping and are not evidence either way.
-        "stripped": len(list(b.symtab_symbols)) == 0,
-    }
+        out["stripped"] = len(list(b.symtab_symbols)) == 0
+    except Exception:  # noqa: BLE001
+        pass
+    return out
 
 
 def _pe_extra(b: "lief.PE.Binary") -> dict:
@@ -139,10 +174,12 @@ def _pe_extra(b: "lief.PE.Binary") -> dict:
 
 
 def _macho_extra(b: "lief.MachO.Binary") -> dict:
+    out = {}
     try:
-        return {"libraries": sorted(set(b.libraries))[:MAX_LIBRARIES]}
+        out["libraries"] = sorted(set(b.libraries))[:MAX_LIBRARIES]
     except Exception:  # noqa: BLE001
-        return {}
+        pass
+    return out
 
 
 _FORMAT_EXTRA = {"ELF": _elf_extra, "PE": _pe_extra, "MACHO": _macho_extra}
@@ -167,10 +204,9 @@ def lief_parse(data: bytes) -> dict | None:
         "entrypoint": hex(binary.entrypoint),
         "sections": [],
     }
-    try:
-        out["architecture"] = binary.header.machine_type.name
-    except Exception:  # noqa: BLE001
-        pass
+    architecture = _architecture(out["format"], binary.header)
+    if architecture is not None:
+        out["architecture"] = architecture
     try:
         out["is_pie"] = bool(binary.is_pie)
     except Exception:  # noqa: BLE001
@@ -188,10 +224,15 @@ def lief_parse(data: bytes) -> dict | None:
 
     extra = _FORMAT_EXTRA.get(out["format"])
     if extra:
+        # Every extra() guards its own fields now (#2072), so this only
+        # catches breakage outside any single field -- a new lief release
+        # renaming something structural. Logged, never silent: the failure
+        # mode that started #2072 was exactly this block swallowing an API
+        # rename without a trace.
         try:
             out.update(extra(binary))
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception:  # noqa: BLE001 -- partial result beats none
+            logging.exception("lief %s extra block failed", out["format"])
     return out
 
 

@@ -25,9 +25,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # flare-floss's own binary2strings dependency needs a C++11 compiler at
 # build time (build-essential above already covers it, verified against
 # this same base image, 2026-08-01 -- no separate package needed).
+
+# lief is pinned like every other tool here (#2072): an unpinned install is
+# exactly the "one version drift from breaking" risk this container exists to
+# prevent -- lief crossed its 1.0 major boundary, and server.py talks to its
+# API surface directly (machine_type/machine/cpu_type per format). CI reads
+# this pin back out of this file when it exercises lief_parse(), so the
+# version under test and the version shipped cannot drift apart.
 RUN pip install --no-cache-dir -U pip 'setuptools<81' wheel six cffi \
     && pip install --no-cache-dir --no-build-isolation ssdeep \
-    && pip install --no-cache-dir py-tlsh lief flare-capa==9.4.0 flare-floss==3.1.1
+    && pip install --no-cache-dir py-tlsh lief==1.0.0 flare-capa==9.4.0 flare-floss==3.1.1
 
 # capa-rules must match capa's own version exactly (Mandiant's own
 # requirement -- rule schema drifts between releases). Pinned by tag and
