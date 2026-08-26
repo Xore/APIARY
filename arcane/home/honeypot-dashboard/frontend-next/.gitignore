@@ -8,3 +8,8 @@ dist/
 # #1828: the design lab symlinks variant stylesheets in here at start-up
 # and clears it on exit. Never content, always disposable.
 public/static/lab/
+
+# Playwright run artifacts (#2034): failures keep traces/screenshots in
+# test-results/, and report.html + attachments land in playwright-report/.
+test-results/
+playwright-report/
