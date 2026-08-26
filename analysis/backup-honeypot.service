@@ -1,5 +1,5 @@
 [Unit]
-Description=Elasticsearch snapshot + stack-config backup for the honeypot stack
+Description=Stack-config backup for the honeypot stack (config tarball, Keycloak dump, small volumes)
 After=docker.service
 Requires=docker.service
 
