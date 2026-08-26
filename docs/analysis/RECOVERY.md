@@ -33,7 +33,10 @@ destructive. On a replacement host:
 3. Create the named volumes with `docker compose -f compose.yml create`, keep all
    services stopped, and restore each matching volume archive using a temporary
    networkless BusyBox container.
-4. Start setup jobs and sensors, then run `analysis/verify-stack.py`.
+4. Start setup jobs and sensors, then run `analysis/verify-stack.py` — with
+   `DASHBOARD_SERVICE_TOKEN` from the restored stack's `.env` exported; it
+   reads source-health through dashboard-next's `/bff` passthrough and exits
+   nonzero on any failure.
 
 Never restore a volume archive into a running container. Captured malware must
 remain encrypted at rest outside the analysis host and must not be unpacked on a
