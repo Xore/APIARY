@@ -635,10 +635,27 @@ impl Notifier {
             .collect();
         let alert_on_crypto = env_or("GHIDRA_ALERT_ON_CRYPTO", "false").eq_ignore_ascii_case("true");
 
-        if let Some(result) =
-            self.search(&[GHIDRA_INDEX], json!({"size": 300, "query": {"exists": {"field": "ghidra.sha256"}}})).await
+        // #2179: freshest-first sort + a loud truncation warning instead of an
+        // unsorted 300-doc window whose silent rotation out of alerting was
+        // arbitrary (same discipline as llm_flagged_alerts below).
+        const GHIDRA_ALERT_SCAN: i64 = 300;
+        if let Some(result) = self
+            .search(
+                &[GHIDRA_INDEX],
+                json!({"size": GHIDRA_ALERT_SCAN,
+                       "query": {"exists": {"field": "ghidra.sha256"}},
+                       "sort": [{"@timestamp": {"order": "desc", "unmapped_type": "date"}}]}),
+            )
+            .await
         {
-            for hit in result["hits"]["hits"].as_array().cloned().unwrap_or_default() {
+            let hits = result["hits"]["hits"].as_array().cloned().unwrap_or_default();
+            if hits.len() as i64 >= GHIDRA_ALERT_SCAN {
+                tracing::warn!(
+                    cap = GHIDRA_ALERT_SCAN,
+                    "ghidra alert scan hit its size cap this cycle, older samples may be skipped"
+                );
+            }
+            for hit in hits {
                 let g = &hit["_source"]["ghidra"];
                 let sha = g["sha256"].as_str().unwrap_or("").to_string();
                 if sha.is_empty() {
@@ -744,11 +761,26 @@ impl Notifier {
         }
 
         let threshold: i64 = env_or("GITHUB_ANALYSIS_ALERT_POSITIVES", "10").parse().unwrap_or(10).max(1);
+        // #2179: freshest-first sort + loud truncation warning (see
+        // ghidra_alerts above for the rationale).
+        const GITHUB_ALERT_SCAN: i64 = 300;
         if let Some(result) = self
-            .search(&[GITHUB_ANALYSIS_INDEX], json!({"size": 300, "query": {"exists": {"field": "github_analysis.sha256"}}}))
+            .search(
+                &[GITHUB_ANALYSIS_INDEX],
+                json!({"size": GITHUB_ALERT_SCAN,
+                       "query": {"exists": {"field": "github_analysis.sha256"}},
+                       "sort": [{"@timestamp": {"order": "desc", "unmapped_type": "date"}}]}),
+            )
             .await
         {
-            for hit in result["hits"]["hits"].as_array().cloned().unwrap_or_default() {
+            let hits = result["hits"]["hits"].as_array().cloned().unwrap_or_default();
+            if hits.len() as i64 >= GITHUB_ALERT_SCAN {
+                tracing::warn!(
+                    cap = GITHUB_ALERT_SCAN,
+                    "github-analysis alert scan hit its size cap this cycle, older samples may be skipped"
+                );
+            }
+            for hit in hits {
                 let g = &hit["_source"]["github_analysis"];
                 let sha = g["sha256"].as_str().unwrap_or("").to_string();
                 let Some(malicious) = g["verdict"]["malicious"].as_i64() else { continue };
@@ -959,14 +991,28 @@ impl Notifier {
     /// Section 1: high-scoring campaigns (campaigns-v1).
     async fn campaign_alerts(&mut self, mark_only: bool) {
         let threshold: u64 = env_or("ALERT_CAMPAIGN_SCORE", "80").parse().unwrap_or(80).clamp(1, 100);
+        // #2179: sort on `last` (campaign docs carry no @timestamp; correlator
+        // stamps `last`/`generated` instead) so the 200-doc window holds the
+        // currently hottest campaigns, and warn loudly when the window is full.
+        const CAMPAIGN_ALERT_SCAN: i64 = 200;
         if let Some(result) = self
             .search(
                 &["campaigns-v1"],
-                json!({"size": 200, "query": {"range": {"score": {"gte": threshold}}}}),
+                json!({"size": CAMPAIGN_ALERT_SCAN,
+                       "query": {"range": {"score": {"gte": threshold}}},
+                       "sort": [{"last": {"order": "desc", "unmapped_type": "date"}}]}),
             )
             .await
         {
-            for hit in result["hits"]["hits"].as_array().cloned().unwrap_or_default() {
+            let hits = result["hits"]["hits"].as_array().cloned().unwrap_or_default();
+            if hits.len() as i64 >= CAMPAIGN_ALERT_SCAN {
+                tracing::warn!(
+                    cap = CAMPAIGN_ALERT_SCAN,
+                    threshold,
+                    "campaign alert scan hit its size cap this cycle, colder high-score campaigns may be skipped"
+                );
+            }
+            for hit in hits {
                 let source = &hit["_source"];
                 let cidr = source["cidr"].as_str().unwrap_or("");
                 if cidr.is_empty() {
@@ -1040,15 +1086,26 @@ impl Notifier {
 
     /// Section 4: YARA payload matches.
     async fn yara_alerts(&mut self, mark_only: bool) {
+        // #2179: this scan already sorts freshest-first; all that was missing
+        // is disclosing the bound instead of rotating old matches out silently.
+        const YARA_ALERT_SCAN: i64 = 200;
         if let Some(result) = self
             .search(
                 &["yara-analysis-v1"],
-                json!({"size": 200, "query": {"exists": {"field": "yara.matches"}},
+                json!({"size": YARA_ALERT_SCAN,
+                       "query": {"exists": {"field": "yara.matches"}},
                        "sort": [{"@timestamp": {"order": "desc"}}]}),
             )
             .await
         {
-            for hit in result["hits"]["hits"].as_array().cloned().unwrap_or_default() {
+            let hits = result["hits"]["hits"].as_array().cloned().unwrap_or_default();
+            if hits.len() as i64 >= YARA_ALERT_SCAN {
+                tracing::warn!(
+                    cap = YARA_ALERT_SCAN,
+                    "yara alert scan hit its size cap this cycle, older matches may be skipped"
+                );
+            }
+            for hit in hits {
                 let yara = &hit["_source"]["yara"];
                 let matches: Vec<&str> = yara["matches"]
                     .as_array()
@@ -1074,14 +1131,26 @@ impl Notifier {
     /// Section 5: sandbox high-risk detonations.
     async fn sandbox_risk_alerts(&mut self, mark_only: bool) {
         let risk_threshold: u64 = env_or("SANDBOX_ALERT_RISK_SCORE", "50").parse().unwrap_or(50).clamp(1, 100);
+        // #2179: freshest-first sort + loud truncation warning (see
+        // campaign_alerts above for the rationale).
+        const SANDBOX_ALERT_SCAN: i64 = 100;
         if let Some(result) = self
             .search(
                 &["sandbox-analysis-v1"],
-                json!({"size": 100, "query": {"range": {"risk_score": {"gte": risk_threshold}}}}),
+                json!({"size": SANDBOX_ALERT_SCAN,
+                       "query": {"range": {"risk_score": {"gte": risk_threshold}}},
+                       "sort": [{"@timestamp": {"order": "desc", "unmapped_type": "date"}}]}),
             )
             .await
         {
-            for hit in result["hits"]["hits"].as_array().cloned().unwrap_or_default() {
+            let hits = result["hits"]["hits"].as_array().cloned().unwrap_or_default();
+            if hits.len() as i64 >= SANDBOX_ALERT_SCAN {
+                tracing::warn!(
+                    cap = SANDBOX_ALERT_SCAN,
+                    "sandbox alert scan hit its size cap this cycle, older high-risk jobs may be skipped"
+                );
+            }
+            for hit in hits {
                 let source = &hit["_source"];
                 let job = source["sandbox"]["job"].as_str().or(source["job"].as_str()).unwrap_or("");
                 let sha = source["file"]["hash"]["sha256"].as_str().unwrap_or("");
