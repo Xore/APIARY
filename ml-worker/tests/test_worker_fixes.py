@@ -6,8 +6,14 @@ regression back to the old behavior fails loudly here rather than silently
 un-fixing something the audit already flagged.
 """
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
+
+import pytest
+from elastic_transport import ApiResponseMeta
+from elasticsearch import NotFoundError
+from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -124,3 +130,145 @@ class TestBoundedRetrain:
         assert ok is True
         assert len(events) == 5
         assert es.scroll.call_count == 1, "must stop after the first scroll page already exceeds max_total, not fetch a third page"
+
+
+class _WarnCapture:
+    """Collect loguru records at WARNING+ while active; call stop() when done."""
+
+    def __init__(self):
+        self.lines = []
+        self._hid = logger.add(lambda m: self.lines.append(m), level="WARNING")
+
+    def stop(self):
+        logger.remove(self._hid)
+
+    def has(self, fragment: str) -> bool:
+        return any(fragment in line for line in self.lines)
+
+
+class TestCheckpointReadsSurviveElasticsearchFailures:
+    """#2236: load_checkpoint()'s old catch-all treated ANY es.get failure --
+    timeout, 5xx, connection refused mid-run -- as "first run", silently
+    rewinding scoring to one hour ago with no evidence left in the log. Now
+    only a genuine NotFound bootstraps the 1-hour default; a transient read
+    failure either falls back to the in-memory copy of the last good
+    checkpoint or fails this poll cycle exactly like a fetch failure (#188),
+    and a regressed stored checkpoint is diagnosed loudly."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh_cache(self, monkeypatch):
+        # _LAST_GOOD_CHECKPOINT is module-global; give each test its own
+        # instance so seeding for one case can't leak into another.
+        monkeypatch.setattr(worker, "_LAST_GOOD_CHECKPOINT", {})
+
+    def test_midrun_timeout_falls_back_to_in_memory_copy(self):
+        cached = {"last_timestamp": "2026-08-01T12:00:00+00:00", "seen_ids": ["a", "b"]}
+        worker._LAST_GOOD_CHECKPOINT["honeypot-v2-*"] = dict(cached)
+        warn = _WarnCapture()
+        try:
+            es = MagicMock()
+            es.get.side_effect = TimeoutError("simulated read timeout")
+
+            checkpoint, ok = worker.load_checkpoint(es, "honeypot-v2-*")
+        finally:
+            warn.stop()
+
+        assert ok is True, "ES flapping must degrade to last-known-position, not fail"
+        assert checkpoint == cached, \
+            f"must continue from the in-memory copy, got {checkpoint}"
+        assert checkpoint is not cached, "must hand back a copy the loop can't alias-mutate"
+        assert warn.has("in-memory copy"), "degraded fallback must be logged loudly"
+
+    def test_unreadable_checkpoint_with_no_cache_fails_like_a_fetch(self):
+        warn = _WarnCapture()
+        try:
+            es = MagicMock()
+            es.get.side_effect = TimeoutError("simulated read timeout")
+
+            checkpoint, ok = worker.load_checkpoint(es, "honeypot-v2-*")
+        finally:
+            warn.stop()
+
+        assert (checkpoint, ok) == (None, False), \
+            "with nothing to stand in for the position, the cycle must fail (#188) " \
+            "instead of silently restarting from one hour ago"
+        assert warn.has("#188"), "failure must reference the sustained-outage path it feeds"
+
+    def test_only_genuine_notfound_bootstraps_one_hour_default(self):
+        warn = _WarnCapture()
+        try:
+            es = MagicMock()
+            # es-py 8.x ApiError signature: (message, meta, body).
+            not_found_meta = ApiResponseMeta(status=404, http_version="1.1",
+                                             headers={}, duration=0.0, node=None)
+            es.get.side_effect = NotFoundError("index_not_found_exception",
+                                               not_found_meta, {"found": False})
+
+            checkpoint, ok = worker.load_checkpoint(es, "honeypot-v2-*")
+        finally:
+            warn.stop()
+
+        assert ok is True
+        parsed = datetime.fromisoformat(checkpoint["last_timestamp"])
+        expected = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
+        assert abs(parsed.replace(tzinfo=None) - expected) < timedelta(minutes=5), \
+            f"bootstrap default should be ~now-1h, got {checkpoint['last_timestamp']}"
+        assert checkpoint["seen_ids"] == []
+
+    def test_regressed_stored_checkpoint_is_loud_but_honored(self):
+        # Stored state readable but older than what this process already
+        # acted on: keep honoring ES as source of truth (the stored doc may
+        # be exactly right after an operator restored it) but say so.
+        worker._LAST_GOOD_CHECKPOINT["honeypot-v2-*"] = {
+            "last_timestamp": "2026-08-02T00:00:00+00:00", "seen_ids": []}
+        warn = _WarnCapture()
+        try:
+            es = MagicMock()
+            es.get.return_value = {"_source": {
+                "last_timestamp": "2026-08-01T00:00:00Z",
+                "seen_ids": ["old"],
+            }}
+
+            checkpoint, ok = worker.load_checkpoint(es, "honeypot-v2-*")
+        finally:
+            warn.stop()
+
+        assert ok is True
+        assert checkpoint["last_timestamp"] == "2026-08-01T00:00:00Z"
+        assert warn.has("moved backwards"), "a rewind of stored state must be diagnosable from logs"
+
+
+class TestPersistenceWritesAreBestEffort:
+    """#2236: run_worker()'s persistence writes (checkpoint, save_buffers,
+    session_tracker, last_fired_slot) go through _persist_best_effort() --
+    extracted so the non-fatal contract is unit-testable despite the loop
+    itself being untestable-in-place, same rationale as
+    drift_rate_if_triggered()'s extraction. A failing write warns and
+    returns instead of propagating into (and killing) the poll loop that
+    would otherwise have retried it next cycle."""
+
+    def test_failing_write_returns_false_and_warns_without_raising(self):
+        warn = _WarnCapture()
+
+        def exploding_write(*_args):
+            raise RuntimeError("simulated state-index write failure")
+
+        try:
+            result = worker._persist_best_effort("save_checkpoint(hp)", exploding_write)
+        except Exception as exc:  # pragma: no cover -- the assertion failure form
+            raise AssertionError(f"_persist_best_effort let {exc!r} propagate") from exc
+        finally:
+            warn.stop()
+
+        assert result is False
+        assert warn.has("non-fatal"), "failure must be visible in the log"
+
+    def test_successful_write_calls_through_and_reports_true(self):
+        seen_args = []
+
+        def write(*args):
+            seen_args.extend(args)
+            return None
+
+        assert worker._persist_best_effort("save_checkpoint(hp)", write, "es", "hp", "ts", []) is True
+        assert seen_args == ["es", "hp", "ts", []]
