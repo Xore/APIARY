@@ -269,9 +269,18 @@ MAX_TTYLOG_BYTES = int(os.getenv("MAX_TTYLOG_BYTES", str(20 * 1024 * 1024)))
 # an absurd number of tiny documents, not as a real limit anyone should
 # expect to hit -- 64MB guest PCAPs are the documented normal case
 # (dashboard/sandbox.go's own attachSandboxDownloads history) and comfortably
-# clear this by 4x. 8MB raw per chunk (~11MB base64'd) stays well under
-# Elasticsearch's own ~100MB HTTP body ceiling with real headroom for bulk()
-# batching several chunks in one request.
+# clear this by 4x.
+#
+# #2109: the size invariant that makes that safe is ONE ACTION PER HTTP
+# REQUEST (dispatch_bulk below). bulk() batches by action count -- its
+# chunk_size default of 500 -- never by bytes, so all N chunks of a file
+# (~11MB base64 each) used to land in a single request: anything past ~9
+# chunks exceeded Elasticsearch's ~100MB http.max_content_length, the
+# transport-level 413 failed the whole batch, state correctly never
+# advanced, and the identical oversized request was rebuilt and rejected
+# every pass, forever. With chunk_size=1 for chunked sources, each request
+# carries exactly one ~CHUNK_BYTES-sized document regardless of artifact
+# size -- these two knobs alone decide what this importer will admit.
 CHUNK_BYTES = int(os.getenv("SANDBOX_ARTIFACT_CHUNK_BYTES", str(8 * 1024 * 1024)))
 MAX_CHUNKED_ARTIFACT_BYTES = int(os.getenv("MAX_CHUNKED_ARTIFACT_BYTES", str(256 * 1024 * 1024)))
 
@@ -533,6 +542,29 @@ def advance_state_after_bulk(pending: list, failed_ids: set, state: dict) -> Non
             state[key] = mtime
 
 
+def dispatch_bulk(es: Elasticsearch, pending: list, source: dict):
+    """Sends one source's pending actions to Elasticsearch and returns the
+    (ok_count, errors) pair run_pass consumes.
+
+    #2109: chunked sources go one action per request (chunk_size=1).
+    bulk() batches by action count -- its chunk_size default of 500 --
+    never by bytes, so all of a chunked artifact's ~11MB documents would
+    otherwise ride in a single HTTP request; any artifact past ~9 chunks
+    exceeded Elasticsearch's ~100MB http.max_content_length, and since a
+    transport-level 413 fails the whole batch (advance_state_after_bulk
+    correctly records nothing on failure), the identical oversized request
+    was rebuilt and rejected every pass, permanently. One action per
+    request bounds request size by CHUNK_BYTES alone, independent of
+    artifact size. Non-chunked sources keep the default batching -- their
+    documents are small, and per-request count is what keeps those passes
+    cheap.
+    """
+    actions = [action for _, _, action in pending]
+    if source.get("chunked"):
+        return bulk(es, actions, stats_only=False, raise_on_error=False, chunk_size=1)
+    return bulk(es, actions, stats_only=False, raise_on_error=False)
+
+
 def run_pass(es: Elasticsearch, state: dict) -> int:
     total = 0
     for source in SOURCES:
@@ -547,8 +579,7 @@ def run_pass(es: Elasticsearch, state: dict) -> int:
         pending = scan_source(source, root_path, state)
         if not pending:
             continue
-        actions = [action for _, _, action in pending]
-        ok, errors = bulk(es, actions, stats_only=False, raise_on_error=False)
+        ok, errors = dispatch_bulk(es, pending, source)
         failed_ids = {e.get("index", {}).get("_id") for e in errors}
         if failed_ids:
             logger.warning(f"{source['label']}: {len(failed_ids)} document(s) failed to index, will retry next pass")
