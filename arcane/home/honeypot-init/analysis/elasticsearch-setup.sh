@@ -31,7 +31,9 @@ curl -fsS -X PUT "$es_url/_snapshot/honeypot-fs" \
 # Policy *names* stay fixed (suricata-7d etc.) even though the actual
 # min_age they enforce is now dynamic -- they are stable ILM policy
 # identifiers referenced by index templates elsewhere in this file, not a
-# literal claim about the configured duration.
+# literal claim about the configured duration. That holds for all ELEVEN
+# policies below, including honeypot-30d (#2193: its name predates the
+# knob and other tooling references it by name only).
 retention_days="${HONEYPOT_RETENTION_DAYS:-30}"
 suricata_days=$(( retention_days * 7 / 30 ))
 [ "$suricata_days" -ge 1 ] || suricata_days=1
@@ -63,9 +65,17 @@ done
 # index each day from Filebeat's date-named pattern instead); 25gb is a
 # secondary safety trigger so an unusually heavy single day still rolls
 # rather than growing one shard past a healthy size.
+# #2193: delete.min_age derives from retention_days like every other
+# policy above -- this was the one ILM policy still hardcoding "30d",
+# so an operator who shrank HONEYPOT_RETENTION_DAYS to reclaim disk saw
+# every secondary family shrink while the dominant raw-events stream
+# ignored the knob entirely. Body is assembled with escaped double quotes
+# (same idiom as the loop) precisely because a single-quoted literal is
+# what silently prevented ${retention_days} from ever expanding here.
+# The #585 rollover mechanics and 25gb safety trigger are unchanged.
 curl -fsS -X PUT "$es_url/_ilm/policy/honeypot-30d" \
   -H 'Content-Type: application/json' \
-  --data-binary '{"policy":{"phases":{"hot":{"actions":{"rollover":{"max_age":"1d","max_primary_shard_size":"25gb"}}},"delete":{"min_age":"30d","actions":{"delete":{}}}}}}' >/dev/null
+  --data-binary "{\"policy\":{\"phases\":{\"hot\":{\"actions\":{\"rollover\":{\"max_age\":\"1d\",\"max_primary_shard_size\":\"25gb\"}}},\"delete\":{\"min_age\":\"${retention_days}d\",\"actions\":{\"delete\":{}}}}}}" >/dev/null
 
 # #827: this stack's own address(es), so the Suricata block below can tell
 # "the honeypot itself" apart from the actual remote party -- same real
