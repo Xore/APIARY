@@ -40,6 +40,7 @@ function Page() {
   return (
     <StoreListPage
       fetchPage={fetchPage}
+      pageSize={25}
       label="Evidence"
       title="CAPE"
       subtitle="CAPE sandbox detonations — config-extraction runs for payloads that warrant the heavier analysis pipeline."

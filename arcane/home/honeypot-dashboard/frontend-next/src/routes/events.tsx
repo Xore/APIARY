@@ -6,6 +6,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react'
 import { FiltersButton, FiltersModal } from '../components/FiltersModal'
+import { SkeletonRows } from '../components/Investigate'
 import { RowActions, RowIcons } from '../components/RowActions'
 import { copyWithFlash } from '../lib/flash'
 import { subscribeLiveEvents, useLiveState } from '../lib/live'
@@ -269,20 +270,6 @@ function clock(iso: string): string {
  *  and every prop reference has to stay stable across renders. */
 function rowKey(row: EventRow): string {
   return row.id || `${row.time}|${row.sensor}|${row.src_ip}|${row.session}`
-}
-
-function SkeletonRows({ count }: { count: number }) {
-  return (
-    <>
-      {Array.from({ length: count }, (_, i) => (
-        <tr key={`skel-${i}`} className="hp-skel-batch" aria-hidden="true">
-          <td colSpan={6}>
-            <span className="skeleton-line" />
-          </td>
-        </tr>
-      ))}
-    </>
-  )
 }
 
 function Events() {
@@ -632,7 +619,10 @@ function Events() {
               </thead>
               <tbody>
                 {keyedRows === null ? (
-                  <SkeletonRows count={12} />
+                  /* Ghosts mirror the six real columns (#1967): time short,
+                     sensor short, source ip long, port short, detail long,
+                     actions stub. */
+                  <SkeletonRows count={12} cols={6} wide={[2, 4]} stub={[5]} />
                 ) : (
                   keyedRows.map(({ row, key, breakLabel }) => (
                     <FragmentRow
@@ -646,7 +636,9 @@ function Events() {
                     />
                   ))
                 )}
-                {loadingMore ? <SkeletonRows count={Math.min(25, Math.max(1, total - (rows?.length ?? 0)))} /> : null}
+                {loadingMore ? (
+                  <SkeletonRows count={Math.min(25, Math.max(1, total - (rows?.length ?? 0)))} cols={6} wide={[2, 4]} stub={[5]} />
+                ) : null}
               </tbody>
             </table>
             {rows !== null && rows.length === 0 ? (

@@ -493,6 +493,7 @@ function Page() {
         <StoreListPage
           key={generation}
           fetchPage={fetchPage}
+          pageSize={25}
           label="Tools"
           title="Canarytokens"
           subtitle="Deployed decoy tokens — documents, URLs and hostnames that phone home the moment an attacker touches them."

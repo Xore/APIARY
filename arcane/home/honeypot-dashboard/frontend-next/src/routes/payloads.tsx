@@ -133,13 +133,42 @@ function boundedFamily(family: string): string {
 }
 
 function SkeletonCards({ count }: { count: number }) {
+  // Shape-true ghost of PayloadCard (#1967): same shells, same order --
+  // icon chip + mono hash title + badge pills, one desc line, then the
+  // byte-preview block (a real .hp-code-results pre so min-height 180 is
+  // claimed up front instead of appearing at swap-in), then meta.
   return (
     <>
       {Array.from({ length: count }, (_, i) => (
         <div key={`skel-${i}`} className="project-card" aria-hidden="true">
-          <div className="skeleton-line" style={{ width: '60%' }} />
-          <div className="skeleton-line" style={{ width: '85%' }} />
-          <div className="skeleton-line" style={{ width: '40%' }} />
+          <div className="project-card__header">
+            <span className="project-card__icon">
+              <span className="skeleton-line" style={{ display: 'block', width: 16, height: 16 }} />
+            </span>
+            <span className="project-card__title">
+              <span className="skeleton-line" style={{ display: 'block', width: '82%' }} />
+            </span>
+            <div className="project-card__badges">
+              <span className="skeleton-line" style={{ display: 'block', width: 56, height: 18, borderRadius: 999 }} />
+              <span className="skeleton-line" style={{ display: 'block', width: 44, height: 18, borderRadius: 999 }} />
+            </div>
+          </div>
+          <p className="project-card__desc">
+            <span className="skeleton-line" style={{ display: 'block', width: '88%' }} />
+          </p>
+          <pre className="code hp-code-results">
+            <span className="skeleton-line" style={{ display: 'block', width: '92%' }} />
+            <span className="skeleton-line" style={{ display: 'block', width: '74%' }} />
+            <span className="skeleton-line" style={{ display: 'block', width: '81%' }} />
+          </pre>
+          <div className="project-card__meta">
+            <span>
+              <span className="skeleton-line" style={{ display: 'block', width: 64 }} />
+            </span>
+            <span>
+              <span className="skeleton-line" style={{ display: 'block', width: 120 }} />
+            </span>
+          </div>
         </div>
       ))}
     </>
@@ -382,7 +411,7 @@ function Payloads() {
         </p>
         <div className="project-grid" id="payloads-results">
           {rows === null ? (
-            <SkeletonCards count={6} />
+            <SkeletonCards count={12} />
           ) : rows.length === 0 ? (
             <p className="empty">No payloads captured yet.</p>
           ) : (

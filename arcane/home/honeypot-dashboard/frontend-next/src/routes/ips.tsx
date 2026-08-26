@@ -50,13 +50,28 @@ function when(iso: string): string {
 }
 
 function SkeletonCards({ count }: { count: number }) {
+  // Shape-true ghost of hp-src-card (#1967): ip + country head, the three
+  // stat destinations, a sensors line and the when-range -- not three
+  // generic bars. The stats cells copy the loaded card's flex/padding so
+  // the three-column rhythm is already standing when numbers land.
   return (
     <>
       {Array.from({ length: count }, (_, i) => (
-        <div key={`skel-${i}`} className="hp-skel-batch" aria-hidden="true">
-          <div className="skeleton-line" />
-          <div className="skeleton-line" />
-          <div className="skeleton-line" />
+        <div key={`skel-${i}`} className="hp-src-card" aria-hidden="true">
+          <div className="hp-src-card__head">
+            <span className="skeleton-line" style={{ display: 'block', width: '42%' }} />
+            <span className="skeleton-line" style={{ display: 'block', width: 34, height: 16, borderRadius: 999 }} />
+          </div>
+          <div className="hp-src-card__stats">
+            {[0, 1, 2].map((j) => (
+              <span key={j} style={{ flex: 1, minWidth: 0, padding: j === 0 ? '0 var(--space-md) 0 0' : '0 var(--space-md)', borderLeft: j === 0 ? 'none' : '1px solid var(--border-100)' }}>
+                <span className="skeleton-line" style={{ display: 'block', width: 36, height: 17 }} />
+                <span className="skeleton-line" style={{ display: 'block', width: 48, height: 10 }} />
+              </span>
+            ))}
+          </div>
+          <span className="skeleton-line" style={{ display: 'block', width: '68%' }} />
+          <span className="skeleton-line" style={{ display: 'block', width: '46%' }} />
         </div>
       ))}
     </>
