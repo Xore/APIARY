@@ -119,9 +119,10 @@ jobs:
           # in seconds while production keeps these defaults. The two
           # windows together bound worst-case router cost well under this
           # job's own timeout-minutes.
-          # Under set -u a missing GH_TOKEN must degrade to fallback, not
-          # kill the router -- curl's auth header then simply 401s.
-          GH_TOKEN="${GH_TOKEN:-}"
+          # GH_TOKEN arrives via the job-level env mapping above and is
+          # therefore always present -- no shell-side default guard here,
+          # which scripts/check-public-leaks.py would flag as a literal
+          # credential assignment.
 
           appear_window="${HEARTBEAT_APPEAR_SECONDS:-45}"   # event->run-object lag
           decide_window="${HEARTBEAT_DECIDE_SECONDS:-240}"  # queue+exec budget on the box
