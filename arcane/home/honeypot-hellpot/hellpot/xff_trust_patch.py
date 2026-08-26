@@ -66,9 +66,12 @@ MARKER = "honeypot-stack: record the forwarded header, adjudicate in the worker 
 MARKER_SECOND_DOOR = "honeypot-stack: Traefik-only second listener (#1908) :second-door"
 TARGET = Path("/build/internal/http/router.go")
 
-# The listener only the Traefik-side bridge can reach. Kept in step with
-# compose.yml's published port, the socat target in vps/docker-compose.yml,
-# and HELLPOT_PROXIED_PORT in the enrichment worker.
+# The listener only the Traefik-side bridge can reach. compose.yml's
+# published port, the socat target in vps/docker-compose.yml, and
+# HELLPOT_PROXIED_PORT in the enrichment worker repeat this value across
+# stacks and languages nothing here can import into, so their agreement is
+# asserted by tests/test_xff_trust_patch.py (ProxiedPortAgreement, #2192)
+# rather than left to this comment to remember.
 HELLPOT_PROXIED_PORT = "8090"
 
 OLD = '''	slog := log.With().

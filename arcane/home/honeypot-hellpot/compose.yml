@@ -43,6 +43,8 @@ services:
       # port, which is what left the source address up to a guess. Bound to
       # the tunnel address like 8080, and no portbridge rule points at it,
       # so socat-hp-hellpot is its only possible caller.
+      # (Both halves agree with xff_trust_patch.py's HELLPOT_PROXIED_PORT;
+      # hellpot/tests/test_xff_trust_patch.py asserts it -- #2192.)
       - ${HP_BIND:-10.8.0.2}:8090:8090
     volumes:
       - /opt/stacks/apiary/logs/hellpot:/var/log/honeypot

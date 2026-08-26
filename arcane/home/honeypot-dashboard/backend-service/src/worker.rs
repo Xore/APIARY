@@ -952,10 +952,12 @@ impl Notifier {
         }
     }
 
-    async fn pass(&mut self, mark_only: bool) {
-        self.messages.clear();
+    // Sections 1-6 of pass(), split out below (#2181) so all fourteen
+    // checks stand behind the same per-check panic boundary the method-form
+    // checks (7-14) always had.
 
-        // 1. High-scoring campaigns (campaigns-v1).
+    /// Section 1: high-scoring campaigns (campaigns-v1).
+    async fn campaign_alerts(&mut self, mark_only: bool) {
         let threshold: u64 = env_or("ALERT_CAMPAIGN_SCORE", "80").parse().unwrap_or(80).clamp(1, 100);
         if let Some(result) = self
             .search(
@@ -978,8 +980,10 @@ impl Notifier {
                     .await;
             }
         }
+    }
 
-        // 2. Stale sensor feeds + 3. activity spike + dead letters — one agg.
+    /// Section 2: stale sensor feeds + activity spike — one aggregation.
+    async fn sensor_activity_alerts(&mut self, mark_only: bool) {
         if let Some(result) = self
             .search(
                 &["honeypot-v2-*", "suricata-v2-*"],
@@ -1014,6 +1018,10 @@ impl Notifier {
                 }
             }
         }
+    }
+
+    /// Section 3: ingest rejection dead letters.
+    async fn dead_letter_alerts(&mut self, mark_only: bool) {
         if let Some(result) = self
             .search(
                 &["dead-letter-honeypot"],
@@ -1028,8 +1036,10 @@ impl Notifier {
                 self.observe("pipeline:dead-letters", message, "", mark_only).await;
             }
         }
+    }
 
-        // 4. YARA payload matches.
+    /// Section 4: YARA payload matches.
+    async fn yara_alerts(&mut self, mark_only: bool) {
         if let Some(result) = self
             .search(
                 &["yara-analysis-v1"],
@@ -1059,8 +1069,10 @@ impl Notifier {
                     .await;
             }
         }
+    }
 
-        // 5. Sandbox high-risk detonations.
+    /// Section 5: sandbox high-risk detonations.
+    async fn sandbox_risk_alerts(&mut self, mark_only: bool) {
         let risk_threshold: u64 = env_or("SANDBOX_ALERT_RISK_SCORE", "50").parse().unwrap_or(50).clamp(1, 100);
         if let Some(result) = self
             .search(
@@ -1084,8 +1096,10 @@ impl Notifier {
                     .await;
             }
         }
+    }
 
-        // 6. LLM-flagged analyses (severity allowlist; AI-guessed, labeled).
+    /// Section 6: LLM-flagged analyses (severity allowlist; AI-guessed, labeled).
+    async fn llm_flagged_alerts(&mut self, mark_only: bool) {
         let severities: Vec<String> = env_or("LLM_ANALYSIS_ALERT_SEVERITIES", "high,critical")
             .split(',')
             .map(|level| level.trim().to_lowercase())
@@ -1116,25 +1130,48 @@ impl Notifier {
                     .await;
             }
         }
+    }
 
+    async fn pass(&mut self, mark_only: bool) {
+        self.messages.clear();
+
+        // #2181: every check runs behind its own panic boundary. The checks
+        // share only this struct (messages vec, ES client config), never an
+        // interior lock, so a panicked check costs just its own alert family
+        // this pass — the sibling families keep reporting, and the webhook
+        // fan-out below still sends whatever did notify. Without these,
+        // one malformed document or drifted aggregation shape unwinds the
+        // notifier task itself and silences every family at once.
+        // 1. High-scoring campaigns (campaigns-v1).
+        crate::isolate::item("alert-notifier", "campaigns", self.campaign_alerts(mark_only)).await;
+        // 2. Stale sensor feeds + activity spike — one agg.
+        crate::isolate::item("alert-notifier", "sensor-activity", self.sensor_activity_alerts(mark_only)).await;
+        // 3. Dead letters.
+        crate::isolate::item("alert-notifier", "dead-letters", self.dead_letter_alerts(mark_only)).await;
+        // 4. YARA payload matches.
+        crate::isolate::item("alert-notifier", "yara-matches", self.yara_alerts(mark_only)).await;
+        // 5. Sandbox high-risk detonations.
+        crate::isolate::item("alert-notifier", "sandbox-risk", self.sandbox_risk_alerts(mark_only)).await;
+        // 6. LLM-flagged analyses.
+        crate::isolate::item("alert-notifier", "llm-flagged", self.llm_flagged_alerts(mark_only)).await;
         // 7. OT command alerts (T1692.001) — ES-derived, no mount needed.
-        self.ot_command_alerts(mark_only).await;
+        crate::isolate::item("alert-notifier", "ot-command", self.ot_command_alerts(mark_only)).await;
         // 8. Log-stream size alerts.
-        self.log_stream_alerts(mark_only).await;
+        crate::isolate::item("alert-notifier", "log-stream-size", self.log_stream_alerts(mark_only)).await;
         // 9. Sandbox spool + worker-status health.
-        self.sandbox_alerts(mark_only).await;
+        crate::isolate::item("alert-notifier", "sandbox-spool", self.sandbox_alerts(mark_only)).await;
         // 10. Ghidra spool + worker-status health + flagged findings.
-        self.ghidra_alerts(mark_only).await;
+        crate::isolate::item("alert-notifier", "ghidra-spool", self.ghidra_alerts(mark_only)).await;
         // 11. CAPE spool + worker-status health.
-        self.cape_alerts(mark_only).await;
+        crate::isolate::item("alert-notifier", "cape-spool", self.cape_alerts(mark_only)).await;
         // 12. GitHub-analysis spool + worker-status health + verdict findings.
-        self.github_analysis_alerts(mark_only).await;
+        crate::isolate::item("alert-notifier", "github-analysis", self.github_analysis_alerts(mark_only)).await;
         // 13. Filebeat ingestion health via FILEBEAT_URL.
-        self.filebeat_alerts(mark_only).await;
+        crate::isolate::item("alert-notifier", "filebeat", self.filebeat_alerts(mark_only)).await;
         // 14. Ingestion lag per index (#1750), on its own slower cadence.
         if self.last_ingest_check.is_none_or(|at| at.elapsed() >= INGEST_CHECK_EVERY) {
             self.last_ingest_check = Some(std::time::Instant::now());
-            self.ingest_lag_alerts(mark_only).await;
+            crate::isolate::item("alert-notifier", "ingest-lag", self.ingest_lag_alerts(mark_only)).await;
         }
 
         // Webhook fan-out for everything that newly notified.
@@ -1277,7 +1314,12 @@ async fn retention_sweep_loop(state: AppState) {
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         ticker.tick().await;
-        retention_sweep_once(&state).await;
+        // #2181: the sweep reads a stored document shaped like user data
+        // inline in this task; a panic below used to end the task outright.
+        // The cycle is its own blast radius — nothing is written (removal
+        // rewrites one doc only after partition), so a degraded pass simply
+        // retriggers unchanged next hour.
+        crate::isolate::cycle("user-retention-sweep", retention_sweep_once(&state)).await;
     }
 }
 
@@ -1336,17 +1378,29 @@ const REPORTS_SCHEDULER_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Ports reports_scheduler.go's reportScheduleLoop: every tick, render
 /// every due definition through the same pipeline as the manual generate
-/// endpoint (origin "schedule"), then advance its schedule. Unlike Go's
-/// goroutine model, a panic inside this spawned task can't take the whole
-/// process down (tokio isolates it), so there's no need to port
-/// runDueReportsRecovered's explicit recover() wrapping — Result::Err from
-/// one definition's render simply doesn't stop the rest of the tick.
+/// endpoint (origin "schedule"), then advance its schedule.
+///
+/// What this comment said before #2181 was wrong. Tokio's isolation runs
+/// one way only: a panicking task can't take down the process, but nothing
+/// stops a panic from unwinding *this* task — renders execute inline in
+/// its future, so one poisoned definition would have killed the ticker and
+/// every later definition each time it came due, forever, because
+/// mark_scheduled_run (which advances next_run_at out of the "due" set)
+/// sits after the render and never got to run. Go needed
+/// runDueReportsRecovered for exactly this reason; the port has two
+/// boundaries instead:
+///   * per definition — reports_scheduler_tick isolates each render behind
+///     isolate::item; a panicked render still gets its mark_scheduled_run,
+///     so next_run_at advances and repeated failures park the definition
+///     durably (reports_store::SCHEDULE_QUARANTINE_FAILURES);
+///   * per tick — isolate::cycle takes any other panic out of this task's
+///     blast radius entirely.
 async fn reports_scheduler_loop(state: AppState) {
     let mut ticker = tokio::time::interval(REPORTS_SCHEDULER_INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         ticker.tick().await;
-        reports_scheduler_tick(&state).await;
+        crate::isolate::cycle("reports-scheduler", reports_scheduler_tick(&state)).await;
     }
 }
 
@@ -1360,11 +1414,27 @@ async fn reports_scheduler_tick(state: &AppState) {
     };
     for definition in due {
         let ran_at = chrono::Utc::now();
-        let result = crate::reports_api::render_definition_to_stored(state, &definition, "schedule").await;
-        let success = result.is_ok();
-        if let Err(error) = result {
-            tracing::warn!(id = %definition.id, name = %definition.name, %error, "scheduled report failed");
+        // One poisoned definition costs itself: siblings still render in
+        // this pass, and None (panic) is counted like any other failure.
+        let result = crate::isolate::item(
+            "reports-scheduler",
+            &definition.id,
+            crate::reports_api::render_definition_to_stored(state, &definition, "schedule"),
+        )
+        .await;
+        match &result {
+            Some(Ok(_)) => {}
+            Some(Err(error)) => {
+                tracing::warn!(id = %definition.id, name = %definition.name, %error, "scheduled report failed");
+            }
+            None => {
+                tracing::warn!(id = %definition.id, name = %definition.name, "scheduled report panicked; isolated (#2181)");
+            }
         }
+        // Both Err and panic must still advance next_run_at — a failing
+        // definition may not hot-loop — and both feed the failure streak
+        // that eventually quarantines the schedule.
+        let success = matches!(result, Some(Ok(_)));
         crate::reports_store::mark_scheduled_run(state, &definition.id, ran_at, success).await;
     }
 }
@@ -1383,12 +1453,14 @@ async fn alert_notifier_loop(state: AppState) {
     };
     // Baseline pass: mark existing conditions without paging about
     // history at boot (same posture as the Go loop's current(true)).
-    notifier.pass(true).await;
+    // #2181: even this first pass is boundary-wrapped — a boot-time panic
+    // would otherwise end the task before its first tick.
+    crate::isolate::cycle("alert-notifier", notifier.pass(true)).await;
     let mut ticker = tokio::time::interval(INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         ticker.tick().await;
-        notifier.pass(false).await;
+        crate::isolate::cycle("alert-notifier", notifier.pass(false)).await;
     }
 }
 

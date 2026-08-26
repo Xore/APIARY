@@ -28,6 +28,14 @@ npm install
 npm run dev
 ```
 
+Both tiers refuse to boot without auth configured (#2183): an unset
+`SERVICE_TOKEN` used to silently disable the Rust tier's `/api/v1` check
+*and* this tier's `/bff/*` proxy check; now both fail at startup with
+`[E-SERVICE-TOKEN]`. So run `SERVICE_TOKEN=dev-secret cargo run` /
+`SERVICE_TOKEN=dev-secret npm run dev` (any non-empty value both tiers
+agree on), or set `APIARY_ALLOW_UNAUTH_DEV=1` to state explicitly that an
+unauthenticated dev instance is what you want — exactly "1", nothing else.
+
 `OIDC_DISABLED=1` skips the Keycloak login flow entirely (treats every
 request as an authenticated admin) — the mode `port-tests/` and most local
 iteration use, since standing up a real Keycloak realm locally is rarely

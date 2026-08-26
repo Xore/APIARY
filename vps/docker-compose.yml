@@ -684,6 +684,8 @@ services:
     # only thing that could tell them apart, and it answers by port alone
     # over a six-hour window -- so on this path a coincidental match could
     # attribute a request to an unrelated attacker.
+    # (The dial target agrees with xff_trust_patch.py's HELLPOT_PROXIED_PORT
+    # and hellpot compose.yml's publish line; hellpot/tests asserts it -- #2192.)
     command: TCP4-LISTEN:8084,fork,reuseaddr TCP4:10.8.0.2:8090
     networks: [proxy]
 

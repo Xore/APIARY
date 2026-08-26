@@ -1058,20 +1058,32 @@ async fn sweep_once(state: &AppState) {
 
     let mut changed = 0usize;
     for (id, owner) in &targets {
-        match crate::workbench_es::update_run(&state.es, id, owner, |run| {
-            let (reconciled, dirty) = reconcile_run(std::mem::take(run));
-            *run = reconciled;
-            Ok(dirty)
-        })
-        .await
-        {
-            Ok(_) => changed += 1,
+        // #2181: one run whose stored document panics the reconciler costs
+        // itself only. Skipped here means parked in place — a non-terminal
+        // run stays non-terminal and oldest-first ordering hands it back to
+        // the very next pass (the same retry contract the SWEEP_LIMIT cap
+        // already promises), instead of every later run in the batch going
+        // unreconciled for as long as that one record exists.
+        let reconciled = crate::isolate::item(
+            "workbench-reconcile",
+            id,
+            crate::workbench_es::update_run(&state.es, id, owner, |run| {
+                let (reconciled, dirty) = reconcile_run(std::mem::take(run));
+                *run = reconciled;
+                Ok(dirty)
+            }),
+        )
+        .await;
+        match reconciled {
+            Some(Ok(_)) => changed += 1,
             // A run that vanished or changed owner mid-sweep is not an error
             // worth shouting about; the next pass sees the current truth.
-            Err(crate::workbench_es::UpdateRunError::NotFound) => {}
-            Err(error) => {
+            Some(Err(crate::workbench_es::UpdateRunError::NotFound)) => {}
+            Some(Err(error)) => {
                 tracing::warn!(run_id = %id, ?error, "workbench-reconcile: update failed")
             }
+            // None: isolate::item already named and logged the panic.
+            None => {}
         }
     }
     tracing::debug!(

@@ -978,7 +978,13 @@ pub async fn attacker_identity_loop(state: AppState) {
     let window = env_duration("EVIDENCE_WINDOW", Duration::from_secs(6 * 3600));
     let interval = env_duration("ATTACKER_IDENTITY_RUN_INTERVAL", Duration::from_secs(15 * 60));
     loop {
-        run_cycle(&state, window).await;
+        // #2181: the cycle ingests raw honeypot documents inline. The parse
+        // paths below use unwrap_or-style accessors that cannot panic today,
+        // so a per-event split would guard nothing real — this cycle-level
+        // boundary is what keeps future drift from ending the task. A lost
+        // cycle self-heals: entities rebuild from scratch over the full
+        // window next interval.
+        crate::isolate::cycle("attacker-identity", run_cycle(&state, window)).await;
         tokio::time::sleep(interval).await;
     }
 }

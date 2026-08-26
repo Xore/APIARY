@@ -102,7 +102,10 @@ services:
       # at 607,288 events over 48h. The tunnel peer is always excluded
       # whether or not it is listed here. Comma-separated.
       - HONEYPOT_SELF_IPS=${HONEYPOT_SELF_IPS:-}
+      # #2183: empty SERVICE_TOKEN refuses to boot with [E-SERVICE-TOKEN];
+      # the override below is the one sanctioned dev escape hatch.
       - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
+      - APIARY_ALLOW_UNAUTH_DEV=${APIARY_ALLOW_UNAUTH_DEV:-}
       - CANARYTOKENS_API_URL=${CANARYTOKENS_API_URL:-}
       # #1612 misc write paths: honeyfs-implant credential provisioning/
       # rotation. Same reachability posture as CANARYTOKENS_API_URL above --

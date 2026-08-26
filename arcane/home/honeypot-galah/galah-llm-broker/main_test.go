@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,41 +9,16 @@ import (
 	"time"
 )
 
-func newTestHandler(t *testing.T, upstream *httptest.Server, maxBody int) http.Handler {
+// serveWith newHandler starts an httptest upstream and returns exactly the
+// handler main() would serve against it -- no re-implemented copy lives
+// here, so a change to production behavior changes what these tests see.
+func newRealHandler(t *testing.T, upstream *httptest.Server, maxBody int64, upstreamTimeout time.Duration) http.Handler {
 	t.Helper()
-	targetURL, err := url.Parse(upstream.URL)
+	target, err := url.Parse(upstream.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := upstream.Client()
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || !allowedPaths[r.URL.Path] {
-			http.NotFound(w, r)
-			return
-		}
-		r.Body = http.MaxBytesReader(w, r.Body, int64(maxBody))
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "request body too large or unreadable", http.StatusRequestEntityTooLarge)
-			return
-		}
-		req, err := http.NewRequest(http.MethodPost, targetURL.String()+r.URL.Path, strings.NewReader(string(body)))
-		if err != nil {
-			http.Error(w, "bad upstream request", http.StatusInternalServerError)
-			return
-		}
-		resp, err := client.Do(req)
-		if err != nil {
-			http.Error(w, "upstream error", http.StatusBadGateway)
-			return
-		}
-		defer resp.Body.Close()
-		w.WriteHeader(resp.StatusCode)
-		_, _ = io.Copy(w, resp.Body)
-	})
-	return mux
+	return newHandler(target, maxBody, upstreamTimeout)
 }
 
 func TestAllowedPathIsForwarded(t *testing.T) {
@@ -52,13 +26,18 @@ func TestAllowedPathIsForwarded(t *testing.T) {
 		if r.URL.Path != "/api/chat" {
 			t.Errorf("upstream got path %q, want /api/chat", r.URL.Path)
 		}
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Errorf("upstream Content-Type = %q, want application/json", got)
+		}
+		w.Header().Set("Content-Type", "application/x-ndjson")
 		w.Write([]byte(`{"message":"ok"}`))
 	}))
 	defer upstream.Close()
 
-	h := newTestHandler(t, upstream, 65536)
+	h := newRealHandler(t, upstream, 65536, 8*time.Second)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(`{"model":"qwen3:8b"}`))
+	req.Header.Set("Content-Type", "application/json")
 	h.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
@@ -66,6 +45,9 @@ func TestAllowedPathIsForwarded(t *testing.T) {
 	}
 	if rr.Body.String() != `{"message":"ok"}` {
 		t.Fatalf("body = %q", rr.Body.String())
+	}
+	if got := rr.Header().Get("Content-Type"); got != "application/x-ndjson" {
+		t.Errorf("relayed Content-Type = %q, want application/x-ndjson", got)
 	}
 }
 
@@ -75,7 +57,7 @@ func TestDisallowedPathIs404(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	h := newTestHandler(t, upstream, 65536)
+	h := newRealHandler(t, upstream, 65536, 8*time.Second)
 	for _, path := range []string{"/api/embeddings", "/api/pull", "/api/tags", "/"} {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
@@ -92,7 +74,7 @@ func TestGetIsRejected(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	h := newTestHandler(t, upstream, 65536)
+	h := newRealHandler(t, upstream, 65536, 8*time.Second)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/chat", nil)
 	h.ServeHTTP(rr, req)
@@ -107,7 +89,7 @@ func TestOversizedBodyIsRejected(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	h := newTestHandler(t, upstream, 16)
+	h := newRealHandler(t, upstream, 16, 8*time.Second)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/generate", strings.NewReader(strings.Repeat("a", 1000)))
 	h.ServeHTTP(rr, req)
@@ -137,22 +119,32 @@ func TestUpstreamTimeoutSurfacesAsBadGateway(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	targetURL, _ := url.Parse(upstream.URL)
-	client := &http.Client{Timeout: 5 * time.Millisecond}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		req, _ := http.NewRequest(http.MethodPost, targetURL.String()+r.URL.Path, nil)
-		if _, err := client.Do(req); err != nil {
-			http.Error(w, "upstream error", http.StatusBadGateway)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	})
+	// This drives the real request construction -- NewRequestWithContext on
+	// the shared client -- so a regression in its timeout wiring fails here.
+	h := newRealHandler(t, upstream, 65536, 5*time.Millisecond)
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/generate", nil)
-	mux.ServeHTTP(rr, req)
+	h.ServeHTTP(rr, req)
 	if rr.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502 on upstream timeout", rr.Code)
+	}
+}
+
+func TestResponseRelayKeepsUpstreamStatus(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"model not found"}`, http.StatusNotFound)
+	}))
+	defer upstream.Close()
+
+	h := newRealHandler(t, upstream, 65536, 8*time.Second)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(`{}`))
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 relayed from upstream", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "model not found") {
+		t.Fatalf("body = %q, want upstream error body relayed", rr.Body.String())
 	}
 }

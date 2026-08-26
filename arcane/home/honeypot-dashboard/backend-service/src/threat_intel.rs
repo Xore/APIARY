@@ -149,7 +149,12 @@ pub async fn threat_intel_loop(state: AppState) {
             last_reload = SystemTime::now();
         }
         if !prefixes.is_empty() {
-            run_classification(&state, &prefixes).await;
+            // #2181: every fallible step inside (bucket parsing, tagging)
+            // already returns Option/Result, so a per-bucket split would
+            // guard nothing real — this cycle-level boundary is what keeps
+            // future drift from ending the task. Tagging is scoped by IP +
+            // time window and idempotent, so a degraded pass redoes itself.
+            crate::isolate::cycle("threat-intel", run_classification(&state, &prefixes)).await;
         }
         tokio::time::sleep(RUN_INTERVAL).await;
     }

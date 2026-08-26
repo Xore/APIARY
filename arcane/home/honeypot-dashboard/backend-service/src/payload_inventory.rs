@@ -467,7 +467,11 @@ pub async fn payload_inventory_loop(state: AppState) {
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         ticker.tick().await;
-        run_scan(&state).await;
+        // #2141 already isolates the walk/classify stage per file; #2181
+        // extends that posture to everything around it: a panicked
+        // inventory-index or bytes-mirror phase ends neither the scan nor
+        // this task, and the directories rescan wholesale next interval.
+        crate::isolate::cycle("payload-inventory", run_scan(&state)).await;
     }
 }
 

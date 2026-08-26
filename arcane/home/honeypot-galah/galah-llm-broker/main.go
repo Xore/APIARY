@@ -42,6 +42,14 @@ func main() {
 		log.Fatalf("galah-llm-broker: invalid OLLAMA_URL %q: %s", target, err)
 	}
 
+	log.Printf("galah-llm-broker: listening on %s, forwarding to %s (max body %d bytes, upstream timeout %s)", listen, target, maxBody, upstreamTimeout)
+	log.Fatal(http.ListenAndServe(listen, newHandler(targetURL, int64(maxBody), upstreamTimeout)))
+}
+
+// newHandler builds the proxy main() serves. It lives outside main() so
+// the test suite exercises this exact construction rather than its own
+// re-implemented copy; editing it is what changes broker behavior.
+func newHandler(target *url.URL, maxBody int64, upstreamTimeout time.Duration) http.Handler {
 	client := &http.Client{Timeout: upstreamTimeout}
 
 	mux := http.NewServeMux()
@@ -51,7 +59,7 @@ func main() {
 			return
 		}
 
-		r.Body = http.MaxBytesReader(w, r.Body, int64(maxBody))
+		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, "request body too large or unreadable", http.StatusRequestEntityTooLarge)
@@ -61,7 +69,7 @@ func main() {
 		ctx, cancel := context.WithTimeout(r.Context(), upstreamTimeout)
 		defer cancel()
 
-		upstreamURL := *targetURL
+		upstreamURL := *target
 		upstreamURL.Path = r.URL.Path
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL.String(), bytes.NewReader(body))
 		if err != nil {
@@ -84,9 +92,7 @@ func main() {
 		w.WriteHeader(resp.StatusCode)
 		_, _ = io.Copy(w, resp.Body)
 	})
-
-	log.Printf("galah-llm-broker: listening on %s, forwarding to %s (max body %d bytes, upstream timeout %s)", listen, target, maxBody, upstreamTimeout)
-	log.Fatal(http.ListenAndServe(listen, mux))
+	return mux
 }
 
 func envOr(key, fallback string) string {

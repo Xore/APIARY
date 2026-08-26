@@ -38,4 +38,22 @@ const requireSession = createMiddleware({ type: 'function' }).server(
 
 export const startInstance = createStart(() => ({
   functionMiddleware: [requireSession],
+  // #2028: one CSP per request, emitted by one place. Type 'request' runs
+  // once per HTTP request around the whole Start handler — HTML documents
+  // and server-fn RPCs alike — before anything renders, which is exactly
+  // the "every route sends CSP is a property of one function" property #58
+  // gave the Go dashboard via its single renderPage() call site. No route
+  // can forget it because no route has a say in it.
+  //
+  // The nonce itself must ALSO reach the markup (router options carry it
+  // into every script tag react-dom emits); that half of the plumbing lives
+  // in lib/cspNonce.server.ts — withCspScope runs next() INSIDE its scope,
+  // because an enter-then-return scheme would leave the store invisible to
+  // everything this pipeline spawns (see that file's rationale).
+  requestMiddleware: [
+    createMiddleware({ type: 'request' }).server(async ({ next }) => {
+      const csp = await import('./lib/cspNonce.server')
+      return csp.withCspScope(() => next())
+    }),
+  ],
 }))

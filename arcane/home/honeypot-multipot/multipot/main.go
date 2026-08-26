@@ -282,6 +282,21 @@ func serve(s service, log *logger, proxy bool) {
 			continue
 		}
 		go func() {
+			// #2186: protocol handlers parse attacker bytes directly on this
+			// goroutine with no recover underneath, and in Go one unrecovered
+			// panic kills the whole binary -- every listener with it, while
+			// restart: unless-stopped hands the attacker their kill switch
+			// back. http-honeypot gets this boundary per request from
+			// net/http; multipot carries it itself, at the top of the
+			// per-connection goroutine before any parsing runs: one
+			// panicking connection collapses into one handler_panic event
+			// plus a closed socket while this serve()'s accept loop (and the
+			// other protocols' listeners) keep serving.
+			defer func() {
+				if r := recover(); r != nil {
+					log.emit(event{Proto: s.proto, Port: s.port, SrcIP: srcIP(conn), Event: "handler_panic", Data: fmt.Sprint(r)})
+				}
+			}()
 			// If fronted by portbridge with PROXY protocol, recover the real
 			// attacker address before anything reads/logs the connection.
 			conn = decodeProxy(conn, proxy)

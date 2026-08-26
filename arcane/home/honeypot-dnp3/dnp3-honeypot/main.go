@@ -15,6 +15,7 @@ import (
 type event struct {
 	Time, Sensor, Persona, Site, Asset, Organization string
 	SrcIP, Event, FrameHex, Function, AppFunction    string
+	Data                                             string
 	SrcPort, Port, DNP3Source, DNP3Destination       int
 }
 
@@ -33,10 +34,11 @@ func (e event) MarshalJSON() ([]byte, error) {
 		Frame           string `json:"frame_hex,omitempty"`
 		Function        string `json:"function,omitempty"`
 		AppFunction     string `json:"app_function,omitempty"`
+		Data            string `json:"data,omitempty"`
 		DNP3Source      int    `json:"dnp3_source,omitempty"`
 		DNP3Destination int    `json:"dnp3_destination,omitempty"`
 	}
-	return json.Marshal(record{e.Time, e.Sensor, e.Persona, e.Site, e.Asset, e.Organization, e.SrcIP, e.SrcPort, e.Port, e.Event, e.FrameHex, e.Function, e.AppFunction, e.DNP3Source, e.DNP3Destination})
+	return json.Marshal(record{e.Time, e.Sensor, e.Persona, e.Site, e.Asset, e.Organization, e.SrcIP, e.SrcPort, e.Port, e.Event, e.FrameHex, e.Function, e.AppFunction, e.Data, e.DNP3Source, e.DNP3Destination})
 }
 
 type logger struct {
@@ -138,10 +140,25 @@ func appFunctionCode(data []byte) (string, bool) {
 }
 
 func serve(c net.Conn, log *logger) {
-	defer c.Close()
 	host, portText, _ := net.SplitHostPort(c.RemoteAddr().String())
 	var port int
 	fmt.Sscanf(portText, "%d", &port)
+	// #2186: serve() is the whole world past Accept -- raw link/application
+	// frames are decoded straight off the socket here with no recover
+	// anywhere downstream, and in Go one unrecovered panic kills the entire
+	// sensor while restart: unless-stopped hands the attacker the same
+	// replayable bytes right back. http-honeypot gets this shield per
+	// request from net/http; the low-interaction listener carries it itself,
+	// at the top of the per-connection entrypoint: a panicking connection is
+	// closed and lands in the normal JSON pipeline as one handler_panic
+	// event while the accept loop and every other live connection keep
+	// running.
+	defer func() {
+		if r := recover(); r != nil {
+			log.emit(event{SrcIP: host, SrcPort: port, Port: 20000, Event: "handler_panic", Data: fmt.Sprint(r)})
+		}
+	}()
+	defer c.Close()
 	c.SetReadDeadline(time.Now().Add(12 * time.Second))
 	buf := make([]byte, 4096)
 	n, err := c.Read(buf)
