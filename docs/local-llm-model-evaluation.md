@@ -557,3 +557,102 @@ gated; SecurityLLM/ZySec-7B — lower relevance) are recorded for a future
 pass if the gating/relevance situation changes. Dolphin3-Cyber-8B's
 abliterated-base property needs an explicit decision before evaluation, not
 an assumption either way.
+
+## Issue #1795-b / #1947 part 1 (2026-08-26): derestricted candidates and security tunes, sessions + revdeck
+
+First slice of the #1947 rebuild: the eleven models the #1795 shortlist had
+already sized plus its controls, run through the two slots that do not depend
+on #1805-c. The ghidra slot is deliberately absent — it runs at Tier B once
+real Ghidra output feeds it; a number from prose fixtures would measure a
+different job.
+
+### Runtime pins
+
+- Card: NVIDIA RTX 4000 Ada, 20475 MiB measured, driver 595.84, host supermicro.
+- Runtime: Ollama 0.32.13 in `ghidra-ollama-1` — this round re-measures what
+  #144 recorded on 0.32.0 and the wrong card.
+- Harness: `evaluate-models.py` legacy positional mode, `--slots sessions,revdeck`,
+  `--context 8192`, temperature 0, seed 144, thinking disabled, provenance
+  synthetic, operator `bg-1795b`. N = 3 repeats per model (mandatory per #1947;
+  #1805-b measured single-run spread at ±1 total).
+- transcripts: `docs/benchmarks/runs/2026-08-26-20260826T062813Z-57eb0be2`
+  (`4cfd9ba7…`), `…T065140Z-4b31fb94` (`9644e7bd…`), `…T071328Z-4cb54af9`
+  (`9c0f7bfb…`) for the main loop; `…T181814Z-0770770d` (`4bf2eaf4…`),
+  `…T181852Z-19dee6a5` (`8973a2dc…`), `…T181930Z-f750ba3a` (`0c696b45…`) for the
+  gap-fill rerun below.
+
+### Import deviation, recorded explicitly
+
+`hf.co/mradermacher/DeepHat-V1-7B-Heretic-Abliterated-i1-GGUF:i1-Q4_K_S` failed
+to load on all three repeats with `HTTP 500`: its embedded chat template uses
+the XLAM tool-calling form, and llama-server aborts at parse time
+(`Unknown built-in filter 'tojson' for type Undefined`). The weights are fine.
+The row was measured as
+`deephat-v1-7b-heretic-abliterated-fixed:q4_k_s`: an `ollama create` import of
+the **same weights blob** (`sha256:7389512f868752b19a749398627e8fc61ef6d8ac4d467f6a7c09bad9657d3570`)
+with `TEMPLATE` replaced by the working twin's ChatML template. Nothing else
+changes: no tools field is ever sent by this harness, and every prompt supplies
+its own system message, so the replaced template only affects basic chat
+framing. Recorded here because tag+digest pinning (#1947 rule 5) has to say so.
+
+### Matrix (mean ± spread over N=3)
+
+| Model | sessions (/67) | revdeck (/16) | tok/s | VRAM MiB | gates |
+|---|---|---|---|---|---|
+| ObserverX-Qwen3.8-27B-heretic Q4_K_S | **100%** 67 ±0 | **93.8%** 15 ±0 | ~20 | 15176 | clean |
+| Huihui-Qwen3.8-27B-abliterated Q4_K | **100%** 67 ±0 | 87.5% 14 ±0 | ~19 | 16094 | clean |
+| Huihui-Qwen3.5-9B-abliterated Q4_K_M | 98.5% 66 ±0 | 81.3% 13 ±0 | ~54 | 6364 | clean |
+| qwen3:14b (incumbent) | 97.0% 65 ±0 | 87.5% 14 ±0 | ~34 | 10198 | clean |
+| Huihui-Qwen3.6-35B-A3B-abl Q3_K | 98.5% 66 ±0 | 87.5% 14 ±0 | ~100 | 16292 | critical-gate fail (see below) |
+| Qwen3.8-27B stock Q4_K | 98.5% 66 ±0 | 87.5% 14 ±0 | ~34 | 18256 | critical-gate fail (see below) |
+| DeepHat-V1-7B Q4_K_M | 98.5% 66 ±0 | 87.5% 14 ±0 | ~66 | 5098 | critical-gate fail (see below) |
+| DeepHat-V1-7B-Heretic-abl Q4_K_S (template-fix) | 94.0% 63 ±0 | 75.0% 12 ±0 | ~70 | 4882 | critical-gate fail (see below) |
+| Foundation-Sec-1.1-8B-Instruct i1-Q4_K_S | 83.6% 56 ±0 | 93.8% 15 ±0 | ~66 | 5644 | critical-gate fail (see below) |
+| GPT-OSS-Cybersecurity-20B-Merged-heretic i1-Q4_K_M | 14.9% 10 ±0 | 18.8% 3 ±0 | ~93 | 15198 | harness-incompatible (see below) |
+| gpt-oss 20b MXFP4 | 14.9% 10 ±0 | 18.8% 3 ±0 | ~75 | 12664 | harness-incompatible (see below) |
+
+Reading notes:
+
+- **Every non-gpt-oss critical-gate failure is one case
+  (`agentic-encoded-exfiltration`) failing one vocabulary check**, while the
+  model correctly rated severity `critical`. The gate requires the summary to
+  contain at least one token from each of four concept groups; these models
+  covered credential access, exfiltration and encoding but did not name the
+  hosts-file/raw-socket egress leg in the gate's words while scoring 13–15/16.
+  That is keyword-recall brittleness in the gate, not a safety or accuracy
+  verdict, and it trips stock `qwen3.8:27b` harder than several abliterated
+  tunes. Filed separately; until the gate measures the claim instead of the
+  wording, "critical-gate fail" from this slot cannot disqualify anything by
+  itself. The negation-blind matcher defect #1946 was checked first and did
+  **not** fire anywhere in this round.
+- **Both gpt-oss-family rows returned empty content on every case**
+  (`content: ""`, `parsed: null`, schema score ≈ floor). Their recorded
+  injection-gate failures are consequences of the null fields, not observed
+  compliance. The scores measure compatibility between harmony-format models
+  and this harness path (plain `/api/chat` + JSON schema), nothing else; they
+  need their own serving shape before they can be ranked.
+- **Spread inside this round was ±0 on totals across all three repeats per
+  model**, while transcript hashes differ per repeat — decisions reproduce,
+  wording varies. Do not read that as "N was unnecessary": #1805-b's ±1–2
+  across independent server restarts remains the honest error bar for margins,
+  which caps what today's deltas can prove.
+- The DeepHat pair is an accidental A/B the round inherited from #1804's
+  question: same base and size, one abliterated (+heretic). Abliteration cost
+  3 points on sessions and 2 on revdeck and lost three of the four summary
+  concept groups on the exfiltration case.
+
+### Decision
+
+**No promotion.** `qwen3:14b` stays approved across the evaluated slots. Two
+rows pass every gate and sit above the incumbent beyond this round's internal
+spread — `ObserverX-Qwen3.8-27B-heretic` (+2 sessions/+1 revdeck) and
+`Huihui-Qwen3.8-27B-abliterated` (+2/±0) — but the margin equals the historical
+cross-restart noise band, so they are flagged as lead candidates for the rest
+of the #1947 matrix rather than promoted ahead of it. Promotion goes through
+`model-governance.py promote` only after the full matrix (ghidra Tier B, wave-2
+rows, WhiteRabbitNeo A/B) exists to compare against.
+
+#1804's remaining named candidates (`WhiteRabbitNeo-2.5-Qwen-2.5-Coder-7B`,
+gemma-4 heretics, LLM4Decompile-Ref as Tier C preprocessing) carry into the
+next slices; SecureBERT2.0-NER stays out of this matrix by design (encoder,
+own harness, labelled IOC sample from captured sessions).
