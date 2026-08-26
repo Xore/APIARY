@@ -44,14 +44,19 @@ jobs:
   #      the repository variable CI_HOMESERVER_PRS=true makes allowing them
   #      a deliberate, auditable act.
   #
-  #   2. Is a honeypot-ci-labelled self-hosted runner registered AND
-  #      reporting status=online right now?
-  #      Registered-but-paused, powered-off, connectivity-dead or
-  #      unregistered all resolve to "GitHub-hosted". So does any runners-
-  #      API failure: routing infrastructure can degrade CI's speed, never
-  #      its pass/fail correctness -- if the probe cannot answer, every
-  #      pair falls back and Quality looks exactly like it did before this
-  #      job existed.
+  #   2. Can a honeypot-ci-labelled runner ACTUALLY execute this commit
+  #      right now? Answering costs one measurement, because the obvious
+  #      ask-the-registry approach does not exist for CI tokens: GET
+  #      /actions/runners answers HTTP 403 "Resource not accessible by
+  #      integration" to GITHUB_TOKEN under every permission shape (live-
+  #      verified 2026-08-27). So ci-target dispatches the one-job
+  #      ci-heartbeat.yml canary pinned to [honeypot-ci] at THIS commit
+  #      and gives it a bounded window; success means a real box really
+  #      ran our code seconds ago. Paused, powered-off, unregistered,
+  #      network-stalled or service-wedged all fail the window ->
+  #      "GitHub-hosted". Routing infrastructure can degrade CI's speed,
+  #      never its pass/fail correctness: any router error lands on the
+  #      fallback and Quality still looks exactly like a conventional run.
   #
   # NOT paired, deliberately: frontend-next / frontend-next-browser need
   # docker/sudo-apt/chromium/redis and most scripts-and-compose entries need
@@ -63,14 +68,19 @@ jobs:
   ci-target:
     name: Pick CI executor
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Must comfortably outlive the heartbeat window below
+    # (dispatch + appear-wait + terminal-wait + API slack).
+    timeout-minutes: 10
+    # actions:write exists solely to launch the ci-heartbeat canary.
+    permissions:
+      contents: read
+      actions: write
     outputs:
       # Always written ('true'/'false', never empty) so downstream
       # `== 'true'` comparisons cannot misread an absent string as truthy.
       homeserver: ${{ steps.route.outputs.homeserver }}
     env:
       GH_TOKEN: ${{ github.token }}
-      EVENT_PATH: ${{ github.event_path }}
       CI_HOMESERVER_PRS: ${{ vars.CI_HOMESERVER_PRS || '' }}
       FORCE_GITHUB_HOSTED: ${{ inputs.force_github_hosted || '' }}
     steps:
@@ -99,14 +109,62 @@ jobs:
               fi ;;
           esac
 
-          if [[ "$trusted" == "true" ]]; then
-            count="$(gh api "repos/$GITHUB_REPOSITORY/actions/runners" \
-              --jq '[.runners[]
-                      | select(.status == "online")
-                      | .labels[]
-                      | select(.name == "honeypot-ci")]
-                    | length' 2>/dev/null || echo 0)"
-            [[ "$count" =~ ^[1-9][0-9]*$ ]] && online=true
+          # Decision-window knobs: env-overridable so local unit tests run
+          # in seconds while production keeps these defaults. The two
+          # windows together bound worst-case router cost well under this
+          # job's own timeout-minutes.
+          # Under set -u a missing GH_TOKEN must degrade to fallback, not
+          # kill the router -- curl's auth header then simply 401s.
+          GH_TOKEN="${GH_TOKEN:-}"
+
+          appear_window="${HEARTBEAT_APPEAR_SECONDS:-45}"   # event->run-object lag
+          decide_window="${HEARTBEAT_DECIDE_SECONDS:-240}"  # queue+exec budget on the box
+          poll_every="${HEARTBEAT_POLL_SECONDS:-10}"
+
+          if [[ "$trusted" == "true" && "${FORCE_GITHUB_HOSTED}" != "true" ]]; then
+            echo "heartbeat: dispatching ci-heartbeat at ${GITHUB_SHA}"
+            api="repos/$GITHUB_REPOSITORY/actions/workflows/ci-heartbeat.yml"
+            http="$(curl -fsS -o "${RUNNER_TEMP:-/tmp}/hb-disp.out" -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              "$GITHUB_API_URL/$api/dispatches" \
+              -d "{\"ref\":\"$GITHUB_SHA\"}" || echo X)"
+            [[ "$http" == "204" ]] \
+              && echo "heartbeat: dispatch accepted" \
+              || { echo "::warning::heartbeat dispatch refused (HTTP $http); routing fallback"; http=""; }
+
+            # Phase A: wait for the dispatched run to become VISIBLE as a
+            # non-completed workflow_run of this exact commit. Only this
+            # fresh object may prove liveness -- historical successes of
+            # older dispatches must never count, or one healthy heartbeat
+            # would vouch forever for a box that died five minutes later.
+            rid=""
+            deadline=$(( $(date +%s) + appear_window ))
+            while [[ "$(date +%s)" -lt "$deadline" ]]; do
+              rid="$(gh api "$api/runs?head_sha=$GITHUB_SHA&per_page=10" \
+                --jq '[.workflow_runs[] | select(.status != "completed") | .id][0] // ""' \
+                2>/dev/null || true)"
+              [[ -n "$rid" ]] && break
+              sleep "$poll_every"
+            done
+
+            # Phase B: give the found run its window to finish.
+            if [[ -n "$rid" ]]; then
+              deadline=$(( $(date +%s) + decide_window ))
+              while [[ "$(date +%s)" -lt "$deadline" ]]; do
+                line="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$rid" \
+                  --jq '"\(.status) \(.conclusion)"' 2>/dev/null || true)"
+                case "$line" in
+                  "completed success") online=true ;;
+                  completed*) : ;;                # finished badly -> stays offline
+                  # empty = transient API hiccup; anything else = still
+                  # running. Both keep polling inside the window.
+                  *) sleep "$poll_every"; continue ;;
+                esac
+                break
+              done
+            fi
+            echo "heartbeat verdict: online=$online"
           fi
 
           homeserver=false
