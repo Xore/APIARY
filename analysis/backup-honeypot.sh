@@ -1,6 +1,13 @@
 #!/bin/sh
 set -eu
 
+# Manual runs get what systemd's UMask=0077 gives the scheduled ones (#2025):
+# under an interactive shell's typical umask 022 the archive set -- including
+# .env secrets and the Keycloak dump below -- sat world-readable between
+# creation and the trailing chmod -R go-rwx. One line closes the window for
+# both invocation paths.
+umask 077
+
 # backup-honeypot.sh — on-host snapshot of the state needed to bring the stack
 # back, taken on the homeserver itself.
 #
@@ -33,13 +40,46 @@ set -eu
 stack_dir=${STACK_DIR:-/opt/stacks/apiary}
 backup_root=${BACKUP_ROOT:-/opt/backups/honeypot}
 retention_days=${RETENTION_DAYS:-14}
+
+# Retention runs FIRST, before anything else this script does (#2025). The
+# most plausible persistent failure mode for a backup job is a full disk,
+# and pruning used to sit at the very END, behind tar/pg_dump/busybox steps
+# that need free space to succeed -- so the disk filling up aborted every
+# run before the one step that frees space could ever run again: no
+# self-healing path short of a human. Retention depends on nothing produced
+# below -- only directory names under $backup_root -- so it belongs before
+# them, unconditionally.
+#
+# #1413's history is why position matters as much as presence: it found the
+# original script never pruned AT ALL, and once the prune existed every run
+# still died on its way down to it (the broken ES snapshot era above).
+# Directory names are the UTC stamp itself, all the same fixed width
+# (%Y%m%dT%H%M%SZ) -- stripped of its T/Z separators that is a plain
+# 14-digit number, safe to compare with -lt. Deliberately not
+# `[ "$a" \< "$b" ]`: this script is #!/bin/sh, and on this fleet that is
+# dash (`readlink -f /bin/sh` -> /usr/bin/dash), whose test builtin has no
+# </> string operators at all -- a bash-only extension that would have
+# failed every run.
+cutoff=$(date -u -d "-${retention_days} days" +%Y%m%dT%H%M%SZ 2>/dev/null || date -u -v-"${retention_days}"d +%Y%m%dT%H%M%SZ)
+cutoff_n=$(echo "$cutoff" | tr -d 'TZ')
+for old in "$backup_root"/*/; do
+  old_stamp=$(basename "$old")
+  old_n=$(echo "$old_stamp" | tr -d 'TZ')
+  case $old_n in ''|*[!0-9]*) continue ;; esac
+  [ "$old_n" -lt "$cutoff_n" ] || continue
+  rm -rf "$old"
+done
+
+cd "$stack_dir"
+docker compose -f compose.yml config -q
+
+# Only create this run's directories once validation has passed (#2025): a
+# failed validation used to leave an empty stamped directory behind for a
+# later run's retention to collect.
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 destination="$backup_root/$stamp"
 mkdir -p "$destination/volumes"
 chmod 700 "$destination"
-
-cd "$stack_dir"
-docker compose -f compose.yml config -q
 
 # Config/state archive. Excludes event logs, PCAP, Elasticsearch data, captured
 # malware and generated databases.
@@ -125,22 +165,3 @@ done
 )
 chmod -R go-rwx "$destination"
 echo "$destination"
-
-# Retention: prune archive directories older than $retention_days. #1413 found
-# the original script never pruned at all; it then never got the chance to,
-# since every run aborted before reaching this point. Directory names are the
-# UTC stamp itself, all the same fixed width (%Y%m%dT%H%M%SZ) -- stripped of
-# its T/Z separators that is a plain 14-digit number, safe to compare with -lt.
-# Deliberately not `[ "$a" \< "$b" ]`: this script is #!/bin/sh, and on this
-# fleet that is dash (`readlink -f /bin/sh` -> /usr/bin/dash), whose test
-# builtin has no </> string operators at all -- a bash-only extension that
-# would have failed every run.
-cutoff=$(date -u -d "-${retention_days} days" +%Y%m%dT%H%M%SZ 2>/dev/null || date -u -v-"${retention_days}"d +%Y%m%dT%H%M%SZ)
-cutoff_n=$(echo "$cutoff" | tr -d 'TZ')
-for old in "$backup_root"/*/; do
-  old_stamp=$(basename "$old")
-  old_n=$(echo "$old_stamp" | tr -d 'TZ')
-  case $old_n in ''|*[!0-9]*) continue ;; esac
-  [ "$old_n" -lt "$cutoff_n" ] || continue
-  rm -rf "$old"
-done
