@@ -11,10 +11,10 @@ import { useAppearanceKey } from '../lib/prefs'
 export type ChartKind = 'sankey' | 'timeline' | 'heatmap' | 'pie' | 'line' | 'bar' | 'barh' | 'scatter' | 'radar'
 
 type Builder = (
-  chart: import('echarts').ECharts,
+  chart: import('echarts/core').EChartsType,
   data: unknown,
   themeColor: (name: string, fallback?: string) => string,
-  echartsModule: typeof import('echarts'),
+  echartsModule: typeof import('echarts/core'),
 ) => string
 
 const humanizeNumber = (n: number): string => {
@@ -322,7 +322,7 @@ export function EChart({ kind, url, height }: { kind: ChartKind; url: string; he
   // has to rebuild -- but a theme change is not new data, and making it cost
   // a refetch would put a network round trip behind a toggle.
   const dataRef = useRef<unknown>(null)
-  const chartRef = useRef<import('echarts').ECharts | null>(null)
+  const chartRef = useRef<import('echarts/core').EChartsType | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
   const appearance = useAppearanceKey()
 
