@@ -77,6 +77,11 @@ spawnChild("bff", process.execPath, [join(ROOT, ".output/server/index.mjs")], {
   // Sessions resolve from the fixture redis first; OIDC_DISABLED=1 is the
   // cookie-less admin fallback so unseeded contexts still navigate as an
   // operator. Production never sets either of these two vars together.
+  // #2183's SERVICE_TOKEN gate refuses tokenless boots without this exact
+  // dev override -- the e2e harness is that sanctioned context (same opt-in
+  // the port-tests harness sets). Setting it here keeps production-parity:
+  // a real token in CI would still break auth, so this stays override-only.
+  APIARY_ALLOW_UNAUTH_DEV: "1",
   OIDC_DISABLED: "1",
   OIDC_SESSION_REDIS_URL: redis.url,
   BACKEND_URL: backend.url,
