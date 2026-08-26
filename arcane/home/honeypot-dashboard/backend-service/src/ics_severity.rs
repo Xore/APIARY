@@ -25,6 +25,13 @@ const CONTROL_FUNCTIONS: &[&str] = &["direct_operate", "direct_operate_no_ack"];
 /// configuration write, a select-then-operate sequence) but either require
 /// a follow-up step or affect the RTU itself rather than field equipment
 /// directly — real, but a rung below an unconfirmed direct operate.
+///
+/// Every name here must be spelled exactly as the dnp3 honeypot's IEEE
+/// 1815 decoder emits it (`honeypot-dnp3/dnp3-honeypot/main.go`,
+/// `applicationFunctionCodes`) — the lookup is an exact string compare
+/// against `app_function`, and #2114 was exactly such a drift: this table
+/// said `save_config`, the sensor says `save_configuration`, so a
+/// configuration write rendered unbadged for the module's whole life.
 const RESTART_OR_CONFIG_FUNCTIONS: &[&str] = &[
     "select",
     "operate",
@@ -32,7 +39,7 @@ const RESTART_OR_CONFIG_FUNCTIONS: &[&str] = &[
     "warm_restart",
     "initialize_application",
     "activate_config",
-    "save_config",
+    "save_configuration",
     "delete_file",
 ];
 
@@ -52,7 +59,8 @@ pub fn dnp3_function_severity(app_function: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::dnp3_function_severity;
+    use super::{dnp3_function_severity, CONTROL_FUNCTIONS, RESTART_OR_CONFIG_FUNCTIONS};
+    use std::collections::HashSet;
 
     #[test]
     fn unconfirmed_control_is_critical() {
@@ -64,7 +72,41 @@ mod tests {
     fn restart_and_config_are_high() {
         assert_eq!(dnp3_function_severity("cold_restart"), "high");
         assert_eq!(dnp3_function_severity("select"), "high");
-        assert_eq!(dnp3_function_severity("save_config"), "high");
+        // #2114: the wire spelling, not the banding table's — this
+        // assertion previously pinned the drifted name `save_config`
+        // against the table that contained it, proving nothing.
+        assert_eq!(dnp3_function_severity("save_configuration"), "high");
+    }
+
+    /// The vocabulary the sensor can possibly emit, lifted straight from
+    /// the dnp3 honeypot's decoder map at compile time. Map literal lines
+    /// look like `0x13: "save_configuration",`.
+    fn decoder_vocabulary() -> HashSet<&'static str> {
+        let go = include_str!("../../../honeypot-dnp3/dnp3-honeypot/main.go");
+        let map_entry =
+            regex::Regex::new(r#"0x[0-9a-fA-F]+:\s*"([a-z0-9_]+)""#).unwrap();
+        map_entry
+            .captures_iter(go)
+            .map(|c| c.get(1).unwrap().as_str())
+            .collect()
+    }
+
+    #[test]
+    fn every_banded_name_is_one_the_sensor_emits() {
+        // The parity anchor #2114 lacked: a rename on either side of the
+        // producer/bander seam now fails here instead of silently
+        // unbadging real configuration writes in production.
+        let decoded = decoder_vocabulary();
+        assert!(
+            decoded.contains("save_configuration"),
+            "decoder extraction broke — save_configuration missing"
+        );
+        for name in CONTROL_FUNCTIONS.iter().chain(RESTART_OR_CONFIG_FUNCTIONS.iter()) {
+            assert!(
+                decoded.contains(name),
+                "{name} is banded but applicationFunctionCodes never emits it"
+            );
+        }
     }
 
     #[test]
