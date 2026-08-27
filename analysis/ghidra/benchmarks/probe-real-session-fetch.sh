@@ -32,7 +32,7 @@ query=$(jq -n --arg lookback "$lookback" '{
   _source: ["honeypot.session", "honeypot.input", "@timestamp"]
 }')
 
-hits=$(docker run --rm --network honeynet curlimages/curl:latest -s \
+hits=$(docker run --rm --network honeynet curlimages/curl:8.21.0@sha256:7c12af72ceb38b7432ab85e1a265cff6ae58e06f95539d539b654f2cfa64bb13 -s \
   -H 'Content-Type: application/json' \
   "http://elasticsearch:9200/honeypot-v2-*/_search" -d "$query" \
   | jq '.hits.hits')

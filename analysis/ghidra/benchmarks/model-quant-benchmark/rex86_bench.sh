@@ -128,7 +128,7 @@ free_gpu
 echo "############ 3) vLLM (same weights, HF safetensors, OpenAI-compatible) ############"
 wait_gpu_free
 docker run -d --name vllm-bench --gpus all -v "$WORK/rex86-merged":/model -p 18000:8000 \
-  vllm/vllm-openai:latest --model /model --dtype float16 --max-model-len 4096 --gpu-memory-utilization 0.85
+  vllm/vllm-openai:v0.26.0@sha256:ffb2d59b1c059a5bd8d781320c9f5189de8293693b7d95da54befddaa54abf52 --model /model --dtype float16 --max-model-len 4096 --gpu-memory-utilization 0.85
 for i in $(seq 1 40); do curl -sf http://127.0.0.1:18000/v1/models >/dev/null 2>&1 && break; sleep 5; done
 curl -sf http://127.0.0.1:18000/v1/models >/dev/null && echo " -- vllm up"
 echo "-- warmup --"

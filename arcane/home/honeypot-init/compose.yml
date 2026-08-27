@@ -68,7 +68,7 @@ services:
   # Dionaea's FTP/TFTP/UPnP/printer files are copied into its persistent volume.
   persona-apply:
     <<: *runtime-defaults
-    image: python:3.12-alpine
+    image: python:3.12-alpine@sha256:d09d15e60962ca365d1cd544a48773bac9d33f2fb1b00f2aa0deec78ade7dc31
     container_name: hp-persona-apply
     restart: no
     working_dir: /stack
@@ -86,7 +86,7 @@ services:
   # ===================== Log dir ownership bootstrap =====================
   log-init:
     <<: *runtime-defaults
-    image: busybox:latest
+    image: busybox:latest@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
     container_name: hp-log-init
     restart: no
     depends_on:
@@ -237,7 +237,7 @@ services:
 
   arkime-init:
     <<: *runtime-defaults
-    image: ghcr.io/arkime/arkime/arkime:v6-latest
+    image: ghcr.io/arkime/arkime/arkime:v6-latest@sha256:754ac8d50c8d4136462c3bb3701c400be66310020ab01d5ea94a4e73942b0127
     container_name: hp-arkime-init
     restart: no
     command:

@@ -96,7 +96,7 @@ services:
   mitmproxy:
     <<: *gateway-defaults
     profiles: ["mitm"]
-    image: mitmproxy/mitmproxy:latest
+    image: mitmproxy/mitmproxy:latest@sha256:00b77b5d8804c8ad18cb6caefbf9d5849e895e8986c5ce011f4ae30f4385962f
     container_name: sbx-mitmproxy
     networks:
       sandbox:
@@ -124,7 +124,7 @@ services:
   # ALL capabilities dropped.
   zeek:
     <<: *gateway-defaults
-    image: zeek/zeek:latest
+    image: zeek/zeek:latest@sha256:703f0b22af150d9418739b2a012fbfb5d01ee004aded3bd43b0175010db05928
     container_name: sbx-zeek
     network_mode: host
     cap_drop:
@@ -146,7 +146,7 @@ services:
   # identically to everything else in this repository.
   suricata:
     <<: *gateway-defaults
-    image: jasonish/suricata:latest
+    image: jasonish/suricata:latest@sha256:4f51f6e6ab355cfb6288a2186b0a2e884618c0a45d0fe140023293441fc2176a
     container_name: sbx-suricata
     network_mode: host
     cap_drop:
@@ -203,7 +203,7 @@ services:
   # been wrong about a protocol.
   tcpdump:
     <<: *gateway-defaults
-    image: nicolaka/netshoot:latest
+    image: nicolaka/netshoot:latest@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70
     container_name: sbx-tcpdump
     network_mode: host
     cap_drop:

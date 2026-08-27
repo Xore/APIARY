@@ -15,7 +15,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 RUN cargo build --release --locked
 
-FROM docker.io/library/debian:bookworm-slim
+FROM docker.io/library/debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
 
 # libpcap0.8 for capture; ca-certificates is not needed -- this talks to
 # nothing, it only reads packets and writes stdout.
