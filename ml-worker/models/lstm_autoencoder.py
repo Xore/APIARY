@@ -203,10 +203,11 @@ class LSTMAEModel:
         self._load_latest()
         self._load_buffers()
 
-    def score(self, src: dict, cmd_count: int = 0) -> float:
+    def score(self, src: dict, cmd_count: int = 0) -> "float | None":
         """
-        Append this event to its src_ip's sliding window and return a
-        reconstruction-loss-based anomaly score in [0, 1].
+        Append this event to its src_ip's sliding window and, when this
+        model actually has an opinion, return a reconstruction-loss-based
+        anomaly score in [0, 1].
 
         Takes the raw ES _source dict directly (like
         IsoForestModel.extract_features()) rather than a slice of an
@@ -218,12 +219,20 @@ class LSTMAEModel:
         IsoForestModel.extract_features(), so one event is only ever
         observed once.
 
-        Returns 0.0 before SEQ_LEN events have accumulated for this IP (real
-        "no signal yet", same as before). That is distinct from the bounded
-        CPU-fallback path below, which returns 0.5 -- this codebase's
-        established neutral-default convention (IsoForestModel/HBOS return
-        0.5 before their first retrain too) -- if inference itself fails, so
-        a scoring error can never silently read as "confirmed normal".
+        Returns None whenever this detector has NO usable opinion
+        (#1969): before the first accepted fit loaded or trained any
+        weights (BiLSTMAE() always constructs with random weights, so the
+        old behaviour of scoring through them let random-weight noise
+        masquerade as a middling vote); before SEQ_LEN events have
+        accumulated for this IP (the old exact-0.0 "no signal yet"
+        sentinel); or if inference itself fails (the old neutral-0.5
+        fallback -- an error reading as a confident midpoint vote is its
+        own flavour of wrong, and compute_composite()'s
+        availability-renormalisation makes exclusion strictly more honest
+        than either sentinel). The per-IP bookkeeping above runs on every
+        call regardless, so windows accumulate during abstention and the
+        detector starts producing opinions the moment it is trained and
+        primed, never losing history to the abstaining period.
         """
         ip = _get_ip(src) or "unknown"
         now = _ts_to_epoch(src.get("@timestamp") or src.get("timestamp"))
@@ -238,8 +247,11 @@ class LSTMAEModel:
 
         vec = featurise_temporal(src, inter_arrival, cmd_count=cmd_count)
         self._buffers[ip].append(vec)
+
+        if not self._trained:
+            return None  # random-weight net: noise, not an opinion (#1969)
         if len(self._buffers[ip]) < SEQ_LEN:
-            return 0.0  # not enough history yet
+            return None  # not enough history yet
 
         seq = np.array(list(self._buffers[ip]), dtype=np.float32)  # (SEQ_LEN, 6)
         x   = torch.tensor(seq).unsqueeze(0).to(self.device)       # (1, SEQ_LEN, 6)
@@ -250,8 +262,8 @@ class LSTMAEModel:
                 recon = self.net(x)                             # (1, SEQ_LEN, 6)
                 loss  = nn.functional.mse_loss(recon, x).item()
         except Exception as exc:
-            logger.warning(f"LSTM-AE inference failed for {ip}, falling back to neutral score: {exc}")
-            return 0.5
+            logger.warning(f"LSTM-AE inference failed for {ip}, abstaining (no opinion, excluded from the composite): {exc}")
+            return None
 
         # Normalise: above threshold → score > 0.5
         return float(min(loss / (self.threshold * 4), 1.0))

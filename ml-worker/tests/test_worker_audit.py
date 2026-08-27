@@ -20,6 +20,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import worker  # noqa: E402
+from worker import contributing_detectors  # noqa: E402
 from models.isolation_forest import IsoForestModel  # noqa: E402
 from models.lstm_autoencoder import LSTMAEModel, SEQ_LEN  # noqa: E402
 
@@ -75,38 +77,39 @@ class TestFieldSchemaMismatch:
 
 
 class TestNeutralScoreCannotAlert:
-    """Finding #4: before first training, no event can ever cross
-    ML_ALERT_THRESHOLD (0.75) -- worker.py's own weighting makes it
-    mathematically unreachable, not just unlikely."""
+    """Finding #4 (historical): before first training, the neutral 0.5
+    placeholders kept their full composite weight and no event could ever
+    cross ML_ALERT_THRESHOLD (0.75) -- mathematically unreachable, not just
+    unlikely. #1969 replaced that contract outright: an untrained detector
+    has NO opinion (None), compute_composite() renormalises over whatever
+    did opine, and a fresh worker stays silent for the honest reason --
+    nobody has an opinion yet -- rather than because every vote was faked
+    at a constant."""
 
-    def test_untrained_scores_are_the_documented_neutral_default(self):
+    def test_untrained_scores_are_none_not_a_placeholder_vote(self):
         model = IsoForestModel(model_dir="/tmp/does-not-matter")
         features = model.extract_features(REAL_SHAPED_DOCUMENT["_source"])
-        assert model.score(features) == 0.5
-        assert model.hbos_score(features) == 0.5
+        assert model.score(features) is None
+        assert model.hbos_score(features) is None
 
-    def test_hbos_gate_uses_strict_greater_than_on_the_neutral_value(self):
-        # worker.py: `if hbos_score > 0.5: lstm_score = lstm_model.score(...)`
-        # The untrained hbos_score is exactly 0.5, so this is always False
-        # before the first retrain -- LSTM never runs pre-training, not just
-        # rarely.
-        hbos_score = 0.5
-        lstm_would_run = hbos_score > 0.5
+    def test_execution_gate_never_runs_lstm_when_hbos_abstains(self):
+        # score_and_write_events()'s gate: `if hbos_v is not None and
+        # hbos_v > 0.5`. (Pre-#1969 the untrained hbos score was exactly
+        # 0.5, so its strict-greater-than meant LSTM never ran before the
+        # first retrain either -- same outcome, less honest encoding.)
+        hbos_v = None
+        lstm_would_run = hbos_v is not None and hbos_v > 0.5
         assert lstm_would_run is False
 
-    def test_composite_score_pre_training_is_always_0_3(self):
-        # Reproduces worker.py's exact composite formula with the documented
-        # pre-training defaults.
-        iso_score, hbos_score, lstm_score = 0.5, 0.5, 0.0  # lstm never ran, see above
-        composite = 0.4 * iso_score + 0.4 * lstm_score + 0.2 * hbos_score
-        threshold = 0.75
-        assert composite == pytest.approx(0.3)
-        assert composite < threshold, (
-            "an untrained worker can NEVER write an anomaly, regardless of how "
-            "anomalous the underlying event actually is -- not a calibration "
-            "problem, a hardcoded impossibility until the first retrain has "
-            ">100 events (RETRAIN_INTERVAL default 6h)"
+    def test_composite_with_no_detector_opinions_is_zero_and_cannot_alert(self):
+        composite = worker.compute_composite(
+            {"isolation_forest": None, "lstm_ae": None, "hbos": None}
         )
+        assert composite == 0.0
+        assert contributing_detectors(
+            {"isolation_forest": None, "lstm_ae": None, "hbos": None}
+        ) == []
+        assert composite < worker.THRESHOLD
 
 
 class TestLSTMTrainInferenceSkew:

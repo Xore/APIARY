@@ -35,12 +35,12 @@ and serious in production:
 
 | check | why it exists |
 |---|---|
-| `abstains_without_history` | `LSTMAEModel.score()` returns exactly `0.0` until `SEQ_LEN` events exist for a source — *no signal yet*, not *looks normal*. A candidate returning a small-but-nonzero score there asserts normality about a source it has barely seen, and no accuracy metric would ever show it. |
-| `neutral_on_inference_failure` | On an inference exception the detectors return `0.5`. Failing to `0.0` would read as "confirmed normal" — the one answer a broken detector must never give. |
+| `abstains_without_history` | Until `SEQ_LEN` events exist for a source (and before any accepted fit) a detector must return `None` (#1969) — *no signal yet*, not *looks normal*. A candidate returning a small-but-nonzero score there asserts normality about a source it has barely seen, and no accuracy metric would ever show it. |
+| `abstains_on_inference_failure` | On an inference exception a detector abstains (`None`, #1969): excluded from the composite rather than counted as any vote. A constant placeholder keeping its full ensemble weight is a vote from nothing; a low score reads as "confirmed normal", which is what a broken detector must never give. Skipped on untrained candidates, where pre-fault and post-fault are indistinguishable. |
 | `survives_every_sensor_schema` | Dionaea and Conpot documents have gaps the Cowrie-shaped ones do not. A detector that throws on one sensor stops scoring it and the alert count merely drops, which looks like an improvement. |
 | `survives_malformed_document` | A document missing its timestamp must not take the worker down. |
-| `scores_are_bounded` | A NaN or out-of-range value poisons the 0.4/0.4/0.2 composite rather than failing visibly. |
-| `abstention_differs_from_confident_normal` | The two must be distinguishable values, not both "low". |
+| `scores_are_bounded` | When a detector opines at all, a NaN or out-of-range value poisons the weighted composite rather than failing visibly; absence must be `None`, never a low number. |
+| `composite_renormalises_over_present_detectors` | Runs production `compute_composite()` against detector-absent cases: absence drops out of numerator AND denominator, an all-absent event composites to 0.0, single-detector opinions stand at face value (#1969). |
 
 **A skipped check is not a passed check.** Skips are counted and reported
 separately so a partially-exercised candidate cannot read as a clean one.

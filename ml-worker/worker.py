@@ -46,7 +46,9 @@ POLL_INTERVAL    = int(os.getenv("POLL_INTERVAL",   "30"))     # seconds
 # roughly matches the old 6h-interval default's cadence, now at fixed,
 # predictable times instead.
 RETRAIN_SLOTS_UTC = os.getenv("RETRAIN_SLOTS_UTC", "03:00,09:00,15:00,21:00")
-THRESHOLD        = float(os.getenv("ML_ALERT_THRESHOLD", "0.75"))
+# ML_ALERT_THRESHOLD is read further down, immediately before
+# _severity_bands() derives SEVERITY_BANDS from it (#1969) -- keeping the
+# derivation physically adjacent to the config read is the point.
 MODEL_DIR        = os.getenv("MODEL_DIR",         "/models")
 LOG_LEVEL        = os.getenv("LOG_LEVEL",         "INFO")
 
@@ -115,11 +117,27 @@ STATE_INDEX    = "ml-worker-state"
 METRICS_INDEX  = "ml-worker-metrics"
 REDIS_CHANNEL  = "ml-anomaly-events"
 
-SEVERITY_BANDS = [
-    (0.95, "critical"),
-    (0.85, "high"),
-    (0.75, "medium"),
-]
+def _severity_bands(alert_threshold: float) -> list:
+    """Derive the severity bands from ML_ALERT_THRESHOLD (#1969).
+
+    Previously SEVERITY_BANDS were hardcoded absolutes (0.75/0.85/0.95)
+    while THRESHOLD was env-configurable -- raise the threshold to 0.85
+    and every alert was still labelled by bands calibrated for a 0.75
+    deployment, so severity distributions silently changed meaning on any
+    threshold move. The bands now derive from it (medium starts AT the
+    alerting bar itself, high/critical at fixed offsets above), so the two
+    can no longer drift apart. With the default threshold of 0.75 this
+    reproduces the historical constants exactly.
+    """
+    return [
+        (alert_threshold + 0.20, "critical"),
+        (alert_threshold + 0.10, "high"),
+        (alert_threshold,        "medium"),
+    ]
+
+
+THRESHOLD = float(os.getenv("ML_ALERT_THRESHOLD", "0.75"))
+SEVERITY_BANDS = _severity_bands(THRESHOLD)
 
 # Ensemble formula, docs/ml-worker-plan.md §4.4. Single source of truth (#63)
 # -- previously duplicated verbatim in write_anomaly() and the main loop,
@@ -128,7 +146,45 @@ COMPOSITE_WEIGHTS = {"isolation_forest": 0.4, "lstm_ae": 0.4, "hbos": 0.2}
 
 
 def compute_composite(scores: dict) -> float:
-    return sum(COMPOSITE_WEIGHTS[k] * scores.get(k, 0.0) for k in COMPOSITE_WEIGHTS)
+    """Availability-aware ensemble score (#1969, docs §4.4).
+
+    scores values are the detectors' normalised opinions in [0, 1], or
+    None where a detector has NO opinion this event: skipped by its gate,
+    untrained, insufficient history, or an inference failure (each
+    model's own docstring defines exactly when). A None is excluded from
+    BOTH numerator and denominator -- "didn't run" must not read as
+    "scored perfectly normal" (the old skipped-LSTM-as-0.0 encoding,
+    which acted as an undocumented veto: with THRESHOLD=0.75 and no LSTM
+    contribution the composite capped at 0.6, so nothing could ever fire
+    without LSTM running), nor as a real vote when a placeholder like an
+    untrained IsoForest's constant 0.5 kept its full 0.4 weight (#1959:
+    6,669 alerts partly cleared the bar on that floor alone). The
+    remaining weights are renormalised to sum to 1, so each contributing
+    detector's opinion carries exactly the relative influence its weight
+    prescribes.
+
+    Consequence worth stating plainly: single-detector alerts are now
+    possible -- e.g. {iso=0.9, everything else absent} composites to 0.9
+    -- whereas before they were unreachable below THRESHOLD<=0.6. That is
+    deliberate: the honest answer to "one calibrated detector says 0.9"
+    is not silence. contributing_detectors() is written onto every anomaly
+    document precisely so such alerts are identifiable after the fact.
+    """
+    present = {k: v for k, v in scores.items() if k in COMPOSITE_WEIGHTS and v is not None}
+    total_weight = sum(COMPOSITE_WEIGHTS[k] for k in present)
+    if not present or total_weight <= 0:
+        return 0.0
+    return sum(COMPOSITE_WEIGHTS[k] * v for k, v in present.items()) / total_weight
+
+
+def contributing_detectors(scores: dict) -> list:
+    """Which detectors produced an opinion for this scoring (#1969) --
+    sorted keyword list, written verbatim into each ml-anomalies document
+    next to model_scores (whose values carry the same information as
+    nulls, but aggregations over a flat keyword field beat object-field
+    archaeology for the common 'which detector fired this' question).
+    """
+    return sorted(k for k in scores if k in COMPOSITE_WEIGHTS and scores[k] is not None)
 
 
 def severity(score: float) -> str:
@@ -479,20 +535,37 @@ def score_and_write_events(es: Elasticsearch, rdb, iso_model, lstm_model,
     matrix = np.vstack([features for _, features, _ in extracted])
     iso_scores = iso_model.score_batch(matrix)
     hbos_scores = iso_model.hbos_score_batch(matrix)  # fast pre-filter
+    # None from either batch (#1969) means that detector is untrained and
+    # has no opinion on ANY event this cycle -- recorded per event as None,
+    # excluded by compute_composite(), and reported via contributing_detectors().
 
     suppressed_own_address = 0
-    for (event, features, session_feats), iso_score, hbos_score in zip(extracted, iso_scores, hbos_scores):
+    for i, (event, features, session_feats) in enumerate(extracted):
         try:
             src = event.get("_source", {})
-            lstm_score = 0.0
+            # An untrained IsoForest/HBOS batch is None (no opinion), not a
+            # constant 0.5 vote carrying its full weight (#1969: the
+            # constant floor was indistinguishable from a real middling
+            # score -- #1959 measured 6,669 alerts partly clearing the bar
+            # on exactly that floor).
+            iso_v  = float(iso_scores[i]) if iso_scores is not None else None
+            hbos_v = float(hbos_scores[i]) if hbos_scores is not None else None
 
-            # Only run LSTM if HBOS flagged as potentially anomalous
-            if hbos_score > 0.5:
+            lstm_score = None
+
+            # Only run LSTM if HBOS flagged as potentially anomalous. This
+            # stays an EXECUTION gate (LSTM costs ~3ms/call; the flag keeps
+            # it off clear events) -- it no longer decides MEANING: an
+            # LSTM skipped here records None and compute_composite()
+            # renormalises over the detectors that did produce opinions,
+            # so the old encoding (skipped -> 0.0 -> silent veto capping
+            # every composite at 0.6 under the default threshold) is gone.
+            if hbos_v is not None and hbos_v > 0.5:
                 lstm_score = lstm_model.score(src, cmd_count=session_feats.get("cmd_count", 0))
 
             scores = {
-                "isolation_forest": float(iso_score),
-                "hbos":             float(hbos_score),
+                "isolation_forest": iso_v,
+                "hbos":             hbos_v,
                 "lstm_ae":          lstm_score,
             }
             composite = compute_composite(scores)
@@ -664,7 +737,11 @@ def write_anomaly(es: Elasticsearch, rdb: "redis.Redis | None",
         "src_country":       (src.get("source") or {}).get("geo", {}).get("country_iso_code"),
         "composite_score":   round(composite, 4),
         "severity":          severity(composite),
-        "model_scores":      {k: round(v, 4) for k, v in scores.items()},
+        # None stays null in the stored doc (#1969): model_scores carries
+        # exactly what each detector expressed -- an absent detector reads
+        # back as null, not 0.0.
+        "model_scores":      {k: (None if v is None else round(v, 4)) for k, v in scores.items()},
+        "contributing_detectors": contributing_detectors(scores),
         "explanation":       explanation,
         "event_type":        (src.get("event") or {}).get("category"),
         "dst_port":          _get_port(src) or None,
@@ -732,6 +809,10 @@ def run_worker() -> None:
                 "composite_score":  {"type": "float"},
                 "severity":         {"type": "keyword"},
                 "model_scores":     {"type": "object"},
+                # Which detectors produced an opinion for this alert
+                # (#1969) -- null model_scores values are honest but not
+                # aggregatable; this flat keyword list is.
+                "contributing_detectors": {"type": "keyword"},
                 "explanation":      {"type": "text"},
                 "event_type":       {"type": "keyword"},
                 "dst_port":         {"type": "integer"},

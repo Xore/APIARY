@@ -1,4 +1,6 @@
-"""Tests for the Tier 1 detector contract benchmark (issue #1794).
+"""Tests for the Tier 1 detector contract benchmark (issue #1794), under the
+#1969 contract: an opinion is a float in [0, 1]; absence is None -- never a
+low score, never a placeholder constant.
 
 The checks are exercised against stub candidates rather than the real models,
 so the harness's own logic is verified without torch and without a trained
@@ -15,11 +17,12 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from benchmarks.evaluate_detectors import (  # noqa: E402
-    ABSTENTION,
-    NEUTRAL,
+    ABSENT,
+    BENCHMARK_VERSION,
     Candidate,
+    check_abstains_on_inference_failure,
     check_abstains_without_history,
-    check_neutral_on_inference_failure,
+    check_composite_renormalises_over_present_detectors,
     check_scores_are_bounded,
     check_survives_every_sensor_schema,
     check_survives_malformed_document,
@@ -30,14 +33,14 @@ from benchmarks.evaluate_detectors import (  # noqa: E402
 FIXTURES = load_fixtures()
 
 
-def candidate(fn, *, abstains=True, name="stub"):
-    return Candidate(name=name, score_event=fn, abstains=abstains)
+def candidate(fn, *, abstains=True, trained=False, name="stub"):
+    return Candidate(name=name, score_event=fn, abstains=abstains, trained=trained)
 
 
 class TestAbstention:
     def test_accepts_a_detector_that_abstains(self):
         result = check_abstains_without_history(
-            candidate(lambda src, n: ABSTENTION), FIXTURES["single_event"])
+            candidate(lambda src, n: ABSENT), FIXTURES["single_event"])
         assert result.passed
 
     def test_rejects_a_low_score_standing_in_for_abstention(self):
@@ -48,48 +51,60 @@ class TestAbstention:
         assert not result.passed
         assert "asserts normality" in result.detail
 
-    def test_rejects_the_neutral_value_as_abstention(self):
+    def test_rejects_a_placeholder_constant_as_absence(self):
+        """v1 allowed a neutral 0.5 here; #1969 removed the placeholder
+        entirely -- a constant IS a vote, just one cast from nothing."""
         result = check_abstains_without_history(
-            candidate(lambda src, n: NEUTRAL), FIXTURES["single_event"])
+            candidate(lambda src, n: 0.5), FIXTURES["single_event"])
         assert not result.passed
 
     def test_skips_for_a_detector_that_declares_it_does_not_abstain(self):
-        """IsoForest returns the neutral 0.5 before its first retrain instead,
-        so the check would be meaningless rather than failing."""
         result = check_abstains_without_history(
-            candidate(lambda src, n: NEUTRAL, abstains=False), FIXTURES["single_event"])
+            candidate(lambda src, n: 0.5, abstains=False), FIXTURES["single_event"])
         assert result.skipped
 
-    def test_abstention_and_neutral_are_different_values(self):
-        assert ABSTENTION != NEUTRAL
+    def test_benchmark_version_is_v2(self):
+        """Guards against an accidental revert of the #1969 contract while
+        keeping v1's sentinel vocabulary."""
+        assert BENCHMARK_VERSION.endswith("-v2")
 
 
 class TestInferenceFailure:
-    def test_accepts_neutral_on_failure(self):
-        result = check_neutral_on_inference_failure(
-            candidate(lambda src, n: NEUTRAL), FIXTURES["single_event"], lambda: None)
+    def test_accepts_absence_on_failure(self):
+        result = check_abstains_on_inference_failure(
+            candidate(lambda src, n: ABSENT, trained=True),
+            FIXTURES["single_event"], lambda: None)
         assert result.passed
 
-    def test_rejects_failing_to_confident_normal(self):
-        """Returning 0.0 on an inference error reads as 'confirmed normal',
-        the one answer a broken detector must never give."""
-        result = check_neutral_on_inference_failure(
-            candidate(lambda src, n: 0.0), FIXTURES["single_event"], lambda: None)
+    def test_skips_an_untrained_candidate_rather_than_passing_vacuously(self):
+        """On an untrained model pre-fault and post-fault are both None, so
+        nothing was exercised -- a check that cannot run is not a passing one."""
+        result = check_abstains_on_inference_failure(
+            candidate(lambda src, n: ABSENT, trained=False),
+            FIXTURES["single_event"], lambda: None)
+        assert result.skipped
+        assert "untrained" in result.detail
+
+    def test_rejects_scoring_confidently_through_the_fault(self):
+        """Returning ANY number through a broken forward pass claims knowledge
+        it does not have; low scores additionally read as 'confirmed normal'."""
+        result = check_abstains_on_inference_failure(
+            candidate(lambda src, n: 0.0, trained=True),
+            FIXTURES["single_event"], lambda: None)
         assert not result.passed
-        assert "confirmed normal" in result.detail
 
     def test_rejects_propagating_the_exception(self):
         def boom(src, n):
             raise RuntimeError("cuda is on fire")
 
-        result = check_neutral_on_inference_failure(
-            candidate(boom), FIXTURES["single_event"], lambda: None)
+        result = check_abstains_on_inference_failure(
+            candidate(boom, trained=True), FIXTURES["single_event"], lambda: None)
         assert not result.passed
         assert "propagated" in result.detail
 
     def test_skips_when_no_fault_injector_is_supplied(self):
-        result = check_neutral_on_inference_failure(
-            candidate(lambda src, n: NEUTRAL), FIXTURES["single_event"], None)
+        result = check_abstains_on_inference_failure(
+            candidate(lambda src, n: ABSENT), FIXTURES["single_event"], None)
         assert result.skipped
 
 
@@ -98,13 +113,39 @@ class TestBounds:
         assert check_scores_are_bounded(
             candidate(lambda src, n: 0.42), FIXTURES["documents"]).passed
 
-    @pytest.mark.parametrize("bad", [1.5, -0.1, float("nan"), None, "0.5", True])
+    def test_accepts_absence_and_reports_its_share(self):
+        result = check_scores_are_bounded(
+            candidate(lambda src, n: ABSENT), FIXTURES["documents"])
+        assert result.passed
+        assert "abstained as None" in result.detail
+
+    @pytest.mark.parametrize("bad", [1.5, -0.1, float("nan"), "0.5", True])
     def test_rejects_out_of_range_or_non_numeric(self, bad):
         """A NaN or an out-of-range value poisons the composite blend rather
         than failing visibly. True is rejected too -- bool is an int subclass
         and would otherwise slip through as 1.0."""
         assert not check_scores_are_bounded(
             candidate(lambda src, n: bad), FIXTURES["documents"]).passed
+
+
+class TestCompositeRenormalisation:
+    """The ensemble check runs production compute_composite() against
+    detector-absent cases (#1969)."""
+
+    def test_production_semantics_pass(self):
+        assert check_composite_renormalises_over_present_detectors().passed
+
+    def test_the_check_catches_v1_style_placeholder_arithmetic(self, monkeypatch):
+        """A revert to treating None-as-some-vote must fail loudly here --
+        the check exercises production code, so break the production code in
+        the same way a regression would arrive."""
+        import worker
+
+        monkeypatch.setattr(worker, "compute_composite",
+                            lambda scores: sum((0.4, 0.4, 0.2)[i] * (scores.get(k) or 0.5)
+                                               for i, k in enumerate(["isolation_forest", "lstm_ae", "hbos"])))
+        result = check_composite_renormalises_over_present_detectors()
+        assert not result.passed
 
 
 class TestSchemaCoverage:
@@ -135,16 +176,19 @@ class TestSchemaCoverage:
             candidate(fragile), FIXTURES["malformed"]).passed
         assert check_survives_malformed_document(
             candidate(lambda src, n: 0.5), FIXTURES["malformed"]).passed
+        assert check_survives_malformed_document(
+            candidate(lambda src, n: ABSENT), FIXTURES["malformed"]).passed
 
 
 class TestReport:
-    def test_a_clean_candidate_passes_and_declares_its_caps(self):
+    def test_an_untrained_abstaining_candidate_passes_with_the_fault_check_skipped(self):
         report = run_checks(
-            candidate(lambda src, n: ABSTENTION), FIXTURES, lambda: None)
-        # The stub abstains on every call, including the failure probe, so the
-        # neutral check fails -- which is itself the correct outcome.
-        assert any(c.name == "neutral_on_inference_failure" and not c.passed
+            candidate(lambda src, n: ABSENT), FIXTURES, lambda: None)
+        # Nothing exercised the fault path (the candidate is untrained), so
+        # that check reports a skip -- visibly, not as a quiet pass.
+        assert any(c.name == "abstains_on_inference_failure" and c.skipped
                    for c in report.checks)
+        assert report.passed
         assert report.caps, "a run must state the bounds it applied"
         assert "does not measure accuracy" in report.caps[0]
 

@@ -195,14 +195,48 @@ different anomaly types: [web:275][web:276][web:283][web:292]
 
 ### 4.4 Ensemble Scoring
 
-Final `composite_score` = weighted combination:
+Final `composite_score` = availability-weighted combination (#1969):
 
 ```
-composite_score = 0.4 × norm(IsoForest) + 0.4 × LSTM_AE + 0.2 × HBOS
+                       Σ (w_d × s_d)   over detectors d that produced an opinion
+composite_score  =  ─────────────────────────────────────────────────────────────
+                       Σ (w_d)         same contributing detectors only
+
+weights:  w_iso = 0.4,  w_lstm = 0.4,  w_hbos = 0.2
 ```
 
-Only events with `composite_score ≥ 0.75` are written to `ml-anomalies` and
-shown on the dashboard (tunable via `ML_ALERT_THRESHOLD` env var).
+A detector has **no opinion** (`s_d = None`) when it was skipped by its gate,
+is untrained, lacks sequence history, or failed during inference — each
+model's own docstring defines exactly when. Absent detectors drop out of BOTH
+numerator and denominator: "didn't run" must not read as "scored perfectly
+normal" (the pre-#1969 skipped-LSTM-as-0.0 encoding acted as an undocumented
+veto — with the default threshold, nothing could fire without LSTM running),
+and an untrained placeholder must not vote (its constant 0.5 kept full weight;
+#1959 measured 6,669 alerts partly clearing the bar on exactly that floor).
+The weights renormalise to sum to 1 over the detectors that did opine.
+
+Consequences worth stating plainly:
+
+- **Single-detector alerts are possible** — `{iso = 0.9, others absent}`
+  composites to 0.9. Under the old formula they were unreachable below a
+  threshold of 0.6; the honest answer to "one calibrated detector says 0.9" is
+  not silence.
+- **An event where no detector opines composites to 0.0** and cannot alert.
+- Every alert records **`contributing_detectors`** next to its
+  `model_scores`, whose values carry `null` for any absent detector — so an
+  aggregation can always answer "which detector fired this".
+
+The HBOS > 0.5 pre-filter remains as an **execution gate only** (it decides
+whether the more expensive LSTM scores an event), never a semantic one — what
+LSTM skipping means is decided by the renormalisation above.
+
+Severity bands derive from the threshold rather than drifting beside it:
+medium starts AT `ML_ALERT_THRESHOLD`, high/critical sit at fixed offsets of
++0.10/+0.20 above it. With the default threshold of 0.75 this reproduces the
+historical absolute bands exactly.
+
+Only events with `composite_score ≥ ML_ALERT_THRESHOLD` (default 0.75) are
+written to `ml-anomalies` and shown on the dashboard.
 
 `worker.py`'s `compute_composite()` is the single source of truth for this
 formula (#63) — previously duplicated verbatim at both call sites (the main

@@ -402,7 +402,14 @@ class IsoForestModel:
     """
     Wraps IsolationForest + HBOS.
     Both are fitted on the first retrain() call.
-    Before first training, scores default to 0.5 (neutral).
+    Before first training, score()/hbos_score() return None -- not a
+    neutral 0.5 (#1969): an untrained model has no calibration data and
+    therefore no opinion, and a placeholder that kept its full composite
+    weight was indistinguishable from a real middling vote (#1959 measured
+    exactly that: mean IsoForest contribution 0.5000 across 6,669 alerts
+    during a day the detector had never been trained). The caller's
+    compute_composite() renormalises over the detectors that did produce
+    an opinion.
     """
 
     def __init__(self, model_dir: str = "/models") -> None:
@@ -467,10 +474,12 @@ class IsoForestModel:
 
         return features.reshape(1, -1)
 
-    def score(self, features: np.ndarray) -> float:
-        """Return anomaly score in [0, 1] (1 = most anomalous)."""
+    def score(self, features: np.ndarray) -> "float | None":
+        """Return anomaly score in [0, 1] (1 = most anomalous), or None
+        before the first accepted fit (#1969 -- no calibration data, no
+        opinion)."""
         if self.iso is None:
-            return 0.5
+            return None
         # sklearn IsoForest: score_samples returns negative scores;
         # more negative = more anomalous.
         raw = self.iso.score_samples(features)[0]
@@ -483,10 +492,11 @@ class IsoForestModel:
         # retrain recalibrates it.
         return float(np.clip((-raw) * 2, 0.0, 1.0))
 
-    def hbos_score(self, features: np.ndarray) -> float:
-        """Return HBOS outlier score normalised to [0, 1]."""
+    def hbos_score(self, features: np.ndarray) -> "float | None":
+        """Return HBOS outlier score normalised to [0, 1], or None before
+        the first accepted fit (#1969 -- see score())."""
         if self.hbos is None:
-            return 0.5
+            return None
         raw = self.hbos.decision_function(features)[0]
         calib = getattr(self.hbos, "hp_calib", None)
         if calib is not None:
@@ -496,9 +506,11 @@ class IsoForestModel:
         # Fallback for a model saved before #174 -- see score()'s comment.
         return float(np.clip(raw / 10.0, 0.0, 1.0))
 
-    def score_batch(self, features: np.ndarray) -> np.ndarray:
+    def score_batch(self, features: np.ndarray) -> "np.ndarray | None":
         """Batched form of score(): one score_samples() call over the whole
         (n_events, n_features) matrix instead of one call per row.
+        Returns None before the first accepted fit (#1969), same contract
+        as score().
 
         #1227: confirmed live (production model, 2000 real events) that the
         per-row call path -- score() invoked once per event, as
@@ -515,18 +527,19 @@ class IsoForestModel:
         abs diff 0.0 over the same 2000-event sample).
         """
         if self.iso is None:
-            return np.full(features.shape[0], 0.5)
+            return None
         raw = self.iso.score_samples(features)
         calib = getattr(self.iso, "hp_calib", None)
         if calib is not None:
             return _percentile_normalize_batch(raw, calib["p50"], calib["p99"], lower_is_more_anomalous=True)
         return np.clip((-raw) * 2, 0.0, 1.0)
 
-    def hbos_score_batch(self, features: np.ndarray) -> np.ndarray:
+    def hbos_score_batch(self, features: np.ndarray) -> "np.ndarray | None":
         """Batched form of hbos_score() -- see score_batch()'s own comment
-        for why this exists and the measured speedup."""
+        for why this exists and the measured speedup. Returns None before
+        the first accepted fit (#1969), same contract as score()."""
         if self.hbos is None:
-            return np.full(features.shape[0], 0.5)
+            return None
         raw = self.hbos.decision_function(features)
         calib = getattr(self.hbos, "hp_calib", None)
         if calib is not None:
@@ -550,7 +563,9 @@ class IsoForestModel:
             parts.append("Source matches known scanner ASN (Shodan/Censys)")
         if f[4] < 0.005 and f[5] > 0.01:
             parts.append("Very short session with commands (automated exploit attempt)")
-        if scores.get("lstm_ae", 0) > 0.85:
+        # None-safe read (#1969): an absent LSTM score is a None in scores,
+        # not a low one, and must neither crash this nor read as a high one.
+        if (scores.get("lstm_ae") or 0) > 0.85:
             parts.append("Unusual temporal sequence vs. learned baseline (LSTM-AE)")
 
         if not parts:
