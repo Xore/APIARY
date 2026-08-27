@@ -287,6 +287,12 @@ function route(pathname) {
   }
   if (pathname === "/api/v1/ml-health") return [];
   if (pathname === "/api/v1/ml-anomalies/acks") return {};
+  // Reports studio envelopes (backend-service reports_api.rs shapes): the
+  // generic `{}` catch-all below used to leak through the routes' settled-
+  // body gates as `result.definitions === undefined`, and DefinitionsCard
+  // crashed on `.length` -- see #2178's browser-matrix repro.
+  if (pathname === "/api/v1/reports/templates") return { templates: [], elements: [] };
+  if (pathname === "/api/v1/reports/definitions") return { definitions: [] };
   if (pathname.startsWith("/api/v1/store/")) return { rows: [], total: 0 };
   if (pathname === "/api/v1/search") return { results: [] };
   return {};
