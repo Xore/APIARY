@@ -82,7 +82,7 @@ ALLOWED_CONTAINERS = frozenset({
     # "not observable".
     "hp-beelzebub",
     "hp-hellpot",
-    "hp-wordpot",
+    # wordpot retired from this allowlist with its stack (#2381).
     "hp-mailoney",
     "hp-galah",
     "hp-galah-llm-broker",

@@ -46,6 +46,19 @@ standing guidance on iterating directly against `ssh homeserver`/`ssh vps`.
 real output (a real log line, a real ES document, a real HTTP response),
 not inferred from source reading alone.
 
+**Worked example (#1972, serving-tier app logs):** the dashboard's own HTTP
+tiers keep durable records on Elasticsearch now, and verifying a change to
+them means watching a record land end-to-end rather than trusting the
+writer. Signed in, hit any dashboard API route; the Rust tier appends one
+JSONL line per request to `/opt/stacks/apiary/logs/dashboard-backend*/app.jsonl`
+(host) and ships into `dashboard-backend-v1-*`, and it echoes its
+`x-request-id` on the response so one id joins browser → BFF → Rust tier. A
+failed sign-in leaves `dashboard-bff-v1-*` documents (`auth_login_failed`,
+with a trimmed reason) even when nothing else recorded it. Container stdout
+is still there for tailing (`docker compose logs -f backend-service`), but
+it is the rotating ring buffer — Elasticsearch is where an incident is
+reconstructed from after the fact.
+
 ### Tier 3 — Full clean-install end-to-end test (pre-release gate)
 
 Everything in Tiers 1-2 verifies a change in isolation, often against a host

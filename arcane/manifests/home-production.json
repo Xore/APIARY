@@ -189,15 +189,6 @@
     "syncInterval": 300
   },
   {
-    "syncName": "honeypot-wordpot",
-    "gitRepo": "apiary",
-    "branch": "production",
-    "dockerComposePath": "arcane/home/honeypot-wordpot/compose.yml",
-    "autoSync": false,
-    "syncDirectory": true,
-    "syncInterval": 300
-  },
-  {
     "syncName": "honeypot-mailoney",
     "gitRepo": "apiary",
     "branch": "production",

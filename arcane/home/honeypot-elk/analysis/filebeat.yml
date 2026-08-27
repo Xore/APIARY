@@ -223,7 +223,7 @@ filebeat.inputs:
     fields_under_root: true
 
   # #1739: Traefik access log. Traefik terminates TLS for the Host-routed
-  # decoys (hellpot, galah, wordpot), so this is the only place their requests
+  # decoys (hellpot, galah), so this is the only place their requests
   # exist in cleartext -- a wire sensor sees the ClientHello and then
   # ciphertext. Until now the log went to container stdout with no filePath
   # and no input here, so zero Traefik records reached Elasticsearch.
@@ -311,6 +311,66 @@ filebeat.inputs:
           add_error_key: true
     fields:
       logset: sensors
+    fields_under_root: true
+
+  # #1972 serving-tier app logs -- three producers, three directories, two
+  # index families (the two backend-service instances share one family; see
+  # the indices routing below). Each stream is one producer writing
+  # already-structured JSON lines that ARE the final ECS-ish shape (same
+  # reasoning as disk-space above: one producer, no namespace needed),
+  # appended by obs.rs / the BFF's obs.server.ts onto their own writable
+  # subdirectory of the shared logs root.
+  #
+  # #1776/#2189: file_identity pinned explicitly rather than left implicit,
+  # same posture as every input added since the Filebeat 9 default flip --
+  # these files are append-only from byte zero (writers reopen per line), so
+  # the fingerprint of the leading bytes never changes and survives restarts;
+  # if rename rotation lands later (follow-up noted in #1972), a rotated
+  # generation's fresh inode + fresh bytes legitimately reads as a new file,
+  # which is the desired ingest-from-its-start behavior.
+  - type: filestream
+    id: dashboard-backend-app
+    file_identity.fingerprint: ~
+    prospector.scanner.fingerprint.enabled: true
+    paths:
+      - /logs/dashboard-backend/app.jsonl
+    parsers:
+      - ndjson:
+          overwrite_keys: true
+          add_error_key: true
+    fields:
+      logset: dashboard-backend
+    fields_under_root: true
+
+  - type: filestream
+    id: dashboard-backend-mounted-app
+    file_identity.fingerprint: ~
+    prospector.scanner.fingerprint.enabled: true
+    paths:
+      - /logs/dashboard-backend-mounted/app.jsonl
+    parsers:
+      - ndjson:
+          overwrite_keys: true
+          add_error_key: true
+    fields:
+      logset: dashboard-backend-mounted
+    fields_under_root: true
+
+  # The BFF tier's stream carries named outcomes (auth started/failed/
+  # completed and everything else routed through recordNamedEvent), not one
+  # line per request; username deliberately never appears among the fields.
+  - type: filestream
+    id: dashboard-bff-app
+    file_identity.fingerprint: ~
+    prospector.scanner.fingerprint.enabled: true
+    paths:
+      - /logs/dashboard-bff/app.jsonl
+    parsers:
+      - ndjson:
+          overwrite_keys: true
+          add_error_key: true
+    fields:
+      logset: dashboard-bff
     fields_under_root: true
 
 processors:
@@ -413,8 +473,11 @@ processors:
   # couple of hardcoded /conpot, /dionaea path fallbacks tanner isn't part
   # of), so every tanner event landed unclassified: present in
   # honeypot-v2-*, but invisible to any event.sensor-scoped view (the
-  # Sensors card, Event Explorer's sensor filter, EXPECTED_SENSORS
-  # freshness tracking). Confirmed live (2026-08-09). Fixed at the source
+  # Sensors card, Event Explorer's sensor filter, and at the time the
+  # dashboard's EXPECTED_SENSORS freshness tracking -- that expectation
+  # list has since been removed by commit 824aa33d/#1628, with its
+  # freshness role absorbed by source-health alone; see #2359).
+  # Confirmed live (2026-08-09). Fixed at the source
   # here rather than adding a third hardcoded path fallback to the ingest
   # pipeline's already-accumulating special cases.
   # #1217: tanner_report.json now routes through ip-enrichment-worker like
@@ -470,16 +533,8 @@ processors:
       target: honeypot
       fields: {persona_id: harborline-pbx, site_id: harborline-dispatch-office, asset_id: pbx-trunk-02, organization: Harborline Logistics AG}
       when.contains: {log.file.path: "enriched/sentrypeer.json"}
-  # #1421: wordpot.json has no "sensor" field of its own either, same
-  # reasoning as beelzebub/hellpot above -- ip-enrichment-worker/wordpot.go
-  # already writes sensor/src_ip/src_port as flat lowercase fields before
-  # Filebeat ever sees it. Shares hellpot's own meridian-legacy-web persona
-  # (see personas/personas.json) -- a real decommissioned web asset could
-  # plausibly run both a generic tarpit and a still-live WordPress install.
-  - add_fields:
-      target: honeypot
-      fields: {persona_id: meridian-legacy-web, site_id: meridian-legacy-infra, asset_id: web-legacy-04, organization: Meridian Retail Systems Ltd.}
-      when.contains: {log.file.path: "enriched/wordpot.json"}
+  # (the enriched/wordpot.json add_fields block went with wordpot's
+  # retirement, #2381; its meridian-legacy-web persona stays on hellpot.)
   # NOTE on stats events: they carry ~600 engine-internal counter fields and
   # once exhausted the shared daily index's field limit (2026-07-19 outage).
   # With per-event-type indices (see output below) they are contained in
@@ -534,6 +589,24 @@ output.elasticsearch:
     - index: "huginn-v1-%{+yyyy.MM.dd}"
       when.equals:
         logset: "huginn"
+    # #1972: the dashboard's own serving tiers. Two index families, three
+    # logsets -- both backend-service instances (regular + -mounted; same
+    # image, same route table) ship into one shared family because their
+    # per-request records are identical in shape and lifetime, and every
+    # "what did the API serve / since when" question spans both tiers; the
+    # logset value kept on each document still answers which instance
+    # answered. The BFF's named-event stream gets its own family. HTTP
+    # request records and app events, not sensor data -- traefik-v1-*'s
+    # #1739 reasoning applies to each.
+    - index: "dashboard-backend-v1-%{+yyyy.MM.dd}"
+      when.equals:
+        logset: "dashboard-backend"
+    - index: "dashboard-backend-v1-%{+yyyy.MM.dd}"
+      when.equals:
+        logset: "dashboard-backend-mounted"
+    - index: "dashboard-bff-v1-%{+yyyy.MM.dd}"
+      when.equals:
+        logset: "dashboard-bff"
 
   # Preserve the original event if Elasticsearch ever rejects it despite the
   # flattened mapping. This prevents silent data loss and records the cause.

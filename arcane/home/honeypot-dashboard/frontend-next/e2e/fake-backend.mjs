@@ -324,7 +324,7 @@ const TOPOLOGY_SENSORS = [
   ["api-honeypot", ["portbridge"]],
   ["galah", ["traefik", "portbridge"]],
   ["hellpot", ["traefik", "portbridge"]],
-  ["wordpot", ["traefik", "portbridge"]],
+  // wordpot retired from the fleet (#2381) -- not a fake sensor any more.
   ["snare", ["traefik"]],
   ["sentrypeer", ["portbridge"]],
   ["elasticpot", ["portbridge"]],

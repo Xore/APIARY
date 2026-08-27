@@ -6,47 +6,48 @@
 # T-Pot's compose/customizer.py walks an operator through a per-service
 # choice and fails fast on an invalid combination rather than failing
 # silently at runtime. This is the equivalent for this repo's current
-# shape -- one compose file per Dockge stack instead of one compose file
-# with many services, so the thing being validated is "which stacks" and
-# "does EXPECTED_SENSORS agree with them", not "which services within one
+# shape -- one compose file per stack instead of one compose file with many
+# services, so the thing being validated is "which stacks exist" and "do
+# their structural dependencies line up", not "which services within one
 # file".
+#
+# History note (#2359): this script used to also cross-check the profile
+# against `EXPECTED_SENSORS=` parsed live out of
+# arcane/home/honeypot-dashboard/compose.yml, plus an
+# --emit-expected-sensors helper that printed that value. Commit 824aa33d
+# (#1628) removed the variable during the dashboard cutover completion --
+# nothing consumes it anywhere now: source-health derives sensor liveness
+# from observed event.sensor values (backend-service/src/health.rs), not
+# from a static expectation list. The cross-check asserted against a
+# contract with no owner, so both were deleted; what remains is what is
+# actually enforceable against the tree today.
 #
 # Usage:
 #   scripts/validate-deploy-profile.sh deploy-profiles/<name>.txt
-#   scripts/validate-deploy-profile.sh --emit-expected-sensors deploy-profiles/<name>.txt
-# Run from the repo root (reads arcane/home/honeypot-dashboard/compose.yml
-# relative to it -- #1502 moved it there).
 #
-# --emit-expected-sensors prints the EXPECTED_SENSORS value this profile
-# actually needs, instead of validating against
-# arcane/home/honeypot-dashboard/compose.yml's current one. EXPECTED_SENSORS
-# there is a single hardcoded value assuming
-# every sensor is present -- it is NOT profile-aware today, so any profile
-# narrower than deploy-profiles/full.txt WILL fail the cross-check below
-# until that line is hand-edited (or overridden) to match. This flag exists
-# so that edit has a concrete, correct value to copy rather than a guess.
+# Design rule bought hard by #2359: every run ends with output. A check
+# whose guard message must fire on missing input gets implemented so that
+# message can never be killed before it prints (no bare command
+# substitution whose failure aborts under set -e before fail() runs).
 
 set -euo pipefail
 
-emit_mode=false
+# Removed-flag tombstone BEFORE any argument parsing that would treat the
+# old spelling as a filename.
 if [ "${1:-}" = "--emit-expected-sensors" ]; then
-  emit_mode=true
-  shift
+  echo "FAIL: --emit-expected-sensors was removed with the EXPECTED_SENSORS contract it printed (commit 824aa33d / #1628 deleted the variable; #2359 removed this flag). No static expectation list is maintained anywhere today -- source-health derives sensor liveness from observed event.sensor values." >&2
+  exit 2
 fi
 
-profile="${1:?Usage: $0 [--emit-expected-sensors] deploy-profiles/<name>.txt}"
+profile="${1:?Usage: $0 deploy-profiles/<name>.txt}"
 [ -f "$profile" ] || { echo "No such profile file: $profile" >&2; exit 1; }
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-dashboard_compose="$repo_root/arcane/home/honeypot-dashboard/compose.yml"
-[ -f "$dashboard_compose" ] || { echo "Cannot find compose.yml at $dashboard_compose" >&2; exit 1; }
 
-# Every sensor stack this profile format can name, mapped to the
-# EXPECTED_SENSORS name(s) that stack is responsible for. Kept in sync by
-# hand with .github/workflows/deploy.yml's own sensor loop and
-# arcane/home/honeypot-dashboard/compose.yml's EXPECTED_SENSORS -- both are cross-checked
-# below, so a stale entry here shows up as a mismatch rather than silently
-# passing.
+# Every sensor stack this profile format can name, used to decide whether a
+# profile is sensor-bearing for the structural-dependency rules below.
+# (Historically also keyed the EXPECTED_SENSORS cross-check; that consumer
+# is gone -- see the history note in the header.)
 declare -A STACK_TO_SENSORS=(
   [cowrie]="cowrie"
   [multipot]="multipot"
@@ -63,16 +64,13 @@ declare -A STACK_TO_SENSORS=(
   [elasticpot]="elasticpot"
   [galah]="galah"
   [sentrypeer]="sentrypeer"
-  [wordpot]="wordpot"
+  # wordpot retired with its stack (#2381); no profile may name it.
   [mailoney]="mailoney"
   [canarytokens]="canarytokens"
   [tanner]="tanner"
   [conpot]="conpot conpot-s7-1200 conpot-s7-1500 conpot-iec104 conpot-guardian conpot-kamstrup"
   [endlessh]="endlessh"
 )
-# suricata runs on the VPS, unconditionally, regardless of which home
-# sensor stacks are enabled -- not tied to any profile entry.
-UNCONDITIONAL_SENSORS="suricata"
 
 errors=0
 warnings=0
@@ -85,6 +83,9 @@ while IFS= read -r line; do
   line="${line%%#*}"
   line="$(echo "$line" | tr -d '[:space:]')"
   [ -n "$line" ] || continue
+  if ! [ -d "$repo_root/arcane/home/honeypot-$line" ]; then
+    fail "profile enables '$line' but no arcane/home/honeypot-$line/ stack exists -- typo or retired stack? The authoritative roster is arcane/manifests/home-production.json (#1502)."
+  fi
   enabled["$line"]=1
 done < "$profile"
 
@@ -92,17 +93,6 @@ has_sensor=false
 for stack in "${!STACK_TO_SENSORS[@]}"; do
   [ -v "enabled[$stack]" ] && has_sensor=true
 done
-
-if $emit_mode; then
-  names=("$UNCONDITIONAL_SENSORS")
-  for stack in "${!STACK_TO_SENSORS[@]}"; do
-    [ -v "enabled[$stack]" ] || continue
-    for name in ${STACK_TO_SENSORS[$stack]}; do names+=("$name"); done
-  done
-  IFS=','
-  echo "EXPECTED_SENSORS=${names[*]}"
-  exit 0
-fi
 
 # ── structural dependencies ──────────────────────────────────────────────
 if $has_sensor; then
@@ -120,42 +110,17 @@ if $has_sensor && ! [ -v "enabled[payload-analysis]" ]; then
   warn "'payload-analysis' is not enabled -- no payload dedup or YARA scanning for this deployment."
 fi
 
-# ── EXPECTED_SENSORS cross-check, parsed live, not hardcoded ────────────
-expected_line="$(grep -o 'EXPECTED_SENSORS=[^[:space:]]*' "$dashboard_compose" | head -n1)"
-if [ -z "$expected_line" ]; then
-  fail "could not find EXPECTED_SENSORS in $dashboard_compose -- is the format still 'EXPECTED_SENSORS=a,b,c'?"
-else
-  expected_csv="${expected_line#EXPECTED_SENSORS=}"
-  declare -A expected_names
-  IFS=',' read -ra names <<< "$expected_csv"
-  for n in "${names[@]}"; do expected_names["$n"]=1; done
-
-  # profile stack enabled -> every one of its sensor names must be expected
-  for stack in "${!STACK_TO_SENSORS[@]}"; do
-    [ -v "enabled[$stack]" ] || continue
-    for name in ${STACK_TO_SENSORS[$stack]}; do
-      if [ -v "expected_names[$name]" ]; then
-        pass "'$stack' is enabled and '$name' is in EXPECTED_SENSORS"
-      else
-        fail "'$stack' is enabled but '$name' is missing from EXPECTED_SENSORS in $dashboard_compose -- the dashboard would never flag it as expected-but-offline, it'd just be silently absent from health checks."
-      fi
-    done
-  done
-
-  # expected name -> owning stack must be enabled (unless unconditional)
-  for name in "${!expected_names[@]}"; do
-    case " $UNCONDITIONAL_SENSORS " in *" $name "*) continue ;; esac
-    owner=""
-    for stack in "${!STACK_TO_SENSORS[@]}"; do
-      case " ${STACK_TO_SENSORS[$stack]} " in *" $name "*) owner="$stack" ;; esac
-    done
-    if [ -z "$owner" ]; then
-      warn "'$name' is in EXPECTED_SENSORS but no stack in this script's own STACK_TO_SENSORS map owns it -- this validator's map is stale, update it."
-    elif ! [ -v "enabled[$owner]" ]; then
-      fail "EXPECTED_SENSORS names '$name' (owned by stack '$owner') but '$owner' is not enabled in this profile -- the dashboard would show '$name' as permanently missing/offline."
-    fi
-  done
-fi
+# ── what this script deliberately no longer does ──────────────────────────
+# Until #2359 this block cross-checked the profile against EXPECTED_SENSORS=
+# parsed live from arcane/home/honeypot-dashboard/compose.yml. Commit 824aa33d
+# (#1628) removed that variable when the dashboard cutover completed; the
+# modern source-health view (backend-service/src/health.rs) answers
+# "is this sensor alive" from observed event.sensor values and container
+# topology instead of any static list, so there is nothing left to compare a
+# profile against. The old check's own guard also could never speak: parsing
+# via bare command substitution meant grep's exit 1 aborted under set -e
+# before fail() ran. Both defects die together here; per the header's design
+# rule, everything remaining always produces output.
 
 echo
 if [ "$errors" -gt 0 ]; then

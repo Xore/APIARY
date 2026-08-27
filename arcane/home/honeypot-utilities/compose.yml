@@ -289,6 +289,11 @@ services:
     environment:
       - REPORTER_LIVE=${REPORTER_LIVE:-}
       - ABUSEIPDB_API_KEY=${ABUSEIPDB_API_KEY:-}
+      # #2330: second provider per docs/ip-reporting-plan.md. Without
+      # these forwarded the BlockListDe sender could never activate --
+      # compose interpolation forwards nothing unnamed (#2196 class).
+      - BLOCKLISTDE_SENDER=${BLOCKLISTDE_SENDER:-}
+      - BLOCKLISTDE_API_KEY=${BLOCKLISTDE_API_KEY:-}
       - REPORTER_COOLDOWN_HOURS=${REPORTER_COOLDOWN_HOURS:-24}
       - REPORTER_MIN_EVENTS=${REPORTER_MIN_EVENTS:-3}
       - REPORTER_POLL_SECONDS=30

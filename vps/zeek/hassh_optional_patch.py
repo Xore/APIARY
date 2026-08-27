@@ -39,7 +39,7 @@ That also makes the pin in the Containerfile exact rather than aspirational:
 package will ever have.
 
 Same shape as this repo's other build-time patches (hellpot/router_patch.py,
-wordpot/wordpot_patch.py): exact-match replacement, a marker for
+mailoney/json_log_patch.py): exact-match replacement, a marker for
 idempotency, applied at image build.
 """
 import re

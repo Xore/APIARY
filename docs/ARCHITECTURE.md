@@ -177,9 +177,9 @@ flowchart TB
   markers[("state/init-markers/*.done")]
   loginit & esinit & arkinit & snareclone --> markers
 
-  subgraph sg["Sensor stacks ×22 (isolated networks)"]
+  subgraph sg["Sensor stacks ×21 (isolated networks)"]
     direction LR
-    cow["cowrie"] & dion["dionaea+tftp"] & conp["conpot ×5"] & rest["dnp3 · dicompot · dns · citrix<br/>cisco-asa · rdp · endlessh · http/api<br/>multipot · mailoney · beelzebub · hellpot<br/>elasticpot · galah · sentrypeer · wordpot<br/>canarytokens"]
+    cow["cowrie"] & dion["dionaea+tftp"] & conp["conpot ×5"] & rest["dnp3 · dicompot · dns · citrix<br/>cisco-asa · rdp · endlessh · http/api<br/>multipot · mailoney · beelzebub · hellpot<br/>elasticpot · galah · sentrypeer<br/>canarytokens"]
   end
 
   logsT[("logs/&lt;sensor&gt;")]

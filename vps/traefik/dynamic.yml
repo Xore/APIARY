@@ -26,10 +26,8 @@
 #                                     this bridge reaches is what lets the
 #                                     enrichment worker tell a proxied
 #                                     request from a direct one)
-# socat-hp-wordpot        :8086   →  10.8.0.2:8091  (wordpot :8090, #1512 --
-#                                     same reasoning as socat-hp-galah,
-#                                     including its #1908 split onto a
-#                                     port only this bridge reaches)
+# (socat-hp-wordpot :8086 → 10.8.0.2:8091 went with wordpot's retirement,
+# #2381.)
 # socat-hp-http           :8081   →  10.8.0.2:19081 (http-honeypot :8080)
 # socat-hp-snare          :8082   →  10.8.0.2:19082 (snare :8080)
 # socat-hp-dashboard      :8090   →  10.8.0.2:19090 (dashboard :8080)
@@ -222,15 +220,8 @@ http:
         options: modern
       middlewares: [security-headers]
 
-    # #1512: same Cloudflare-port-allowlist reasoning as honeypot-galah
-    # above. Deliberately generic name, not `wordpot`/`wp`/`cms`.
-    honeypot-wordpot:
-      rule: "Host(`news.honeypot.example`)"
-      entryPoints: [websecure]
-      service: honeypot-wordpot
-      tls:
-        options: modern
-      middlewares: [security-headers]
+    # (honeypot-wordpot's news.honeypot.example router went with wordpot's
+    # retirement, #2381.)
 
     python-api:
       rule: "Host(`api.honeypot.example`)"
@@ -662,12 +653,6 @@ http:
       loadBalancer:
         servers:
           - url: "http://socat-hp-galah:8085"
-        passHostHeader: true
-
-    honeypot-wordpot:
-      loadBalancer:
-        servers:
-          - url: "http://socat-hp-wordpot:8086"
         passHostHeader: true
 
     python-api:

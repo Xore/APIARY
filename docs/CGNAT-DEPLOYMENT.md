@@ -24,10 +24,11 @@ flowchart TD
   `honeypot-payload-analysis`, `honeypot-tanner`, `honeypot-dashboard`,
   `honeypot-utilities`, the standalone honeypots (cisco-asa, citrix, rdp,
   dicompot, dns-honeypot, endlessh, beelzebub, hellpot, elasticpot, galah,
-  sentrypeer, wordpot, mailoney, canarytokens), `honeypot-keycloak`, and the
+  sentrypeer, mailoney, canarytokens), `honeypot-keycloak`, and the
   workers (ip-enrichment, agent-intrusion, attacker-identity, correlator,
-  payload-inventory) — 32 stacks total, one Arcane-managed directory each
-  under `arcane/home/<name>/`. `honeypot-init` still deploys first; every
+  payload-inventory) — 31 stacks total, one Arcane-managed directory each
+  under `arcane/home/<name>/` (`honeypot-wordpot` sat here until #2381
+  retired it). `honeypot-init` still deploys first; every
   sensor stack waits on its completion markers at its own entrypoint rather
   than a Compose-level dependency, same reasoning as before, just across
   more projects now. See `docs/STACK-REBUILD.md` for the full current list
@@ -97,10 +98,13 @@ the only internet-facing component.
 > disagree. As of #1502, per-stack provisioning means importing an Arcane
 > directory-aware Git sync per `arcane/manifests/home-production.json`
 > entry, not copying/symlinking a compose file — see
-> `docs/ARCANE-GIT-SYNC.md`. Note the gap that doc's own comments flag: a
-> genuinely from-scratch run of this script can't reach that step yet,
-> since `step_dockge_install` still installs Dockge rather than Arcane
-> (tracked as an explicit follow-up, not fixed in #1502).
+> `docs/ARCANE-GIT-SYNC.md`. One genuine from-scratch gap remains
+> (#1504's surviving caveat): minting `ARCANE_API_TOKEN` requires a first
+> human login, which is OIDC-only once Keycloak exists, so a truly-fresh
+> install is inherently two-pass. (`step_dockge_install` — the pre-#1504
+> "installs Dockge rather than Arcane" step this paragraph used to warn
+> about — was itself the thing #1504 replaced; its mention here was
+> stale.)
 
 1. Establish WireGuard and verify that the VPS can reach `10.8.0.2`.
 2. Copy this repository to `/opt/stacks/apiary/`.
@@ -368,9 +372,6 @@ Create proxied DNS records for the HTTP services you enable, normally:
   non-standard port isn't on Cloudflare's proxied-port allowlist, so this
   is the only way it's reachable through this domain at all. Deliberately
   not named `galah`/`llm`/`ai`)
-- `news` (optional — wordpot's Traefik-routed path, #1512. Same
-  Cloudflare-port-allowlist reasoning as `hub`. Deliberately not named
-  `wordpot`/`wp`/`cms`)
 
 All names point to the VPS. Raw TCP/UDP sensors need no DNS record.
 

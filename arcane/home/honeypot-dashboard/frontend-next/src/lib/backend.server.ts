@@ -23,6 +23,7 @@
 import { Agent, setGlobalDispatcher } from 'undici'
 import { ConcurrencyLimiter, envInt, Overloaded, overloadedResponse, releaseOnFinish } from './backpressure.server'
 import { assertServiceTokenPolicy, SERVICE_TOKEN_GATE_CODE, serviceTokenPolicy } from './serviceToken.server'
+import type { RequestContextRuntime } from './requestContext.server'
 
 // #2183: the boot half of the shared token contract. An unset/empty
 // SERVICE_TOKEN used to silently switch off this file's inbound
@@ -88,6 +89,14 @@ export function bffInternalURL(): string {
  * !response.ok as "return null, let the route render its empty state",
  * and direct serviceFetch callers already branch on response.ok — so
  * shedding needed no new error-handling contract at any call site. */
+/** This request's correlation id, read through the globalThis contract
+ * requestContext.server.ts publishes (same shape as cspNonce's reader).
+ * Typed here against the runtime interface instead of imported, because the
+ * module is server-only and this file compiles into both bundles. */
+function currentRequestId(): string | undefined {
+  return (globalThis as typeof globalThis & { __APIARY_REQ_ID__?: RequestContextRuntime }).__APIARY_REQ_ID__?.current?.()
+}
+
 export async function serviceFetch(path: string, init?: RequestInit, opts?: { mounted?: boolean }): Promise<Response> {
   const base =
     serveMode() === 'frontend'
@@ -95,18 +104,40 @@ export async function serviceFetch(path: string, init?: RequestInit, opts?: { mo
       : opts?.mounted
         ? backendMountedURL()
         : backendURL()
-  return backendLimiter
-    .run(() =>
+  const { recordBackendCall } = await import('./obs.server')
+  try {
+    const response = await backendLimiter.run(() =>
       fetch(`${base}${path}`, {
         ...init,
         headers: {
           ...(init?.headers ?? {}),
+          // #1972: one id across the hop chain — set when this call runs
+          // inside a request scope (SSR/server fns), absent in boot-time
+          // prefetchers, which have nothing to correlate with yet.
+          'x-request-id': currentRequestId() ?? '',
           'x-service-token': process.env.SERVICE_TOKEN ?? '',
         },
         signal: init?.signal ?? AbortSignal.timeout(15_000),
       }),
     )
-    .catch((err) => overloadedOrThrow(err))
+    recordBackendCall(response.ok ? 'ok' : `http_${response.status}`)
+    return response
+  } catch (err) {
+    recordBackendCall(outcomeOf(err))
+    // Same conversion as before: a shed stays an indistinguishable 503 to
+    // every caller (#1616's contract), now with its own counter.
+    return overloadedOrThrow(err)
+  }
+}
+
+/** Closed-set failure classification for the metrics counter — the shapes
+ * a limiter shed, an aborted timeout, and a real socket error produce on
+ * undici/Node today; anything else reads network_error rather than feeding
+ * cardinality. */
+function outcomeOf(err: unknown): string {
+  if (err instanceof Overloaded) return 'shed'
+  if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) return 'timeout'
+  return 'network_error'
 }
 
 function overloadedOrThrow(err: unknown): Response {
@@ -180,9 +211,14 @@ export function parseRetryAfter(value: string | null): number | undefined {
  * Only successes are cached, exactly as before — a failure must never turn
  * into fifteen seconds of cached certainty. */
 export async function serviceJSONResult<T>(path: string, opts?: { mounted?: boolean }): Promise<ServiceResult<T>> {
+  // One lookup, one layer outcome (#1972) — see obs.server's contract.
+  const { recordCacheLookup } = await import('./obs.server')
   const cacheKey = opts?.mounted ? `mounted:${path}` : path
   const cached = payloadCache.get(cacheKey)
-  if (cached && Date.now() - cached.at < PAYLOAD_TTL_MS) return { ok: true, body: cached.body as T }
+  if (cached && Date.now() - cached.at < PAYLOAD_TTL_MS) {
+    recordCacheLookup('in_process')
+    return { ok: true, body: cached.body as T }
+  }
   const redis = await cacheRedis()
   if (redis) {
     try {
@@ -190,12 +226,14 @@ export async function serviceJSONResult<T>(path: string, opts?: { mounted?: bool
       if (shared) {
         const body = JSON.parse(shared) as T
         payloadCache.set(cacheKey, { at: Date.now(), body })
+        recordCacheLookup('redis')
         return { ok: true, body }
       }
     } catch {
       /* fall through to the live fetch */
     }
   }
+  recordCacheLookup('miss')
   try {
     const response = await serviceFetch(path, undefined, opts)
     if (!response.ok) {
@@ -239,8 +277,15 @@ const PROXY_BODY_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
  * api/live.ts's SSE passthrough. Gated by backendLimiter (#1616), shared
  * with serviceFetch's direct path since this is a split deployment's only
  * route to the Rust tier and must not duplicate that fan-out's bounded
- * queue. */
-export async function proxyToRust(request: Request, splat: string | undefined, base: string): Promise<Response> {
+ * queue. Pass the caller's own mount prefix (`'/bff'` / `'/bff-mounted'`) so
+ * the upstream target can be cut from the original request target (#2302);
+ * without it the historical splat-param reassembly applies. */
+export async function proxyToRust(
+  request: Request,
+  splat: string | undefined,
+  base: string,
+  mountPrefix?: string,
+): Promise<Response> {
   if (serveMode() === 'frontend') {
     // This instance IS the frontend-only tier — it has no Rust backend to
     // proxy to. Reaching this branch means /bff*/* was routed here by
@@ -271,13 +316,36 @@ export async function proxyToRust(request: Request, splat: string | undefined, b
     if (err instanceof Overloaded) return overloadedResponse(err)
     throw err
   }
-  const search = new URL(request.url).search
-  const upstreamPath = `/${splat ?? ''}${search}`
+  // #2302: forward the original request target rather than reassembling it
+  // from splat params. Route params arrive percent-DECODED, so rebuilding
+  // from `params._splat` collapsed a single-encoded %2F into a literal
+  // slash — splitting one upstream path segment into two and 404ing axum's
+  // router on every real CIDR link (investigate.cidr.$cidr.tsx sends
+  // /investigate/cidr/175.107.1.0%2F24) while %252F "worked" purely because
+  // it decayed into exactly the one encoding axum wanted. The pathname off
+  // request.url is the escaping-preserved original, so cut off only this
+  // route's mount prefix and pass everything else through byte-for-byte;
+  // query encodings ride along unchanged (.search never decodes). Without a
+  // matching prefix (direct invocation in tests, or a mount we don't know)
+  // fall back to the historical reassembly.
+  const target = new URL(request.url)
+  const prefixLength =
+    mountPrefix !== undefined &&
+    (target.pathname === mountPrefix || target.pathname.startsWith(`${mountPrefix}/`))
+      ? mountPrefix.length
+      : -1
+  const upstreamPath =
+    prefixLength >= 0
+      ? `${target.pathname.slice(prefixLength) || '/'}${target.search}`
+      : `/${splat ?? ''}${target.search}`
   const contentType = request.headers.get('content-type')
   const upstream = await fetch(`${base}${upstreamPath}`, {
     method: request.method,
     headers: {
       ...(contentType ? { 'content-type': contentType } : {}),
+      // #1972: same correlation-id forwarding as serviceFetch — a split
+      // deployment must join hops identically.
+      'x-request-id': currentRequestId() ?? '',
       'x-service-token': token,
     },
     body: PROXY_BODY_METHODS.has(request.method) ? await request.arrayBuffer() : undefined,

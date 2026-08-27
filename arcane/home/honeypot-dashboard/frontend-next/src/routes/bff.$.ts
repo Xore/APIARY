@@ -12,11 +12,14 @@
 // proxyToRust (lib/backend.server.ts) carries the actual proxy behavior —
 // SERVE_MODE gate, x-service-token check, backendLimiter admission,
 // unbuffered streaming — shared with bff-mounted.$.ts so the two only
-// differ in which Rust-tier base they forward to.
+// differ in which Rust-tier base they forward to. The mount prefix rides
+// along (#2302): the target forwarded upstream is cut from the raw request
+// pathname instead of reassembled from the percent-decoded splat params, so
+// encoded path segments (%2F CIDRs) arrive in one piece.
 import { createFileRoute } from '@tanstack/react-router'
 import { backendURL, proxyToRust } from '../lib/backend.server'
 
-const proxy = (request: Request, splat: string | undefined) => proxyToRust(request, splat, backendURL())
+const proxy = (request: Request, splat: string | undefined) => proxyToRust(request, splat, backendURL(), '/bff')
 
 export const Route = createFileRoute('/bff/$')({
   server: {

@@ -1,0 +1,14 @@
+{
+  "benchmark": "honeypot-stack-issue-158-v2",
+  "finished_at": "2026-08-27T06:56:47Z",
+  "notes": null,
+  "operator": "bg-1947-wave2",
+  "provenance": "synthetic",
+  "record_count": 88,
+  "run_id": "20260827T053133Z-9f525e60",
+  "schema_version": "apiary-benchmark-transcript-v1",
+  "started_at": "2026-08-27T05:31:33Z",
+  "supersedes": null,
+  "transcripts": "/mnt-1/benchmarks/APIARY/docs/benchmarks/runs/2026-08-27-20260827T053133Z-9f525e60/transcripts.jsonl",
+  "transcripts_sha256": "41b24485852e934076ac3ff419b387ad9d976d0ca6c559a1fa361e8b1d2f2c25"
+}
