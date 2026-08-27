@@ -2,7 +2,7 @@
 #
 # Two stages because huginn-net pulls in a full Rust toolchain and ~200 crates
 # to build, none of which belong on a VPS that also fronts every honeypot.
-FROM docker.io/library/rust:1-bookworm AS build
+FROM rust:1-bookworm@sha256:82150a52ec202c1b14d7817e14516c392bb7f5cfebd88f1ed531cb37ebd39922 AS build
 
 # libpcap headers: huginn-net captures through libpcap, and the slim base has
 # the runtime library but not the headers.
