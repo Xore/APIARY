@@ -1,5 +1,5 @@
 # Web-attack-focused: HTTP/API honeypot + SNARE/TANNER, skip ICS/SSH/
-# legacy-protocol sensors. See deploy-profiles/README.md.
+# legacy-protocol sensors. See docs/deploy-profiles/README.md.
 
 keycloak
 init

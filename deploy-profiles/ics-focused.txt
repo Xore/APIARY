@@ -1,6 +1,6 @@
 # OT/ICS-only exposure: the industrial-protocol sensors, skip every
 # general-purpose/web/SSH/legacy-protocol honeypot. See
-# deploy-profiles/README.md.
+# docs/deploy-profiles/README.md.
 
 keycloak
 init
