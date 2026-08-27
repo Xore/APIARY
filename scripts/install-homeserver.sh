@@ -1011,6 +1011,57 @@ step_bootstrap_missing_envs() {
   echo "Bootstrapped $n placeholder .env file(s) — review for CHANGE_ME values."
 }
 
+# #2498: honeypot-canarytokens' compose interpolates
+# ${CANARY_PUBLIC_HOSTNAME:-honeypot.example}, and until now nothing in any
+# deploy path ever supplied the real value -- the sed passes reach only
+# vps/traefik/dynamic.yml, step_bootstrap_missing_envs copies this stack's
+# .env.example verbatim (shipped placeholder included), there is no second
+# domain-scoped variable inside this stack's own interpolation scope to chain
+# a compose-level fallback onto, and step_restore_env_files can only restore
+# what a LAN backup once captured. Every fresh install baked unresolvable
+# 'honeypot.example' into every created token unless an operator hand-typed
+# the apex afterwards -- the exact same bare-apex string this config already
+# knows (and validates non-placeholder, above) as KEYCLOAK_PUBLIC_DOMAIN, and
+# the exact string docs/CGNAT-DEPLOYMENT.md instructs typing into this stack's
+# .env by hand. Runs AFTER both env steps above so it sees whichever of
+# {restored backup, example copy} landed:
+#   - key absent                    -> appended with the apex
+#   - empty or shipped 'honeypot.example' -> replaced with the apex
+#   - anything else                 -> left untouched (a real hand-set override
+#                                      always wins; re-runs stay idempotent)
+step_seed_canary_public_hostname() {
+  # CANARY_STACK_DIR exists purely so the seeding branches can be exercised
+  # against a scratch directory in tests; every real invocation takes the
+  # default below, matching how every other step addresses stack dirs.
+  local env_file="${CANARY_STACK_DIR:-/var/dockge/stacks/honeypot-canarytokens}/.env"
+  if [[ ! -f "$env_file" ]]; then
+    echo "honeypot-canarytokens has no .env yet -- skipping CANARY_PUBLIC_HOSTNAME seed"
+    return 0
+  fi
+  local current
+  current=$(grep -E '^CANARY_PUBLIC_HOSTNAME=' "$env_file" | tail -1 | cut -d= -f2-)
+  case "$current" in
+    ""|"honeypot.example")
+      if grep -qE '^CANARY_PUBLIC_HOSTNAME=' "$env_file"; then
+        sed -i "s|^CANARY_PUBLIC_HOSTNAME=.*|CANARY_PUBLIC_HOSTNAME=${KEYCLOAK_PUBLIC_DOMAIN}|" "$env_file"
+        echo "seeded CANARY_PUBLIC_HOSTNAME=${KEYCLOAK_PUBLIC_DOMAIN} in honeypot-canarytokens/.env (replaced '${current}')"
+      else
+        {
+          echo ""
+          echo "# seeded by install-homeserver.sh (#2498) from KEYCLOAK_PUBLIC_DOMAIN"
+          echo "CANARY_PUBLIC_HOSTNAME=${KEYCLOAK_PUBLIC_DOMAIN}"
+        } >> "$env_file"
+        echo "seeded CANARY_PUBLIC_HOSTNAME=${KEYCLOAK_PUBLIC_DOMAIN} in honeypot-canarytokens/.env (key was absent)"
+      fi
+      chmod 600 "$env_file"
+      ;;
+    *)
+      echo "honeypot-canarytokens/.env already sets CANARY_PUBLIC_HOSTNAME=${current} -- leaving it alone"
+      ;;
+  esac
+  return 0
+}
+
 step_create_shared_resources() {
   # arcane/home/honeypot-init/compose.yml declares these as external:true. On a genuinely
   # fresh Docker install none of them exist yet, and honeypot-init's
@@ -1880,6 +1931,7 @@ run_step restore-env-files     "Restore .env files from LAN backup" step_restore
 run_step arcane-import-stacks  "Import honeypot-* + auth-events-worker/llm-worker/ml-worker as Arcane Git syncs" step_arcane_import_stacks
 run_step stage-keycloak-theme  "Check out and sync the Keycloak login theme" step_stage_keycloak_theme
 run_step bootstrap-missing-envs "Bootstrap any still-missing .env from .example" step_bootstrap_missing_envs
+run_step seed-canary-hostname "Seed honeypot-canarytokens' CANARY_PUBLIC_HOSTNAME from KEYCLOAK_PUBLIC_DOMAIN (#2498)" step_seed_canary_public_hostname
 run_step provision-keycloak-secrets "Generate Keycloak secrets, reset bootstrap admin to admin/admin123" step_provision_keycloak_secrets
 
 run_step shared-resources      "Create honeynet + placeholder volumes" step_create_shared_resources
