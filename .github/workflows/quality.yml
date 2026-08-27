@@ -791,6 +791,14 @@ jobs:
               # comes back empty; pins the dispatch so the calibrated Qwen
               # request shape is untouched.
               python analysis/ghidra/benchmarks/tests/test_harmony_chat.py
+              # Real-data session probe (#2387). contracts is stubbed, so no
+              # /app, pydantic, ES, or docker is involved. Pins both halves of
+              # the metadata honesty fix: stage 0's correlated auth/duration
+              # evidence reaches session_prompt() unchanged (the old code pinned
+              # auth_success=False / duration=0.0 under an EXACT-prompt claim),
+              # and sessions whose evidence missed the lookback window are
+              # reported and skipped instead of being prompted with defaults.
+              python analysis/ghidra/benchmarks/tests/test_probe_real_session.py
               # full_capabilities.py (#800): inventories env vars straight out of
               # the real pipeline source, so its own test runs against the real
               # tree rather than fixtures -- proving that stays true.
