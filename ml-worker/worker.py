@@ -12,6 +12,7 @@ import os
 import time
 import json
 import hashlib
+import ipaddress
 from collections import deque
 from datetime import datetime, time as dt_time, timezone, timedelta
 
@@ -21,7 +22,8 @@ from elasticsearch import Elasticsearch, NotFoundError
 from loguru import logger
 
 from models.isolation_forest import (IsoForestModel, MAX_TRAIN_SAMPLES, _get_ip, _get_port,
-                                     _get_transport_proto, is_our_own_address)
+                                     _get_transport_proto, _in_home_net, _resolve_flow_sides,
+                                     is_our_own_address)
 from models.lstm_autoencoder import LSTMAEModel
 from models.session_features import SessionFeatureTracker
 
@@ -131,6 +133,23 @@ STATE_INDEX    = "ml-worker-state"
 METRICS_INDEX  = "ml-worker-metrics"
 REDIS_CHANNEL  = "ml-anomaly-events"
 
+# Retention decisions (#1968) -- deliberate, written down, and enforced where
+# the volume calls for it:
+#
+# - ml-anomalies: NO ILM, keep forever. This is the labelled-corpus substrate
+#   #1794/#1797 both stall on -- operator dispositions accumulate on exactly
+#   these documents (#918's ack workflow, extended in #1968), and deleting an
+#   alert deletes a training label. Observed volume is small (7.3k documents
+#   over ~8 months), so permanence costs almost nothing; if that ever changes,
+#   the decision to revisit is recorded HERE rather than discovered from an
+#   unexpectedly empty index.
+# - ml-worker-metrics: ILM delete after ML_METRICS_RETENTION (default 180d).
+#   These are diagnostic evidence for retrain acceptance/drift/outage events;
+#   their value decays once newer evidence exists, and unlike anomalies they
+#   carry no operator input or labels worth preserving.
+METRICS_RETENTION = os.getenv("ML_METRICS_RETENTION", "180d")
+METRICS_RETENTION_POLICY = "ml-worker-metrics-retention"
+
 def _severity_bands(alert_threshold: float) -> list:
     """Derive the severity bands from ML_ALERT_THRESHOLD (#1969).
 
@@ -208,10 +227,193 @@ def severity(score: float) -> str:
     return "low"
 
 
-def ensure_index(es: Elasticsearch, index: str, mapping: dict) -> None:
+def _get_sensor(src: dict) -> "str | None":
+    """Which honeypot produced the source event (#1968) -- an operator
+    reading an alert row should learn *what decoy drew it* without
+    re-querying the (30-day-expiring) source index by ID. event.sensor is
+    unreliable for some sensors (#132), hence honeypot.sensor first."""
+    hp = src.get("honeypot") or {}
+    return hp.get("sensor") or (src.get("event") or {}).get("sensor") or None
+
+
+def _get_src_port(src: dict) -> "int | None":
+    """The attacker-side port of the source event (#1968) -- deliberately
+    the mirror of _get_port(): that reads the LOCAL side (our decoy's
+    listening port), this reads the REMOTE side through the same
+    flow-sides resolution, so Suricata netflow's orientation swap (#174)
+    can't mislabel one side as the other here either."""
+    remote, _ = _resolve_flow_sides(src)
+    if remote.get("port") is not None:
+        return int(remote["port"])
+    hp = src.get("honeypot") or {}
+    if hp.get("src_port") is not None:
+        return int(hp["src_port"])
+    eve = ((src.get("suricata") or {}).get("eve")) or {}
+    if eve.get("src_port") is not None:
+        return int(eve["src_port"])
+    return None
+
+
+def _get_dst_ip(src: dict) -> "str | None":
+    """Which of OUR addresses was attacked (#1968) -- 'what did they aim
+    at', the other half of the context dst_port has always given partially.
+    One sides-resolution definition shared with _get_port()/
+    _get_transport_proto(), so local/remote cannot disagree between the
+    feature vector and the operator-facing metadata."""
+    _, local = _resolve_flow_sides(src)
+    ip = local.get("ip")
+    if ip:
+        return ip
+    hp = src.get("honeypot") or {}
+    if hp.get("dst_ip"):
+        return hp["dst_ip"]
+    eve = ((src.get("suricata") or {}).get("eve")) or {}
+    return eve.get("dest_ip") or None
+
+
+def classify_source_address(ip: str) -> "tuple[str | None, bool]":
+    """(scope, internal) for an alert's src_ip (#1968).
+
+    internal answers 'is this address ours?' via the same HOME_NET list
+    #1959's suppression uses -- one definition, so a dashboard filter and
+    the worker's own suppression decision can never disagree about what
+    counts as our own space. scope refines ours into loopback /
+    link_local / home_net; WireGuard-vs-LAN is deliberately NOT separated
+    because both arrive inside one configurable CIDR list and both mean
+    identically 'unactionable as an attacker origin'.
+
+    The classification is WRITTEN rather than only consulted: #1959's
+    post-hoc spike forensics had to re-derive these classes by hand from
+    raw IPs precisely because nothing recorded them at alert time.
+    """
+    if not ip:
+        return None, False
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return None, False
+    if not _in_home_net(ip):
+        return "external", False
+    if addr.is_loopback:
+        return "loopback", True
+    if addr.is_link_local:
+        return "link_local", True
+    return "home_net", True
+
+
+# The checkpoint artifacts each model's save/_load_latest() actually load,
+# symlinked under fixed names. This trio is the complete observable state
+# behind any composite score -- reduce it to one stamp per alert (#1968).
+_STATE_ARTIFACTS = (
+    "current_isoforest.joblib",
+    "current_hbos.joblib",
+    "current_lstm_ae.pt",
+)
+
+
+def model_state_id(model_dir: "str | None" = None) -> "str | None":
+    """Stable identifier for the model state that produced an alert
+    (#1968): sha256 over (name, mtime_ns, size) of every promoted
+    checkpoint artifact, truncated to 16 hex chars. os.stat follows the
+    current_* symlinks, so the id changes exactly when an accepted
+    retrain's atomic promotion (#169) replaces targets, and survives a
+    process restart unchanged.
+
+    Written onto every ml-anomalies document at score time it makes
+    historical alerts interpretable forever WITHOUT keeping the
+    checkpoints themselves -- #1959's Aug-24 forensics had to be
+    reconstructed from container restart times precisely because no such
+    stamp existed and the day's checkpoints were deleted.
+
+    Retrains run synchronously with scoring in the poll loop (see
+    run_worker()), so promotion can never land between extracting
+    features and writing their alerts: the artifact set observed HERE is
+    the state that produced the scores being stamped. Returns None when
+    no artifact exists at all -- before any accepted retrain there IS no
+    trained state, and silence beats minting an identity for nothing.
+    """
+    parts = []
+    for name in _STATE_ARTIFACTS:
+        path = os.path.join(model_dir or MODEL_DIR, name)
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        parts.append(f"{name}:{st.st_mtime_ns}:{st.st_size}")
+    if not parts:
+        return None
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
+
+
+# Operator-owned lifecycle fields on an ml-anomalies document (#1968).
+# Everything else the worker computes may be overwritten by a better-scored
+# rewrite of the same deterministic ID; these belong to whoever disposed of
+# the alert and outlive the machine's opinion of it.
+DISPOSITION_FIELDS = ("status", "disposition_reason", "disposed_at")
+
+
+def _carry_forward_disposition(es: Elasticsearch, index: str, doc_id: str, doc: dict) -> None:
+    """Preserve operator input across an idempotent rewrite (#1968).
+
+    anomaly_doc_id()'s determinism (#168) means a replayed source event --
+    checkpoint rewind, crash-retry, the equal-timestamp boundary requery --
+    indexes OVER its earlier finding. That overwrite predates dispositions'
+    existence and happily reset every field; without this, one replay
+    would silently flip a reviewed false_positive back to open and corrupt
+    exactly the labelled corpus the dispositions exist to accumulate
+    (#1794/#1797). Machine-owned fields still update to the newest score;
+    only the operator's fields ride through untouched.
+
+    Best-effort on purpose: a failed read degrades to 'preserve nothing'
+    and lets the authoritative ES write below proceed -- losing one label
+    on one replayed document is bounded and survivable; raising here
+    would cost whole alerts during exactly the kind of ES flakiness the
+    rest of the worker treats as non-fatal (#188/#2236 convention).
+    """
+    try:
+        old = es.get(index=index, id=doc_id)["_source"]
+    except NotFoundError:
+        return
+    except Exception as exc:
+        logger.warning(f"disposition read for {doc_id} failed (non-fatal, preserving nothing): {exc}")
+        return
+    for field in DISPOSITION_FIELDS:
+        value = old.get(field)
+        if value is None:
+            continue
+        if field == "status" and value == "open":
+            continue  # the default carries no information worth preserving
+        doc[field] = value
+
+
+def ensure_index(es: Elasticsearch, index: str, mapping: dict,
+                 settings: "dict | None" = None) -> None:
     if not es.indices.exists(index=index):
-        es.indices.create(index=index, body=mapping)
+        body = dict(mapping)
+        if settings:
+            body["settings"] = settings
+        es.indices.create(index=index, body=body)
         logger.info(f"Created index {index}")
+
+
+def attach_metrics_retention(es: Elasticsearch) -> dict:
+    """Install (idempotently) the ml-worker-metrics ILM policy and return
+    the index settings that bind a newly created METRICS_INDEX to it
+    (#1968 -- the code comment this replaces admitted the hole and left
+    it). Empty dict on any failure: unbounded metrics growth is the old,
+    known behaviour, while raising here would kill the worker before its
+    first poll for want of an ops nicety. Best-effort by the same
+    convention as every other non-scoring ES write."""
+    try:
+        es.ilm.put_lifecycle(policy=METRICS_RETENTION_POLICY, body={
+            "policy": {"phases": {"delete": {
+                "min_age": METRICS_RETENTION, "actions": {"delete": {}}}}}})
+        return {"index.lifecycle.name": METRICS_RETENTION_POLICY}
+    except Exception as exc:
+        logger.warning(
+            f"Could not install metrics retention policy {METRICS_RETENTION_POLICY} "
+            f"(non-fatal; metrics stay unbounded as pre-#1968): {exc}")
+        return {}
 
 
 def _bootstrap_checkpoint() -> dict:
@@ -733,13 +935,21 @@ def write_anomaly(es: Elasticsearch, rdb: "redis.Redis | None",
     # extract_features() (#62 task 33) -- src.get("src_ip") etc. never
     # matches a real document's top level, so a correctly-fired anomaly
     # would otherwise still get written with a null src_ip, which is the
-    # one field an operator actually needs to act on it.
+    # one field an operator actually needs to act on it. #1968 extends that
+    # contract: every context field below exists so ONE alert document
+    # answers 'what was attacked / which model said so / under what config /
+    # how internal is this source' with no second query against a source
+    # index that will have expired under it.
+    scope, internal = classify_source_address(_get_ip(src) or "")
     doc = {
         "@timestamp":        src.get("@timestamp", datetime.now(timezone.utc).isoformat()),
         "source_event_id":   event.get("_id"),
         "source_index":      event.get("_index"),
         "src_ip":            _get_ip(src) or None,
         "src_country":       (src.get("source") or {}).get("geo", {}).get("country_iso_code"),
+        "src_port":          _get_src_port(src),
+        "dst_ip":            _get_dst_ip(src) or None,
+        "sensor":            _get_sensor(src),
         "composite_score":   round(composite, 4),
         "severity":          severity(composite),
         # None stays null in the stored doc (#1969): model_scores carries
@@ -751,6 +961,17 @@ def write_anomaly(es: Elasticsearch, rdb: "redis.Redis | None",
         "event_type":        (src.get("event") or {}).get("category"),
         "dst_port":          _get_port(src) or None,
         "proto":             _get_transport_proto(src),
+        "community_id":      (src.get("network") or {}).get("community_id"),
+        # Which trained state produced this score (#1968) and at what alert
+        # bar -- so a reader of an OLD alert can reconstruct what
+        # composite_score meant THAT day without archaeology.
+        "model_state_id":    model_state_id(),
+        "alert_threshold":   THRESHOLD,
+        "src_internal":      internal,
+        "src_scope":         scope,
+        # Disposition lifecycle (#1968): born open; see
+        # _carry_forward_disposition() for what a rewrite may never reset.
+        "status":            "open",
     }
 
     # The Elasticsearch write is the authoritative action -- a dashboard
@@ -764,7 +985,11 @@ def write_anomaly(es: Elasticsearch, rdb: "redis.Redis | None",
     # crash-retry, or fetch_new_events' own equal-timestamp boundary
     # requery -- overwrites the same anomaly document instead of creating a
     # duplicate finding for something scored exactly once conceptually.
-    es.index(index=ANOMALY_INDEX, id=anomaly_doc_id(doc["source_index"], doc["source_event_id"]), document=doc)
+    # #1968: the overwrite carries an operator's disposition through --
+    # machine fields update, judgement fields survive.
+    doc_id = anomaly_doc_id(doc["source_index"], doc["source_event_id"])
+    _carry_forward_disposition(es, ANOMALY_INDEX, doc_id, doc)
+    es.index(index=ANOMALY_INDEX, id=doc_id, document=doc)
     if rdb is not None:
         try:
             rdb.publish(REDIS_CHANNEL, json.dumps({
@@ -802,7 +1027,9 @@ def run_worker() -> None:
         logger.error("Elasticsearch not reachable after 5 minutes, exiting.")
         return
 
-    # Ensure required indices exist
+    # Ensure required indices exist. ml-anomalies deliberately has NO ILM:
+    # keep-forever is the recorded decision (see the RETENTION comment block
+    # at the top of this module -- label corpus).
     ensure_index(es, ANOMALY_INDEX, {
         "mappings": {
             "properties": {
@@ -811,6 +1038,9 @@ def run_worker() -> None:
                 "source_index":     {"type": "keyword"},
                 "src_ip":           {"type": "ip"},
                 "src_country":      {"type": "keyword"},
+                "src_port":         {"type": "integer"},   # #1968 attacker-side port
+                "dst_ip":           {"type": "ip"},        # #1968 which decoy was hit
+                "sensor":           {"type": "keyword"},   # #1968 which honeypot fired
                 "composite_score":  {"type": "float"},
                 "severity":         {"type": "keyword"},
                 "model_scores":     {"type": "object"},
@@ -822,6 +1052,16 @@ def run_worker() -> None:
                 "event_type":       {"type": "keyword"},
                 "dst_port":         {"type": "integer"},
                 "proto":            {"type": "keyword"},
+                "community_id":     {"type": "keyword"},   # #1968 flow pivot key
+                "model_state_id":   {"type": "keyword"},   # #1968 checkpoint identity stamp
+                "alert_threshold":  {"type": "float"},     # #1968 config of that day
+                "src_internal":     {"type": "boolean"},   # #1968 our-space classification
+                "src_scope":        {"type": "keyword"},   # #1968 loopback|link_local|home_net|external
+                # Disposition lifecycle (#1968); populated by the operator,
+                # preserved across rewrites by _carry_forward_disposition().
+                "status":             {"type": "keyword"},
+                "disposition_reason": {"type": "text"},
+                "disposed_at":        {"type": "date"},
             }
         }
     })
@@ -829,6 +1069,8 @@ def run_worker() -> None:
     # #65: METRICS_INDEX was declared but never written to until now --
     # retrain acceptance/rejection evidence (docs/ml-worker-plan.md §11.1)
     # and drift-detection events (§11.4) both land here.
+    # #1968: bound to the delete-after-ML_METRICS_RETENTION ILM policy;
+    # diagnostic evidence decays, unlike anomaly labels it is safe to lose.
     ensure_index(es, METRICS_INDEX, {
         "mappings": {
             "properties": {
@@ -851,7 +1093,7 @@ def run_worker() -> None:
                 "downtime_seconds":      {"type": "integer"},
             }
         }
-    })
+    }, settings=attach_metrics_retention(es))
 
     # Initialise models
     iso_model      = IsoForestModel(model_dir=MODEL_DIR)
