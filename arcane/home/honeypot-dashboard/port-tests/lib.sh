@@ -140,6 +140,16 @@ print(v if isinstance(v, str) else "")' "$2"
 check() { # check <label> <command...>
   local label="$1"
   shift
+  # #2214: a missing/empty command used to pass vacuously ("$@" with no
+  # fields is a zero-exit no-op, so `check <label>` printed PASS for work
+  # that never ran). A future edit that produces an empty command string
+  # must name itself loudly here instead of silently converting real checks
+  # into green ones — the counted FAIL keeps summary() red.
+  if [ $# -eq 0 ] || [ -z "$1" ]; then
+    echo "FAIL  $label (harness bug: check() invoked with an empty command — fix the caller)" >&2
+    FAIL=$((FAIL + 1))
+    return 1
+  fi
   if "$@" >/dev/null 2>&1; then
     echo "PASS  $label"
     PASS=$((PASS + 1))
