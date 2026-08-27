@@ -89,6 +89,14 @@ services:
       timeout: 10s
       retries: 10
       start_period: 60s
+    # #2339: docker's default 10s SIGTERM window is not enough for this node
+    # to finish a clean shutdown -- at 6g heap it can still be mid-flush when
+    # the SIGKILL lands (restarts during shard merges or GC pauses), forcing
+    # translog replay plus yellow-cluster recovery on every bounce. 120s gives
+    # the flush room; the stateful convention in
+    # arcane/home/honeypot-keycloak/compose.yml is 60s for a much lighter
+    # database.
+    stop_grace_period: 120s
     # Restarted by the autoheal sidecar (arcane/home/honeypot-utilities/compose.yml, #258)
     # on unhealthy, not by restart: alone -- see #119, the same gap #111
     # found and fixed for conpot. autoheal watches Docker directly via
