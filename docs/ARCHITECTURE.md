@@ -211,7 +211,7 @@ entrypoint instead — the cross-stack readiness contract documented in
 ## Event ingestion (summary)
 
 The full pipeline — PROXY-aware vs tunnel-blind sensor split, the
-ingest-time `via_port` join, the 11-step `geoip-honeypot` processor chain,
+ingest-time `via_port` join, the 12-step `geoip-honeypot` processor chain,
 and the dashboard's four read paths — is
 [PIPELINES.md §1](PIPELINES.md#1-event-ingestion). Facts that shape
 everything else:
@@ -245,8 +245,12 @@ on demand — drill-in only, never paid for list-page rows:
 Fingerprints are read, not computed, by this fleet: Cowrie emits HASSH +
 client banner itself, Suricata provides JA3/JA4, proxies provide x-ja3/x-ja4
 headers, p0f contributes a fallback OS guess when no handshake happened.
-None of these claims identity — shared software or shared networks compress
-investigation effort; they are not verdicts.
+Since #1970 each of those lands as a typed `fingerprint.kind` /
+`fingerprint.value` pair at ingest (one collapse per document, mirroring
+`pivots_from_source`'s precedence), so the clustering above is reproducible
+from pure ES terms aggregations — Kibana and ml-worker pivot on it without
+the dashboard running. None of these claims identity — shared software or
+shared networks compress investigation effort; they are not verdicts.
 
 ## Agent-intrusion escalation (summary)
 

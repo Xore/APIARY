@@ -157,6 +157,14 @@ geoip_pipeline_body="$(cat <<'JSON'
       }
     },
     {
+      "script": {
+        "lang": "painless",
+        "ignore_failure": true,
+        "description": "#1970: promote each sensor's correlation fingerprint into one typed (fingerprint.kind, fingerprint.value) envelope pair. Honeypot documents mirror dashboard-side pivots_from_source (backend-service/src/events.rs)'s exact precedence: honeypot.canonical_fingerprint first (carrying its canonical_fingerprint_kind, falling back to kind 'fingerprint' when the worker wrote one without the other), then hassh -> HASSH, fingerprint -> SSH pubkey, client -> client banner, user_agent -> User-Agent -- so a pre-promotion document classifies identically read-time vs ingest-side. Suricata TLS promotes ja4 over ja3.hash (same precedence charts.rs' TLS-fingerprint chart reads), JA3 falls back to the ja3.hash md5 rather than the ja3 string blob; suricata.eve.http.http_user_agent keeps the User-Agent kind alive on IDS HTTP records. portbridge.os becomes kind 'p0f OS'. Stripped or empty source values write NOTHING (no empty-string pollution) exactly like classify()'s absent-property degrade, and one document carries at most one fingerprint kind -- the same collapse semantics every consumer already assumed. Field shapes verified live before writing this (#1295/#1611 rule): honeypot.hassh is a bare md5 hex string, suricata.eve.tls.ja3 an OBJECT {string, hash}, ja4 a plain keyword-length string, portbridge.os a plain p0f label.",
+        "source": "void put_fingerprint(def c, def k, def v) { if (c == null || k == null || v == null) { return; } String kd = k.toString(); String val = v.toString(); if (kd == '' || val == '') { return; } if (c.fingerprint == null) { c.fingerprint = new HashMap(); } c.fingerprint.kind = kd; c.fingerprint.value = val; } if (ctx.honeypot != null) { def h = ctx.honeypot; if (h.canonical_fingerprint != null && h.canonical_fingerprint.toString() != '') { if (h.canonical_fingerprint_kind != null && h.canonical_fingerprint_kind.toString() != '') { put_fingerprint(ctx, h.canonical_fingerprint_kind, h.canonical_fingerprint); } else { put_fingerprint(ctx, 'fingerprint', h.canonical_fingerprint); } } else if (h.hassh != null && h.hassh.toString() != '') { put_fingerprint(ctx, 'HASSH', h.hassh); } else if (h.fingerprint != null && h.fingerprint.toString() != '') { put_fingerprint(ctx, 'SSH pubkey', h.fingerprint); } else if (h.client != null && h.client.toString() != '') { put_fingerprint(ctx, 'client banner', h.client); } else if (h.user_agent != null && h.user_agent.toString() != '') { put_fingerprint(ctx, 'User-Agent', h.user_agent); } } if (ctx.suricata != null && ctx.suricata.eve != null) { def s = ctx.suricata.eve; if (s.tls != null) { if (s.tls.ja4 != null && s.tls.ja4.toString() != '') { put_fingerprint(ctx, 'JA4', s.tls.ja4); } else if (s.tls.ja3 != null && s.tls.ja3.hash != null && s.tls.ja3.hash.toString() != '') { put_fingerprint(ctx, 'JA3', s.tls.ja3.hash); } } else if (s.http != null && s.http.http_user_agent != null && s.http.http_user_agent.toString() != '') { put_fingerprint(ctx, 'User-Agent', s.http.http_user_agent); } } if (ctx.portbridge != null) { def pb = ctx.portbridge; if (pb.os != null && pb.os.toString() != '') { put_fingerprint(ctx, 'p0f OS', pb.os); } }"
+      }
+    },
+    {
       "community_id": {
         "description": "#1765: Traefik's join key must describe the WIRE, not the logical client. source.ip is ClientHost -- the client Traefik resolved after applying forwardedHeaders trust -- which is the right attacker identity but is NOT what a passive sniffer saw when the request came through a proxy. The wire tuple built above uses ClientAddr (the address the connection was actually accepted from) against the VPS's own address and the entrypoint's port, so a Traefik request and huginn-sidecar's tls_client observation for the same TLS connection land on the same key. Runs before the generic processor below, which would otherwise fill this field from source.ip and produce a key matching nothing whenever the two differ -- exactly the Cloudflare case.",
         "source_ip": "traefik.wire_src_ip",
@@ -308,6 +316,15 @@ echo
 # hunting the way user.name already does. Only applies going forward --
 # the pipeline can't rewrite documents already indexed, and the datastream
 # rolls daily, so coverage is effectively immediate for new data.
+# #1970: honeypot-v2-* gains the same typed fingerprint pair every other raw
+# family maps below -- at ingest one document's correlation identity lands as
+# top-level fingerprint.kind/fingerprint.value keywords (the promotion script
+# in geoip-honeypot above mirrors events.rs pivots_from_source's precedence),
+# so terms aggs stop depending on either a flattened leaf (honeypot.* has no
+# stats/cardinality niceties) or the dashboard process running at all.
+# ignore_above matches traefik-access' user_agent.original convention: a
+# User-Agent value past 1024 bytes is attack junk, not an identity, and would
+# otherwise be a rejected-document term-limit hazard (the #1295 failure mode).
 curl -fsS -X PUT "$es_url/_index_template/honeypot-events-v2" \
   -H 'Content-Type: application/json' \
   --data-binary @- <<'JSON'
@@ -338,6 +355,7 @@ curl -fsS -X PUT "$es_url/_index_template/honeypot-events-v2" \
         } },
         "destination": { "properties": { "ip": { "type": "ip", "ignore_malformed": true }, "port": { "type": "integer", "ignore_malformed": true } } },
         "network": { "properties": { "transport": { "type": "keyword" }, "protocol": { "type": "keyword" }, "community_id": { "type": "keyword" } } },
+        "fingerprint": { "properties": { "kind": { "type": "keyword" }, "value": { "type": "keyword", "ignore_above": 1024 } } },
         "user": { "properties": { "name": { "type": "keyword" }, "password": { "type": "keyword" } } },
         "process": { "properties": { "command_line": { "type": "wildcard" } } },
         "url": { "properties": { "path": { "type": "wildcard" } } },
@@ -352,6 +370,14 @@ JSON
 
 # Suricata's protocol-specific daily indices can be high volume. Keep their
 # mappings permissive but bounded, and retain seven days of raw IDS telemetry.
+#
+# #1970: JA3 (the ja3.hash md5, not the string blob) / JA4 from suricata.eve.tls.*
+# and the HTTP User-Agent from suricata.eve.http.* are promoted to the typed
+# fingerprint.kind/value pair at ingest (geoip-honeypot processor above) --
+# today charts.rs reaches ja4 only through the accidental dynamic
+# text+.keyword mapping (`suricata.eve.tls.ja4.keyword`), which no template ever
+# declared. Same pair the honeypot and portbridge templates map, so one terms
+# agg correlates fingerprints across all three raw families.
 curl -fsS -X PUT "$es_url/_index_template/suricata-events" \
   -H 'Content-Type: application/json' \
   --data-binary @- <<'JSON'
@@ -379,7 +405,8 @@ curl -fsS -X PUT "$es_url/_index_template/suricata-events" \
         "port": { "type": "integer", "ignore_malformed": true },
         "geo": { "properties": { "location": { "type": "geo_point" }, "country_iso_code": { "type": "keyword" }, "city_name": { "type": "keyword" } } }
       } },
-      "network": { "properties": { "transport": { "type": "keyword" }, "protocol": { "type": "keyword" }, "community_id": { "type": "keyword" } } }
+      "network": { "properties": { "transport": { "type": "keyword" }, "protocol": { "type": "keyword" }, "community_id": { "type": "keyword" } } },
+      "fingerprint": { "properties": { "kind": { "type": "keyword" }, "value": { "type": "keyword", "ignore_above": 1024 } } }
     } }
   }
 }
@@ -406,6 +433,12 @@ JSON
 # per-index-family join needed. Plain daily indices like suricata-events
 # (not a data stream like honeypot-events-v2): portbridge's volume doesn't
 # need rollover, and this keeps the simpler index-per-day model.
+#
+# #1970: the p0f OS guess is promoted at ingest into the typed fingerprint
+# pair (kind 'p0f OS') -- fusion.rs' attacker-fusion table reads it from the
+# flattened portbridge.* blob today, invisible to anything that does not
+# re-parse per-sensor shapes. Same mapping block the honeypot and suricata
+# templates carry.
 curl -fsS -X PUT "$es_url/_index_template/portbridge-events" \
   -H 'Content-Type: application/json' \
   --data-binary @- <<'JSON'
@@ -431,7 +464,8 @@ curl -fsS -X PUT "$es_url/_index_template/portbridge-events" \
           "as": { "properties": { "asn": { "type": "long" }, "organization_name": { "type": "keyword" }, "type": { "type": "keyword" } } }
         } },
         "destination": { "properties": { "port": { "type": "integer", "ignore_malformed": true } } },
-        "network": { "properties": { "transport": { "type": "keyword" }, "community_id": { "type": "keyword" } } }
+        "network": { "properties": { "transport": { "type": "keyword" }, "community_id": { "type": "keyword" } } },
+        "fingerprint": { "properties": { "kind": { "type": "keyword" }, "value": { "type": "keyword", "ignore_above": 1024 } } }
       }
     }
   }
