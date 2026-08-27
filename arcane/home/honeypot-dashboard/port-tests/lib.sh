@@ -2,7 +2,7 @@
 # Shared harness for the modernization-port smoke suite (#1608/#1610).
 # Every script sources this. Requirements:
 #   - an Elasticsearch tunnel or endpoint (default http://127.0.0.1:19200;
-#     on the devbox: ssh -N -L 19200:172.16.1.12:9200 xore@$HOMESERVER_HOST)
+#     on the devbox: ssh -N -L 19200:172.16.1.16:9200 xore@$HOMESERVER_HOST)
 #   - rust toolchain (cargo) and node 22+ / npm
 # Overridables: ES_URL, BE_PORT, FE_PORT.
 set -u

@@ -8,8 +8,10 @@ so results reflect actual parity, not fixtures.
 ## Prerequisites
 
 - Elasticsearch reachable (default `http://127.0.0.1:19200`). On the
-  devbox that's a tunnel: `ssh -N -L 19200:172.16.1.12:9200 xore@$HOMESERVER_HOST &`
-  (it dies occasionally — restart it before blaming a failure on code).
+  devbox that's a tunnel: `ssh -N -L 19200:172.16.1.16:9200 xore@$HOMESERVER_HOST &`
+  (it dies occasionally — restart it before blaming a failure on code; the
+  target is Docker-assigned, so if the tunnel lands but ES doesn't answer,
+  re-check `docker inspect hp-elasticsearch` for the current address).
 - Rust toolchain (`cargo`) and Node 22+ / `npm ci` done in `frontend-next/`.
 
 ## Scripts
