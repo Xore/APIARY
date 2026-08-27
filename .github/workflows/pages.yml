@@ -15,6 +15,12 @@ on:
 
 permissions:
   contents: read
+  # The ci-target router dispatches the ci-heartbeat canary with
+  # GITHUB_TOKEN, and a called reusable workflow can never exceed the
+  # caller's envelope -- under-granting it startup-fails the whole run
+  # as "Invalid workflow file". The deploy job keeps its own narrower
+  # job-level envelope (pages: write, id-token: write).
+  actions: write
 
 concurrency:
   group: pages

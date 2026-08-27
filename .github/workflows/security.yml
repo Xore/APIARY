@@ -10,6 +10,12 @@ on:
 permissions:
   contents: read
   security-events: write
+  # The ci-target router dispatches the ci-heartbeat canary with
+  # GITHUB_TOKEN, and a called reusable workflow can never exceed the
+  # caller's envelope -- under-granting it startup-fails the whole run
+  # as "Invalid workflow file" (quality.yml's inline router instead
+  # elevates at its own job level).
+  actions: write
 
 jobs:
   # Executor routing ("homeserver first, GitHub-hosted fallback") via the

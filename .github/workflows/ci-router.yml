@@ -21,6 +21,12 @@ name: CI executor router
 #
 # Fail-safe: every error path resolves to homeserver=false, so routing can
 # degrade CI's speed, never its pass/fail correctness.
+#
+# Caller obligation: every calling workflow MUST grant `actions: write` at
+# its workflow-level permissions -- a called reusable workflow can never
+# exceed the caller's envelope, and under-granting it startup-fails the
+# whole run as "Invalid workflow file" (the route job below requests
+# actions:write solely for the heartbeat dispatch).
 
 on:
   workflow_call:
