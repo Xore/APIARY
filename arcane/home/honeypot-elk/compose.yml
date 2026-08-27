@@ -604,8 +604,10 @@ services:
       - IMPORT_INTERVAL=${EXTRACT_IMPORT_INTERVAL:-60}
     volumes:
       - ./analysis/extracted-file-importer.py:/app/extracted-file-importer.py:ro
-      # Both read-only: this reads artefacts, it does not manage them. The
-      # pruner owns deletion.
+      # Both read-only: this reads artefacts, it does not manage them.
+      # log-maintenance.sh (honeypot-utilities) owns deletion for both --
+      # as of #2323; before that nothing pruned these dirs at all, despite
+      # this comment claiming otherwise.
       - /opt/stacks/apiary/logs/zeek-proxy:/logs/zeek-proxy:ro
       - /opt/stacks/apiary/logs/zeek-proxy-extract:/logs/zeek-proxy-extract:ro
       - /opt/stacks/apiary/state/extracted-files:/state

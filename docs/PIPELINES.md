@@ -25,7 +25,7 @@ The one-paragraph version:
 flowchart LR
   subgraph sensors["Sensors (each its own stack + network)"]
     direction TB
-    s1["cowrie · dionaea · conpot ×5"]
+    s1["cowrie · dionaea · conpot ×6"]
     s2["dnp3 · dicompot · dns · citrix<br/>cisco-asa · rdp · endlessh"]
     s3["http · api · multipot · mailoney<br/>beelzebub · hellpot · elasticpot<br/>galah · sentrypeer · tanner"]
   end
@@ -59,10 +59,11 @@ flowchart LR
   dash["Dashboard tier<br/>frontend-next ⇄ backend-service"]
 
   s1 & s2 & s3 --> logs
-  logs -->|"5 sensors need the join"| enrich
+  logs -->|"tunnel-blind sensors: via_port join"| enrich
+  logs -->|"PROXY-attributed sensors: watched for canonical promotion only"| enrich
   connlog --> enrich
   enrich --> enriched
-  logs -->|"rest: already PROXY-attributed"| fb
+  logs -->|"not watched: already PROXY-attributed or adapter-written"| fb
   enriched -->|"tailed instead of raw — not shipped twice"| fb
   eve --> fb
   connlog --> fb
@@ -86,21 +87,26 @@ consume those files, never each other:
 
 1. **Filebeat** ships everything durable into Elasticsearch with
    restart-safe registry offsets.
-2. **The enrichment worker** rewrites five sensors' files into
-   `logs/enriched/` before Filebeat sees them.
+2. **The enrichment worker** rewrites watched sensors' files into
+   `logs/enriched/` before Filebeat sees them. That watch list began as
+   the five sensor families of #37/#38 (cowrie, dionaea, the conpot
+   personas, dns-honeypot, cisco-asa-honeypot) and has grown to 16 named
+   sources plus every conpot persona discovered on disk (six live,
+   2026-08-27) — 22 sources in all.
 
-Which sensors need step 2 is decided by one question: **does the sensor see
-the attacker's real IP?**
+Which sensors the worker watches, and whether their files need rewriting
+at all, follows one question per sensor: **does the sensor see the
+attacker's real IP?**
 
 | Group | Sensors | Why | Fix |
 |---|---|---|---|
-| PROXY-aware | http, api-honeypot, multipot, tanner, dnp3, dicompot, citrix, rdp, endlessh, cisco-asa (WebVPN side), galah (Traefik path, XFF) | the VPS-side portbridge (`vps/portbridge`) speaks HAProxy PROXY v1, or Traefik sets XFF in-band | none — raw log is already correct |
-| Tunnel-blind | cowrie, dionaea, every conpot persona, dns-honeypot, cisco-asa (IKE side), hellpot (raw path) | raw TCP relay; the log records the WireGuard peer | `via_port` join against the portbridge connection log |
+| PROXY-aware | http, api-honeypot, multipot, tanner, dnp3, dicompot, citrix, rdp, endlessh, cisco-asa (WebVPN side), galah (proxied door, XFF), hellpot (proxied door, XFF) | the VPS-side portbridge (`vps/portbridge`) speaks HAProxy PROXY v1, or Traefik sets XFF in-band | none for attribution. Five of them (multipot, tanner, http-honeypot, citrix-honeypot, rdp-honeypot) are watched anyway, solely so canonical-field promotion (#1217) runs on their lines |
+| Tunnel-blind (joined) | cowrie, dionaea + its incident variant (#623), every conpot persona, dns-honeypot, cisco-asa (IKE side), elasticpot, mailoney, hellpot (raw door), beelzebub, sentrypeer, galah (raw door) | raw TCP relay; the log records the WireGuard peer (`10.8.0.1`, the VPS-side tunnel address) | `via_port` join against the portbridge connection log — the generic join for flat `src_ip`/`src_port` shapes (cowrie, dionaea, the conpot personas, dns-honeypot, cisco-asa IKE, elasticpot, mailoney); bespoke join paths for the rest (dionaea-incident's nested rewrite; beelzebub and sentrypeer derive their own address field, then join; hellpot and galah's raw door is joined and adjudicated against their forwarded-header claim) |
 
 The join runs **at ingest time, not read time** (#37/#38): the networkless
 `backend-worker-enrichment` container reads both files off disk and writes
 an already-correct copy to `logs/enriched/*.json`. Filebeat tails the
-enriched path for exactly those sensors — nothing is shipped twice. A
+enriched path for every watched sensor — nothing is shipped twice. A
 portbridge dial must **precede** the flow it explains for the join to fire;
 where no candidate survives that ordering test, the record honestly stays
 tunnel-attributed (surfaced dashboard-wide as `unattributed_24h`, #1723).
