@@ -19,8 +19,10 @@
 //!   errStaleRevision flow): GET /api/v1/config returns the document's
 //!   monotonic `revision`; every write endpoint accepts an optional
 //!   `If-Match: <revision>` header and answers 409 when it no longer
-//!   matches the stored revision. A missing header (or `*`) keeps the
-//!   legacy last-write-wins behavior so existing callers stay working.
+//!   matches the stored revision — carrying the stored `X-Current-Revision`
+//!   so a stale client can re-sync directly (#2496). A missing header
+//!   (or `*`) keeps the legacy last-write-wins behavior so existing
+//!   callers stay working.
 //! - POST /api/v1/config/validate — persist-nothing preview mirroring Go's
 //!   /api/settings/config/validate, scoped to what this Value-level tier
 //!   actually constrains (see validate_config_patch).
@@ -30,6 +32,7 @@
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
+    response::{IntoResponse, Response},
     Json,
 };
 use serde::Deserialize;
@@ -104,6 +107,21 @@ fn check_revision(expected: Option<u64>, doc: &Value) -> Result<(), (StatusCode,
     }
 }
 
+/// The stale-revision 409 as an actual response (#2496): the legacy text
+/// stays verbatim in the body for tier-parity recognition, and the stored
+/// document's current revision rides along as `X-Current-Revision` so a
+/// stale client can rebase its next If-Match without refetching the whole
+/// doc first.
+fn conflict_response(doc: &Value) -> Response {
+    let current = doc["revision"].as_u64().unwrap_or(0);
+    (
+        StatusCode::CONFLICT,
+        [("x-current-revision", current.to_string())],
+        STALE_REVISION.to_string(),
+    )
+        .into_response()
+}
+
 #[derive(Deserialize)]
 pub struct ActorQuery {
     #[serde(default)]
@@ -123,12 +141,12 @@ async fn put_config_field(
     expected: Option<u64>,
     payload_key: &str,
     value: Value,
-) -> Result<Value, (StatusCode, String)> {
+) -> Result<Response, (StatusCode, String)> {
     let mut doc = load_config(state)
         .await
         .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?
         .unwrap_or_else(|| json!({"schema_version": 4, "revision": 0, "payload": {}}));
-    if let Err(conflict) = check_revision(expected, &doc) {
+    if check_revision(expected, &doc).is_err() {
         state.audit.log(AuditEvent {
             actor_subject: actor.actor_subject,
             actor_username: actor.actor_username,
@@ -138,7 +156,7 @@ async fn put_config_field(
             result: "conflict".into(),
             ..Default::default()
         });
-        return Err(conflict);
+        return Ok(conflict_response(&doc));
     }
     doc["payload"][payload_key] = value;
     doc["revision"] = json!(doc["revision"].as_u64().unwrap_or(0) + 1);
@@ -168,7 +186,7 @@ async fn put_config_field(
         result: "success".into(),
         ..Default::default()
     });
-    Ok(doc)
+    Ok(Json(doc).into_response())
 }
 
 pub async fn put_presentation(
@@ -176,12 +194,12 @@ pub async fn put_presentation(
     Query(actor): Query<ActorQuery>,
     headers: HeaderMap,
     Json(presentation): Json<Value>,
-) -> Result<Json<Value>, (StatusCode, String)> {
+) -> Result<Response, (StatusCode, String)> {
     if !presentation.is_object() {
         return Err((StatusCode::BAD_REQUEST, "presentation object required".into()));
     }
     let expected = expected_revision(&headers)?;
-    Ok(Json(put_config_field(&state, actor, expected, "presentation", presentation).await?))
+    put_config_field(&state, actor, expected, "presentation", presentation).await
 }
 
 /// URL section name -> `payload.*` key. Only these three are exposed here;
@@ -210,7 +228,7 @@ pub async fn put_config_section(
     Query(actor): Query<ActorQuery>,
     headers: HeaderMap,
     Json(value): Json<Value>,
-) -> Result<Json<Value>, (StatusCode, String)> {
+) -> Result<Response, (StatusCode, String)> {
     let Some(payload_key) = config_section_key(&section) else {
         return Err((StatusCode::NOT_FOUND, "unknown config section".into()));
     };
@@ -218,7 +236,7 @@ pub async fn put_config_section(
         return Err((StatusCode::BAD_REQUEST, format!("{payload_key} object required")));
     }
     let expected = expected_revision(&headers)?;
-    Ok(Json(put_config_field(&state, actor, expected, payload_key, value).await?))
+    put_config_field(&state, actor, expected, payload_key, value).await
 }
 
 /// configHistoryView-equivalent: everything needed for review and rollback
@@ -258,7 +276,7 @@ pub async fn rollback(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(body): Json<RollbackBody>,
-) -> Result<Json<Value>, (StatusCode, String)> {
+) -> Result<Response, (StatusCode, String)> {
     if body.revision < 0 {
         return Err((StatusCode::BAD_REQUEST, "a non-negative revision is required".into()));
     }
@@ -271,7 +289,7 @@ pub async fn rollback(
         .await
         .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?
         .unwrap_or_else(|| json!({"schema_version": 4, "revision": 0, "payload": {}}));
-    if let Err(conflict) = check_revision(expected, &doc) {
+    if check_revision(expected, &doc).is_err() {
         state.audit.log(AuditEvent {
             actor_subject: body.actor_subject,
             actor_username: body.actor_username,
@@ -281,7 +299,7 @@ pub async fn rollback(
             result: "conflict".into(),
             ..Default::default()
         });
-        return Err(conflict);
+        return Ok(conflict_response(&doc));
     }
     doc["payload"] = restored_payload.clone();
     doc["revision"] = json!(doc["revision"].as_u64().unwrap_or(0) + 1);
@@ -311,7 +329,7 @@ pub async fn rollback(
         result: "success".into(),
         ..Default::default()
     });
-    Ok(Json(doc))
+    Ok(Json(doc).into_response())
 }
 
 pub async fn users(State(state): State<AppState>) -> Result<Json<Value>, (StatusCode, String)> {
@@ -635,6 +653,27 @@ mod tests {
         assert_eq!(err.1, STALE_REVISION);
         assert!(check_revision(Some(4), &doc).is_ok());
         assert!(check_revision(None, &doc).is_ok());
+    }
+
+    // The 409 response itself (#2496): the stored document's revision is
+    // surfaced as X-Current-Revision beside the verbatim legacy text, so a
+    // stale client (expected=3 vs stored=5) learns it must rebase onto 5.
+    #[tokio::test]
+    async fn conflict_response_carries_the_current_revision() {
+        let doc = json!({"revision": 5, "payload": {}});
+        assert!(check_revision(Some(3), &doc).is_err());
+        assert!(check_revision(Some(5), &doc).is_ok(), "non-conflict behavior is unchanged");
+
+        let response = conflict_response(&doc);
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            response.headers().get("x-current-revision").and_then(|v| v.to_str().ok()),
+            Some("5")
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(&body[..], STALE_REVISION.as_bytes());
     }
 
     #[test]
