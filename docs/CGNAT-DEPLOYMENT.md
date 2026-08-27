@@ -24,10 +24,11 @@ flowchart TD
   `honeypot-payload-analysis`, `honeypot-tanner`, `honeypot-dashboard`,
   `honeypot-utilities`, the standalone honeypots (cisco-asa, citrix, rdp,
   dicompot, dns-honeypot, endlessh, beelzebub, hellpot, elasticpot, galah,
-  sentrypeer, wordpot, mailoney, canarytokens), `honeypot-keycloak`, and the
+  sentrypeer, mailoney, canarytokens), `honeypot-keycloak`, and the
   workers (ip-enrichment, agent-intrusion, attacker-identity, correlator,
-  payload-inventory) — 32 stacks total, one Arcane-managed directory each
-  under `arcane/home/<name>/`. `honeypot-init` still deploys first; every
+  payload-inventory) — 31 stacks total, one Arcane-managed directory each
+  under `arcane/home/<name>/` (`honeypot-wordpot` sat here until #2381
+  retired it). `honeypot-init` still deploys first; every
   sensor stack waits on its completion markers at its own entrypoint rather
   than a Compose-level dependency, same reasoning as before, just across
   more projects now. See `docs/STACK-REBUILD.md` for the full current list
@@ -371,9 +372,6 @@ Create proxied DNS records for the HTTP services you enable, normally:
   non-standard port isn't on Cloudflare's proxied-port allowlist, so this
   is the only way it's reachable through this domain at all. Deliberately
   not named `galah`/`llm`/`ai`)
-- `news` (optional — wordpot's Traefik-routed path, #1512. Same
-  Cloudflare-port-allowlist reasoning as `hub`. Deliberately not named
-  `wordpot`/`wp`/`cms`)
 
 All names point to the VPS. Raw TCP/UDP sensors need no DNS record.
 
