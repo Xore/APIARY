@@ -137,11 +137,25 @@ def ensure_index(es_host: str) -> None:
         "mappings": {
             "properties": {
                 "job_id": {"type": "keyword"},
-                "job_type": {"type": "keyword"},
+                # #2226: these two are term-filtered by list_queue() as
+                # "<field>.keyword" (the shape #1686 fixed them to), so the
+                # explicit mapping must reproduce the dynamic one -- "text"
+                # with a ".keyword" multi-field, exactly what dynamic
+                # mapping generates for any unmapped string. Mapping them
+                # plain "keyword" (as this used to) creates an index on
+                # which no ".keyword" path exists at all: ES silently
+                # matches nothing for term queries against an unmapped
+                # field, and a fresh deployment's drainer starves forever
+                # with zero log output. Old dynamically-mapped indexes keep
+                # working either way because the declared shape now matches
+                # what they already have.
+                "job_type": {"type": "text",
+                             "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}},
                 "ref": {"type": "keyword"},
                 "model": {"type": "keyword"},
                 "estimated_vram_mib": {"type": "long"},
-                "status": {"type": "keyword"},
+                "status": {"type": "text",
+                           "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}},
                 "requested_at": {"type": "date"},
                 "started_at": {"type": "date"},
                 "finished_at": {"type": "date"},
@@ -208,18 +222,36 @@ def enqueue(
 
 
 def list_queue(es_host: str, status: str | None = None, job_type: str | None = None, size: int = 100) -> list[dict]:
-    # .keyword: status/job_type have no explicit index mapping, so ES's
-    # dynamic mapping gave them "text" (analyzed) with a ".keyword"
-    # sub-field, same as any other unmapped string. A term query against
-    # the bare (analyzed) field name never matched job_type values
-    # containing a hyphen ("ghidra-triage" tokenizes to "ghidra"/"triage",
-    # neither of which equals the literal string) -- confirmed live: three
-    # ghidra-triage jobs sat "queued" for up to 11 days, gpu-queue-drain.py
-    # silently found zero matches on every single tick (main() only prints
-    # once it has a job in hand, so this failure mode produced no log
-    # output at all). status values happen to be single words with no
-    # analyzer-relevant punctuation, so that filter accidentally worked --
-    # not something to rely on, fixed the same way for both.
+    # .keyword: these term filters filter on the keyword form of
+    # status/job_type, and they own half of a two-sided contract whose other
+    # half is the mapping those fields actually have:
+    #
+    #   * Indexes created before ensure_index() ever declared a mapping got
+    #     ES's dynamic mapping for unmapped strings -- type "text"
+    #     (analyzed) plus an auto-generated ".keyword" sub-field.
+    #   * Indexes created by ensure_index() (#2226) declare exactly that
+    #     shape explicitly, because mapping these plain "keyword" created an
+    #     index with NO ".keyword" path at all -- ES silently matches
+    #     nothing for a term query against an unmapped field, so a fresh
+    #     deployment drained nothing forever, invisibly.
+    #
+    # Why the bare field name is not good enough (why this targets ".keyword"
+    # rather than dropping the suffix): a term query against the bare
+    # analyzed field never matched job_type values containing a hyphen
+    # ("ghidra-triage" tokenizes to "ghidra"/"triage", neither of which
+    # equals the literal string) -- confirmed live: three ghidra-triage jobs
+    # sat "queued" for up to 11 days, gpu-queue-drain.py silently found zero
+    # matches on every single tick (main() only prints once it has a job in
+    # hand, so that failure produced no log output at all). status values
+    # happen to be single words with no analyzer-relevant punctuation, so
+    # that filter accidentally worked -- not something to rely on, fixed the
+    # same way for both.
+    #
+    # analysis/gpu-queue/test_gpu_queue.py cross-asserts this contract: every
+    # field path queried below must resolve within ensure_index()'s own
+    # mapping payload. If you rename or re-shape either side here, update the
+    # test -- it exists precisely to catch creator and querier disagreeing
+    # again.
     filters = []
     if status is not None:
         filters.append({"term": {"status.keyword": status}})
