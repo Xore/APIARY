@@ -20,6 +20,10 @@ use crate::AppState;
 
 const GRAPH_MAX_NODES: usize = 60;
 const ML_ACK_INDEX: &str = "dashboard-ml-anomaly-ack-v1";
+/// The closed lifecycle set #1968 wrote onto the anomaly documents
+/// themselves ("open" is a retraction value, not an in-flight disposition,
+/// so it is deliberately absent here — see `ml_anomaly_disposition`).
+const DISPOSITION_STATUSES: [&str; 3] = ["false_positive", "true_positive", "benign_known"];
 
 fn bad_gateway(error: anyhow::Error) -> (StatusCode, String) {
     (StatusCode::BAD_GATEWAY, error.to_string())
@@ -510,11 +514,75 @@ pub struct MlAckAllBody {
     pub actor: String,
 }
 
+/// GET /api/v1/ml-anomalies/stats — #2396's exact all-time backlog numbers.
+/// The frontend can only see the ack sidecar wholesale and the dispositioned
+/// population through paginated windows, so it cannot form the union the
+/// honest "Open (all time)" tile needs; this computes it where both halves
+/// live. `open` subtracts every anomaly that is either dispositioned on the
+/// document or has an Acknowledged=true sidecar record — overlap between the
+/// two bookkeeping forms exists in history (#2396's own ack-before-verdict
+/// sequences) and is cancelled by set-union rather than assumed away. Both
+/// id pulls share the 10000 cap everything else in this file uses, mirroring
+/// the ack map's own ceiling; past that size the count under-reports exactly
+/// like ack-all's write set does.
+pub async fn ml_anomaly_stats(State(state): State<AppState>) -> Result<Json<Value>, (StatusCode, String)> {
+    let total_result = state
+        .es
+        .search_index(
+            &["ml-anomalies"],
+            json!({"size": 0, "track_total_hits": true, "query": {"match_all": {}}}),
+        )
+        .await
+        .map_err(bad_gateway)?;
+    let dispositioned_results = state
+        .es
+        .search_index(
+            &["ml-anomalies"],
+            json!({
+                "size": 10000,
+                "_source": false,
+                "query": {"terms": {"status": DISPOSITION_STATUSES}}
+            }),
+        )
+        .await
+        .map_err(bad_gateway)?;
+    let acks = state
+        .es
+        .search_index(&[ML_ACK_INDEX], json!({"size": 10000, "query": {"match_all": {}}}))
+        .await
+        .map_err(bad_gateway)?;
+    let total = total_result["hits"]["total"]["value"].as_u64().unwrap_or(0);
+    let dispositioned: std::collections::HashSet<&str> = dispositioned_results["hits"]["hits"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|hit| hit["_id"].as_str())
+        .collect();
+    let acked: std::collections::HashSet<&str> = acks["hits"]["hits"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|hit| hit["_source"]["Acknowledged"].as_bool() == Some(true))
+        .filter_map(|hit| hit["_id"].as_str())
+        .collect();
+    let union = dispositioned.len().saturating_add(acked.len()).saturating_sub(dispositioned.union(&acked).count());
+    Ok(Json(json!({
+        "total": total,
+        "open": total.saturating_sub(union as u64),
+    })))
+}
+
 /// POST /api/v1/ml-anomalies/ack-all — #1566's bulk acknowledge, ported
 /// from ml_anomaly_ack.go's serveMLAnomalyAckAll: every open anomaly
 /// across the full index (not just the page the client has loaded),
 /// through the same per-record write path as the single ack so one failed
 /// write can't abort the rest. Returns {"changed": N}.
+///
+/// #2396: "open" is honored where the lifecycle actually lives now — a
+/// document carrying an operator verdict from #1968 is not open no matter
+/// what its sidecar says, so the bulk sweep never stamps Acknowledged=true
+/// onto verdict-bearing documents (which both muddied seen-vs-judged
+/// bookkeeping and inflated the acked denominator of the Open tile forever).
 pub async fn ml_anomaly_ack_all(
     State(state): State<AppState>,
     Json(body): Json<MlAckAllBody>,
@@ -523,7 +591,11 @@ pub async fn ml_anomaly_ack_all(
         .es
         .search_index(
             &["ml-anomalies"],
-            json!({"size": 10000, "_source": false, "query": {"match_all": {}}}),
+            json!({
+                "size": 10000,
+                "_source": false,
+                "query": {"bool": {"must_not": [{"terms": {"status": DISPOSITION_STATUSES}}]}}
+            }),
         )
         .await
         .map_err(bad_gateway)?;
