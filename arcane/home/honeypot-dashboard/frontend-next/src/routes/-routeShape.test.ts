@@ -195,7 +195,8 @@ describe('settled-error discipline (#2178)', () => {
     // Guards the guard: each classification half must actually classify.
     expect(RENDERS_GHOST.test('{rows === null ? <SkeletonRows count={4}/> : null}')).toBe(true)
     expect(RENDERS_GHOST.test("import { SkeletonRows } from './Investigate'")).toBe(false)
-    expect(FAILURE_VOCABULARY.test('if (!page) setFailed(true)')).toBe(true)
+    expect(FAILURE_VOCABULARY.test('const { failed, retry } = useServerQuery()')).toBe(true)
+    expect(FAILURE_VOCABULARY.test('usePaginatedList(first, fetchMore) sets Failed via setFailed')).toBe(false)
     expect(FAILURE_VOCABULARY.test('<ErrorStateBlock title="failed to load"/>')).toBe(true)
     expect(FAILURE_VOCABULARY.test('const [rows, setRows] = useState(null)')).toBe(false)
     expect(DEFINES_PRIMITIVE.test('export function SkeletonRows({ count }: { count: number }) {')).toBe(true)
