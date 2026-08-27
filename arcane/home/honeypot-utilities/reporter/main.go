@@ -96,6 +96,13 @@ func main() {
 	}
 	log.Printf("reporter: live=%v (effective blocklistde sender is live=%v)", live, live && bdEmail != "" && bdAPIKey != "")
 
+	// #2330: complement the live-side warnings above. Credentials set
+	// without REPORTER_LIVE also mean no reporting happens, and that used
+	// to be silent too -- the compose env never reached here at all.
+	if !live && (apiKey != "" || bdEmail != "" || bdAPIKey != "") {
+		log.Print("reporter: reporting credentials set but REPORTER_LIVE is unset -- every sender stays in dry-run")
+	}
+
 	cooldown := time.Duration(getenvInt("REPORTER_COOLDOWN_HOURS", 24)) * time.Hour
 	minHits := getenvInt("REPORTER_MIN_EVENTS", 3)
 
