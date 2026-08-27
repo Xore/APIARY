@@ -316,16 +316,9 @@ const EXPOSURE: &[SensorExposure] = &[
         ports: &[tcp(8080, 8080)],
         hostnames: &["apex / www / static catch-all"],
     },
-    SensorExposure {
-        sensor: "wordpot",
-        stack: "honeypot-wordpot",
-        containers: &["hp-wordpot"],
-        // Same Cloudflare allowlist finding as galah (#1512): raw 8082 exists
-        // but news.<domain> is the reachable leg.
-        ingress: &[TRAEFIK, PORTBRIDGE],
-        ports: &[tcp(8082, 8081)],
-        hostnames: &["news.<domain>"],
-    },
+    // wordpot exposure removed with its retirement (#2381): its raw
+    // 8082/tcp rule went out of vps/docker-compose.yml's RULES and the
+    // news.<domain> router out of traefik/dynamic.yml with it.
     SensorExposure {
         sensor: "snare",
         stack: "honeypot-tanner",
@@ -395,7 +388,6 @@ const SENSOR_RAW_INDEX: &[(&str, &str)] = &[
     ("api-honeypot", "honeypot-v2-*"),
     ("galah", "honeypot-v2-*"),
     ("hellpot", "honeypot-v2-*"),
-    ("wordpot", "honeypot-v2-*"),
     ("snare", "honeypot-v2-*"),
     ("sentrypeer", "honeypot-v2-*"),
     ("elasticpot", "honeypot-v2-*"),
@@ -546,7 +538,7 @@ const STACK_CONTAINERS: &[(&str, &[&str])] = &[
     ("honeypot-http", &["hp-http", "hp-api-honeypot"]),
     ("honeypot-galah", &["hp-galah", "hp-galah-llm-broker"]),
     ("honeypot-hellpot", &["hp-hellpot"]),
-    ("honeypot-wordpot", &["hp-wordpot"]),
+    // honeypot-wordpot's stack entry left with its retirement (#2381).
     ("honeypot-tanner", &["hp-snare", "hp-tanner", "hp-tanner-api", "hp-tanner-web", "hp-tanner-redis", "hp-tanner-phpox", "hp-tanner-docker"]),
     ("honeypot-sentrypeer", &["hp-sentrypeer"]),
     ("honeypot-elasticpot", &["hp-elasticpot"]),
@@ -618,7 +610,7 @@ const ADAPTER_VISIBLE: &[&str] = &[
     // services-adapter's ALLOWED_CONTAINERS.
     "hp-beelzebub",
     "hp-hellpot",
-    "hp-wordpot",
+    // hp-wordpot mirrored the adapter allowlist until #2381 retired it.
     "hp-mailoney",
     "hp-galah",
     "hp-galah-llm-broker",

@@ -35,7 +35,7 @@ use pending::{EnrichFn, PendingQueue};
 use rotate::OutputWriter;
 use sensors::{
     enrich_beelzebub_line, enrich_dionaea_incident_line, enrich_galah_line, enrich_hellpot_line, enrich_line,
-    enrich_sentrypeer_line, enrich_wordpot_line, TUNNEL_PEER_IP,
+    enrich_sentrypeer_line, TUNNEL_PEER_IP,
 };
 use viamap::{ViaMap, ViaMapBuilder};
 
@@ -123,7 +123,8 @@ fn discover_sources(logs_dir: &Path, out_dir: &Path, state_dir: &Path) -> Vec<So
     add("elasticpot", logs_dir.join("elasticpot").join("elasticpot.json"), enrich_line);
     add("galah", logs_dir.join("galah").join("event_log.json"), enrich_galah_line);
     add("sentrypeer", logs_dir.join("sentrypeer").join("sentrypeer.json"), enrich_sentrypeer_line);
-    add("wordpot", logs_dir.join("wordpot").join("wordpot.log"), enrich_wordpot_line);
+    // wordpot's own source left with its retirement (#2381): its stack,
+    // filebeat config and Traefik bridge no longer produce a wordpot.log.
     // mailoney's own log shape already matches enrichLine's exactly.
     add("mailoney", logs_dir.join("mailoney").join("mailoney.json"), enrich_line);
 
@@ -439,11 +440,11 @@ mod tests {
             "cowrie", "dionaea", "dionaea-incident", "dns-honeypot", "cisco-asa-honeypot",
             "conpot", "conpot-s7-1200", "conpot-kamstrup",
             "multipot", "tanner", "http-honeypot", "citrix-honeypot", "rdp-honeypot",
-            "beelzebub", "hellpot", "elasticpot", "galah", "sentrypeer", "wordpot", "mailoney",
+            "beelzebub", "hellpot", "elasticpot", "galah", "sentrypeer", "mailoney",
         ] {
             assert!(by_name.contains_key(want), "no source named {want:?}");
         }
-        assert_eq!(sources.len(), 20, "no duplicates across conpot personas");
+        assert_eq!(sources.len(), 19, "no duplicates across conpot personas");
 
         // Each conpot persona reads its own subdirectory, all under the
         // same literal filename.
@@ -463,7 +464,6 @@ mod tests {
             ("rdp-honeypot", "rdp-honeypot", "rdp-honeypot.json"),
             ("hellpot", "hellpot", "HellPot.log"),
             ("galah", "galah", "event_log.json"),
-            ("wordpot", "wordpot", "wordpot.log"),
         ] {
             assert_eq!(by_name[name].input, logs.join(dir).join(file), "{name} input path");
         }
@@ -476,7 +476,7 @@ mod tests {
 
         // Discovery does not require the files to exist -- only conpot is
         // glob-driven -- so the fixed list is always present.
-        assert_eq!(sources.len(), 17);
+        assert_eq!(sources.len(), 16);
         assert!(!sources.iter().any(|s| s.name.starts_with("conpot")));
     }
 
