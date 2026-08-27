@@ -205,11 +205,12 @@ func clientIP(r *http.Request) string {
 	// sound against a pre-seeded header, since whatever the client writes
 	// remains to the left of what Cloudflare appends.
 	//
-	// Unlike galah, wordpot and hellpot, the guard above is a real
+	// Unlike galah and hellpot, the guard above is a real
 	// discriminator here rather than a guess: this sensor's raw port is a
 	// ":pp" rule, so RemoteAddr is the attacker on that path and being the
 	// tunnel peer genuinely does mean "came through Traefik". #1908 split
-	// the others onto separate ports to earn the same property.
+	// galah and hellpot onto separate ports to earn the same property
+	// (wordpot got a third such split before its #2381 retirement).
 	if host == tunnelPeerIP {
 		if cf := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cf != "" {
 			return cf
