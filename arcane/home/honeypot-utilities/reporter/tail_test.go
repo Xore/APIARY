@@ -196,6 +196,64 @@ func TestTailerSkipsAnOversizedLineInsteadOfStallingForever(t *testing.T) {
 	}
 }
 
+// TestTailerCompletesAPartialLineAcrossPolls (#2327): a poll landing while
+// a writer is mid-line must neither report nor commit the unterminated
+// fragment. The pre-fix normal path claimed len(fragment)+1 bytes although
+// no newline had been observed, so once the writer landed the rest of the
+// line every later poll started at that committed byte and permanently
+// skipped the line's head.
+func TestTailerCompletesAPartialLineAcrossPolls(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "multipot.json")
+	st, err := openStore(filepath.Join(dir, "reported.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	tl := newTailer(st)
+
+	head := `{"event":"slow-session","victim":`
+	if err := os.WriteFile(path, []byte(head), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var got []string
+	if err := tl.poll(path, func(l []byte) { got = append(got, string(l)) }); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("poll caught mid-write: got %v, want nothing (an un-terminated fragment must not be reported)", got)
+	}
+
+	// The writer lands the rest of the line -- plus a complete following
+	// one to prove polling resumes cleanly past the resumed boundary.
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString(`"more":"tailer-bug"}` + "\n")
+	f.WriteString("after-complete\n")
+	f.Close()
+
+	got = nil
+	if err := tl.poll(path, func(l []byte) { got = append(got, string(l)) }); err != nil {
+		t.Fatal(err)
+	}
+	wantHead := head + `"more":"tailer-bug"}`
+	if len(got) != 2 || got[0] != wantHead || got[1] != "after-complete" {
+		t.Fatalf("second poll: got %v, want the WHOLE first line (%q) then after-complete", got, wantHead)
+	}
+
+	// And a third poll must not re-deliver anything: offset has caught up.
+	got = nil
+	if err := tl.poll(path, func(l []byte) { got = append(got, string(l)) }); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("third poll: got %v, want none", got)
+	}
+}
+
 func TestTailerMissingFileIsNotAnError(t *testing.T) {
 	dir := t.TempDir()
 	st, err := openStore(filepath.Join(dir, "reported.db"))
