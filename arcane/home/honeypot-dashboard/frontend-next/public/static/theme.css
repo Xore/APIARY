@@ -38,9 +38,14 @@
      its theme's ground so it sits in the theme rather than on top of it,
      then AA-tuned against that theme's own surfaces. */
 
-  /* Fixed regardless of theme or mode: ink on a saturated status fill and
-     the knob of a control. Both are drawn on top of a saturated or solid
-     colour, so neither follows the surface. */
+  /* Fallback inks drawn on top of saturated or solid fills, where following
+     the surface makes no sense. Not fixed values any more (#134): the
+     generated blocks below recast both against each theme's actual
+     --switch-on paint, because that fill *is* the link colour -- light
+     pastels under dark modes -- and fixed white cannot serve as ink there.
+     These literals remain what renders if the generated surface is ever
+     stripped out, which only helps where light themes' darker fills are
+     painted. */
   --control-knob: #ffffff;
   --text-on-status: #ffffff;
 
@@ -127,7 +132,7 @@
   --red: var(--danger);
   --red-subtle: var(--danger-soft);
   --accent-subtle: var(--accent-soft);
-  --radius-sm: var(--radius-control);
+  --radius-sm: var(--radius-xs);
   --radius-md: 8px;
   --radius-lg: var(--radius-panel);
   --radius-xl: var(--radius-dialog);
@@ -212,6 +217,8 @@
   --text-link: light-dark(#9b4f3a, #de866b);
   --text-link-hover: light-dark(#854432, #e49a84);
   --switch-on: light-dark(#9b4f3a, #de866b);
+  --text-on-status: light-dark(#ffffff, #1c1613);
+  --control-knob: light-dark(#ffffff, #1c1613);
   --btn-inverted-bg: light-dark(#262421, #f5f4ef);
   --btn-inverted-bg-hover: light-dark(#151412, #ffffff);
   --btn-inverted-text: light-dark(#f5f4ef, #161513);
@@ -275,6 +282,8 @@
   --text-link: light-dark(#44618a, #8aa2c0);
   --text-link-hover: light-dark(#3a5376, #9eb2cb);
   --switch-on: light-dark(#44618a, #8aa2c0);
+  --text-on-status: light-dark(#ffffff, #1c1613);
+  --control-knob: light-dark(#ffffff, #1c1613);
   --btn-inverted-bg: light-dark(#212326, #eff2f5);
   --btn-inverted-bg-hover: light-dark(#121315, #ffffff);
   --btn-inverted-text: light-dark(#eff2f5, #131416);
@@ -338,6 +347,8 @@
   --text-link: light-dark(#456e3a, #8fb27b);
   --text-link-hover: light-dark(#385a2f, #9fbd8e);
   --switch-on: light-dark(#456e3a, #8fb27b);
+  --text-on-status: light-dark(#ffffff, #1c1613);
+  --control-knob: light-dark(#ffffff, #1c1613);
   --btn-inverted-bg: light-dark(#212621, #eff5f0);
   --btn-inverted-bg-hover: light-dark(#121512, #ffffff);
   --btn-inverted-text: light-dark(#eff5ef, #131613);
@@ -354,13 +365,13 @@
   --warning-soft: light-dark(rgba(155, 131, 37, 0.19), rgba(222, 203, 106, 0.21));
   --warning-text-on-soft: light-dark(#675718, #dfcc6e);
   --warning-badge-fill: light-dark(#ab8f29, #decb6a);
-  --danger: light-dark(#b36c4c, #dc9574);
-  --danger-soft: light-dark(rgba(179, 108, 76, 0.2), rgba(220, 149, 116, 0.21));
-  --danger-text-on-soft: light-dark(#774e32, #e7b6a0);
-  --danger-badge-fill: light-dark(#c08168, #dc9574);
-  --critical: light-dark(#c55a30, #ff8c5c);
-  --critical-soft: light-dark(rgba(197, 90, 48, 0.13), rgba(255, 140, 92, 0.16));
-  --critical-text-on-soft: light-dark(#954224, #ffa075);
+  --danger: light-dark(#b3644c, #dc8d74);
+  --danger-soft: light-dark(rgba(179, 100, 76, 0.2), rgba(220, 141, 116, 0.21));
+  --danger-text-on-soft: light-dark(#7b4833, #e8b1a4);
+  --danger-badge-fill: light-dark(#c37f70, #dc8d74);
+  --critical: light-dark(#c55030, #ff7f5c);
+  --critical-soft: light-dark(rgba(197, 80, 48, 0.13), rgba(255, 127, 92, 0.16));
+  --critical-text-on-soft: light-dark(#9d3c26, #ff9b7f);
   --terminal-bg: light-dark(#364738, #141b15);
   --terminal-fg: light-dark(#e6e6e6, #dfe9e0);
   --framebuffer-bg: light-dark(#2f3e31, #0d120e);
@@ -401,6 +412,8 @@
   --text-link: light-dark(#6d4fc4, #ab93e3);
   --text-link-hover: light-dark(#5d3db7, #beabe9);
   --switch-on: light-dark(#6d4fc4, #ab93e3);
+  --text-on-status: light-dark(#ffffff, #1c1613);
+  --control-knob: light-dark(#ffffff, #1c1613);
   --btn-inverted-bg: light-dark(#232126, #f1eff5);
   --btn-inverted-bg-hover: light-dark(#131215, #ffffff);
   --btn-inverted-text: light-dark(#f1eff5, #141316);
@@ -464,6 +477,8 @@
   --text-link: light-dark(#536d1b, #b3cf5a);
   --text-link-hover: light-dark(#405415, #bed672);
   --switch-on: light-dark(#536d1b, #b3cf5a);
+  --text-on-status: light-dark(#ffffff, #1c1613);
+  --control-knob: light-dark(#ffffff, #1c1613);
   --btn-inverted-bg: light-dark(#252621, #f3f5ef);
   --btn-inverted-bg-hover: light-dark(#141512, #ffffff);
   --btn-inverted-text: light-dark(#f4f5ef, #151613);
@@ -527,6 +542,8 @@
   --text-link: light-dark(#825d0e, #d9a842);
   --text-link-hover: light-dark(#66490b, #deb45b);
   --switch-on: light-dark(#825d0e, #d9a842);
+  --text-on-status: light-dark(#ffffff, #1c1613);
+  --control-knob: light-dark(#ffffff, #1c1613);
   --btn-inverted-bg: light-dark(#262421, #f5f2ef);
   --btn-inverted-bg-hover: light-dark(#151412, #ffffff);
   --btn-inverted-text: light-dark(#f5f3ef, #161513);
@@ -590,6 +607,8 @@
   --text-link: light-dark(#1d69a0, #55a7d8);
   --text-link-hover: light-dark(#185886, #6eb4de);
   --switch-on: light-dark(#1d69a0, #55a7d8);
+  --text-on-status: light-dark(#ffffff, #1c1613);
+  --control-knob: light-dark(#ffffff, #1c1613);
   --btn-inverted-bg: light-dark(#212426, #eff3f5);
   --btn-inverted-bg-hover: light-dark(#121415, #ffffff);
   --btn-inverted-text: light-dark(#eff3f5, #131516);
@@ -653,6 +672,8 @@
   --text-link: light-dark(#a0435e, #d98298);
   --text-link-hover: light-dark(#8a3a51, #e099ab);
   --switch-on: light-dark(#a0435e, #d98298);
+  --text-on-status: light-dark(#ffffff, #1c1613);
+  --control-knob: light-dark(#ffffff, #1c1613);
   --btn-inverted-bg: light-dark(#262122, #f5eff1);
   --btn-inverted-bg-hover: light-dark(#151213, #ffffff);
   --btn-inverted-text: light-dark(#f5eff1, #161314);
@@ -708,7 +729,7 @@
   --text-200: light-dark(#57605f, #9fa2a2);
   --text-300: light-dark(#9daaa8, #535c5b);
   --accent: light-dark(#0f8f7a, #3ee6c8);
-  --accent-hover: light-dark(#0d7d6a, #55e9ce);
+  --accent-hover: light-dark(#0e8672, #55e9ce);
   --accent-pressed: light-dark(#0b6a5a, #27e3c2);
   --accent-soft: light-dark(rgba(15, 143, 122, 0.13), rgba(62, 230, 200, 0.16));
   --accent-text-on-soft: light-dark(#0b675a, #3ee6c8);
@@ -716,6 +737,8 @@
   --text-link: light-dark(#0c7162, #3ee6c8);
   --text-link-hover: light-dark(#09554a, #59ead0);
   --switch-on: light-dark(#0c7162, #3ee6c8);
+  --text-on-status: light-dark(#ffffff, #1c1613);
+  --control-knob: light-dark(#ffffff, #1c1613);
   --btn-inverted-bg: light-dark(#212625, #e1eceb);
   --btn-inverted-bg-hover: light-dark(#121515, #f4f4f4);
   --btn-inverted-text: light-dark(#eff5f4, #080a0a);
@@ -732,13 +755,13 @@
   --warning-soft: light-dark(rgba(155, 145, 37, 0.19), rgba(222, 215, 106, 0.21));
   --warning-text-on-soft: light-dark(#635917, #ded76a);
   --warning-badge-fill: light-dark(#9f9526, #ded76a);
-  --danger: light-dark(#b3784c, #dca074);
-  --danger-soft: light-dark(rgba(179, 120, 76, 0.2), rgba(220, 160, 116, 0.21));
-  --danger-text-on-soft: light-dark(#735030, #dfa980);
-  --danger-badge-fill: light-dark(#bb845c, #dca074);
-  --critical: light-dark(#c56c30, #ff9d5c);
-  --critical-soft: light-dark(rgba(197, 108, 48, 0.13), rgba(255, 157, 92, 0.16));
-  --critical-text-on-soft: light-dark(#894e21, #ff9d5c);
+  --danger: light-dark(#b3644c, #dc8d74);
+  --danger-soft: light-dark(rgba(179, 100, 76, 0.2), rgba(220, 141, 116, 0.21));
+  --danger-text-on-soft: light-dark(#7b4833, #e3a290);
+  --danger-badge-fill: light-dark(#c37f70, #dc8d74);
+  --critical: light-dark(#c55030, #ff7f5c);
+  --critical-soft: light-dark(rgba(197, 80, 48, 0.13), rgba(255, 127, 92, 0.16));
+  --critical-text-on-soft: light-dark(#9d3c26, #ff8766);
   --terminal-bg: light-dark(#384543, #0a0e0d);
   --terminal-fg: light-dark(#e6e6e6, #d1e0de);
   --framebuffer-bg: light-dark(#313d3b, #040505);
@@ -1426,7 +1449,7 @@ select.form-input { cursor: pointer; }
 .alert--info { border-color: color-mix(in srgb, var(--info) 28%, transparent); background: var(--info-soft); color: var(--info-text-on-soft); }
 .alert--success { border-color: color-mix(in srgb, var(--success) 28%, transparent); background: var(--success-soft); color: var(--success-text-on-soft); }
 .alert--warning { border-color: color-mix(in srgb, var(--warning) 28%, transparent); background: var(--warning-soft); color: var(--warning-text-on-soft); }
-.alert--danger { border-color: color-mix(in srgb, var(--danger) 28%, transparent); background: var(--danger-soft); }
+.alert--danger { border-color: color-mix(in srgb, var(--danger) 28%, transparent); background: var(--danger-soft); color: var(--danger-text-on-soft); }
 .alert--critical { border-color: color-mix(in srgb, var(--critical) 40%, transparent); background: var(--critical-soft); color: var(--critical-text-on-soft); }
 
 .tabs {
@@ -3164,7 +3187,9 @@ button.copy:hover { color: var(--text-000); background: var(--bg-300); }
 
 /* ── Legacy content hooks ───────────────────────────────────────────────── */
 .note { font-size: 12px; color: var(--text-200); margin: 0 0 var(--space-md); }
-.card .note { margin: -var(--space-xs) 0 var(--space-md); }
+/* #135: the -4px pull-up was written as -var(...), which parses as an
+   unknown function and dropped the whole declaration silently. */
+.card .note { margin: calc(-1 * var(--space-xs)) 0 var(--space-md); }
 .empty { font: 12px var(--hp-mono); color: var(--text-200); margin: 0; }
 .cc {
   padding: 1px var(--space-xs); border-radius: var(--radius-xs);
@@ -3366,8 +3391,8 @@ pre.code {
    no CSP nonce pattern is needed. Reuses the same --success/--danger
    state-color tokens .badge--success/--danger already establish. */
 .diff-line { display: block; padding: 0 var(--space-sm); border-radius: 2px; }
-.diff-line--add { background: var(--success-soft); color: var(--success); }
-.diff-line--del { background: var(--danger-soft); color: var(--danger); }
+.diff-line--add { background: var(--success-soft); color: var(--success-text-on-soft); }
+.diff-line--del { background: var(--danger-soft); color: var(--danger-text-on-soft); }
 
 /* ── AI-generated report body + citations panel ───────────────────────────
    The typographic layer for a markdown-parsed AI report: a left accent
@@ -3583,11 +3608,6 @@ a.project-card { display: block; color: inherit; text-decoration: none; }
   min-width: 32px; width: auto; height: 32px; padding: 0 var(--space-sm); text-align: center;
   font: 700 11px/30px var(--hp-mono); cursor: pointer;
 }
-.leaflet-control-attribution {
-  background: color-mix(in srgb, var(--bg-100) 86%, transparent) !important;
-  color: var(--text-200) !important;
-}
-.leaflet-control-attribution a { color: var(--text-link) !important; }
 .leaflet-tooltip.attack-tooltip {
   padding: var(--space-sm) var(--space-md);
   border: 1px solid var(--border-200); border-radius: var(--radius-control);
@@ -4447,7 +4467,9 @@ tr.selected .hp-row-actions__more,
   /* Design refresh 2 (pick 9D): claude's circular jump button -- the pill
      becomes a raised round ↓ control; behaviour (page down mid-list, load
      next batch at the end) is unchanged in hp-app.js. */
-  margin: -var(--space-2xl) auto var(--space-sm);
+  /* #135: negating via -var(...) parsed as an unknown function and dropped
+     this shorthand whole -- centering and the overlap included. */
+  margin: calc(-1 * var(--space-2xl)) auto var(--space-sm);
   border: 1px solid var(--border-100); border-radius: 50%;
   padding: 0;
   box-shadow: var(--shadow-pill);
@@ -4509,7 +4531,10 @@ tr.selected .hp-row-actions__more,
 @media (max-width: 700px) { .hp-topbar-search kbd, .hp-topbar-search span { display: none; } .hp-topbar-search { width: auto; } }
 
 /* A11y pass: Leaflet's stock white attribution strip carried near-white
-   link text over light tiles (1.8:1). Theme it like every other chrome. */
+   link text over light tiles (1.8:1). Theme it like every other chrome.
+   The one styling pass for this strip -- an earlier block near the map-shell
+   rules set bg-100/text-200 against the same selectors with the same
+   !important and never rendered after this landed behind it (#147). */
 .leaflet-control-attribution {
   background: color-mix(in srgb, var(--bg-200) 90%, transparent) !important;
   color: var(--text-100) !important;
@@ -4562,6 +4587,13 @@ tr.selected .hp-row-actions__more,
    border it read as overlapping/cut off by the curve rather than sitting
    inside it. A small margin off both edges and a matching corner radius. */
 .leaflet-bottom.leaflet-right .leaflet-control-attribution { margin: 0 var(--space-sm) var(--space-sm) 0; border-radius: 6px; }
+
+/* space-scale: exempt-start -- down to the matching exempt-end, the layout
+   came over verbatim from the honeypot stack (settings modal inline <style>
+   plus hp-* geometry, #58), and Xore/APIARY vendors this stylesheet
+   byte-for-byte, so snapping these values locally would fork the vendor
+   copy. They convert upstream and flow back with the next sync (#138):
+   until then they ride outside the scale gate rather than hiding from it. */
 
 /* ── Settings modal layout ─────────────────────────────────────────────
    Was ui/partials/settings_modal.html's own inline <style> (#58): that
@@ -4801,7 +4833,8 @@ tr.selected .hp-row-actions__more,
   flex: 1;
   width: 100%;
   min-height: 0;
-  margin: 0 -var(--space-xl);
+  /* #135: as above -- bare -var(...) never parses as a negated length. */
+  margin: 0 calc(-1 * var(--space-xl));
   border: 0;
   background: var(--bg-100);
 }
@@ -4922,6 +4955,7 @@ tr.selected .hp-row-actions__more,
 @media(prefers-reduced-motion:reduce){
   .hp-dash-settings *{animation:none!important;transition:none!important}
 }
+/* space-scale: exempt-end (#138) */
 
 /* ═══════════════════════════════════════════════════════════════════════
    Xore/auth-backend — application-specific
