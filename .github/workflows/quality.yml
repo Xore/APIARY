@@ -538,7 +538,10 @@ jobs:
       # The session fixture spawns a real redis-server rather than
       # reimplementing RESP (#1034's tradeoff); ubuntu-latest usually ships
       # it, but fail loudly into install rather than obscurely later.
-      - run: command -v redis-server || sudo apt-get update && sudo apt-get install -y redis-server
+      # Grouped braces: ungrouped `A || B && C` parses as `(A || B) && C`
+      # (#2224), which apt-installs on every run. Same idiom as the
+      # shellcheck guard below.
+      - run: command -v redis-server >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y redis-server; }
       - run: npm run test:browser
         working-directory: arcane/home/honeypot-dashboard/frontend-next
 
