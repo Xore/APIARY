@@ -8,8 +8,9 @@
 // dumped payloads/configs, and the analyzer log.
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
+import { useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
-import { useResolved } from '../lib/hooks'
+import { ErrorStateBlock } from '../components/ErrorState'
 import type { Json, JsonRecord } from '../lib/json'
 
 type Signature = { name: string; description: string; severity: Json }
@@ -48,11 +49,19 @@ type CapeRun = {
   report_summary: ReportSummary | null
 }
 
+// #2178: serviceJSON collapsed "no CAPE run exists for this hash" (a real
+// 404 — a genuine answer about this sample) into the same null as "the
+// request failed", so an outage read as confident absence. This union
+// keeps the two separable; the handler never rejects.
+type RunFetch = { state: 'run'; run: CapeRun } | { state: 'missing' } | { state: 'failed' }
+
 const fetchRun = createServerFn({ method: 'GET' })
   .inputValidator((input: { sha: string }) => input)
-  .handler(async ({ data }): Promise<CapeRun | null> => {
-    const { serviceJSON } = await import('../lib/backend.server')
-    return serviceJSON<CapeRun>(`/api/v1/cape/${encodeURIComponent(data.sha)}`)
+  .handler(async ({ data }): Promise<RunFetch> => {
+    const { serviceJSONResult } = await import('../lib/backend.server')
+    const result = await serviceJSONResult<CapeRun>(`/api/v1/cape/${encodeURIComponent(data.sha)}`)
+    if (result.ok) return { state: 'run', run: result.body }
+    return result.status === 404 ? { state: 'missing' } : { state: 'failed' }
   })
 
 export const Route = createFileRoute('/cape/$sha')({
@@ -111,11 +120,44 @@ function ProcessActivityCard({ summary }: { summary: ReportSummary }) {
 function CapeDetail() {
   const { first } = Route.useLoaderData()
   const { sha } = Route.useParams()
-  const resolved = useResolved(first)
-  const run: CapeRun | null | 'missing' = resolved === undefined ? null : resolved ?? 'missing'
+  // #2178: `resolved ?? 'missing'` made a failed fetch assert "No CAPE
+  // result found" — an outage masquerading as evidence. Tri-state now:
+  // null while loading, 'missing' only for the backend's own 404, and a
+  // named failure with retry for everything else.
+  const [fetch, setFetch] = useState<RunFetch | null>(null)
+  const [attempt, setAttempt] = useState(0)
+  useEffect(() => {
+    let cancelled = false
+    setFetch(null)
+    ;(attempt === 0 ? first : fetchRun({ data: { sha } })).then((result) => {
+      if (!cancelled) setFetch(result)
+    })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- caller-owned loader stream
+  }, [first, attempt])
 
-  if (run === 'missing') {
+  const run: CapeRun | null = fetch !== null && fetch.state === 'run' ? fetch.run : null
+
+  if (fetch?.state === 'missing') {
     return <InvestigateHeader label="Evidence" title={sha.slice(0, 24)} subtitle="No CAPE result found for this hash." />
+  }
+  if (fetch?.state === 'failed') {
+    return (
+      <>
+        <InvestigateHeader
+          label="Dynamic analysis"
+          title={`CAPE sandbox — ${sha.slice(0, 24)}…`}
+          subtitle="The load failed before any result could be shown."
+        />
+        <ErrorStateBlock
+          title="The CAPE result failed to load"
+          hint="The backend request failed — this says nothing about whether a run exists for this hash."
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
+      </>
+    )
   }
   const failed = run !== null && run.exit_status === 'error'
   const summary = run?.report_summary ?? null

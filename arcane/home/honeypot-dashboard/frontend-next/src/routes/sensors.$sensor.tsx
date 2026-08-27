@@ -16,6 +16,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import type React from 'react'
 import { InvestigateHeader } from '../components/Investigate'
+import { ErrorStateBlock } from '../components/ErrorState'
 import { SensorEventsTable } from '../components/SensorEvents'
 import { formatTimestamp } from '../lib/time'
 import { protocolFor, type SensorEventRow } from '../lib/sensorProtocols'
@@ -155,25 +156,53 @@ function SensorPage() {
   const { sensor } = Route.useParams()
   const { overview, events, catalog } = Route.useLoaderData()
   const navigate = useNavigate()
+  // #2178: all three streamed loads collapsed failure into "not arrived",
+  // so an outage meant an eternal overview skeleton-line, an event table
+  // riding its loading rows forever, and — worst — a navigation rail with
+  // NO sensors on it, stranding the page's only way to move between
+  // sensors. Each stream now names its own failure; one retry re-runs all
+  // three.
   const [view, setView] = useState<Overview | null>(null)
+  const [viewFailed, setViewFailed] = useState(false)
   const [rows, setRows] = useState<{ total: number; rows: SensorEventRow[] } | null>(null)
+  const [eventsFailed, setEventsFailed] = useState(false)
   const [sensors, setSensors] = useState<SensorSummary[]>([])
+  const [catalogFailed, setCatalogFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+  const retry = () => setAttempt((n) => n + 1)
 
   useEffect(() => {
     let cancelled = false
-    overview.then((result) => {
-      if (!cancelled) setView(result)
+    setView(null)
+    setViewFailed(false)
+    setRows(null)
+    setEventsFailed(false)
+    setSensors([])
+    setCatalogFailed(false)
+    // attempt === 0 honours the streamed loader promises it was handed; a
+    // retry cannot replay those, so it re-issues the server fns directly.
+    const overviewP = attempt === 0 ? overview : fetchOverview({ data: { sensor } })
+    const eventsP = attempt === 0 ? events : fetchEvents({ data: { sensor } })
+    const catalogP = attempt === 0 ? catalog : fetchCatalog()
+    overviewP.then((result) => {
+      if (cancelled) return
+      if (result) setView(result)
+      else setViewFailed(true)
     })
-    events.then((result) => {
+    eventsP.then((result) => {
       if (!cancelled && result) setRows({ total: result.total, rows: result.rows })
+      else if (!cancelled) setEventsFailed(true)
     })
-    catalog.then((result) => {
-      if (!cancelled && result) setSensors(result.sensors)
+    catalogP.then((result) => {
+      if (cancelled) return
+      if (result) setSensors(result.sensors)
+      else setCatalogFailed(true)
     })
     return () => {
       cancelled = true
     }
-  }, [overview, events, catalog])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- caller-owned loader streams
+  }, [overview, events, catalog, attempt])
 
   // #1904: every sensor is an entry in the rail, and picking one opens its
   // own page. There is no roster view: a wall of twenty-seven tiles is
@@ -211,9 +240,26 @@ function SensorPage() {
           ) : undefined
         }
       />
+      {catalogFailed ? (
+        // #2178: an empty rail used to read as "the roster has no sensors"
+        // rather than "the catalog request failed" — the page's only
+        // between-sensor navigation silently vanished.
+        <p className="note text-danger" role="alert">
+          The sensor roster failed to load, so the per-sensor navigation above is missing this load.{' '}
+          <button type="button" className="lnk" onClick={retry}>
+            Retry
+          </button>
+        </p>
+      ) : null}
       {viewTabs}
 
-      {view === null ? (
+      {view === null && viewFailed ? (
+        <ErrorStateBlock
+          title="This sensor's overview failed to load"
+          hint="The backend request failed — this says nothing about how active the sensor is."
+          onRetry={retry}
+        />
+      ) : view === null ? (
         <span className="skeleton-line" aria-hidden="true" />
       ) : (
         <>
@@ -278,9 +324,18 @@ function SensorPage() {
 
       {/* A sensor with a hand-written reading gets it; the rest get the
           generic one, which is strictly more than the nothing they had. */}
+      {eventsFailed ? (
+        <div className="card wide">
+          <ErrorStateBlock
+            title="This sensor's events failed to load"
+            hint="The backend request failed — the event list below this page normally rides here."
+            onRetry={retry}
+          />
+        </div>
+      ) : null}
       {hasCuratedView(sensor) ? (
         <CuratedSensorView sensor={sensor} />
-      ) : (
+      ) : eventsFailed ? null : (
         <div className="card wide">
           <SensorEventsTable sensor={sensor} rows={rows?.rows ?? null} total={rows?.total} />
         </div>

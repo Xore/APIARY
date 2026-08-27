@@ -12,6 +12,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { ErrorStateBlock } from '../components/ErrorState'
 import { formatTimestamp } from '../lib/time'
 import { countryName } from '../lib/country'
 
@@ -165,15 +166,28 @@ const COLUMNS: Column<RecordingRow>[] = [
 ]
 
 function Recordings() {
-  const { first } = Route.useLoaderData()
+  const streamed = Route.useLoaderData().first
   const { ip } = Route.useSearch()
+  // #2178: the streamed first page resolves null when the request fails --
+  // which used to be indistinguishable from "still loading", so the table
+  // held its ghosts forever. Tri-state + a fresh zero-offset fetch as retry.
+  const [first, setFirst] = useState(streamed)
+  useEffect(() => setFirst(streamed), [streamed])
   const [rows, setRows] = useState<RecordingRow[] | null>(null)
   const [total, setTotal] = useState(0)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [failed, setFailed] = useState(false)
   useEffect(() => {
     let cancelled = false
+    setRows(null)
+    setTotal(0)
+    setFailed(false)
     first.then((page) => {
-      if (cancelled || !page) return
+      if (cancelled) return
+      if (!page) {
+        setFailed(true)
+        return
+      }
       setRows(page.rows)
       setTotal(page.total)
     })
@@ -181,6 +195,7 @@ function Recordings() {
       cancelled = true
     }
   }, [first])
+  const retry = useCallback(() => setFirst(fetchRecordings({ data: { offset: 0, ip } })), [ip])
   const viewMore = useCallback(async () => {
     if (!rows || loadingMore) return
     setLoadingMore(true)
@@ -199,28 +214,36 @@ function Recordings() {
         subtitle="Replayable cowrie TTY sessions — every keystroke and screen output an attacker's interactive shell produced, in order. One row per session; sessions that ran identical commands share one recording."
         chips={
           <>
-            <span className="chip">{total.toLocaleString('en-US')} recorded sessions</span>
+            <span className="chip">{failed ? 'load failed' : `${total.toLocaleString('en-US')} recorded sessions`}</span>
             {ip ? <span className="badge badge--info">source {ip}</span> : null}
           </>
         }
       />
-      <MasterDetailTable
-        rows={rows}
-        columns={COLUMNS}
-        // #1716: NOT the shasum — thousands of sessions share one recording,
-        // so keying on it collides. The session id is this row's own identity.
-        rowKey={(row, i) => `${row.session || 'anon'}-${row.when}-${i}`}
-        detailHref={(row) => `/tty-replay/${encodeURIComponent(row.shasum)}`}
-        emptyState={{
-          title: 'No session recordings captured yet',
-          hint: 'Cowrie writes one per interactive shell session.',
-        }}
-        total={total}
-        onViewMore={viewMore}
-        loadingMore={loadingMore}
-        inspectorTitle="Recording details"
-        inspectorExtra={(row) => <ReplayPane row={row} />}
-      />
+      {failed ? (
+        <ErrorStateBlock
+          title="Session recordings failed to load"
+          hint="The backend request failed — nothing here is cached."
+          onRetry={retry}
+        />
+      ) : (
+        <MasterDetailTable
+          rows={rows}
+          columns={COLUMNS}
+          // #1716: NOT the shasum — thousands of sessions share one recording,
+          // so keying on it collides. The session id is this row's own identity.
+          rowKey={(row, i) => `${row.session || 'anon'}-${row.when}-${i}`}
+          detailHref={(row) => `/tty-replay/${encodeURIComponent(row.shasum)}`}
+          emptyState={{
+            title: 'No session recordings captured yet',
+            hint: 'Cowrie writes one per interactive shell session.',
+          }}
+          total={total}
+          onViewMore={viewMore}
+          loadingMore={loadingMore}
+          inspectorTitle="Recording details"
+          inspectorExtra={(row) => <ReplayPane row={row} />}
+        />
+      )}
     </>
   )
 }

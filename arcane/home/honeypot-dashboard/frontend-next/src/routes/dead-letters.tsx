@@ -9,6 +9,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useState } from 'react'
 import { confirmAction } from '../components/ConfirmDialog'
 import { InvestigateHeader, MasterDetailTable } from '../components/Investigate'
+import { ErrorStateBlock } from '../components/ErrorState'
 import { str, when, type StorePage, type StoreRow } from '../components/StoreList'
 import type { Column } from '../components/Investigate'
 
@@ -65,18 +66,31 @@ function Page() {
   const [appliedQuery, setAppliedQuery] = useState('')
   const [purging, setPurging] = useState(false)
   const [message, setMessage] = useState('')
+  // #2178: `page?.rows ?? []` made a failed store read indistinguishable
+  // from an empty backlog -- exactly the quiet-this-page-calls-healthy that
+  // must never be manufactured. Tri-state instead.
+  const [failed, setFailed] = useState(false)
 
   const load = useCallback((q: string) => {
     setRows(null)
-    fetchPage({ data: { offset: 0, q } }).then((page) => {
-      setRows(page?.rows ?? [])
-      setTotal(page?.total ?? 0)
-    })
+    setFailed(false)
+    fetchPage({ data: { offset: 0, q } })
+      .then((page) => {
+        if (!page) {
+          setFailed(true)
+          return
+        }
+        setRows(page.rows)
+        setTotal(page.total)
+      })
+      .catch(() => setFailed(true))
   }, [])
 
   useEffect(() => {
     load(appliedQuery)
   }, [load, appliedQuery])
+
+  const retryLoad = useCallback(() => load(appliedQuery), [load, appliedQuery])
 
   const viewMore = useCallback(async () => {
     if (!rows || loadingMore) return
@@ -129,7 +143,7 @@ function Page() {
         subtitle="Documents Elasticsearch rejected, with their original error and field shape for remediation. An empty list is the healthy state."
         chips={
           <>
-            <span className="chip">{total.toLocaleString('en-US')} documents</span>
+            <span className="chip">{failed ? 'load failed' : `${total.toLocaleString('en-US')} documents`}</span>
             <input
               className="search"
               placeholder="optional Elasticsearch query"
@@ -156,19 +170,30 @@ function Page() {
           {message}
         </p>
       ) : null}
-      <MasterDetailTable
-        rows={rows}
-        columns={COLUMNS}
-        rowKey={(_, index) => String(index)}
-        emptyState={{
-          title: 'No dead letters recorded',
-          hint: 'Events that could not be parsed or indexed land here — an empty list is the healthy state.',
-        }}
-        total={total}
-        onViewMore={viewMore}
-        loadingMore={loadingMore}
-        inspectorTitle="Dead letter"
-      />
+      {failed ? (
+        /* #2178: this page's own copy says an empty list is the healthy
+           state -- which is precisely why a failed read must not render
+           as one. */
+        <ErrorStateBlock
+          title="Dead letters failed to load"
+          hint="The store read failed — nothing here is cached."
+          onRetry={retryLoad}
+        />
+      ) : (
+        <MasterDetailTable
+          rows={rows}
+          columns={COLUMNS}
+          rowKey={(_, index) => String(index)}
+          emptyState={{
+            title: 'No dead letters recorded',
+            hint: 'Events that could not be parsed or indexed land here — an empty list is the healthy state.',
+          }}
+          total={total}
+          onViewMore={viewMore}
+          loadingMore={loadingMore}
+          inspectorTitle="Dead letter"
+        />
+      )}
     </>
   )
 }

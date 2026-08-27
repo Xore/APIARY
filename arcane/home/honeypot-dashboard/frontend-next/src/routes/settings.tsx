@@ -2338,15 +2338,27 @@ function resultBadge(result: string) {
 function AuditLogCard({ initial }: { initial: AuditResponse | null }) {
   const [filter, setFilter] = useState('')
   const [data, setData] = useState<AuditResponse | null>(initial)
+  // #2178: the filter path collapsed a failed query into `{ events: [] }`,
+  // rendering "No audit events recorded yet." — erasing the audit trail on
+  // exactly the box that is failing. The initial path's settled-null sat on
+  // its skeleton line forever. Both are named now.
+  const [failed, setFailed] = useState(initial === null)
   const hidden = useFieldHidden('audit', 'audit')
 
-  useEffect(() => setData(initial), [initial])
+  useEffect(() => {
+    if (initial !== null) setData(initial)
+  }, [initial])
 
   const applyFilter = async (action: string) => {
     setFilter(action)
     setData(null)
+    setFailed(false)
     const result = await fetchAudit({ data: { action } })
-    setData(result ?? { events: [] })
+    if (!result) {
+      setFailed(true)
+      return
+    }
+    setData(result)
   }
 
   return (
@@ -2361,7 +2373,15 @@ function AuditLogCard({ initial }: { initial: AuditResponse | null }) {
           </option>
         ))}
       </select>
-      {data === null ? (
+      {data === null && failed ? (
+        // Retrying re-issues whatever scope is selected; resubmitting via
+        // the select is an equivalent retry.
+        <ErrorStateBlock
+          title="Audit log failed to load"
+          hint="The backend request failed — this says nothing about what has been recorded."
+          onRetry={() => void applyFilter(filter)}
+        />
+      ) : data === null ? (
         <span className="skeleton-line" aria-hidden="true" />
       ) : data.events.length === 0 ? (
         <p className="empty">No audit events recorded yet.</p>

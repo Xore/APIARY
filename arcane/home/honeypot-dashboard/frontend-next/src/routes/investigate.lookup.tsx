@@ -47,16 +47,30 @@ function classify(raw: string): Shape {
 // which. Try payload first (the more common lookup — a captured file's
 // hash), fall back to fingerprint; a caller who knows better can still
 // reach either kind directly from clusters.tsx's own links.
+//
+// #2178: the old single-null return collapsed "neither kind correlates"
+// (a real answer about this hash) into "the request failed", so an outage
+// read as a confident negative about the operator's own paste. Tri-state
+// now: only all-success-and-empty is 'not-found'.
+type HashKindFetch = { state: 'kind'; kind: 'payload' | 'fingerprint' } | { state: 'not-found' } | { state: 'failed' }
+
 const resolveHashKind = createServerFn({ method: 'GET' })
   .inputValidator((input: { value: string }) => input)
-  .handler(async ({ data }): Promise<'payload' | 'fingerprint' | null> => {
-    const { serviceJSON } = await import('../lib/backend.server')
+  .handler(async ({ data }): Promise<HashKindFetch> => {
+    const { serviceJSONResult } = await import('../lib/backend.server')
+    let sawFailure = false
     for (const kind of ['payload', 'fingerprint'] as const) {
       const params = new URLSearchParams({ kind, value: data.value })
-      const hit = await serviceJSON<{ ip_count: number }>(`/api/v1/investigate/cluster?${params.toString()}`)
-      if (hit) return kind
+      const result = await serviceJSONResult<{ ip_count: number }>(`/api/v1/investigate/cluster?${params.toString()}`)
+      if (result.ok) {
+        if (result.body) return { state: 'kind', kind }
+      } else if (result.status !== 404) {
+        // A 404 is the endpoint's own "no such membership"; anything else
+        // (shed, timeout, 5xx) means we cannot know either way.
+        sawFailure = true
+      }
     }
-    return null
+    return sawFailure ? { state: 'failed' } : { state: 'not-found' }
   })
 
 export const Route = createFileRoute('/investigate/lookup')({
@@ -66,7 +80,7 @@ export const Route = createFileRoute('/investigate/lookup')({
 function Lookup() {
   const navigate = useNavigate()
   const [value, setValue] = useState('')
-  const [status, setStatus] = useState<'idle' | 'busy' | 'not-found'>('idle')
+  const [status, setStatus] = useState<'idle' | 'busy' | 'not-found' | 'failed'>('idle')
   const [lastHash, setLastHash] = useState('')
 
   const submit = async (event: React.FormEvent) => {
@@ -88,12 +102,12 @@ function Lookup() {
         return
       case 'hash': {
         const resolved = await resolveHashKind({ data: { value: shape.value } })
-        if (!resolved) {
+        if (resolved.state !== 'kind') {
           setLastHash(shape.value)
-          setStatus('not-found')
+          setStatus(resolved.state)
           return
         }
-        await navigate({ to: '/investigate/cluster', search: { kind: resolved, value: shape.value } })
+        await navigate({ to: '/investigate/cluster', search: { kind: resolved.kind, value: shape.value } })
         return
       }
     }
@@ -124,6 +138,15 @@ function Lookup() {
           </button>
         </div>
       </form>
+      {status === 'failed' ? (
+        // #2178: the lookup itself failing is a different fact from the
+        // hash genuinely not correlating. No retry button — resubmitting
+        // the form IS the retry, same posture as search.tsx's failed query.
+        <p className="empty text-danger" role="alert">
+          The lookup request for <code>{lastHash}</code> failed — the backend may be down or shedding load, so this says
+          nothing about whether the value correlates. Submit again to retry.
+        </p>
+      ) : null}
       {status === 'not-found' ? (
         <p className="empty" role="status" aria-live="polite">
           No cluster correlation for <code>{lastHash}</code> as either a payload hash or a fingerprint — it may be

@@ -135,6 +135,76 @@ describe('route shape', () => {
 })
 
 // ---------------------------------------------------------------------------
+// #2178's settled-error discipline. Every site in that census shipped as the
+// same shape: a module renders loading ghosts (`SkeletonRows`,
+// `SkeletonCards`, `.skeleton-line`) while carrying no vocabulary anywhere
+// for what happens when the load fails -- because serviceJSON collapses
+// settled-null into "still loading", those ghosts render forever, or hand
+// off to an empty state that asserts absence during an outage. Phases 1-3
+// named a failure state in every such module; this keeps it named.
+//
+// Mechanical rule: any routes/components module that renders a ghost
+// primitive must also reference ErrorStateBlock or a failed/load-failed
+// channel somewhere in the file. The one legitimate exception is the
+// primitive-defining host itself (Investigate.tsx exports SkeletonRows but
+// loads no data of its own).
+// ---------------------------------------------------------------------------
+
+const COMPONENTS = join(dirname(ROUTES), 'components')
+
+const RENDERS_GHOST = /<SkeletonRows\b|<SkeletonCards\b|skeleton-line/
+const FAILURE_VOCABULARY = /ErrorStateBlock|\bfailed\b|[Ll]oad [Ff]ailed/
+const DEFINES_PRIMITIVE = /export function Skeleton(Rows|Cards)/
+
+describe('settled-error discipline (#2178)', () => {
+  /** modules under routes/ and components/, recursive, tests excluded */
+  function tsxSources(): { name: string; source: string }[] {
+    const out: { name: string; source: string }[] = []
+    const walk = (root: string): void => {
+      for (const entry of readdirSync(root, { withFileTypes: true })) {
+        if (entry.name.endsWith('.test.ts') || entry.name.endsWith('.test.tsx')) continue
+        const full = join(root, entry.name)
+        if (entry.isDirectory()) walk(full)
+        else if (entry.name.endsWith('.tsx')) out.push({ name: full, source: readFileSync(full, 'utf8') })
+      }
+    }
+    walk(ROUTES)
+    walk(COMPONENTS)
+    return out
+  }
+
+  it('every ghost-rendering module can name a failure', () => {
+    const offenders = tsxSources()
+      .filter((file) => RENDERS_GHOST.test(file.source))
+      .filter((file) => !FAILURE_VOCABULARY.test(file.source))
+      // The component library hosting the primitives legitimately carries no
+      // error copy: it renders ghosts for whoever feeds it.
+      .filter((file) => !DEFINES_PRIMITIVE.test(file.source))
+      .map((file) => file.name)
+
+    expect(
+      offenders,
+      `${offenders.join(', ')} renders loading ghosts but never says what a failed load looks like. With ` +
+        `serviceJSON collapsing settled errors into null, that module renders its ghosts forever -- or asserts ` +
+        `absence through an empty state during an outage (#2178). Give the load an explicit failed/error channel ` +
+        `rendered through ErrorStateBlock (routes/*$*.tsx detail trio and routes/commands.tsx are the local idioms).`,
+    ).toEqual([])
+  })
+
+  it('recognises the shapes', () => {
+    // Guards the guard: each classification half must actually classify.
+    expect(RENDERS_GHOST.test('{rows === null ? <SkeletonRows count={4}/> : null}')).toBe(true)
+    expect(RENDERS_GHOST.test("import { SkeletonRows } from './Investigate'")).toBe(false)
+    expect(FAILURE_VOCABULARY.test('const { failed, retry } = useServerQuery()')).toBe(true)
+    expect(FAILURE_VOCABULARY.test('usePaginatedList(first, fetchMore) sets Failed via setFailed')).toBe(false)
+    expect(FAILURE_VOCABULARY.test('<ErrorStateBlock title="failed to load"/>')).toBe(true)
+    expect(FAILURE_VOCABULARY.test('const [rows, setRows] = useState(null)')).toBe(false)
+    expect(DEFINES_PRIMITIVE.test('export function SkeletonRows({ count }: { count: number }) {')).toBe(true)
+    expect(DEFINES_PRIMITIVE.test("<SkeletonRows count={12} cols={6} wide={[2, 4]} stub={[5]} />")).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // #2311's admin write-path contract, guarded mechanically like the rest of
 // this file. The bug these pins keep closed: fetchAdminData collapsed
 // partly-dead loads into an all-defaults AdminConfig — maintenance off,
