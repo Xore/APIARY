@@ -10,7 +10,7 @@ log:
   format: json
 
 # #1739: Traefik is a sensor, not just infrastructure. It terminates TLS for
-# the Host-routed decoys (hellpot, galah, wordpot), so it is the ONLY
+# the Host-routed decoys (hellpot, galah), so it is the ONLY
 # component in the stack that ever sees those requests decrypted -- a wire
 # sensor on the public interface sees the ClientHello and then ciphertext.
 #

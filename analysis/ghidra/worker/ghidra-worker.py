@@ -2043,6 +2043,59 @@ def revdeck_failure_result(sha: str, requested_at: str, error: str) -> dict:
     }
 
 
+def result_exit_ok(path: Path) -> bool:
+    """Is there a completed analysis already sitting at this result path?
+
+    #2400: the stranded-claim sweep needed this discriminator. The crash
+    window it guards is two adjacent operations -- write_result() lands the
+    ok JSON atomically, claimed.unlink() then removes the .running marker --
+    so a SIGKILL between them leaves BOTH a finished result AND an unowned
+    claim behind. Sweeping such a claim straight into a failure envelope
+    would replace a real analysis with a record asserting "the owning
+    worker died before writing any result", which is factually wrong.
+    Unreadable/corrupt bytes count as not-written (mirroring
+    patch_result_triage's stance toward vanished targets), so a mangled
+    result gets regenerated rather than silently kept.
+    """
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return False
+    return isinstance(payload, dict) and payload.get("exit_status") == "ok"
+
+
+def on_stranded_ghidra(sha: str, requested_at: str, age: int) -> None:
+    """#2246's sweep callback for the embedded-Ghidra spool.
+
+    Module-level (was a drain()-local closure) so the #2400 regression test
+    drives the exact production path. Only synthesizes a failure envelope
+    when no completed result exists -- see result_exit_ok().
+    """
+    if result_exit_ok(RESULTS_DIR / f"{sha}_ghidra.json"):
+        log(f"swept stranded claim {sha[:12]}...: completed result already "
+            f"on disk ({STALE_RUNNING_SECS}s threshold met), nothing to synthesize")
+        return
+    write_result(sha, ghidra_failure_result(
+        sha, requested_at,
+        f"stranded .request.running claim swept after {int(age)}s with no "
+        f"living drain (threshold {STALE_RUNNING_SECS}s); the owning worker "
+        f"died before writing any result (#2246)"))
+
+
+def on_stranded_revdeck(sha: str, requested_at: str, age: int) -> None:
+    """#2246's sweep callback for the standalone Rev·Deck spool; #2400
+    guard identical to on_stranded_ghidra, same reason."""
+    if result_exit_ok(Path(REVDECK_RESULTS_DIR) / f"{sha}_revdeck.json"):
+        log(f"swept stranded revdeck claim {sha[:12]}...: completed result "
+            f"already on disk ({STALE_RUNNING_SECS}s threshold met), nothing to synthesize")
+        return
+    write_revdeck_result(Path(REVDECK_RESULTS_DIR), sha, revdeck_failure_result(
+        sha, requested_at,
+        f"stranded .request.running claim swept after {int(age)}s with no "
+        f"living drain (threshold {STALE_RUNNING_SECS}s); the owning worker "
+        f"died before writing any result (#2246)"))
+
+
 def sweep_stranded_claims(request_dir: Path, on_stranded) -> int:
     """Convert claims abandoned by dead drains into legible failures (#2246).
 
@@ -2149,14 +2202,9 @@ def drain_revdeck() -> int:
 
     # #2246: same stranded-claim recovery the embedded spool gets; needs no
     # Rev·Deck reachability and runs even when this spool looks empty.
-    def _stranded_revdeck(sha: str, requested_at: str, age: int) -> None:
-        write_revdeck_result(results_dir, sha, revdeck_failure_result(
-            sha, requested_at,
-            f"stranded .request.running claim swept after {int(age)}s with no "
-            f"living drain (threshold {STALE_RUNNING_SECS}s); the owning worker "
-            f"died before writing any result (#2246)"))
-
-    sweep_stranded_claims(request_dir, _stranded_revdeck)
+    # #2400: callback is module-level on_stranded_revdeck so the completed-
+    # result guard and its regression test can't drift from production.
+    sweep_stranded_claims(request_dir, on_stranded_revdeck)
 
     processed = 0
     for request in sorted(request_dir.glob("*.request")):
@@ -2357,14 +2405,9 @@ def drain() -> int:
     # #2246: recover claims stranded by dead drains before anything else.
     # Needs no Ghidra reachability; runs before the empty-queue early return
     # so an otherwise quiet spool still gets its leftovers made legible.
-    def _stranded_ghidra(sha: str, requested_at: str, age: int) -> None:
-        write_result(sha, ghidra_failure_result(
-            sha, requested_at,
-            f"stranded .request.running claim swept after {int(age)}s with no "
-            f"living drain (threshold {STALE_RUNNING_SECS}s); the owning worker "
-            f"died before writing any result (#2246)"))
-
-    sweep_stranded_claims(REQUEST_DIR, _stranded_ghidra)
+    # #2400: callback is module-level on_stranded_ghidra (completed-result
+    # guard + regression test share that one path).
+    sweep_stranded_claims(REQUEST_DIR, on_stranded_ghidra)
 
     pending = sorted(REQUEST_DIR.glob("*.request"))
     client = GhidraClient(API_BASE)

@@ -26,6 +26,7 @@ import { Route as HistoryRouteImport } from './routes/history'
 import { Route as IpsRouteImport } from './routes/ips'
 import { Route as KillChainRouteImport } from './routes/kill-chain'
 import { Route as LlmAnalysisRouteImport } from './routes/llm-analysis'
+import { Route as MetricsRouteImport } from './routes/metrics'
 import { Route as MlAnomaliesRouteImport } from './routes/ml-anomalies'
 import { Route as PayloadsRouteImport } from './routes/payloads'
 import { Route as ProblemReportsRouteImport } from './routes/problem-reports'
@@ -155,6 +156,11 @@ const KillChainRoute = KillChainRouteImport.update({
 const LlmAnalysisRoute = LlmAnalysisRouteImport.update({
   id: '/llm-analysis',
   path: '/llm-analysis',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MetricsRoute = MetricsRouteImport.update({
+  id: '/metrics',
+  path: '/metrics',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MlAnomaliesRoute = MlAnomaliesRouteImport.update({
@@ -405,6 +411,7 @@ export interface FileRoutesByFullPath {
   '/ips': typeof IpsRoute
   '/kill-chain': typeof KillChainRoute
   '/llm-analysis': typeof LlmAnalysisRoute
+  '/metrics': typeof MetricsRoute
   '/ml-anomalies': typeof MlAnomaliesRoute
   '/payloads': typeof PayloadsRoute
   '/problem-reports': typeof ProblemReportsRoute
@@ -469,6 +476,7 @@ export interface FileRoutesByTo {
   '/ips': typeof IpsRoute
   '/kill-chain': typeof KillChainRoute
   '/llm-analysis': typeof LlmAnalysisRoute
+  '/metrics': typeof MetricsRoute
   '/ml-anomalies': typeof MlAnomaliesRoute
   '/payloads': typeof PayloadsRoute
   '/problem-reports': typeof ProblemReportsRoute
@@ -534,6 +542,7 @@ export interface FileRoutesById {
   '/ips': typeof IpsRoute
   '/kill-chain': typeof KillChainRoute
   '/llm-analysis': typeof LlmAnalysisRoute
+  '/metrics': typeof MetricsRoute
   '/ml-anomalies': typeof MlAnomaliesRoute
   '/payloads': typeof PayloadsRoute
   '/problem-reports': typeof ProblemReportsRoute
@@ -600,6 +609,7 @@ export interface FileRouteTypes {
     | '/ips'
     | '/kill-chain'
     | '/llm-analysis'
+    | '/metrics'
     | '/ml-anomalies'
     | '/payloads'
     | '/problem-reports'
@@ -664,6 +674,7 @@ export interface FileRouteTypes {
     | '/ips'
     | '/kill-chain'
     | '/llm-analysis'
+    | '/metrics'
     | '/ml-anomalies'
     | '/payloads'
     | '/problem-reports'
@@ -728,6 +739,7 @@ export interface FileRouteTypes {
     | '/ips'
     | '/kill-chain'
     | '/llm-analysis'
+    | '/metrics'
     | '/ml-anomalies'
     | '/payloads'
     | '/problem-reports'
@@ -793,6 +805,7 @@ export interface RootRouteChildren {
   IpsRoute: typeof IpsRoute
   KillChainRoute: typeof KillChainRoute
   LlmAnalysisRoute: typeof LlmAnalysisRoute
+  MetricsRoute: typeof MetricsRoute
   MlAnomaliesRoute: typeof MlAnomaliesRoute
   PayloadsRoute: typeof PayloadsRoute
   ProblemReportsRoute: typeof ProblemReportsRoute
@@ -959,6 +972,13 @@ declare module '@tanstack/react-router' {
       path: '/llm-analysis'
       fullPath: '/llm-analysis'
       preLoaderRoute: typeof LlmAnalysisRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/metrics': {
+      id: '/metrics'
+      path: '/metrics'
+      fullPath: '/metrics'
+      preLoaderRoute: typeof MetricsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/ml-anomalies': {
@@ -1297,6 +1317,7 @@ const rootRouteChildren: RootRouteChildren = {
   IpsRoute: IpsRoute,
   KillChainRoute: KillChainRoute,
   LlmAnalysisRoute: LlmAnalysisRoute,
+  MetricsRoute: MetricsRoute,
   MlAnomaliesRoute: MlAnomaliesRoute,
   PayloadsRoute: PayloadsRoute,
   ProblemReportsRoute: ProblemReportsRoute,

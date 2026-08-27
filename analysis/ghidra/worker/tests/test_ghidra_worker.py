@@ -1293,6 +1293,93 @@ def test_sweep_stranded_claims():
               "unrecognized running file is skipped, not consumed")
 
 
+def _stale_running_claim(req_dir: Path, sha: str) -> None:
+    """A .request.running claim older than STALE_RUNNING_SECS, i.e. exactly
+    what a kill between write_result() and claimed.unlink() leaves behind
+    (#2400's window)."""
+    import time as time_mod
+
+    claim = req_dir / f"{sha}.request.running"
+    claim.write_text("")
+    old = time_mod.time() - 10_000
+    os.utime(claim, (old, old))
+
+
+def test_on_stranded_spares_completed_results():
+    """#2400: a stranded .running claim whose sample already has an ok
+    result on disk must NOT be swept into the #2246 failure envelope --
+    crash-after-write-before-unlink leaves finished work behind, and the
+    sweep replacing it with 'the owning worker died before writing any
+    result' would assert something untrue. Both spool callbacks behave
+    identically; claims with genuinely nothing on disk still get the
+    #2246 envelope; unreadable bytes count as nothing-on-disk."""
+    import json as json_mod
+
+    w = load_worker()
+    print("--- on_stranded_* spare-completed-results (#2400) ---")
+    real_ghidra_results, real_revdeck_results = w.RESULTS_DIR, w.REVDECK_RESULTS_DIR
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            gh_req, gh_res = Path(td) / "gh-req", Path(td) / "gh-res"
+            rd_req, rd_res = Path(td) / "rd-req", Path(td) / "rd-res"
+            for d in (gh_req, gh_res, rd_req, rd_res):
+                d.mkdir()
+            # The callbacks read these module globals at call time.
+            w.RESULTS_DIR = gh_res
+            w.REVDECK_RESULTS_DIR = str(rd_res)
+
+            ok_payload = {"sha256": "x", "exit_status": "ok"}
+            for case, (req_dir, res_dir, suffix, cb, write) in {
+                "embedded": (gh_req, gh_res, "_ghidra.json",
+                             w.on_stranded_ghidra,
+                             lambda p: p.write_text(json_mod.dumps(ok_payload))),
+                "revdeck": (rd_req, rd_res, "_revdeck.json",
+                            w.on_stranded_revdeck,
+                            lambda p: p.write_text(json_mod.dumps({**ok_payload, "revdeck": {}}))),
+            }.items():
+                # Case 1: crash-after-write -- completed result exists.
+                sha_ok = "c" * 64
+                write(res_dir / f"{sha_ok}{suffix}")
+                original_bytes = (res_dir / f"{sha_ok}{suffix}").read_bytes()
+                _stale_running_claim(req_dir, sha_ok)
+                swept = w.sweep_stranded_claims(req_dir, cb)
+                check(swept == 1, f"{case}: stale claim swept once")
+                check((res_dir / f"{sha_ok}{suffix}").read_bytes() == original_bytes,
+                      f"{case}: completed result untouched by the sweep")
+
+                # Case 2: genuinely no result -- #2246 envelope, unchanged.
+                sha_none = "d" * 64
+                _stale_running_claim(req_dir, sha_none)
+                w.sweep_stranded_claims(req_dir, cb)
+                envelope = json_mod.loads(
+                    (res_dir / f"{sha_none}{suffix}").read_text())
+                check(envelope["exit_status"] == "error",
+                      f"{case}: missing result still yields the error envelope")
+                check("#2246" in envelope["error"],
+                      f"{case}: envelope message cites its origin")
+
+                # Case 3: corrupt-but-present bytes are treated as absent,
+                # so the regenerated envelope matches patch_result_triage's
+                # gone-is-nothing stance rather than preserving garbage.
+                sha_corrupt = "e" * 64
+                (res_dir / f"{sha_corrupt}{suffix}").write_text("{not json")
+                _stale_running_claim(req_dir, sha_corrupt)
+                w.sweep_stranded_claims(req_dir, cb)
+                replaced = json_mod.loads(
+                    (res_dir / f"{sha_corrupt}{suffix}").read_text())
+                check(replaced["exit_status"] == "error",
+                      f"{case}: corrupt result does not block regeneration")
+
+                # Every case consumed its claim the same way #2246 did.
+                leftovers = sorted(p.name for p in req_dir.iterdir())
+                check(leftovers == [f"{'c' * 64}.request.failed",
+                                    f"{'d' * 64}.request.failed",
+                                    f"{'e' * 64}.request.failed"],
+                      f"{case}: all three claims renamed .failed: {leftovers}")
+    finally:
+        w.RESULTS_DIR, w.REVDECK_RESULTS_DIR = real_ghidra_results, real_revdeck_results
+
+
 def main():
     ghidra = serve(Stub)
     model = serve(ModelStub)
@@ -1301,6 +1388,7 @@ def main():
     revdeck = serve(RevDeckStub)
     test_unit()
     test_sweep_stranded_claims()
+    test_on_stranded_spares_completed_results()
     test_resolve_sample()
     test_spool(ghidra)
     test_triage(ghidra, model, truncating)

@@ -1,7 +1,7 @@
 # Zeek site config for the homeserver's decoy-side sensor (#1742, decision 8).
 #
 # The VPS sensor watches ens6 and sees every packet an attacker sends -- but
-# Traefik terminates TLS for the Host-routed decoys (hellpot, galah, wordpot),
+# Traefik terminates TLS for the Host-routed decoys (hellpot, galah),
 # so for those the VPS sensor gets the ClientHello and then ciphertext. This
 # instance watches the honeynet bridge on the homeserver, where the same
 # requests arrive in plaintext at the decoy containers.

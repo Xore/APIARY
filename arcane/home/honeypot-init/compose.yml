@@ -114,7 +114,7 @@ services:
         # full command per physical line -- no folding ambiguity, no
         # backslash continuations, every line does exactly what it shows.
         rm -f /markers/log-init.done
-        mkdir -p /logs/cowrie/downloads /logs/cowrie/tty /logs/cowrie/lib-cowrie /logs/conpot /logs/conpot-s7-1200 /logs/conpot-s7-1500 /logs/conpot-iec104 /logs/conpot-guardian /logs/conpot-kamstrup /logs/api-honeypot /logs/dionaea /logs/multipot /logs/http-honeypot /logs/tanner /logs/snare /logs/dnp3 /logs/dicompot /logs/dns-honeypot /logs/citrix-honeypot /logs/cisco-asa-honeypot /logs/rdp-honeypot /logs/tftp-relay /logs/endlessh /logs/beelzebub /logs/hellpot /logs/elasticpot /logs/galah /logs/sentrypeer /logs/wordpot /logs/mailoney/mail /logs/canarytokens/frontend /logs/canarytokens/switchboard /logs/suricata/pcap /logs/portbridge /logs/arkime-raw /logs/zeek /logs/zeek-proxy /logs/zeek-extract /logs/huginn /logs/traefik
+        mkdir -p /logs/cowrie/downloads /logs/cowrie/tty /logs/cowrie/lib-cowrie /logs/conpot /logs/conpot-s7-1200 /logs/conpot-s7-1500 /logs/conpot-iec104 /logs/conpot-guardian /logs/conpot-kamstrup /logs/api-honeypot /logs/dionaea /logs/multipot /logs/http-honeypot /logs/tanner /logs/snare /logs/dnp3 /logs/dicompot /logs/dns-honeypot /logs/citrix-honeypot /logs/cisco-asa-honeypot /logs/rdp-honeypot /logs/tftp-relay /logs/endlessh /logs/beelzebub /logs/hellpot /logs/elasticpot /logs/galah /logs/sentrypeer /logs/mailoney/mail /logs/canarytokens/frontend /logs/canarytokens/switchboard /logs/suricata/pcap /logs/portbridge /logs/arkime-raw /logs/zeek /logs/zeek-proxy /logs/zeek-extract /logs/huginn /logs/traefik /logs/dashboard-backend /logs/dashboard-backend-mounted /logs/dashboard-bff
         # -R on /logs/cowrie specifically: mkdir -p above just created
         # downloads/, tty/, and lib-cowrie/ as this container's own root
         # user, and a bare (non-recursive) chown of the parent only touches
@@ -132,7 +132,7 @@ services:
         chown -R 2000:2000 /logs/cowrie
         chown -R 2000:2000 /logs/conpot /logs/conpot-s7-1200 /logs/conpot-s7-1500 /logs/conpot-iec104 /logs/conpot-guardian /logs/conpot-kamstrup
         chown -R 1000:1000 /logs/dionaea
-        chown -R 65534:65534 /logs/multipot /logs/http-honeypot /logs/api-honeypot /logs/tanner /logs/snare /logs/dnp3 /logs/dicompot /logs/dns-honeypot /logs/citrix-honeypot /logs/cisco-asa-honeypot /logs/rdp-honeypot /logs/tftp-relay /logs/endlessh /logs/beelzebub /logs/hellpot /logs/elasticpot /logs/galah /logs/wordpot /logs/mailoney /logs/canarytokens
+        chown -R 65534:65534 /logs/multipot /logs/http-honeypot /logs/api-honeypot /logs/tanner /logs/snare /logs/dnp3 /logs/dicompot /logs/dns-honeypot /logs/citrix-honeypot /logs/cisco-asa-honeypot /logs/rdp-honeypot /logs/tftp-relay /logs/endlessh /logs/beelzebub /logs/hellpot /logs/elasticpot /logs/galah /logs/mailoney /logs/canarytokens
         # sentrypeer/Dockerfile's own non-root user is uid 2000 (matching
         # upstream's own Dockerfile choice), same numeric uid cowrie/conpot
         # happen to use for unrelated reasons -- not a real collision, just
@@ -148,6 +148,14 @@ services:
         # pcap-sync's raw output is consumed by Arkime's systemd-network
         # runtime identity (uid/gid 998 in the deployed image).
         chown -R 998:998 /logs/arkime-raw
+        # #1972 serving-tier app logs. backend-service and
+        # backend-service-mounted run as `USER nobody` (uid 65534, their
+        # Dockerfile's final stage); dashboard-next runs as `USER node`
+        # (node:22-alpine's uid 1000). Without these chowns the writers'
+        # first append fails with EACCES -- docker auto-creates a missing
+        # bind host dir root-owned before this step would ever see it.
+        chown -R 65534:65534 /logs/dashboard-backend /logs/dashboard-backend-mounted
+        chown -R 1000:1000 /logs/dashboard-bff
         chmod 755 /logs
         mkdir -p /snapshots
         chown 1000:1000 /snapshots

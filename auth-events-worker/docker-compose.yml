@@ -36,6 +36,10 @@ services:
       KEYCLOAK_CLIENT_ID: auth-events-poller
       KEYCLOAK_CLIENT_SECRET_FILE: /run/secrets/client-secret
       LOG_LEVEL: INFO
+      # #2219 pagination bounds; keep in sync with worker.py's own env
+      # overrides (AUTH_EVENTS_PAGE_SIZE / AUTH_EVENTS_MAX_PAGES_PER_DAY).
+      AUTH_EVENTS_PAGE_SIZE: "1000"
+      AUTH_EVENTS_MAX_PAGES_PER_DAY: "100"
     volumes:
       # A sibling of this stack's own directory, not nested inside it --
       # install-homeserver.sh's step_auth_events_worker_start symlinks the

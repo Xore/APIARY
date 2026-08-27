@@ -23,7 +23,13 @@ permissions:
 
 concurrency:
   group: quality-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancellation stays on for pull_request runs (a superseded run was for a
+  # commit we already stopped caring about) and off for push-to-main -- on
+  # main the cancelled run is the ONLY verification that commit ever gets,
+  # so serializing beats superseding (#2347): cbb5ef3f landed non-compiling
+  # Rust and its own quality run never finished, because each next main
+  # push cancelled the previous in-flight one down the chain to #2317.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/heads/main') }}
 
 jobs:
   # -------------------------------------------------------------------------
@@ -532,7 +538,10 @@ jobs:
       # The session fixture spawns a real redis-server rather than
       # reimplementing RESP (#1034's tradeoff); ubuntu-latest usually ships
       # it, but fail loudly into install rather than obscurely later.
-      - run: command -v redis-server || sudo apt-get update && sudo apt-get install -y redis-server
+      # Grouped braces: ungrouped `A || B && C` parses as `(A || B) && C`
+      # (#2224), which apt-installs on every run. Same idiom as the
+      # shellcheck guard below.
+      - run: command -v redis-server >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y redis-server; }
       - run: npm run test:browser
         working-directory: arcane/home/honeypot-dashboard/frontend-next
 
@@ -701,18 +710,6 @@ jobs:
               # rotation/data-loss behavior.
               python arcane/home/honeypot-dionaea/dionaea/tests/test_log_rotation_patch.py
 
-          - name: wordpot request-path patches (#1421, #1908)
-            home: true
-            run: |
-              # Five patches across three files, matched on exact upstream
-              # text. What they replaced was a rule that trusted
-              # X-Forwarded-For whenever the peer was the tunnel address --
-              # true for every request on wordpot's raw port, so anyone
-              # could name their own source. These assert it stays gone,
-              # that the headers still reach the log as evidence, and that
-              # the Traefik-only listener actually starts.
-              python arcane/home/honeypot-wordpot/wordpot/tests/test_wordpot_patch.py
-
           - name: HellPot X-Forwarded-For trust patch (#1876)
             home: true
             run: |
@@ -775,6 +772,17 @@ jobs:
           - name: Compose interpolation documented per stack (#1982)
             home: true
             run: python scripts/check-compose-env-docs.py
+
+          # #2352: #1502 moved the YARA scanner under
+          # honeypot-payload-analysis/analysis/yara/ and updated the checker
+          # script, but the surrounding prose never got the same pass -- six
+          # documents kept pointing readers at the dead repository-root path,
+          # including the operator README's own sync command, which failed
+          # verbatim from a fresh checkout. Grep-level guard for that class:
+          # outside arcane/**, a .md may cite analysis/yara/ only on a line
+          # that also names its real home (or carries an inline waiver).
+          - name: Docs cite moved trees by their real home (#2352)
+            run: python scripts/check-doc-stale-paths.py
 
           - name: Dionaea SMB exploit-signature incidents (#622, #1775)
             home: true
@@ -899,6 +907,18 @@ jobs:
             run: |
               python -m pip install -r ml-worker/requirements.txt pytest
               python -m pytest ml-worker/tests/ -v
+
+          # #2219: Keycloak caps every admin-events page silently, and the
+          # single-page fetch permanently dropped everything past row 1,000
+          # on exactly the credential-spray days this telemetry exists for.
+          # The pagination contracts (stubbed HTTP layer, no live service)
+          # pin the drained/undrained pager and its checkpoint-hold rule.
+          # pytest again only installed here -- not a production dependency.
+          - name: auth-events-worker Keycloak pagination contracts
+            home: true
+            run: |
+              python -m pip install -r auth-events-worker/requirements.txt pytest
+              python -m pytest auth-events-worker/tests/ -v
 
           - name: es-results-importer chunked-upload and dedup contracts
             home: true

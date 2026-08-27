@@ -45,6 +45,7 @@ type event struct {
 	Event   string `json:"event"`
 	Lines   int    `json:"lines,omitempty"`
 	HeldMS  int64  `json:"held_ms,omitempty"`
+	Data    string `json:"data,omitempty"`
 }
 
 type logger struct {
@@ -159,8 +160,26 @@ func randByte() byte {
 }
 
 func serve(c net.Conn, log *logger, port int, delay time.Duration) {
-	defer c.Close()
 	host, portText, _ := net.SplitHostPort(c.RemoteAddr().String())
+	srcPort, _ := strconv.Atoi(portText)
+	// #2210: serve() is the whole world past Accept -- it constructs banner
+	// content per connection (randomBannerLine + the RFC4253 §4.2 scrub over
+	// it) and trickles it into a client the scanner fully controls, off a
+	// fresh goroutine with no recover anywhere underneath; in Go one
+	// unrecovered panic kills the entire sensor while restart:
+	// unless-stopped hands the attacker the same open socket right back.
+	// http-honeypot gets this shield per request from net/http; the tarpit
+	// listener carries it itself, at the top of the per-connection
+	// entrypoint: a panicking connection costs exactly one attributable
+	// handler_panic event (no disconnect line -- it never held, and saying
+	// otherwise would lie about HeldMS/Lines) while main()'s accept loop and
+	// every other held connection keep running.
+	defer func() {
+		if r := recover(); r != nil {
+			log.emit(event{Port: port, SrcIP: host, SrcPort: srcPort, Event: "handler_panic", Data: fmt.Sprint(r)})
+		}
+	}()
+	defer c.Close()
 	// #1677: main()'s -healthcheck dials 127.0.0.1 directly (see main), and
 	// that connection is accepted by this same listener -- a real external
 	// connection can never present that address (it always arrives as
@@ -172,7 +191,6 @@ func serve(c net.Conn, log *logger, port int, delay time.Duration) {
 	if host == "127.0.0.1" || host == "::1" {
 		return
 	}
-	srcPort, _ := strconv.Atoi(portText)
 	log.emit(event{Port: port, SrcIP: host, SrcPort: srcPort, Event: "connect"})
 
 	start := time.Now()

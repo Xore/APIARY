@@ -19,7 +19,8 @@
 # sentrypeer (5070 tcp+udp) all had a live portbridge RULES entry but no
 # firewall rule -- fully unreachable from the internet despite every other
 # piece (dashboard visibility, ip-enrichment-worker joins) being wired.
-# wordpot (8082) and endlessh (2022) are newly added in this same commit.
+# wordpot (8082) and endlessh (2022) are newly added in this same commit;
+# wordpot's 8082 went again when its stack retired (#2381).
 # check-firewall-portbridge-sync.sh now passes clean against this file.
 #
 # vps/check-firewall-portbridge-sync.sh statically compares this list
@@ -27,7 +28,7 @@
 # editing either file.
 set -eu
 
-for port in 21 22 23 25 102 110 135 143 389 445 502 1025 1080 1102 1433 1502 1723 1883 2022 2102 2200 2375 2404 2502 2575 3306 3389 4443 5060 5070 5432 5555 5900 6379 8000 8080 8081 8082 8443 8880 8888 8889 9100 9200 9201 10001 11112 11211 20000 27017 44818 50100; do
+for port in 21 22 23 25 102 110 135 143 389 445 502 1025 1080 1102 1433 1502 1723 1883 2022 2102 2200 2375 2404 2502 2575 3306 3389 4443 5060 5070 5432 5555 5900 6379 8000 8080 8081 8443 8880 8888 8889 9100 9200 9201 10001 11112 11211 20000 27017 44818 50100; do
     ufw allow "${port}/tcp" comment honeypot
 done
 

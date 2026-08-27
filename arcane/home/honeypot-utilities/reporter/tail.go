@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"io"
 	"log"
 	"os"
@@ -76,10 +77,27 @@ func (t *tailer) poll(path string, fn func(line []byte)) error {
 
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	// #2327: offset is committed at START-of-line -- only bytes that ran
+	// through an observed newline are safe to claim. The stock ScanLines
+	// hands back a file's final unterminated fragment at EOF like any other
+	// line, and claiming len(fragment)+1 for it (the pre-fix behavior)
+	// permanently skipped the finished line's head once the writer landed
+	// its remainder -- exactly the slow-written high-value sessions the
+	// poll caught mid-write.
+	var terminated bool
+	sc.Split(terminatingLineSplitter(&terminated))
 	offset := start
 	for sc.Scan() {
 		line := sc.Bytes()
-		offset += int64(len(line)) + 1 // +1 for the newline Scanner strips
+		if !terminated {
+			// No newline has been observed past this byte yet: leave it
+			// uncommitted and deliver nothing. The next poll re-reads the
+			// completed line whole from this same offset -- same invariant
+			// skipOversizedLine already honors below for a too-long line
+			// still in flight (#890).
+			break
+		}
+		offset += int64(len(line)) + 1 // +1 for the newline the splitter consumed
 		if len(line) == 0 {
 			continue
 		}
@@ -108,6 +126,39 @@ func (t *tailer) poll(path string, fn func(line []byte)) error {
 		offset += skipped
 	}
 	return t.st.saveTailOffset(path, inode, offset)
+}
+
+// terminatingLineSplitter returns a bufio.SplitFunc with the stock
+// ScanLines behavior -- drop a trailing \r -- plus one bit of extra signal:
+// whether the token it is currently yielding ran through a real '\n'
+// boundary or merely hit EOF un-terminated (#2327). Writing it out rather
+// than wrapping ScanLines keeps all of Scanner's machinery intact, notably
+// the 1MB buffer cap whose ErrTooLong handling the oversized-line branch
+// below relies on.
+func terminatingLineSplitter(terminated *bool) bufio.SplitFunc {
+	return func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+		if i := bytes.IndexByte(data, '\n'); i >= 0 {
+			*terminated = true
+			return i + 1, dropCR(data[:i]), nil
+		}
+		if !atEOF {
+			return 0, nil, nil // keep reading; more data may land
+		}
+		*terminated = false
+		if len(data) == 0 {
+			return 0, nil, io.EOF
+		}
+		return len(data), dropCR(data), nil
+	}
+}
+
+// dropCR mirrors bufio.ScanLines: a \r immediately before the newline (or
+// dangling at EOF) is not part of the line.
+func dropCR(b []byte) []byte {
+	if len(b) > 0 && b[len(b)-1] == '\r' {
+		return b[:len(b)-1]
+	}
+	return b
 }
 
 // skipOversizedLine seeks f to offset and reads raw, uncapped bytes up to

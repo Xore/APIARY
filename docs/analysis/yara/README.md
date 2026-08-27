@@ -1,5 +1,12 @@
 # YARA scanner sidecar
 
+> **Location:** this is the operator doc, not the tree itself. The scanner
+> lives at `arcane/home/honeypot-payload-analysis/analysis/yara/` — moved
+> there by #1502 when the honeypot-payload-analysis stack became
+> self-contained. Every path below is relative to that directory, and
+> compose commands run from `arcane/home/honeypot-payload-analysis/`.
+> `scripts/check-yara-corpus.sh` knows both locations already.
+
 A networkless, non-executing scanner over hash-addressed captures. `scanner.py`
 walks the payload roots on an interval and writes `results.json`; the dashboard
 reads that file and never runs yara itself.
@@ -25,13 +32,15 @@ skips cleanly if nothing has been vendored.
 ## Updating the corpus
 
 ```bash
-analysis/yara/sync-yara.sh          # --dry-run to see what would change
+arcane/home/honeypot-payload-analysis/analysis/yara/sync-yara.sh   # --dry-run to see what would change
 ```
 
 Needs `yara` or `yarac` on PATH; it refuses to run without one. Then rebuild the
-sidecar so the new rules are actually loaded:
+sidecar so the new rules are actually loaded. Compose resolves the service name
+only from inside the stack directory:
 
 ```bash
+cd arcane/home/honeypot-payload-analysis
 docker compose build yara-scanner && docker compose up -d yara-scanner
 ```
 

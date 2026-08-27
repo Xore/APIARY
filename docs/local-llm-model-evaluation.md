@@ -656,3 +656,327 @@ rows, WhiteRabbitNeo A/B) exists to compare against.
 gemma-4 heretics, LLM4Decompile-Ref as Tier C preprocessing) carry into the
 next slices; SecureBERT2.0-NER stays out of this matrix by design (encoder,
 own harness, labelled IOC sample from captured sessions).
+
+## Issue #1795-c / #1947 part 2 (2026-08-27): wave-2 roster completion, sessions + revdeck
+
+Second slice of the #1947 rebuild: every remaining named candidate from
+#1795/#1804 that can run on this card, plus the library controls re-measured
+from #144 on real hardware. Twenty-two models benched over both non-Ghidra
+slots, N = 3 each, same protocol as part 1 so the two matrices compare
+directly. The ghidra slot is still absent for the same #1805 reason; its
+Tier B number is a separate slice, and no promotion is decided without it.
+
+### Runtime pins
+
+Identical to part 1 except where stated: NVIDIA RTX 4000 Ada (20475 MiB,
+driver 595.84, host supermicro), Ollama 0.32.13 in `ghidra-ollama-1`,
+`evaluate-models.py` legacy positional mode with `--slots sessions,revdeck`,
+`--context 8192`, temperature 0, seed 144, thinking disabled, provenance
+synthetic, operator `bg-1947-wave2`, N = 3 repeats per model. The harness
+clone is at the same commit as the part-1 runs (pre-#2265 scorer), so the
+vocabulary-gate caveat in the reading notes applies to this matrix unchanged.
+- transcripts: `docs/benchmarks/runs/` main batch
+  `2026-08-27-20260827T023624Z-b7c339af` (`f1d4316f…`),
+  `…T032545Z-0c4a8cce` (`abf601a0…`), `…T045313Z-b86d9e65` (`6a219430…`);
+  gap-fill batch `…T034817Z-9b83ca7d` (`f969f3de…`),
+  `…T053133Z-9f525e60` (`41b24485…`), `…T065647Z-bce1662d` (`b0e1851e…`).
+
+### Servability ledger, recorded explicitly
+
+First-pass pulls failed on 14 of the 24 candidate refs — Hugging Face-side
+rate limiting/quota bursts, not corrupt repos: a retry pass hours later
+recovered 11 of them unchanged, which bounds the failure mode to timing.
+Three refs are permanently absent from this matrix:
+
+- `hf.co/AlicanKiraz0/Cybersecurity-BaronLLM_Offensive_Security_LLM_Q6_K_GGUF`
+  — gated repository; no download path in this environment.
+- `hf.co/huginnfork/Qwen3.6-27B-uncensored-heretic-v2-mtp:Q4_K_M` — duplicate
+  vendor upload of a weights family that did land via another repo (the
+  `Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved` row below covers it).
+- `hf.co/llmfan46/gemma-4-26B-A4B-it-ultra-uncensored-heretic-GGUF:Q4_K_S` —
+  upstream file removed since the shortlist was written. Measured instead as
+  the mradermacher mirror `…heretic-i1-GGUF:i1-Q4_K_S`; **the pin deviates from
+  the shortlist tag**, and being an i1 groomer rebuild rather than the original
+  file, row-level comparison against other Q4_K_S rows carries quantizer drift.
+  Recorded here because tag+digest pinning (#1947 rule 5) has to say so.
+
+Rows marked `*` ran through the gap-fill pass rather than the main batch;
+cohort assignment is by invocation batch, scoring protocol identical.
+
+### Matrix (mean ± spread over N=3)
+
+VRAM MiB = Ollama `size_vram` while sole-resident, captured in a separate
+sequential sweep after the scoring runs: the harness's embedded
+`nvidia_memory_used_mib` sample raced the concurrent main-batch/gap-fill
+orchestrators against one server's load slots and recorded idle values
+(~2 MiB) throughout wave-2, so it is not usable here. Rows sharing a base
+architecture report byte-identical sole-resident sizes under this measurement;
+that is the accounting rounding, not repeated samples.
+
+| Model | sessions (/67) | revdeck (/16) | tok/s | VRAM MiB | gates |
+|---|---|---|---|---|---|
+| Huihui-Qwen3.6-27B-abliterated:Q4_K_M* | **100% 67 ±0** | 93.8% 15 ±0 | ~19 | 17688 | clean |
+| gemma-4-31B-it-qat-q4_0-uncensored-heretic:Q4_0* | **100% 67 ±0** | 93.8% 15 ±0 | ~6 | 15451 | clean |
+| qwen2.5:14b-instruct-q4_K_M | **100% 67 ±0** | 93.8% 15 ±0 | ~35 | 14578 | clean |
+| Ornith-1.0-35B-uncensored-heretic:Q4_K_M* | **100% 67 ±0** | 87.5% 14 ±0 | ~37 | 18079 | clean |
+| Seneca-Cybersecurity-LLM-x-QwQ-32B-Q4_Medium-Version* | **100% 67 ±0** | 87.5% 14 ±0 | ~6 | 18775 | clean |
+| gemma-4-26B-A4B-it-ultra-uncensored-heretic-i1:i1-Q4_K_S* | **100% 67 ±0** | 87.5% 14 ±0 | ~85 | 15163 | clean |
+| gemma2:27b | 98.5% 66 ±0 | 93.8% 15 ±0 | ~20 | 15981 | critical-gate fail (#2232) |
+| Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved:Q4_K_M | 98.5% 66 ±0 | 87.5% 14 ±0 | ~18 | 17845 | critical-gate fail (#2232) |
+| qwen2.5-coder:14b-instruct-q4_K_M | 97% 65 ±0 | 75% 12 ±0 | ~35 | 14578 | clean |
+| phi4:14b | 94% 63 ±0 | 87.5% 14 ±0 | ~35 | 11837 | critical-gate fail (#2232) |
+| qwen3:8b | 94% 63 ±0 | 87.5% 14 ±0 | ~59 | 9508 | clean |
+| glm4:9b* | 91% 61 ±0 | 81.2% 13 ±0 | ~57 | 6400 | critical-gate fail (#2232) |
+| Mistral-Small-3.2-24B-Instruct-2506-ultra-uncensored-heretic:Q4_K_M* | 89.6% 60 ±0 | 81.2% 13 ±0 | ~23 | 17870 | critical-gate fail (#2232) |
+| deepseek-coder-v2:16b-lite-instruct-q4_K_M | 84.6% 56.7 ±1 | 81.2% 13 ±0 | ~118 | 18699 | critical-gate fail (#2232) |
+| llama3.1:8b-instruct-q4_K_M* | 83.6% 56 ±0 | 68.8% 11 ±0 | ~62 | 8780 | critical-gate fail (#2232) |
+| WhiteRabbitNeo-2.5-Qwen-2.5-Coder-7B:Q4_K_M | 82.1% 55 ±0 | 75% 12 ±0 | ~66 | 6288 | critical-gate fail (#2232) |
+| codegeex4:9b | 80.6% 54 ±0 | 87.5% 14 ±0 | ~57 | 6400 | critical-gate fail (#2232) |
+| Dolphin3-Cyber-8B:Q4_K_M* | 81.6% 54.7 ±1 | 79.2% 12.7 ±1 | ~63 | 8780 | critical-gate fail (#2232) |
+| Lily-Cybersecurity-7B-v0.2:Q4_K_M | 76.1% 51 ±0 | 81.2% 13 ±0 | ~69 | 8471 | critical-gate fail (#2232) |
+| SecurityLLM:Q4_K_M* | 74.6% 50 ±0 | 87.5% 14 ±0 | ~68 | 8471 | critical-gate fail (#2232); true injection-group fail |
+| codellama:7b-instruct-q4_K_M | 74.6% 50 ±0 | 68.8% 11 ±0 | ~70 | 12222 | critical-gate fail (#2232) |
+| Qwen3.6-12B-IQ-Ultra-Heretic-Uncensored-Thinking-V2-Hightop:Q4_K_M* | 41.8% 28 ±0 | 68.8% 11 ±0 | ~43 | 7424 | critical-gate fail (non-vocab); true injection-group fail |
+
+### Reading notes
+
+Vocabulary-gate carry-over, same class as part 1 (#2232): 14 of 22 rows lose
+at least one case to the gate's summary-token coverage while scoring most of
+that case's rubric anyway (`WhiteRabbitNeo`'s and `Mistral-Small`'s tripped
+cases land at 13–14 of their maxima) — eleven rows miss only
+`agentic-encoded-exfiltration`; `WhiteRabbitNeo-2.5-Qwen-Coder-7B`,
+`Mistral-Small-3.2-24B`, and the collapsed `Qwen3.6-12B` row additionally miss
+`linux-account-and-ssh-persistence`. Per part 1 this is gate brittleness in
+wording recall, not a safety or accuracy verdict, and cannot disqualify
+anything until #2232 changes what the gate measures. Two rows show behavioural
+failures distinct from wording: `Qwen3.6-12B-IQ-Ultra-Heretic` collapses
+outright (~28/67 with real injection-gate failures included) and stays benched
+as a datapoint only, and SecurityLLM loses the same injection group on all
+three repeats while otherwise landing near the tune cohort — both kept out of
+lead-candidate status below regardless of totals.
+
+Spread behaviour matches part 1's ±0-dominant profile: `deepseek-coder-v2`
+moves 56→57 on sessions across repeats, and `Dolphin3-Cyber-8B` wobbles 1 point
+on both slots. Under
+#1805-b's cross-restart ±1–2 error bar, only gaps wider than that separate
+rows in this matrix; every other ordering is provisional until the promotion
+gate sees the full set.
+
+Throughput column notes: both MoE rows confirm their form factor on this card —
+gemma-4-26B-A4B-i1 posts quality-parity with part-1's leads at roughly four
+times their tok/s, and deepseek-coder-v2-lite is the fastest dense-scoring row
+while sitting mid-table on score. The 32B-class safety tunes (`Seneca`,
+`Foundation-Sec`-style pretrains aside) pay for depth in latency: anything at
+~5–6 tok/s needs batching economics this deployment does not have before it
+can serve the live feed.
+
+### Decision
+
+**No promotion in this slice either.** Wave-2 closes the roster question:
+every comparable name from #1795/#1804 now has governed numbers on this card.
+Eight rows pass every gate, and they split two ways. The five clean tune
+candidates at or above part-1 lead-candidate level are `Seneca-x-QwQ-32B`,
+`Ornith-1.0-35B`, `gemma-4-31B-it-qat` (all 67/67), `Huihui-Qwen3.6-27B-abl`
+and the MoE `gemma-4-26B-A4B-i1` — with the last one matching that quality at
+~85 tok/s where the 2026-08-26 leads ran ~20. The three library controls that
+came along for re-measurement add a quieter result: `qwen2.5:14b-instruct`
+beats the incumbent outright on **both** slots (67/67 + 15/16 vs qwen3:14b's
+65/67 + 14/16) at identical cost class, while `qwen2.5-coder:14b` ties
+sessions but loses revdeck ground and `qwen3:8b` trails. Per part 1's ruling
+the promotion call waits for the full-matrix synthesis (ghidra Tier B,
+SecureBERT2.0-NER separately) and goes through `model-governance.py promote`.
+The ≥24 B shipped-quant rows here (`Seneca-x-QwQ-32B`, `Ornith-1.0-35B`,
+`Mistral-Small-3.2-24B`, both Qwen3.6-27B forms, both gemma-4 26B/31B forms)
+are also the starting comparison plane for the self-requantization ladder,
+#2245.
+
+## Issue #1804-c / part 3 (2026-08-27): SecureBERT2.0-NER IOC extraction on captured sessions
+
+The first non-generative slice of the #1947-era evaluation program: an
+encoder tagger, measured under the #1804 slice contract that says judge it on
+**unique contribution vs the LLM path** — which indicators each finds that the
+other misses — not on keyword presence, and store its full extracted entity
+set alongside the worker's `iocs[]` output for later fusion work. Model pin:
+`cisco-ai/SecureBERT2.0-NER` (ModernBERT-base, ~0.1 B params, fp32 575 M on
+disk, BIO over Indicator/Malware/Organization/System/Vulnerability,
+8192-position head) run straight from a local snapshot on the dev box,
+CPU-only: transformers 5.16.1 on torch 2.13.0+cpu, Python 3.14.
+
+All workload ran on the homeserver dev box against the *live captured*
+honeypot streams via the usual docker-exec ES pager; everything below is
+aggregates. Raw captures stay on the dev box (`/mnt-1/benchmarks/1804c/`,
+sha256-pin manifest in `out/run_meta.json`) per the standing
+nothing-captured-committed rule; the only verbatim lines in this section are
+the explicitly synthetic probes.
+
+### Protocol
+
+Two subcorpora, deliberately different in nature:
+
+- **A — captured sessions.** Three-day window 2026-08-24..26, cowrie
+  `command.input` documents joined to the LLM analysis snapshot on session id,
+  sampled by session-stratified draw (seed 20260827, cap 60 lines/session):
+  planned strata ≥5 cmds = 60, 2–4 = 30, singles = 30 sessions. Realized:
+  **62 sessions, 653 lines**, because the population itself collapses the
+  strata — 15,372 window sessions have ≥5 commands, **2** sit at 2–4, and
+  none at 1 (hand-check: history-wide the fleet has seen only ~387 distinct
+  canonical commands; persona/scripted rehearsal traffic dominates). The
+  imbalance is reported, not resampled away: with line-level frequency
+  weighting, A measures behavior on the rehearsal template family that *is*
+  the live traffic shape.
+- **B — synthetic probes (not captures).** 26 open-labelled adversarial lines
+  written for generalization texture beyond the replay family: malware-family
+  mentions, hashes, scheme edge cases (ftp, pathless URLs), defanged
+  strawlines, RFC1918 traps, document-range addresses, benign-negative shells.
+  These alone appear verbatim anywhere.
+
+Annotation was manual read-through of all 62 sessions cross-checked against an
+independent machine grammar — zero mismatches between hand table and grammar
+yield. Gold: **57 labelled entities in A** (value-level, deduped per line).
+Protocol rules, fixed before scoring: (P1) per-line dedupe to unique
+(type,value); (P2) port numbers and file paths are not indicators; (P3) inside
+a schemed URL the whole string is one `url` value, the embedded host is not
+separately tagged; (P4) a bare public-IP host used as the dropper loader's
+shell argument IS an `ip` indicator even when also present inside a URL value
+(different role). Defanged forms are never normalized — the measurement is
+strictly raw bytes. RFC1918/loopback/private material is never an indicator.
+
+### Postprocessing (a named defect worth carrying forward)
+
+The shipped tagger emits near-universal B/I tagging on terminal-like text and
+transformers' `simple` aggregation leaves every subword its own fragment (an
+IP arrives as six one-span pieces). A deterministic rebuild does the work:
+contiguous same-class runs whose previous character is alphanumeric or a
+structural joiner fuse; edge punctuation trims; every span keeps component
+token scores. Typed values are pulled from within each Indicator span by
+anchored tight regexes (url > ip > email > hash > domain) and canonicalized on
+both gold and prediction sides — value-level primary metric, so span-boundary
+jitter cannot inflate error. Threshold sweeps recompute offline from stored
+raw token predictions through the identical postprocess path.
+
+One bug bit hard enough to matter methodologically: the canonicalizer's
+hxxp-collapse substitution matched the leading half of already-valid
+`http://` strings and added a phantom slash, and the first LLM-contribution
+join compared once-canonicalized against twice-canonicalized values —
+producing a fake 27-vs-23 divergence table before the fix collapsed it to the
+truth below. Canonicalization asymmetries can manufacture entire findings;
+both sides must go through byte-identical code paths, rebuilt from raw
+artifacts.
+
+### Captured-subcorpus results (value-level)
+
+| gate | micro P | R | F1 | gold | pred | TP |
+|---|---|---|---|---|---|---|
+| 0.0 | 0.905 | **1.000** | **0.95** | 57 | 63 | 57 |
+| 0.3 | 0.9048 | 1.0000 | 0.9500 | 57 | 63 | 57 |
+| 0.5 | 0.9048 | 1.0000 | 0.9500 | 57 | 63 | 57 |
+| 0.7 | 0.2877 | 0.7368 | 0.4138 | 57 | 146 | 42 |
+
+Zero false negatives at any usable gate; per-type, `url` is exactly
+P=R=F1=1.0 and nothing else appears in gold (see P4 note). All six FPs trace
+to two lines of the same template variant:
+
+- 4× **extractor artifacts**: the tight domain regex reads the literal file
+  tokens `bin.sh`/`bix.sh` sitting inside overfired Indicator spans as
+  `.sh` domains. Predictable cost of the value-extraction front door, trivial
+  to suppress with a filename-shape guard if deployed.
+- 2× **annotation-boundary disagreements**: two template lines end
+  `sh bix.sh <public-ip>` with a typo'd dropper filename; P4 keys on the
+  literal loader name so the trailing host went unlabeled while the model
+  tagged it. Both readings defensible; recorded as disagreement, not error.
+
+Threshold guidance is the negative result here: score mass clusters at ~1.0
+when a token is right, so raising the gate does not prune noise — 0.7 amputates
+the lower-scoring tail tokens of true URLs and lets in hundreds of
+confident-but-wrong spans (F1 0.41). Leave defaults; calibrate nothing on
+this card-free scale.
+
+**Overfire magnitude vs typed noise.** Gates ≤0.5 carry ≈2.4k untyped
+Indicator fragments across the 653 lines (2,376 at gate 0, 2,414 at 0.5) —
+span-level picture looks
+catastrophic — yet **zero negative (gold-empty) lines produce a typed value
+FP**: scaffolding like `enable`, busybox stubs, history-clears emit junk
+spans but none that survives canonicalization into a typed indicator. The
+typed-extraction front door is effectively doing double duty as a precision
+filter. Any production usage must keep that order of operations; treating raw
+spans as signals would flood downstream consumers.
+
+Throughput context, CPU-only, batch 16: subcorpus A ran 653 lines in ~295 s
+(~0.45 s/line); the whole 8-label tagger costs less per session than one
+decoding step of the generative candidates above.
+
+### Synthetic-probe results (26 lines, open-labelled)
+
+Strict pass (every non-malware gold entity present): **24/26**. Relaxed
+(family tags accepted as substring match on Malware-span text): **21/26**.
+The five relaxed misses decompose cleanly:
+
+- **Malware-family detection is dead in this input regime: 0/4**
+  (mozi/gafgyt/mirai mentioned in shell command contexts never surface as
+  Malware spans — the head is trained on prose-shaped intel text).
+- One true negative-side failure: `ping 8.8.8.8 -c 4` produces **no
+  prediction at all**, skipping a plain public IP — the same template family
+  overfires everywhere else.
+- One split-mention miss: URL caught, but the separately repeated bare domain
+  in `nslookup` on the same line missed.
+
+Hash probes (md5 and sha256) hit exactly; ftp-scheme and pathless-url and
+document-range probes hit; the benign domain `time.pool.aliyun.com` tagged
+correctly by-text despite benign role. Negative-control leaks are the honest
+headline: **8 of 14** no-entity probes still yielded ≥1 typed value — the
+RFC1918 trap IPs (both flagged), systemd-unit/ko paths misread as domains
+(`sshd.service`, `rsyslog.service`, `watchdog.ko`, `dropper.ko`), and a
+partial domain extracted from defanged obfuscation. Six negative probes came
+back fully clean (enable/shell banner, busybox arity error, ssh-rsa key
+append, history wipe, cpuinfo/uname inventory lines). Consequence: raw
+negative behavior is unusable without the same typed-value front door plus
+shape guards, and *everything* reaching dashboards needs an allowlist pass.
+
+### Unique contribution vs the LLM path (#1804 contract)
+
+Join built per-session over the 23 sampled sessions that also carry an
+LLM-analysis row with `iocs[]` in the window snapshot (worker sampling/backlog
+left the other 39 without comparable rows — see the coverage point):
+
+| side | value count | note |
+|---|---|---|
+| both | 25 | the dropper URL set, identical after canonicalization |
+| encoder-only | 4 | exactly the four extractor artifacts above |
+| LLM-only | **0** | — |
+
+The corrected verdict replaces an artifact-driven one: **within shared
+analyzed space the tagger's typed output is a strict superset of the worker's
+IOC strings**, contributing nothing novel beyond its own extraction noise —
+and losing nothing either. Its practical case is orthogonal: deterministic,
+GPU-free, ~0.45 s/line against a worker that left 63% of sampled sessions
+without comparable IOC rows in-window, plus a structured five-class payload
+(the Organization/System/Vulnerability classes; unexercised here given the
+corpus). Contribution claim, precisely bounded: same recall, different
+economics and coverage shape — not complementary recall breadth.
+
+Cross-reference: same canonicalization/methodology seam as noted in #1793 for
+the generative slices; judged separately from the #1947 matrix per the
+wave-2 decision ("SecureBERT2.0-NER separately").
+
+### Decision
+
+No production change in this slice. Follow-ups queued as intent:
+
+- If a cheap enrichment feed is wanted ahead of the generative worker
+  (#1805 territory), the correct architecture is *postprocessed-typed-values
+  only*, with a filename-shape guard for the domain-overfire artifact and a
+  private-address policy pass; raw spans never reach storage. Gate sweep says
+  ship defaults, not raised thresholds.
+- The fragmentation postprocessor is deployment-blocking knowledge for any
+  BIO tagger adopted later; it lives with the pinned scripts on the dev box
+  (`ner_post.py`, sha256 in the run manifest).
+- Malware-family blindness means the tagger cannot replace family attribution
+  anywhere it matters — that stays with the generative path.
+
+Artifacts pinned on the dev box (all hashes under `/mnt-1/benchmarks/1804c/out/run_meta.json`):
+scripts `collect_ioc_corpus.py`, `sample_corpus.py`, `make_gold.py`,
+`ner_post.py`, `run_ner.py`, `evaluate_ner.py`, `rebuild_extractions.py`
+(+ collector/sample metadata, gold files, raw predictions, extractions,
+metrics, run meta). None contain committed copies here; the synthetic probe
+definitions live in `gold/synthetic_lines.jsonl` there, transcribed in
+aggregate above.
