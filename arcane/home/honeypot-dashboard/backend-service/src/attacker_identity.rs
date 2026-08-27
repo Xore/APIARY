@@ -143,7 +143,10 @@ async fn fetch_recent_events(
                     "query": {"bool": {"filter": [
                         {"range": {"@timestamp": {"gte": since_str}}},
                         {"exists": {"field": "source.ip"}}
-                    ]}},
+                    // #2145: this feed builds attacker identity entities; a
+                    // probe doc that did carry a source.ip would otherwise
+                    // merge fleet healthcheck activity into an identity.
+                    ], "must_not": [crate::es::internal_probe_exclusion()]}},
                     "_source": [
                         "@timestamp", "source.ip", "event.sensor",
                         "destination.ip", "destination.port", "network.protocol",

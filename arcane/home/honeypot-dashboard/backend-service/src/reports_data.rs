@@ -203,7 +203,14 @@ async fn event_appendix_rows(
     let body = json!({
         "size": limit,
         "sort": [{"@timestamp": {"order": "desc"}}],
-        "query": {"bool": {"filter": filters}}
+        // #2145: both the appendix rows and the summary aggregations are
+        // attacker-facing report content; a sensor-scoped report would
+        // otherwise count the sensor's own healthchecks in every section
+        // (unlike events.rs's list, reports_data had no noise exclusion).
+        "query": {"bool": {
+            "filter": filters,
+            "must_not": [crate::es::internal_probe_exclusion()]
+        }}
     });
     let result = state.es.search(body).await?;
     Ok(result["hits"]["hits"]
@@ -319,7 +326,10 @@ pub async fn report_data_for(
     let agg_body = json!({
         "size": 0,
         "track_total_hits": true,
-        "query": {"bool": {"filter": filters}},
+        "query": {"bool": {
+            "filter": filters,
+            "must_not": [crate::es::internal_probe_exclusion()]
+        }},
         "aggs": {
             "sensors": {"terms": {"field": "event.sensor", "size": 10, "order": [{"_count": "desc"}, {"_key": "asc"}]}},
             "unique_sources": {"cardinality": {"field": "source.ip"}},

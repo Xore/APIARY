@@ -164,7 +164,12 @@ async fn run_classification(state: &AppState, prefixes: &[IntelPrefix]) {
     let since = (chrono::Utc::now() - LOOKBACK).to_rfc3339();
     let body = json!({
         "size": 0,
-        "query": {"range": {"@timestamp": {"gte": since}}},
+        // #2145: the source.ip terms agg already keeps probe docs (which
+        // carry none) out of the intel loop; the term makes it explicit.
+        "query": {"bool": {
+            "filter": [{"range": {"@timestamp": {"gte": since}}}],
+            "must_not": [crate::es::internal_probe_exclusion()]
+        }},
         "aggs": {"ips": {"terms": {"field": "source.ip", "size": IP_TERMS_SIZE}}},
     });
     let response = match state.es.search(body).await {

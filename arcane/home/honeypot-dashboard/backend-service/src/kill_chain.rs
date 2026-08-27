@@ -82,7 +82,13 @@ fn bad_gateway(error: anyhow::Error) -> (StatusCode, String) {
 async fn technique_counts(state: &AppState) -> anyhow::Result<HashMap<String, u64>> {
     let body = json!({
         "size": 0,
-        "query": {"range": {"@timestamp": {"gte": WINDOW}}},
+        // #2145: conpot healthchecks arrive tagged T0886, so unfiltered
+        // the fleet's own probes would count as technique usage in both
+        // the kill-chain grid and the sankey flows.
+        "query": {"bool": {
+            "filter": [{"range": {"@timestamp": {"gte": WINDOW}}}],
+            "must_not": [crate::es::internal_probe_exclusion()]
+        }},
         "aggs": {
             "techs": {"terms": {"field": "honeypot.canonical_attck_techniques", "size": 40}}
         }
@@ -231,7 +237,13 @@ pub async fn sankey(State(state): State<AppState>) -> Result<Json<SankeyData>, (
     // grouping fallback as buildKillChainSankey.
     let body = json!({
         "size": 0,
-        "query": {"range": {"@timestamp": {"gte": WINDOW}}},
+        // #2145: conpot healthchecks arrive tagged T0886, so unfiltered
+        // the fleet's own probes would count as technique usage in both
+        // the kill-chain grid and the sankey flows.
+        "query": {"bool": {
+            "filter": [{"range": {"@timestamp": {"gte": WINDOW}}}],
+            "must_not": [crate::es::internal_probe_exclusion()]
+        }},
         "aggs": {
             "sessions": {
                 "terms": {"field": "honeypot.session", "size": GROUP_CAP},

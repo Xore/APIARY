@@ -98,7 +98,10 @@ pub async fn fusion(
             "query": {"bool": {"filter": [
                 {"range": {"@timestamp": {"gte": WINDOW}}},
                 {"terms": {*ip_field: ips}}
-            ]}},
+            // #2145: probes carry no source.ip so the member-IP terms alone
+            // already exclude them; the term keeps that guarantee explicit
+            // (and no-op for the non-honeypot signals).
+            ], "must_not": [crate::es::internal_probe_exclusion()]}},
             "aggs": {"values": {
                 "terms": {"field": *value_field, "size": 100},
                 "aggs": {"ips": {"cardinality": {"field": *ip_field}}}

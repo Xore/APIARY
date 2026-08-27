@@ -60,7 +60,13 @@ pub async fn sources(
     let size = (q.offset + q.size).min(1000);
     let body = json!({
         "size": 0,
-        "query": {"range": {"@timestamp": {"gte": "now-10d"}}},
+        // #2145: the /ips top-attacker list; probes mostly drop out via the
+        // source.ip aggs, but the exclusion makes that incidental protection
+        // explicit (and keeps the total-unique count probe-free).
+        "query": {"bool": {
+            "filter": [{"range": {"@timestamp": {"gte": "now-10d"}}}],
+            "must_not": [crate::es::internal_probe_exclusion()]
+        }},
         "aggs": {
             "unique": {"cardinality": {"field": "source.ip"}},
             "ips": {
@@ -140,7 +146,13 @@ pub struct FilterValues {
 pub async fn filter_values(State(state): State<AppState>) -> Result<Json<FilterValues>, (StatusCode, String)> {
     let body = json!({
         "size": 0,
-        "query": {"range": {"@timestamp": {"gte": "now-48h"}}},
+        // #2145: probe docs DO carry sensors/kinds/ports/protos values, so
+        // without this clause the fleet's healthchecks leak into the
+        // filter-bar vocabulary the operator browses.
+        "query": {"bool": {
+            "filter": [{"range": {"@timestamp": {"gte": "now-48h"}}}],
+            "must_not": [crate::es::internal_probe_exclusion()]
+        }},
         "aggs": {
             "sensors": {"terms": {"field": "event.sensor", "size": 60}},
             "countries": {"terms": {"field": "source.geo.country_iso_code", "size": 200}},

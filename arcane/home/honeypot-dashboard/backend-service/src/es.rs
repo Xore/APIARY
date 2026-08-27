@@ -81,6 +81,22 @@ pub fn logins_filter() -> Value {
     ], "minimum_should_match": 1}})
 }
 
+/// The ingest-time health-check probe exclusion (#1902 residue, audited in
+/// #2145): the ip-enrichment worker marks every fleet/self healthcheck
+/// event with `honeypot.internal_probe = true` (ip_enrichment/sensors.rs)
+/// and strips its `source.ip`, but the documents still land in
+/// `honeypot-v2-*` — roughly 92k/day on the audited deployment — so any
+/// honeypot-v2 aggregation built without this clause silently counts
+/// sensor liveness probes as attacker traffic. Every attacker-facing
+/// aggregation over the index must carry this term in its `must_not`;
+/// reads that exist to observe the probes themselves (source-health
+/// pages, lag/activity sampling) deliberately omit it — that asymmetry is
+/// the recorded #2145 decision to keep probes indexed rather than move
+/// them to a separate index.
+pub fn internal_probe_exclusion() -> Value {
+    serde_json::json!({"term": {"honeypot.internal_probe": true}})
+}
+
 pub struct Es {
     client: Elasticsearch,
 }
