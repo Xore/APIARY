@@ -784,6 +784,18 @@ jobs:
           - name: Docs cite moved trees by their real home (#2352)
             run: python scripts/check-doc-stale-paths.py
 
+          # #2456: vps/zeek and dev/sensing-lab build the same parser set on
+          # purpose -- the lab's measurements are only evidence for production
+          # while production runs the same parsers. A component pinned in one
+          # file but floating (or pinned to a different commit) in the other
+          # is exactly the lab/prod drift the #1821 hassh pin pattern exists
+          # to prevent; this makes it a red build instead of a silent rebuild
+          # difference. Offline and stdlib-only, so it rides the docker-less
+          # homeserver rows.
+          - name: Zeek lab/prod build pin parity (#2456)
+            home: true
+            run: python scripts/check-zeek-pin-parity.py
+
           - name: Dionaea SMB exploit-signature incidents (#622, #1775)
             home: true
             run: |
