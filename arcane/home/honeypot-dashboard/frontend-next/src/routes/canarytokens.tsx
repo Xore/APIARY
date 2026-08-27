@@ -84,6 +84,9 @@ const createToken = createServerFn({ method: 'POST' })
 
 function MintForm({ onCreated, presetType, formRef }: { onCreated: () => void; presetType?: string; formRef?: React.RefObject<HTMLDivElement | null> }) {
   const [types, setTypes] = useState<TokenType[]>([])
+  // #2178: a failed type-catalog read used to leave an empty dropdown --
+  // indistinguishable from a platform serving zero token types.
+  const [typesUnavailable, setTypesUnavailable] = useState(false)
   const [tokenType, setTokenType] = useState(presetType || 'adobe_pdf')
   const [memo, setMemo] = useState('')
   const [snippet, setSnippet] = useState('')
@@ -93,8 +96,11 @@ function MintForm({ onCreated, presetType, formRef }: { onCreated: () => void; p
 
   useEffect(() => {
     let cancelled = false
+    setTypesUnavailable(false)
     fetchTypes().then((result) => {
-      if (!cancelled && result) setTypes(result)
+      if (cancelled) return
+      if (!result) setTypesUnavailable(true)
+      else setTypes(result)
     })
     return () => {
       cancelled = true
@@ -195,6 +201,9 @@ function MintForm({ onCreated, presetType, formRef }: { onCreated: () => void; p
             onChange={(event) => setFile(event.target.files?.[0] ?? null)}
             aria-label="Image upload"
           />
+        ) : null}
+        {typesUnavailable ? (
+          <span className="note">The token-type catalog failed to load — minting needs one of its entries. Reload to retry.</span>
         ) : null}
         <button className="btn btn-secondary btn-sm" type="submit" disabled={busy || !memo.trim()}>
           {busy ? 'Minting…' : 'Mint token'}
@@ -313,13 +322,16 @@ function FiredTokens() {
             </tr>
           </thead>
           <tbody>
-            {rows === null ? (
+            {/* #2178: with the in-band error showing, the placeholder row
+                reads as an endless load -- drop it so the failure stands
+                alone instead of under an eternally-loading table. */}
+            {rows === null && !error ? (
               <tr>
                 <td colSpan={6}>
                   <span className="skeleton-line" aria-hidden="true" />
                 </td>
               </tr>
-            ) : (
+            ) : rows === null ? null : (
               rows.map((row, index) => {
                 const manageURL = pathString(row.record, 'honeypot', 'manage_url')
                 const tokenType =

@@ -5,6 +5,7 @@ import { Link, createFileRoute, useRouter } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { ErrorStateBlock } from '../components/ErrorState'
 import { useLiveInterval } from '../lib/live'
 import { formatTimestamp } from '../lib/time'
 
@@ -110,10 +111,22 @@ function SourceHealthPage() {
   const { first } = Route.useLoaderData()
   const [health, setHealth] = useState<SourceHealth | null>(null)
   const router = useRouter()
+  // #2178: every settled section of this page sits behind `health ?`,
+  // and the loader collapses failures to null -- so a failed snapshot held
+  // the page's opening skeleton forever. Track it separately: a first-load
+  // failure names itself, while a failure after good data keeps the last
+  // verdicts up (stale truth beats a blanked dashboard) with a note.
+  const [failed, setFailed] = useState(false)
   useEffect(() => {
     let cancelled = false
     first.then((result) => {
-      if (!cancelled && result) setHealth(result)
+      if (cancelled) return
+      if (!result) {
+        setFailed(true)
+        return
+      }
+      setHealth(result)
+      setFailed(false)
     })
     return () => {
       cancelled = true
@@ -149,6 +162,18 @@ function SourceHealthPage() {
           ) : undefined
         }
       />
+      {failed && !health ? (
+        <ErrorStateBlock
+          title="Pipeline health failed to load"
+          hint="The backend request failed — nothing here is cached."
+          onRetry={refresh}
+        />
+      ) : null}
+      {failed && health ? (
+        <p className="note" role="alert">
+          The latest health refresh failed — the figures below are the last ones fetched.
+        </p>
+      ) : null}
       {/* source_health.html:24-33's KPI strip. All four values were already
           on the API response; only the tiles were missing, so the page
           opened with no at-a-glance verdict at all. The two in-page

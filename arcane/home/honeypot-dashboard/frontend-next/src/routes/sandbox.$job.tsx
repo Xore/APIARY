@@ -9,21 +9,29 @@
 // see sandbox.vnc.tsx.
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ArtifactList } from '../components/ArtifactList'
 import { confirmAction } from '../components/ConfirmDialog'
 import { InvestigateHeader } from '../components/Investigate'
-import { useResolved } from '../lib/hooks'
+import { ErrorStateBlock } from '../components/ErrorState'
 import type { Json, JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
 
 type Run = JsonRecord
 
+// #2178: serviceJSON collapsed "no sandbox run has this job id" (a real
+// 404) and "the request failed" into one null, so an outage read as
+// confident absence. This union keeps the two separable; the handler
+// never rejects — same channel shape as this file's vnc/status fns.
+type RunFetch = { state: 'run'; run: Run } | { state: 'missing' } | { state: 'failed' }
+
 const fetchRun = createServerFn({ method: 'GET' })
   .inputValidator((input: { job: string }) => input)
-  .handler(async ({ data }): Promise<Run | null> => {
-    const { serviceJSON } = await import('../lib/backend.server')
-    return serviceJSON<Run>(`/api/v1/sandbox/${encodeURIComponent(data.job)}`)
+  .handler(async ({ data }): Promise<RunFetch> => {
+    const { serviceJSONResult } = await import('../lib/backend.server')
+    const result = await serviceJSONResult<Run>(`/api/v1/sandbox/${encodeURIComponent(data.job)}`)
+    if (result.ok) return { state: 'run', run: result.body }
+    return result.status === 404 ? { state: 'missing' } : { state: 'failed' }
   })
 
 // Re-analysis queues a request marker via sandbox_submit.rs, identical to
@@ -203,13 +211,41 @@ function Panel({ id, active, children }: { id: string; active: string; children:
 function SandboxDetail() {
   const { first } = Route.useLoaderData()
   const { job } = Route.useParams()
-  const resolved = useResolved(first)
+  // #2178: `resolved ?? 'missing'` made a failed fetch assert "No sandbox
+  // run found" — an outage dressed up as a clean analytical result.
+  // Tri-state now: null while loading, 'missing' only for the backend's
+  // own 404, and a named failure with retry for everything else.
+  const [fetch, setFetch] = useState<RunFetch | null>(null)
+  const [attempt, setAttempt] = useState(0)
   const [tab, setTab] = useState('verdict')
-  const run: Run | null | 'missing' = resolved === undefined ? null : resolved ?? 'missing'
+  useEffect(() => {
+    let cancelled = false
+    setFetch(null)
+    ;(attempt === 0 ? first : fetchRun({ data: { job } })).then((result) => {
+      if (!cancelled) setFetch(result)
+    })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- caller-owned loader stream
+  }, [first, attempt])
 
-  if (run === 'missing') {
+  if (fetch?.state === 'missing') {
     return <InvestigateHeader label="Evidence" title={job} subtitle="No sandbox run found for this job id." />
   }
+  if (fetch?.state === 'failed') {
+    return (
+      <>
+        <InvestigateHeader label="Evidence" title={job} subtitle="The run could not be loaded." />
+        <ErrorStateBlock
+          title="The sandbox run failed to load"
+          hint="The backend request failed — this says nothing about whether a run exists for this job id."
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
+      </>
+    )
+  }
+  const run: Run | null = fetch !== null && fetch.state === 'run' ? fetch.run : null
   const doc = run === null ? null : run
   // es_importer.rs's build_document nests the result file under "sandbox";
   // legacy documents kept the payload at top level (detail.rs's query

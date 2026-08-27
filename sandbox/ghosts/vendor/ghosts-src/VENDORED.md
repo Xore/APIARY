@@ -50,6 +50,18 @@ Not vendored: everything else in upstream's `src/` (`Ghosts.Client.Lite`,
 repo actually builds, matching #324's own original scope decision to skip
 GHOSTS' operator-facing tooling.
 
+## What's stripped at build time
+
+The vendored tree itself stays upstream-verbatim — but `ghosts-api` is not
+built from `Dockerfile-api` directly. `sandbox/ghosts/Dockerfile.api-prep`
+(#2444) copies these same sources and deletes three controller files before
+`dotnet publish` (the animations control plane, the `/animations` web UI
+and `/api/attack` — all #324-excluded operator tooling; the wrapper's own
+header explains each one). Nothing changes for this step when re-copying a
+bumped pin: the wrapper's `rm` list is by path, so an upstream
+move/rename of a listed file surfaces as a build failure to re-decide, not
+as a silently skipped strip.
+
 ## Updating the pin
 
 There's no script for this yet (a genuine gap, same as every other vendored

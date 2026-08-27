@@ -9,6 +9,9 @@ import { createServer } from "node:http";
 // instead of the page. Endpoints not named below get a generic answer
 // ({rows:[], total:0} for the store family, {} otherwise): enough for shell-
 // level smoke on the long-tail routes without fixture-maintaining all 114.
+// The bare {} tail is not silent (#2507): it logs once per unrecognized
+// path so a new page's fixture gap shows up in harness output instead of
+// passing unnoticed as empty-state coverage.
 //
 // Deliberately no auth surface: production browser traffic never talks to
 // BACKEND_URL directly, the BFF server functions do it server-side.
@@ -127,6 +130,126 @@ const sourceRow = {
   first: NOW,
   last: NOW,
 };
+
+// --- reports studio (#2507) ----------------------------------------------
+// Mirrors backend-service reports_store.rs / reports_api.rs: the template
+// catalog (report_template_catalog()), the element catalog
+// (REPORT_ELEMENT_CATALOG), one serde ReportDefinition, and one
+// GeneratedReportMeta row. Before these handlers existed the bare catch-all
+// answered {} and /reports exercised only its empty/error render paths --
+// the exact fixture gap that shipped #2480's DefinitionsCard crash past
+// every pre-#2480 sweep (they timed out before reaching the route).
+
+// [id, name, description, title, window, elements, kind] -- kind "" is the
+// generic renderer; sandbox/payload/ghidra name the artifact-referenced one.
+const reportTemplates = [
+  ["executive", "Executive report", "Management-ready summary of the observation window: headline metrics, assessment, findings, and recommendations.", "Honeypot Executive Security Report", "24h", ["cover", "metrics", "assessment", "findings", "recommendations", "top_sources", "top_countries", "parameters"], ""],
+  ["security", "Full security report", "Complete defensive picture: every metric, ranking, operational alert, and a bounded evidence appendix.", "Honeypot Security Operations Report", "24h", ["cover", "metrics", "assessment", "findings", "recommendations", "top_sensors", "top_sources", "top_signatures", "top_asns", "top_countries", "top_ports", "operational_alerts", "event_appendix", "parameters"], ""],
+  ["threat", "Threat landscape", "Who and what is attacking: signatures, autonomous systems, countries, and targeted ports over a longer window.", "Honeypot Threat Landscape Report", "7d", ["cover", "metrics", "top_signatures", "top_asns", "top_countries", "top_ports", "findings", "parameters"], ""],
+  ["incident", "Incident investigation", "Scoped deep-dive for one IP, session, network, or signature with operational alerts and an extended event appendix.", "Honeypot Incident Investigation Report", "24h", ["cover", "metrics", "assessment", "findings", "recommendations", "operational_alerts", "event_appendix", "parameters"], ""],
+  ["sensors", "Sensor and collection health", "Collection coverage and operational state: sensor volumes plus open operational alerts.", "Honeypot Sensor and Collection Health Report", "24h", ["cover", "metrics", "top_sensors", "operational_alerts", "parameters"], ""],
+  ["sandbox", "Sandbox analysis", "Dynamic-analysis report for one sandbox job: assessment, process / socket / network evidence, and ATT&CK mapping.", "Sandbox Dynamic Analysis Report", "", [], "sandbox"],
+  ["payload", "Payload analysis", "Static/dynamic analysis report for one captured payload: classification, IOCs, YARA, sandbox runs, and any GitHub-analysis verdict.", "Payload Analysis Report", "", [], "payload"],
+  ["ghidra", "Ghidra static analysis", "Headless-decompilation report for one captured payload: functions, strings, imports, capa capabilities, FLOSS-deobfuscated strings, fuzzy hashes, and structural (lief) info.", "Ghidra Static Analysis Report", "", [], "ghidra"],
+  ["custom", "Custom report", "Blank canvas: pick every element, the scope, the theme, and the branding yourself.", "Honeypot Custom Report", "", ["cover", "metrics", "parameters"], ""],
+].map(([id, name, description, title, window, elements, kind]) => ({
+  id,
+  name,
+  description,
+  title,
+  theme: "dark",
+  window,
+  elements,
+  sandbox: kind === "sandbox",
+  payload: kind === "payload",
+  ghidra: kind === "ghidra",
+}));
+
+// [id, label, description] -- report_pdf.rs's ELEMENT_* literals.
+const reportElements = [
+  ["cover", "Cover", "Title, scope, author, observed window, and classification line"],
+  ["metrics", "Metric grid", "Headline counts: events, sources, alerts, logins, payloads, sessions, risk rating"],
+  ["assessment", "Assessment", "Deterministic triage score explanation and rating"],
+  ["findings", "Key findings", "Derived findings from the matching telemetry"],
+  ["recommendations", "Recommended actions", "Derived defensive next steps"],
+  ["top_sensors", "Top sensors", "Sensor volume ranking"],
+  ["top_sources", "Top source addresses", "Source IP volume ranking"],
+  ["top_signatures", "Top alert signatures", "IDS / honeypot signature ranking"],
+  ["top_asns", "Top autonomous systems", "ASN / organization ranking"],
+  ["top_countries", "Top countries", "Country ranking (contextual GeoIP lead only)"],
+  ["top_ports", "Top destination ports", "Targeted port ranking"],
+  ["operational_alerts", "Operational alerts", "Dashboard operational alert state matching the scope"],
+  ["event_appendix", "Event appendix", "Representative newest matching event records (bounded)"],
+  ["parameters", "Parameters and limitations", "Applied filters, data source, and evidentiary limitations"],
+].map(([id, label, description]) => ({ id, label, description }));
+
+const reportDefinition = {
+  id: "def-e2e-1",
+  name: "Daily executive digest",
+  template: "executive",
+  theme: "dark",
+  branding: {
+    title: "APIARY Executive Security Report",
+    author: "e2e",
+    header_left: "APIARY",
+    header_right: "browser-e2e deployment",
+    footer_left: "hermetic fixture",
+    classification: "UNCLASSIFIED // e2e",
+  },
+  scope: {
+    window: "24h",
+    ip: "",
+    network: "",
+    sensor: "",
+    port: "",
+    signature: "",
+    country: "",
+    asn: "",
+    text: "",
+    type: "",
+    session: "",
+    job: "",
+    hash: "",
+  },
+  elements: ["cover", "metrics", "parameters"],
+  appendix_limit: 200,
+  schedule: { enabled: true, frequency: "daily", hour: 6, minute: 0, weekday: 0, month_day: 1, last_run_at: NOW, next_run_at: NOW },
+  created: NOW,
+  updated: NOW,
+};
+
+// GeneratedReportMeta -- what the generated-reports grid's columns read.
+const generatedReport = {
+  id: "rep-e2e-1",
+  definition_id: "def-e2e-1",
+  name: "daily-executive-digest",
+  template: "executive",
+  theme: "dark",
+  title: "APIARY Executive Security Report",
+  size_bytes: 153_600,
+  created_at: NOW,
+  origin: "manual",
+};
+
+// gpu_queue.rs's GpuJob list -- a real array ({} here used to be a wrong
+// shape, not just an empty one: the loader hands it to an array-typed card).
+const gpuJob = {
+  job_id: "gpu-e2e-1",
+  job_type: "ghidra",
+  ref: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  model: "qwen3:14b",
+  estimated_vram_mib: 20480,
+  status: "queued",
+  requested_at: NOW,
+  started_at: "",
+  finished_at: "",
+  abort_requested: false,
+  error: "",
+  attempts: 0,
+};
+
+/** Paths that already answered the bare {} catch-all -- logged once each. */
+const catchAllWarned = new Set();
 
 /** Minimal handler table; keys are matched by startsWith after the query
  *  string is split off, first match wins, then the catch-all. */
@@ -251,6 +374,90 @@ function route(pathname) {
     return [{ token_type: "http", label: "HTTP", description: "web token", requires_upload: false, supports_snippet: false }];
   }
   if (pathname === "/api/v1/canarytokens") return { tokens: [] };
+  if (pathname === "/api/v1/reports/templates") {
+    // Reports studio wizard catalog (#2507): the template gallery and the
+    // element picker both render straight off this response.
+    return { templates: reportTemplates, elements: reportElements };
+  }
+  if (pathname === "/api/v1/reports/definitions") {
+    // The Library's saved-definitions table; a body without its documented
+    // array once crashed this page (#2480), so the shape is load-bearing.
+    return { definitions: [reportDefinition] };
+  }
+  if (pathname.startsWith("/api/v1/store/generated-reports")) {
+    // Specific leg ahead of the generic store catch-all so the
+    // generated-reports grid exercises a real GeneratedReportMeta row.
+    return { total: 1, rows: [generatedReport] };
+  }
+  if (pathname === "/api/v1/gpu-queue") {
+    // gpu_queue.rs::list returns a bare array; /payload-workbench/results
+    // loads it into an array-typed card on mount.
+    return [gpuJob];
+  }
+  if (pathname === "/api/v1/ml-anomalies/stats") {
+    // detail.rs::ml_anomaly_stats -- the Open (all time) tile's backlog.
+    return { total: 34, open: 9 };
+  }
+  if (pathname.startsWith("/api/v1/charts/kill-chain-sankey")) {
+    // The four chart payloads below are what /kill-chain and /ml-anomalies
+    // fetch on mount through the /api/chart/{name} BFF proxy (#2507); the
+    // catch-all's {} used to drop every one into EChart's empty/error state.
+    // Same {nodes, links} envelope as the topology flow graph.
+    return {
+      nodes: [
+        { name: "Recon" },
+        { name: "Initial Access" },
+        { name: "Execution" },
+        { name: "Persistence" },
+        { name: "Lateral Movement" },
+        { name: "Impact" },
+      ],
+      links: [
+        { source: "Recon", target: "Initial Access" },
+        { source: "Initial Access", target: "Execution" },
+        { source: "Execution", target: "Persistence" },
+        { source: "Execution", target: "Lateral Movement" },
+        { source: "Lateral Movement", target: "Impact" },
+      ],
+    };
+  }
+  if (pathname.startsWith("/api/v1/charts/attck-coverage")) {
+    // Heatmap cell grid: {tactic_idx, technique_idx, count} triples.
+    return {
+      tactics: ["Recon", "Execution", "Persistence"],
+      techniques: ["T1595", "T1059", "T1505"],
+      cells: [
+        { tactic_idx: 0, technique_idx: 0, count: 40 },
+        { tactic_idx: 1, technique_idx: 1, count: 12 },
+        { tactic_idx: 2, technique_idx: 2, count: 3 },
+      ],
+    };
+  }
+  if (pathname.startsWith("/api/v1/charts/campaign-timeline")) {
+    // Per-CIDR Gantt rows; the client encodes [index, start_ms, end_ms, score].
+    const startMs = Date.parse("2026-08-26T10:00:00Z");
+    return [
+      { cidr: "203.0.113.0/24", start_ms: startMs, end_ms: startMs + 3_600_000, score: 42, events: 190 },
+      { cidr: "198.51.100.0/24", start_ms: startMs + 1_800_000, end_ms: startMs + 7_200_000, score: 17, events: 64 },
+    ];
+  }
+  if (pathname.startsWith("/api/v1/charts/ml-anomaly-scores")) {
+    // Scatter series: [{name, points:[{time, value}]}].
+    return [
+      {
+        name: "203.0.113.7",
+        points: [
+          { time: "2026-08-26T10:00:00Z", value: 0.62 },
+          { time: "2026-08-26T11:00:00Z", value: 0.81 },
+        ],
+      },
+    ];
+  }
+  if (pathname.startsWith("/api/v1/preferences")) {
+    // preferences.rs::get envelope -- {preferences, revision}. The root
+    // route's appearance reconcile reads preferences.theme/palette off it.
+    return { preferences: { theme: "dark", palette: "claude" }, revision: 1 };
+  }
   if (pathname === "/api/v1/alerts") {
     return { total: 1, offset: 0, rows: [{ id: "alert-1", time: NOW, sensor: "citrix", signature: "test alert", severity: "high", record: {} }], fingerprint_ips: null };
   }
@@ -289,6 +496,14 @@ function route(pathname) {
   if (pathname === "/api/v1/ml-anomalies/acks") return {};
   if (pathname.startsWith("/api/v1/store/")) return { rows: [], total: 0 };
   if (pathname === "/api/v1/search") return { results: [] };
+  // #2507: an unrecognized /api/v1/* path used to answer {} invisibly, so
+  // every new page silently inherited fallback coverage and its smoke test
+  // verified little more than the skeleton. Say so, once per path, so a
+  // fixture gap is visible in harness output instead of silent.
+  if (!catchAllWarned.has(pathname)) {
+    catchAllWarned.add(pathname);
+    console.error(`[fake-backend] ${pathname} answered the bare {} catch-all`);
+  }
   return {};
 }
 

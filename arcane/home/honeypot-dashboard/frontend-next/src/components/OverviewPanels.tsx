@@ -4,6 +4,7 @@
 // drill-down (#471), and the leaflet attack map.
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useRef, useState } from 'react'
+import { ErrorStateBlock } from './ErrorState'
 
 export type Kv = { key: string; count: number; link: string }
 
@@ -13,22 +14,32 @@ export function Tbl({
   half,
   hint,
   id,
+  failed,
 }: {
   title: string
   rows: Kv[] | null
   half?: boolean
   hint?: string
   id?: string
+  failed?: boolean
 }) {
   return (
     <div className={half ? 'card half' : 'card'} id={id}>
       <h2>{title}</h2>
       {rows === null ? (
-        <>
-          <span className="skeleton-line" aria-hidden="true" />
-          <span className="skeleton-line" aria-hidden="true" />
-          <span className="skeleton-line" aria-hidden="true" />
-        </>
+        failed ? (
+          /* #2178: null both starts and ends the skeleton here; a failed
+             dashboard slice must not pose as one still loading forever. */
+          <p className="empty" role="alert">
+            Load failed — the backend request didn’t answer.
+          </p>
+        ) : (
+          <>
+            <span className="skeleton-line" aria-hidden="true" />
+            <span className="skeleton-line" aria-hidden="true" />
+            <span className="skeleton-line" aria-hidden="true" />
+          </>
+        )
       ) : rows.length === 0 ? (
         <p className="empty">{hint ?? 'No data in this window.'}</p>
       ) : (
@@ -57,8 +68,16 @@ export function Tbl({
 
 export type HeatRow = { sensor: string; cells: { label: string; count: number; pct: number }[] }
 
-export function Heatmap({ rows }: { rows: HeatRow[] | null }) {
-  if (rows === null) return <div className="skeleton" style={{ height: 90 }} aria-hidden="true" />
+export function Heatmap({ rows, failed }: { rows: HeatRow[] | null; failed?: boolean }) {
+  if (rows === null)
+    return failed ? (
+      // #2178: a dead /overview/dashboard read held this block forever.
+      <p className="empty" role="alert">
+        Load failed — the backend request didn’t answer.
+      </p>
+    ) : (
+      <div className="skeleton" style={{ height: 90 }} aria-hidden="true" />
+    )
   if (rows.length === 0) return <p className="empty">No events in the last 24 hours.</p>
   return (
     <>
@@ -117,20 +136,30 @@ export function AttackVectors({
   onSensorChange: (sensor: string) => void
 }) {
   const [vectors, setVectors] = useState<Vectors | null>(null)
+  // #2178: a failed drill-down used to hold its skeleton line forever --
+  // null result and "still fetching" were the same value to the old render.
+  // Hand-rolled rather than useServerQuery because an empty sensor pick
+  // must not fire a request at all.
+  const [failed, setFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
   useEffect(() => {
-    if (!sensor) {
-      setVectors(null)
-      return
-    }
     let cancelled = false
     setVectors(null)
-    fetchVectors({ data: { sensor } }).then((result) => {
-      if (!cancelled) setVectors(result)
-    })
+    setFailed(false)
+    if (!sensor) return
+    fetchVectors({ data: { sensor } })
+      .then((result) => {
+        if (cancelled) return
+        if (result === null || result === undefined) setFailed(true)
+        else setVectors(result)
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true)
+      })
     return () => {
       cancelled = true
     }
-  }, [sensor])
+  }, [sensor, attempt])
   const options = sensors.filter((name) => name !== 'suricata' && name !== 'portbridge')
   return (
     <>
@@ -149,7 +178,14 @@ export function AttackVectors({
           </button>
         ) : null}
       </div>
-      {sensor && vectors === null ? <span className="skeleton-line" aria-hidden="true" /> : null}
+      {sensor && vectors === null && !failed ? <span className="skeleton-line" aria-hidden="true" /> : null}
+      {failed ? (
+        <ErrorStateBlock
+          title="Attack-vector drill-down failed to load"
+          hint="The backend request failed."
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
+      ) : null}
       {vectors ? (
         <div className="hp-duo">
           {(
@@ -205,7 +241,7 @@ export type MapPoint = { city: string; country: string; lat: number; lon: number
 // ground radius was never the right unit for it.
 const MARKER_RADIUS_PX = 6
 
-export function AttackMap({ points }: { points: MapPoint[] | null }) {
+export function AttackMap({ points, failed }: { points: MapPoint[] | null; failed?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<import('leaflet').Map | null>(null)
   // Torn down alongside the map itself; the ResizeObserver outlives the
@@ -293,7 +329,16 @@ export function AttackMap({ points }: { points: MapPoint[] | null }) {
     }
   }, [points])
 
-  if (points === null) return <div className="skeleton" style={{ height: 320 }} aria-hidden="true" />
+  if (points === null)
+    return failed ? (
+      // #2178: same lie as the heatmap -- an outage rendered as a forever
+      // half-built map.
+      <p className="empty" role="alert">
+        Load failed — the backend request didn’t answer.
+      </p>
+    ) : (
+      <div className="skeleton" style={{ height: 320 }} aria-hidden="true" />
+    )
   if (points.length === 0) return <p className="empty">No geolocated sources in this window.</p>
   return (
     <div className="map-shell">

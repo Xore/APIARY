@@ -5,6 +5,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react'
+import { ErrorStateBlock } from '../components/ErrorState'
 import { FiltersButton, FiltersModal } from '../components/FiltersModal'
 import { SkeletonRows } from '../components/Investigate'
 import { RowActions, RowIcons } from '../components/RowActions'
@@ -426,10 +427,23 @@ function Events() {
     }
   }, [live, livePaused, flushLiveBuffer])
 
+  // #2178: a failed first page settled as null and the table rode its
+  // opening ghosts forever — during exactly the outage when an operator is
+  // most likely to come looking. `failed` names the state; retry re-fetches
+  // page zero through the ordinary paging fn, since the streamed loader
+  // promise cannot be re-run. The live tail needs no guard change: its
+  // flush already refuses to prepend into null rows.
+  const [failed, setFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     let cancelled = false
-    first.then((page) => {
-      if (cancelled || !page) return
+    setFailed(false)
+    ;(attempt === 0 ? first : fetchEvents({ data: { offset: 0, filters: search } })).then((page) => {
+      if (cancelled) return
+      if (!page) {
+        setFailed(true)
+        return
+      }
       setRows(page.rows)
       setTotal(page.total)
       setFingerprintIps(page.fingerprint_ips)
@@ -437,7 +451,8 @@ function Events() {
     return () => {
       cancelled = true
     }
-  }, [first])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- caller-owned loader stream; search read at retry time only
+  }, [first, attempt])
 
   // Outside-click closes the record pane (per Xore) — clicks inside the
   // pane or the list are handled by their own logic.
@@ -628,8 +643,9 @@ function Events() {
                 {keyedRows === null ? (
                   /* Ghosts mirror the six real columns (#1967): time short,
                      sensor short, source ip long, port short, detail long,
-                     actions stub. */
-                  <SkeletonRows count={12} cols={6} wide={[2, 4]} stub={[5]} />
+                     actions stub. Suppressed while failed — a failure keeps
+                     promising data otherwise (#2178); the alert below speaks. */
+                  failed ? null : <SkeletonRows count={12} cols={6} wide={[2, 4]} stub={[5]} />
                 ) : (
                   keyedRows.map(({ row, key, breakLabel }) => (
                     <FragmentRow
@@ -671,6 +687,15 @@ function Events() {
                   </button>
                 </div>
               </div>
+            ) : null}
+            {rows === null && failed ? (
+              /* #2178: the load failure itself — named here, beside the same
+                 table whose emptiness it would otherwise have imitated. */
+              <ErrorStateBlock
+                title="Events failed to load"
+                hint="The backend request failed — this says nothing about whether events exist in the window."
+                onRetry={() => setAttempt((n) => n + 1)}
+              />
             ) : null}
             {rows !== null && rows.length < total ? (
               <div className="hp-lazy-controls" aria-live="polite">

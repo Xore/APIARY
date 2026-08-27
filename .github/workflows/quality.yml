@@ -757,8 +757,12 @@ jobs:
       - uses: actions/checkout@v7
       - name: theme.css matches the pinned commit
         run: scripts/check-vendored-theme.sh
+      # python3, not python: this job has no setup-python step, so on the
+      # self-hosted lane it runs on the runner's own PATH and the homeserver
+      # runner ships no bare `python` -- `python branding/...` died with
+      # exit 127 there (#2461) while the vendored sheet itself was fine.
       - name: Portable APIARY tokens match Xore/theme
-        run: python branding/scripts/check_theme_sync.py
+        run: python3 branding/scripts/check_theme_sync.py
       # Canvas surfaces resolve tokens to pixels and carry dark-theme
       # fallbacks, so a rename upstream degrades silently instead of failing.
       # #1825 renamed eight tokens and 31 call sites kept rendering, wrong.
@@ -779,8 +783,10 @@ jobs:
       - uses: actions/checkout@v7
       - name: theme.css matches the pinned commit
         run: scripts/check-vendored-theme.sh
+      # Same python3 choice as the self-hosted twin above: one spelling
+      # across both lanes, valid on the runner's own PATH either way.
       - name: Portable APIARY tokens match Xore/theme
-        run: python branding/scripts/check_theme_sync.py
+        run: python3 branding/scripts/check_theme_sync.py
       - name: Frontend theme tokens all exist
         run: scripts/check-theme-tokens.sh
       - name: Theme catalogue matches theme.css
@@ -899,6 +905,18 @@ jobs:
             home: true
             run: python scripts/check-compose-env-docs.py
 
+          # #2320: every WORKER_LOOPS consumer boots through the same
+          # apiary-backend entrypoint whose gate (#2183) refuses an empty
+          # SERVICE_TOKEN unless APIARY_ALLOW_UNAUTH_DEV=1 -- both arrive as
+          # per-container env, so a loop tier forwarding only the token half
+          # crash-looped on the dev-tier deployment (#2320) while its serving
+          # siblings booted. Mechanical form of checking every consumer
+          # against the gate's inputs: if backend ever grows a third gating
+          # variable, AUTH_VARS in the script and this gate move together.
+          - name: WORKER_LOOPS consumers carry the apiary-backend auth pair (#2320)
+            home: true
+            run: python scripts/check-backend-boot-contract.py
+
           # #2352: #1502 moved the YARA scanner under
           # honeypot-payload-analysis/analysis/yara/ and updated the checker
           # script, but the surrounding prose never got the same pass -- six
@@ -909,6 +927,18 @@ jobs:
           # that also names its real home (or carries an inline waiver).
           - name: Docs cite moved trees by their real home (#2352)
             run: python scripts/check-doc-stale-paths.py
+
+          # #2456: vps/zeek and dev/sensing-lab build the same parser set on
+          # purpose -- the lab's measurements are only evidence for production
+          # while production runs the same parsers. A component pinned in one
+          # file but floating (or pinned to a different commit) in the other
+          # is exactly the lab/prod drift the #1821 hassh pin pattern exists
+          # to prevent; this makes it a red build instead of a silent rebuild
+          # difference. Offline and stdlib-only, so it rides the docker-less
+          # homeserver rows.
+          - name: Zeek lab/prod build pin parity (#2456)
+            home: true
+            run: python scripts/check-zeek-pin-parity.py
 
           - name: Dionaea SMB exploit-signature incidents (#622, #1775)
             home: true
@@ -989,6 +1019,7 @@ jobs:
               python sandbox/cape/worker/tests/test_cape_worker.py
 
           - name: Real-data session probe metadata honesty (#2387)
+            home: true
             run: |
               # contracts is stubbed, so /app, pydantic, ES, docker and Ollama
               # stay out of CI. Pins both halves of the metadata honesty fix:
@@ -997,6 +1028,11 @@ jobs:
               # auth_success=False / duration=0.0 under an EXACT-prompt claim),
               # and sessions whose evidence missed the lookback window are
               # reported and skipped instead of being prompted with defaults.
+              # Also drives the extracted stage-0 jq program (#2426) against
+              # committed fixtures -- latest-close-wins, string-duration
+              # coercion, failed-only auth, empty second-response gap -- on
+              # plain jq; skips itself gracefully where jq is absent so this
+              # row stays homeserver-first per #2389 without dropping coverage.
               python analysis/ghidra/benchmarks/tests/test_probe_real_session.py
 
           - name: Statictools lief contract (#2072)

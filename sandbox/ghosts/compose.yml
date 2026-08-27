@@ -47,6 +47,21 @@
 # to match -- the same "one fixed, documented address" pattern as RevDeck's
 # REVDECK_API_BASE=http://10.8.0.2:19500.
 #
+# #2444: ghosts-api's route surface is image-prepped by this repo's
+# Dockerfile.api-prep (see the build context below): the animations control
+# plane and the /api/attack scenario tooling -- upstream operator tooling
+# our #324 scope decision excludes, which #2444 additionally showed an
+# unauthenticated guest could drive (scheduled server-side GETs to any
+# caller-supplied URL, ATT&CK-table wipe-and-reload) -- are deleted before
+# dotnet publish, so the running API never serves them at all. What
+# legitimately remains on 10.20.30.1:5000 is the client
+# enrollment/check-in plane, and network-filter.sh additionally
+# source-pins tcp/5000 on virbr-ghosts to the enrolled clients (#2444 /
+# #2257's step 1), so non-pinned guests fail closed at the firewall even
+# for the routes that do exist. Admitting a new client is a two-place
+# change by design: a static <host mac=... ip=.../> entry in network.xml
+# and its address in network-filter.sh's GHOSTS_API_CLIENTS, together.
+#
 # #1502: migrated into arcane/home/ghosts/ for Arcane directory-aware Git
 # sync (kept its previous sandbox/ghosts/ path's contents together as-is --
 # already self-contained, and the build context is a remote git URL, not a
@@ -81,9 +96,12 @@ services:
       - no-new-privileges:true
 
   ghosts-api:
+    # Built through this repo's image-prep wrapper rather than upstream's
+    # verbatim Dockerfile-api (#2444): same vendored sources, untouched,
+    # minus the out-of-scope/unreachable-by-design controller surfaces.
     build:
-      context: ./vendor/ghosts-src
-      dockerfile: Dockerfile-api
+      context: .
+      dockerfile: Dockerfile.api-prep
     depends_on:
       ghosts-postgres:
         condition: service_healthy

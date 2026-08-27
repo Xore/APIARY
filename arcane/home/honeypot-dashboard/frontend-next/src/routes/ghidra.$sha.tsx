@@ -5,14 +5,14 @@
 // table), Deep dive (types, globals, annotations, memory map, chat threads,
 // symbol recovery), plus a Raw tab keeping the full analysis record and the
 // report artifacts the port already exposed.
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { InvestigateHeader } from '../components/Investigate'
+import { ErrorStateBlock } from '../components/ErrorState'
 import { ArtifactList } from '../components/ArtifactList'
 import { GhidraCallGraph } from '../components/GhidraCallGraph'
 import { confirmAction } from '../components/ConfirmDialog'
-import { useResolved } from '../lib/hooks'
 import { formatTimestamp } from '../lib/time'
 import { type JsonRecord } from '../lib/json'
 
@@ -155,11 +155,19 @@ type GhidraDoc = {
   revdeck_recovery?: { index?: unknown; symbols?: unknown } | null
 }
 
+// #2178: serviceJSON collapsed "no analysis exists for this hash" (a real
+// 404) and "the request failed" into one null, so an outage read as
+// confident absence. This union keeps the two separable; the handler
+// never rejects.
+type RunFetch = { state: 'run'; run: Run } | { state: 'missing' } | { state: 'failed' }
+
 const fetchRun = createServerFn({ method: 'GET' })
   .inputValidator((input: { sha: string }) => input)
-  .handler(async ({ data }): Promise<Run | null> => {
-    const { serviceJSON } = await import('../lib/backend.server')
-    return serviceJSON<Run>(`/api/v1/ghidra/${encodeURIComponent(data.sha)}`)
+  .handler(async ({ data }): Promise<RunFetch> => {
+    const { serviceJSONResult } = await import('../lib/backend.server')
+    const result = await serviceJSONResult<Run>(`/api/v1/ghidra/${encodeURIComponent(data.sha)}`)
+    if (result.ok) return { state: 'run', run: result.body }
+    return result.status === 404 ? { state: 'missing' } : { state: 'failed' }
   })
 
 type SubmitResult = { ok: boolean; error?: string }
@@ -1053,14 +1061,42 @@ function DeepDivePanel({ g, correlation }: { g: GhidraDoc; correlation: IocCorre
 function GhidraDetail() {
   const { first } = Route.useLoaderData()
   const { sha } = Route.useParams()
-  const resolved = useResolved(first)
-  const run: Run | null | 'missing' = resolved === undefined ? null : resolved ?? 'missing'
+  // #2178: `resolved ?? 'missing'` made a failed fetch assert "No Ghidra
+  // analysis found" — an outage dressed up as evidence. Tri-state now:
+  // null while loading, 'missing' only for the backend's own 404, and a
+  // named failure with retry for everything else.
+  const [fetch, setFetch] = useState<RunFetch | null>(null)
+  const [attempt, setAttempt] = useState(0)
   const [tab, setTab] = useState('overview')
   const [queued, setQueued] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    setFetch(null)
+    ;(attempt === 0 ? first : fetchRun({ data: { sha } })).then((result) => {
+      if (!cancelled) setFetch(result)
+    })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- caller-owned loader stream
+  }, [first, attempt])
 
-  if (run === 'missing') {
+  if (fetch?.state === 'missing') {
     return <InvestigateHeader label="Evidence" title={sha.slice(0, 24)} subtitle="No Ghidra analysis found for this hash." />
   }
+  if (fetch?.state === 'failed') {
+    return (
+      <>
+        <InvestigateHeader label="Evidence" title={sha.slice(0, 24)} subtitle="The analysis could not be loaded." />
+        <ErrorStateBlock
+          title="The Ghidra analysis failed to load"
+          hint="The backend request failed — this says nothing about whether an analysis exists for this hash."
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
+      </>
+    )
+  }
+  const run: Run | null = fetch !== null && fetch.state === 'run' ? fetch.run : null
   const doc = run === null ? null : run
   const g: GhidraDoc = doc ? ((doc.ghidra ?? {}) as GhidraDoc) : {}
   const failed = doc !== null && g.exit_status === 'error'

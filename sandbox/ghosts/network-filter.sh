@@ -59,6 +59,28 @@
 #      off, and incidentally also closes off any host-bound service
 #      listening on 0.0.0.0 that isn't meant to be reachable from here.
 #
+#   4. Source-pinning the API socket itself (#2257 step 1 / #2444 AC#1).
+#      The ACCEPT in GHOSTS-FWD was originally unqualified by source: every
+#      guest libvirt hands out from the bridge's dynamic DHCP range
+#      (.10-.99, the WAN-detonation population #325/#331 exist to receive)
+#      could reach ghosts-api at all. Ghosts.Api serves its entire upstream
+#      management plane there -- including POST /api/animations/workflows,
+#      which schedules an in-container recurring GET to any caller-supplied
+#      URL (#2444), and POST /api/attack/import. The accept is now pinned to
+#      the enrolled clients listed below (today exactly one: the static MAC
+#      host entry in network.xml, win11-ghosts at 10.20.30.50), followed by
+#      an explicit drop for everything else bound for the API backend so a
+#      non-pinned guest fails closed immediately instead of depending on the
+#      rule ordering into the RFC1918 drops. To admit a NEW client later:
+#      add another static <host mac=... ip=.../> entry in network.xml AND its
+#      address below -- one fixed documented pair per client, same pattern as
+#      RevDeck's REVDECK_API_BASE; don't open the dynamic range back up.
+#      Ephemeral verification flows are exempt by construction rather than
+#      widening these lists: verify-client-enrollment.sh grants its own
+#      throwaway lease a scoped rule for the duration of its run and removes
+#      it again on exit, so the standing policy never grows an exception no
+#      one remembers.
+#
 # Idempotent the same way forensic-egress-network.sh's nft table is: flush
 # and repopulate the custom chains rather than trying to detect and skip
 # individual duplicate rules. The FORWARD/INPUT/DOCKER-USER jumps are each
@@ -83,6 +105,11 @@ IN_CHAIN=GHOSTS-IN
 # the published 10.20.30.1 address the guest actually connects to.
 GHOSTS_API_BACKEND=10.90.0.2/32
 GHOSTS_API_PORT=5000
+# The enrolled ghosts clients allowed to reach the API socket above (#2444,
+# see the "(4)" note in the header for how this list is maintained). Must
+# stay in lockstep with the static <host .../> entries in network.xml -- the
+# only enrolled client today is win11-ghosts at its pinned address.
+GHOSTS_API_CLIENTS=("10.20.30.50/32")
 # Not RFC1918 -- IANA benchmarking space (RFC 2544) -- so it needs its own
 # DROP line; the sandbox/network.xml Linux runner's forensic-egress proxy
 # lives here (198.18.0.1) and must stay unreachable from this guest too.
@@ -92,7 +119,14 @@ RFC1918=(10.0.0.0/8 172.16.0.0/12 192.168.0.0/16)
 apply() {
   iptables -N "$FWD_CHAIN" 2>/dev/null || true
   iptables -F "$FWD_CHAIN"
-  iptables -A "$FWD_CHAIN" -d "$GHOSTS_API_BACKEND" -p tcp --dport "$GHOSTS_API_PORT" -j ACCEPT
+  for client in "${GHOSTS_API_CLIENTS[@]}"; do
+    iptables -A "$FWD_CHAIN" -s "$client" -d "$GHOSTS_API_BACKEND" -p tcp --dport "$GHOSTS_API_PORT" -j ACCEPT
+  done
+  # Fail closed for any other source bound for the API socket, right here,
+  # instead of letting an unpinned guest's packet walk on (it would only hit
+  # the 10.0.0.0/8 DROP further down, but depending on that ordering hides
+  # what actually guards this surface).
+  iptables -A "$FWD_CHAIN" -d "$GHOSTS_API_BACKEND" -p tcp --dport "$GHOSTS_API_PORT" -j DROP
   iptables -A "$FWD_CHAIN" -d "$FORENSIC_EGRESS_NET" -j DROP
   for net in "${RFC1918[@]}"; do
     iptables -A "$FWD_CHAIN" -d "$net" -j DROP
@@ -148,8 +182,12 @@ verify() {
   }
   check "iptables -C FORWARD -i $BRIDGE -j $FWD_CHAIN" \
     "FORWARD jumps to $FWD_CHAIN for $BRIDGE"
-  check "iptables -C $FWD_CHAIN -d $GHOSTS_API_BACKEND -p tcp --dport $GHOSTS_API_PORT -j ACCEPT" \
-    "$FWD_CHAIN accepts the post-DNAT GHOSTS API backend ($GHOSTS_API_BACKEND:$GHOSTS_API_PORT)"
+  for client in "${GHOSTS_API_CLIENTS[@]}"; do
+    check "iptables -C $FWD_CHAIN -s $client -d $GHOSTS_API_BACKEND -p tcp --dport $GHOSTS_API_PORT -j ACCEPT" \
+      "$FWD_CHAIN accepts enrolled client $client for the API backend ($GHOSTS_API_BACKEND:$GHOSTS_API_PORT)"
+  done
+  check "iptables -C $FWD_CHAIN -d $GHOSTS_API_BACKEND -p tcp --dport $GHOSTS_API_PORT -j DROP" \
+    "$FWD_CHAIN drops the API backend for every non-enrolled source (fail closed, #2444)"
   check "iptables -C $FWD_CHAIN -d $FORENSIC_EGRESS_NET -j DROP" \
     "$FWD_CHAIN drops the forensic-egress net ($FORENSIC_EGRESS_NET)"
   for net in "${RFC1918[@]}"; do
@@ -166,11 +204,20 @@ verify() {
   check "iptables -C DOCKER-USER -o $BRIDGE -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT" \
     "DOCKER-USER accepts the established return leg for $BRIDGE"
 
-  # Ordering matters: the ACCEPT exception has to precede the RFC1918 DROP
-  # that would otherwise also match 10.90.0.2 (it's inside 10.0.0.0/8).
-  local accept_line drop_line
-  accept_line=$(iptables -L "$FWD_CHAIN" -n --line-numbers | awk -v ip="${GHOSTS_API_BACKEND%/*}" '$0 ~ ip {print $1; exit}')
+  # Ordering matters twice over: the enrolled-client ACCEPTs have to precede
+  # both the fail-closed API-backend DROP that would otherwise match the
+  # same socket, and the RFC1918 DROP that would otherwise also match
+  # 10.90.0.2 (it's inside 10.0.0.0/8).
+  local accept_line api_drop_line drop_line
+  accept_line=$(iptables -L "$FWD_CHAIN" -n --line-numbers | awk -v ip="${GHOSTS_API_BACKEND%/*}" '$0 ~ ip && /ACCEPT/ {print $1; exit}')
+  api_drop_line=$(iptables -L "$FWD_CHAIN" -n --line-numbers | awk -v ip="${GHOSTS_API_BACKEND%/*}" -v pt="$GHOSTS_API_PORT" '$0 ~ ip && /DROP/ && $0 ~ pt {print $1; exit}')
   drop_line=$(iptables -L "$FWD_CHAIN" -n --line-numbers | awk '$0 ~ /10\.0\.0\.0\/8/ {print $1; exit}')
+  if [[ -n $accept_line && -n $api_drop_line && $accept_line -lt $api_drop_line ]]; then
+    echo "PASS: the enrolled-client ACCEPT precedes the fail-closed API-backend DROP"
+  else
+    echo "FAIL: the enrolled-client ACCEPT does not precede the fail-closed API-backend DROP"
+    ok=0
+  fi
   if [[ -n $accept_line && -n $drop_line && $accept_line -lt $drop_line ]]; then
     echo "PASS: the API backend exception precedes the 10.0.0.0/8 DROP"
   else

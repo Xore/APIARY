@@ -1,0 +1,44 @@
+name: CI queue watch
+
+# Scheduled sentinel for #2499's "multi-hour head-of-line blocks page
+# instead of silently parking green PRs" option. 2026-08-27 the whole
+# quality pipeline queued for hours with nothing running (54 runs parked
+# while ~5 jobs were in flight); the people waiting found out by polling.
+# This sweep turns that observable into a labeled tracking issue, and
+# closes it with recovery evidence when the queue drains again.
+#
+# Cron beats long-lived watchers here: a stuck queue cannot starve the
+# alarm into existence the way it starves everything else, because a
+# scheduled dispatch only needs one scheduling slot every 15 minutes —
+# and during the exact degradation it watches, even a late sweep still
+# fires (runs stay queued), which is the point.
+#
+# Deliberately NOT part of quality.yml: an in-pipeline alarm would wait
+# behind the very router dependency that stalls. Runs the repo's own
+# scripts/ci-queue-watch.py so the detection logic is inspectable and
+# dry-runnable outside Actions (--dry-run validated against live queue
+# state for #2499: 18 runs parked beyond 60m detected mid-stall).
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  issues: write
+
+concurrency:
+  group: ci-queue-watch
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Sweep for runs parked in the queue beyond the stall threshold
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci-queue-watch.py

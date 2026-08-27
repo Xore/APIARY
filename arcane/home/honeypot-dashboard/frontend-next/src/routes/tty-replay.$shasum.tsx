@@ -22,8 +22,8 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
+import { ErrorStateBlock } from '../components/ErrorState'
 import { Tabs, TabPanel } from '../components/Tabs'
-import { useResolved } from '../lib/hooks'
 import { formatTimestamp } from '../lib/time'
 import { cssVar } from '../lib/cssVar'
 import { useAppearanceKey } from '../lib/prefs'
@@ -101,32 +101,60 @@ type IpProfile = {
   events: ProfileEvent[]
 }
 
+// #2178: serviceJSON collapsed "no recording has this id" (a real 404)
+// and "the request failed" into one null, so an outage read as "No
+// recording found for this id." — a confident negative about evidence.
+// Tri-state now; the handler never rejects.
+type ReplayFetch = { state: 'replay'; replay: Replay } | { state: 'missing' } | { state: 'failed' }
+
 const fetchReplay = createServerFn({ method: 'GET' })
   .inputValidator((input: { shasum: string }) => input)
-  .handler(async ({ data }): Promise<Replay | null> => {
-    const { serviceJSON } = await import('../lib/backend.server')
-    return serviceJSON<Replay>(`/api/v1/recordings/${encodeURIComponent(data.shasum)}`)
+  .handler(async ({ data }): Promise<ReplayFetch> => {
+    const { serviceJSONResult } = await import('../lib/backend.server')
+    const result = await serviceJSONResult<Replay>(`/api/v1/recordings/${encodeURIComponent(data.shasum)}`)
+    if (result.ok) return { state: 'replay', replay: result.body }
+    return result.status === 404 ? { state: 'missing' } : { state: 'failed' }
   })
 
 /** The recording's source IP, recovered the same way /recordings joins
  * attribution: the cowrie.log.closed event whose honeypot.shasum is this
  * recording's shasum (events.rs:99-102). since=365d — the 10d events
- * default would lose attribution for older recordings. */
+ * default would lose attribution for older recordings.
+ *
+ * #2178: this used to return plain string, where '' meant BOTH "no indexed
+ * event references this recording anymore" AND "the attribution query
+ * itself failed" — an outage collapsed into confident absence about
+ * evidence. Tri-state now; never rejects. */
+type SourceIpFetch = { state: 'ip'; ip: string } | { state: 'none' } | { state: 'failed' }
+
 const fetchSourceIp = createServerFn({ method: 'GET' })
   .inputValidator((input: { shasum: string }) => input)
-  .handler(async ({ data }): Promise<string> => {
-    const { serviceJSON } = await import('../lib/backend.server')
-    const page = await serviceJSON<{ rows: { src_ip: string }[] }>(
+  .handler(async ({ data }): Promise<SourceIpFetch> => {
+    const { serviceJSONResult } = await import('../lib/backend.server')
+    const result = await serviceJSONResult<{ rows?: { src_ip: string }[] }>(
       `/api/v1/events?kind=cowrie.log.closed&shasum=${encodeURIComponent(data.shasum)}&size=1&since=365d`,
     )
-    return page?.rows?.[0]?.src_ip ?? ''
+    if (!result.ok) {
+      // A 404 from the events search reads as "nothing matched"; every
+      // other failure means the pipeline itself is down.
+      return result.status === 404 ? { state: 'none' } : { state: 'failed' }
+    }
+    const ip = result.body.rows?.[0]?.src_ip ?? ''
+    return ip ? { state: 'ip', ip } : { state: 'none' }
   })
+
+// #2178: null here also overloaded "the operator profile genuinely isn't
+// there" (404) with "the profile request failed". Tri-state like the rest
+// of this file; never rejects.
+type ProfileFetch = { state: 'profile'; profile: IpProfile } | { state: 'absent' } | { state: 'failed' }
 
 const fetchProfile = createServerFn({ method: 'GET' })
   .inputValidator((input: { ip: string }) => input)
-  .handler(async ({ data }): Promise<IpProfile | null> => {
-    const { serviceJSON } = await import('../lib/backend.server')
-    return serviceJSON<IpProfile>(`/api/v1/investigate/ip/${encodeURIComponent(data.ip)}`)
+  .handler(async ({ data }): Promise<ProfileFetch> => {
+    const { serviceJSONResult } = await import('../lib/backend.server')
+    const result = await serviceJSONResult<IpProfile>(`/api/v1/investigate/ip/${encodeURIComponent(data.ip)}`)
+    if (result.ok) return { state: 'profile', profile: result.body }
+    return result.status === 404 ? { state: 'absent' } : { state: 'failed' }
   })
 
 export const Route = createFileRoute('/tty-replay/$shasum')({
@@ -379,30 +407,59 @@ function MiniTable({ title, rows, linkTo }: { title: string; rows: Kv[]; linkTo?
 // single-point Leaflet map and payload-observation KPI aren't in
 // /api/v1/investigate/ip's profile; everything else is.
 function AttackerTab({ shasum }: { shasum: string }) {
-  const [state, setState] = useState<'loading' | 'none' | { ip: string; profile: IpProfile | null }>('loading')
+  // #2178: three distinct dead ends — the attribution query failing, the
+  // recording genuinely unreferenced by any indexed event, and the profile
+  // request failing after a good ip — all landed in the same "No indexed
+  // event still references this recording's source IP" paragraph, so an
+  // outage asserted nothing was known. Each state now speaks for itself.
+  const [state, setState] = useState<
+    'loading' | 'none' | 'failed' | { ip: string; profile: IpProfile | null }
+  >('loading')
+  const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     let cancelled = false
+    setState('loading')
     ;(async () => {
       try {
-        const ip = await fetchSourceIp({ data: { shasum } })
+        const source = await fetchSourceIp({ data: { shasum } })
         if (cancelled) return
-        if (!ip) {
+        if (source.state === 'failed') {
+          setState('failed')
+          return
+        }
+        if (source.state === 'none') {
           setState('none')
           return
         }
-        const profile = await fetchProfile({ data: { ip } })
-        if (!cancelled) setState({ ip, profile })
+        const profile = await fetchProfile({ data: { ip: source.ip } })
+        if (!cancelled) {
+          if (profile.state === 'failed') setState('failed')
+          else if (profile.state === 'absent') setState({ ip: source.ip, profile: null })
+          else setState({ ip: source.ip, profile: profile.profile })
+        }
       } catch {
-        if (!cancelled) setState('none')
+        // Handlers don't reject by construction; this backstop maps any
+        // surprise to "unknown", not to "no attacker context exists".
+        if (!cancelled) setState('failed')
       }
     })()
     return () => {
       cancelled = true
     }
-  }, [shasum])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-runs on attempt bump only
+  }, [shasum, attempt])
 
   if (state === 'loading') return <span className="skeleton-line" aria-hidden="true" />
-  if (state === 'none' || !state.profile) {
+  if (state === 'failed') {
+    return (
+      <ErrorStateBlock
+        title="Attacker context failed to load"
+        hint="The backend request failed — this says nothing about whether attacker context exists for this recording."
+        onRetry={() => setAttempt((n) => n + 1)}
+      />
+    )
+  }
+  if (state === 'none') {
     return (
       <p className="empty">
         No indexed event still references this recording's source IP — either it aged out of the events window, or the
@@ -416,6 +473,21 @@ function AttackerTab({ shasum }: { shasum: string }) {
   }
 
   const { ip, profile } = state
+  if (!profile) {
+    // #2178 split from the catch-all above: we KNOW the source ip; only
+    // its profile is unavailable — so name the ip instead of implying the
+    // whole trail vanished.
+    return (
+      <p className="empty">
+        This recording's source IP is <code>{ip}</code>, but its indexed attacker profile isn't available right now —
+        open{' '}
+        <a className="lnk" href={`/investigate/ip/${encodeURIComponent(ip)}`}>
+          its profile page
+        </a>{' '}
+        directly.
+      </p>
+    )
+  }
   return (
     <>
       <div className="overview-header">
@@ -492,13 +564,42 @@ function AttackerTab({ shasum }: { shasum: string }) {
 function TtyReplay() {
   const { first } = Route.useLoaderData()
   const { shasum } = Route.useParams()
-  const resolved = useResolved(first)
-  const replay: Replay | null | 'missing' = resolved === undefined ? null : resolved ?? 'missing'
+  // #2178: `resolved ?? 'missing'` made a failed fetch assert "No
+  // recording found for this id." — an outage dressed as absence of
+  // evidence. Tri-state now: null while loading, 'missing' only for the
+  // backend's own 404, 'failed' named with a retry.
+  const [fetch, setFetch] = useState<ReplayFetch | null>(null)
+  const [attempt, setAttempt] = useState(0)
   const [tab, setTab] = useState('playback')
+  useEffect(() => {
+    let cancelled = false
+    setFetch(null)
+    ;(attempt === 0 ? first : fetchReplay({ data: { shasum } })).then((result) => {
+      if (!cancelled) setFetch(result)
+    })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- caller-owned loader stream
+  }, [first, attempt])
 
-  if (replay === 'missing') {
+  if (fetch?.state === 'missing') {
     return <InvestigateHeader label="Attacker behavior" title={shasum} subtitle="No recording found for this id." />
   }
+  if (fetch?.state === 'failed') {
+    return (
+      <>
+        <InvestigateHeader label="Attacker behavior" title={shasum} subtitle="The recording could not be loaded." />
+        <ErrorStateBlock
+          title="This recording failed to load"
+          hint="The backend request failed — this says nothing about whether a recording exists for this id."
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
+      </>
+    )
+  }
+
+  const replay: Replay | null = fetch !== null && fetch.state === 'replay' ? fetch.replay : null
 
   return (
     <>

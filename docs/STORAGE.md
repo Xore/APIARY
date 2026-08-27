@@ -45,7 +45,7 @@ flowchart TB
 
 | Path | Writer(s) | Reader(s) | Notes |
 |---|---|---|---|
-| `logs/<sensor>/*.json` | sensor containers | Filebeat; enrichment worker (5 sensors) | ownership per runtime UID, provisioned by `honeypot-init`'s mkdir/chown matrix |
+| `logs/<sensor>/*.json` | sensor containers | Filebeat; enrichment worker (its watched sensors — roster in [PIPELINES.md](PIPELINES.md#1a-write-path-sensor-log--index)) | ownership per runtime UID, provisioned by `honeypot-init`'s mkdir/chown matrix |
 | `logs/enriched/` | backend-worker-enrichment | Filebeat (tailed instead of raw for those sensors) | Arcane provisions this dir `994:979` at deploy time; consumers carry matching `group_add` |
 | `logs/cowrie/downloads`, `logs/cowrie/tty` | cowrie | payload-dedupe, YARA, inventory worker, es_importer, dashboard | the shared payload handoff point; recursive chown matters here (#107's war story) |
 | `logs/suricata/pcap/` | VPS suricata (over SSHFS) | pcap-sync → Arkime | sync skips the newest file; SSHFS writes don't raise inotify events, so Arkime gets local close-write instead |

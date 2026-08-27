@@ -1,0 +1,12 @@
+[
+  {
+    "session_id": "ddeeaa0404",
+    "commands": ["ls -la /tmp"],
+    "last_seen": "2026-08-26T15:00:03+00:00",
+    "first_seen": null,
+    "auth_success": null,
+    "closed": false,
+    "duration_seconds": null,
+    "metadata_gaps": ["no login-outcome or session-close evidence for this session inside the lookback window"]
+  }
+]

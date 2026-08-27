@@ -10,9 +10,10 @@
 # ── Spools ───────────────────────────────────────────────────────────────────
 # The dashboard writes {sha256}.request into the request directory and reads
 # {sha256}_cape.json back out of the results directory. docker-compose.yml
-# will mount both into the dashboard container as /cape-requests and
-# /cape-results once #319 lands; these are the host paths, which is what the
-# worker needs.
+# mounts both into the dashboard container as /cape-requests and
+# /cape-results -- landed with #319 (2026-08-08) and surviving the
+# Rust/TanStack cutover (#1628) unchanged; these are the host paths, which
+# is what the worker needs.
 CAPE_REQUEST_DIR=/var/lib/honeypot-cape/requests/pending
 CAPE_RESULTS_DIR=/var/lib/honeypot-cape/results
 

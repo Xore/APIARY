@@ -10,6 +10,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useMemo, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { ErrorStateBlock } from '../components/ErrorState'
 import { when } from '../components/StoreList'
 import { getSessionUser } from '../lib/auth'
 
@@ -362,19 +363,34 @@ function Page() {
   const [generation, setGeneration] = useState(0)
   const [data, setData] = useState<CredentialsResponse | null>(null)
   const [tokens, setTokens] = useState<TokenRecord[]>([])
+  // #2178: a failed credential-store read used to leave the table's opening
+  // ghosts up forever -- the null result was identical to "still loading".
+  const [failed, setFailed] = useState(false)
 
   const refresh = async () => {
+    setFailed(false)
     const result = await fetchCredentials()
+    if (!result) {
+      setFailed(true)
+      return
+    }
     setData(result)
   }
 
   useEffect(() => {
     let cancelled = false
+    setData(null)
+    setFailed(false)
     fetchCredentials().then((result) => {
-      if (!cancelled) setData(result)
+      if (cancelled) return
+      if (!result) {
+        setFailed(true)
+        return
+      }
+      setData(result)
     })
     fetchLinkableTokens().then((result) => {
-      if (!cancelled) setTokens(result)
+      if (!cancelled) setTokens(result ?? [])
     })
     return () => {
       cancelled = true
@@ -393,7 +409,13 @@ function Page() {
         chips={data?.available ? <span className="chip">{data.credentials.length.toLocaleString('en-US')} credentials</span> : undefined}
       />
       <ProvisionForm onCreated={() => setGeneration((current) => current + 1)} />
-      {data === null ? (
+      {data === null && failed ? (
+        <ErrorStateBlock
+          title="Credential store failed to load"
+          hint="The backend request failed — provisioned bait itself is untouched; this page just can't list it right now."
+          onRetry={() => setGeneration((current) => current + 1)}
+        />
+      ) : data === null ? (
         <MasterDetailTable rows={null} columns={columns} rowKey={(row) => row.id} inspectorTitle="Credential details" />
       ) : !data.available ? (
         <div className="card wide">

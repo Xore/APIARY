@@ -10,8 +10,9 @@
 // visible error card, matching dashboard/ui/revdeck.html's own alert.
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
+import { useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
-import { useResolved } from '../lib/hooks'
+import { ErrorStateBlock } from '../components/ErrorState'
 
 type Citation = { kind: string; raw: string; value: string; valid: boolean }
 
@@ -32,11 +33,19 @@ type RevdeckRun = {
   revdeck: RevDeckAnalysis | null
 }
 
+// #2178: serviceJSON collapsed "no RevDeck analysis exists for this hash"
+// (a real 404) and "the request failed" into one null, so an outage read
+// as confident absence. This union keeps the two separable; the handler
+// never rejects.
+type RunFetch = { state: 'run'; run: RevdeckRun } | { state: 'missing' } | { state: 'failed' }
+
 const fetchRun = createServerFn({ method: 'GET' })
   .inputValidator((input: { sha: string }) => input)
-  .handler(async ({ data }): Promise<RevdeckRun | null> => {
-    const { serviceJSON } = await import('../lib/backend.server')
-    return serviceJSON<RevdeckRun>(`/api/v1/revdeck/${encodeURIComponent(data.sha)}`)
+  .handler(async ({ data }): Promise<RunFetch> => {
+    const { serviceJSONResult } = await import('../lib/backend.server')
+    const result = await serviceJSONResult<RevdeckRun>(`/api/v1/revdeck/${encodeURIComponent(data.sha)}`)
+    if (result.ok) return { state: 'run', run: result.body }
+    return result.status === 404 ? { state: 'missing' } : { state: 'failed' }
   })
 
 export const Route = createFileRoute('/revdeck/$sha')({
@@ -136,12 +145,41 @@ function RevDeckCard({ analysis }: { analysis: RevDeckAnalysis | null }) {
 function RevdeckDetail() {
   const { first } = Route.useLoaderData()
   const { sha } = Route.useParams()
-  const resolved = useResolved(first)
-  const run: RevdeckRun | null | 'missing' = resolved === undefined ? null : resolved ?? 'missing'
+  // #2178: `resolved ?? 'missing'` made a failed fetch assert "No RevDeck
+  // analysis found" — an outage dressed up as evidence. Tri-state now:
+  // null while loading, 'missing' only for the backend's own 404, and a
+  // named failure with retry for everything else.
+  const [fetch, setFetch] = useState<RunFetch | null>(null)
+  const [attempt, setAttempt] = useState(0)
+  useEffect(() => {
+    let cancelled = false
+    setFetch(null)
+    ;(attempt === 0 ? first : fetchRun({ data: { sha } })).then((result) => {
+      if (!cancelled) setFetch(result)
+    })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- caller-owned loader stream
+  }, [first, attempt])
 
-  if (run === 'missing') {
+  if (fetch?.state === 'missing') {
     return <InvestigateHeader label="Evidence" title={sha.slice(0, 24)} subtitle="No RevDeck analysis found for this hash." />
   }
+  if (fetch?.state === 'failed') {
+    return (
+      <>
+        <InvestigateHeader label="Evidence" title={sha.slice(0, 24)} subtitle="The analysis could not be loaded." />
+        <ErrorStateBlock
+          title="The RevDeck analysis failed to load"
+          hint="The backend request failed — this says nothing about whether an analysis exists for this hash."
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
+      </>
+    )
+  }
+  const run: RevdeckRun | null = fetch !== null && fetch.state === 'run' ? fetch.run : null
+
   const failed = run !== null && run.exit_status === 'error'
 
   return (
