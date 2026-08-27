@@ -21,10 +21,18 @@
 # #1876: that path is no longer the only one. #1509 added a Traefik route
 # for the bare/www/static hosts, which reaches HellPot through socat rather
 # than portbridge -- so portbridge writes no record for those connections
-# and the via_port join misses permanently. xff_trust_patch.py covers that
-# path using the same trust rule galah's own patch established for the same
-# situation (#1511): X-Forwarded-For only from the tunnel peer, last hop
-# only. It must run after router_patch.py, whose output it matches on.
+# and the via_port join misses permanently. No header can fill that gap,
+# because anything Traefik adds an attacker can send too: the #1511-era
+# rule that trusted X-Forwarded-For from the tunnel peer was removed along
+# that line (#1885 -> #1891, where the same indistinguishability was
+# proven live against galah). xff_trust_patch.py therefore records rather
+# than decides: REMOTE_ADDR keeps the true TCP peer, the raw header is
+# logged alongside it as XFF, and since #1908 a second listener on
+# HELLPOT_PROXIED_PORT gives the socat path a door of its own, so the
+# arrival port in each log line says which way in. ip-enrichment-worker
+# adjudicates -- portbridge's record on the raw path, the forwarded chain
+# on the proxied one. It must run after router_patch.py, whose output it
+# matches on.
 FROM golang:1.23@sha256:60deed95d3888cc5e4d9ff8a10c54e5edc008c6ae3fba6187be6fb592e19e8c0 AS build
 RUN apt-get update && apt-get install -y --no-install-recommends python3 git \
  && rm -rf /var/lib/apt/lists/*

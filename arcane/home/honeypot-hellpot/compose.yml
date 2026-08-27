@@ -6,16 +6,20 @@
 # Scope decisions made integrating this sensor (see PR description for the
 # full writeup):
 #
-# - Raw-port/portbridge-only, no Traefik hostname: upstream's own
-#   getRealRemote() trusts a client-settable X-Real-IP header with zero
-#   validation of which hop set it -- confirmed live that a direct request
-#   carrying its own X-Real-IP header spoofs REMOTE_ADDR outright.
-#   hellpot/router_patch.py removes that trust entirely and switches to
-#   RemoteAddr() (keeps the port), so this stack resolves the real
-#   attacker IP the same trusted way as every other non-PROXY-protocol
-#   sensor here: ip-enrichment-worker's via_port join against portbridge's
-#   own connection log (ip-enrichment-worker/hellpot.go), never request
-#   content.
+# - The sensor never resolves source identity from request content:
+#   upstream's own getRealRemote() trusts a client-settable X-Real-IP
+#   header with zero validation of which hop set it -- confirmed live that
+#   a direct request carrying its own X-Real-IP header spoofs REMOTE_ADDR
+#   outright. hellpot/router_patch.py removes that trust entirely and
+#   switches to RemoteAddr() (keeps the port). On the raw portbridge path
+#   that makes the real attacker IP resolvable the same trusted way as
+#   every other non-PROXY-protocol sensor here: ip-enrichment-worker's
+#   via_port join against portbridge's own connection log
+#   (ip-enrichment-worker/hellpot.go). The Traefik route (#1509) has no
+#   portbridge record, so since #1908 it arrives through socat-hp-hellpot
+#   on the second door published below instead, and the worker resolves
+#   that path from the forwarded chain -- xff_trust_patch.py records both
+#   facts per line and decides nothing.
 # - No cap_drop/cap_add: port 8080 isn't privileged, unlike beelzebub's
 #   LDAP/389.
 

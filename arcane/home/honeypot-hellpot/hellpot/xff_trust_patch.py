@@ -3,19 +3,27 @@
 
 The first version of this patch resolved X-Forwarded-For inside
 getRealRemote(), trusting it whenever RemoteAddr was the tunnel peer --
-the rule galah's xff_trust_patch.py uses (#1511). That rule is safe for
-galah and unsafe here, and the difference is the deployment:
+the rule galah's xff_trust_patch.py used under #1511. The reasoning that
+called that rule "safe for galah" did not survive contact with the
+deployment, and #1891 disproved it live:
 
-  * galah's raw port is source-preserving, so on that path RemoteAddr is
-    the attacker. "RemoteAddr is the tunnel peer" therefore means "this
-    came through Traefik", and trusting the header follows.
+  * galah's raw port is a plain portbridge relay (tcp:8889:10.8.0.2:8888,
+    no `:pp`), so RemoteAddr is the tunnel peer on *both* of galah's
+    paths -- not the attacker, as this docstring once claimed. An
+    attacker-supplied `X-Forwarded-For: 198.51.100.77` was logged
+    verbatim as srcIP, which is exactly what #1891 is.
 
-  * HellPot's portbridge path is *not* source-preserving -- that is the
-    entire reason enrichHellpotLine joins on the port of a tunnel-peer
-    RemoteAddr. So here RemoteAddr is the tunnel peer on *both* paths, the
-    condition cannot tell them apart, and trusting the header on the
-    portbridge path lets an attacker set their own source by sending one.
-    That is precisely the spoofing #1419 removed.
+  * Galah's sensor-side rule was therefore removed outright (#1891):
+    upstream is left alone, commonFields() keeps logging RemoteAddr plus
+    every request header, and ip-enrichment-worker's enrich_galah_line
+    adjudicates. Only this stack got the split-port variant below
+    (#1908), because HellPot's portbridge path leans on the via_port
+    join -- enrichHellpotLine resolving on the port of a tunnel-peer
+    RemoteAddr -- which a bare header log cannot serve. So here too
+    RemoteAddr is the tunnel peer on *both* paths, the condition cannot
+    tell them apart, and trusting the header on the portbridge path lets
+    an attacker set their own source by sending one. That is precisely
+    the spoofing #1419 removed.
 
 No header can tell the paths apart, because anything Traefik adds an
 attacker can also send. What separates them is something outside the
