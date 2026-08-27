@@ -9,10 +9,10 @@
 
 # ── Spools ───────────────────────────────────────────────────────────────────
 # The dashboard writes {sha256}.request into the request directory and reads
-# {sha256}_cape.json back out of the results directory. docker-compose.yml
-# will mount both into the dashboard container as /cape-requests and
-# /cape-results once #319 lands; these are the host paths, which is what the
-# worker needs.
+# {sha256}_cape.json back out of the results directory. The dashboard's
+# compose.yml (arcane/home/honeypot-dashboard, #319 landed) mounts both
+# into the container as /cape-requests and /cape-results; these are the
+# host paths, which is what the worker needs.
 CAPE_REQUEST_DIR=/var/lib/honeypot-cape/requests/pending
 CAPE_RESULTS_DIR=/var/lib/honeypot-cape/results
 
