@@ -74,6 +74,10 @@ cleanup() {
   [ -n "${bff_pid}" ] && kill "${bff_pid}" >/dev/null 2>&1 || true
   docker rm -f "${redis}" "${kc}" "${pg}" >/dev/null 2>&1 || true
   docker network rm "${network}" >/dev/null 2>&1 || true
+  if [ "${DEBUG_KEEP:-0}" = "1" ]; then
+    printf '(DEBUG_KEEP=1: kept %s and %s)\n' "${flow_dir:-}" "${state_dir:-}" >&2
+    return 0
+  fi
   rm -rf "${flow_dir:-}" "${rendered_realm:-}" "${state_dir:-}"
 }
 trap cleanup EXIT
@@ -272,6 +276,70 @@ complete_totp_enrollment() {
 # NOTE for temporary-password accounts: they reach HERE having replaced the
 # temp credential (drive step 2 below passes the password they were given;
 # the chain calls them back out to replace it -- handled inside the loop).
+# Advance one auth chain without blind-following (-L) so a login-completing
+# /auth/callback?code=... redirect is DETECTED rather than dissolved into the
+# app shell's HTML. Sets _chain_cb to the callback location exactly when
+# authentication finished (empty otherwise) -- via global, never stdout: this
+# runs inside $() callers, where echoing the final page body would be
+# indistinguishable from the callback it replaces. Last body lands in
+# chain-last.html, NUL-stripped on load by callers (some KC/nitro hops smuggle
+# stray \0 into otherwise-plain HTML).
+follow_auth_chain() {
+  local __jar="$1" __url="$2"; shift 2
+  local __hdr __hop __loc
+  # Payload flags ride here as an array: visible size keeps them on
+  # hop 1 only (cleared right below), and expansion stays word-safe.
+  local __args=("$@")
+  __hdr=$(mktemp)
+  rm -f "${flow_dir}/chain-last.html"
+  _chain_cb=""
+  for __hop in 1 2 3 4 5 6 7 8; do
+    # $@ rides hop 1 ONLY: replaying --data-urlencode payloads onto subsequent
+    # redirect targets would turn their GETs into spurious POSTs.
+    if [ "${#__args[@]}" -gt 0 ]; then
+      # DEBUG_TRACE captures the wire-level bytes of payload-bearing hops
+      # (test-only literal credentials; files stay inside flow_dir).
+      if [ "${DEBUG_TRACE:-0}" = "1" ]; then
+        curl -s --trace-ascii "${flow_dir}/post-trace-${__hop}.txt" \
+          -c "${__jar}" -b "${__jar}" -D "${__hdr}" -o "${flow_dir}/chain-body.raw" "${__args[@]}" "${__url}"
+      else
+        curl -s -c "${__jar}" -b "${__jar}" -D "${__hdr}" -o "${flow_dir}/chain-body.raw" "${__args[@]}" "${__url}"
+      fi
+      __args=()
+    else
+      curl -s -c "${__jar}" -b "${__jar}" -D "${__hdr}" -o "${flow_dir}/chain-body.raw" "${__url}"
+    fi
+    if [ "${DEBUG_TRACE:-0}" = "1" ]; then
+      # Post-mortem hop log: request target (origin only), payload KEYS
+      # never values, and the response status/location of this hop.
+      {
+        printf 'hop %s %s\n' "${__hop}" "${__url}"
+        for __a in "${__args[@]}"; do
+          case "${__a}" in --data-urlencode*=*) printf 'payload key: %s\n' "${__a#--data-urlencode}" ;; esac
+        done
+        grep -iE "^(HTTP/|location:)" "${__hdr}" | tr -d '\r'
+      } >> "${flow_dir}/chain-trace.log"
+    fi
+    __loc=$(grep -i '^location:' "${__hdr}" | tail -1 | sed 's/^[Ll]ocation: //' | tr -d '\r')
+    # Snapshot every hop's body (NUL-stripped): callers read
+    # chain-last.html for form scraping, however the loop ends --
+    # including the plain 200-page exit via break below.
+    tr -d '\000' < "${flow_dir}/chain-body.raw" > "${flow_dir}/chain-last.html"
+    case "${__loc}" in
+      "") break ;;
+      "${app_base}/auth/callback"?*)
+        rm -f "${__hdr}"
+        # Reported through this global -- never stdout: callers would read a
+        # login-page body here otherwise and mistake it for the callback.
+        _chain_cb="${__loc}"
+        return 0 ;;
+      *) __url="${__loc}" ;;
+    esac
+  done
+  rm -f "${__hdr}"
+  return 0
+}
+
 dashboard_login_flow() {
   local jar="$1" username="$2" password="$3" step page form_action otp_action sel_cred
   local cb_url="#none"
@@ -279,11 +347,25 @@ dashboard_login_flow() {
   # state. Everything downstream just fills Keycloak's forms.
   local auth_location
   auth_location=$(curl -s -c "${jar}" -D - -o /dev/null "${app_base}/auth/login" | grep -i '^location:' | sed 's/^[Ll]ocation: //' | tr -d '\r')
-  page=$(curl -s -c "${jar}" -b "${jar}" "${auth_location}")
+  follow_auth_chain "${jar}" "${auth_location}"
+  [ -n "${_chain_cb}" ] && { echo "${_chain_cb}"; return 0; }
+  page=$(tr -d '\000' < "${flow_dir}/chain-last.html")
   form_action=$(echo "${page}" | grep -o 'action="[^"]*"' | head -1 | sed 's/action="//;s/"$//' | sed 's/&amp;/\&/g')
-  page=$(curl -sL -c "${jar}" -b "${jar}" --data-urlencode "username=${username}" --data-urlencode "password=${password}" --data-urlencode "credentialId=" "${form_action}")
+  if [ -z "${form_action}" ]; then
+    printf '    (no login form rendered where the authorize chain ended -- %s, see DEBUG_KEEP captures)\n' "${username}" >&2
+    return 1
+  fi
+  follow_auth_chain "${jar}" "${form_action}" \
+    --data-urlencode "username=${username}" \
+    --data-urlencode "password=${password}" \
+    --data-urlencode "credentialId="
+  [ -n "${_chain_cb}" ] && { echo "${_chain_cb}"; return 0; }
+  page=$(tr -d '\000' < "${flow_dir}/chain-last.html")
 
   for step in 1 2 3 4 5 6; do
+    if [ "${DEBUG_KEEP:-0}" = "1" ]; then
+      printf '%s' "${page}" > "${flow_dir}/step-${username}-${step}.html"
+    fi
     # OTP challenge present? (login-otp.ftl names its field "otp" and carries
     # hidden selectedCredentialId -- omit it and every correct code fails.)
     otp_action=$(echo "${page}" | grep -o 'action="[^"]*"' | head -1 | sed 's/action="//;s/"$//' | sed 's/&amp;/\&/g')
@@ -305,7 +387,18 @@ dashboard_login_flow() {
         return 1
       fi
       if [ -n "${_totp_enroll_callback}" ]; then
-        page=$(curl -sL -c "${jar}" -b "${jar}" "${_totp_enroll_callback}")
+        case "${_totp_enroll_callback}" in
+          # With TOTP newly configured the SSO session is complete: Keycloak
+          # sends acceptance as the finished /auth/callback?code=... redirect.
+          # The BFF has already exchanged that code by the time this fetch
+          # follows it home -- so this IS the flow's success location, not a
+          # page to scrape for further required actions.
+          "${app_base}/auth/callback"?*)
+            echo "${_totp_enroll_callback}"
+            return 0 ;;
+          *)
+            page=$(curl -sL -c "${jar}" -b "${jar}" "${_totp_enroll_callback}") ;;
+        esac
       else
         page="${_totp_enroll_next_body}"
       fi
@@ -316,7 +409,13 @@ dashboard_login_flow() {
     if grep -q 'name="password-new"' <<<"${page}"; then
       printf 'update-password\n' >>"${flow_dir}/chain-${username}.log"
       form_action=$(echo "${page}" | grep -o 'action="[^"]*"' | head -1 | sed 's/action="//;s/"$//' | sed 's/&amp;/\&/g')
-      page=$(curl -sL -c "${jar}" -b "${jar}" --data-urlencode "password-new=${new_perm_password}" --data-urlencode "password-confirm=${new_perm_password}" "${form_action}")
+      # A completed password update usually ends the whole auth session
+      # (callback redirect) -- never blind-follow that into the app shell.
+      follow_auth_chain "${jar}" "${form_action}" \
+        --data-urlencode "password-new=${new_perm_password}" \
+        --data-urlencode "password-confirm=${new_perm_password}"
+      [ -n "${_chain_cb}" ] && { echo "${_chain_cb}"; return 0; }
+      page=$(tr -d '\000' < "${flow_dir}/chain-last.html")
       continue
     fi
     # Anything else means we're stuck off the expected execution graph.
@@ -328,10 +427,12 @@ dashboard_login_flow() {
   return 1
 }
 
-# Read a cookie value out of a Netscape-format curl jar (skips # comments,
-# including #HttpOnly_-prefixed lines).
+# Read a cookie value out of a Netscape-format curl jar. Comment lines are
+# skipped -- except #HttpOnly_-prefixed ones, which is how curl stores
+# Secure+HttpOnly cookies (the __Host-apiary_bff session cookie is both):
+# stripping that exact prefix turns them back into ordinary 7-field lines.
 jar_cookie_value() {
-  awk '!/^#/ && $6 == "'"$1"'" {print $7}' "$2" | tail -1
+  sed 's/^#HttpOnly_//' "$2" | awk '!/^#/ && $6 == "'"$1"'" {print $7}' | tail -1
 }
 
 session_doc() {
@@ -359,10 +460,14 @@ state_dir="$(mktemp -d)"
 # dev override, which would muzzle the very tier this suite exercises) -- hand
 # the server a throwaway test token so it boots with enforcement ON.
 service_token='pkce-suite-local-token-not-a-secret'
+# Plain-http Keycloak issuer: openid-client needs the explicit opt-in the
+# OIDC_ALLOW_INSECURE seam provides (see src/lib/oidc.server.ts).
+oidc_allow_insecure='1'
 (
   cd "${repo_root}/arcane/home/honeypot-dashboard/frontend-next"
   PORT="${dash_port}" HOST=127.0.0.1 \
   SERVICE_TOKEN=${service_token} \
+  OIDC_ALLOW_INSECURE=${oidc_allow_insecure} \
   OIDC_ISSUER_URL="http://127.0.0.1:${kc_port}/realms/apiary" \
   OIDC_EXTERNAL_URL="${app_base}" \
   OIDC_CLIENT_ID="apiary-dashboard" \
@@ -400,12 +505,20 @@ if [ -z "${auth_location}" ]; then
   head -c 400 "${flow_dir}/login-start-body.html" >&2
 fi
 case "${auth_location}" in
-  "http://127.0.0.1:${kc_port}/realms/apiary/protocol/openid-connect/auth?"*"client_id=apiary-dashboard"*"code_challenge_method=S256"*"state="*)
-    ok "/auth/login redirects to the real Keycloak authorize endpoint with PKCE S256 + state" ;;
+  "http://127.0.0.1:${kc_port}/realms/apiary/protocol/openid-connect/auth?"*)
+    # Order-insensitive component check: Keycloak does not promise any query
+    # parameter order, and the assertion only cares that the pieces exist.
+    if grep -q 'client_id=apiary-dashboard' <<<"${auth_location}" \
+      && grep -q 'code_challenge_method=S256' <<<"${auth_location}" \
+      && grep -q '[?&]state=' <<<"${auth_location}"; then
+      ok "/auth/login redirects to the real Keycloak authorize endpoint with PKCE S256 + state"
+    else
+      bad "authorize redirect is missing a required piece: $(redact_code "${auth_location}")"
+    fi ;;
   *) bad "unexpected /auth/login redirect target: $(redact_code "${auth_location}")" ;;
 esac
 
-cb_url=$(dashboard_login_flow "${jar}" pkce-totp-test 'PkceTotpTest9!Extra')
+cb_url=$(dashboard_login_flow "${jar}" pkce-totp-test 'PkceTotpTest9!Extra') || true
 case "${cb_url}" in
   "${app_base}/auth/callback"?*) ok "real password+TOTP login succeeded through the mandatory-TOTP enrollment chain" ;;
   *) bad "golden-path login failed for pkce-totp-test: $(redact_code "${cb_url:-<empty>}")" ;;

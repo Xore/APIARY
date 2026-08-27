@@ -49,13 +49,26 @@ bff_pid=""
 sid=""
 jar="$(mktemp)"
 
+# Enrolled at prereq, reused by restart/key-rotation replays; see
+# complete_totp_enrollment for how it crosses the $() boundary.
+totp_secret=""
 ok()   { printf '  OK    %s\n' "$*"; }
 bad()  { printf '  FAIL  %s\n' "$*"; fail=1; }
 
 cleanup() {
+  # Same post-mortem aids as the login suite: bff.log speaks for /auth/login
+  # failures, DEBUG_KEEP=1 preserves the flow captures for page forensics.
+  if [ "${DEBUG_BFF_LOG:-0}" = "1" ] && [ -n "${state_dir:-}" ] && [ -f "${state_dir}/bff.log" ]; then
+    printf -- '-- bff.log --\n' >&2
+    cat "${state_dir}/bff.log" >&2
+  fi
   [ -n "${bff_pid}" ] && kill "${bff_pid}" >/dev/null 2>&1 || true
   docker rm -f "${redis}" "${kc}" "${pg}" >/dev/null 2>&1 || true
   docker network rm "${network}" >/dev/null 2>&1 || true
+  if [ "${DEBUG_KEEP:-0}" = "1" ]; then
+    printf '(DEBUG_KEEP=1: kept %s and %s)\n' "${flow_dir:-}" "${state_dir:-}" >&2
+    return 0
+  fi
   rm -rf "${flow_dir:-}" "${rendered_realm:-}" "${state_dir:-}" "${jar}"
 }
 trap cleanup EXIT
@@ -182,6 +195,11 @@ complete_totp_enrollment() {
     echo "${manual_page}" >&2
     exit 1
   fi
+  # This function runs inside a $(dashboard_login_flow ...) command
+  # substitution -- assignments do NOT survive back into the parent shell.
+  # The restart/key-rotation replays log this account back in from THEIR OWN
+  # subshells afterwards, so hand the secret over through flow_dir.
+  printf '%s' "${totp_secret}" > "${flow_dir}/totp-secret-current.txt"
   form_action=$(echo "${manual_page}" | grep -o 'action="[^"]*"' | head -1 | sed 's/action="//;s/"$//' | sed 's/&amp;/\&/g')
   secret_field=$(echo "${manual_page}" | grep -o 'id="totpSecret"[^>]*value="[^"]*"' | head -1 | grep -o 'value="[^"]*"' | sed 's/value="//;s/"$//')
   _totp_enroll_callback=$(submit_totp_with_retry "${jar}" "${form_action}" totp "${success_substr}" --data-urlencode "totpSecret=${secret_field}" --data-urlencode "userLabel=")
@@ -194,14 +212,83 @@ complete_totp_enrollment() {
   { [ -n "${_totp_enroll_callback}" ] || [ -n "${_totp_enroll_next_body}" ]; } && _totp_enroll_ok=true
 }
 
+# Terminal-callback-aware chain follower (login-suite twin has the long
+# story): no blind -L, so a login-completing /auth/callback redirect is
+# detected instead of dissolved into app-shell HTML. Sets _chain_cb to that
+# location when authentication finished -- via global, never stdout, because
+# $() callers would read a page body as the callback. Bodies land in
+# chain-last.html, NUL-stripped on load by callers.
+follow_auth_chain() {
+  local __jar="$1" __url="$2"; shift 2
+  local __hdr __hop __loc
+  # Payload flags ride here as an array: visible size keeps them on
+  # hop 1 only (cleared right below), and expansion stays word-safe.
+  local __args=("$@")
+  __hdr=$(mktemp)
+  rm -f "${flow_dir}/chain-last.html"
+  _chain_cb=""
+  for __hop in 1 2 3 4 5 6 7 8; do
+    # $@ rides hop 1 ONLY -- replaying payloads onto redirect GETs would
+    # corrupt Keycloak's required-action endpoints.
+    if [ "${#__args[@]}" -gt 0 ]; then
+      # DEBUG_TRACE captures the wire-level bytes of payload-bearing hops
+      # (test-only literal credentials; files stay inside flow_dir).
+      if [ "${DEBUG_TRACE:-0}" = "1" ]; then
+        curl -s --trace-ascii "${flow_dir}/post-trace-${__hop}.txt" \
+          -c "${__jar}" -b "${__jar}" -D "${__hdr}" -o "${flow_dir}/chain-body.raw" "${__args[@]}" "${__url}"
+      else
+        curl -s -c "${__jar}" -b "${__jar}" -D "${__hdr}" -o "${flow_dir}/chain-body.raw" "${__args[@]}" "${__url}"
+      fi
+      __args=()
+    else
+      curl -s -c "${__jar}" -b "${__jar}" -D "${__hdr}" -o "${flow_dir}/chain-body.raw" "${__url}"
+    fi
+    if [ "${DEBUG_TRACE:-0}" = "1" ]; then
+      # Post-mortem hop log: request target (origin only), payload KEYS
+      # never values, and the response status/location of this hop.
+      {
+        printf 'hop %s %s\n' "${__hop}" "${__url}"
+        for __a in "${__args[@]}"; do
+          case "${__a}" in --data-urlencode*=*) printf 'payload key: %s\n' "${__a#--data-urlencode}" ;; esac
+        done
+        grep -iE "^(HTTP/|location:)" "${__hdr}" | tr -d '\r'
+      } >> "${flow_dir}/chain-trace.log"
+    fi
+    __loc=$(grep -i '^location:' "${__hdr}" | tail -1 | sed 's/^[Ll]ocation: //' | tr -d '\r')
+    # Snapshot every hop's body (NUL-stripped): callers read
+    # chain-last.html for form scraping, however the loop ends --
+    # including the plain 200-page exit via break below.
+    tr -d '\000' < "${flow_dir}/chain-body.raw" > "${flow_dir}/chain-last.html"
+    case "${__loc}" in
+      "") break ;;
+      "${app_base}/auth/callback"?*)
+        rm -f "${__hdr}"
+        # Reported through this global -- never stdout: callers would read a
+        # login-page body here otherwise and mistake it for the callback.
+        _chain_cb="${__loc}"
+        return 0 ;;
+      *) __url="${__loc}" ;;
+    esac
+  done
+  rm -f "${__hdr}"
+  return 0
+}
+
 dashboard_login_flow() {
   local jar="$1" username="$2" password="$3" step page form_action otp_action sel_cred
   local cb_url="#none"
   local auth_location
   auth_location=$(curl -s -c "${jar}" -D - -o /dev/null "${app_base}/auth/login" | grep -i '^location:' | sed 's/^[Ll]ocation: //' | tr -d '\r')
-  page=$(curl -s -c "${jar}" -b "${jar}" "${auth_location}")
+  follow_auth_chain "${jar}" "${auth_location}"
+  [ -n "${_chain_cb}" ] && { echo "${_chain_cb}"; return 0; }
+  page=$(tr -d '\000' < "${flow_dir}/chain-last.html")
   form_action=$(echo "${page}" | grep -o 'action="[^"]*"' | head -1 | sed 's/action="//;s/"$//' | sed 's/&amp;/\&/g')
-  page=$(curl -sL -c "${jar}" -b "${jar}" --data-urlencode "username=${username}" --data-urlencode "password=${password}" --data-urlencode "credentialId=" "${form_action}")
+  follow_auth_chain "${jar}" "${form_action}" \
+    --data-urlencode "username=${username}" \
+    --data-urlencode "password=${password}" \
+    --data-urlencode "credentialId="
+  [ -n "${_chain_cb}" ] && { echo "${_chain_cb}"; return 0; }
+  page=$(tr -d '\000' < "${flow_dir}/chain-last.html")
 
   for step in 1 2 3 4 5 6; do
     otp_action=$(echo "${page}" | grep -o 'action="[^"]*"' | head -1 | sed 's/action="//;s/"$//' | sed 's/&amp;/\&/g')
@@ -219,7 +306,16 @@ dashboard_login_flow() {
         return 1
       fi
       if [ -n "${_totp_enroll_callback}" ]; then
-        page=$(curl -sL -c "${jar}" -b "${jar}" "${_totp_enroll_callback}")
+        case "${_totp_enroll_callback}" in
+          # Acceptance can close the whole SSO login (see login-suite twin):
+          # the finished /auth/callback?code=... redirect means the BFF
+          # already exchanged it -- echo it as this flow's result.
+          "${app_base}/auth/callback"?*)
+            echo "${_totp_enroll_callback}"
+            return 0 ;;
+          *)
+            page=$(curl -sL -c "${jar}" -b "${jar}" "${_totp_enroll_callback}") ;;
+        esac
       else
         page="${_totp_enroll_next_body}"
       fi
@@ -233,14 +329,21 @@ dashboard_login_flow() {
   return 1
 }
 
+# Same #HttpOnly_ handling as the login-suite twin: the session cookie is
+# Secure+HttpOnly and curl writes it behind that prefix.
 jar_cookie_value() {
-  awk '!/^#/ && $6 == "'"$1"'" {print $7}' "$2" | tail -1
+  sed 's/^#HttpOnly_//' "$2" | awk '!/^#/ && $6 == "'"$1"'" {print $7}' | tail -1
 }
 
+# Readiness probe: the realm's OIDC discovery document, not /health/ready --
+# Keycloak 26 serves health on a separate management port we do not publish,
+# while discovery exercises exactly what this suite needs back after a
+# restart: HTTP listener up, database session live, apiary realm loadable.
 wait_kc_ready() {
-  local i
+  local i code
   for i in $(seq 1 120); do
-    code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${kc_port}/health/ready" 2>/dev/null || true)
+    code=$(curl -s -o /dev/null -w '%{http_code}' \
+      "http://127.0.0.1:${kc_port}/realms/apiary/.well-known/openid-configuration" 2>/dev/null || true)
     [ "${code}" = "200" ] && return 0
     sleep 1
   done
@@ -272,10 +375,14 @@ state_dir="$(mktemp -d)"
 # Throwaway token so the #2183 boot gate lets the server up with enforcement
 # ON -- the chaos scenarios rotate what Keycloak knows, never this tier.
 service_token='chaos-suite-local-token-not-a-secret'
+# Plain-http Keycloak issuer: openid-client needs the explicit opt-in the
+# OIDC_ALLOW_INSECURE seam provides (see src/lib/oidc.server.ts).
+oidc_allow_insecure='1'
 (
   cd "${repo_root}/arcane/home/honeypot-dashboard/frontend-next"
   PORT="${dash_port}" HOST=127.0.0.1 \
   SERVICE_TOKEN=${service_token} \
+  OIDC_ALLOW_INSECURE=${oidc_allow_insecure} \
   OIDC_ISSUER_URL="http://127.0.0.1:${kc_port}/realms/apiary" \
   OIDC_EXTERNAL_URL="${app_base}" \
   OIDC_CLIENT_ID="apiary-dashboard" \
@@ -295,7 +402,7 @@ done
 [ "${bff_up}" = 1 ] || { printf 'FAIL: BFF never came up\n' >&2; cat "${state_dir}/bff.log" >&2; exit 1; }
 
 # ═══ Prerequisite: establish ONE real enrolled+authenticated session ═══════
-cb_url=$(dashboard_login_flow "${jar}" chaos-totp-test 'ChaosTotpTest9!Extra')
+cb_url=$(dashboard_login_flow "${jar}" chaos-totp-test 'ChaosTotpTest9!Extra') || true
 case "${cb_url}" in
   "${app_base}/auth/callback"?*) ok "prerequisite real PKCE+TOTP login succeeded" ;;
   *) bad "prerequisite login failed -- cannot run chaos scenarios"; printf '\nFAIL\n' >&2; exit 1 ;;
@@ -305,6 +412,13 @@ prot=$(curl -s -o /dev/null -w '%{http_code}' -b "${jar}" "${app_base}/")
 [ "${prot}" = "200" ] || { bad "prerequisite session not granted (HTTP ${prot})"; printf '\nFAIL\n' >&2; exit 1; }
 sid=$(jar_cookie_value '__Host-apiary_bff' "${jar}")
 cp "${jar}" "${flow_dir}/jar-prereq.txt"
+
+# dashboard_login_flow ran in a $() subshell above: its globals died there.
+# The enrollment left the secret in flow_dir though -- reload it so later
+# replays can compute valid codes for the already-enrolled account again.
+if [ -f "${flow_dir}/totp-secret-current.txt" ]; then
+  totp_secret="$(cat "${flow_dir}/totp-secret-current.txt")"
+fi
 
 # ═══ Scenario A: realm outage must NOT invalidate local sessions ═══════════
 docker stop -t 10 "${kc}" >/dev/null
@@ -350,7 +464,7 @@ else
   bad "scenario B: Keycloak failed to become ready within 120s after restart"
 fi
 jar_b="${flow_dir}/jar-b.txt"
-cb_b=$(dashboard_login_flow "${jar_b}" chaos-totp-test 'ChaosTotpTest9!Extra')
+cb_b=$(dashboard_login_flow "${jar_b}" chaos-totp-test 'ChaosTotpTest9!Extra') || true
 case "${cb_b}" in
   "${app_base}/auth/callback"?*)
     curl -s -o /dev/null -c "${jar_b}" -b "${jar_b}" "${cb_b}"
@@ -367,20 +481,23 @@ esac
 # Startup-time-JWKS-cached implementations mint invalid-token rejections here;
 # a correct jwksUri fetch-on-unknown-kid implementation sails through.
 kcadmin_err=""
+# providerId=rsa-generated: Keycloak mints its own keypair, so nothing key-
+# shaped needs posting (the bare 'rsa' provider would demand an imported
+# 'Private RSA Key'). Priority 200 out-prioritizes every built-in/imported
+# key, making it the active signer -- i.e. a brand-new kid nobody cached.
 if ! kcadm create components -r apiary \
     -s name=chaos-rotation-rsa \
-    -s providerId=rsa \
+    -s providerId=rsa-generated \
     -s providerType=org.keycloak.keys.KeyProvider \
     -s 'config.priority=["200"]' \
-    -s 'config.enabled=["true"]' \
-    -s 'config.algorithm=["RS256"]' >/dev/null 2>"${flow_dir}/kcadm.err"; then
+    -s 'config.enabled=["true"]' >/dev/null 2>"${flow_dir}/kcadm.err"; then
   kcadmin_err=$(cat "${flow_dir}/kcadm.err")
 fi
 if [ -n "${kcadmin_err}" ]; then
   bad "scenario C: could not add rotation RSA provider: $(echo "${kcadmin_err}" | head -2)"
 else
   jar_c="${flow_dir}/jar-c.txt"
-  cb_c=$(dashboard_login_flow "${jar_c}" chaos-totp-test 'ChaosTotpTest9!Extra')
+  cb_c=$(dashboard_login_flow "${jar_c}" chaos-totp-test 'ChaosTotpTest9!Extra') || true
   case "${cb_c}" in
     "${app_base}/auth/callback"?*)
       curl -s -o /dev/null -c "${jar_c}" -b "${jar_c}" "${cb_c}"
