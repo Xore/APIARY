@@ -183,5 +183,8 @@ class TestRetentionPolicies:
         worker.ensure_ilm_policy(es, "ml-worker-metrics-retention", policy)
         worker.ensure_ilm_policy(es, "ml-worker-metrics-retention", policy)
 
+        # #2579: the wire body is the policy definition itself (ES >= 9.0
+        # parses PUT _ilm/policy unwrapped); the {"policy": ...} envelope is
+        # stripped by ensure_ilm_policy before the client call.
         es.ilm.put_lifecycle.assert_called_once_with(
-            name="ml-worker-metrics-retention", policy=policy)
+            name="ml-worker-metrics-retention", policy=policy["policy"])

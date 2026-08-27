@@ -767,7 +767,13 @@ def ensure_ilm_policy(es: Elasticsearch, name: str, policy: dict) -> None:
         es.ilm.get_lifecycle(name=name)
         return
     except NotFoundError:
-        es.ilm.put_lifecycle(name=name, policy=policy)
+        # #2579: elasticsearch-py sends `policy=` as the request body verbatim,
+        # and ES >= 9.0 parses PUT _ilm/policy bodies as the policy definition
+        # itself -- so the {"policy": ...} envelope build_ilm_policy() returns
+        # must be stripped here or the server 400s with
+        # [lifecycle_policy] unknown field [policy] and the worker dies at
+        # bootstrap before its first batch.
+        es.ilm.put_lifecycle(name=name, policy=policy["policy"])
         logger.info(f"Installed ILM policy {name}")
 
 
