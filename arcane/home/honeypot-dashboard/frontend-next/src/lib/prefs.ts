@@ -96,7 +96,12 @@ const fetchAppearance = createServerFn({ method: 'GET' }).handler(async (): Prom
 /// Both axes, and neither re-pushed: `sync: false` on each apply, or pulling
 /// a value would immediately write it back and every page load would cost a
 /// PUT.
+///
+/// Also the once-per-document hook for watchCrossTabAppearance() below: this
+/// runs in an effect on the root route's mount (__root.tsx), so every live
+/// tab gets the listener regardless of which components happen to subscribe.
 export async function pullAppearance(): Promise<void> {
+  watchCrossTabAppearance()
   try {
     const { mode, theme } = await fetchAppearance()
     if (mode && mode !== getThemeMode()) applyTheme(mode, { sync: false })
@@ -329,6 +334,43 @@ function watchOsTheme() {
   else if (typeof query.addListener === 'function') query.addListener(onChange)
 }
 
+// #2138: the other live source of appearance change — another open tab.
+// The appliers above already write hp-theme / hp-palette through to
+// localStorage, so cross-tab state has always been on disk; only the
+// notification was missing, and a theme flip in one tab left every other
+// dashboard tab stale until a reload re-ran the boot script. Registered
+// once alongside the OS watcher, handed each key's change through the same
+// applier its toggle uses, and mapped exactly as the saved-value readers
+// read it:
+//
+// - hp-theme → applyTheme(): only an explicit light/dark is a mode (the
+//   same ternary settings.tsx's reset path applies); anything else — the
+//   key removed, a value that would not survive the boot script — reads
+//   as system.
+// - hp-palette → applyPalette(): null maps to '' and the raw value goes
+//   straight over; the applier itself treats '' as back-to-default and
+//   ignores malformed names, which is precisely the boot script's reader
+//   shape (#1754).
+//
+// `sync: false` everywhere: the writing tab pushes to the preference store
+// as part of its toggle; reacting tabs must not PUT what was just stored.
+// And no echo guard is needed — storage events never fire in the tab that
+// wrote them (the same fact upstream Xore/theme #129/#130 rely on).
+let crossTabAppearanceWatched = false
+function watchCrossTabAppearance() {
+  if (crossTabAppearanceWatched || typeof window === 'undefined') return
+  crossTabAppearanceWatched = true
+  window.addEventListener('storage', (event) => {
+    if (event.key === 'hp-theme') {
+      applyTheme(event.newValue === 'dark' || event.newValue === 'light' ? event.newValue : 'system', {
+        sync: false,
+      })
+    } else if (event.key === 'hp-palette') {
+      applyPalette(event.newValue ?? '', { sync: false })
+    }
+  })
+}
+
 /// One value that changes whenever anything about the rendered appearance
 /// does: the mode, the theme name, or the OS preference while in `system`.
 ///
@@ -343,6 +385,7 @@ export function useAppearanceKey(): string {
   return useSyncExternalStore(
     (listener) => {
       watchOsTheme()
+      watchCrossTabAppearance()
       listeners.add(listener)
       return () => listeners.delete(listener)
     },

@@ -101,3 +101,123 @@ describe('applyTheme suppression ordering', () => {
     expect(localStorage.getItem('hp-theme')).toBeNull()
   })
 })
+
+// #2138: appearance crosses tabs through localStorage alone — the appliers
+// have always written hp-theme / hp-palette through to disk — so live sync
+// is exactly the question of whether the receiving tab reacts to the storage
+// event. These simulate another tab writing the keys by hand, which is all
+// a real second tab does that a reloading tab would replay anyway.
+//
+// The listener is armed lazily like every other appearance plumbing here:
+// void pullAppearance() runs its registration line synchronously (its
+// server round-trip is irrelevant and best-effort), so these tests arm it
+// the same way the root route's mount effect arms it in the app.
+describe('cross-tab appearance propagation (#2138)', () => {
+  beforeEach(() => {
+    document.documentElement.className = ''
+    delete document.documentElement.dataset.theme
+    document.documentElement.removeAttribute('data-hp-theme')
+    document.documentElement.removeAttribute('data-hp-palette')
+    localStorage.clear()
+    vi.resetModules()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  const arm = async () => {
+    const prefs = await import('./prefs')
+    void prefs.pullAppearance()
+    return prefs
+  }
+
+  const fromAnotherTab = (key: string, newValue: string | null) => {
+    window.dispatchEvent(new StorageEvent('storage', { key, newValue }))
+  }
+
+  it('applies an hp-theme flip from another tab live', async () => {
+    const frames = makeFrameQueue()
+    vi.stubGlobal('requestAnimationFrame', frames.raf)
+    await arm()
+
+    fromAnotherTab('hp-theme', 'light')
+
+    expect(document.documentElement.dataset.theme).toBe('light')
+    expect(localStorage.getItem('hp-theme')).toBe('light')
+  })
+
+  it('treats a removed hp-theme key as back-to-system, not as a stale explicit value', async () => {
+    const frames = makeFrameQueue()
+    vi.stubGlobal('requestAnimationFrame', frames.raf)
+    const { applyTheme } = await import('./prefs')
+    applyTheme('dark')
+    await arm()
+
+    // The reset case: the originating tab deleted the key entirely.
+    fromAnotherTab('hp-theme', null)
+
+    expect('theme' in document.documentElement.dataset).toBe(false)
+    expect(localStorage.getItem('hp-theme')).toBeNull()
+  })
+
+  it('reads an unrecognized hp-theme value as system, mirroring the saved-value readers', async () => {
+    const frames = makeFrameQueue()
+    vi.stubGlobal('requestAnimationFrame', frames.raf)
+    await arm()
+
+    fromAnotherTab('hp-theme', 'neon-flux')
+
+    // The boot script ignores values that are not light/dark; reacting to
+    // one by applying it would desync from every reload.
+    expect('theme' in document.documentElement.dataset).toBe(false)
+  })
+
+  it('applies an hp-palette pick from another tab live', async () => {
+    const frames = makeFrameQueue()
+    vi.stubGlobal('requestAnimationFrame', frames.raf)
+    await arm()
+
+    fromAnotherTab('hp-palette', 'slate')
+
+    expect(document.documentElement.dataset.hpTheme).toBe('slate')
+    expect(document.documentElement.dataset.hpPalette).toBe('slate')
+    expect(localStorage.getItem('hp-palette')).toBe('slate')
+  })
+
+  it('treats a removed hp-palette key as back-to-default', async () => {
+    const frames = makeFrameQueue()
+    vi.stubGlobal('requestAnimationFrame', frames.raf)
+    const { applyPalette } = await import('./prefs')
+    applyPalette('slate')
+    await arm()
+
+    fromAnotherTab('hp-palette', null)
+
+    expect(document.documentElement.dataset.hpTheme).toBe('claude')
+    expect(document.documentElement.dataset.hpPalette).toBe('claude')
+  })
+
+  it('ignores a malformed hp-palette value exactly like the gallery toggle path does', async () => {
+    const frames = makeFrameQueue()
+    vi.stubGlobal('requestAnimationFrame', frames.raf)
+    const { applyPalette } = await import('./prefs')
+    applyPalette('slate')
+    await arm()
+
+    fromAnotherTab('hp-palette', 'Not A Theme Name!')
+
+    expect(document.documentElement.dataset.hpTheme).toBe('slate')
+  })
+
+  it('leaves the appearance alone when an unrelated key changes', async () => {
+    const frames = makeFrameQueue()
+    vi.stubGlobal('requestAnimationFrame', frames.raf)
+    await arm()
+
+    fromAnotherTab('hp-map-center', '42,42')
+
+    expect('theme' in document.documentElement.dataset).toBe(false)
+    expect(document.documentElement.dataset.hpTheme).toBeUndefined()
+  })
+})
