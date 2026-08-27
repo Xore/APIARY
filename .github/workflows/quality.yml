@@ -23,7 +23,13 @@ permissions:
 
 concurrency:
   group: quality-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancellation stays on for pull_request runs (a superseded run was for a
+  # commit we already stopped caring about) and off for push-to-main -- on
+  # main the cancelled run is the ONLY verification that commit ever gets,
+  # so serializing beats superseding (#2347): cbb5ef3f landed non-compiling
+  # Rust and its own quality run never finished, because each next main
+  # push cancelled the previous in-flight one down the chain to #2317.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/heads/main') }}
 
 jobs:
   # -------------------------------------------------------------------------
