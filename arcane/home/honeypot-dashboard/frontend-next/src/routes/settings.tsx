@@ -285,10 +285,29 @@ const resetPreferences = createServerFn({ method: 'POST' }).handler(
   },
 )
 
+// #2512: a stale-revision 409 carries the stored document revision as
+// X-Current-Revision so a stale client can re-sync directly. Parsed here
+// once for both PUT sites; a tier without the header (or a non-numeric
+// value) yields undefined, and callers degrade to the legacy recovery.
+function conflictRevision(response: Response): { currentRevision?: number } {
+  const header = response.headers.get('x-current-revision')
+  if (header === null || header.trim() === '') return {}
+  const current = Number(header)
+  return Number.isFinite(current) && current >= 0 ? { currentRevision: current } : {}
+}
+
 // Config-save results carry the concurrency outcome explicitly: `conflict`
 // is a 409 from config.rs's check_revision (someone else saved since our
-// GET), `revision` is the new baseline after a successful write.
-type ConfigSaveResult = { ok: boolean; conflict?: boolean; revision?: number; error?: string }
+// GET), `revision` is the new baseline after a successful write, and — on
+// conflict only — `currentRevision` is the stored revision the backend now
+// surfaces as X-Current-Revision on stale-revision 409s (#2512/#2513).
+type ConfigSaveResult = {
+  ok: boolean
+  conflict?: boolean
+  revision?: number
+  currentRevision?: number
+  error?: string
+}
 
 const savePresentation = createServerFn({ method: 'POST' })
   .inputValidator((input: { value: Presentation; revision: number }) => input)
@@ -304,7 +323,7 @@ const savePresentation = createServerFn({ method: 'POST' })
       headers: { 'content-type': 'application/json', 'if-match': String(data.revision) },
       body: JSON.stringify(data.value),
     })
-    if (response.status === 409) return { ok: false, conflict: true }
+    if (response.status === 409) return { ok: false, conflict: true, ...conflictRevision(response) }
     if (!response.ok) return { ok: false, error: await response.text().catch(() => 'save failed') }
     const doc = (await response.json().catch(() => null)) as { revision?: number } | null
     return { ok: true, revision: doc?.revision }
@@ -326,7 +345,7 @@ const saveConfigSection = createServerFn({ method: 'POST' })
       headers: { 'content-type': 'application/json', 'if-match': String(data.revision) },
       body: JSON.stringify(data.value),
     })
-    if (response.status === 409) return { ok: false, conflict: true }
+    if (response.status === 409) return { ok: false, conflict: true, ...conflictRevision(response) }
     if (!response.ok) return { ok: false, error: await response.text().catch(() => 'save failed') }
     const doc = (await response.json().catch(() => null)) as { revision?: number } | null
     return { ok: true, revision: doc?.revision }
@@ -619,13 +638,17 @@ function useSettingsStatus(): [ReactNode, (text: string, kind?: 'ok' | 'error') 
 // in the pane's status line), If-Match'd write, and the Go 409 recovery —
 // error status, refetch, re-baseline (the caller's card rebases via its
 // initial-prop effect once onConflict has refreshed the admin data).
+// #2513: when the 409 carries X-Current-Revision (#2512), the recovery is
+// a direct re-sync — the cards re-baseline onto the fresh server values
+// but keep the operator's staged edits on top, so the next save is an
+// If-Match'd retry of the merged form instead of a lost update.
 async function runConfigSave(opts: {
   section: 'presentation' | 'honeypot' | 'behavior' | 'report-presets'
   value: unknown
   revision: number
   setStatus: (text: string, kind?: 'ok' | 'error') => void
   onSaved: (revision: number) => void
-  onConflict: () => void | Promise<void>
+  onConflict: (currentRevision?: number) => void | Promise<void>
   successText: string
 }): Promise<'saved' | 'invalid' | 'conflict'> {
   const { section, value, revision, setStatus, onSaved, onConflict, successText } = opts
@@ -642,8 +665,15 @@ async function runConfigSave(opts: {
       ? await savePresentation({ data: { value: value as Presentation, revision } })
       : await saveConfigSection({ data: { section, value, revision } })
   if (result.conflict) {
-    setStatus('Configuration changed in another session — reloaded current values, reapply your edits', 'error')
-    await onConflict()
+    if (typeof result.currentRevision === 'number') {
+      setStatus(
+        'Configuration changed in another session — your unsaved edits were kept on top of the reloaded values. Review and save again.',
+        'error',
+      )
+    } else {
+      setStatus('Configuration changed in another session — reloaded current values, reapply your edits', 'error')
+    }
+    await onConflict(result.currentRevision)
     return 'conflict'
   }
   if (!result.ok) throw new Error(result.error?.trim() || 'save failed (admin role required)')
@@ -657,8 +687,12 @@ type ConfigCardProps<T> = {
   editable: boolean
   revision: number
   onSaved: (revision: number) => void
-  onConflict: () => void | Promise<void>
+  onConflict: (currentRevision?: number) => void | Promise<void>
   onDirty: (dirty: boolean) => void
+  /** Bumped on every X-Current-Revision-backed conflict re-sync (#2513):
+   *  a change here tells the card the incoming fresh config should merge
+   *  under its staged edits instead of discarding them. */
+  conflictRebase: number
 }
 
 function SwitchRow({
@@ -1385,17 +1419,37 @@ const PRESENTATION_FIELDS: (keyof Presentation)[] = [
   'privacy_notice',
 ]
 
-function PresentationCard({ initial, editable, revision, onSaved, onConflict, onDirty }: ConfigCardProps<Presentation>) {
+function PresentationCard({ initial, editable, revision, onSaved, onConflict, onDirty, conflictRebase }: ConfigCardProps<Presentation>) {
   const [form, setForm] = useState<Presentation>(initial)
   const [snapshot, setSnapshot] = useState<Presentation>(initial)
   const [status, setStatus] = useSettingsStatus()
   const hidden = useFieldHidden('branding', 'presentation')
   // Re-baseline whenever fresh config arrives (initial load and the 409
-  // conflict reload both replace the initial object).
+  // conflict reload both replace the initial object). On a conflict
+  // re-sync (#2513) the fresh server values go under the operator's
+  // staged edits — fields still differing from the previous snapshot —
+  // so the next save is a retry of the merged form, not a lost update.
+  const lastRebase = useRef(0)
   useEffect(() => {
-    setForm(initial)
+    const rebase = conflictRebase !== lastRebase.current
+    lastRebase.current = conflictRebase
+    if (!rebase) {
+      setForm(initial)
+      setSnapshot(initial)
+      return
+    }
+    setForm((current) => {
+      const staged: Partial<Presentation> = {}
+      for (const key of PRESENTATION_FIELDS) {
+        if ((current[key] ?? '') !== (snapshot[key] ?? '')) staged[key] = current[key]
+      }
+      return { ...initial, ...staged }
+    })
     setSnapshot(initial)
-  }, [initial])
+    // `snapshot` is read deliberately stale here: the staged-edit diff is
+    // against the baseline the operator edited on top of, not the incoming
+    // one. Same for every card's rebase effect below.
+  }, [initial, conflictRebase])
   const changed = PRESENTATION_FIELDS.filter((key) => (form[key] ?? '') !== (snapshot[key] ?? ''))
   useEffect(() => {
     onDirty(changed.length > 0)
@@ -1521,16 +1575,32 @@ function honeypotForm(initial: HoneypotConfig): Record<string, string> {
   }
 }
 
-function HoneypotOperationsCard({ initial, editable, revision, onSaved, onConflict, onDirty }: ConfigCardProps<HoneypotConfig>) {
+function HoneypotOperationsCard({ initial, editable, revision, onSaved, onConflict, onDirty, conflictRebase }: ConfigCardProps<HoneypotConfig>) {
   const [form, setForm] = useState<Record<string, string>>(() => honeypotForm(initial))
   const [snapshot, setSnapshot] = useState(() => honeypotForm(initial))
   const [status, setStatus] = useSettingsStatus()
   const hidden = useFieldHidden('honeypot', 'operations')
+  const lastRebase = useRef(0)
   useEffect(() => {
     const next = honeypotForm(initial)
-    setForm(next)
+    const rebase = conflictRebase !== lastRebase.current
+    lastRebase.current = conflictRebase
+    if (!rebase) {
+      setForm(next)
+      setSnapshot(next)
+      return
+    }
+    // Conflict re-sync (#2513): staged edits survive on top of the fresh
+    // server values.
+    setForm((current) => {
+      const merged = { ...next }
+      for (const key of Object.keys(merged)) {
+        if (current[key] !== snapshot[key]) merged[key] = current[key]
+      }
+      return merged
+    })
     setSnapshot(next)
-  }, [initial])
+  }, [initial, conflictRebase])
   const changed = Object.keys(form).filter((key) => form[key] !== snapshot[key])
   useEffect(() => {
     onDirty(changed.length > 0)
@@ -1675,16 +1745,34 @@ function behaviorForm(initial: BehaviorConfig) {
   }
 }
 
-function BehaviorCard({ initial, editable, revision, onSaved, onConflict, onDirty }: ConfigCardProps<BehaviorConfig>) {
+function BehaviorCard({ initial, editable, revision, onSaved, onConflict, onDirty, conflictRebase }: ConfigCardProps<BehaviorConfig>) {
   const [form, setForm] = useState(() => behaviorForm(initial))
   const [snapshot, setSnapshot] = useState(() => behaviorForm(initial))
   const [status, setStatus] = useSettingsStatus()
   const hidden = useFieldHidden('behavior', 'behavior')
+  const lastRebase = useRef(0)
   useEffect(() => {
     const next = behaviorForm(initial)
-    setForm(next)
+    const rebase = conflictRebase !== lastRebase.current
+    lastRebase.current = conflictRebase
+    if (!rebase) {
+      setForm(next)
+      setSnapshot(next)
+      return
+    }
+    // Conflict re-sync (#2513): staged edits survive on top of the fresh
+    // server values.
+    setForm((current) => {
+      const merged = { ...next }
+      for (const key of Object.keys(merged) as (keyof typeof merged)[]) {
+        if (JSON.stringify(current[key]) !== JSON.stringify(snapshot[key])) {
+          ;(merged as Record<string, unknown>)[key] = current[key]
+        }
+      }
+      return merged
+    })
     setSnapshot(next)
-  }, [initial])
+  }, [initial, conflictRebase])
   const changed = (Object.keys(form) as (keyof ReturnType<typeof behaviorForm>)[]).filter(
     (key) => JSON.stringify(form[key]) !== JSON.stringify(snapshot[key]),
   )
@@ -1897,6 +1985,7 @@ function ReportPresetsCard({
   onSaved,
   onConflict,
   onDirty,
+  conflictRebase,
 }: {
   templates: ReportTemplate[]
   overrides: Record<string, ReportPresetOverride>
@@ -1905,10 +1994,32 @@ function ReportPresetsCard({
   const [snapshot, setSnapshot] = useState<Record<string, ReportPresetOverride>>(overrides)
   const [status, setStatus] = useSettingsStatus()
   const hidden = useFieldHidden('report-presets', 'presets')
+  const lastRebase = useRef(0)
   useEffect(() => {
-    setForm(overrides)
+    const rebase = conflictRebase !== lastRebase.current
+    lastRebase.current = conflictRebase
+    if (!rebase) {
+      setForm(overrides)
+      setSnapshot(overrides)
+      return
+    }
+    // Conflict re-sync (#2513): staged overrides survive on top of the
+    // fresh server values.
+    setForm((current) => {
+      const merged = { ...overrides }
+      for (const template of templates) {
+        if (
+          current[template.id] !== undefined &&
+          JSON.stringify(norm(current[template.id])) !== JSON.stringify(norm(snapshot[template.id]))
+        ) {
+          merged[template.id] = current[template.id]
+        }
+      }
+      return merged
+    })
     setSnapshot(overrides)
-  }, [overrides])
+    // `norm` is declared just below; the effect body only runs after render.
+  }, [overrides, conflictRebase, templates])
 
   // Normalized so an untouched empty field never reads as a change.
   const norm = (override?: ReportPresetOverride) => ({ name: override?.name ?? '', description: override?.description ?? '' })
@@ -2552,7 +2663,7 @@ export function SettingsSurface({
     return () => window.clearInterval(timer)
   }, [blocker])
 
-  /* ---- config revision plumbing (#1653 item 5) ---- */
+  /* ---- config revision plumbing (#1653 item 5, #2513 re-sync) ---- */
   const bumpRevision = useCallback((revision: number) => {
     setAdminData((current) => (current ? { ...current, revision } : current))
   }, [])
@@ -2570,6 +2681,18 @@ export function SettingsSurface({
     setAdminFailed(false)
     setAdminData(fresh)
   }, [])
+  // #2513: bumped whenever a 409 arrives carrying X-Current-Revision
+  // (#2512) — the cards read it to keep their staged edits during the
+  // re-baseline instead of discarding them. Rollback and header-less
+  // conflicts reload without arming it, keeping the legacy recovery.
+  const [conflictRebase, setConflictRebase] = useState(0)
+  const handleConfigConflict = useCallback(
+    async (currentRevision?: number) => {
+      await reloadAdminConfig()
+      if (typeof currentRevision === 'number') setConflictRebase((n) => n + 1)
+    },
+    [reloadAdminConfig],
+  )
 
   useEffect(() => {
     setPrefetch(prefetchEnabled())
@@ -2849,8 +2972,9 @@ export function SettingsSurface({
                         editable={isAdmin}
                         revision={adminData.revision}
                         onSaved={bumpRevision}
-                        onConflict={reloadAdminConfig}
+                        onConflict={handleConfigConflict}
                         onDirty={brandingDirty}
+                        conflictRebase={conflictRebase}
                       />
                     ) : adminFailed ? (
                       adminLoadFailure
@@ -2866,8 +2990,9 @@ export function SettingsSurface({
                         editable={isAdmin}
                         revision={adminData.revision}
                         onSaved={bumpRevision}
-                        onConflict={reloadAdminConfig}
+                        onConflict={handleConfigConflict}
                         onDirty={presetsDirty}
+                        conflictRebase={conflictRebase}
                       />
                     ) : adminFailed ? (
                       adminLoadFailure
@@ -2882,8 +3007,9 @@ export function SettingsSurface({
                         editable={isAdmin}
                         revision={adminData.revision}
                         onSaved={bumpRevision}
-                        onConflict={reloadAdminConfig}
+                        onConflict={handleConfigConflict}
                         onDirty={behaviorDirty}
+                        conflictRebase={conflictRebase}
                       />
                     ) : adminFailed ? (
                       adminLoadFailure
@@ -2899,8 +3025,9 @@ export function SettingsSurface({
                         editable={isAdmin}
                         revision={adminData.revision}
                         onSaved={bumpRevision}
-                        onConflict={reloadAdminConfig}
+                        onConflict={handleConfigConflict}
                         onDirty={honeypotDirty}
+                        conflictRebase={conflictRebase}
                       />
                     ) : adminFailed ? (
                       adminLoadFailure
