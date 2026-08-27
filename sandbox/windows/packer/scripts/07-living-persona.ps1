@@ -95,11 +95,27 @@ public class PersonaDaemon {
         mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
     }
 
+    const byte VK_SHIFT = 0x10;
+
     static void TypeChar(char c) {
-        byte vk = (byte)VkKeyScan(c);
+        // VkKeyScan returns a SHORT: low byte = virtual key, HIGH byte =
+        // required modifiers (bit 0 Shift, bit 1 Ctrl, bit 2 Alt). Casting
+        // straight to byte kept only the virtual key and dropped the shift
+        // state, so every capital and shifted glyph was injected unshifted --
+        // 'D' came out 'd', ':' as ';', '+' as '=' (#2448). Synthesize the
+        // Shift press/release around the key; refuse Ctrl/Alt-composed
+        // characters entirely rather than fire surprise hotkeys.
+        short res = VkKeyScan(c);
+        if (res == -1) return;           // not typeable on this layout
+        if ((res >> 8 & 2) != 0) return; // Ctrl-composed
+        if ((res >> 8 & 4) != 0) return; // Alt-composed
+        byte vk = (byte)(res & 0xff);
+        bool shift = (res >> 8 & 1) != 0;
+        if (shift) keybd_event(VK_SHIFT, 0, 0, UIntPtr.Zero);
         keybd_event(vk, 0, 0, UIntPtr.Zero);
         Thread.Sleep(20 + rng.Next(40));
         keybd_event(vk, 0, KEYUP, UIntPtr.Zero);
+        if (shift) keybd_event(VK_SHIFT, 0, KEYUP, UIntPtr.Zero);
     }
     [DllImport("user32.dll")] static extern short VkKeyScan(char ch);
 
@@ -107,9 +123,23 @@ public class PersonaDaemon {
         // Bring up notepad, type a plausible finance note, leave it open.
         var ps = Process.GetProcessesByName("notepad");
         Process np = ps.Length > 0 ? ps[0] : Process.Start("notepad.exe");
-        Thread.Sleep(1200);
-        SetForegroundWindow(np.MainWindowHandle);
+        // The old flat 1200 ms sleep left MainWindowHandle at IntPtr.Zero on
+        // slow boots: SetForegroundWindow silently no-oped and every
+        // keystroke landed in whichever window held focus (#2448). Poll for
+        // the handle instead, then refuse to type at all unless notepad
+        // actually holds the foreground -- injecting finance jargon into an
+        // unrelated application is its own detectable anomaly.
+        IntPtr hwnd = IntPtr.Zero;
+        for (int i = 0; i < 20; i++) {
+            hwnd = np.MainWindowHandle;
+            if (hwnd != IntPtr.Zero) break;
+            np.Refresh();
+            Thread.Sleep(250);
+        }
+        if (hwnd == IntPtr.Zero) return;            // window never materialized
+        if (!SetForegroundWindow(hwnd)) return;     // focus request refused
         Thread.Sleep(400);
+        if (GetForegroundWindow() != hwnd) return;  // lost the foreground anyway
         string[] lines = {
             "accrual for legal fees - confirm w/ Dana before Thu",
             "FX hedge ratio 0.75 for EUR book, revisit after FOMC",
@@ -134,10 +164,24 @@ public class PersonaDaemon {
         }
     }
 
+    // Office-hours weighting: less active 18:00-08:00 EASTERN time, whatever
+    // the guest's own timezone setting is (#2448: this read DateTime.Now.Hour
+    // -- local time, so the provisioning host's TZ decided what "office
+    // hours" meant -- while the comment promised EST).
+    static bool WorkHours() {
+        try {
+            TimeZoneInfo est = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+            int h = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, est).Hour;
+            return h >= 8 && h < 18;
+        } catch (TimeZoneNotFoundException) {
+            return DateTime.Now.Hour >= 8 && DateTime.Now.Hour < 18;
+        } catch (InvalidTimeZoneException) {
+            return DateTime.Now.Hour >= 8 && DateTime.Now.Hour < 18;
+        }
+    }
+
     static void RunCycle(ref int idleStreak) {
-        // Office-hours weighting: less active 18:00-08:00 EST
-        int h = DateTime.Now.Hour;
-        bool workHours = h >= 8 && h < 18;
+        bool workHours = WorkHours();
         int act = rng.Next(100);
 
         if (workHours ? act < 55 : act < 15) {
