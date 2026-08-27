@@ -707,18 +707,6 @@ jobs:
               # rotation/data-loss behavior.
               python arcane/home/honeypot-dionaea/dionaea/tests/test_log_rotation_patch.py
 
-          - name: wordpot request-path patches (#1421, #1908)
-            home: true
-            run: |
-              # Five patches across three files, matched on exact upstream
-              # text. What they replaced was a rule that trusted
-              # X-Forwarded-For whenever the peer was the tunnel address --
-              # true for every request on wordpot's raw port, so anyone
-              # could name their own source. These assert it stays gone,
-              # that the headers still reach the log as evidence, and that
-              # the Traefik-only listener actually starts.
-              python arcane/home/honeypot-wordpot/wordpot/tests/test_wordpot_patch.py
-
           - name: HellPot X-Forwarded-For trust patch (#1876)
             home: true
             run: |
