@@ -220,10 +220,13 @@ TryStep "pstranscripts_copy" {
 }
 TryStep "fakenet_stop" {
     Stop-Process -Name fakenet -Force -ErrorAction SilentlyContinue
-    # config/fakenet.ini's DumpDir is hardcoded to C:\Logs\fakenet_downloads
-    # (not overridable by the -l flag passed at launch, which only
-    # redirects fakenet's own primary log) -- confirmed by reading that
-    # ini rather than assumed, same as the transcription path above.
+    # honeypot_fakenet.ini's DumpHTTPPostsFilePrefix is an absolute prefix
+    # under C:\Logs\fakenet_downloads (upstream HTTPListener opens
+    # "<prefix>_<timestamp>.txt" verbatim; the tree is pre-created by
+    # 04-tools.ps1) -- so HTTP POST dumps genuinely land here and the
+    # Test-Path gate below fires. The pre-#2445 comment claimed a "DumpDir"
+    # key that FakeNet has never implemented; the gate silently skipped
+    # this copy on every run while the ini looked authoritative.
     if (Test-Path "C:\Logs\fakenet_downloads") {
         Copy-Item "C:\Logs\fakenet_downloads" "$analysisDir\Logs\fakenet_downloads" -Recurse -Force -ErrorAction SilentlyContinue
     }

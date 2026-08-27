@@ -260,14 +260,26 @@ if (Test-Path $staged) {
 }
 
 # #294: fake-intranet landing page the HTTP/HTTPS listeners' Webroot points
-# at (relative to $fnConfigDir, per honeypot_fakenet.ini's DefaultFiles).
+# at. The destination MUST equal the absolute Webroot in
+# honeypot_fakenet.ini: upstream's ListenerBase.abs_config_path resolves a
+# relative webroot against the CWD / fakenet.exe directory and never against
+# this config's directory, so a landing page parked under configs\ was
+# unreachable and FakeNet served its stock pages instead (#2445).
 $stagedWebroot = 'C:\Windows\Temp\honeypot_fakenet_defaultFiles'
+$fnWebroot = 'C:\Tools\FakeNet\webroot'
 if (Test-Path $stagedWebroot) {
-    Move-Item $stagedWebroot "$fnConfigDir\defaultFiles" -Force
+    New-Item $fnWebroot -ItemType Directory -Force | Out-Null
+    Move-Item "$stagedWebroot\*" $fnWebroot -Force
     Write-Host '[+] FakeNet intranet webroot installed'
 } else {
-    Write-Warning '[!] FakeNet defaultFiles were not staged - HTTP/HTTPS will use the stock 200 OK'
+    Write-Warning '[!] FakeNet webroot was not staged - HTTP/HTTPS will use the stock 200 OK'
 }
+
+# honeypot_fakenet.ini's DumpHTTPPostsFilePrefix is an absolute prefix under
+# this directory; HTTPListener opens "<prefix>_<timestamp>.txt" verbatim and
+# never creates directories (#2445), and run_sample.py's collector plus the
+# orchestrator's fakenet_stop both expect the tree to be here.
+New-Item 'C:\Logs\fakenet_downloads' -ItemType Directory -Force | Out-Null
 
 # ── Install Regshot ───────────────────────────────────────────────────────
 # orchestrate/run_sample.py shells out to a hard-coded
