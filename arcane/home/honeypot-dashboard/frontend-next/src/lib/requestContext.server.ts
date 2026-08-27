@@ -40,15 +40,13 @@ if (!globalScope.__APIARY_REQ_ID__) {
   }
 }
 
-const ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789'
-
 export function createRequestId(): string {
   // Same entropy stance as CSP nonces: correlation key, not capability.
-  // 18 chars of crypto-random keep collision odds irrelevant.
-  const bytes = randomBytes(18)
-  let out = 'r-'
-  for (const byte of bytes) out += ALPHABET[byte % ALPHABET.length]
-  return out
+  // Hex keeps it modulo-free: base-36 over raw CSPRNG bytes is biased
+  // (256 isn't divisible by 36 — CodeQL flagged exactly that), and the
+  // rejection-sampling dance buys nothing for an id nobody guesses on.
+  // 72 bits across 18 hex chars keep collision odds irrelevant.
+  return `r-${randomBytes(9).toString('hex')}`
 }
 
 /**

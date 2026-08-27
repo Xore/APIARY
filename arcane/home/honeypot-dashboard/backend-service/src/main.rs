@@ -473,8 +473,11 @@ async fn main() -> anyhow::Result<()> {
         // #1972 observability wraps EVERYTHING above it — health probe,
         // metrics scrape, and every /api/v1 route get a request id echoed
         // in x-request-id, metrics recorded per family/status/latency, and
-        // one durable JSONL line when DASHBOARD_LOG_FILE is set.
-        .layer(middleware::from_fn(obs::observe))
+        // one durable JSONL line when DASHBOARD_LOG_FILE is set. observe()
+        // reads its Obs handle via State<AppState>, so this must be the
+        // _with_state form (plain from_fn builds FromFn<(), ..> whose
+        // Service bound never matches a state-taking extractor).
+        .layer(middleware::from_fn_with_state(state.clone(), obs::observe))
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(state);
 

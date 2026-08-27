@@ -69,14 +69,15 @@ export const startInstance = createStart(() => ({
       }
       return reqCtx.withRequestScope(inboundId, async () => {
         const csp = await import('./lib/cspNonce.server')
-        try {
-          const result = await csp.withCspScope(() => next())
+        // Scope wraps next() itself and its result comes back OUT as the
+        // response — csp.test.ts pins both shapes verbatim, so keep the
+        // literal `return csp.withCspScope(() => next())`. Duration rides
+        // Promise.prototype.finally, which fires on settlement either way
+        // outcome goes; a try/finally around the bare call would run when
+        // the RETURN statement executes, i.e. before resolution.
+        return csp.withCspScope(() => next()).finally(() => {
           obs.recordBffRequest(performance.now() - started)
-          return result
-        } catch (error) {
-          obs.recordBffRequest(performance.now() - started)
-          throw error
-        }
+        })
       })
     }),
   ],
