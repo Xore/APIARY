@@ -25,6 +25,16 @@ from models.isolation_forest import (IsoForestModel, MAX_TRAIN_SAMPLES, _get_ip,
 from models.lstm_autoencoder import LSTMAEModel
 from models.session_features import SessionFeatureTracker
 
+# #1971: the poll/checkpoint mechanics below (#168 boundary semantics,
+# #188 failure-vs-empty shape, #190 batch caps) are the reference
+# implementation of the repo's shared incremental-checkpoint consume
+# pattern and now live in the vendored, contract-tested
+# analysis/es-consume/es_consume.py (this file carries a byte-identical
+# copy -- ml-worker/tests/test_es_consume_vendoring.py enforces that).
+# advance_checkpoint()/fetch_new_events() stay as thin wrappers so every
+# call site and test keeps its exact signature and log text.
+import es_consume  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Configuration (all overridable via env vars)
 # ---------------------------------------------------------------------------
@@ -72,6 +82,10 @@ DRIFT_ANOMALY_RATE = float(os.getenv("DRIFT_ANOMALY_RATE", "0.15"))
 # small enough that a real backlog now checkpoints incrementally across
 # several cycles instead of one unbounded one.
 MAX_POLL_BATCH = int(os.getenv("MAX_POLL_BATCH", "5000"))
+
+# Server-side keep-alive for one poll's scroll context (passed to
+# es.search/es.scroll by fetch_new_events's transport adapters below).
+SCROLL_KEEPALIVE = "2m"
 
 # #188: fetch_new_events() already retries every POLL_INTERVAL by nature of
 # the main loop calling it again next cycle -- no separate backoff/jitter is
@@ -308,13 +322,13 @@ def advance_checkpoint(events: list, previous: dict) -> dict:
     however many documents happen to share one exact timestamp, not by
     total history.
     """
-    if not events:
-        return previous
-    max_ts = max(e["_source"].get("@timestamp", "") for e in events)
-    if not max_ts:
-        return previous
-    seen_ids = [e["_id"] for e in events if e["_source"].get("@timestamp") == max_ts]
-    return {"last_timestamp": max_ts, "seen_ids": seen_ids}
+    # #1971: implementation extracted verbatim into the vendored shared
+    # module (analysis/es-consume/es_consume.py); this wrapper keeps the
+    # call-site/test-facing name and shape. That module's contract suite
+    # drives both this code (as vendored) and a Go port through the same
+    # fixture stream -- advance_checkpoint's equal-timestamp semantics are
+    # now pinned cross-language, not just by this worker's own tests.
+    return es_consume.advance_checkpoint(events, previous)
 
 
 def fetch_new_events(es: Elasticsearch, index_pattern: str,
@@ -349,33 +363,24 @@ def fetch_new_events(es: Elasticsearch, index_pattern: str,
     no other cap, and MAX_TRAIN_SAMPLES only bounds what retrain() fits on
     AFTER everything's already been fetched and held in memory (#62 task 33).
     """
-    exclude_ids = exclude_ids or set()
-    events = []
-    query = {
-        "query": {"range": {"@timestamp": {"gte": since}}},
-        "sort":  [{"@timestamp": {"order": "asc"}}],
-        "size":  page_size,
-    }
-    try:
-        resp = es.search(index=index_pattern, body=query, scroll="2m")
-        scroll_id = resp["_scroll_id"]
-        hits = resp["hits"]["hits"]
-        while hits:
-            for hit in hits:
-                if hit["_id"] in exclude_ids:
-                    continue
-                events.append(hit)
-            if max_total is not None and len(events) >= max_total:
-                events = events[:max_total]
-                break
-            resp = es.scroll(scroll_id=scroll_id, scroll="2m")
-            scroll_id = resp["_scroll_id"]
-            hits = resp["hits"]["hits"]
-        es.clear_scroll(scroll_id=scroll_id)
-    except Exception as exc:
-        logger.warning(f"Fetch error for {index_pattern}: {exc}")
-        return events, False
-    return events, True
+    # #1971: body extracted verbatim into the vendored shared module; the
+    # three adapters below are exactly the elasticsearch-py calls this file
+    # used to make inline, so behaviour (including the exact log text) is
+    # unchanged. The engine's fixture contract additionally pins these
+    # semantics cross-language -- see the wrapper note on advance_checkpoint.
+    def _warn(message):
+        logger.warning(f"Fetch error for {index_pattern}: {message}")
+
+    return es_consume.fetch_events_since(
+        lambda query: es.search(index=index_pattern, body=query, scroll=SCROLL_KEEPALIVE),
+        lambda scroll_id: es.scroll(scroll_id=scroll_id, scroll=SCROLL_KEEPALIVE),
+        lambda scroll_id: es.clear_scroll(scroll_id=scroll_id),
+        since,
+        page_size=page_size,
+        max_total=max_total,
+        exclude_ids=exclude_ids,
+        warn=_warn,
+    )
 
 
 def write_retrain_metric(es: Elasticsearch, model_name: str, result) -> None:
