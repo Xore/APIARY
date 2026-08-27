@@ -3,7 +3,7 @@
   "contract_version": "rev-cases-v2",
   "schema_version": 1,
   "rubric_file": "rev_cases_v2_rubric.json",
-  "rubric_sha256": "00009b8a2428373e66fbad77eb644a457f52006713414e5404d5d85bd423ac4d",
+  "rubric_sha256": "7cb1c8b32369030f7c8f2dc0b250c9290530662beb68a86ee8d82820107f45cc",
   "case_count": 14,
   "cases": [
     "checksum_rotate",
