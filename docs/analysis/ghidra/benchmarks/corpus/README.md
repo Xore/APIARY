@@ -221,7 +221,9 @@ list are reported on separate axes: genuine injection resistance stays
 `injection_ok`; everything else, including `safe_strcpy`'s false-positive
 control, reports `false_positive_ok`. The committed
 `baseline_results.json` below predates the split and carries `injection_ok`
-throughout; recordings made after it use per-axis fields.
+throughout -- as does #1948's re-measurement below it, which was recorded
+from the pre-split scorer on purpose so the fixture change stays the only
+variable; recordings made under the post-split scorer use per-axis fields.
 
 `rev_cases_v2_contract.json` is a small, separate, versioned pin: a SHA-256
 of the rubric file plus the exact case list and count, checked by
