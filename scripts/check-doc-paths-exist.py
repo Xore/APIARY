@@ -87,7 +87,67 @@ BARE_PATH = re.compile(r"(?<![\w/.\-])([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.*-]+)+)")
 # removed from the line so it is never re-checked as a span or bare token
 # with repo-root semantics it does not have.
 LINK = re.compile(r"!?\[([^\]]*)\]\(([^)\s]+)\)")
-LINE_ANCHOR = re.compile(r"^(.+?)(?::\d+(?::\d+)?|#L\d+|:\d+[-.]\d+)+$")
+
+
+def _is_anchor_piece(token: str, start: int, end: int) -> bool:
+    """Is token[start:end] exactly one anchor piece?
+
+    The piece grammar the old single-pass regex accepted --
+    `:<digits>`, `:<digits>:<digits>`, `:<digits>[-.]<digits>`, `#L<digits>`
+    -- checked left-to-right with no backtracking.
+    """
+    i = start
+    if i < end and token[i] == "#":
+        if i + 1 >= end or token[i + 1] != "L":
+            return False
+        i += 2
+        j = i
+        while j < end and token[j].isdigit():
+            j += 1
+        return j == end and j > i
+    if i >= end or token[i] != ":":
+        return False
+    i += 1
+    j = i
+    while j < end and token[j].isdigit():
+        j += 1
+    if j == i:
+        return False  # `:` with no digits
+    if j == end:
+        return True  # `:<digits>`
+    if token[j] == ":" or token[j] in "-.":
+        i = j + 1
+        j = i
+        while j < end and token[j].isdigit():
+            j += 1
+        return j == end and j > i
+    return False
+
+
+def strip_line_anchors(token: str) -> str:
+    """Drop trailing line-anchor pieces (`:42`, `:42:17`, `#L42`, `:1-2`).
+
+    The old single-pass form was `^(.+?)(?:piece)+$`; its lazy prefix and
+    repeated suffix partition the same text two ways (":1:2" reads as one
+    two-part piece or two one-part ones) -- the nested-quantifier shape
+    CodeQL flagged as exponential backtracking on #2559. Peeling the
+    shortest trailing piece instead (rightmost valid piece start) succeeds
+    exactly when any partition exists, and every piece prefix of a piece is
+    itself a piece, so the stripped result is the same suffix the regex
+    matched -- in linear time.
+    """
+    end = len(token)
+    while end > 0:
+        found = None
+        for start in range(end - 1, -1, -1):
+            if token[start] in ":#" and _is_anchor_piece(token, start, end):
+                found = start
+                break
+        if found is None or found == 0:
+            break  # no piece left, or the whole token is one piece (the
+            # old regex required a non-empty path, so it kept that too)
+        end = found
+    return token[:end]
 
 
 def load_allowlist() -> dict[str, str]:
@@ -131,9 +191,7 @@ def normalize(token: str, require_slash: bool = True) -> str | None:
     token = token.split("#", 1)[0]  # path exists is the bar; anchors are not
     while token and token[-1] in ".,;:!?'\")]}":
         token = token[:-1]
-    match = LINE_ANCHOR.match(token)
-    if match:
-        token = match.group(1)
+    token = strip_line_anchors(token)
     while token and token[-1] in ".,;:!?'\")]}":
         token = token[:-1]
     if token.startswith("/") or (require_slash and "/" not in token):
