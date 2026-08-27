@@ -887,6 +887,7 @@ jobs:
               python sandbox/cape/worker/tests/test_cape_worker.py
 
           - name: Real-data session probe metadata honesty (#2387)
+            home: true
             run: |
               # contracts is stubbed, so /app, pydantic, ES, docker and Ollama
               # stay out of CI. Pins both halves of the metadata honesty fix:
@@ -895,6 +896,11 @@ jobs:
               # auth_success=False / duration=0.0 under an EXACT-prompt claim),
               # and sessions whose evidence missed the lookback window are
               # reported and skipped instead of being prompted with defaults.
+              # Also drives the extracted stage-0 jq program (#2426) against
+              # committed fixtures -- latest-close-wins, string-duration
+              # coercion, failed-only auth, empty second-response gap -- on
+              # plain jq; skips itself gracefully where jq is absent so this
+              # row stays homeserver-first per #2389 without dropping coverage.
               python analysis/ghidra/benchmarks/tests/test_probe_real_session.py
 
           - name: Statictools lief contract (#2072)
