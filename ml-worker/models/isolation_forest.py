@@ -303,6 +303,45 @@ def _get_transport_proto(src: dict) -> Optional[str]:
     return net.get("protocol") or hp.get("protocol")
 
 
+def _get_dst_ip(src: dict) -> str:
+    """Our side's address of the flow (#1968): which decoy drew the alert.
+
+    The positional-swap rules of _resolve_flow_sides() decide what "our"
+    means exactly as they do for _get_port() -- on netflow records whose
+    ECS sides are literal packet direction, the honeypot's own address is
+    the honest answer to "what was attacked"; the fallback chains mirror
+    _get_ip()'s for the sensors that never promote destination namespaces.
+    """
+    _, local = _resolve_flow_sides(src)
+    ip = local.get("ip")
+    if ip:
+        return ip
+    hp = src.get("honeypot") or {}
+    if hp.get("dst_ip"):
+        return hp["dst_ip"]
+    eve = ((src.get("suricata") or {}).get("eve")) or {}
+    return eve.get("dest_ip") or ""
+
+
+def _get_src_port(src: dict) -> int:
+    """The remote side's source port (#1968), mirroring _get_ip()'s side.
+
+    0 (not None) keeps the convention _get_port() established for ports no
+    sensor reported -- a typed integer column that dashboards can range-
+    filter without null-handling.
+    """
+    remote, _ = _resolve_flow_sides(src)
+    if remote.get("port") is not None:
+        return int(remote["port"])
+    hp = src.get("honeypot") or {}
+    if hp.get("src_port") is not None:
+        return int(hp["src_port"])
+    eve = ((src.get("suricata") or {}).get("eve")) or {}
+    if eve.get("src_port") is not None:
+        return int(eve["src_port"])
+    return 0
+
+
 def _get_username(src: dict) -> str:
     user = (src.get("user") or {}).get("name")
     if user:
