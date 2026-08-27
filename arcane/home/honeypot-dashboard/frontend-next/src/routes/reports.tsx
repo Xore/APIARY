@@ -1437,7 +1437,12 @@ function Reports() {
   const [definitions, setDefinitions] = useState<ReportDefinition[] | null>(null)
   // #2178: every one of the three loader promises collapses failure to
   // null, and the old effects either kept the skeleton up forever or — for
-  // definitions — manufactured an empty library out of a dead read.
+  // definitions — manufactured an empty library out of a dead read. A
+  // settled body is not automatically a good one either: serviceJSON hands
+  // through whatever JSON the tier answered with, so a 200 whose envelope
+  // is missing the expected array (backend drift, stubbed upstream) would
+  // otherwise ride this exact gate straight into a TypeError on
+  // `.length`/`.map` below. Shape-check at the same gate.
   // #2179 disclosure zones (jobsFailed/payloadError in the sandbox and
   // payload pickers) are separate channels and untouched here.
   const [generatedFailed, setGeneratedFailed] = useState(false)
@@ -1466,7 +1471,10 @@ function Reports() {
     data.generated
       .then((page) => {
         if (cancelled) return
-        if (!page) {
+        // Null means the read failed whole; a body without rows means the
+        // tier answered something else — either way, name it rather than
+        // render from undefined.
+        if (!page || !Array.isArray(page.rows)) {
           setGeneratedFailed(true)
           return
         }
@@ -1478,7 +1486,7 @@ function Reports() {
     data.templates
       .then((result) => {
         if (cancelled) return
-        if (!result) {
+        if (!result || !Array.isArray(result.templates) || !Array.isArray(result.elements)) {
           setTemplatesFailed(true)
           return
         }
@@ -1490,8 +1498,9 @@ function Reports() {
     data.definitions
       .then((result) => {
         if (cancelled) return
-        // A null collapse is a failed read, not an empty library.
-        if (!result) {
+        // A null collapse is a failed read, not an empty library — and so
+        // is a 200 that isn't carrying the definitions array at all.
+        if (!result || !Array.isArray(result.definitions)) {
           setDefinitionsFailed(true)
           return
         }
@@ -1512,8 +1521,8 @@ function Reports() {
     const result = await fetchDefinitions()
     // #2178: a failed refetch keeps the list on screen; blanking it to []
     // read as "every definition vanished" exactly when the store was
-    // merely unreachable.
-    if (!result) return
+    // merely unreachable. Same posture for a 200 without the array.
+    if (!result || !Array.isArray(result.definitions)) return
     const next = result.definitions
     setDefinitions(next)
     // The definition being edited may have been deleted from the library —
