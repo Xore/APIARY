@@ -1,0 +1,182 @@
+name: CI executor router
+
+# Reusable homeserver-first routing decision, shared by every workflow that
+# can execute jobs on the homeserver's honeypot-ci runner (containers.yml,
+# security.yml, pages.yml -- and, once its inline copy retires, quality.yml).
+# The decision procedure and its full rationale are documented in quality.yml's
+# ci-target job and docs/CI-CD.md; the short form:
+#
+#   1. Trust gate. Fork PRs are attacker-controlled input and must never
+#      become process execution on home-network infrastructure, so they are
+#      never routed to the homeserver (the caller passes CI_HOMESERVER_PRS
+#      through, and empty means pull_request is never trusted). push to
+#      main and workflow_dispatch are trusted by construction.
+#   2. Liveness is measured, not read. GET /actions/runners answers HTTP
+#      403 to GITHUB_TOKEN under every permission shape (live-verified
+#      2026-08-27), so availability is proven by dispatching the ci-heartbeat
+#      canary at this ref and requiring a fresh run to complete inside the
+#      decision windows. Anything else -- box off, paused, unregistered,
+#      service wedged -- times out and the caller's jobs fall back to
+#      GitHub-hosted.
+#
+# Fail-safe: every error path resolves to homeserver=false, so routing can
+# degrade CI's speed, never its pass/fail correctness.
+
+on:
+  workflow_call:
+    inputs:
+      ci_homeserver_prs:
+        description: >-
+          Value of vars.CI_HOMESERVER_PRS at the caller. "true" lets
+          same-repo pull_request runs execute on the homeserver; anything
+          else keeps every pull_request on GitHub-hosted.
+        type: string
+        required: false
+        default: ""
+    outputs:
+      homeserver:
+        description: "'true' when the honeypot-ci runner may execute this run, else 'false'"
+        value: ${{ jobs.route.outputs.homeserver }}
+
+permissions:
+  contents: read
+
+jobs:
+  route:
+    name: Pick CI executor
+    runs-on: ubuntu-latest
+    # Must comfortably outlive the heartbeat windows below
+    # (dispatch + appear-wait + terminal-wait + API slack).
+    timeout-minutes: 10
+    # actions:write exists solely to launch the ci-heartbeat canary.
+    permissions:
+      contents: read
+      actions: write
+    outputs:
+      # Always written ('true'/'false', never empty) so downstream
+      # `== 'true'` comparisons cannot misread an absent string as truthy.
+      homeserver: ${{ steps.route.outputs.homeserver }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CI_HOMESERVER_PRS: ${{ inputs.ci_homeserver_prs }}
+    steps:
+      - id: route
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # The runner always exposes the webhook payload natively as
+          # GITHUB_EVENT_PATH; there is no github.event_path expression to
+          # map through env (the key silently vanishes and, under set -u,
+          # reading the bare name aborts the step -- seen live on a PR run).
+          EVENT_PATH="${EVENT_PATH:-${GITHUB_EVENT_PATH:-}}"
+
+          # Defaults are the fallback path; the guards below may only set
+          # them to true.
+          trusted=false
+          online=false
+
+          case "$GITHUB_EVENT_NAME" in
+            push)
+              # Callers' push triggers are branch/tag scoped to
+              # already-reviewed commits (main, v* tags).
+              trusted=true ;;
+            workflow_dispatch)
+              trusted=true ;;
+            schedule)
+              trusted=true ;;
+            pull_request)
+              base="$(jq -r '.pull_request.base.repo.full_name // ""' "$EVENT_PATH")"
+              head_repo="$(jq -r '.pull_request.head.repo.full_name // ""' "$EVENT_PATH")"
+              if [[ -n "$base" && "$base" == "$head_repo" && "${CI_HOMESERVER_PRS}" == "true" ]]; then
+                trusted=true
+              fi ;;
+          esac
+
+          # Decision-window knobs: env-overridable so local unit tests run
+          # in seconds while production keeps these defaults. The two
+          # windows together bound worst-case router cost well under this
+          # job's own timeout-minutes.
+          # GH_TOKEN arrives via the job-level env mapping above and is
+          # therefore always present -- no shell-side default guard here,
+          # which scripts/check-public-leaks.py would flag as a literal
+          # credential assignment.
+
+          appear_window="${HEARTBEAT_APPEAR_SECONDS:-45}"   # event->run-object lag
+          decide_window="${HEARTBEAT_DECIDE_SECONDS:-240}"  # queue+exec budget on the box
+          poll_every="${HEARTBEAT_POLL_SECONDS:-10}"
+
+          if [[ "$trusted" == "true" ]]; then
+            echo "heartbeat: dispatching ci-heartbeat on ${GITHUB_REF_NAME}"
+            api="repos/$GITHUB_REPOSITORY/actions/workflows/ci-heartbeat.yml"
+            # cutoff predates the dispatch by 2min so minor runner/GitHub
+            # clock skew cannot out-veto a real fresh run.
+            cutoff="$(date -u -d '2 minutes ago' +%FT%TZ)"
+            http="$(curl -fsS -o "${RUNNER_TEMP:-/tmp}/hb-disp.out" -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              "$GITHUB_API_URL/$api/dispatches" \
+              -d "{\"ref\":\"${GITHUB_REF_NAME:-}\"}" || echo X)"
+            [[ "$http" == "204" ]] \
+              && echo "heartbeat: dispatch accepted" \
+              || { echo "::warning::heartbeat dispatch refused (HTTP $http); routing fallback"; http=""; }
+
+            # Phase A: wait for a FRESH heartbeat run to appear -- created
+            # after the cutoff (dispatch minus skew allowance) and not yet
+            # completed. The ref is the branch name (the dispatch API
+            # rejects commit SHAs with 422 "No ref found for"), so
+            # freshness -- not a SHA pin -- guards against counting old
+            # runs: only something genuinely recent may vouch, and it must
+            # still reach success inside this cycle's own window. Runs
+            # dispatched concurrently by sibling workflows' routers on the
+            # same ref may be consumed as evidence; they measure the same
+            # box (ci-heartbeat.yml therefore carries no concurrency group:
+            # cancelling a sibling's canary would un-vouch exactly the
+            # evidence this router is waiting on).
+            rid=""
+            deadline=$(( $(date +%s) + appear_window ))
+            while [[ "$(date +%s)" -lt "$deadline" ]]; do
+              # system jq (not `gh api --jq`, which cannot bind
+              # variables) so the cutoff is a proper parameter.
+              runs_json="$(gh api "$api/runs?per_page=20" 2>/dev/null || true)"
+              rid="$(printf '%s' "$runs_json" | jq -r --arg cutoff "$cutoff" '
+                [.workflow_runs[]
+                 | select(.event == "workflow_dispatch"
+                          and .status != "completed"
+                          and .run_started_at >= $cutoff)
+                 | .id][0] // ""' 2>/dev/null || true)"
+              [[ -n "$rid" ]] && break
+              sleep "$poll_every"
+            done
+
+            # Phase B: give the found run its window to finish.
+            if [[ -n "$rid" ]]; then
+              deadline=$(( $(date +%s) + decide_window ))
+              while [[ "$(date +%s)" -lt "$deadline" ]]; do
+                line="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$rid" \
+                  --jq '"\(.status) \(.conclusion)"' 2>/dev/null || true)"
+                case "$line" in
+                  "completed success") online=true ;;
+                  completed*) : ;;                # finished badly -> stays offline
+                  # empty = transient API hiccup; anything else = still
+                  # running. Both keep polling inside the window.
+                  *) sleep "$poll_every"; continue ;;
+                esac
+                break
+              done
+            fi
+            echo "heartbeat verdict: online=$online"
+          fi
+
+          homeserver=false
+          if [[ "$trusted" == "true" && "$online" == "true" ]]; then
+            homeserver=true
+          fi
+
+          {
+            echo "trusted=$trusted"
+            echo "online=$online"
+            echo "executor=$( [[ "$homeserver" == true ]] && echo honeypot-ci || echo ubuntu-latest )"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+          echo "homeserver=$homeserver" >>"$GITHUB_OUTPUT"

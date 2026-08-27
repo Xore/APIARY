@@ -4,13 +4,17 @@
 # (scripts referenced from docs/CI-CD.md's "Home deployment" section,
 # labels self-hosted/linux/x64/honeypot-home, environment production-home).
 # This is a second, separate runner registration with its own labels, own
-# unprivileged system user, and no Docker-socket/production-directory
-# access, because its trust boundary is different: it only ever runs
-# workflows gated to push/workflow_dispatch (see docs/CI-CD.md's "GitHub CI
-# runner" section for why pull_request must never be wired to it -- a
-# public repo's fork PRs are attacker-controlled input, and self-hosted
-# runner code execution is real code execution on this network, not a
-# sandboxed ephemeral VM the way GitHub-hosted runners are).
+# sudo-less system user, docker-group access (#2565: containers, the
+# frontend lockfile check and the Keycloak/OIDC suites route here), and no
+# production-directory/sensor-state access. Its trust boundary is
+# different from the deployment runner's: it only ever runs workflows
+# gated by the ci-target router (push/workflow_dispatch, plus same-repo
+# pull_request when repo variable CI_HOMESERVER_PRS=true -- see
+# docs/CI-CD.md's "GitHub CI runner" section for why fork pull_request
+# must never be wired to it -- a public repo's fork PRs are
+# attacker-controlled input, and self-hosted runner code execution is
+# real code execution on this network, not a sandboxed ephemeral VM the
+# way GitHub-hosted runners are).
 #
 # Usage:
 #   sudo scripts/github-ci-runner/install-ci-runner.sh --repo Xore/APIARY [--token TOKEN]
@@ -52,14 +56,49 @@ if [[ -z "$token" && ! -f "$RUNNER_HOME/.runner" ]]; then
   token=$(gh api -X POST "repos/$repo/actions/runners/registration-token" --jq .token)
 fi
 
-# Dedicated, unprivileged system user -- deliberately NOT in the docker
-# group and with no access to /var/lib/honeypot-*, /opt/stacks, or any
-# sensor state. A workflow running here needs a language toolchain
-# (go/python3/node/shellcheck), never host-level access.
+# Dedicated, unprivileged system user -- no sudo, and no access to
+# /var/lib/honeypot-*, /opt/stacks, or any sensor state. Since #2565 it
+# DOES carry a docker-group membership (the same grant
+# github-deploy-runner always had) because the homeserver-first routing
+# sends docker-bound checks here: containers.yml, the frontend lockfile
+# check, the Keycloak/oauth2-proxy/OIDC suites, compose validation. The
+# trust gate in quality.yml's ci-target router (and the shared
+# ci-router.yml) is what makes that acceptable -- only push-to-main,
+# workflow_dispatch, and CI_HOMESERVER_PRS'd same-repo pull requests ever
+# execute here; fork PRs can never qualify.
 if ! id "$RUNNER_USER" >/dev/null 2>&1; then
   useradd --system --create-home --home-dir "$RUNNER_HOME" --shell /usr/sbin/nologin "$RUNNER_USER"
 fi
 install -d -m 0755 -o "$RUNNER_USER" -g "$RUNNER_USER" "$RUNNER_HOME"
+
+# Host provision for the routed checks, kept idempotent so re-running this
+# script restores a drifted box. The runner user has no sudo BY DESIGN, so
+# every sudo-apt path inside a workflow check would be a guaranteed
+# relocation failure -- everything a check needs is preinstalled here
+# instead, and checks that would install on a missing dep fail loudly.
+#   redis-server: the frontend-next browser fixture spawns its own
+#     (daemon disabled -- only the binary is wanted).
+#   nodejs/npm: the dashboard OIDC suites run the BFF build against the
+#     node 22 the suites pin.
+#   shellcheck: the shell-syntax scripts-and-compose row prefers an
+#     existing binary and only apt-installs where it was already required.
+#   chromium libs: playwright's own ubuntu26.04-x64 chromium dependency
+#     list, extracted from the playwright-core version pinned by
+#     frontend-next/package-lock.json (1.62.1 at the time of writing) --
+#     when that pin moves, re-extract the list from the new
+#     playwright-core and update here.
+apt-get update -qq
+apt-get install -y -qq \
+  redis-server nodejs npm shellcheck \
+  libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64 \
+  libcairo2 libcups2t64 libdbus-1-3 libdrm2 libgbm1 libglib2.0-0t64 \
+  libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 libxcomposite1 \
+  libxdamage1 libxext6 libxfixes3 libxkbcommon0 libxrandr2
+systemctl disable --now redis-server.service 2>/dev/null || true
+if ! id -nG "$RUNNER_USER" | tr ' ' '\n' | grep -qx docker; then
+  usermod -aG docker "$RUNNER_USER"
+  echo "added $RUNNER_USER to the docker group -- the runner service will be restarted below to pick it up"
+fi
 
 if [[ ! -f "$RUNNER_HOME/run.sh" ]]; then
   tmp=$(mktemp -d)

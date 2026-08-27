@@ -29,17 +29,24 @@ flowchart TB
     direction TB
     quality["quality.yml —<br/>the only checks any PR<br/>ever depends on"]
     containerBuild["Container build<br/>(PR: build only,<br/>main/tag: build + publish to GHCR)"]
+    codeql["CodeQL — go / js-ts / python"]
+    pages["Branding site build"]
   end
 
-  subgraph ciSelfHosted["honeypot-ci — self-hosted, narrow host access,<br/>not wired to pull_request by default"]
-    qualityHome["quality.yml paired jobs —<br/>homeserver-first routing when the<br/>runner is online; automatic fallback<br/>to GitHub-hosted otherwise; not a<br/>faster path to green on a PR"]
+  subgraph ciSelfHosted["honeypot-ci — self-hosted, docker-capable,<br/>not wired to pull_request by default"]
+    qualityHome["quality.yml paired jobs + home-flagged<br/>scripts-and-compose rows"]
+    containersHome["containers.yml — all image builds"]
+    securityHome["security.yml — all CodeQL languages"]
+    pagesHome["pages.yml artifact build"]
   end
 
   prPush --> quality
   prPush -->|"PR: build only,<br/>never published"| containerBuild
   mainPush --> quality
   mainPush --> containerBuild
-  mainPush -.->|"push:main + workflow_dispatch —<br/>only after passing the ci-target<br/>trust gate; pull_request needs<br/>repo variable CI_HOMESERVER_PRS,<br/>and forks can never qualify"| qualityHome
+  mainPush --> codeql
+  mainPush --> pages
+  mainPush -.->|"every workflow's compute jobs —<br/>only after passing the ci-router<br/>trust gate + heartbeat; pull_request needs<br/>repo variable CI_HOMESERVER_PRS,<br/>and forks can never qualify"| ciSelfHosted
 ```
 
 **`honeypot-ci` does not see `pull_request` by default, by design.** A
@@ -48,10 +55,12 @@ job; a self-hosted runner's job runs as a real process on real
 home-network infrastructure. A malicious test file in an unreviewed PR
 (`os.system(...)`, a crafted Go `TestMain`) would execute wherever that
 runner has access — the same reasoning `production-home`'s own deployment
-runner (below) already applies. Quality's executor routing (`ci-target`
-in `quality.yml`) trusts push-to-main (already reviewed and merged) and
-`workflow_dispatch` (an operator's own click); same-repo pull requests
-need setting the repository variable `CI_HOMESERVER_PRS=true`, and fork
+runner (below) already applies. Every workflow's executor routing (the
+`ci-target` router in `quality.yml`, and the shared
+`.github/workflows/ci-router.yml` the other workflows call) trusts
+push-to-main (already reviewed and merged), the `schedule` and
+`workflow_dispatch` (an operator's own machinery); same-repo pull
+requests need the repository variable `CI_HOMESERVER_PRS=true`, and fork
 PRs are excluded regardless of that variable — defense-in-depth against a
 compromised contributor account, not just fork-origin PRs.
 
@@ -519,13 +528,14 @@ Arcane-synced directory instead ([ARCANE-GIT-SYNC.md](ARCANE-GIT-SYNC.md)).
 ## GitHub CI runner
 
 A second, separate self-hosted runner from the deployment one above --
-different labels, different systemd service, different (much narrower)
-host access. It is the PRIMARY executor for Quality's toolchain-only
-checks (`public-safety`, `design-lab-readonly`, go formatting/tests,
-`vendored-theme`, `backend-service`) whenever it is online: warm
-toolchain caches in its persistent HOME plus a warm Rust build directory
-make it cheaper per run than spinning an ephemeral GitHub-hosted VM --
-and unlike raw CPU, that warmth is most of the actual speed win.
+different labels, different systemd service, different host access. It is
+the PRIMARY executor for every workflow's compute jobs (#2565): all of
+Quality (including the docker-bound rows, the frontend build and the
+browser matrix), all of containers.yml, all CodeQL, and the pages build,
+whenever it is online. Warm toolchain caches in its persistent HOME plus
+warm Rust/Go build directories make it cheaper per run than spinning an
+ephemeral GitHub-hosted VM -- and unlike raw CPU, that warmth is most of
+the actual speed win.
 
 ```text
 self-hosted, linux, x64, honeypot-ci
@@ -533,21 +543,27 @@ self-hosted, linux, x64, honeypot-ci
 
 ### Executor routing (homeserver first, GitHub-hosted fallback)
 
-Actions has no "runs-on A else B" syntax, so `quality.yml` decides in two
+Actions has no "runs-on A else B" syntax, so each workflow decides in two
 steps. Its `ci-target` router job asks whether this run's source may
 reach the homeserver at all (trust gate below), then whether a
 `honeypot-ci`-labelled runner is currently registered AND reporting
-online. Each eligible check ships as a PAIR of conditional jobs fed by
-that single answer -- exactly one twin runs, the other reports skipped.
-When the box is off, paused, unregistered, or the runners API itself
-errors, every pair falls back to its `(GitHub-hosted)` twin and Quality
-looks exactly like a conventional workflow run: degraded speed is the
-worst failure mode routing can produce. The `force_github_hosted`
-workflow_dispatch input forces the fallback direction manually (e.g.
-while servicing the machine); repository variable `CI_HOMESERVER_PRS=true`
-is what opts same-repo pull requests into homeserver execution -- unset by
-default so the trust posture below stands until someone reverses it
-deliberately.
+online -- measured, not read, by dispatching the `ci-heartbeat.yml` canary
+(the runners-listing API answers 403 to `GITHUB_TOKEN`, so the registry
+cannot be asked). Quality ships each eligible check as a PAIR of
+conditional jobs fed by that single answer -- exactly one twin runs, the
+other reports skipped. containers/security/pages call the shared
+`.github/workflows/ci-router.yml` instead and give their one
+executor-agnostic job a conditional `runs-on`. When the box is off,
+paused, unregistered, or the runners API itself errors, everything falls
+back to its `(GitHub-hosted)` twin/suffix and the workflow looks exactly
+like a conventional run: degraded speed is the worst failure mode routing
+can produce. The `force_github_hosted` workflow_dispatch input on Quality
+forces the fallback direction manually (e.g. while servicing the
+machine); repository variable `CI_HOMESERVER_PRS=true` is what opts
+same-repo pull requests into homeserver execution -- it IS set
+deliberately (the operator's stated intent is that the homeserver carry
+all CI), and undoing it is the auditable way to push PR runs back to the
+cloud.
 
 The old supplement `quality-homeserver.yml` (its own duplicate Go +
 shellcheck pass over pushes to main) was removed once these pairs
@@ -582,9 +598,11 @@ from that.
 sudo scripts/github-ci-runner/install-ci-runner.sh --repo Xore/APIARY
 ```
 
-Registers a dedicated `github-ci-runner` system user (no `docker` group,
-no access to `/var/lib/honeypot-*`, `/opt/stacks`, or any sensor state --
-a workflow here only ever needs a language toolchain), downloads and
+Registers a dedicated `github-ci-runner` system user (sudo-less, with a
+docker-group membership and a preinstalled host provision for the routed
+checks -- redis-server, node 22, shellcheck, and playwright's chromium
+library set -- but no access to `/var/lib/honeypot-*`, `/opt/stacks`, or
+any sensor state), downloads and
 checksum-verifies the pinned `actions/runner` release, registers it with
 the given repository using a registration token (fetched automatically via
 `gh api` if `--token` is not passed and `gh auth login` has already been

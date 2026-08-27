@@ -12,9 +12,34 @@ permissions:
   packages: write
 
 jobs:
+  # Executor routing ("homeserver first, GitHub-hosted fallback") -- the
+  # same ci-target decision quality.yml documents in full: trusted events
+  # (push to main, tags, workflow_dispatch; same-repo pull_request only
+  # when repo variable CI_HOMESERVER_PRS=true) may run on the homeserver,
+  # and only if a fresh ci-heartbeat canary proves a honeypot-ci runner
+  # actually executable right now. Fork pull_request runs never reach the
+  # box and land on GitHub-hosted exactly as before.
+  #
+  # Unlike quality.yml there is a single matrix job rather than PAIR twins:
+  # every row is executor-agnostic (buildx builds and -- on non-PR events
+  # -- ghcr pushes work identically under either runner), so the one job
+  # just picks its runs-on off the router output. The matrix name carries
+  # the "(GitHub-hosted)" suffix on fallback days per quality.yml's pair-
+  # naming rule, so a degraded day reads honestly in the checks list.
+  # Matrix rows serialize behind the single registered runner instance;
+  # the 120-min per-row ceiling only fires on a wedged pickup, mirroring
+  # the timeout-minutes-on-homeserver-only convention.
+  ci-target:
+    name: Pick CI executor
+    uses: ./.github/workflows/ci-router.yml
+    with:
+      ci_homeserver_prs: ${{ vars.CI_HOMESERVER_PRS || '' }}
+
   build:
-    name: ${{ matrix.image }}
-    runs-on: ubuntu-latest
+    name: ${{ matrix.image }}${{ needs.ci-target.outputs.homeserver != 'true' && ' (GitHub-hosted)' || '' }}
+    needs: [ci-target]
+    runs-on: ${{ needs.ci-target.outputs.homeserver == 'true' && fromJSON('["self-hosted", "linux", "x64", "honeypot-ci"]') || fromJSON('["ubuntu-latest"]') }}
+    timeout-minutes: ${{ needs.ci-target.outputs.homeserver == 'true' && 120 || 360 }}
     strategy:
       fail-fast: false
       # #1502: contexts below repointed at arcane/home/honeypot-<name>/ for
