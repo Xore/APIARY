@@ -223,6 +223,21 @@ func entityTechniqueSet(e *entity) map[string]bool {
 	return m
 }
 
+// parseStamp turns a stored RFC3339 timestamp back into an instant, zero
+// when the string is empty or unparseable -- the read-side counterpart to
+// every `.UTC().Format(time.RFC3339)` write site in this file (#2341).
+// Ordering decisions are made on time.Time, never on the rendered strings:
+// an off-UTC container renders observations in local time, and documents
+// carried over from a bad era may hold non-Z offsets, so lexicographic
+// comparison of RFC3339 strings misorders first/last-seen across them.
+func parseStamp(s string) time.Time {
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
 // absorb folds o's IPs/signals/sensors/techniques/events/time-range into e
 // in place.
 func absorb(e *entity, o *ipObservation) {
@@ -237,11 +252,16 @@ func absorb(e *entity, o *ipObservation) {
 		techniques[t] = true
 	}
 	e.Events += o.events
-	if e.First == "" || (!o.first.IsZero() && o.first.Format(time.RFC3339) < e.First) {
+	// #2341: adopt by instant, not by rendered string -- the pre-fix path
+	// formatted o.first without .UTC() and compared it straight against the
+	// stored stamp, so off-UTC containers (or mixed-offset stored docs)
+	// misordered first-seen. parseStamp gives e.First back as a time.Time;
+	// adoption still re-renders through .UTC() so the index keeps pure-Z.
+	if first := parseStamp(e.First); !o.first.IsZero() && (first.IsZero() || o.first.UTC().Before(first)) {
 		e.First = o.first.UTC().Format(time.RFC3339)
 	}
-	if last := o.last.UTC().Format(time.RFC3339); last > e.Last {
-		e.Last = last
+	if last := parseStamp(e.Last); !o.last.IsZero() && o.last.UTC().After(last) {
+		e.Last = o.last.UTC().Format(time.RFC3339)
 	}
 }
 
@@ -260,11 +280,16 @@ func mergeEntityInto(a, b *entity) {
 		entityTechniqueSet(a)[t] = true
 	}
 	a.Events += b.Events
-	if b.First != "" && (a.First == "" || b.First < a.First) {
-		a.First = b.First
+	// #2341: same instant-not-string rule as absorb -- both sides come from
+	// stored documents and may be in mixed offsets until rewritten; the
+	// really-earlier/really-later instant wins, re-rendered through UTC().
+	if bf := parseStamp(b.First); !bf.IsZero() {
+		if af := parseStamp(a.First); af.IsZero() || bf.Before(af) {
+			a.First = bf.UTC().Format(time.RFC3339)
+		}
 	}
-	if b.Last > a.Last {
-		a.Last = b.Last
+	if bl := parseStamp(b.Last); !bl.IsZero() && bl.After(parseStamp(a.Last)) {
+		a.Last = bl.UTC().Format(time.RFC3339)
 	}
 }
 
