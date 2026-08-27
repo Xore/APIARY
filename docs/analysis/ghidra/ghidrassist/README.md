@@ -93,7 +93,7 @@ every time, and only exists for whichever Ghidra versions upstream chose
 to publish a prebuilt asset for (`12.0`/`12.1` for `2.2.0`, checked above).
 
 ```bash
-cd analysis/ghidra/ghidrassist
+cd docs/analysis/ghidra/ghidrassist
 
 # Adjust to the release and asset matching your installed Ghidra version.
 GHIDRASSIST_VERSION=2.2.0

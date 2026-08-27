@@ -796,6 +796,18 @@ jobs:
             home: true
             run: python scripts/check-zeek-pin-parity.py
 
+          # #2458: the pointer-rot family (#2352, #2353, #2356/#2453, #2455,
+          # #2357, five docs' worth invalidated by #1659) kept being fixed by
+          # hand after PR #2367's one-off sweep script proved the shape. This
+          # makes that sweep standing: every repo-path-like citation in
+          # docs/** and the root README must resolve to a git-tracked path.
+          # Offline, stdlib-only; deliberate era-record and host-side
+          # references live in scripts/doc-path-lint-allowlist.txt with
+          # per-entry reasons instead of passing silently.
+          - name: Docs cite existing repo paths (#2458)
+            home: true
+            run: python scripts/check-doc-paths-exist.py
+
           - name: Dionaea SMB exploit-signature incidents (#622, #1775)
             home: true
             run: |

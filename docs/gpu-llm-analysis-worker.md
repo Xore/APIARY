@@ -49,7 +49,7 @@ events from Elasticsearch and produces structured, human-readable analysis:
 
 - **Cowrie session summaries** — what the attacker did, in 3 sentences,
   with an intent label and MITRE ATT&CK technique IDs.
-- **Payload triage** — explain captured scripts/binaries (from Dionaea /
+- **Payload triage** — explain captured scripts and binaries (from Dionaea /
   Cowrie download stores) without executing them.
 - **Daily threat report** — one aggregated digest of the last 24 h, written
   to Elasticsearch for the dashboard.

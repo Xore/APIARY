@@ -94,7 +94,7 @@ the attacker's real IP?**
 
 | Group | Sensors | Why | Fix |
 |---|---|---|---|
-| PROXY-aware | http, api-honeypot, multipot, tanner, dnp3, dicompot, citrix, rdp, endlessh, cisco-asa (WebVPN side), galah (Traefik path, XFF) | portbridge/VPS speaks HAProxy PROXY v1 or Traefik sets XFF in-band | none — raw log is already correct |
+| PROXY-aware | http, api-honeypot, multipot, tanner, dnp3, dicompot, citrix, rdp, endlessh, cisco-asa (WebVPN side), galah (Traefik path, XFF) | the VPS-side portbridge (`vps/portbridge`) speaks HAProxy PROXY v1, or Traefik sets XFF in-band | none — raw log is already correct |
 | Tunnel-blind | cowrie, dionaea, every conpot persona, dns-honeypot, cisco-asa (IKE side), hellpot (raw path) | raw TCP relay; the log records the WireGuard peer | `via_port` join against the portbridge connection log |
 
 The join runs **at ingest time, not read time** (#37/#38): the networkless
@@ -112,7 +112,7 @@ One ES ingest pipeline (`index.default_pipeline` on all three index
 families) processes every document. Each processor is
 `ignore_failure: true`; enrichment failure never blocks indexing.
 
-Order (1:1 with `analysis/elasticsearch-setup.sh`):
+Order (1:1 with `arcane/home/honeypot-init/analysis/elasticsearch-setup.sh`):
 
 1. Main normalization script — promotes heterogeneous sensor fields into
    the flattened `honeypot.*` map (sensor, ips/ports, protocol, user,
