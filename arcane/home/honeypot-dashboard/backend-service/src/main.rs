@@ -353,6 +353,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/ml-anomalies/ack", post(detail::ml_anomaly_ack))
         .route("/api/v1/ml-anomalies/ack-all", post(detail::ml_anomaly_ack_all))
         .route("/api/v1/ml-anomalies/acks", get(detail::ml_anomaly_acks))
+        .route("/api/v1/ml-anomalies/stats", get(detail::ml_anomaly_stats))
         .route("/api/v1/ml-anomalies/disposition", post(detail::ml_anomaly_disposition))
         .route("/api/v1/reports/{id}/pdf", get(reports::pdf))
         // #1612 phase 4: Reports studio — template/element catalog,

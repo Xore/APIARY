@@ -305,6 +305,26 @@ const fetchStats = createServerFn({ method: 'GET' }).handler(async (): Promise<K
   return { total24h: first.total, scanned: rows.length, bySeverity, topSrcIPs }
 })
 
+// #2396: the all-time open backlog is a server number, not a client
+// derivation — the ack sidecar loads wholesale but the dispositioned
+// population spans every page of history, so only the service sees enough
+// to form the honest union. detail.rs's ml_anomaly_stats computes
+// total − |dispositioned ∪ acked| under the same 10000-per-index ceiling
+// its siblings carry. null keeps the tile on the old total−acked fallback
+// while an un-deployed backend answers this route with a 404.
+type Backlog = { total: number; open: number }
+const fetchBacklog = createServerFn({ method: 'GET' }).handler(async (): Promise<Backlog | null> => {
+  const { serviceJSON } = await import('../lib/backend.server')
+  // Shape-checked rather than trusted: a stub backend (or any proxy that
+  // answers a missing route with an empty JSON body) must land in the same
+  // null fallback as an outright failure — an unvalidated {} would turn
+  // Math.max(0, undefined) into a NaN on the Open tile.
+  const body = await serviceJSON<Partial<Backlog>>('/api/v1/ml-anomalies/stats')
+  return typeof body?.total === 'number' && typeof body?.open === 'number'
+    ? { total: body.total, open: body.open }
+    : null
+})
+
 function severityBadge(severity: string) {
   // critical→danger, high→warning, medium→info (ml_anomalies.html:65).
   const cls =
@@ -499,6 +519,7 @@ function Page() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [acks, setAcks] = useState<Record<string, AckRecord>>({})
   const [stats, setStats] = useState<KpiStats | null>(null)
+  const [backlog, setBacklog] = useState<Backlog | null>(null)
   const [severity, setSeverity] = useState('')
   const [eventType, setEventType] = useState('')
   const [status, setStatus] = useState('')
@@ -508,6 +529,13 @@ function Page() {
   const refreshAcks = () => {
     fetchAcks().then((result) => {
       if (result) setAcks(result)
+    })
+  }
+  // Same lifecycle as refreshAcks: ack-all and dispositions both change the
+  // open backlog, so both callers refresh this beside their own refetch.
+  const refreshBacklog = () => {
+    fetchBacklog().then((result) => {
+      if (result) setBacklog(result)
     })
   }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- load once
@@ -533,6 +561,9 @@ function Page() {
     fetchStats().then((result) => {
       if (!cancelled) setStats(result)
     })
+    fetchBacklog().then((result) => {
+      if (!cancelled && result) setBacklog(result)
+    })
     return () => {
       cancelled = true
     }
@@ -551,10 +582,13 @@ function Page() {
 
   const columns = useMemo(() => buildColumns(acks), [acks])
   // Open across the full index (#1566's "not just the current filter"),
-  // not just the loaded page: total is exact and the ack index only holds
-  // rows an operator touched, so total − acked is the open backlog.
+  // not just the loaded page. #2396: computed by ml_anomaly_stats as
+  // total − |dispositioned ∪ acked| — verdict-bearing documents stop
+  // counting as open on the strength of their sidecar alone. Falls back to
+  // the old sidecar-only arithmetic if the stats fetch returns nothing
+  // (pre-#2396 backend still serving during a rolling deploy).
   const ackedCount = useMemo(() => Object.values(acks).filter((record) => record.Acknowledged).length, [acks])
-  const openCount = Math.max(0, total - ackedCount)
+  const openCount = backlog ? Math.max(0, backlog.open) : Math.max(0, total - ackedCount)
   const eventTypes = useMemo(
     () => [...new Set((rows ?? []).map((row) => str(row, 'event_type')).filter(Boolean))].sort(),
     [rows],
@@ -601,6 +635,7 @@ function Page() {
                       const changed = await ackAll()
                       if (changed === null) throw new Error('Acknowledge all failed — admin access required?')
                       refreshAcks()
+                      refreshBacklog()
                       return `Acknowledged ${changed} ${changed === 1 ? 'anomaly' : 'anomalies'}`
                     },
                   })
@@ -753,8 +788,8 @@ function Page() {
             {/* Disposition first (#1968): it's the verdict an operator is
                 here to record; the sidecar ack stays for the quick "seen"
                 that carries no verdict. */}
-            <DispositionControl docIds={idsFor(row)} row={row} onChanged={() => void reload()} />
-            <AckControl docIds={idsFor(row)} acks={acks} onChanged={refreshAcks} />
+            <DispositionControl docIds={idsFor(row)} row={row} onChanged={() => { void reload(); refreshBacklog() }} />
+            <AckControl docIds={idsFor(row)} acks={acks} onChanged={() => { refreshAcks(); refreshBacklog() }} />
           </>
         )}
       />
