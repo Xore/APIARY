@@ -1,0 +1,7 @@
+[
+  {
+    "session_id": "aabbccdd0101",
+    "commands": ["uname -a", "cat /etc/passwd"],
+    "last_seen": "2026-08-26T12:00:05+00:00"
+  }
+]

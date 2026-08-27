@@ -204,5 +204,52 @@ class UnresolvableMetadataTest(unittest.TestCase):
                          ["duration_seconds"])
 
 
+class StageZeroMergeFixturesTest(unittest.TestCase):
+    """#2426: stage 0's jq correlate-and-fill program is extracted verbatim
+    into probe-real-session-merge.jq so the exact expression the live probe
+    runs can be executed hermetically -- plain jq on committed fixture files,
+    no docker, no ES, no second copy of the logic to drift. The dev-session
+    docker shim that once proved this logic existed nowhere in CI, which let
+    the empty-second-response null-iteration bug be caught by luck instead of
+    by a run."""
+
+    BENCH_DIR = Path(__file__).resolve().parents[1]
+    PROGRAM = BENCH_DIR / "probe-real-session-merge.jq"
+    FIXTURES = Path(__file__).resolve().parent / "fixtures" / "probe-real-session-merge"
+    FETCH = BENCH_DIR / "probe-real-session-fetch.sh"
+
+    def test_the_probe_executes_the_extracted_file(self):
+        """Wiring tripwire: if fetch.sh ever grows its own inline copy again,
+        this suite would be testing a file nothing runs."""
+        self.assertIn("probe-real-session-merge.jq", self.FETCH.read_text())
+
+    def test_every_fixture_matches_its_expected_output(self):
+        import shutil
+        import subprocess
+
+        jq = shutil.which("jq")
+        if jq is None:
+            # Graceful degrade where the binary itself is unavailable (#2389's
+            # home-row contract: only interpreter + checkout files). The
+            # fixtures stay committed and reviewed either way.
+            self.skipTest("jq binary not available on this executor")
+
+        cases = sorted(p for p in self.FIXTURES.iterdir() if p.is_dir())
+        self.assertGreaterEqual(len(cases), 4, "fixture set shrank")
+        for case in cases:
+            with self.subTest(fixture=case.name):
+                meta = (case / "meta.json").read_text()
+                result = subprocess.run(
+                    [jq, "--argjson", "meta", meta, "-f", str(self.PROGRAM)],
+                    input=(case / "sessions.json").read_bytes(),
+                    capture_output=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr.decode())
+                self.assertEqual(
+                    json.loads(result.stdout),
+                    json.loads((case / "expected.json").read_text()),
+                )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

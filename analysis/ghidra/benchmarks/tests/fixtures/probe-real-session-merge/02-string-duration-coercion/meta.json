@@ -1,0 +1,26 @@
+[
+  {
+    "_source": {
+      "honeypot": {"session": "bbeeff0202", "eventid": "cowrie.login.success"},
+      "@timestamp": "2026-08-26T12:59:58+00:00"
+    }
+  },
+  {
+    "_source": {
+      "honeypot": {"session": "bbeeff0202", "eventid": "cowrie.session.closed", "duration": "12.5"},
+      "@timestamp": "2026-08-26T13:00:15+00:00"
+    }
+  },
+  {
+    "_source": {
+      "honeypot": {"session": "bbeeff0203", "eventid": "cowrie.login.failed"},
+      "@timestamp": "2026-08-26T13:05:00+00:00"
+    }
+  },
+  {
+    "_source": {
+      "honeypot": {"session": "bbeeff0203", "eventid": "cowrie.session.closed", "duration": "not-a-number"},
+      "@timestamp": "2026-08-26T13:10:09+00:00"
+    }
+  }
+]

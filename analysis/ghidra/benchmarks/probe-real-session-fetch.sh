@@ -47,6 +47,13 @@ lookback="${1:-7d}"
 max_sessions="${2:-5}"
 es_host="${PROBE_REAL_SESSION_ES_HOST:-http://elasticsearch:9200}"
 
+# The correlate-and-fill merge below is single-sourced in
+# probe-real-session-merge.jq (same directory, resolved from the script's own
+# location so any cwd works): CI's fixture harness (#2426) runs that exact
+# file against committed fixtures, so a divergence between what this probe
+# executes and what CI tests would need two files to happen.
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 fetch_hits() { # $1: ES query body -- read-only _search, nothing written
   docker run --rm --network honeynet curlimages/curl:8.21.0@sha256:7c12af72ceb38b7432ab85e1a265cff6ae58e06f95539d539b654f2cfa64bb13 -s \
     -H 'Content-Type: application/json' \
@@ -105,55 +112,4 @@ auth_query=$(jq -n --arg lookback "$lookback" --argjson ids "$session_ids" '{
 
 metadata=$(fetch_hits "$auth_query")
 
-printf '%s' "$sessions" | jq --argjson meta "$metadata" '
-  def normalize_duration:
-    if type == "number" then . else ((tonumber?) // null) end;
-  map(. as $sess
-    | [($meta // [])[] | select(._source.honeypot.session == $sess.session_id)] as $events
-    | [$events[]."_source".honeypot.eventid] as $eventids
-    | if ($events | length) == 0 then
-        $sess + {
-          first_seen: null,
-          auth_success: null,
-          closed: false,
-          duration_seconds: null,
-          metadata_gaps: ["no login-outcome or session-close evidence for this session inside the lookback window"]
-        }
-      else
-        (if any($eventids[]; . == "cowrie.login.success") then true
-         elif any($eventids[]; . == "cowrie.login.failed") then false
-         else null end) as $auth
-        | ([$events[]
-            | select(._source.honeypot.eventid == "cowrie.session.closed")
-            | select(._source.honeypot.duration != null)]
-           | sort_by(._source["@timestamp"])
-           | last
-           | ._source.honeypot.duration
-           | normalize_duration
-          ) as $duration
-        # Production semantics for reference: llm-worker keeps auth_success=False
-        # until a login.success arrives and reads duration only from the close
-        # event -- but where this probe cannot observe either, it emits null
-        # and names the gap instead of borrowing that default silently here.
-        | ($sess
-          + {
-              first_seen: ([($events[] | ._source["@timestamp"])] | min),
-              auth_success: $auth,
-              closed: (any($eventids[]; . == "cowrie.session.closed")),
-              duration_seconds: $duration
-            }
-          + {metadata_gaps: (
-               (if $auth == null then
-                  ["auth_success: no cowrie.login.success/cowrie.login.failed event found for this session inside the lookback window"]
-                else [] end)
-               + (if $duration == null then
-                    (if any($eventids[]; . == "cowrie.session.closed") then
-                       ["duration_seconds: cowrie.session.closed observed but carried no usable honeypot.duration"]
-                     else
-                       ["duration_seconds: no cowrie.session.closed event found for this session inside the lookback window"]
-                     end)
-                  else [] end)
-             )}
-        )
-      end
-)'
+printf '%s' "$sessions" | jq --argjson meta "$metadata" -f "$script_dir/probe-real-session-merge.jq"
