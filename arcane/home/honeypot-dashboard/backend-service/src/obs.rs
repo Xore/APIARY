@@ -173,7 +173,9 @@ impl Metrics {
         let mut rows: Vec<((String, String), u64)> =
             self.requests.lock().unwrap_or_else(|p| p.into_inner()).clone().into_iter().collect();
         rows.sort();
-        for ((family, class), count) in rows {
+        // Borrowed, not moved: the histogram section below re-reads these
+        // same rows for per-family family lists and +Inf counts.
+        for ((family, class), count) in &rows {
             out.push_str(&format!(
                 "apiary_backend_requests_total{{family=\"{family}\",status=\"{class}\"}} {count}\n"
             ));
@@ -182,7 +184,17 @@ impl Metrics {
         out.push_str("# HELP apiary_backend_request_duration_seconds Request latency by route family.\n");
         out.push_str("# TYPE apiary_backend_request_duration_seconds histogram\n");
         let buckets = self.latency_buckets.lock().unwrap_or_else(|p| p.into_inner()).clone();
-        let mut families: Vec<&str> = buckets.keys().filter_map(|k| k.split('|').next()).collect();
+        // Family list comes from the requests rows, NOT from populated
+        // bucket keys: a duration above every finite edge fills no bucket
+        // yet is still a real sample of that family — dropping it would
+        // strand the family with no +Inf close and skew histogram_quantile().
+        // record() bumps both maps one-for-one, so the same rows also give
+        // each family its own sample count for +Inf (the global counter
+        // would leak one family's volume into every other family's Inf
+        // bucket — caught exactly that way by the text-exposition test).
+        let rows_ref = &rows;
+        let mut families: Vec<&str> =
+            rows_ref.iter().map(|((f, _), _)| f.as_str()).collect();
         families.sort_unstable();
         families.dedup();
         let total = self.latency_count.load(Ordering::Relaxed);
@@ -194,8 +206,13 @@ impl Metrics {
                     edge as f64 / 1000.0
                 ));
             }
+            let family_total: u64 = rows_ref
+                .iter()
+                .filter(|((f, _), _)| f.as_str() == family)
+                .map(|(_, c)| c)
+                .sum();
             out.push_str(&format!(
-                "apiary_backend_request_duration_seconds_bucket{{family=\"{family}\",le=\"+Inf\"}} {total}\n"
+                "apiary_backend_request_duration_seconds_bucket{{family=\"{family}\",le=\"+Inf\"}} {family_total}\n"
             ));
         }
         let sum = self.latency_sum_ms.load(Ordering::Relaxed);

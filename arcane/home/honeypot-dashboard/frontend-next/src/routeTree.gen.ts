@@ -407,11 +407,11 @@ export interface FileRoutesByFullPath {
   '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
   '/healthz': typeof HealthzRoute
-  '/metrics': typeof MetricsRoute
   '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
   '/kill-chain': typeof KillChainRoute
   '/llm-analysis': typeof LlmAnalysisRoute
+  '/metrics': typeof MetricsRoute
   '/ml-anomalies': typeof MlAnomaliesRoute
   '/payloads': typeof PayloadsRoute
   '/problem-reports': typeof ProblemReportsRoute
@@ -472,11 +472,11 @@ export interface FileRoutesByTo {
   '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
   '/healthz': typeof HealthzRoute
-  '/metrics': typeof MetricsRoute
   '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
   '/kill-chain': typeof KillChainRoute
   '/llm-analysis': typeof LlmAnalysisRoute
+  '/metrics': typeof MetricsRoute
   '/ml-anomalies': typeof MlAnomaliesRoute
   '/payloads': typeof PayloadsRoute
   '/problem-reports': typeof ProblemReportsRoute
@@ -538,11 +538,11 @@ export interface FileRoutesById {
   '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
   '/healthz': typeof HealthzRoute
-  '/metrics': typeof MetricsRoute
   '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
   '/kill-chain': typeof KillChainRoute
   '/llm-analysis': typeof LlmAnalysisRoute
+  '/metrics': typeof MetricsRoute
   '/ml-anomalies': typeof MlAnomaliesRoute
   '/payloads': typeof PayloadsRoute
   '/problem-reports': typeof ProblemReportsRoute
@@ -605,11 +605,11 @@ export interface FileRouteTypes {
     | '/dead-letters'
     | '/events'
     | '/healthz'
-    | '/metrics'
     | '/history'
     | '/ips'
     | '/kill-chain'
     | '/llm-analysis'
+    | '/metrics'
     | '/ml-anomalies'
     | '/payloads'
     | '/problem-reports'
@@ -670,11 +670,11 @@ export interface FileRouteTypes {
     | '/dead-letters'
     | '/events'
     | '/healthz'
-    | '/metrics'
     | '/history'
     | '/ips'
     | '/kill-chain'
     | '/llm-analysis'
+    | '/metrics'
     | '/ml-anomalies'
     | '/payloads'
     | '/problem-reports'
@@ -735,11 +735,11 @@ export interface FileRouteTypes {
     | '/dead-letters'
     | '/events'
     | '/healthz'
-    | '/metrics'
     | '/history'
     | '/ips'
     | '/kill-chain'
     | '/llm-analysis'
+    | '/metrics'
     | '/ml-anomalies'
     | '/payloads'
     | '/problem-reports'
@@ -801,11 +801,11 @@ export interface RootRouteChildren {
   DeadLettersRoute: typeof DeadLettersRoute
   EventsRoute: typeof EventsRoute
   HealthzRoute: typeof HealthzRoute
-  MetricsRoute: typeof MetricsRoute
   HistoryRoute: typeof HistoryRoute
   IpsRoute: typeof IpsRoute
   KillChainRoute: typeof KillChainRoute
   LlmAnalysisRoute: typeof LlmAnalysisRoute
+  MetricsRoute: typeof MetricsRoute
   MlAnomaliesRoute: typeof MlAnomaliesRoute
   PayloadsRoute: typeof PayloadsRoute
   ProblemReportsRoute: typeof ProblemReportsRoute
@@ -946,13 +946,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof HealthzRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/metrics': {
-      id: '/metrics'
-      path: '/metrics'
-      fullPath: '/metrics'
-      preLoaderRoute: typeof MetricsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/history': {
       id: '/history'
       path: '/history'
@@ -979,6 +972,13 @@ declare module '@tanstack/react-router' {
       path: '/llm-analysis'
       fullPath: '/llm-analysis'
       preLoaderRoute: typeof LlmAnalysisRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/metrics': {
+      id: '/metrics'
+      path: '/metrics'
+      fullPath: '/metrics'
+      preLoaderRoute: typeof MetricsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/ml-anomalies': {
@@ -1313,11 +1313,11 @@ const rootRouteChildren: RootRouteChildren = {
   DeadLettersRoute: DeadLettersRoute,
   EventsRoute: EventsRoute,
   HealthzRoute: HealthzRoute,
-  MetricsRoute: MetricsRoute,
   HistoryRoute: HistoryRoute,
   IpsRoute: IpsRoute,
   KillChainRoute: KillChainRoute,
   LlmAnalysisRoute: LlmAnalysisRoute,
+  MetricsRoute: MetricsRoute,
   MlAnomaliesRoute: MlAnomaliesRoute,
   PayloadsRoute: PayloadsRoute,
   ProblemReportsRoute: ProblemReportsRoute,
