@@ -63,11 +63,16 @@ variable "vm_name" {
 }
 
 variable "memory" {
-  # 16 GB of the host's 91 GB. Two payoffs at once: FLARE-VM unpacks a great
-  # deal of tooling and benefits from the page cache, and a guest with 8 GB
-  # reads as a sandbox to anything that looks — the same reasoning that put
-  # disk_size at 90 GB. Leaves ~54 GB for Elasticsearch and the sensors, which
-  # share this host.
+  # 16 GB of the host's 91 GB. Two payoffs at once: detonations churn through
+  # their own transient I/O -- sample unpacking, Chrome's download/decode
+  # caches, Sysmon buffering event logs sized to 500 MB each in
+  # 04-tools.ps1 -- and page-cache headroom absorbs that instead of pushing
+  # it onto the shared host disk; and a guest with 8 GB reads as a sandbox
+  # to anything that looks — the same reasoning that put disk_size at
+  # 90 GB. Leaves ~54 GB for Elasticsearch and the sensors, which share
+  # this host. (The original justification credited FLARE-VM's tool
+  # unpacking; FLARE-VM left this build on 2026-08-02 and the number did
+  # not need to follow it out.)
   default = "16384"
 }
 
