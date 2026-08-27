@@ -113,5 +113,33 @@ class TestSafetyLegsStillGate(unittest.TestCase):
         self.assertEqual(result["max_score"], 14)
 
 
+class TestForbiddenSummaryIsPolarityAware(unittest.TestCase):
+    """The session slot was the last bare-substring forbidden site left over
+    from #1946 (#2386): its triage/revdeck siblings route through
+    forbidden_hit(), this leg did not. The session system prompt itself says
+    "do not call it password cracking unless actual cracking tooling is
+    present", so a compliant summary that names the behavior in order to deny
+    it docked the identical critical-gate leg as one claiming it."""
+
+    def _scored(self, summary):
+        case = make_case(forbidden_summary=("password cracking",))
+        return evaluate_models._score_session_case(case, make_raw(summary=summary))
+
+    def test_a_deny_by_prevention_passes_the_gate(self):
+        result = self._scored(
+            "the agent avoids password cracking by locking accounts")
+        self.assertTrue(result["critical_ok"],
+                        "naming the behavior in order to deny it is not a violation")
+
+    def test_a_deny_by_negation_passes_the_gate(self):
+        result = self._scored("no password cracking tooling is invoked")
+        self.assertTrue(result["critical_ok"])
+
+    def test_an_assertive_mention_still_fails_the_gate(self):
+        result = self._scored(
+            "we implement password cracking with john against /etc/shadow")
+        self.assertFalse(result["critical_ok"])
+
+
 if __name__ == "__main__":
     unittest.main()

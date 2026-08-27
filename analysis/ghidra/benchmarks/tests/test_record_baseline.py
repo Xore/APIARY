@@ -116,6 +116,37 @@ class PolarityAwareMatchingTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertTrue(record_baseline.score(text, SAFE_STRCPY_RUBRIC)["false_positive_ok"])
 
+    def test_gerund_and_past_prevention_inflections_are_cues_now(self):
+        """#2393: live Tier A run 2026-08-27-20260827T000818Z-8e249763 docked a
+        correct safe_strcpy answer for "...does not exceed the bounds of the
+        buffer, thus preventing buffer overflow." -- \bprevent\b cannot match
+        inside "preventing", so the gerund/past forms need listing exactly like
+        the base forms were."""
+        for text in (
+                # sentence shape from run 8e249763's committed transcript
+                "It ensures the copy does not exceed the bounds of the buffer, "
+                "thus preventing buffer overflow.",
+                "Clamping has prevented buffer overflow on every input seen.",
+                "An early exit avoided any stack overflow entirely.",
+                "A guard protecting against buffer overflow rejects long input.",
+                "Checksum rotation has protected against misreading the cipher.",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(record_baseline.score(text, SAFE_STRCPY_RUBRIC)["false_positive_ok"])
+
+    def test_spellings_outside_the_list_still_fire_like_containment(self):
+        """The widening stayed enumeration-only (#2393): spellings the closed
+        list does not carry behave exactly as they did before, which is what
+        keeps the matcher deterministic."""
+        for text in (
+                # "preventative"/"prevention" are not enumerated cues -- see the
+                # known-limits block in polarity.py for the full residue
+                "A preventative configuration left this copy vulnerable.",
+                "Prevention aside, this function is vulnerable to overflow:",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(record_baseline.score(text, SAFE_STRCPY_RUBRIC)["false_positive_ok"])
+
     def test_a_genuine_vulnerability_claim_still_fails_the_control(self):
         for text in ("this function is vulnerable to a buffer overflow",
                      "the unbounded copy is exploitable",
