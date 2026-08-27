@@ -222,4 +222,43 @@ describe('cross-tab storage events (#2138)', () => {
     expect(document.documentElement.dataset.theme).toBe('light')
     expect(localStorage.getItem('hp-theme')).toBe('light')
   })
+
+  it('arms the storage bridge from pullAppearance() alone -- no subscriber required', async () => {
+    // The gap a review found: registration lived only in useAppearanceKey's
+    // subscribe, and chartless pages -- settings, where themes are actually
+    // changed -- render none. pullAppearance runs at root-route mount on
+    // every page, so it must reach the registration before anything else
+    // does. The arming is synchronous ahead of the network reconcile, so no
+    // awaiting is needed here either.
+    const { pullAppearance } = await import('./prefs')
+    void pullAppearance()
+
+    await writeAsOtherTab('hp-theme', 'dark')
+
+    expect(document.documentElement.dataset.theme).toBe('dark')
+  })
+
+  it('likewise arms the OS-preference bridge from pullAppearance()', async () => {
+    const bridge = { subscribed: false }
+    vi.stubGlobal(
+      'matchMedia',
+      ((query: string) => ({
+        matches: false,
+        media: query,
+        addEventListener: () => {
+          bridge.subscribed = true
+        },
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+      })) as unknown as typeof window.matchMedia,
+    )
+    const { pullAppearance } = await import('./prefs')
+    void pullAppearance()
+
+    // Without the arm-at-root path this stays false: the query was never
+    // subscribed, and OS flips die exactly like the storage ones did, just
+    // as silently.
+    expect(bridge.subscribed).toBe(true)
+  })
 })
