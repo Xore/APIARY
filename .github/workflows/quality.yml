@@ -56,8 +56,11 @@ jobs:
   #      /actions/runners answers HTTP 403 "Resource not accessible by
   #      integration" to GITHUB_TOKEN under every permission shape (live-
   #      verified 2026-08-27). So ci-target dispatches the one-job
-  #      ci-heartbeat.yml canary pinned to [honeypot-ci] at THIS commit
-  #      and gives it a bounded window; success means a real box really
+  #      ci-heartbeat.yml canary pinned to [honeypot-ci] at a real ref
+  #      (the triggering branch; a same-repo PR's head branch -- the
+  #      pull_request merge ref backs no branch and dispatches refuse
+  #      with 422) and gives it a bounded window; success means a real
+  #      box really
   #      ran our code seconds ago. Paused, powered-off, unregistered,
   #      network-stalled or service-wedged all fail the window ->
   #      "GitHub-hosted". Routing infrastructure can degrade CI's speed,
