@@ -154,6 +154,15 @@ jobs:
               && echo "heartbeat: dispatch accepted" \
               || { echo "::warning::heartbeat dispatch refused (HTTP ${http:-none}); routing fallback"; http=""; }
 
+            # cutoff predates the dispatch by 2min so minor runner/GitHub
+            # clock skew cannot out-veto a real fresh run. Must be assigned
+            # BEFORE Phase A -- under set -u an unbound $cutoff kills the
+            # pipeline subshell every poll iteration and rid silently stays
+            # empty (live on #2568: canaries succeeded while every router
+            # still concluded offline because this line was dropped in the
+            # dispatch-ref edit).
+            cutoff="$(date -u -d '2 minutes ago' +%FT%TZ)"
+
             # Phase A: wait for a FRESH heartbeat run to appear -- created
             # after the cutoff (dispatch minus skew allowance) and not yet
             # completed. The ref is the branch name (the dispatch API
