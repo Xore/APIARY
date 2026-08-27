@@ -45,6 +45,13 @@ async function seedSessionCookie(context: BrowserContext, role: "admin" | "user"
 }
 
 test.describe("route smoke across theme x viewport", () => {
+  // Each sweep navigates all sidebar routes through full SSR round-trips --
+  // currently 25 hops at roughly 2s each puts a healthy run near 60s (#2480),
+  // well past Playwright's default 30s. Without this the budget expires
+  // mid-loop (often during a goto), stranding the probe on about:blank where
+  // html carries no data-theme attribute and neither shell branch exists,
+  // which reads as a dashboard crash but is only arithmetic.
+  test.setTimeout(120_000);
   for (const [label, viewport] of [
     ["desktop/dark", { width: 1280, height: 800 }],
     ["mobile/light", { width: 390, height: 844 }],
