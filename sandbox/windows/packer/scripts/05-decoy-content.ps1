@@ -207,10 +207,16 @@ Set-ItemProperty 'HKCU:\Software\Microsoft\Office\16.0\Outlook' -Name 'DefaultPr
 
 $ru = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU'
 New-Item -Path $ru -Force | Out-Null
-Set-ItemProperty $ru -Name a -Value "excel.exe`1"
-Set-ItemProperty $ru -Name b -Value "$PersonaShare`1"
-Set-ItemProperty $ru -Name c -Value "winword.exe`1"
-Set-ItemProperty $ru -Name d -Value "outlook.exe`1"
+# Genuine RunMRU values are REG_SZ strings terminated by the \x01 control
+# byte -- RegRipper/LECMD-class parsers split entries on that separator.
+# PowerShell has NO `1 escape sequence (only `0 is NUL among the digit
+# forms), so "x`1" silently stores a literal trailing '1' instead (#2450).
+# Compose the real terminator with [char]0x01.
+$runMruSep = [string][char]0x01
+Set-ItemProperty $ru -Name a -Value "excel.exe$runMruSep"
+Set-ItemProperty $ru -Name b -Value "$PersonaShare$runMruSep"
+Set-ItemProperty $ru -Name c -Value "winword.exe$runMruSep"
+Set-ItemProperty $ru -Name d -Value "outlook.exe$runMruSep"
 Set-ItemProperty $ru -Name MRUList -Value 'abcd'
 
 $tp = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\TypedPaths'
