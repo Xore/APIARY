@@ -38,6 +38,7 @@ mod decode_correlate;
 mod detail;
 mod es;
 mod event_detail;
+mod obs;
 mod event_page;
 mod es_importer;
 mod events;
@@ -97,6 +98,9 @@ pub struct AppState {
     pub service_token: Arc<Option<String>>,
     pub audit: Arc<audit::AuditLogger>,
     pub config_history: Arc<config_history::ConfigHistory>,
+    /// #1972: request metrics + where durable JSONL request lines land
+    /// (empty = durable shipping disabled; stdout tracing unaffected).
+    pub observability: Arc<obs::Obs>,
 }
 
 #[derive(Serialize)]
@@ -256,12 +260,16 @@ async fn main() -> anyhow::Result<()> {
         std::env::var("DASHBOARD_AUDIT_FILE").unwrap_or_else(|_| "/state/dashboard-audit.jsonl".into());
     let config_history_path = std::env::var("DASHBOARD_CONFIG_HISTORY_FILE")
         .unwrap_or_else(|_| "/state/dashboard-config-history.jsonl".into());
+    // #1972: per-request JSONL lines for filebeat (empty/unset disables —
+    // same posture as audit logging, enabled by compose's volume mount).
+    let log_file = std::env::var("DASHBOARD_LOG_FILE").unwrap_or_default();
 
     let state = AppState {
         es: Arc::new(es::Es::connect(&es_url)?),
         service_token: Arc::new(service_token),
         audit: Arc::new(audit::AuditLogger::new(audit_path)),
         config_history: Arc::new(config_history::ConfigHistory::new(config_history_path)),
+        observability: Arc::new(obs::Obs::new(log_file)),
     };
 
     // Worker loops (#1610): same image, role by WORKER_LOOPS env.
@@ -459,7 +467,14 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/healthz", get(healthz))
+        // #1972: same listener, same internal-network posture as /healthz.
+        .route("/metrics", get(obs::metrics_route))
         .merge(api)
+        // #1972 observability wraps EVERYTHING above it — health probe,
+        // metrics scrape, and every /api/v1 route get a request id echoed
+        // in x-request-id, metrics recorded per family/status/latency, and
+        // one durable JSONL line when DASHBOARD_LOG_FILE is set.
+        .layer(middleware::from_fn(obs::observe))
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(state);
 

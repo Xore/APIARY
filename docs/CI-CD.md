@@ -198,7 +198,7 @@ transfer. These host-owned paths are explicitly preserved:
 | Preserved path | Reason |
 |---|---|
 | `.env` | production addresses, credentials, and local settings |
-| `logs/` | sensor and imported VPS logs |
+| `logs/` | sensor and imported VPS logs, plus the dashboard's own serving-tier app logs (#1972: `dashboard-backend*/`, `dashboard-bff/`) |
 | `state/`, `dashboard-state/` | application checkpoints and state |
 | `analysis/geoip/*.mmdb` | locally downloaded licensed databases |
 | `sandbox/results/` | runtime malware-analysis output |

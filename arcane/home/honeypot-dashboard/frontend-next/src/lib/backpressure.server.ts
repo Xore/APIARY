@@ -18,6 +18,7 @@
 // those hold a socket/file-descriptor for the life of the stream, not just
 // for one request/response cycle.
 import { monitorEventLoopDelay } from 'node:perf_hooks'
+import { recordShed } from './obs.server'
 
 const elMonitor = monitorEventLoopDelay({ resolution: 20 })
 elMonitor.enable()
@@ -53,11 +54,20 @@ export class ConcurrencyLimiter {
     private readonly maxQueue: number = 0,
   ) {}
 
-  /** Resolves with a release function once admitted, or throws Overloaded. */
+  /** Resolves with a release function once admitted, or throws Overloaded.
+   * Both shed shapes count here (#1972): the whole point of #1616's design
+   * is that shedding is safe, and a shedding storm invisible in any counter
+   * would be indistinguishable from capacity nobody ever needed. */
   async acquire(): Promise<() => void> {
-    if (eventLoopLagMs() > EVENT_LOOP_LAG_SHED_MS) throw new Overloaded('event-loop-lag')
+    if (eventLoopLagMs() > EVENT_LOOP_LAG_SHED_MS) {
+      recordShed('event-loop-lag')
+      throw new Overloaded('event-loop-lag')
+    }
     if (this.active >= this.maxConcurrent) {
-      if (this.waiters.length >= this.maxQueue) throw new Overloaded('queue-full')
+      if (this.waiters.length >= this.maxQueue) {
+        recordShed('queue-full')
+        throw new Overloaded('queue-full')
+      }
       await new Promise<void>((resolve) => this.waiters.push(resolve))
     }
     this.active++

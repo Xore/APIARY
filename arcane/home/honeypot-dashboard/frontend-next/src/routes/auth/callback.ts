@@ -15,6 +15,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { completeLogin } from '../../lib/oidc.server'
 import { authErrorPage, providerErrorFrom } from '../../lib/oidcErrors.server'
 import { createSession, sessionCookie } from '../../lib/session.server'
+import { recordNamedEvent } from '../../lib/obs.server'
 
 export const Route = createFileRoute('/auth/callback')({
   server: {
@@ -25,6 +26,7 @@ export const Route = createFileRoute('/auth/callback')({
         if (providerError) {
           // Provider-decided failure (expired request, denied consent,
           // replayed state). A warn, not an error: this is protocol.
+          recordNamedEvent('auth_callback_provider_refused', { reason: providerError.error })
           console.warn(
             `[auth] idp refused login at /auth/callback: ${providerError.error}`,
             providerError.description,
@@ -41,6 +43,7 @@ export const Route = createFileRoute('/auth/callback')({
         try {
           const result = await completeLogin(url)
           if (!result) {
+            recordNamedEvent('auth_callback_expired')
             return authErrorPage({
               status: 400,
               heading: 'Login attempt expired',
@@ -56,12 +59,18 @@ export const Route = createFileRoute('/auth/callback')({
             role: result.role,
             idToken: result.idToken,
           })
+          // The event carries the outcome only — usernames never become
+          // label values or searchable log fields here.
+          recordNamedEvent('auth_callback_completed', { role: result.role })
           return new Response(null, {
             status: 303,
             headers: { location: result.returnTo, 'set-cookie': sessionCookie(sid) },
           })
         } catch (error) {
           console.error('[auth] /auth/callback exchange failed:', error)
+          recordNamedEvent('auth_callback_failed', {
+            reason: error instanceof Error ? error.message.slice(0, 200) : 'unknown',
+          })
           return authErrorPage({
             status: 502,
             heading: 'Sign-in could not be completed',

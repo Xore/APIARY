@@ -52,8 +52,32 @@ export const startInstance = createStart(() => ({
   // everything this pipeline spawns (see that file's rationale).
   requestMiddleware: [
     createMiddleware({ type: 'request' }).server(async ({ next }) => {
-      const csp = await import('./lib/cspNonce.server')
-      return csp.withCspScope(() => next())
+      // #1972 observability wraps the whole pipeline: one request id scoped
+      // over everything (echoed as x-request-id and forwarded to the Rust
+      // tier), then the CSP scope, then the app. Duration covers all of it;
+      // a throw still lands the duration before propagating (#1942 showed
+      // failed requests are precisely the ones worth counting).
+      const started = performance.now()
+      const reqCtx = await import('./lib/requestContext.server')
+      const obs = await import('./lib/obs.server')
+      let inboundId: string | undefined
+      try {
+        const { getRequest } = await import('@tanstack/react-start/server')
+        inboundId = getRequest()?.headers.get('x-request-id') ?? undefined
+      } catch {
+        /* no ambient request here — mint fresh, correlation unaffected */
+      }
+      return reqCtx.withRequestScope(inboundId, async () => {
+        const csp = await import('./lib/cspNonce.server')
+        try {
+          const result = await csp.withCspScope(() => next())
+          obs.recordBffRequest(performance.now() - started)
+          return result
+        } catch (error) {
+          obs.recordBffRequest(performance.now() - started)
+          throw error
+        }
+      })
     }),
   ],
 }))

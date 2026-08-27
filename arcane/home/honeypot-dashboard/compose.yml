@@ -208,11 +208,21 @@ services:
       - REVDECK_RESULTS_DIR=${REVDECK_RESULTS_DIR:-}
       - PAYLOAD_DIRS=/dionaea-lib/binaries,/cowrie-downloads
       - SCRIPT_PAYLOAD_DIR=/state/script-payloads
+      # #1972: same durable per-request app log as backend-service (obs.rs,
+      # see honeypot-dashboard-backend/compose.yml), own directory so the two
+      # instances stay separate files for filebeat's registry while shipping
+      # into the shared dashboard-backend-v1-* index family. Workbench/sandbox
+      # submissions are exactly the requests you'll want a line for.
+      - DASHBOARD_LOG_FILE=${DASHBOARD_LOG_FILE:-/logs/dashboard-backend-mounted/app.jsonl}
       - TZ=Europe/Berlin
     volumes:
       - dashboard-state:/state
       - dionaea-lib:/dionaea-lib:ro
       - /opt/stacks/apiary/logs/cowrie/downloads:/cowrie-downloads:ro
+      # #1972 read-write: this instance CREATES its own app.jsonl, same
+      # provisioning/chown posture as backend-service's (log-init step,
+      # uid 65534).
+      - /opt/stacks/apiary/logs/dashboard-backend-mounted:/logs/dashboard-backend-mounted
       # Read-write: this service is the one thing that CREATES these
       # markers. Windows/GHOSTS/Ghidra/GitHub-analysis/Rev·Deck stay inert
       # (empty env var above) until the operator has actually deployed that
@@ -480,6 +490,15 @@ services:
       - BACKEND_MAX_INFLIGHT=${DASHBOARD_BACKEND_MAX_INFLIGHT:-}
       - BACKEND_MAX_QUEUE=${DASHBOARD_BACKEND_MAX_QUEUE:-}
       - BACKEND_HTTP_MAX_SOCKETS=${DASHBOARD_BACKEND_HTTP_MAX_SOCKETS:-}
+      # #1972 durable BFF app log: named outcomes only (sign-in
+      # started/failed/completed, and anything else that goes through obs
+      # server's recordNamedEvent), not one line per request -- the Rust tier's
+      # stream carries per-request volume, this one carries the events you
+      # otherwise grep stdout for and lose on redeploy (#1942's invisible auth
+      # failures were exactly that). Username is deliberately never among the
+      # fields. File reopened per write, so rename rotation works without a
+      # signal. Provisioned (mkdir + chown 1000) by honeypot-init's log-init.
+      - DASHBOARD_BFF_LOG_FILE=${DASHBOARD_BFF_LOG_FILE:-/logs/dashboard-bff/app.jsonl}
     # 19090: the live production binding, moved here permanently by #1628's
     # cutover (previously a cutover-dashboard.sh-generated override.yml
     # layer, not checked in -- moved into the real compose.yml once the
@@ -503,6 +522,10 @@ services:
       - "${HP_BIND:-10.8.0.2}:19092:8080"
     volumes:
       - ${DASHBOARD_SECRETS_DIR:-/var/dockge/stacks/honeypot-dashboard/secrets}:/run/dashboard-secrets:ro
+      # #1972 read-write: appends DASHBOARD_BFF_LOG_FILE as the node user
+      # (uid 1000 -- chowned by honeypot-init's log-init step, same story as
+      # the group_add above but for a path that must stay writable).
+      - /opt/stacks/apiary/logs/dashboard-bff:/logs/dashboard-bff
     # The secrets dir's own files are -r--rw---- github-deploy-runner:
     # deploy-runner (Arcane's own deploy-time provisioning owner). The old
     # Go dashboard reading the same mount never needed this: it runs as
