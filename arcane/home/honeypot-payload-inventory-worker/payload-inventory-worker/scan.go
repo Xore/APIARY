@@ -109,29 +109,66 @@ func humanBytes(n int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
-// scanDirs walks every capture directory and returns the merged inventory
-// plus a hash -> first-seen-path map (mirrorPayloadBytes needs a real path
+// scanStats carries what a scan could NOT see, next to what it did --
+// #2343: both halves used to be swallowed silently. On a partially-corrupt
+// dionaea-lib volume an unreadable directory entry vanishes from the
+// inventory outright, and a hash-named file whose open fails still gets a
+// row but with the default octet-stream/no-preview classification -- and
+// nothing anywhere distinguished the resulting incomplete inventory from a
+// clean full scan. runScan puts these counts in the completion log, same
+// "scanned N, skipped M" honesty the ES half got from #1352.
+type scanStats struct {
+	WalkErrs   int // directory entries WalkDir itself couldn't read
+	Unreadable int // hash-named regular files whose head-read failed
+}
+
+// maxLoggedScanIssues bounds the per-issue log lines emitted during one
+// scan: a single wedged FUSE mount or corrupted tree can produce thousands
+// of identical EACCES/EIO lines, and ten examples plus a suppressed count
+// says everything ten thousand would.
+const maxLoggedScanIssues = 10
+
+// scanDirs walks every capture directory and returns the merged inventory,
+// a hash -> first-seen-path map (mirrorPayloadBytes needs a real path
 // to read from; dashboard's own capturedFile carries no path field, since
 // dashboard re-derives it on demand via payloadPath's disk search --
 // unnecessary here, since this worker already has the path in hand while
-// walking). Same two-pass shape as dashboard/payloads_data.go's
-// scanPayloads (collect per-file info, then merge sources/copies across
-// directories sharing a hash), split into its own function so the walk
-// itself is testable without a real Elasticsearch.
-func scanDirs(dirs []string) ([]capturedFile, map[string]string) {
+// walking), and the scanStats above. Same two-pass shape as
+// dashboard/payloads_data.go's scanPayloads (collect per-file info, then
+// merge sources/copies across directories sharing a hash), split into its
+// own function so the walk itself is testable without a real Elasticsearch.
+func scanDirs(dirs []string) ([]capturedFile, map[string]string, scanStats) {
 	files := map[string]*capturedFile{}
 	paths := map[string]string{}
 	sourceSets := map[string]map[string]bool{}
 	sourceCounts := map[string]int{}
+	var stats scanStats
+	logged := 0
+	logIssue := func(path string, err error) {
+		if logged < maxLoggedScanIssues {
+			log.Printf("payload-inventory-worker: unreadable during scan: %s: %v", path, err)
+		}
+		logged++
+	}
 
 	for _, dir := range dirs {
 		source := payloadSourceName(dir)
 		filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
-			if walkErr != nil || d.IsDir() || !hashName.MatchString(d.Name()) {
+			if walkErr != nil {
+				stats.WalkErrs++
+				logIssue(path, walkErr)
+				return nil
+			}
+			if d.IsDir() || !hashName.MatchString(d.Name()) {
 				return nil
 			}
 			fi, err := d.Info()
-			if err != nil || !fi.Mode().IsRegular() {
+			if err != nil {
+				stats.WalkErrs++
+				logIssue(path, err)
+				return nil
+			}
+			if !fi.Mode().IsRegular() {
 				return nil
 			}
 			hash := strings.ToLower(d.Name())
@@ -152,7 +189,11 @@ func scanDirs(dirs []string) ([]capturedFile, map[string]string) {
 			mime := "application/octet-stream"
 			classification := classifyPayload(nil)
 			var preview string
-			if f, err := os.Open(path); err == nil {
+			f, err := os.Open(path)
+			if err != nil {
+				stats.Unreadable++
+				logIssue(path, err)
+			} else {
 				head := make([]byte, 64<<10)
 				n, _ := f.Read(head)
 				f.Close()
@@ -177,6 +218,9 @@ func scanDirs(dirs []string) ([]capturedFile, map[string]string) {
 			return nil
 		})
 	}
+	if logged > maxLoggedScanIssues {
+		log.Printf("payload-inventory-worker: %d further scan issue(s) beyond the first %d suppressed", logged-maxLoggedScanIssues, maxLoggedScanIssues)
+	}
 
 	var out []capturedFile
 	for hash, file := range files {
@@ -187,7 +231,7 @@ func scanDirs(dirs []string) ([]capturedFile, map[string]string) {
 		out = append(out, *file)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Mtime > out[j].Mtime })
-	return out, paths
+	return out, paths, stats
 }
 
 func utcOrEmpty(t time.Time) string {
