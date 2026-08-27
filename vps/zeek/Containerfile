@@ -4,8 +4,15 @@
 # Same package set as dev/sensing-lab, deliberately: what the lab measures is
 # only evidence for production if production runs the same parsers. The two
 # Containerfiles differ in what they are for (live capture vs offline replay),
-# not in what they load.
-FROM docker.io/zeek/zeek:8.0
+# not in what they load -- same base digest, same pins, mirrored line for line
+# (scripts/check-zeek-pin-parity.py fails CI when the two files disagree).
+#
+# Base pinned by manifest-list digest per docs/CONTAINER-UPDATES.md, resolved
+# 2026-08-27 to what :8.0 pointed at that day (#2456). The list digest covers
+# amd64 and arm64 alike, so lab and prod land on identical base bits however
+# each host pulls; moving it is a deliberate edit to this line, and that is
+# the point -- patch-level drift inside 8.0.x was invisible before the pin.
+FROM docker.io/zeek/zeek:8.0@sha256:73e80e9cd23ff71fd28d158e9a9af5c7b2b0ef5d4036af61521827531347c0e3
 
 # The official image installs under /usr/local/zeek, not the /opt/zeek that
 # source builds use. Naming it explicitly rather than relying on the base
@@ -30,7 +37,14 @@ RUN zkg autoconfig --force
 # permits internal security use and non-commercial research and forbids
 # monetization. APIARY qualifies -- recorded here so the constraint travels
 # with the image.
-RUN zkg install --force --skiptests zeek/foxio/ja4
+#
+# Pinned for the same reason as the hassh block below (#2456): --version
+# resolves to what prod's 2026-08-23 build had already shipped, read back out
+# of the running sensor's zkg state -- the v1.0.0 tag commit (2026-08-14).
+# main has moved past it since; refreshing is a deliberate
+# docs/CONTAINER-UPDATES.md bump, not something a rebuild absorbs silently.
+RUN zkg install --force --skiptests --version 4ce66bbc50d52e47825133e99fd8869d0b8a941a \
+        zeek/foxio/ja4
 
 # By git URL, not index name: HASSH is indexed under corelight rather than its
 # own repo owner, so "zeek/salesforce/hassh" is "package name not found".
@@ -54,14 +68,40 @@ RUN python3 /tmp/hassh_optional_patch.py
 # single upstream breakage is obvious instead of taking the whole ICS surface
 # down, and by URL because the index names do not always match the repo names
 # -- the Profinet parser is icsnpp-profinet-io-cm, and icsnpp-profinet 404s.
-RUN zkg install --force --skiptests \
-        https://github.com/cisagov/icsnpp-modbus \
-        https://github.com/cisagov/icsnpp-dnp3 \
-        https://github.com/cisagov/icsnpp-enip \
+#
+# Every parser is pinned (--version) to what prod's 2026-08-23 build actually
+# shipped, read back out of the running sensor's zkg clones (#2456): building
+# this file now reproduces what prod already runs instead of resolving
+# whatever main moved to since the last rebuild. One --version applies to a
+# whole zkg invocation, so each parser gets its own call.
+#
+#   modbus          16428919  v2.0.0 tag (2025-09-03); main has since moved
+#                             to 27f22b41 (2026-08-05) -- taking it is a
+#                             deliberate docs/CONTAINER-UPDATES.md bump
+#   dnp3            b31dbade  main tip at pin time
+#   enip            9ad78fbe  main tip at pin time
+#   bacnet          b34b92eb  main tip at pin time
+#   s7comm          7ebeb03a  main tip at pin time
+#   opcua-binary    efca88a3  v2.0.0 tag (2025-07-09); main has since moved
+#                             to 926c08a (2026-08-24) -- taking it is a
+#                             deliberate docs/CONTAINER-UPDATES.md bump
+#   profinet-io-cm  833a78c0  main tip at pin time
+#
+# dev/sensing-lab/Containerfile mirrors this table line for line;
+# scripts/check-zeek-pin-parity.py fails CI when the two files disagree.
+RUN zkg install --force --skiptests --version 16428919f5efb034eda625bf989c68543e2a5e76 \
+        https://github.com/cisagov/icsnpp-modbus && \
+    zkg install --force --skiptests --version b31dbadeceb1cbcda16aef89c650559cd177dd7e \
+        https://github.com/cisagov/icsnpp-dnp3 && \
+    zkg install --force --skiptests --version 9ad78fbe11127f152a1c5c5f97ba4c8e48cc8fea \
+        https://github.com/cisagov/icsnpp-enip && \
+    zkg install --force --skiptests --version b34b92eb2a82848e55748fc57036a624368b1d4f \
         https://github.com/cisagov/icsnpp-bacnet
-RUN zkg install --force --skiptests \
-        https://github.com/cisagov/icsnpp-s7comm \
-        https://github.com/cisagov/icsnpp-opcua-binary \
+RUN zkg install --force --skiptests --version 7ebeb03a0f954541369361651d1c27d09a64b5a3 \
+        https://github.com/cisagov/icsnpp-s7comm && \
+    zkg install --force --skiptests --version efca88a3f65c58ad496588aba8e9dfe79d9f92a1 \
+        https://github.com/cisagov/icsnpp-opcua-binary && \
+    zkg install --force --skiptests --version 833a78c04c2f623f6afcda6d3dc72cc288cb11d8 \
         https://github.com/cisagov/icsnpp-profinet-io-cm
 
 # #1764: IEC-104. ICSNPP has no parser for it, so port 2404 -- the one ICS
