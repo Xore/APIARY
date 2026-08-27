@@ -28,9 +28,13 @@
 # files from *somewhere* -- but the firmware never boots from it; PXE does
 # that instead, exactly as win11-analysis.pkr.hcl already established.
 #
-# Build host requirements (same as win11-analysis.pkr.hcl, already present):
+# Build host requirements (already met on this host, which also builds
+# win11-analysis.pkr.hcl):
 #   /dev/kvm, qemu-system-x86_64, swtpm (TPM 2.0 emulation for Windows 11)
-#   /usr/share/OVMF/OVMF_CODE_4M.secboot.fd + OVMF_VARS_4M.ms.fd
+#   /usr/share/OVMF/OVMF_CODE_4M.fd + OVMF_VARS_4M.fd -- the non-secboot
+#     pair this file's source block actually loads; deliberately not the
+#     secboot pair win11-analysis.pkr.hcl's requirements list also names,
+#     see the comment above the efi_firmware_* lines in the source block
 #
 # Usage:
 #   packer init win11-cape.pkr.hcl
@@ -147,6 +151,14 @@ source "qemu" "win11cape" {
   net_device = "e1000e"
   cpu_model  = "host"
 
+  # Non-secboot OVMF, deliberate: this PXE chain was debugged under
+  # non-secboot, and the one SECBOOT run attempted back then failed
+  # differently (initial PXE fine, then a firmware boot-order fallthrough
+  # to "No bootable option" -- the full account and the swap-back plan
+  # live in win11-analysis.pkr.hcl's "Secure Boot OFF for now -- TEMPORARY"
+  # comment block, #288/#419, above that file's own efi_firmware_* lines).
+  # Revisit secure boot only once that reset is root-caused; the pair to
+  # move to then is OVMF_CODE_4M.secboot.fd + OVMF_VARS_4M.ms.fd.
   efi_boot          = true
   efi_firmware_code = "/usr/share/OVMF/OVMF_CODE_4M.fd"
   efi_firmware_vars = "/usr/share/OVMF/OVMF_VARS_4M.fd"
