@@ -94,6 +94,30 @@ test.describe("route smoke across theme x viewport", () => {
   });
 });
 
+test.describe("reports studio content (#2507)", () => {
+  // The route smoke above is shell-level by design; /reports is the one
+  // route whose real UI never got exercised until its fixtures existed --
+  // the bare {} catch-all shipped #2480's DefinitionsCard crash past every
+  // sweep that timed out before reaching the route. These pins hold the
+  // fixture-backed catalog, Library, and generated grid to their contentful
+  // render paths.
+  test("template gallery, library definitions, and generated grid render contentfully", async ({ page }) => {
+    await page.goto("/reports");
+    // Design step: the wizard's template gallery lists the fixture catalog
+    // instead of "No report templates are available.".
+    await expect(page.locator(".hp-rp-template", { hasText: "Executive report" })).toBeVisible();
+    await expect(page.getByText("No report templates are available.")).toHaveCount(0);
+
+    // Library step: saved definition with its schedule, plus the generated
+    // PDF row the grid reads from /api/v1/store/generated-reports.
+    await page.locator("#rp-library").click();
+    await expect(page.getByText("Daily executive digest")).toBeVisible();
+    await expect(page.getByText("daily @ 06:00 UTC")).toBeVisible();
+    await expect(page.getByText("APIARY Executive Security Report").first()).toBeVisible();
+    await expect(page.getByText("150 KB")).toBeVisible();
+  });
+});
+
 test.describe("modal core", () => {
   test("command palette opens, filters, and Escape closes", async ({ page }) => {
     await page.goto("/");
