@@ -89,8 +89,9 @@ jobs:
     name: Pick CI executor
     runs-on: ubuntu-latest
     # Must comfortably outlive the heartbeat window below
-    # (dispatch + appear-wait + terminal-wait + API slack).
-    timeout-minutes: 10
+    # (dispatch + appear-wait + terminal-wait + API slack; worst case
+    # 120s + 420s plus slack).
+    timeout-minutes: 15
     # actions:write exists solely to launch the ci-heartbeat canary.
     permissions:
       contents: read
@@ -144,8 +145,17 @@ jobs:
           # which scripts/check-public-leaks.py would flag as a literal
           # credential assignment.
 
-          appear_window="${HEARTBEAT_APPEAR_SECONDS:-45}"   # event->run-object lag
-          decide_window="${HEARTBEAT_DECIDE_SECONDS:-240}"  # queue+exec budget on the box
+          # 120s appear: seen live on #2568 -- the dispatch is accepted and
+          # the canary still not visible in /runs 45s later while GitHub's
+          # run indexing lags, so the window must cover API lag, not just
+          # dispatch latency (the loop exits early when the run appears,
+          # so the cost is paid only in the worst case).
+          # 420s decide: the canary is tiny, but it rides a queue behind
+          # whatever else the single box instance is executing; #2572
+          # tracks real capacity. Fan-out deeper than ~2 canaries still
+          # overflows this window and falls back -- fail-safe direction.
+          appear_window="${HEARTBEAT_APPEAR_SECONDS:-120}"   # event->run-object lag (API indexing included)
+          decide_window="${HEARTBEAT_DECIDE_SECONDS:-420}"   # queue+exec budget on the box
           poll_every="${HEARTBEAT_POLL_SECONDS:-10}"
 
           if [[ "$trusted" == "true" && "${FORCE_GITHUB_HOSTED}" != "true" ]]; then
