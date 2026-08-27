@@ -29,6 +29,8 @@ use axum::response::{IntoResponse, Response};
 use serde_json::json;
 use tracing::Instrument;
 
+use crate::AppState;
+
 /// Upper bound accepted from upstream before we regenerate instead.
 const MAX_INBOUND_ID_LEN: usize = 128;
 
@@ -316,7 +318,7 @@ mod tests {
         // Whitespace/control bytes/oversized are regenerated, not echoed.
         assert_ne!(mint_request_id(Some("bad id")), "bad id");
         assert_ne!(mint_request_id(Some("bad\nid")), "bad\nid");
-        assert_ne!(mint_request_id(Some("x".repeat(MAX_INBOUND_ID_LEN + 1)).as_str()), "");
+        assert_ne!(mint_request_id(Some("x".repeat(MAX_INBOUND_ID_LEN + 1).as_str())), "");
         // Every generated id is distinct from a fresh one.
         assert_ne!(mint_request_id(None), mint_request_id(None));
     }

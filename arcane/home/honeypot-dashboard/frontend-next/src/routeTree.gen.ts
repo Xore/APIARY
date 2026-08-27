@@ -26,6 +26,7 @@ import { Route as HistoryRouteImport } from './routes/history'
 import { Route as IpsRouteImport } from './routes/ips'
 import { Route as KillChainRouteImport } from './routes/kill-chain'
 import { Route as LlmAnalysisRouteImport } from './routes/llm-analysis'
+import { Route as MetricsRouteImport } from './routes/metrics'
 import { Route as MlAnomaliesRouteImport } from './routes/ml-anomalies'
 import { Route as PayloadsRouteImport } from './routes/payloads'
 import { Route as ProblemReportsRouteImport } from './routes/problem-reports'
@@ -155,6 +156,11 @@ const KillChainRoute = KillChainRouteImport.update({
 const LlmAnalysisRoute = LlmAnalysisRouteImport.update({
   id: '/llm-analysis',
   path: '/llm-analysis',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MetricsRoute = MetricsRouteImport.update({
+  id: '/metrics',
+  path: '/metrics',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MlAnomaliesRoute = MlAnomaliesRouteImport.update({
@@ -401,6 +407,7 @@ export interface FileRoutesByFullPath {
   '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
   '/healthz': typeof HealthzRoute
+  '/metrics': typeof MetricsRoute
   '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
   '/kill-chain': typeof KillChainRoute
@@ -465,6 +472,7 @@ export interface FileRoutesByTo {
   '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
   '/healthz': typeof HealthzRoute
+  '/metrics': typeof MetricsRoute
   '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
   '/kill-chain': typeof KillChainRoute
@@ -530,6 +538,7 @@ export interface FileRoutesById {
   '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
   '/healthz': typeof HealthzRoute
+  '/metrics': typeof MetricsRoute
   '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
   '/kill-chain': typeof KillChainRoute
@@ -596,6 +605,7 @@ export interface FileRouteTypes {
     | '/dead-letters'
     | '/events'
     | '/healthz'
+    | '/metrics'
     | '/history'
     | '/ips'
     | '/kill-chain'
@@ -660,6 +670,7 @@ export interface FileRouteTypes {
     | '/dead-letters'
     | '/events'
     | '/healthz'
+    | '/metrics'
     | '/history'
     | '/ips'
     | '/kill-chain'
@@ -724,6 +735,7 @@ export interface FileRouteTypes {
     | '/dead-letters'
     | '/events'
     | '/healthz'
+    | '/metrics'
     | '/history'
     | '/ips'
     | '/kill-chain'
@@ -789,6 +801,7 @@ export interface RootRouteChildren {
   DeadLettersRoute: typeof DeadLettersRoute
   EventsRoute: typeof EventsRoute
   HealthzRoute: typeof HealthzRoute
+  MetricsRoute: typeof MetricsRoute
   HistoryRoute: typeof HistoryRoute
   IpsRoute: typeof IpsRoute
   KillChainRoute: typeof KillChainRoute
@@ -931,6 +944,13 @@ declare module '@tanstack/react-router' {
       path: '/healthz'
       fullPath: '/healthz'
       preLoaderRoute: typeof HealthzRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/metrics': {
+      id: '/metrics'
+      path: '/metrics'
+      fullPath: '/metrics'
+      preLoaderRoute: typeof MetricsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/history': {
@@ -1293,6 +1313,7 @@ const rootRouteChildren: RootRouteChildren = {
   DeadLettersRoute: DeadLettersRoute,
   EventsRoute: EventsRoute,
   HealthzRoute: HealthzRoute,
+  MetricsRoute: MetricsRoute,
   HistoryRoute: HistoryRoute,
   IpsRoute: IpsRoute,
   KillChainRoute: KillChainRoute,
