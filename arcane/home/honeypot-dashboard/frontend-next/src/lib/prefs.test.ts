@@ -6,6 +6,8 @@
 // the *second* animation frame. Releasing on the first re-enables
 // transitions before the new values are painted, which is the original bug
 // with extra steps — and looks correct in review.
+import { act, createElement } from 'react'
+import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const SUPPRESS_CLASS = 'hp-theme-switching'
@@ -99,5 +101,125 @@ describe('applyTheme suppression ordering', () => {
     // distinguishes "explicitly light" from "follow the OS" by presence.
     expect('theme' in document.documentElement.dataset).toBe(false)
     expect(localStorage.getItem('hp-theme')).toBeNull()
+  })
+})
+
+// #2138: appearance must follow the operator across tabs, and the only notice
+// another tab receives is a `storage` event. These tests drive the real
+// registration path -- mounting a subscriber to useAppearanceKey -- then play
+// the other tab the way a second document does: change the key under the
+// running page and dispatch. Assertions are on end state (the attributes),
+// because that is where a wrong mapping shows.
+describe('cross-tab storage events (#2138)', () => {
+  beforeEach(() => {
+    document.documentElement.className = ''
+    delete document.documentElement.dataset.theme
+    delete document.documentElement.dataset.hpTheme
+    delete document.documentElement.dataset.hpPalette
+    localStorage.clear()
+    vi.resetModules()
+  })
+
+  /** Mount a minimal component so useAppearanceKey's subscribe runs. */
+  async function mountSubscriber(): Promise<void> {
+    const { useAppearanceKey } = await import('./prefs')
+    let root: ReturnType<typeof createRoot>
+    function Probe(): null {
+      useAppearanceKey()
+      return null
+    }
+    await act(async () => {
+      root = createRoot(document.createElement('div'))
+      root.render(createElement(Probe))
+    })
+  }
+
+  /** Play the writing tab: change the key directly, then notify. */
+  async function writeAsOtherTab(key: string | null, newValue: string | null): Promise<void> {
+    if (key === null) {
+      localStorage.clear()
+    } else if (newValue === null) {
+      localStorage.removeItem(key)
+    } else {
+      localStorage.setItem(key, newValue)
+    }
+    // Storage handlers re-render through the store; stay inside act().
+    await act(async () => {
+      window.dispatchEvent(new StorageEvent('storage', { key, newValue }))
+    })
+  }
+
+  it('applies a mode another tab switched to', async () => {
+    const { applyTheme } = await import('./prefs')
+    await mountSubscriber()
+
+    applyTheme('dark') // local toggle first: this tab never sees its own event
+    expect(document.documentElement.dataset.theme).toBe('dark')
+
+    writeAsOtherTab('hp-theme', 'light')
+
+    expect(document.documentElement.dataset.theme).toBe('light')
+    expect(localStorage.getItem('hp-theme')).toBe('light')
+  })
+
+  it('reads a removed key as reset to system (#1754 shape: absent = system)', async () => {
+    const { applyTheme } = await import('./prefs')
+    await mountSubscriber()
+
+    applyTheme('dark')
+    writeAsOtherTab('hp-theme', null)
+
+    expect('theme' in document.documentElement.dataset).toBe(false)
+  })
+
+  it('maps a whole-area clear (key null) to defaults on both axes', async () => {
+    const { applyTheme } = await import('./prefs')
+    await mountSubscriber()
+
+    applyTheme('dark')
+    writeAsOtherTab('hp-palette', 'ocean')
+    expect(document.documentElement.dataset.theme).toBe('dark')
+
+    writeAsOtherTab(null, null)
+
+    expect('theme' in document.documentElement.dataset).toBe(false)
+    // The palette applier normalises to the named default rather than leaving
+    // the attribute absent -- getThemeName()/gallery need an answerable DOM.
+    expect(document.documentElement.dataset.hpTheme).toBe('claude')
+  })
+
+  it('applies a palette written elsewhere and resets it on removal', async () => {
+    await mountSubscriber()
+
+    writeAsOtherTab('hp-palette', 'sunset')
+    expect(document.documentElement.dataset.hpTheme).toBe('sunset')
+
+    writeAsOtherTab('hp-palette', null)
+
+    expect(document.documentElement.dataset.hpTheme).toBe('claude')
+  })
+
+  it('normalises a malformed foreign value back to the boot-contract default', async () => {
+    await mountSubscriber()
+
+    // Same read the pre-paint boot script makes: not shaped like a name --
+    // even though present -- reads as absent, and absent is the default.
+    writeAsOtherTab('hp-palette', 'Not A Palette Name!!')
+
+    expect(document.documentElement.dataset.hpTheme).toBe('claude')
+  })
+
+  it('never echoes through the appliers after resolving a foreign write', async () => {
+    await mountSubscriber()
+
+    writeAsOtherTab('hp-theme', 'light')
+    writeAsOtherTab('hp-theme', 'light')
+
+    // Reacting cannot rewrite storage into a state another handler would see
+    // as new: same-value writes produce no event anywhere, and the guard
+    // short-circuits the rest. If this ever regressed into ping-pong, the
+    // extra pass above flips out via the mismatched old/new assertions.
+    expect(document.documentElement.dataset.theme).toBe('light')
+    expect(localStorage.getItem('hp-theme')).toBe('light')
   })
 })
