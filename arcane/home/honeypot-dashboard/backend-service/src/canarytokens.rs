@@ -240,6 +240,18 @@ pub async fn create(
     }))
 }
 
+/// One history record's browser-facing shape: auth_token stripped,
+/// everything else passed through untouched. Extracted from list()'s map
+/// so the strip has its own test -- the ES document keeps the credential
+/// (create() persists it for download()'s ?auth= use), only responses
+/// drop it.
+fn redact_record(mut record: Value) -> Value {
+    if let Some(object) = record.as_object_mut() {
+        object.remove("auth_token");
+    }
+    record
+}
+
 /// GET /api/v1/canarytokens — every created token's history record, newest
 /// first, for the Settings pane's history table and credentials'
 /// link-token id validation. auth_token is the platform's own management
@@ -267,13 +279,7 @@ pub async fn list(State(state): State<AppState>) -> Result<Json<Value>, (StatusC
         .as_array()
         .into_iter()
         .flatten()
-        .map(|hit| {
-            let mut record = hit["_source"].clone();
-            if let Some(object) = record.as_object_mut() {
-                object.remove("auth_token");
-            }
-            record
-        })
+        .map(|hit| redact_record(hit["_source"].clone()))
         .collect();
     records.sort_by(|a, b| {
         let a = a["created_at"].as_str().unwrap_or_default();
@@ -396,5 +402,109 @@ mod tests {
         // an absent hostname field means nothing to bake, so nothing to
         // refuse.
         assert!(!placeholder_hostname(""));
+    }
+
+    // The rest of this module pins #2457's invariant: auth_token (the
+    // platform's management credential for a token, password-equivalent)
+    // is persisted to dashboard-canarytokens-v1 but never serializes into
+    // any browser-facing shape. See list()'s doc-comment for the incident
+    // that makes this load-bearing: a generic /api/v1/store proxy route
+    // once served this index with auth_token's shape exposed. These
+    // assertions exist so widening a projection, adding a passthrough
+    // proxy over the ES index, or forgetting the strip in a third
+    // response shape fails here first.
+
+    const FAKE_AUTH_TOKEN: &str = "tok-secret-abcdef1234567890";
+
+    /// The ES document exactly as create()'s persisted `record` json!()
+    /// block writes it -- nine fields, credential included.
+    fn es_record(id: &str, created_at: &str) -> Value {
+        json!({
+            "id": id,
+            "token_type": "ms_word",
+            "memo": format!("decoy {id}"),
+            "token_url": format!("https://decoys.example-shack.net/{id}"),
+            "hostname": "quiet-river-4211.decoys.example-shack.net",
+            "filename_hint": "quarterly-report.docx",
+            "auth_token": FAKE_AUTH_TOKEN,
+            "created_by": "ops",
+            "created_at": created_at,
+        })
+    }
+
+    fn assert_no_credential(text: &str) {
+        assert!(!text.contains("auth_token"), "field name leaked: {text}");
+        assert!(
+            !text.contains(FAKE_AUTH_TOKEN),
+            "credential value leaked past its own key (sibling-field embedding): {text}"
+        );
+    }
+
+    #[test]
+    fn created_token_serialization_never_carries_the_auth_token() {
+        // create() builds CreatedToken field-by-field rather than
+        // serializing the ES record, so the struct's field list IS the
+        // redaction. A new field added there has to be added to this
+        // initializer too, forcing whoever touches it through these
+        // assertions. Both the key name and the value are checked: a
+        // token_url-style sibling embedding the credential must not pass
+        // on a technicality.
+        let record = es_record("0fdec0yF", "2026-08-27T00:00:00+00:00");
+        let created = CreatedToken {
+            id: record["id"].as_str().unwrap().to_string(),
+            token_type: record["token_type"].as_str().unwrap().to_string(),
+            memo: record["memo"].as_str().unwrap().to_string(),
+            token_url: record["token_url"].as_str().unwrap().to_string(),
+            hostname: record["hostname"].as_str().unwrap().to_string(),
+            created_by: record["created_by"].as_str().unwrap().to_string(),
+            created_at: record["created_at"].as_str().unwrap().to_string(),
+        };
+        let wire = serde_json::to_string(&created).unwrap();
+        assert_no_credential(&wire);
+        assert!(serde_json::to_value(&created).unwrap().get("auth_token").is_none());
+    }
+
+    #[test]
+    fn every_history_record_comes_back_without_the_auth_token() {
+        // list()'s strip via redact_record(), over two documents shaped
+        // like real hits.hits[] entries -- "every returned object", not
+        // just the newest.
+        let hits = json!({
+            "hits": {"hits": [
+                {"_index": "dashboard-canarytokens-v1", "_id": "old", "_source": es_record("old", "2026-08-26T10:00:00+00:00")},
+                {"_index": "dashboard-canarytokens-v1", "_id": "new", "_source": es_record("new", "2026-08-27T09:30:00+00:00")},
+            ]}
+        });
+        let tokens: Vec<Value> = hits["hits"]["hits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|hit| redact_record(hit["_source"].clone()))
+            .collect();
+        assert_eq!(tokens.len(), 2);
+        for token in &tokens {
+            assert!(token.get("auth_token").is_none());
+            assert_no_credential(&token.to_string());
+            // Stripping, not truncating: everything else in the document
+            // survives intact, down to filename_hint (which history keeps
+            // even though CreatedToken's response omits it).
+            for kept in [
+                "id",
+                "token_type",
+                "memo",
+                "token_url",
+                "hostname",
+                "filename_hint",
+                "created_by",
+                "created_at",
+            ] {
+                assert!(
+                    token.get(kept).is_some(),
+                    "redaction dropped {kept} along with the credential"
+                );
+            }
+        }
+        assert_eq!(tokens[0]["id"], "old");
+        assert_eq!(tokens[1]["id"], "new");
     }
 }
