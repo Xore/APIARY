@@ -243,3 +243,42 @@ describe('settings admin write-path (#2311)', () => {
     expect(values("headers: { 'if-match': '0' },")).toEqual(["'0'"])
   })
 })
+
+describe('settings conflict re-sync (#2513)', () => {
+  const settingsSource = readFileSync(join(ROUTES, 'settings.tsx'), 'utf8')
+
+  it('both 409 branches consume the surfaced X-Current-Revision', () => {
+    // savePresentation + saveConfigSection are the same two PUT sites the
+    // If-Match test above pins; both must read the header (#2512) or the
+    // conflict recovery degrades to the legacy discard for that card only,
+    // silently diverging between panes.
+    const sites = [...settingsSource.matchAll(/conflictRevision\(response\)/g)].length
+    expect(sites).toBe(2)
+    // Defensive parse: a tier without the header (or a non-numeric value)
+    // must yield no revision at all, never a fabricated 0.
+    const parser = settingsSource.indexOf("response.headers.get('x-current-revision')")
+    expect(parser).toBeGreaterThan(-1)
+    expect(settingsSource).toContain("header === null || header.trim() === ''")
+  })
+
+  it('runConfigSave arms the re-sync from the header and keeps the legacy fallback', () => {
+    // The re-sync recovery must actually carry the surfaced revision to the
+    // card layer, and the header-less tier must still get the legacy
+    // discard-and-reapply copy rather than a merge it cannot honor.
+    expect(settingsSource).toContain('onConflict(result.currentRevision)')
+    expect(settingsSource).toContain('reloaded current values, reapply your edits')
+    expect(settingsSource).toContain('your unsaved edits were kept on top of the reloaded values')
+  })
+
+  it('all four config cards participate in the staged-edit re-baseline', () => {
+    // Presentation, report-presets, behavior, honeypot: every card that
+    // re-baselines off fresh admin data must also take the conflictRebase
+    // counter, or a conflict silently discards that card's staged edits.
+    const wired = [...settingsSource.matchAll(/conflictRebase=\{conflictRebase\}/g)].length
+    expect(wired).toBe(4)
+    // And each re-baseline effect branches on the counter instead of
+    // unconditionally resetting both halves.
+    const rebases = [...settingsSource.matchAll(/const rebase = conflictRebase !== lastRebase\.current/g)].length
+    expect(rebases).toBe(4)
+  })
+})
