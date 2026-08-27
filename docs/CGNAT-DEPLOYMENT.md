@@ -97,10 +97,13 @@ the only internet-facing component.
 > disagree. As of #1502, per-stack provisioning means importing an Arcane
 > directory-aware Git sync per `arcane/manifests/home-production.json`
 > entry, not copying/symlinking a compose file — see
-> `docs/ARCANE-GIT-SYNC.md`. Note the gap that doc's own comments flag: a
-> genuinely from-scratch run of this script can't reach that step yet,
-> since `step_dockge_install` still installs Dockge rather than Arcane
-> (tracked as an explicit follow-up, not fixed in #1502).
+> `docs/ARCANE-GIT-SYNC.md`. One genuine from-scratch gap remains
+> (#1504's surviving caveat): minting `ARCANE_API_TOKEN` requires a first
+> human login, which is OIDC-only once Keycloak exists, so a truly-fresh
+> install is inherently two-pass. (`step_dockge_install` — the pre-#1504
+> "installs Dockge rather than Arcane" step this paragraph used to warn
+> about — was itself the thing #1504 replaced; its mention here was
+> stale.)
 
 1. Establish WireGuard and verify that the VPS can reach `10.8.0.2`.
 2. Copy this repository to `/opt/stacks/apiary/`.

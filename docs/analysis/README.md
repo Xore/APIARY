@@ -9,7 +9,7 @@ scripts that run on the sensor host.
 > planned in the github-analysis-integration-roadmap doc (removed with
 > #1662's stale-doc sweep; **built** as summarized below) and is tracked in
 > [#73](https://github.com/Xore/APIARY/issues/73)
-> (upstream YARA corpus sync — built, see [`yara/`](../../analysis/yara/)) and
+> (upstream YARA corpus sync — built, see [`arcane/home/honeypot-payload-analysis/analysis/yara/`](../../arcane/home/honeypot-payload-analysis/analysis/yara/) and its [operator doc](yara/README.md)) and
 > [#74](https://github.com/Xore/APIARY/issues/74) (the manual publisher).
 > Per the roadmap's own status line: **built** — dashboard trigger/read
 > (Phases 2-3), the host publisher itself (Phase 1), queue health/alerting
@@ -72,7 +72,7 @@ flowchart TB
 | `analyze.py` | Offline triage of Cowrie / http-honeypot / multipot / Dionaea JSON logs. Stdlib only |
 | `collect.sh` | **Deprecated.** Cron-driven bulk copy of captures into a clone of `Xore/honeypot`. Superseded by the dashboard button; kept for a one-time manual backfill |
 | `dedupe-payloads.py` | Collapses duplicate captures by SHA-256 |
-| `yara/` | Networkless YARA scanner sidecar, local rules, and the vendored upstream corpus (`yara/sync-yara.sh`) |
+| *none here* — the YARA scanner moved to `arcane/home/honeypot-payload-analysis/analysis/yara/` (#1502) | Networkless YARA scanner sidecar, local rules, and vendored upstream corpus (`sync-yara.sh`); operator doc kept at [`yara/README.md`](yara/README.md) |
 | `ghidra/` | Headless Ghidra reverse-engineering pipeline, local-model triage, and the analysis-host installer ([`ghidra/README.md`](ghidra/README.md)) |
 | `es-results-importer/` | Ships Ghidra/sandbox/GitHub-analysis/workbench-run results into Elasticsearch, read-only, alongside the raw event stream ([#378](https://github.com/Xore/APIARY/issues/378)) |
 | `elasticsearch-setup.sh`, `honeypot-kibana-setup.sh`, `filebeat.yml`, `evebox.yaml` | Log pipeline and search UI provisioning |

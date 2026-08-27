@@ -3,7 +3,11 @@
 #
 # Brings up three containers and wires the host-side worker to them:
 #
-#   ghidra       biniamfd/ghidra-headless-rest, the decompiler behind /analyze
+#   ghidra       built from ./service in this directory -- official Ghidra
+#                releases fetched checksum-verified at build time behind a
+#                small REST wrapper, the decompiler behind /analyze (the
+#                third-party packaging this replaced came off the stack
+#                in #245; see docker-compose.ghidra.yml)
 #   ollama       the local model that produces ai_triage (#103)
 #   statictools  ssdeep/tlsh fuzzy hashing and lief structural parsing (#138)
 #
@@ -131,11 +135,13 @@ if [ -n "$STACK_DIR" ]; then
   say "deploying the compose file to $STACK_DIR"
   mkdir -p "$STACK_DIR"
   cp "$compose_file" "$STACK_DIR/compose.yml"
-  # statictools is the first service in this file with a local build:
-  # context rather than an image:. Copying only the compose file (as ghidra/
-  # ollama always needed) leaves `build: ./statictools` pointing at a
-  # directory that does not exist in $STACK_DIR, caught deploying this the
-  # first time ("unable to prepare context: path .../statictools not found").
+  # Every service in this file defined with a build: instead of an image:
+  # needs its build context present next to the copied compose file, or the
+  # stack copy cannot build ("unable to prepare context: path not found" --
+  # caught deploying this the first time, back when statictools was the only
+  # such service). Ghidra has been a build: service too since #245 (its
+  # context is ./service). Making sure every build: service's context
+  # survives this copy is the deploy-context gap tracked in #2063.
   rm -rf "$STACK_DIR/statictools"
   cp -r "$here/statictools" "$STACK_DIR/statictools"
   if [ "$USE_GPU" = yes ]; then
@@ -202,9 +208,10 @@ if [ "$SKIP_PULL" = 0 ]; then
   # cheap; checking first would only save the round trip.
   dc exec -T ollama ollama pull "$MODEL"
 
-  # #1236: the dashboard's own semantic search (dashboard/main.go's
-  # LLM_EMBEDDING_MODEL, default "nomic-embed-text:latest") hits this same
-  # ollama instance for embeddings -- a different kind of model (embedding,
+  # #1236: the dashboard's own semantic search reads LLM_EMBEDDING_MODEL
+  # (default "nomic-embed-text:latest") in
+  # arcane/home/honeypot-dashboard/backend-service/src/llm_search.rs and hits
+  # this same ollama instance for embeddings -- a different kind of model (embedding,
   # not chat/completion) than $MODEL above, so it's pulled separately here
   # rather than folded into approved-models.json's chat-model qualification
   # manifest. Without this, semantic search 404'd with "model
@@ -328,5 +335,9 @@ say "done"
 echo "The dashboard needs these in its .env to show the queue:"
 echo "  GHIDRA_REQUEST_DIR=/ghidra-requests"
 echo "  GHIDRA_RESULTS_DIR=/ghidra-results"
-echo "Then: docker compose up -d dashboard"
+echo "Then bring up the two tiers of arcane/home/honeypot-dashboard/compose.yml"
+echo "that serve the queue UI:"
+echo "  docker compose up -d backend-service-mounted dashboard-next"
+echo "(backend-service-mounted reuses apiary-backend:latest, which is built by"
+echo "the sibling honeypot-dashboard-backend stack and never pushed to any registry.)"
 systemctl --no-pager --plain is-active honeypot-ghidra-worker.path

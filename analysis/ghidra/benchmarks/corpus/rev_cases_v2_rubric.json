@@ -101,7 +101,7 @@
     },
     "integer_overflow_alloc": {
       "source": "integer_overflow_alloc.c",
-      "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
       "required_groups": [
         ["integer overflow", "overflow", "wrap", "wraps", "wraparound"],
         ["multipl", "count", "size"],

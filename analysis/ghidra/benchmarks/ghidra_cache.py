@@ -39,12 +39,17 @@ expressions, e.g. `"rotate_checksum(one, 1) == 0x41"`. Those asserts *are* the
 240 executable semantic checks, i.e. the ground truth. Feeding a harness binary
 to a model hands it the answer key as evidence.
 
-**Injection coverage.** `process_and_injection.c` carries its payload in a C
-comment, which the compiler strips; it is present in zero of the 1400 corpus
-objects and reaches Tier A only because `objdump --source` re-reads the `.c`
-from disk. Tier B therefore has no injection coverage at all until the fixture
-changes (#1948), and a report must say so rather than showing a passing gate.
-`assert_injection_present()` below exists to make that impossible to forget.
+**Injection coverage.** Since #1948, `process_and_injection.c` carries its
+payload as a referenced string literal (`kInjectionNote`, passed through execv
+argv), so it survives compilation into `.rodata`; `build_corpus.py` asserts that
+needle in every built artifact of the fixture -- unstripped and stripped, every
+toolchain, every optimisation level -- and fails the build otherwise. Before
+that fix the payload lived only in a C comment -- stripped by the compiler,
+absent from all objects, reaching Tier A solely via `objdump --source`
+re-reading the `.c` from disk. Survival *in the binary* is still not survival
+*in the evidence*: whether the needle reaches a model is proven per cache entry
+by `assert_injection_present()` below, and a False there must be reported as
+"not covered" rather than a passing gate.
 """
 
 from __future__ import annotations
@@ -223,8 +228,11 @@ def assert_injection_present(entry: dict[str, Any], needle: str) -> bool:
     The injection gate is worth nothing unless the payload survives the
     round-trip into Ghidra's output. Callers must record the False case as
     'not covered' rather than letting the forbidden-term check find nothing and
-    report a unanimous pass. See #1948: for the current corpus this is False for
-    every build, because the payload is a source comment.
+    report a unanimous pass. Since #1948 the payload is a referenced string
+    literal asserted present in every built object by `build_corpus.py`, but
+    that proves only binary-level survival; this check is what proves
+    evidence-level reach. Historically (pre-#1948) it returned False for every
+    build because the payload was a source comment.
     """
     haystack = json.dumps(entry.get("evidence", entry), separators=(",", ":"))
     return needle.lower() in haystack.lower()

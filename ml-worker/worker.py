@@ -21,7 +21,8 @@ from elasticsearch import Elasticsearch, NotFoundError
 from loguru import logger
 
 from models.isolation_forest import (IsoForestModel, MAX_TRAIN_SAMPLES, _get_ip, _get_port,
-                                     _get_transport_proto, is_our_own_address)
+                                     _get_dst_ip, _get_src_port, _get_transport_proto,
+                                     is_our_own_address)
 from models.lstm_autoencoder import LSTMAEModel
 from models.session_features import SessionFeatureTracker
 
@@ -61,6 +62,25 @@ RETRAIN_SLOTS_UTC = os.getenv("RETRAIN_SLOTS_UTC", "03:00,09:00,15:00,21:00")
 # derivation physically adjacent to the config read is the point.
 MODEL_DIR        = os.getenv("MODEL_DIR",         "/models")
 LOG_LEVEL        = os.getenv("LOG_LEVEL",         "INFO")
+
+# #1968: retention for the two indices this worker owns (see
+# build_ilm_policy / run_worker's bootstrap order). Windows follow #261's
+# convention -- every retention decision in this stack is an env knob over a
+# stable-named policy, not a hardcoded constant -- and replace the previous
+# answer ("no policy at all") with a recorded one: anomaly documents carry
+# operator dispositions, the labelled corpus #1794/#1797 feed on, so they
+# keep a year; retrain/drift evidence ages much faster.
+ML_ANOMALIES_RETENTION_DAYS = int(os.getenv("ML_ANOMALIES_RETENTION_DAYS", "365"))
+ML_METRICS_RETENTION_DAYS   = int(os.getenv("ML_METRICS_RETENTION_DAYS",   "90"))
+
+ANOMALY_ILM_POLICY   = "ml-anomalies-retention"
+METRICS_ILM_POLICY   = "ml-worker-metrics-retention"
+
+# Operator-owned fields (#1968): written by the dashboard's disposition
+# endpoint, never by scoring -- write_anomaly() preserves any previously set
+# value across the deterministic-id rewrite instead of letting a checkpoint
+# replay silently wipe an analyst's verdict.
+DISPOSITION_FIELDS = ("status", "disposition_reason", "disposition_by", "disposed_at")
 
 # Drift detection (#65, docs/ml-worker-plan.md §11.4): a rolling window over
 # the last DRIFT_WINDOW composite scores this worker actually computed.
@@ -537,6 +557,10 @@ def score_and_write_events(es: Elasticsearch, rdb, iso_model, lstm_model,
     if not extracted:
         return
 
+    # One state id per batch (#1968): promotions don't happen inside a
+    # scoring batch, so batch-consistent is document-consistent here.
+    checkpoint = model_state_id(iso_model, lstm_model)
+
     matrix = np.vstack([features for _, features, _ in extracted])
     iso_scores = iso_model.score_batch(matrix)
     hbos_scores = iso_model.hbos_score_batch(matrix)  # fast pre-filter
@@ -587,7 +611,8 @@ def score_and_write_events(es: Elasticsearch, rdb, iso_model, lstm_model,
                     suppressed_own_address += 1
                 else:
                     explanation = iso_model.explain(features, scores)
-                    write_anomaly(es, rdb, event, scores, explanation)
+                    write_anomaly(es, rdb, event, scores, explanation,
+                                  checkpoint_id=checkpoint)
         except Exception as exc:
             write_malformed_event_metric(es, event, exc)
 
@@ -722,8 +747,62 @@ def anomaly_doc_id(source_index: "str | None", source_event_id: "str | None") ->
     return hashlib.md5(f"{source_index or ''}|{source_event_id or ''}".encode()).hexdigest()
 
 
+def build_ilm_policy(retention_days: int) -> dict:
+    """Pure function (#1968) so the retention contract is unit-testable
+    without a live ES: delete-only phases need no rollover on these classic
+    (non-data-stream) indices -- min_age counts from index creation, and
+    unlike honeypot-30d's data-stream backing index there is no
+    write-index-delete ILM structurally cannot perform here."""
+    return {"policy": {"phases": {
+        "delete": {"min_age": f"{retention_days}d", "actions": {"delete": {}}},
+    }}}
+
+
+def ensure_ilm_policy(es: Elasticsearch, name: str, policy: dict) -> None:
+    """Idempotently install one ILM policy (#1968). Attachment order matters:
+    run_worker() calls this BEFORE ensure_index(), because an index created
+    with index.lifecycle.name referencing a missing policy fails its own
+    creation. Stable names + env-tunable windows per #261."""
+    try:
+        es.ilm.get_lifecycle(name=name)
+        return
+    except NotFoundError:
+        es.ilm.put_lifecycle(name=name, policy=policy)
+        logger.info(f"Installed ILM policy {name}")
+
+
+def model_state_id(iso_model, lstm_model) -> "str | None":
+    """Identity of the exact checkpoint trio behind this batch's scores
+    (#1968), so every historical alert stays interpretable without
+    reconstructing model state from process restart times (the #1959
+    forensics hole).
+
+    Read from the promotion pointers' realpath basenames, not mtimes:
+    _save() promotes via atomic symlink retarget and never edits a promoted
+    file in place, so equal ids guarantee equal artifacts regardless of
+    filesystem timestamp resolution or container image layer copies.
+    None until all three detectors have been promoted at least once -- which
+    is itself the signal that IsoForest was serving an untrained/no-op state,
+    the exact condition whose invisibility made #1959's constant-0.5 scores
+    hard to attribute after the fact.
+    """
+    links = (
+        ("iso",  os.path.join(iso_model.model_dir,  "current_isoforest.joblib")),
+        ("hbos", os.path.join(iso_model.model_dir,  "current_hbos.joblib")),
+        ("lstm", os.path.join(lstm_model.model_dir, "current_lstm_ae.pt")),
+    )
+    parts = []
+    for prefix, link in links:
+        if not os.path.exists(link):
+            return None
+        stem = os.path.basename(os.path.realpath(link)).rsplit(".", 1)[0]
+        parts.append(f"{prefix}:{stem.rsplit('_', 1)[-1]}")
+    return "|".join(parts)
+
+
 def write_anomaly(es: Elasticsearch, rdb: "redis.Redis | None",
-                 event: dict, scores: dict, explanation: str) -> None:
+                 event: dict, scores: dict, explanation: str,
+                 checkpoint_id: "str | None" = None) -> None:
     src = event.get("_source", {})
     composite = compute_composite(scores)
     if composite < THRESHOLD:
@@ -734,11 +813,12 @@ def write_anomaly(es: Elasticsearch, rdb: "redis.Redis | None",
     # matches a real document's top level, so a correctly-fired anomaly
     # would otherwise still get written with a null src_ip, which is the
     # one field an operator actually needs to act on it.
+    src_ip = _get_ip(src) or None
     doc = {
         "@timestamp":        src.get("@timestamp", datetime.now(timezone.utc).isoformat()),
         "source_event_id":   event.get("_id"),
         "source_index":      event.get("_index"),
-        "src_ip":            _get_ip(src) or None,
+        "src_ip":            src_ip,
         "src_country":       (src.get("source") or {}).get("geo", {}).get("country_iso_code"),
         "composite_score":   round(composite, 4),
         "severity":          severity(composite),
@@ -751,7 +831,53 @@ def write_anomaly(es: Elasticsearch, rdb: "redis.Redis | None",
         "event_type":        (src.get("event") or {}).get("category"),
         "dst_port":          _get_port(src) or None,
         "proto":             _get_transport_proto(src),
+
+        # Context that makes the alert actionable without re-querying a
+        # source index that expires under honeypot-30d (#1968): which decoy
+        # drew it (our side of the flow + its sensor), who connected
+        # (remote port), and the flow-level pivot key shared with
+        # agent-intrusion-campaigns.
+        "dst_ip":            _get_dst_ip(src) or None,
+        "src_port":          _get_src_port(src),
+        "sensor":            src.get("sensor") or (src.get("event") or {}).get("sensor"),
+        "community_id":      (src.get("network") or {}).get("community_id"),
+
+        # Interpretation stamps (#1968): the configuration and model state
+        # these scores came from -- ML_ALERT_THRESHOLD is per-deployment,
+        # and severity bands only mean something against the day's own
+        # threshold; model_state_id pins the checkpoint trio (None =
+        # detectors never promoted yet, e.g. IsoForest serving untrained).
+        # is_our_own_address is stamped rather than left implicit: while
+        # #1959 suppression keeps own-address alerts unwritten this is
+        # always false in practice, but if that policy ever changes the
+        # historical documents will already carry the classification.
+        "alert_threshold":   round(THRESHOLD, 4),
+        "model_state_id":    checkpoint_id,
+        "src_internal":      bool(src_ip and is_our_own_address(src_ip)),
     }
+
+    # Operator dispositions survive scoring rewrites (#1968): id= is
+    # deterministic (#168), and es.index() REPLACES the whole document --
+    # without reading back first, a checkpoint replay or crash-retry would
+    # silently reset an analyst's verdict to open. Disposition keys are
+    # worker-read-only: they change exclusively through the dashboard's
+    # partial-update endpoint.
+    try:
+        existing = es.get(index=ANOMALY_INDEX,
+                          id=anomaly_doc_id(doc["source_index"], doc["source_event_id"]))["_source"]
+    except NotFoundError:
+        existing = {}
+    except Exception as exc:
+        # A transient read failure must not block the alert itself; treat
+        # like absent (dispositions stay untouched only when we cannot see
+        # them, which beats suppressing real findings over one GET).
+        logger.warning(f"Disposition read-back failed for {doc['source_event_id']} (writing fresh fields): {exc}")
+        existing = {}
+    for key in DISPOSITION_FIELDS:
+        if existing.get(key) is not None:
+            doc[key] = existing[key]
+    if "status" not in doc:
+        doc["status"] = "open"
 
     # The Elasticsearch write is the authoritative action -- a dashboard
     # polling ml-anomalies will see this finding regardless of what happens
@@ -802,8 +928,20 @@ def run_worker() -> None:
         logger.error("Elasticsearch not reachable after 5 minutes, exiting.")
         return
 
+    # ILM policies must exist before any index references them (#1968) --
+    # creation with a lifecycle.name pointing at a missing policy fails.
+    ensure_ilm_policy(es, ANOMALY_ILM_POLICY, build_ilm_policy(ML_ANOMALIES_RETENTION_DAYS))
+    ensure_ilm_policy(es, METRICS_ILM_POLICY, build_ilm_policy(ML_METRICS_RETENTION_DAYS))
+
     # Ensure required indices exist
     ensure_index(es, ANOMALY_INDEX, {
+        "settings": {
+            # #1968: recorded retention (ML_ANOMALIES_RETENTION_DAYS, default
+            # one year) -- source_event_id dangles after honeypot-30d anyway,
+            # but operator dispositions stay analysable for label extraction
+            # (#1794/#1797) well past that.
+            "index.lifecycle.name": ANOMALY_ILM_POLICY,
+        },
         "mappings": {
             "properties": {
                 "@timestamp":       {"type": "date"},
@@ -822,6 +960,19 @@ def run_worker() -> None:
                 "event_type":       {"type": "keyword"},
                 "dst_port":         {"type": "integer"},
                 "proto":            {"type": "keyword"},
+
+                # #1968 actionability/audit fields:
+                "dst_ip":           {"type": "ip"},          # which decoy
+                "src_port":         {"type": "integer"},     # remote ephemeral port
+                "sensor":           {"type": "keyword"},     # producing honeypot stack
+                "community_id":     {"type": "keyword"},     # flow pivot key
+                "alert_threshold":  {"type": "float"},       # deployment config of that day
+                "model_state_id":   {"type": "keyword"},     # checkpoint trio identity
+                "src_internal":     {"type": "boolean"},     # #1959 classification stamp
+                "status":           {"type": "keyword"},     # disposition lifecycle
+                "disposition_reason": {"type": "text"},
+                "disposition_by":   {"type": "keyword"},
+                "disposed_at":      {"type": "date"},
             }
         }
     })
@@ -830,6 +981,13 @@ def run_worker() -> None:
     # retrain acceptance/rejection evidence (docs/ml-worker-plan.md §11.1)
     # and drift-detection events (§11.4) both land here.
     ensure_index(es, METRICS_INDEX, {
+        "settings": {
+            # #1968: recorded retention (ML_METRICS_RETENTION_DAYS, default
+            # 90d) -- retrain/drift evidence informs the next cycle, not a
+            # permanent audit; its own comment below already admitted this
+            # index had no retention answer.
+            "index.lifecycle.name": METRICS_ILM_POLICY,
+        },
         "mappings": {
             "properties": {
                 "@timestamp":            {"type": "date"},

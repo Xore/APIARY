@@ -147,7 +147,15 @@ for volume in dashboard-state honeypot-arcane_arcane-data honeypot-elk_evebox-co
               honeypot-dashboard_es-importer-state; do
   docker volume inspect "$volume" >/dev/null 2>&1 || continue
   safe=$(printf '%s' "$volume" | tr -c 'A-Za-z0-9._-' '_')
-  docker run --rm --network none -v "$volume:/source:ro" -v "$destination/volumes:/backup" busybox:1.36 \
+  # busybox pin (#2348): bare "busybox:1.36" made every run's archive tool
+  # an unowned mutable input -- whatever Docker Hub serves under that tag
+  # next month would execute inside this security-sensitive path without
+  # anyone noticing. Digest-pinned to the multi-arch manifest-list of
+  # busybox:1.36 fetched from Docker Hub 2026-08-27, same policy form
+  # (tag@sha256:) as the fleet's compose images since #1955's Keycloak pin.
+  docker run --rm --network none -v "$volume:/source:ro" \
+    -v "$destination/volumes:/backup" \
+    busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662 \
     tar -C /source -czf "/backup/$safe.tar.gz" .
 done
 

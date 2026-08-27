@@ -30,6 +30,14 @@
 
 services:
   cape-mongo:
+    # Deliberately unpinned as of the #2380 recon (2026-08-27): no reachable
+    # host has ever stood this stack up, so there is no deployed digest to
+    # observe and the #1986/#2382 sweeps forbid inventing one. When Phase 4/5
+    # of docs/sandbox/cape/IMPLEMENTATION_PLAN.md first deploys on a real
+    # host, record `docker image inspect --format '{{json .RepoDigests}}'
+    # cape-mongo` from THERE and re-pin tag@sha256 like every other image.
+    # Until then dependabot covers nothing in /sandbox either (#2316), so
+    # this float drifts unflagged.
     image: mongo:7.0
     volumes:
       - cape-mongo-data:/data/db

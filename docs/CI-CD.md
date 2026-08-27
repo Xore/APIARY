@@ -59,7 +59,7 @@ compromised contributor account, not just fork-origin PRs.
 
 Python and shell tests live in a sibling `tests/` directory next to the code
 they test (e.g. `ml-worker/tests/`, `analysis/ghidra/worker/tests/`,
-`analysis/yara/tests/`), not flat alongside it. When adding a new Python or
+`arcane/home/honeypot-payload-analysis/analysis/yara/tests/`), not flat alongside it. When adding a new Python or
 shell test, put it under the nearest `tests/` directory for its component,
 creating one if none exists yet.
 
@@ -100,8 +100,9 @@ self-hosted, linux, x64, honeypot-home
 Attach the runner to the protected `production-home` environment. Its service
 account needs write access to `/opt/stacks/apiary` and permission to
 run Docker Compose. The workflow preserves the server's `.env` and runtime
-state, synchronizes the repository, writes Arcane's authoritative
-`compose.yml`, validates it, and recreates changed services.
+state, synchronizes the repository into `/opt/stacks/apiary`, and validates
+compose files — it no longer deploys any home stack itself. What actually
+deploys is described below.
 
 Install or repair the runner with
 [`../scripts/github-ci-runner/install-deploy-runner.sh`](../scripts/github-ci-runner/install-deploy-runner.sh)
@@ -137,40 +138,49 @@ CI can apply -- if a fresh homeserver ever exhausts its own default pools
 again, the fix is the same `daemon.json` edit plus a daemon restart, not a
 per-stack workaround.
 
-### Protected homeserver deployment and split-stack order
+### What deploy.yml actually runs (since #1502)
+
+> **Status.** The sections below this one were rewritten when the home
+> stacks' deployment moved to Arcane-managed Git syncs (#1502). Anything
+> still describing a deploy-loop "deploying" or "sequencing" sensor stacks
+> would be pre-cutover fiction — this file should mirror `deploy.yml`'s own
+> header comments, which state the same contract line by line. Where it and
+> [ARCANE-GIT-SYNC.md](ARCANE-GIT-SYNC.md) disagree about deployment,
+> ARCANE-GIT-SYNC.md wins; file a gap against #1502 if they diverge.
 
 ```mermaid
 flowchart TB
   approve["Operator approves<br/>production-home environment"]
   runner["Self-hosted honeypot-home runner<br/>polls GitHub, pulls the job"]
-  sync["Local rsync into<br/>/opt/stacks/apiary<br/>(--delete-delay, .env/logs/state<br/>preserved -- see table below)"]
-  init["honeypot-init<br/>(one-shot bootstrap jobs)"]
-  marker["apiary marker sync<br/>(root docker-compose.yml,<br/>zero-service, not a real stack)"]
-  conpot["honeypot-conpot<br/>(#258 split proof of concept,<br/>its own job)"]
-  sensorLoop["Looped stacks (#258 split, identical<br/>treatment): cowrie, multipot, http, dnp3,<br/>dionaea, tanner, dicompot, dns-honeypot,<br/>citrix-honeypot, cisco-asa-honeypot,<br/>rdp-honeypot, endlessh"]
-  workers["ip-enrichment-worker,<br/>then agent-intrusion-worker"]
-  payload["payload-analysis"]
-  util["utilities"]
-  elk["elk"]
+  sync["rsync into /opt/stacks/apiary<br/>(--delete-delay, host-owned paths<br/>preserved -- see table below)<br/>+ compose.yml copy + root-config check"]
+  ghidra["ghidra-worker re-sync<br/>(host-level systemd unit,<br/>skipped if not installed)"]
+  arcaneBootstrap["honeypot-arcane bootstrap<br/>(up -d when its .env exists,<br/>sync-only otherwise)"]
+  validate["Validate every manifest stack's<br/>compose file (placeholder-fill<br/>for required secrets)"]
 
-  approve --> runner --> sync
-  sync --> init --> marker --> conpot --> sensorLoop --> workers --> payload --> util --> elk
+  approve --> runner --> sync --> ghidra --> arcaneBootstrap --> validate
 ```
 
-Every step after `sync` is `docker compose -f compose.yml config --quiet`
-(validate) then `up -d --build` against that one stack's own compose file —
-a failure on
-any step is visible in that step's own job log without the whole workflow
-stopping later stacks from at least attempting to reconcile. `honeypot-init`
-runs first because every other stack polls its `state/init-markers/*.done`
-files at container entrypoint rather than a Compose-level `depends_on`,
-which can't reach across a stack boundary — see "Home container
-interaction map" in `ARCHITECTURE.md` for why. The sensor loop, both
-workers, and utilities/payload-analysis/elk have no ordering dependency on
-each other; they're sequenced in the workflow file for log readability, not
-because stack N+1 needs stack N up first. See
-["Dashboard request, state, import, and control flows"](ARCHITECTURE.md#dashboard-request-state-import-and-control-flows)
-for the dashboard step's own rolling-update sequence diagram in full.
+That is the complete list. What puts a changed sensor/persona/dashboard
+stack on the host lives entirely in Arcane's Git-sync machinery — see
+[ARCANE-GIT-SYNC.md](ARCANE-GIT-SYNC.md) for the full contract (its
+non-obvious cornerstones: creating a sync *is* an initial deploy, every
+sync carries `redeployAfterSync: false` so a sync materializes files
+without redeploying, and 35 of the 38 synced stacks run `autoSync: false`
+behind the tag-promotion / `production`-pointer policy decided in #1507).
+This workflow deliberately stopped touching those directories entirely:
+running an rsync/build loop alongside Arcane's own sync would put two
+independent writers in a race for the same on-host directory, the exact
+failure class #1502's migration review flagged. What survived here is a
+cheap validation gate so a broken compose file fails visibly at review
+time instead of surfacing mid-sync on the host.
+
+`honeypot-init`'s marker mechanism (`state/init-markers/*.done`, polled at
+container entrypoint rather than via Compose-level `depends_on`) still
+governs startup order between sensors and their bootstrap jobs — but on
+today's topology that ordering plays out inside Arcane's sync/deploy flow,
+not across steps of this job. See "Home container interaction map" in
+`ARCHITECTURE.md` for the why; the dashboard redeploy mechanics live in
+its own section below, unchanged by any of this.
 
 ### How files reach the homeserver
 
@@ -181,11 +191,19 @@ SSH connection to the home network:
 2. `actions/checkout` downloads the selected repository commit into the
    runner's temporary work directory.
 3. Local `rsync` copies that checkout into `/opt/stacks/apiary`.
-4. The workflow copies `docker-compose.yml` to `compose.yml`, which is the
-   filename Arcane manages.
-5. `docker compose config --quiet` validates the deployed configuration.
-6. `docker compose up -d --build` builds local images and reconciles the
-   running stack.
+4. The same step copies the root `docker-compose.yml` to `compose.yml`
+   (the filename Arcane manages) and tightens `.env`'s mode to `0600`
+   if the file exists.
+5. `docker compose -f compose.yml config --quiet` validates the root
+   configuration — a pure syntax gate, not a deploy: the root file has
+   carried `services: {}` since the last monolith service moved out
+   (#258, updated by #1502).
+6. Nothing comes up here. With zero services under the root file there is
+   no stack this workflow could reconcile — what actually deploys a changed
+   stack is Arcane's Git-sync machinery ([ARCANE-GIT-SYNC.md](ARCANE-GIT-SYNC.md),
+   "The model" above), plus this workflow's one remaining deployment-adjacent
+   action: the conditional host-level nsenter re-sync of the ghidra worker's
+   source tree described below.
 
 The runner therefore needs outbound HTTPS access to GitHub, local filesystem
 access to the Arcane-managed stack, and access to the Docker socket. It does not need a
@@ -195,13 +213,17 @@ The synchronization uses `--delete-delay`, so repository-controlled files
 removed from Git are removed from the destination near the end of a successful
 transfer. These host-owned paths are explicitly preserved:
 
-| Preserved path | Reason |
+This table mirrors the step's own `--exclude` list exactly (`deploy.yml`,
+"Synchronize APIARY source"):
+
+| Excluded path | Reason |
 |---|---|
 | `.env` | production addresses, credentials, and local settings |
 | `logs/` | sensor and imported VPS logs, plus the dashboard's own serving-tier app logs (#1972: `dashboard-backend*/`, `dashboard-bff/`) |
 | `state/`, `dashboard-state/` | application checkpoints and state |
-| `analysis/geoip/*.mmdb` | locally downloaded licensed databases |
 | `sandbox/results/` | runtime malware-analysis output |
+| `analysis/geoip/` | whole directory, not just `*.mmdb`: nothing under it is git-tracked, and geoipupdate (a root-owned container, #1258) writes a root-owned `.geoipupdate.lock` into its root-owned directory — the runner user cannot unlink that, so any narrower exclude broke every deploy with rsync exit 23 once the geoip-update profile ran (#1226) |
+| `analysis/ghidra/revdeck/`, `sandbox/windows/packer/pxe/ipxe*` | hand-vendored or build-generated on the host, untracked in Git (`revdeck-proxyfix` doc comment; `prepare-pxe.sh`) — without excluding them, `--delete-delay` either fails outright (populated directory it can't recursively delete) or silently deletes a hand-built ipxe/webui tree on every deploy |
 | `.git/`, `.github/` | not needed by the deployed stack |
 
 The runner's service account, rather than the workflow YAML, determines the
@@ -214,11 +236,12 @@ not give the `production-home` environment to pull-request workflows.
 `/opt/stacks/honeypot-init`, not as part of `APIARY`. It holds the
 one-shot bootstrap jobs (log directory ownership, persona seeding,
 Elasticsearch/Kibana/Arkime first-run setup) that used to live in the main
-compose file; see that file's header for the full reasoning (#111). The same
-`home` job deploys it first, from the same checkout: every split stack's
-dependents block on completion markers this stack writes, and deploying it
-second made the very first rollout of that split hang for 29 minutes
-waiting on markers that could not exist yet.
+compose file; see that file's header for the full reasoning (#111). It
+reaches the host through the same Arcane-managed sync machinery as every
+manifest stack now: its one-shot jobs write the `state/init-markers/*.done`
+files other stacks' dependents block on at container entrypoint, so its
+initial deploy has to land before theirs — a rollout that got this backwards
+once hung for 29 minutes waiting on markers that could not exist yet.
 
 Its `.env` is created once by hand on the homeserver and is never touched by
 this workflow — `ARKIME_ADMIN_PASSWORD` and `ARKIME_PASSWORD_SECRET` in it
@@ -232,11 +255,10 @@ is still correct.
 `/opt/stacks/honeypot-conpot`: the six Conpot personas (base S7-200,
 S7-1200, S7-1500, IEC104, Guardian AST, Kamstrup) split out of
 `APIARY`'s monolithic compose file, as a proof of concept for #258.
-The same `home` job deploys it alongside `honeypot-init`, before
-`APIARY`, though (unlike `honeypot-init`) it has no hard ordering
-requirement -- each persona polls its own marker file rather than using a
-compose `depends_on` chain, so its `docker compose up -d` returns
-immediately either way. See `arcane/home/honeypot-conpot/compose.yml`'s own header for
+It has no hard ordering requirement against anything else:
+each persona polls its own marker file rather than joining a compose
+`depends_on` chain, so bringing the stack up through its Arcane-managed
+sync never blocks on or gates another project either way. See `arcane/home/honeypot-conpot/compose.yml`'s own header for
 what this proved about #258's open questions (no external networks/volumes
 needed for a standalone honeypot persona; `autoheal`, which watches by Docker
 label rather than by compose project, needs no changes at all).
@@ -254,42 +276,45 @@ own fully private network, so no external network/volume treatment is
 needed. `arcane/home/honeypot-http/compose.yml` covers two services (`http-honeypot` and
 `api-honeypot`) in one stack -- they already share one build context and are
 already treated as one logical unit elsewhere (`scripts/reset-logs.sh`'s
-`http` target covers both). Deployed the same way as `honeypot-conpot`, in a
-single looped step (`.github/workflows/deploy.yml`) since the four stacks
-are otherwise identical in shape. Same log-directory/`.env` posture as
+`http` target covers both). Synced through Arcane the same way as
+`honeypot-conpot`; all four are otherwise identical in shape. Same
+log-directory/`.env` posture as
 `honeypot-conpot` above.
 
 ### honeypot-dashboard (#258)
 
 `arcane/home/honeypot-dashboard/compose.yml` runs as its own Arcane-managed stack at
-`/opt/stacks/honeypot-dashboard`, bundling `dashboard` and
-`services-adapter` -- kept together because they talk to each other only
-over `services-adapter-socket`. Unlike the
-five services above, this pair could not be split with the "own fully
-private network" treatment: `dashboard` resolves `elasticsearch` and
-`filebeat` by service name over the shared `honeynet` network, and reads/
-writes three named Docker volumes other stacks also touch --
-`dionaea-lib`/`yara-results` (`arcane/home/honeypot-dionaea/compose.yml`'s `dionaea` and
+`/opt/stacks/honeypot-dashboard`; its own header lists the current service
+inventory (the legacy Go `dashboard` it once led with is gone — #1659 —
+and #1622 has since moved the original `backend-service` out to its own
+stack below). What drove keeping this tier in one project originally was
+that its members could not take the "own fully private network"
+treatment: they resolve `elasticsearch` and `filebeat` by service name
+over the shared `honeynet` network, and read/write named Docker volumes
+other stacks also touch -- `dionaea-lib`/`yara-results`
+(`arcane/home/honeypot-dionaea/compose.yml`'s `dionaea` and
 `arcane/home/honeypot-payload-analysis/compose.yml`'s `yara-scanner` write there,
-`dashboard` only reads) and `dashboard-state` (genuinely shared both ways:
-`payload-dedupe`/`yara-scanner`, now in `arcane/home/honeypot-payload-analysis/compose.yml`,
-read/write retained script payloads under `/payloads/scripts`, the same
-subtree this stack's own `SCRIPT_PAYLOAD_DIR=/state/script-payloads`
-writes). All four resources are declared with an explicit shared `name:` in
-every compose file that touches them, the same mechanism
+these services only read) and `dashboard-state` (shared both ways:
+the payload-analysis workers read/write retained script payloads under
+`/payloads/scripts`, the same subtree these services'
+`SCRIPT_PAYLOAD_DIR=/state/script-payloads` writes). Those resources are
+declared with an explicit shared `name:` in every compose file that
+touches them, the same mechanism
 `honeynet`/`es-data`/`evebox-config` already use to stay shared between
-`APIARY` and `honeypot-init`.
+projects.
 
-The `home` job deploys this stack *after* `APIARY`, not before like
-the standalone honeypots above -- Compose itself doesn't require the
-ordering (none of the shared resources are `external: true`, so whichever
-project runs first just creates them), but starting `APIARY` first
-means the dashboard has real data to show immediately instead of booting
-against empty indices. `services-adapter-socket` was originally left
-private/unnamed to this stack (grepped every compose file at the time to
-confirm nothing else referenced it); #1622 (below) added a second consumer
-in a different project, so it now carries an explicit shared `name:` too,
-same mechanism as the other three.
+There is no Compose-enforced ordering in any of this — none of the shared
+resources are `external: true`, so whichever project touches them first
+just creates them — but standing the analysis plane up before this stack's
+first start (its importer/worker tiers read the same Elasticsearch
+instance) means real data to show immediately instead of booting against
+empty indices. On today's topology that ordering lives in the operator's
+cutover sequence ([ARCANE-GIT-SYNC.md](ARCANE-GIT-SYNC.md), "Cutover
+procedure"), not in a workflow file. `services-adapter-socket` was
+originally left private/unnamed to this stack (grepped every compose file
+at the time to confirm nothing else referenced it); #1622 (below) added a
+second consumer in a different project, so it now carries an explicit
+shared `name:` too, same mechanism as the other three.
 
 Per explicit instruction, this split did not preserve `dashboard-state`
 across the cutover -- the new stack starts with a fresh volume, and any
@@ -381,8 +406,8 @@ tails every sensor's JSON log to (eventually, once explicitly authorized)
 report attacker IPs to AbuseIPDB.
 
 None of the three share a named volume or network with anything outside
-this stack, so -- like the standalone honeypots -- it deploys ahead of
-`APIARY` with no ordering requirement.
+this stack, so their Arcane-managed sync carries no ordering requirement
+against any other stack.
 
 ### honeypot-dionaea and honeypot-payload-analysis (#258)
 
@@ -403,13 +428,12 @@ still touch `dashboard-state` and `yara-results` (shared with
 downloads directory (a host bind mount, unaffected by which Compose
 project owns the container that writes to it).
 
-`arcane/home/honeypot-dionaea/compose.yml` deploys in the same looped step as
-`honeypot-cowrie`/`multipot`/`http`/`dnp3` (`.github/workflows/deploy.yml`)
--- like them, it has no ordering requirement, since `dionaea-lib` is a
-non-external shared-name volume Compose creates if absent.
-`arcane/home/honeypot-payload-analysis/compose.yml` gets its own step right after, purely
-for readability (the "reader" half following the "writer" half); no hard
-ordering requirement here either.
+Neither stack imposes an ordering constraint on deployment: each reaches
+the host through its own Arcane-managed sync, and `dionaea-lib` is a
+non-external shared-name volume Compose creates if absent — whichever
+project touches it first just creates it. They have no cross-dependency;
+any writer-before-reader sync order observed on the host is convention,
+not mechanism.
 
 `scripts/reset-logs.sh` treats `dionaea` as a `SPLIT_TARGETS` entry like
 the other split honeypots. `payload-dedupe`/`yara-scanner` don't get their
@@ -439,10 +463,11 @@ still restarts `tanner_docker`/`tanner_redis` on unhealthy via the
 `autoheal=true` label, same as always -- it needs no changes for this or
 any #258 split.
 
-Deployed in the same looped step as the other standalone honeypots
-(`.github/workflows/deploy.yml`) -- no ordering requirement, since
-`snare-pages` is already created by `honeypot-init`, which this workflow
-deploys before this step runs. `scripts/reset-logs.sh` treats `tanner` as
+No ordering requirement against other stacks: `snare-pages` is created by
+`honeypot-init`'s `snare-clone` job as an external volume, so provided
+that initial deploy landed first (the cutover sequencing in
+[ARCANE-GIT-SYNC.md](ARCANE-GIT-SYNC.md)), this stack's sync never blocks
+on or gates anything else. `scripts/reset-logs.sh` treats `tanner` as
 a `SPLIT_TARGETS` entry, same as `dionaea`; only `tanner`, `tanner_api`,
 `tanner_web`, and `snare` are stopped/started on a wipe (unchanged from
 before the split) -- `tanner_docker`/`tanner_redis`/`tanner_phpox` hold no
@@ -471,30 +496,25 @@ grep -- no `es-data` reference anywhere in `arcane/home/honeypot-init/compose.ym
 `es-data` volume on cutover -- every honeypot's indexed Elasticsearch
 history is not preserved across the split.
 
-This split also surfaced a real pre-existing ordering bug in
-`.github/workflows/deploy.yml`, dating back to the original
-`honeypot-conpot` proof of concept (#336): every split stack's `build:`
-points at an absolute path under `/opt/stacks/apiary` (e.g.
-`/opt/stacks/apiary/dionaea`), populated by the "Synchronize APIARY
-source" rsync step -- but that step used to run *after* every one of those
-builds, near the end of the job, in the slot where `APIARY`'s own
-`docker compose up` used to live. Never a hard failure (the destination
-directory already existed from prior runs), just quietly building from
-whatever the *previous* deploy had rsynced -- one deploy stale rather than
-this run's checkout. Fixed by moving the rsync step to run immediately
-after `honeypot-init`, before any split stack's step.
+(#1502 closed out both loose ends this split left behind. First, the
+ordering bug it surfaced -- every split stack building from absolute paths
+under `/opt/stacks/apiary`, fed by an rsync step that had itself run
+*after* those builds for years, quietly one deploy stale (#1103, dating
+back to the original #336 proof-of-concept) -- died with the
+build-from-checkout model entirely: #1502 relocated every build context
+into its own stack directory under `arcane/home/<name>/`, so nothing
+builds from the rsync destination any more. Second, `up -d --build`
+against the now-permanently-zero-service root file failed outright with
+`no service selected` (confirmed locally at the time) rather than being a
+harmless no-op; that call no longer exists because nothing here brings
+anything up any more.)
 
-With this split, `APIARY`'s own `docker-compose.yml` has no
-services of its own left at all (`services: {}`) -- see that file's header
-for what that means going forward. The rsync step still runs
-unconditionally, since every other stack's build context depends on the
-checkout landing there, but `docker compose up -d --build` against a
-zero-service file fails outright (`no service selected`, confirmed
-locally) rather than being a harmless no-op, so that call is gone from
-this one step -- `config --quiet` alone stays as a lightweight sanity
-check. Retiring this file and its deploy step entirely, once every build
-context instead points somewhere that doesn't need a `docker-compose.yml`
-to justify its existence, is tracked as the last step of #258.
+What remains after all of that: the root `docker-compose.yml` carries
+`services: {}` permanently -- see its header for what that means -- and
+the `deploy.yml` rsync step survives with exactly one direct consumer, the
+ghidra worker's host-level re-sync described earlier. Everything else
+that used to read or build from `/opt/stacks/apiary` reads its own
+Arcane-synced directory instead ([ARCANE-GIT-SYNC.md](ARCANE-GIT-SYNC.md)).
 
 ## GitHub CI runner
 
