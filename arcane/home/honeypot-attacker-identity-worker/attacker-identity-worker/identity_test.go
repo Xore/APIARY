@@ -237,6 +237,75 @@ func TestMergeEntityIntoMergesTechniques(t *testing.T) {
 	}
 }
 
+// TestAbsorbOrdersByInstantOffUTCTimezone (#2341): with the process
+// running somewhere other than UTC, the pre-fix code compared o.first's
+// LOCAL RFC3339 rendering straight against the stored string -- an
+// observation whose instant was genuinely earlier looked string-later and
+// lost the first-seen ranking. Ranking must be decided on instants, and
+// whatever we adopt must still land as pure-Z UTC.
+func TestAbsorbOrdersByInstantOffUTCTimezone(t *testing.T) {
+	zone := time.FixedZone("TEST+1000", 10*60*60)
+	prev := time.Local
+	time.Local = zone
+	defer func() { time.Local = prev }()
+
+	seen := &entity{ID: "identity-a", IPs: []string{"203.0.113.1"}, First: "2026-08-10T23:00:00Z"}
+
+	// Renders locally as 2026-08-11T06:00:00+10:00, which string-sorts
+	// AFTER the stored stamp, yet its instant (20:00Z) is two hours
+	// EARLIER than 23:00Z.
+	at := time.Date(2026, 8, 11, 6, 0, 0, 0, zone)
+	if got := at.Format(time.RFC3339); got != "2026-08-11T06:00:00+10:00" {
+		t.Fatalf("premise check failed: local render %q", got)
+	}
+
+	absorb(seen, obs("203.0.113.1", "fp-shared", "", "", at))
+	if want := "2026-08-10T20:00:00Z"; seen.First != want {
+		t.Fatalf("First = %q, want %q (the earlier instant wins even off-UTC)", seen.First, want)
+	}
+}
+
+// TestAbsorbIgnoresLaterInstantAgainstMixedOffsetStoredStamp (#2341): a
+// legacy document may carry a non-Z offset; its rendered string sorts
+// independently of its instant, so only instant comparison keeps the real
+// earliest-seen intact when a later observation arrives.
+func TestAbsorbIgnoresLaterInstantAgainstMixedOffsetStoredStamp(t *testing.T) {
+	stored := &entity{ID: "identity-b", First: "2026-08-11T02:00:00+11:00"} // = 2026-08-10T15:00:00Z
+
+	later := time.Date(2026, 8, 10, 16, 0, 0, 0, time.UTC)
+	absorb(stored, obs("203.0.113.7", "fp-x", "", "", later))
+	if stored.First != "2026-08-11T02:00:00+11:00" {
+		t.Fatalf("First = %q, want the stored stamp kept (16:00Z is LATER than its 15:00Z instant)", stored.First)
+	}
+
+	earlier := time.Date(2026, 8, 10, 14, 0, 0, 0, time.UTC)
+	absorb(stored, obs("203.0.113.7", "fp-x", "", "", earlier))
+	if want := "2026-08-10T14:00:00Z"; stored.First != want {
+		t.Fatalf("First = %q, want %q (an actually-earlier instant still replaces it)", stored.First, want)
+	}
+}
+
+// TestMergeEntityIntoPicksInstantsAcrossOffsets (#2341): mergeEntityInto
+// compares stamps pulled from two stored documents; with mixed offsets a
+// really-earlier First (or really-later Last) can render in a string that
+// sorts the wrong way. The survivor must adopt by instant, re-rendered
+// through UTC().
+func TestMergeEntityIntoPicksInstantsAcrossOffsets(t *testing.T) {
+	a := &entity{ID: "a", First: "2026-08-03T00:00:00Z"}
+	b := &entity{ID: "b", First: "2026-08-03T03:00:00+05:00"} // = 2026-08-02T22:00:00Z -- earlier instant, later-rendered string
+	mergeEntityInto(a, b)
+	if want := "2026-08-02T22:00:00Z"; a.First != want {
+		t.Fatalf("a.First = %q, want %q", a.First, want)
+	}
+
+	c := &entity{ID: "c", Last: "2026-08-05T20:00:00Z"}
+	d := &entity{ID: "d", Last: "2026-08-06T05:00:00+11:00"} // = 2026-08-05T18:00:00Z -- earlier instant, later-rendered string
+	mergeEntityInto(c, d)
+	if c.Last != "2026-08-05T20:00:00Z" {
+		t.Fatalf("c.Last = %q, want it kept (d's instant is EARLIER though its string renders later)", c.Last)
+	}
+}
+
 func equalStrings(got, want []string) bool {
 	if len(got) != len(want) {
 		return false
