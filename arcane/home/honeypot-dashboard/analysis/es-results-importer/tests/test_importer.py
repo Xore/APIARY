@@ -442,6 +442,67 @@ class AdvanceStateAfterBulkTest(unittest.TestCase):
         self.assertEqual(state, {"keyB": 2.0})
 
 
+class ScanSourceSameMtimeRaceTest(unittest.TestCase):
+    """#2377 ledger row characterization of the mtime state's known
+    equal-resolution race: a file rewritten within the same clock tick the
+    filesystem hands out (kernel coarse-grained inode timestamps can make
+    two sub-tick writes share one st_mtime) is skipped even though its
+    content changed -- mtime equality is the sole change signal; nothing
+    backs it up with size or content hashing.
+
+    os.utime forces a genuinely identical st_mtime so this is
+    deterministic on every filesystem, not just coarse-clock ones. The
+    flip side is also pinned: the skip never becomes permanent loss --
+    the next write whose mtime does advance re-imports the CURRENT bytes,
+    and since document _ids are deterministic the ES mirror overwrites in
+    place."""
+
+    def test_same_tick_rewrite_skipped_then_healed_by_next_real_change(self):
+        import os
+        import tempfile
+
+        # The plainest live source in this module: doc _id IS the filename
+        # (a hash by production convention), arbitrary bytes, no aggregate/
+        # chunked machinery -- so nothing here characterizes anything but
+        # the mtime gate itself.
+        source = next(s for s in MODULE.SOURCES if s["label"] == "cowrie_ttylog")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            f = root / SHA
+            f.write_bytes(b"contents v1")
+            state = {}
+
+            first = MODULE.scan_source(source, root, state)
+            self.assertEqual(len(first), 1, "initial import: no state yet")
+            key, mtime, action = first[0]
+            self.assertEqual(action["_source"]["shasum"], SHA)
+            self.assertEqual(base64.b64decode(action["_source"]["ttylog_base64"]), b"contents v1")
+
+            # Cycle succeeds -> state advances to this file's mtime.
+            MODULE.advance_state_after_bulk(first, set(), state)
+
+            # Same-tick rewrite: new bytes, mtime forced back to exactly
+            # what was recorded.
+            f.write_bytes(b"contents v2 CHANGED")
+            os.utime(f, (mtime, mtime))
+            self.assertEqual(f.stat().st_mtime, state[key])
+
+            skipped = MODULE.scan_source(source, root, state)
+            self.assertEqual(skipped, [], "equal-mtime rewrite is invisible to the scan (the characterized race)")
+
+            # Any later write that actually moves mtime heals the mirror:
+            # current bytes get indexed under the same deterministic _id.
+            f.write_bytes(b"contents v3 HEALED")
+            healed = MODULE.scan_source(source, root, state)
+            self.assertEqual(len(healed), 1)
+            _, _, heal_action = healed[0]
+            self.assertEqual(heal_action["_id"], action["_id"])
+            self.assertEqual(
+                base64.b64decode(heal_action["_source"]["ttylog_base64"]), b"contents v3 HEALED"
+            )
+
+
 class VerdictProjectionTest(unittest.TestCase):
     """#2047: the ioc-verdicts-v1 projection the importer side-writes --
     raw facts per sample only, with the Rust readers rebuilding their own
