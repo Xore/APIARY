@@ -34,10 +34,11 @@ route) with the differences #328 called for:
 Requires: pip install pywinrm
 
 Env vars:
-  VM_HOST             IP of the GHOSTS guest (for WinRM/SMB). No pinned
-                       DHCP reservation exists yet in the deployed
-                       sandbox/ghosts/network.xml (#325/#327 tracked this
-                       gap) -- override this if the guest's lease floats.
+  VM_HOST             IP of the GHOSTS guest (for WinRM/SMB). Pinned by
+                       sandbox/ghosts/network.xml's DHCP reservation
+                       (MAC 00:1a:a0:3c:4d:6f -> 10.20.30.50, #327's
+                       PR #425); the default below matches that pin, so
+                       override only if the pin itself moves.
   VM_USER / VM_PASS    Guest credentials, same defaults as win11-sandbox
                        (the shared golden-image base, #326).
   LIBVIRT_URI          libvirt connection URI (default: qemu:///system)
@@ -69,7 +70,7 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger(__name__)
 
-VM_HOST         = os.environ.get('VM_HOST',          '10.20.30.72')
+VM_HOST         = os.environ.get('VM_HOST',          '10.20.30.50')
 VM_USER         = os.environ.get('VM_USER',          'analyst')
 VM_PASS         = os.environ.get('VM_PASS',          'malware123!')
 VIRSH_PATH      = os.environ.get('VIRSH_PATH',       '/usr/bin/virsh')
@@ -288,8 +289,9 @@ def fetch_ghosts_activity(hostname: str) -> dict:
     on later check-ins/heartbeats, even though `lastReportedUtc` updates
     correctly every time: a real, fresh heartbeat from this exact guest
     still showed `hostIp` frozen at a different address from over a day
-    earlier, because DHCP (no pinned reservation, see this file's own
-    VM_HOST docstring) handed out a new lease in between. Querying by
+    earlier, because DHCP -- this predates the network.xml pin, see this
+    file's own VM_HOST docstring -- handed out a new lease in between.
+    Querying by
     hostIp was therefore only ever going to match by coincidence -- this
     is why #806 found the real detonated machine "never appears in this
     list at all, under any IP": it was there all along, under its

@@ -25,12 +25,13 @@ GOLDEN_IMAGE=/var/dockge/sandbox/golden-images/win11-ghosts.qcow2
 VM_DISK=/var/dockge/sandbox/vms/win11-ghosts.qcow2
 
 # ── Guest access (WinRM/SMB over virbr-ghosts, #325) ─────────────────────
-# No pinned DHCP reservation exists yet in the deployed sandbox/ghosts/
-# network.xml (tracked on #327's PR) -- check
-#   virsh net-dhcp-leases ghosts
-# and update this if the guest's lease has floated since this file was
-# written.
-VM_HOST=10.20.30.72
+# The guest's address is pinned, not floating: sandbox/ghosts/network.xml's
+# DHCP reservation holds win11-ghosts's MAC (00:1a:a0:3c:4d:6f) at
+# 10.20.30.50 (#327's PR #425, same pattern sandbox-network.xml uses for
+# win11-sandbox), so no lease-watching is needed. network.xml is the side
+# that governs: if the pin ever moves, move it there first, then mirror
+# the new value here.
+VM_HOST=10.20.30.50
 VM_USER=analyst
 VM_PASS=changeme
 

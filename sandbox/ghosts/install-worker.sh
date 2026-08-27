@@ -39,7 +39,7 @@ if [[ ! -e /etc/default/honeypot-ghosts-sandbox ]]; then
     "$script_dir/honeypot-ghosts-sandbox.default.example" \
     /etc/default/honeypot-ghosts-sandbox
   echo "Wrote /etc/default/honeypot-ghosts-sandbox from the example -- edit VM_PASS" \
-    "(and VM_HOST, if the guest's DHCP lease has floated) before real detonations run." >&2
+    "before real detonations run (VM_HOST already matches network.xml's DHCP pin)." >&2
 fi
 
 install -d -m 0700 -o root -g root /var/lib/honeypot-ghosts-sandbox/requests/{pending,rejected}
