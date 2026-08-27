@@ -153,12 +153,27 @@ services:
       # wrong service in honeypot-dashboard/compose.yml and it silently
       # read empty (reported "disabled" instead of failing loudly).
       - FILEBEAT_URL=${FILEBEAT_URL:-http://filebeat:5066}
+      # #1972 durable per-request app log: obs.rs writes one JSONL line per
+      # served request here, onto the filebeat-tailed logs root, so an API
+      # incident can be reconstructed from Elasticsearch after the container
+      # json-file ring buffer (25m x3 above) has rotated it away. The file is
+      # opened per write and never held open, so a plain rename rotation
+      # works without any signal dance (next append recreates the path).
+      # Provisioned (mkdir + chown 65534) by honeypot-init's log-init step.
+      - DASHBOARD_LOG_FILE=${DASHBOARD_LOG_FILE:-/logs/dashboard-backend/app.jsonl}
       - TZ=Europe/Berlin
     volumes:
       - dashboard-state:/state
       - services-adapter-socket:/run/services-adapter
       - dionaea-lib:/dionaea-lib:ro
       - /opt/stacks/apiary/logs/cowrie/downloads:/cowrie-downloads:ro
+      # Read-write: this service CREATES app.jsonl. The logs root itself is
+      # mounted ro into the elk stack's filebeat; only producers mount their
+      # own subdirectory writable. backend-service-mounted gets its own
+      # sibling directory (honeypot-dashboard/compose.yml) so the two
+      # instances' streams stay separate files for filebeat's registry --
+      # they ship into one ES index family keyed by their logset values.
+      - /opt/stacks/apiary/logs/dashboard-backend:/logs/dashboard-backend
     networks:
       - honeynet
     security_opt: [no-new-privileges:true]

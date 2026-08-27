@@ -219,7 +219,8 @@ This table mirrors the step's own `--exclude` list exactly (`deploy.yml`,
 | Excluded path | Reason |
 |---|---|
 | `.env` | production addresses, credentials, and local settings |
-| `logs/`, `state/`, `dashboard-state/` | sensor logs, application checkpoints, dashboard state |
+| `logs/` | sensor and imported VPS logs, plus the dashboard's own serving-tier app logs (#1972: `dashboard-backend*/`, `dashboard-bff/`) |
+| `state/`, `dashboard-state/` | application checkpoints and state |
 | `sandbox/results/` | runtime malware-analysis output |
 | `analysis/geoip/` | whole directory, not just `*.mmdb`: nothing under it is git-tracked, and geoipupdate (a root-owned container, #1258) writes a root-owned `.geoipupdate.lock` into its root-owned directory — the runner user cannot unlink that, so any narrower exclude broke every deploy with rsync exit 23 once the geoip-update profile ran (#1226) |
 | `analysis/ghidra/revdeck/`, `sandbox/windows/packer/pxe/ipxe*` | hand-vendored or build-generated on the host, untracked in Git (`revdeck-proxyfix` doc comment; `prepare-pxe.sh`) — without excluding them, `--delete-delay` either fails outright (populated directory it can't recursively delete) or silently deletes a hand-built ipxe/webui tree on every deploy |

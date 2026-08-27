@@ -11,6 +11,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { beginLogin, oidcDisabled, safeReturnTo } from '../../lib/oidc.server'
 import { authErrorPage } from '../../lib/oidcErrors.server'
 import { createSession, sessionCookie } from '../../lib/session.server'
+import { recordNamedEvent } from '../../lib/obs.server'
 
 export const Route = createFileRoute('/auth/login')({
   server: {
@@ -35,9 +36,16 @@ export const Route = createFileRoute('/auth/login')({
         }
         try {
           const { redirect } = await beginLogin(returnTo)
+          // #1972: named outcomes — "how often is sign-in failing, and
+          // since when" becomes a counter over durable lines instead of
+          // grepping stdout that a redeploy already deleted.
+          recordNamedEvent('auth_login_started')
           return new Response(null, { status: 303, headers: { location: redirect } })
         } catch (error) {
           console.error('[auth] /auth/login could not start sign-in:', error)
+          recordNamedEvent('auth_login_failed', {
+            reason: error instanceof Error ? error.message.slice(0, 200) : 'unknown',
+          })
           return authErrorPage({
             status: 503,
             heading: 'Sign-in is temporarily unavailable',

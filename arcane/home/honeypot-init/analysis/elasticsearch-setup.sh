@@ -31,7 +31,7 @@ curl -fsS -X PUT "$es_url/_snapshot/honeypot-fs" \
 # Policy *names* stay fixed (suricata-7d etc.) even though the actual
 # min_age they enforce is now dynamic -- they are stable ILM policy
 # identifiers referenced by index templates elsewhere in this file, not a
-# literal claim about the configured duration. That holds for all ELEVEN
+# literal claim about the configured duration. That holds for all TWELVE
 # policies below, including honeypot-30d (#2193: its name predates the
 # knob and other tooling references it by name only).
 retention_days="${HONEYPOT_RETENTION_DAYS:-30}"
@@ -43,6 +43,7 @@ for spec in "suricata-7d:${suricata_days}d" \
             "traefik-30d:${retention_days}d" \
             "zeek-30d:${retention_days}d" "zeek-proxy-30d:${retention_days}d" "huginn-30d:${retention_days}d" \
             "extracted-files-30d:${retention_days}d" \
+            "dashboard-app-30d:${retention_days}d" \
             "analysis-results-180d:$(( retention_days * 6 ))d"; do
   name=${spec%%:*}
   age=${spec#*:}
@@ -810,6 +811,87 @@ curl -fsS -X PUT "$es_url/_index_template/traefik-access" \
         } },
         "user_agent": { "properties": { "original": { "type": "keyword", "ignore_above": 1024 } } },
         "network": { "properties": { "protocol": { "type": "keyword" }, "transport": { "type": "keyword" }, "community_id": { "type": "keyword" } } }
+      }
+    }
+  }
+}
+JSON
+
+# #1972 serving-tier app logs. The dashboard previously had no durable,
+# searchable record of what its own HTTP tiers served -- backend-service
+# logs vanished with each redeploy's json-file rotation (#1942's invisible
+# auth failures were diagnosed from a container that no longer existed),
+# so per-request lines now land on Elasticsearch via filebeat's
+# dashboard-backend-app / dashboard-backend-mounted-app inputs.
+#
+# One template covers BOTH backend-service instances: they are the same
+# image emitting the same nine fields; only the logset value distinguishes
+# them at query time. Their records are pure request metadata -- method,
+# path, status, duration, request.id -- plus service/level/event.category;
+# nothing here is attacker-controlled beyond url.path, which is mapped as
+# plain keyword exactly like traefik-access above (no analysis, capped by
+# ignore_malformed on anything weird).
+#
+# Same index shape as every other family here: plain daily indices, not a
+# data stream, delete-only ILM via dashboard-app-30d.
+curl -fsS -X PUT "$es_url/_index_template/dashboard-backend-app" \
+  -H 'Content-Type: application/json' \
+  --data-binary @- <<'JSON'
+{
+  "index_patterns": ["dashboard-backend-v1-*"],
+  "priority": 468,
+  "template": {
+    "settings": {
+      "index.lifecycle.name": "dashboard-app-30d",
+      "index.number_of_replicas": 0,
+      "index.mapping.ignore_malformed": true,
+      "index.refresh_interval": "5s"
+    },
+    "mappings": {
+      "properties": {
+        "@timestamp": { "type": "date" },
+        "event": { "properties": { "category": { "type": "keyword" } } },
+        "service": { "type": "keyword" },
+        "level": { "type": "keyword" },
+        "request.id": { "type": "keyword" },
+        "http.request.method": { "type": "keyword" },
+        "url.path": { "type": "keyword", "ignore_above": 1024 },
+        "status_code": { "type": "integer" },
+        "duration_ms": { "type": "long" }
+      }
+    }
+  }
+}
+JSON
+
+# The BFF tier's companion stream (filebeat input dashboard-bff-app): named
+# outcomes, not per-request lines -- auth sign-in started/failed/completed
+# and future recordNamedEvent call sites. reason carries the trimmed error
+# string (#1942's diagnosis now possible months later); role is the closed
+# set the auth layer assigns. Usernames are deliberately NOT among the
+# emitted fields and therefore not in this mapping either (#1972's privacy
+# note holds in both tiers' emitters).
+curl -fsS -X PUT "$es_url/_index_template/dashboard-bff-app" \
+  -H 'Content-Type: application/json' \
+  --data-binary @- <<'JSON'
+{
+  "index_patterns": ["dashboard-bff-v1-*"],
+  "priority": 466,
+  "template": {
+    "settings": {
+      "index.lifecycle.name": "dashboard-app-30d",
+      "index.number_of_replicas": 0,
+      "index.mapping.ignore_malformed": true,
+      "index.refresh_interval": "5s"
+    },
+    "mappings": {
+      "properties": {
+        "@timestamp": { "type": "date" },
+        "event": { "properties": { "category": { "type": "keyword" }, "action": { "type": "keyword" } } },
+        "service": { "type": "keyword" },
+        "level": { "type": "keyword" },
+        "reason": { "type": "keyword", "ignore_above": 256 },
+        "role": { "type": "keyword" }
       }
     }
   }
