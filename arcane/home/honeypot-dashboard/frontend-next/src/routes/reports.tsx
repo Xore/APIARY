@@ -1490,12 +1490,18 @@ function Reports() {
     data.definitions
       .then((result) => {
         if (cancelled) return
-        // A null collapse is a failed read, not an empty library.
-        if (!result) {
+        // A null collapse is a failed read, not an empty library — and so
+        // is a body that doesn't carry its definitions array at all: shape
+        // drift upstream, or a catch-all answer from a fixture/misroute.
+        // Storing result.definitions directly let an undefined through the
+        // `definitions === null` gate and crashed on definitions.length
+        // (the client render death the browser matrix caught on /reports).
+        const next = result?.definitions
+        if (!next) {
           setDefinitionsFailed(true)
           return
         }
-        setDefinitions(result.definitions)
+        setDefinitions(next)
       })
       .catch(() => {
         if (!cancelled) setDefinitionsFailed(true)
@@ -1512,9 +1518,10 @@ function Reports() {
     const result = await fetchDefinitions()
     // #2178: a failed refetch keeps the list on screen; blanking it to []
     // read as "every definition vanished" exactly when the store was
-    // merely unreachable.
-    if (!result) return
-    const next = result.definitions
+    // merely unreachable. A body without its definitions array counts as
+    // failed too — only a real response may redraw.
+    const next = result?.definitions
+    if (!next) return
     setDefinitions(next)
     // The definition being edited may have been deleted from the library —
     // fall back to a fresh draft rather than resurrecting it on save.
