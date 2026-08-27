@@ -46,9 +46,11 @@ autoinstall).
 [network isolation](honeypot-network-isolation.md) ·
 [agent-intrusion threat model](agent-intrusion-threat-model.md) ·
 [Ghidra/GPU analysis](gpu-docker-passthrough.md) ·
+[GPU LLM analysis worker](gpu-llm-analysis-worker.md) ·
 [KVM traffic analysis](kvm-network-traffic-analysis.md) ·
 [snapshot-vs-golden-image](kvm-snapshot-vs-golden-image.md) ·
-[Windows 11 malware lab](windows11-malware-lab-hardening.md)
+[Windows 11 malware lab](windows11-malware-lab-hardening.md) ·
+[ES consume patterns](ES-CONSUME-PATTERNS.md)
 
 ## Plans and evaluations — forward-looking or comparative
 
