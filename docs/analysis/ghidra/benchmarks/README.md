@@ -28,10 +28,10 @@ them itself:
 ```bash
 install -d -m 0700 "$HOME/model-qualification"
 python3 evaluate-models.py \
-  --manifest ../models/approved-models.json \
+  --manifest ../../../../analysis/ghidra/models/approved-models.json \
   --output "$HOME/model-qualification/qualification.json"
-python3 ../models/model-governance.py verify-report \
-  --manifest ../models/approved-models.json \
+python3 ../../../../analysis/ghidra/models/model-governance.py verify-report \
+  --manifest ../../../../analysis/ghidra/models/approved-models.json \
   --report "$HOME/model-qualification/qualification.json"
 ```
 
@@ -79,11 +79,11 @@ real addresses in issues is unchanged.
 
 ```bash
 # synthetic (default): committed alongside the repo
-python3 evaluate-models.py --manifest ../models/approved-models.json \
+python3 evaluate-models.py --manifest ../../../../analysis/ghidra/models/approved-models.json \
   --output "$HOME/model-qualification/qualification.json"
 
 # real captured data: operator-only path, outside the repo
-python3 evaluate-models.py --manifest ../models/approved-models.json \
+python3 evaluate-models.py --manifest ../../../../analysis/ghidra/models/approved-models.json \
   --output "$HOME/model-qualification/qualification.json" \
   --provenance captured --transcript-dir "$HOME/model-qualification/transcripts"
 ```
@@ -128,7 +128,7 @@ under [#636](https://github.com/Xore/APIARY/issues/636)). **The
 actual #568 root cause was a missing deployment, not missing
 drift-detection code** — don't build a second timer for this.
 
-`probe-gpu-capabilities.py --manifest ../models/approved-models.json`
+`probe-gpu-capabilities.py --manifest ../../../../analysis/ghidra/models/approved-models.json`
 below runs that same host-drift check standalone, without needing the
 full systemd deployment — useful as a pre-deployment sanity check, from
 CI, or from an operator's laptop, but it is not filling a monitoring gap
@@ -145,7 +145,7 @@ change when the hardware, model roster, or the operator's intent does.
 
 ```bash
 # capability drift, standalone (see above -- prefer the timer once deployed)
-python3 probe-gpu-capabilities.py --manifest ../models/approved-models.json
+python3 probe-gpu-capabilities.py --manifest ../../../../analysis/ghidra/models/approved-models.json
 
 # context-length sweep: for one already-installed model, how much does
 # raising OLLAMA_CONTEXT_LENGTH actually cost in VRAM, and does the model

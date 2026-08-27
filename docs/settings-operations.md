@@ -60,7 +60,7 @@ gauges:
 
 Config and users (Elasticsearch-backed since #787) are covered by whatever
 snapshot/backup policy this cluster's other Elasticsearch-owned dashboard
-data already has (`analysis/elasticsearch-setup.sh`) — not
+data already has (`arcane/home/honeypot-init/analysis/elasticsearch-setup.sh`) — not
 `scripts/backup-state.sh`, which now only covers what's still on the
 `dashboard-state` volume.
 

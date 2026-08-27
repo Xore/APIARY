@@ -106,7 +106,7 @@ Two explicit checks that source asked to add here:
   "not forgeable," which §1's own read-only-mount finding above already
   covers)? This is the sharper, distinct question: could a compromised
   sandbox guest, *during* its own detonation, read back any prior
-  analysis/result data that would let it detect it's being evaluated and
+  analysis result data that would let it detect it's being evaluated and
   adapt? Checked directly against `docs/kvm-network-traffic-analysis.md`
   and `docker-compose.sandbox.yml`: the Ghidra/sandbox/GitHub-analysis
   result spools are host-side directories, written by the analysis pipeline
@@ -138,7 +138,7 @@ own code.**
   (#150, just landed) explicitly re-derives this same reasoning for model
   output specifically because it is a second layer of untrusted free text on
   top of the underlying event.
-- Archive/container-format processing: `analysis/es-results-importer/` and
+- Archive/container-format processing: `arcane/home/honeypot-dashboard/analysis/es-results-importer/` and
   the Ghidra/sandbox result pipelines parse producer-written JSON, not
   archives directly — no code in this tree currently unpacks
   attacker-supplied ZIP/TAR/container images. This is a **currently-absent

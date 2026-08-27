@@ -321,7 +321,7 @@ nests its data under `honeypot.*`/`source.*`/`network.*`/`event.*`, not at
 the top level, and the raw field names differ per sensor.
 
 Ground truth for all 5 sources — real sensor logging source read directly
-(not assumed), ingest pipeline (`analysis/elasticsearch-setup.sh`'s
+(not assumed), ingest pipeline (`arcane/home/honeypot-init/analysis/elasticsearch-setup.sh`'s
 `geoip-honeypot`) read directly for what actually gets ECS-promoted — is in
 [`ml-worker/tests/fixtures.py`](../ml-worker/tests/fixtures.py), exercised by
 [`ml-worker/tests/test_schema_contract.py`](../ml-worker/tests/test_schema_contract.py).

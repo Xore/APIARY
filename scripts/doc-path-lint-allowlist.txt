@@ -1,0 +1,65 @@
+# Allowlist for scripts/check-doc-paths-exist.py (#2458).
+#
+# One token per line: `<token> # <reason>`. Blank lines and full-line
+# comments are ignored. Entries are matched against the token exactly as it
+# appears in the doc and against its normalized repo-root form, so write the
+# form the doc uses (a trailing slash matters to the reader even though the
+# checker normalizes it away).
+#
+# House rules for entries: every line carries its own reason, and every
+# entry names a reference that is deliberate -- an era record, a host-side
+# path, or an untracked-by-design file. Fix a citation instead of adding an
+# entry whenever a real, current path exists.
+
+# --- host-side VPS deploy state, deliberately untracked (BACKUP-ESSENTIALS
+#     restore recipe describes live machine content) ---
+vps/env/vps.env # host-side VPS deploy state, untracked by design
+vps/secrets/ # host-side VPS deploy state, untracked by design
+vps/secrets/oidc/ # host-side VPS deploy state, untracked by design
+vps/wireguard/ # host-side VPS deploy state, untracked by design
+vps/wireguard/wg0.conf # host-side VPS deploy state, untracked by design
+
+# --- runtime/generated state that only exists on hosts ---
+sandbox/results/ # runtime malware-analysis output on the analysis host
+./sandbox/results/current # runtime output pointer inside that host-side dir
+analysis/geoip # geoipupdate owns this dir on the runner; nothing under it is tracked (#1258)
+analysis/geoip/ # geoipupdate owns this dir on the runner; nothing under it is tracked (#1258)
+analysis/threat-intel/threat-cidrs.csv # generated on the host from the tracked .csv.example
+analysis/ghidra/revdeck/ # hand-vendored/build-generated on the host, untracked (CI-CD says so itself)
+analysis/ghidra/revdeck/ai-reverse-engineering # upstream clone target inside that host-side tree
+../.env # untracked local env file; the tracked template is vps/.env.example
+
+# --- removed components kept deliberately in era records ---
+scripts/cutover-dashboard.sh # removed after the cutover; DASHBOARD-CUTOVER documents that removal
+scripts/deploy-dashboard-rolling.sh # removed; CI-CD's own text documents its removal
+arcane/home/honeypot-dashboard/dashboard # pre-cutover Go binary, kept as the "Old:" contrast
+sandbox/Ghidra # pre-move name of the ghidra tree, cited in era docs
+arcane/home/honeypot-wordpot/ # retired stack (#2381); the row documents its removal
+sandbox/reset-vm.sh # orphaned and slated for deletion (#90); both docs blockquote that status
+docs/vm-detection-verification.md # retired by #2367; era plan citation
+sandbox/windows_kimi/RESEARCH.md # deleted; era plan cites it for provenance
+sandbox/cape/install-analysis-host.sh # planned mirror of ghidra's installer never landed; era plan
+docs/MODALS.md # retired by #2367; era plan citation
+analysis/ghidra/ghidra_analyze.py # deleted under #107; the roadmap row itself says so
+docs/DASHBOARD-UI-REDESIGN-GUIDE.md # retired; era roadmap citation
+analysis/scan_samples.py # removed; security-fixes narrates the deletion
+vps/forward-auth/ # moved to Xore/auth-backend; security-fixes narrates the move
+ml-worker/models/embedder.py # #67-era module no longer in the tree; acceleration record kept as era doc
+.github/workflows/analyze.yml # superseded section (#107); the workflow lived in a different repo
+.claude/settings.local.json # untracked local settings / content inside upstream release assets
+
+# --- prose phrases that merely look like paths ---
+ml-worker/analysis # prose phrase ("ml-worker/analysis ship whole"), not a path
+sandbox/analysis # prose phrase ("sandbox/analysis services"), not a path
+analysis/management # prose shorthand ("analysis/management plane"), not a path
+sandbox/ghidra/pihole/dockge # host dockge layout shorthand in a research note
+
+# --- untracked local config files named by setup instructions ---
+llm-worker/.env # cp target in the README; .env.example is the tracked template
+ml-worker/docker-compose.override.yml # local-only compose override, untracked by design
+sandbox/windows/config/sysmon_config.xml # operator-provided during provisioning; not tracked
+
+# --- retired path convention (#2352): old name plus today's home on the
+#     same line; check-doc-stale-paths.py governs the same citations ---
+analysis/yara # both mentions name arcane/home/honeypot-payload-analysis/analysis/yara/ inline
+analysis/yara/ # both mentions name arcane/home/honeypot-payload-analysis/analysis/yara/ inline

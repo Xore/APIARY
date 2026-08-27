@@ -99,7 +99,7 @@ For anything more than a trivial patch bump, actually run the new image
 against this repo's own logic before pinning it:
 
 - **A service this repo has its own setup/integration script for**
-  (Elasticsearch has `analysis/elasticsearch-setup.sh`; Dionaea has
+  (Elasticsearch has `arcane/home/honeypot-init/analysis/elasticsearch-setup.sh`; Dionaea has
   `dionaea/log_rotation_patch.py`'s build-time patch) — run that script
   end-to-end against a real instance of the new version, not just
   `docker run` and check it starts.

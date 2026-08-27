@@ -27,6 +27,48 @@ if (-not (Test-Path $custom)) { $custom = "$PSScriptRoot\..\fakenet\detnode.ini"
 if (Test-Path $custom) {
   Copy-Item $custom "$fn\fakenet\configs\detnode.ini" -Force
   Write-Host 'Custom detnode.ini installed.'
+
+  # Smoke check (#2446): assert the parse contract fakenet.py enforces
+  # before anything can listen. configparser preserves section-header
+  # whitespace, fakenet.py getbooleans 'enabled' on every section other
+  # than [FakeNet]/[Diverter] with no exception handling, and
+  # expand_listeners silently skips sections without a Listener key. The
+  # original detnode.ini violated all three (a padded "[ Diverter ]"
+  # header crashed the parse before [DNS Listener]/[BlackListIDs] could)
+  # and shipped zero listeners behind DivertTraffic=Yes -- a blackholed
+  # wire reported as "installed". Headers are compared UNtrimmed here on
+  # purpose: a padded header is itself the defect.
+  $cur = $null
+  $secs = @{}
+  switch -Regex -File "$fn\fakenet\configs\detnode.ini" {
+    '^\s*\[(.+)\]\s*$'               { $cur = $Matches[1]; $secs[$cur] = @{} }
+    '^\s*[#;]'                       { }
+    '^\s*$'                          { }
+    '^\s*([^=;#]+?)\s*=\s*(.*?)\s*$' { if ($cur) { $secs[$cur][$Matches[1].Trim().ToLower()] = $Matches[2].Trim() } }
+  }
+  $violations = @()
+  foreach ($name in $secs.Keys) {
+    if ($name -eq 'FakeNet' -or $name -eq 'Diverter') { continue }
+    if (-not $secs[$name].ContainsKey('enabled')) {
+      $violations += "${name}: no Enabled key (fakenet.py dies at parse)"
+      continue
+    }
+    if ('1','yes','true','on' -notcontains $secs[$name]['enabled'].ToLower()) { continue }
+    foreach ($req in 'port','protocol','listener') {
+      if (-not $secs[$name].ContainsKey($req)) {
+        $violations += "${name}: Enabled listener has no $req (silently skipped as Anonymous)"
+      }
+    }
+  }
+  if ($violations.Count -gt 0) {
+    $violations | ForEach-Object { Write-Warning "[!] detnode.ini parse contract: $_" }
+    exit 1
+  }
+  $enabledCount = ($secs.Keys | Where-Object {
+    $_ -notin 'FakeNet','Diverter' -and $secs[$_].ContainsKey('enabled') -and
+    '1','yes','true','on' -contains $secs[$_]['enabled'].ToLower()
+  }).Count
+  Write-Host "[+] detnode.ini parse contract OK ($enabledCount enabled listener sections)"
 } else {
   Write-Host 'Custom detnode.ini not found; using upstream default.'
   Copy-Item "$fn\fakenet\configs\default.ini" "$fn\fakenet\configs\detnode.ini" -Force

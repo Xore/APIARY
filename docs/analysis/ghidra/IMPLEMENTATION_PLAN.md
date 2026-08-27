@@ -24,7 +24,7 @@
 > the Ghidra REST job's own artifacts, only the sample bytes, so nothing
 > about running it standalone duplicates work. Its own result page lives at
 > `/revdeck/{sha256}`, and the `revdeck` entry in
-> [`workbench_domain.go`](../../../dashboard/workbench_domain.go) is now
+> [`workbench_domain.rs`](../../../arcane/home/honeypot-dashboard/backend-service/src/workbench_domain.rs) is now
 > `Available` whenever that spool is configured, closing out #78's last open
 > item.  
 > **Tracked in**: [#78](https://github.com/Xore/APIARY/issues/78)
@@ -115,7 +115,7 @@ Three corrections against the layout this section used to show:
   against a real clone of `biniamf/ai-reverse-engineering` (see
   `revdeck/README.md`). **The standalone piece is also built** (2026-08-02,
   #78): the dashboard's `revdeck` workbench adapter
-  ([`workbench_domain.go`](../../../dashboard/workbench_domain.go)) is now a
+  ([`workbench_domain.rs`](../../../arcane/home/honeypot-dashboard/backend-service/src/workbench_domain.rs)) is now a
   separately orchestrated, independently selectable analyzer with its own
   submission path (`REVDECK_REQUEST_DIR`, drained by `drain_revdeck()` in
   `worker/ghidra-worker.py`, independent of the Ghidra spool) and its own

@@ -100,7 +100,7 @@ attacker's real IP?**
 
 | Group | Sensors | Why | Fix |
 |---|---|---|---|
-| PROXY-aware | http, api-honeypot, multipot, tanner, dnp3, dicompot, citrix, rdp, endlessh, cisco-asa (WebVPN side), galah (proxied door, XFF), hellpot (proxied door, XFF) | portbridge/VPS speaks HAProxy PROXY v1 or Traefik sets XFF in-band | none for attribution. Five of them (multipot, tanner, http-honeypot, citrix-honeypot, rdp-honeypot) are watched anyway, solely so canonical-field promotion (#1217) runs on their lines |
+| PROXY-aware | http, api-honeypot, multipot, tanner, dnp3, dicompot, citrix, rdp, endlessh, cisco-asa (WebVPN side), galah (proxied door, XFF), hellpot (proxied door, XFF) | the VPS-side portbridge (`vps/portbridge`) speaks HAProxy PROXY v1, or Traefik sets XFF in-band | none for attribution. Five of them (multipot, tanner, http-honeypot, citrix-honeypot, rdp-honeypot) are watched anyway, solely so canonical-field promotion (#1217) runs on their lines |
 | Tunnel-blind (joined) | cowrie, dionaea + its incident variant (#623), every conpot persona, dns-honeypot, cisco-asa (IKE side), elasticpot, mailoney, hellpot (raw door), beelzebub, sentrypeer, galah (raw door) | raw TCP relay; the log records the WireGuard peer (`10.8.0.1`, the VPS-side tunnel address) | `via_port` join against the portbridge connection log — the generic join for flat `src_ip`/`src_port` shapes (cowrie, dionaea, the conpot personas, dns-honeypot, cisco-asa IKE, elasticpot, mailoney); bespoke join paths for the rest (dionaea-incident's nested rewrite; beelzebub and sentrypeer derive their own address field, then join; hellpot and galah's raw door is joined and adjudicated against their forwarded-header claim) |
 
 The join runs **at ingest time, not read time** (#37/#38): the networkless
@@ -118,7 +118,7 @@ One ES ingest pipeline (`index.default_pipeline` on all three index
 families) processes every document. Each processor is
 `ignore_failure: true`; enrichment failure never blocks indexing.
 
-Order (1:1 with `analysis/elasticsearch-setup.sh`):
+Order (1:1 with `arcane/home/honeypot-init/analysis/elasticsearch-setup.sh`):
 
 1. Main normalization script — promotes heterogeneous sensor fields into
    the flattened `honeypot.*` map (sensor, ips/ports, protocol, user,

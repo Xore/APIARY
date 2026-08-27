@@ -417,12 +417,15 @@ http:
     # bare Host() match below that sends "everything else" to the
     # frontend-only tier once split.
     #
-    # Currently a no-op in practice: dashboard-next isn't cut over yet
-    # (still behind compose.yml's `profiles: ["next"]`, unreached from
-    # here), and even once it is, both roles still run combined
-    # (SERVE_MODE=all, loopback bffInternalURL) on the single
-    # honeypot-dashboard service below -- #1622 is what stands up a second
-    # docker host and its own socat bridge for a BFF-only instance. At that
+    # Currently a no-op in practice: the deployment still runs combined
+    # (SERVE_MODE=all, loopback bffInternalURL -- backend.server.ts's own
+    # header documents all-mode as the only mode deployed today), so
+    # /bff/* is served by the same process the bare Host() match already
+    # targets. dashboard-next owns the production binding since #1628's
+    # cutover (compose.yml carries no profile gate any more -- the old
+    # `profiles: ["next"]` was deleted there), so this router already
+    # reaches the right host; the split only becomes observable when the
+    # BFF role moves to its own instance behind its own bridge. At that
     # point only this router's `service:` target needs to change to point
     # at that new bridge instead of reusing honeypot-dashboard.
     #

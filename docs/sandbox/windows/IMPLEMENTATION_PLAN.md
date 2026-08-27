@@ -356,27 +356,27 @@ exactly — add/remove there first, then update this enumeration.
    `config/fakenet.ini` → `C:/Windows/Temp/honeypot_fakenet.ini`, plus
    `config/defaultFiles/` — run_sample.py points FakeNet's `-c` at these, so
    they must be baked in before detonations
-4. `scripts/01-hardening.ps1` — network config, disable Defender/WU/
+4. `sandbox/windows/packer/scripts/01-hardening.ps1` — network config, disable Defender/WU/
    telemetry/UAC/firewall, install Chocolatey (phases 1–7)
 5. windows-restart to settle pending reboots before tooling installs
-6. `scripts/04-tools.ps1` — runtime dependencies via Chocolatey (phase 8);
+6. `sandbox/windows/packer/scripts/04-tools.ps1` — runtime dependencies via Chocolatey (phase 8);
    Sysmon + SwiftOnSecurity config pinned by commit **and** SHA-256 (phase
    9); PS ScriptBlock/Module/Transcription logging, process-creation
    auditing, event-log sizing (phase 10); FakeNet-NG install and the staged
    ini/defaultFiles moved into place (phase 11); Regshot (11b); QEMU guest
    agent (phase 12); analysis directories
-7. `scripts/09-vcredist.ps1` — standalone VC++ redistributables (#368)
-8. `scripts/12-display-resolution.ps1` — real desktop resolution at 1080p
-9. `scripts/10-loldrivers.ps1` — BYOVD bait drivers + blocklist disabled
-10. `scripts/05-decoy-content.ps1` — decoy documents, SMB share, Recent-files
+7. `sandbox/windows/packer/scripts/09-vcredist.ps1` — standalone VC++ redistributables (#368)
+8. `sandbox/windows/packer/scripts/12-display-resolution.ps1` — real desktop resolution at 1080p
+9. `sandbox/windows/packer/scripts/10-loldrivers.ps1` — BYOVD bait drivers + blocklist disabled
+10. `sandbox/windows/packer/scripts/05-decoy-content.ps1` — decoy documents, SMB share, Recent-files
     entries (anti-evasion cosmetics only)
-11. `scripts/06-chrome-history.ps1` — aged Chrome browsing history seeded
+11. `sandbox/windows/packer/scripts/06-chrome-history.ps1` — aged Chrome browsing history seeded
     into the History SQLite DB (#292)
-12. `scripts/07-living-persona.ps1` — mouse/persona daemon simulating a
+12. `sandbox/windows/packer/scripts/07-living-persona.ps1` — mouse/persona daemon simulating a
     user at the keyboard (#290)
-13. `scripts/08-traffic-noise.ps1` — taggable background browsing traffic
+13. `sandbox/windows/packer/scripts/08-traffic-noise.ps1` — taggable background browsing traffic
     generator (#291)
-14. `scripts/11-detonation-orchestrator.ps1` — in-guest detonation staging
+14. `sandbox/windows/packer/scripts/11-detonation-orchestrator.ps1` — in-guest detonation staging
     consumed by run_sample.py over WinRM (#490)
 15. Final inline cleanup — EnablePrefetcher=3, DNS pinned to INetSim at
     10.10.10.1, event logs and temp dirs cleared, build timestamp written

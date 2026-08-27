@@ -20,8 +20,8 @@ the only compose profile in the repo is the optional on-demand
 A public VPS terminates attacker traffic — Suricata sniffs it, Traefik
 routes HTTP through Keycloak-backed auth, portbridge relays raw protocol
 ports — and forwards everything over a home-initiated WireGuard tunnel to
-a homeserver running **32 Arcane-managed sensor/worker/utility stacks**
-(plus 6 more at repository-root paths; 38 sync entries in
+a homeserver running **31 Arcane-managed sensor/worker/utility stacks**
+(plus 6 more at repository-root paths; 37 sync entries in
 [`arcane/manifests/home-production.json`](../arcane/manifests/home-production.json),
 which is authoritative — not `.github/workflows/deploy.yml`). Sensors
 write JSON logs to shared host directories; Filebeat ships them into
@@ -179,7 +179,7 @@ flowchart TB
 
   subgraph sg["Sensor stacks ×21 (isolated networks)"]
     direction LR
-    cow["cowrie"] & dion["dionaea+tftp"] & conp["conpot ×5"] & rest["dnp3 · dicompot · dns · citrix<br/>cisco-asa · rdp · endlessh · http/api<br/>multipot · mailoney · beelzebub · hellpot<br/>elasticpot · galah · sentrypeer<br/>canarytokens"]
+    cow["cowrie"] & dion["dionaea+tftp"] & conp["conpot ×6"] & rest["dnp3 · dicompot · dns · citrix<br/>cisco-asa · rdp · endlessh · http/api<br/>multipot · mailoney · beelzebub · hellpot<br/>elasticpot · galah · sentrypeer<br/>canarytokens"]
   end
 
   logsT[("logs/&lt;sensor&gt;")]

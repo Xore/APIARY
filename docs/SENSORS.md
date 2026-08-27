@@ -4,7 +4,7 @@
 
 | Sensor | Ports | Exposed via | Notes |
 |---|---|---|---|
-| **cowrie** | SSH 22, Telnet 23 | raw tunnel | seeded NexusAI Ubuntu GPU node ([cowrie/README-fs.md](../cowrie/README-fs.md)) |
+| **cowrie** | SSH 22, Telnet 23 | raw tunnel | seeded NexusAI Ubuntu GPU node ([cowrie/README-fs.md](../arcane/home/honeypot-cowrie/cowrie/README-fs.md)) |
 | **multipot** | Postgres 5432, VNC 5900, Redis 6379, ES 9200, Docker 2375, POP3 110, IMAP 143, SOCKS5 1080, HL7/MLLP 2575, ADB 5555 | raw tunnel | light Go multi-protocol sensor — dashboard reads its events from Elasticsearch, not its log file (#403) |
 | **dionaea** | FTP 21, TFTP 69/udp, MSRPC 135, SMB 445, MSSQL 1433, PPTP 1723, MQTT 1883, UPnP 1900/udp, MySQL 3306, SIP 5060 tcp/udp, printer 9100, Memcached 11211, Mongo 27017 | raw tunnel | broad legacy/IoT attack surface + **malware capture** |
 | **conpot** | S7 102, Modbus 502, SNMP 161/udp, BACnet 47808/udp, IPMI 623/udp, ENIP 44818 | raw tunnel | **ICS/SCADA** (Siemens S7-200) |
@@ -118,7 +118,7 @@ environment. Suspicious payload detonation belongs in the separate KVM/libvirt
 sandbox described in [`sandbox/README.md`](sandbox/README.md). Containers: `tanner_redis`,
 `tanner_phpox`, `tanner_api`, `tanner` (analyzer, `:8090`), `tanner_web`
 (dashboard, `:8091`), `snare_clone` (one-shot deterministic persona installer),
-`snare` (`:8080`). The page source lives under [snare/persona](../snare/persona)
+`snare` (`:8080`). The page source lives under [snare/persona](../arcane/home/honeypot-tanner/snare/persona)
 and is transformed into SNARE's content-addressed store during the image build;
 no third-party site is cloned. All `mushorg/*` images are third-party
 — verify tags/args upstream (needs a live build/pull).
@@ -131,7 +131,7 @@ tunnel. It writes to `/opt/stacks/apiary/logs/suricata/` on the VPS:
 
 - `eve.json` (alerts, http, dns, tls, flow) — Filebeat on the home server ships
   it to the `suricata-*` Elasticsearch index (stats events are dropped, see
-  [analysis/filebeat.yml](../analysis/filebeat.yml)).
+  [analysis/filebeat.yml](../arcane/home/honeypot-elk/analysis/filebeat.yml)).
 - `pcap/log.pcap.<epoch>` — full packet capture, rotated at **4mb**
   (Suricata's hard minimum; smaller values crash pcap-log) with
   `max-files: 12500` ≈ 50 GB retention. Consumed by Arkime, see below.
