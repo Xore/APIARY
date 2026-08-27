@@ -125,7 +125,7 @@ Two explicit checks that source asked to add here:
 **Applies directly — this is the shape of a large fraction of this repo's
 own code.**
 
-- YARA rule/corpus loading (`scripts/check-yara-corpus.sh`, `analysis/yara/`)
+- YARA rule/corpus loading (`scripts/check-yara-corpus.sh`, now `arcane/home/honeypot-payload-analysis/analysis/yara/` since #1502)
   processes rule files against untrusted sample bytes. CI (`quality.yml`)
   already runs the corpus through the scanner's own base image on every
   change specifically because a bad rule takes the whole scanner down
