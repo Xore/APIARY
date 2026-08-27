@@ -189,14 +189,26 @@ alone. Re-verify against whatever Arcane version is pinned in
   Confirmed independently against this deployment: `GET
   /environments/0/gitops-syncs` and `GET
   /environments/0/projects/{id}` both return zero profile-related fields
-  anywhere in their schemas, and `honeypot-dashboard`'s own project record
-  reports `serviceCount: 4` / `runningCount: 4` — exactly its four
-  profile-less services (`dashboard`, `oidc-sessions`,
-  `es-results-importer`, `services-adapter`), with none of its
-  `profiles: ["next"]`-gated services (`dashboard-next`, `backend-worker`,
-  etc.) counted or running. This settles #1628's own open question: a
-  sync brings up only a stack's base (non-profiled) services; activating
-  any `profiles:`-gated service group — `next` here, same as
+  anywhere in their schemas, and `honeypot-dashboard`'s own project
+  inventory bears that out. First recorded during #1502 against pinned
+  `v2.8.0`, when the record reported `serviceCount: 4` / `runningCount: 4`
+  over the then-current four services (`dashboard`, `oidc-sessions`,
+  `es-results-importer`, `services-adapter`); re-derived on 2026-08-27
+  against pinned `v2.9.0` straight from the deployed stack rather than a
+  captured API response (compose declares eight services, `docker ps`
+  showed seven of them running at observation time), it covers exactly
+  today's eight profile-less services — `oidc-sessions`,
+  `backend-service-mounted`, `backend-worker`, `dashboard-next`,
+  `backend-worker-importer`, `backend-worker-enrichment`,
+  `backend-worker-payload-inventory`, `services-adapter` — and the synced
+  file carries no `profiles:` field anywhere anymore: the historic
+  `["next"]` gate ended with the #1608/#1628 cutover that made this stack
+  fully base, so there is no gated `dashboard-next`/`backend-worker`
+  subset left to sit uncounted. Which snapshot you land on shifts with
+  the stack itself — the drift mode this section keeps warning about.
+  This settles #1628's own open question: a sync brings up only a stack's
+  base (non-profiled) services; activating any `profiles:`-gated service
+  group — same as
   `geoip-update`/`threat-intel`/`revdeck`/`mitm`/`test`/`blackhole`
   elsewhere in this repo — is always a manual `docker compose --profile X
   up -d` run against the synced directory on the host afterward. There is
