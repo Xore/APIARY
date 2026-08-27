@@ -319,5 +319,88 @@ class TestFullPipelineAgainstRealCorpus(unittest.TestCase):
         self.assertEqual(sig.parameters["window"].default, worker.CORRELATION_WINDOW)
 
 
+class _PersistentES(FakeElasticsearch):
+    """FakeES with real-ES-like durability: index() upserts into a caller-
+    shared {id: document} store, so a second client instance sees whatever
+    earlier "processes" wrote -- exactly the state an interrupted worker
+    leaves behind for its own restart."""
+
+    def __init__(self, documents, store, fail_after=None):
+        super().__init__(documents)
+        self._store = store
+        self._fail_after = fail_after  # raise on the (N+1)th write if set
+
+    def index(self, index, document, id=None):
+        if self._fail_after is not None and len(self.indexed) >= self._fail_after:
+            # KeyboardInterrupt, not Exception: write_campaign_verdict
+            # deliberately swallows ordinary errors as non-fatal, but a
+            # mid-cycle kill (SIGTERM/Ctrl-C/the OOM killer) escapes that
+            # catch -- that is the interruption this class simulates.
+            raise KeyboardInterrupt("simulated mid-cycle interruption")
+        self.indexed.append({"index": index, "id": id, "document": document})
+        self._store[id] = document
+
+
+def _stripped(doc):
+    return {k: v for k, v in doc.items() if k != "@timestamp"}
+
+
+class TestInterruptedCycleUpsert(unittest.TestCase):
+    """#2377 ledger row characterization: a cycle interrupted mid-write is
+    absorbed by the campaign_id upsert. The next full cycle recomputes the
+    same campaigns under the same content-derived IDs and overwrites; no
+    duplicate survives and the converged store equals what an uninterrupted
+    cycle would have written."""
+
+    def _corpus(self):
+        now = datetime.now(timezone.utc)
+        def ts(seconds_ago):
+            # utc-verified below: the zone lives in `now`, an aware UTC
+            # datetime, so this stamp renders true UTC -- but the zone sits
+            # one line up where grep cannot see it, hence the waiver.
+            return (now - timedelta(hours=1, seconds=seconds_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")  # utc-verified: now is timezone.utc-aware
+        return {
+            "honeypot-v2-2026": [
+                _cowrie_doc("high-a", ts(10), "sess-a", "203.0.113.10", "cat /proc/self/environ"),
+                _cowrie_doc("high-b", ts(20), "sess-b", "203.0.113.11", "cat /proc/self/environ"),
+                _cowrie_doc("benign", ts(30), "sess-c", "198.51.100.9", "ls -la"),
+            ],
+        }
+
+    def test_interrupted_cycle_converges_to_uninterrupted_result(self):
+        store_interrupted: dict = {}
+        es_kill = _PersistentES(self._corpus(), store_interrupted, fail_after=1)
+        with self.assertRaises(KeyboardInterrupt):
+            worker.run_cycle(es_kill)
+        self.assertEqual(len(store_interrupted), 1, "exactly one verdict survived the kill")
+
+        # The restart: fresh client instance, same underlying ES store,
+        # cycle runs to completion.
+        es_retry = _PersistentES(self._corpus(), store_interrupted)
+        self.assertEqual(worker.run_cycle(es_retry), 2)
+
+        store_reference: dict = {}
+        es_ref = _PersistentES(self._corpus(), store_reference)
+        self.assertEqual(worker.run_cycle(es_ref), 2)
+
+        self.assertEqual(set(store_interrupted), set(store_reference))
+        for cid in store_reference:
+            # @timestamp is wall-clock by design; every other field must
+            # converge byte-for-byte given the same source events.
+            self.assertEqual(_stripped(store_interrupted[cid]), _stripped(store_reference[cid]))
+
+    def test_second_write_overwrites_instead_of_duplicating(self):
+        store: dict = {}
+        corpus = self._corpus()
+        first = _PersistentES(corpus, store)
+        worker.run_cycle(first)
+        ids_first = sorted(store)
+        second = _PersistentES(corpus, store)
+        worker.run_cycle(second)
+        # Same IDs again, store unchanged in membership: rolling-window
+        # overlap between consecutive cycles rewrites, never duplicates.
+        self.assertEqual(sorted(store), ids_first)
+
+
 if __name__ == "__main__":
     unittest.main()
