@@ -14,10 +14,12 @@ name: CI executor router
 #   2. Liveness is measured, not read. GET /actions/runners answers HTTP
 #      403 to GITHUB_TOKEN under every permission shape (live-verified
 #      2026-08-27), so availability is proven by dispatching the ci-heartbeat
-#      canary at this ref and requiring a fresh run to complete inside the
-#      decision windows. Anything else -- box off, paused, unregistered,
-#      service wedged -- times out and the caller's jobs fall back to
-#      GitHub-hosted.
+#      canary at a real ref -- the triggering branch, or a same-repo PR's
+#      head branch (the "<n>/merge" merge ref GITHUB_REF_NAME holds for
+#      pull_request runs backs no branch and dispatches refuse with 422) --
+#      and requiring a fresh run to complete inside the decision windows.
+#      Anything else -- box off, paused, unregistered, service wedged --
+#      times out and the caller's jobs fall back to GitHub-hosted.
 #
 # Fail-safe: every error path resolves to homeserver=false, so routing can
 # degrade CI's speed, never its pass/fail correctness.
@@ -113,19 +115,34 @@ jobs:
           poll_every="${HEARTBEAT_POLL_SECONDS:-10}"
 
           if [[ "$trusted" == "true" ]]; then
-            echo "heartbeat: dispatching ci-heartbeat on ${GITHUB_REF_NAME}"
             api="repos/$GITHUB_REPOSITORY/actions/workflows/ci-heartbeat.yml"
-            # cutoff predates the dispatch by 2min so minor runner/GitHub
-            # clock skew cannot out-veto a real fresh run.
-            cutoff="$(date -u -d '2 minutes ago' +%FT%TZ)"
-            http="$(curl -fsS -o "${RUNNER_TEMP:-/tmp}/hb-disp.out" -w '%{http_code}' -X POST \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H 'Accept: application/vnd.github+json' \
-              "$GITHUB_API_URL/$api/dispatches" \
-              -d "{\"ref\":\"${GITHUB_REF_NAME:-}\"}" || echo X)"
+            # The dispatch API needs a real ref. For pull_request runs
+            # GITHUB_REF_NAME is the ephemeral "<n>/merge" merge ref that no
+            # branch backs, so dispatching there is refused with 422 "No ref
+            # found for" -- seen live on #2568, and it would have routed
+            # every same-repo PR to the fallback forever. Same-repo PRs
+            # therefore dispatch at the PR's head branch (whose
+            # ci-heartbeat.yml is the branch's own; fork PRs never get this
+            # far, trusted=false). push/workflow_dispatch/schedule carry a
+            # real branch in GITHUB_REF_NAME already.
+            dispatch_ref="$GITHUB_REF_NAME"
+            if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+              dispatch_ref="$(jq -r '.pull_request.head.ref // ""' "$EVENT_PATH")"
+            fi
+            echo "heartbeat: dispatching ci-heartbeat on ${dispatch_ref:-<none>}"
+            http=""
+            if [[ -n "$dispatch_ref" ]]; then
+              # No -f: a refused dispatch must land its HTTP code in $http,
+              # not abort the capture (with -f a 422 printed as "422X").
+              http="$(curl -sS -o "${RUNNER_TEMP:-/tmp}/hb-disp.out" -w '%{http_code}' -X POST \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H 'Accept: application/vnd.github+json' \
+                "$GITHUB_API_URL/$api/dispatches" \
+                -d "{\"ref\":\"${dispatch_ref}\"}" || true)"
+            fi
             [[ "$http" == "204" ]] \
               && echo "heartbeat: dispatch accepted" \
-              || { echo "::warning::heartbeat dispatch refused (HTTP $http); routing fallback"; http=""; }
+              || { echo "::warning::heartbeat dispatch refused (HTTP ${http:-none}); routing fallback"; http=""; }
 
             # Phase A: wait for a FRESH heartbeat run to appear -- created
             # after the cutoff (dispatch minus skew allowance) and not yet
