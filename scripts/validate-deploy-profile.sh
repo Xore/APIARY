@@ -63,7 +63,7 @@ declare -A STACK_TO_SENSORS=(
   [elasticpot]="elasticpot"
   [galah]="galah"
   [sentrypeer]="sentrypeer"
-  [wordpot]="wordpot"
+  # wordpot retired with its stack (#2381); no profile may name it.
   [mailoney]="mailoney"
   [canarytokens]="canarytokens"
   [tanner]="tanner"

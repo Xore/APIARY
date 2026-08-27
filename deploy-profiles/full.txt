@@ -25,6 +25,5 @@ hellpot
 elasticpot
 galah
 sentrypeer
-wordpot
 mailoney
 canarytokens
