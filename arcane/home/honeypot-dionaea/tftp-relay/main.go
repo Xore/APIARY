@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -10,10 +12,49 @@ import (
 	"time"
 )
 
+// udpReplyWriter is the slice of an upstream socket the forwarding paths
+// actually need -- narrowed to an interface so handler_panic_test.go can
+// hand the relay a crafted socket whose reply leg detonates mid-handler
+// (see #2489); the real *net.UDPConn main() opens satisfies it as-is.
+type udpReplyWriter interface {
+	WriteToUDP(b []byte, addr *net.UDPAddr) (int, error)
+	SetReadDeadline(t time.Time) error
+}
+
+// upstreamConn adds the read/close legs relayReplies needs off the same
+// underlying socket -- still narrow enough to craft, nothing more than
+// main()'s real conn offers.
+type upstreamConn interface {
+	udpReplyWriter
+	ReadFromUDP(b []byte) (int, *net.UDPAddr, error)
+	Close() error
+}
+
+// replySink is the listener-facing half of the forwarding story --
+// relayReplies sends every upstream datagram back toward the client through
+// it. Narrowed like udpReplyWriter so the crafted sockets can detonate the
+// exact leg a handler exercises (#2489); the real listener satisfies it as-is.
+type replySink interface {
+	WriteToUDP(b []byte, addr *net.UDPAddr) (int, error)
+}
+
 type session struct {
-	conn   *net.UDPConn
+	conn   upstreamConn
 	mu     sync.RWMutex
 	target *net.UDPAddr
+}
+
+// relay bundles what every per-datagram and per-session hop needs, so the
+// handlers can be plain methods instead of six-parameter functions whose
+// callers (and tests) have to keep the argument order straight (#2489).
+type relay struct {
+	server      replySink
+	target      *net.UDPAddr
+	maxSessions int
+	sessionLog  *os.File
+	listenPort  int
+	lock        sync.Mutex
+	sessions    map[string]*session
 }
 
 func main() {
@@ -38,71 +79,132 @@ func main() {
 	// existing 2-minute idle sweep in relayReplies ever ran.
 	maxSessions := getenvInt("TFTP_MAX_SESSIONS", 1024)
 	log.Printf("tftp relay %s -> %s (max %d concurrent sessions)", listen, target, maxSessions)
-	var lock sync.Mutex
-	sessions := map[string]*session{}
+	r := &relay{
+		server:      server,
+		target:      target,
+		maxSessions: maxSessions,
+		sessionLog:  sessionLog,
+		listenPort:  server.LocalAddr().(*net.UDPAddr).Port,
+		sessions:    map[string]*session{},
+	}
 	buf := make([]byte, 65535)
 	for {
 		n, client, readErr := server.ReadFromUDP(buf)
 		if readErr != nil {
 			continue
 		}
-		key := client.String()
-		lock.Lock()
-		current := sessions[key]
-		if current == nil {
-			if len(sessions) >= maxSessions {
-				// At the cap: drop rather than open another upstream
-				// socket/goroutine. A real client just retries (TFTP is
-				// itself a retry-on-timeout protocol); an attacker's
-				// spoofed-source flood gets no further sockets to burn.
-				lock.Unlock()
-				continue
-			}
-			upstream, listenErr := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero})
-			if listenErr != nil {
-				lock.Unlock()
-				continue
-			}
-			current = &session{conn: upstream, target: target}
-			sessions[key] = current
-			// #747: dionaea sees every TFTP session as coming from this
-			// relay's own upstream socket, never the real client -- its
-			// own connection log has no way to recover client.IP once the
-			// packet leaves this process. Recording {relay_port, client_ip}
-			// the moment that socket is opened (this port is exactly what
-			// dionaea will log as src_port for the resulting session, per
-			// TFTP's own "server replies from a fresh ephemeral port, but
-			// the client's own port stays fixed for the session" contract)
-			// lets ip-enrichment-worker join on it the same way it already
-			// joins portbridge's via_port for every other affected sensor.
-			logSession(sessionLog, upstream.LocalAddr().(*net.UDPAddr).Port, client.IP.String())
-			go relayReplies(server, client, key, current, sessions, &lock)
-		}
-		lock.Unlock()
-		current.mu.RLock()
-		peer := current.target
-		current.mu.RUnlock()
-		current.conn.SetReadDeadline(time.Now().Add(2 * time.Minute))
-		_, _ = current.conn.WriteToUDP(buf[:n], peer)
+		r.handleDatagram(buf[:n], client)
 	}
 }
 
-func relayReplies(server *net.UDPConn, client *net.UDPAddr, key string, current *session, sessions map[string]*session, lock *sync.Mutex) {
+func (r *relay) handleDatagram(datagram []byte, client *net.UDPAddr) {
+	// #2489: handleDatagram is the whole world past ReadFromUDP -- attacker
+	// datagrams hit the session table and the upstream write with no recover
+	// anywhere downstream, and in Go one unrecovered panic kills the entire
+	// relay while restart: unless-stopped hands the attacker the same
+	// replayable datagram right back. The forwarding itself is bounds-free
+	// today, but the boundary exists for what future edits past it could
+	// add: a panicking datagram costs exactly one attributable handler_panic
+	// event while the ReadFromUDP loop and every other live session keep
+	// running.
+	defer func() {
+		if rec := recover(); rec != nil {
+			emitPanic(r.listenPort, client, rec)
+		}
+	}()
+	key := client.String()
+	r.lock.Lock()
+	current := r.sessions[key]
+	if current == nil {
+		if len(r.sessions) >= r.maxSessions {
+			// At the cap: drop rather than open another upstream
+			// socket/goroutine. A real client just retries (TFTP is
+			// itself a retry-on-timeout protocol); an attacker's
+			// spoofed-source flood gets no further sockets to burn.
+			r.lock.Unlock()
+			return
+		}
+		upstream, listenErr := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero})
+		if listenErr != nil {
+			r.lock.Unlock()
+			return
+		}
+		// #747: dionaea sees every TFTP session as coming from this
+		// relay's own upstream socket, never the real client -- its
+		// own connection log has no way to recover client.IP once the
+		// packet leaves this process. Recording {relay_port, client_ip}
+		// the moment that socket is opened (this port is exactly what
+		// dionaea will log as src_port for the resulting session, per
+		// TFTP's own "server replies from a fresh ephemeral port, but
+		// the client's own port stays fixed for the session" contract)
+		// lets ip-enrichment-worker join on it the same way it already
+		// joins portbridge's via_port for every other affected sensor.
+		logSession(r.sessionLog, upstream.LocalAddr().(*net.UDPAddr).Port, client.IP.String())
+		current = &session{conn: upstream, target: r.target}
+		r.sessions[key] = current
+		go r.relayReplies(client, key, current)
+	}
+	r.lock.Unlock()
+	current.mu.RLock()
+	peer := current.target
+	current.mu.RUnlock()
+	current.conn.SetReadDeadline(time.Now().Add(2 * time.Minute))
+	_, _ = current.conn.WriteToUDP(datagram, peer)
+}
+
+func (r *relay) relayReplies(client *net.UDPAddr, key string, current *session) {
 	buf := make([]byte, 65535)
 	for {
 		n, peer, err := current.conn.ReadFromUDP(buf)
 		if err != nil {
-			lock.Lock()
-			delete(sessions, key)
-			lock.Unlock()
+			r.lock.Lock()
+			delete(r.sessions, key)
+			r.lock.Unlock()
 			_ = current.conn.Close()
 			return
 		}
-		current.mu.Lock()
-		current.target = peer
-		current.mu.Unlock()
-		_, _ = server.WriteToUDP(buf[:n], client)
+		// #2489: the boundary wraps the LOOP BODY, not the whole function --
+		// recovering around the whole goroutine would contain the panic but
+		// skip straight past the error-path cleanup that deletes the session
+		// entry, and after #882's hard cap a leaked entry is a permanently
+		// burned slot. A contained iteration leaves the table intact for the
+		// next packet to reconnect or the sweep to reclaim.
+		func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					emitPanic(r.listenPort, client, rec)
+				}
+			}()
+			current.mu.Lock()
+			current.target = peer
+			current.mu.Unlock()
+			_, _ = r.server.WriteToUDP(buf[:n], client)
+		}()
 	}
+}
+
+// panicOut is where handler_panic events land -- stdout, docker-captured and
+// shape-compatible with every other sensor's JSON stream (jq-greppable as
+// .event=="handler_panic") -- deliberately NOT sessions.json: that file is
+// ip-enrichment-worker's {relay_port, client_ip} join contract from #747 and
+// must stay exactly that shape.
+var panicOut io.Writer = os.Stdout
+
+func emitPanic(listenPort int, client *net.UDPAddr, recovered any) {
+	line, err := json.Marshal(map[string]any{
+		"time":     time.Now().UTC().Format(time.RFC3339),
+		"sensor":   "tftp-relay",
+		"proto":    "tftp",
+		"port":     listenPort,
+		"src_ip":   client.IP.String(),
+		"src_port": client.Port,
+		"event":    "handler_panic",
+		"data":     fmt.Sprint(recovered),
+	})
+	if err != nil {
+		return
+	}
+	fmt.Fprintln(panicOut, string(line))
 }
 
 func getenv(key, fallback string) string {

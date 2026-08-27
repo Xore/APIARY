@@ -169,6 +169,33 @@ func extractNegotiationProtocols(data []byte) (string, bool) {
 	return strings.Join(names, "+"), true
 }
 
+// handleConn is the whole world past Accept: PROXY/X.224 attacker bytes are
+// decoded straight off the socket inside the spawned goroutine (#2099 moved
+// that work out of the accept loop) with no recover anywhere underneath, and
+// in Go one unrecovered panic kills the entire sensor while restart:
+// unless-stopped hands the attacker the same replayable bytes right back.
+// http-honeypot gets this shield per request from net/http; this
+// low-interaction listener carries it itself, at the top of the
+// per-connection entrypoint so it covers BOTH stages the goroutine runs --
+// the decodeProxy leg and the serve body. A panicking connection is closed
+// and lands in the normal JSON pipeline as one attributable handler_panic
+// event while the accept loop and every other live connection keep running.
+// Attribution comes from the RAW accepted conn because it is the one address
+// guaranteed valid even if the panic fired before decodeProxy ever returned;
+// behind portbridge that is the tunnel peer, not the PROXY-decoded attacker
+// IP -- worth one honest field over inventing two-stage bookkeeping for a
+// path future edits are expected to trip far more often than production is.
+func handleConn(c net.Conn, proxy bool, log *logger, port int) {
+	defer func() {
+		if r := recover(); r != nil {
+			host, portText, _ := net.SplitHostPort(c.RemoteAddr().String())
+			srcPort, _ := strconv.Atoi(portText)
+			log.emit(event{Port: port, SrcIP: host, SrcPort: srcPort, Event: "handler_panic", Data: fmt.Sprint(r)})
+		}
+	}()
+	serve(decodeProxy(c, proxy), log, port)
+}
+
 func serve(c net.Conn, log *logger, port int) {
 	defer c.Close()
 	host, portText, _ := net.SplitHostPort(c.RemoteAddr().String())
@@ -246,7 +273,5 @@ func main() {
 // to 5s each (the same defect #1346 fixed in cisco-asa and #2099 ports
 // into citrix/endlessh/http/dnp3).
 func spawnServe(c net.Conn, proxy bool, log *logger, port int) {
-	go func() {
-		serve(decodeProxy(c, proxy), log, port)
-	}()
+	go handleConn(c, proxy, log, port)
 }
