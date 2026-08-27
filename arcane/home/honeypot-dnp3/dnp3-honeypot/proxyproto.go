@@ -94,24 +94,34 @@ func parseProxy(r *bufio.Reader) net.Addr {
 	return nil
 }
 
-// maxProxyV1Line bounds how many bytes parseProxyV1 will buffer hunting for
-// the header's terminating newline. Per the PROXY protocol v1 spec, a
-// well-formed header line is never longer than 107 bytes (including the
-// CRLF); without this cap, bufio.Reader.ReadString keeps appending every
-// byte read to a growing slice with no size limit, so an attacker who sends
-// the 5-byte "PROXY" prefix followed by megabytes of non-newline data can
-// force this connection to buffer all of it in memory for the full 5-second
-// read-deadline window -- an easy memory-exhaustion DoS with many
-// concurrent connections.
+// maxProxyV1Line caps how long a PROXY v1 header line parseProxyV1 will
+// accept. Per the PROXY protocol v1 spec a well-formed header line is never
+// longer than 107 bytes (including the CRLF), so anything longer is
+// malformed by definition -- rejecting it up front is what stops a client
+// that sends "PROXY" plus megabytes of non-newline data from turning the
+// header read into a memory-exhaustion DoS (#1348, propagated by #2187).
 const maxProxyV1Line = 107
 
 // parseProxyV1 reads "PROXY TCP4 <src> <dst> <sport> <dport>\r\n".
 func parseProxyV1(r *bufio.Reader) net.Addr {
-	line, err := bufio.NewReader(io.LimitReader(r, maxProxyV1Line)).ReadString('\n')
+	// ReadSlice on the connection's own reader -- not ReadString, whose
+	// growing-slice accumulation once the buffer fills is exactly the #1348
+	// memory DoS, and not a throwaway bufio+io.LimitReader(r, maxProxyV1Line)
+	// wrapper either: that construction over-consumes everything it pulled
+	// past the newline into the wrapper's own buffer and discards it with
+	// the wrapper, swallowing the start of the client's first request
+	// whenever it arrived coalesced with the header. ReadSlice keeps bytes
+	// past the newline in the shared buffer where the handler reads them;
+	// ErrBufferFull here means the line already exceeds the reader's whole
+	// 4096-byte buffer, 40x past the cap.
+	chunk, err := r.ReadSlice('\n')
+	if err != nil || len(chunk) > maxProxyV1Line {
+		return nil
+	}
 	if err != nil {
 		return nil
 	}
-	f := strings.Fields(strings.TrimRight(line, "\r\n"))
+	f := strings.Fields(strings.TrimRight(string(chunk), "\r\n"))
 	// f[0]=PROXY f[1]=TCP4/TCP6/UNKNOWN f[2]=src f[3]=dst f[4]=sport f[5]=dport
 	if len(f) < 6 || f[1] == "UNKNOWN" {
 		return nil
@@ -124,6 +134,17 @@ func parseProxyV1(r *bufio.Reader) net.Addr {
 	return &net.TCPAddr{IP: ip, Port: port}
 }
 
+// maxProxyV2Addr bounds the address block parseProxyV2 will allocate. The
+// peer declares its length as a raw 16-bit field -- up to 65535 bytes --
+// while the PROXY v2 spec caps the real block at 216; allocating the
+// claimed length before validating it let a client park ~64KB per
+// connection behind the decode deadline with nothing but the 16-byte
+// signature and a stalled socket -- the v1 memory DoS at 64x the bytes and
+// no newline required. Oversize is rejected rather than parsed: the only
+// local PROXY emitter (portbridge) speaks v1, so there is no legitimate
+// v2 traffic to preserve. (#2187)
+const maxProxyV2Addr = 216
+
 // parseProxyV2 reads the 16-byte header + address block.
 func parseProxyV2(r *bufio.Reader) net.Addr {
 	hdr := make([]byte, 16)
@@ -133,6 +154,9 @@ func parseProxyV2(r *bufio.Reader) net.Addr {
 	verCmd := hdr[12]
 	fam := hdr[13]
 	length := int(binary.BigEndian.Uint16(hdr[14:16]))
+	if length > maxProxyV2Addr {
+		return nil
+	}
 	addr := make([]byte, length)
 	if _, err := io.ReadFull(r, addr); err != nil {
 		return nil
