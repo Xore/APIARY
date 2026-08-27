@@ -324,8 +324,10 @@ build {
   }
 
   # #294: the fake-intranet landing page FakeNet's HTTP/HTTPS listeners
-  # serve as their DefaultFiles -- staged the same way as the ini itself,
-  # moved into place by 04-tools.ps1 alongside it.
+  # serve as their Webroot (honeypot_fakenet.ini points Webroot at the
+  # absolute path C:\Tools\FakeNet\webroot, where 04-tools.ps1 moves this --
+  # upstream resolves a relative webroot against the CWD / fakenet.exe
+  # directory and would otherwise serve its stock pages, #2445).
   provisioner "file" {
     source      = "../config/defaultFiles"
     destination = "C:/Windows/Temp/honeypot_fakenet_defaultFiles"
