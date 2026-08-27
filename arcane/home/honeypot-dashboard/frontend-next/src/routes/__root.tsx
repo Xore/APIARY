@@ -10,6 +10,11 @@ import { getSessionUser, type User } from '../lib/auth'
 import { activeBanner, type BannerView, type BehaviorConfig, type PresentationConfig } from '../lib/banner'
 import { pullAppearance } from '../lib/prefs'
 import { type Appearance } from '../lib/appearanceCookie'
+// Inlined verbatim by Vite (?raw) at build time; "types": ["vite/client"] in
+// tsconfig.json is what types it. Read as text rather than fs because head()
+// runs on both sides of SSR and the file ships in the repo, not on disk at
+// runtime.
+import themeLock from '../../theme.lock?raw'
 
 type ShellConfig = { banner: BannerView | null; showProblemReportButton: boolean; appName: string }
 
@@ -65,6 +70,19 @@ const getAppearance = createServerFn({ method: 'GET' }).handler(async (): Promis
 // process, not of a request, and production never sets it.
 const variantCSS = process.env.VARIANT_CSS ?? ''
 
+// #2143: theme.css used to be linked bare, so a re-vendor changed bytes at an
+// unchanged URL and shipped behind exactly the stale cache #1852 recorded.
+// Key the URL by the stylesheet's sha256 as pinned in theme.lock: the same
+// hash sync-theme.sh writes is what check-vendored-theme.sh enforces against
+// public/static/theme.css, so the version key tracks the bytes actually
+// served -- identical upstream content keeps its URL (cacheable between
+// deploys), any re-vendor rotates it. Short prefix is enough for a cache key;
+// commit is the fallback field so an unparsable lock degrades to the
+// historical bare link rather than emitting one with an empty query.
+const lockValue = (key: string) => new RegExp(`^${key}=([0-9a-f]+)$`, 'm').exec(themeLock)?.[1] ?? ''
+const themeCSSVersion = (lockValue('sha256') || lockValue('commit')).slice(0, 12)
+const themeCSSHref = themeCSSVersion ? `/static/theme.css?v=${themeCSSVersion}` : '/static/theme.css'
+
 export const Route = createRootRoute({
   // BFF-owned auth: every navigation resolves the redis session on the
   // server; unauthenticated requests bounce to the Keycloak flow. The
@@ -101,7 +119,7 @@ export const Route = createRootRoute({
       { title: 'APIARY' },
     ],
     links: [
-      { rel: 'stylesheet', href: '/static/theme.css' },
+      { rel: 'stylesheet', href: themeCSSHref },
       // #1828: a design-lab variant layers its token overrides on the
       // vendored stylesheet instead of replacing it, so a variant is a diff
       // against what ships rather than a fork of it — the authoring pattern
