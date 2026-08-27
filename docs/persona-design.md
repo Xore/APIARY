@@ -94,7 +94,7 @@ inventing an unrelated naming scheme:
 - Hostnames should describe a role, not the honeypot's real purpose —
   `gpu01` (Cowrie's `COWRIE_HOSTNAME`), not `cowrie-honeypot-1`.
 - Never reuse a real organization's name, clone a real site, or seed real
-  credentials/customer data — `personas/README.md`'s own stated rule, and
+  credentials/customer data — `docs/personas/README.md`'s own stated rule, and
   the one non-negotiable constraint on all of the above.
 
 **Placement (protocol/persona to sensor mapping).** Match a persona's

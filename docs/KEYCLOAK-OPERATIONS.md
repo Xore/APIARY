@@ -181,7 +181,7 @@ sudo chmod 440 ./secrets/oidc/<client>/*
 `client-secret` is different: since `apiary-realm.json` pins no client
 `secret`, Keycloak generates a fresh random one for all 8 confidential
 clients on every `--import-realm` (including a clean rebuild, #787). Use
-[`keycloak/sync-client-secrets.sh`](../keycloak/sync-client-secrets.sh) to
+[`keycloak/sync-client-secrets.sh`](../arcane/home/honeypot-keycloak/keycloak/sync-client-secrets.sh) to
 fetch and install all 8 in one pass instead of the manual per-client
 procedure below -- run from the homeserver with SSH access to the VPS:
 

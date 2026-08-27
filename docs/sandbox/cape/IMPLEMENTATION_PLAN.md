@@ -568,8 +568,8 @@ sandbox/cape/
     build-with-retry.sh
     agent/agent.py                   vendored CAPEv2 agent
     autounattend.xml
-    scripts/01-hardening.ps1
-    scripts/02-cape-agent.ps1
+    sandbox/cape/packer/scripts/01-hardening.ps1
+    sandbox/cape/packer/scripts/02-cape-agent.ps1
   capev2-overrides/        tracked source of truth for what gets
                             deployed INTO the out-of-tree /opt/CAPEv2
                             install (#314) — live

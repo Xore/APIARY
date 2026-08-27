@@ -177,7 +177,7 @@ fixed back into this document and the install scripts themselves.
        traces/screenshots/logs where applicable) and link it from #787.
 5. **Fix forward, and track it:** any gap found (a missing install step,
    an undocumented manual fix, a firewall hole) gets fixed in the actual
-   install scripts/compose files/docs during the same pass where it's
+   install scripts, compose files, and docs during the same pass where it's
    small enough to — the whole point of Tier 3 is catching "works because
    I already fixed it by hand" gaps before a real first-time install hits
    them. Every gap found also gets its own GitHub issue, whether fixed

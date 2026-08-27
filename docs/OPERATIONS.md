@@ -19,7 +19,7 @@ See [personas/README.md](personas/README.md) for the complete matrix and validat
 The fake shell is a believable in-use NexusAI GPU inference node, not an empty
 box — realistic `/etc/passwd`, inference services, a credential-laden `.env`,
 `.bash_history`, nginx/cron configs and logs (all fictional). Baked at build time; details in
-[cowrie/README-fs.md](../cowrie/README-fs.md).
+[cowrie/README-fs.md](../arcane/home/honeypot-cowrie/cowrie/README-fs.md).
 
 ## GeoIP
 
@@ -36,7 +36,7 @@ all database downloads must be fetched on the VPS and copied over):
 
 - **Arkime** reads free [db-ip.com](https://db-ip.com) lite databases from
   `arkime/geo/{country,asn}.mmdb` (mounted into capture + viewer, configured
-  via `geoLite2Country`/`geoLite2ASN` in [arkime/config.ini](../arkime/config.ini)).
+  via `geoLite2Country`/`geoLite2ASN` in [arkime/config.ini](../arcane/home/honeypot-elk/arkime/config.ini)).
   Sessions get country + ASN. No MaxMind account needed.
 - **Elasticsearch** enriches every `suricata-*` and `honeypot-*` event through
   the `geoip-honeypot` ingest pipeline (set as `index.default_pipeline` on both
