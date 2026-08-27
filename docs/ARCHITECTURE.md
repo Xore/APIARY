@@ -179,7 +179,7 @@ flowchart TB
 
   subgraph sg["Sensor stacks ×21 (isolated networks)"]
     direction LR
-    cow["cowrie"] & dion["dionaea+tftp"] & conp["conpot ×5"] & rest["dnp3 · dicompot · dns · citrix<br/>cisco-asa · rdp · endlessh · http/api<br/>multipot · mailoney · beelzebub · hellpot<br/>elasticpot · galah · sentrypeer<br/>canarytokens"]
+    cow["cowrie"] & dion["dionaea+tftp"] & conp["conpot ×6"] & rest["dnp3 · dicompot · dns · citrix<br/>cisco-asa · rdp · endlessh · http/api<br/>multipot · mailoney · beelzebub · hellpot<br/>elasticpot · galah · sentrypeer<br/>canarytokens"]
   end
 
   logsT[("logs/&lt;sensor&gt;")]
