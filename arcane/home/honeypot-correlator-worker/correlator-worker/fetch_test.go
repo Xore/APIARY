@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -198,5 +200,79 @@ func TestFetchSuricataAlertCountsReturnsFalseOnServerError(t *testing.T) {
 	_, ok := fetchSuricataAlertCounts(es, time.Now().Add(-time.Hour))
 	if ok {
 		t.Fatal("a genuine 500 must not be conflated with a missing-index 404")
+	}
+}
+
+// Characterization pin for the #2377 audit ledger: this worker is pattern 2
+// (windowed-refetch) *by aggregation*, not by document fetch. If any of the
+// three fetchers ever regresses to consuming raw documents (a page seam that
+// would need a total-order search_after tuple) or to an exclusive window
+// edge (gt reintroduces the #168 sibling-loss shape at the boundary), this
+// test fails. The canned response is irrelevant here -- only the request
+// body is asserted.
+func TestFetchersKeepThePatternTwoQueryShape(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"aggregations":{}}`))
+	}))
+	defer srv.Close()
+
+	es := newESClient(srv.URL)
+	since := time.Now().Add(-time.Hour)
+	fetchCampaignAggregates(es, since)
+	assertPatternTwoShape(t, "fetchCampaignAggregates", body)
+	fetchClusterAggregates(es, since)
+	assertPatternTwoShape(t, "fetchClusterAggregates", body)
+	fetchSuricataAlertCounts(es, since)
+	assertPatternTwoShape(t, "fetchSuricataAlertCounts", body)
+}
+
+func assertPatternTwoShape(t *testing.T, name string, body []byte) {
+	t.Helper()
+	var v struct {
+		Size  int             `json:"size"`
+		Sort  json.RawMessage `json:"sort"`
+		After json.RawMessage `json:"search_after"`
+		Query struct {
+			Bool struct {
+				Filter []map[string]json.RawMessage `json:"filter"`
+			} `json:"bool"`
+		} `json:"query"`
+	}
+	if err := json.Unmarshal(body, &v); err != nil {
+		t.Fatalf("%s: unreadable request body: %v", name, err)
+	}
+	if v.Size != 0 {
+		t.Fatalf("%s: requested %d raw hits; pattern 2 consumes aggregations only", name, v.Size)
+	}
+	if v.Sort != nil || v.After != nil {
+		t.Fatalf("%s: sort/search_after present; raw-document paging is not part of this consumer", name)
+	}
+	sawInclusive := false
+	for _, f := range v.Query.Bool.Filter {
+		var rng struct {
+			Timestamp struct {
+				GTE string `json:"gte"`
+				GT  string `json:"gt"`
+			} `json:"@timestamp"`
+		}
+		rngClause, hasRange := f["range"]
+		if !hasRange {
+			continue // exists/terms filters etc.; only the range clause carries a boundary
+		}
+		if json.Unmarshal(rngClause, &rng) != nil {
+			continue // a range over some other field than @timestamp
+		}
+		if rng.Timestamp.GT != "" {
+			t.Fatalf("%s: exclusive gt window edge found; use gte so boundary events re-enter the window (#168)", name)
+		}
+		if rng.Timestamp.GTE != "" {
+			sawInclusive = true
+		}
+	}
+	if !sawInclusive {
+		t.Fatalf("%s: no inclusive gte @timestamp range found in the filter set -- got body %s", name, body)
 	}
 }
