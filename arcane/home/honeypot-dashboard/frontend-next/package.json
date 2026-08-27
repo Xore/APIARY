@@ -23,7 +23,7 @@
     "@xterm/xterm": "^6.0.0",
     "cytoscape": "^3.34.1",
     "echarts": "^6.1.0",
-    "ioredis": "^5.11.1",
+    "ioredis": "^6.0.0",
     "leaflet": "^1.9.4",
     "nitro": "3.0.260610-beta",
     "openid-client": "^6.8.7",
