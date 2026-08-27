@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"io"
 	"net"
 	"testing"
 	"time"
@@ -106,5 +107,76 @@ func TestProxyConnRemoteAddrResolvesRealAddressBeforeAnyRead(t *testing.T) {
 	addr := pc.RemoteAddr()
 	if addr == nil || addr.String() != "198.51.100.7:54321" {
 		t.Fatalf("RemoteAddr() = %v, want 198.51.100.7:54321", addr)
+	}
+}
+
+// --- #2187: v2 address-block cap (control / spec-max boundary / oversize). ---
+
+// TestParseProxyV2ParsesWellFormedHeader is the control case for the #2187
+// v2 cap: a legitimate AF_INET v2 header must still parse.
+func TestParseProxyV2ParsesWellFormedHeader(t *testing.T) {
+	hdr := append([]byte{}, proxyV2Sig...)
+	hdr = append(hdr, 0x21, 0x11, 0x00, 0x0c) // PROXY command, AF_INET, 12-byte address block
+	hdr = append(hdr, 198, 51, 100, 7, 10, 8, 0, 2, 0xd4, 0x31, 0x4e, 0x20)
+	addr := parseProxyV2(bufio.NewReader(bytes.NewReader(hdr)))
+	if addr == nil {
+		t.Fatal("expected a parsed address for a well-formed v2 header")
+	}
+	if addr.String() != "198.51.100.7:54321" {
+		t.Fatalf("addr = %q, want 198.51.100.7:54321", addr.String())
+	}
+}
+
+// TestParseProxyV2AcceptsSpecMaxAddressBlock pins the cap to the spec's own
+// maximum: a header declaring exactly maxProxyV2Addr bytes is inside the
+// spec and must parse rather than trip the oversize reject.
+func TestParseProxyV2AcceptsSpecMaxAddressBlock(t *testing.T) {
+	hdr := append([]byte{}, proxyV2Sig...)
+	hdr = append(hdr, 0x21, 0x11, byte(maxProxyV2Addr>>8), byte(maxProxyV2Addr&0xff))
+	addrBlock := make([]byte, maxProxyV2Addr)
+	copy(addrBlock, []byte{198, 51, 100, 7, 10, 8, 0, 2, 0xd4, 0x31, 0x4e, 0x20})
+	hdr = append(hdr, addrBlock...)
+	addr := parseProxyV2(bufio.NewReader(bytes.NewReader(hdr)))
+	if addr == nil {
+		t.Fatal("expected a parsed address for a spec-maximum v2 header")
+	}
+	if addr.String() != "198.51.100.7:54321" {
+		t.Fatalf("addr = %q, want 198.51.100.7:54321", addr.String())
+	}
+}
+
+// TestParseProxyV2RejectsOversizeDeclaredAddress covers the #2187 v2 cap:
+// the address block length is peer-declared as a raw 16-bit field, and
+// allocating it before validating anything let a 16-byte signature plus a
+// declared 64KB park ~64KB per connection behind the decode deadline --
+// the v1 memory DoS at 64x the bytes and no newline required.
+func TestParseProxyV2RejectsOversizeDeclaredAddress(t *testing.T) {
+	hdr := append([]byte{}, proxyV2Sig...)
+	hdr = append(hdr, 0x21, 0x11, 0xff, 0xff) // declares a 65535-byte address block
+	addr := parseProxyV2(bufio.NewReader(bytes.NewReader(hdr)))
+	if addr != nil {
+		t.Fatalf("expected nil for a v2 header declaring %d address bytes, got %v", 0xffff, addr)
+	}
+}
+
+// TestParseProxyV1LeavesBufferedPayloadIntact pins the property the #1348
+// LimitReader construction broke: whatever follows the header's newline
+// must stay in the shared reader's buffer for the handler, never be
+// swallowed by the header read itself -- a client whose request coalesced
+// with the PROXY header (the common case, one TCP segment) would otherwise
+// lose the start of its first exchange.
+func TestParseProxyV1LeavesBufferedPayloadIntact(t *testing.T) {
+	payload := "REQ-1 REQ-2"
+	src := bytes.NewReader([]byte("PROXY TCP4 198.51.100.7 10.8.0.2 54321 20000\r\n" + payload))
+	r := bufio.NewReader(src)
+	if addr := parseProxyV1(r); addr == nil {
+		t.Fatal("expected a parsed address for a well-formed header")
+	}
+	rest, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read past header: %v", err)
+	}
+	if string(rest) != payload {
+		t.Fatalf("payload past the header = %q, want %q", rest, payload)
 	}
 }
