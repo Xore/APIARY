@@ -698,7 +698,14 @@ def _score_session_case(case: SessionCase, raw: dict[str, Any]) -> dict[str, Any
         points += 1
     schema_ok = exact_schema(parsed, keys)
     required_mitre_ok = isinstance(mitre, list) and all(value in mitre for value in case.required_mitre)
-    forbidden_summary_ok = not any(term.lower() in summary for term in case.forbidden_summary)
+    # #2386 (#1946 residue): this was the last bare-substring containment site
+    # -- its siblings in score_triage and score_revdeck already route through
+    # forbidden_hit(). The session system prompt itself says "do not call it
+    # password cracking unless actual cracking tooling is present", so a
+    # compliant summary that names the behavior only to deny it ("avoids
+    # password cracking by ...") must not dock the same critical-gate leg as a
+    # summary claiming the behavior.
+    forbidden_summary_ok = not forbidden_hit(summary, case.forbidden_summary)
     forbidden_mitre_ok = isinstance(mitre, list) and not any(value in mitre for value in case.forbidden_mitre)
     # #2232: recall of the rubric's own vocabulary -- still scored per group
     # above, but deliberately NOT a gate leg, and reported on its own so a

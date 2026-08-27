@@ -14,9 +14,14 @@ prevention cues. Anything else still counts as a hit. Same input, same verdict,
 every time.
 
 Known limits, accepted on purpose rather than papered over:
-  * The cue list is closed and inflection-blind: "prevents" is listed,
-    "prevented" is not; contractions match literally ("doesn't"), but other
-    spellings do not.
+  * The cue list stays closed and spelling-literal. #2393 added the gerund and
+    past forms of its own prevention cues ("prevented", "preventing",
+    "avoided", "protecting against", "protected against"); everything it never
+    enumerated still is not a cue -- bare "avoid" (only avoids / avoiding /
+    avoided are listed), nominalizations ("protection against", "a
+    preventative"), "keeps/kept ... from", negated auxiliaries other than
+    does-not ("cannot/can't", "will not/won't"), "rules out". Contractions
+    match literally ("doesn't"); variant spellings of the same words do not.
   * The window is positional, not grammatical. "Without further analysis, this
     function appears to be benign" would drop the hit although nothing negated
     the claim; rare in practice, worth knowing.
@@ -32,24 +37,33 @@ adjudicated as a false claim instead of matched lexically.
 import re
 from typing import Iterable
 
-# Exactly the cue list scoped in issue #1946, plus nothing more. Matching is on
-# word boundaries so "not" does not fire inside "nothing".
+# The cue list scoped in issue #1946, widened by #2393 with the gerund and past
+# forms of its own prevention cues (the live Tier A run of 2026-08-27 docked
+# safe_strcpy for "...thus preventing buffer overflow"). Still enumerated by
+# hand: no stemming, no parsing, nothing inferred at match time. Matching is on
+# word boundaries so "not" does not fire inside "nothing" and the inflected
+# cues stay out of larger words alike.
 NEGATION_CUES = (
     "prevent",
     "prevents",
+    "prevented",
+    "preventing",
     "not",
     "no",
     "avoids",
     "avoiding",
+    "avoided",
     "protects against",
+    "protecting against",
+    "protected against",
     "does not",
     "doesn't",
     "without",
 )
 
 # Characters immediately preceding a term occurrence that are searched for a
-# cue. Must exceed the longest cue ("protects against", 16 chars) plus a short
-# connective ("a ", "an "), or phrases like "protects against a buffer
+# cue. Must exceed the longest cue ("protecting against", 18 chars) plus a
+# short connective ("a ", "an "), or phrases like "protecting against a buffer
 # overflow" would be missed; must stay small so distant mentions of "not"
 # cannot clear an unrelated hit.
 CUE_WINDOW_CHARS = 24
