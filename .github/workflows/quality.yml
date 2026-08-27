@@ -59,11 +59,14 @@ jobs:
   #      fallback and Quality still looks exactly like a conventional run.
   #
   # NOT paired, deliberately: frontend-next / frontend-next-browser need
-  # docker/sudo-apt/chromium/redis and most scripts-and-compose entries need
-  # real containers -- the runner's dedicated user has neither sudo nor a
-  # docker-group membership by design (see
-  # scripts/github-ci-runner/install-ci-runner.sh), so guessing "homeserver"
-  # for them would just relocate failures.
+  # docker/sudo-apt/chromium/redis -- the runner's dedicated user has
+  # neither sudo nor a docker-group membership by design (see
+  # scripts/github-ci-runner/install-ci-runner.sh), so guessing
+  # "homeserver" for them would just relocate failures. Inside
+  # scripts-and-compose, #2389 replaced the blanket stay-cloud rule with
+  # per-row routing: rows whose entire runtime is checkout files plus the
+  # interpreter carry `home: true`; container/apt-bound rows stay
+  # unflagged (the rationale lives on the matrix itself).
   # -------------------------------------------------------------------------
   ci-target:
     name: Pick CI executor
@@ -650,16 +653,46 @@ jobs:
         run: scripts/check-theme-catalogue.sh
 
   scripts-and-compose:
-    name: ${{ matrix.name }}
-    runs-on: ubuntu-latest
+    # Per-row executor routing (#2389): `home: true` marks matrix rows whose
+    # whole run touches only checkout files, this workflow's own setup-python
+    # interpreter, and pip installs -- no daemon, no container, no apt
+    # dependency. Eligibility was audited by executing every candidate in a
+    # docker-less, sudo-less environment with the pip-flavored rows re-run in
+    # clean venvs -- audit ledger lives on the #2389 PR; notably the four
+    # analysis/tests/test_{honeypot_ilm_rollover,geoip_pipeline,
+    # dionaea_incidents_index,conpot_persona_pipeline}.sh rows print
+    # "SKIP: docker daemon is not reachable" without a container engine --
+    # relocating those would have gone green while testing nothing, so they
+    # are NOT flagged despite looking like their shell-suite siblings.
+    #
+    # A flagged row lands on [self-hosted, linux, x64, honeypot-ci] whenever
+    # ci-target proves the box live -- the same heartbeat gate every paired
+    # family above uses -- else falls back to ubuntu-latest, gaining the
+    # "(GitHub-hosted)" name suffix that day per the pair-naming rule above.
+    # timeout-minutes rides along only while the leg actually sits on the
+    # metal (a wedged pickup blocks a real box nobody reboots promptly);
+    # fallback legs keep the platform ceiling (360 = effectively unset).
+    #
+    # Unflagged rows need real engines and stay on ubuntu-latest exactly as
+    # before: real-Elasticsearch suites (the four above), keycloak-realm
+    # import into Postgres, the oauth2-proxy gateway suite, vendored-YARA and
+    # rev-eng-corpus reproducibility (docker run of pinned images), and
+    # compose validation (docker compose config -- the CLI alone needs
+    # privileges this user must never hold).
+    name: ${{ matrix.name }}${{ matrix.home == true && needs.ci-target.outputs.homeserver != 'true' && ' (GitHub-hosted)' || '' }}
+    needs: [ci-target]
+    runs-on: ${{ matrix.home == true && needs.ci-target.outputs.homeserver == 'true' && fromJSON('["self-hosted", "linux", "x64", "honeypot-ci"]') || fromJSON('["ubuntu-latest"]') }}
+    timeout-minutes: ${{ (matrix.home == true && needs.ci-target.outputs.homeserver == 'true') && 45 || 360 }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: Python syntax
+            home: true
             run: find . -path '*/vendor' -prune -o -name '*.py' -type f -print0 | xargs -0 -r python -m py_compile
 
           - name: Dionaea log rotation patch (#1389)
+            home: true
             run: |
               # Build-time patch applied to dionaea's vendored log_json.py/
               # log_incident.py -- exercises apply_patch() against fixtures built
@@ -669,6 +702,7 @@ jobs:
               python arcane/home/honeypot-dionaea/dionaea/tests/test_log_rotation_patch.py
 
           - name: wordpot request-path patches (#1421, #1908)
+            home: true
             run: |
               # Five patches across three files, matched on exact upstream
               # text. What they replaced was a rule that trusted
@@ -680,6 +714,7 @@ jobs:
               python arcane/home/honeypot-wordpot/wordpot/tests/test_wordpot_patch.py
 
           - name: HellPot X-Forwarded-For trust patch (#1876)
+            home: true
             run: |
               # Two build-time patches run in sequence against the same file
               # and the second matches on the first's output. That coupling
@@ -690,6 +725,7 @@ jobs:
               python arcane/home/honeypot-hellpot/hellpot/tests/test_xff_trust_patch.py
 
           - name: "Mailoney JSON-line sink patches (#1422, #2197)"
+            home: true
             run: |
               # Exact-text build-time patches over vendored core.py. The suite
               # execs the injected helper block under the container's own
@@ -701,6 +737,7 @@ jobs:
               python arcane/home/honeypot-mailoney/mailoney/tests/test_json_log_patch.py
 
           - name: Sensor timestamps carry explicit UTC sources (#2197)
+            home: true
             run: |
               # Repo-wide grep-level guard for the class behind #2197: any
               # emitter of a %SZ stamp must pass an explicit UTC source
@@ -712,6 +749,7 @@ jobs:
               python scripts/check-timestamp-utc.py
 
           - name: "JSON sink retention parity (#120, #2196)"
+            home: true
             run: |
               # Every self-rotating JSON directory under /logs must have BOTH
               # halves of the #120 contract present -- a writer that actually
@@ -735,9 +773,11 @@ jobs:
           # twice within one environment: block (the ZEEK_PROXY_ATTRIBUTION_
           # INTERVAL_SECONDS dup meant tuning line one silently changed nothing).
           - name: Compose interpolation documented per stack (#1982)
+            home: true
             run: python scripts/check-compose-env-docs.py
 
           - name: Dionaea SMB exploit-signature incidents (#622, #1775)
+            home: true
             run: |
               # Executes the code this patch injects into smb.py, against a
               # stand-in connection, rather than asserting on the substituted
@@ -747,6 +787,7 @@ jobs:
               # 47.5% of everything the fleet ingested.
               python arcane/home/honeypot-dionaea/dionaea/tests/test_smb_exploit_patch.py
           - name: Ghidra worker, spool discipline and AI triage
+            home: true
             run: |
               # Stdlib only and stubbed on both sides, so it runs here in seconds.
               # Worth running: this worker decides what reaches an analyst's screen
@@ -814,6 +855,7 @@ jobs:
               python sandbox/cape/worker/tests/test_cape_worker.py
 
           - name: Statictools lief contract (#2072)
+            home: true
             run: |
               # lief_parse() is the structural read on PE/Mach-O/ELF samples,
               # and lief was the one unpinned install in an image whose whole
@@ -826,6 +868,7 @@ jobs:
               python analysis/ghidra/statictools/tests/test_lief_parse.py
 
           - name: Guarded LLM worker contracts
+            home: true
             run: |
               python -m pip install -r llm-worker/requirements.txt
               python -m unittest discover -s llm-worker/tests -v
@@ -841,31 +884,42 @@ jobs:
           # plain unittest -- pytest isn't a production dependency so it's
           # installed here rather than added to ml-worker/requirements.txt.
           - name: ml-worker anomaly pipeline contracts
+            home: true
             run: |
               python -m pip install -r ml-worker/requirements.txt pytest
               python -m pytest ml-worker/tests/ -v
 
           - name: es-results-importer chunked-upload and dedup contracts
+            home: true
             run: |
               python -m pip install -r arcane/home/honeypot-dashboard/analysis/es-results-importer/requirements.txt
               python -m unittest discover -s arcane/home/honeypot-dashboard/analysis/es-results-importer/tests -v
 
           - name: Persona application is idempotent
+            home: true
             run: python -m unittest discover -s personas/tests -v
 
           - name: services-adapter allowlist enforcement
+            home: true
             run: python -m unittest discover -s arcane/home/honeypot-dashboard/services-adapter/tests -v
 
           - name: Sandbox guest string-cleaning filter (#530)
+            home: true
             run: python3 sandbox/test_guest_clean_strings.py -v
 
           - name: Windows sandbox static/dynamic IOC extraction (#482)
+            home: true
             run: python3 sandbox/windows/orchestrate/test_extract_iocs.py -v
 
           - name: Shell syntax and high-severity ShellCheck
+            home: true
             run: |
-              sudo apt-get update
-              sudo apt-get install -y shellcheck
+              # #2389: use whatever shellcheck already exists -- the
+              # honeypot-ci host ships it for its runner user, so the
+              # self-hosted leg never touches sudo; only an image without
+              # the binary pays apt. No privilege class is added anywhere;
+              # the install path is unchanged where it was required.
+              command -v shellcheck >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y shellcheck; }
               # A couple of sandbox/windows/packer/pxe/*.sh files are actually
               # Python (named .sh to match their sibling shell scripts' calling
               # convention, e.g. `packer trigger-callback... .sh`) -- filter to
@@ -884,6 +938,7 @@ jobs:
               fi
 
           - name: Validate Keycloak realm policy
+            home: true
             run: ./arcane/home/honeypot-keycloak/keycloak/realm/validate.sh
 
           # #982 phase 1 / #1040: validate.sh only checks structure/policy --
@@ -940,6 +995,7 @@ jobs:
             run: ./scripts/test-dashboard-oidc-chaos.sh
 
           - name: GitHub-analysis publisher stays dry-run by default
+            home: true
             run: |
               # The one property this whole feature depends on (#74):
               # GITHUB_PUBLISH_ENABLED unset must never reach publish-sample.sh,
@@ -955,6 +1011,7 @@ jobs:
               done
 
           - name: Threat-intel CIDR refresh script (#244)
+            home: true
             run: analysis/threat-intel/tests/test_refresh_threat_cidrs.sh
 
           # #2024: the Keycloak dump is the backup's most sensitive artifact,
@@ -968,6 +1025,7 @@ jobs:
           # same suite to retention running before failure-prone steps, the
           # manual-run umask window, and no empty stamp on failed validation.
           - name: backup-honeypot dump discipline, retention order and umask (#2024, #2025)
+            home: true
             run: sh analysis/tests/test_backup_honeypot.sh
 
           - name: honeypot-30d ILM policy rolls over and deletes (#585)
@@ -998,6 +1056,7 @@ jobs:
           # on the homeserver, not a CI step.
 
           - name: Shared GPU job queue
+            home: true
             run: analysis/gpu-queue/test_gpu_queue.py
 
           # #1971: shared ES consume idioms. The canonical suite walks the
@@ -1009,9 +1068,11 @@ jobs:
           # job (attacker-identity-worker's TestParityFixtures); disagreement
           # between the two engines fails whichever side drifts.
           - name: Shared ES consume patterns (#1971)
+            home: true
             run: python3 analysis/es-consume/tests/test_es_consume.py
 
           - name: Payload/artifact dedupe (#481/#528)
+            home: true
             run: |
               # test_dedupe_payloads.py and test_cdc_dedup_prototype.py had
               # zero CI coverage before this -- no workflow referenced either
@@ -1033,9 +1094,11 @@ jobs:
           # malformed-line skips, dead parameters, total undercount, the
           # category catch-all, multipot VNC login counting).
           - name: analyze.py sanitisation and stats hygiene (#1984, #1985)
+            home: true
             run: python3 analysis/tests/test_analyze.py -v
 
           - name: Agent-intrusion synthetic replay corpus (#154 phase 1)
+            home: true
             run: |
               # #154's own acceptance criteria: "CI verifies schemas, safe
               # fixtures, and replay expectations." Runs both the standalone
@@ -1047,6 +1110,7 @@ jobs:
               python3 arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/tests/test_corpus.py -v
 
           - name: Agent-intrusion decode/correlate pipeline (#154 phase 2)
+            home: true
             run: |
               # Bounded, non-executing base64/gzip/zlib/xor decoder plus
               # multi-part message-chunk reassembly, proven against the real
@@ -1056,6 +1120,7 @@ jobs:
               python3 arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/tests/test_decode_correlate.py -v
 
           - name: Agent-intrusion campaign correlator (#154 phase 2)
+            home: true
             run: |
               # Second half of phase 2 ("correlate events across sensors into
               # one campaign timeline using stable IDs and time windows") --
@@ -1065,6 +1130,7 @@ jobs:
               python3 arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/tests/test_campaign_correlator.py -v
 
           - name: Agent-intrusion criticality rules (#154 phase 3)
+            home: true
             run: |
               # Deterministic, structural rules (never reads the corpus's own
               # phase/should_escalate labels -- see criticality_rules.py's own
@@ -1075,6 +1141,7 @@ jobs:
               python3 arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/tests/test_criticality_rules.py -v
 
           - name: Agent-intrusion campaign worker (#154 phase 5)
+            home: true
             run: |
               # Wires decode_correlate/campaign_correlator/criticality_rules
               # against Elasticsearch-shaped data for real (a hand-rolled fake
@@ -1086,6 +1153,7 @@ jobs:
               python3 arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/tests/test_worker.py -v
 
           - name: Sandbox VNC bridge read-only enforcement (#805)
+            home: true
             run: python3 sandbox/windows/vnc-bridge/tests/test_server.py
 
           - name: Vendored YARA corpus is intact and loadable
@@ -1164,6 +1232,7 @@ jobs:
                 -f llm-worker/docker-compose.captured-data.yml config --quiet
 
           - name: Pi-hole/DNSCrypt install topology (#1387)
+            home: true
             run: python3 scripts/tests/test_pihole_install.py
     steps:
       - uses: actions/checkout@v7
