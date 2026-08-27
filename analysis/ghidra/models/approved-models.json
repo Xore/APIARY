@@ -5,6 +5,7 @@
     "driver": "595.84",
     "gpu": "NVIDIA RTX 4000 Ada Generation",
     "gpu_memory_mib": 20475,
+    "gpu_uuid": "GPU-18a00c7e-670a-c305-a2aa-20e3a71917a3",
     "record": "docs/local-llm-model-evaluation.md (#568 re-evaluation)"
   },
   "benchmark_version": "honeypot-stack-issue-158-v2",
