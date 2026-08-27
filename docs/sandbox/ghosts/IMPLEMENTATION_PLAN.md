@@ -102,8 +102,8 @@ Two constraints specific to this chain:
   (Docker's port-publish DNAT rewrites the destination before FORWARD
   runs) plus a DOCKER-USER rule for the return leg.
 
-- **`win11-ghosts` guest** (`10.20.30.x`, floating — no DHCP pin deployed
-  yet, see "Known gaps" below) — [#326/#327]
+- **`win11-ghosts` guest** (`10.20.30.50`, pinned by `network.xml`'s
+  `<host>` entry — MAC `00:1a:a0:3c:4d:6f`, #327's PR #425) — [#326/#327]
   - `Ghosts.Client.Universal` (`C:\ghosts\`), not autostarted — the
     detonation worker starts it per run
   - #290's living-persona daemon (`PersonaDaemon.exe`, scheduled task
@@ -173,7 +173,11 @@ reference a single line instead of a floating one.
 |---|---|---|
 | `virbr-ghosts` bridge / GHOSTS API published port | `10.20.30.1:5000` | `network.xml` (#325), `compose.yml` (#324) |
 | `ghosts-api` docker-internal backend (FORWARD-chain exception target only, never addressed directly) | `10.90.0.2:5000` | `compose.yml` (#324) |
-| `win11-ghosts` guest | floating (`virsh net-dhcp-leases ghosts`) — **no pin deployed yet, see below** | — |
+| `win11-ghosts` guest | `10.20.30.50` | `network.xml` `<host>` entry (MAC `00:1a:a0:3c:4d:6f`, #327's PR #425) |
+
+Historical only: before #425 merged, the guest floated on the dynamic
+range (`.72` at the last pre-pin check) — any `.72` reference in older
+configs, logs, or docs predates the pin and is stale.
 
 ---
 
@@ -232,11 +236,6 @@ explicitly disabled first.
 
 ## Known gaps (tracked, not silently dropped)
 
-- **No DHCP pin deployed for `win11-ghosts`'s MAC.** `network.xml`'s
-  header notes the pin is prepared for once #327's domain MAC is chosen,
-  but the *deployed* network on the host is still running the plain-range
-  version — the guest gets a floating lease (`.72` at last check), not a
-  pinned address. Flagged on PR #425; reconcile before that PR merges.
 - **Sysmon EVTX collection silently no-ops** in both live #328 test runs
   (`orchestrate/run_sample.py`'s `collect_artifacts` best-effort `get`
   calls). The GHOSTS-activity artifact — the priority one — worked both

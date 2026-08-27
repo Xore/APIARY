@@ -8,6 +8,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useState } from 'react'
 import { confirmAction } from '../components/ConfirmDialog'
+import { ErrorStateBlock } from '../components/ErrorState'
 import { InvestigateHeader } from '../components/Investigate'
 import { RowActions, RowIcons } from '../components/RowActions'
 import { formatTimestamp } from '../lib/time'
@@ -350,14 +351,26 @@ function Payloads() {
   const [sourceOther, setSourceOther] = useState(0)
   const [verdictScan, setVerdictScan] = useState<VerdictScan | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
+  // #2178: both load paths (the streamed first page and the per-source
+  // refilter) collapsed a failed fetch into "rows stay null", which renders
+  // as the opening skeleton grid forever. `failed` names that state;
+  // retry re-fetches page zero through the ordinary paging fn, since the
+  // streamed loader promise cannot be re-run.
+  const [failed, setFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     let cancelled = false
-    first.then((page) => {
-      if (cancelled || !page) return
+    setFailed(false)
+    ;(attempt === 0 ? first : fetchPayloads({ data: { offset: 0, source: source || undefined } })).then((page) => {
+      if (cancelled) return
+      if (!page) {
+        setFailed(true)
+        return
+      }
       setRows(page.rows)
       setTotal(page.total)
-      setUniqueTotal(page.total)
+      if (!source) setUniqueTotal(page.total)
     })
     // #2179: the census is no longer seeded from the loaded page's rows --
     // chips come from the whole-store terms agg, independent of what page 1
@@ -374,16 +387,20 @@ function Payloads() {
     return () => {
       cancelled = true
     }
-  }, [first])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- caller-owned loader stream; source read at retry time only
+  }, [first, attempt])
 
   const applySource = useCallback(async (name: string) => {
     setSource(name)
     setRows(null)
+    setFailed(false)
     const page = await fetchPayloads({ data: { offset: 0, source: name || undefined } })
-    if (page) {
-      setRows(page.rows)
-      setTotal(page.total)
+    if (!page) {
+      setFailed(true)
+      return
     }
+    setRows(page.rows)
+    setTotal(page.total)
   }, [])
 
   const viewMore = useCallback(async () => {
@@ -457,7 +474,14 @@ function Payloads() {
           </p>
         ) : null}
         <div className="project-grid" id="payloads-results">
-          {rows === null ? (
+          {rows === null && failed ? (
+            // #2178: an outage here used to read as the opening ghosts, forever.
+            <ErrorStateBlock
+              title="Captured payloads failed to load"
+              hint="The backend request failed — this says nothing about what has been captured."
+              onRetry={() => setAttempt((n) => n + 1)}
+            />
+          ) : rows === null ? (
             <SkeletonCards count={12} />
           ) : rows.length === 0 ? (
             <p className="empty">No payloads captured yet.</p>

@@ -152,18 +152,37 @@ foreach ($s in $shortcuts) {
 
 # ---------------- RunMRU: recent Run-dialog commands ----------------
 $ru = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU'
-Set-ItemProperty $ru -Name a -Value "excel.exe`1"
-Set-ItemProperty $ru -Name b -Value "\\CORPNET-FS01\Finance\Reports`1"
-Set-ItemProperty $ru -Name c -Value "winword.exe`1"
-Set-ItemProperty $ru -Name d -Value "outlook.exe`1"
+# Genuine RunMRU values are REG_SZ strings terminated by the \x01 control
+# byte -- RegRipper/LECMD-class parsers split entries on that separator.
+# PowerShell has NO `1 escape sequence (only `0 is NUL among the digit
+# forms), so "x`1" silently stores a literal trailing '1' instead (#2450).
+# Compose the real terminator with [char]0x01.
+$runMruSep = [string][char]0x01
+Set-ItemProperty $ru -Name a -Value "excel.exe$runMruSep"
+Set-ItemProperty $ru -Name b -Value "\\CORPNET-FS01\Finance\Reports$runMruSep"
+Set-ItemProperty $ru -Name c -Value "winword.exe$runMruSep"
+Set-ItemProperty $ru -Name d -Value "outlook.exe$runMruSep"
 Set-ItemProperty $ru -Name MRUList -Value "abcd"
 
 # ---------------- RecentDocs (Explorer recent items) ----------------
+# Each Recent .lnk must resolve to the document it names. Naming four
+# distinct documents while targeting the bare Documents folder on all four
+# is a structurally impossible output of real usage -- shell/link
+# forensics that resolve RecentDocs items spot it in seconds (#2450), so
+# point every shortcut at the concrete decoy file created earlier in this
+# script, the way 05-decoy-content.ps1 builds its Recent entries.
 $recent = "$env:APPDATA\Microsoft\Windows\Recent"
-foreach ($n in @('FY2026_Departmental_Budget_v4_FINAL', 'close_checklist', 'Board_Pack_Agenda_Jan2026', 'payroll_variance_dec')) {
-  $sc = $wsh.CreateShortcut("$recent\$n.lnk")
-  $sc.TargetPath = "$docs"
+$recentDocs = @(
+  @{ Name = 'FY2026_Departmental_Budget_v4_FINAL'; Target = "$docs\2026 Budget\FY2026_Departmental_Budget_v4_FINAL.csv" },
+  @{ Name = 'close_checklist';                     Target = "$desktop\Month-End Close\close_checklist.txt" },
+  @{ Name = 'Board_Pack_Agenda_Jan2026';           Target = "$docs\Board Reports\2026\Board_Pack_Agenda_Jan2026.txt" },
+  @{ Name = 'payroll_variance_dec';                Target = "$docs\Payroll Reconciliation\payroll_variance_dec.txt" }
+)
+foreach ($r in $recentDocs) {
+  $sc = $wsh.CreateShortcut("$recent\$($r.Name).lnk")
+  $sc.TargetPath = $r.Target
   $sc.Save()
+  Set-AgedTimestamp -Path "$recent\$($r.Name).lnk" -MinDays 1 -MaxDays 60
 }
 
 # ---------------- Outlook profile stub ----------------

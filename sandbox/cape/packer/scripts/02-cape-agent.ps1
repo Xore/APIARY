@@ -34,7 +34,7 @@
 #
 # -- NO STATIC IP HERE -- same trap 01-hardening.ps1's own header warns
 # about for itself. This script runs over the network Packer's own
-# QEMU user-mode NAT provides during the build (10.0.2.x/10.0.3.x), not
+# QEMU user-mode NAT provides during the build (10.0.4.x/10.0.5.x), not
 # over virbr-cape (10.40.50.0/24) -- that bridge does not exist from
 # this guest's perspective until it is deployed as a real detonation
 # domain (win11-cape-kvm.xml) after the build finishes. The guest gets

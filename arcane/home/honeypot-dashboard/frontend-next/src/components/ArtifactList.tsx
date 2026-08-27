@@ -1,7 +1,8 @@
 // Artifact list for one analysis run — fetched lazily when the inspector
 // opens, each row a download link through the BFF proxy.
 import { createServerFn } from '@tanstack/react-start'
-import { useEffect, useState } from 'react'
+import { useServerQuery } from '../lib/useServerQuery'
+import { ErrorStateBlock } from './ErrorState'
 
 type ArtifactRow = {
   filename: string
@@ -21,18 +22,18 @@ const fetchArtifacts = createServerFn({ method: 'GET' })
   })
 
 export function ArtifactList({ kind, artifactKey }: { kind: 'ghidra' | 'sandbox'; artifactKey: string }) {
-  const [rows, setRows] = useState<ArtifactRow[] | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    setRows(null)
-    fetchArtifacts({ data: { kind, key: artifactKey } }).then((result) => {
-      if (!cancelled) setRows(result?.rows ?? [])
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [kind, artifactKey])
-  if (rows === null) return <span className="skeleton-line" aria-hidden="true" />
+  // #2178: a failed fetch used to land in the same empty row list as
+  // "this run produced no artifacts", which rendered as nothing at all --
+  // no section header, no explanation, no way back. Tri-state now keeps a
+  // genuine zero invisible but names a failure and offers a retry.
+  const query = useServerQuery(fetchArtifacts, { kind, key: artifactKey }, [kind, artifactKey])
+  if (query.status === 'loading') return <span className="skeleton-line" aria-hidden="true" />
+  if (query.status === 'error') {
+    return (
+      <ErrorStateBlock title="Artifacts failed to load" hint="The backend request failed." onRetry={query.retry} />
+    )
+  }
+  const rows = query.data.rows
   if (rows.length === 0) return null
   return (
     <>

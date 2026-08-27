@@ -1129,8 +1129,14 @@
       "qwen2.5-coder:7b-instruct-q4_K_M",
       "qwen3:14b"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "14add515674f1a3d",
@@ -1145,8 +1151,14 @@
     "made_by": [
       "qwen2.5-coder:7b-instruct-q4_K_M"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "811fd3b6f73e15f2",
@@ -1161,8 +1173,14 @@
     "made_by": [
       "qwen2.5-coder:7b-instruct-q4_K_M"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "9ddb562a9b72f935",
@@ -1177,8 +1195,14 @@
     "made_by": [
       "qwen2.5-coder:7b-instruct-q4_K_M"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "1aa42ca8ee1c690a",
@@ -1193,8 +1217,14 @@
     "made_by": [
       "qwen2.5-coder:7b-instruct-q4_K_M"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "dfbeaa1fc9bd3f25",
@@ -1209,8 +1239,14 @@
     "made_by": [
       "qwen2.5-coder:7b-instruct-q4_K_M"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "23065a4aa869b270",
@@ -1225,8 +1261,14 @@
     "made_by": [
       "qwen2.5-coder:7b-instruct-q4_K_M"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "3ff390756bee4386",
@@ -1241,8 +1283,14 @@
     "made_by": [
       "qwen2.5-coder:7b-instruct-q4_K_M"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "a872c6feaba8c384",
@@ -1257,8 +1305,14 @@
     "made_by": [
       "qwen2.5-coder:7b-instruct-q4_K_M"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "249f4b33e79ba607",
@@ -1273,8 +1327,14 @@
     "made_by": [
       "qwen2.5-coder:7b-instruct-q4_K_M"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "df00268c78ab16ae",
@@ -1289,8 +1349,14 @@
     "made_by": [
       "qwen2.5-coder:7b-instruct-q4_K_M"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "2637cd2ffec40c9f",
@@ -1305,8 +1371,14 @@
     "made_by": [
       "qwen2.5-coder:7b-instruct-q4_K_M"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "dfe1616cc7d64bde",
@@ -1321,8 +1393,14 @@
     "made_by": [
       "qwen2.5-coder:7b-instruct-q4_K_M"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "86caa13b1b1799cf",
@@ -1337,8 +1415,14 @@
     "made_by": [
       "qwen2.5-coder:7b-instruct-q4_K_M"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "f1003de7a3eebc7d",
@@ -1353,8 +1437,14 @@
     "made_by": [
       "qwen2.5-coder:7b-instruct-q4_K_M"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "dc68f5a295d4be58",
@@ -1369,8 +1459,14 @@
     "made_by": [
       "qwen2.5-coder:7b-instruct-q4_K_M"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "6904fff7ae2ca2f8",
@@ -1385,8 +1481,14 @@
     "made_by": [
       "qwen2.5-coder:7b-instruct-q4_K_M"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "9b15b5fd1af7c642",
@@ -4417,8 +4519,14 @@
     "made_by": [
       "qwen3:14b"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "a8d291170b5dbdb5",
@@ -4433,8 +4541,14 @@
     "made_by": [
       "qwen3:14b"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "64e1780155f6b429",
@@ -4449,8 +4563,14 @@
     "made_by": [
       "qwen3:14b"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "6847a4779560174e",
@@ -4465,8 +4585,14 @@
     "made_by": [
       "qwen3:14b"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "e99741b5365e8647",
@@ -4481,8 +4607,14 @@
     "made_by": [
       "qwen3:14b"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "41357d22a9613b64",
@@ -4497,8 +4629,14 @@
     "made_by": [
       "qwen3:14b"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "3f2fb1f5c686eb99",
@@ -4513,8 +4651,14 @@
     "made_by": [
       "qwen3:14b"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "84aa5ef57db69fed",
@@ -4529,8 +4673,14 @@
     "made_by": [
       "qwen3:14b"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "2484f5a91cc45ce0",
@@ -4545,8 +4695,14 @@
     "made_by": [
       "qwen3:14b"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "cf324433205b91d0",
@@ -4561,8 +4717,14 @@
     "made_by": [
       "qwen3:14b"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "7a12a279cb8da452",
@@ -4577,8 +4739,14 @@
     "made_by": [
       "qwen3:14b"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "1ed253672a8bcaac",
@@ -4593,8 +4761,14 @@
     "made_by": [
       "qwen3:14b"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "6458db9f6a794e45",
@@ -4609,8 +4783,14 @@
     "made_by": [
       "qwen3:14b"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "be15169b25451070",
@@ -4625,8 +4805,14 @@
     "made_by": [
       "qwen3:14b"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "d40cf995afe46875",
@@ -4641,8 +4827,14 @@
     "made_by": [
       "qwen3:14b"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "d2b876e363fd8972",
@@ -4657,8 +4849,14 @@
     "made_by": [
       "qwen3:14b"
     ],
-    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
-    "verdict": "<< true | false | unsupported >>"
+    "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps and malloc returns that undersized wrapped total: the function then returns 0 having copied only part of the caller's data (silent truncation on the success path), reading past the end of src whenever the real input is shorter than the wrapped total. The buffer itself is never overrun inside this function -- one wrapped value sizes both the allocation and the memcpy -- so the classic heap-overflow consequence materializes only downstream, where a consumer indexes records past the true allocated size.",
+    "verdict": "<< true | false | unsupported >>",
+    "ground_truth_superseded": {
+      "issue": 2384,
+      "previous_text": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "why_retired": "the fixture cannot produce that write: count*size wraps once, and the same wrapped value sizes both malloc and memcpy, so nothing is written past the allocation inside this function",
+      "adjudication_rule": "grade these claims only against the corrected mechanism: silent truncation on the success path, out-of-bounds reads of src when input is shorter than the wrapped total, heap overflow only downstream"
+    }
   },
   {
     "claim_id": "a46424b3bbc3e0ea",

@@ -72,9 +72,15 @@ check "WAN DNS resolves example.com" pass \
 check "WAN HTTPS reaches example.com" pass \
   tcp_open example.com 443
 
-# The one documented exception must work: ghosts-api publishes on this
-# bridge's own gateway address (#324), not a docker-internal IP.
-check "GHOSTS API exception (10.20.30.1:5000) is reachable" pass \
+# The API socket is no longer a blanket exception: network-filter.sh
+# source-pins tcp/5000 to the enrolled clients (#2444, #2257 step 1), and
+# this guest holds an anonymous dynamic lease from the bridge's DHCP range
+# -- the same untrusted population the pin exists to wall off. Reaching it
+# from here would mean the gate regressed to pre-#2444 behavior. The
+# enrolled client's positive path is verified end to end by
+# verify-client-enrollment.sh (which grants its own lease a scoped,
+# self-revoking exception for the duration of the run).
+check "GHOSTS API (10.20.30.1:5000) stays unreachable from an unpinned guest" fail \
   tcp_open 10.20.30.1 5000
 
 # Everything private must not.

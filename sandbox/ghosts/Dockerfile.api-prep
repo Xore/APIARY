@@ -1,0 +1,76 @@
+# Dockerfile.api-prep — ghosts-api's image-prep layer over the vendored
+# upstream source (#2444).
+#
+# Upstream's own multi-stage Dockerfile-api (vendored verbatim at
+# vendor/ghosts-src/Dockerfile-api, see that directory's VENDORED.md) builds
+# the tree as-is. This wrapper exists purely to strip controller surfaces
+# upstream ships that Arcane deliberately excludes (#324's scope decision)
+# and that #2444 confirmed are reachable attack surface from the
+# WAN-permitted detonation guests: the animations control plane and the
+# ATT&CK scenario tooling. Nothing else in the repo consumes either route
+# (nothing references /api/animations or /api/attack outside the vendored
+# tree), and the ghosts clients themselves talk only to the client
+# enrollment/check-in surface, so deleting the controller files before
+# `dotnet publish` removes the routes wholesale: ASP.NET Core discovers
+# controllers by reflection over the built assembly, so code that never
+# existed means endpoints that never come up, while every service those
+# routes consumed (AnimationsManager, ScenarioEnrichmentService, ...)
+# stays registered for whatever still needs it.
+#
+# The stripped files, with the reason each one goes, so a future upstream
+# bump re-decides consciously instead of inheriting a stale list:
+#   Controllers/Api/AnimationJobsController.cs
+#     POST /api/animations/* job control. POST /api/animations/workflows
+#     schedules an in-container recurring GET to any caller-supplied URL
+#     from an unauthenticated caller (#2444's core finding) -- the API
+#     container becomes a programmable beacon. Its `apiKey.Substring(0, 8)`
+#     Info-level credential-fragment log dies with the file; a repo-wide
+#     grep shows no other credential-material logging in the tree.
+#   Controllers/AnimationsController.cs
+#     The upstream web UI experiment those jobs drive (/animations --
+#     n8n/Grafana-class operator tooling, out of scope per #324).
+#   Controllers/Api/AttackController.cs
+#     /api/attack, including POST /api/attack/import's unauthenticated
+#     wipe-and-reload of the live ATT&CK tables (folded into #2444 by its
+#     review sweep's second comment). Defense-in-depth: the socket is also
+#     source-pinned by network-filter.sh.
+#
+# Everything below this header is upstream's Dockerfile-api with only the
+# COPY paths adjusted for this wrapper's wider build context (the stack
+# root instead of vendor/ghosts-src) and the rm layer above, kept in
+# deliberate structural parity so upstream diffs stay eyeball-able.
+# The vendored tree itself is never modified.
+
+# multi-stage target: dev
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS dev
+
+COPY vendor/ghosts-src/Ghosts.Api/. /app/Ghosts.Api
+COPY vendor/ghosts-src/Ghosts.Domain/. /app/Ghosts.Domain
+COPY vendor/ghosts-src/Ghosts.Animator/. /app/Ghosts.Animator
+
+RUN rm /app/Ghosts.Api/Controllers/Api/AnimationJobsController.cs \
+       /app/Ghosts.Api/Controllers/AnimationsController.cs \
+       /app/Ghosts.Api/Controllers/Api/AttackController.cs
+
+WORKDIR /app/Ghosts.Api
+RUN dotnet publish -c Release -o /app/dist
+COPY vendor/ghosts-src/Ghosts.Api/config /app/dist/config
+
+CMD ["dotnet", "run"]
+
+# multi-stage target: prod
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS prod
+ARG commit
+ENV COMMIT=$commit
+COPY --from=dev /app/dist /app
+WORKDIR /app
+
+LABEL "product"="GHOSTS API"
+LABEL "maintainer"="Dustin Updyke <ddupdyke[-@-]sei.cmu.edu>"
+LABEL "version"="Browse to /swagger"
+
+EXPOSE 5000
+ENV ASPNETCORE_URLS=http://*:5000 \
+    ASPNETCORE_ENVIRONMENT=DEVELOPMENT
+
+CMD ["dotnet", "ghosts.api.dll"]

@@ -8,6 +8,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useState } from 'react'
 import { confirmAction } from '../components/ConfirmDialog'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { ErrorStateBlock } from '../components/ErrorState'
 import { Tabs, TabPanel } from '../components/Tabs'
 import { formatTimestamp } from '../lib/time'
 
@@ -77,16 +78,24 @@ function groupAlerts(rows: AlertRow[]): AlertGroup[] {
 // 100, so page up to that same 200 cap here.
 const BOARD_CAP = 200
 
-const fetchAlerts = createServerFn({ method: 'GET' }).handler(async (): Promise<AlertRow[]> => {
+// #2178: a failed store read used to break the paging loop and return
+// whatever prefix had loaded — a backend outage rendered as an empty board,
+// i.e. the exact "quiet" an operator reads as healthy. complete:false lets
+// the component say "failed outright" vs "partial board" instead of either
+// masquerading as no-alerts.
+type BoardFetch = { rows: AlertRow[]; complete: boolean }
+
+const fetchAlerts = createServerFn({ method: 'GET' }).handler(async (): Promise<BoardFetch> => {
   const { serviceJSON } = await import('../lib/backend.server')
   const rows: AlertRow[] = []
   for (let offset = 0; offset < BOARD_CAP; offset += 100) {
     const page = await serviceJSON<Page>(`/api/v1/alerts?offset=${offset}&size=100`)
-    if (!page || page.rows.length === 0) break
+    if (!page) return { rows, complete: false }
+    if (page.rows.length === 0) break
     rows.push(...page.rows)
     if (rows.length >= page.total) break
   }
-  return rows.slice(0, BOARD_CAP)
+  return { rows: rows.slice(0, BOARD_CAP), complete: true }
 })
 
 const acknowledgeAlert = createServerFn({ method: 'POST' })
@@ -238,22 +247,30 @@ function buildColumns(onToggleGroup: (group: AlertGroup) => void, onToggleMember
 function Alerts() {
   const { first } = Route.useLoaderData()
   const [alerts, setAlerts] = useState<AlertRow[] | null>(null)
+  const [complete, setComplete] = useState(true)
   const [tab, setTab] = useState('new')
   const [query, setQuery] = useState('')
 
+  const applyBoard = useCallback((result: BoardFetch) => {
+    setAlerts(result.rows)
+    setComplete(result.complete)
+  }, [])
+
   useEffect(() => {
     let cancelled = false
-    first.then((rows) => {
-      if (!cancelled) setAlerts(rows)
+    setAlerts(null)
+    setComplete(true)
+    first.then((result) => {
+      if (!cancelled) applyBoard(result)
     })
     return () => {
       cancelled = true
     }
-  }, [first])
+  }, [first, applyBoard])
 
   const reload = useCallback(async () => {
-    setAlerts(await fetchAlerts())
-  }, [])
+    applyBoard(await fetchAlerts())
+  }, [applyBoard])
 
   // Per-member acknowledge/reopen (from a group's expanded member list) —
   // same confirm surface and copy as hp-modals.js's data-hp-alert-ack
@@ -305,6 +322,11 @@ function Alerts() {
 
   const openCount = alerts ? alerts.filter((row) => !row.Acknowledged).length : 0
 
+  // #2178 tri-state: a walk that failed on its very first read is not a
+  // quiet board; a walk that died partway shows what loaded plus a note.
+  const boardFailed = alerts !== null && alerts.length === 0 && !complete
+  const boardPartial = alerts !== null && alerts.length > 0 && !complete
+
   const ackAll = useCallback(() => {
     confirmAction({
       title: 'Acknowledge every open alert?',
@@ -330,21 +352,37 @@ function Alerts() {
     const groups = partition(acknowledged)
     return (
       <TabPanel id={id} active={tab} idPrefix="alerts" className="dashboard-panel">
-        {groups && groups.length === 0 ? (
-          <p className="empty" role="status" aria-live="polite">
-            {alerts && alerts.length ? 'No alerts match this filter.' : 'No alerts recorded.'}
-          </p>
-        ) : (
-          <MasterDetailTable
-            rows={groups}
-            columns={columns}
-            rowKey={(group) => group.signature}
-            emptyState={{
-              title: 'No alerts match this filter',
-              hint: 'Nothing is open right now, or a filter above is excluding it.',
-            }}
-            inspectorTitle="Alert group details"
+        {boardFailed ? (
+          <ErrorStateBlock
+            title="The alert board failed to load"
+            hint="The backend request failed — an outage looks like silence here, so it names itself instead."
+            onRetry={reload}
           />
+        ) : (
+          <>
+            {boardPartial ? (
+              <p className="note">
+                A read against the alert state store failed mid-walk; showing the {alerts?.length.toLocaleString('en-US')}{' '}
+                record{alerts?.length === 1 ? '' : 's'} that did load.
+              </p>
+            ) : null}
+            {groups && groups.length === 0 ? (
+              <p className="empty" role="status" aria-live="polite">
+                {alerts && alerts.length ? 'No alerts match this filter.' : 'No alerts recorded.'}
+              </p>
+            ) : (
+              <MasterDetailTable
+                rows={groups}
+                columns={columns}
+                rowKey={(group) => group.signature}
+                emptyState={{
+                  title: 'No alerts match this filter',
+                  hint: 'Nothing is open right now, or a filter above is excluding it.',
+                }}
+                inspectorTitle="Alert group details"
+              />
+            )}
+          </>
         )}
       </TabPanel>
     )

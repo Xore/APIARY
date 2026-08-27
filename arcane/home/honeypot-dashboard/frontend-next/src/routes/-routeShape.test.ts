@@ -135,6 +135,76 @@ describe('route shape', () => {
 })
 
 // ---------------------------------------------------------------------------
+// #2178's settled-error discipline. Every site in that census shipped as the
+// same shape: a module renders loading ghosts (`SkeletonRows`,
+// `SkeletonCards`, `.skeleton-line`) while carrying no vocabulary anywhere
+// for what happens when the load fails -- because serviceJSON collapses
+// settled-null into "still loading", those ghosts render forever, or hand
+// off to an empty state that asserts absence during an outage. Phases 1-3
+// named a failure state in every such module; this keeps it named.
+//
+// Mechanical rule: any routes/components module that renders a ghost
+// primitive must also reference ErrorStateBlock or a failed/load-failed
+// channel somewhere in the file. The one legitimate exception is the
+// primitive-defining host itself (Investigate.tsx exports SkeletonRows but
+// loads no data of its own).
+// ---------------------------------------------------------------------------
+
+const COMPONENTS = join(dirname(ROUTES), 'components')
+
+const RENDERS_GHOST = /<SkeletonRows\b|<SkeletonCards\b|skeleton-line/
+const FAILURE_VOCABULARY = /ErrorStateBlock|\bfailed\b|[Ll]oad [Ff]ailed/
+const DEFINES_PRIMITIVE = /export function Skeleton(Rows|Cards)/
+
+describe('settled-error discipline (#2178)', () => {
+  /** modules under routes/ and components/, recursive, tests excluded */
+  function tsxSources(): { name: string; source: string }[] {
+    const out: { name: string; source: string }[] = []
+    const walk = (root: string): void => {
+      for (const entry of readdirSync(root, { withFileTypes: true })) {
+        if (entry.name.endsWith('.test.ts') || entry.name.endsWith('.test.tsx')) continue
+        const full = join(root, entry.name)
+        if (entry.isDirectory()) walk(full)
+        else if (entry.name.endsWith('.tsx')) out.push({ name: full, source: readFileSync(full, 'utf8') })
+      }
+    }
+    walk(ROUTES)
+    walk(COMPONENTS)
+    return out
+  }
+
+  it('every ghost-rendering module can name a failure', () => {
+    const offenders = tsxSources()
+      .filter((file) => RENDERS_GHOST.test(file.source))
+      .filter((file) => !FAILURE_VOCABULARY.test(file.source))
+      // The component library hosting the primitives legitimately carries no
+      // error copy: it renders ghosts for whoever feeds it.
+      .filter((file) => !DEFINES_PRIMITIVE.test(file.source))
+      .map((file) => file.name)
+
+    expect(
+      offenders,
+      `${offenders.join(', ')} renders loading ghosts but never says what a failed load looks like. With ` +
+        `serviceJSON collapsing settled errors into null, that module renders its ghosts forever -- or asserts ` +
+        `absence through an empty state during an outage (#2178). Give the load an explicit failed/error channel ` +
+        `rendered through ErrorStateBlock (routes/*$*.tsx detail trio and routes/commands.tsx are the local idioms).`,
+    ).toEqual([])
+  })
+
+  it('recognises the shapes', () => {
+    // Guards the guard: each classification half must actually classify.
+    expect(RENDERS_GHOST.test('{rows === null ? <SkeletonRows count={4}/> : null}')).toBe(true)
+    expect(RENDERS_GHOST.test("import { SkeletonRows } from './Investigate'")).toBe(false)
+    expect(FAILURE_VOCABULARY.test('const { failed, retry } = useServerQuery()')).toBe(true)
+    expect(FAILURE_VOCABULARY.test('usePaginatedList(first, fetchMore) sets Failed via setFailed')).toBe(false)
+    expect(FAILURE_VOCABULARY.test('<ErrorStateBlock title="failed to load"/>')).toBe(true)
+    expect(FAILURE_VOCABULARY.test('const [rows, setRows] = useState(null)')).toBe(false)
+    expect(DEFINES_PRIMITIVE.test('export function SkeletonRows({ count }: { count: number }) {')).toBe(true)
+    expect(DEFINES_PRIMITIVE.test("<SkeletonRows count={12} cols={6} wide={[2, 4]} stub={[5]} />")).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // #2311's admin write-path contract, guarded mechanically like the rest of
 // this file. The bug these pins keep closed: fetchAdminData collapsed
 // partly-dead loads into an all-defaults AdminConfig — maintenance off,
@@ -241,5 +311,44 @@ describe('settings admin write-path (#2311)', () => {
       'String(revision ?? 0)',
     ])
     expect(values("headers: { 'if-match': '0' },")).toEqual(["'0'"])
+  })
+})
+
+describe('settings conflict re-sync (#2513)', () => {
+  const settingsSource = readFileSync(join(ROUTES, 'settings.tsx'), 'utf8')
+
+  it('both 409 branches consume the surfaced X-Current-Revision', () => {
+    // savePresentation + saveConfigSection are the same two PUT sites the
+    // If-Match test above pins; both must read the header (#2512) or the
+    // conflict recovery degrades to the legacy discard for that card only,
+    // silently diverging between panes.
+    const sites = [...settingsSource.matchAll(/conflictRevision\(response\)/g)].length
+    expect(sites).toBe(2)
+    // Defensive parse: a tier without the header (or a non-numeric value)
+    // must yield no revision at all, never a fabricated 0.
+    const parser = settingsSource.indexOf("response.headers.get('x-current-revision')")
+    expect(parser).toBeGreaterThan(-1)
+    expect(settingsSource).toContain("header === null || header.trim() === ''")
+  })
+
+  it('runConfigSave arms the re-sync from the header and keeps the legacy fallback', () => {
+    // The re-sync recovery must actually carry the surfaced revision to the
+    // card layer, and the header-less tier must still get the legacy
+    // discard-and-reapply copy rather than a merge it cannot honor.
+    expect(settingsSource).toContain('onConflict(result.currentRevision)')
+    expect(settingsSource).toContain('reloaded current values, reapply your edits')
+    expect(settingsSource).toContain('your unsaved edits were kept on top of the reloaded values')
+  })
+
+  it('all four config cards participate in the staged-edit re-baseline', () => {
+    // Presentation, report-presets, behavior, honeypot: every card that
+    // re-baselines off fresh admin data must also take the conflictRebase
+    // counter, or a conflict silently discards that card's staged edits.
+    const wired = [...settingsSource.matchAll(/conflictRebase=\{conflictRebase\}/g)].length
+    expect(wired).toBe(4)
+    // And each re-baseline effect branches on the counter instead of
+    // unconditionally resetting both halves.
+    const rebases = [...settingsSource.matchAll(/const rebase = conflictRebase !== lastRebase\.current/g)].length
+    expect(rebases).toBe(4)
   })
 })

@@ -4,8 +4,9 @@
 // server-side (backend-service/src/reports_api.rs, reports_store.rs).
 import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { ErrorStateBlock } from '../components/ErrorState'
 import { ReportIcon } from '../components/CardIcons'
 import { getSessionUser } from '../lib/auth'
 import { pathString, type JsonRecord } from '../lib/json'
@@ -1291,6 +1292,7 @@ function DefinitionsCard({
   onNew,
   onChanged,
   onGenerated,
+  failed,
 }: {
   definitions: ReportDefinition[] | null
   editable: boolean
@@ -1300,6 +1302,7 @@ function DefinitionsCard({
   onNew: () => void
   onChanged: () => Promise<void> | void
   onGenerated: () => Promise<void> | void
+  failed?: boolean
 }) {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [rowMessage, setRowMessage] = useState<Record<string, string>>({})
@@ -1347,7 +1350,15 @@ function DefinitionsCard({
           </button>
         ) : null}
         {definitions === null ? (
-          <span className="skeleton-line" aria-hidden="true" />
+          failed ? (
+            /* #2178: the studio's own library must not answer an outage
+               with "No report definitions yet". */
+            <p className="empty" role="alert">
+              Load failed — the backend request didn’t answer.
+            </p>
+          ) : (
+            <span className="skeleton-line" aria-hidden="true" />
+          )
         ) : definitions.length === 0 ? (
           <p className="empty">No report definitions yet.</p>
         ) : (
@@ -1424,6 +1435,14 @@ function Reports() {
   const [generated, setGenerated] = useState<Page | null>(null)
   const [templatesData, setTemplatesData] = useState<TemplatesResponse | null>(null)
   const [definitions, setDefinitions] = useState<ReportDefinition[] | null>(null)
+  // #2178: every one of the three loader promises collapses failure to
+  // null, and the old effects either kept the skeleton up forever or — for
+  // definitions — manufactured an empty library out of a dead read.
+  // #2179 disclosure zones (jobsFailed/payloadError in the sandbox and
+  // payload pickers) are separate channels and untouched here.
+  const [generatedFailed, setGeneratedFailed] = useState(false)
+  const [templatesFailed, setTemplatesFailed] = useState(false)
+  const [definitionsFailed, setDefinitionsFailed] = useState(false)
   // Wizard state: which step is showing, and which saved definition (if
   // any) is loaded into the form. formSeed remounts the form so "New
   // definition" / cancel always reset to a blank draft.
@@ -1444,15 +1463,49 @@ function Reports() {
 
   useEffect(() => {
     let cancelled = false
-    data.generated.then((page) => {
-      if (!cancelled && page) setGenerated(page)
-    })
-    data.templates.then((result) => {
-      if (!cancelled) setTemplatesData(result)
-    })
-    data.definitions.then((result) => {
-      if (!cancelled) setDefinitions(result?.definitions ?? [])
-    })
+    data.generated
+      .then((page) => {
+        if (cancelled) return
+        if (!page) {
+          setGeneratedFailed(true)
+          return
+        }
+        setGenerated(page)
+      })
+      .catch(() => {
+        if (!cancelled) setGeneratedFailed(true)
+      })
+    data.templates
+      .then((result) => {
+        if (cancelled) return
+        if (!result) {
+          setTemplatesFailed(true)
+          return
+        }
+        setTemplatesData(result)
+      })
+      .catch(() => {
+        if (!cancelled) setTemplatesFailed(true)
+      })
+    data.definitions
+      .then((result) => {
+        if (cancelled) return
+        // A null collapse is a failed read, not an empty library — and so
+        // is a body that doesn't carry its definitions array at all: shape
+        // drift upstream, or a catch-all answer from a fixture/misroute.
+        // Storing result.definitions directly let an undefined through the
+        // `definitions === null` gate and crashed on definitions.length
+        // (the client render death the browser matrix caught on /reports).
+        const next = result?.definitions
+        if (!next) {
+          setDefinitionsFailed(true)
+          return
+        }
+        setDefinitions(next)
+      })
+      .catch(() => {
+        if (!cancelled) setDefinitionsFailed(true)
+      })
     return () => {
       cancelled = true
     }
@@ -1463,12 +1516,29 @@ function Reports() {
 
   const refreshDefinitions = async () => {
     const result = await fetchDefinitions()
-    const next = result?.definitions ?? []
+    // #2178: a failed refetch keeps the list on screen; blanking it to []
+    // read as "every definition vanished" exactly when the store was
+    // merely unreachable. A body without its definitions array counts as
+    // failed too — only a real response may redraw.
+    const next = result?.definitions
+    if (!next) return
     setDefinitions(next)
     // The definition being edited may have been deleted from the library —
     // fall back to a fresh draft rather than resurrecting it on save.
     setEditing((current) => (current && !next.some((entry) => entry.id === current.id) ? null : current))
   }
+
+  // #2178: the wizard's template catalog has no other retry path -- the
+  // designer is unusable until it answers.
+  const retryTemplates = useCallback(() => {
+    setTemplatesFailed(false)
+    fetchTemplates()
+      .then((result) => {
+        if (result) setTemplatesData(result)
+        else setTemplatesFailed(true)
+      })
+      .catch(() => setTemplatesFailed(true))
+  }, [])
 
   const refreshGenerated = async () => {
     const page = await fetchGenerated({ data: { offset: 0 } })
@@ -1505,7 +1575,7 @@ function Reports() {
         label="Reports"
         title="Reports studio"
         subtitle="Finished PDF reports and the definitions that produce them — scheduled and on-demand runs land here."
-        chips={<span className="chip">{(generated?.total ?? 0).toLocaleString('en-US')} generated reports</span>}
+        chips={<span className="chip">{generatedFailed && !generated ? 'load failed' : `${(generated?.total ?? 0).toLocaleString('en-US')} generated reports`}</span>}
       />
       {viewTabs}
       {/* Steps 01-04 are the wizard form — always mounted (hidden panels)
@@ -1529,7 +1599,13 @@ function Reports() {
         />
       ) : step !== 'library' ? (
         templatesData === null ? (
-          <span className="skeleton-line" aria-hidden="true" />
+          templatesFailed ? (
+            /* #2178: an admin stared at a bare skeleton through any
+               template-catalog outage, with no signal and no way forward. */
+            <ErrorStateBlock title="Report templates failed to load" hint="The designer needs its template catalog — the request failed." onRetry={retryTemplates} />
+          ) : (
+            <span className="skeleton-line" aria-hidden="true" />
+          )
         ) : (
           <p className="empty">Admin role required to design report definitions — the Library step is read-only browsing.</p>
         )
@@ -1540,6 +1616,7 @@ function Reports() {
         <DefinitionsCard
           definitions={definitions}
           editable={editable}
+          failed={definitionsFailed && definitions === null ? true : undefined}
           onEdit={startEdit}
           onNew={startNew}
           onChanged={refreshDefinitions}
@@ -1547,6 +1624,15 @@ function Reports() {
         />
         <h2 className="label-section">Generated reports</h2>
         <p className="note">Newest first. Select a card to view inline, download the PDF, or delete stale artifacts.</p>
+        {generatedFailed && !generated ? (
+          /* #2178: the library's finished-PDF list also stood as ghost
+             cards forever under an outage. */
+          <ErrorStateBlock
+            title="Generated reports failed to load"
+            hint="The backend request failed — nothing here is cached."
+            onRetry={() => void refreshGenerated()}
+          />
+        ) : (
         <MasterDetailTable
           rows={generated ? generated.rows : null}
           columns={buildGeneratedColumns(setViewingReport, (row) => void removeGenerated(row), deletingId)}
@@ -1564,6 +1650,7 @@ function Reports() {
             return format ? <span className="badge badge--muted">{format}</span> : null
           }}
         />
+        )}
       </div>
       {viewingReport ? (
         <ReportViewerModal

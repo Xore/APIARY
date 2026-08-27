@@ -312,6 +312,13 @@ services:
       # credential the serving siblings already carry (line ~191), just
       # copied onto the loop-only replicas.
       - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
+      # #2320: the other half of the same gate. Env forwarding is
+      # per-service, so an empty-token deployment opts each role out
+      # individually -- leaving this off loop-only roles made them
+      # crash-loop on [E-SERVICE-TOKEN] while serving roles above booted
+      # on APIARY_ALLOW_UNAUTH_DEV=1. check-backend-boot-contract.py
+      # fails CI if any WORKER_LOOPS consumer drops either half again.
+      - APIARY_ALLOW_UNAUTH_DEV=${APIARY_ALLOW_UNAUTH_DEV:-}
       # dashboard-rollups (#2046): same pure-ES shape — writes the three
       # derived rollup indices the overview/map/kill-chain endpoints read;
       # nothing mounted, nothing local, fully disposable/rebuildable.
@@ -606,6 +613,13 @@ services:
       - HONEYPOT_SELF_IPS=${HONEYPOT_SELF_IPS:-}
       # #2299: loop-only role, still subject to the #2183 boot gate.
       - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
+      # #2320: the other half of the same gate. Env forwarding is
+      # per-service, so an empty-token deployment opts each role out
+      # individually -- leaving this off loop-only roles made them
+      # crash-loop on [E-SERVICE-TOKEN] while serving roles above booted
+      # on APIARY_ALLOW_UNAUTH_DEV=1. check-backend-boot-contract.py
+      # fails CI if any WORKER_LOOPS consumer drops either half again.
+      - APIARY_ALLOW_UNAUTH_DEV=${APIARY_ALLOW_UNAUTH_DEV:-}
       - WORKER_LOOPS=es-results-importer
       - IMPORT_INTERVAL=${ES_IMPORTER_INTERVAL:-300}
       - IMPORTER_STATE=/state-importer/es-results-importer.json
@@ -682,6 +696,13 @@ services:
       # #2299: loop-only role (offline, network_mode: none), still subject
       # to the #2183 boot gate.
       - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
+      # #2320: the other half of the same gate. Env forwarding is
+      # per-service, so an empty-token deployment opts each role out
+      # individually -- leaving this off loop-only roles made them
+      # crash-loop on [E-SERVICE-TOKEN] while serving roles above booted
+      # on APIARY_ALLOW_UNAUTH_DEV=1. check-backend-boot-contract.py
+      # fails CI if any WORKER_LOOPS consumer drops either half again.
+      - APIARY_ALLOW_UNAUTH_DEV=${APIARY_ALLOW_UNAUTH_DEV:-}
       - WORKER_LOOPS=ip-enrichment
       - LOGS_DIR=/logs
       - OUT_DIR=/logs/enriched
@@ -761,6 +782,13 @@ services:
       - HONEYPOT_SELF_IPS=${HONEYPOT_SELF_IPS:-}
       # #2299: loop-only role, still subject to the #2183 boot gate.
       - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
+      # #2320: the other half of the same gate. Env forwarding is
+      # per-service, so an empty-token deployment opts each role out
+      # individually -- leaving this off loop-only roles made them
+      # crash-loop on [E-SERVICE-TOKEN] while serving roles above booted
+      # on APIARY_ALLOW_UNAUTH_DEV=1. check-backend-boot-contract.py
+      # fails CI if any WORKER_LOOPS consumer drops either half again.
+      - APIARY_ALLOW_UNAUTH_DEV=${APIARY_ALLOW_UNAUTH_DEV:-}
       - WORKER_LOOPS=payload-inventory
       - PAYLOAD_DIRS=/dionaea-lib/binaries,/cowrie-downloads
       - SCAN_INTERVAL=${PAYLOAD_INVENTORY_SCAN_INTERVAL:-5m}

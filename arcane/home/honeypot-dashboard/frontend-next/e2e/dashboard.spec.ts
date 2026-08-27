@@ -45,40 +45,40 @@ async function seedSessionCookie(context: BrowserContext, role: "admin" | "user"
 }
 
 test.describe("route smoke across theme x viewport", () => {
-  // Each sweep navigates all sidebar routes through full SSR round-trips --
-  // currently 25 hops at roughly 2s each puts a healthy run near 60s (#2480),
-  // well past Playwright's default 30s. Without this the budget expires
-  // mid-loop (often during a goto), stranding the probe on about:blank where
-  // html carries no data-theme attribute and neither shell branch exists,
-  // which reads as a dashboard crash but is only arithmetic.
-  test.setTimeout(120_000);
+  // One test per nav entry (#2508), not one sweep: when the sweep lived in a
+  // single loop a deep failure stranded every later route behind it and hid
+  // which page actually broke unless you read a trace, while the 120s budget
+  // was arithmetic over route count (#2480/#2481). Generated per route, each
+  // probe keeps the default 30s budget, names its route in its own failure
+  // artifacts, and lands on its own worker. Theme x viewport coverage below
+  // and the tablet canary stay unchanged.
   for (const [label, viewport] of [
     ["desktop/dark", { width: 1280, height: 800 }],
     ["mobile/light", { width: 390, height: 844 }],
   ] as const) {
-    test(`every sidebar route renders its shell at ${label}`, async ({ browser }) => {
-      const context = await browser.newContext({ viewport });
-      await context.addInitScript(
-        (theme) => {
-          try {
-            localStorage.setItem("hp-theme", theme);
-            localStorage.setItem("hp-palette", "claude");
-          } catch {}
-        },
-        label.endsWith("dark") ? "dark" : "light",
-      );
-      const page = await context.newPage();
-
+    const theme = label.endsWith("dark") ? "dark" : "light";
+    test.describe(label, () => {
       for (const route of NAV_ROUTES) {
-        await page.goto(route);
-        // data-theme comes from the boot script reading hp-theme back out.
-        await expect(page.locator("html")).toHaveAttribute(
-          "data-theme",
-          label.endsWith("dark") ? "dark" : "light",
-        );
-        await assertShellHealthy(page);
+        test(`${route} renders its shell`, async ({ browser }) => {
+          const context = await browser.newContext({ viewport });
+          await context.addInitScript(
+            (t) => {
+              try {
+                localStorage.setItem("hp-theme", t);
+                localStorage.setItem("hp-palette", "claude");
+              } catch {}
+            },
+            theme,
+          );
+          const page = await context.newPage();
+
+          await page.goto(route);
+          // data-theme comes from the boot script reading hp-theme back out.
+          await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+          await assertShellHealthy(page);
+          await context.close();
+        });
       }
-      await context.close();
     });
   }
 
@@ -91,6 +91,30 @@ test.describe("route smoke across theme x viewport", () => {
     // retry panel.
     await expect(page.getByText("APIARY").first()).toBeVisible();
     await assertShellHealthy(page);
+  });
+});
+
+test.describe("reports studio content (#2507)", () => {
+  // The route smoke above is shell-level by design; /reports is the one
+  // route whose real UI never got exercised until its fixtures existed --
+  // the bare {} catch-all shipped #2480's DefinitionsCard crash past every
+  // sweep that timed out before reaching the route. These pins hold the
+  // fixture-backed catalog, Library, and generated grid to their contentful
+  // render paths.
+  test("template gallery, library definitions, and generated grid render contentfully", async ({ page }) => {
+    await page.goto("/reports");
+    // Design step: the wizard's template gallery lists the fixture catalog
+    // instead of "No report templates are available.".
+    await expect(page.locator(".hp-rp-template", { hasText: "Executive report" })).toBeVisible();
+    await expect(page.getByText("No report templates are available.")).toHaveCount(0);
+
+    // Library step: saved definition with its schedule, plus the generated
+    // PDF row the grid reads from /api/v1/store/generated-reports.
+    await page.locator("#rp-library").click();
+    await expect(page.getByText("Daily executive digest")).toBeVisible();
+    await expect(page.getByText("daily @ 06:00 UTC")).toBeVisible();
+    await expect(page.getByText("APIARY Executive Security Report").first()).toBeVisible();
+    await expect(page.getByText("150 KB")).toBeVisible();
   });
 });
 

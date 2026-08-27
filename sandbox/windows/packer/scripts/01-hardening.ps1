@@ -8,10 +8,11 @@
 # the build was split across more scripts than it needs now -- a Boxstarter
 # reboot mid-script silently terminated Packer's elevated scheduled-task
 # provisioner (0x41306/exit 267014), so no single script could span one
-# safely. FLARE-VM is gone as of 2026-08-02 (see win11-analysis.pkr.hcl and
-# 04-tools.ps1's headers for why); the settle-restart before 04-tools.ps1 is
-# the only remnant of that structure, kept as cheap insurance rather than
-# because anything here still reboots the guest.
+# safely. FLARE-VM is gone as of 2026-08-02 (see the headers of
+# sandbox/windows/packer/win11-analysis.pkr.hcl and
+# sandbox/windows/packer/scripts/04-tools.ps1 for why); the settle-restart
+# before 04-tools.ps1 is the only remnant of that structure, kept as cheap
+# insurance rather than because anything here still reboots the guest.
 
 Set-ExecutionPolicy Unrestricted -Scope LocalMachine -Force
 $ErrorActionPreference = 'Continue'

@@ -16,20 +16,48 @@ import { type Appearance } from '../lib/appearanceCookie'
 // runtime.
 import themeLock from '../../theme.lock?raw'
 
-type ShellConfig = { banner: BannerView | null; showProblemReportButton: boolean; appName: string }
+type ShellConfig = {
+  banner: BannerView | null
+  showProblemReportButton: boolean
+  appName: string
+  /** #2178: true when /api/v1/config could not be read. The shell then
+   * fails conservative — banner slot says the truth about what is unknown,
+   * and the report-a-problem affordance stays up — instead of rendering
+   * "no banner, no button", which was indistinguishable from a deliberately
+   * quiet deployment precisely when the operator most needs both. */
+  configFailed?: boolean
+}
 
 // One /api/v1/config read backs every shell-wide (not per-route) piece of
 // chrome: the banner and whether the "Report a problem" button shows at
 // all (behavior.show_problem_report_button) — fetched together so neither
 // costs its own round trip.
 const fetchShellConfig = createServerFn({ method: 'GET' }).handler(async (): Promise<ShellConfig> => {
-  const { serviceJSON } = await import('../lib/backend.server')
-  const config = await serviceJSON<{
+  const { serviceJSONResult } = await import('../lib/backend.server')
+  const result = await serviceJSONResult<{
     payload?: {
       presentation?: (PresentationConfig & { app_name?: string })
       behavior?: BehaviorConfig & { show_problem_report_button?: boolean }
     }
   }>('/api/v1/config')
+  if (!result.ok) {
+    // #2178: serviceJSON collapsed this failure into an all-defaults shell.
+    // A configured incident/maintenance banner went invisible and the one
+    // button for telling an operator something was wrong disappeared with
+    // it. The fallback banner is honest about being a fallback rather than
+    // inventing maintenance state; the actual configured banner (if any)
+    // simply cannot be known from here.
+    return {
+      banner: {
+        text: 'Dashboard configuration could not be loaded — banners and feature switches may be out of date.',
+        severity: 'warning',
+      },
+      showProblemReportButton: true,
+      appName: 'APIARY',
+      configFailed: true,
+    }
+  }
+  const config = result.body
   return {
     banner: activeBanner(config?.payload?.presentation, config?.payload?.behavior),
     showProblemReportButton: config?.payload?.behavior?.show_problem_report_button ?? false,

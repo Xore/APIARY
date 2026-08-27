@@ -9,6 +9,7 @@ import { useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { EChart } from '../components/EChart'
 import { AttackerGraph } from '../components/AttackerGraph'
+import { ErrorStateBlock } from '../components/ErrorState'
 import { Tabs, TabPanel } from '../components/Tabs'
 import { usePaginatedList } from '../lib/hooks'
 import { formatTimestamp } from '../lib/time'
@@ -237,7 +238,7 @@ function Dossier({ row }: { row: AttackerRow }) {
 
 function Attackers() {
   const { first } = Route.useLoaderData()
-  const { rows, total, loadingMore, viewMore } = usePaginatedList(first, (offset) => fetchAttackers({ data: { offset } }))
+  const { rows, total, loadingMore, viewMore, failed, retry } = usePaginatedList(first, (offset) => fetchAttackers({ data: { offset } }))
   // attackers.html:21's "real merges" count. The Go tier computed it over
   // every attackers-v1 doc (attackers.go's attackersData); here only the
   // loaded pages are in hand, so it grows as the operator pages deeper —
@@ -260,25 +261,33 @@ function Attackers() {
             <a className="chip" href="/clusters">
               infrastructure clusters
             </a>
-            <span className="chip">{total.toLocaleString('en-US')} identities</span>
+            <span className="chip">{failed ? 'load failed' : `${total.toLocaleString('en-US')} identities`}</span>
             {merged !== null ? <span className="chip">{merged.toLocaleString('en-US')} merged across &gt;1 IP</span> : null}
           </>
         }
       />
-      <MasterDetailTable
-        rows={rows}
-        columns={COLUMNS}
-        rowKey={(row) => row.id}
-        emptyState={{
-          title: 'No attacker entities yet',
-          hint: 'attacker-identity-worker merges IPs sharing 2+ strong signals — fingerprint, payload hash, credential pair — into durable entities as traffic accumulates.',
-        }}
-        total={total}
-        onViewMore={viewMore}
-        loadingMore={loadingMore}
-        inspectorTitle="Identity details"
-        inspectorExtra={(row) => <Dossier row={row} />}
-      />
+      {failed ? (
+        <ErrorStateBlock
+          title="Attacker identities failed to load"
+          hint="The backend request failed — nothing here is cached."
+          onRetry={retry}
+        />
+      ) : (
+        <MasterDetailTable
+          rows={rows}
+          columns={COLUMNS}
+          rowKey={(row) => row.id}
+          emptyState={{
+            title: 'No attacker entities yet',
+            hint: 'attacker-identity-worker merges IPs sharing 2+ strong signals — fingerprint, payload hash, credential pair — into durable entities as traffic accumulates.',
+          }}
+          total={total}
+          onViewMore={viewMore}
+          loadingMore={loadingMore}
+          inspectorTitle="Identity details"
+          inspectorExtra={(row) => <Dossier row={row} />}
+        />
+      )}
     </>
   )
 }

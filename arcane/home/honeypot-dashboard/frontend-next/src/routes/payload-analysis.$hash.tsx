@@ -14,6 +14,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { confirmAction } from '../components/ConfirmDialog'
 import { InvestigateHeader } from '../components/Investigate'
+import { ErrorStateBlock } from '../components/ErrorState'
 import { RowActions, RowIcons } from '../components/RowActions'
 import { getSessionUser, type User } from '../lib/auth'
 import { flash } from '../lib/flash'
@@ -30,11 +31,22 @@ type PayloadDetail = {
   hex_preview: string[]
 }
 
+// #2178: serviceJSON collapsed "no analysis exists for this hash" (a real
+// 404) and "the request failed" into one null, so an outage read as "No
+// analysis found for <hash>" — asserting absence about a sample that may
+// simply be unreachable. Tri-state now; the handler never rejects.
+type DetailFetch =
+  | { state: 'detail'; detail: PayloadDetail }
+  | { state: 'missing' }
+  | { state: 'failed' }
+
 const fetchDetail = createServerFn({ method: 'GET' })
   .inputValidator((input: { hash: string }) => input)
-  .handler(async ({ data }): Promise<PayloadDetail | null> => {
-    const { serviceJSON } = await import('../lib/backend.server')
-    return serviceJSON<PayloadDetail>(`/api/v1/payloads/${encodeURIComponent(data.hash)}`)
+  .handler(async ({ data }): Promise<DetailFetch> => {
+    const { serviceJSONResult } = await import('../lib/backend.server')
+    const result = await serviceJSONResult<PayloadDetail>(`/api/v1/payloads/${encodeURIComponent(data.hash)}`)
+    if (result.ok) return { state: 'detail', detail: result.body }
+    return result.status === 404 ? { state: 'missing' } : { state: 'failed' }
   })
 
 // #86 Windows golden-image staleness report — informational only.
@@ -54,9 +66,17 @@ type GoldenImageStatus = {
   error?: string
 }
 
-const fetchGoldenImageStatus = createServerFn({ method: 'GET' }).handler(async (): Promise<GoldenImageStatus | null> => {
-  const { serviceJSON } = await import('../lib/backend.server')
-  return serviceJSON<GoldenImageStatus>('/api/v1/sandbox/golden-image-status', { mounted: true })
+// #2178: serviceJSON collapsed a failed status read into the same null the
+// unconfigured-sandbox path produces downstream, so an outage rendered as
+// quiet "no news" from a report whose whole job is surfacing bad news.
+// Tagged now; a 404 keeps the legacy nil posture (no report is not an outage).
+type GoldenImageFetch = { state: 'status'; status: GoldenImageStatus } | { state: 'unavailable' }
+
+const fetchGoldenImageStatus = createServerFn({ method: 'GET' }).handler(async (): Promise<GoldenImageFetch> => {
+  const { serviceJSONResult } = await import('../lib/backend.server')
+  const result = await serviceJSONResult<GoldenImageStatus>('/api/v1/sandbox/golden-image-status', { mounted: true })
+  if (result.ok) return { state: 'status', status: result.body }
+  return result.status === 404 ? { state: 'status', status: { configured: false } } : { state: 'unavailable' }
 })
 
 type SubmitResult = { ok: boolean; target?: string; error?: string }
@@ -174,9 +194,15 @@ function jnum(value: Json | undefined | null): number | null {
   return typeof value === 'number' ? value : null
 }
 
+// #2178: the three store lookups behind this all resolve empty through
+// serviceJSON when their request fails, which used to compose into a
+// confident "not seen elsewhere" verdict for a sample whose stores were
+// simply unreachable. Any failing leg now fails the whole correlation.
+type CorrelationFetch = { state: 'data'; correlation: Correlation } | { state: 'failed' }
+
 const fetchCorrelation = createServerFn({ method: 'GET' })
   .inputValidator((input: { key: string }) => input)
-  .handler(async ({ data }): Promise<Correlation> => {
+  .handler(async ({ data }): Promise<CorrelationFetch> => {
     const { serviceJSON } = await import('../lib/backend.server')
     const key = data.key.toLowerCase()
     const q = encodeURIComponent(key)
@@ -185,6 +211,7 @@ const fetchCorrelation = createServerFn({ method: 'GET' })
       serviceJSON<StorePage>(`/api/v1/store/ghidra-runs?offset=0&size=5&q=${q}`),
       serviceJSON<StorePage>(`/api/v1/store/github-analysis?offset=0&size=5&q=${q}`),
     ])
+    if (!sandbox || !ghidra || !github) return { state: 'failed' }
     // Result documents are namespaced by the es-results-importer source
     // label ("sandbox"/"ghidra"/"github_analysis" sub-objects) — read the
     // namespaced object first, fall back to the row itself, same
@@ -227,7 +254,7 @@ const fetchCorrelation = createServerFn({ method: 'GET' })
       ghidraView = { exit_status: jstr(run.exit_status) || 'completed', completed_at: jstr(run.completed_at) }
       break
     }
-    return { sandbox_runs: sandboxRuns, github: githubView, ghidra: ghidraView }
+    return { state: 'data', correlation: { sandbox_runs: sandboxRuns, github: githubView, ghidra: ghidraView } }
   })
 
 // Related-event sightings + capture origin, recovered from the event feed
@@ -238,23 +265,32 @@ type RelatedEvents = {
   total: number
   earliest: { time: string; sensor: string; session: string } | null
 }
+// #2178 companion channel so a failed sighting lookup can't read as
+// "total: 0".
+type RelatedFetch = { state: 'data'; related: RelatedEvents } | { state: 'failed' }
 
 const fetchRelatedEvents = createServerFn({ method: 'GET' })
   .inputValidator((input: { hash: string }) => input)
-  .handler(async ({ data }): Promise<RelatedEvents> => {
+  .handler(async ({ data }): Promise<RelatedFetch> => {
     const { serviceJSON } = await import('../lib/backend.server')
     type EventsPage = { total: number; rows: { time: string; sensor: string; session: string }[] }
     const base = `/api/v1/events?shasum=${encodeURIComponent(data.hash)}&size=1`
     const first = await serviceJSON<EventsPage>(base)
-    if (!first || first.total === 0) return { total: first?.total ?? 0, earliest: null }
+    // #2178: `first?.total ?? 0` on a failed query used to read as "no
+    // sightings anywhere"; a failed lookup is no answer at all.
+    if (!first) return { state: 'failed' }
+    if (first.total === 0) return { state: 'data', related: { total: 0, earliest: null } }
     let row = first.rows[0] ?? null
     if (first.total > 1 && first.total <= 10000) {
       const last = await serviceJSON<EventsPage>(`${base}&offset=${first.total - 1}`)
       row = last?.rows[0] ?? row
     }
     return {
-      total: first.total,
-      earliest: row ? { time: row.time, sensor: row.sensor, session: row.session } : null,
+      state: 'data',
+      related: {
+        total: first.total,
+        earliest: row ? { time: row.time, sensor: row.sensor, session: row.session } : null,
+      },
     }
   })
 
@@ -505,7 +541,18 @@ function SearchablePane({
   )
 }
 
-function OperatorActionsCard({ hash, golden, editable }: { hash: string; golden: GoldenImageStatus | null; editable: boolean }) {
+function OperatorActionsCard({
+  hash,
+  golden,
+  goldenUnavailable,
+  editable,
+}: {
+  hash: string
+  golden: GoldenImageStatus | null
+  /** #2178: the status read itself failed — distinct from "not configured". */
+  goldenUnavailable: boolean
+  editable: boolean
+}) {
   const [sandboxBusy, setSandboxBusy] = useState(false)
   const [sandboxMessage, setSandboxMessage] = useState('')
   const [ghidraBusy, setGhidraBusy] = useState(false)
@@ -586,6 +633,10 @@ function OperatorActionsCard({ hash, golden, editable }: { hash: string; golden:
                     <span className={goldenNote.cls}>{goldenNote.label}</span>{' '}
                     <span className="note">{goldenNote.detail}</span>
                   </>
+                ) : goldenUnavailable ? (
+                  <span className="badge badge--muted" title="#2178: the staleness report could not be loaded right now — this says so rather than implying no news is good news.">
+                    Golden-image status unavailable
+                  </span>
                 ) : (
                   <span className="note">Routes to the Windows or Linux sandbox automatically, based on classification.</span>
                 )}
@@ -738,12 +789,38 @@ function PayloadReportViewer({ id, onClose }: { id: string; onClose: () => void 
 function PayloadAnalysis() {
   const { first, golden, user } = Route.useLoaderData()
   const { hash } = Route.useParams()
-  const resolvedDetail = useResolved(first)
-  const detail: PayloadDetail | null | 'missing' = resolvedDetail === undefined ? null : resolvedDetail ?? 'missing'
-  const goldenStatus: GoldenImageStatus | null = useResolved(golden) ?? null
+  // #2178: `resolved ?? 'missing'` let a failed detail fetch assert "No
+  // analysis found for this hash". Tri-state now; a retry re-issues the
+  // server fn once the streamed loader promise is spent.
+  const [detailFetch, setDetailFetch] = useState<DetailFetch | null>(null)
+  const [attempt, setAttempt] = useState(0)
+  useEffect(() => {
+    let cancelled = false
+    setDetailFetch(null)
+    ;(attempt === 0 ? first : fetchDetail({ data: { hash } })).then((result) => {
+      if (!cancelled) setDetailFetch(result)
+    })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- caller-owned loader stream
+  }, [first, attempt])
+  const detail = detailFetch?.state === 'detail' ? detailFetch.detail : null
+  const goldenResolved = useResolved(golden)
+  // #2178: unavailable is rendered, not absorbed — the note cell says so
+  // rather than implying the sandbox fleet is simply fine.
+  const goldenUnavailable = goldenResolved?.state === 'unavailable'
+  const goldenStatus: GoldenImageStatus | null = goldenResolved?.state === 'status' ? goldenResolved.status : null
   const [tab, setTab] = useState('identity')
   const [correlation, setCorrelation] = useState<Correlation | null>(null)
   const [related, setRelated] = useState<RelatedEvents | null>(null)
+  // #2178: a failed lookup used to be indistinguishable from "still
+  // loading" here (and, since the fns composed their own empties out of
+  // failed sub-fetches, from "checked and found nothing") — an outage
+  // could read as "not seen elsewhere". Named flags keep absence
+  // truthful without reshaping every consumer below.
+  const [corrFailed, setCorrFailed] = useState(false)
+  const [relFailed, setRelFailed] = useState(false)
   const [reportBusy, setReportBusy] = useState(false)
   const [reportId, setReportId] = useState<string | null>(null)
 
@@ -767,22 +844,36 @@ function PayloadAnalysis() {
     }
   }
 
-  const view = useMemo(() => buildStaticView(detail && detail !== 'missing' ? detail.analysis : null), [detail])
-  const yara = useMemo(() => buildYaraView(detail && detail !== 'missing' ? detail.yara : []), [detail])
+  const view = useMemo(() => buildStaticView(detail?.analysis ?? null), [detail])
+  const yara = useMemo(() => buildYaraView(detail?.yara ?? []), [detail])
 
   // The correlation pass keys result stores by sha256; Dionaea captures
   // are MD5-addressed, so wait for the static-analysis doc to resolve the
   // real sha256 before querying (hp-payload-analysis.js's own re-fire-
   // with-sha256 dance, collapsed to one fetch since both arrive together).
+  // #2178: a failed leg now lands in the 'failed' channel instead of
+  // sitting at null forever.
   useEffect(() => {
     if (detail === null) return
     const key = view?.sha256 || hash
     let cancelled = false
+    setCorrFailed(false)
+    setRelFailed(false)
     fetchCorrelation({ data: { key } }).then((result) => {
-      if (!cancelled && result) setCorrelation(result)
+      if (cancelled) return
+      if (result.state === 'data') setCorrelation(result.correlation)
+      else {
+        setCorrFailed(true)
+        setCorrelation(null)
+      }
     })
     fetchRelatedEvents({ data: { hash } }).then((result) => {
-      if (!cancelled && result) setRelated(result)
+      if (cancelled) return
+      if (result.state === 'data') setRelated(result.related)
+      else {
+        setRelFailed(true)
+        setRelated(null)
+      }
     })
     return () => {
       cancelled = true
@@ -794,7 +885,7 @@ function PayloadAnalysis() {
   // once a real session exists.
   const isAdmin = !user || user.role === 'admin'
 
-  if (detail === 'missing') {
+  if (detailFetch?.state === 'missing') {
     return (
       <InvestigateHeader
         label="Evidence"
@@ -803,12 +894,31 @@ function PayloadAnalysis() {
       />
     )
   }
+  if (detailFetch?.state === 'failed') {
+    return (
+      <>
+        <InvestigateHeader
+          label="Evidence"
+          title="Payload analysis"
+          subtitle="The analysis could not be loaded."
+        />
+        <ErrorStateBlock
+          title="The payload analysis failed to load"
+          hint="The backend request failed — this says nothing about whether an analysis exists for this hash."
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
+      </>
+    )
+  }
 
   const inventory = detail && detail.inventory ? detail.inventory : null
   const kind = view?.classification?.label || jstr(inventory?.Kind)
   const sha256 = view?.sha256 || (hash.length === 64 ? hash : '')
   const allMatches = [...new Set([...(view?.yaraMatches ?? []), ...yara.matches])]
   const iocs = view?.iocs ?? []
+  // #2178: settled data vs the failed flags — only settled data may feed
+  // the "known elsewhere" verdict or the origin chip.
+  const lookupFailed = corrFailed || relFailed
   const origin = related?.earliest ?? null
   const originLabel = origin ? `${origin.sensor} · ${formatTimestamp(origin.time)}` : ''
   const known = !!correlation && (correlation.sandbox_runs.length > 0 || !!correlation.github || !!correlation.ghidra || (related?.total ?? 0) > 0)
@@ -1164,7 +1274,11 @@ function PayloadAnalysis() {
             <div className="card wide">
               <h2>
                 Known elsewhere{' '}
-                {correlation !== null && related !== null ? (
+                {lookupFailed ? (
+                  // #2178: an outage must not wear the "not seen
+                  // elsewhere" verdict it never checked for.
+                  <span className="badge badge--danger">lookup failed</span>
+                ) : correlation !== null && related !== null ? (
                   known ? (
                     <span className="badge badge--green">already analyzed</span>
                   ) : (
@@ -1176,7 +1290,15 @@ function PayloadAnalysis() {
                 Advisory only — checked before queueing a new run so you know if this hash was already analyzed. Never
                 blocks a fresh submission.
               </p>
-              {correlation === null || related === null ? (
+              {lookupFailed ? (
+                <p className="note text-danger" role="alert">
+                  The cross-store lookup failed this load — rows shown here say nothing about stores that were never
+                  reached.{' '}
+                  <button type="button" className="lnk" onClick={() => setAttempt((n) => n + 1)}>
+                    Retry
+                  </button>
+                </p>
+              ) : correlation === null || related === null ? (
                 skeleton
               ) : (
                 <>
@@ -1369,7 +1491,7 @@ function PayloadAnalysis() {
             </div>
           </div>
 
-          <OperatorActionsCard hash={detail.hash} golden={goldenStatus} editable={isAdmin} />
+          <OperatorActionsCard hash={detail.hash} golden={goldenStatus} goldenUnavailable={goldenUnavailable} editable={isAdmin} />
           <ExternalPublicationCard hash={detail.hash} editable={isAdmin} />
         </>
       )}

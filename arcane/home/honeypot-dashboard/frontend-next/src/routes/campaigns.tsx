@@ -3,8 +3,9 @@
 // score-explanation note mirror dashboard/ui/intel.html's campaigns-body.
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { ErrorStateBlock } from '../components/ErrorState'
 import { formatTimestamp } from '../lib/time'
 
 type CampaignRow = {
@@ -98,12 +99,24 @@ const COLUMNS: Column<CampaignRow>[] = [
 ]
 
 function Campaigns() {
-  const { page } = Route.useLoaderData()
+  const streamed = Route.useLoaderData().page
+  // #2178: the streamed loader resolves null on any backend failure -- which
+  // used to be indistinguishable from "still streaming", so the table sat in
+  // opening ghosts forever. A failed stream now surfaces the error block,
+  // separate from loading and from a genuinely empty correlation window.
+  const [page, setPage] = useState(streamed)
+  useEffect(() => setPage(streamed), [streamed])
   const [rows, setRows] = useState<CampaignRow[] | null>(null)
+  const [failed, setFailed] = useState(false)
+  const retry = useCallback(() => setPage(fetchCampaigns()), [])
   useEffect(() => {
     let cancelled = false
+    setRows(null)
+    setFailed(false)
     page.then((result) => {
-      if (!cancelled && result) setRows(result.rows)
+      if (cancelled) return
+      if (result) setRows(result.rows)
+      else setFailed(true)
     })
     return () => {
       cancelled = true
@@ -118,7 +131,7 @@ function Campaigns() {
         subtitle="Related source networks grouped across sensors over a rolling 7-day window."
         chips={
           <>
-            <span className="chip">{rows ? `${rows.length} active networks` : '…'}</span>
+            <span className="chip">{rows ? `${rows.length} active networks` : failed ? 'load failed' : '…'}</span>
             <a className="chip" title="Download every correlated campaign as CSV" href="/api/export/campaigns.csv">
               ⇩ CSV
             </a>
@@ -130,16 +143,24 @@ function Campaigns() {
         Score combines volume, unique sources, sensor and port spread, reused credentials, captured payloads, and IDS
         alerts. Select a network for its complete event chain.
       </p>
-      <MasterDetailTable
-        rows={rows}
-        columns={COLUMNS}
-        rowKey={(row) => row.cidr}
-        detailHref={(row) => `/investigate/cidr/${encodeURIComponent(row.cidr)}`}
-        emptyState={{
-          title: 'No active campaigns in the selected correlation window',
-          hint: 'Widen the window, or wait for more traffic to correlate into one.',
-        }}
-      />
+      {failed ? (
+        <ErrorStateBlock
+          title="Correlated campaigns failed to load"
+          hint="The backend request failed — nothing here is cached."
+          onRetry={retry}
+        />
+      ) : (
+        <MasterDetailTable
+          rows={rows}
+          columns={COLUMNS}
+          rowKey={(row) => row.cidr}
+          detailHref={(row) => `/investigate/cidr/${encodeURIComponent(row.cidr)}`}
+          emptyState={{
+            title: 'No active campaigns in the selected correlation window',
+            hint: 'Widen the window, or wait for more traffic to correlate into one.',
+          }}
+        />
+      )}
     </>
   )
 }

@@ -128,7 +128,7 @@ commands/credentials, payloads, enriched IDS alerts, and ingest failures.
   portbridge connection log is used only to recover real source IPs; it is not
   counted as a sensor or displayed as an event.
   The overview attack map uses the vendored Leaflet 1.9.4 client with a
-  configurable OpenStreetMap raster basemap and GeoLite2 City/ASN coordinates
+  hardcoded OpenStreetMap raster basemap and GeoLite2 City/ASN coordinates
   from `/api/map-points`. Attack origins are geographic circles whose physical
   radius is weighted by event count, so their displayed size changes naturally
   with zoom. Hover shows IP/city/ASN/provider details and selecting a circle
@@ -136,9 +136,10 @@ commands/credentials, payloads, enriched IDS alerts, and ingest failures.
   and update only its GeoJSON layer, preserving pan and zoom. If the map library
   or tiles fail, the current OpenStreetMap container remains visible with an
   availability message; there is no local basemap fallback.
-  `HONEYPOT_MAP_TILE_URL` and `HONEYPOT_MAP_ATTRIBUTION` can be set in Dockge's
-  `.env`; when using the default public OSM tiles, keep attribution visible and
-  follow the [tile usage policy](https://operations.osmfoundation.org/policies/tiles/).
+  #2425: `HONEYPOT_MAP_TILE_URL` / `HONEYPOT_MAP_ATTRIBUTION` are gone --
+  they fed the retired Go dashboard's server-side template; the Leaflet layer
+  hardcodes both values outright (`frontend-next/src/components/
+  OverviewPanels.tsx`), so there is no basemap env surface to set anymore.
   The hourly activity chart also exposes exact counts on hover/focus. The 24-hour
   KPI compares activity with the preceding 24 hours and labels large changes;
   source health reports dashboard heap, reserved and cgroup memory, uptime, and

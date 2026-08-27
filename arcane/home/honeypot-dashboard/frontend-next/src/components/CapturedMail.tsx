@@ -14,6 +14,7 @@
 // controlled script sink nor a malware distribution point.
 import { createServerFn } from '@tanstack/react-start'
 import { useState } from 'react'
+import { ErrorStateBlock } from './ErrorState'
 
 export type MailAddress = { name: string; address: string }
 export type MailAttachment = { filename: string; content_type: string; size_bytes: number; sha256: string }
@@ -108,6 +109,24 @@ export function MailMessage({ mail }: { mail: Mail }) {
   )
 }
 
+// #2178: fetchMail (kept above, other pages still call it) resolves null for
+// both "this session has no captured body" (backend 404: "no captured mail",
+// "mail body not yet imported") and "the request failed outright", because
+// serviceJSON collapses statuses. This variant rides serviceJSONResult
+// (#1966) so the 404 — a real answer about the session — stays separable
+// from a gateway/timeout failure, which these two inline viewers now render
+// differently. Its handler never rejects, so callers need no catch.
+type MailFetch = { state: 'mail'; mail: Mail } | { state: 'missing' } | { state: 'failed' }
+
+const fetchMailDetailed = createServerFn({ method: 'GET' })
+  .inputValidator((input: { id: string }) => input)
+  .handler(async ({ data }): Promise<MailFetch> => {
+    const { serviceJSONResult } = await import('../lib/backend.server')
+    const result = await serviceJSONResult<Mail>(`/api/v1/mail/${encodeURIComponent(data.id)}`)
+    if (result.ok) return { state: 'mail', mail: result.body }
+    return result.status === 404 ? { state: 'missing' } : { state: 'failed' }
+  })
+
 /** Fetches on demand and renders the message inline.
  *
  *  Deferred rather than loaded with the page because the body lives in a
@@ -115,16 +134,18 @@ export function MailMessage({ mail }: { mail: Mail }) {
  *  otherwise pay for every message an operator never opens. */
 export function CapturedMailInline({ sessionId }: { sessionId: string }) {
   const [busy, setBusy] = useState(false)
-  const [mail, setMail] = useState<Mail | null | 'missing'>(null)
+  const [mail, setMail] = useState<Mail | 'missing' | 'failed' | null>(null)
   const [opened, setOpened] = useState(false)
 
   const load = async () => {
     setOpened(true)
-    if (mail !== null) return
+    // A past 'failed' attempt is refetchable; anything else is a settled
+    // answer we cache so re-opening doesn't cost another round-trip.
+    if (mail !== null && mail !== 'failed') return
     setBusy(true)
     try {
-      const result = await fetchMail({ data: { id: sessionId } })
-      setMail(result ?? 'missing')
+      const result = await fetchMailDetailed({ data: { id: sessionId } })
+      setMail(result.state === 'mail' ? result.mail : result.state)
     } finally {
       setBusy(false)
     }
@@ -138,6 +159,15 @@ export function CapturedMailInline({ sessionId }: { sessionId: string }) {
     )
   }
   if (busy) return <span className="skeleton-line" aria-hidden="true" />
+  if (mail === 'failed') {
+    return (
+      <ErrorStateBlock
+        title="The captured message failed to load"
+        hint="The backend request failed — this is not evidence either way about whether a body was captured."
+        onRetry={() => void load()}
+      />
+    )
+  }
   if (mail === 'missing' || mail === null) {
     return <p className="empty">No captured mail body found for this session.</p>
   }
@@ -148,7 +178,18 @@ export function CapturedMailInline({ sessionId }: { sessionId: string }) {
 export function MailCard({ sessionId }: { sessionId: string }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [mail, setMail] = useState<Mail | null | 'missing'>(null)
+  const [mail, setMail] = useState<Mail | 'missing' | 'failed' | null>(null)
+
+  const load = async () => {
+    if (mail !== null && mail !== 'failed') return
+    setBusy(true)
+    try {
+      const result = await fetchMailDetailed({ data: { id: sessionId } })
+      setMail(result.state === 'mail' ? result.mail : result.state)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const toggle = async () => {
     if (open) {
@@ -156,14 +197,7 @@ export function MailCard({ sessionId }: { sessionId: string }) {
       return
     }
     setOpen(true)
-    if (mail !== null) return
-    setBusy(true)
-    try {
-      const result = await fetchMail({ data: { id: sessionId } })
-      setMail(result ?? 'missing')
-    } finally {
-      setBusy(false)
-    }
+    await load()
   }
 
   return (
@@ -179,6 +213,12 @@ export function MailCard({ sessionId }: { sessionId: string }) {
       {open ? (
         busy ? (
           <span className="skeleton-line" aria-hidden="true" />
+        ) : mail === 'failed' ? (
+          <ErrorStateBlock
+            title="The captured message failed to load"
+            hint="The backend request failed — this is not evidence either way about whether a body was captured."
+            onRetry={() => void load()}
+          />
         ) : mail === 'missing' || mail === null ? (
           <p className="empty">No captured mail body found for this session.</p>
         ) : (
