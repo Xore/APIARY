@@ -8,9 +8,11 @@ import importlib.util
 import json
 import os
 import stat
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 HERE = Path(__file__).resolve().parent.parent
@@ -67,7 +69,7 @@ class GovernanceTests(unittest.TestCase):
             },
             "host": {
                 key: self.manifest["approved_host"][key]
-                for key in ("gpu", "gpu_memory_mib", "driver", "compute_capability")
+                for key in ("gpu_uuid", "gpu", "gpu_memory_mib", "driver", "compute_capability")
             },
         }
 
@@ -121,6 +123,138 @@ class GovernanceTests(unittest.TestCase):
         for slot_name in affected_slots:
             self.assertIn("model_digest_changed", status["slots"][slot_name]["codes"])
         self.assertIn("host_driver_changed", status["host"]["codes"])
+
+    # --- #2394: the GPU is verified by identity, never by position ----------
+
+    def test_removed_pinned_card_is_approved_gpu_absent(self):
+        # The collected shape when nvidia-smi --id=<approved> reports no such
+        # device (driver 595.84: exit 6, "No devices were found"). Distinct
+        # from gpu_telemetry_unavailable, and no fallback comparison against
+        # whichever other card is present.
+        snapshot = self.snapshot()
+        snapshot["host"] = {
+            "approved_gpu_absent": True,
+            "expected_gpu_uuid": self.manifest["approved_host"]["gpu_uuid"],
+        }
+        status = governance.evaluate_drift(self.manifest, snapshot)
+        self.assertEqual(status["overall"], "drift")
+        self.assertEqual(status["host"], {"status": "drift", "codes": ["approved_gpu_absent"]})
+
+    def test_wrong_card_identity_drifts_even_when_name_and_driver_match(self):
+        # Index-order sampling's failure mode: every field the old schema
+        # compared looks right, but a different physical card produced them.
+        snapshot = self.snapshot()
+        snapshot["host"]["gpu_uuid"] = "GPU-deadbeef-0000-0000-0000-000000000000"
+        status = governance.evaluate_drift(self.manifest, snapshot)
+        self.assertEqual(status["overall"], "drift")
+        self.assertEqual(status["host"]["codes"], ["host_gpu_uuid_changed"])
+
+    def test_legacy_snapshot_without_recorded_uuid_cannot_pass_as_approved(self):
+        # Pre-#2394 snapshots carry name/memory/driver only; they must drift
+        # until re-collected under the new schema rather than silently
+        # continue index-order sampling.
+        snapshot = self.snapshot()
+        del snapshot["host"]["gpu_uuid"]
+        status = governance.evaluate_drift(self.manifest, snapshot)
+        self.assertEqual(status["overall"], "drift")
+        self.assertEqual(status["host"]["codes"], ["host_gpu_uuid_changed"])
+
+    def test_unverified_identity_snapshot_is_drift(self):
+        snapshot = self.snapshot()
+        snapshot["host"] = {"gpu_identity_unverified": True}
+        status = governance.evaluate_drift(self.manifest, snapshot)
+        self.assertEqual(status["overall"], "drift")
+        self.assertEqual(status["host"]["codes"], ["approved_gpu_uuid_missing"])
+
+    def test_container_reservation_mismatch_is_independently_visible(self):
+        uuid = self.manifest["approved_host"]["gpu_uuid"]
+        snapshot = self.snapshot()
+        # The compose overlay not applying at all.
+        snapshot["runtime"]["container_gpu_device_ids"] = []
+        drifted = governance.evaluate_drift(self.manifest, snapshot)
+        self.assertEqual(drifted["overall"], "drift")
+        self.assertEqual(drifted["runtime"]["codes"], ["ollama_container_gpu_reservation_changed"])
+        # A different card reserved than the one approved.
+        snapshot["runtime"]["container_gpu_device_ids"] = ["GPU-deadbeef-0000-0000-0000-000000000000"]
+        still_drifted = governance.evaluate_drift(self.manifest, snapshot)
+        self.assertIn(
+            "ollama_container_gpu_reservation_changed", still_drifted["runtime"]["codes"]
+        )
+        # The pin holding as deployed.
+        snapshot["runtime"]["container_gpu_device_ids"] = [uuid]
+        healthy = governance.evaluate_drift(self.manifest, snapshot)
+        self.assertEqual(healthy["overall"], "approved")
+
+    def _collect_with_stubs(self, smi_result, inspect, expected_gpu_uuid=None):
+        """Drive collect_snapshot with docker/nvidia-smi stood in for; the
+        real ones need a GPU and an Ollama socket this test host lacks."""
+        captured: list[list[str]] = []
+
+        def fake_run_json(command, timeout=15):
+            if command[:2] == ["docker", "inspect"]:
+                return [
+                    {
+                        "Config": {"Image": "ollama/ollama:test", "Env": []},
+                        "Image": "sha256:" + "a" * 64,
+                        "HostConfig": {"DeviceRequests": inspect},
+                    }
+                ]
+            return [{"RepoDigests": ["ollama/ollama@sha256:" + "c" * 64]}]
+
+        def fake_smi(command, **kwargs):
+            captured.append(command)
+            return smi_result
+
+        with mock.patch.object(governance, "request_json", side_effect=lambda url, timeout=10: {}), \
+                mock.patch.object(governance, "run_json", side_effect=fake_run_json), \
+                mock.patch.object(governance.subprocess, "run", side_effect=fake_smi):
+            result = governance.collect_snapshot(
+                "http://127.0.0.1:1", "ghidra-ollama-1", expected_gpu_uuid
+            )
+        return result, captured
+
+    def test_collect_queries_by_uuid_and_records_the_observed_identity(self):
+        uuid = self.manifest["approved_host"]["gpu_uuid"]
+        completed = subprocess.CompletedProcess([], 0)
+        completed.stdout = f"{uuid}, NVIDIA RTX 4000 Ada Generation, 20475, 595.84, 8.9\n"
+        completed.stderr = ""
+        snapshot, calls = self._collect_with_stubs(
+            completed,
+            [{"Driver": "nvidia", "DeviceIDs": [uuid], "Capabilities": [["gpu"]]}],
+            expected_gpu_uuid=uuid,
+        )
+        self.assertEqual(calls[0][1], f"--id={uuid}")
+        self.assertEqual(
+            snapshot["host"],
+            {
+                "gpu_uuid": uuid,
+                "gpu": "NVIDIA RTX 4000 Ada Generation",
+                "gpu_memory_mib": 20475,
+                "driver": "595.84",
+                "compute_capability": "8.9",
+            },
+        )
+        self.assertEqual(snapshot["runtime"]["container_gpu_device_ids"], [uuid])
+
+    def test_collect_reports_absence_instead_of_sampling_any_other_card(self):
+        expected = "GPU-deadbeef-0000-0000-0000-000000000000"
+        completed = subprocess.CompletedProcess([], 6)
+        # Live driver 595.84 behavior: rc=6 and the message lands on stdout.
+        completed.stdout = "No devices were found\n"
+        completed.stderr = ""
+        snapshot, calls = self._collect_with_stubs(completed, [], expected_gpu_uuid=expected)
+        self.assertEqual(calls[0][1], f"--id={expected}")
+        self.assertEqual(snapshot["host"]["approved_gpu_absent"], True)
+        self.assertNotIn("gpu", snapshot["host"])
+        self.assertEqual(snapshot["runtime"]["container_gpu_device_ids"], [])
+
+    def test_collect_without_a_pin_refuses_to_sample_index_zero(self):
+        completed = subprocess.CompletedProcess([], 0)
+        completed.stdout = "GPU-x, Some Other Card, 5120, 595.84, 6.1\n"
+        completed.stderr = ""
+        snapshot, calls = self._collect_with_stubs(completed, [])
+        self.assertEqual(calls, [], "no positional query may run without an identity pin")
+        self.assertEqual(snapshot["host"], {"gpu_identity_unverified": True})
 
     def test_missing_model_is_drift_not_an_install_action(self):
         ghidra_tag = self.manifest["slots"]["ghidra"]["artifact"]["tag"]

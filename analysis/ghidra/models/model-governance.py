@@ -81,8 +81,20 @@ def run_json(command: list[str], timeout: int = 15) -> Any:
     return json.loads(completed.stdout)
 
 
-def collect_snapshot(base_url: str, container: str) -> dict[str, Any]:
-    """Collect only local, read-only runtime identity and capacity metadata."""
+def collect_snapshot(
+    base_url: str,
+    container: str,
+    expected_gpu_uuid: str | None = None,
+) -> dict[str, Any]:
+    """Collect only local, read-only runtime identity and capacity metadata.
+
+    The GPU is queried by identity, never by position (#2394): pass the
+    approved card's UUID and nvidia-smi filters to exactly that device.
+    Positional sampling splitlines()[0] -- whichever card enumerates as
+    index 0 -- silently compares against the wrong card on this documented
+    two-card host (#1539), and nothing tied the result to the UUID the
+    compose overlay actually reserves for Ollama.
+    """
     snapshot: dict[str, Any] = {"models": [], "runtime": {}, "host": {}}
     tags = request_json(f"{base_url.rstrip('/')}/api/tags")
     snapshot["models"] = tags.get("models", [])
@@ -108,27 +120,66 @@ def collect_snapshot(base_url: str, container: str) -> dict[str, Any]:
     except (OSError, subprocess.SubprocessError, ValueError, json.JSONDecodeError):
         snapshot["runtime"]["repo_digests"] = []
 
-    try:
-        completed = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=name,memory.total,driver_version,compute_cap",
-                "--format=csv,noheader,nounits",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        parts = [part.strip() for part in completed.stdout.splitlines()[0].split(",")]
-        snapshot["host"] = {
-            "gpu": parts[0],
-            "gpu_memory_mib": int(parts[1]),
-            "driver": parts[2],
-            "compute_capability": parts[3],
-        }
-    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
-        snapshot["host"] = {"unavailable": True}
+    # Which card(s) the running container actually reserved (#2394): docker
+    # records the GPU overlay's UUID pin here, so a broken reservation (the
+    # overlay silently not applying, or Ollama falling back to another card)
+    # is visible alongside the host-side identity instead of being masked by
+    # the right name appearing somewhere on the host.
+    reservation_ids: list[str] = []
+    for request in item.get("HostConfig", {}).get("DeviceRequests") or []:
+        if isinstance(request, dict):
+            reservation_ids.extend(
+                device_id
+                for device_id in request.get("DeviceIDs") or []
+                if isinstance(device_id, str)
+            )
+    snapshot["runtime"]["container_gpu_device_ids"] = sorted(set(reservation_ids))
+
+    if expected_gpu_uuid:
+        # Confirmed live against driver 595.84: `--id=<unknown uuid>` exits 6
+        # and prints "No devices were found", so absence is detectable. A
+        # missing pinned card is its own outcome (approved_gpu_absent) --
+        # never a fallback to whichever card happens to sit at index 0.
+        try:
+            completed = subprocess.run(
+                [
+                    "nvidia-smi",
+                    f"--id={expected_gpu_uuid}",
+                    "--query-gpu=uuid,name,memory.total,driver_version,compute_cap",
+                    "--format=csv,noheader,nounits",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            rows = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+            if completed.returncode != 0 or not rows:
+                raise RuntimeError(
+                    completed.stderr.strip().splitlines()[0]
+                    if completed.stderr.strip()
+                    else f"exit {completed.returncode}"
+                )
+            parts = [part.strip() for part in rows[0].split(",")]
+            snapshot["host"] = {
+                "gpu_uuid": parts[0],
+                "gpu": parts[1],
+                "gpu_memory_mib": int(parts[2]),
+                "driver": parts[3],
+                "compute_capability": parts[4],
+            }
+        except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+            snapshot["host"] = {"unavailable": True}
+        except RuntimeError as exc:
+            snapshot["host"] = {
+                "approved_gpu_absent": True,
+                "expected_gpu_uuid": expected_gpu_uuid,
+                "detail": str(exc)[:96],
+            }
+    else:
+        # No UUID pin anywhere to verify against (#2394): sampling index 0
+        # and recording its name/memory would re-bless exactly the ambiguity
+        # this snapshot exists to audit, so say so instead.
+        snapshot["host"] = {"gpu_identity_unverified": True}
     return snapshot
 
 
@@ -185,13 +236,30 @@ def evaluate_drift(manifest: dict[str, Any], snapshot: dict[str, Any]) -> dict[s
     for key, value in expected_runtime["environment"].items():
         if f"{key}={value}" not in actual_env:
             runtime_codes.append(f"runtime_env_{key.lower()}_changed")
+    # #2394: close the loop on wrong-card validation -- the host may show
+    # the approved card while the container never got it. An empty recorded
+    # list means the compose overlay's reservation did not apply; a key
+    # absent entirely (snapshot written by an older schema) proves nothing
+    # either way and is skipped.
+    expected_gpu_uuid = manifest["approved_host"].get("gpu_uuid")
+    if expected_gpu_uuid and isinstance(runtime.get("container_gpu_device_ids"), list):
+        if expected_gpu_uuid not in runtime["container_gpu_device_ids"]:
+            runtime_codes.append("ollama_container_gpu_reservation_changed")
 
     actual_host = snapshot.get("host", {})
     host_codes: list[str] = []
     if actual_host.get("unavailable"):
         host_codes.append("gpu_telemetry_unavailable")
+    elif actual_host.get("approved_gpu_absent"):
+        # #2394: distinct from telemetry-unavailable -- the tool ran, was
+        # pointed at the approved UUID explicitly, and no such card exists.
+        host_codes.append("approved_gpu_absent")
+    elif actual_host.get("gpu_identity_unverified"):
+        # #2394: the snapshot predates identity selection (or nothing pins
+        # one); name/memory/driver cannot attest WHICH card produced them.
+        host_codes.append("approved_gpu_uuid_missing")
     else:
-        for key in ("gpu", "gpu_memory_mib", "driver", "compute_capability"):
+        for key in ("gpu_uuid", "gpu", "gpu_memory_mib", "driver", "compute_capability"):
             if actual_host.get(key) != manifest["approved_host"].get(key):
                 host_codes.append(f"host_{key}_changed")
 
@@ -372,7 +440,14 @@ def command_check(args: argparse.Namespace) -> int:
         # say why" as a dead Ollama, and crashing here left the previous
         # artifact -- or nothing at all -- for the dashboard to serve.
         manifest = read_json(args.manifest)
-        snapshot = read_json(args.snapshot) if args.snapshot else collect_snapshot(args.base_url, args.container)
+        # #2394: the manifest's pin is authoritative; --expected-gpu-uuid
+        # exists so an operator can drill the absence path without editing
+        # the reviewed manifest. getattr keeps hand-built argparse
+        # namespaces from older harnesses working.
+        expected_gpu_uuid = getattr(args, "expected_gpu_uuid", None) or manifest["approved_host"].get("gpu_uuid")
+        snapshot = read_json(args.snapshot) if args.snapshot else collect_snapshot(
+            args.base_url, args.container, expected_gpu_uuid
+        )
         status = evaluate_drift(manifest, snapshot)
     except Exception as exc:
         status = {
@@ -455,6 +530,10 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("--manifest", type=Path, required=True)
     check.add_argument("--base-url", default="http://127.0.0.1:11434")
     check.add_argument("--container", default="ghidra-ollama-1")
+    check.add_argument(
+        "--expected-gpu-uuid",
+        help="verify this GPU UUID instead of the manifest's approved_host.gpu_uuid pin",
+    )
     check.add_argument("--snapshot", type=Path)
     check.add_argument("--status-file", type=Path)
     check.add_argument("--warn-only", action="store_true")
