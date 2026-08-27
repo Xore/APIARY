@@ -1,5 +1,5 @@
 # Standard deployment: every home stack .github/workflows/deploy.yml
-# currently syncs. See deploy-profiles/README.md.
+# currently syncs. See docs/deploy-profiles/README.md.
 
 keycloak
 init
