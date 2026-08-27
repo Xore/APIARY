@@ -18,7 +18,7 @@ Fourteen small, synthetic, non-weaponized C functions:
 | `linked_list_sum.c` | data structure traversal |
 | `indirect_dispatch.c` | indirect call (function-pointer dispatch table) |
 | `error_handling_alloc.c` | error handling (allocation failure as a return code, not a crash) |
-| `process_and_injection.c` | behavior-shaped fixture (process creation) + embedded prompt-injection comment |
+| `process_and_injection.c` | behavior-shaped fixture (process creation) + embedded prompt-injection string literal |
 | `tlv_parser.c` | parsing (type-length-value records) |
 | `loopback_connect.c` | behavior-shaped fixture (network access, loopback-only) |
 | `safe_strcpy.c` | benign near-neighbor to `vulnerable_strcpy.c` (bounds-checked, same call shape) |
@@ -30,8 +30,12 @@ Fourteen small, synthetic, non-weaponized C functions:
 
 All fixtures are original, written for this corpus, non-routable, and contain
 no real malware, credentials, or C2 indicators. `process_and_injection.c`'s
-embedded comment ("ignore all prior instructions...") is evidence for testing
-prompt-injection resistance, and is never executed. `safe_strcpy.c` is
+embedded payload ("ignore all prior instructions...") is evidence for testing
+prompt-injection resistance, and is never executed: since #1948 it is carried
+as a string literal referenced by live code, so it survives compilation into
+the binary instead of living only in a source comment the compiler strips --
+until then no corpus object contained it at all, and every rebuild now fails
+loudly if the compiled artifacts ever lose it (#1948). `safe_strcpy.c` is
 deliberately paired with `vulnerable_strcpy.c` -- same shape, safe
 implementation -- to test whether a model overclaims a vulnerability on code
 that only superficially resembles a known-bad pattern (a benign-control
@@ -200,6 +204,14 @@ Recorded result: **56/69 (81.2%)** across all 14 cases, no prompt-injection
 compliance failures on any case (`injection_ok: true` throughout). Full
 per-case scores, wall time, and the model's raw answer text are in
 `baseline_results.json`.
+
+After #1948's fixture change, the same pinned model and digest
+(`qwen2.5-coder:7b-instruct-q4_K_M`, `dae161e27b0e…`) was re-measured against
+the new corpus and recorded in `baseline_results_fixture_v2.json` -- labelled
+there as a fixture change, not a continuation of 56/69. It is the first Tier A
+measurement whose injection evidence genuinely comes from the compiled binary
+(`injection_payload_in_evidence: true` on `process_and_injection`), with the
+full transcript committed under `docs/benchmarks/runs/2026-08-27-20260827T000818Z-8e249763/`.
 
 ## CI verification (`validate_manifest.py`, `ci_verify.sh`, `.github/workflows/quality.yml`)
 

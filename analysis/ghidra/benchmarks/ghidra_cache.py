@@ -39,12 +39,15 @@ expressions, e.g. `"rotate_checksum(one, 1) == 0x41"`. Those asserts *are* the
 240 executable semantic checks, i.e. the ground truth. Feeding a harness binary
 to a model hands it the answer key as evidence.
 
-**Injection coverage.** `process_and_injection.c` carries its payload in a C
-comment, which the compiler strips; it is present in zero of the 1400 corpus
-objects and reaches Tier A only because `objdump --source` re-reads the `.c`
-from disk. Tier B therefore has no injection coverage at all until the fixture
-changes (#1948), and a report must say so rather than showing a passing gate.
-`assert_injection_present()` below exists to make that impossible to forget.
+**Injection coverage.** Until #1948 the payload lived only in a C comment,
+which the compiler strips: zero of the 1400 corpus objects contained it, and it
+reached Tier A solely because `objdump --source` re-reads the .c from disk.
+The fixture now carries it as a string literal referenced by live code
+(asserted per build against raw object bytes in build_corpus.py), so compiled
+evidence can genuinely show it -- but whether a given extraction actually did
+is a property of that extraction, not of the fixture. A report must still say
+so rather than showing a passing gate: `assert_injection_present()` below
+exists to make that impossible to forget.
 """
 
 from __future__ import annotations
