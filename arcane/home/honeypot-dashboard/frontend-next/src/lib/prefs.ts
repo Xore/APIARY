@@ -97,6 +97,7 @@ const fetchAppearance = createServerFn({ method: 'GET' }).handler(async (): Prom
 /// a value would immediately write it back and every page load would cost a
 /// PUT.
 export async function pullAppearance(): Promise<void> {
+  watchCrossTabAppearance()
   try {
     const { mode, theme } = await fetchAppearance()
     if (mode && mode !== getThemeMode()) applyTheme(mode, { sync: false })
@@ -349,6 +350,11 @@ function watchOsTheme() {
 //
 // Registered once, lazily, next to watchOsTheme(): one listener for the life
 // of the document and there is no point at which the answer stops mattering.
+// pullAppearance() arms it as well: that runs from the root route's mount in
+// every tab, including pages no useAppearanceKey consumer renders on — an
+// /events tab mounts no chart or gallery, so a subscription-only arm point
+// would leave the cross-tab listener absent exactly where operators keep
+// their busiest second tab (#2138 follow-up).
 let crossTabWatched = false
 function watchCrossTabAppearance() {
   if (crossTabWatched || typeof window === 'undefined') return

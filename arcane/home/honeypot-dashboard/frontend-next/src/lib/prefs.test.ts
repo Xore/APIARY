@@ -149,6 +149,27 @@ describe('cross-tab storage events (#2138)', () => {
     })
   }
 
+  it('is armed by pullAppearance alone, for pages with no useAppearanceKey consumer', async () => {
+    // First in this describe deliberately: the jsdom window persists across
+    // tests while vi.resetModules() does not unhook them, so anything after
+    // a mountSubscriber() call cannot tell WHICH registration answered.
+    // Here none has ever been mounted — the workhorse /events page renders
+    // no chart, gallery or tty surface, so a subscription-only arm point
+    // never fires on it. The root route's mount effect calls
+    // pullAppearance in every tab regardless of content (__root.tsx), and
+    // its registration line runs synchronously, ahead of the server
+    // round-trip. With only that arm point exercised, these foreign writes
+    // land only if pullAppearance really did arm the listener.
+    const { pullAppearance } = await import('./prefs')
+    void pullAppearance()
+
+    writeAsOtherTab('hp-theme', 'dark')
+    expect(document.documentElement.dataset.theme).toBe('dark')
+
+    writeAsOtherTab('hp-palette', 'ocean')
+    expect(document.documentElement.dataset.hpTheme).toBe('ocean')
+  })
+
   it('applies a mode another tab switched to', async () => {
     const { applyTheme } = await import('./prefs')
     await mountSubscriber()
