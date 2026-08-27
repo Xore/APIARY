@@ -29,6 +29,7 @@ type event struct {
 	Recursion bool   `json:"rd,omitempty"`
 	ReqBytes  int    `json:"req_bytes,omitempty"`
 	RespBytes int    `json:"resp_bytes,omitempty"`
+	Data      string `json:"data,omitempty"`
 }
 
 type logger struct {
@@ -87,7 +88,31 @@ func waitForMarker(path string) {
 	}
 }
 
-func handlePacket(conn *net.UDPConn, addr *net.UDPAddr, req []byte, log *logger, port int) {
+// udpReplyWriter is the one slice of *net.UDPConn handlePacket actually
+// needs -- narrowed to an interface so handler_panic_test.go can hand it a
+// crafted connection whose replies detonate mid-handler (see #2210); the
+// real socket main() passes satisfies it as-is.
+type udpReplyWriter interface {
+	WriteToUDP(b []byte, addr *net.UDPAddr) (int, error)
+}
+
+func handlePacket(conn udpReplyWriter, addr *net.UDPAddr, req []byte, log *logger, port int) {
+	// #2210: handlePacket is the whole world past ReadFromUDP -- attacker
+	// datagrams are walked question-by-question and answered in a fresh
+	// goroutine here with no recover anywhere downstream. dns.go's own
+	// parsing is bounds-checked today, but one future edit past it that
+	// slips a bounds check kills the entire sensor while restart:
+	// unless-stopped hands the attacker the same replayable datagram right
+	// back. http-honeypot gets this shield per request from net/http; this
+	// low-interaction listener carries it itself, at the top of the
+	// per-datagram entrypoint: a panicking datagram costs exactly one
+	// attributable handler_panic event while the ReadFromUDP loop and every
+	// other live query goroutine keep running.
+	defer func() {
+		if r := recover(); r != nil {
+			log.emit(event{Port: port, SrcIP: addr.IP.String(), SrcPort: addr.Port, Event: "handler_panic", Data: fmt.Sprint(r)})
+		}
+	}()
 	resp := buildCappedResponse(req)
 	if resp != nil {
 		conn.WriteToUDP(resp, addr)
