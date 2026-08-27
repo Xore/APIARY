@@ -773,6 +773,18 @@ jobs:
             home: true
             run: python scripts/check-compose-env-docs.py
 
+          # #2320: every WORKER_LOOPS consumer boots through the same
+          # apiary-backend entrypoint whose gate (#2183) refuses an empty
+          # SERVICE_TOKEN unless APIARY_ALLOW_UNAUTH_DEV=1 -- both arrive as
+          # per-container env, so a loop tier forwarding only the token half
+          # crash-looped on the dev-tier deployment (#2320) while its serving
+          # siblings booted. Mechanical form of checking every consumer
+          # against the gate's inputs: if backend ever grows a third gating
+          # variable, AUTH_VARS in the script and this gate move together.
+          - name: WORKER_LOOPS consumers carry the apiary-backend auth pair (#2320)
+            home: true
+            run: python scripts/check-backend-boot-contract.py
+
           # #2352: #1502 moved the YARA scanner under
           # honeypot-payload-analysis/analysis/yara/ and updated the checker
           # script, but the surrounding prose never got the same pass -- six
