@@ -905,11 +905,40 @@ jobs:
             run: ./scripts/test-oauth2-proxy-gateway-resilience.sh
 
           # #982's PKCE+TOTP login and Keycloak-outage/key-rotation chaos
-          # suites (test-dashboard-oidc-pkce-totp-login.sh,
-          # test-dashboard-oidc-chaos.sh) drove `go run .` against the real
-          # Go dashboard binary -- retired with it (#1659). No equivalent
-          # exists yet against dashboard-next's BFF + Keycloak; tracked as a
-          # real coverage gap, not a silent drop.
+          # suites, retired with the Go dashboard (#1659), restored for
+          # dashboard-next (#1661): both drive the REAL BFF build output
+          # (`node .output/server/index.mjs`, the same artifact the container
+          # runs) against a real disposable Keycloak importing the actual
+          # realm -- full authorization-code +PKCE logins through the realm's
+          # mandatory TOTP factor, persisted session-role verification
+          # (#1656), single-use codes + forged-state rejection, server-side
+          # logout revocation (#1094), first-login password reset (#1036),
+          # then outage-persistence / KC-down-logout / restart-recovery /
+          # signing-key-rotation chaos. One shared build feeds both via
+          # DASHBOARD_BFF_SKIP_BUILD.
+          - name: Set up Node for the dashboard OIDC suites
+            uses: actions/setup-node@v7
+            with:
+              node-version: "22"
+              cache: npm
+              cache-dependency-path: arcane/home/honeypot-dashboard/frontend-next/package-lock.json
+
+          - name: Build dashboard-next BFF once for both OIDC suites
+            run: |
+              cd arcane/home/honeypot-dashboard/frontend-next
+              npm ci --no-audit --no-fund
+              npm run build
+
+          - name: OIDC PKCE+TOTP login suite (port of #982)
+            env:
+              DASHBOARD_BFF_SKIP_BUILD: "1"
+            run: ./scripts/test-dashboard-oidc-pkce-totp-login.sh
+
+          - name: Keycloak outage/restart/rotation chaos suite (port of #982)
+            env:
+              DASHBOARD_BFF_SKIP_BUILD: "1"
+            run: ./scripts/test-dashboard-oidc-chaos.sh
+
           - name: GitHub-analysis publisher stays dry-run by default
             run: |
               # The one property this whole feature depends on (#74):
