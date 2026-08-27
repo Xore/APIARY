@@ -97,6 +97,14 @@ const fetchAppearance = createServerFn({ method: 'GET' }).handler(async (): Prom
 /// a value would immediately write it back and every page load would cost a
 /// PUT.
 export async function pullAppearance(): Promise<void> {
+  // Arm the event bridges here as well as from useAppearanceKey's subscribe:
+  // the root route mounts everywhere (routes/__root.tsx), but a page that
+  // renders no subscriber never reaches that registration path -- settings,
+  // where themes are actually changed, has none. Arming is idempotent, the
+  // listeners cost one entry each for the life of the document, and both
+  // functions guard non-window contexts themselves.
+  watchOsTheme()
+  watchCrossTabAppearance()
   try {
     const { mode, theme } = await fetchAppearance()
     if (mode && mode !== getThemeMode()) applyTheme(mode, { sync: false })
@@ -347,8 +355,10 @@ function watchOsTheme() {
 // pushed the new value to the server preference store, so re-pushing from each
 // open tab would put N-1 redundant PUTs behind every toggle.
 //
-// Registered once, lazily, next to watchOsTheme(): one listener for the life
-// of the document and there is no point at which the answer stops mattering.
+// Registered once, lazily, from useAppearanceKey's subscribe and again from
+// pullAppearance() -- whichever a given page reaches first; one listener for
+// the life of the document and there is no point at which the answer stops
+// mattering. The subscribe path alone left chartless pages unarmed.
 let crossTabWatched = false
 function watchCrossTabAppearance() {
   if (crossTabWatched || typeof window === 'undefined') return
