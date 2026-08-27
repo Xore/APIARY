@@ -219,8 +219,12 @@ for volume in dashboard-state honeypot-arcane_arcane-data honeypot-elk_evebox-co
               honeypot-canarytokens_canarytokens-redis-data \
               honeypot-dashboard_es-importer-state; do
   docker volume inspect "$volume" >/dev/null 2>&1 || continue
+  # Same #2348 digest pin as backup-honeypot.sh (#1955 policy form) -- the
+  # on-host copy's header carries the full rationale; this sibling pull is
+  # the same unowned input from the workstation side.
   docker run --rm --network none -v "$volume:/source:ro" \
-    -v "$stage/volumes:/backup" busybox:1.36 \
+    -v "$stage/volumes:/backup" \
+    busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662 \
     tar -C /source -czf "/backup/$volume.tar.gz" . 2>/dev/null || {
       echo "  volume $volume: FAILED" >&2; continue; }
 done
