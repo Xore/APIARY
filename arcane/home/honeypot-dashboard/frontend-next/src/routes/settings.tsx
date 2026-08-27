@@ -2475,9 +2475,6 @@ export function SettingsSurface({
   const [servicesData, setServicesData] = useState<ServicesResponse | null>(null)
   const [historyData, setHistoryData] = useState<HistoryResponse | null>(null)
   const [auditData, setAuditData] = useState<AuditResponse | null>(null)
-  // #2178: fetchAdminData now fails whole instead of manufacturing defaults;
-  // the admin panes render this state rather than fabricated configuration.
-  const [adminFailed, setAdminFailed] = useState(false)
   const [reporterStatsData, setReporterStatsData] = useState<ReporterStats | null>(null)
 
   const isAdmin = !user || user.role === 'admin'
