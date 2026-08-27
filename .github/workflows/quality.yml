@@ -854,6 +854,17 @@ jobs:
               # stays with --selftest --round-trip (#318) instead.
               python sandbox/cape/worker/tests/test_cape_worker.py
 
+          - name: Real-data session probe metadata honesty (#2387)
+            run: |
+              # contracts is stubbed, so /app, pydantic, ES, docker and Ollama
+              # stay out of CI. Pins both halves of the metadata honesty fix:
+              # stage 0's correlated auth/duration evidence reaches
+              # session_prompt() unchanged (the old code pinned
+              # auth_success=False / duration=0.0 under an EXACT-prompt claim),
+              # and sessions whose evidence missed the lookback window are
+              # reported and skipped instead of being prompted with defaults.
+              python analysis/ghidra/benchmarks/tests/test_probe_real_session.py
+
           - name: Statictools lief contract (#2072)
             home: true
             run: |
