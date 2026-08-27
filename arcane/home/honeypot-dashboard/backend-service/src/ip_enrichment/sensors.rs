@@ -6,9 +6,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
-use regex::Regex;
 use serde_json::Value;
-use std::sync::LazyLock;
 
 use super::canonical::promote_canonical_fields;
 use super::tftp::is_tftp_relay_record;
