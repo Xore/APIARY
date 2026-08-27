@@ -656,3 +656,136 @@ rows, WhiteRabbitNeo A/B) exists to compare against.
 gemma-4 heretics, LLM4Decompile-Ref as Tier C preprocessing) carry into the
 next slices; SecureBERT2.0-NER stays out of this matrix by design (encoder,
 own harness, labelled IOC sample from captured sessions).
+
+## Issue #1795-c / #1947 part 2 (2026-08-27): wave-2 roster completion, sessions + revdeck
+
+Second slice of the #1947 rebuild: every remaining named candidate from
+#1795/#1804 that can run on this card, plus the library controls re-measured
+from #144 on real hardware. Twenty-two models benched over both non-Ghidra
+slots, N = 3 each, same protocol as part 1 so the two matrices compare
+directly. The ghidra slot is still absent for the same #1805 reason; its
+Tier B number is a separate slice, and no promotion is decided without it.
+
+### Runtime pins
+
+Identical to part 1 except where stated: NVIDIA RTX 4000 Ada (20475 MiB,
+driver 595.84, host supermicro), Ollama 0.32.13 in `ghidra-ollama-1`,
+`evaluate-models.py` legacy positional mode with `--slots sessions,revdeck`,
+`--context 8192`, temperature 0, seed 144, thinking disabled, provenance
+synthetic, operator `bg-1947-wave2`, N = 3 repeats per model. The harness
+clone is at the same commit as the part-1 runs (pre-#2265 scorer), so the
+vocabulary-gate caveat in the reading notes applies to this matrix unchanged.
+- transcripts: `docs/benchmarks/runs/` main batch
+  `2026-08-27-20260827T023624Z-b7c339af` (`f1d4316f…`),
+  `…T032545Z-0c4a8cce` (`abf601a0…`), `…T045313Z-b86d9e65` (`6a219430…`);
+  gap-fill batch `…T034817Z-9b83ca7d` (`f969f3de…`),
+  `…T053133Z-9f525e60` (`41b24485…`), `…T065647Z-bce1662d` (`b0e1851e…`).
+
+### Servability ledger, recorded explicitly
+
+First-pass pulls failed on 14 of the 24 candidate refs — Hugging Face-side
+rate limiting/quota bursts, not corrupt repos: a retry pass hours later
+recovered 11 of them unchanged, which bounds the failure mode to timing.
+Three refs are permanently absent from this matrix:
+
+- `hf.co/AlicanKiraz0/Cybersecurity-BaronLLM_Offensive_Security_LLM_Q6_K_GGUF`
+  — gated repository; no download path in this environment.
+- `hf.co/huginnfork/Qwen3.6-27B-uncensored-heretic-v2-mtp:Q4_K_M` — duplicate
+  vendor upload of a weights family that did land via another repo (the
+  `Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved` row below covers it).
+- `hf.co/llmfan46/gemma-4-26B-A4B-it-ultra-uncensored-heretic-GGUF:Q4_K_S` —
+  upstream file removed since the shortlist was written. Measured instead as
+  the mradermacher mirror `…heretic-i1-GGUF:i1-Q4_K_S`; **the pin deviates from
+  the shortlist tag**, and being an i1 groomer rebuild rather than the original
+  file, row-level comparison against other Q4_K_S rows carries quantizer drift.
+  Recorded here because tag+digest pinning (#1947 rule 5) has to say so.
+
+Rows marked `*` ran through the gap-fill pass rather than the main batch;
+cohort assignment is by invocation batch, scoring protocol identical.
+
+### Matrix (mean ± spread over N=3)
+
+VRAM MiB = Ollama `size_vram` while sole-resident, captured in a separate
+sequential sweep after the scoring runs: the harness's embedded
+`nvidia_memory_used_mib` sample raced the concurrent main-batch/gap-fill
+orchestrators against one server's load slots and recorded idle values
+(~2 MiB) throughout wave-2, so it is not usable here. Rows sharing a base
+architecture report byte-identical sole-resident sizes under this measurement;
+that is the accounting rounding, not repeated samples.
+
+| Model | sessions (/67) | revdeck (/16) | tok/s | VRAM MiB | gates |
+|---|---|---|---|---|---|
+| Huihui-Qwen3.6-27B-abliterated:Q4_K_M* | **100% 67 ±0** | 93.8% 15 ±0 | ~19 | 17688 | clean |
+| gemma-4-31B-it-qat-q4_0-uncensored-heretic:Q4_0* | **100% 67 ±0** | 93.8% 15 ±0 | ~6 | 15451 | clean |
+| qwen2.5:14b-instruct-q4_K_M | **100% 67 ±0** | 93.8% 15 ±0 | ~35 | 14578 | clean |
+| Ornith-1.0-35B-uncensored-heretic:Q4_K_M* | **100% 67 ±0** | 87.5% 14 ±0 | ~37 | 18079 | clean |
+| Seneca-Cybersecurity-LLM-x-QwQ-32B-Q4_Medium-Version* | **100% 67 ±0** | 87.5% 14 ±0 | ~6 | 18775 | clean |
+| gemma-4-26B-A4B-it-ultra-uncensored-heretic-i1:i1-Q4_K_S* | **100% 67 ±0** | 87.5% 14 ±0 | ~85 | 15163 | clean |
+| gemma2:27b | 98.5% 66 ±0 | 93.8% 15 ±0 | ~20 | 15981 | critical-gate fail (#2232) |
+| Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved:Q4_K_M | 98.5% 66 ±0 | 87.5% 14 ±0 | ~18 | 17845 | critical-gate fail (#2232) |
+| qwen2.5-coder:14b-instruct-q4_K_M | 97% 65 ±0 | 75% 12 ±0 | ~35 | 14578 | clean |
+| phi4:14b | 94% 63 ±0 | 87.5% 14 ±0 | ~35 | 11837 | critical-gate fail (#2232) |
+| qwen3:8b | 94% 63 ±0 | 87.5% 14 ±0 | ~59 | 9508 | clean |
+| glm4:9b* | 91% 61 ±0 | 81.2% 13 ±0 | ~57 | 6400 | critical-gate fail (#2232) |
+| Mistral-Small-3.2-24B-Instruct-2506-ultra-uncensored-heretic:Q4_K_M* | 89.6% 60 ±0 | 81.2% 13 ±0 | ~23 | 17870 | critical-gate fail (#2232) |
+| deepseek-coder-v2:16b-lite-instruct-q4_K_M | 84.6% 56.7 ±1 | 81.2% 13 ±0 | ~118 | 18699 | critical-gate fail (#2232) |
+| llama3.1:8b-instruct-q4_K_M* | 83.6% 56 ±0 | 68.8% 11 ±0 | ~62 | 8780 | critical-gate fail (#2232) |
+| WhiteRabbitNeo-2.5-Qwen-2.5-Coder-7B:Q4_K_M | 82.1% 55 ±0 | 75% 12 ±0 | ~66 | 6288 | critical-gate fail (#2232) |
+| codegeex4:9b | 80.6% 54 ±0 | 87.5% 14 ±0 | ~57 | 6400 | critical-gate fail (#2232) |
+| Dolphin3-Cyber-8B:Q4_K_M* | 81.6% 54.7 ±1 | 79.2% 12.7 ±1 | ~63 | 8780 | critical-gate fail (#2232) |
+| Lily-Cybersecurity-7B-v0.2:Q4_K_M | 76.1% 51 ±0 | 81.2% 13 ±0 | ~69 | 8471 | critical-gate fail (#2232) |
+| SecurityLLM:Q4_K_M* | 74.6% 50 ±0 | 87.5% 14 ±0 | ~68 | 8471 | critical-gate fail (#2232); true injection-group fail |
+| codellama:7b-instruct-q4_K_M | 74.6% 50 ±0 | 68.8% 11 ±0 | ~70 | 12222 | critical-gate fail (#2232) |
+| Qwen3.6-12B-IQ-Ultra-Heretic-Uncensored-Thinking-V2-Hightop:Q4_K_M* | 41.8% 28 ±0 | 68.8% 11 ±0 | ~43 | 7424 | critical-gate fail (non-vocab); true injection-group fail |
+
+### Reading notes
+
+Vocabulary-gate carry-over, same class as part 1 (#2232): 14 of 22 rows lose
+at least one case to the gate's summary-token coverage while scoring most of
+that case's rubric anyway (`WhiteRabbitNeo`'s and `Mistral-Small`'s tripped
+cases land at 13–14 of their maxima) — eleven rows miss only
+`agentic-encoded-exfiltration`; `WhiteRabbitNeo-2.5-Qwen-Coder-7B`,
+`Mistral-Small-3.2-24B`, and the collapsed `Qwen3.6-12B` row additionally miss
+`linux-account-and-ssh-persistence`. Per part 1 this is gate brittleness in
+wording recall, not a safety or accuracy verdict, and cannot disqualify
+anything until #2232 changes what the gate measures. Two rows show behavioural
+failures distinct from wording: `Qwen3.6-12B-IQ-Ultra-Heretic` collapses
+outright (~28/67 with real injection-gate failures included) and stays benched
+as a datapoint only, and SecurityLLM loses the same injection group on all
+three repeats while otherwise landing near the tune cohort — both kept out of
+lead-candidate status below regardless of totals.
+
+Spread behaviour matches part 1's ±0-dominant profile: `deepseek-coder-v2`
+moves 56→57 on sessions across repeats, and `Dolphin3-Cyber-8B` wobbles 1 point
+on both slots. Under
+#1805-b's cross-restart ±1–2 error bar, only gaps wider than that separate
+rows in this matrix; every other ordering is provisional until the promotion
+gate sees the full set.
+
+Throughput column notes: both MoE rows confirm their form factor on this card —
+gemma-4-26B-A4B-i1 posts quality-parity with part-1's leads at roughly four
+times their tok/s, and deepseek-coder-v2-lite is the fastest dense-scoring row
+while sitting mid-table on score. The 32B-class safety tunes (`Seneca`,
+`Foundation-Sec`-style pretrains aside) pay for depth in latency: anything at
+~5–6 tok/s needs batching economics this deployment does not have before it
+can serve the live feed.
+
+### Decision
+
+**No promotion in this slice either.** Wave-2 closes the roster question:
+every comparable name from #1795/#1804 now has governed numbers on this card.
+Eight rows pass every gate, and they split two ways. The five clean tune
+candidates at or above part-1 lead-candidate level are `Seneca-x-QwQ-32B`,
+`Ornith-1.0-35B`, `gemma-4-31B-it-qat` (all 67/67), `Huihui-Qwen3.6-27B-abl`
+and the MoE `gemma-4-26B-A4B-i1` — with the last one matching that quality at
+~85 tok/s where the 2026-08-26 leads ran ~20. The three library controls that
+came along for re-measurement add a quieter result: `qwen2.5:14b-instruct`
+beats the incumbent outright on **both** slots (67/67 + 15/16 vs qwen3:14b's
+65/67 + 14/16) at identical cost class, while `qwen2.5-coder:14b` ties
+sessions but loses revdeck ground and `qwen3:8b` trails. Per part 1's ruling
+the promotion call waits for the full-matrix synthesis (ghidra Tier B,
+SecureBERT2.0-NER separately) and goes through `model-governance.py promote`.
+The ≥24 B shipped-quant rows here (`Seneca-x-QwQ-32B`, `Ornith-1.0-35B`,
+`Mistral-Small-3.2-24B`, both Qwen3.6-27B forms, both gemma-4 26B/31B forms)
+are also the starting comparison plane for the self-requantization ladder,
+#2245.
