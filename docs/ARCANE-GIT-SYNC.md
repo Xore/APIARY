@@ -45,13 +45,17 @@ been provisioned once.
 ## Manifest import
 
 `scripts/install-homeserver.sh`'s `step_arcane_import_stacks` reads the
-manifest and creates one `POST /environments/0/gitops-syncs` per
-`honeypot-*` entry (environment `0` is Arcane's single "Local Docker"
-environment on a one-host deployment). The 6 non-`honeypot-*` stacks are
-**not** imported by that step — they're still provisioned by their own
-existing `scripts/install-homeserver.sh` steps on a from-scratch install
-(retiring those in favor of Arcane management is a deliberate follow-up,
-not done in #1502 — see that script's own comment on why).
+manifest and creates one `POST /environments/0/gitops-syncs` per matching
+entry (environment `0` is Arcane's single "Local Docker" environment on a
+one-host deployment). Its selection filter matches every `honeypot-*`
+entry — and, since #1505, three of the six non-`honeypot-*` stacks too:
+`auth-events-worker`, `llm-worker` and `ml-worker` are imported by that
+step as well (each confirmed to have no host-local state beyond `.env`).
+The other three keep their dedicated installer steps for reasons specific
+to each: `pihole`'s non-`.env` host state, `analysis/ghidra`'s conditional
+GPU compose overlay, and `sandbox/ghosts`'s Arcane build-context
+limitation (#1506) — see the script's own Phase 8 header comment for the
+reasoning behind each.
 
 To import (or re-import) by hand instead, `POST` the manifest's entries to
 `/environments/0/gitops-syncs/import` — the bulk-import shape matches the
