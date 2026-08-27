@@ -239,12 +239,11 @@ async fn append_log_line(log_file: String, line: serde_json::Value) {
         tracing::debug!(log_file = %log_file, "[E-OBS] durable request log unavailable");
         return;
     };
-    match serde_json::to_string(&line) {
-        Ok(mut rendered) => {
-            rendered.push('\n');
-            let _ = file.write_all(rendered.as_bytes()).await;
-        }
-        Err(_) => {}
+    // if let, not a two-arm match: clippy single_match (-D warnings) fails
+    // the build otherwise, and the Err arm carries no behavior anyway.
+    if let Ok(mut rendered) = serde_json::to_string(&line) {
+        rendered.push('\n');
+        let _ = file.write_all(rendered.as_bytes()).await;
     }
 }
 
