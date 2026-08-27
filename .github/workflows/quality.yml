@@ -908,6 +908,18 @@ jobs:
               python -m pip install -r ml-worker/requirements.txt pytest
               python -m pytest ml-worker/tests/ -v
 
+          # #2219: Keycloak caps every admin-events page silently, and the
+          # single-page fetch permanently dropped everything past row 1,000
+          # on exactly the credential-spray days this telemetry exists for.
+          # The pagination contracts (stubbed HTTP layer, no live service)
+          # pin the drained/undrained pager and its checkpoint-hold rule.
+          # pytest again only installed here -- not a production dependency.
+          - name: auth-events-worker Keycloak pagination contracts
+            home: true
+            run: |
+              python -m pip install -r auth-events-worker/requirements.txt pytest
+              python -m pytest auth-events-worker/tests/ -v
+
           - name: es-results-importer chunked-upload and dedup contracts
             home: true
             run: |
