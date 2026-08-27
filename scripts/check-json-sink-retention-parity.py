@@ -84,6 +84,22 @@ ROWS = [
         "writer": ("arcane/home/honeypot-mailoney/mailoney",
                    ["MAILONEY_JSON_MAX_BYTES"]),
     },
+    # #2323: the two zeek-proxy directories prune on the same two-sided
+    # contract, but their writer half is Zeek's own rotation/extraction
+    # (site scripts, not a Go knob), so the proof tokens are the redef /
+    # hook that would have to disappear for the half to stop existing.
+    {
+        "dir": "/logs/zeek-proxy",
+        "globs": ["'*.log'"],
+        "writer": ("arcane/home/honeypot-elk/zeek-proxy",
+                   ["Log::default_rotation_interval"]),
+    },
+    {
+        "dir": "/logs/zeek-proxy-extract",
+        "globs": ["'*.bin'"],
+        "writer": ("arcane/home/honeypot-elk/zeek-proxy",
+                   ["extract_filename"]),
+    },
 ]
 
 
