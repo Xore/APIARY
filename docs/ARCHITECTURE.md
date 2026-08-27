@@ -20,8 +20,8 @@ the only compose profile in the repo is the optional on-demand
 A public VPS terminates attacker traffic — Suricata sniffs it, Traefik
 routes HTTP through Keycloak-backed auth, portbridge relays raw protocol
 ports — and forwards everything over a home-initiated WireGuard tunnel to
-a homeserver running **32 Arcane-managed sensor/worker/utility stacks**
-(plus 6 more at repository-root paths; 38 sync entries in
+a homeserver running **31 Arcane-managed sensor/worker/utility stacks**
+(plus 6 more at repository-root paths; 37 sync entries in
 [`arcane/manifests/home-production.json`](../arcane/manifests/home-production.json),
 which is authoritative — not `.github/workflows/deploy.yml`). Sensors
 write JSON logs to shared host directories; Filebeat ships them into
