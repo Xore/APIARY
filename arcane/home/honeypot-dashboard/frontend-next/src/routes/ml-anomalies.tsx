@@ -17,6 +17,25 @@ import { countryName } from '../lib/country'
 
 type AckRecord = { Acknowledged: boolean; AckedBy?: string; AckedAt?: string }
 
+// #1968's closed operator vocabulary. Unlike acks (a sidecar index keyed by
+// doc id), these land ON the anomaly document itself — verdicts beside
+// scores — because they feed the labelled corpus (#1794/#1797). "open" is
+// the worker-set default plus the explicit retraction value, not a choice.
+const DISPOSITIONS = ['false_positive', 'true_positive', 'benign_known'] as const
+type Disposition = (typeof DISPOSITIONS)[number]
+
+function dispositionBadge(status: string) {
+  switch (status) {
+    case 'true_positive':
+      return <span className="badge badge--danger">true positive</span>
+    case 'false_positive':
+      return <span className="badge badge--success">false positive</span>
+    case 'benign_known':
+      return <span className="badge badge--info">benign known</span>
+  }
+  return <span className="badge badge--muted">{status}</span>
+}
+
 const fetchAcks = createServerFn({ method: 'GET' }).handler(async (): Promise<Record<string, AckRecord> | null> => {
   const { serviceJSON } = await import('../lib/backend.server')
   return serviceJSON<Record<string, AckRecord>>('/api/v1/ml-anomalies/acks')
@@ -112,6 +131,24 @@ const setAck = createServerFn({ method: 'POST' })
     return response.ok
   })
 
+// #1968 operator disposition — same admin gate as setAck, different write:
+// detail.rs's ml_anomaly_disposition does a partial `_update` on the
+// anomaly document (reason free-text, valued for the labelled corpus).
+const setDisposition = createServerFn({ method: 'POST' })
+  .inputValidator((input: { key: string; status: string; reason?: string }) => input)
+  .handler(async ({ data }): Promise<boolean> => {
+    const { getSessionUser } = await import('../lib/auth')
+    const user = await getSessionUser()
+    if (!user || user.role !== 'admin') return false
+    const { serviceFetch } = await import('../lib/backend.server')
+    const response = await serviceFetch('/api/v1/ml-anomalies/disposition', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...data, reason: data.reason ?? '', actor: user?.username ?? '' }),
+    })
+    return response.ok
+  })
+
 // Bulk acknowledge (#1566) — the server iterates every open anomaly and
 // reuses the single-ack write path (detail.rs's ml_anomaly_ack_all), same
 // admin gate as setAck. Returns how many records it flipped, or null on
@@ -159,6 +196,63 @@ function AckControl({ docIds, acks, onChanged }: { docIds: string[]; acks: Recor
     >
       {busy ? '…' : acked ? `Reopen ${many ? `all ${docIds.length}` : 'anomaly'}` : `Acknowledge ${many ? `all ${docIds.length}` : 'anomaly'}`}
     </button>
+  )
+}
+
+// #1968: verdicts go on the document, so a folded run is judged as a whole
+// here too — disposing only the representative would leave identical
+// siblings of the same burst carrying different verdicts. "Retract" assigns
+// the open status explicitly (clearing reason/actor/time server-side) so a
+// mis-clicked verdict is undoable rather than permanent.
+function DispositionControl({ docIds, row, onChanged }: { docIds: string[]; row: StoreRow; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [selection, setSelection] = useState<Disposition>('true_positive')
+  const [reason, setReason] = useState('')
+  if (!docIds.length) return null
+  const disposed = (DISPOSITIONS as readonly string[]).includes(str(row, 'status'))
+  const many = docIds.length > 1
+  const apply = async (next: Disposition | 'open') => {
+    setBusy(true)
+    try {
+      const results = await Promise.all(docIds.map((id) => setDisposition({ data: { key: id, status: next, reason } })))
+      if (results.some(Boolean)) onChanged()
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <>
+      <label className="form-label" htmlFor="hp-ml-disposition-select">
+        Disposition{many ? ` — applies to all ${docIds.length}` : ''}
+      </label>
+      <select
+        id="hp-ml-disposition-select"
+        className="form-input"
+        value={selection}
+        onChange={(event) => setSelection(event.target.value as Disposition)}
+      >
+        {DISPOSITIONS.map((value) => (
+          <option key={value} value={value}>
+            {value.replace('_', ' ')}
+          </option>
+        ))}
+      </select>
+      <input
+        className="form-input"
+        type="text"
+        placeholder="why (kept beside the score for the labelled corpus)"
+        value={reason}
+        onChange={(event) => setReason(event.target.value)}
+      />
+      <button className="btn btn-sm btn-secondary" type="button" disabled={busy} onClick={() => void apply(selection)}>
+        {busy ? '…' : disposed ? `Change to ${selection.replace('_', ' ')}` : 'Record disposition'}
+      </button>
+      {disposed ? (
+        <button className="btn btn-sm btn-secondary" type="button" disabled={busy} onClick={() => void apply('open')}>
+          Retract
+        </button>
+      ) : null}
+    </>
   )
 }
 
@@ -228,6 +322,17 @@ function modelScore(row: StoreRow, key: string): string {
   const scores = row.model_scores as Record<string, unknown> | null | undefined
   const value = scores?.[key]
   return typeof value === 'number' ? value.toFixed(2) : '—'
+}
+
+// The two lifecycles in one bucket per row (#1968 kept both: on-document
+// dispositions for verdicts worth labelling, sidecar acks for "seen, no
+// verdict"). A disposition outranks acks; a partially acknowledged folded
+// run reads as open because it still has findings to do.
+function lifecycle(row: StoreRow, acks: Record<string, AckRecord>): 'open' | 'acknowledged' | Disposition {
+  const doc = str(row, 'status')
+  if ((DISPOSITIONS as readonly string[]).includes(doc)) return doc as Disposition
+  const acked = idsFor(row).every((id) => acks[id]?.Acknowledged ?? false)
+  return acked ? 'acknowledged' : 'open'
 }
 
 // Pivot to the exact source event, ported from mlAnomaly.SourceLink():
@@ -300,6 +405,13 @@ function buildColumns(acks: Record<string, AckRecord>): Column<StoreRow>[] {
     {
       header: 'status',
       render: (row) => {
+        // A stored disposition (#1968) outranks the sidecar acks for its own
+        // doc: once an operator has judged the finding, that is the status.
+        // Folded siblings carry no fields client-side (collapseRuns keeps
+        // ids only), but dispositions are applied group-wide from this very
+        // UI, so reading the representative is honest in practice.
+        const repStatus = str(row, 'status')
+        if ((DISPOSITIONS as readonly string[]).includes(repStatus)) return dispositionBadge(repStatus)
         // #1566: a folded row speaks for every anomaly in it. Reading only
         // the representative's ack would show "acknowledged" over a run
         // that still has open findings inside it.
@@ -320,6 +432,62 @@ function buildColumns(acks: Record<string, AckRecord>): Column<StoreRow>[] {
     { header: 'dst port', detail: true, render: (row) => str(row, 'dst_port') },
     { header: 'proto', detail: true, render: (row) => str(row, 'proto') },
     { header: 'source index', detail: true, render: (row) => str(row, 'source_index') },
+    // #1968: the alert must be judgeable without a second query — producing
+    // sensor, our side of the flow, and exactly which threshold + promoted
+    // model checkpoints produced this score (the #1959 forensics gap).
+    {
+      header: 'sensor',
+      detail: true,
+      render: (row) => str(row, 'sensor') || <span className="text-muted">—</span>,
+    },
+    { header: 'our ip', detail: true, render: (row) => str(row, 'dst_ip') || <span className="text-muted">—</span> },
+    {
+      header: 'their port',
+      detail: true,
+      className: 'n',
+      render: (row) => {
+        const port = num(row, 'src_port')
+        return port > 0 ? String(port) : <span className="text-muted">—</span>
+      },
+    },
+    {
+      header: 'flow id',
+      detail: true,
+      className: 'v',
+      render: (row) =>
+        str(row, 'community_id') ? <code>{str(row, 'community_id')}</code> : <span className="text-muted">—</span>,
+    },
+    {
+      header: 'threshold @ scoring',
+      detail: true,
+      className: 'n',
+      render: (row) =>
+        typeof row['alert_threshold'] === 'number' ? row['alert_threshold'].toFixed(4) : <span className="text-muted">—</span>,
+    },
+    {
+      header: 'source class',
+      detail: true,
+      render: (row) => {
+        const value = row['src_internal']
+        if (value === undefined || value === null) return <span className="text-muted">—</span>
+        return value ? 'internal' : 'external'
+      },
+    },
+    {
+      header: 'model state',
+      detail: true,
+      className: 'v',
+      render: (row) =>
+        str(row, 'model_state_id') ? (
+          <code title="Promoted detector checkpoints behind the score — None until all three models have been trained">
+            {str(row, 'model_state_id')}
+          </code>
+        ) : (
+          <span className="badge badge--muted" title="No full detector trio was promoted when this score was computed">
+            untrained detectors
+          </span>
+        ),
+    },
   ]
 }
 
@@ -344,6 +512,16 @@ function Page() {
   }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- load once
   useEffect(refreshAcks, [])
+
+  // Dispositions write onto the documents themselves (#1968), so applying
+  // one means refetching rows, not just the ack index. Like any filter
+  // change this collapses back to the first page.
+  const reload = useCallback(async () => {
+    const page = await fetchPage({ data: { offset: 0 } })
+    if (!page) return
+    setRows(page.rows)
+    setTotal(page.total)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -386,10 +564,9 @@ function Page() {
     return rows.filter((row) => {
       if (severity && str(row, 'severity') !== severity) return false
       if (eventType && str(row, 'event_type') !== eventType) return false
-      if (status) {
-        const acked = acks[str(row, '_doc_id')]?.Acknowledged ?? false
-        if (status === 'open' ? acked : !acked) return false
-      }
+      // status now spans both lifecycles (#1968): the three on-document
+      // dispositions plus the legacy open/acknowledged ack states.
+      if (status && lifecycle(row, acks) !== status) return false
       return true
     })
   }, [rows, severity, eventType, status, acks])
@@ -437,7 +614,7 @@ function Page() {
       />
       <p className="note">
         Composite scores from ml-worker's three unsupervised models (Isolation Forest, LSTM-AE, HBOS) — statistical
-        outliers, not confirmed attacks.
+        outliers, not confirmed attacks. Operator dispositions are stored on the anomaly itself and survive re-scoring.
       </p>
       <div className="metric-grid" id="ml-kpis">
         <div className="metric">
@@ -520,9 +697,14 @@ function Page() {
               Status
             </label>
             <select className="form-input" id="hp-ml-filter-status" name="status" defaultValue={status}>
-              <option value="">any status</option>
+              <option value="">all statuses</option>
               <option value="open">open</option>
               <option value="acknowledged">acknowledged</option>
+              {DISPOSITIONS.map((value) => (
+                <option key={value} value={value}>
+                  {value.replace('_', ' ')}
+                </option>
+              ))}
             </select>
           </div>
         </FiltersModal>
@@ -550,12 +732,28 @@ function Page() {
         inspectorTitle="Anomaly details"
         inspectorExtra={(row) => (
           <>
+            {(() => {
+              const doc = str(row, 'status')
+              if (!(DISPOSITIONS as readonly string[]).includes(doc)) return null
+              return (
+                <p className="note">
+                  Disposition: <strong>{doc.replace('_', ' ')}</strong>
+                  {str(row, 'disposition_by') ? ` by ${str(row, 'disposition_by')}` : ''}
+                  {str(row, 'disposed_at') ? ` at ${formatTimestamp(str(row, 'disposed_at'))}` : ''}
+                  {str(row, 'disposition_reason') ? <> — “{str(row, 'disposition_reason')}”</> : null}
+                </p>
+              )
+            })()}
             {acks[str(row, '_doc_id')]?.Acknowledged ? (
               <p className="note">
                 Acknowledged by {acks[str(row, '_doc_id')]?.AckedBy || 'unknown'}
                 {acks[str(row, '_doc_id')]?.AckedAt ? ` at ${formatTimestamp((acks[str(row, '_doc_id')]!.AckedAt as string))}` : ''}
               </p>
             ) : null}
+            {/* Disposition first (#1968): it's the verdict an operator is
+                here to record; the sidecar ack stays for the quick "seen"
+                that carries no verdict. */}
+            <DispositionControl docIds={idsFor(row)} row={row} onChanged={() => void reload()} />
             <AckControl docIds={idsFor(row)} acks={acks} onChanged={refreshAcks} />
           </>
         )}

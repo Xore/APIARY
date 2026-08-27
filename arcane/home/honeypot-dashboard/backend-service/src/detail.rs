@@ -568,3 +568,65 @@ pub async fn ml_anomaly_acks(State(state): State<AppState>) -> Result<Json<Value
     }
     Ok(Json(Value::Object(map)))
 }
+
+#[derive(Deserialize)]
+pub struct MlDispositionBody {
+    /// The anomaly document's _id (surfaced as _doc_id on store rows).
+    pub key: String,
+    /// Closed lifecycle set (#1968). `open` is assignable only as an
+    /// explicit retraction — a mis-clicked verdict must be undoable, not
+    /// half-survive beside its withdrawn status.
+    pub status: String,
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default)]
+    pub actor: String,
+}
+
+/// POST /api/v1/ml-anomalies/disposition — #1968's operator verdict, written
+/// ONTO the ml-anomalies document itself so the labelled corpus #1794/#1797
+/// feed on lives beside the score it judges. Deliberately an `_update`
+/// partial (`update_doc`, retry-on-conflict), never a whole-document index:
+/// the worker owns every other field and rewrites them wholesale on replay,
+/// preserving only the disposition_* fields it reads back first. The legacy
+/// ack sidecar index keeps working unchanged alongside this.
+pub async fn ml_anomaly_disposition(
+    State(state): State<AppState>,
+    Json(body): Json<MlDispositionBody>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    if body.key.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "missing anomaly key".into()));
+    }
+    match body.status.as_str() {
+        "open" | "false_positive" | "true_positive" | "benign_known" => {}
+        other => return Err((StatusCode::BAD_REQUEST, format!("invalid status: {other}"))),
+    }
+    let doc = if body.status == "open" {
+        // Retraction nulls the metadata out (ES keeps explicit nulls, which
+        // the worker's read-back then treats as unset) instead of leaving a
+        // stale reason and actor beside a withdrawn verdict.
+        json!({
+            "status": "open",
+            "disposition_reason": serde_json::Value::Null,
+            "disposition_by": serde_json::Value::Null,
+            "disposed_at": serde_json::Value::Null,
+        })
+    } else {
+        json!({
+            "status": body.status,
+            "disposition_reason": body.reason,
+            "disposition_by": body.actor,
+            "disposed_at": chrono::Utc::now().to_rfc3339(),
+        })
+    };
+    state
+        .es
+        .update_doc("ml-anomalies", &body.key, doc)
+        .await
+        .map_err(bad_gateway)?;
+    Ok(Json(json!({
+        "key": body.key,
+        "status": body.status,
+        "disposed_at": chrono::Utc::now().to_rfc3339(),
+    })))
+}
