@@ -68,7 +68,7 @@ func main() {
 
 func runScan(es *esClient, dirs []string) {
 	start := time.Now()
-	files, paths := scanDirs(dirs)
+	files, paths, stats := scanDirs(dirs)
 	failures := indexPayloadInventory(es, files)
 	for _, file := range files {
 		if path, ok := paths[file.Hash]; ok {
@@ -77,8 +77,13 @@ func runScan(es *esClient, dirs []string) {
 			}
 		}
 	}
-	if failures > 0 {
-		log.Printf("payload-inventory-worker: scan complete WITH %d elasticsearch failure(s): %d unique files in %s", failures, len(files), time.Since(start).Round(time.Millisecond))
+	// #2343: the completion line must not claim a clean full scan when the
+	// walk itself lost entries (unreadable/corrupt capture trees make an
+	// incomplete inventory indistinguishable from a complete one otherwise).
+	// Walk errors omit entries outright; unreadable opens still write a row
+	// but with the degraded octet-stream/no-preview classification.
+	if problems := failures + stats.WalkErrs + stats.Unreadable; problems > 0 {
+		log.Printf("payload-inventory-worker: scan complete WITH PROBLEMS: %d elasticsearch failure(s), %d walk error(s), %d unopenable file(s): %d unique files in %s", failures, stats.WalkErrs, stats.Unreadable, len(files), time.Since(start).Round(time.Millisecond))
 		return
 	}
 	log.Printf("payload-inventory-worker: scan complete: %d unique files in %s", len(files), time.Since(start).Round(time.Millisecond))
