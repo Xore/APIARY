@@ -12,12 +12,24 @@ set -euo pipefail
 fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "pass: $*"; }
 
-[[ ! -e /etc/honeypot-github.env ]] || \
-  fail "refusing to run: /etc/honeypot-github.env exists on this machine and could leak into the test"
-
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
+
+# Pin the env-file path into the sandbox. process-github-requests.sh sources
+# ${GITHUB_ANALYSIS_ENV_FILE:-/etc/honeypot-github.env} whenever the file
+# exists, and this suite's CI lane runs on the real homeserver runner
+# (#2389), which legitimately has /etc/honeypot-github.env installed --
+# sourcing it would override these hermetic exports with live host state
+# (GH_PAT, GITHUB_REPO, real dirs). The old refuse-guard closed that leak
+# by refusing to run on any host carrying the file, which made this test
+# permanently red on the very runner it is routed to (#2461). Pointing the
+# variable at an empty fixture inside $work closes the same leak
+# deterministically instead: nothing host-owned can ever be sourced, and
+# the exported GITHUB_PUBLISH_ENABLED/CAP below stay the only inputs.
+: >"$work/host-env"
+export GITHUB_ANALYSIS_ENV_FILE="$work/host-env"
+
 today=$(date -u +%F)
 yesterday=$(date -u -d "yesterday" +%F)
 
