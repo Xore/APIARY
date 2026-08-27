@@ -116,12 +116,15 @@ services:
       # dynamic.yml's honeypot-canarytokens router matches a wildcard
       # under it, not a dedicated cdn.* subdomain (see that router's own
       # comment for why: Cloudflare's free Universal SSL doesn't cover a
-      # second wildcard level). Placeholder here per this repo's usual
-      # convention -- override CANARY_PUBLIC_HOSTNAME in .env with the
-      # real deployed apex domain (this repo's usual honeypot.example
-      # placeholder gets sed-replaced to the real deployed domain at
-      # deploy time, same as every other public hostname in this repo --
-      # see docs/CGNAT-DEPLOYMENT.md).
+      # second wildcard level). Override CANARY_PUBLIC_HOSTNAME in .env
+      # with the real deployed apex domain BEFORE creating any token:
+      # deploy-time sed passes cover vps/traefik/dynamic.yml only --
+      # nothing substitutes placeholders inside this stack's compose or
+      # .env (#2331), so an un-overridden value bakes honeypot.example
+      # straight into every issued artifact. The dashboard's create API
+      # refuses generation whose returned hostname still sits under one
+      # of those reserved documentation suffixes rather than plant
+      # triggers that can never resolve.
       - CANARY_DOMAINS=${CANARY_PUBLIC_HOSTNAME:-honeypot.example}
       # #1487 follow-up: several token types (PDF, signed exe/dll -- see
       # pdfgen.py/authenticode.py call sites, both call get_hostname with

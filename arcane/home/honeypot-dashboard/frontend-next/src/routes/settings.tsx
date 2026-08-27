@@ -146,11 +146,14 @@ const fetchAdminData = createServerFn({ method: 'GET' }).handler(async (): Promi
     serviceJSON<{ users: Operator[] }>('/api/v1/users'),
     serviceJSON<{ templates: ReportTemplate[] }>('/api/v1/reports/templates'),
   ])
-  // #2178: a failed leg used to collapse into the defaults below and render
-  // as real configuration — maintenance off, an empty users roster — with a
-  // revision 0 that would poison the next save's If-Match baseline. An
+  // #2311: a partly-dead fetch used to fall through to the all-defaults
+  // object below — maintenance off, an empty roster, and above all
+  // `revision: 0`, which as an If-Match baseline can only 409 against the
+  // real config doc (blaming "another session" that never existed). An
   // admin panel built from partly-dead stores lies worse than a missing
-  // one, so any failed leg fails whole; nothing manufactured reaches a card.
+  // one, so any failed leg fails whole: callers get null and hold no
+  // editable config at all. (#2178 phase 3 reuses this same gate for its
+  // rendering half; the write-path guards below are #2311's half.)
   if (!config || !roster || !reports) return null
   return {
     revision: config?.revision ?? 0,
@@ -2462,6 +2465,13 @@ export function SettingsSurface({
   const [prefsData, setPrefsData] = useState<Prefs | null | 'loading'>('loading')
   const [storageData, setStorageData] = useState<EsStorage | null>(null)
   const [adminData, setAdminData] = useState<AdminConfig | null>(null)
+  // #2311: the write-side companion of adminData — true means fetchAdminData
+  // settled to null and no real config has been loaded (or a reload of one
+  // failed). While it stands, every admin pane parks behind an honest
+  // failure card instead of offering mutation affordances built from
+  // fabricated state; saving from synthetic data is what manufactured the
+  // poisoned If-Match: "0" in the first place.
+  const [adminFailed, setAdminFailed] = useState(false)
   const [servicesData, setServicesData] = useState<ServicesResponse | null>(null)
   const [historyData, setHistoryData] = useState<HistoryResponse | null>(null)
   const [auditData, setAuditData] = useState<AuditResponse | null>(null)
@@ -2552,8 +2562,11 @@ export function SettingsSurface({
   const reloadAdminConfig = useCallback(async () => {
     const fresh = await fetchAdminData()
     if (!fresh) {
-      // #2178: a failed reload used to be silently ignored; name it so the
-      // panes' failure state stays truthful.
+      // #2311: a failed reload used to be silently ignored, leaving the
+      // operator on whatever state the last successful load had while the
+      // status line said nothing. Name it: already-loaded cards keep their
+      // real data, but a page that never loaded anything parks on the
+      // failure card instead of skeletons-forever.
       setAdminFailed(true)
       return
     }
@@ -2574,10 +2587,12 @@ export function SettingsSurface({
       if (!cancelled) setPrefsData(result)
     })
     admin.then((result) => {
-      if (!cancelled && result) setAdminData(result)
-      // #2178: settled-null here used to leave every admin pane on its
-      // skeleton forever (or worse, on fabricated defaults) — name it.
-      else if (!cancelled) setAdminFailed(true)
+      if (cancelled) return
+      // #2311: settled-null means the fetch failed whole — name it instead
+      // of leaving every admin pane on its skeleton forever. Nothing is
+      // stored: adminData stays null, so no mutation affordance can exist.
+      if (result) setAdminData(result)
+      else setAdminFailed(true)
     })
     services.then((result) => {
       if (!cancelled) setServicesData(result)
@@ -2614,12 +2629,15 @@ export function SettingsSurface({
     </div>
   )
 
-  // #2178: shared across every admin pane — an outage must not read as
-  // fabricated defaults (maintenance off, empty roster) or ride skeletons.
+  // #2311: shared across every admin pane — the parked state an outage
+  // renders instead of mutation affordances built from fabricated config.
+  // If-Match never fires from here because no editable card mounts while
+  // adminData is null; Retry refetches the whole admin bundle. #2178 phase
+  // 3 will carry this exact ErrorStateBlock usage into its render sweep.
   const adminLoadFailure = (
     <ErrorStateBlock
       title="Administration settings failed to load"
-      hint="The backend request failed — nothing here reflects real configuration."
+      hint="The backend request failed — nothing on these panes reflects real configuration, so saving is unavailable."
       onRetry={() => void reloadAdminConfig()}
     />
   )
@@ -2914,7 +2932,7 @@ export function SettingsSurface({
                           </tbody>
                         </table>
                       ) : adminFailed ? (
-                        // #2178: an outage used to render as an empty roster,
+                        // #2311: an outage used to render an empty roster —
                         // reading as "no one has ever used the dashboard".
                         adminLoadFailure
                       ) : (

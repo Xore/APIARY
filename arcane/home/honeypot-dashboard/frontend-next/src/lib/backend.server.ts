@@ -277,8 +277,15 @@ const PROXY_BODY_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
  * api/live.ts's SSE passthrough. Gated by backendLimiter (#1616), shared
  * with serviceFetch's direct path since this is a split deployment's only
  * route to the Rust tier and must not duplicate that fan-out's bounded
- * queue. */
-export async function proxyToRust(request: Request, splat: string | undefined, base: string): Promise<Response> {
+ * queue. Pass the caller's own mount prefix (`'/bff'` / `'/bff-mounted'`) so
+ * the upstream target can be cut from the original request target (#2302);
+ * without it the historical splat-param reassembly applies. */
+export async function proxyToRust(
+  request: Request,
+  splat: string | undefined,
+  base: string,
+  mountPrefix?: string,
+): Promise<Response> {
   if (serveMode() === 'frontend') {
     // This instance IS the frontend-only tier — it has no Rust backend to
     // proxy to. Reaching this branch means /bff*/* was routed here by
@@ -309,8 +316,28 @@ export async function proxyToRust(request: Request, splat: string | undefined, b
     if (err instanceof Overloaded) return overloadedResponse(err)
     throw err
   }
-  const search = new URL(request.url).search
-  const upstreamPath = `/${splat ?? ''}${search}`
+  // #2302: forward the original request target rather than reassembling it
+  // from splat params. Route params arrive percent-DECODED, so rebuilding
+  // from `params._splat` collapsed a single-encoded %2F into a literal
+  // slash — splitting one upstream path segment into two and 404ing axum's
+  // router on every real CIDR link (investigate.cidr.$cidr.tsx sends
+  // /investigate/cidr/175.107.1.0%2F24) while %252F "worked" purely because
+  // it decayed into exactly the one encoding axum wanted. The pathname off
+  // request.url is the escaping-preserved original, so cut off only this
+  // route's mount prefix and pass everything else through byte-for-byte;
+  // query encodings ride along unchanged (.search never decodes). Without a
+  // matching prefix (direct invocation in tests, or a mount we don't know)
+  // fall back to the historical reassembly.
+  const target = new URL(request.url)
+  const prefixLength =
+    mountPrefix !== undefined &&
+    (target.pathname === mountPrefix || target.pathname.startsWith(`${mountPrefix}/`))
+      ? mountPrefix.length
+      : -1
+  const upstreamPath =
+    prefixLength >= 0
+      ? `${target.pathname.slice(prefixLength) || '/'}${target.search}`
+      : `/${splat ?? ''}${target.search}`
   const contentType = request.headers.get('content-type')
   const upstream = await fetch(`${base}${upstreamPath}`, {
     method: request.method,

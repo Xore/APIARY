@@ -789,3 +789,194 @@ The ≥24 B shipped-quant rows here (`Seneca-x-QwQ-32B`, `Ornith-1.0-35B`,
 `Mistral-Small-3.2-24B`, both Qwen3.6-27B forms, both gemma-4 26B/31B forms)
 are also the starting comparison plane for the self-requantization ladder,
 #2245.
+
+## Issue #1804-c / part 3 (2026-08-27): SecureBERT2.0-NER IOC extraction on captured sessions
+
+The first non-generative slice of the #1947-era evaluation program: an
+encoder tagger, measured under the #1804 slice contract that says judge it on
+**unique contribution vs the LLM path** — which indicators each finds that the
+other misses — not on keyword presence, and store its full extracted entity
+set alongside the worker's `iocs[]` output for later fusion work. Model pin:
+`cisco-ai/SecureBERT2.0-NER` (ModernBERT-base, ~0.1 B params, fp32 575 M on
+disk, BIO over Indicator/Malware/Organization/System/Vulnerability,
+8192-position head) run straight from a local snapshot on the dev box,
+CPU-only: transformers 5.16.1 on torch 2.13.0+cpu, Python 3.14.
+
+All workload ran on the homeserver dev box against the *live captured*
+honeypot streams via the usual docker-exec ES pager; everything below is
+aggregates. Raw captures stay on the dev box (`/mnt-1/benchmarks/1804c/`,
+sha256-pin manifest in `out/run_meta.json`) per the standing
+nothing-captured-committed rule; the only verbatim lines in this section are
+the explicitly synthetic probes.
+
+### Protocol
+
+Two subcorpora, deliberately different in nature:
+
+- **A — captured sessions.** Three-day window 2026-08-24..26, cowrie
+  `command.input` documents joined to the LLM analysis snapshot on session id,
+  sampled by session-stratified draw (seed 20260827, cap 60 lines/session):
+  planned strata ≥5 cmds = 60, 2–4 = 30, singles = 30 sessions. Realized:
+  **62 sessions, 653 lines**, because the population itself collapses the
+  strata — 15,372 window sessions have ≥5 commands, **2** sit at 2–4, and
+  none at 1 (hand-check: history-wide the fleet has seen only ~387 distinct
+  canonical commands; persona/scripted rehearsal traffic dominates). The
+  imbalance is reported, not resampled away: with line-level frequency
+  weighting, A measures behavior on the rehearsal template family that *is*
+  the live traffic shape.
+- **B — synthetic probes (not captures).** 26 open-labelled adversarial lines
+  written for generalization texture beyond the replay family: malware-family
+  mentions, hashes, scheme edge cases (ftp, pathless URLs), defanged
+  strawlines, RFC1918 traps, document-range addresses, benign-negative shells.
+  These alone appear verbatim anywhere.
+
+Annotation was manual read-through of all 62 sessions cross-checked against an
+independent machine grammar — zero mismatches between hand table and grammar
+yield. Gold: **57 labelled entities in A** (value-level, deduped per line).
+Protocol rules, fixed before scoring: (P1) per-line dedupe to unique
+(type,value); (P2) port numbers and file paths are not indicators; (P3) inside
+a schemed URL the whole string is one `url` value, the embedded host is not
+separately tagged; (P4) a bare public-IP host used as the dropper loader's
+shell argument IS an `ip` indicator even when also present inside a URL value
+(different role). Defanged forms are never normalized — the measurement is
+strictly raw bytes. RFC1918/loopback/private material is never an indicator.
+
+### Postprocessing (a named defect worth carrying forward)
+
+The shipped tagger emits near-universal B/I tagging on terminal-like text and
+transformers' `simple` aggregation leaves every subword its own fragment (an
+IP arrives as six one-span pieces). A deterministic rebuild does the work:
+contiguous same-class runs whose previous character is alphanumeric or a
+structural joiner fuse; edge punctuation trims; every span keeps component
+token scores. Typed values are pulled from within each Indicator span by
+anchored tight regexes (url > ip > email > hash > domain) and canonicalized on
+both gold and prediction sides — value-level primary metric, so span-boundary
+jitter cannot inflate error. Threshold sweeps recompute offline from stored
+raw token predictions through the identical postprocess path.
+
+One bug bit hard enough to matter methodologically: the canonicalizer's
+hxxp-collapse substitution matched the leading half of already-valid
+`http://` strings and added a phantom slash, and the first LLM-contribution
+join compared once-canonicalized against twice-canonicalized values —
+producing a fake 27-vs-23 divergence table before the fix collapsed it to the
+truth below. Canonicalization asymmetries can manufacture entire findings;
+both sides must go through byte-identical code paths, rebuilt from raw
+artifacts.
+
+### Captured-subcorpus results (value-level)
+
+| gate | micro P | R | F1 | gold | pred | TP |
+|---|---|---|---|---|---|---|
+| 0.0 | 0.905 | **1.000** | **0.95** | 57 | 63 | 57 |
+| 0.3 | 0.9048 | 1.0000 | 0.9500 | 57 | 63 | 57 |
+| 0.5 | 0.9048 | 1.0000 | 0.9500 | 57 | 63 | 57 |
+| 0.7 | 0.2877 | 0.7368 | 0.4138 | 57 | 146 | 42 |
+
+Zero false negatives at any usable gate; per-type, `url` is exactly
+P=R=F1=1.0 and nothing else appears in gold (see P4 note). All six FPs trace
+to two lines of the same template variant:
+
+- 4× **extractor artifacts**: the tight domain regex reads the literal file
+  tokens `bin.sh`/`bix.sh` sitting inside overfired Indicator spans as
+  `.sh` domains. Predictable cost of the value-extraction front door, trivial
+  to suppress with a filename-shape guard if deployed.
+- 2× **annotation-boundary disagreements**: two template lines end
+  `sh bix.sh <public-ip>` with a typo'd dropper filename; P4 keys on the
+  literal loader name so the trailing host went unlabeled while the model
+  tagged it. Both readings defensible; recorded as disagreement, not error.
+
+Threshold guidance is the negative result here: score mass clusters at ~1.0
+when a token is right, so raising the gate does not prune noise — 0.7 amputates
+the lower-scoring tail tokens of true URLs and lets in hundreds of
+confident-but-wrong spans (F1 0.41). Leave defaults; calibrate nothing on
+this card-free scale.
+
+**Overfire magnitude vs typed noise.** Gates ≤0.5 carry ≈2.4k untyped
+Indicator fragments across the 653 lines (2,376 at gate 0, 2,414 at 0.5) —
+span-level picture looks
+catastrophic — yet **zero negative (gold-empty) lines produce a typed value
+FP**: scaffolding like `enable`, busybox stubs, history-clears emit junk
+spans but none that survives canonicalization into a typed indicator. The
+typed-extraction front door is effectively doing double duty as a precision
+filter. Any production usage must keep that order of operations; treating raw
+spans as signals would flood downstream consumers.
+
+Throughput context, CPU-only, batch 16: subcorpus A ran 653 lines in ~295 s
+(~0.45 s/line); the whole 8-label tagger costs less per session than one
+decoding step of the generative candidates above.
+
+### Synthetic-probe results (26 lines, open-labelled)
+
+Strict pass (every non-malware gold entity present): **24/26**. Relaxed
+(family tags accepted as substring match on Malware-span text): **21/26**.
+The five relaxed misses decompose cleanly:
+
+- **Malware-family detection is dead in this input regime: 0/4**
+  (mozi/gafgyt/mirai mentioned in shell command contexts never surface as
+  Malware spans — the head is trained on prose-shaped intel text).
+- One true negative-side failure: `ping 8.8.8.8 -c 4` produces **no
+  prediction at all**, skipping a plain public IP — the same template family
+  overfires everywhere else.
+- One split-mention miss: URL caught, but the separately repeated bare domain
+  in `nslookup` on the same line missed.
+
+Hash probes (md5 and sha256) hit exactly; ftp-scheme and pathless-url and
+document-range probes hit; the benign domain `time.pool.aliyun.com` tagged
+correctly by-text despite benign role. Negative-control leaks are the honest
+headline: **8 of 14** no-entity probes still yielded ≥1 typed value — the
+RFC1918 trap IPs (both flagged), systemd-unit/ko paths misread as domains
+(`sshd.service`, `rsyslog.service`, `watchdog.ko`, `dropper.ko`), and a
+partial domain extracted from defanged obfuscation. Six negative probes came
+back fully clean (enable/shell banner, busybox arity error, ssh-rsa key
+append, history wipe, cpuinfo/uname inventory lines). Consequence: raw
+negative behavior is unusable without the same typed-value front door plus
+shape guards, and *everything* reaching dashboards needs an allowlist pass.
+
+### Unique contribution vs the LLM path (#1804 contract)
+
+Join built per-session over the 23 sampled sessions that also carry an
+LLM-analysis row with `iocs[]` in the window snapshot (worker sampling/backlog
+left the other 39 without comparable rows — see the coverage point):
+
+| side | value count | note |
+|---|---|---|
+| both | 25 | the dropper URL set, identical after canonicalization |
+| encoder-only | 4 | exactly the four extractor artifacts above |
+| LLM-only | **0** | — |
+
+The corrected verdict replaces an artifact-driven one: **within shared
+analyzed space the tagger's typed output is a strict superset of the worker's
+IOC strings**, contributing nothing novel beyond its own extraction noise —
+and losing nothing either. Its practical case is orthogonal: deterministic,
+GPU-free, ~0.45 s/line against a worker that left 63% of sampled sessions
+without comparable IOC rows in-window, plus a structured five-class payload
+(the Organization/System/Vulnerability classes; unexercised here given the
+corpus). Contribution claim, precisely bounded: same recall, different
+economics and coverage shape — not complementary recall breadth.
+
+Cross-reference: same canonicalization/methodology seam as noted in #1793 for
+the generative slices; judged separately from the #1947 matrix per the
+wave-2 decision ("SecureBERT2.0-NER separately").
+
+### Decision
+
+No production change in this slice. Follow-ups queued as intent:
+
+- If a cheap enrichment feed is wanted ahead of the generative worker
+  (#1805 territory), the correct architecture is *postprocessed-typed-values
+  only*, with a filename-shape guard for the domain-overfire artifact and a
+  private-address policy pass; raw spans never reach storage. Gate sweep says
+  ship defaults, not raised thresholds.
+- The fragmentation postprocessor is deployment-blocking knowledge for any
+  BIO tagger adopted later; it lives with the pinned scripts on the dev box
+  (`ner_post.py`, sha256 in the run manifest).
+- Malware-family blindness means the tagger cannot replace family attribution
+  anywhere it matters — that stays with the generative path.
+
+Artifacts pinned on the dev box (all hashes under `/mnt-1/benchmarks/1804c/out/run_meta.json`):
+scripts `collect_ioc_corpus.py`, `sample_corpus.py`, `make_gold.py`,
+`ner_post.py`, `run_ner.py`, `evaluate_ner.py`, `rebuild_extractions.py`
+(+ collector/sample metadata, gold files, raw predictions, extractions,
+metrics, run meta). None contain committed copies here; the synthetic probe
+definitions live in `gold/synthetic_lines.jsonl` there, transcribed in
+aggregate above.

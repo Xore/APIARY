@@ -97,6 +97,14 @@ const fetchAppearance = createServerFn({ method: 'GET' }).handler(async (): Prom
 /// a value would immediately write it back and every page load would cost a
 /// PUT.
 export async function pullAppearance(): Promise<void> {
+  // Arm the event bridges here as well as from useAppearanceKey's subscribe:
+  // the root route mounts everywhere (routes/__root.tsx), but a page that
+  // renders no subscriber never reaches that registration path -- settings,
+  // where themes are actually changed, has none. Arming is idempotent, the
+  // listeners cost one entry each for the life of the document, and both
+  // functions guard non-window contexts themselves.
+  watchOsTheme()
+  watchCrossTabAppearance()
   try {
     const { mode, theme } = await fetchAppearance()
     if (mode && mode !== getThemeMode()) applyTheme(mode, { sync: false })
@@ -329,6 +337,59 @@ function watchOsTheme() {
   else if (typeof query.addListener === 'function') query.addListener(onChange)
 }
 
+// #2138: both appliers write through to localStorage, and every other tab of
+// this origin boots from those same keys — but nothing told those tabs that a
+// key changed underneath them, so appearance changes crossed tabs only by
+// accident of reload: switch the theme in one tab and every other one kept
+// its old colours until a full page load.
+//
+// Bridge the `storage` event into the appliers themselves (rather than poking
+// attributes directly), so every reactive surface hears about it the same way
+// it hears about local toggles: they emit(), sync the cookie, and skip
+// re-writing what already matches. Storage events never fire in the tab that
+// wrote them and not on no-op writes either, so this cannot echo back or ping-
+// pong between tabs; upstream shipped the identical shape in theme.js
+// (#129/#130) with the same reasoning.
+//
+// `sync: false` is pullAppearance's rule applied here: the writing tab already
+// pushed the new value to the server preference store, so re-pushing from each
+// open tab would put N-1 redundant PUTs behind every toggle.
+//
+// Registered once, lazily, from useAppearanceKey's subscribe and again from
+// pullAppearance() -- whichever a given page reaches first; one listener for
+// the life of the document and there is no point at which the answer stops
+// mattering. The subscribe path alone left chartless pages unarmed.
+let crossTabWatched = false
+function watchCrossTabAppearance() {
+  if (crossTabWatched || typeof window === 'undefined') return
+  crossTabWatched = true
+  window.addEventListener('storage', (event) => {
+    // A whole-area clear reports key null: both keys are gone at once, so
+    // both axes fall back to their defaults together. (The appliers never
+    // clear() themselves -- writes are remove/set on one key at a time --
+    // so null only ever comes from an outside hand.)
+    if (event.key === null) {
+      if (getThemeMode() !== 'system') applyTheme('system', { sync: false })
+      if (getThemeName() !== 'claude') applyPalette('', { sync: false })
+      return
+    }
+    if (event.key === 'hp-theme') {
+      // Same closed-shape read the boot script (#1754) makes: light/dark are
+      // real choices, everything else -- including the key being gone --
+      // reads as absent, and absent has meant `system` all along.
+      const mode = event.newValue === 'dark' || event.newValue === 'light' ? event.newValue : 'system'
+      if (mode !== getThemeMode()) applyTheme(mode, { sync: false })
+    } else if (event.key === 'hp-palette') {
+      // Well-formed names apply verbatim (open-ended identifiers, same rule
+      // as fetchAppearance); a removed key -- or anything not shaped like a
+      // name -- falls back to the default through applyPalette's
+      // empty-string path, the way absent reads as the default elsewhere.
+      const next = event.newValue !== null && isThemeName(event.newValue) ? event.newValue : ''
+      if (next !== getThemeName()) applyPalette(next, { sync: false })
+    }
+  })
+}
+
 /// One value that changes whenever anything about the rendered appearance
 /// does: the mode, the theme name, or the OS preference while in `system`.
 ///
@@ -343,6 +404,7 @@ export function useAppearanceKey(): string {
   return useSyncExternalStore(
     (listener) => {
       watchOsTheme()
+      watchCrossTabAppearance()
       listeners.add(listener)
       return () => listeners.delete(listener)
     },

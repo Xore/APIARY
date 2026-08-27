@@ -9,7 +9,11 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { backendMountedURL, proxyToRust } from '../lib/backend.server'
 
-const proxy = (request: Request, splat: string | undefined) => proxyToRust(request, splat, backendMountedURL())
+// '/bff-mounted' passed as the mount prefix — see bff.$.ts / #2302 for why
+// the upstream target is cut from the raw pathname rather than reassembled
+// from decoded splat params.
+const proxy = (request: Request, splat: string | undefined) =>
+  proxyToRust(request, splat, backendMountedURL(), '/bff-mounted')
 
 export const Route = createFileRoute('/bff-mounted/$')({
   server: {
