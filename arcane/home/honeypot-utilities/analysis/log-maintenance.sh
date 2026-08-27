@@ -114,5 +114,22 @@ while true; do
   # -delete walks depth-first and mindepth 1 keeps mail/ itself.
   find /logs/mailoney/mail -mindepth 1 -type d -empty -delete 2>/dev/null || true
 
+  # #2323: zeek-proxy rotates hourly by rename-and-reopen (conn.log stays
+  # open and fresh; conn-2026-08-26-13-00-00.log style stamps pile up) --
+  # nothing pruned them, ~400MB/day went unreclaimed. Same staging-only
+  # retention reasoning as every glob above: Filebeat tails these .log
+  # files (filebeat.yml's zeek-proxy-logs input), so they need to outlive
+  # ingest lag, not hold searchable history. The bare-name match covers the
+  # never-reopened live file of a dead sensor too -- healthy writers keep
+  # its mtime current, so -mmin never fires on it (same shape vps/
+  # suricata-log-maintenance.sh uses for eve.json).
+  find /logs/zeek-proxy -maxdepth 1 -name '*.log' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  # #2323 part 2: extracted-file-importer.py copies carved bytes into ES
+  # and tracks what it has seen in state/extracted-files.json, so the disk
+  # copy only needs to outlive that importer's lag (IMPORT_INTERVAL=60s,
+  # orders of magnitude inside the window). extract.zeek names every carve
+  # <file-id>.bin, so the glob is exact.
+  find /logs/zeek-proxy-extract -maxdepth 1 -name '*.bin' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+
   sleep "$interval"
 done
