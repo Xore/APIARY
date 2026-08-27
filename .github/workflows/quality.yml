@@ -632,8 +632,12 @@ jobs:
       - uses: actions/checkout@v7
       - name: theme.css matches the pinned commit
         run: scripts/check-vendored-theme.sh
+      # python3, not python: this job has no setup-python step, so on the
+      # self-hosted lane it runs on the runner's own PATH and the homeserver
+      # runner ships no bare `python` -- `python branding/...` died with
+      # exit 127 there (#2461) while the vendored sheet itself was fine.
       - name: Portable APIARY tokens match Xore/theme
-        run: python branding/scripts/check_theme_sync.py
+        run: python3 branding/scripts/check_theme_sync.py
       # Canvas surfaces resolve tokens to pixels and carry dark-theme
       # fallbacks, so a rename upstream degrades silently instead of failing.
       # #1825 renamed eight tokens and 31 call sites kept rendering, wrong.
@@ -654,8 +658,10 @@ jobs:
       - uses: actions/checkout@v7
       - name: theme.css matches the pinned commit
         run: scripts/check-vendored-theme.sh
+      # Same python3 choice as the self-hosted twin above: one spelling
+      # across both lanes, valid on the runner's own PATH either way.
       - name: Portable APIARY tokens match Xore/theme
-        run: python branding/scripts/check_theme_sync.py
+        run: python3 branding/scripts/check_theme_sync.py
       - name: Frontend theme tokens all exist
         run: scripts/check-theme-tokens.sh
       - name: Theme catalogue matches theme.css

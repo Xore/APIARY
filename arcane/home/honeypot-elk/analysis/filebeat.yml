@@ -10,31 +10,44 @@
 # Elasticsearch 400s are almost always caused by merging all sources into root.
 
 filebeat.inputs:
-  # Honeypot sensor logs (cowrie / http / multipot / dionaea / conpot / tanner / dicompot / dns-honeypot / citrix-honeypot / cisco-asa-honeypot / rdp-honeypot).
+  # Honeypot sensor logs. Only the sensors the enrichment worker does NOT
+  # rewrite keep their raw path in this input (api-honeypot / dnp3 /
+  # dicompot / endlessh / canarytokens -- see below); every watched sensor
+  # is read from /logs/enriched/ instead.
   # Each sensor writes to its own subdirectory: /logs/<service>/<file>.json
   #
   # #37/#38: cowrie, dionaea, every conpot persona, dns-honeypot, and
   # cisco-asa-honeypot aren't PROXY-protocol wrapped, so their own raw logs
   # only ever carry the tunnel peer address (10.8.0.1), never the real
   # attacker IP -- that used to be joined against portbridge's connection
-  # log at dashboard read time. ip-enrichment-worker now does that join at
+  # log at dashboard read time. The enrichment worker now does that join at
   # ingest time instead and writes an already-correct copy to
-  # /logs/enriched/*.json.
+  # /logs/enriched/*.json. The watch list has since grown well past those
+  # five: elasticpot and mailoney's logs match the same flat
+  # src_ip/src_port shape and get the same generic join; dionaea-incident
+  # gets the nested-shape variant (#623); beelzebub, sentrypeer, hellpot
+  # and galah get bespoke enrichers that derive their own address field
+  # and join -- or, on hellpot/galah's Traefik-proxied door, adjudicate
+  # the forwarded-header claim instead of joining at all.
   #
   # #1217: multipot/tanner/http-honeypot/citrix-honeypot/rdp-honeypot
   # already get the real attacker IP directly via PROXY protocol (no join
-  # needed) but are ALSO now watched by ip-enrichment-worker, purely to
+  # needed) but are ALSO now watched, purely to
   # promote canonical_* creds/command/fingerprint fields (see
-  # ip-enrichment-worker/canonical.go) -- their enriched copies land in
+  # backend-service/src/ip_enrichment/canonical.rs) -- their enriched copies land in
   # /logs/enriched/ too (multipot.json, tanner.json, http-honeypot.json,
   # citrix-honeypot.json, rdp-honeypot.json).
   #
-  # Every one of these ten sensors' own raw paths is deliberately absent
+  # Every watched sensor's own raw path is deliberately absent
   # from this list -- only /logs/enriched/*.json is tailed for them, so no
-  # event is ever shipped twice. api-honeypot/dnp3/dicompot/endlessh are
-  # NOT in ip-enrichment-worker's scope at all (#1217 is exactly these
-  # five, no more) and keep tailing their raw path as before. See
-  # ip-enrichment-worker/main.go's package doc comment for the full design.
+  # event is ever shipped twice. That set is the #37/#38 five above plus
+  # elasticpot, mailoney, the four bespoke joiners, dionaea-incident and
+  # the #1217 five -- 16 named sources plus every conpot persona found on
+  # disk; backend-service/src/ip_enrichment/mod.rs's discover_sources is
+  # the authoritative roster. api-honeypot/dnp3/dicompot/endlessh are
+  # NOT watched at all (#1217 is exactly the five named above, no more)
+  # and keep tailing their raw path as before, as does canarytokens
+  # (#1426, below).
   - type: filestream
     id: honeypot-json
     paths:
@@ -85,7 +98,7 @@ filebeat.inputs:
   # walks the whole record for that shape and writes an already-correct
   # copy to /logs/enriched/dionaea-incident.json -- tailed here instead of
   # the raw path, the same "enriched supersedes raw" pattern the honeypot-json
-  # input above already uses for its five sensors.
+  # input above already uses for every sensor it watches.
   - type: filestream
     id: dionaea-incidents-raw-v1
     paths:
@@ -421,8 +434,8 @@ processors:
   # raw per-service directory these when.contains conditions were originally
   # written against. Confirmed live: zero honeypot.persona_id documents existed
   # anywhere for cowrie or conpot before this fix. Matching against the
-  # enriched filename instead (ip-enrichment-worker/main.go's discoverSources
-  # names each output "<persona>.json") fixes all of them in one pass.
+  # enriched filename instead (backend-service/src/ip_enrichment/mod.rs's
+  # discover_sources names each output "<persona>.json") fixes all of them in one pass.
   # #2189 correction: dionaea's own dionaea_incident.json IS rewritten by
   # ip-enrichment-worker too (#623 -- src_ip is buried under a data.* key
   # that varies by incident origin, so its enrich function walks the whole
@@ -491,7 +504,8 @@ processors:
       when.contains: {log.file.path: "enriched/tanner.json"}
   # #1418: beelzebub.json has no "sensor" field of its own either (a
   # vendored, unmodified binary with no knowledge of this repo's
-  # convention) -- ip-enrichment-worker/beelzebub.go already writes
+  # convention) -- backend-service/src/ip_enrichment/sensors.rs's
+  # enrich_beelzebub_line already writes
   # sensor/src_ip/src_port as flat lowercase fields onto every line before
   # Filebeat ever sees it, same "enriched supersedes raw" path as
   # cowrie/dionaea/conpot/tanner above, so this only needs to attach
@@ -501,7 +515,7 @@ processors:
       fields: {persona_id: nexusai-directory, site_id: nexusai-berlin-core, asset_id: directory-estate, organization: NexusAI Research GmbH}
       when.contains: {log.file.path: "enriched/beelzebub.json"}
   # #1419: hellpot.json has no "sensor" field of its own either, same
-  # reasoning as beelzebub above -- ip-enrichment-worker/hellpot.go already
+  # reasoning as beelzebub above -- sensors.rs's enrich_hellpot_line already
   # writes sensor/src_ip/src_port as flat lowercase fields before Filebeat
   # ever sees it.
   - add_fields:
@@ -509,7 +523,7 @@ processors:
       fields: {persona_id: meridian-legacy-web, site_id: meridian-legacy-infra, asset_id: web-legacy-04, organization: Meridian Retail Systems Ltd.}
       when.contains: {log.file.path: "enriched/hellpot.json"}
   # #1420: event_log.json has no "sensor" field of its own either, same
-  # reasoning as beelzebub/hellpot above -- ip-enrichment-worker/galah.go
+  # reasoning as beelzebub/hellpot above -- sensors.rs's enrich_galah_line
   # already writes sensor/src_ip/src_port as flat fields before Filebeat
   # ever sees it.
   - add_fields:
@@ -526,8 +540,9 @@ processors:
       fields: {persona_id: nexusai-analytics-legacy, site_id: nexusai-berlin-analytics, asset_id: analytics-es-04, organization: NexusAI Research GmbH}
       when.contains: {log.file.path: "enriched/elasticpot.json"}
   # #1424: sentrypeer.json has no "sensor" field of its own either, same
-  # reasoning as beelzebub/hellpot above -- ip-enrichment-worker/sentrypeer.go
-  # already writes sensor/src_ip/src_port as flat fields before Filebeat
+  # reasoning as beelzebub/hellpot above -- sensors.rs's
+  # enrich_sentrypeer_line already writes sensor/src_ip/src_port as flat
+  # fields before Filebeat
   # ever sees it.
   - add_fields:
       target: honeypot
