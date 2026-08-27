@@ -40,8 +40,12 @@
 # also carries an explicit shared `name:`, same mechanism as dionaea-lib/
 # dashboard-state.
 #
-# EXPECTED_SENSORS and every /logs-derived, host-bind-mounted path are
-# unaffected by this move: the dashboard reads sensor activity from log
+# The log-path half of this claim held; the EXPECTED_SENSORS half did not
+# survive: that expectation list was removed when the cutover completed
+# (commit 824aa33d, #1628), and source-health today derives sensor liveness
+# from observed event.sensor values (backend-service/src/health.rs) rather
+# than a static list (#2359). Every /logs-derived, host-bind-mounted path
+# is unaffected by the move: the dashboard reads sensor activity from log
 # files at their existing host paths regardless of which compose project
 # produced them, exactly as already proven by the five sensor splits before
 # this one.

@@ -473,8 +473,11 @@ processors:
   # couple of hardcoded /conpot, /dionaea path fallbacks tanner isn't part
   # of), so every tanner event landed unclassified: present in
   # honeypot-v2-*, but invisible to any event.sensor-scoped view (the
-  # Sensors card, Event Explorer's sensor filter, EXPECTED_SENSORS
-  # freshness tracking). Confirmed live (2026-08-09). Fixed at the source
+  # Sensors card, Event Explorer's sensor filter, and at the time the
+  # dashboard's EXPECTED_SENSORS freshness tracking -- that expectation
+  # list has since been removed by commit 824aa33d/#1628, with its
+  # freshness role absorbed by source-health alone; see #2359).
+  # Confirmed live (2026-08-09). Fixed at the source
   # here rather than adding a third hardcoded path fallback to the ingest
   # pipeline's already-accumulating special cases.
   # #1217: tanner_report.json now routes through ip-enrichment-worker like
