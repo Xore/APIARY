@@ -248,5 +248,39 @@ class PoolVersionTest(unittest.TestCase):
         self.assertEqual(loaded[0].claim_id, pool[0].claim_id)
 
 
+class ReviewQueueFreshnessTest(unittest.TestCase):
+    """#2417: the review queue stamps each row with the rubric's ground_truth
+    at generation time, and a rubric correction (#2384) can retire that text
+    while the queue keeps quoting it -- the next adjudication pass would then
+    rule on claims against a mechanism the repo says is wrong. The invariant:
+    every quoted ground truth equals the live rubric's, or the rubric change
+    lands together with a restamped queue."""
+
+    BENCH_DIR = Path(__file__).resolve().parents[1]
+    QUEUE = BENCH_DIR.parents[2] / "docs" / "benchmarks" / "claim-pools" / "tier-a-v1-review-queue.json"
+    RUBRIC = BENCH_DIR / "corpus" / "rev_cases_v2_rubric.json"
+
+    def test_every_row_quotes_the_current_rubric_ground_truth(self):
+        queue = json.loads(self.QUEUE.read_text())
+        rubric = json.loads(self.RUBRIC.read_text())["cases"]
+        stale = [
+            (row["claim_id"], row["case"]) for row in queue
+            if row.get("ground_truth") != (rubric.get(row["case"]) or {}).get("ground_truth")
+        ]
+        self.assertEqual(stale, [],
+                         f"queue rows quoting retired ground truth: {stale}")
+
+    def test_retired_narrative_is_kept_only_as_an_explicit_annotation(self):
+        """Fidelity: the pre-correction text survives inside a
+        ground_truth_superseded note (superseded-but-annotated), never as the
+        row's operative quote."""
+        queue = json.loads(self.QUEUE.read_text())
+        for row in queue:
+            if row.get("ground_truth_superseded") is not None:
+                self.assertNotEqual(row["ground_truth_superseded"].get("previous_text"),
+                                    row["ground_truth"],
+                                    f"{row['claim_id']}: supersession recorded but quote unchanged")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
