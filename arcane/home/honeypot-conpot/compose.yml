@@ -40,11 +40,14 @@
 #     .github/workflows/deploy.yml's "Synchronize honeypot-conpot" step and
 #     docs/CI-CD.md, added alongside this file.
 #
-# Deployed as /opt/stacks/honeypot-conpot, a separate Dockge stack from
-# APIARY -- same arrangement as arcane/home/honeypot-init/compose.yml's
-# honeypot-init. Log paths are unchanged (still
-# /opt/stacks/apiary/logs/conpot*), so Filebeat and the dashboard's
-# EXPECTED_SENSORS list need no changes at all.
+# Deployed as a separate stack, same arrangement as
+# arcane/home/honeypot-init/compose.yml's honeypot-init (since #1502 the
+# per-stack deploy.yml "Synchronize" step named above no longer exists --
+# stacks reach the host through Arcane's directory Git syncs). Log paths
+# are unchanged (/opt/stacks/apiary/logs/conpot*) so Filebeat needs no
+# change; the dashboard EXPECTED_SENSORS list once mentioned here was
+# itself removed by 824aa33d/#1628 -- source-health now derives sensor
+# liveness from observed events instead (#2359).
 
 name: honeypot-conpot
 
