@@ -1,12 +1,15 @@
 # Arcane Git sync
 
-How the 39 home-hosted stacks (33 that migrated under `arcane/home/` plus 6
+How the 37 home-hosted stacks (31 that migrated under `arcane/home/` plus 6
 that were already self-contained and stayed at their existing path) get to
 the live host, replacing the old model of copying or symlinking top-level
 `docker-compose.*.yml` files into place. Everything here was confirmed live
 against the pinned Arcane `v2.8.0` API during #1502's own migration, not
 taken from Arcane's docs — see the risk that motivated that in "Version/API
-compatibility" below.
+compatibility" below. Census numbers and the live sync-store state were
+re-verified 2026-08-27 against the pinned `v2.9.0` image and its own sqlite
+store (#2549): 31 in-tree directories + 6 self-contained = 37, exactly the
+manifest's entry count.
 
 ## The model
 
@@ -15,7 +18,7 @@ Each stack gets its own **directory-aware Git sync**: Arcane clones the
 selected `compose.yml` (not just that one file) under
 `/var/dockge/stacks/<syncName>/`, and deploys it. The manifest at
 [`arcane/manifests/home-production.json`](../arcane/manifests/home-production.json)
-is the single source of truth for which 39 stacks exist, what branch/path
+is the single source of truth for which 37 stacks exist, what branch/path
 each syncs from, and any per-stack sync limits — `scripts/install-homeserver.sh`,
 CI, and this doc all read from it rather than maintaining separate lists.
 
@@ -240,7 +243,7 @@ alone. Re-verify against whatever Arcane version is pinned in
 ## Local environment overrides
 
 Compose's own `.env`-in-project-directory interpolation already covers
-every `${VAR}` reference in these 39 stacks — none of them use `env_file:`,
+every `${VAR}` reference in these 37 stacks — none of them use `env_file:`,
 and none needed it added. Arcane's effective environment merge
 (`project.env` + `.env.git` → `.env`) feeds that same mechanism
 transparently, so a local override set through Arcane's own UI for a synced
@@ -299,47 +302,77 @@ Two things worth knowing when setting an override:
 
 ## Promotion workflow and change control
 
-Decided in #1507: **release/tag promotion**, and `autoSync` enabled for
-exactly the three stacks where a sync is the whole deploy.
+Decided in #1507: **release/tag promotion**, with `autoSync` enabled for
+exactly the three stacks where a sync is the whole deploy. As of
+2026-08-27 that policy has **never been put into effect** — every sync
+still tracks `main` and nothing auto-deploys (#2549 re-derived the live
+state). What actually runs is the manual model below; #2577 holds the
+one-time activation steps and the dangling-sync cleanup if that ever
+changes.
 
-### Two facts the policy turns on
+### Two facts (still true today)
 
-**A sync does not build, and by default does not even redeploy.** Every sync
-in the manifest carries `redeployAfterSync: false` and
-`pullImageAfterSync: false`, so a sync materializes files onto the host and
-stops there. Confirmed operationally: syncing `honeypot-dashboard` puts new
-Rust source on the host and leaves `apiary-backend:latest` exactly as it was
-until a separate `POST /projects/{id}/build` (a call that belongs to the
-sibling `honeypot-dashboard-backend` project since #1622 — its
-`backend-service` is the one service in the pair with a `build:`).
-Without that call a redeploy
-recreates the containers from the *previous* image — green, healthy, running
-the old code.
+**A sync does not build, and by default does not even redeploy.** The
+live store carries `auto_sync = 0`, `pull_image_after_sync = 0` and
+`redeploy_after_sync = 0` on every sync (re-verified 2026-08-27 against
+the pinned `v2.9.0` image's own sqlite store) — those are Arcane's
+defaults, not manifest-set values: the manifest carries neither field,
+and #2455's schema check confirmed the bulk-import request has no way to
+set them (only the single create-sync request does). A sync therefore
+materializes files onto the host and stops there. Confirmed
+operationally: syncing `honeypot-dashboard` puts new Rust source on the
+host and leaves `apiary-backend:latest` exactly as it was until a
+separate `POST /projects/{id}/build` (a call that belongs to the sibling
+`honeypot-dashboard-backend` project since #1622 — its `backend-service`
+is the one service in the pair with a `build:`). Without that call a
+redeploy recreates the containers from the *previous* image — green,
+healthy, running the old code.
 
-**35 of the 38 stacks build an image.** Only `honeypot-elk`,
-`honeypot-keycloak` and `pihole` pull. For the other 35, `autoSync: true`
-would mean every merge produces a deployment that looks successful and
-changes nothing — worse than a manual process, because it is unattended.
+**34 of the 37 stacks build an image.** Only `honeypot-elk`,
+`honeypot-keycloak` and `pihole` pull — re-derived 2026-08-27 from the 37
+manifest compose paths (34 carry `build:`; the same three pullers the
+#1502-era text named, which said "35 of the 38" before #2381 retired
+wordpot and f139fe24 retired the Go ip-enrichment-worker). For any
+building stack, `autoSync: true` would mean every merge produces a
+deployment that looks successful and changes nothing — worse than a
+manual process, because it is unattended.
 
-### The policy
+### What actually runs
+
+- **Every sync tracks `branch: "main"`** — all 38 live `gitops_syncs`
+  rows (the 37 manifest stacks plus #2577's dangling `honeypot-wordpot`
+  orphan). The rows predate #1507's decision and nothing re-pointed
+  them; no `production` pointer exists.
+- **`autoSync` is 0 everywhere, including the three the manifest flags.**
+  `honeypot-elk`, `honeypot-keycloak` and `pihole` carry `autoSync: true`
+  in `arcane/manifests/home-production.json`, but the live store has
+  `auto_sync = 0` on all 38 rows — the elk/keycloak/pihole auto-follow
+  policy is silently inert: a promotion, or any push, will not deploy
+  them.
+- **Every deploy is manual**: sync → build → redeploy per stack. The
+  order matters and is not arbitrary: `honeypot-dashboard` must sync
+  before `honeypot-dashboard-backend` builds, because the Rust source
+  lives in the dashboard project's directory.
+- **Promotion is CI-only.** `scripts/promote-release.sh v0.1.0` exists
+  and still refuses a ref that is not a tag, and a tag that is not an
+  ancestor of `main` — so if a pointer ever exists, what reaches it has
+  always been through CI. Today it moves nothing, because there is no
+  pointer to move.
+
+### The #1507 design, for the record
 
 - **What deploys is a tagged commit.** Releases are tagged `v*` on `main`.
-- **`production` is a pointer at the current release.** All 38 syncs track
-  `branch: "production"`.
-- **Promotion moves the pointer**: `scripts/promote-release.sh v0.1.0`.
-  Rollback is the same command naming an earlier tag. The script refuses a
-  ref that is not a tag, and refuses a tag that is not an ancestor of
-  `main`, so what reaches the pointer has always been through CI.
-- **`autoSync: true` for `honeypot-elk`, `honeypot-keycloak` and `pihole`**,
-  which follow a promotion within `syncInterval` (300s). To make that a real
-  deploy rather than a file copy, those three also need
-  `pullImageAfterSync` and `redeployAfterSync` set on the Arcane side — the
-  manifest schema has no field for either.
-- **The other 35 stay `autoSync: false`.** A promotion makes the release
-  available; an operator still runs sync → build → redeploy per stack. The
-  order matters and is not arbitrary: `honeypot-dashboard` must sync before
-  `honeypot-dashboard-backend` builds, because the Rust source lives in the
-  dashboard project's directory.
+- **`production` is a pointer at the current release.** Promotion moves
+  the pointer; rollback is the same command naming an earlier tag.
+- **`autoSync: true` for the three pullers**, which would follow a
+  promotion within `syncInterval` (300s). Making that a real deploy
+  rather than a file copy requires `pullImageAfterSync` and
+  `redeployAfterSync` set on the Arcane side — fields the manifest
+  schema has no way to carry (see the fact above), so they would be
+  single-sync PATCH work.
+
+Activating any of that is live-store work, collected with the wordpot
+cleanup in #2577.
 
 ### Arcane cannot track a tag
 
@@ -349,9 +382,9 @@ Verified live on 2026-08-25 against the `pihole` sync and reverted. This is
 the same `refs/heads/` assumption documented above for the build-context
 resolver: Arcane prefixes `refs/heads/` onto whatever ref it is given.
 
-That is why the policy is a tag *promoted onto a branch* rather than a tag
-tracked directly. The deployed commit is still always a tagged one; the
-branch is only the pointer Arcane is able to follow.
+That is why the #1507 design is a tag *promoted onto a branch* rather than
+a tag tracked directly. The deployed commit would still always be a tagged
+one; the branch is only the pointer Arcane is able to follow.
 
 ## Security implications of Arcane's Docker-socket access
 

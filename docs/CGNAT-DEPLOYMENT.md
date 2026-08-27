@@ -39,7 +39,7 @@ flowchart TD
 - VPS: plain Docker Compose manages `/root/vps/docker-compose.yml`.
   Unchanged by #1502 — VPS deployment stays outside Arcane entirely, as
   that issue's own scope decision.
-- Each of the 32 stacks' Compose source (build context, git-tracked config,
+- Each of the 31 migrated stacks' Compose source (build context, git-tracked config,
   `compose.yml` with an explicit top-level `name:` pinned to its live
   project name) lives self-contained under `arcane/home/<name>/` in this
   repository. Arcane clones the repo and materializes the *entire

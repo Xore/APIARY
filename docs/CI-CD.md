@@ -163,10 +163,13 @@ flowchart TB
 That is the complete list. What puts a changed sensor/persona/dashboard
 stack on the host lives entirely in Arcane's Git-sync machinery — see
 [ARCANE-GIT-SYNC.md](ARCANE-GIT-SYNC.md) for the full contract (its
-non-obvious cornerstones: creating a sync *is* an initial deploy, every
-sync carries `redeployAfterSync: false` so a sync materializes files
-without redeploying, and 35 of the 38 synced stacks run `autoSync: false`
-behind the tag-promotion / `production`-pointer policy decided in #1507).
+non-obvious cornerstones: creating a sync *is* an initial deploy, a sync
+materializes files without redeploying — live `redeploy_after_sync`
+defaults to 0, though the manifest schema cannot express it — and every
+synced stack runs `autoSync: false`: the #1507 tag-promotion /
+`production`-pointer policy was decided but never deployed, so all syncs
+track `main` and deploys are manual; ARCANE-GIT-SYNC.md's promotion
+section carries the live-state evidence).
 This workflow deliberately stopped touching those directories entirely:
 running an rsync/build loop alongside Arcane's own sync would put two
 independent writers in a race for the same on-host directory, the exact
