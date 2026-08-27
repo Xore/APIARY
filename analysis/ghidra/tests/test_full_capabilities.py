@@ -71,6 +71,87 @@ def test_preset_all_on_then_minimal():
         check("REVDECK_API_BASE=\n" in contents, "minimal clears REVDECK_API_BASE back to empty")
 
 
+# --- #2391: defaults resets every inventoried override, not just gates ----
+
+def _any_non_gate_tunable():
+    """A real inventoried non-gate name (GHIDRA_TRIAGE_TIMEOUT & friends):
+    whatever it is today, it must not survive 'back to source defaults'."""
+    return next(name for name, meta in sorted(fc.inventory().items()) if not meta["gate"])
+
+
+def test_preset_defaults_removes_every_inventoried_override():
+    with tempfile.TemporaryDirectory() as tmp:
+        env_file = Path(tmp) / "env"
+        tunable = _any_non_gate_tunable()
+        env_file.write_text(
+            f"# operator experiment\n{tunable}=60\n"
+            "REVDECK_API_BASE=http://127.0.0.1:19500\nOPERATORS_PRIVATE_NOTE=keepme\n"
+        )
+
+        result = run("--env-file", str(env_file), "--preset", "defaults")
+        contents = env_file.read_text().splitlines()
+        check(result.returncode == 0, "defaults exits 0")
+        check(f"{tunable}=60" not in contents,
+              f"non-gate tunable {tunable} is removed, not stranded (#2391)")
+        check("REVDECK_API_BASE=http://127.0.0.1:19500" not in contents,
+              "a gate override is still removed")
+        check("OPERATORS_PRIVATE_NOTE=keepme" in contents,
+              "names no pipeline source reads are left alone")
+        check("# operator experiment" in contents, "comment lines survive the reset")
+        check(tunable in result.stdout and "REVDECK_API_BASE" in result.stdout,
+              "the removal report names what was actually removed")
+
+
+def test_preset_all_on_then_defaults_is_a_clean_reset():
+    with tempfile.TemporaryDirectory() as tmp:
+        env_file = Path(tmp) / "env"
+        run("--env-file", str(env_file), "--preset", "all-on")
+        run("--env-file", str(env_file), "--preset", "defaults")
+        contents = env_file.read_text()
+        for key in ("STATICTOOLS_API_BASE", "GHIDRA_TRIAGE_API_BASE", "REVDECK_API_BASE"):
+            check(key not in contents, f"defaults cancels all-on's {key} cleanly")
+        check(not Path(tmp).joinpath(".env.tmp").exists(), "no temp residue after defaults")
+
+
+def test_preset_defaults_with_nothing_to_remove_reports_honestly():
+    with tempfile.TemporaryDirectory() as tmp:
+        env_file = Path(tmp) / "env"
+        # No line belongs to an inventoried name: only a hand-written key no
+        # pipeline source reads plus comments/blank lines.
+        env_file.write_text("# notes\nOPERATORS_PRIVATE_NOTE=keepme\n\n")
+        result = run("--env-file", str(env_file), "--preset", "defaults")
+        check(result.returncode == 0, "defaults on an override-free file exits 0")
+        check(env_file.read_text() == "# notes\nOPERATORS_PRIVATE_NOTE=keepme\n\n",
+              "nothing was removed when no inventoried override existed")
+        check("no pipeline-managed overrides" in result.stdout,
+              "the report says honestly when nothing was pipeline-managed")
+
+
+def test_reset_path_is_atomic_under_write_failure():
+    # The reset writes through the same #2064 tmp+os.replace machinery as
+    # apply(); a crash mid-write must leave the operator's file untouched.
+    with tempfile.TemporaryDirectory() as tmp:
+        env_file = Path(tmp) / "env"
+        env_file.write_text("REVDECK_API_BASE=http://old\nOTHER=kept\n")
+        original = env_file.read_text()
+
+        real_replace = os.replace
+        def exploding_replace(src, dst):
+            raise OSError(28, "simulated ENOSPC")
+        os.replace = exploding_replace
+        try:
+            fc.reset(env_file, {"REVDECK_API_BASE": {}, "GHOST": {}})
+        except OSError:
+            pass
+        else:
+            fails.append("reset() did not propagate the simulated rename failure")
+        finally:
+            os.replace = real_replace
+
+        check(env_file.read_text() == original, "original env file untouched after failed reset write")
+        check(not (Path(tmp) / ".env.tmp").exists(), "no temp residue after failed reset write")
+
+
 def test_set_overrides_existing_line_in_place():
     with tempfile.TemporaryDirectory() as tmp:
         env_file = Path(tmp) / "env"
@@ -229,6 +310,10 @@ def test_apply_is_atomic_under_write_failure():
 if __name__ == "__main__":
     test_show_finds_known_gates()
     test_preset_all_on_then_minimal()
+    test_preset_defaults_removes_every_inventoried_override()
+    test_preset_all_on_then_defaults_is_a_clean_reset()
+    test_preset_defaults_with_nothing_to_remove_reports_honestly()
+    test_reset_path_is_atomic_under_write_failure()
     test_set_overrides_existing_line_in_place()
     test_inventory_matches_independent_census()
     test_historical_misses_attributed_to_their_own_file()

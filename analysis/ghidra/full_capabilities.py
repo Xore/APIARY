@@ -32,7 +32,10 @@ Presets:
     minimal   turn off every optional feature; only deterministic Ghidra
               output remains
     defaults  remove every override this script or an operator has made;
-              back to whatever the process defaults in source are
+              back to whatever the process defaults in source are (#2391:
+              that means any inventoried name -- gates and tunables alike;
+              comment lines and keys no pipeline source reads are left
+              alone)
 """
 import argparse
 import os
@@ -292,6 +295,25 @@ def apply(env_file: Path, overrides: dict):
     print("  sudo systemctl restart honeypot-ghidra-worker.service")
 
 
+def reset(env_file: Path, inv: dict):
+    """Remove every inventoried override from env_file (#2391), returning
+    the names actually removed. The old defaults branch filtered only names
+    the inventory had classified as feature gates, so a tunable set via
+    --set or by hand (GHIDRA_TRIAGE_TIMEOUT, ANALYSIS_TIMEOUT, ...) survived
+    a "back to source defaults" reset silently -- and the removal report was
+    honest about that, which made it quieter: nothing looked wrong while a
+    stale value sat next to the freshly reset gates."""
+    original = env_file.read_text().splitlines() if env_file.is_file() else []
+    remaining = [line for line in original if line.split("=", 1)[0].strip() not in inv]
+    removed = {
+        raw.strip().split("=", 1)[0].strip()
+        for raw in original
+        if raw.strip() and not raw.strip().startswith("#") and "=" in raw.strip()
+    } & set(inv)
+    _write_env_file(env_file, remaining)
+    return sorted(removed)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--env-file", default=DEFAULT_ENV_FILE)
@@ -304,11 +326,15 @@ def main():
     env_values = load_env_file(env_file)
 
     if args.preset == "defaults":
-        gate_names = {name for name, meta in inv.items() if meta["gate"]}
-        remaining = [line for line in (env_file.read_text().splitlines() if env_file.is_file() else [])
-                     if line.split("=", 1)[0].strip() not in gate_names]
-        _write_env_file(env_file, remaining)
-        print(f"Removed overrides for: {', '.join(sorted(gate_names))}")
+        # #2391: scope is the whole inventory, matching the docstring --
+        # every name show() lists came from a real pipeline read, so each
+        # one is an override this script or an operator could have made.
+        removed = reset(env_file, inv)
+        print(
+            f"Removed overrides for: {', '.join(removed)}"
+            if removed
+            else "Env file carried no pipeline-managed overrides."
+        )
         return
     if args.preset:
         apply(env_file, PRESETS[args.preset])
