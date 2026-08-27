@@ -59,7 +59,7 @@ compromised contributor account, not just fork-origin PRs.
 
 Python and shell tests live in a sibling `tests/` directory next to the code
 they test (e.g. `ml-worker/tests/`, `analysis/ghidra/worker/tests/`,
-`analysis/yara/tests/`), not flat alongside it. When adding a new Python or
+`arcane/home/honeypot-payload-analysis/analysis/yara/tests/`), not flat alongside it. When adding a new Python or
 shell test, put it under the nearest `tests/` directory for its component,
 creating one if none exists yet.
 

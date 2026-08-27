@@ -782,6 +782,17 @@ jobs:
             home: true
             run: python scripts/check-compose-env-docs.py
 
+          # #2352: #1502 moved the YARA scanner under
+          # honeypot-payload-analysis/analysis/yara/ and updated the checker
+          # script, but the surrounding prose never got the same pass -- six
+          # documents kept pointing readers at the dead repository-root path,
+          # including the operator README's own sync command, which failed
+          # verbatim from a fresh checkout. Grep-level guard for that class:
+          # outside arcane/**, a .md may cite analysis/yara/ only on a line
+          # that also names its real home (or carries an inline waiver).
+          - name: Docs cite moved trees by their real home (#2352)
+            run: python scripts/check-doc-stale-paths.py
+
           - name: Dionaea SMB exploit-signature incidents (#622, #1775)
             home: true
             run: |
