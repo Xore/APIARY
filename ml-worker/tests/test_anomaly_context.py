@@ -29,7 +29,7 @@ def _event(**src_extra):
         "@timestamp": "2026-07-31T00:00:00Z",
         "sensor": "cowrie",
         "source": {"ip": "203.0.113.7", "port": 51234},
-        "destination": {"ip": "192.168.42.250", "port": 2222},
+        "destination": {"ip": "192.168.1.50", "port": 2222},
         "network": {"transport": "tcp", "community_id": "1:synthetic-flow-key"},
     }
     src.update(src_extra)
@@ -57,7 +57,7 @@ class TestNewAlertAnswersWithoutSecondQuery:
                              checkpoint_id="iso:1756000000|hbos:1756000000|lstm:1756000001")
         doc = _written_doc(es)
 
-        assert doc["dst_ip"] == "192.168.42.250"       # our side of the flow
+        assert doc["dst_ip"] == "192.168.1.50"         # our side of the flow
         assert doc["src_port"] == 51234                # remote ephemeral port
         assert doc["sensor"] == "cowrie"
         assert doc["community_id"] == "1:synthetic-flow-key"
