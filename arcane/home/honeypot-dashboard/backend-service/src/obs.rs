@@ -12,13 +12,17 @@
 //!    had. When DASHBOARD_LOG_FILE names a file on the filebeat-tailed
 //!    mount (/logs/dashboard-backend/app.jsonl in compose), one structured
 //!    JSONL line lands there per request and survives into ES under its own
-//!    index family + ILM policy, next to every other evidence stream.
+//!    index family + ILM policy, next to every other evidence stream. That
+//!    sink is size-capped with rename rotation (#2468) so it can't outgrow
+//!    the json-file retention stdout already has — see MAX_SINK_BYTES for
+//!    the arithmetic.
 //! 3. **A metrics baseline.** /metrics serves Prometheus text exposition —
 //!    requests by route family/status class and a latency histogram per
 //!    family — hand-rolled on atomics because the point is exposing numbers
 //!    today, not adopting a client crate for two series families. A shedding
 //!    storm or error burst becomes visible without reading Traefik's log.
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
@@ -37,6 +41,19 @@ const MAX_INBOUND_ID_LEN: usize = 128;
 /// Latency bucket edges in whole milliseconds, kept integer so every write
 /// is a relaxed atomic increment (no float accumulators anywhere).
 const LATENCY_BUCKETS_MS: [u64; 10] = [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000];
+
+/// Size cap for the durable JSONL sink (#2468). The file path it lands on is
+/// bind-mounted with NO other rotator in the deployment (no host logrotate,
+/// no copytruncate sidecar), so this constant IS the retention policy — and
+/// stdout already sets the parity target: compose's json-file driver keeps
+/// 3 × 25m per container. One live generation + one retired `.1`
+/// (crate::audit::rotate_if_oversized's rename) bounds the sink at
+/// 25 MiB + ≤25 MiB = ≤50 MiB on disk. Retention math at the measured line
+/// shape (~300 B: timestamp, request id, method/path/status/duration):
+/// 26_214_400 B ÷ 300 B ≈ ~87k requests per generation — over a day of the
+/// tier's traffic including /healthz probes, and a retry storm fills it in
+/// hours instead of never-pruning forever.
+const MAX_SINK_BYTES: u64 = 25 << 20;
 
 /// The path's coarse identity. "Per route family" needs bounded label sets;
 /// tower's matched-route patterns would need routing internals inside the
@@ -82,11 +99,17 @@ pub struct Obs {
     pub metrics: Metrics,
     /// Durable JSONL sink (DASHBOARD_LOG_FILE); empty string disables.
     pub log_file: String,
+    /// Serializes each append's size-check → rotate → open → write so
+    /// concurrent spawned tasks can't straddle the rename. Unserialized, a
+    /// writer holding an open fd across the swap appends into the retired
+    /// `.1` after filebeat has already drained it — those lines never ship.
+    /// Same guard shape config_history.rs wraps its own rotated sink in.
+    sink_lock: tokio::sync::Mutex<()>,
 }
 
 impl Obs {
     pub fn new(log_file: String) -> Self {
-        Self { metrics: Metrics::new(), log_file }
+        Self { metrics: Metrics::new(), log_file, sink_lock: tokio::sync::Mutex::new(()) }
     }
 }
 
@@ -223,27 +246,48 @@ impl Metrics {
     }
 }
 
-/// One structured line per served request into the filebeat-tailed volume.
-/// Shape mirrors what the -v1 index template maps: ECS-ish top level like
-/// disk-space-check's feed (#263 precedent), so downstream needs no ndjson
-/// target namespace. A failing sink logs once per failure at debug and gets
-/// out of the way — shipping logs must never take serving down with it.
-async fn append_log_line(log_file: String, line: serde_json::Value) {
-    use tokio::io::AsyncWriteExt;
-    let Ok(mut file) = tokio::fs::OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(&log_file)
-        .await
-    else {
-        tracing::debug!(log_file = %log_file, "[E-OBS] durable request log unavailable");
-        return;
-    };
+/// One structured line per served request into the filebeat-tailed volume,
+/// size-capped by rename rotation (#2468). Shape mirrors what the -v1 index
+/// template maps: ECS-ish top level like disk-space-check's feed (#263
+/// precedent), so downstream needs no ndjson target namespace. A failing
+/// sink (open or rotate — rotate_if_oversized already degrades to a no-op on
+/// fs errors) logs once per failure at debug and gets out of the way —
+/// shipping logs must never take serving down with it.
+///
+/// The mechanism is rename-and-reopen, never truncation-in-place:
+/// copytruncate against a file Filebeat tails shipped every line twice when
+/// portbridge's 8 MiB sidecar did it ("99.9% of portbridge documents were
+/// exact duplicate pairs" — the measured evidence in vps/docker-compose.yml's
+/// #1776 block), because truncation reset the harvester offset AND gave the
+/// rewritten head a second fingerprint identity. Renaming keeps every
+/// generation append-only from byte zero — exactly the story
+/// honeypot-elk/analysis/filebeat.yml's dashboard-backend stanzas already
+/// bless for this path. max_bytes is a parameter so tests can cross real
+/// thresholds instead of writing 25 MiB; production passes MAX_SINK_BYTES.
+///
+/// The rotate → open → write critical section is sync std fs, exactly as in
+/// config_history.rs's rotated sink: these are single small writes on a line
+/// format that must land atomically behind the guard, and an await between
+/// open and write lets tokio's lazy file lifecycle interleave or defer them
+/// across tasks (measured in the tests below: sizes lagged a full append).
+async fn append_line(
+    log_file: &Path,
+    lock: &tokio::sync::Mutex<()>,
+    max_bytes: u64,
+    line: &serde_json::Value,
+) {
+    let _guard = lock.lock().await;
     // if let, not a two-arm match: clippy single_match (-D warnings) fails
     // the build otherwise, and the Err arm carries no behavior anyway.
-    if let Ok(mut rendered) = serde_json::to_string(&line) {
+    if let Ok(mut rendered) = serde_json::to_string(line) {
         rendered.push('\n');
-        let _ = file.write_all(rendered.as_bytes()).await;
+        crate::audit::rotate_if_oversized(log_file, max_bytes);
+        let Ok(mut file) = std::fs::OpenOptions::new().append(true).create(true).open(log_file)
+        else {
+            tracing::debug!(log_file = %log_file.display(), "[E-OBS] durable request log unavailable");
+            return;
+        };
+        let _ = std::io::Write::write_all(&mut file, rendered.as_bytes());
     }
 }
 
@@ -291,8 +335,16 @@ pub async fn observe(
             "duration_ms": duration_ms,
             "level": if status >= 500 { "error" } else { "info" },
         });
-        let log_file = state.observability.log_file.clone();
-        tokio::spawn(async move { append_log_line(log_file, line).await });
+        let observability = state.observability.clone();
+        tokio::spawn(async move {
+            append_line(
+                Path::new(&observability.log_file),
+                &observability.sink_lock,
+                MAX_SINK_BYTES,
+                &line,
+            )
+            .await;
+        });
     }
     response
 }
@@ -357,5 +409,153 @@ mod tests {
         assert!(body.contains(plus_inf));
         assert!(body.contains("apiary_backend_request_duration_seconds_sum 10.542000"));
         assert!(body.contains("apiary_backend_request_duration_seconds_count 3"));
+    }
+
+    // Process-unique scratch paths under the OS temp dir: this crate has no
+    // tempfile dependency, and parallel `cargo test` binaries must not share
+    // a sink path.
+    fn sink_path(tag: &str) -> std::path::PathBuf {
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("apiary-obs-sink-{tag}-{}-{seq}.jsonl", std::process::id()))
+    }
+
+    fn scrub(path: &Path) {
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(crate::audit::rotated_path(path));
+    }
+
+    fn line_count(path: &Path) -> usize {
+        std::fs::read_to_string(path).unwrap().lines().count()
+    }
+
+    #[tokio::test]
+    async fn crossing_the_cap_rotates_the_generation_and_the_live_sink_continues() {
+        use tokio::sync::Mutex;
+        let live = sink_path("cross");
+        scrub(&live);
+        let lock = Mutex::new(());
+        let line = serde_json::json!({"request.id": "req-rotation-cross-test"});
+        let step = serde_json::to_string(&line).unwrap().len() as u64 + 1; // + newline
+        // Room for one full line but never two: sized off the real render so
+        // the test stays far away from MAX_SINK_BYTES' 25 MiB.
+        let max_bytes = step + step / 2;
+        append_line(&live, &lock, max_bytes, &line).await;
+        append_line(&live, &lock, max_bytes, &line).await;
+        // Two lines sit over the cap but the swap happens BEFORE a write,
+        // measured at append time — nothing rotated yet.
+        assert!(!crate::audit::rotated_path(&live).exists());
+        // The next append ships generation one whole...
+        let rotated = crate::audit::rotated_path(&live);
+        append_line(&live, &lock, max_bytes, &line).await;
+        assert_eq!(line_count(&rotated), 2, "over-cap content moved into .1 intact");
+        let retired = std::fs::read_to_string(&rotated).unwrap();
+        assert!(retired.starts_with('{') && retired.ends_with('\n'));
+        // ...while the live file continues receiving appended lines instead
+        // of starting over per request: the fresh generation takes this line
+        // on top of its own first one.
+        append_line(&live, &lock, max_bytes, &line).await;
+        assert_eq!(line_count(&live), 2, "fresh generation accumulates without re-rotating");
+        scrub(&live);
+    }
+
+    #[tokio::test]
+    async fn the_cap_boundary_is_stable_and_does_not_thrash_generations() {
+        use tokio::sync::Mutex;
+        let live = sink_path("boundary");
+        scrub(&live);
+        let lock = Mutex::new(());
+        let line = serde_json::json!({"n": 123456789});
+        let step = serde_json::to_string(&line).unwrap().len() as u64 + 1; // + newline
+        // Room for exactly four full lines: rotate_if_oversized fires on
+        // strictly-greater, so sitting AT the cap must not rotate either.
+        let max_bytes = 4 * step;
+        for _ in 0..4 {
+            append_line(&live, &lock, max_bytes, &line).await;
+        }
+        assert!(!crate::audit::rotated_path(&live).exists(), "just-under/at cap: no rotation");
+        assert_eq!(std::fs::metadata(&live).unwrap().len(), max_bytes);
+
+        // One line over the cap saturates the live file; the swap itself is
+        // observed by the FOLLOWING call (size-check precedes each write),
+        // so two calls take it from saturated to exactly-one-generation-old.
+        append_line(&live, &lock, max_bytes, &line).await;
+        append_line(&live, &lock, max_bytes, &line).await;
+        let rotated = crate::audit::rotated_path(&live);
+        assert_eq!(line_count(&rotated), 5, "the whole saturated generation retired");
+        assert_eq!(line_count(&live), 1);
+
+        // ...and further appends settle into the fresh generation without
+        // minting more of them per line.
+        for _ in 0..3 {
+            append_line(&live, &lock, max_bytes, &line).await;
+        }
+        assert_eq!(line_count(&rotated), 5, "retired generation untouched since the swap");
+        assert_eq!(line_count(&live), 4);
+        let name = live.file_name().unwrap().to_string_lossy().into_owned();
+        let retired_name = format!("{name}.1");
+        let siblings: Vec<_> = live
+            .parent()
+            .map(|dir| {
+                // Exact-name matching, not a substring scan: /tmp keeps
+                // leftovers of earlier failed runs under other pid-unique
+                // names that happen to share the tag.
+                std::fs::read_dir(dir)
+                    .unwrap()
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.file_name().to_string_lossy() == name
+                        || e.file_name().to_string_lossy() == retired_name)
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert_eq!(siblings.len(), 2, "exactly one live file plus one .1 generation");
+        scrub(&live);
+    }
+
+    #[tokio::test]
+    async fn concurrent_appenders_never_tear_or_duplicate_lines_across_generations() {
+        let live = sink_path("racing");
+        scrub(&live);
+        // Arc over the guard mirrors Obs holding it behind its own handle.
+        let lock: std::sync::Arc<tokio::sync::Mutex<()>> =
+            std::sync::Arc::new(tokio::sync::Mutex::new(()));
+        // A small cap (~54 bytes vs ~10-byte lines) forces several swaps
+        // mid-flight: without the shared guard holding size-check → rotate →
+        // open → write together, writers race the rename and their lines
+        // retire unshipped or interleave torn. Mid-run swaps may legitimately
+        // evict an earlier .1 (single-generation retention), so the stable
+        // property asserted is integrity, not a total.
+        let max_bytes = 54;
+        let tasks: Vec<_> = (0..40)
+            .map(|n| {
+                let lock = std::sync::Arc::clone(&lock);
+                let live = live.clone();
+                tokio::spawn(async move { append_line(&live, &lock, max_bytes, &serde_json::json!({"i": n})).await })
+            })
+            .collect();
+        for task in tasks {
+            task.await.unwrap();
+        }
+        let rotated = crate::audit::rotated_path(&live);
+        assert!(rotated.exists(), "the run crossed the cap while contended");
+        let mut ids = Vec::new();
+        for path in [live.as_path(), rotated.as_path()] {
+            if let Ok(raw) = std::fs::read_to_string(path) {
+                for l in raw.lines() {
+                    let parsed: serde_json::Value =
+                        serde_json::from_str(l).unwrap_or_else(|e| panic!("torn line {l:?}: {e}"));
+                    ids.push(parsed["i"].as_u64().expect("intact id"));
+                }
+            }
+        }
+        let distinct = {
+            let mut sorted = ids.clone();
+            sorted.sort_unstable();
+            sorted.dedup();
+            sorted.len()
+        };
+        assert_eq!(distinct, ids.len(), "no payload ever shipped twice: {ids:?}");
+        assert!(ids.iter().all(|&id| id < 40), "only spawned payloads land: {ids:?}");
+        scrub(&live);
     }
 }
