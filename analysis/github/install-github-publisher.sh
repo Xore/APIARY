@@ -53,6 +53,63 @@ install -d -m 0700 -o root -g root \
   /var/lib/honeypot-github/pending \
   /var/lib/honeypot-github/results
 
+# #2415: break the activation cycle while we own the box, because nothing
+# downstream can. The only writer on requests/pending is backend-service's
+# container (image USER nobody, uid 65534), and its grant lives solely in
+# process-github-requests.sh -- which honeypot-github-publish.path triggers
+# on DirectoryNotEmpty of that very spool. A fresh spool root-owned 0700
+# leaves nobody unable to create the first .request, so the path unit never
+# fires once, so the drain never runs its own setfacl, so submissions can
+# never land: dead from first boot with dashboard-side write errors as the
+# only symptom. The installer runs BEFORE any of that matters, granting
+# where installation created the directory. The explicit mask::rwx mirrors
+# the drain-side reassertion: install -d -m (and any later mode reset)
+# collapses the ACL mask down again, which is exactly why the per-run
+# reassertion stays necessary too -- this is belt AND suspenders by design.
+for spool_dir in /var/lib/honeypot-github/requests/pending \
+                 /var/lib/honeypot-github/requests/rejected; do
+  setfacl -m u:65534:rwx,mask::rwx "$spool_dir" \
+    || { echo "FAILED to grant uid 65534 write access on $spool_dir." \
+             "setfacl itself is present (checked above), so this is almost" \
+             "certainly a filesystem without ACL support -- the publisher" \
+             "cannot work from there; install onto an ACL-capable mount." >&2
+         exit 1; }
+done
+
+# #2415 self-check: prove the write property rather than assume it. An
+# empty spool grants no signal back, so the only honest test of what the
+# path unit depends on is writing the way the real writer does -- AS uid
+# 65534. Fails the install (loudly naming the gap) instead of leaving a
+# publisher that works in every CI test and dies on first submission.
+pending_spool=/var/lib/honeypot-github/requests/pending
+probe_name=".acl-probe.$$.tmp"
+if command -v runuser >/dev/null; then
+  runuser -u '#65534' -- touch "$pending_spool/$probe_name" \
+    || { echo "Drop-privilege write probe FAILED: uid 65534 could not create" \
+              "a file in $pending_spool even after the setfacl grant above" \
+              "(ACL on an unsupported mount is one suspect). Dashboard" \
+              "submissions would fail to land here; refusing to install a" \
+              "silently-dead publisher (#2415)." >&2
+         exit 1; }
+elif [[ $(id -u nobody 2>/dev/null) == 65534 ]]; then
+  su -s /bin/sh nobody -c "touch '$pending_spool/$probe_name'" \
+    || { echo "Drop-privilege write probe FAILED: user nobody(65534) could" \
+              "not create a file in $pending_spool even after the setfacl" \
+              "grant above. Dashboard submissions would fail to land here;" \
+              "refusing to install a silently-dead publisher (#2415)." >&2
+         exit 1; }
+else
+  echo "Cannot verify uid 65534 write access: neither runuser nor the" \
+       "nobody(==65534) account is available for the drop-privilege probe." >&2
+  exit 1
+fi
+[[ -f $pending_spool/$probe_name ]] \
+  || { echo "uid 65534 could NOT create a probe file in $pending_spool;" \
+            "dashboard submissions will fail to land on this host. Refusing" \
+            "to leave a silently-dead publisher installed (#2415)." >&2
+       exit 1; }
+rm -f "$pending_spool/$probe_name"
+
 # shellcheck disable=SC1091
 source /etc/honeypot-github.env
 clone_dir=${GITHUB_CLONE:-/var/lib/honeypot-github/repo}
