@@ -65,6 +65,17 @@ sed \
   "$DOMAIN_XML_TEMPLATE" > "$DOMAIN_XML"
 
 cleanup() {
+  # Remove this run's API-socket exception before the domain goes away --
+  # standing policy (network-filter.sh's GHOSTS-FWD, #2444) source-pins
+  # tcp/5000 on virbr-ghosts to the enrolled clients, and this throwaway
+  # clone deliberately holds a random-MAC dynamic lease (#651) rather than
+  # the production identity, so it gets a scoped, self-revoking grant for
+  # the duration of the run instead of the standing list growing an
+  # exception no one remembers. Best-effort both ways: absent chain or
+  # empty lease (early-exit paths) leave nothing behind either way.
+  if [ -n "${guest_ip:-}" ]; then
+    iptables -D GHOSTS-FWD -s "${guest_ip}/32" -d 10.90.0.2/32 -p tcp --dport 5000 -j ACCEPT 2>/dev/null || true
+  fi
   virsh destroy "$vm" >/dev/null 2>&1 || true
   virsh undefine "$vm" --nvram >/dev/null 2>&1 || true
   rm -f -- "$VM_DISK"
@@ -113,6 +124,21 @@ while [ "$tries" -gt 0 ]; do
 done
 [ -n "$guest_ip" ] || { echo "error: WinRM never came up on $vm" >&2; exit 1; }
 echo "  guest is at $guest_ip"
+
+echo "== granting this lease a scoped API-socket exception (#2444)"
+# Standing policy (network-filter.sh) fails closed for any non-enrolled
+# source on the API backend. This clone's fresh dynamic lease is exactly
+# such a source until it enrolls, so open -- just for this lease, just for
+# tcp/5000 -- the same hole the production client holds permanently, and
+# let cleanup() take it back out. If GHOSTS-FWD doesn't exist at all (the
+# filter was never applied on this host) there is nothing to grant past:
+# the socket was never closed, so the run proceeds unchanged.
+if iptables -nL GHOSTS-FWD >/dev/null 2>&1; then
+  iptables -I GHOSTS-FWD 1 -s "${guest_ip}/32" -d 10.90.0.2/32 -p tcp --dport 5000 -j ACCEPT
+  echo "  granted: -s ${guest_ip}/32 (revoked again on exit)"
+else
+  echo "  GHOSTS-FWD not present -- network-filter.sh not applied, nothing to grant past"
+fi
 
 echo "== launching the client (scheduled task, Interactive principal -- #462: not WMI Create,"
 echo "   which always spawns in Session 0, invisible on the real desktop session an attacker"
