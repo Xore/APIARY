@@ -109,7 +109,7 @@ printf '%s' "$sessions" | jq --argjson meta "$metadata" '
   def normalize_duration:
     if type == "number" then . else ((tonumber?) // null) end;
   map(. as $sess
-    | [$meta[] | select(._source.honeypot.session == $sess.session_id)] as $events
+    | [($meta // [])[] | select(._source.honeypot.session == $sess.session_id)] as $events
     | [$events[]."_source".honeypot.eventid] as $eventids
     | if ($events | length) == 0 then
         $sess + {
