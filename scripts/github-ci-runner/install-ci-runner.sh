@@ -80,8 +80,12 @@ install -d -m 0755 -o "$RUNNER_USER" -g "$RUNNER_USER" "$RUNNER_HOME"
 #     (daemon disabled -- only the binary is wanted).
 #   nodejs/npm: the dashboard OIDC suites run the BFF build against the
 #     node 22 the suites pin.
-#   shellcheck: the shell-syntax scripts-and-compose row prefers an
-#     existing binary and only apt-installs where it was already required.
+#   the shellcheck binary: the shell-syntax scripts-and-compose row
+#     prefers an existing binary and only apt-installs where it was
+#     already required. (This comment block is inside that row's scan
+#     set: a comment line leading with the word "shellcheck" is parsed
+#     as a shellcheck directive, which is why none of these lines
+#     starts with it.)
 #   chromium libs: playwright's own ubuntu26.04-x64 chromium dependency
 #     list, extracted from the playwright-core version pinned by
 #     frontend-next/package-lock.json (1.62.1 at the time of writing) --
