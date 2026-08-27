@@ -82,6 +82,10 @@ func (l *logger) emit(e event) {
 	e.Sensor = "dicompot"
 	e.Persona = "nexusai-imaging"
 	e.Site = "nexusai-radiology-archive"
+	// Fixed asset id like every sibling decoy ships (dns01, rdpgw01,
+	// asagw01, citrixgw01): the dashboard joins attacker traffic to the
+	// deployed asset on this field, so it must be stable and non-empty.
+	e.Asset = "pacs01"
 	e.Org = "NexusAI Research GmbH"
 	e.Proto = "dicom"
 	line, _ := json.Marshal(e)

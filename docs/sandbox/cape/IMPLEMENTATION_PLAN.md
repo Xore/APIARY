@@ -1,8 +1,9 @@
 # CAPE Sandbox — Implementation Plan
 
 > **Status**: #314, #315, #316, #317, #318, #320 done and verified live;
-> #319 has its registry entry (the result-detail page is real follow-up
-> work, see Known Gaps). The golden image (#315) builds via PXE against
+> #319 landed too (2026-08-08): the Workbench `cape` analyzer entry plus
+> the `/cape/{sha256}` result-detail page, both re-landed through the
+> Rust/TanStack cutover (#1628). The golden image (#315) builds via PXE against
 > the evaluation ISO already on the homeserver (no licensed ISO needed —
 > see that section below for why this plan's earlier assumption was
 > wrong). The host stack (#314) runs all four systemd services
@@ -12,7 +13,7 @@
 > `reported`-status end-to-end analysis of a known-benign sample through
 > its own `utils/submit.py` — not just a startup self-test. See "What's
 > verified" for the concrete evidence and every bug found getting there.
-> **Last updated**: 2026-08-07
+> **Last updated**: 2026-08-27
 > **Host platform**: KVM + QEMU + libvirt + docker-compose, same as
 > `sandbox/windows` and `sandbox/ghosts` — no VMware, no Hyper-V, no
 > CI-triggered detonation.
@@ -191,7 +192,7 @@ differently-configured venv without saying so.
 | VM lifecycle | CAPE's own `kvm`/`libvirt` machinery module (not this worker) | `sandbox/windows/orchestrate/run_sample.py`, direct `virsh` |
 | Results | `{sha256}_cape.json` → `CAPE_RESULTS_DIR`; dashboard only reads | `{sha256}_sandbox.json` → `WINDOWS_SANDBOX_RESULTS_DIR` |
 | Trust boundary | Dashboard never touches libvirt, Docker, or CAPE's API credentials directly | Same |
-| Detail page | **Not built yet** (#319 remaining scope — see below) | `GET /sandbox/{job}` |
+| Detail page | `/cape/{sha256}` — landed with #319, re-landed by the cutover (#1628); admin-gated, detonation confirmation | `GET /sandbox/{job}` |
 
 No new trust boundary. The dashboard container stays unprivileged and never
 calls `virsh`, `docker`, or CAPE's own API directly — same guarantee every
@@ -501,34 +502,24 @@ recreating the overlay completely from scratch, the same way `capekvm`
   correctly with zero manual intervention, the same way `capekvm` does
   it for every real analysis.
 
-### Dashboard wiring (#319, registry entry only)
+### Dashboard wiring (#319, landed)
 
-`go build ./...` and the full existing `dashboard` test suite
-(`go test ./... -run Workbench`) both pass unchanged after adding the
-`cape` registry entry — no regression to any existing analyzer's
-behavior. The entry correctly reports `unconfigured` (no live spool
-directories exist on this dashboard instance) rather than claiming
-availability nothing backs, same discipline `ghidraConfigured`/
-`revdeckConfigured` already hold themselves to.
+#319 landed 2026-08-08 as the Workbench `cape` registry entry plus the
+`/cape/{sha256}` result-detail page, and #1628's Rust/TanStack cutover
+re-landed both: `backend-service`'s `workbench_domain.rs` "cape" entry
+(admin role, "detonation" confirmation, `result_link_shape:
+"/cape/{sha256}"`), `detail.rs`'s `/api/v1/cape/{sha}` and
+`/api/v1/cape/{sha}/raw` endpoints, and the frontend route at
+`routes/cape.$sha.tsx`. The registry entry's unconfigured discipline
+survives the cutover: the Rust side reports `unconfigured` until both
+spool directories are usable (`workbench_domain.rs`'s `cape_configured`
+check) rather than claiming availability nothing backs, same as the
+ghidra/revdeck entries already hold themselves to.
 
 ---
 
 ## Known gaps (tracked, not silently dropped)
 
-- **No `/cape/{sha256}` result detail page.** #319's own issue text is
-  explicit that this depends on "a real result shape" — no longer
-  blocked on a golden image to produce one (#315 and a real `reported`
-  analysis both now exist), but the shape hasn't been designed against
-  yet: that analysis went through `utils/submit.py` directly, not
-  `cape-worker.py`'s own spool-drain path, so there is still no real
-  `{sha256}_cape.json` written by *this repo's own* worker to design the
-  page against. The registry entry's `ResultLinkShape: "/cape/{sha256}"`
-  is therefore still a route *promise*, not yet a working link —
-  clicking through 404s today. Build `dashboard/cape.go`'s
-  `loadCapeResults()` / `capePageData` / ES-mirror pair (mirroring
-  `revdeck.go`'s shape, which is closer to CAPE's single-result-per-
-  submission model than `ghidra.go`'s larger one) once `cape-worker.py`
-  has actually written one, per the API-client gap below.
 - **`cape-worker.py`'s CAPE API client is still unverified against a
   live service** — narrower than before, not removed: #314's own
   `utils/submit.py` CLI and the `/apiv2/tasks/status/<id>/` read

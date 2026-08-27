@@ -328,7 +328,7 @@ iptables -I FORWARD -i eth0 -o virbr-sandbox -j DROP
 
 See: [`packer/win11-analysis.pkr.hcl`](../../../sandbox/windows/packer/win11-analysis.pkr.hcl)
 
-Packer automates the full Windows 11 install + FLARE-VM + logging config
+Packer automates the full Windows 11 install + hardening + logging config
 into a single reproducible `qcow2` image.
 
 ### Build
@@ -342,25 +342,52 @@ cd sandbox/windows/packer
 packer init win11-analysis.pkr.hcl
 packer build win11-analysis.pkr.hcl
 # Output: /golden-images/win11-analysis.qcow2  (~25-35 GB)
-# Build time: ~3-5 hours (FLARE-VM install takes most of it)
+# Build time: a few hours (Windows install/OOBE + the provisioner chain below
+# and its settle-restart; no multi-hour FLARE-VM install anymore)
 ```
 
 ### What Packer Does
+The chain below mirrors the provisioner list in `win11-analysis.pkr.hcl`
+exactly — add/remove there first, then update this enumeration.
+
 1. Boot Windows 11 ISO with `autounattend.xml` (fully unattended install)
 2. WinRM auto-enabled via `SetupComplete.cmd` in autounattend
-3. PowerShell provisioners run `01-hardening.ps1`, `02-flarevm-start.ps1`, `03-flarevm-wait.ps1` (x12), `04-tools.ps1`:
-   - Installs FLARE-VM (Chocolatey)
-   - Installs Sysmon + SwiftOnSecurity config
-   - Enables PS ScriptBlock/Module/Transcription logging
-   - Installs FakeNet-NG
-   - Creates analysis directories
-   - Hardens VM (disable Defender, UAC, WU, telemetry)
-   - Populates decoy user environment (anti-evasion)
-4. Sysprep + shutdown → Packer exports `win11-analysis.qcow2`
+3. Stage config into the guest (`provisioner "file"`):
+   `config/fakenet.ini` → `C:/Windows/Temp/honeypot_fakenet.ini`, plus
+   `config/defaultFiles/` — run_sample.py points FakeNet's `-c` at these, so
+   they must be baked in before detonations
+4. `sandbox/windows/packer/scripts/01-hardening.ps1` — network config, disable Defender/WU/
+   telemetry/UAC/firewall, install Chocolatey (phases 1–7)
+5. windows-restart to settle pending reboots before tooling installs
+6. `sandbox/windows/packer/scripts/04-tools.ps1` — runtime dependencies via Chocolatey (phase 8);
+   Sysmon + SwiftOnSecurity config pinned by commit **and** SHA-256 (phase
+   9); PS ScriptBlock/Module/Transcription logging, process-creation
+   auditing, event-log sizing (phase 10); FakeNet-NG install and the staged
+   ini/defaultFiles moved into place (phase 11); Regshot (11b); QEMU guest
+   agent (phase 12); analysis directories
+7. `sandbox/windows/packer/scripts/09-vcredist.ps1` — standalone VC++ redistributables (#368)
+8. `sandbox/windows/packer/scripts/12-display-resolution.ps1` — real desktop resolution at 1080p
+9. `sandbox/windows/packer/scripts/10-loldrivers.ps1` — BYOVD bait drivers + blocklist disabled
+10. `sandbox/windows/packer/scripts/05-decoy-content.ps1` — decoy documents, SMB share, Recent-files
+    entries (anti-evasion cosmetics only)
+11. `sandbox/windows/packer/scripts/06-chrome-history.ps1` — aged Chrome browsing history seeded
+    into the History SQLite DB (#292)
+12. `sandbox/windows/packer/scripts/07-living-persona.ps1` — mouse/persona daemon simulating a
+    user at the keyboard (#290)
+13. `sandbox/windows/packer/scripts/08-traffic-noise.ps1` — taggable background browsing traffic
+    generator (#291)
+14. `sandbox/windows/packer/scripts/11-detonation-orchestrator.ps1` — in-guest detonation staging
+    consumed by run_sample.py over WinRM (#490)
+15. Final inline cleanup — EnablePrefetcher=3, DNS pinned to INetSim at
+    10.10.10.1, event logs and temp dirs cleared, build timestamp written
+16. Sysprep + shutdown → Packer exports `win11-analysis.qcow2`
+
+(FLARE-VM was part of this chain through 2026-08-02 and is deliberately
+gone — see the removal note in `win11-analysis.pkr.hcl` itself.)
 
 ### Rebuilding
 ```bash
-# Rebuild from scratch (e.g. after FLARE-VM update)
+# Rebuild from scratch
 packer build -force win11-analysis.pkr.hcl
 
 # Update just the logging config without full rebuild:
@@ -824,10 +851,9 @@ flowchart TD
     Packer --> KvmXml["win11-kvm.xml<br/>libvirt domain XML template"]
     Packer --> Autounattend["autounattend.xml<br/>Windows unattended install answer file"]
     Packer --> PackerScripts["scripts/"]
-    PackerScripts --> Hardening["01-hardening.ps1 … 08-traffic-noise.ps1<br/>run inside VM during build"]
+    PackerScripts --> Hardening["01-hardening, 04-tools … 12-display-resolution<br/>run inside VM during build"]
 
     Root --> Setup["setup/"]
-    Setup --> EnableLogging["enable_logging.ps1<br/>Sysmon + PS logging"]
     Setup --> KvmManage["kvm_manage.sh<br/>virsh helper: create/snapshot/revert"]
     Setup --> SandboxNetwork["sandbox-network.xml<br/>the libvirt network; no &lt;forward&gt; is the point"]
 

@@ -31,6 +31,10 @@ export function CommandPalette() {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [result, setResult] = useState<SearchResult | null>(null)
+  // #2178: a failed lookup collapsed into the same null as "not searched
+  // yet", and the bottom line then presented ordinary guidance while the
+  // backend was down. searchFailed names that state instead.
+  const [searchFailed, setSearchFailed] = useState(false)
   const [activeRow, setActiveRow] = useState(-1)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const restoreFocusRef = useRef<Element | null>(null)
@@ -84,6 +88,7 @@ export function CommandPalette() {
     else {
       setQuery('')
       setResult(null)
+      setSearchFailed(false)
       setActiveRow(-1)
     }
   }, [open])
@@ -92,17 +97,28 @@ export function CommandPalette() {
     const trimmed = query.trim()
     if (!trimmed) {
       setResult(null)
+      setSearchFailed(false)
       setActiveRow(-1)
       return
     }
     const request = ++requestRef.current
     const timer = setTimeout(() => {
-      searchFn({ data: { q: trimmed } }).then((response) => {
-        if (requestRef.current === request) {
+      searchFn({ data: { q: trimmed } })
+        .then((response) => {
+          if (requestRef.current !== request) return
+          // #2178: serviceJSON collapses every failure mode to null; flag it
+          // rather than letting it read as guidance for an empty palette.
+          setSearchFailed(response === null)
           setResult(response)
           setActiveRow(response && response.total > 0 ? 0 : -1)
-        }
-      })
+        })
+        .catch(() => {
+          if (requestRef.current === request) {
+            setSearchFailed(true)
+            setResult(null)
+            setActiveRow(-1)
+          }
+        })
     }, 200)
     return () => clearTimeout(timer)
   }, [query])
@@ -218,9 +234,11 @@ export function CommandPalette() {
           </div>
         ) : (
           <p className="command-palette__empty">
-            {result && result.total === 0
-              ? 'No matches in the current window.'
-              : 'Press Enter to open an investigation for this query.'}
+            {searchFailed
+              ? 'The search request failed — the backend may be down or shedding load. Enter still opens a full /search for this query.'
+              : result && result.total === 0
+                ? 'No matches in the current window.'
+                : 'Press Enter to open an investigation for this query.'}
           </p>
         )}
       </section>

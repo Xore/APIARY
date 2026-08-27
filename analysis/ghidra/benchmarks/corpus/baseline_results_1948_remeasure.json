@@ -233,5 +233,8 @@
     }
   },
   "transcript_run_id": "20260826T234418Z-ee529ed9",
-  "transcripts_sha256": "032bbfaa065d2c4a12479b23d681775417511ce16bec4fe6e3797edcf85a7162"
+  "transcripts_sha256": "032bbfaa065d2c4a12479b23d681775417511ce16bec4fe6e3797edcf85a7162",
+  "_scorer_generation": {
+    "recorded_under": "pre-#2393 polarity matcher -- this score predates the prevention-inflection cue widening (#2402, 2026-08-27T01:11Z); see corpus README \"Scorer generations\" (#2406)"
+  }
 }

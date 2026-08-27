@@ -31,7 +31,8 @@
 #   stack only ever uses plain SIP (5061/TLS is never exposed).
 # - sentrypeer/nul_byte_crash_patch.py fixes a real, confirmed-live crash:
 #   any packet containing an embedded NUL byte (including our own
-#   healthcheck's nc -z -u probe) panicked the whole SIP listener thread --
+#   healthcheck's then-nc -z -u probe) panicked the whole SIP listener
+#   thread --
 #   a trivial DoS for a sensor whose entire job is accepting arbitrary
 #   internet garbage. See that file's doc comment.
 # - No third-party sharing: SentryPeer's own Peer-to-Peer bad-actor-list
@@ -69,8 +70,15 @@ services:
       - no-new-privileges:true
     read_only: true
     networks: [sentrypeer_net]
+    # #2337: protocol-level liveness per the #2107/#111 doctrine -- a TCP
+    # connect passes via kernel backlog even with the SIP reactor wedged,
+    # and this sensor's entire job is servicing UDP datagrams a TCP probe
+    # never exercises (the image's own `nc -z -u` check requires no reply
+    # either, so it samples nothing). healthcheck-probe.sh sends one SIP
+    # OPTIONS datagram to loopback and demands a "SIP/" answer back; see
+    # its docstring for payload choice and cost accounting.
     healthcheck:
-      test: ["CMD", "nc", "-z", "127.0.0.1", "5060"]
+      test: ["CMD", "/usr/local/bin/healthcheck-probe"]
       interval: 30s
       timeout: 5s
       retries: 3

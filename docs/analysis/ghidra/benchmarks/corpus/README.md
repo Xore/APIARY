@@ -271,6 +271,19 @@ two totals are presented side by side here and never diffed or averaged as
 if comparable. The re-measure scorer predates #1946's polarity matcher by
 design: one changed variable per run.
 
+**Scorer generations across stored results (#2406).** #2393's matcher
+widening (PR #2402, merged 2026-08-27T01:11Z) is the first change that moves
+a recorded score without any new measurement: rescoring stored answers under
+the post-widening matcher flips `safe_strcpy`'s control leg where an answer's
+"thus preventing buffer overflow" met the pre-#2393 cue list. Every result in
+this directory family therefore carries its generation with it --
+`baseline_results_fixture_v2.json` states it inline (`fixture_change_note.
+_scorer_generation`), the fixture-v1 totals above predate the widening and
+say so in their own sections, and run `20260827T000818Z-8e249763` carries a
+README in its run directory naming the moved leg. Stored answers are never
+rescored in place: a generation boundary means side-by-side presentation, not
+rewritten history.
+
 ## CI verification (`validate_manifest.py`, `ci_verify.sh`, `.github/workflows/quality.yml`)
 
 Two layers, matching #159's "CI verifies provenance, fixture safety,

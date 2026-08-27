@@ -11,7 +11,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useRef, useState } from 'react'
 import { confirmAction } from '../components/ConfirmDialog'
 import { InvestigateHeader } from '../components/Investigate'
-import { useResolved } from '../lib/hooks'
+import { ErrorStateBlock } from '../components/ErrorState'
 
 type Scanner = { source: string; ok: boolean; positives?: number; total?: number; suspicious?: boolean; permalink?: string; error?: string }
 type Verdict = { malicious: number; suspicious: number; total: number; level: string }
@@ -39,11 +39,19 @@ type GithubAnalysisRun = {
   view_url: string | null
 }
 
+// #2178: serviceJSON collapsed "no publication record exists for this
+// hash" (a real 404) and "the request failed" into one null, so an outage
+// read as confident absence. This union keeps the two separable; the
+// handler never rejects.
+type RunFetch = { state: 'run'; run: GithubAnalysisRun } | { state: 'missing' } | { state: 'failed' }
+
 const fetchRun = createServerFn({ method: 'GET' })
   .inputValidator((input: { sha: string }) => input)
-  .handler(async ({ data }): Promise<GithubAnalysisRun | null> => {
-    const { serviceJSON } = await import('../lib/backend.server')
-    return serviceJSON<GithubAnalysisRun>(`/api/v1/github-analysis/${encodeURIComponent(data.sha)}`)
+  .handler(async ({ data }): Promise<RunFetch> => {
+    const { serviceJSONResult } = await import('../lib/backend.server')
+    const result = await serviceJSONResult<GithubAnalysisRun>(`/api/v1/github-analysis/${encodeURIComponent(data.sha)}`)
+    if (result.ok) return { state: 'run', run: result.body }
+    return result.status === 404 ? { state: 'missing' } : { state: 'failed' }
   })
 
 // Re-analyze (github_analysis.html:94's /github-analysis/submit form):
@@ -175,15 +183,43 @@ function scannerBadge(scanner: Scanner) {
 function GithubAnalysisDetail() {
   const { first } = Route.useLoaderData()
   const { sha } = Route.useParams()
-  const resolved = useResolved(first)
-  const run: GithubAnalysisRun | null | 'missing' = resolved === undefined ? null : resolved ?? 'missing'
+  // #2178: `resolved ?? 'missing'` made a failed fetch assert "No
+  // GitHub-analysis result found" — an outage dressed up as evidence.
+  // Tri-state now: null while loading, 'missing' only for the backend's
+  // own 404, and a named failure with retry for everything else.
+  const [fetch, setFetch] = useState<RunFetch | null>(null)
+  const [attempt, setAttempt] = useState(0)
   const [tab, setTab] = useState<'verdict' | 'provenance' | 'artifacts'>('verdict')
   const [queued, setQueued] = useState(false)
   const [viewerOpen, setViewerOpen] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    setFetch(null)
+    ;(attempt === 0 ? first : fetchRun({ data: { sha } })).then((result) => {
+      if (!cancelled) setFetch(result)
+    })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- caller-owned loader stream
+  }, [first, attempt])
 
-  if (run === 'missing') {
+  if (fetch?.state === 'missing') {
     return <InvestigateHeader label="Evidence" title={sha.slice(0, 24)} subtitle="No GitHub-analysis result found for this hash." />
   }
+  if (fetch?.state === 'failed') {
+    return (
+      <>
+        <InvestigateHeader label="Evidence" title={sha.slice(0, 24)} subtitle="The publication record could not be loaded." />
+        <ErrorStateBlock
+          title="The GitHub-analysis result failed to load"
+          hint="The backend request failed — this says nothing about whether a publication exists for this hash."
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
+      </>
+    )
+  }
+  const run: GithubAnalysisRun | null = fetch !== null && fetch.state === 'run' ? fetch.run : null
   const note = run ? STATUS_NOTES[run.exit_status] : undefined
 
   return (

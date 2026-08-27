@@ -11,10 +11,19 @@ $chrome = "${env:ProgramFiles}\Google\Chrome\Application\chrome.exe"
 if (-not (Test-Path $chrome)) { $chrome = "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe" }
 if (-not (Test-Path $chrome)) { Write-Host 'Chrome not found, skipping history seeding'; exit 0 }
 
-$profileDir = "$env:LOCALAPPDATA\Google\Chrome\User Data\Default"
+$userDataDir = "$env:LOCALAPPDATA\Google\Chrome\User Data"
+$profileDir = "$userDataDir\Default"
 
-# Launch & close Chrome once so the profile skeleton exists
-& $chrome --no-first-run --no-default-browser-check --headless=new --disable-gpu about:blank 2>$null
+# Launch & close Chrome once so the profile skeleton (incl. the History
+# SQLite DB) exists. --user-data-dir is explicit rather than left to
+# Chrome's default resolution (#2447): the twin 06-chrome-history.ps1
+# confirmed live (2026-08-03) that a headless launch over a
+# WinRM-provisioned session did NOT reliably create the profile under
+# $env:LOCALAPPDATA\Google without it -- real chrome.exe child processes
+# were running while %LOCALAPPDATA%\Google never appeared. This copy
+# predates that lesson, so the History DB seeded below was
+# non-deterministically absent.
+& $chrome --no-first-run --no-default-browser-check --headless=new --disable-gpu "--user-data-dir=`"$userDataDir`"" about:blank 2>$null
 Start-Sleep -Seconds 5
 Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 2
@@ -59,43 +68,108 @@ URLS = [
     ("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "YouTube", 3, 0),
 ]
 
+# Transitions: CHAIN_START|CHAIN_END with core LINK (0) or TYPED (1).
+# #2447: urls.typed_count must be backed by TYPED-core visits; from_visit=0
+# with start/end chain flags makes every visit its own complete chain --
+# internally consistent for direct/typed navigation.
+TRANS_LINK  = 805306368   # 0x30000000 = CHAIN_START|CHAIN_END|LINK
+TRANS_TYPED = 805306369   # 0x30000001 = CHAIN_START|CHAIN_END|TYPED
+
 now = datetime.datetime.now()
-rows = []
+
+# #2447: one urls row per DISTINCT URL, all of its visits pointing at it.
+# The old loop inserted a brand-new urls record per visit (so visit_count
+# could never exceed 1 and every site appeared as dozens of once-visited
+# rows), then "corrected" the aggregates with an UPDATE that preserved
+# exactly that. Group each URL's visits under a single row instead. The
+# typed draw is hoisted to per-URL level so the row carries ONE coherent
+# typed_count, and exactly that many of its visits get the TYPED-core
+# transition -- the real Chrome invariant (typed_count counts typed
+# navigations, each of which records a TYPED visit).
+plan = []  # (url, title, typed_count, [(ts, visit_duration), ...])
 for url, title, visits, typed in URLS:
+    typed_count = min(random.choice([0, 0, 0, typed]), visits)
+    vlist = []
     for _ in range(visits):
         d = now - datetime.timedelta(
             days=random.randint(0, 120),
             hours=random.randint(0, 9),
             minutes=random.randint(0, 59))
         # mostly business hours
-        d = d.replace(hour=random.choice([8,9,10,11,12,13,14,15,16,17]))
-        rows.append((url, title, chrome_ts(d), random.choice([0, 0, 0, typed])))
+        d = d.replace(hour=random.choice([8, 9, 10, 11, 12, 13, 14, 15, 16, 17]))
+        vlist.append(chrome_ts(d))
+    vlist.sort()
+    durations = [random.randint(5_000_000, 300_000_000) for _ in vlist]
+    plan.append((url, title, typed_count, list(zip(vlist, durations))))
 
-rows.sort(key=lambda r: r[2])
+# Insert urls rows oldest-first: Chrome assigns urls.id in first-visit
+# order, so id ordering should follow earliest visit.
+plan.sort(key=lambda p: p[3][0][0])
 
 con = sqlite3.connect(hist)
 cur = con.cursor()
-for url, title, ts, typed in rows:
-    cur.execute("INSERT INTO urls (url, title, visit_count, typed_count, last_visit_time, hidden) VALUES (?,?,?,?,?,0)",
-                (url, title, 1, typed, ts))
+
+# Idempotency guard (#2447): a provisioner re-run against an already
+# seeded profile would insert the corpus a second time, recreating the
+# duplicate-urls defect this fix removes. Skip instead of double-seeding.
+corpus = [u for u, _, _, _ in URLS]
+already = cur.execute(
+    "SELECT COUNT(*) FROM urls WHERE url IN (%s)" % ",".join("?" * len(corpus)),
+    corpus).fetchone()[0]
+if already:
+    print(f"History already contains {already} corpus URLs -- skipping re-seed")
+    con.close()
+    sys.exit(0)
+
+for url, title, typed_count, vlist in plan:
+    n = len(vlist)
+    cur.execute(
+        "INSERT INTO urls (url, title, visit_count, typed_count, last_visit_time, hidden) VALUES (?,?,?,?,?,0)",
+        (url, title, n, typed_count, vlist[-1][0]))
     uid = cur.lastrowid
-    cur.execute("INSERT INTO visits (url, visit_time, from_visit, transition, segment_id, visit_duration) VALUES (?,?,0,805306368,0,?)",
-                (uid, ts, random.randint(5_000_000, 300_000_000)))
+    # Scatter the TYPED visits roughly evenly across the URL's own
+    # chronology rather than clustering them at the oldest end.
+    stride = n // typed_count if typed_count else 0
+    for i, (ts, dur) in enumerate(vlist):
+        is_typed = typed_count and stride and i % stride == 0 and i // stride < typed_count
+        cur.execute(
+            "INSERT INTO visits (url, visit_time, from_visit, transition, segment_id, visit_duration) VALUES (?,?,0,?,0,?)",
+            (uid, ts, TRANS_TYPED if is_typed else TRANS_LINK, dur))
 con.commit()
 
-# Fix url-level aggregate counts
-cur.execute("""UPDATE urls SET
-    visit_count = (SELECT COUNT(*) FROM visits WHERE visits.url = urls.id)""")
-con.commit()
+# Self-check (#2447 acceptance criteria): aggregate integrity must hold in
+# the committed DB, not just in what this loop believes it inserted.
+sum_counts, total_visits = cur.execute(
+    "SELECT (SELECT SUM(visit_count) FROM urls), (SELECT COUNT(*) FROM visits)").fetchone()
+dupes, unbacked = cur.execute(
+    "SELECT (SELECT COUNT(*) FROM (SELECT url FROM urls GROUP BY url HAVING COUNT(*) > 1)),"
+    " (SELECT COUNT(*) FROM urls u WHERE u.typed_count >"
+    "   (SELECT COUNT(*) FROM visits v WHERE v.url = u.id AND (v.transition & 255) = 1))").fetchone()
+if sum_counts != total_visits or dupes or unbacked:
+    print(f"History invariant broken: SUM(urls.visit_count)={sum_counts} vs COUNT(visits)={total_visits},"
+          f" duplicate-url rows={dupes}, typed_count rows lacking TYPED visits={unbacked}")
+    con.close()
+    sys.exit(1)
+
 con.close()
-print(f"Seeded {len(rows)} history entries into {hist}")
+print(f"Seeded {len(plan)} urls / {sum_counts} visits into {hist}")
 '@
 
 $seederPath = 'C:\ProgramData\persona\seed_history.py'
 $seeder | Set-Content $seederPath -Encoding UTF8
 & $py $seederPath "$profileDir"
+# #2447: the seeder's honest-failure paths (missing History DB, failed
+# self-check) exit non-zero -- previously absorbed into an unconditional
+# "done", so provisioning reported success with an empty profile. Python's
+# stderr is already on the provisioning log; fail the provisioner loudly.
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning "[!] Chrome history seeder exited $LASTEXITCODE -- history NOT seeded"
+    exit $LASTEXITCODE
+}
 
-# Default browser + first-run suppression
-Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice' -Name ProgId -Value 'ChromeHTML' -ErrorAction SilentlyContinue
+# The old "default browser" write set UserChoice ProgId=ChromeHTML without
+# computing the UserChoice Hash, which Windows 10+ verifies and ignores
+# outright (#2447) -- inert config implying a registration that never
+# happened. Removed rather than left as decorative registry output.
 
 Write-Host '== 50-chrome-history done =='

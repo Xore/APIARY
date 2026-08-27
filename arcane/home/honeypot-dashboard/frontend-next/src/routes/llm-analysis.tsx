@@ -20,6 +20,12 @@ const semanticSearch = createServerFn({ method: 'GET' })
 function SemanticSearchCard() {
   const [query, setQuery] = useState('')
   const [result, setResult] = useState<SemanticResult | null>(null)
+  // #2178: a failed search collapsed to the same null as "never run", so the
+  // spinner ended and nothing at all happened on screen — the one part of
+  // this route's designed escape hatch that was still unwired. The
+  // available/reason channel itself now renders below; this names the
+  // distinct case of the endpoint being unreachable.
+  const [unreachable, setUnreachable] = useState(false)
   const [busy, setBusy] = useState(false)
   return (
     <div className="card wide">
@@ -34,8 +40,11 @@ function SemanticSearchCard() {
           event.preventDefault()
           if (!query.trim() || busy) return
           setBusy(true)
+          setUnreachable(false)
           try {
-            setResult(await semanticSearch({ data: { q: query.trim() } }))
+            const answer = await semanticSearch({ data: { q: query.trim() } })
+            if (!answer) setUnreachable(true)
+            else setResult(answer)
           } finally {
             setBusy(false)
           }
@@ -53,6 +62,11 @@ function SemanticSearchCard() {
           {busy ? 'Searching…' : 'Search'}
         </button>
       </form>
+      {unreachable ? (
+        <p className="empty" role="alert">
+          The semantic-search backend could not be reached — submitting again retries it.
+        </p>
+      ) : null}
       {result && !result.available ? <p className="empty">{result.reason}</p> : null}
       {result?.available && result.hits.length === 0 && query ? <p className="empty">No semantic matches.</p> : null}
       {result?.available && result.hits.length > 0 ? (

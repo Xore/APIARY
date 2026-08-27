@@ -6,6 +6,12 @@ String selection (>=6 printable chars, 200 longest, deduplicated) matches
 the production ai_triage evidence_shown convention (see ghidra-analysis-v1
 docs / analysis/ghidra/worker) so real-corpus prompts look like what the
 production triage pipeline actually shows a model, not a bespoke format.
+The matching 150-import budget is applied at presentation time, in
+run_real_corpus_eval.build_prompt (ghidra-worker.py's GHIDRA_TRIAGE_MAX_IMPORTS),
+while this file deliberately records every import: it stays a complete
+mechanical artifact, and only presentation decides how much of it a model sees.
+Import order follows PE capture order rather than production's alphabetical
+sort of its deduplicated set -- kept mechanical here, noted where it diverges.
 
 Requires: pip install pefile
 """

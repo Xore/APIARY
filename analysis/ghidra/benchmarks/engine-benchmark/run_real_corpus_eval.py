@@ -29,18 +29,32 @@ import os
 import sys
 import urllib.request
 
+# Production ai_triage's import budget: ghidra-worker.py slices its
+# deduplicated list to GHIDRA_TRIAGE_MAX_IMPORTS (default 150) and
+# docs/analysis/ghidra/AI_TRIAGE.md documents the result as "150/312
+# imports". Prompt parity is this script's stated premise, and it held for
+# strings while imports quietly stayed unbounded -- an import-heavy live
+# capture got shown evidence production would never present (#2050). Kept
+# here rather than in extract_evidence.py: extraction records every import
+# so the evidence file remains a complete mechanical artifact; presentation
+# decides how much of it a model sees.
+TRIAGE_MAX_IMPORTS = 150
+
 
 def build_prompt(evidence):
-    imports = "\n".join(f"  {imp}" for imp in evidence["imports"])
+    shown_imports = evidence["imports"][:TRIAGE_MAX_IMPORTS]
+    imports_block = "\n".join(f"  {imp}" for imp in shown_imports)
     interesting_strings = [s for s in evidence["strings_sample"] if len(s) < 40][:15]
     strings_block = "\n".join(f"  {s}" for s in interesting_strings) or \
         "  (no short human-readable strings found; sample dominated by high-entropy/encoded data)"
     sections = ", ".join(f"{s['name']}(entropy={s['entropy']})" for s in evidence["sections"])
     kind = "DLL" if evidence["is_dll"] else "EXE"
+    # The "shown of N" header mirrors ghidra-worker.py's triage prompt block;
+    # the model should be able to tell it saw a subset, not the whole truth.
     return (
         f"Q: A captured Windows PE32 {kind} was analyzed. Based on this evidence, "
         f"describe what the program does and any suspicious behavior.\n\n"
-        f"IMPORTS ({evidence['imports_count']}):\n{imports}\n\n"
+        f"IMPORTS ({len(shown_imports)} shown of {evidence['imports_count']}):\n{imports_block}\n\n"
         f"NOTABLE STRINGS:\n{strings_block}\n\n"
         f"SECTIONS: {sections}\n\n"
         f"A:"
@@ -115,7 +129,8 @@ def main():
         raise SystemExit(f"no *.evidence.json found in {args.evidence_dir} -- run extract_evidence.py first")
     required_groups = json.load(open(args.rubric))["required_groups"]
 
-    total_score, total_max = 0, 0
+    total_score, total_max, errored_samples = 0, 0, 0
+    samples_out = []
     for i, path in enumerate(files):
         evidence = json.load(open(path))
         sample_id = os.path.basename(path).split(".")[0]
@@ -130,17 +145,43 @@ def main():
                                   top_k=args.vllm_top_k, repetition_penalty=args.vllm_repetition_penalty)
         except Exception as e:
             print(f"  [{i+1}/{len(files)}] {sample_id}: ERROR {e}", file=sys.stderr)
+            # An errored sample stays in the denominator whether the engine
+            # answered or not: dropping out here used to make n_samples mean
+            # "files found" while the totals summed over survivors only, so
+            # cross-engine pct values were computed over different, unstated
+            # subsets (#2050). Errored samples differing per engine is not a
+            # footnote here -- reliability differences are one of the things
+            # this benchmark measures. Same shape as corpus_eval.py's
+            # post-#2385 handling of its identical gap.
+            mx = len(required_groups)
+            samples_out.append({
+                "sample": sample_id, "error": str(e),
+                "score": 0, "max": mx, "hits": None,
+                "output": None,
+            })
+            errored_samples += 1
+            total_max += mx
             continue
         pts, mx, hits = score(text, required_groups)
         total_score += pts
         total_max += mx
         print(f"  [{i+1}/{len(files)}] {sample_id}  {pts}/{mx}  {hits}", file=sys.stderr)
         print(f"      output: {text[:200]!r}", file=sys.stderr)
+        # Full raw completion kept per sample (mirrors corpus_eval.py): what
+        # an engine actually said on real captures is the whole point of the
+        # real-corpus slice; `text` is already in hand.
+        samples_out.append({
+            "sample": sample_id,
+            "score": pts, "max": mx, "hits": [list(h) for h in hits],
+            "output": text,
+        })
 
     print(json.dumps({
         "engine": args.engine, "model": args.model, "total_score": total_score, "total_max": total_max,
         "pct": round(100 * total_score / total_max, 1) if total_max else None,
         "n_samples": len(files),
+        "errored_samples": errored_samples,
+        "samples": samples_out,
     }))
 
 

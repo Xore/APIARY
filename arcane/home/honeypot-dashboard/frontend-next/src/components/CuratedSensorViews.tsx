@@ -10,6 +10,7 @@
 // rendered from the sensor's page rather than from a tab on a shared one.
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
+import { ErrorStateBlock } from './ErrorState'
 import { MasterDetailTable, type Column } from './Investigate'
 import { CapturedMailInline } from './CapturedMail'
 import { formatTimestamp } from '../lib/time'
@@ -185,15 +186,28 @@ export function hasCuratedView(sensor: string): boolean {
 /** The curated reading for one sensor, or null when it has none. */
 export function CuratedSensorView({ sensor }: { sensor: string }) {
   const [detail, setDetail] = useState<SensorDetail | null>(null)
+  // #2178: all three curated views shared one fetch whose failure kept every
+  // table on its opening ghosts forever — one step short of an empty state
+  // that would have asserted "no activity in 48h" during an outage.
+  const [failed, setFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     let cancelled = false
+    setFailed(false)
     fetchSensors().then((result) => {
-      if (!cancelled && result) setDetail(result)
+      if (cancelled) return
+      if (!result) {
+        setFailed(true)
+        return
+      }
+      setDetail(result)
     })
     return () => {
       cancelled = true
     }
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only load; attempt drives retry
+  }, [attempt])
+  const retryLoad = () => setAttempt((n) => n + 1)
 
   if (sensor === 'mailoney') {
     return (
@@ -203,7 +217,14 @@ export function CuratedSensorView({ sensor }: { sensor: string }) {
           Grouped by mailoney session — AUTH PLAIN credentials, the MAIL FROM / RCPT TO envelope, and the captured
           message itself. Newest first, last 48h.
         </p>
-        <MasterDetailTable
+        {failed ? (
+          <ErrorStateBlock
+            title="SMTP conversations failed to load"
+            hint="The backend request failed — this says nothing about activity on the sensor."
+            onRetry={retryLoad}
+          />
+        ) : (
+          <MasterDetailTable
           rows={detail ? detail.mailoney : null}
           columns={MAILONEY_COLUMNS}
           rowKey={(row) => row.session_id}
@@ -213,7 +234,8 @@ export function CuratedSensorView({ sensor }: { sensor: string }) {
             title: 'No mailoney SMTP activity in the last 48h',
             hint: 'Nothing has talked SMTP to this sensor in the current window.',
           }}
-        />
+          />
+        )}
       </div>
     )
   }
@@ -226,7 +248,14 @@ export function CuratedSensorView({ sensor }: { sensor: string }) {
           Every request&apos;s own method, path, headers, and body — not just the generic &quot;METHOD path&quot;
           summary line. Newest first, last 48h.
         </p>
-        <MasterDetailTable
+        {failed ? (
+          <ErrorStateBlock
+            title="http-honeypot requests failed to load"
+            hint="The backend request failed — this says nothing about activity on the sensor."
+            onRetry={retryLoad}
+          />
+        ) : (
+          <MasterDetailTable
           rows={detail ? detail.http_requests : null}
           columns={HTTP_COLUMNS}
           rowKey={(row, index) => `${row.when}-${index}`}
@@ -236,7 +265,8 @@ export function CuratedSensorView({ sensor }: { sensor: string }) {
             title: 'No http-honeypot activity in the last 48h',
             hint: 'Nothing has hit this sensor over HTTP in the current window.',
           }}
-        />
+          />
+        )}
       </div>
     )
   }
@@ -249,7 +279,14 @@ export function CuratedSensorView({ sensor }: { sensor: string }) {
           Every request tanner&apos;s web emulator handled — submitted POST fields, cookies, and (when one of its 10
           emulators matched) the attack detection and captured execution result. Newest first, last 48h.
         </p>
-        <MasterDetailTable
+        {failed ? (
+          <ErrorStateBlock
+            title="tanner requests failed to load"
+            hint="The backend request failed — this says nothing about activity on the sensor."
+            onRetry={retryLoad}
+          />
+        ) : (
+          <MasterDetailTable
           rows={detail ? detail.tanner : null}
           columns={TANNER_COLUMNS}
           rowKey={(row, index) => `${row.when}-${index}`}
@@ -259,7 +296,8 @@ export function CuratedSensorView({ sensor }: { sensor: string }) {
             title: 'No tanner activity in the last 48h',
             hint: 'Nothing has reached the tanner sensor in the current window.',
           }}
-        />
+          />
+        )}
       </div>
     )
   }

@@ -65,6 +65,26 @@ published. Recorded so the striking figure is not quoted as a finding.
 the extractor returned malformed JSON despite `format: json`, most likely
 unescaped quotes inside claim text. The case is absent from this pool.
 
+## Ground-truth supersession log (#2417)
+
+The review queue stamps each row with the rubric's `ground_truth` as it stood
+at generation time, so a rubric correction can leave the queue quoting a
+retired narrative. That happened once:
+
+- **#2384 / 2026-08-27, `integer_overflow_alloc`.** #2384 corrected the
+  fixture's ground truth everywhere authoritative: the wrapped `count*size`
+  sizes *both* the allocation and the memcpy, so the fixture cannot produce an
+  intra-function write-past-allocation; the accurate mechanism is silent
+  truncation on the success path plus out-of-bounds reads of `src`, with the
+  textbook heap overflow only downstream. The 33 queued rows for that case
+  were restamped to the corrected wording; each carries a
+  `ground_truth_superseded` note preserving the retired text and the grading
+  rule. All 33 verdicts are still placeholders — no ruling was ever made
+  against the retired narrative, so nothing needs re-adjudicating.
+- **Tripwire:** `tests/test_claims.py::ReviewQueueFreshnessTest` asserts every
+  queued row's quoted ground truth equals the current rubric text, so the next
+  rubric correction fails CI until the queue is restamped the same day.
+
 ## Rules
 
 - **Never edit a frozen pool in place.** Add claims and rulings through

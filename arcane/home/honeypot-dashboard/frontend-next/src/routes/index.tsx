@@ -7,6 +7,7 @@ import { Await, Link, createFileRoute, useRouter } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { Suspense, useCallback, useEffect, useState } from 'react'
 import { AttackMap, AttackVectors, Heatmap, Tbl, type HeatRow, type Kv, type MapPoint } from '../components/OverviewPanels'
+import { ErrorStateBlock } from '../components/ErrorState'
 import { RowActions, RowIcons } from '../components/RowActions'
 import { EChart } from '../components/EChart'
 import { copyWithFlash } from '../lib/flash'
@@ -249,7 +250,7 @@ function KpiSpark({ hourly }: { hourly: number[] | undefined }) {
   )
 }
 
-function KpiStrip({ kpis, payloads }: { kpis: OverviewKpis | null; payloads: number | null }) {
+function KpiStrip({ kpis, payloads, payloadsFailed }: { kpis: OverviewKpis | null; payloads: number | null; payloadsFailed?: boolean }) {
   return (
     <div className="metric-grid" id="overview-kpis">
       <a className="metric" href="/events" title="Open all normalized events in the current dashboard window">
@@ -291,7 +292,13 @@ function KpiStrip({ kpis, payloads }: { kpis: OverviewKpis | null; payloads: num
       </a>
       <a className="metric" href="/payloads" title="Distinct payload binaries captured safely">
         <div className="metric__value">
-          <KpiValue value={payloads} />
+          {payloadsFailed && payloads === null ? (
+            /* #2178: the tile says nothing rather than a skeleton that
+               outlives the request it was waiting for. */
+            <span className="note">load failed</span>
+          ) : (
+            <KpiValue value={payloads} />
+          )}
         </div>
         <div className="metric__label">Captured payloads</div>
       </a>
@@ -299,18 +306,30 @@ function KpiStrip({ kpis, payloads }: { kpis: OverviewKpis | null; payloads: num
   )
 }
 
-function usePromise<T>(promise: Promise<T | null>): T | null {
-  const [value, setValue] = useState<T | null>(null)
+// #2178: every loader server function collapses failure to null, and null
+// used to mean only one thing here -- "keep the skeleton up". Returning the
+// failure flag alongside the value lets each panel say the request died
+// instead of posing as eternally loading.
+function usePromise<T>(promise: Promise<T | null>): { value: T | null; failed: boolean } {
+  const [state, setState] = useState<{ value: T | null; failed: boolean }>({ value: null, failed: false })
   useEffect(() => {
     let cancelled = false
-    promise.then((result) => {
-      if (!cancelled) setValue(result)
-    })
+    setState({ value: null, failed: false })
+    promise
+      .then((result) => {
+        // A resolved null IS a failure for these endpoints; tab-scoped
+        // promises that resolve null off-tab are never rendered by the
+        // panels that would read their flag.
+        if (!cancelled) setState({ value: result, failed: result === null })
+      })
+      .catch(() => {
+        if (!cancelled) setState({ value: null, failed: true })
+      })
     return () => {
       cancelled = true
     }
   }, [promise])
-  return value
+  return state
 }
 
 /** One stream row, ported from events.html's shared "everow" template:
@@ -408,11 +427,11 @@ function RecentEventRow({ row, open, onToggle }: { row: EventRow; open: boolean;
 
 function Overview() {
   const data = Route.useLoaderData()
-  const dashboard = usePromise(data.dashboard)
-  const recent = usePromise(data.recent)
-  const campaigns = usePromise(data.campaigns)
-  const payloads = usePromise(data.payloads)
-  const presentation = usePromise(data.presentation)
+  const { value: dashboard, failed: dashboardFailed } = usePromise(data.dashboard)
+  const { value: recent, failed: recentFailed } = usePromise(data.recent)
+  const { value: campaigns, failed: campaignsFailed } = usePromise(data.campaigns)
+  const { value: payloads, failed: payloadsFailed } = usePromise(data.payloads)
+  const presentation = usePromise(data.presentation).value
   const search = Route.useSearch()
   const navigate = Route.useNavigate()
   // The tab comes from the URL rather than the loader data so switching
@@ -532,7 +551,7 @@ function Overview() {
 
       <Suspense fallback={<KpiStrip kpis={null} payloads={null} />}>
         <Await promise={data.kpis}>
-          {(kpis) => <KpiStrip kpis={kpis} payloads={payloads ? payloads.total : null} />}
+          {(kpis) => <KpiStrip kpis={kpis} payloads={payloads ? payloads.total : null} payloadsFailed={payloadsFailed} />}
         </Await>
       </Suspense>
 
@@ -551,6 +570,7 @@ function Overview() {
             <h2>Activity — last 24h</h2>
             <Heatmap
               rows={dashboard ? dashboard.heatmap.filter((row) => !heatSensor || row.sensor === heatSensor) : null}
+              failed={dashboardFailed}
             />
             {dashboard ? (
               <AttackVectors
@@ -562,7 +582,7 @@ function Overview() {
           </div>
           <div className="card wide map-card">
             <h2>Attack origins — live geographic view</h2>
-            <AttackMap points={dashboard ? dashboard.map_points : null} />
+            <AttackMap points={dashboard ? dashboard.map_points : null} failed={dashboardFailed} />
             <p className="note">
               Approximate geolocation only. One marker per city, accumulating every IP that geolocated there. Map data ©
               OpenStreetMap contributors.
@@ -578,11 +598,17 @@ function Overview() {
           <div className="card wide" id="recent-events-card">
             <h2>Recent events</h2>
             {recent === null ? (
-              <>
-                <span className="skeleton-line" aria-hidden="true" />
-                <span className="skeleton-line" aria-hidden="true" />
-                <span className="skeleton-line" aria-hidden="true" />
-              </>
+              recentFailed ? (
+                /* #2178: three ghost lines used to stand in for the stream
+                   whenever /api/v1/events shed the request. */
+                <ErrorStateBlock title="The event stream failed to load" hint="The backend request failed — this panel is never cached." onRetry={refresh} />
+              ) : (
+                <>
+                  <span className="skeleton-line" aria-hidden="true" />
+                  <span className="skeleton-line" aria-hidden="true" />
+                  <span className="skeleton-line" aria-hidden="true" />
+                </>
+              )
             ) : (
               <div className="card__scroll">
                 <table className="recent data-table">
@@ -621,10 +647,18 @@ function Overview() {
           <div className="card half sensor-card">
             <h2>Sensor feeds</h2>
             {dashboard === null ? (
-              <>
-                <span className="skeleton-line" aria-hidden="true" />
-                <span className="skeleton-line" aria-hidden="true" />
-              </>
+              dashboardFailed ? (
+                /* #2178: "warming up forever" and "backend down" are
+                   different states; only one of them is the skeleton. */
+                <p className="empty" role="alert">
+                  Load failed — the backend request didn’t answer.
+                </p>
+              ) : (
+                <>
+                  <span className="skeleton-line" aria-hidden="true" />
+                  <span className="skeleton-line" aria-hidden="true" />
+                </>
+              )
             ) : (
               <>
                 <p className="note">
@@ -648,7 +682,7 @@ function Overview() {
               </>
             )}
           </div>
-          <Tbl title="Protocols probed" rows={dashboard ? dashboard.protocols : null} half />
+          <Tbl title="Protocols probed" rows={dashboard ? dashboard.protocols : null} half failed={dashboardFailed} />
           <div className="card wide" id="ml-backlog-card">
             <h2>ML classification backlog — last 7 days</h2>
             <EChart kind="line" url="/api/chart/ml-backlog" height={280} />
@@ -673,14 +707,14 @@ function Overview() {
             </div>
             <a className="section-link" href="/ips">Investigate all sources →</a>
           </div>
-          <Tbl title="Top source IPs" rows={dashboard ? dashboard.top_ips : null} />
-          <Tbl title="Top targeted ports" rows={dashboard ? dashboard.top_ports : null} />
-          <Tbl title="Top countries" rows={dashboard ? dashboard.countries : null} />
+          <Tbl title="Top source IPs" rows={dashboard ? dashboard.top_ips : null} failed={dashboardFailed} />
+          <Tbl title="Top targeted ports" rows={dashboard ? dashboard.top_ports : null} failed={dashboardFailed} />
+          <Tbl title="Top countries" rows={dashboard ? dashboard.countries : null} failed={dashboardFailed} />
           {/* #1565 (overview.html:258-259): ASNs and provider classes are a
               deliberate half/half pair; the ids let theme.css widen the
               busier ASN card. */}
-          <Tbl title="Top autonomous systems" rows={dashboard ? dashboard.asns : null} half id="overview-asns-card" />
-          <Tbl title="Network/provider classes" rows={dashboard ? dashboard.providers : null} half id="overview-providers-card" />
+          <Tbl title="Top autonomous systems" rows={dashboard ? dashboard.asns : null} half id="overview-asns-card" failed={dashboardFailed} />
+          <Tbl title="Network/provider classes" rows={dashboard ? dashboard.providers : null} half id="overview-providers-card" failed={dashboardFailed} />
           <div className="card wide" id="netflow-bytes-card">
             <h2>Traffic volume — bytes/hour, last 7 days</h2>
             <p className="note">
@@ -725,11 +759,11 @@ function Overview() {
             </div>
             <a className="section-link" href="/commands">Review all commands →</a>
           </div>
-          <Tbl title="Top credentials (user / pass)" rows={dashboard ? dashboard.top_creds : null} hint="authentication events only" />
-          <Tbl title="Top commands" rows={dashboard ? dashboard.top_commands : null} hint="No shell commands captured yet — fed by cowrie and multipot sessions." />
-          <Tbl title="SSH/telnet clients" rows={dashboard ? dashboard.clients : null} hint="No client banners yet — fed by cowrie." />
-          <Tbl title="Top fingerprints (HASSH / JA3 / JA4 / User-Agent)" rows={dashboard ? dashboard.fingerprints : null} half hint="No protocol or client fingerprints captured yet." />
-          <Tbl title="Top HTTP paths" rows={dashboard ? dashboard.top_paths : null} half hint="No web probes yet — fed by http-honeypot and tanner." />
+          <Tbl title="Top credentials (user / pass)" rows={dashboard ? dashboard.top_creds : null} hint="authentication events only" failed={dashboardFailed} />
+          <Tbl title="Top commands" rows={dashboard ? dashboard.top_commands : null} hint="No shell commands captured yet — fed by cowrie and multipot sessions." failed={dashboardFailed} />
+          <Tbl title="SSH/telnet clients" rows={dashboard ? dashboard.clients : null} hint="No client banners yet — fed by cowrie." failed={dashboardFailed} />
+          <Tbl title="Top fingerprints (HASSH / JA3 / JA4 / User-Agent)" rows={dashboard ? dashboard.fingerprints : null} half hint="No protocol or client fingerprints captured yet." failed={dashboardFailed} />
+          <Tbl title="Top HTTP paths" rows={dashboard ? dashboard.top_paths : null} half hint="No web probes yet — fed by http-honeypot and tanner." failed={dashboardFailed} />
           <div className="card wide" id="os-distribution-card">
             <h2>Attacker OS distribution</h2>
             <p className="note">
@@ -827,8 +861,8 @@ function Overview() {
             </div>
             <a className="section-link" href="/payloads">Open payload analysis →</a>
           </div>
-          <Tbl title="Suricata alerts" rows={dashboard ? dashboard.alerts : null} half hint="No Suricata alerts in this window — pipeline status lives under Source & pipeline health." />
-          <Tbl title="Alert categories" rows={dashboard ? dashboard.alert_cats : null} half hint="No Suricata alerts in this window." />
+          <Tbl title="Suricata alerts" rows={dashboard ? dashboard.alerts : null} half hint="No Suricata alerts in this window — pipeline status lives under Source & pipeline health." failed={dashboardFailed} />
+          <Tbl title="Alert categories" rows={dashboard ? dashboard.alert_cats : null} half hint="No Suricata alerts in this window." failed={dashboardFailed} />
           <div className="card wide">
             <h2>Captured payloads</h2>
             <p className="note">Inert copies of malware and high-confidence scripts. Static analysis never executes the payload.</p>
@@ -836,10 +870,18 @@ function Overview() {
                 events, hash → static analysis, target path → events,
                 lookup → static analysis + VirusTotal. */}
             {dashboard === null ? (
-              <>
-                <span className="skeleton-line" aria-hidden="true" />
-                <span className="skeleton-line" aria-hidden="true" />
-              </>
+              dashboardFailed ? (
+                /* #2178: the payloads table posed as still loading through
+                   any outage; same honest note as its sibling Tbl cards. */
+                <p className="empty" role="alert">
+                  Load failed — the backend request didn’t answer.
+                </p>
+              ) : (
+                <>
+                  <span className="skeleton-line" aria-hidden="true" />
+                  <span className="skeleton-line" aria-hidden="true" />
+                </>
+              )
             ) : dashboard.payloads.length === 0 ? (
               <p className="empty">No payloads captured yet — cowrie logs downloads/uploads during a shell session.</p>
             ) : (
@@ -878,10 +920,16 @@ function Overview() {
               payloads, IDS alerts, and matching fingerprints.
             </p>
             {campaigns === null ? (
-              <>
-                <span className="skeleton-line" aria-hidden="true" />
-                <span className="skeleton-line" aria-hidden="true" />
-              </>
+              campaignsFailed ? (
+                /* #2178: correlation is evidence too -- a dead read must
+                   not look like "no campaigns correlated". */
+                <ErrorStateBlock title="Campaign correlation failed to load" hint="The backend request failed — this panel is never cached." onRetry={refresh} />
+              ) : (
+                <>
+                  <span className="skeleton-line" aria-hidden="true" />
+                  <span className="skeleton-line" aria-hidden="true" />
+                </>
+              )
             ) : (
               <div className="card__scroll">
                 <table className="recent data-table">

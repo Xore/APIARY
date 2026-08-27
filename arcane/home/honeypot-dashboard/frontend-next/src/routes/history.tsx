@@ -5,6 +5,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { ErrorStateBlock } from '../components/ErrorState'
 import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
 
@@ -62,6 +63,10 @@ function History() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [query, setQuery] = useState(initialQ)
   const activeQuery = useRef(initialQ)
+  // #2178: two null collapses lived here -- a failed first page held the
+  // table's ghosts forever, and a failed search() rendered [] ("no events
+  // matched") while the archive was simply unreachable. Tri-state both.
+  const [failed, setFailed] = useState(false)
 
   // A client-side navigation to /history?q=… re-runs the loader with new
   // deps; sync the input and paging scope to the arriving query.
@@ -73,8 +78,13 @@ function History() {
   useEffect(() => {
     let cancelled = false
     setRows(null)
+    setFailed(false)
     first.then((page) => {
-      if (cancelled || !page) return
+      if (cancelled) return
+      if (!page) {
+        setFailed(true)
+        return
+      }
       setRows(page.rows)
       setTotal(page.total)
     })
@@ -86,11 +96,20 @@ function History() {
   const search = useCallback(async (q: string) => {
     activeQuery.current = q
     setRows(null)
-    const page = await fetchHistory({ data: { offset: 0, q } })
+    setFailed(false)
+    const page = await fetchHistory({ data: { offset: 0, q } }).catch(() => null)
     if (activeQuery.current !== q) return // superseded by a newer search
-    setRows(page ? page.rows : [])
-    setTotal(page ? page.total : 0)
+    if (!page) {
+      setFailed(true)
+      return
+    }
+    setRows(page.rows)
+    setTotal(page.total)
   }, [])
+
+  // The error state's way back in -- a zero-offset re-run of whatever query
+  // is live, which also serves as the initial-page retry.
+  const retry = useCallback(() => void search(activeQuery.current), [search])
 
   const viewMore = useCallback(async () => {
     if (!rows || loadingMore) return
@@ -120,7 +139,7 @@ function History() {
         label="Operations"
         title="Event history"
         subtitle="Raw search across the full event archive — Lucene query syntax, 90-day window, exportable."
-        chips={<span className="chip">{total.toLocaleString('en-US')} matches</span>}
+        chips={<span className="chip">{failed ? 'load failed' : `${total.toLocaleString('en-US')} matches`}</span>}
       />
       <form
         className="filters"
@@ -151,19 +170,27 @@ function History() {
           Export JSON
         </a>
       </form>
-      <MasterDetailTable
-        rows={rows}
-        columns={COLUMNS}
-        rowKey={(row, index) => `${row.time}-${index}`}
-        emptyState={{
-          title: 'No history entries match this view',
-          hint: 'Widen the time window, or clear a filter above.',
-        }}
-        total={total}
-        onViewMore={viewMore}
-        loadingMore={loadingMore}
-        inspectorTitle="Archived event"
-      />
+      {failed ? (
+        <ErrorStateBlock
+          title="Event history failed to load"
+          hint="The search request failed — results are never cached here."
+          onRetry={retry}
+        />
+      ) : (
+        <MasterDetailTable
+          rows={rows}
+          columns={COLUMNS}
+          rowKey={(row, index) => `${row.time}-${index}`}
+          emptyState={{
+            title: 'No history entries match this view',
+            hint: 'Widen the time window, or clear a filter above.',
+          }}
+          total={total}
+          onViewMore={viewMore}
+          loadingMore={loadingMore}
+          inspectorTitle="Archived event"
+        />
+      )}
     </>
   )
 }

@@ -8,6 +8,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { str, num, when, type StorePage, type StoreRow } from '../components/StoreList'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { ErrorStateBlock } from '../components/ErrorState'
 import { confirmAction } from '../components/ConfirmDialog'
 import { EChart } from '../components/EChart'
 import { FiltersButton, FiltersModal } from '../components/FiltersModal'
@@ -65,20 +66,38 @@ function outcomeBadge(accepted: boolean) {
 
 function ModelHealthCard() {
   const [models, setModels] = useState<ModelHealth[] | null>(null)
+  // #2178: `result ?? []` made a failed /api/v1/ml-health call render as
+  // "No retrain history recorded yet." -- asserting quiet models during an
+  // outage. Tri-state it.
+  const [failed, setFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     let cancelled = false
+    setModels(null)
+    setFailed(false)
     fetchModelHealth().then((result) => {
-      if (!cancelled) setModels(result ?? [])
+      if (cancelled) return
+      if (!result) {
+        setFailed(true)
+        return
+      }
+      setModels(result)
     })
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [attempt])
   return (
     <div className="card wide" id="ml-model-health-card">
       <h2>Model health</h2>
       <p className="note">Each detector model's most recent retrain decision — accepted or rejected, and why.</p>
-      {models === null ? (
+      {models === null && failed ? (
+        <ErrorStateBlock
+          title="Model health failed to load"
+          hint="The backend request failed — this says nothing about whether models are healthy."
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
+      ) : models === null ? (
         <span className="skeleton-line" aria-hidden="true" />
       ) : models.length === 0 ? (
         <p className="empty">No retrain history recorded yet.</p>
@@ -520,6 +539,12 @@ function Page() {
   const [acks, setAcks] = useState<Record<string, AckRecord>>({})
   const [stats, setStats] = useState<KpiStats | null>(null)
   const [backlog, setBacklog] = useState<Backlog | null>(null)
+  // #2178: `if (cancelled || !page) return` treated a failed page read and a
+  // cancelled mount identically -- the table kept its ghost skeleton and the
+  // "Open (all time)" tile derived from a frozen zero.
+  const [failed, setFailed] = useState(false)
+  const [statsFailed, setStatsFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
   const [severity, setSeverity] = useState('')
   const [eventType, setEventType] = useState('')
   const [status, setStatus] = useState('')
@@ -553,21 +578,40 @@ function Page() {
 
   useEffect(() => {
     let cancelled = false
-    fetchPage({ data: { offset: 0 } }).then((page) => {
-      if (cancelled || !page) return
-      setRows(page.rows)
-      setTotal(page.total)
-    })
-    fetchStats().then((result) => {
-      if (!cancelled) setStats(result)
-    })
+    setRows(null)
+    setTotal(0)
+    setFailed(false)
+    setStatsFailed(false)
+    fetchPage({ data: { offset: 0 } })
+      .then((page) => {
+        if (cancelled) return
+        if (!page) {
+          setFailed(true)
+          return
+        }
+        setRows(page.rows)
+        setTotal(page.total)
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true)
+      })
+    fetchStats()
+      .then((result) => {
+        if (cancelled) return
+        if (!result) setStatsFailed(true)
+        else setStats(result)
+      })
+      .catch(() => {
+        if (!cancelled) setStatsFailed(true)
+      })
     fetchBacklog().then((result) => {
       if (!cancelled && result) setBacklog(result)
     })
     return () => {
       cancelled = true
     }
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- stable server fns + retry nonce
+  }, [attempt])
 
   const viewMore = useCallback(async () => {
     if (!rows || loadingMore) return
@@ -653,14 +697,23 @@ function Page() {
       </p>
       <div className="metric-grid" id="ml-kpis">
         <div className="metric">
-          <div className="metric__value">{stats ? stats.total24h : <span className="skeleton-line" aria-hidden="true" />}</div>
+          <div className="metric__value">
+            {stats ? (
+              stats.total24h
+            ) : statsFailed ? (
+              /* #2178: the skeleton was only honest while the request lived. */
+              <span className="note">load failed</span>
+            ) : (
+              <span className="skeleton-line" aria-hidden="true" />
+            )}
+          </div>
           <div className="metric__label">Anomalies, 24h</div>
         </div>
         {/* #1566: a "0 in 24h" tile directly above a table full of week-old
             open items read as "nothing to do here" — surface the open
             backlog alongside the 24h count. */}
         <div className="metric">
-          <div className="metric__value">{openCount}</div>
+          <div className="metric__value">{failed ? <span className="note">load failed</span> : openCount}</div>
           <div className="metric__label">Open (all time)</div>
         </div>
         {(stats?.bySeverity ?? []).map((bucket) => (
@@ -753,6 +806,15 @@ function Page() {
         <EChart kind="scatter" url="/api/chart/ml-anomaly-scores" height={300} />
       </div>
       <ModelHealthCard />
+      {rows === null && failed ? (
+        /* #2178: the same null that meant "still loading" also meant "the
+           read died" -- a failed page held ghost rows forever. */
+        <ErrorStateBlock
+          title="Anomaly scores failed to load"
+          hint="The backend request failed — nothing here is cached."
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
+      ) : (
       <MasterDetailTable
         rows={grouped}
         columns={columns}
@@ -793,6 +855,7 @@ function Page() {
           </>
         )}
       />
+      )}
       {stats && stats.topSrcIPs.length > 0 ? (
         <div className="card wide">
           <h2>Top source IPs, 24h</h2>
