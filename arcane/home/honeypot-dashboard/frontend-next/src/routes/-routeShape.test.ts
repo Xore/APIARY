@@ -133,3 +133,113 @@ describe('route shape', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// #2311's admin write-path contract, guarded mechanically like the rest of
+// this file. The bug these pins keep closed: fetchAdminData collapsed
+// partly-dead loads into an all-defaults AdminConfig — maintenance off,
+// empty roster, and worst of all `revision: 0`, which as the next save's
+// If-Match baseline could only 409 against the real doc, blaming "another
+// session" when the client had invented the precondition itself. Four
+// mechanical facts have to stay true together:
+//
+//   1. the load fails WHOLE (any dead leg → null, nothing manufactured),
+//   2. both settling paths (initial fetch, conflict-driven reload) NAME the
+//      failure instead of silently ignoring it,
+//   3. every admin pane parks behind the failure state rather than mounting
+//      editable cards from nothing,
+//   4. If-Match is minted only from a revision parameter its caller actually
+//      received from a real load — never a constant placeholder.
+// ---------------------------------------------------------------------------
+
+describe('settings admin write-path (#2311)', () => {
+  const settingsSource = readFileSync(join(ROUTES, 'settings.tsx'), 'utf8')
+
+  /** The fail-whole gate fetchAdminData must apply before touching defaults. */
+  const FAILS_WHOLE = /if \(!config \|\| !roster \|\| !reports\) return null/
+
+  /** How each PUT server fn mints its If-Match header (single expression). */
+  const IF_MATCH_SITES = /'if-match':\s*([^,}\n]+)/g
+
+  /** The only acceptable minting expression, from the save call's input. */
+  const MINTED_FROM_INPUT = 'String(data.revision)'
+
+  /** Collect every top-level Pane chunk by id, including nested markup. */
+  function paneChunks(source: string): Map<string, string> {
+    const chunks = new Map<string, string>()
+    const opener = /<Pane id="([a-z-]+)">/g
+    let match: RegExpExecArray | null
+    while ((match = opener.exec(source))) {
+      const close = source.indexOf('</Pane>', match.index)
+      chunks.set(match[1], close === -1 ? source.slice(match.index) : source.slice(match.index, close))
+    }
+    return chunks
+  }
+
+  it('fetchAdminData fails whole before anything can manufacture defaults', () => {
+    expect(FAILS_WHOLE.test(settingsSource)).toBe(true)
+    // And the gate sits between the legs resolving and the defaults object
+    // being built — reordering either side recreates the bug.
+    const handlerStart = settingsSource.indexOf('createServerFn({ method: \'GET\' }).handler(async (): Promise<AdminConfig | null>')
+    const gateAt = settingsSource.search(FAILS_WHOLE)
+    const defaultsAt = settingsSource.indexOf('revision: config?.revision ?? 0')
+    expect(gateAt > handlerStart).toBe(true)
+    expect(gateAt < defaultsAt).toBe(true)
+  })
+
+  it('recognises the fail-whole gate shape', () => {
+    expect(FAILS_WHOLE.test('return { revision: config?.revision ?? 0 }')).toBe(false)
+    expect(FAILS_WHOLE.test('if (!config || !roster || !reports) return null')).toBe(true)
+  })
+
+  it('both settling paths name the failure instead of ignoring settled-null', () => {
+    // Initial mount + reloadAdminConfig — one count per site; dropping
+    // either leaves the operator parked on skeletons-forever again.
+    const named = [...settingsSource.matchAll(/setAdminFailed\(true\)/g)].length
+    expect(named).toBeGreaterThanOrEqual(2)
+  })
+
+  it('every admin pane parks behind the failure state', () => {
+    const panes = paneChunks(settingsSource)
+    // The five surfaces #2311 found rendering fabricated content during an
+    // outage: four editable config cards plus the users roster.
+    const adminPanes = ['branding', 'report-presets', 'behavior', 'honeypot', 'users']
+    const parked: string[] = []
+    for (const id of adminPanes) {
+      const chunk = panes.get(id)
+      if (!chunk || !chunk.includes('adminFailed ?') || !chunk.includes('adminData ?')) parked.push(id)
+    }
+    expect(
+      parked,
+      `${parked.join(', ')} does not gate on both a loaded config and the named failure — ` +
+        `with serviceJSON collapsing outages to null, it either rides a skeleton forever ` +
+        `or saves from synthetic state (#2311): {adminData ? <Card/> : adminFailed ? <failure/> : loadingCard}`,
+    ).toEqual([])
+  })
+
+  it('recognises the parked-pane shape too', () => {
+    const chunk = paneChunks(`<Pane id="probe">{x ? <C/> : loadingCard}</Pane><Pane id="ok">{y ? <D/> : adminFailed ? fail : loadingCard}</Pane>`)
+    expect(chunk.get('probe')).not.toContain('adminFailed ?')
+    expect(chunk.get('ok')).toContain('adminFailed ?')
+  })
+
+  it('If-Match is minted from the save input\'s loaded revision, never a placeholder', () => {
+    // savePresentation + saveConfigSection are exactly two PUT sites, and
+    // every If-Match value in the file must be built from the revision the
+    // caller actually passed in — a constant or `?? 0` fallback here is the
+    // #2311 precondition-invention bug reappearing somewhere new.
+    const minted = [...settingsSource.matchAll(IF_MATCH_SITES)].map((m) => m[1].trim())
+    expect(minted).toHaveLength(2)
+    expect(new Set(minted)).toEqual(new Set([MINTED_FROM_INPUT]))
+  })
+
+  it('recognises the If-Match shapes', () => {
+    const values = (source: string) =>
+      [...source.matchAll(/'if-match':\s*([^,}\n]+)/g)].map((m) => m[1].trim())
+    expect(values("headers: { 'if-match': String(data.revision), body: v }")).toEqual(['String(data.revision)'])
+    expect(values("headers: { 'content-type': 'application/json', 'if-match': String(revision ?? 0) }")).toEqual([
+      'String(revision ?? 0)',
+    ])
+    expect(values("headers: { 'if-match': '0' },")).toEqual(["'0'"])
+  })
+})
