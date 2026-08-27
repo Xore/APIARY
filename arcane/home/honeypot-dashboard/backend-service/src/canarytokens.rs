@@ -24,6 +24,32 @@ const ADAPTER_WEBHOOK_URL: &str = "http://canarytokens-adapter.internal:8090/";
 const DEFAULT_API_ROOT: &str = "/d3aece8093b71007b5ccfedad91ebb11";
 const MAX_UPLOAD_BYTES: usize = 8 << 20;
 
+/// RFC 2606/6761 domains reserved for documentation. Everything this
+/// repo ships as a stand-in apex (compose defaults, .env.example values)
+/// sits under exactly one of these suffixes, and no real deployment
+/// domain ever does (.example is a whole TLD, the rest full second-level
+/// names). Endings rather than equality on purpose: a generated token's
+/// hostname is always its own random label subdomained under whatever
+/// domain the stack was handed.
+const RESERVED_PLACEHOLDER_SUFFIXES: &[&str] =
+    &[".example", ".example.com", ".example.net", ".example.org", ".invalid"];
+
+/// #2331 belt-and-braces, create-time half of the fix: the platform bakes
+/// generate()'s returned hostname into each artifact at creation, and the
+/// stack serves `${CANARY_PUBLIC_HOSTNAME:-honeypot.example}` -- so an
+/// operator who copied the shipped .env without overriding it plants
+/// triggers that can only resolve through this repo's placeholder domain,
+/// silently dead air that reads as "nobody took the bait". Refusing here
+/// names the exact knob instead of issuing unresolvable bait; a
+/// derive-at-deploy default for the stack env itself is tracked
+/// separately in install-homeserver.sh.
+fn placeholder_hostname(hostname: &str) -> bool {
+    let host = hostname.to_ascii_lowercase();
+    RESERVED_PLACEHOLDER_SUFFIXES
+        .iter()
+        .any(|suffix| host.ends_with(suffix))
+}
+
 pub struct TokenType {
     id: &'static str,
     label: &'static str,
@@ -169,6 +195,22 @@ pub async fn create(
         return Err((StatusCode::BAD_GATEWAY, message));
     }
 
+    // #2331: fail before persisting or returning -- a token generated
+    // against the placeholder domain would be planted as-is by the next
+    // step and could never fire for anyone outside this network.
+    let baked_hostname = result["hostname"].as_str().unwrap_or("");
+    if placeholder_hostname(baked_hostname) {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "canarytokens: refusing to plant a token whose trigger hostname '{baked_hostname}' is \
+                 still this repo's placeholder domain -- set CANARY_PUBLIC_HOSTNAME in the \
+                 honeypot-canarytokens stack .env to the deployed bare apex (see \
+                 docs/CGNAT-DEPLOYMENT.md's DNS section) and redeploy that stack before creating tokens"
+            ),
+        ));
+    }
+
     let created_at = chrono::Utc::now().to_rfc3339();
     let record = json!({
         "id": token,
@@ -293,4 +335,66 @@ pub async fn download(
         ],
         bytes.to_vec(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_compose_placeholder_itself_is_named() {
+        assert!(placeholder_hostname("honeypot.example"));
+    }
+
+    #[test]
+    fn a_token_hostname_subdomained_under_the_placeholder_is_caught() {
+        // What generate() actually returns on an unprovisioned deploy:
+        // canarydrop.generate_random_hostname()'s random label over the
+        // stack's CANARY_PUBLIC_HOSTNAME. Exact-match against the bare
+        // placeholder would miss every real token this way.
+        assert!(placeholder_hostname("quiet-river-4211.honeypot.example"));
+    }
+
+    #[test]
+    fn case_is_normalized_before_matching() {
+        assert!(placeholder_hostname("Honeypot.Example"));
+        assert!(placeholder_hostname("QUIET-RIVER-4211.Honeypot.Example"));
+    }
+
+    #[test]
+    fn the_other_reserved_documentation_domains_are_caught_too() {
+        // The stand-ins shipped across this repo's other stacks
+        // (dashboard OIDC_ISSUER_URL's example.invalid etc.) -- if those
+        // ever get pasted here as an "apex", same dead-air outcome.
+        assert!(placeholder_hostname("x.example.com"));
+        assert!(placeholder_hostname("y.example.net"));
+        assert!(placeholder_hostname("z.example.org"));
+        assert!(placeholder_hostname("w.invalid"));
+    }
+
+    #[test]
+    fn real_deployed_apexes_pass_through() {
+        assert!(!placeholder_hostname("quiet-river-4211.decoys.example-shack.net"));
+        assert!(!placeholder_hostname("tokeneer.io"));
+        assert!(!placeholder_hostname("label.honeynet.mydomain.dev"));
+    }
+
+    #[test]
+    fn near_miss_forms_that_are_not_the_reserved_namespaces_pass() {
+        // Deliberate anchors: only reserved-suffix ENDINGS count --
+        // "example.evil.com" merely contains the word, and RFC 2606 says
+        // nothing about subdomains two levels under ".example"
+        // ("a.b.example" ends with ".example" and IS caught; these are
+        // not that).
+        assert!(!placeholder_hostname("example.evil.com"));
+        assert!(!placeholder_hostname("a.b.co.uk"));
+    }
+
+    #[test]
+    fn an_empty_or_missing_hostname_is_not_ours_to_judge() {
+        // create() leaves the platform's response shape alone otherwise;
+        // an absent hostname field means nothing to bake, so nothing to
+        // refuse.
+        assert!(!placeholder_hostname(""));
+    }
 }
