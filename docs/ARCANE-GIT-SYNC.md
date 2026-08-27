@@ -159,12 +159,20 @@ alone. Re-verify against whatever Arcane version is pinned in
   cd /var/dockge/stacks/ghosts && docker compose up -d ghosts-api
   ```
 - **The default sync file-count limit (500) is easy to exceed with a
-  vendored dependency tree.** `honeypot-dashboard`'s vendored Go
-  dependencies (`dashboard/vendor/`, ~650 tracked files) exceed it; the
-  manifest entry sets `maxSyncFiles: 2500` explicitly. If a future stack's
-  build context grows a large vendored/generated tree, expect the same
-  `file count limit exceeded` failure and raise that stack's own
-  `maxSyncFiles` rather than assuming the default is enough.
+  vendored dependency tree.** `honeypot-dashboard`'s manifest entry sets
+  `maxSyncFiles: 2500` explicitly — headroom carried over from when its
+  build context still included the Go dashboard's vendored tree
+  (`dashboard/vendor/`, exactly 650 tracked files at the #1502 move,
+  re-counted from git history), which exceeded the default back then. That
+  tree is gone with the Go tier itself (#1659) and the synced directory is
+  down to 268 tracked files (re-counted 2026-08-27,
+  `git ls-files arcane/home/honeypot-dashboard`) — under the default
+  again, so the bump is dormant headroom, kept because raising it is an
+  Arcane-side change rather than a repo one. The failure mode itself
+  remains: if a future stack's build context grows a large
+  vendored/generated tree, expect the same `file count limit exceeded`
+  failure and raise that stack's own `maxSyncFiles` rather than assuming
+  the default is enough.
 - **A destroyed project can leave a stale path/sync binding.** Deleting a
   *sync* does not always fully clear the *project* record Arcane created
   for it — a subsequent sync attempt at the same path can fail with
@@ -185,23 +193,49 @@ alone. Re-verify against whatever Arcane version is pinned in
 - **Arcane has no Docker Compose `profiles:` support at all** — not a
   quirk, a confirmed missing feature
   ([getarcaneapp/arcane#1193](https://github.com/getarcaneapp/arcane/issues/1193),
-  open/unimplemented as of v2.8.1, the latest release at time of writing).
-  Confirmed independently against this deployment: `GET
-  /environments/0/gitops-syncs` and `GET
-  /environments/0/projects/{id}` both return zero profile-related fields
-  anywhere in their schemas, and `honeypot-dashboard`'s own project record
-  reports `serviceCount: 4` / `runningCount: 4` — exactly its four
-  profile-less services (`dashboard`, `oidc-sessions`,
-  `es-results-importer`, `services-adapter`), with none of its
-  `profiles: ["next"]`-gated services (`dashboard-next`, `backend-worker`,
-  etc.) counted or running. This settles #1628's own open question: a
-  sync brings up only a stack's base (non-profiled) services; activating
-  any `profiles:`-gated service group — `next` here, same as
-  `geoip-update`/`threat-intel`/`revdeck`/`mitm`/`test`/`blackhole`
-  elsewhere in this repo — is always a manual `docker compose --profile X
-  up -d` run against the synced directory on the host afterward. There is
-  no Arcane-native mechanism (env override or otherwise) that activates a
-  profile instead.
+  open/unimplemented as of v2.8.1, the latest release at time of writing;
+  still open against the pinned `v2.9.0`, re-checked 2026-08-27).
+  Confirmed independently against this deployment, re-derived 2026-08-27
+  against the exact digest-pinned `v2.9.0` image this host runs (image
+  digest verified against `docker-compose.arcane.yml`; response schemas
+  exported from that container with `./arcane openapi`; the project
+  record read from Arcane's own store — no API token was on hand for a
+  fresh authenticated GET, so the schema and the stored record stand in
+  for it): `GET /environments/0/gitops-syncs` and `GET
+  /environments/0/projects/{id}` still expose no profile-activation state
+  — the only `profiles`-shaped fields anywhere in either response's schema
+  are the raw compose service-config passthroughs embedded in the project
+  response's optional `services[]` / `runtimeServices[].serviceConfig`
+  arrays, which merely echo what a compose file declared and are omitted
+  from a plain project GET. `honeypot-dashboard`'s project record reports
+  `serviceCount: 8` — exactly the eight services its
+  `arcane/home/honeypot-dashboard/compose.yml` defines today
+  (`oidc-sessions`, `backend-service-mounted`, `backend-worker`,
+  `dashboard-next`, `backend-worker-importer`,
+  `backend-worker-enrichment`, `backend-worker-payload-inventory`,
+  `services-adapter`), none of them profile-gated: the file contains no
+  `profiles:` key at all. (The request/response `backend-service` itself
+  now lives one stack over, in `honeypot-dashboard-backend` — its own
+  one-service project record, same zero-profile shape.) The four-service
+  snapshot this section used to quote (`dashboard`, `oidc-sessions`,
+  `es-results-importer`, `services-adapter` at `serviceCount: 4` /
+  `runningCount: 4` when captured during #1502) is an era record now: the
+  Go `dashboard` went away with its folder (#1659), the Python
+  `es-results-importer` was ported to the Rust `backend-worker-importer`
+  (#1610), and the #1610/#1612 worker migration added the rest.
+  `runningCount` is not a fixed record field: v2.9.0 recomputes it from
+  `docker compose ps` on every project GET, so it tracks actual container
+  state at query time (7/8 on 2026-08-27, with `backend-worker-enrichment`
+  exited at that moment), not profile gating. This settles
+  #1628's own open question: a sync brings up only a stack's base
+  (non-profiled) services; activating any `profiles:`-gated service group
+  — same as `geoip-update`/`threat-intel`/`revdeck`/`mitm`/`test`/
+  `blackhole` elsewhere in this repo — is always a manual `docker compose
+  --profile X up -d` run against the synced directory on the host
+  afterward. There is no Arcane-native mechanism (env override or
+  otherwise) that activates a profile instead. (`next` itself never got
+  that treatment: #1608's cutover deleted the profile outright rather
+  than activating it.)
 
 ## Local environment overrides
 
@@ -275,7 +309,10 @@ in the manifest carries `redeployAfterSync: false` and
 `pullImageAfterSync: false`, so a sync materializes files onto the host and
 stops there. Confirmed operationally: syncing `honeypot-dashboard` puts new
 Rust source on the host and leaves `apiary-backend:latest` exactly as it was
-until a separate `POST /projects/{id}/build`. Without that call a redeploy
+until a separate `POST /projects/{id}/build` (a call that belongs to the
+sibling `honeypot-dashboard-backend` project since #1622 — its
+`backend-service` is the one service in the pair with a `build:`).
+Without that call a redeploy
 recreates the containers from the *previous* image — green, healthy, running
 the old code.
 
