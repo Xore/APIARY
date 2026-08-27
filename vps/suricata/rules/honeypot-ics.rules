@@ -121,9 +121,11 @@ alert tcp any any -> $HOME_NET 502 (msg:"HONEYPOT-ICS Modbus Diagnostics (fc08 -
 alert tcp any any -> $HOME_NET 502 (msg:"HONEYPOT-ICS Modbus Report Server ID (fc17 recon)"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|11|"; offset:7; depth:1; classtype:attempted-recon; sid:92020011; rev:1; metadata:protocol modbus;)
 alert tcp any any -> $HOME_NET 502 (msg:"HONEYPOT-ICS Modbus Read Device Identification (fc43/0x2b recon)"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|2b|"; offset:7; depth:1; content:"|0e|"; offset:8; depth:1; classtype:attempted-recon; sid:92020012; rev:1; metadata:protocol modbus;)
 
-# -- Illegal / vendor-specific function code sweep (fc >= 0x41 that aren't the
-#    standard set): often nmap modbus scripts or exploit tooling.
-alert tcp any any -> $HOME_NET 502 (msg:"HONEYPOT-ICS Modbus non-standard/high function code (scanner/exploit)"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|5a|"; offset:7; depth:1; classtype:attempted-recon; sid:92020013; rev:1; metadata:protocol modbus;)
+# -- Illegal / vendor-specific function code sweep. No public-assigned code
+#    lives above fc 0x2B (Read Device Identification, covered above), so every
+#    fc >= 0x41 is the spec's user-defined/reserved space — nmap modbus
+#    scripts, fuzzer tooling, hand-built exploit packets.
+alert tcp any any -> $HOME_NET 502 (msg:"HONEYPOT-ICS Modbus non-standard/high function code (scanner/exploit)"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; pcre:"/^.{7}[\x41-\xff]/s"; classtype:attempted-recon; sid:92020013; rev:2; metadata:protocol modbus;)
 
 # -- Rate anomaly: burst of Modbus writes from one source (flood/brute).
 alert tcp any any -> $HOME_NET 502 (msg:"HONEYPOT-ICS Modbus high write rate (flood/manipulation burst)"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; pcre:"/^.{7}[\x05\x06\x0f\x10]/s"; threshold:type threshold, track by_src, count 50, seconds 60; classtype:attempted-dos; sid:92020020; rev:1; metadata:protocol modbus;)
