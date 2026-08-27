@@ -151,7 +151,7 @@ class ContainerStatusTests(unittest.TestCase):
         for name in (
             "hp-beelzebub",
             "hp-hellpot",
-            "hp-wordpot",
+            # hp-wordpot was here until #2381 retired the stack.
             "hp-mailoney",
             "hp-galah",
             "hp-galah-llm-broker",

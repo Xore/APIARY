@@ -59,7 +59,7 @@ Still under consideration:
 |---|---|---|---|
 | Galah | Integrated | `arcane/home/honeypot-galah/` | #1420; routed-path decision in #1511 |
 | HellPot | Integrated | `arcane/home/honeypot-hellpot/` | #1419 |
-| WordPot | Integrated | `arcane/home/honeypot-wordpot/` | #1421; routed-path decision in #1512 |
+| WordPot | Retired 2026-08-27 (#2381) — attacker-facing Python 2.7 runtime, noise-floor traffic; its WordPress/CMS probe duty stays covered by http-honeypot's wp-login/readme/xmlrpc pages and beelzebub's HTTP decoy | removed (`arcane/home/honeypot-wordpot/` deleted) | #1421; routed-path decision in #1512; retirement in #2381 |
 | Canarytokens | Integrated | `arcane/home/honeypot-canarytokens/` | #1426; the token-creation design record was retired by #2367 and its live contract is `backend-service/src/canarytokens.rs` |
 
 Still under consideration:

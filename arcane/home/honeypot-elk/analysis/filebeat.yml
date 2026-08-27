@@ -223,7 +223,7 @@ filebeat.inputs:
     fields_under_root: true
 
   # #1739: Traefik access log. Traefik terminates TLS for the Host-routed
-  # decoys (hellpot, galah, wordpot), so this is the only place their requests
+  # decoys (hellpot, galah), so this is the only place their requests
   # exist in cleartext -- a wire sensor sees the ClientHello and then
   # ciphertext. Until now the log went to container stdout with no filePath
   # and no input here, so zero Traefik records reached Elasticsearch.
@@ -533,16 +533,8 @@ processors:
       target: honeypot
       fields: {persona_id: harborline-pbx, site_id: harborline-dispatch-office, asset_id: pbx-trunk-02, organization: Harborline Logistics AG}
       when.contains: {log.file.path: "enriched/sentrypeer.json"}
-  # #1421: wordpot.json has no "sensor" field of its own either, same
-  # reasoning as beelzebub/hellpot above -- ip-enrichment-worker/wordpot.go
-  # already writes sensor/src_ip/src_port as flat lowercase fields before
-  # Filebeat ever sees it. Shares hellpot's own meridian-legacy-web persona
-  # (see personas/personas.json) -- a real decommissioned web asset could
-  # plausibly run both a generic tarpit and a still-live WordPress install.
-  - add_fields:
-      target: honeypot
-      fields: {persona_id: meridian-legacy-web, site_id: meridian-legacy-infra, asset_id: web-legacy-04, organization: Meridian Retail Systems Ltd.}
-      when.contains: {log.file.path: "enriched/wordpot.json"}
+  # (the enriched/wordpot.json add_fields block went with wordpot's
+  # retirement, #2381; its meridian-legacy-web persona stays on hellpot.)
   # NOTE on stats events: they carry ~600 engine-internal counter fields and
   # once exhausted the shared daily index's field limit (2026-07-19 outage).
   # With per-event-type indices (see output below) they are contained in
