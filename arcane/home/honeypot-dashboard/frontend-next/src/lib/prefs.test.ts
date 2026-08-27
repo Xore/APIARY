@@ -132,7 +132,7 @@ describe('cross-tab appearance propagation (#2138)', () => {
     return prefs
   }
 
-  const fromAnotherTab = (key: string, newValue: string | null) => {
+  const fromAnotherTab = (key: string | null, newValue: string | null) => {
     window.dispatchEvent(new StorageEvent('storage', { key, newValue }))
   }
 
@@ -194,6 +194,25 @@ describe('cross-tab appearance propagation (#2138)', () => {
 
     fromAnotherTab('hp-palette', null)
 
+    expect(document.documentElement.dataset.hpTheme).toBe('claude')
+    expect(document.documentElement.dataset.hpPalette).toBe('claude')
+  })
+
+  it('reads a whole-area clear as a reset of both axes together', async () => {
+    // localStorage.clear() arrives as one event with key:null — the appliers
+    // never write that way, so it can only mean an outside hand wiped the
+    // keys; both axes fall back together rather than leaving the last theme
+    // riding on default mode.
+    const frames = makeFrameQueue()
+    vi.stubGlobal('requestAnimationFrame', frames.raf)
+    const { applyTheme, applyPalette } = await import('./prefs')
+    applyTheme('dark')
+    applyPalette('slate')
+    await arm()
+
+    fromAnotherTab(null, null)
+
+    expect('theme' in document.documentElement.dataset).toBe(false)
     expect(document.documentElement.dataset.hpTheme).toBe('claude')
     expect(document.documentElement.dataset.hpPalette).toBe('claude')
   })

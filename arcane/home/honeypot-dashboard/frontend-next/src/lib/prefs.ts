@@ -361,6 +361,14 @@ function watchCrossTabAppearance() {
   if (crossTabAppearanceWatched || typeof window === 'undefined') return
   crossTabAppearanceWatched = true
   window.addEventListener('storage', (event) => {
+    // A whole-area clear() reports key:null and takes both keys at once —
+    // nothing in this module ever calls clear(), so null only ever comes
+    // from an outside hand wiping storage — reset both axes together.
+    if (event.key === null) {
+      applyTheme('system', { sync: false })
+      applyPalette('', { sync: false })
+      return
+    }
     if (event.key === 'hp-theme') {
       applyTheme(event.newValue === 'dark' || event.newValue === 'light' ? event.newValue : 'system', {
         sync: false,
