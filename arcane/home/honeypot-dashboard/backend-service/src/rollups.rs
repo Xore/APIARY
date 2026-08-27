@@ -492,7 +492,13 @@ async fn write_attack_bucket(state: &AppState, hour: DateTime<Utc>) -> anyhow::R
 
     let tech_body = json!({
         "size": 0,
-        "query": {"range": {"@timestamp": {"gte": gte, "lt": lt}}},
+        // #2145: this is the hourly materialization of the kill-chain view;
+        // the same probe exclusion kill_chain.rs applies at read time has
+        // to hold at write time or every bucket bakes the probes in.
+        "query": {"bool": {
+            "filter": [{"range": {"@timestamp": {"gte": gte, "lt": lt}}}],
+            "must_not": [crate::es::internal_probe_exclusion()]
+        }},
         "aggs": {"techs":
             {"terms": {"field": "honeypot.canonical_attck_techniques", "size": TECH_TERMS_CAP}}}
     });
@@ -500,7 +506,13 @@ async fn write_attack_bucket(state: &AppState, hour: DateTime<Utc>) -> anyhow::R
 
     let group_body = json!({
         "size": 0,
-        "query": {"range": {"@timestamp": {"gte": gte, "lt": lt}}},
+        // #2145: this is the hourly materialization of the kill-chain view;
+        // the same probe exclusion kill_chain.rs applies at read time has
+        // to hold at write time or every bucket bakes the probes in.
+        "query": {"bool": {
+            "filter": [{"range": {"@timestamp": {"gte": gte, "lt": lt}}}],
+            "must_not": [crate::es::internal_probe_exclusion()]
+        }},
         "aggs": {
             "sessions": {
                 "terms": {"field": "honeypot.session", "size": GROUP_CAP},

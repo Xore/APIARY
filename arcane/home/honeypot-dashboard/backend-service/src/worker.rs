@@ -487,7 +487,9 @@ impl Notifier {
                 json!({"size": 500, "query": {"bool": {"filter": [
                     {"range": {"@timestamp": {"gte": "now-10m"}}},
                     {"term": {"honeypot.canonical_attck_techniques": "T1692.001"}}
-                ]}}}),
+                // #2145: a healthcheck exercising the OT path must not raise
+                // an OT-command alert (the term is a no-op for suricata docs).
+                ], "must_not": [crate::es::internal_probe_exclusion()]}}}),
             )
             .await
         else {
@@ -1038,7 +1040,13 @@ impl Notifier {
         if let Some(result) = self
             .search(
                 &["honeypot-v2-*", "suricata-v2-*"],
-                json!({"size": 0, "query": {"range": {"@timestamp": {"gte": "now-48h"}}},
+                json!({"size": 0,
+                       // #2145: probe bursts would otherwise read as
+                       // per-sensor activity spikes and fire false alerts.
+                       "query": {"bool": {
+                           "filter": [{"range": {"@timestamp": {"gte": "now-48h"}}}],
+                           "must_not": [crate::es::internal_probe_exclusion()]
+                       }},
                        "aggs": {
                            "sensors": {"terms": {"field": "event.sensor", "size": 50},
                                         "aggs": {"last": {"max": {"field": "@timestamp"}}}},

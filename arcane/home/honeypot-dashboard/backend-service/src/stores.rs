@@ -219,7 +219,13 @@ pub async fn recordings(
             "@timestamp", "source.ip", "source.geo.country_iso_code",
             "honeypot.session", "honeypot.shasum", "honeypot.size", "honeypot.duration_ms"
         ],
-        "query": {"bool": {"filter": filter}}
+        // #2145: a healthcheck session against cowrie closes like a real
+        // one and would render as a recordings row with empty shasum and
+        // country; attacker-facing list, so probes stay out.
+        "query": {"bool": {
+            "filter": filter,
+            "must_not": [crate::es::internal_probe_exclusion()]
+        }}
     });
     let result = state
         .es

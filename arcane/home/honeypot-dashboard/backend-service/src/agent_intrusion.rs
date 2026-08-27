@@ -85,7 +85,13 @@ async fn fetch_window_events(
             index_pattern,
             |search_after| {
                 let mut body = serde_json::json!({
-                    "query": {"range": {"@timestamp": {"gte": since}}},
+                    // #2145: the window feed drives campaign correlation, so
+                    // it must not ingest the fleet's own healthcheck stream;
+                    // the term is a no-op for suricata-v2 docs (no such field).
+                    "query": {"bool": {
+                        "filter": [{"range": {"@timestamp": {"gte": since}}}],
+                        "must_not": [crate::es::internal_probe_exclusion()]
+                    }},
                     "sort": [{"@timestamp": {"order": "desc"}}],
                     "_source": {"excludes": ["suricata.eve.packet", "suricata.eve.payload"]}
                 });

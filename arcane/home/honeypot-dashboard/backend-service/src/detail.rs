@@ -437,7 +437,10 @@ pub async fn attack_vectors(
         "query": {"bool": {"filter": [
             {"term": {"event.sensor": sensor}},
             {"range": {"@timestamp": {"gte": "now-24h"}}}
-        ]}},
+        // #2145: probe docs carry the queried sensor name plus
+        // destination.port/network.protocol, so without this clause the
+        // fleet's healthchecks inflate the attack-vectors panel.
+        ], "must_not": [crate::es::internal_probe_exclusion()]}},
         "aggs": {
             "ports": {"terms": {"field": "destination.port", "size": 12}},
             "protocols": {"terms": {"field": "network.protocol", "size": 12}}

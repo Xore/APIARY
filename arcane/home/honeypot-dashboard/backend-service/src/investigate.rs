@@ -231,7 +231,10 @@ pub async fn ip(
     let filter = json!({"bool": {"filter": [
         {"term": {"source.ip": ip}},
         {"range": {"@timestamp": {"gte": WINDOW}}}
-    ]}});
+    // #2145: the IP profile page renders attacker totals; investigating a
+    // fleet/self address should surface its healthchecks as probes, not
+    // as attacker activity.
+    ], "must_not": [crate::es::internal_probe_exclusion()]}});
     let agg_body = json!({
         "size": 0,
         "track_total_hits": true,
@@ -505,7 +508,7 @@ pub async fn cidr(
     let filter = json!({"bool": {"filter": [
         {"term": {"source.ip": cidr}},
         {"range": {"@timestamp": {"gte": WINDOW}}}
-    ]}});
+    ], "must_not": [crate::es::internal_probe_exclusion()]}});
     let portbridge_filter = json!({"bool": {"filter": [
         {"term": {"portbridge.src_ip": cidr}},
         {"range": {"@timestamp": {"gte": WINDOW}}}
@@ -580,7 +583,9 @@ pub async fn cluster(
             membership,
             {"exists": {"field": "source.ip"}},
             {"range": {"@timestamp": {"gte": WINDOW}}}
-        ]}},
+        // #2145: mirrors correlator.rs's cluster aggregation, which now
+        // excludes probes -- this member recomputation must agree with it.
+        ], "must_not": [crate::es::internal_probe_exclusion()]}},
         "aggs": {
             "ip_count": {"cardinality": {"field": "source.ip"}},
             "member_ips": {"terms": {"field": "source.ip", "size": MEMBER_IP_CAP}}
@@ -605,7 +610,7 @@ pub async fn cluster(
     let filter = json!({"bool": {"filter": [
         {"terms": {"source.ip": member_ips}},
         {"range": {"@timestamp": {"gte": WINDOW}}}
-    ]}});
+    ], "must_not": [crate::es::internal_probe_exclusion()]}});
     let portbridge_filter = json!({"bool": {"filter": [
         {"terms": {"portbridge.src_ip": member_ips}},
         {"range": {"@timestamp": {"gte": WINDOW}}}

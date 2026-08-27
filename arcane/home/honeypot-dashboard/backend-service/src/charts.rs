@@ -768,7 +768,10 @@ pub async fn endlessh_histogram(State(state): State<AppState>) -> Result<Json<Ba
             {"term": {"event.sensor": "endlessh"}},
             {"term": {"honeypot.event": "disconnect"}},
             {"range": {"@timestamp": {"gte": OVERVIEW_WINDOW}}}
-        ]}},
+        // #2145: a fleet healthcheck against endlessh produces exactly the
+        // disconnect event this histogram buckets, tagged with the sensor
+        // name -- without the probe exclusion the held_ms buckets drift.
+        ], "must_not": [crate::es::internal_probe_exclusion()]}},
         "aggs": {"held": {"range": {"field": "held_ms", "keyed": true, "ranges": ranges}}}
     });
     let result = state.es.search(body).await.map_err(bad_gateway)?;

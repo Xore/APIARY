@@ -73,7 +73,10 @@ async fn write_flow_links(state: &AppState) -> anyhow::Result<()> {
         "query": {"bool": {"filter": [
             {"range": {"@timestamp": {"gte": "now-24h"}}},
             {"exists": {"field": "network.community_id"}}
-        ]}},
+        // #2145: probes carry community ids too; a published flow link
+        // still needs 2+ families, but the exclusion keeps the buckets
+        // attacker-only in the first place.
+        ], "must_not": [crate::es::internal_probe_exclusion()]}},
         "aggs": {"flows": {
             "terms": {
                 "field": "network.community_id",
@@ -148,7 +151,10 @@ async fn write_cred_reuse(state: &AppState, since: chrono::DateTime<chrono::Utc>
         "query": {"bool": {"filter": [
             {"range": {"@timestamp": {"gte": since.to_rfc3339()}}},
             {"exists": {"field": "source.ip"}}
-        ]}},
+        // #2145: this materializes into attacker-clusters-v1, so the
+        // source.ip term alone (probes have none) is only incidental
+        // protection -- make the intent explicit.
+        ], "must_not": [crate::es::internal_probe_exclusion()]}},
         "aggs": {"pairs": {
             "terms": {
                 "script": {

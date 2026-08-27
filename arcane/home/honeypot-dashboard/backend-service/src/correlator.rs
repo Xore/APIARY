@@ -249,7 +249,10 @@ async fn fetch_campaign_aggregates(state: &AppState, since: chrono::DateTime<chr
         "query": {"bool": {"filter": [
             {"range": {"@timestamp": {"gte": since.to_rfc3339()}}},
             {"exists": {"field": "source.ip"}}
-        ]}},
+        // #2145: both aggregates materialize into attacker-facing stores
+        // (campaigns-v1 / attacker-clusters-v1); the fleet's own probes
+        // must not become CIDR/cluster members.
+        ], "must_not": [crate::es::internal_probe_exclusion()]}},
         "aggs": {
             "cidrs_v4": {
                 "ip_prefix": {"field": "source.ip", "prefix_length": 24, "is_ipv6": false, "min_doc_count": 2},
@@ -303,7 +306,10 @@ async fn fetch_cluster_aggregates(state: &AppState, since: chrono::DateTime<chro
         "query": {"bool": {"filter": [
             {"range": {"@timestamp": {"gte": since.to_rfc3339()}}},
             {"exists": {"field": "source.ip"}}
-        ]}},
+        // #2145: both aggregates materialize into attacker-facing stores
+        // (campaigns-v1 / attacker-clusters-v1); the fleet's own probes
+        // must not become CIDR/cluster members.
+        ], "must_not": [crate::es::internal_probe_exclusion()]}},
         "aggs": {
             "fingerprints": {
                 "terms": {"field": "honeypot.canonical_fingerprint", "size": 250, "min_doc_count": 2},
@@ -392,7 +398,11 @@ async fn fetch_suricata_alert_counts(state: &AppState, since: chrono::DateTime<c
         "query": {"bool": {"filter": [
             {"range": {"@timestamp": {"gte": since.to_rfc3339()}}},
             {"exists": {"field": "source.ip"}}
-        ]}},
+        // #2145: these counts land on campaign docs' per-IP alert tallies.
+        // suricata docs carry no honeypot.internal_probe flag today, so this
+        // is a no-op here -- kept explicit so a future flag on the suricata
+        // pipeline can't leak probe noise into the published tallies.
+        ], "must_not": [crate::es::internal_probe_exclusion()]}},
         "aggs": {"by_ip": {"terms": {"field": "source.ip", "size": ALERT_BUCKET_CAP}}}
     });
     let result = state.es.search_index(&[SURICATA_ALERT_INDEX_PATTERN], body).await?;
