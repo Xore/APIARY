@@ -39,7 +39,8 @@ def not_found():
 
 
 # A real-shaped honeypot-v2-* document (multipot handshake), same structure
-# as the audit tests' fixture; values synthetic, TEST-NET only.
+# as the audit tests' fixture; values synthetic -- TEST-NET for remote hosts,
+# unrelated RFC1918 hosts for our own side (never this deployment's subnet).
 def shaped_src(**over):
     src = {
         "@timestamp": "2026-08-01T10:00:00.000Z",
@@ -94,12 +95,12 @@ class TestContextFields:
         # must say OUR side for dst_ip even when source.ip is our own.
         netflow_inbound = {
             "source": {"ip": "198.51.100.7"},      # genuinely remote here
-            "destination": {"ip": "192.168.42.250", "port": 22},
+            "destination": {"ip": "192.168.100.10", "port": 22},
             "network": {"transport": "tcp"},
         }
         # Without ML_HOME_NET knowledge in this unit, exercise the helper's
         # ECS chain directly: local side wins when present positionally.
-        assert _get_dst_ip(netflow_inbound) == "192.168.42.250"
+        assert _get_dst_ip(netflow_inbound) == "192.168.100.10"
         # ...and honeypot-shaped docs without destination.ip still resolve:
         assert _get_dst_ip({"honeypot": {"dst_ip": "10.8.0.1"}}) == "10.8.0.1"
         assert _get_dst_ip(
@@ -121,7 +122,7 @@ class TestContextFields:
         zeek_conn = {"_id": "z1", "_index": "zeek-v1-conn-2026.08.01", "_source": {
             "@timestamp": "2026-08-01T11:00:00.000Z",
             "source": {"ip": "198.51.100.23", "port": 53088},
-            "destination": {"ip": "192.168.42.10", "port": 445},
+            "destination": {"ip": "192.168.100.20", "port": 445},
             "network": {"transport": "tcp",
                         "community_id": "1:t9KrdB3IhcTPeUrdJvQhThKV0ok="},
             "event": {"category": "network"},
@@ -130,7 +131,7 @@ class TestContextFields:
                       {"isolation_forest": 0.92, "hbos": None, "lstm_ae": None}, "why")
         doc = es.index.call_args.kwargs["document"]
         assert doc["sensor"] is None
-        assert doc["dst_ip"] == "192.168.42.10"
+        assert doc["dst_ip"] == "192.168.100.20"
         assert doc["src_port"] == 53088
         assert doc["dst_port"] == 445
         assert doc["community_id"] == "1:t9KrdB3IhcTPeUrdJvQhThKV0ok="
@@ -144,7 +145,7 @@ class TestClassifySourceAddress:
         assert classify_source_address("127.0.0.1") == ("loopback", True)
 
     def test_home_net_lan_and_wireguard_both_read_as_owned(self):
-        assert classify_source_address("192.168.42.250") == ("home_net", True)
+        assert classify_source_address("192.168.100.7") == ("home_net", True)
         assert classify_source_address("10.8.0.2") == ("home_net", True), (
             "WireGuard-vs-LAN separation is deliberately not pretended: both "
             "mean 'we own it' through the same CIDR list")
