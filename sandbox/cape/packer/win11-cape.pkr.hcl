@@ -239,7 +239,8 @@ build {
       # virbr-cape's own gateway (10.40.50.1) -- harmless under the default
       # 'drop' route (#316) since nothing resolves anyway, and correct in
       # advance if a future CAPE-dedicated INetSim instance lands on this
-      # same address per network.xml's own Known Gaps note.
+      # same address -- per network.xml's own header block (the inetsim
+      # paragraph there leaves such an instance as follow-up work).
       "$adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -First 1; Set-DnsClientServerAddress -InterfaceAlias $adapter.Name -ServerAddresses '10.40.50.1'",
       "Get-EventLog -List | ForEach-Object { Clear-EventLog -LogName $_.Log -ErrorAction SilentlyContinue }",
       "wevtutil cl Microsoft-Windows-Sysmon/Operational 2>$null; $global:LASTEXITCODE = 0",
