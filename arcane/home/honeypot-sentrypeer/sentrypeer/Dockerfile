@@ -73,6 +73,13 @@ RUN apk -U add --no-cache \
 # standalone `docker run`.
 COPY --from=builder /SentryPeer/sentrypeer /usr/local/bin/sentrypeer
 
+# #2337: protocol-level UDP liveness probe -- see healthcheck-probe.sh for
+# why TCP-connect-only healthchecks can't see a wedged SIP reactor. chmod
+# while still root: the runtime stage switches to the sentrypeer user two
+# lines down.
+COPY healthcheck-probe.sh /usr/local/bin/healthcheck-probe
+RUN chmod 0755 /usr/local/bin/healthcheck-probe
+
 # /var/log/sentrypeer is a bind-mount point (docker-compose.sentrypeer.yml),
 # same convention as every other sensor's image.
 
