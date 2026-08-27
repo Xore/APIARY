@@ -30,15 +30,20 @@
 
 services:
   cape-mongo:
-    # Deliberately unpinned as of the #2380 recon (2026-08-27): no reachable
-    # host has ever stood this stack up, so there is no deployed digest to
-    # observe and the #1986/#2382 sweeps forbid inventing one. When Phase 4/5
-    # of docs/sandbox/cape/IMPLEMENTATION_PLAN.md first deploys on a real
-    # host, record `docker image inspect --format '{{json .RepoDigests}}'
-    # cape-mongo` from THERE and re-pin tag@sha256 like every other image.
-    # Until then dependabot covers nothing in /sandbox either (#2316), so
-    # this float drifts unflagged.
-    image: mongo:7.0
+    # Pinned per owner decision on #2380 (2026-08-27), closing the last
+    # floating tag in the post-#1986 tree. Provenance is honest about one
+    # thing: the digest was observed from the Docker Hub registry API (the
+    # manifest-list `docker-content-digest` for library/mongo:7.0) during the
+    # #2380 recon and re-verified unchanged at push time -- NOT inspected off
+    # a live deployment, because no reachable host has ever stood this stack
+    # up. Digests are content-addressed, so the pulled bytes are identical
+    # either way; when IMPLEMENTATION_PLAN.md Phase 4/5 first deploys on a
+    # real host, re-observe there (`docker image inspect --format '{{json
+    # .RepoDigests}}' cape-mongo`) if deployment provenance matters for the
+    # audit trail. Dependabot covers nothing in /sandbox (#2316), so patch
+    # releases of mongo:7.0 will NOT arrive automatically -- bump by repinning
+    # a freshly observed digest.
+    image: mongo:7.0@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b
     volumes:
       - cape-mongo-data:/data/db
     networks:
