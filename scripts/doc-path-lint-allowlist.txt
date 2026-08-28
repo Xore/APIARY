@@ -63,3 +63,22 @@ sandbox/windows/config/sysmon_config.xml # operator-provided during provisioning
 #     same line; check-doc-stale-paths.py governs the same citations ---
 analysis/yara # both mentions name arcane/home/honeypot-payload-analysis/analysis/yara/ inline
 analysis/yara/ # both mentions name arcane/home/honeypot-payload-analysis/analysis/yara/ inline
+
+# --- root-relative tests/* paths the docs cite as test class targets ---
+# These docs (ES-CONSUME-PATTERNS, benchmarks/claim-pools) reference the
+# tests by class name (e.g. tests/test_worker.py::TestInterruptedCycleUpsert).
+# The actual test files live at deeply-nested paths inside arcane/home/<stack>/
+# or analysis/<component>/; the root-relative shorthand predates the move
+# and the docs are era records of the consumer pipeline rather than
+# current pointers. Tracking them as a single root-relative token would
+# shadow the new tests/docs/ tree that #2576 introduces (which makes the
+# linter see 'tests' as a valid first segment and proceed to check the
+# full path). Listed per-token so each citation stays individually
+# accountable rather than blanket-allowed.
+tests/test_worker.py # root-relative test path in docs/ES-CONSUME-PATTERNS; actual file lives at arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/tests/test_worker.py
+tests/test_worker.py::TestInterruptedCycleUpsert # era class reference; same source as above
+tests/test_importer.py # root-relative test path; actual at arcane/home/honeypot-dashboard/analysis/es-results-importer/tests/test_importer.py
+tests/test_importer.py::ScanSourceSameMtimeRaceTest # era class reference; same source as above
+tests/test_es_consume.py # root-relative test path; the consuming doc predates the per-component split
+tests/test_claims.py # root-relative test path in docs/benchmarks/claim-pools; actual at analysis/ghidra/benchmarks/tests/test_claims.py
+tests/test_claims.py::ReviewQueueFreshnessTest # era class reference; same source as above

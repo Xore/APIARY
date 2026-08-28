@@ -192,7 +192,7 @@ differently-configured venv without saying so.
 | VM lifecycle | CAPE's own `kvm`/`libvirt` machinery module (not this worker) | `sandbox/windows/orchestrate/run_sample.py`, direct `virsh` |
 | Results | `{sha256}_cape.json` → `CAPE_RESULTS_DIR`; dashboard only reads | `{sha256}_sandbox.json` → `WINDOWS_SANDBOX_RESULTS_DIR` |
 | Trust boundary | Dashboard never touches libvirt, Docker, or CAPE's API credentials directly | Same |
-| Detail page | `/cape/{sha256}` — landed with #319, re-landed by the cutover (#1628); admin-gated, detonation confirmation | `GET /sandbox/{job}` |
+| Detail page | `/cape/{sha256}` — landed with #319, re-landed by the cutover (#1628); the page itself sits behind normal session auth — the backing `/api/v1/cape/{sha}` call is service-token gated, same middleware as the other detail pages, no admin/role check, detonation confirmation | `GET /sandbox/{job}` |
 
 No new trust boundary. The dashboard container stays unprivileged and never
 calls `virsh`, `docker`, or CAPE's own API directly — same guarantee every

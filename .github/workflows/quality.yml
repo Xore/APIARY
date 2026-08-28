@@ -974,6 +974,23 @@ jobs:
             home: true
             run: python scripts/check-doc-paths-exist.py
 
+          # #2576: the CAPE implementation-plan doc claimed the detail page
+          # (/cape/{sha256}) was admin-gated. Nothing in backend-service
+          # enforces that -- require_service_token is the actual gate on
+          # /api/v1/cape/{sha}, the same middleware every other /api/v1
+          # detail route carries (main.rs:183, wired at main.rs:468). A real
+          # admin-role check does exist, but on a different route entirely
+          # (the Workbench "cape" analyzer entry that triggers a fresh
+          # detonation) -- this regression-tests the doc text, not the code,
+          # so the wrong claim can't silently drift back in on a rewrap or a
+          # synonym swap. pytest installed inline, same as the other
+          # pytest-based rows above -- it isn't a production dependency.
+          - name: Docs regression tests (#2576)
+            home: true
+            run: |
+              python -m pip install pytest
+              python -m pytest tests/docs/ -v
+
           - name: Dionaea SMB exploit-signature incidents (#622, #1775)
             home: true
             run: |
