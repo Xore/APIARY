@@ -376,7 +376,37 @@ services:
             n=$$(basename "$$f")
             [ "$$n" = "$$newest" ] && continue
             [ -e "/dst/$$n" ] && continue
-            cp -p "$$f" "/dst/$$n"
+            # #2584: a plain single-shot `cp` of a multi-GB rotated pcap
+            # from /src (sshfs-backed on the host, see the #1409 comment
+            # above) can run for minutes. While it does, it monopolizes the
+            # same sshfs channel the healthcheck's own /src reads use below,
+            # so the healthcheck exceeds its timeout and this container gets
+            # SIGKILLed mid-copy -- confirmed the live incident, not
+            # hypothetical. Stage the risky read in the container's own
+            # /tmp (never bind-mounted, so arkime-capture cannot see it) in
+            # short timeout-bounded dd chunks that resume across loop passes
+            # by size -- no single /src read can block longer than the
+            # per-chunk timeout below. Only the final /tmp-to-/dst copy ever
+            # touches the watched final name, and it happens in one shot
+            # once the staged copy is byte-complete, so IN_CLOSE_WRITE still
+            # fires exactly once on a whole file -- chunking straight onto
+            # the final name would instead fire it once per chunk on a
+            # still-partial file, which arkime-capture's --monitor would
+            # try to import.
+            stage="/tmp/sync.$$n"
+            size=$$(stat -c %s "$$f" 2>/dev/null) || continue
+            have=0
+            [ -e "$$stage" ] && have=$$(stat -c %s "$$stage" 2>/dev/null || echo 0)
+            if [ "$$have" -lt "$$size" ]; then
+              timeout 8 dd if="$$f" of="$$stage" bs=1M \
+                skip=$$((have / 1048576)) seek=$$((have / 1048576)) \
+                conv=notrunc 2>/dev/null
+              have=$$(stat -c %s "$$stage" 2>/dev/null || echo 0)
+            fi
+            if [ "$$have" -ge "$$size" ]; then
+              cp -p "$$stage" "/dst/$$n" && touch -r "$$f" "/dst/$$n" 2>/dev/null
+              rm -f "$$stage"
+            fi
           done
           # Retention: an age ceiling, then a size ceiling that actually
           # binds. #1737 -- what looked like a 14-day policy was really "the
@@ -430,7 +460,13 @@ services:
           now=$$(date +%s);
           [ $$((now - mtime)) -lt 900 ]
       interval: 120s
-      timeout: 10s
+      # #2584: was 10s. This check's own /src reads share the sshfs channel
+      # the sync loop's copy also reads from -- the loop now bounds each of
+      # its own /src reads to an 8s timeout (see command: above), so 20s
+      # leaves this check clear margin to queue behind one in-flight chunk
+      # and still complete, instead of getting killed itself and driving
+      # the container to SIGKILL on repeated false-unhealthy readings.
+      timeout: 20s
       retries: 3
       start_period: 60s
     labels:
