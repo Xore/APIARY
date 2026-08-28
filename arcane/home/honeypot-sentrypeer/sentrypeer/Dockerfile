@@ -100,6 +100,23 @@ WORKDIR /opt/sentrypeer/
 
 ENV SENTRYPEER_JSON_LOG=1
 ENV SENTRYPEER_JSON_LOG_FILE=/var/log/sentrypeer/sentrypeer.json
+# #2583: this env var alone does NOT turn on responsive mode at the pinned
+# SENTRYPEER_REF -- confirmed directly against sentrypeer_rust/src/cli.rs
+# and src/conf.c::process_cli(). process_cli() runs process_env_vars(config)
+# (reads this var, sets config->sip_responsive_mode = true) and then, since
+# this image builds with Rust support, calls process_cli_rs() ->
+# cli.rs::parse_args(), which unconditionally executes
+# `(*sentrypeer_c_config).sip_responsive_mode = args.responsive;` where
+# args.responsive reflects only the `-r` CLI flag (clap has no `env(...)`
+# wired to it despite the --help text's claim) -- clobbering the env-set
+# `true` back to `false` because CMD below never passed `-r`. udp.rs then
+# never sends a reply (only logs), which is exactly the #2583 symptom: the
+# #2337 probe's OPTIONS is received, parsed and logged as bad-actor traffic,
+# but draws no "SIP/" answer. SENTRYPEER_JSON_LOG survives the same Rust
+# pass only because cli.rs guards it with `if args.json { ... }` instead of
+# assigning unconditionally -- responsive mode has no such guard. Left set
+# here for documentation/forward-compat (harmless, and correct if upstream
+# ever adds the guard), but the actual mechanism is the -r flag on CMD.
 ENV SENTRYPEER_SIP_RESPONSIVE=1
 # sentrypeer_rust/src/config.rs also writes its own config dir via the
 # `directories` crate's XDG_CONFIG_HOME convention (confirmed live: without
@@ -119,4 +136,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # JSON log file is read directly, and it's an unused extra surface. No -p
 # (Peer to Peer): declined third-party data sharing, same call already made
 # in docs/community-threat-intel-sharing.md.
-CMD ["/usr/local/bin/sentrypeer", "-v", "-f", "/var/lib/sentrypeer/sentrypeer.db"]
+# -r (SIP responsive mode) passed explicitly, not left to
+# SENTRYPEER_SIP_RESPONSIVE alone -- see the #2583 note above.
+CMD ["/usr/local/bin/sentrypeer", "-v", "-r", "-f", "/var/lib/sentrypeer/sentrypeer.db"]
