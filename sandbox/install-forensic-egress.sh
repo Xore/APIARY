@@ -11,7 +11,7 @@ if systemctl is-active --quiet squid.service; then
 fi
 
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y dnsmasq-base squid nftables
+DEBIAN_FRONTEND=noninteractive apt-get install -y dnsmasq-base squid nftables logrotate
 systemctl disable --now squid.service 2>/dev/null || true
 
 target=/usr/local/libexec/honeypot-sandbox
@@ -25,8 +25,18 @@ install -m 0644 -o root -g root "$script_dir/forensic-egress-allowed-domains.txt
 
 install -d -m 0750 -o nobody -g nogroup /var/log/honeypot-sandbox/dns
 install -d -m 0750 -o proxy -g adm /var/log/honeypot-sandbox/proxy
+
+# dnsmasq (log-queries=extra) and squid (stdio access.log + cache.log) both
+# log unbounded to the trees above; Debian's own /etc/logrotate.d/squid only
+# covers /var/log/squid/*, so this custom pair needs its own drop-in or the
+# host fills its disk. postrotate signals each daemon to reopen its log
+# in place rather than restarting it -- SIGUSR2 (not SIGUSR1, which only
+# dumps cache stats) is what makes dnsmasq close/reopen a log-facility file.
+install -m 0644 -o root -g root "$script_dir/forensic-egress-logrotate.conf" /etc/logrotate.d/honeypot-sandbox-egress
+
 /usr/sbin/dnsmasq --test --conf-file=/etc/honeypot-sandbox/dnsmasq.conf
 /usr/sbin/squid -k parse -f /etc/honeypot-sandbox/squid.conf
+/usr/sbin/logrotate -d /etc/logrotate.d/honeypot-sandbox-egress >/dev/null
 for unit in honeypot-sandbox-egress-network.service honeypot-sandbox-egress-dns.service honeypot-sandbox-egress-proxy.service; do
   install -m 0644 -o root -g root "$script_dir/$unit" "/etc/systemd/system/$unit"
 done
