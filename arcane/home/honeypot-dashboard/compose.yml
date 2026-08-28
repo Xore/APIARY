@@ -259,6 +259,16 @@ services:
   # enabled and no service port — movable to any docker host that can
   # reach ES (stateless, env-configured). Scale by listing loops per
   # replica.
+  #
+  # reports-scheduler and user-retention-sweep are deliberately NOT in this
+  # list (#2301 audited this file alone and concluded, wrongly, that
+  # neither loop was wired anywhere): both moved with backend-service into
+  # the sibling honeypot-dashboard-backend stack at the #1622 split and are
+  # enabled there instead — see that stack's compose.yml WORKER_LOOPS= line
+  # and its comment. Each is a non-atomic ES read-modify-write (due-
+  # definitions render / users-doc sweep), so adding them here too would
+  # run a second, uncoordinated consumer racing the existing one — the same
+  # failure mode #2110 already fixed once for payload-inventory below.
   backend-worker:
     <<: *runtime-defaults
     image: apiary-backend:latest
