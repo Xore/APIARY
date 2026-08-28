@@ -1496,8 +1496,11 @@ function Reports() {
         // Storing result.definitions directly let an undefined through the
         // `definitions === null` gate and crashed on definitions.length
         // (the client render death the browser matrix caught on /reports).
+        // A truthy-but-non-array `definitions` (an object or string from
+        // the same drift) passed a bare `!next` check just as wrongly, so
+        // the gate checks the shape, not just presence.
         const next = result?.definitions
-        if (!next) {
+        if (!Array.isArray(next)) {
           setDefinitionsFailed(true)
           return
         }
@@ -1519,9 +1522,11 @@ function Reports() {
     // #2178: a failed refetch keeps the list on screen; blanking it to []
     // read as "every definition vanished" exactly when the store was
     // merely unreachable. A body without its definitions array counts as
-    // failed too — only a real response may redraw.
+    // failed too — only a real response may redraw. That includes a
+    // truthy non-array (#2573): a bare `!next` check let it through to
+    // `next.some(...)` below.
     const next = result?.definitions
-    if (!next) return
+    if (!Array.isArray(next)) return
     setDefinitions(next)
     // The definition being edited may have been deleted from the library —
     // fall back to a fresh draft rather than resurrecting it on save.
