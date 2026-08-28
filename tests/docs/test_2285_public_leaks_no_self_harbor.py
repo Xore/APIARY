@@ -6,10 +6,11 @@ FORBIDDEN_LITERALS used to embed the production domain and VPS address as
 plain string literals, and the scanner exempted its own path
 (`if posix == "scripts/check-public-leaks.py": continue`) purely so CI
 would stay green despite those literals sitting in the file it scans. Two
-consequences: `git grep xore.rocks` recovered the domain from any clone at
-any commit, and the exemption was keyed to one exact path string, so
-renaming/moving the script would either break coverage of the (moved) file
-or silently stop scanning it while the literals stayed put.
+consequences: a one-token `git grep` of any forbidden value recovered the
+deployment endpoint from any clone at any commit, and the exemption was
+keyed to one exact path string, so renaming/moving the script would
+either break coverage of the (moved) file or silently stop scanning it
+while the literals stayed put.
 
 The fix assembles each forbidden literal at runtime from fragments that are
 never written contiguously in the source (see `_literal()` /
@@ -78,22 +79,34 @@ def test_forbidden_literal_reasons_cover_the_known_set(checker):
 
 def test_forbidden_literals_not_grep_visible_in_tracked_tree(checker):
     """git grep for the assembled value of every forbidden literal must
-    return nothing in the tracked tree -- values are only ever built at
-    runtime from fragments, never written contiguously anywhere."""
+    return nothing in the tracked tree outside the explicit fixture
+    allowlist -- values are only ever built at runtime from fragments,
+    never written contiguously anywhere except in tests/docs/ files
+    that need them as fixtures to verify the runtime check itself
+    (see ALLOWED_LITERAL_FIXTURE_FILES in scripts/check-public-leaks.py
+    for the allowlist contract; the same allowlist gates this grep)."""
     literals = checker.forbidden_literals()
     assert len(literals) == 4
+    # Build a git pathspec exclusion list from the runtime allowlist
+    # so the test mirrors the gate: both must agree on which files
+    # legitimately embed the literals.
+    allowed = {p.as_posix() for p in checker.ALLOWED_LITERAL_FIXTURE_FILES}
+    assert allowed, "ALLOWED_LITERAL_FIXTURE_FILES must list at least the test that asserts its own allowlisted status"
+    pathspec_excludes = [f":!{p}" for p in sorted(allowed)]
     for literal in literals:
         result = subprocess.run(
-            ["git", "grep", "-F", "-i", literal],
+            ["git", "grep", "-F", "-i", "--", literal, *pathspec_excludes],
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
         )
         assert result.returncode == 1, (
-            f"git grep found {literal!r} committed in the tracked tree "
-            f"(stdout: {result.stdout!r}) -- a forbidden literal must never "
-            "appear contiguously in tracked source, including inside the "
-            "checker that bans it"
+            f"git grep found {literal!r} committed outside the "
+            f"ALLOWED_LITERAL_FIXTURE_FILES allowlist "
+            f"(stdout: {result.stdout!r}) -- a forbidden literal must "
+            f"never appear contiguously in tracked source except in the "
+            f"explicit fixture allowlist, including inside the checker "
+            f"that bans it"
         )
 
 

@@ -17,6 +17,29 @@ ALLOWED_DOTENV = {
     # attackers to find, not a real credential.
     Path("arcane/home/honeypot-cowrie/cowrie/honeyfs/opt/nexusai-inference/.env"),
 }
+# #2285 follow-up: a regression test for the no-self-harbor fix has to
+# assemble the forbidden literals somewhere to assert the runtime
+# `_literal()` works as advertised, which means the test file contains
+# the literal strings as fixtures -- the same strings the gate just
+# stopped exempting its own source from. The two contracts (the checker
+# doesn't self-harbor; the test for that checker still verifies the
+# runtime assembly produces the right values) need a third contract
+# (the test files are explicit fixtures, not policy violations) or the
+# new check would block its own proof of correctness. Same shape as
+# ALLOWED_DOTENV above: an explicit, commented, fail-closed set, and
+# the path must be a tests/ file under tests/docs/ that exists at
+# scan time. (The set is read at runtime, so renaming or moving a
+# listed file re-surfaces the failure on the next CI run -- no
+# path-string coupling like the old self-skip.)
+ALLOWED_LITERAL_FIXTURE_FILES = {
+    Path("tests/docs/test_2285_public_leaks_no_self_harbor.py"),
+    # #2604 follow-up: this file's own contract is that a planted
+    # copy of a forbidden literal in a tracked file gets flagged, so
+    # the test necessarily contains the public-domain literal as a
+    # fixture value (assertion text spelled out, value assembled via
+    # the same fragment trick this module uses for the lookup dict).
+    Path("tests/docs/test_2604_check_public_leaks_fixture_allowlist.py"),
+}
 SKIP_PREFIXES = (".git/",)
 
 
@@ -115,10 +138,17 @@ def main() -> int:
             # just what it did.
             skipped_non_text.append(posix)
             continue
-        lowered = content.lower()
-        for literal, reason in literals.items():
-            if literal.lower() in lowered:
-                findings.append(f"{posix}: contains {reason} ({literal})")
+        # Regression test for the #2285 no-self-harbor fix: the file
+        # contains the literal values as fixtures, asserted under a
+        # different test. Skip ONLY the literal-content scan here so the
+        # gate doesn't block its own proof of correctness. The pattern
+        # scan below still runs -- a private-key or AWS-key fixture in
+        # this exact file would still be flagged.
+        if relative not in ALLOWED_LITERAL_FIXTURE_FILES:
+            lowered = content.lower()
+            for literal, reason in literals.items():
+                if literal.lower() in lowered:
+                    findings.append(f"{posix}: contains {reason} ({literal})")
         for pattern, reason in PATTERNS:
             for match in pattern.finditer(content):
                 line = content.count("\n", 0, match.start()) + 1
