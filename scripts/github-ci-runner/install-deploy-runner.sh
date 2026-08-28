@@ -92,14 +92,19 @@ if [[ -z "$token" && ! -f "$RUNNER_HOME/.runner" ]]; then
   token=$(gh api -X POST "repos/$repo/actions/runners/registration-token" --jq .token)
 fi
 
-# System user + its two groups: RUNNER_GROUP (primary) matches this host's
-# existing convention (id github-deploy-runner: gid=github-deploy-runner,
-# groups=github-deploy-runner,docker,deploy-runner) -- both
-# github-deploy-runner and deploy-runner groups already exist on a
-# previously-provisioned host; useradd -g/-G below create them fresh only
-# on a genuinely new host.
+# System user + its two groups: RUNNER_GROUP (secondary, deploy-runner) and
+# RUNNER_USER-as-group (primary, github-deploy-runner). useradd -g below
+# requires the primary group to exist (#2288: only RUNNER_GROUP was being
+# groupadd'd, so a fresh host aborted at useradd(8) with
+# "useradd: group 'github-deploy-runner' does not exist" and a tier-3
+# disaster-rebuild hit it). Both groups are created here on a genuinely
+# new host; previously-provisioned hosts get past the getent guards and
+# proceed straight to useradd.
 if ! getent group "$RUNNER_GROUP" >/dev/null; then
   groupadd --system "$RUNNER_GROUP"
+fi
+if ! getent group "$RUNNER_USER" >/dev/null; then
+  groupadd --system "$RUNNER_USER"
 fi
 if ! id "$RUNNER_USER" >/dev/null 2>&1; then
   useradd --system --create-home --home-dir "$RUNNER_HOME" --shell /usr/sbin/nologin \
