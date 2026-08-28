@@ -135,6 +135,11 @@ services:
       # The dedicated runner is the sole scan loop; PAYLOAD_DIRS below
       # stays because payload_bytes.rs's on-demand self-heal still reads
       # those mounts.
+      # #2301 confirmed this line is the two loops' only consumer: an audit
+      # that looked solely at honeypot-dashboard/compose.yml (pre-#1622,
+      # where backend-service used to live) found neither loop wired
+      # anywhere and proposed adding both to backend-worker there — which
+      # would have raced this one instead of fixing a real gap.
       - WORKER_LOOPS=user-retention-sweep,reports-scheduler
       # #1612 payload-bytes on-demand mirror self-heal (payload_bytes.rs):
       # read-only access to the same capture sources main.go's PAYLOAD_DIRS
