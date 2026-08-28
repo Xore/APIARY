@@ -359,7 +359,12 @@ step_nic_gro_fix() {
 # ---------------------------------------------------------------------------
 # Phase 6 -- repo checkout + stage vps/ into /root/vps/, matching
 # .github/workflows/deploy.yml's own rsync exactly (same excludes) so a
-# fresh install and a CI redeploy converge on the identical result.
+# fresh install and a CI redeploy converge on the identical result. This
+# exclude list must move in lockstep with that workflow's -- #1184 added
+# --exclude 'secrets/' there after --delete-delay took down all seven
+# oauth2-proxy gateways by deleting the git-ignored, never-present-in-
+# checkout secrets/ directory (#2294: this script didn't inherit it, so a
+# --force-rerun-from stage-vps-dir replayed the same deletion locally).
 # ---------------------------------------------------------------------------
 REPO_DIR="/root/apiary-repo"
 
@@ -379,6 +384,7 @@ step_stage_vps_dir() {
     --exclude '.env' \
     --exclude 'traefik/certs/' \
     --exclude 'traefik/dynamic.yml' \
+    --exclude 'secrets/' \
     "${REPO_DIR}/vps/" /root/vps/
 }
 
