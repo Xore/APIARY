@@ -415,20 +415,39 @@ def _payload_roots() -> list[Path]:
     stable for a given volume's lifetime in practice, but the cost of an
     extra `docker volume inspect` per drain cycle is negligible next to an
     actual Ghidra analysis, and caching a stale path silently would be a far
-    worse failure mode than this."""
+    worse failure mode than this.
+
+    Each candidate root is wrapped in a PermissionError/OSError guard: the
+    runner user on the CI box cannot traverse the dionaea Docker volume's
+    binaries directory (root-owned inside the dionaea container), and the
+    pre-fix code crashed the whole drain with a PermissionError on the
+    first is_dir() call. Skipping a single inaccessible root is the safe
+    fallback -- the worker still resolves samples from the roots it can
+    read, and the missing root surfaces as a single quiet 'cannot list'
+    rather than a worker-wide exit.
+    """
     roots = []
-    if COWRIE_DOWNLOADS_DIR.is_dir():
-        roots.append(COWRIE_DOWNLOADS_DIR)
+    try:
+        if COWRIE_DOWNLOADS_DIR.is_dir():
+            roots.append(COWRIE_DOWNLOADS_DIR)
+    except OSError:
+        pass
     dionaea_mount = _docker_volume_mountpoint(DIONAEA_VOLUME)
     if dionaea_mount is not None:
         binaries = dionaea_mount / "binaries"
-        if binaries.is_dir():
-            roots.append(binaries)
+        try:
+            if binaries.is_dir():
+                roots.append(binaries)
+        except OSError:
+            pass
     state_mount = _docker_volume_mountpoint(DASHBOARD_STATE_VOLUME)
     if state_mount is not None:
         scripts = state_mount / "script-payloads"
-        if scripts.is_dir():
-            roots.append(scripts)
+        try:
+            if scripts.is_dir():
+                roots.append(scripts)
+        except OSError:
+            pass
     return roots
 
 

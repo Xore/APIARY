@@ -56,30 +56,42 @@ jobs:
   #      /actions/runners answers HTTP 403 "Resource not accessible by
   #      integration" to GITHUB_TOKEN under every permission shape (live-
   #      verified 2026-08-27). So ci-target dispatches the one-job
-  #      ci-heartbeat.yml canary pinned to [honeypot-ci] at THIS commit
-  #      and gives it a bounded window; success means a real box really
+  #      ci-heartbeat.yml canary pinned to [honeypot-ci] at a real ref
+  #      (the triggering branch; a same-repo PR's head branch -- the
+  #      pull_request merge ref backs no branch and dispatches refuse
+  #      with 422) and gives it a bounded window; success means a real
+  #      box really
   #      ran our code seconds ago. Paused, powered-off, unregistered,
   #      network-stalled or service-wedged all fail the window ->
   #      "GitHub-hosted". Routing infrastructure can degrade CI's speed,
   #      never its pass/fail correctness: any router error lands on the
   #      fallback and Quality still looks exactly like a conventional run.
   #
-  # NOT paired, deliberately: frontend-next / frontend-next-browser need
-  # docker/sudo-apt/chromium/redis -- the runner's dedicated user has
-  # neither sudo nor a docker-group membership by design (see
-  # scripts/github-ci-runner/install-ci-runner.sh), so guessing
-  # "homeserver" for them would just relocate failures. Inside
-  # scripts-and-compose, #2389 replaced the blanket stay-cloud rule with
-  # per-row routing: rows whose entire runtime is checkout files plus the
-  # interpreter carry `home: true`; container/apt-bound rows stay
-  # unflagged (the rationale lives on the matrix itself).
+  # #2565: the no-docker CI-runner design is retired. The runner's
+  # dedicated user now carries a docker-group membership (the same grant
+  # github-deploy-runner always had) and the host ships node 22, the
+  # redis-server binary, shellcheck and the playwright 1.62.1 chromium
+  # library set for its user -- preinstalled, because the user still has
+  # no sudo by design and every sudo-apt path in a check would otherwise
+  # be a guaranteed relocation failure. Everything Quality runs is
+  # therefore homeserver-eligible: frontend-next and frontend-next-browser
+  # ship as pairs like the families above (the browser twin swaps
+  # `--with-deps` and the apt install for presence checks -- deps live on
+  # the host now, and a missing one must fail loudly, not silently
+  # apt-install), and every docker-bound scripts-and-compose row is
+  # flagged `home: true` (#2389's docker-less audit criterion graduated
+  # to "docker or no engine needed").
+  #
+  # containers.yml / security.yml (CodeQL) / pages.yml (build) route the
+  # same way via the shared .github/workflows/ci-router.yml.
   # -------------------------------------------------------------------------
   ci-target:
     name: Pick CI executor
     runs-on: ubuntu-latest
     # Must comfortably outlive the heartbeat window below
-    # (dispatch + appear-wait + terminal-wait + API slack).
-    timeout-minutes: 10
+    # (dispatch + appear-wait + terminal-wait + API slack; worst case
+    # 120s + 420s plus slack).
+    timeout-minutes: 15
     # actions:write exists solely to launch the ci-heartbeat canary.
     permissions:
       contents: read
@@ -133,24 +145,57 @@ jobs:
           # which scripts/check-public-leaks.py would flag as a literal
           # credential assignment.
 
-          appear_window="${HEARTBEAT_APPEAR_SECONDS:-45}"   # event->run-object lag
-          decide_window="${HEARTBEAT_DECIDE_SECONDS:-240}"  # queue+exec budget on the box
+          # 120s appear: seen live on #2568 -- the dispatch is accepted and
+          # the canary still not visible in /runs 45s later while GitHub's
+          # run indexing lags, so the window must cover API lag, not just
+          # dispatch latency (the loop exits early when the run appears,
+          # so the cost is paid only in the worst case).
+          # 420s decide: the canary is tiny, but it rides a queue behind
+          # whatever else the single box instance is executing; #2572
+          # tracks real capacity. Fan-out deeper than ~2 canaries still
+          # overflows this window and falls back -- fail-safe direction.
+          appear_window="${HEARTBEAT_APPEAR_SECONDS:-120}"   # event->run-object lag (API indexing included)
+          decide_window="${HEARTBEAT_DECIDE_SECONDS:-420}"   # queue+exec budget on the box
           poll_every="${HEARTBEAT_POLL_SECONDS:-10}"
 
           if [[ "$trusted" == "true" && "${FORCE_GITHUB_HOSTED}" != "true" ]]; then
-            echo "heartbeat: dispatching ci-heartbeat on ${GITHUB_REF_NAME}"
             api="repos/$GITHUB_REPOSITORY/actions/workflows/ci-heartbeat.yml"
-            # cutoff predates the dispatch by 2min so minor runner/GitHub
-            # clock skew cannot out-veto a real fresh run.
-            cutoff="$(date -u -d '2 minutes ago' +%FT%TZ)"
-            http="$(curl -fsS -o "${RUNNER_TEMP:-/tmp}/hb-disp.out" -w '%{http_code}' -X POST \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H 'Accept: application/vnd.github+json' \
-              "$GITHUB_API_URL/$api/dispatches" \
-              -d "{\"ref\":\"${GITHUB_REF_NAME:-}\"}" || echo X)"
+            # The dispatch API needs a real ref. For pull_request runs
+            # GITHUB_REF_NAME is the ephemeral "<n>/merge" merge ref that no
+            # branch backs, so dispatching there is refused with 422 "No ref
+            # found for" -- seen live on #2568, and it would have routed
+            # every same-repo PR to the fallback forever. Same-repo PRs
+            # therefore dispatch at the PR's head branch (whose
+            # ci-heartbeat.yml is the branch's own; fork PRs never get this
+            # far, trusted=false). push/workflow_dispatch/schedule carry a
+            # real branch in GITHUB_REF_NAME already.
+            dispatch_ref="$GITHUB_REF_NAME"
+            if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+              dispatch_ref="$(jq -r '.pull_request.head.ref // ""' "$EVENT_PATH")"
+            fi
+            echo "heartbeat: dispatching ci-heartbeat on ${dispatch_ref:-<none>}"
+            http=""
+            if [[ -n "$dispatch_ref" ]]; then
+              # No -f: a refused dispatch must land its HTTP code in $http,
+              # not abort the capture (with -f a 422 printed as "422X").
+              http="$(curl -sS -o "${RUNNER_TEMP:-/tmp}/hb-disp.out" -w '%{http_code}' -X POST \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H 'Accept: application/vnd.github+json' \
+                "$GITHUB_API_URL/$api/dispatches" \
+                -d "{\"ref\":\"${dispatch_ref}\"}" || true)"
+            fi
             [[ "$http" == "204" ]] \
               && echo "heartbeat: dispatch accepted" \
-              || { echo "::warning::heartbeat dispatch refused (HTTP $http); routing fallback"; http=""; }
+              || { echo "::warning::heartbeat dispatch refused (HTTP ${http:-none}); routing fallback"; http=""; }
+
+            # cutoff predates the dispatch by 2min so minor runner/GitHub
+            # clock skew cannot out-veto a real fresh run. Must be assigned
+            # BEFORE Phase A -- under set -u an unbound $cutoff kills the
+            # pipeline subshell every poll iteration and rid silently stays
+            # empty (live on #2568: canaries succeeded while every router
+            # still concluded offline because this line was dropped in the
+            # dispatch-ref edit).
+            cutoff="$(date -u -d '2 minutes ago' +%FT%TZ)"
 
             # Phase A: wait for a FRESH heartbeat run to appear -- created
             # after the cutoff (dispatch minus skew allowance) and not yet
@@ -422,12 +467,21 @@ jobs:
           expect "go tests (matrix)" "$TEST_HS"   "$TEST_CLOUD"   || fail=1
           exit "$fail"
 
-  # Stays GitHub-hosted unconditionally: needs docker (lockfile check),
-  # npm cache actions and a full vite build -- the homeserver runner user
-  # has no docker-group membership by design.
+  # Homeserver-first as a pair (#2565): the tier's only special
+  # requirement is docker (lockfile check) plus node 24 via setup-node --
+  # the runner user now carries the docker-group membership, and
+  # setup-node works identically on the self-hosted runner (its
+  # node/npm caches simply persist in the runner's _work/_tool and HOME
+  # instead of the platform cache). Steps stay byte-identical across the
+  # twins so a red result means the same thing wherever it ran;
+  # timeout-minutes rides only on the homeserver twin per the pair
+  # convention.
   frontend-next:
     name: Dashboard frontend (next)
-    runs-on: ubuntu-latest
+    needs: [ci-target]
+    if: needs.ci-target.outputs.homeserver == 'true'
+    runs-on: [self-hosted, linux, x64, honeypot-ci]
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -509,6 +563,54 @@ jobs:
       - name: Generated route tree is current
         run: git diff --exit-code -- arcane/home/honeypot-dashboard/frontend-next/src/routeTree.gen.ts
 
+  frontend-next-cloud:
+    name: Dashboard frontend (next) (GitHub-hosted)
+    needs: [ci-target]
+    if: needs.ci-target.outputs.homeserver != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: arcane/home/honeypot-dashboard/frontend-next/package-lock.json
+      # #1816: the lockfile must install under the npm the *image* uses.
+      # (Full rationale lives on the homeserver twin above.)
+      - name: lockfile installs under the image's npm
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+        run: |
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -e HOME=/tmp -e npm_config_cache=/tmp/npm-cache \
+            -v "$PWD:/app" -w /app \
+            node:22-alpine npm ci --no-audit --no-fund
+          rm -rf node_modules
+      - run: npm ci
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+      - name: TanStack minors diverge inside one install (#2180)
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+        run: |
+          rows="$(jq -r '[.packages | to_entries[]
+              | select(.key | test("^node_modules/@tanstack/react-"))
+              | select(.value.version | startswith("1."))
+              | "\(.key | sub("node_modules/@tanstack/"; "")) \(.value.version)"]
+            | sort | .[]' package-lock.json)"
+          echo "$rows"
+          minors="$(cut -d" " -f2 <<<"$rows" | cut -d. -f1-2 | sort -u)"
+          if [ "$(wc -l <<<"$minors")" -gt 1 ]; then
+            echo "::warning file=arcane/home/honeypot-dashboard/frontend-next/package-lock.json::@tanstack/react-* 1.x span multiple minors in one install ($(paste -sd/ <<<"$minors")) -- bump the family together and verify route-tree behaviour (#2180)"
+          fi
+      - run: npm run typecheck
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+      - run: npm test
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+      # No live-ES smoke suite here on purpose -- see the homeserver twin.
+      - run: npm run build
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+      - name: Generated route tree is current
+        run: git diff --exit-code -- arcane/home/honeypot-dashboard/frontend-next/src/routeTree.gen.ts
+
   # #2034: the browser-level acceptance net returned. The Go tier ran a
   # 90-case Playwright matrix (#60, PR #146) until the cutover deleted it;
   # nothing replaced it and visual/behavioural regressions have had no net
@@ -516,11 +618,56 @@ jobs:
   # smoke over every sidebar route (from lib/nav.ts), the modal core, and
   # role-aware action visibility -- running against the BUILT production
   # server output with hermetic fixtures (e2e/start-dashboard.mjs), not the
-  # dev server. ubuntu-latest only: needs chromium deps + redis-server,
-  # neither present on the self-hosted runner by design (#2034 follows
-  # dashboard-browser's precedent for the same reason).
+  # dev server.
+  #
+  # Homeserver-first as a pair (#2565): the box preinstalls the playwright
+  # chromium library set (extracted for the pinned playwright-core's
+  # ubuntu26.04-x64 key) and the redis-server binary for the runner user,
+  # who has no sudo by design -- so the homeserver twin drops --with-deps
+  # and the apt fallback and, instead of guessing, FAILS LOUDLY when the
+  # host provision is missing. Consequence to keep in mind on a playwright
+  # bump: if the new build needs a library the host list doesn't cover,
+  # this twin fails at chromium launch with the missing-lib message and
+  # the host list (not this file) is what needs the update.
   frontend-next-browser:
     name: Dashboard-next browser matrix
+    needs: [ci-target]
+    if: needs.ci-target.outputs.homeserver == 'true'
+    runs-on: [self-hosted, linux, x64, honeypot-ci]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: arcane/home/honeypot-dashboard/frontend-next/package-lock.json
+      - run: npm ci
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+      - run: npm run build
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+      # No --with-deps: that path apt-installs, and the runner user has no
+      # sudo by design. The chromium library set lives on the host (#2565)
+      # and only the browser binary itself downloads here (cached in the
+      # runner's persistent ~/.cache/ms-playwright).
+      - run: npx playwright install chromium
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+      # The session fixture spawns a real redis-server rather than
+      # reimplementing RESP (#1034's tradeoff). The runner user cannot
+      # apt-install it, so a missing binary fails here, loudly, instead of
+      # as an obscure fixture error three steps later.
+      - run: |
+          command -v redis-server >/dev/null 2>&1 || {
+            echo "::error::redis-server missing on the runner host -- see #2565's homeserver provision list"
+            exit 1
+          }
+      - run: npm run test:browser
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+
+  frontend-next-browser-cloud:
+    name: Dashboard-next browser matrix (GitHub-hosted)
+    needs: [ci-target]
+    if: needs.ci-target.outputs.homeserver != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -668,17 +815,20 @@ jobs:
         run: scripts/check-theme-catalogue.sh
 
   scripts-and-compose:
-    # Per-row executor routing (#2389): `home: true` marks matrix rows whose
-    # whole run touches only checkout files, this workflow's own setup-python
-    # interpreter, and pip installs -- no daemon, no container, no apt
-    # dependency. Eligibility was audited by executing every candidate in a
-    # docker-less, sudo-less environment with the pip-flavored rows re-run in
-    # clean venvs -- audit ledger lives on the #2389 PR; notably the four
+    # Per-row executor routing (#2389, widened by #2565): `home: true`
+    # marks matrix rows whose whole run needs nothing beyond checkout
+    # files, this workflow's own setup interpreters, pip installs, and --
+    # since #2565 retired the runner's no-docker design -- the docker
+    # daemon the runner user now drives via its docker-group membership.
+    # Eligibility under the ORIGINAL (docker-less) criterion was audited
+    # by executing every candidate in a docker-less, sudo-less
+    # environment with the pip-flavored rows re-run in clean venvs -- the
+    # audit ledger lives on the #2389 PR. The four
     # analysis/tests/test_{honeypot_ilm_rollover,geoip_pipeline,
-    # dionaea_incidents_index,conpot_persona_pipeline}.sh rows print
-    # "SKIP: docker daemon is not reachable" without a container engine --
-    # relocating those would have gone green while testing nothing, so they
-    # are NOT flagged despite looking like their shell-suite siblings.
+    # dionaea_incidents_index,conpot_persona_pipeline}.sh rows were left
+    # unflagged then because they print "SKIP: docker daemon is not
+    # reachable" without a container engine -- on the box they now run
+    # their real Elasticsearch containers, so they are flagged.
     #
     # A flagged row lands on [self-hosted, linux, x64, honeypot-ci] whenever
     # ci-target proves the box live -- the same heartbeat gate every paired
@@ -688,12 +838,10 @@ jobs:
     # metal (a wedged pickup blocks a real box nobody reboots promptly);
     # fallback legs keep the platform ceiling (360 = effectively unset).
     #
-    # Unflagged rows need real engines and stay on ubuntu-latest exactly as
-    # before: real-Elasticsearch suites (the four above), keycloak-realm
-    # import into Postgres, the oauth2-proxy gateway suite, vendored-YARA and
-    # rev-eng-corpus reproducibility (docker run of pinned images), and
-    # compose validation (docker compose config -- the CLI alone needs
-    # privileges this user must never hold).
+    # Unflagged rows stay on ubuntu-latest: the inert "Set up Node for the
+    # dashboard OIDC suites" row (a matrix can't inject a use-step -- its
+    # node arrives from the runner image either way), and nothing else --
+    # every remaining row is flagged.
     name: ${{ matrix.name }}${{ matrix.home == true && needs.ci-target.outputs.homeserver != 'true' && ' (GitHub-hosted)' || '' }}
     needs: [ci-target]
     runs-on: ${{ matrix.home == true && needs.ci-target.outputs.homeserver == 'true' && fromJSON('["self-hosted", "linux", "x64", "honeypot-ci"]') || fromJSON('["ubuntu-latest"]') }}
@@ -1027,6 +1175,7 @@ jobs:
           # Postgres's varchar(255) column limit crash-looped the container on
           # every fresh install, undetected by any static check).
           - name: Keycloak realm imports cleanly into a real Postgres
+            home: true
             run: ./scripts/test-keycloak-realm-import.sh
 
           # #977: proves the isolated oauth2-proxy gateway pattern every
@@ -1036,6 +1185,7 @@ jobs:
           # enforcement, upstream network isolation, and gateway-outage
           # fail-closed behavior.
           - name: oauth2-proxy gateway pattern is resilient
+            home: true
             run: ./scripts/test-oauth2-proxy-gateway-resilience.sh
 
           # #982's PKCE+TOTP login and Keycloak-outage/key-rotation chaos
@@ -1058,17 +1208,20 @@ jobs:
               cache-dependency-path: arcane/home/honeypot-dashboard/frontend-next/package-lock.json
 
           - name: Build dashboard-next BFF once for both OIDC suites
+            home: true
             run: |
               cd arcane/home/honeypot-dashboard/frontend-next
               npm ci --no-audit --no-fund
               npm run build
 
           - name: OIDC PKCE+TOTP login suite (port of #982)
+            home: true
             env:
               DASHBOARD_BFF_SKIP_BUILD: "1"
             run: ./scripts/test-dashboard-oidc-pkce-totp-login.sh
 
           - name: Keycloak outage/restart/rotation chaos suite (port of #982)
+            home: true
             env:
               DASHBOARD_BFF_SKIP_BUILD: "1"
             run: ./scripts/test-dashboard-oidc-chaos.sh
@@ -1107,16 +1260,26 @@ jobs:
             home: true
             run: sh analysis/tests/test_backup_honeypot.sh
 
+          # The four real-Elasticsearch suites. #2389 left them unflagged
+          # because without a container engine they print "SKIP: docker
+          # daemon is not reachable" and go green while testing nothing;
+          # the runner user now drives docker (#2565), so on the box they
+          # exercise their actual ES containers -- which is exactly the
+          # difference between a relocated failure and a relocated no-op.
           - name: honeypot-30d ILM policy rolls over and deletes (#585)
+            home: true
             run: analysis/tests/test_honeypot_ilm_rollover.sh
 
           - name: geoip-honeypot ingest pipeline (#563)
+            home: true
             run: analysis/tests/test_geoip_pipeline.sh
 
           - name: dionaea-incidents index template (#565)
+            home: true
             run: analysis/tests/test_dionaea_incidents_index.sh
 
           - name: conpot persona extraction in geoip-honeypot pipeline (#567)
+            home: true
             run: analysis/tests/test_conpot_persona_pipeline.sh
 
           # #789's sensor event-kind coverage audit used to run here. It is
@@ -1236,6 +1399,7 @@ jobs:
             run: python3 sandbox/windows/vnc-bridge/tests/test_server.py
 
           - name: Vendored YARA corpus is intact and loadable
+            home: true
             run: |
               # yara(1) refuses to start on a corpus with one bad rule rather than
               # skipping it, so a rule file edited in place or dropped from
@@ -1256,6 +1420,7 @@ jobs:
               '
 
           - name: Rev-eng benchmark corpus is reproducible and safe (#159)
+            home: true
             run: |
               # Runs in the corpus's own documented build environment
               # (debian:trixie-slim, matching corpus/README.md's "Rebuilding"
@@ -1269,6 +1434,7 @@ jobs:
               '
 
           - name: Validate home and VPS Compose
+            home: true
             run: |
               cp .env.example .env
               cp vps/.env.example vps/.env

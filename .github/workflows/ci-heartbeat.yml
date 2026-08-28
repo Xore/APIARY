@@ -1,7 +1,8 @@
 name: CI heartbeat
 
-# One-job canary used by quality.yml's ci-target router as its
-# homeserver-liveness proof. The runners-listing REST endpoint answers
+# One-job canary used by every workflow's ci-target router (quality.yml's
+# inline job, and the reusable ci-router.yml) as its homeserver-liveness
+# proof. The runners-listing REST endpoint answers
 # 403 "Resource not accessible by integration" for GITHUB_TOKEN no matter
 # what permissions a workflow requests -- the registry cannot be asked,
 # so availability is MEASURED instead: router dispatches this workflow at
@@ -14,16 +15,21 @@ name: CI heartbeat
 #
 # Deliberately trivial -- checkout would waste minutes; empty steps are
 # legal. Never triggers itself on push/pull_request/schedule.
+#
+# Deliberately WITHOUT a concurrency group: one push now fans out to
+# several routing workflows at once (quality, containers, security,
+# pages), each dispatching its own canary on the same ref. With
+# cancel-in-progress, the newest dispatch would cancel the canary an
+# earlier router is actively waiting on, un-vouching exactly the evidence
+# its decision depends on and flinging that workflow to the fallback for
+# no operational reason. Canaries are sub-second no-op jobs; letting
+# siblings queue briefly on the single runner is cheaper than that race.
 
 on:
   workflow_dispatch:
 
 permissions:
   contents: none
-
-concurrency:
-  group: ci-heartbeat-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   ping:

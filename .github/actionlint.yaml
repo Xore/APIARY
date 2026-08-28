@@ -2,6 +2,9 @@ self-hosted-runner:
   # Labels of self-hosted runner in array of strings.
   labels:
     - honeypot-home
+    # CI-feedback runner on the same homeserver as honeypot-home -- see
+    # scripts/github-ci-runner/install-ci-runner.sh and #2565.
+    - honeypot-ci
 
 # Configuration variables in array of strings defined in your repository or
 # organization. `null` means disabling configuration variables check.
