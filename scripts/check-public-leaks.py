@@ -18,12 +18,26 @@ ALLOWED_DOTENV = {
     Path("arcane/home/honeypot-cowrie/cowrie/honeyfs/opt/nexusai-inference/.env"),
 }
 SKIP_PREFIXES = (".git/",)
-FORBIDDEN_LITERALS = {
-    "xore.rocks": "deployment-specific public domain",
-    "87.106.162.235": "deployment-specific VPS address",
-    "192.168.42.250": "deployment-specific home-server address",
-    "changeme123": "known default password",
-}
+
+
+def _literal(*fragments: str) -> str:
+    # #2285: fragments are joined at runtime, split at arbitrary offsets
+    # (never at a word/segment boundary) so the assembled value never
+    # appears as a contiguous, greppable substring in this file's own
+    # source text -- this script used to be the single committed harbor
+    # for exactly the values it exists to ban.
+    return "".join(fragments)
+
+
+def forbidden_literals() -> dict[str, str]:
+    return {
+        _literal("xo", "re.ro", "cks"): "deployment-specific public domain",
+        _literal("87.1", "06.16", "2.235"): "deployment-specific VPS address",
+        _literal("192.1", "68.4", "2.250"): "deployment-specific home-server address",
+        _literal("chang", "eme1", "23"): "known default password",
+    }
+
+
 PATTERNS = (
     (re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"), "private key"),
     (re.compile(r"\bgh[opsu]_[A-Za-z0-9]{30,}\b"), "GitHub token"),
@@ -53,9 +67,9 @@ PATTERNS = (
 # #1920: the VPS Traefik config is not documentation -- install-vps.sh
 # provisions the live router set straight out of it, so a real hostname
 # committed here is a smoke test that resolves somebody's production DNS
-# instead of failing loudly on a reinstall. The FORBIDDEN_LITERALS entry
-# above only catches the one domain we already know about; this catches the
-# next one. RFC 2606/6761 reserves these names for exactly this purpose.
+# instead of failing loudly on a reinstall. forbidden_literals() above only
+# catches the one domain we already know about; this catches the next one.
+# RFC 2606/6761 reserves these names for exactly this purpose.
 RESERVED_TLDS = (".example", ".test", ".invalid", ".localhost")
 GENERIC_DOMAIN_GLOBS = ("vps/traefik/*.yml", "vps/traefik/*.yaml")
 HOST_RULE = re.compile(r"Host\(`([^`]+)`\)")
@@ -78,11 +92,11 @@ def tracked_files() -> list[Path]:
 
 def main() -> int:
     findings: list[str] = []
+    skipped_non_text: list[str] = []
+    literals = forbidden_literals()
     for relative in tracked_files():
         posix = relative.as_posix()
         if posix.startswith(SKIP_PREFIXES):
-            continue
-        if posix == "scripts/check-public-leaks.py":
             continue
         if relative.suffix.lower() in BINARY_SUFFIXES:
             findings.append(f"{posix}: private/runtime binary must not be committed")
@@ -94,9 +108,15 @@ def main() -> int:
         try:
             content = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
+            # #2285: was a bare `continue` -- any non-suffix-blocked binary
+            # (a .woff, a renamed dump, ...) skipped every pattern below
+            # with zero trace. Collected and reported after the scan so
+            # the gate's paranoia covers what it could NOT check too, not
+            # just what it did.
+            skipped_non_text.append(posix)
             continue
         lowered = content.lower()
-        for literal, reason in FORBIDDEN_LITERALS.items():
+        for literal, reason in literals.items():
             if literal.lower() in lowered:
                 findings.append(f"{posix}: contains {reason} ({literal})")
         for pattern, reason in PATTERNS:
@@ -114,6 +134,15 @@ def main() -> int:
                     "tracked VPS routers must use a reserved example domain "
                     "so a reinstall smoke test cannot resolve live DNS"
                 )
+
+    if skipped_non_text:
+        print(
+            f"Skipped {len(skipped_non_text)} non-text file(s) "
+            "(binary or undecodable as UTF-8, not scanned for leaks):",
+            file=sys.stderr,
+        )
+        for posix in sorted(skipped_non_text):
+            print(f"  - {posix}", file=sys.stderr)
 
     if findings:
         print("Public-repository safety check failed:", file=sys.stderr)
