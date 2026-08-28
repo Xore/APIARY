@@ -167,6 +167,17 @@ const INGEST_FEEDS: &[IngestFeed] = &[
             IngestIndex { pattern: "suricata-v2-dns-*", stale_after: minutes(180) },
         ],
     },
+    // #2300: attacker verdicts were silently frozen 4 days (last 2026-08-22
+    // 23:47Z) before anyone noticed. The attacker-identity loop is wired
+    // (alert-notifier,attacker-identity,... in WORKER_LOOPS), but a worker
+    // crash or a deploy regression can kill the producer without paging.
+    // 4h threshold: well above the worker's own tick interval and a real
+    // paged-not-observed gap, while still tight enough that the next
+    // multi-day freeze is impossible to miss.
+    IngestFeed {
+        name: "attackers",
+        indices: &[IngestIndex { pattern: "attackers-v1", stale_after: minutes(240) }],
+    },
 ];
 
 /// What one index pattern's real (non-probe) ingestion looks like right now.
