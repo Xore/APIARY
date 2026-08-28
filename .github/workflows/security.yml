@@ -46,6 +46,14 @@ jobs:
         language: [go, javascript-typescript, python]
     steps:
       - uses: actions/checkout@v7
+      - if: matrix.language == 'go' && needs.ci-target.outputs.homeserver != 'true'
+        uses: actions/setup-go@v5
+        with:
+          # CodeQL's Go autobuild shell-out to `go` to enumerate targets;
+          # the GitHub-hosted ubuntu runner has no Go toolchain by default
+          # (the homeserver runner does), so we install it on the fallback
+          # path only. Pinned minor to keep the lockfile reproducible.
+          go-version: '1.23'
       - uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}

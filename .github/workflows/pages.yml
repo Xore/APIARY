@@ -53,7 +53,7 @@ jobs:
         uses: actions/configure-pages@v6
 
       - name: Build branding site
-        run: python branding/scripts/build_pages_site.py --output _site
+        run: python3 branding/scripts/build_pages_site.py --output _site
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
