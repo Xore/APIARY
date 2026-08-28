@@ -7,8 +7,10 @@
 # complements the sensors' own JSON logs. Each uses `threshold type limit` so a
 # chatty session produces one alert per source per window, not a flood.
 #
-# Suricata runs on the VPS public NIC (ens6), so src_ip here is the REAL
-# attacker address (before the WireGuard tunnel to the home sensors).
+# Suricata runs on the VPS public NIC, so src_ip here is the REAL attacker
+# address (before the WireGuard tunnel to the home sensors). The NIC name
+# is runtime-derived (CAPTURE_INTERFACE, #1929/#1932) and not fixed to any
+# one value -- see suricata.yaml's af-packet section (#2307).
 #
 # SID range 92050000–92059999.
 # ============================================================================

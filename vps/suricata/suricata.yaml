@@ -225,7 +225,15 @@ threshold-file: /etc/suricata/threshold.config
 # the tunnel on this interface) creating a feedback loop that fills
 # pcap-log with 100MB every few seconds. The command-line positional BPF
 # form is ignored in this setup, so it must live here.
+#
+# #2307: the filter must sit on the `default` stanza, not a named one.
+# af-packet matches stanzas by literal interface name, but the real capture
+# NIC is runtime-derived (CAPTURE_INTERFACE, detect-capture-interface.service,
+# #1929/#1932) and has already been renamed once by a reboot (ens6 -> eth0).
+# A named entry here goes stale the moment the NIC is renamed again, and
+# Suricata silently falls back to the unfiltered default instead of erroring.
+# `default` matches whatever `-i` is given, by construction, so there is
+# nothing left here to drift.
 af-packet:
-  - interface: ens6
-    bpf-filter: "not udp port 51820"
   - interface: default
+    bpf-filter: "not udp port 51820"
