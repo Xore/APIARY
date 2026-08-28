@@ -10,6 +10,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -163,8 +164,13 @@ func TestElasticLogsRequestBody(t *testing.T) {
 // tests above) since the guard depends on a genuine RemoteAddr.
 func TestServeSkipsLoggingOwnHealthcheck(t *testing.T) {
 	const testPort = 19654
-	var buf bytes.Buffer
-	log := &logger{out: &buf}
+	var mu sync.Mutex
+	var buf bytes.Buffer // guarded: serve()'s "listening" emit and this test's read race otherwise
+	log := &logger{out: writerFunc(func(p []byte) (int, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return buf.Write(p)
+	})}
 	handlerCalled := make(chan struct{}, 1)
 
 	go serve(service{proto: "test", port: testPort, handler: func(net.Conn, *sessionLogger, int) {
@@ -194,7 +200,10 @@ func TestServeSkipsLoggingOwnHealthcheck(t *testing.T) {
 	// serve()'s own one-time startup "listening" event is expected and
 	// unrelated to this guard -- only a per-connection "connect" event
 	// would mean the healthcheck got logged as a sensor interaction.
-	for _, ev := range decodeEvents(t, buf.String()) {
+	mu.Lock()
+	events := decodeEvents(t, buf.String())
+	mu.Unlock()
+	for _, ev := range events {
 		if ev.Event == "connect" {
 			t.Fatalf("logged a connect event for the container's own healthcheck: %+v", ev)
 		}
