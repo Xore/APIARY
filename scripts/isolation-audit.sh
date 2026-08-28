@@ -23,10 +23,30 @@ info() { printf '  --    %s\n' "$*"; }
 section() { printf '\n== %s ==\n' "$*"; }
 
 # ---------------------------------------------------------------------------
+# Every isolated sandbox bridge/network this script audits, in one place the
+# iptables and route sections below both read (#2295: each used to hardcode
+# virbr-sandbox alone, leaving the Linux lane's virbr-hpsbx unaudited by
+# either). A third sandbox network only needs a line here, not a second
+# hand-written check block.
+#
+# fields: <virsh network> <bridge> <subnet> <probe IP in the subnet> <mode>
+#   mode=always           the bridge carries this subnet's host route
+#                         whenever it's up (Windows lane: static gateway).
+#   mode=forensic-egress  the bridge is address-less by design (see
+#                         sandbox/network.xml) and may only carry this route
+#                         while sandbox/forensic-egress-network.sh's systemd
+#                         unit is intentionally active.
+GUARDED_BRIDGES=(
+  "sandbox          virbr-sandbox 10.10.10.0/24 10.10.10.1 always"
+  "honeypot-sandbox virbr-hpsbx   198.18.0.0/24 198.18.0.1 forensic-egress"
+)
+
+# ---------------------------------------------------------------------------
 section "Sandbox libvirt networks: no <forward>"
 # 'ghosts' is the one deliberate exception (#331: WAN-permitted by design,
 # NAT forward is intentional) -- every OTHER sandbox network must have none.
-for net in sandbox honeypot-sandbox; do
+for entry in "${GUARDED_BRIDGES[@]}"; do
+  read -r net _ <<<"$entry"
   if ! virsh net-info "$net" >/dev/null 2>&1; then
     bad "libvirt network '$net' does not exist (expected active, isolated)"
     continue
@@ -43,24 +63,31 @@ if virsh net-info ghosts >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------------------
-section "Phase 0 iptables barrier (virbr-sandbox)"
+section "Phase 0 iptables barrier (guarded sandbox bridges)"
 # sandbox/honeypot-sandbox have no <forward> element, so libvirt never adds a
 # LIBVIRT_FWI/FWO/FWX rule routing them anywhere -- the isolation is the
 # FORWARD chain's own default policy catching everything libvirt didn't
 # explicitly allow, not a named per-bridge DROP rule. The real failure mode
 # to catch is the default policy being ACCEPT, or an explicit ACCEPT rule
-# for virbr-sandbox added later (by hand, or by an unrelated tool) that would
-# override the default.
+# for a guarded bridge added later (by hand, or by an unrelated tool) that
+# would override the default. Checked for every bridge in GUARDED_BRIDGES,
+# not just the Windows one (#2295).
 if ! command -v iptables >/dev/null 2>&1; then
   bad "iptables not found"
 elif iptables_rules=$(sudo -n iptables -S FORWARD 2>&1); then
   policy=$(grep '^-P FORWARD' <<<"$iptables_rules" | awk '{print $3}')
   if [ "$policy" != "DROP" ]; then
     bad "FORWARD chain default policy is '$policy', not DROP -- sandbox traffic with no explicit rule would be forwarded"
-  elif grep -q 'virbr-sandbox.*ACCEPT' <<<"$iptables_rules"; then
-    bad "an explicit ACCEPT rule references virbr-sandbox in the FORWARD chain -- this overrides the default-DROP isolation"
   else
-    ok "FORWARD default policy is DROP and nothing explicitly ACCEPTs virbr-sandbox traffic"
+    ok "FORWARD default policy is DROP"
+    for entry in "${GUARDED_BRIDGES[@]}"; do
+      read -r _ bridge _ _ _ <<<"$entry"
+      if grep -q "$bridge.*ACCEPT" <<<"$iptables_rules"; then
+        bad "an explicit ACCEPT rule references $bridge in the FORWARD chain -- this overrides the default-DROP isolation"
+      else
+        ok "nothing explicitly ACCEPTs $bridge traffic"
+      fi
+    done
   fi
 else
   bad "could not read iptables FORWARD chain (sudo -n iptables failed: needs the isolation-audit sudoers grant)"
@@ -87,17 +114,35 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-section "No host route into the sandbox subnet other than the bridge"
-route_hits=$(ip route show 10.10.10.0/24 2>/dev/null)
-route_count=$(printf '%s\n' "$route_hits" | grep -c 'dev virbr-sandbox' || true)
-other_count=$(printf '%s\n' "$route_hits" | grep -vc 'dev virbr-sandbox\|^$' || true)
-if [ -z "$route_hits" ]; then
-  info "no route to 10.10.10.0/24 at all (bridge not currently up -- expected between detonations)"
-elif [ "$route_count" -ge 1 ] && [ "$other_count" -eq 0 ]; then
-  ok "only the virbr-sandbox bridge routes to 10.10.10.0/24"
-else
-  bad "unexpected route(s) to 10.10.10.0/24: $route_hits"
-fi
+section "No host route into guarded sandbox subnets other than their own bridge"
+# 'ip route get' resolves the route the kernel would actually use for an
+# address in the subnet, so a covering supernet route (e.g. someone
+# aggregates lab ranges under a /16) is caught the same way an exact-prefix
+# one is -- 'ip route show <subnet>' (the old check) only matched the
+# latter. Comparing the resolved device against the host's own default
+# route tells "nothing sandbox-specific is configured right now" (expected
+# between detonations) apart from "some other specific route exists" (never
+# expected).
+default_dev=$(ip route show default 2>/dev/null | awk '/^default/ {print $5; exit}')
+for entry in "${GUARDED_BRIDGES[@]}"; do
+  read -r _ bridge subnet probe_ip bridge_mode <<<"$entry"
+  authorized=0
+  if [ "$bridge_mode" = "forensic-egress" ] && command -v systemctl >/dev/null 2>&1 \
+     && systemctl is-active --quiet honeypot-sandbox-egress-network.service 2>/dev/null; then
+    authorized=1
+  fi
+  route_out=$(ip route get "$probe_ip" 2>/dev/null)
+  routed_dev=$(grep -oE 'dev [^ ]+' <<<"$route_out" | head -1 | awk '{print $2}')
+  if [ "$bridge_mode" = "forensic-egress" ] && [ "$authorized" -eq 0 ] && [ "$routed_dev" = "$bridge" ]; then
+    bad "$subnet has a host route via $bridge outside the forensic-egress window (honeypot-sandbox-egress-network.service is not active) -- did teardown fail?"
+  elif [ -n "$routed_dev" ] && [ "$routed_dev" != "$bridge" ] && [ "$routed_dev" != "$default_dev" ]; then
+    bad "$subnet resolves via '$routed_dev', neither $bridge nor the host default route -- unexpected route (possibly a covering supernet): $route_out"
+  elif [ "$routed_dev" = "$bridge" ]; then
+    ok "$subnet is only reachable via $bridge"
+  else
+    info "no sandbox-specific route to $subnet ($bridge not currently up, or the forensic-egress window is closed -- expected between detonations)"
+  fi
+done
 
 # ---------------------------------------------------------------------------
 section "Stack containers (hp-*/sbx-* only -- this host also runs unrelated stacks: dockge, pihole, ghidra/ollama, ghosts-*, etc.)"
