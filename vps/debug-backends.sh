@@ -11,9 +11,17 @@
 # This script curls each backend directly over WireGuard so you can
 # see the real HTTP response without Traefik in the way.
 #
+# The probed inventory mirrors vps/traefik/dynamic.yml's own socat-hp-*
+# table (see that file's header comment): the port probed here is the
+# home-exposed port on the right of that table's "->" (10.8.0.2:<port>),
+# not the VPS-side socat listen port on the left. When a new socat-hp-*
+# bridge is added there, add its home port here too, or this drifts
+# again (#2297).
+#
 # Usage:  ./debug-backends.sh
+#         WG=127.0.0.1 ./debug-backends.sh   # point at a different target
 
-WG="10.8.0.2"
+WG="${WG:-10.8.0.2}"
 PASS=0; FAIL=0; WARN=0
 
 GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[0;33m'
@@ -56,14 +64,14 @@ echo -e "${CYAN}${BOLD}  Backend layer-7 probe  ·  WireGuard home: $WG${NC}"
 sep
 
 # ============================================================
-info "HTTP services on home server (10.8.0.2)"
+info "HTTP services on home server (10.8.0.2) — always expected up"
 # ============================================================
-
-# www / static site
-probe $WG 8080  "www (static nginx)"
 
 # Honeypot dashboard (502 in Traefik but port open)
 probe $WG 19090 "Honeypot dashboard"
+
+# Honeypot dashboard-next (#1628 — owns the production binding)
+probe $WG 19092 "Honeypot dashboard-next"
 
 # EveBox (was 302 via Traefik — verify direct)
 probe $WG 19636 "EveBox"
@@ -74,51 +82,46 @@ probe $WG 19601 "Kibana"
 # Tanner
 probe $WG 19091 "Tanner web"
 
-# API services (working reference)
-probe $WG 5000  "Flask API"
-probe $WG 5001  "Flask+Redis API"
-probe $WG 3000  "Node.js API"
-probe $WG 5002  "C# ASP.NET API"
-probe $WG 5003  "Go API"
-probe $WG 5004  "Rust Axum API"
+# Arkime viewer
+probe $WG 19080 "Arkime viewer"
+
+# Keycloak
+probe $WG 18080 "Keycloak"
+
+# Arcane (deploy control plane)
+probe $WG 3552  "Arcane"
 
 # ============================================================
-info "Services expected CLOSED on home (run on VPS or not started)"
+info "Services expected CLOSED on home (one-shot dependency or opt-in profile)"
 # ============================================================
 
-# Snare
+# Snare — depends on the snare-clone one-shot persona installer
 echo -e "  Checking snare 10.8.0.2:19082..."
 if tcp_open $WG 19082; then
   probe $WG 19082 "Snare honeypot"
 else
   warn "Snare (10.8.0.2:19082) CLOSED — container not running"
-  echo "    Likely cause: snare_clone (one-shot clone container) has not completed successfully."
+  echo "    Likely cause: snare-clone (one-shot persona installer, container"
+  echo "    hp-snare-clone) has not completed successfully."
   echo "    Fix: on home server run:"
   echo "      docker logs hp-snare-clone"
-  echo "      docker compose up -d snare"
+  echo "      cd /opt/stacks/honeypot-init && docker compose up -d snare-clone"
+  echo "      cd /opt/stacks/honeypot-tanner && docker compose up -d snare"
 fi
 
-# Uptime Kuma
-echo -e "  Checking uptime-kuma 10.8.0.2:3001..."
-if tcp_open $WG 3001; then
-  probe $WG 3001 "Uptime Kuma"
+# RevDeck — behind the opt-in 'revdeck' compose profile, not started by default
+echo -e "  Checking revdeck 10.8.0.2:19500..."
+if tcp_open $WG 19500; then
+  probe $WG 19500 "RevDeck"
 else
-  warn "Uptime Kuma (10.8.0.2:3001) CLOSED — not running on home server"
-fi
-
-# FileBrowser
-echo -e "  Checking filebrowser 10.8.0.2:8070..."
-if tcp_open $WG 8070; then
-  probe $WG 8070 "FileBrowser"
-else
-  warn "FileBrowser (10.8.0.2:8070) CLOSED — not running on home server"
+  warn "RevDeck (10.8.0.2:19500) CLOSED — behind the 'revdeck' compose profile, not started by default"
 fi
 
 # ============================================================
 info "Diagnosing 502s: TCP-open-but-HTTP-broken"
 # ============================================================
 
-for spec in "$WG:8080:www" "$WG:19090:dashboard"; do
+for spec in "$WG:19090:dashboard" "$WG:19092:dashboard-next"; do
   IFS=: read -r h p lbl <<< "$spec"
   if tcp_open "$h" "$p"; then
     # Try with explicit HTTP/1.1
