@@ -1496,6 +1496,7 @@ jobs:
           - name: Pi-hole/DNSCrypt install topology (#1387)
             home: true
             run: python3 scripts/tests/test_pihole_install.py
+
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

@@ -2,8 +2,8 @@
 // cape.$sha's parent, and a component-ful parent that renders no <Outlet/>
 // swallows its child entirely — every /cape/$sha deep link re-rendered this
 // list and read as "worker not producing yet".
-// CAPE — advanced sandbox detonations (cape-analysis-v1). Empty until
-// the CAPE host worker is deployed; submissions land with #1612.
+// CAPE — advanced sandbox detonations (cape-analysis-v1). A StoreListPage
+// over /api/v1/store/cape; each row deep-links into /cape/${sha}.
 import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { StoreListPage, sha256Of, str, when, type StorePage, type StoreRow } from '../components/StoreList'
