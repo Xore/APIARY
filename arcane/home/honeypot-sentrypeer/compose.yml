@@ -39,6 +39,15 @@
 #   distribution (-p/SENTRYPEER_PEER_TO_PEER) and its RESTful API
 #   (-a/SENTRYPEER_API) are both left off -- same call already made in
 #   docs/community-threat-intel-sharing.md for T-Pot's own ewsposter/hpfeeds.
+# - sentrypeer/Dockerfile's CMD passes -r explicitly, not left to
+#   SENTRYPEER_SIP_RESPONSIVE alone (#2583): confirmed directly against the
+#   pinned SENTRYPEER_REF that sentrypeer_rust/src/cli.rs::parse_args()
+#   unconditionally overwrites config->sip_responsive_mode from the
+#   clap-parsed -r flag (default false) *after* src/conf.c::process_env_vars()
+#   already applied the env var -- so the env var alone was silently
+#   clobbered back to false and the #2337 healthcheck's OPTIONS never drew a
+#   reply, even though the packet was received, parsed and logged fine. See
+#   sentrypeer/Dockerfile's own note next to ENV SENTRYPEER_SIP_RESPONSIVE=1.
 
 name: honeypot-sentrypeer
 
