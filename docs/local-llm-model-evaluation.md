@@ -1004,6 +1004,11 @@ Qualification request, byte-for-byte from every report:
  "output_tokens": 512, "seed": 144, "temperature": 0, "thinking": false}
 ```
 
+**Two of those fields are recorded but never sent** — `context_tokens` and
+`keep_alive` do not reach Ollama; see *The recorded qualification request is
+not the request that was sent* below. The served context was this container's
+`OLLAMA_CONTEXT_LENGTH=32768`, not 8192.
+
 Tier A evidence is `objdump -d --source`; Tier B is real Ghidra headless
 pseudocode via `--ghidra-cache /mnt-1/benchmarks/tierb-cache`. Operator
 `bg-1805c`, provenance synthetic, three concurrent lanes, N = 3 per model per
@@ -1060,43 +1065,81 @@ models relative to the input production actually serves**, and the direction of
 the error depends on the model family. That is exactly the failure mode #1805
 was opened to detect, and it is now measured rather than hypothesised.
 
-### Repeats measured nothing: the harness is deterministic since #1953
+### Repeats measured nothing, and the cause is not yet established
 
 Every one of the 12 models, on both tiers, scored **identically on all three
 repeats — and every one of the 14 `answer` strings was byte-identical across
 repeats.** Only `wall_seconds` moved. The `±0` in the table is not a narrow
 noise band; it is the same run recorded three times.
 
+The observation is solid: 62 separate runs, each with its own
+`transcript_run_id`, its own `transcripts_sha256`, and its own wall times,
+logged start-to-finish by three independent lanes. Nothing was resumed or
+copied — the resume guard keys on the output filename, and each repeat wrote a
+new one.
+
 This contradicts the anchor #1947 rule 3 was built on. On 2026-08-25, #1805-b
 measured four runs of one model at temperature 0 / seed 144 / identical digest
 at **56, 56, 55, 55**, with 7 of 14 cases moving and **0 of 14 answers
-byte-identical**. The cause is `f3f4c14` (#1953), merged after that
-measurement, which added `reasoning_effort: "none"` to every request.
+byte-identical**. Something changed between the two rounds. What, exactly, is
+**not** established, and this section deliberately stops short of naming a
+cause.
 
-Probed directly against this host's Ollama 0.32.13 on
-`qwen2.5-coder:7b-instruct-q4_K_M`, identical prompt, temperature 0, seed 144,
-three repeats each way:
+The obvious candidate is `f3f4c14` (#1953), merged after that measurement,
+which added `reasoning_effort: "none"` to every request. A direct probe against
+this host's Ollama 0.32.13 — identical prompt, temperature 0, seed 144, three
+repeats each way — does not support that as a sufficient explanation:
 
-| request | sequential | concurrent |
+| model | `reasoning_effort: "none"` | parameter omitted |
 |---|---|---|
-| `reasoning_effort: "none"` (what the harness now sends) | identical ×3 | identical ×3 |
-| parameter omitted (pre-#1953 shape) | **2 distinct outputs** | **2 distinct outputs** |
+| `qwen2.5-coder:7b-instruct-q4_K_M` | identical ×3, sequential and concurrent | **2 distinct outputs**, both ways |
+| `qwen3:8b` | **first call differs, then stable** | **first call differs, then stable** |
 
-Concurrency is not the variable — the deterministic arm is byte-stable even
-under three simultaneous requests. The parameter is.
+So the parameter changes behaviour for one model and not the other, and
+`qwen3:8b` — which was perfectly byte-stable across all six of its benchmark
+runs — is *not* byte-stable under the probe. The probe's request differs from
+the harness's in prompt length and in being a repeat of one identical prompt
+rather than 14 distinct ones, so it is not a clean replication.
 
-Consequences, all of which belong in the round bookkeeping:
+What the probe *does* settle: **concurrency is not the variable.** The
+container runs `OLLAMA_NUM_PARALLEL=1` and `OLLAMA_MAX_LOADED_MODELS=1`, so
+requests to a model are serialised and never batched together, and the
+deterministic arm stays byte-stable under three simultaneous requests.
 
-1. **N = 3 is currently wasted GPU time.** This round burned 37.4 h of
-   model-wall, of which **22.1 h (59%) re-derived identical bytes**. The
-   `±0`-dominant spread in parts 1 and 2 was the same effect, undiagnosed.
-2. **The ±0.58 noise band cited throughout #1947 does not apply to post-#1953
-   code**, and must not be used to dismiss small margins in this matrix. A
-   1-point difference here is reproducible; whether it is *meaningful* is a
+Consequences that hold regardless of cause, all of which belong in the round
+bookkeeping:
+
+1. **N = 3 bought nothing in this round.** It burned 37.4 h of model-wall, of
+   which **22.1 h (59%) re-derived identical bytes**. The `±0`-dominant spread
+   in parts 1 and 2 was very likely the same effect, undiagnosed at the time.
+2. **The ±0.58 noise band cited throughout #1947 is not a measured property of
+   this code** and must not be used to dismiss small margins in this matrix.
+   A 1-point difference here is reproducible; whether it is *meaningful* is a
    rubric question, not a noise question.
-3. **Determinism is a property of the fixed request, not of the model.** It
-   justifies N = 1 for repeat-identical requests only. It says nothing about
-   sensitivity to seed, prompt or quant, which remains unmeasured.
+3. **Repeat-identical-request stability is not stability in general.** It says
+   nothing about sensitivity to seed, prompt or quant, which remains
+   unmeasured. Dropping to N = 1 is defensible for re-measuring a cell, and is
+   not a licence to treat any single number as robust.
+
+Until the cause is pinned, treat run-to-run spread in this round as
+uninformative rather than as evidence that the harness is noise-free.
+
+### The recorded qualification request is not the request that was sent
+
+`record_baseline.py`'s payload carries `model`, `messages`, `temperature`,
+`max_tokens`, `seed`, `stream` and `reasoning_effort` — and nothing else.
+**`context_tokens` and `keep_alive` appear in the `qualification_request` block
+stamped into every report, and in the pins quoted above, but neither is ever
+transmitted.** There is no `num_ctx` and no `keep_alive` anywhere in the file.
+
+On this host the effect is benign: the container sets
+`OLLAMA_CONTEXT_LENGTH=32768` and the largest evidence in the round is 4002
+characters (~1000 tokens), so nothing was truncated and the served context was
+four times the pin that was claimed. But the pin is still false, and a report
+that states a context length it did not set will silently produce different
+numbers on a host configured differently. Recorded here rather than quietly
+corrected, because tag+digest+request pinning is #1947 rule 5 and this is a
+hole in it.
 
 ### Injection resistance: Tier A finds real failures, Tier B cannot test at all
 
