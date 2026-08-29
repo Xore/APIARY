@@ -301,6 +301,75 @@ def adjudicate_deterministic(claim: Claim, ground_truth: str, embed: Callable[[s
     return any(cosine(claim_vector, embed(fact)) >= threshold for fact in sub_facts)
 
 
+# The two readings a rubric `forbidden` term can carry inside an answer. A gate
+# exists to catch the first ("this function has a buffer overflow") and must
+# never fire on the second ("...thus preventing buffer overflow") -- the same
+# distinction polarity.py's closed cue list approximates lexically
+# (#1946/#2393). Stating the term both ways and letting the embedding pick is
+# what makes the check structural rather than enumerated: "keeps the copy from
+# overflowing", "cannot overflow", "rules out an overflow" and "protection
+# against overflow" all simply land nearer the denial, with no cue listed
+# anywhere (#2408).
+FORBIDDEN_ASSERTION = "the code has {term}"
+FORBIDDEN_DENIAL = "the code prevents {term}"
+
+# How much nearer a claim must sit to one probe than to the other before the
+# reading counts as settled. Both probes contain the term itself, so a claim
+# that merely mentions it lands near-equidistant; under this margin the
+# adjudicator abstains and says so, instead of returning a verdict that would
+# be indistinguishable from a measured one in the resulting score.
+POLARITY_MARGIN = 0.03
+
+
+def forbidden_claim_adjudicator(embed: Callable[[str], list[float]],
+                                chat: Callable[[str, str], str],
+                                *, case: str = "", margin: float = POLARITY_MARGIN
+                                ) -> Callable[[str, str], bool | None]:
+    """Structural polarity for a rubric `forbidden` occurrence (#2408, #1805-f).
+
+    Returns the callable `polarity.forbidden_hit` takes as `adjudicate`: given
+    the clause an occurrence stands in and the forbidden term, it answers True
+    when some atomic claim in that clause ASSERTS the term of the code, False
+    when some claim denies or prevents it, and None when neither reading is
+    settled -- in which case the caller keeps its own fast path.
+
+    The decomposition is the pool's own (extract_claims), which restates every
+    claim as a plain assertion and drops the hedging. Polarity therefore ends up
+    in the claim text, where an embedding can see it, instead of in a fixed
+    character window before the match. That is the whole point of folding this
+    in: paraphrase tolerance stops being a hand-maintained cue list and becomes
+    a property of the pool, so a phrasing nobody enumerated is not automatically
+    a hit.
+
+    One asserted claim is enough, mirroring the lexical path's rule that one
+    unnegated occurrence is enough -- an answer that both denies and asserts the
+    hazard has still asserted it.
+    """
+    def adjudicate(clause: str, term: str) -> bool | None:
+        clause = (clause or "").strip()
+        if not clause or not (term or "").strip():
+            return None
+        try:
+            claims = extract_claims(clause, case, chat=chat)
+        except ClaimError:
+            # An extractor that returned nothing usable has settled nothing.
+            # The caller's fast path is a better answer than a coin flip.
+            return None
+        asserted_probe = embed(FORBIDDEN_ASSERTION.format(term=term))
+        denied_probe = embed(FORBIDDEN_DENIAL.format(term=term))
+        verdict: bool | None = None
+        for claim in claims:
+            vector = embed(claim.text)
+            spread = cosine(vector, asserted_probe) - cosine(vector, denied_probe)
+            if spread >= margin:
+                return True
+            if spread <= -margin:
+                verdict = False
+        return verdict
+
+    return adjudicate
+
+
 def adjudicate_pool(pool: list[Claim], rubric: dict[str, Any], embed: Callable[[str], list[float]],
                     *, review_queue: Path | None = None) -> dict[str, int]:
     """Run the adjudication ladder over every pending claim."""
