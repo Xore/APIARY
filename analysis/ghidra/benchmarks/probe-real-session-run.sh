@@ -18,6 +18,16 @@ input="${1:?usage: $0 <stage1-output.json> <model-tag> [base-url]}"
 model="${2:?usage: $0 <stage1-output.json> <model-tag> [base-url]}"
 base_url="${3:-http://127.0.0.1:11434}"
 
+# Stage 1 builds the transcript from up to MAX_CONTENT_CHARS (default 12000)
+# chars of captured commands, plus the system/user prompt scaffolding around
+# it. Without an explicit num_ctx, the request falls back to whatever the
+# target Ollama server happens to be configured with -- 2048 on a default
+# install -- which silently drops the head of the evidence (system prompt
+# and earliest commands) before generation (#2059). 8192 covers ~12000
+# chars of transcript (~3000 tokens at ~4 chars/token) plus scaffolding with
+# headroom left for the response; override for a larger MAX_CONTENT_CHARS.
+num_ctx="${PROBE_REAL_SESSION_NUM_CTX:-8192}"
+
 command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 1; }
 
 count=$(jq '.prompts | length' "$input")
@@ -32,10 +42,11 @@ for i in $(seq 0 $((count - 1))); do
   truncated=$(jq -r ".prompts[$i].transcript_truncated" "$input")
   echo "== session $session_id ($real_count real commands, truncated=$truncated) ==" >&2
 
-  jq -n \
+  response=$(jq -n \
     --arg model "$model" \
     --slurpfile stage1 "$input" \
     --argjson idx "$i" \
+    --argjson num_ctx "$num_ctx" \
     '{
       model: $model,
       messages: [
@@ -44,10 +55,26 @@ for i in $(seq 0 $((count - 1))); do
       ],
       stream: false,
       think: false,
-      options: {temperature: 0, seed: 144}
+      options: {temperature: 0, seed: 144, num_ctx: $num_ctx}
     }' \
-  | curl -s "$base_url/api/chat" -d @- \
-  | jq -r '.message.content // .response // .'
+  | curl -s "$base_url/api/chat" -d @-)
+
+  # Ollama drops the head of an over-length prompt and keeps generating
+  # rather than raising an HTTP error, so a truncated transcript would
+  # otherwise reach the human judge silently, indistinguishable from a
+  # complete one. done=false or truncated=true is that signal -- fail loud
+  # instead of handing over a partial result (#2059).
+  ollama_done=$(jq -r '.done' <<<"$response")
+  ollama_truncated=$(jq -r '.truncated' <<<"$response")
+  if [ "$ollama_done" = "false" ] || [ "$ollama_truncated" = "true" ]; then
+    echo "ERROR: session $session_id: Ollama signaled context truncation" \
+         "(done=$ollama_done, truncated=$ollama_truncated) -- refusing to" \
+         "hand a partial transcript to the judge. Raise num_ctx (currently" \
+         "$num_ctx via PROBE_REAL_SESSION_NUM_CTX) or lower MAX_CONTENT_CHARS." >&2
+    exit 1
+  fi
+
+  jq -r '.message.content // .response // .' <<<"$response"
 
   echo >&2
 done
