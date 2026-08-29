@@ -12,11 +12,14 @@ underneath without a version change -- for python:3.14-slim,
 python:3.11-slim, python:3.10-slim, python:3.12-slim, debian:bookworm-slim,
 valkey/valkey:9.1.1-alpine3.24, postgres:18.6-bookworm and redis:7-alpine.
 
-The conpot image was deliberately NOT bumped: dtagdevsec/conpot:24.04.1
-exists, but the six *_patch.py scripts hard-code 24.04's package layout
-(/usr/lib/python3.11/site-packages/conpot/...) and the build
-FileNotFoundErrors against 24.04.1. That freeze is the contract the
-conpot tests below pin.
+The conpot image was deliberately NOT bumped at the time: 24.04.1 existed,
+but the six *_patch.py scripts hard-coded 24.04's Python site-packages
+root and the build FileNotFoundErrored against it. #2619 has since lifted
+that freeze -- the "restructured the package" premise turned out to be
+wrong, the only real difference being the Python install root -- so the
+version contract for the conpot pin now lives in
+tests/docs/test_2619_fix.py, which asserts the bumped state. The conpot
+tests kept below are the ones that hold whatever the pin is.
 
 Two things the issue body got wrong, corrected here against the real repo
 and a live registry query rather than trusted verbatim:
@@ -47,20 +50,19 @@ Three defects in the original version of this file, fixed here:
    now walks `git ls-files`, so it sees exactly the repo's tracked content
    wherever it runs.
 2. The conpot freeze was asserted by string-searching the whole file for
-   the literal "dtagdevsec/conpot:24.04.1". That is both too narrow and
-   too broad. Too narrow: bumping to 24.05, 25.04, `latest`, or dropping
-   the digest pin entirely all sail through, even though each re-breaks
-   the build the same way. Too broad: it fails on a *comment* that names
-   the tag, which is exactly how the freeze is documented -- the current
-   Dockerfile header escapes only because it happens to write "24.04.1"
-   without the repository prefix. The FROM instruction is now parsed and
-   its repository/tag/digest checked as fields, and the 24.04.1 ban
-   applies to instruction lines only, so the rationale may be written
-   down.
+   the literal "dtagdevsec/conpot:24.04.1" -- both too narrow (a bump to
+   24.05, `latest`, or a silently dropped digest pin all sailed through)
+   and too broad (it failed on a *comment* naming the tag, which is how
+   the freeze was documented). Those assertions have since been removed
+   rather than repaired: #2619 lifted the freeze, so pinning the image at
+   24.04 became an assertion against the repo's actual contract. The
+   parsed-fields approach they were rewritten into lives on in
+   test_2619_fix.py, applied to the 24.04.1 pin.
 3. Nothing tested the coupling that *causes* the freeze. The tests below
-   now assert that every COPY'd patch script exists in the build context,
-   that the RUN line executes each one, and that each still hard-codes the
-   24.04 layout root -- so the freeze fails loudly if its premise changes.
+   now assert that every COPY'd patch script exists in the build context
+   and that the RUN line executes each one -- version-agnostic couplings
+   that outlived the freeze. The layout-root assertion that went with them
+   moved to test_2619_fix.py, retargeted at the 3.12 root.
 """
 import pathlib
 import re
@@ -163,25 +165,14 @@ SAME_VERSION_REFRESHES = {
 
 ALL_OLD_DIGESTS = {OLD_GOLANG_DIGEST} | {spec["old"] for spec in SAME_VERSION_REFRESHES.values()}
 
-# --- conpot: the deliberate non-bump -------------------------------------
+# --- conpot ---------------------------------------------------------------
 #
-# dtagdevsec/conpot:24.04.1 EXISTS on Docker Hub (manifest list
-# sha256:ff37c322037ad8c1f4f05c2c93f7b60cc5f56b7f37a2c4cbc16901ec70bddb5b)
-# but the six *_patch.py scripts hard-code the 24.04 package layout, so
-# building against it FileNotFoundErrors. The bump is tracked separately
-# and requires auditing every patch against 24.04.1's layout first.
+# The image pin itself -- repository, tag and digest -- is asserted by
+# tests/docs/test_2619_fix.py, which owns that contract since #2619 bumped
+# 24.04 -> 24.04.1. What remains here are the Dockerfile/build-context
+# couplings that hold at any pin.
 CONPOT_DIR = "arcane/home/honeypot-conpot/conpot"
 CONPOT_DOCKERFILE = f"{CONPOT_DIR}/Dockerfile"
-CONPOT_REPOSITORY = "dtagdevsec/conpot"
-CONPOT_PINNED_TAG = "24.04"
-CONPOT_PINNED_DIGEST = "sha256:717f0bdf79ad267e7402ff09fcc2f4ce413e9165843dd58c18f340acdd49ea7e"
-CONPOT_REJECTED_TAG = "24.04.1"
-CONPOT_REJECTED_DIGEST = "sha256:ff37c322037ad8c1f4f05c2c93f7b60cc5f56b7f37a2c4cbc16901ec70bddb5b"
-# The layout root every *_patch.py targets. This path existing in the base
-# image is the whole reason the tag is frozen at 24.04.
-CONPOT_LAYOUT_ROOT = "/usr/lib/python3.11/site-packages/conpot"
-
-DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 # --- helpers --------------------------------------------------------------
@@ -222,29 +213,8 @@ def _instruction_lines(text):
     return logical
 
 
-def _parse_image_ref(ref):
-    """Split a Docker image reference into (repository, tag, digest)."""
-    digest = None
-    if "@" in ref:
-        ref, digest = ref.split("@", 1)
-    tag = None
-    # A ':' before the last '/' is a registry port, not a tag.
-    if ":" in ref and "/" not in ref.rsplit(":", 1)[1]:
-        ref, tag = ref.rsplit(":", 1)
-    return ref, tag, digest
-
-
 def _conpot_dockerfile_text():
     return (REPO_ROOT / CONPOT_DOCKERFILE).read_text(encoding="utf-8")
-
-
-def _from_refs(instructions):
-    refs = []
-    for line in instructions:
-        m = re.match(r"^FROM\s+(?:--\S+\s+)*(\S+)", line, re.IGNORECASE)
-        if m:
-            refs.append(m.group(1))
-    return refs
 
 
 def _copy_pairs(instructions):
@@ -385,70 +355,16 @@ def test_no_stale_digest_pins_remain_anywhere():
     assert not offenders, "stale digest pins remain -- #2314:\n" + "\n".join(offenders)
 
 
-# --- conpot: 24.04 kept, NOT bumped to 24.04.1 ---------------------------
-
-def test_conpot_from_pins_expected_repository_tag_and_digest():
-    """The conpot Dockerfile must build from dtagdevsec/conpot:24.04 at the
-    exact manifest-list digest the patch scripts were written against.
-
-    Asserted as parsed fields rather than as a substring search for the
-    rejected tag: a bump to 24.05, to `latest`, or a silent drop of the
-    `@sha256:` pin all re-break the build in the same way as 24.04.1, and
-    a literal-string ban catches none of them.
-    """
-    instructions = _instruction_lines(_conpot_dockerfile_text())
-    refs = _from_refs(instructions)
-    assert len(refs) == 1, (
-        f"{CONPOT_DOCKERFILE} should have exactly one FROM (the pinned "
-        f"conpot base); found {len(refs)}: {refs}"
-    )
-    repository, tag, digest = _parse_image_ref(refs[0])
-    assert repository == CONPOT_REPOSITORY, (
-        f"{CONPOT_DOCKERFILE} builds from {repository!r}, expected "
-        f"{CONPOT_REPOSITORY!r} -- #2314"
-    )
-    assert tag == CONPOT_PINNED_TAG, (
-        f"{CONPOT_DOCKERFILE} builds from tag {tag!r}, expected "
-        f"{CONPOT_PINNED_TAG!r}. The six *_patch.py scripts hard-code "
-        f"{CONPOT_LAYOUT_ROOT}, which is 24.04's layout; any other tag "
-        f"risks the build-time FileNotFoundError #2314 hit on 24.04.1. "
-        f"Audit every patch script against the new layout before bumping."
-    )
-    assert digest is not None, (
-        f"{CONPOT_DOCKERFILE} dropped the @sha256: digest pin. The bare "
-        f"{CONPOT_PINNED_TAG} tag is mutable and can roll onto a "
-        f"restructured image without any file in this repo changing -- #2314"
-    )
-    assert DIGEST_RE.match(digest), f"malformed digest pin {digest!r}"
-    assert digest == CONPOT_PINNED_DIGEST, (
-        f"{CONPOT_DOCKERFILE} pins {CONPOT_PINNED_TAG} at {digest}, expected "
-        f"{CONPOT_PINNED_DIGEST} -- the manifest list the patch scripts were "
-        f"verified against (#2314)"
-    )
-
-
-def test_conpot_instructions_never_reference_24_04_1():
-    """The rejected 24.04.1 tag/digest must not appear in any instruction.
-
-    Comments are excluded on purpose. Naming the rejected tag is how the
-    freeze is documented -- the Dockerfile header does exactly that -- and
-    a whole-file string search would fail on its own rationale. This bans
-    it where it would actually take effect.
-    """
-    instructions = _instruction_lines(_conpot_dockerfile_text())
-    for banned, why in (
-        (f"{CONPOT_REPOSITORY}:{CONPOT_REJECTED_TAG}", "tag"),
-        (CONPOT_REJECTED_DIGEST, "digest"),
-    ):
-        offending = [line for line in instructions if banned in line]
-        assert not offending, (
-            f"{CONPOT_DOCKERFILE} references the rejected 24.04.1 {why} "
-            f"{banned!r} in an instruction:\n  " + "\n  ".join(offending) +
-            f"\n24.04.1 restructured the conpot package layout and the "
-            f"*_patch.py scripts FileNotFoundError against it. Revert to "
-            f"{CONPOT_PINNED_TAG} and track the bump separately -- #2314"
-        )
-
+# --- conpot: couplings that outlive the pin ------------------------------
+#
+# Three tests used to sit here asserting the #2314 freeze: that the FROM
+# pinned 24.04 at a fixed digest, that no instruction named 24.04.1, and
+# that every patch script hard-coded the 3.11 layout root. #2619 bumped
+# the pin, so all three now assert the opposite of the repo's contract.
+# They were not dropped on the floor -- their inverse lives in
+# tests/docs/test_2619_fix.py, which pins 24.04.1 at its digest, bans the
+# old pin from instructions, and requires the 3.12 root in all six
+# scripts. What stays below is version-agnostic.
 
 def test_conpot_copied_files_exist_in_the_build_context():
     """Every COPY source must exist. The 24.04.1 failure was a build-time
@@ -490,31 +406,6 @@ def test_conpot_run_executes_every_copied_patch_script():
         f"them: {never_run}. Being COPY'd (and later rm'd) is not enough -- "
         f"an unexecuted patch leaves the honeypot serving conpot's stock "
         f"persona while the build stays green."
-    )
-
-
-def test_conpot_patch_scripts_still_target_the_24_04_layout():
-    """Every patch script must still hard-code 24.04's package layout.
-
-    This is the premise of the whole freeze: the tag is pinned *because*
-    the patches only work against this path. If a patch is ever rewritten
-    to discover the layout at runtime, this fails -- which is the right
-    moment to revisit the pin rather than leave it frozen for a reason
-    that stopped being true.
-    """
-    patch_scripts = sorted((REPO_ROOT / CONPOT_DIR).glob("*_patch.py"))
-    assert patch_scripts, f"no *_patch.py scripts found in {CONPOT_DIR}"
-    layout_agnostic = [
-        p.name for p in patch_scripts
-        if CONPOT_LAYOUT_ROOT not in p.read_text(encoding="utf-8")
-    ]
-    assert not layout_agnostic, (
-        f"these patch scripts no longer hard-code {CONPOT_LAYOUT_ROOT}: "
-        f"{layout_agnostic}. The conpot tag is frozen at "
-        f"{CONPOT_PINNED_TAG} solely because the patches depend on that "
-        f"layout -- if they no longer do, re-evaluate the "
-        f"{CONPOT_REJECTED_TAG} bump instead of leaving the pin in place "
-        f"for a stale reason (#2314)"
     )
 
 

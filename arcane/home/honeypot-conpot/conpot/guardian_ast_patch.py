@@ -48,7 +48,7 @@ accumulation loop.
 from pathlib import Path
 
 TARGET = Path(
-    "/usr/lib/python3.11/site-packages/conpot/protocols/guardian_ast/guardian_ast_server.py"
+    "/usr/lib/python3.12/site-packages/conpot/protocols/guardian_ast/guardian_ast_server.py"
 )
 
 MARKER_RESET = "honeypot-stack: guardian_ast ConnectionReset patch"

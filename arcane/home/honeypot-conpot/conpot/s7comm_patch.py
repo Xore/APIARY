@@ -27,7 +27,7 @@ from pathlib import Path
 
 MARKER = "honeypot-stack: s7comm MSG_WAITALL patch"
 TARGET = Path(
-    "/usr/lib/python3.11/site-packages/conpot/protocols/s7comm/s7_server.py"
+    "/usr/lib/python3.12/site-packages/conpot/protocols/s7comm/s7_server.py"
 )
 
 HELPER = '''

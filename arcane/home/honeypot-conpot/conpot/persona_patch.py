@@ -4,7 +4,7 @@ from pathlib import Path
 import shutil
 import xml.etree.ElementTree as ET
 
-ROOT = Path("/usr/lib/python3.11/site-packages/conpot/templates")
+ROOT = Path("/usr/lib/python3.12/site-packages/conpot/templates")
 BASE = ROOT / "default"
 PERSONAS = {
     "s7_200": {
