@@ -47,22 +47,33 @@ RUNNER_GROUP=deploy-runner
 RUNNER_HOME=/opt/github-deploy-runner
 RUNNER_LABELS="self-hosted,linux,x64,honeypot-home"
 
-# The exact set of directories deploy.yml writes into (destination= across
-# every job in .github/workflows/deploy.yml, cross-checked against that
-# file directly, not re-derived from memory). Sensor stacks and the other
-# single-compose-file destinations are deliberately NOT listed here: those
-# jobs only ever `cp` one compose.yml into an already-`install -d`'d
-# directory, never rsync a tree into them, so there is no equivalent
-# ownership risk to fix there -- adding them would only widen this script's
-# blast radius for no real gain.
+# The exact set of directories deploy.yml writes into as a full tree rsync
+# (destination= in .github/workflows/deploy.yml's home job, cross-checked
+# against that file directly, not re-derived from memory or from this
+# list's own prior contents). This used to be seven entries matching a
+# pre-#1502 deploy.yml; #1502 ("Phase 2 - installer + CI now drive off the
+# Arcane manifest") collapsed that workflow to two destination= assignments
+# ten days after this script shipped, and the list silently kept the old
+# seven (#2602). Five of the stale entries just printed misleading "does
+# not exist yet" skips, but the sixth --
+# /var/dockge/stacks/honeypot-keycloak, which DOES exist under the Arcane
+# layout -- got a gratuitous recursive re-own of a live identity-stack
+# directory that nothing deploys to any more.
+#
+# honeypot-arcane, deploy.yml's other current destination=, is deliberately
+# NOT listed here, same as the sensor stacks before it: that job only ever
+# `cp`s one compose.yml into an already-`install -d`'d directory, never
+# rsyncs a tree into it, so there is no equivalent ownership risk to fix
+# there -- adding it would only widen this script's blast radius for no
+# real gain.
+#
+# If deploy.yml's destinations change again, re-derive this list by hand --
+# grep destination= .github/workflows/deploy.yml, then keep only the ones
+# whose step runs a tree `rsync ... "$destination/"` (not a single `cp`
+# into it, the way honeypot-arcane's step does) -- rather than trusting
+# this comment's history to still be accurate.
 DEPLOY_DIRS=(
   /opt/stacks/apiary
-  /opt/stacks/honeypot-init
-  /var/dockge/stacks/honeypot-keycloak
-  /opt/stacks/honeypot-payload-analysis
-  /opt/stacks/honeypot-utilities
-  /opt/stacks/honeypot-elk
-  /opt/stacks/honeypot-dashboard
 )
 
 # Subtree names that are container-owned wherever they appear under any of
