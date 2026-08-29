@@ -26,7 +26,15 @@ The fix in two parts (landed in this PR):
    reading the log immediately knows which file to use.
 
 This test asserts the source-level contract for both parts.
+
+worker.py is inspected through `ast` rather than by matching a
+multi-line regex against the raw text. The parser gives an exact,
+unambiguous span for a function and its statements, so the assertions
+below say what they mean ("the first statement is `if config.dry_run:
+return`") instead of encoding it as a pattern that has to re-guess
+Python's own indentation and docstring rules.
 """
+import ast
 import pathlib
 import re
 
@@ -37,9 +45,40 @@ BASE_COMPOSE = REPO_ROOT / "llm-worker" / "docker-compose.yml"
 CAPTURED_DATA_OVERLAY = REPO_ROOT / "llm-worker" / "docker-compose.captured-data.yml"
 WORKER = REPO_ROOT / "llm-worker" / "worker.py"
 
+PREFLIGHT = "compose_route_preflight"
+
 
 def _read(path: pathlib.Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def _worker_function(name: str) -> ast.FunctionDef:
+    """Return the ast node of a top-level function in worker.py."""
+    text = _read(WORKER)
+    for node in ast.parse(text).body:
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return node
+    raise AssertionError(f"worker.py must define a top-level {name}()")
+
+
+def _function_source(node: ast.FunctionDef) -> str:
+    """Return the exact source text of a function, docstring included."""
+    segment = ast.get_source_segment(_read(WORKER), node)
+    assert segment, f"could not recover the source of {node.name}()"
+    return segment
+
+
+def _body_after_docstring(node: ast.FunctionDef) -> list:
+    """Return a function's statements with a leading docstring dropped."""
+    body = node.body
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        return body[1:]
+    return body
 
 
 def test_base_compose_forces_es_host_empty():
@@ -56,7 +95,7 @@ def test_base_compose_forces_es_host_empty():
     # is the substring, which a future edit cannot satisfy with
     # anything other than an explicit empty-string override.
     assert re.search(
-        r"^(\s+)ES_HOST:\s*''\s*$",
+        r"^[ \t]+ES_HOST:[ \t]*''[ \t]*$",
         text,
         re.MULTILINE,
     ), (
@@ -72,13 +111,13 @@ def test_captured_data_overlay_sets_real_es_host():
     change."""
     text = _read(CAPTURED_DATA_OVERLAY)
     m = re.search(
-        r"^(\s+)ES_HOST:\s*'([^']+)'\s*$",
+        r"^[ \t]+ES_HOST:[ \t]*'([^']+)'[ \t]*$",
         text,
         re.MULTILINE,
     )
     assert m, "captured-data overlay must set ES_HOST to a real URL"
-    assert m.group(2).strip(), (
-        f"captured-data overlay's ES_HOST must not be empty: {m.group(2)!r}"
+    assert m.group(1).strip(), (
+        f"captured-data overlay's ES_HOST must not be empty: {m.group(1)!r}"
     )
 
 
@@ -87,30 +126,22 @@ def test_compose_route_preflight_refuses_captured_data_without_es_host():
     when dry_run is false and ES_HOST is empty, with a message
     that names the overlay entrypoint so the next operator reading
     the log knows which file to use."""
-    text = _read(WORKER)
-    assert "def compose_route_preflight(config: Config) -> None:", (
-        "compose_route_preflight must be defined as a top-level function"
-    )
-    # Pull the function body
-    m = re.search(
-        r"def compose_route_preflight\(config: Config\) -> None:\s*\n"
-        r"(?:(?:    [^\n]*\n)|(?:\s*\"\"\".*?\"\"\"\s*\n))+"
-        r"(.*?)(?=\n\ndef |\nclass |\Z)",
-        text,
-        re.DOTALL,
-    )
-    assert m, "could not isolate compose_route_preflight body"
-    body = m.group(0)
+    node = _worker_function(PREFLIGHT)
+    body = _function_source(node)
     # Must gate on dry_run -- synthetic canary must not raise
     assert "config.dry_run" in body, (
-        "compose_route_preflight must be a no-op when LLM_DRY_RUN=true"
+        f"{PREFLIGHT} must be a no-op when LLM_DRY_RUN=true"
     )
     # Must check ES_HOST
-    assert "ES_HOST" in body, "compose_route_preflight must read ES_HOST"
+    assert "ES_HOST" in body, f"{PREFLIGHT} must read ES_HOST"
     # Must raise RuntimeError (not just log)
-    assert "raise RuntimeError" in body, (
-        "compose_route_preflight must raise RuntimeError when the gate fails"
-    )
+    assert any(
+        isinstance(stmt, ast.Raise)
+        and isinstance(stmt.exc, ast.Call)
+        and isinstance(stmt.exc.func, ast.Name)
+        and stmt.exc.func.id == "RuntimeError"
+        for stmt in ast.walk(node)
+    ), f"{PREFLIGHT} must raise RuntimeError when the gate fails"
     # The error message must name the overlay
     assert "docker-compose.captured-data-deploy.yml" in body, (
         "the RuntimeError message must name the overlay entrypoint so "
@@ -127,24 +158,28 @@ def test_compose_route_preflight_is_a_noop_in_dry_run():
     """The preflight must short-circuit on dry_run=true (synthetic
     canary mode), even with ES_HOST empty -- the synthetic canary
     overlay doesn't try to reach ES, and an LLM_DRY_RUN=true config
-    must not raise."""
-    text = _read(WORKER)
-    m = re.search(
-        r"def compose_route_preflight\(config: Config\) -> None:.*?return\s*\n",
-        text,
-        re.DOTALL,
+    must not raise.
+
+    The early return has to be the FIRST executable statement, not
+    merely present somewhere: a dry_run check placed after an ES_HOST
+    lookup would still raise on the canary path."""
+    node = _worker_function(PREFLIGHT)
+    body = _body_after_docstring(node)
+    assert body, f"{PREFLIGHT} must have a body"
+    first = body[0]
+    assert isinstance(first, ast.If), (
+        f"{PREFLIGHT}'s first executable statement must be the dry_run "
+        f"early-return, got {type(first).__name__}"
     )
-    assert m, "could not isolate compose_route_preflight body"
-    body = m.group(0)
-    # The early-return-on-dry_run must be the first thing after the
-    # docstring (not gated on anything else)
-    after_docstring = body.split('"""', 2)[-1]
-    assert re.match(
-        r"\s*if config\.dry_run:\s*\n\s*return\s*\n",
-        after_docstring,
-    ), (
-        "compose_route_preflight's dry_run early-return must be the "
-        "first executable statement after the docstring"
+    assert (
+        isinstance(first.test, ast.Attribute)
+        and first.test.attr == "dry_run"
+        and isinstance(first.test.value, ast.Name)
+        and first.test.value.id == "config"
+    ), f"{PREFLIGHT}'s first statement must test `config.dry_run`"
+    assert not first.orelse, "the dry_run guard must not carry an else branch"
+    assert len(first.body) == 1 and isinstance(first.body[0], ast.Return), (
+        f"{PREFLIGHT}'s dry_run guard must return immediately"
     )
 
 
@@ -154,14 +189,16 @@ def test_main_runs_compose_route_preflight_before_es_preflight():
     same-process, network-free check; running it before es_preflight
     means a misconfigured bring-up fails with a named cause in
     milliseconds rather than after an es_preflight network timeout."""
-    text = _read(WORKER)
-    # Find both call sites in main()
-    preflight = text.find("compose_route_preflight(config)")
-    es_preflight = text.find("es_preflight(config)")
-    assert preflight > 0, "compose_route_preflight must be called from main()"
-    assert es_preflight > 0, "es_preflight must still be called from main()"
-    assert preflight < es_preflight, (
-        "compose_route_preflight must be called before es_preflight in main() "
+    main = _worker_function("main")
+    calls = [
+        node.func.id
+        for node in ast.walk(main)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    ]
+    assert PREFLIGHT in calls, f"{PREFLIGHT} must be called from main()"
+    assert "es_preflight" in calls, "es_preflight must still be called from main()"
+    assert calls.index(PREFLIGHT) < calls.index("es_preflight"), (
+        f"{PREFLIGHT} must be called before es_preflight in main() "
         "-- the cheap compose-level gate runs first so a misconfigured "
         "bring-up fails with a named cause in milliseconds, not after a "
         "network timeout"
