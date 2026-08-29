@@ -153,7 +153,7 @@ def load_tier_b_evidence(cache_dir: Path) -> dict:
     return evidence
 
 
-def score(text: str, rubric: dict) -> dict:
+def score(text: str, rubric: dict, *, adjudicate=None) -> dict:
     max_score = len(rubric["required_groups"]) + 1
     gate_field = gate_field_for(rubric)
 
@@ -176,11 +176,14 @@ def score(text: str, rubric: dict) -> dict:
         any(term.lower() in lowered for term in group)
         for group in rubric["required_groups"]
     ]
-    # #1946: polarity-aware matching -- an occurrence preceded by a negation
-    # or prevention cue ("prevent buffer overflows", "is not vulnerable") no
-    # longer trips the forbidden list; see polarity.py for its documented
-    # limits and its intended replacement by claim-pool adjudication (#1805-f).
-    hit = forbidden_hit(text, rubric.get("forbidden", []))
+    # #1946: polarity-aware matching -- an occurrence the answer does not
+    # actually assert ("prevent buffer overflows", "is not vulnerable") no
+    # longer trips the forbidden list. Pass `adjudicate` (built by
+    # claims.forbidden_claim_adjudicator) to decide that from the claim pool
+    # instead of polarity.py's closed cue list (#2408/#1805-f); left None, as
+    # every offline run leaves it, the deterministic cue list decides and the
+    # recorded baseline is bit-for-bit the one this scorer always produced.
+    hit = forbidden_hit(text, rubric.get("forbidden", []), adjudicate=adjudicate)
     return {
         "score": sum(group_hits) + (0 if hit else 1),
         "max_score": max_score,
