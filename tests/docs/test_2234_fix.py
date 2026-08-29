@@ -171,3 +171,6 @@ def test_main_runs_compose_route_preflight_before_es_preflight():
 if __name__ == "__main__":
     import sys
     sys.exit(pytest.main([__file__, "-v"]))
+
+# This file is intentionally only added by the orchestrator's PR
+# flow; the production source is llm-worker/{docker-compose.yml,worker.py}.
