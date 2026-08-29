@@ -9,6 +9,16 @@
 # #1502: migrated into arcane/home/ for Arcane directory-aware Git sync.
 # Already self-contained; only the explicit name: below and the file's own
 # relocation/rename to compose.yml were needed.
+#
+# #2234: if you started this with bare docker-compose.yml and it refuses to
+# come up (or comes up and exits within seconds, unhealthy), you needed
+# docker-compose.captured-data-deploy.yml instead. That file `include`s this
+# one plus docker-compose.captured-data.yml, which sets ES_HOST and adds the
+# llm-data/llm-backend networks -- without them, the worker cannot resolve
+# or reach elasticsearch. ES_HOST is forced empty below on purpose: it is
+# the compose-level signal worker.py's compose_route_preflight() checks, so
+# a bare bring-up refuses to start named and fast even when a shared .env
+# already carries production captured-data flags.
 
 name: llm-worker
 
@@ -26,6 +36,13 @@ services:
       LLM_ENABLED: '${LLM_ENABLED:-false}'
       LLM_DRY_RUN: '${LLM_DRY_RUN:-true}'
       LLM_ALLOW_CAPTURED_DATA: '${LLM_ALLOW_CAPTURED_DATA:-false}'
+      # #2234: deliberately not ${ES_HOST:-...} -- forced empty regardless
+      # of .env, so this is the safe default even when a shared .env
+      # already carries production captured-data flags. Only the captured-
+      # data/canary overlays set a real value, alongside the networks that
+      # make it reachable; worker.py's compose_route_preflight() refuses to
+      # start captured-data mode when it finds this still empty.
+      ES_HOST: ''
       LLM_SESSION_ENABLED: '${LLM_SESSION_ENABLED:-false}'
       LLM_PAYLOAD_ENABLED: '${LLM_PAYLOAD_ENABLED:-false}'
       LLM_DAILY_REPORT_ENABLED: '${LLM_DAILY_REPORT_ENABLED:-false}'
