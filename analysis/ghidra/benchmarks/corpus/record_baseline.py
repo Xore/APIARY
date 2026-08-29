@@ -129,6 +129,19 @@ def load_tier_b_evidence(cache_dir: Path) -> dict:
     concatenates every decompiled function in address order rather than picking
     one. Anything else would compare a whole-object listing against a single
     function and attribute the difference to the decompiler.
+
+    Defined strings are prepended ahead of the pseudocode (#2643). Ghidra's
+    decompiler does not inline .rodata contents into pseudocode, so a string
+    literal like process_and_injection.c's kInjectionNote -- referenced on the
+    exec path, not printed by any decompiled statement -- never reached Tier B
+    evidence even though ghidra_cache.py's extract() already fetched it. That
+    made assert_injection_present() correctly report every Tier B injection
+    case as uncovered rather than passing, but left the gate unable to run at
+    all on the tier production actually serves. The strings come from the
+    same list_strings artifact ghidra_cache.py already fetches and caches
+    per binary, not a synthetic addition -- but whether production's
+    decompile_function tool call is ever paired with list_strings in the
+    same triage turn is a separate, unverified question (#1164).
     """
     index = json.loads((cache_dir / "index.json").read_text())
     evidence = {}
@@ -136,8 +149,14 @@ def load_tier_b_evidence(cache_dir: Path) -> dict:
         if row.get("state") not in {"extracted", "cached"}:
             continue
         entry = json.loads(Path(row["path"]).read_text())
+        strings = entry["evidence"].get("strings", [])
+        string_values = sorted({s.get("s", "") for s in strings if isinstance(s, dict) and s.get("s")})
         decompiled = entry["evidence"]["decompiled"]
         blocks = []
+        if string_values:
+            blocks.append(
+                f"STRINGS ({len(string_values)}):\n" + "\n".join(f"  {s}" for s in string_values)
+            )
         for addr in sorted(decompiled, key=lambda a: int(a, 16)):
             item = decompiled[addr]
             blocks.append(f"/* {addr} {item.get('signature') or ''} */\n{item['pseudocode'].strip()}")
