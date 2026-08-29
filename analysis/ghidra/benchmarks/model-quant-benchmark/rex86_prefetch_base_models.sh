@@ -12,7 +12,8 @@
 # whenever rex86_run_all_base.sh's own per-spec quantize step would
 # otherwise reuse an already-converted f16 file; skips cleanly if that file
 # already exists, same check that script uses.
-set -uo pipefail
+set -uo
+source "$WORK/rex86_common.sh" pipefail
 WORK=/var/dockge/stacks/rex86-eval/work
 LOG="$WORK/other-models/prefetch.log"
 cd "$WORK"
@@ -45,11 +46,20 @@ fetch() {
   fi
   require_free_gb "$need_gb" || return 1
   echo "=== PREFETCH: ${name} ($hf_repo) starting $(date -u +%FT%TZ) ==="
+  # Resolve "main" to a concrete commit SHA once and pin the download to
+  # exactly that commit -- an unpinned snapshot_download means that if
+  # disk is lost and the model is re-fetched later, upstream drift on the
+  # "main" branch can silently swap in different weights than the ones
+  # existing results describe, with nothing on disk recording which
+  # commit produced them (#2055 item 4). Logged next to the GGUF's own
+  # sha256sum below.
   if docker exec rex86-eval bash -lc "
     source /work/venv/bin/activate
     python3 -c \"
-from huggingface_hub import snapshot_download
-snapshot_download('${hf_repo}', local_dir='/work/other-models/${name}-hf')
+from huggingface_hub import snapshot_download, HfApi
+rev = HfApi().model_info('${hf_repo}').sha
+print('resolved_commit_sha=' + rev)
+snapshot_download('${hf_repo}', revision=rev, local_dir='/work/other-models/${name}-hf')
 \"
   "; then
     echo "=== ${name}: download done $(date -u +%FT%TZ) ==="

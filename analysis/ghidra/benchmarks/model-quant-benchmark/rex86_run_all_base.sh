@@ -41,18 +41,14 @@ set -uo pipefail
 WORK=/var/dockge/stacks/rex86-eval/work
 QUEUE_LOG="$WORK/other-models/queue-base.log"
 cd "$WORK"
+source "$WORK/rex86_common.sh"
 exec > >(tee -a "$QUEUE_LOG") 2>&1
 echo "=== BASE-MODEL QUEUE: waiting for any other rex86_*.sh driver to finish $(date -u +%FT%TZ) ==="
 
-# Broadened from the original single "rex86_run_all.sh" (the adapter
-# queue) check to any driver in this directory -- the GPU is a
-# single-consumer resource shared across every script here, and this
-# queue gets re-run (with new models appended) well after that original
-# one-time adapter queue is long gone, so waiting on it specifically was
-# only ever correct for the very first run.
-while pgrep -f 'rex86_(run_all|run_one|run_base_model|backfill|prefetch)' | grep -vx "$$" | grep -q .; do
-  sleep 30
-done
+# Shared guard (#2055 item 3, rex86_common.sh) -- covers every driver in
+# this directory by naming convention instead of an enumerated list, so a
+# new script never needs to be added here by hand to be waited on.
+rex86_wait_for_gpu_drivers
 echo "=== BASE-MODEL QUEUE: GPU clear, starting $(date -u +%FT%TZ) ==="
 
 run() {

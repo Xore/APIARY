@@ -25,6 +25,7 @@ set -euo pipefail
 
 BIG=/mnt-1/rex86-large-models
 MAIN_WORK=/var/dockge/stacks/rex86-eval/work
+source "$MAIN_WORK/rex86_common.sh"
 NAME=deepseek-coder-v2-full
 HF_REPO="deepseek-ai/DeepSeek-Coder-V2-Instruct"
 LOG="$BIG/${NAME}.pipeline.log"
@@ -53,11 +54,18 @@ echo "=== ${NAME}: python3 installed in rex86-eval-big $(date -u +%FT%TZ) ==="
 
 f16_path="/workbig/${NAME}-f16.gguf"
 if ! docker exec rex86-eval-big test -f "$f16_path"; then
+  # Resolve "main" to a concrete commit SHA once and pin the download to
+  # exactly that commit, logged next to the GGUF's own sha256sum below --
+  # see rex86_prefetch_base_models.sh (#2055 item 4). Especially worth it
+  # here: at ~470GB, a mid-fetch upstream commit change would be by far
+  # the most expensive one to silently re-run.
   docker exec rex86-eval-big bash -lc "
     source /work/venv/bin/activate
     python3 -c \"
-from huggingface_hub import snapshot_download
-snapshot_download('${HF_REPO}', local_dir='/workbig/${NAME}-hf')
+from huggingface_hub import snapshot_download, HfApi
+rev = HfApi().model_info('${HF_REPO}').sha
+print('resolved_commit_sha=' + rev)
+snapshot_download('${HF_REPO}', revision=rev, local_dir='/workbig/${NAME}-hf')
 \"
   "
   echo "=== ${NAME}: download done $(date -u +%FT%TZ) ==="
@@ -81,10 +89,12 @@ fi
 # other #847 base-model queue (rex86_run_all_base.sh) to finish before
 # touching it, same serialization rex86_run_all_base.sh already applies to
 # itself relative to the adapter queue.
-echo "=== ${NAME}: f16 ready, waiting for the GPU to be free of the other two queues before quantizing $(date -u +%FT%TZ) ==="
-while pgrep -f 'bash .*rex86_run_all\.sh' >/dev/null 2>&1 || pgrep -f 'bash .*rex86_run_all_base\.sh' >/dev/null 2>&1; do
-  sleep 30
-done
+echo "=== ${NAME}: f16 ready, waiting for any other rex86_*.sh driver to finish before quantizing $(date -u +%FT%TZ) ==="
+# Shared guard (#2055 item 3, rex86_common.sh) -- the old check named only
+# rex86_run_all.sh and rex86_run_all_base.sh by their literal "bash <path>"
+# invocation, so it never waited on the backfill/retry/prefetch drivers or
+# any invocation not prefixed "bash ".
+rex86_wait_for_gpu_drivers
 echo "=== ${NAME}: other queues finished, proceeding $(date -u +%FT%TZ) ==="
 
 free_gpu() {
@@ -125,10 +135,21 @@ run_eval() {
     return 1
   fi
   echo "=== ${NAME} (${tag}): llama-server up, running #159 corpus (32 cases) $(date -u +%FT%TZ) ==="
-  docker exec rex86-eval-big python3 /work/corpus_eval.py llama_cpp "http://127.0.0.1:8081" \
-    --manifest /work/manifest.json --rubric /work/rev_cases_v2_rubric.json | tee "$result"
-  free_gpu
-  echo "=== ${NAME} (${tag}): eval done $(date -u +%FT%TZ) ==="
+  # Write to a tmp file and only replace any previous result once the eval
+  # pipeline has actually succeeded (#2055 item 2, same as
+  # rex86_run_base_model.sh's run_eval()).
+  local tmp="${result}.tmp"
+  if docker exec rex86-eval-big python3 /work/corpus_eval.py llama_cpp "http://127.0.0.1:8081" \
+    --manifest /work/manifest.json --rubric /work/rev_cases_v2_rubric.json | tee "$tmp"; then
+    mv -f "$tmp" "$result"
+    free_gpu
+    echo "=== ${NAME} (${tag}): eval done $(date -u +%FT%TZ) ==="
+  else
+    rm -f "$tmp"
+    free_gpu
+    echo "=== ${NAME} (${tag}): eval FAILED, no result file written $(date -u +%FT%TZ) ==="
+    return 1
+  fi
 }
 
 run_eval IQ2_XS 15  || echo "=== ${NAME} (IQ2_XS): FAILED, continuing ==="

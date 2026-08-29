@@ -24,7 +24,8 @@
 #
 # f16 GGUF and every quantized GGUF are kept on disk afterward (not
 # deleted) so re-running one spec doesn't force regenerating the others.
-set -euo pipefail
+set -euo
+source "$WORK/rex86_common.sh" pipefail
 
 name="${1:?usage: rex86_run_base_model.sh <name> <hf_repo> <spec:TAG:NGL> [...]}"
 hf_repo="${2:?hf_repo required}"
@@ -46,11 +47,17 @@ f16_path="$WORK/other-models/${name}-f16.gguf"
 hf_dir="$WORK/other-models/${name}-hf"
 
 if [[ ! -f "$f16_path" ]]; then
+  # Resolve "main" to a concrete commit SHA once and pin the download to
+  # exactly that commit (logged next to the GGUF's own sha256sum below) --
+  # an unpinned snapshot_download means a new upstream commit mid-batch
+  # silently changes the weights a result describes (#2055 item 4).
   docker exec rex86-eval bash -lc "
     source /work/venv/bin/activate
     python3 -c \"
-from huggingface_hub import snapshot_download
-snapshot_download('${hf_repo}', local_dir='/work/other-models/${name}-hf')
+from huggingface_hub import snapshot_download, HfApi
+rev = HfApi().model_info('${hf_repo}').sha
+print('resolved_commit_sha=' + rev)
+snapshot_download('${hf_repo}', revision=rev, local_dir='/work/other-models/${name}-hf')
 \"
   "
   echo "=== ${name}: download done $(date -u +%FT%TZ) ==="
@@ -133,10 +140,23 @@ run_eval() {
     return 1
   fi
   echo "=== ${name} (${tag}): llama-server up at -ngl ${attempt_ngl}, running #159 corpus (32 cases) $(date -u +%FT%TZ) ==="
-  docker exec rex86-eval python3 /work/corpus_eval.py llama_cpp "http://127.0.0.1:8080" \
-    --manifest /work/manifest.json --rubric /work/rev_cases_v2_rubric.json | tee "$result"
-  free_gpu
-  echo "=== ${name} (${tag}): eval done $(date -u +%FT%TZ) ==="
+  # Write to a tmp file and only replace any previous result once the eval
+  # pipeline has actually succeeded -- an unconditional "tee $result" left
+  # a truncated file in place on a mid-eval failure that this function's
+  # own "-f $result" exists-check (and run()'s all_done sweep in
+  # rex86_run_all_base.sh) then trusted as done (#2055 item 2).
+  local tmp="${result}.tmp"
+  if docker exec rex86-eval python3 /work/corpus_eval.py llama_cpp "http://127.0.0.1:8080" \
+    --manifest /work/manifest.json --rubric /work/rev_cases_v2_rubric.json | tee "$tmp"; then
+    mv -f "$tmp" "$result"
+    free_gpu
+    echo "=== ${name} (${tag}): eval done $(date -u +%FT%TZ) ==="
+  else
+    rm -f "$tmp"
+    free_gpu
+    echo "=== ${name} (${tag}): eval FAILED, no result file written $(date -u +%FT%TZ) ==="
+    return 1
+  fi
 }
 
 f16_requested=0

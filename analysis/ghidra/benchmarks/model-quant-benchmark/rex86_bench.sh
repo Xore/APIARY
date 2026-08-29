@@ -1,5 +1,6 @@
 #!/bin/bash
-set -uo pipefail
+set -uo
+source "$WORK/rex86_common.sh" pipefail
 WORK=/var/dockge/stacks/rex86-eval/work
 LOG=$WORK/bench.log
 cd "$WORK"
