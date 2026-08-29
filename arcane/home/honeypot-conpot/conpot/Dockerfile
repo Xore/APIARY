@@ -1,3 +1,10 @@
+# #2314: dtagdevsec/conpot:24.04 is pinned to a specific manifest-list
+# digest, deliberately NOT bumped to 24.04.1 even though one exists.
+# The six *_patch.py scripts below hard-code
+# /usr/lib/python3.11/site-packages/conpot/templates/default, which is
+# 24.04's directory layout; 24.04.1 restructured the package and the
+# patches FileNotFoundError at build time. Bumping requires auditing
+# every patch script against the 24.04.1 layout -- tracked separately.
 FROM dtagdevsec/conpot:24.04@sha256:717f0bdf79ad267e7402ff09fcc2f4ce413e9165843dd58c18f340acdd49ea7e
 
 USER root

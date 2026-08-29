@@ -117,7 +117,7 @@ for i in $(seq 1 90); do
 done
 
 docker run -d --name "${redis}" --network "${network}" -p "127.0.0.1:${redis_port}:6379" \
-  redis:7-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2 >/dev/null
+  redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf >/dev/null
 for _ in $(seq 1 30); do docker exec "${redis}" redis-cli ping >/dev/null 2>&1 && break; sleep 1; done
 
 kcadm() { docker exec "${kc}" /opt/keycloak/bin/kcadm.sh "$@"; }
