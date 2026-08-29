@@ -281,6 +281,13 @@ if (Test-Path $stagedWebroot) {
 # orchestrator's fakenet_stop both expect the tree to be here.
 New-Item 'C:\Logs\fakenet_downloads' -ItemType Directory -Force | Out-Null
 
+# #2563: honeypot_fakenet.ini's [Diverter] DumpPacketsFilePrefix is an
+# absolute prefix under this directory; the diverter opens the pcap writer
+# at FakeNet init and creates no directories itself, so a missing tree here
+# is a startup crash, not a skipped capture. run_sample.py's collector plus
+# the orchestrator's fakenet_stop both expect the tree to be here.
+New-Item 'C:\Logs\fakenet_packets' -ItemType Directory -Force | Out-Null
+
 # ── HTTPS trust: static persona CA (#2546, mirrors #2449 on windows_kimi) ──
 # honeypot_fakenet.ini's [HTTPS] section sets UseSSL=Yes with static_ca=Yes
 # against the CA generated here, once per build, so the issuer is stable

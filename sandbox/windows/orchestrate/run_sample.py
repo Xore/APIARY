@@ -868,6 +868,15 @@ def collect_artifacts(sha: str, out_dir: Path):
         cwd=str(out_dir), capture_output=True, timeout=60
     )
 
+    # #2563: [Diverter] DumpPacketsFilePrefix in honeypot_fakenet.ini now
+    # writes real pcaps under C:\Logs\fakenet_packets (04-tools.ps1
+    # pre-creates the tree); pull them out the same way as the downloads.
+    subprocess.run(
+        ['smbclient', LOGS_SHARE, '-U', f'{VM_USER}%{VM_PASS}',
+         '-c', 'recurse; mget fakenet_packets\\*'],
+        cwd=str(out_dir), capture_output=True, timeout=60
+    )
+
     log.info(f'Artifacts collected to {out_dir}')
 
 
