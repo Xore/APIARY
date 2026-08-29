@@ -281,6 +281,70 @@ if (Test-Path $stagedWebroot) {
 # orchestrator's fakenet_stop both expect the tree to be here.
 New-Item 'C:\Logs\fakenet_downloads' -ItemType Directory -Force | Out-Null
 
+# ── HTTPS trust: static persona CA (#2546, mirrors #2449 on windows_kimi) ──
+# honeypot_fakenet.ini's [HTTPS] section sets UseSSL=Yes with static_ca=Yes
+# against the CA generated here, once per build, so the issuer is stable
+# across boots -- upstream's non-static path mints a throwaway temp_certs
+# root and imports/removes it in the machine store on every start/stop, churn
+# a sample could notice. windows_kimi's equivalent (40-fakenet.ps1) shells
+# out to Python's `cryptography` package because it already installs FakeNet
+# from source with that dependency; this image installs the compiled
+# fakenet.exe (Phase 11 above) and has no guaranteed Python at this point in
+# the provisioner chain (06-chrome-history.ps1, which installs Python, runs
+# AFTER this script), so the CA is generated with .NET's own
+# CertificateRequest API instead -- no extra dependency, and it is what
+# every other cert operation in this repo already uses.
+Write-Host '[Phase 11c] Generating persona HTTPS CA...'
+$caCert = "$fnConfigDir\persona-ca.crt"
+$caKey  = "$fnConfigDir\persona-ca.key"
+if ((Test-Path $caCert) -and (Test-Path $caKey)) {
+    Write-Host 'Persona CA already present; leaving the existing pair alone.'
+} else {
+    $rsa = [System.Security.Cryptography.RSA]::Create(2048)
+    try {
+        $req = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
+            'CN=Ashford Capital Partners Corporate CA, O=Ashford Capital Partners, C=US',
+            $rsa,
+            [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+            [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+        $req.CertificateExtensions.Add(
+            [System.Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new($true, $false, 0, $true))
+        $req.CertificateExtensions.Add(
+            [System.Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new(
+                [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::KeyCertSign -bor
+                [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::CrlSign,
+                $true))
+        $notBefore = (Get-Date).ToUniversalTime().AddHours(-1)
+        $notAfter  = (Get-Date).ToUniversalTime().AddYears(10)
+        $cert = $req.CreateSelfSigned($notBefore, $notAfter)
+
+        $certPem = "-----BEGIN CERTIFICATE-----`r`n" +
+            [Convert]::ToBase64String($cert.RawData, 'InsertLineBreaks') +
+            "`r`n-----END CERTIFICATE-----"
+        $keyPem = -join [System.Security.Cryptography.PemEncoding]::Write('RSA PRIVATE KEY', $rsa.ExportRSAPrivateKey())
+        Set-Content -Path $caCert -Value $certPem -Encoding ASCII
+        Set-Content -Path $caKey -Value $keyPem -Encoding ASCII
+        Write-Host '[+] Persona CA generated'
+    } finally {
+        $rsa.Dispose()
+    }
+}
+
+# Trust the persona CA for every account in the guest -- the noise generator
+# runs as analyst, FakeNet as SYSTEM, and machine Root covers both.
+if (Test-Path $caCert) {
+    $trusted = Get-ChildItem Cert:\LocalMachine\Root -ErrorAction SilentlyContinue |
+        Where-Object { $_.Subject -like 'CN=Ashford Capital Partners Corporate CA*' }
+    if ($trusted) {
+        Write-Host 'Persona CA already trusted in LocalMachine Root.'
+    } else {
+        certutil -addstore -f Root $caCert | Out-Null
+        Write-Host '[+] Persona CA imported into LocalMachine Root'
+    }
+} else {
+    Write-Warning '[!] Persona CA generation failed; HTTPS noise will fail certificate validation.'
+}
+
 # ── Install Regshot ───────────────────────────────────────────────────────
 # orchestrate/run_sample.py shells out to a hard-coded
 # C:\Tools\Regshot\Regshot-x64-Unicode.exe for the before/after registry diff.
