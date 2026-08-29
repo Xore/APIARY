@@ -260,6 +260,16 @@ def ask_model(
     backoff_seconds: float = ASK_MODEL_BACKOFF_SECONDS,
     sleep=time.sleep,
 ) -> tuple[str, float]:
+    # #2642: this payload carries zero hidden entropy -- no timestamp, nonce,
+    # or request id -- so two calls with the same (request, model, prompt)
+    # always send byte-identical bytes. At temperature 0 with a fixed seed,
+    # any run-to-run difference in the *response* can only come from the
+    # inference backend, never from this function. That makes byte-identical
+    # repeats the expected baseline, not a sign this script is broken; a
+    # protocol that wants to sample noise across repeats must vary an input
+    # (seed, prompt phrasing, quant) that this payload actually carries,
+    # since repeating identical inputs measures backend determinism, not
+    # scoring noise. See PayloadDeterminismTest below for the pinned property.
     payload = {
         "model": model,
         "messages": [
