@@ -1,11 +1,12 @@
-# #2314: dtagdevsec/conpot:24.04 is pinned to a specific manifest-list
-# digest, deliberately NOT bumped to 24.04.1 even though one exists.
-# The six *_patch.py scripts below hard-code
-# /usr/lib/python3.11/site-packages/conpot/templates/default, which is
-# 24.04's directory layout; 24.04.1 restructured the package and the
-# patches FileNotFoundError at build time. Bumping requires auditing
-# every patch script against the 24.04.1 layout -- tracked separately.
-FROM dtagdevsec/conpot:24.04@sha256:717f0bdf79ad267e7402ff09fcc2f4ce413e9165843dd58c18f340acdd49ea7e
+# #2619: bumped from 24.04 to 24.04.1, unblocking the freeze #2314 put
+# in place. The only thing 24.04.1 changed for us is the interpreter it
+# installs conpot under: the package moved from
+# /usr/lib/python3.11/site-packages/conpot to
+# /usr/lib/python3.12/site-packages/conpot. The package's internal
+# layout below that root is unchanged (verified by diffing both images'
+# conpot trees), so the six *_patch.py scripts below only needed their
+# hard-coded install root repointed at python3.12.
+FROM dtagdevsec/conpot:24.04.1@sha256:ff37c322037ad8c1f4f05c2c93f7b60cc5f56b7f37a2c4cbc16901ec70bddb5b
 
 USER root
 COPY persona_patch.py /tmp/persona_patch.py

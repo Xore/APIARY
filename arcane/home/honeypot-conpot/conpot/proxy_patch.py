@@ -14,7 +14,7 @@ are unaffected.
 from pathlib import Path
 
 MARKER = "CONPOT_PROXY_PROTOCOL"
-INIT = Path("/usr/lib/python3.11/site-packages/conpot/__init__.py")
+INIT = Path("/usr/lib/python3.12/site-packages/conpot/__init__.py")
 
 SNIPPET = '''
 
