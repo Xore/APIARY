@@ -43,6 +43,18 @@ GHIDRA_TRIAGE_TIMEOUT=300
 GHIDRA_TRIAGE_OUTPUT_TOKENS=512
 GHIDRA_TRIAGE_SEED=144
 
+# #2646: the seed above does not buy reproducibility on its own. Ollama keeps
+# the model resident (OLLAMA_KEEP_ALIVE=30m in docker-compose.ghidra.yml) and a
+# warm slot answers the same prompt differently run to run, so every result
+# records which resident instance produced it in ai_triage.slot_generation.
+# That comes from Ollama's native API, not the /v1 dialect above; leave this
+# empty and the base is derived from GHIDRA_TRIAGE_API_BASE by dropping /v1.
+# Set it explicitly when /v1 is behind a proxy path where that does not hold,
+# or set it to the literal string "none" to skip the probe -- the field then
+# records "unavailable", which is deliberately not the same as "cold".
+#GHIDRA_TRIAGE_RUNTIME_BASE=http://127.0.0.1:11434
+GHIDRA_TRIAGE_RUNTIME_TIMEOUT=10
+
 # How much of the binary the model is shown. Raising these needs a model with
 # the context window to match; whatever is set here is reported verbatim in the
 # result's evidence_shown field, so an analyst can see what the assessment was

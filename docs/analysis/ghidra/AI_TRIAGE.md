@@ -113,6 +113,7 @@ directly, so it is visible at install time rather than in a malware report.
   "risk_level": "high",
   "behaviors": ["connects to a hardcoded C2 address", "kills competing processes"],
   "model": "qwen3:8b",
+  "slot_generation": "0123456789ab/ctx32768/vram14336mib",
   "evidence_shown": "150/312 imports, 200/11482 strings (longest first, deduplicated, >=6 chars), 100/847 functions (largest first)"
 }
 ```
@@ -123,6 +124,17 @@ directly, so it is visible at install time rather than in a malware report.
   level would silently never alert.
 - **`model`** is always recorded. The detail page and the alert text both name
   it, because "the model said" is only useful if you know which model.
+- **`slot_generation`** says which *resident instance* of that model answered,
+  and it is the field to check before comparing two assessments. Ollama keeps
+  the weights loaded between samples (`OLLAMA_KEEP_ALIVE=30m`), and a warm slot
+  returns different text for a byte-identical prompt at temperature 0 with a
+  fixed seed — so two results carrying the same `model` are still not
+  comparable unless this matches. Values: an instance fingerprint
+  (`<digest>/ctx<n>/vram<n>mib`), `cold` when nothing was loaded at the time,
+  `unavailable` when the runtime API could not be asked, or `a->b` when the
+  slot changed underneath the two workflow calls. `unavailable` is
+  deliberately distinct from `cold`: not knowing which instance answered must
+  not read as knowing it was a fresh one.
 - **`evidence_shown`** is the one to read first. A real sample overflows any
   context window, so the assessment is formed from a subset; a claim the model
   did **not** make may simply be something it was never shown.

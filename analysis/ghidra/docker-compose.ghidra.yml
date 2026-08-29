@@ -95,6 +95,15 @@ services:
       # Keep the model resident between samples. A drain analyses a queue one
       # binary at a time, and reloading several GB of weights per workflow call
       # costs more than the inference does.
+      #
+      # #2646: this is also why triage is not reproducible in production. A
+      # resident slot returns different text for an identical prompt at
+      # temperature 0 with a fixed seed; a freshly loaded one does not. Keeping
+      # the value is the deliberate trade -- the reload is the expensive half,
+      # and #2642 measured a cold run at 4.1 min. What the worker does instead
+      # is record which resident instance answered, in ai_triage.slot_generation
+      # (see analysis/ghidra/worker/ghidra-worker.py's slot_fingerprint), so two
+      # assessments are never compared as though they came from the same one.
       OLLAMA_KEEP_ALIVE: '30m'
       # One request at a time. Ghidra decompilation is already competing for
       # this host, and a queue of parallel generations is how you get an
