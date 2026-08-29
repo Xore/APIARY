@@ -483,6 +483,15 @@ class StartupPreflightIntegrationTests(unittest.TestCase):
     operators see is main() refusing to enter the loop, recording a named
     status document and exiting non-zero instead of crashlooping every
     POLL_INTERVAL on generic cycle errors.
+
+    main() runs two gates in order: compose_route_preflight() (network-free,
+    reads ES_HOST straight from the environment) and then es_preflight()
+    (live ping). ES_HOST is set here because these cases are about the
+    second gate -- they model a deployment brought up through the
+    captured-data overlay, which does supply the route, whose Elasticsearch
+    then does not answer. Leaving it unset would short-circuit every case on
+    the first gate and assert nothing about the ping.
+    ES_HOST_EMPTY below covers the first gate from the same entry point.
     """
 
     def setUp(self):
@@ -493,6 +502,7 @@ class StartupPreflightIntegrationTests(unittest.TestCase):
             patch.object(worker, "STATUS_PATH", self.status_path),
             patch.object(worker, "configure_logging"),
             patch.object(sys, "argv", ["worker.py", "--once"]),
+            patch.dict(os.environ, {"ES_HOST": "http://elasticsearch:9200"}),
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -545,6 +555,26 @@ class StartupPreflightIntegrationTests(unittest.TestCase):
         instance.run_once.assert_called_once_with()
         self.assertNotIn("preflight", err)
         self.assertIs(self._status()["ok"], True)
+
+    def test_missing_compose_route_is_named_before_the_es_ping(self):
+        # The compose gate has the same obligations as the ES gate: no cycle,
+        # non-zero exit, and a status document the healthcheck can read back.
+        # It also has to win the race -- with ES_HOST empty the ES ping never
+        # runs, so the operator is told which compose file is missing rather
+        # than that some host did not answer.
+        with patch.dict(os.environ, {"ES_HOST": ""}):
+            code, instance, err = self._run_main(ping=True)
+        self.assertEqual(code, 1)
+        instance.run_once.assert_not_called()
+        self.assertIn("startup preflight failed", err)
+        self.assertIn("docker-compose.captured-data-deploy.yml", err)
+        status = self._status()
+        self.assertIs(status["ok"], False)
+        self.assertEqual(status["error"], "compose-route-missing")
+        out = StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(worker.healthcheck(self.cfg), 1)
+        self.assertIn("compose-route-missing", out.getvalue())
 
 
 class HealthcheckDiagnosticsTests(unittest.TestCase):
