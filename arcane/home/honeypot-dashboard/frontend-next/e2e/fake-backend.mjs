@@ -496,6 +496,18 @@ function route(pathname) {
   if (pathname === "/api/v1/ml-anomalies/acks") return {};
   if (pathname.startsWith("/api/v1/store/")) return { rows: [], total: 0 };
   if (pathname === "/api/v1/search") return { results: [] };
+  if (pathname === "/api/v1/live") {
+    // STUB pending the live-shared-poller workstream (4b9cae88/bf8d4740:
+    // "serve the live feed from one shared poller per process", "coalesce
+    // live-tail frames"). routes/api/live.ts proxies this path straight
+    // through as an SSE body (limitedStreamProxy forces the response's
+    // content-type/headers regardless of what's returned here), so the
+    // exact frame format isn't exercised by this fixture either way --
+    // this just needs to stop answering the bare {} catch-all (#2542)
+    // without pinning a real-backend contract that workstream is still
+    // reshaping. Replace with a shape-correct frame/envelope once it lands.
+    return { entries: [], cursor: null };
+  }
   // #2507: an unrecognized /api/v1/* path used to answer {} invisibly, so
   // every new page silently inherited fallback coverage and its smoke test
   // verified little more than the skeleton. Say so, once per path, so a
