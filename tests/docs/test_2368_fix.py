@@ -1,43 +1,53 @@
 #!/usr/bin/env python3
-"""Regression test for #2368: sync-client-secrets.sh must enumerate
-exactly the 6 VPS-fronted oauth2-proxy gateway clients, not the stale
-pre-#1185 / pre-#1026 list (which included dockge, oidc-dockge, and
-apiary-dashboard's oidc-dashboard — all of which were decommissioned
-in their own PRs and would now turn the closing
-`docker compose up -d --force-recreate` into a guaranteed reject).
+"""Regression test for #2368: sync-client-secrets.sh must target exactly the
+VPS oauth2-proxy gateways that actually exist in vps/docker-compose.yml.
 
-The fix also restructures the script's two failure modes so the
-runbook and the script share a single source of truth for which
-clients are gateway-fronted (and which are not). The gateway map
-now has exactly six entries:
+The bug: the script's `CLIENT_CONTAINERS` map still carried two rows whose
+gateway compose service had been deleted elsewhere in the repo -- `dockge`
+(removed under #1185, cleanup in #2195) and `apiary-dashboard`'s
+`oidc-dashboard` compat gateway (retired by #1026's follow-up). The closing
 
-  kibana           -> oidc-kibana
-  evebox           -> oidc-evebox
-  arkime           -> oidc-arkime
-  tanner           -> oidc-tanner
-  revdeck          -> oidc-revdeck
-  traefik-dashboard-> oidc-traefik
+    docker compose up -d --force-recreate ${synced_containers[*]}
 
-The three confidential clients NOT in the map (apiary-dashboard,
-arcane, auth-events-poller) have their own provisioner scripts and
-do not sit behind VPS oauth2-proxy gateways.
+names every gateway on one command line, and Compose validates every named
+service before recreating any of them. So a single stale row made the whole
+recreate a guaranteed reject: every *valid* gateway synced its new secret to
+disk and then never restarted to pick it up.
 
-This test asserts:
-- the script's CLIENT_CONTAINERS map has exactly six entries
-- the script does NOT use the decommissioned client names as
-  bash array keys (a comment mentioning them as historical
-  context is fine; an entry in the assoc array is not)
-- the script's preamble lists each of the three non-gateway
-  clients and references their dedicated provisioner script
-- the runbook (KEYCLOAK-OPERATIONS.md) does not REPEAT the
-  decommissioned clients in its per-client gateway enumeration
-  table (the file path /var/dockge/stacks/... is fine and is the
-  real deployment location of the Keycloak stack)
+WHAT THIS TEST ASSERTS, AND WHY IT IS SHAPED THIS WAY
 
-The pre-flight check inside the script itself (the realm-client
-mismatch check) is part of the source-level contract too -- the
-test asserts that branch is present and wired into the pre-write
-phase.
+The failure mode is a disagreement *between files*, so asserting that the
+script contains six hand-listed names proves nothing -- it only restates the
+source. Every assertion below is therefore a cross-file consistency check
+against `vps/docker-compose.yml`, which is the artifact that actually
+rejects the run:
+
+  * every map VALUE must be a real top-level compose service.  This is the
+    #2368 failure mode itself, and it is checked on the values -- the
+    pre-#2368 map had the correct KEY (`apiary-dashboard` is still a real
+    realm client) and a dead VALUE (`oidc-dashboard`), so a key-only test
+    cannot see the bug at all.
+  * every `oidc-*` gateway in compose must appear in the map.  Guards the
+    opposite drift: a newly added gateway whose secret is never rotated,
+    which fails silently at the next realm rebuild rather than loudly.
+  * every map KEY must match both the `${OIDC_SECRETS_DIR}/<key>` bind mount
+    and the `OAUTH2_PROXY_CLIENT_ID` of the gateway it points at.  This ties
+    the path the script writes to the path the gateway reads and the realm
+    client the secret belongs to -- the three ends of the rotation.
+
+Only the key set itself is pinned to a literal (the six clients as of
+#2368), so an intentional gateway addition fails one explicit test with a
+readable diff instead of silently widening the contract.
+
+The script-internal #2195 guards are asserted by ordering rather than mere
+presence: an abort that runs *after* the first write does not prevent the
+half-applied state #2368 produced.
+
+The runbook (docs/KEYCLOAK-OPERATIONS.md) is checked table-by-table against
+the same map, because the issue also flagged its "8 gateways, 9 confidential
+clients" counting mismatch. Whole-file substring checks are avoided
+deliberately: `kibana` occurs throughout the document, so `"kibana" in text`
+is true no matter what the enumeration says.
 """
 import pathlib
 import re
@@ -45,9 +55,13 @@ import re
 import pytest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
-SCRIPT = REPO_ROOT / "arcane/home/honeypot-keycloak/keycloak/sync-client-secrets.sh"
+KEYCLOAK_DIR = REPO_ROOT / "arcane/home/honeypot-keycloak/keycloak"
+SCRIPT = KEYCLOAK_DIR / "sync-client-secrets.sh"
+COMPOSE = REPO_ROOT / "vps/docker-compose.yml"
 RUNBOOK = REPO_ROOT / "docs/KEYCLOAK-OPERATIONS.md"
 
+# The six VPS-fronted oauth2-proxy gateway clients as of #2368. Pinned so
+# that adding or dropping a gateway has to be a deliberate edit here.
 EXPECTED_GATEWAY_CLIENTS = {
     "kibana",
     "evebox",
@@ -56,177 +70,320 @@ EXPECTED_GATEWAY_CLIENTS = {
     "revdeck",
     "traefik-dashboard",
 }
-NON_GATEWAY_CLIENTS = {
-    "apiary-dashboard",
-    "arcane",
-    "auth-events-poller",
-}
-# Decommissioned map entries that the pre-#2368 list had:
-#   [dockge]=oidc-dockge              -- removed by #2195 (#1194 decommission)
-#   [apiary-dashboard]=oidc-dashboard -- removed by #1026's follow-up
-# These would now turn the closing `docker compose up -d --force-recreate`
-# into a guaranteed reject, since Compose validates every named service
-# before recreating any of them.
-DECOMMISSIONED_MAP_ENTRIES = {
-    "dockge",          # was a CLIENT_CONTAINERS key
-    "oidc-dockge",     # was a CLIENT_CONTAINERS value
-    "apiary-dashboard", # was a CLIENT_CONTAINERS key (overlaps with non-gateway set;
-                        # the decommissioned MAP row was the one that broke the
-                        # compose recreation, even though apiary-dashboard is
-                        # a real (non-gateway) client in its own right)
+
+# Confidential clients that exist in the realm but have no VPS gateway, so
+# sync-client-secrets.sh must NOT touch them: client id -> provisioner that
+# owns its rotation instead.
+NON_GATEWAY_PROVISIONERS = {
+    "apiary-dashboard": "provision-dashboard-oidc-secret.sh",
+    "arcane": "provision-arcane-oidc-secret.sh",
+    "auth-events-poller": "provision-events-poller.sh",
 }
 
+# The rows that rotted, as (map key, map value). Both gateway services are
+# gone from vps/docker-compose.yml; neither pair may come back.
+DECOMMISSIONED_ROWS = {
+    "dockge": "oidc-dockge",            # #1185 replaced Dockge with Arcane
+    "apiary-dashboard": "oidc-dashboard",  # #1026 follow-up: native OIDC
+}
 
-def _read(path: pathlib.Path) -> str:
-    return path.read_text(encoding="utf-8")
+SCRIPT_TEXT = SCRIPT.read_text(encoding="utf-8")
+COMPOSE_TEXT = COMPOSE.read_text(encoding="utf-8")
+RUNBOOK_TEXT = RUNBOOK.read_text(encoding="utf-8")
 
 
-def test_client_containers_map_has_exactly_six_entries():
-    """The CLIENT_CONTAINERS bash array must have exactly six keys:
-    kibana, evebox, arkime, tanner, revdeck, traefik-dashboard."""
-    text = _read(SCRIPT)
-    m = re.search(
-        r"declare\s+-A\s+CLIENT_CONTAINERS=\(\s*\n(.*?)\n\s*\)",
-        text,
-        re.DOTALL,
+def _client_containers() -> dict:
+    """Parse `declare -A CLIENT_CONTAINERS=(...)` into {client: service}.
+
+    Values are taken up to whitespace so the trailing `# ...` comments the
+    fix added do not become part of the service name.
+    """
+    block = re.search(
+        r"declare\s+-A\s+CLIENT_CONTAINERS=\(\s*\n(.*?)\n\s*\)\s*$",
+        SCRIPT_TEXT,
+        re.DOTALL | re.MULTILINE,
     )
-    assert m, "could not find `declare -A CLIENT_CONTAINERS=(...)` block"
-    body = m.group(1)
-    keys = set(re.findall(r"^\s*\[([a-zA-Z0-9_-]+)\]=", body, re.MULTILINE))
-    assert keys == EXPECTED_GATEWAY_CLIENTS, (
-        f"CLIENT_CONTAINERS keys must be exactly the six VPS-fronted "
-        f"oauth2-proxy gateway clients. Got {keys!r}, expected "
-        f"{EXPECTED_GATEWAY_CLIENTS!r} -- #2368"
+    assert block, "could not find `declare -A CLIENT_CONTAINERS=(...)` in the script"
+    rows = re.findall(
+        r"^\s*\[([^\]]+)\]=(\S+)", block.group(1), re.MULTILINE
     )
+    mapping = dict(rows)
+    assert len(mapping) == len(rows), f"duplicate CLIENT_CONTAINERS keys: {rows!r}"
+    return mapping
 
 
-def test_script_client_containers_map_has_no_decommissioned_keys():
-    """The CLIENT_CONTAINERS bash array must not have a key matching
-    any decommissioned client. A comment in the preamble explaining
-    "this used to have dockge but it was retired by #1194" is fine
-    (it's an explicit historical note); the key being in the assoc
-    array is the failure mode (it would be passed to docker compose,
-    which would reject the whole run)."""
-    text = _read(SCRIPT)
-    m = re.search(
-        r"declare\s+-A\s+CLIENT_CONTAINERS=\(\s*\n(.*?)\n\s*\)",
-        text,
-        re.DOTALL,
+def _compose_services() -> dict:
+    """Parse vps/docker-compose.yml into {service name: service body text}.
+
+    Hand-rolled rather than via PyYAML: no other test in this repo takes a
+    third-party parser dependency, and the two-space-indent block structure
+    is all that is needed here.
+    """
+    block = re.search(
+        r"^services:\n(.*?)(?=\n[A-Za-z_][\w-]*:\s*$|\Z)",
+        COMPOSE_TEXT,
+        re.DOTALL | re.MULTILINE,
     )
-    assert m, "could not find `declare -A CLIENT_CONTAINERS=(...)` block"
-    body = m.group(1)
-    keys = set(re.findall(r"^\s*\[([a-zA-Z0-9_-]+)\]=", body, re.MULTILINE))
-    # Specifically: dockge (was a key), oidc-dockge (was a value), and
-    # apiary-dashboard (was a key, even though the client itself still
-    # exists in the realm under a different provisioner).
-    for client in ("dockge",):
-        assert client not in keys, (
-            f"CLIENT_CONTAINERS still has {client!r} as a key -- #2368. "
-            f"The decommissioned entry would silently wedge the run via "
-            f"`docker compose up -d --force-recreate` rejecting every "
-            f"valid gateway because the compose validation sees a "
-            f"non-existent service name."
-        )
+    assert block, "could not find the top-level `services:` block in vps/docker-compose.yml"
+    body = block.group(1)
+    starts = [(m.group(1), m.start()) for m in re.finditer(r"^  ([\w.-]+):\s*$", body, re.MULTILINE)]
+    services = {}
+    for i, (name, pos) in enumerate(starts):
+        end = starts[i + 1][1] if i + 1 < len(starts) else len(body)
+        services[name] = body[pos:end]
+    return services
 
 
-def test_script_preamble_lists_non_gateway_clients():
-    """The script's preamble must explain that the realm has 9
-    confidential clients total, the script handles the 6 gateway
-    ones, and the other 3 (apiary-dashboard, arcane, auth-events-
-    poller) have their own provisioner scripts."""
-    text = _read(SCRIPT)
-    # The realm total must be 9 (6 gateway + 3 non-gateway)
-    assert "9 confidential clients" in text or "9 confidential" in text, (
-        "script preamble must state the realm has 9 confidential clients total"
-    )
-    # Each non-gateway client must be mentioned, with its provisioner script named
-    for client in NON_GATEWAY_CLIENTS:
-        assert client in text, (
-            f"script preamble must mention non-gateway client {client!r}"
-        )
-    # Each non-gateway client must be associated with a provisioner script
-    assert "provision-dashboard-oidc-secret.sh" in text, (
-        "apiary-dashboard's provisioner must be named (provision-dashboard-oidc-secret.sh)"
-    )
-    assert "provision-arcane-oidc-secret.sh" in text, (
-        "arcane's provisioner must be named (provision-arcane-oidc-secret.sh)"
-    )
-    assert "provision-events-poller.sh" in text, (
-        "auth-events-poller's provisioner must be named (provision-events-poller.sh)"
-    )
+# Parsed once at import so the per-row tests below are parametrized over the
+# rows the script ACTUALLY declares. Parametrizing over EXPECTED_GATEWAY_CLIENTS
+# instead would skip exactly the rogue row this file exists to catch.
+CLIENT_CONTAINERS = _client_containers()
 
 
-def test_pre_flight_realm_client_mismatch_check_is_present():
-    """The script must validate the hand-maintained map against the
-    realm's own client list BEFORE syncing anything. This is the
-    #2195 pre-flight; it must still be present (and is what would
-    catch a future drift before it can wedge the run)."""
-    text = _read(SCRIPT)
-    assert "get clients -r \"$REALM\"" in text, (
-        "pre-flight must query the realm's own client list"
-    )
-    assert "missing+=(\"$client\")" in text or 'missing+=("$client")' in text, (
-        "pre-flight must record missing clients"
-    )
-    assert "ABORT: listed in CLIENT_CONTAINERS but absent" in text, (
-        "pre-flight must abort loudly with a named cause when a listed "
-        "client is absent from the realm (the failure mode #2368 reported)"
-    )
+def _markdown_table_after(heading_regex: str) -> list:
+    """Return the rows of the first markdown table following a heading line.
 
-
-def test_runbook_enumerates_the_same_six_gateway_clients():
-    """KEYCLOAK-OPERATIONS.md must enumerate the same six gateway
-    clients as the script (single source of truth)."""
-    text = _read(RUNBOOK)
-    for client in EXPECTED_GATEWAY_CLIENTS:
-        assert client in text, (
-            f"KEYCLOAK-OPERATIONS.md must mention the gateway client {client!r}"
-        )
-
-
-def test_runbook_does_not_promote_dockge_to_a_gateway_role():
-    """The runbook must not recommend dockge as a gateway
-    client in its per-client enumeration table. The
-    /var/dockge/stacks/... filesystem path is fine and is the
-    real deployment location of the Keycloak stack; this test
-    only guards against dockge being named as a CLIENT in the
-    per-client gateway table."""
-    text = _read(RUNBOOK)
-    # Find the per-client directory table. The pattern: a line that
-    # names a directory under vps/secrets/oidc/<client> and a public
-    # consumer. We don't want to grep for plain "dockge" because the
-    # file legitimately references /var/dockge/stacks/ as a host path
-    # (the real deployment location).
-    # A real leak would be something like `| `dockge` | ... |` in the
-    # table (backticks around dockge as a column entry).
-    assert not re.search(r"\|\s*`?\bdockge\b`?\s*\|", text), (
-        "KEYCLOAK-OPERATIONS.md per-client gateway table still names "
-        "dockge as a gateway client -- #2368. The /var/dockge/stacks/... "
-        "host path is fine; the runbook must not recommend dockge as "
-        "a client to provision secrets for."
-    )
-    # Same for apiary-dashboard as a gateway row (it's a real
-    # non-gateway client, but it must NOT be in the gateway table).
-    # The table is the "Directory/client" column. A leak would have
-    # `apiary-dashboard` listed as a row with a "VPS oauth2-proxy
-    # gateway" or "compat gateway" public consumer.
-    # The post-#1026 follow-up retired the compat gateway. Find the
-    # runbook's table heading and check no row says
-    # apiary-dashboard alongside a gateway.
-    table_rows = re.findall(
-        r"^\|\s*`?([\w-]+)`?\s*\|\s*([^|]+)\s*\|",
-        text,
+    Rows come back as lists of stripped cells with surrounding backticks
+    removed. Scoping to one table matters: the runbook has four of them and
+    a document-wide scan cannot tell the gateway enumeration apart from the
+    non-gateway one.
+    """
+    anchor = re.search(heading_regex, RUNBOOK_TEXT, re.MULTILINE)
+    assert anchor, f"could not locate {heading_regex!r} in the runbook"
+    table = re.search(
+        r"^\|.*\|\s*\n\|[-|\s]+\|\s*\n((?:\|.*\|\s*\n)+)",
+        RUNBOOK_TEXT[anchor.start():],
         re.MULTILINE,
     )
-    for client, consumer in table_rows:
-        if client == "apiary-dashboard":
-            assert "gateway" not in consumer.lower(), (
-                f"KEYCLOAK-OPERATIONS.md per-client gateway table lists "
-                f"apiary-dashboard with consumer {consumer!r} -- #2368. "
-                f"apiary-dashboard is a real (non-gateway) client, but "
-                f"it must not be in the gateway enumeration; its compat "
-                f"gateway was retired by #1026's follow-up."
-            )
+    assert table, f"no markdown table follows {heading_regex!r}"
+    rows = []
+    for line in table.group(1).strip().splitlines():
+        cells = [c.strip().strip("`") for c in line.strip().strip("|").split("|")]
+        rows.append(cells)
+    return rows
+
+
+def test_client_containers_map_is_exactly_the_six_gateway_clients():
+    """The pinned key set. Anything else is a deliberate gateway change and
+    should have to be written down here too."""
+    assert set(CLIENT_CONTAINERS) == EXPECTED_GATEWAY_CLIENTS
+
+
+@pytest.mark.parametrize("client", sorted(CLIENT_CONTAINERS))
+def test_mapped_gateway_service_exists_in_vps_compose(client):
+    """The #2368 failure mode, checked on the map VALUE.
+
+    `docker compose up -d --force-recreate <svc>...` resolves every named
+    service up front, so one value that names nothing rejects the entire
+    recreate -- including the gateways whose secrets were just written.
+    """
+    service = CLIENT_CONTAINERS[client]
+    services = _compose_services()
+    assert service in services, (
+        f"CLIENT_CONTAINERS[{client}] points at compose service {service!r}, "
+        f"which does not exist in vps/docker-compose.yml -- #2368. The closing "
+        f"`docker compose up -d --force-recreate` names every synced gateway on "
+        f"one command line and Compose validates all of them before recreating "
+        f"any, so this single row stops every valid gateway from ever picking "
+        f"up its rotated secret."
+    )
+
+
+@pytest.mark.parametrize("client,service", sorted(DECOMMISSIONED_ROWS.items()))
+def test_decommissioned_gateway_row_stays_out(client, service):
+    """Neither rotted row may return -- and the check is anchored on compose,
+    so it keeps meaning something if the decommission is ever reverted."""
+    mapping = CLIENT_CONTAINERS
+    assert service not in _compose_services(), (
+        f"{service!r} is a compose service again; this test's premise "
+        f"(that it was decommissioned) no longer holds -- revisit #2368."
+    )
+    assert service not in mapping.values(), (
+        f"CLIENT_CONTAINERS targets decommissioned gateway {service!r} again -- #2368"
+    )
+    assert mapping.get(client) != service, (
+        f"CLIENT_CONTAINERS[{client}]={service!r} is back -- #2368"
+    )
+
+
+def test_every_oauth2_proxy_gateway_in_compose_is_rotated_by_the_script():
+    """The opposite drift: a gateway that exists but is not in the map.
+
+    That one fails quietly -- the gateway simply keeps a client secret from
+    the previous realm and every login through it breaks after the next
+    `--import-realm`, with nothing in the sync run to point at.
+    """
+    gateways = {name for name in _compose_services() if name.startswith("oidc-")}
+    mapped = set(CLIENT_CONTAINERS.values())
+    assert gateways == mapped, (
+        f"oauth2-proxy gateways in vps/docker-compose.yml and the gateways "
+        f"sync-client-secrets.sh rotates have diverged -- #2368.\n"
+        f"  in compose, never rotated: {sorted(gateways - mapped)}\n"
+        f"  rotated, absent from compose: {sorted(mapped - gateways)}"
+    )
+
+
+@pytest.mark.parametrize("client", sorted(CLIENT_CONTAINERS))
+def test_client_id_matches_the_gateways_secret_mount_and_oauth2_proxy_client(client):
+    """Tie the three ends of one rotation together.
+
+    The script writes to `$VPS_SECRETS_DIR/<client>/client-secret`; the
+    gateway bind-mounts `${OIDC_SECRETS_DIR}/<client>` at /run/oidc-secrets
+    and presents `OAUTH2_PROXY_CLIENT_ID: <client>` to Keycloak. If the map
+    key drifts from either, the secret lands beside the gateway that needs
+    it and logins fail with invalid_client while every step reports success.
+    """
+    service = CLIENT_CONTAINERS[client]
+    body = _compose_services()[service]
+    assert re.search(
+        rf"OIDC_SECRETS_DIR[^\n]*\}}/{re.escape(client)}:/run/oidc-secrets", body
+    ), (
+        f"{service} does not mount ${{OIDC_SECRETS_DIR}}/{client} -- the path "
+        f"sync-client-secrets.sh writes for client {client!r} is not the path "
+        f"this gateway reads."
+    )
+    assert re.search(rf"OAUTH2_PROXY_CLIENT_ID:\s*{re.escape(client)}\s*$", body, re.MULTILINE), (
+        f"{service} does not present OAUTH2_PROXY_CLIENT_ID: {client} -- the "
+        f"map key is not the Keycloak client whose secret gets written there."
+    )
+
+
+def test_preflight_realm_check_aborts_before_any_write():
+    """#2195's gate is only worth anything ahead of the first write.
+
+    Presence alone is not the contract: an abort placed after the sync loop
+    would still leave the half-applied state (#2368: secrets on disk, no
+    gateway restarted) it exists to prevent.
+    """
+    abort = SCRIPT_TEXT.find("ABORT: listed in CLIENT_CONTAINERS but absent")
+    assert abort != -1, "the #2195 realm-mismatch abort is gone"
+    assert 'get clients -r "$REALM"' in SCRIPT_TEXT, (
+        "the pre-flight must query the realm's own client list, not trust the map"
+    )
+    write = SCRIPT_TEXT.find('| ssh "$VPS_HOST"')
+    recreate = SCRIPT_TEXT.find("docker compose up -d --force-recreate")
+    assert write != -1 and recreate != -1, "the sync/recreate steps moved; update this test"
+    assert abort < write < recreate, (
+        "the realm-mismatch abort must precede the first secret write (and the "
+        "recreate) -- aborting afterwards still leaves the half-applied state "
+        "#2368 reported"
+    )
+    assert re.search(r"^\s*exit 2\s*$", SCRIPT_TEXT, re.MULTILINE), (
+        "the pre-flight must exit non-zero on drift rather than continue"
+    )
+
+
+def test_recreate_is_limited_to_gateways_actually_synced():
+    """#2195's other half, which #2368's fix relies on: recreate the
+    containers that changed hands this run, never the full static list."""
+    recreate = re.search(
+        r"docker compose up -d --force-recreate ([^\"']+)", SCRIPT_TEXT
+    )
+    assert recreate, "could not find the compose recreate invocation"
+    arg = recreate.group(1).strip()
+    assert arg == "${synced_containers[*]}", (
+        f"recreate is invoked with {arg!r}; it must pass only the gateways "
+        f"whose secret was actually synced this run -- #2195/#2368"
+    )
+    assert "no secrets synced; skipping gateway recreation" in SCRIPT_TEXT, (
+        "an empty synced set must be reported, not passed to compose as a "
+        "zero-service command line"
+    )
+
+
+@pytest.mark.parametrize("client,provisioner", sorted(NON_GATEWAY_PROVISIONERS.items()))
+def test_non_gateway_client_is_documented_and_its_provisioner_exists(client, provisioner):
+    """The three clients this script deliberately skips must be named in the
+    preamble next to the script that does rotate them -- and that script has
+    to be a real file, or the note is a dead end at the next rebuild."""
+    assert client not in CLIENT_CONTAINERS, (
+        f"{client!r} has no VPS oauth2-proxy gateway and must not be in "
+        f"CLIENT_CONTAINERS -- #2368"
+    )
+    assert client in SCRIPT_TEXT, (
+        f"the preamble must name non-gateway client {client!r} so a reader "
+        f"knows the script is the gateway rotater, not the realm's"
+    )
+    assert provisioner in SCRIPT_TEXT, (
+        f"the preamble must point at {provisioner} as {client!r}'s rotater"
+    )
+    assert (KEYCLOAK_DIR / provisioner).is_file(), (
+        f"{provisioner} referenced by the preamble does not exist on disk"
+    )
+
+
+def test_script_preamble_states_the_realm_client_total():
+    """6 handled here + 3 elsewhere = 9. The count is what makes a future
+    reader notice the script is not the all-secrets rotater."""
+    assert re.search(r"\b9 confidential clients\b", SCRIPT_TEXT), (
+        "the preamble must state the realm's 9-confidential-client total"
+    )
+    assert re.search(r"\b6 VPS oauth2-proxy gateway\b", SCRIPT_TEXT), (
+        "the preamble must state how many of them this script handles"
+    )
+
+
+def test_runbook_gateway_table_matches_the_script_map():
+    """§3's per-client directory table is the manual fallback for the same
+    six clients; if it and the map disagree, one of them is wrong."""
+    rows = _markdown_table_after(r"^\| Directory/client \| Public consumer \|")
+    listed = {row[0] for row in rows}
+    assert listed == set(CLIENT_CONTAINERS), (
+        f"the runbook's per-client gateway table and CLIENT_CONTAINERS have "
+        f"diverged -- #2368.\n  runbook only: {sorted(listed - set(CLIENT_CONTAINERS))}"
+        f"\n  script only: {sorted(set(CLIENT_CONTAINERS) - listed)}"
+    )
+
+
+def test_runbook_non_gateway_table_lists_the_three_clients_with_real_provisioners():
+    """The other three, with links that resolve -- the runbook is the only
+    place the full clean-rebuild sequence is written down."""
+    rows = _markdown_table_after(r"^### Non-gateway confidential clients\s*$")
+    listed = {row[0] for row in rows}
+    assert listed == set(NON_GATEWAY_PROVISIONERS), (
+        f"the runbook's non-gateway client table lists {sorted(listed)}, "
+        f"expected {sorted(NON_GATEWAY_PROVISIONERS)} -- #2368"
+    )
+    for client, _surface, provisioner_cell in rows:
+        link = re.search(r"\]\(([^)]+)\)", provisioner_cell)
+        assert link, f"the {client!r} row must link its provisioner script"
+        target = (RUNBOOK.parent / link.group(1)).resolve()
+        assert target.is_file(), (
+            f"the {client!r} row links {link.group(1)}, which does not exist"
+        )
+        assert target.name == NON_GATEWAY_PROVISIONERS[client], (
+            f"the {client!r} row links {target.name}, expected "
+            f"{NON_GATEWAY_PROVISIONERS[client]}"
+        )
+
+
+def test_runbook_carries_no_stale_gateway_or_client_counts():
+    """The counting mismatch #2368 flagged: the runbook claimed 8 gateways
+    against 9 confidential clients, so neither number could be trusted."""
+    stale = re.findall(
+        r"\b(?:7|8|seven|eight)\s+(?:VPS\s+)?(?:gateway|confidential)\w*",
+        RUNBOOK_TEXT,
+        re.IGNORECASE,
+    )
+    assert not stale, (
+        f"the runbook still carries pre-#2368 counts: {stale!r}. There are six "
+        f"VPS gateways and nine confidential clients."
+    )
+    assert re.search(r"\b(?:6|six)\s+(?:VPS\s+)?gateway", RUNBOOK_TEXT, re.IGNORECASE)
+    assert re.search(r"\b(?:9|nine)\s+confidential", RUNBOOK_TEXT, re.IGNORECASE)
+
+
+def test_runbook_never_names_dockge_as_a_client():
+    """`/var/dockge/stacks/...` is the real Keycloak stack path on the
+    homeserver and must stay; `dockge` as a table's client cell must not."""
+    for line in RUNBOOK_TEXT.splitlines():
+        if not line.lstrip().startswith("|"):
+            continue
+        first = line.strip().strip("|").split("|")[0].strip().strip("`")
+        assert first != "dockge", (
+            f"the runbook names dockge as a client in a table row: {line.strip()!r} "
+            f"-- its Keycloak client and gateway were removed under #1185/#2195 (#2368)"
+        )
 
 
 if __name__ == "__main__":
