@@ -45,7 +45,6 @@ flowchart TD
     Host --> Net["libvirt isolated network: virbr-sandbox (10.10.10.0/24)<br/>NO internet routing — host firewall drops all forward to WAN"]
 
     Host --> Guest["Windows 11 KVM Guest (10.10.10.2)"]
-    Guest --> Flare["FLARE-VM tools"]
     Guest --> Sysmon["Sysmon (SwiftOnSecurity config)"]
     Guest --> FakeNet["FakeNet-NG (intercepts all outbound traffic on the guest)"]
     Guest --> PSLog["PowerShell ScriptBlock logging (Event 4104)"]
@@ -822,7 +821,6 @@ for _, result := range loadSandboxResults() {
 |------|---------|------------|
 | Packer + QEMU builder | Automated golden image build | Host |
 | virsh / libvirt-python | VM lifecycle + snapshots | Host |
-| FLARE-VM (mandiant) | 100+ analysis tools | Guest |
 | Sysmon + SwiftOnSecurity config | Process/network/registry telemetry | Guest |
 | PowerShell 4104/4103/Transcription | PS downloader capture | Guest |
 | FakeNet-NG (mandiant) | Intercept ALL outbound traffic | Guest |
