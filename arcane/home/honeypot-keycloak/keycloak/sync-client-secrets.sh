@@ -1,12 +1,27 @@
 #!/usr/bin/env bash
 # sync-client-secrets.sh -- after a fresh `--import-realm` (apiary-realm.json
 # pins no client "secret", so Keycloak generates a new random one for every
-# confidential client on each import), fetches the 7 gateway clients' fresh
-# secrets from Keycloak on the homeserver and writes them into the matching
-# `vps/secrets/oidc/<client>/client-secret` file on the VPS, then restarts
-# each gateway. Replaces the fully-manual per-client procedure in
-# docs/KEYCLOAK-OPERATIONS.md -- run this instead of copy-pasting kcadm
-# commands eight times by hand.
+# confidential client on each import), fetches the 6 VPS oauth2-proxy gateway
+# clients' fresh secrets from Keycloak on the homeserver and writes them into
+# the matching `vps/secrets/oidc/<client>/client-secret` file on the VPS,
+# then restarts each gateway. Replaces the fully-manual per-client procedure
+# in docs/KEYCLOAK-OPERATIONS.md -- run this instead of copy-pasting kcadm
+# commands six times by hand.
+#
+# The realm has 9 confidential clients total (#2368); the other 3 are NOT
+# handled here because none of them sit behind a VPS oauth2-proxy gateway.
+# Each of those has its own idempotent provisioner script and must be run
+# separately, alongside this one, as part of the same clean-rebuild pass --
+# see docs/KEYCLOAK-OPERATIONS.md §7:
+#   apiary-dashboard    native OIDC in the dashboard binary itself (no VPS
+#                        gateway since #1026's follow-up retired
+#                        oidc-dashboard) -- provision-dashboard-oidc-secret.sh
+#   arcane               Arcane's own OIDC login; reads its secret from a
+#                        homeserver .env file, not a VPS secrets file --
+#                        provision-arcane-oidc-secret.sh
+#   auth-events-poller   service-account-only client with a Keycloak role
+#                        grant, never an interactive login --
+#                        provision-events-poller.sh
 #
 # Run from the homeserver (needs docker exec access to hp-keycloak) with SSH
 # access to the VPS. Secret values are piped directly over SSH, never
@@ -20,20 +35,29 @@ KC_CONTAINER="${KC_CONTAINER:-hp-keycloak}"
 KC_CONFIG="${KC_CONFIG:-/tmp/kcadm-sync-client-secrets.config}"
 KC="/opt/keycloak/bin/kcadm.sh"
 
-# client id -> vps/docker-compose.yml service/container name (not always a
-# plain "oidc-<client>" prefix -- apiary-dashboard's gateway is oidc-dashboard,
-# traefik-dashboard's is oidc-traefik). dockge/oidc-dockge lived here until
-# #1194 decommissioned that pair two days after this script landed (#2195);
-# the pre-flight check below now keeps a leftover row like that from
-# re-breaking both halves of the script at once.
+# client id -> vps/docker-compose.yml service/container name of its
+# oauth2-proxy gateway sidecar (not always a plain "oidc-<client>" prefix --
+# traefik-dashboard's is oidc-traefik, not oidc-traefik-dashboard). Two
+# entries have rotted out from under this map before, each the same way: its
+# gateway got decommissioned elsewhere in the repo and nothing here noticed.
+# A different, now-retired gateway pair lived here until #1194
+# decommissioned it (removed by #2195, two days after this script landed);
+# apiary-dashboard/oidc-dashboard lived here until #1026's follow-up retired
+# that compose service three weeks before anyone noticed this map still
+# targeted it (#2368). Either kind turns the closing `docker compose up -d
+# --force-recreate` into a guaranteed reject, since Compose validates every
+# named service before recreating any of them -- so a single stale row
+# silently blocks every *valid* gateway from ever picking up its rotated
+# secret. The pre-flight check below guards against a repeat: a
+# listed-but-decommissioned client aborts loudly before any writes instead
+# of quietly wedging the whole run again.
 declare -A CLIENT_CONTAINERS=(
-  [apiary-dashboard]=oidc-dashboard
-  [kibana]=oidc-kibana
-  [evebox]=oidc-evebox
-  [arkime]=oidc-arkime
-  [tanner]=oidc-tanner
-  [revdeck]=oidc-revdeck
-  [traefik-dashboard]=oidc-traefik
+  [kibana]=oidc-kibana                # Kibana's oauth2-proxy gateway
+  [evebox]=oidc-evebox                # EveBox's oauth2-proxy gateway
+  [arkime]=oidc-arkime                # Arkime's oauth2-proxy gateway
+  [tanner]=oidc-tanner                # TANNER's oauth2-proxy gateway
+  [revdeck]=oidc-revdeck              # RevDeck's oauth2-proxy gateway
+  [traefik-dashboard]=oidc-traefik    # Traefik dashboard's oauth2-proxy gateway
 )
 CLIENTS=("${!CLIENT_CONTAINERS[@]}")
 
