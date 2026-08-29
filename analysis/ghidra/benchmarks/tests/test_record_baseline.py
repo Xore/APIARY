@@ -430,6 +430,57 @@ class AskModelRetryTest(unittest.TestCase):
         self.assertEqual(len(calls), 1, "a non-connection error must not be retried")
 
 
+class PayloadDeterminismTest(unittest.TestCase):
+    """#2642: repeat #1805-c runs scored byte-identical on every case even
+    though each repeat was a genuinely separate execution. That is not this
+    script silently reusing a cached answer -- it is that ask_model's outbound
+    payload carries no per-call entropy (no timestamp, nonce, or request id),
+    so two calls built from the same (request, model, prompt) are always
+    byte-identical on the wire. Pin that property explicitly: if someone ever
+    adds hidden per-call state to the payload, this test catches it, and any
+    N-repeat protocol that wants noise instead of a determinism check knows to
+    vary an input this payload actually carries (seed, prompt) rather than
+    repeat with identical arguments."""
+
+    REQUEST = {"temperature": 0, "output_tokens": 512, "seed": 144, "thinking": False}
+
+    def test_identical_inputs_produce_byte_identical_requests(self):
+        sent_bodies = []
+
+        def fake_urlopen(req, timeout=None):
+            sent_bodies.append(req.data)
+            return _FakeChatResponse("answer text")
+
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            record_baseline.ask_model("http://fake/v1", "model", self.REQUEST, "prompt")
+            record_baseline.ask_model("http://fake/v1", "model", self.REQUEST, "prompt")
+
+        self.assertEqual(len(sent_bodies), 2)
+        self.assertEqual(
+            sent_bodies[0], sent_bodies[1],
+            "same (request, model, prompt) must build the exact same wire "
+            "payload -- any difference would mean hidden per-call entropy",
+        )
+
+    def test_a_different_seed_changes_the_request(self):
+        sent_bodies = []
+
+        def fake_urlopen(req, timeout=None):
+            sent_bodies.append(req.data)
+            return _FakeChatResponse("answer text")
+
+        other_seed_request = {**self.REQUEST, "seed": 145}
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            record_baseline.ask_model("http://fake/v1", "model", self.REQUEST, "prompt")
+            record_baseline.ask_model("http://fake/v1", "model", other_seed_request, "prompt")
+
+        self.assertNotEqual(
+            sent_bodies[0], sent_bodies[1],
+            "varying seed is the axis a repeat protocol should use to sample "
+            "noise -- it must actually change the outbound request",
+        )
+
+
 class RunCasesIncrementalSaveTest(unittest.TestCase):
     """#2644: the report used to be written once at the very end, so 53
     minutes of already-scored cases were discarded the instant a later cell's
