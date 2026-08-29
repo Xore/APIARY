@@ -23,7 +23,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::time::Duration;
 
 use crate::{
@@ -32,7 +32,21 @@ use crate::{
 };
 
 const ATTACKERS_INDEX: &str = "attackers-v1";
-const MAX_EXISTING_LOAD: u32 = 20_000;
+/// Ceiling on the *merge-candidate* half of a cycle's entity load (pass 2
+/// of `load_candidate_entities`). A single popular credential pair can be
+/// shared by a large slice of the population, so that pass needs a bound;
+/// overflowing it costs a merge the next sighting will make again, never
+/// stored history. Pass 1 -- the entities holding an IP this window
+/// actually saw -- is deliberately not subject to it (#2651).
+const MAX_MERGE_CANDIDATE_LOAD: usize = 20_000;
+/// Terms per `terms` query. `index.max_terms_count` defaults to 65,536;
+/// staying an order of magnitude under it leaves room for the noisiest
+/// window (a 6h window on live data carries ~12k distinct credential
+/// pairs) without ever having to reason about the limit.
+const CANDIDATE_TERMS_CHUNK: usize = 4_096;
+/// Pages of `CANDIDATE_PAGE_SIZE` per terms chunk.
+const CANDIDATE_PAGE_SIZE: u64 = 10_000;
+const CANDIDATE_MAX_PAGES: u32 = 10;
 const TUNNEL_PEER_IP: &str = "10.8.0.1";
 const MERGE_THRESHOLD: usize = 2;
 const EVENT_PAGE_SIZE: u64 = 10_000;
@@ -453,8 +467,9 @@ struct Entity {
 /// entity struct's own lazily-built unexported fields (entitySignals/
 /// entityIPSet/entitySensorSet/entityTechniqueSet), just built eagerly here
 /// instead of lazily -- Rust's ownership makes lazy memoization on a shared
-/// struct awkward for no real benefit at this data size (existing entities
-/// cap at 20,000).
+/// struct awkward for no real benefit at this data size (a cycle loads the
+/// entities it can actually touch, not the whole population -- see
+/// `load_candidate_entities`).
 struct Working {
     id: String,
     ip_set: HashSet<String>,
@@ -1138,29 +1153,152 @@ fn needs_verdict_refresh(e: &Entity, persisted: Option<&Vec<String>>) -> bool {
 // main.go
 // --------------------------------------------------------------------
 
-async fn load_existing_entities(state: &AppState) -> anyhow::Result<Vec<Entity>> {
-    let hits = state
-        .es
-        .search_paginated(
-            ATTACKERS_INDEX,
-            |search_after| {
-                let mut body = json!({"sort": [{"_shard_doc": "asc"}], "query": {"match_all": {}}});
-                if let Some(sa) = search_after {
-                    body["search_after"] = sa.clone();
-                }
-                body
-            },
-            10_000,
-            (MAX_EXISTING_LOAD / 10_000).max(1),
-        )
-        .await?;
-    let mut out = Vec::with_capacity(hits.len());
-    for hit in hits {
-        if let Ok(e) = serde_json::from_value::<Entity>(hit["_source"].clone()) {
-            out.push(e);
+/// The term lists a cycle's candidate load queries on, deduped and sorted
+/// so a run over the same window issues byte-identical queries.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct CandidateTerms {
+    ips: Vec<String>,
+    fingerprints: Vec<String>,
+    payloads: Vec<String>,
+    creds: Vec<String>,
+}
+
+/// Every IP this window observed, and every signal any observation carries.
+/// Together these reach a superset of the entities a cycle can touch: an
+/// entity is only ever touched through one of its own IPs, and can only be
+/// absorbed by clearing `MERGE_THRESHOLD` shared signals -- which needs at
+/// least one signal in common, so at least one of these terms matches it.
+fn candidate_terms(observations: &HashMap<String, IpObservation>) -> CandidateTerms {
+    let mut fingerprints: BTreeSet<&str> = BTreeSet::new();
+    let mut payloads: BTreeSet<&str> = BTreeSet::new();
+    let mut creds: BTreeSet<&str> = BTreeSet::new();
+    for o in observations.values() {
+        fingerprints.extend(o.signals.fingerprints.iter().map(String::as_str));
+        payloads.extend(o.signals.payloads.iter().map(String::as_str));
+        creds.extend(o.signals.creds.iter().map(String::as_str));
+    }
+    let owned = |s: BTreeSet<&str>| -> Vec<String> { s.into_iter().map(String::from).collect() };
+    let mut ips: Vec<String> = observations.keys().cloned().collect();
+    ips.sort();
+    CandidateTerms {
+        ips,
+        fingerprints: owned(fingerprints),
+        payloads: owned(payloads),
+        creds: owned(creds),
+    }
+}
+
+/// Folds every entity whose `field` holds one of `values` into `out`, keyed
+/// by entity id so the two passes below can overlap freely. `cap` bounds
+/// how many distinct entities the map is allowed to reach; the return says
+/// whether it stopped early on that bound.
+async fn collect_entities_by_terms(
+    state: &AppState,
+    field: &str,
+    values: &[String],
+    cap: Option<usize>,
+    out: &mut HashMap<String, Entity>,
+) -> anyhow::Result<bool> {
+    for chunk in values.chunks(CANDIDATE_TERMS_CHUNK) {
+        if cap.is_some_and(|c| out.len() >= c) {
+            return Ok(true);
+        }
+        let query = json!({"terms": {field: chunk}});
+        let hits = state
+            .es
+            .search_paginated(
+                ATTACKERS_INDEX,
+                |search_after| {
+                    let mut body = json!({"sort": [{"_shard_doc": "asc"}], "query": query.clone()});
+                    if let Some(sa) = search_after {
+                        body["search_after"] = sa.clone();
+                    }
+                    body
+                },
+                CANDIDATE_PAGE_SIZE,
+                CANDIDATE_MAX_PAGES,
+            )
+            .await?;
+        for hit in hits {
+            if let Ok(e) = serde_json::from_value::<Entity>(hit["_source"].clone()) {
+                out.insert(e.id.clone(), e);
+            }
         }
     }
-    Ok(out)
+    Ok(false)
+}
+
+/// Loads the entities this cycle could actually touch, rather than the
+/// whole `attackers-v1` population (#2651). Two passes, and the split is
+/// the whole point:
+///
+/// 1. **By observed IP**, with no ceiling. This is what makes the old
+///    20,000-doc load cap's data-loss path impossible by construction:
+///    `new_entity_id` is a pure function of the seed IP and `index_doc` is
+///    a full replace, so a stored entity that wasn't loaded came back as a
+///    *blank* document under its own id -- resetting `first`, restarting
+///    the lifetime counter, and dropping its signal sets, its verdicts and
+///    the IPs it had absorbed. Loading every entity that holds an IP this
+///    window saw means the "no candidate, so create one" branch can only
+///    ever fire for an IP that genuinely has no entity yet.
+/// 2. **By shared signal**, capped at `MAX_MERGE_CANDIDATE_LOAD`. Only an
+///    entity sharing a fingerprint, payload hash or credential pair with
+///    some observation can reach `MERGE_THRESHOLD`, and a popular
+///    credential can be shared very widely -- so this half is best-effort,
+///    degrading the way the old warning only claimed to: a missed merge,
+///    never lost history.
+///
+/// An entity with no signal in common with any observation can be neither
+/// touched nor absorbed, so leaving it unloaded is not an approximation.
+/// The one edge it does give up: `credentials.keyword` carries
+/// `ignore_above: 256`, so a merge whose only two shared signals are both
+/// credential pairs longer than that is no longer found. Every shorter
+/// signal still matches and pass 1 is unaffected, so no history is at risk.
+///
+/// The result is sorted by id: `resolve_identities` picks its merge target
+/// by candidate order, and ES `_shard_doc` order is arbitrary, so sorting
+/// is what makes two runs over the same data fold the same way.
+async fn load_candidate_entities(
+    state: &AppState,
+    observations: &HashMap<String, IpObservation>,
+) -> anyhow::Result<Vec<Entity>> {
+    if observations.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let terms = candidate_terms(observations);
+    let mut out: HashMap<String, Entity> = HashMap::new();
+
+    collect_entities_by_terms(state, "ips.keyword", &terms.ips, None, &mut out).await?;
+    let by_ip = out.len();
+
+    let mut truncated = false;
+    for (field, values) in [
+        ("fingerprints.keyword", &terms.fingerprints),
+        ("payloads.keyword", &terms.payloads),
+        ("credentials.keyword", &terms.creds),
+    ] {
+        truncated |=
+            collect_entities_by_terms(state, field, values, Some(MAX_MERGE_CANDIDATE_LOAD), &mut out)
+                .await?;
+    }
+    if truncated {
+        tracing::warn!(
+            candidates = out.len(),
+            cap = MAX_MERGE_CANDIDATE_LOAD,
+            "attacker-identity: merge-candidate load hit its cap -- entities sharing only a signal beyond it won't be considered this cycle (entities holding an observed IP are always loaded)"
+        );
+    }
+
+    let mut entities: Vec<Entity> = out.into_values().collect();
+    entities.sort_by(|a, b| a.id.cmp(&b.id));
+    tracing::debug!(
+        candidates = entities.len(),
+        by_ip,
+        observed_ips = observations.len(),
+        "attacker-identity: candidate entities loaded"
+    );
+    Ok(entities)
 }
 
 async fn run_cycle(state: &AppState, window: Duration) {
@@ -1176,7 +1314,7 @@ async fn run_cycle(state: &AppState, window: Duration) {
     };
     let observations = build_ip_observations(&events);
 
-    let existing = match load_existing_entities(state).await {
+    let existing = match load_candidate_entities(state, &observations).await {
         Ok(existing) => existing,
         Err(error) => {
             tracing::warn!(%error, "attacker-identity: loading existing entities failed, skipping this cycle");
@@ -1184,11 +1322,6 @@ async fn run_cycle(state: &AppState, window: Duration) {
         }
     };
     let existing_count = existing.len();
-    if existing_count as u32 >= MAX_EXISTING_LOAD {
-        tracing::warn!(
-            "attacker-identity: existing entity population hit the {MAX_EXISTING_LOAD}-doc load cap -- merge candidates beyond this cap won't be considered this cycle"
-        );
-    }
 
     // #2041: verdict labels can only change when an entity's payload set
     // changed (fresh entities have no persisted baseline), so everything
@@ -1424,6 +1557,80 @@ mod tests {
     fn new_entity_id_is_a_pure_function_of_the_seed_ip() {
         assert_eq!(new_entity_id("203.0.113.5"), new_entity_id("203.0.113.5"));
         assert_ne!(new_entity_id("203.0.113.5"), new_entity_id("203.0.113.6"));
+    }
+
+    #[test]
+    fn candidate_terms_cover_every_observed_ip_and_signal() {
+        // #2651: the candidate load replaced a whole-population scan, so
+        // the term lists are now the only thing standing between a stored
+        // entity and being recreated blank under its own id. Everything the
+        // window saw has to be in them, deduped and sorted so two runs over
+        // the same window issue identical queries.
+        let mut observations = HashMap::new();
+        observations.insert("198.51.100.9".to_string(), obs("198.51.100.9", "fp-b", "sha-b", "root / b"));
+        observations.insert("198.51.100.8".to_string(), obs("198.51.100.8", "fp-a", "sha-a", "root / a"));
+        // A second IP carrying the same fingerprint must not double it up.
+        observations.insert("198.51.100.7".to_string(), obs("198.51.100.7", "fp-a", "", ""));
+
+        let terms = candidate_terms(&observations);
+        assert_eq!(terms.ips, vec!["198.51.100.7", "198.51.100.8", "198.51.100.9"]);
+        assert_eq!(terms.fingerprints, vec!["fp-a", "fp-b"]);
+        assert_eq!(terms.payloads, vec!["sha-a", "sha-b"]);
+        assert_eq!(terms.creds, vec!["root / a", "root / b"]);
+    }
+
+    #[test]
+    fn every_entity_a_cycle_can_touch_is_reachable_from_the_candidate_terms() {
+        // The correctness argument for loading candidates instead of the
+        // whole index: an entity is only reached through one of its own IPs
+        // or by clearing MERGE_THRESHOLD shared signals, and either way at
+        // least one of its stored field values is in a term list. An entity
+        // with nothing in common is never touched, so never needed loading.
+        let mut observations = HashMap::new();
+        observations.insert(
+            "203.0.113.10".to_string(),
+            obs("203.0.113.10", "fp-shared", "sha-shared", ""),
+        );
+        let terms = candidate_terms(&observations);
+
+        // Shares two signals, so it absorbs the new IP -- and the
+        // fingerprint/payload terms both find it.
+        let mergeable = Entity {
+            id: new_entity_id("203.0.113.11"),
+            ips: vec!["203.0.113.11".to_string()],
+            fingerprints: vec!["fp-shared".to_string()],
+            payloads: vec!["sha-shared".to_string()],
+            ..Default::default()
+        };
+        assert!(mergeable
+            .fingerprints
+            .iter()
+            .any(|f| terms.fingerprints.contains(f)));
+
+        let (changed, _) = resolve_identities(vec![mergeable.clone()], &observations);
+        assert_eq!(changed.len(), 1, "the shared signals should have merged, not forked");
+        assert_eq!(changed[0].id, mergeable.id);
+
+        // Shares nothing: no term matches it, and resolve_identities leaves
+        // it alone -- the two statements have to agree for the scoped load
+        // to be lossless.
+        let unrelated = Entity {
+            id: new_entity_id("203.0.113.99"),
+            ips: vec!["203.0.113.99".to_string()],
+            fingerprints: vec!["fp-other".to_string()],
+            payloads: vec!["sha-other".to_string()],
+            ..Default::default()
+        };
+        assert!(!terms.ips.contains(&unrelated.ips[0]));
+        assert!(!terms.fingerprints.contains(&unrelated.fingerprints[0]));
+        assert!(!terms.payloads.contains(&unrelated.payloads[0]));
+
+        let (changed, absorbed) = resolve_identities(vec![unrelated.clone()], &observations);
+        assert!(absorbed.is_empty());
+        assert!(
+            changed.iter().all(|e| e.id != unrelated.id),
+            "an entity sharing no signal must not be touched, so not loading it loses nothing"
+        );
     }
 
     #[test]
