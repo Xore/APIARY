@@ -18,7 +18,7 @@
 # directly. Every other sensor here writes one JSON line per event to a
 # bind-mounted file for ip-enrichment-worker/Filebeat; this patch adds that
 # without touching the existing DB write. See that file's own doc comment.
-FROM python:3.11-slim@sha256:90744cff8f32887f075c47d747a173ff333e9e98801667af93c357fa9f5e28ff AS build
+FROM python:3.11-slim@sha256:1042b61448fef4ba92d16a8c7eb4996d027568ce64792a7877fd88511e0af7c6 AS build
 RUN apt-get update && apt-get install -y --no-install-recommends git \
  && rm -rf /var/lib/apt/lists/*
 ARG MAILONEY_REF=0987c40b45c2f0491cff3c2cbec4fc8d08a2a54d
@@ -28,7 +28,7 @@ RUN git clone https://github.com/awhitehatter/mailoney /build \
 COPY json_log_patch.py /tmp/json_log_patch.py
 RUN python3 /tmp/json_log_patch.py
 
-FROM python:3.11-slim@sha256:90744cff8f32887f075c47d747a173ff333e9e98801667af93c357fa9f5e28ff
+FROM python:3.11-slim@sha256:1042b61448fef4ba92d16a8c7eb4996d027568ce64792a7877fd88511e0af7c6
 RUN apt-get update && apt-get install -y --no-install-recommends netcat-openbsd \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
