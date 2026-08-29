@@ -119,8 +119,15 @@ and each is documented as it actually behaves:
   interleave, and objdump does not print `.rodata` contents, so for the
   stripped variant alone the scorer records the injection gate as
   not-covered (`injection_ok: null`) instead of silently passing.
-- **Tier B/C** read decompiled pseudocode, where a referenced literal
-  appears just as it would in production Ghidra output.
+- **Tier B/C read decompiled pseudocode, which does not carry the literal on
+  its own.** Ghidra's decompiler does not inline `.rodata` string contents
+  into pseudocode, so a referenced literal like this fixture's payload does
+  not appear there even though the binary genuinely carries it (confirmed
+  live, issue #2643 -- this contradicted an earlier, unverified claim here
+  that it would). `record_baseline.py`'s `load_tier_b_evidence()` now
+  prepends the Ghidra-reported strings list ahead of the pseudocode so the
+  injection gate has real Tier B coverage instead of reporting every case as
+  not-covered.
 
 Every build from every earlier revision of this corpus (the original 48,
 then 160) stayed byte-identical across all of those expansions. #1948 is the
