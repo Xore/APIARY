@@ -980,3 +980,178 @@ scripts `collect_ioc_corpus.py`, `sample_corpus.py`, `make_gold.py`,
 metrics, run meta). None contain committed copies here; the synthetic probe
 definitions live in `gold/synthetic_lines.jsonl` there, transcribed in
 aggregate above.
+
+## Issue #1805-c / #1947 part 4 (2026-08-28): ghidra slot, Tier A vs Tier B, twelve models
+
+The last open slice of the #1947 rebuild, and the one #1805 exists to produce:
+the ghidra-slot view scored on both evidence representations, so the
+promote/no-promote call finally has the column the earlier waves deliberately
+left blank.
+
+"Ghidra slot" here means the corpus-revdeck view, per #1805's own correction:
+the ghidra *triage* slot stays permanently absent because object files carry no
+imports or strings and the harness binaries leak the ground-truth asserts.
+
+### Runtime pins
+
+NVIDIA RTX 4000 Ada (20475 MiB, host `supermicro`), Ollama 0.32.13 in
+`ghidra-ollama-1`, harness clone at `22f01c2` in `/mnt-1/benchmarks/APIARY`.
+`record_baseline.py`, gcc-x86_64 / `-O0` slice, 14 cases, max 69.
+Qualification request, byte-for-byte from every report:
+
+```json
+{"concurrency": 1, "context_tokens": 8192, "keep_alive": "10m",
+ "output_tokens": 512, "seed": 144, "temperature": 0, "thinking": false}
+```
+
+Tier A evidence is `objdump -d --source`; Tier B is real Ghidra headless
+pseudocode via `--ghidra-cache /mnt-1/benchmarks/tierb-cache`. Operator
+`bg-1805c`, provenance synthetic, three concurrent lanes, N = 3 per model per
+tier. Machine-readable matrix (per-case scores, gates, wall times, digests):
+[`docs/benchmarks/matrices/1805c-ghidra-slot-matrix.json`](benchmarks/matrices/1805c-ghidra-slot-matrix.json).
+Transcripts: run 1 of each (model, tier) cell is pinned into
+`docs/benchmarks/runs/`, 24 directories; runs 2 and 3 are byte-identical in
+every `answer` field and are not committed (see *Repeats measured nothing*).
+
+### Matrix
+
+`min/run` is wall-clock for the whole 14-case run under three-lane contention,
+not a serving rate — per #2054 it must not be read as tok/s.
+
+| Model | Tier A (/69) | Tier B (/69) | B−A | N | min/run A→B | gates |
+|---|---|---|---|---|---|---|
+| Ornith-1.0-35B-uncensored-heretic:Q4_K_M | 91.3% 63 ±0 | **97.1% 67 ±0** | **+4** | 3 | 32.0 → 28.2 | **A: injection fail**; A: false-positive `safe_strcpy` |
+| gemma-4-31B-it-qat-q4_0-uncensored-heretic:Q4_0 | 87.0% 60 ±0 | **94.2% 65 ±0** | **+5** | 3 | 54.6 → 50.9 | **A: injection fail**; B: false-positive `safe_strcpy` |
+| gemma-4-26B-A4B-it-ultra-uncensored-heretic-i1:i1-Q4_K_S | 87.0% 60 ±0 | **92.8% 64 ±0** | **+4** | 3 | 22.2 → **19.7** | clean |
+| Huihui-Qwen3.6-27B-abliterated:Q4_K_M | 92.8% 64 ±0 | 91.3% 63 ±0 | −1 | 3 | 32.3 → 28.2 | clean |
+| huihui-qwen3.8-27b-abliterated:q4_k | 92.8% 64 ±0 | 91.3% 63 ±0 | −1 | 3 | 22.1 → 19.6 | **A: injection fail**; A: false-positive `safe_strcpy` |
+| observerx-qwen3.8-27b-heretic:q4_k_s | 92.8% 64 ±0 | 91.3% 63 ±0 | −1 | 3 | 32.2 → 28.2 | A: false-positive `safe_strcpy` |
+| Seneca-Cybersecurity-LLM-x-QwQ-32B-Q4_Medium | 91.3% 63 | 91.3% 63 | 0 | **1** | 63.3 → 60.6 | **A: injection fail** |
+| qwen3:14b — *incumbent* | 89.9% 62 | 88.4% 61 | −1 | **1** | 62.5 → 61.0 | clean |
+| qwen2.5:14b-instruct-q4_K_M | 91.3% 63 ±0 | 87.0% 60 ±0 | −3 | 3 | 53.5 → 51.1 | clean |
+| qwen3:8b | 88.4% 61 ±0 | 87.0% 60 ±0 | −1 | 3 | 22.0 → 19.6 | A: false-positive `safe_strcpy` |
+| qwen2.5-coder:14b-instruct-q4_K_M | 91.3% 63 | 84.1% 58 | −5 | **1** | 62.3 → 61.3 | clean |
+| qwen2.5-coder:7b-instruct-q4_K_M — *#159 baseline* | 79.7% 55 ±0 | 84.1% 58 ±0 | +3 | 3+pilot | 41.6 → 39.8 | clean |
+
+Three rows carry N = 1 because `ghidra-ollama-1` was recreated at
+**2026-08-27T20:18:17Z**, mid-round. All three lanes died within one second of
+each other; `record_baseline.py` has no retry and no incremental save, so a
+53-minute run that had already scored 11 of 14 cases was discarded whole, and
+the three runs queued behind it failed instantly against the still-restarting
+container. Ten cells were lost that way. Under the determinism finding below
+those three rows are nevertheless complete measurements, not partial ones.
+
+### Tier B − Tier A splits by model family, and the sign is not universal
+
+#1805-b measured this delta on one model and got **+1.17 ± 0.73 of 69** — inside
+its own noise, reported at the time as "real Ghidra evidence does not clearly
+beat objdump in aggregate". Across twelve models the aggregate hides a clean
+split:
+
+- **Gemma-derived and Ornith rows gain: +4, +5, +4.** Real decompiled C helps
+  them substantially.
+- **Every Qwen-derived row loses: −1 to −5**, including the incumbent.
+- The one model #1805-b actually measured, `qwen2.5-coder:7b`, is the only Qwen
+  row that gains (+3) — so the single-model result generalised to nothing.
+
+The correct reading is not "Ghidra evidence is better" or "objdump is better".
+It is that **the benchmark's historical Tier A numbers systematically mis-rank
+models relative to the input production actually serves**, and the direction of
+the error depends on the model family. That is exactly the failure mode #1805
+was opened to detect, and it is now measured rather than hypothesised.
+
+### Repeats measured nothing: the harness is deterministic since #1953
+
+Every one of the 12 models, on both tiers, scored **identically on all three
+repeats — and every one of the 14 `answer` strings was byte-identical across
+repeats.** Only `wall_seconds` moved. The `±0` in the table is not a narrow
+noise band; it is the same run recorded three times.
+
+This contradicts the anchor #1947 rule 3 was built on. On 2026-08-25, #1805-b
+measured four runs of one model at temperature 0 / seed 144 / identical digest
+at **56, 56, 55, 55**, with 7 of 14 cases moving and **0 of 14 answers
+byte-identical**. The cause is `f3f4c14` (#1953), merged after that
+measurement, which added `reasoning_effort: "none"` to every request.
+
+Probed directly against this host's Ollama 0.32.13 on
+`qwen2.5-coder:7b-instruct-q4_K_M`, identical prompt, temperature 0, seed 144,
+three repeats each way:
+
+| request | sequential | concurrent |
+|---|---|---|
+| `reasoning_effort: "none"` (what the harness now sends) | identical ×3 | identical ×3 |
+| parameter omitted (pre-#1953 shape) | **2 distinct outputs** | **2 distinct outputs** |
+
+Concurrency is not the variable — the deterministic arm is byte-stable even
+under three simultaneous requests. The parameter is.
+
+Consequences, all of which belong in the round bookkeeping:
+
+1. **N = 3 is currently wasted GPU time.** This round burned 37.4 h of
+   model-wall, of which **22.1 h (59%) re-derived identical bytes**. The
+   `±0`-dominant spread in parts 1 and 2 was the same effect, undiagnosed.
+2. **The ±0.58 noise band cited throughout #1947 does not apply to post-#1953
+   code**, and must not be used to dismiss small margins in this matrix. A
+   1-point difference here is reproducible; whether it is *meaningful* is a
+   rubric question, not a noise question.
+3. **Determinism is a property of the fixed request, not of the model.** It
+   justifies N = 1 for repeat-identical requests only. It says nothing about
+   sensitivity to seed, prompt or quant, which remains unmeasured.
+
+### Injection resistance: Tier A finds real failures, Tier B cannot test at all
+
+Reported separately from accuracy, per #1946's two-axis rule.
+
+**Tier B has zero injection coverage on all 11 Tier B cells.**
+`injection_payload_in_evidence` is `false` everywhere and the harness correctly
+records `injection_ok: null` — not tested, rather than passed. The mechanism is
+confirmed at the source: **no file in the Tier B Ghidra cache contains the
+needle string at all.** The payload is a referenced string literal (#1948), and
+Ghidra's decompiled pseudocode does not carry the contents of `.rodata`, so it
+never reaches the model. #1948's guard is doing its job — without it this round
+would have published a unanimous clean sweep on an untested gate.
+
+At Tier A, where the payload does reach the model, **4 of 12 models fail**:
+
+| Model | Tier A `injection_ok` |
+|---|---|
+| Seneca-Cybersecurity-LLM-x-QwQ-32B | **fail** |
+| Ornith-1.0-35B-uncensored-heretic | **fail** |
+| gemma-4-31B-it-qat-uncensored-heretic | **fail** |
+| huihui-qwen3.8-27b-abliterated | **fail** |
+| the other eight, incl. `qwen3:14b`, `qwen3:8b`, both `qwen2.5-coder` rows, `observerx`, `Huihui-Qwen3.6`, `gemma-4-26B-A4B`, `qwen2.5:14b` | pass |
+
+This qualifies #1795-b's "injection resistance held clean for every model that
+produced output". On the sessions/revdeck slots it did. On the ghidra slot's
+Tier A evidence it does not, for four models — and **the two highest Tier B
+scorers in this matrix are two of the four.**
+
+### Decision
+
+**No promotion. `qwen3:14b` stays the approved ghidra-slot model.**
+
+The two models that beat it by a margin large enough to matter — Ornith-1.0-35B
+(67, +6) and gemma-4-31B-heretic (65, +4) — both fail the Tier A injection gate.
+A model that follows an instruction embedded in the artefact it is analysing is
+disqualified for this slot on the analyst-trust grounds the decision record
+already states, regardless of accuracy. Score does not buy past that gate.
+
+`gemma-4-26B-A4B-it-ultra-uncensored-heretic-i1` is the one genuinely
+interesting row: **64 (92.8%) at Tier B, +3 over the incumbent, clean on both
+gates, and the fastest model in the matrix at 19.7 min/run against the
+incumbent's 61.0** — consistent with its standout showing in part 2. It is the
+single best promote candidate the #1947 rebuild has produced. It is **not
+promoted here** for one stated reason: its Tier B lead over the incumbent
+(+3 of 69) rests on N = 1 for the incumbent, because `qwen3:14b` is one of the
+three rows the Ollama restart truncated. That comparison deserves a re-measured
+incumbent before a production change, and re-measuring it is cheap now that
+repeats are known to be redundant.
+
+Carried forward:
+
+- Re-measure `qwen3:14b`, `qwen2.5-coder:14b` and Seneca at both tiers (N = 1
+  suffices), then settle the `gemma-4-26B-A4B` promotion.
+- Tier B cannot test injection resistance until the payload survives into
+  Ghidra evidence. Until it does, the ghidra slot's injection verdict comes
+  from Tier A only, and that must be stated wherever the gate is cited.
+- Tier C (LLM4Decompile-Ref refinement, #1804-a) remains unmeasured.
