@@ -62,6 +62,15 @@ bumped pin: the wrapper's `rm` list is by path, so an upstream
 move/rename of a listed file surfaces as a build failure to re-decide, not
 as a silently skipped strip.
 
+It also patches `Program.cs` in the build copy (#2257) to drop
+`app.UseSwagger()`/`app.UseSwaggerUI()`, and ships
+`ASPNETCORE_ENVIRONMENT=Production` instead of upstream's `DEVELOPMENT`, so
+the image serves neither an anonymous endpoint map nor developer exception
+pages -- the API authenticates nobody, so both were readable by any guest
+that reached the socket. The sed is bracketed by assertions (exactly two
+`app.UseSwagger*` lines before, none after), giving it the same
+fail-the-build-on-upstream-drift property as the `rm` list.
+
 ## Updating the pin
 
 There's no script for this yet (a genuine gap, same as every other vendored
