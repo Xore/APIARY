@@ -29,7 +29,7 @@ from pathlib import Path
 
 MARKER = "honeypot-stack: IEC104 recv(1) EOF patch"
 TARGET = Path(
-    "/usr/lib/python3.11/site-packages/conpot/protocols/IEC104/IEC104_server.py"
+    "/usr/lib/python3.12/site-packages/conpot/protocols/IEC104/IEC104_server.py"
 )
 
 OLD = """                        while request and len(request) < 2:

@@ -34,7 +34,7 @@ from pathlib import Path
 
 MARKER = "honeypot-stack: modbus recv(1) EOF patch"
 TARGET = Path(
-    "/usr/lib/python3.11/site-packages/conpot/protocols/modbus/modbus_server.py"
+    "/usr/lib/python3.12/site-packages/conpot/protocols/modbus/modbus_server.py"
 )
 
 OLD = '''                _, _, length = struct.unpack(">HHH", request[:6])
