@@ -60,6 +60,7 @@ import json
 import mimetypes
 import os
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -238,6 +239,54 @@ def assert_injection_present(entry: dict[str, Any], needle: str) -> bool:
     return needle.lower() in haystack.lower()
 
 
+def _atomic_write_json(target: Path, payload: dict[str, Any]) -> None:
+    """Write `payload` to `target` so a reader never observes a partial file.
+
+    Mirrors write_atomic() in evaluate-models.py: write to a temp file in
+    the same directory, fsync, then os.replace(). The rename is a single
+    atomic syscall, so `target` always holds either the previous complete
+    contents or the new complete contents -- never a truncated write from a
+    Ctrl-C, OOM kill, or full disk. That guarantee is what makes
+    _cache_entry_is_valid()'s json.loads() check trustworthy: an
+    interrupted write never reaches `target` at all, so the next run just
+    sees the old (or no) file and re-extracts.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    data = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    handle, temp_name = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
+    try:
+        with os.fdopen(handle, "wb") as output:
+            output.write(data)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temp_name, target)
+    finally:
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
+
+
+def _cache_entry_is_valid(target: Path) -> bool:
+    """A cache hit must be backed by parseable JSON, not just a same-named
+    file on disk.
+
+    Before atomic writes, a crash mid-write could leave a truncated
+    `{key}.json` that a bare target.exists() would then treat as a
+    permanent hit under the cache key, which never changes (#2053).
+    json.loads() is cheap next to an 18s Ghidra run, so paying it on every
+    hit check self-heals any entry corrupted before this fix existed, not
+    just ones this process could still interrupt.
+    """
+    if not target.exists():
+        return False
+    try:
+        json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return True
+
+
 def build(corpus_dir: Path, cache_dir: Path, base: str, toolchain: str | None,
           opt_level: str | None, stripped: bool, limit: int | None) -> dict[str, Any]:
     manifest_path = corpus_dir / "manifest.json"
@@ -275,11 +324,13 @@ def build(corpus_dir: Path, cache_dir: Path, base: str, toolchain: str | None,
             "path": str(target),
         }
 
-        if target.exists():
+        if _cache_entry_is_valid(target):
             hits += 1
             row["state"] = "cached"
             index.append(row)
             continue
+        if target.exists():
+            print(f"  CORRUPT {case}: {target.name} failed to parse, re-extracting", flush=True)
 
         binary = corpus_dir / record["path"]
         if not binary.exists():
@@ -331,7 +382,7 @@ def build(corpus_dir: Path, cache_dir: Path, base: str, toolchain: str | None,
             "wall_seconds": round(time.monotonic() - started, 1),
             "evidence": evidence,
         }
-        target.write_text(json.dumps(entry, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        _atomic_write_json(target, entry)
         misses += 1
         row["state"] = "extracted"
         row["functions"] = len(evidence["functions"])
@@ -353,8 +404,7 @@ def build(corpus_dir: Path, cache_dir: Path, base: str, toolchain: str | None,
         "counts": {"cached": hits, "extracted": misses, "errors": errors, "total": len(builds)},
         "entries": index,
     }
-    (cache_dir / "index.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n",
-                                          encoding="utf-8")
+    _atomic_write_json(cache_dir / "index.json", summary)
     return summary
 
 
