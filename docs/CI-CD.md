@@ -617,6 +617,35 @@ and skips re-registration if `$RUNNER_HOME/.runner` already exists (remove
 that file first to re-register, e.g. after moving the runner to a new
 host).
 
+### Scaling past one instance (#2572)
+
+`--instance N` registers an independent SECOND (or third, fourth, ...)
+runner instance on the same box instead of touching the primary one:
+
+```bash
+sudo scripts/github-ci-runner/install-ci-runner.sh --repo Xore/APIARY --instance 2
+```
+
+Each instance gets its own system user (`github-ci-runner-N`), its own
+`_work` dir and `.runner` registration (`/opt/github-ci-runner-N`), and its
+own systemd unit -- but registers under the SAME `honeypot-ci` label as the
+primary instance, so GitHub schedules a queued job onto whichever instance
+is idle rather than piling everything behind one executor. `--instance 1`
+(the default, omitting the flag) is the original unsuffixed layout and
+needs no migration.
+
+This is a real fix for #2572 (one instance serializing the whole
+homeserver-first matrix), not just a mitigation: `quality.yml`'s matrix
+rows are already independent per #2389/#2565, so adding instances turns
+that existing independence into actual wall-clock parallelism. The
+`test_honeypot_ilm_rollover`/`geoip_pipeline`/`dionaea_incidents_index`/
+`conpot_persona_pipeline` rows each pick a random host port in `19000-19899`
+for their throwaway Elasticsearch container specifically so two instances
+running one concurrently don't collide on a fixed port; `containers.yml`'s
+buildx cache is `type=gha` (the GitHub Actions cache backend), which is
+already shared by cache key rather than living on local disk, so a second
+instance is not cold there -- no extra work needed for that tier.
+
 `actions/setup-go`/`actions/setup-node` cache their toolchain downloads in
 the runner's own persistent tool cache -- unlike an ephemeral GitHub-hosted
 runner, that cache survives between job runs on this same machine, so the
