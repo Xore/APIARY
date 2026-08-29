@@ -1238,6 +1238,34 @@ def healthcheck(config: Config) -> int:
         return 1
 
 
+def compose_route_preflight(config: Config) -> None:
+    """Refuse captured-data mode when this composition never wired an ES
+    route in the first place (#2234).
+
+    This is the compose-level counterpart to es_preflight: cheaper (no
+    network call) and independent of whatever .env happens to contain,
+    because it checks a fact set by the compose files themselves rather
+    than by app config. ES_HOST is forced empty in the #66 base compose and
+    only overridden by the captured-data/canary overlays, alongside the
+    networks that make it reachable -- so an empty ES_HOST here is a
+    reliable, static signal that the base file was brought up alone, before
+    es_preflight's live ES ping would even get a chance to time out.
+    """
+    if config.dry_run:
+        return
+    if os.getenv("ES_HOST", "").strip():
+        return
+    raise RuntimeError(
+        "captured-data mode is requested (LLM_ENABLED/LLM_DRY_RUN/"
+        "LLM_ALLOW_CAPTURED_DATA) but ES_HOST is not set: this looks like "
+        "the #66 base compose (docker-compose.yml) brought up on its own. "
+        "It attaches only the internal synthetic-only network and forces "
+        "ES_HOST empty. Start through docker-compose.captured-data-deploy.yml "
+        "instead, which supplies ES_HOST plus the llm-data/llm-backend "
+        "networks that make it reachable. See issue #2234."
+    )
+
+
 def es_preflight(config: Config) -> None:
     """Refuse captured-data mode when Elasticsearch has no route (#2234).
 
@@ -1485,6 +1513,16 @@ def main() -> int:
         print(json.dumps(result, sort_keys=True))
         return 0
     worker = LLMWorker(config)
+    # #2234: the compose-level gate runs first -- it is a same-process,
+    # network-free check on which compose files were actually combined, so
+    # it catches a bare base bring-up instantly instead of waiting on
+    # es_preflight's live ES ping to time out for the same underlying reason.
+    try:
+        compose_route_preflight(config)
+    except RuntimeError as exc:
+        write_status({"mode": "captured-data", "error": "compose-route-missing"}, False)
+        print(f"startup preflight failed: {exc}", file=sys.stderr)
+        return 1
     # #2234: before the loop, so the failure names its cause once at startup
     # and the status document carries it for the healthcheck to repeat,
     # instead of a crashloop whose only symptom is generic cycle errors.
