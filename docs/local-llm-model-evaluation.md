@@ -1005,9 +1005,9 @@ Qualification request, byte-for-byte from every report:
 ```
 
 **Two of those fields are recorded but never sent** — `context_tokens` and
-`keep_alive` do not reach Ollama; see *The recorded qualification request is
-not the request that was sent* below. The served context was this container's
-`OLLAMA_CONTEXT_LENGTH=32768`, not 8192.
+`keep_alive` do not reach Ollama, so the context this round actually ran at is
+not pinned and not recorded; see *The recorded qualification request is not the
+request that was sent* below.
 
 Tier A evidence is `objdump -d --source`; Tier B is real Ghidra headless
 pseudocode via `--ghidra-cache /mnt-1/benchmarks/tierb-cache`. Operator
@@ -1132,14 +1132,22 @@ uninformative rather than as evidence that the harness is noise-free.
 stamped into every report, and in the pins quoted above, but neither is ever
 transmitted.** There is no `num_ctx` and no `keep_alive` anywhere in the file.
 
-On this host the effect is benign: the container sets
-`OLLAMA_CONTEXT_LENGTH=32768` and the largest evidence in the round is 4002
-characters (~1000 tokens), so nothing was truncated and the served context was
-four times the pin that was claimed. But the pin is still false, and a report
-that states a context length it did not set will silently produce different
-numbers on a host configured differently. Recorded here rather than quietly
-corrected, because tag+digest+request pinning is #1947 rule 5 and this is a
-hole in it.
+The consequence is worse than a cosmetic mislabel, because **the context an
+Ollama model serves at is a property of the loaded instance, not of the
+request.** A model loaded without `num_ctx` takes the container's
+`OLLAMA_CONTEXT_LENGTH` (32768 here) — but a model already resident, loaded by
+another client at another size, is *reused at that client's size*. This host
+shares `ghidra-ollama-1` with the live stack, and `ollama ps` right now shows
+`qwen3:14b` resident at **CONTEXT 8192**, loaded by the worker rather than by
+the benchmark. So the context each cell of this round actually ran at depends
+on who loaded the model first, is not controlled by the harness, and **is not
+recorded anywhere in the artifacts**.
+
+Accuracy was almost certainly unaffected: the largest evidence in the round is
+4002 characters (~1000 tokens), far inside any of these ceilings, so nothing
+was truncated at 8192 or 32768. The defect is reproducibility, not these
+numbers. Recorded here rather than quietly corrected, because tag + digest +
+request pinning is #1947 rule 5 and this is a hole in it.
 
 ### Injection resistance: Tier A finds real failures, Tier B cannot test at all
 
