@@ -1386,7 +1386,7 @@ async fn run_cycle(state: &AppState, window: Duration) {
         ips_observed = observations.len(),
         changed = changed.len(),
         absorbed = absorbed.len(),
-        existing_loaded = existing_count,
+        candidates_loaded = existing_count,
         duration_ms = (chrono::Utc::now() - start).num_milliseconds(),
         "attacker-identity: cycle complete"
     );
