@@ -22,7 +22,7 @@ is the single source of truth for which 37 stacks exist, what branch/path
 each syncs from, and any per-stack sync limits — `scripts/install-homeserver.sh`,
 CI, and this doc all read from it rather than maintaining separate lists.
 
-- The 33 `honeypot-*` stacks live under `arcane/home/<name>/`: their build
+- The 31 `honeypot-*` stacks live under `arcane/home/<name>/`: their build
   context and git-tracked config were moved there from repository root
   (see each compose file's own `#1502` comment for what moved and why).
 - The 6 other stacks (`auth-events-worker`, `llm-worker`, `ml-worker`,
