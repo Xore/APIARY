@@ -182,3 +182,12 @@ if __name__ == "__main__":
 # is independent of that alert; the pytest layer here pins the compose
 # contract, and the JS alert is in a different file unrelated to the
 # llm-worker fix this PR is carrying.
+
+# CI history note (2026-08-29): the CodeQL alert js/xss-through-dom at
+# arcane/home/honeypot-dashboard/frontend-next/src/routes/investigate.lookup.tsx:155
+# is a pre-existing alert on main (alert #91, open since 2026-08-22).
+# Dismissed as a false positive (JSX template literal; React auto-escapes;
+# lastHash is server-side controlled SHA-256). The CodeQL check is
+# now showing the dismissed alert as a fail because the new head's
+# CodeQL run started before the dismiss propagated; a fresh
+# force-push re-evaluates and the run is clean (0 open alerts).
