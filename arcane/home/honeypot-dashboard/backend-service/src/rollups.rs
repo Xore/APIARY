@@ -673,14 +673,23 @@ async fn write_geo_cycle(state: &AppState) -> anyhow::Result<()> {
     if !failed.is_empty() {
         anyhow::bail!("geo rollup: {} ops failed", failed.len());
     }
-    state
-        .es
-        .delete_by_query(
-            GEO_INDEX,
-            json!({"query": {"range": {"updated": {"lt": tick}}}}),
-        )
-        .await?;
+    state.es.delete_by_query(GEO_INDEX, geo_stale_query(&tick)).await?;
     Ok(())
+}
+
+/// #2653: `EsClient::delete_by_query` wraps what it is given in `{"query":
+/// …}` itself, so these builders must hand it a *bare* query. Both call
+/// sites used to pass `{"query": …}` and the double wrap made every
+/// request a 400 (`unknown query [query]`) -- silently, since the geo
+/// refresh's delete is the second half of a write-then-swap and the prune
+/// only warns. Keeping the queries as named functions is what lets the
+/// tests below assert the shape the helper actually expects.
+fn geo_stale_query(tick: &str) -> Value {
+    json!({"range": {"updated": {"lt": tick}}})
+}
+
+fn rollup_prune_query(cutoff: &str) -> Value {
+    json!({"range": {"bucket": {"lt": cutoff}}})
 }
 
 /// Drop buckets older than retention from both hourly indices; geo needs no
@@ -690,7 +699,7 @@ async fn prune_old_buckets(state: &AppState, now: DateTime<Utc>) {
     for index in [OVERVIEW_INDEX, ATTACK_INDEX] {
         match state
             .es
-            .delete_by_query(index, json!({"query": {"range": {"bucket": {"lt": cutoff}}}}))
+            .delete_by_query(index, rollup_prune_query(&cutoff))
             .await
         {
             Ok(_) => {}
@@ -791,6 +800,25 @@ mod tests {
 
     fn hour(n: i64) -> DateTime<Utc> {
         DateTime::from_timestamp(1_800_000_000, 0).unwrap() + Duration::hours(n)
+    }
+
+    #[test]
+    fn prune_queries_are_bare_because_the_helper_adds_the_query_wrapper() {
+        // #2653: EsClient::delete_by_query bodies its argument as
+        // {"query": arg}. Both call sites used to pass {"query": …}
+        // themselves, so every request went out as {"query":{"query":…}}
+        // and Elasticsearch 400'd it -- for the whole life of the helper,
+        // seen only as a warn line. A bare query here is the contract.
+        for q in [geo_stale_query("2026-08-29T20:44:10.672Z"), rollup_prune_query("2026-08-29T20:00Z")] {
+            assert!(
+                q.get("query").is_none(),
+                "query must not be pre-wrapped, delete_by_query wraps it: {q}"
+            );
+            assert!(q.get("range").is_some(), "expected a bare range query, got {q}");
+            // What the helper actually puts on the wire.
+            let body = json!({"query": q});
+            assert!(body["query"]["query"].is_null(), "double-wrapped body: {body}");
+        }
     }
 
     #[test]
