@@ -553,6 +553,20 @@ class StartupPreflightIntegrationTests(unittest.TestCase):
         self.assertNotIn("preflight", err)
         self.assertIs(self._status()["ok"], True)
 
+    def test_empty_es_host_stops_at_the_compose_gate_before_any_es_probe(self):
+        # The two gates are ordered on purpose: an empty ES_HOST is the static
+        # signature of a bare #66 base-compose bring-up, so it has to be named
+        # as such immediately rather than waiting on es_preflight's live ping
+        # to time out against a route that was never wired.
+        with patch.dict(os.environ, {"ES_HOST": ""}), \
+                patch.object(worker, "es_preflight") as probe:
+            code, instance, err = self._run_main(ping=True)
+        self.assertEqual(code, 1)
+        probe.assert_not_called()
+        instance.run_once.assert_not_called()
+        self.assertIn("startup preflight failed", err)
+        self.assertEqual(self._status()["error"], "compose-route-missing")
+
 
 class HealthcheckDiagnosticsTests(unittest.TestCase):
     """#2234: the healthcheck's exit 1 carries a reason on stdout."""
