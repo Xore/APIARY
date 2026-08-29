@@ -18,8 +18,18 @@ if (-not (Test-Path "$fn\fakenet")) {
   git clone --depth 1 https://github.com/mandiant/flare-fakenet-ng.git $fn
 }
 
-# FakeNet's python deps (pydivert/win Divert etc. are in requirements.txt)
-& $py -m pip install --quiet -r "$fn\requirements.txt"
+# FakeNet's python deps. Upstream flare-fakenet-ng ships no root
+# requirements.txt (only setup.py's install_requires and a test-only
+# test/requirements.txt) -- installing "-r $fn\requirements.txt" always
+# failed silently under $ErrorActionPreference='Continue' with no deps
+# ever installed. Install the runtime deps explicitly instead: pyopenssl
+# and cryptography from install_requires, pydivert for the Windows
+# diverter, and check the exit code so a failed install is loud.
+& $py -m pip install --quiet pyopenssl cryptography pydivert
+if ($LASTEXITCODE -ne 0) {
+  Write-Warning "[!] FakeNet dependency install failed (pip exit $LASTEXITCODE); FakeNet will not start."
+  exit 1
+}
 
 # ---------------- Copy our tuned config over the default ----------------
 $custom = 'D:\fakenet\detnode.ini'   # PROVISION cdrom, if packer cd_files mounted
