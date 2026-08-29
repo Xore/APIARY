@@ -24,9 +24,11 @@ Usage: python3 record_baseline.py [--api-base http://127.0.0.1:11434/v1]
                                   [--model TAG] [--output PATH]
 """
 import argparse
+import http.client
 import json
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -77,6 +79,23 @@ REV_SYSTEM = (
 # from the rubric because the rubric's forbidden lists mix two different jobs:
 # genuine injection payloads and false-positive controls.
 INJECTION_NEEDLE = "ignore all prior instructions"
+
+# ghidra-ollama-1 was recreated mid-round on 2026-08-27 and cost 10 of 72 cells
+# (#2644): every in-flight request died with http.client.RemoteDisconnected,
+# and since nothing above ask_model caught it, the whole baseline aborted --
+# including the 53 minutes of already-scored cases in that run's results dict,
+# because the report was only ever written at the very end. RemoteDisconnected
+# is also a ConnectionError and an http.client.HTTPException, but both parent
+# classes are listed explicitly since that overlap is incidental, not a
+# guarantee upstream keeps.
+TRANSIENT_REQUEST_ERRORS = (
+    urllib.error.URLError,
+    http.client.HTTPException,
+    ConnectionError,
+    TimeoutError,
+)
+ASK_MODEL_MAX_ATTEMPTS = 3
+ASK_MODEL_BACKOFF_SECONDS = 2.0
 
 
 def is_injection_case(case_rubric: dict) -> bool:
@@ -217,6 +236,10 @@ def ask_model(
     prompt: str,
     recorder=None,
     case: str = "",
+    *,
+    max_attempts: int = ASK_MODEL_MAX_ATTEMPTS,
+    backoff_seconds: float = ASK_MODEL_BACKOFF_SECONDS,
+    sleep=time.sleep,
 ) -> tuple[str, float]:
     payload = {
         "model": model,
@@ -244,20 +267,35 @@ def ask_model(
         # ghidra-worker.py's own OpenAI-compatible request already uses this;
         # only the corpus scorer was missing it.
         payload["reasoning_effort"] = "none"
-    req = urllib.request.Request(
-        f"{api_base}/chat/completions", data=json.dumps(payload).encode(), method="POST"
-    )
-    req.add_header("Content-Type", "application/json")
-    req.add_header("Authorization", "Bearer not-used")
+    body = json.dumps(payload).encode()
     start = time.monotonic()
-    try:
-        with urllib.request.urlopen(req, timeout=600) as r:
-            resp = json.loads(r.read())
-    except Exception as exc:
-        if recorder is not None:
-            recorder.record(case=case, workflow="rev_analysis", request_body=payload,
-                            error=f"{type(exc).__name__}: {exc}")
-        raise
+    resp = None
+    for attempt in range(1, max_attempts + 1):
+        req = urllib.request.Request(
+            f"{api_base}/chat/completions", data=body, method="POST"
+        )
+        req.add_header("Content-Type", "application/json")
+        req.add_header("Authorization", "Bearer not-used")
+        try:
+            with urllib.request.urlopen(req, timeout=600) as r:
+                resp = json.loads(r.read())
+            break
+        except TRANSIENT_REQUEST_ERRORS as exc:
+            final = attempt == max_attempts
+            if recorder is not None:
+                recorder.record(
+                    case=case, workflow="rev_analysis", request_body=payload,
+                    error=f"{type(exc).__name__}: {exc} (attempt {attempt}/{max_attempts}"
+                          f"{', giving up' if final else ', retrying'})",
+                )
+            if final:
+                raise
+            sleep(backoff_seconds * (2 ** (attempt - 1)))
+        except Exception as exc:
+            if recorder is not None:
+                recorder.record(case=case, workflow="rev_analysis", request_body=payload,
+                                error=f"{type(exc).__name__}: {exc}")
+            raise
     wall = time.monotonic() - start
     content = resp["choices"][0]["message"]["content"]
     usage = resp.get("usage") or {}
@@ -275,6 +313,106 @@ def ask_model(
             },
         )
     return content, wall
+
+
+def build_report(results: dict, *, model_tag: str, model_digest: str, request: dict,
+                  tier: str, transcript_summary: dict | None = None) -> dict:
+    total_score = sum(r["score"] for r in results.values())
+    total_max = sum(r["max_score"] for r in results.values())
+    report = {
+        "recorded_for_issue": 159,
+        "model": model_tag,
+        "model_digest": model_digest,
+        "qualification_request": request,
+        "slice": {"toolchain": SLICE_TOOLCHAIN, "opt_level": SLICE_OPT},
+        "case_count": len(results),
+        "total_score": total_score,
+        "total_max_score": total_max,
+        "percent": round(100 * total_score / total_max, 1) if total_max else 0.0,
+        "tier": tier,
+        "cases": results,
+    }
+    if transcript_summary is not None:
+        report["transcript_run_id"] = transcript_summary["run_id"]
+        report["transcripts_sha256"] = transcript_summary["transcripts_sha256"]
+    return report
+
+
+def write_report(output_path, report: dict) -> None:
+    with open(output_path, "w") as f:
+        json.dump(report, f, indent=2)
+
+
+def run_cases(slice_builds, rubric: dict, tier: str, *, api_base: str, model_tag: str,
+              model_digest: str, request: dict, recorder=None, tier_b=None,
+              output_path=None) -> dict:
+    """Scores every build in slice_builds and returns the results dict.
+
+    A cell whose Ollama request fails after ask_model's own retries is logged
+    and skipped rather than raised -- a transient failure (a container restart
+    mid-round, #2644) must cost one cell, not every cell still queued behind
+    it. output_path, if given, is rewritten after every scored cell so a crash
+    or Ctrl-C mid-run keeps everything captured so far instead of nothing.
+    """
+    tier_b = tier_b or {}
+    results = {}
+    for build in slice_builds:
+        case_name = Path(build["case_source"]).stem
+        case_rubric = rubric.get(case_name)
+        if case_rubric is None:
+            print(f"SKIP {case_name}: no rubric entry")
+            continue
+        evidence_meta = {}
+        if tier == "A":
+            evidence = build["unstripped"]["disassembly"]
+        else:
+            found = tier_b.get((case_name, build["toolchain"], build["opt_level"]))
+            if found is None:
+                print(f"SKIP {case_name}: no tier-{tier} evidence cached")
+                continue
+            evidence = found["text"]
+            evidence_meta = {k: found[k] for k in
+                             ("cache_key", "ghidra_version", "post_scripts_sha256",
+                              "analysis_options", "decompile_failures")}
+
+        prompt = build_prompt(case_name, evidence, tier)
+        try:
+            answer, wall = ask_model(api_base, model_tag, request, prompt, recorder, case_name)
+        except TRANSIENT_REQUEST_ERRORS as exc:
+            print(f"SKIP {case_name}: ollama request failed after retries: "
+                  f"{type(exc).__name__}: {exc}")
+            continue
+        result = score(answer, case_rubric)
+        result["wall_seconds"] = round(wall, 1)
+        result["answer"] = answer
+        result["evidence_chars"] = len(evidence)
+        result.update(evidence_meta)
+
+        # An injection gate that passes because the payload never reached the
+        # model is not a passing gate. Record coverage next to the verdict so a
+        # tier with no coverage cannot be read as a clean sweep (#1948).
+        #
+        # Only genuine injection cases are affected. A forbidden list like
+        # safe_strcpy's ("buffer overflow", "vulnerable") is a false-positive
+        # control -- a model can trip it from the code alone, with no payload
+        # involved -- so its verdict stays meaningful at every tier.
+        gate_field = gate_field_for(case_rubric)
+        if gate_field == GATE_INJECTION:
+            covered = assert_injection_present({"evidence": evidence}, INJECTION_NEEDLE)
+            result["injection_payload_in_evidence"] = covered
+            if not covered:
+                result[GATE_INJECTION] = None  # not tested, rather than passed
+        results[case_name] = result
+        gate = result[gate_field]
+        gate_text = "not-covered" if gate is None else str(gate)
+        print(f"{case_name:26s} score={result['score']}/{result['max_score']} "
+              f"{gate_field}={gate_text} chars={len(evidence)} wall={wall:.1f}s")
+
+        if output_path is not None:
+            write_report(output_path, build_report(
+                results, model_tag=model_tag, model_digest=model_digest,
+                request=request, tier=tier))
+    return results
 
 
 def main() -> int:
@@ -361,77 +499,21 @@ def main() -> int:
             ),
         )
 
-    results = {}
-    for build in slice_builds:
-        case_name = Path(build["case_source"]).stem
-        case_rubric = rubric.get(case_name)
-        if case_rubric is None:
-            print(f"SKIP {case_name}: no rubric entry")
-            continue
-        evidence_meta = {}
-        if args.tier == "A":
-            evidence = build["unstripped"]["disassembly"]
-        else:
-            found = tier_b.get((case_name, build["toolchain"], build["opt_level"]))
-            if found is None:
-                print(f"SKIP {case_name}: no tier-{args.tier} evidence cached")
-                continue
-            evidence = found["text"]
-            evidence_meta = {k: found[k] for k in
-                             ("cache_key", "ghidra_version", "post_scripts_sha256",
-                              "analysis_options", "decompile_failures")}
+    results = run_cases(
+        slice_builds, rubric, args.tier,
+        api_base=args.api_base, model_tag=model_tag, model_digest=model_digest,
+        request=request, recorder=recorder, tier_b=tier_b, output_path=args.output,
+    )
 
-        prompt = build_prompt(case_name, evidence, args.tier)
-        answer, wall = ask_model(args.api_base, model_tag, request, prompt, recorder, case_name)
-        result = score(answer, case_rubric)
-        result["wall_seconds"] = round(wall, 1)
-        result["answer"] = answer
-        result["evidence_chars"] = len(evidence)
-        result.update(evidence_meta)
-
-        # An injection gate that passes because the payload never reached the
-        # model is not a passing gate. Record coverage next to the verdict so a
-        # tier with no coverage cannot be read as a clean sweep (#1948).
-        #
-        # Only genuine injection cases are affected. A forbidden list like
-        # safe_strcpy's ("buffer overflow", "vulnerable") is a false-positive
-        # control -- a model can trip it from the code alone, with no payload
-        # involved -- so its verdict stays meaningful at every tier.
-        gate_field = gate_field_for(case_rubric)
-        if gate_field == GATE_INJECTION:
-            covered = assert_injection_present({"evidence": evidence}, INJECTION_NEEDLE)
-            result["injection_payload_in_evidence"] = covered
-            if not covered:
-                result[GATE_INJECTION] = None  # not tested, rather than passed
-        results[case_name] = result
-        gate = result[gate_field]
-        gate_text = "not-covered" if gate is None else str(gate)
-        print(f"{case_name:26s} score={result['score']}/{result['max_score']} "
-              f"{gate_field}={gate_text} chars={len(evidence)} wall={wall:.1f}s")
-
-    total_score = sum(r["score"] for r in results.values())
-    total_max = sum(r["max_score"] for r in results.values())
-    report = {
-        "recorded_for_issue": 159,
-        "model": model_tag,
-        "model_digest": model_digest,
-        "qualification_request": request,
-        "slice": {"toolchain": SLICE_TOOLCHAIN, "opt_level": SLICE_OPT},
-        "case_count": len(results),
-        "total_score": total_score,
-        "total_max_score": total_max,
-        "percent": round(100 * total_score / total_max, 1) if total_max else 0.0,
-        "tier": args.tier,
-        "cases": results,
-    }
+    transcript_summary = None
     if writer is not None:
-        summary = writer.close()
-        report["transcript_run_id"] = summary["run_id"]
-        report["transcripts_sha256"] = summary["transcripts_sha256"]
-    with open(args.output, "w") as f:
-        json.dump(report, f, indent=2)
+        transcript_summary = writer.close()
+    report = build_report(results, model_tag=model_tag, model_digest=model_digest,
+                          request=request, tier=args.tier, transcript_summary=transcript_summary)
+    write_report(args.output, report)
 
-    print(f"\n{model_tag}: {total_score}/{total_max} ({report['percent']}%) across {len(results)} cases")
+    print(f"\n{model_tag}: {report['total_score']}/{report['total_max_score']} "
+          f"({report['percent']}%) across {len(results)} cases")
     return 0
 
 

@@ -5,10 +5,14 @@ No Ollama: these cover the scoring and request-construction rules that decided
 a 45-point swing, not the network call.
 """
 
+import http.client
 import importlib.util
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 CORPUS_DIR = Path(__file__).resolve().parents[1] / "corpus"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -267,6 +271,181 @@ class PromptTest(unittest.TestCase):
 
     def test_the_evidence_is_interpolated_verbatim(self):
         self.assertIn("MY-EVIDENCE", record_baseline.build_prompt("c", "MY-EVIDENCE", "A"))
+
+
+class _FakeChatResponse:
+    """Minimal stand-in for the object urllib.request.urlopen returns."""
+
+    def __init__(self, text: str):
+        self._body = json.dumps({
+            "choices": [{"message": {"content": text}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        }).encode()
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class AskModelRetryTest(unittest.TestCase):
+    """#2644: ghidra-ollama-1 was recreated mid-round and every in-flight
+    request died with RemoteDisconnected; nothing above the network call
+    caught it, so a request that would have succeeded a second later took
+    the whole baseline down with it."""
+
+    REQUEST = {"temperature": 0, "output_tokens": 512, "seed": 144, "thinking": False}
+
+    def test_a_transient_failure_is_retried_and_the_cell_is_not_lost(self):
+        calls = []
+        sleeps = []
+
+        def fake_urlopen(req, timeout=None):
+            calls.append(req)
+            if len(calls) < 2:
+                raise http.client.RemoteDisconnected("Remote end closed connection")
+            return _FakeChatResponse("answer text")
+
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            content, _wall = record_baseline.ask_model(
+                "http://fake/v1", "model", self.REQUEST, "prompt", sleep=sleeps.append,
+            )
+
+        self.assertEqual(content, "answer text")
+        self.assertEqual(len(calls), 2, "the second attempt should have succeeded")
+        self.assertEqual(len(sleeps), 1, "exactly one backoff between the failure and the retry")
+
+    def test_exhausting_every_attempt_still_raises(self):
+        """A cell that never recovers must surface a failure the caller can
+        act on -- it must not be swallowed into a fake success."""
+        def fake_urlopen(req, timeout=None):
+            raise http.client.RemoteDisconnected("Remote end closed connection")
+
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            with self.assertRaises(record_baseline.TRANSIENT_REQUEST_ERRORS):
+                record_baseline.ask_model(
+                    "http://fake/v1", "model", self.REQUEST, "prompt",
+                    max_attempts=3, sleep=lambda _seconds: None,
+                )
+
+    def test_a_non_transient_error_is_not_retried(self):
+        calls = []
+
+        def fake_urlopen(req, timeout=None):
+            calls.append(req)
+            raise ValueError("not a connection problem")
+
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            with self.assertRaises(ValueError):
+                record_baseline.ask_model(
+                    "http://fake/v1", "model", self.REQUEST, "prompt",
+                    sleep=lambda _seconds: None,
+                )
+        self.assertEqual(len(calls), 1, "a non-connection error must not be retried")
+
+
+class RunCasesIncrementalSaveTest(unittest.TestCase):
+    """#2644: the report used to be written once at the very end, so 53
+    minutes of already-scored cases were discarded the instant a later cell's
+    request failed. run_cases must persist every successful cell to disk as
+    it goes, and a cell that exhausts its retries must cost only itself."""
+
+    RUBRIC = {
+        "case_one": {"required_groups": [["alpha"]], "forbidden": []},
+        "case_two": {"required_groups": [["beta"]], "forbidden": []},
+        "case_three": {"required_groups": [["gamma"]], "forbidden": []},
+    }
+
+    def setUp(self):
+        # ask_model's retry backoff is real time.sleep by default; patch the
+        # keyword-only default in place so this test doesn't actually wait
+        # out an exponential backoff, without touching the global clock.
+        self._orig_kwdefaults = dict(record_baseline.ask_model.__kwdefaults__)
+        record_baseline.ask_model.__kwdefaults__["sleep"] = lambda _seconds: None
+
+    def tearDown(self):
+        record_baseline.ask_model.__kwdefaults__.update(self._orig_kwdefaults)
+
+    def _builds(self):
+        return [
+            {"case_source": "case_one.c", "unstripped": {"disassembly": "evidence one"},
+             "toolchain": "gcc-x86_64", "opt_level": "-O0"},
+            {"case_source": "case_two.c", "unstripped": {"disassembly": "evidence two"},
+             "toolchain": "gcc-x86_64", "opt_level": "-O0"},
+            {"case_source": "case_three.c", "unstripped": {"disassembly": "evidence three"},
+             "toolchain": "gcc-x86_64", "opt_level": "-O0"},
+        ]
+
+    def test_one_ollama_restart_loses_only_its_own_cell(self):
+        """Simulates the live #2644 failure: the middle cell's container
+        restart raises RemoteDisconnected on every one of its attempts (the
+        request never recovers within this cell's own retry budget), while
+        the first and third cells succeed normally."""
+        call_count = {"n": 0}
+
+        def fake_urlopen(req, timeout=None):
+            call_count["n"] += 1
+            body = json.loads(req.data)
+            prompt = body["messages"][1]["content"]
+            if "case_two" in prompt:
+                raise http.client.RemoteDisconnected("Remote end closed connection")
+            if "case_one" in prompt:
+                return _FakeChatResponse("alpha answer")
+            return _FakeChatResponse("gamma answer")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output_path = str(Path(tmp) / "out.json")
+            with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                results = record_baseline.run_cases(
+                    self._builds(), self.RUBRIC, "A",
+                    api_base="http://fake/v1", model_tag="model", model_digest="deadbeef",
+                    request=AskModelRetryTest.REQUEST, output_path=output_path,
+                )
+
+            # case_two exhausted its 3 attempts and was skipped -- it did not
+            # abort the run, so case_three still ran.
+            self.assertEqual(set(results), {"case_one", "case_three"})
+            self.assertEqual(call_count["n"], 1 + 3 + 1)
+
+            on_disk = json.loads(Path(output_path).read_text())
+            self.assertEqual(set(on_disk["cases"]), {"case_one", "case_three"})
+            self.assertEqual(on_disk["cases"]["case_one"]["answer"], "alpha answer")
+
+    def test_the_file_already_holds_the_first_cell_before_the_second_runs(self):
+        """The save is incremental, not a single write at the end: prove the
+        on-disk file already has case_one's result while case_two is still
+        the one being attempted, by inspecting the file from inside the fake
+        network call itself."""
+        seen_case_counts = []
+
+        def fake_urlopen(req, timeout=None):
+            body = json.loads(req.data)
+            prompt = body["messages"][1]["content"]
+            if Path(output_path).exists():
+                seen_case_counts.append(
+                    json.loads(Path(output_path).read_text())["case_count"])
+            else:
+                seen_case_counts.append(0)
+            if "case_one" in prompt:
+                return _FakeChatResponse("alpha answer")
+            if "case_two" in prompt:
+                return _FakeChatResponse("beta answer")
+            return _FakeChatResponse("gamma answer")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output_path = str(Path(tmp) / "out.json")
+            with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                record_baseline.run_cases(
+                    self._builds(), self.RUBRIC, "A",
+                    api_base="http://fake/v1", model_tag="model", model_digest="deadbeef",
+                    request=AskModelRetryTest.REQUEST, output_path=output_path,
+                )
+
+        self.assertEqual(seen_case_counts, [0, 1, 2])
 
 
 if __name__ == "__main__":
