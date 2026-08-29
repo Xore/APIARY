@@ -12,11 +12,17 @@ underneath without a version change -- for python:3.14-slim,
 python:3.11-slim, python:3.10-slim, python:3.12-slim, debian:bookworm-slim,
 valkey/valkey:9.1.1-alpine3.24, postgres:18.6-bookworm and redis:7-alpine.
 
-The conpot image was deliberately NOT bumped: dtagdevsec/conpot:24.04.1
-exists, but the six *_patch.py scripts hard-code 24.04's package layout
+The conpot image was originally held back by that sweep: the six
+*_patch.py scripts hard-coded 24.04's install root
 (/usr/lib/python3.11/site-packages/conpot/...) and the build
-FileNotFoundErrors against 24.04.1. That freeze is the contract the
-conpot tests below pin.
+FileNotFoundErrored against 24.04.1. #2619 lifted the freeze -- 24.04.1
+only moved the install root to /usr/lib/python3.12/site-packages/conpot,
+leaving the package's internal layout below it unchanged, so repointing
+all six patch roots was enough. The conpot tests below now pin the
+post-bump state: 24.04.1 at its manifest-list digest, every patch script
+targeting the python3.12 root, and the superseded 24.04 tag/digest and
+python3.11 root banned so a partial revert cannot re-open the same
+build-time FileNotFoundError from the other direction.
 
 Two things the issue body got wrong, corrected here against the real repo
 and a live registry query rather than trusted verbatim:
@@ -46,21 +52,21 @@ Three defects in the original version of this file, fixed here:
    CI by accident of a fresh clone having no such directories. The sweep
    now walks `git ls-files`, so it sees exactly the repo's tracked content
    wherever it runs.
-2. The conpot freeze was asserted by string-searching the whole file for
-   the literal "dtagdevsec/conpot:24.04.1". That is both too narrow and
-   too broad. Too narrow: bumping to 24.05, 25.04, `latest`, or dropping
-   the digest pin entirely all sail through, even though each re-breaks
-   the build the same way. Too broad: it fails on a *comment* that names
-   the tag, which is exactly how the freeze is documented -- the current
-   Dockerfile header escapes only because it happens to write "24.04.1"
-   without the repository prefix. The FROM instruction is now parsed and
-   its repository/tag/digest checked as fields, and the 24.04.1 ban
-   applies to instruction lines only, so the rationale may be written
-   down.
-3. Nothing tested the coupling that *causes* the freeze. The tests below
+2. The conpot pin was asserted by string-searching the whole file for a
+   literal tag. That is both too narrow and too broad. Too narrow:
+   drifting to 24.05, 25.04, `latest`, or dropping the digest pin
+   entirely all sail through, even though each re-breaks the build the
+   same way. Too broad: it fails on a *comment* that names the other
+   tag, which is exactly how the pin's history is documented -- the
+   Dockerfile header names both tags in prose. The FROM instruction is
+   now parsed and its repository/tag/digest checked as fields, and the
+   superseded-tag ban applies to instruction lines only, so the
+   rationale may be written down.
+3. Nothing tested the coupling that *causes* the pin. The tests below
    now assert that every COPY'd patch script exists in the build context,
-   that the RUN line executes each one, and that each still hard-codes the
-   24.04 layout root -- so the freeze fails loudly if its premise changes.
+   that the RUN line executes each one, and that each hard-codes the
+   pinned image's install root -- so the pin fails loudly if either side
+   of that coupling moves without the other.
 """
 import pathlib
 import re
@@ -163,23 +169,35 @@ SAME_VERSION_REFRESHES = {
 
 ALL_OLD_DIGESTS = {OLD_GOLANG_DIGEST} | {spec["old"] for spec in SAME_VERSION_REFRESHES.values()}
 
-# --- conpot: the deliberate non-bump -------------------------------------
+# --- conpot: the 24.04 -> 24.04.1 bump (#2619) ---------------------------
 #
-# dtagdevsec/conpot:24.04.1 EXISTS on Docker Hub (manifest list
-# sha256:ff37c322037ad8c1f4f05c2c93f7b60cc5f56b7f37a2c4cbc16901ec70bddb5b)
-# but the six *_patch.py scripts hard-code the 24.04 package layout, so
-# building against it FileNotFoundErrors. The bump is tracked separately
-# and requires auditing every patch against 24.04.1's layout first.
+# #2314 froze conpot at 24.04 because the six *_patch.py scripts
+# hard-coded that image's install root and the build FileNotFoundErrored
+# against 24.04.1. #2619 lifted the freeze: 24.04.1 installs conpot under
+# python3.12 instead of python3.11 and changes nothing below that root,
+# so repointing all six patch roots was the whole audit.
+#
+# The tag and the install root are still one contract, just pinned one
+# version further on -- these constants are the two halves of it, and the
+# superseded pair below is banned so a half-revert of either side is
+# caught instead of producing the same missing-path build failure.
 CONPOT_DIR = "arcane/home/honeypot-conpot/conpot"
 CONPOT_DOCKERFILE = f"{CONPOT_DIR}/Dockerfile"
 CONPOT_REPOSITORY = "dtagdevsec/conpot"
-CONPOT_PINNED_TAG = "24.04"
-CONPOT_PINNED_DIGEST = "sha256:717f0bdf79ad267e7402ff09fcc2f4ce413e9165843dd58c18f340acdd49ea7e"
-CONPOT_REJECTED_TAG = "24.04.1"
-CONPOT_REJECTED_DIGEST = "sha256:ff37c322037ad8c1f4f05c2c93f7b60cc5f56b7f37a2c4cbc16901ec70bddb5b"
-# The layout root every *_patch.py targets. This path existing in the base
-# image is the whole reason the tag is frozen at 24.04.
-CONPOT_LAYOUT_ROOT = "/usr/lib/python3.11/site-packages/conpot"
+CONPOT_PINNED_TAG = "24.04.1"
+CONPOT_PINNED_DIGEST = "sha256:ff37c322037ad8c1f4f05c2c93f7b60cc5f56b7f37a2c4cbc16901ec70bddb5b"
+CONPOT_SUPERSEDED_TAG = "24.04"
+CONPOT_SUPERSEDED_DIGEST = "sha256:717f0bdf79ad267e7402ff09fcc2f4ce413e9165843dd58c18f340acdd49ea7e"
+# The install root every *_patch.py targets. This path existing in the base
+# image is the whole reason the tag is pinned rather than floating.
+CONPOT_LAYOUT_ROOT = "/usr/lib/python3.12/site-packages/conpot"
+CONPOT_SUPERSEDED_LAYOUT_ROOT = "/usr/lib/python3.11/site-packages/conpot"
+# `24.04` is a prefix of `24.04.1`, so a plain substring ban on the
+# superseded tag would fire on the very FROM line that is correct. Require
+# the tag to end where the reference does.
+CONPOT_SUPERSEDED_TAG_RE = re.compile(
+    rf"{re.escape(CONPOT_REPOSITORY)}:{re.escape(CONPOT_SUPERSEDED_TAG)}(?![\w.-])"
+)
 
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 

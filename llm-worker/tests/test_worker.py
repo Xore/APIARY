@@ -489,14 +489,22 @@ class StartupPreflightIntegrationTests(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.status_path = Path(tmp.name) / "llm-worker-status.json"
+        self.cfg = config(enabled=True, dry_run=False, allow_captured_data=True, session_enabled=True)
         for patcher in (
             patch.object(worker, "STATUS_PATH", self.status_path),
             patch.object(worker, "configure_logging"),
             patch.object(sys, "argv", ["worker.py", "--once"]),
+            # main() gates on compose_route_preflight() before es_preflight(),
+            # and that gate reads ES_HOST straight off the environment rather
+            # than off Config -- it is deliberately a compose-wiring check, not
+            # an app-config one. Without this the whole class fails on
+            # compose-route-missing and never reaches the ES preflight it is
+            # named for. The overlays that supply a route export ES_HOST, so
+            # this is what the deployments under test actually look like.
+            patch.dict(os.environ, {"ES_HOST": self.cfg.es_host}),
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
-        self.cfg = config(enabled=True, dry_run=False, allow_captured_data=True, session_enabled=True)
 
     def _run_main(self, ping):
         client = MagicMock()
