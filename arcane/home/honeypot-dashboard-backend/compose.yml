@@ -94,6 +94,19 @@ services:
     environment:
       - LISTEN_ADDR=0.0.0.0:8081
       - ELASTICSEARCH_URL=http://elasticsearch:9200
+      # #2329: backs /api/v1/llm-search (llm_search.rs), which embeds the
+      # operator's query via Ollama's /api/embed before the ES kNN lookup.
+      # Left unset, ollama_url() returns None and the endpoint permanently
+      # reports {"available": false} -- the state this stack shipped in
+      # since the endpoint (#151) was added, since nothing ever set this
+      # var or joined the network below for backend-service specifically.
+      # The value has to be exactly this host: ollama_url() only accepts a
+      # bare "ollama"/"localhost" or a loopback/private/link-local IP, and
+      # "ollama" is the alias analysis/ghidra/docker-compose.ghidra.yml's
+      # own ollama service publishes on the honeypot-llm network (joined
+      # below) -- the same address honeypot-galah's galah-llm-broker and
+      # llm-worker's captured-data override already reach it by.
+      - OLLAMA_URL=http://ollama:11434
       # #1677: addresses belonging to this fleet, excluded from the
       # dashboard's attacker aggregations. Suricata records `source.ip` as
       # whichever end it saw as the source, so our own hosts appear as
@@ -181,6 +194,7 @@ services:
       - /opt/stacks/apiary/logs/dashboard-backend:/logs/dashboard-backend
     networks:
       - honeynet
+      - honeypot-llm
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     deploy:
@@ -195,6 +209,21 @@ networks:
   honeynet:
     name: honeynet
     driver: bridge
+  # #2329: shared with analysis/ghidra/docker-compose.ghidra.yml, which owns
+  # this network (internal: true there -- no internet egress for the LLM
+  # containers on it) and gives its ollama service the `ollama` alias
+  # OLLAMA_URL above depends on. Same fixed-name mechanism as honeynet
+  # above. backend-service only ever reaches Ollama's own /api/embed
+  # endpoint on it, for semantic search's query-time embedding call
+  # (llm_search.rs). honeypot-dashboard/compose.yml declared this same
+  # network back in #151, with a comment describing this exact intent --
+  # but never actually attached it to backend-service's own networks:
+  # list, so it sat dangling through the #1622 split that moved
+  # backend-service into this file. Declared here instead, where the real
+  # consumer now lives and can actually reach it.
+  honeypot-llm:
+    name: honeypot-llm
+    external: true
 
 volumes:
   # Shared with honeypot-dashboard and the main APIARY stack (dionaea

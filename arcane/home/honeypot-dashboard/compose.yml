@@ -852,14 +852,6 @@ networks:
   honeynet:
     name: honeynet
     driver: bridge
-  # #151: shared with analysis/ghidra/docker-compose.ghidra.yml, which owns
-  # this network (internal: true there -- no internet egress for the LLM
-  # containers on it). Same fixed-name mechanism as honeynet above; the
-  # dashboard only ever reaches Ollama's own /api/embed endpoint on it, for
-  # semantic search's query-time embedding call.
-  honeypot-llm:
-    name: honeypot-llm
-    external: true
 
 volumes:
   # Shared with the main stack (dionaea/yara-scanner write, this stack only
