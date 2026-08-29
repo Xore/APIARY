@@ -61,6 +61,17 @@ services:
     # take this slot. Ollama is retained because issue #144 benchmarked the
     # pinned runtime and local model contract on the deployment GPU; see
     # docs/local-llm-model-evaluation.md.
+    #
+    # #2062: a version bump here is a re-qualification event, not just a tag
+    # edit -- #1407's "safe-batch image bump" changed only this line and left
+    # models/approved-models.json's runtime block (and every host running it)
+    # recorded against the old version for ten days. Any bump of this tag
+    # must be paired, in the same change, with re-running
+    # benchmarks/evaluate-models.py and promoting the result into
+    # models/approved-models.json via `model-governance.py promote`.
+    # model-governance.py check-runtime compares the live container against
+    # that manifest and reports drift on every mismatched field -- that is
+    # working as intended, not a check to silence.
     image: ollama/ollama:0.32.13@sha256:77f1a2a54460f0380f2611e1464233d9b82cb6e58afc8f60abec0061049d2d82
     restart: unless-stopped
     ports:
