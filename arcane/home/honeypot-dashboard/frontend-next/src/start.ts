@@ -12,13 +12,21 @@
 // Throwing the Response rather than returning it is deliberate: the
 // runtime short-circuits either way, but the middleware's return type
 // only admits next() results. The server-functions handler re-emits a
-// thrown Response verbatim, so callers see a real 401.
+// thrown Response verbatim, so a real 401 goes out on the wire.
+//
+// On the wire is as far as that guarantee went, though (#1975). The
+// handler also stamps `x-tss-raw` on it, which makes the client fetcher
+// hand the Response back to the caller as a RESOLVED value rather than a
+// rejection — so browser-side callers did not see a 401, they saw a
+// Response where their data should have been. serverFns.fetch below is
+// what turns it back into a failure, and into a route to re-auth.
 //
 // The session store is imported dynamically inside the server callback:
 // start.ts is part of both bundles, and a static import would drag
 // ioredis into the client graph.
 import { createStart, createMiddleware } from '@tanstack/react-start'
 import { getRequest } from '@tanstack/react-start/server'
+import { sessionAwareFetch } from './lib/reauth'
 
 const requireSession = createMiddleware({ type: 'function' }).server(
   async ({ serverFnMeta, next }) => {
@@ -38,6 +46,15 @@ const requireSession = createMiddleware({ type: 'function' }).server(
 
 export const startInstance = createStart(() => ({
   functionMiddleware: [requireSession],
+  // #1975: the other side of requireSession. The middleware above decides
+  // that a sessionless call gets a 401; this decides what the browser does
+  // when one comes back — go through /auth/login rather than surface a
+  // dead panel with a Retry button that can never succeed. Client-only by
+  // contract (during SSR server functions are invoked directly, and those
+  // navigations are already covered by __root.tsx's beforeLoad redirect),
+  // so this is precisely the hydrate-in-place path and nothing else.
+  // Rationale and the response-parsing trap it works around: lib/reauth.ts.
+  serverFns: { fetch: sessionAwareFetch },
   // #2028: one CSP per request, emitted by one place. Type 'request' runs
   // once per HTTP request around the whole Start handler — HTML documents
   // and server-fn RPCs alike — before anything renders, which is exactly
