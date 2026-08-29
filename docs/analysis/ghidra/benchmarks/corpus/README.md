@@ -289,7 +289,11 @@ _scorer_generation`), the fixture-v1 totals above predate the widening and
 say so in their own sections, and run `20260827T000818Z-8e249763` carries a
 README in its run directory naming the moved leg. Stored answers are never
 rescored in place: a generation boundary means side-by-side presentation, not
-rewritten history.
+rewritten history. `regenerate_pre_2393.py` produces the other side of that
+comparison on demand -- it rescores the three pre-#2393 files' stored answers
+under the current matcher into a fresh `docs/benchmarks/runs/pre-2393-regen-*`
+directory, reads the sources without ever writing them, and exits 0 with a
+warning when the adjudicator's embedding model is unreachable (#2556).
 
 ## CI verification (`validate_manifest.py`, `ci_verify.sh`, `.github/workflows/quality.yml`)
 
