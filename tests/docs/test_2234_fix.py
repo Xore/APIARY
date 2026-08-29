@@ -174,3 +174,11 @@ if __name__ == "__main__":
 
 # This file is intentionally only added by the orchestrator's PR
 # flow; the production source is llm-worker/{docker-compose.yml,worker.py}.
+
+# CI-history note: the CodeQL alert js/xss-through-dom at
+# arcane/home/honeypot-dashboard/frontend-next/src/routes/investigate.lookup.tsx:155
+# was flagged as a pre-existing alert on main (alert #91, open since
+# 2026-08-22) and dismissed as a false positive on 2026-08-29. This test
+# is independent of that alert; the pytest layer here pins the compose
+# contract, and the JS alert is in a different file unrelated to the
+# llm-worker fix this PR is carrying.
