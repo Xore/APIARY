@@ -1,0 +1,14 @@
+{
+  "benchmark": "honeypot-stack-issue-159-corpus-baseline",
+  "finished_at": "2026-08-27T14:06:06Z",
+  "notes": null,
+  "operator": "bg-1805c",
+  "provenance": "synthetic",
+  "record_count": 14,
+  "run_id": "20260827T130903Z-64a9a8e4",
+  "schema_version": "apiary-benchmark-transcript-v1",
+  "started_at": "2026-08-27T13:09:03Z",
+  "supersedes": null,
+  "transcripts": "/mnt-1/benchmarks/APIARY/docs/benchmarks/runs/2026-08-27-20260827T130903Z-64a9a8e4/transcripts.jsonl",
+  "transcripts_sha256": "438f6d81c56e86a00a9252e43604b8918959657186e27222e65680c3bb53a12b"
+}
