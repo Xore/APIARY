@@ -48,6 +48,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -57,6 +58,27 @@ import (
 	"sync"
 	"syscall"
 	"time"
+)
+
+// errOut stands in for os.Stderr so tests can capture the resource-pressure
+// diagnostics added in #2255. Pre-existing startup messages keep writing to
+// os.Stderr directly; only the new lines need to be observable.
+var errOut io.Writer = os.Stderr
+
+// #2255 tuneables for the accept loop and the UDP session table, mirroring
+// #2240's for the home-side portbridge. The accept backoff starts small so a
+// transient blip costs almost nothing, but caps at a value that keeps a
+// persistently failing listener from spinning (the old bare `continue`
+// pegged one core per affected rule while producing zero diagnostics -- most
+// acute exactly when the process is already at its fd limit, which is when
+// Accept fails every call). The session cap bounds the per-client socket
+// table; this binary fronts raw internet traffic on the VPS, so the
+// source-port churn that needs it is not hypothetical.
+const (
+	defaultAcceptBackoffMin = 5 * time.Millisecond
+	defaultAcceptBackoffMax = time.Second
+	defaultUDPMaxSessions   = 512
+	logThrottleInterval     = 10 * time.Second
 )
 
 type rule struct {
@@ -295,11 +317,7 @@ func serveTCP(ip string, r rule, cl *connLogger, bh *blackhole) {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "portbridge: tcp %s -> %s (proxy=%v)\n", addr, r.target, r.proxy)
-	for {
-		c, err := ln.Accept()
-		if err != nil {
-			continue
-		}
+	acceptLoop(ln, addr, func(c net.Conn) {
 		// #268: the TCP handshake already completed by the time Accept returns
 		// (Suricata, sniffing the interface independently, already saw it) —
 		// closing here without dialing upstream still keeps the connection from
@@ -308,10 +326,88 @@ func serveTCP(ip string, r rule, cl *connLogger, bh *blackhole) {
 		// noise this feature exists to keep off the dashboard.
 		if host, _ := splitHostPort(c.RemoteAddr()); bh.blocked(host) {
 			c.Close()
-			continue
+			return
 		}
 		go pipeTCP(c, r, cl)
+	}, acceptOptions{backoffMin: defaultAcceptBackoffMin, backoffMax: defaultAcceptBackoffMax})
+}
+
+type acceptOptions struct {
+	backoffMin time.Duration
+	backoffMax time.Duration
+	// logEvery picks how often a persistent failure re-logs its progress;
+	// 0 selects the default cadence. Exposed for tests.
+	logEvery int
+}
+
+// acceptLoop runs a listener's accept loop, answering failures with a capped
+// exponential backoff instead of the bare `continue` this file used to carry
+// (#2255). spawn is handed each accepted connection.
+func acceptLoop(ln net.Listener, addr string, spawn func(net.Conn), opts acceptOptions) {
+	backoff := opts.backoffMin
+	failures := 0
+	logEvery := opts.logEvery
+	if logEvery == 0 {
+		logEvery = 50
 	}
+	for {
+		c, err := ln.Accept()
+		if err != nil {
+			// A closed listener is the only clean way out -- anything else
+			// gets backoff-and-retry, not bail-out (see below).
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+			failures++
+			// Never bail out of the loop entirely: exiting here would take
+			// this rule's forwarding down until the whole process restarted,
+			// which turns a transient EMFILE burst into a manual outage on a
+			// host that is deliberately exposed to the internet. A capped
+			// backoff is "restart" semantics at negligible cost.
+			if failures == 1 || failures%logEvery == 0 {
+				fmt.Fprintf(errOut,
+					"portbridge: tcp %s accept failed %d times in a row (still retrying): %v\n",
+					addr, failures, err)
+			}
+			time.Sleep(backoff)
+			backoff *= 2
+			if backoff > opts.backoffMax {
+				backoff = opts.backoffMax
+			}
+			continue
+		}
+		failures = 0
+		backoff = opts.backoffMin
+		spawn(c)
+	}
+}
+
+// rateLimitedLog lets a pathological path (a full table shedding every fresh
+// datagram, say) complain loudly without the complaining itself becoming a
+// new CPU or stderr-flooding problem: at most one line per interval.
+type rateLimitedLog struct {
+	interval time.Duration
+	mu       sync.Mutex
+	last     time.Time
+}
+
+func (l *rateLimitedLog) allow(now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if now.Sub(l.last) >= l.interval {
+		l.last = now
+		return true
+	}
+	return false
+}
+
+func udpMaxSessions() int {
+	if v := os.Getenv("UDP_MAX_SESSIONS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultUDPMaxSessions
 }
 
 func pipeTCP(client net.Conn, r rule, cl *connLogger) {
@@ -361,8 +457,54 @@ func proxyV1Header(client net.Conn) string {
 	return "PROXY UNKNOWN\r\n"
 }
 
-// serveUDP forwards datagrams with a small per-client session table so replies
-// find their way back.
+// udpReplyWindow is how long a per-client session may sit without hearing
+// from upstream before its return goroutine's read deadline evicts it --
+// unchanged from the original design (TFTP transfers and SNMP walks both
+// need generous slack). #2255 only adds a ceiling the forward path
+// participates in, so a scanner cycling source ports cannot walk fd count to
+// the wall faster than silence can expire sessions -- which it previously
+// could, since nothing but that deadline ever removed an entry.
+const udpReplyWindow = 2 * time.Minute
+
+type udpSession struct {
+	conn *net.UDPConn
+	mu   sync.RWMutex
+	// target is the address replies were last seen from, so subsequent
+	// client datagrams follow a TFTP server's freshly selected transfer-ID
+	// port. Guarded by mu.
+	target *net.UDPAddr
+	// lastUse is the last time this session forwarded a client datagram.
+	// Guarded by udpForwarder.mu; consulted for LRU eviction.
+	lastUse time.Time
+}
+
+// udpForwarder is serveUDP's per-rule state: one front listener, the capped
+// per-client session table, and everything the forward path needs to gate
+// (blackhole), attribute (connLogger) and reach (target) a datagram.
+type udpForwarder struct {
+	label  string // listen addr, for log lines
+	conn   *net.UDPConn
+	rule   rule
+	target *net.UDPAddr
+	cl     *connLogger
+	bh     *blackhole
+	max    int
+
+	// Two independent limiters: a shed storm must not starve write-failure
+	// diagnostics of their slot, or vice versa.
+	shedLog  *rateLimitedLog
+	writeLog *rateLimitedLog
+
+	mu       sync.Mutex
+	sessions map[string]*udpSession
+
+	// now is injectable so tests can fast-forward session ages instead of
+	// waiting out the real reply window.
+	now func() time.Time
+}
+
+// serveUDP forwards datagrams with a per-client session table, capped since
+// #2255 so replies find their way back without the table growing unbounded.
 func serveUDP(ip string, r rule, cl *connLogger, bh *blackhole) {
 	listenNetwork := "udp4"
 	if parsed := net.ParseIP(ip); parsed != nil && parsed.To4() == nil {
@@ -399,86 +541,177 @@ func serveUDP(ip string, r rule, cl *connLogger, bh *blackhole) {
 	if err != nil {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "portbridge: udp %s -> %s\n", laddr, r.target)
-
-	type udpSession struct {
-		conn   *net.UDPConn
-		mu     sync.RWMutex
-		target *net.UDPAddr
+	f := &udpForwarder{
+		label:    laddr.String(),
+		conn:     conn,
+		rule:     r,
+		target:   target,
+		cl:       cl,
+		bh:       bh,
+		max:      udpMaxSessions(),
+		shedLog:  &rateLimitedLog{interval: logThrottleInterval},
+		writeLog: &rateLimitedLog{interval: logThrottleInterval},
+		sessions: map[string]*udpSession{},
+		now:      time.Now,
 	}
-	var mu sync.Mutex
-	sessions := map[string]*udpSession{}
+	fmt.Fprintf(os.Stderr, "portbridge: udp %s -> %s (max %d sessions)\n", laddr, r.target, f.max)
+	f.run()
+}
+
+func (f *udpForwarder) run() {
 	buf := make([]byte, 64*1024)
 	for {
-		n, client, err := conn.ReadFromUDP(buf)
+		n, client, err := f.conn.ReadFromUDP(buf)
 		if err != nil {
 			continue
 		}
-		key := client.String()
-		mu.Lock()
-		session, ok := sessions[key]
-		// #268: only gate new sessions, same reasoning as serveTCP's Accept-time
-		// check — a session already forwarding isn't worth tearing down
-		// mid-stream, and this only costs a map lookup (already paid for
-		// `ok` above) once a session exists, not a lookup per packet.
-		if !ok {
-			if host, _ := splitHostPort(client); bh.blocked(host) {
-				mu.Unlock()
-				continue
-			}
-			network := "udp4"
-			bind := &net.UDPAddr{IP: net.IPv4zero}
-			if target.IP.To4() == nil {
-				network = "udp6"
-				bind.IP = net.IPv6zero
-			}
-			up, listenErr := net.ListenUDP(network, bind)
-			if listenErr != nil {
-				mu.Unlock()
-				continue
-			}
-			session = &udpSession{conn: up, target: target}
-			sessions[key] = session
-			// Log once per new client session. The per-session socket is bound
-			// before the first datagram leaves, so its local port is already
-			// assigned — and it is the src_port the honeypot sees for every
-			// datagram of this session, exactly like the TCP via_port. Without
-			// it the UDP sensors (conpot SNMP/BACnet/IPMI, dionaea tftp/upnp/
-			// sip) have no recovery path at all: conpot's PROXY shim is TCP-only
-			// by construction, so nothing else can carry the real source across
-			// the tunnel. See issue #75.
-			// nil destination: this socket is wildcard-bound, so the address
-			// the datagram was actually sent to is not recoverable here.
-			// PUBLIC_IP supplies it when set (#1728).
-			cl.log(r, client, nil, up.LocalAddr())
-			// Return path accepts a reply from any port on the target host. This is
-			// required by TFTP, whose server selects a new transfer-ID port after
-			// the request; subsequent client datagrams follow that selected port.
-			go func(session *udpSession, client *net.UDPAddr, key string) {
-				rbuf := make([]byte, 64*1024)
-				for {
-					session.conn.SetReadDeadline(time.Now().Add(2 * time.Minute))
-					rn, from, err := session.conn.ReadFromUDP(rbuf)
-					if err != nil {
-						mu.Lock()
-						delete(sessions, key)
-						mu.Unlock()
-						session.conn.Close()
-						return
-					}
-					session.mu.Lock()
-					session.target = from
-					session.mu.Unlock()
-					conn.WriteToUDP(rbuf[:rn], client)
-				}
-			}(session, client, key)
+		f.forward(client, buf[:n]) // forwarded, gated or deliberately shed (#2255)
+	}
+}
+
+// forward routes one client datagram, enforcing the session ceiling (#2255).
+// Returns the number of bytes actually sent upstream -- blackholed, shed and
+// failed datagrams return 0.
+func (f *udpForwarder) forward(client *net.UDPAddr, payload []byte) int {
+	key := client.String()
+
+	f.mu.Lock()
+	s, ok := f.sessions[key]
+	if !ok {
+		// #268: only gate new sessions, same reasoning as serveTCP's
+		// Accept-time check -- a session already forwarding isn't worth
+		// tearing down mid-stream. Checked before the cap is enforced, so a
+		// blackholed scanner can never evict a legitimate session on its way
+		// to being dropped.
+		if host, _ := splitHostPort(client); f.bh.blocked(host) {
+			f.mu.Unlock()
+			return 0
 		}
-		mu.Unlock()
-		session.mu.RLock()
-		upstream := session.target
-		session.mu.RUnlock()
-		if _, err := session.conn.WriteToUDP(buf[:n], upstream); err != nil {
-			fmt.Fprintf(os.Stderr, "portbridge: udp write %s: %v\n", upstream, err)
+		if !f.admitLocked(key) {
+			f.mu.Unlock()
+			return 0
 		}
+		network := "udp4"
+		bind := &net.UDPAddr{IP: net.IPv4zero}
+		if f.target.IP.To4() == nil {
+			network = "udp6"
+			bind.IP = net.IPv6zero
+		}
+		up, listenErr := net.ListenUDP(network, bind)
+		if listenErr != nil {
+			if f.shedLog.allow(f.now()) {
+				fmt.Fprintf(errOut, "portbridge: udp %s session socket for %q failed: %v\n",
+					f.label, key, listenErr)
+			}
+			f.mu.Unlock()
+			return 0
+		}
+		s = &udpSession{conn: up, target: f.target, lastUse: f.now()}
+		f.sessions[key] = s
+		// Log once per new client session. The per-session socket is bound
+		// before the first datagram leaves, so its local port is already
+		// assigned — and it is the src_port the honeypot sees for every
+		// datagram of this session, exactly like the TCP via_port. Without
+		// it the UDP sensors (conpot SNMP/BACnet/IPMI, dionaea tftp/upnp/
+		// sip) have no recovery path at all: conpot's PROXY shim is TCP-only
+		// by construction, so nothing else can carry the real source across
+		// the tunnel. See issue #75.
+		// nil destination: this socket is wildcard-bound, so the address
+		// the datagram was actually sent to is not recoverable here.
+		// PUBLIC_IP supplies it when set (#1728).
+		f.cl.log(f.rule, client, nil, up.LocalAddr())
+		// Return path accepts a reply from any port on the target host. This is
+		// required by TFTP, whose server selects a new transfer-ID port after
+		// the request; subsequent client datagrams follow that selected port.
+		go f.replyLoop(s, client, key)
+	}
+	s.lastUse = f.now()
+	f.mu.Unlock()
+
+	s.mu.RLock()
+	upstream := s.target
+	s.mu.RUnlock()
+	if _, err := s.conn.WriteToUDP(payload, upstream); err != nil {
+		// Rate-limited (#2255): the pre-existing unthrottled line turned a
+		// persistently unreachable target into its own stderr flood, which
+		// is the same failure class this issue is about.
+		if f.writeLog.allow(f.now()) {
+			fmt.Fprintf(errOut, "portbridge: udp write %s: %v\n", upstream, err)
+		}
+		return 0
+	}
+	return len(payload)
+}
+
+// admitLocked makes room for one new session, or reports that there is none.
+// Called with f.mu held, only on the new-session path -- an established
+// client's datagrams cost no scan.
+//
+// Genuinely expired sessions go first, LRU-first (their reply goroutine is
+// usually about to reap them anyway). If the table is still full of flows
+// seen inside the reply window, the NEW client is shed rather than an
+// established one evicted: replies must keep working for live flows, and a
+// shed here is exactly the signal that someone is cycling source ports.
+func (f *udpForwarder) admitLocked(key string) bool {
+	for len(f.sessions) >= f.max {
+		victimKey, victimAge := f.oldestSessionLocked()
+		if victimAge < udpReplyWindow {
+			break
+		}
+		f.sessions[victimKey].conn.Close()
+		delete(f.sessions, victimKey)
+		if f.shedLog.allow(f.now()) {
+			fmt.Fprintf(errOut,
+				"portbridge: udp %s evicted stale session %q (%ds idle, cap %d)\n",
+				f.label, victimKey, int(victimAge.Seconds()), f.max)
+		}
+	}
+	if len(f.sessions) >= f.max {
+		if f.shedLog.allow(f.now()) {
+			fmt.Fprintf(errOut,
+				"portbridge: udp %s session table full (%d), dropping datagram from fresh client %q -- if this repeats, something is cycling source ports\n",
+				f.label, len(f.sessions), key)
+		}
+		return false
+	}
+	return true
+}
+
+// oldestSessionLocked finds the least-recently-used entry and its age.
+// Called with f.mu held; O(n) over a table capped at defaultUDPMaxSessions is
+// cheap, and only paid when a new session is being admitted.
+func (f *udpForwarder) oldestSessionLocked() (string, time.Duration) {
+	var oldestKey string
+	var oldest time.Time
+	first := true
+	for k, s := range f.sessions {
+		if first || s.lastUse.Before(oldest) {
+			oldestKey, oldest, first = k, s.lastUse, false
+		}
+	}
+	return oldestKey, f.now().Sub(oldest)
+}
+
+func (f *udpForwarder) replyLoop(s *udpSession, client *net.UDPAddr, key string) {
+	rbuf := make([]byte, 64*1024)
+	for {
+		s.conn.SetReadDeadline(time.Now().Add(udpReplyWindow))
+		rn, from, err := s.conn.ReadFromUDP(rbuf)
+		if err != nil {
+			f.mu.Lock()
+			// Only reap the session this loop actually owns: if the same
+			// client tuple reconnected after eviction, f.sessions[key] now
+			// points at a live replacement that must survive (#2255).
+			if cur, ok := f.sessions[key]; ok && cur == s {
+				delete(f.sessions, key)
+			}
+			f.mu.Unlock()
+			s.conn.Close()
+			return
+		}
+		s.mu.Lock()
+		s.target = from
+		s.mu.Unlock()
+		f.conn.WriteToUDP(rbuf[:rn], client)
 	}
 }
