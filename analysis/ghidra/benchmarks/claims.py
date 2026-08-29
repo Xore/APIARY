@@ -261,18 +261,44 @@ def merge_into_pool(pool: list[Claim], incoming: Iterable[Claim], embed: Callabl
     return stats
 
 
+# Ground truths are compound prose: several sentence-level facts joined into
+# one paragraph (xor_decode_loop's is two sentences -- the XOR mechanism, then
+# a symmetry note). An atomic claim only ever asserts one fact, so comparing
+# it against the whole paragraph dilutes that one fact against every other
+# sentence's vocabulary and can miss the cosine bar even for a correct
+# restatement (#2030). Splitting on sentence boundaries (". ", "! ", "? ")
+# recovers per-fact chunks at the same granularity as the claim.
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+
+
+def split_ground_truth(ground_truth: str) -> list[str]:
+    """Break a compound ground_truth paragraph into sentence-level sub-facts."""
+    stripped = ground_truth.strip()
+    if not stripped:
+        return []
+    return [s.strip() for s in _SENTENCE_SPLIT_RE.split(stripped) if s.strip()]
+
+
 def adjudicate_deterministic(claim: Claim, ground_truth: str, embed: Callable[[str], list[float]],
                              *, threshold: float = 0.80) -> bool:
     """Cheapest rung: does the case's own ground_truth already assert this?
+
+    ground_truth is compound prose, so the claim is checked against each of
+    its sentence-level sub-facts individually (see split_ground_truth) and the
+    best match decides -- never against the whole paragraph as one string,
+    which would dilute the claim's single fact against every other sentence
+    and could never cross the bar even when correct.
 
     Only ever promotes a claim to `true`. It never rules anything false, because
     absence from a one-paragraph summary is not evidence that a claim is wrong --
     the ground_truth is a description, not an exhaustive enumeration. Everything
     it cannot settle goes to a human.
     """
-    if not ground_truth:
+    sub_facts = split_ground_truth(ground_truth)
+    if not sub_facts:
         return False
-    return cosine(embed(claim.text), embed(ground_truth)) >= threshold
+    claim_vector = embed(claim.text)
+    return any(cosine(claim_vector, embed(fact)) >= threshold for fact in sub_facts)
 
 
 def adjudicate_pool(pool: list[Claim], rubric: dict[str, Any], embed: Callable[[str], list[float]],
