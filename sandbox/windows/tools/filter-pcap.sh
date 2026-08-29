@@ -6,6 +6,18 @@
 #   1. DNS/hostnames matching *.acp-persona.net
 #   2. HTTP header  X-Persona-Noise: 1
 #   3. User-Agent containing  ACPPersona/1.0
+#
+# Marker visibility differs by layer, because the https half is REAL TLS
+# since #2546 (FakeNet terminates SSL with the static persona CA that
+# packer/scripts/04-tools.ps1 generates; config/fakenet.ini sets UseSSL +
+# static_ca):
+#   - On a host-side pcap, 443 sessions are encrypted. Only the
+#     *.acp-persona.net SNI (and the DNS lookups) match here -- clause (1)
+#     and the tls SNI clause below.
+#   - The X-Persona-Noise header and the ACPPersona UA travel INSIDE the
+#     stream FakeNet itself terminates: visible in FakeNet's own HTTP(S)
+#     logs and on the plain-HTTP share of requests (clauses 2/3).
+#
 # This script builds a display filter from the marker list and writes a
 # clean pcap, so run_sample.py's captured traffic can be split into
 # clean.pcap (the sample's own traffic) and noise.pcap (baseline activity
@@ -48,8 +60,11 @@ fi
 cat <<'NOTE'
 
 [!] Filtering caveats:
-    - TLS without SNI visibility (ECH, or non-browser noise) can only be
-      filtered by hostname at the DNS layer; correlate by 5-tuple if needed.
+    - Encrypted 443 noise is only matchable by SNI + DNS in a host-side
+      pcap (the X-Persona-Noise header and persona UA are inside the TLS
+      stream; they are visible in FakeNet's own HTTP logs). TLS without
+      SNI visibility (ECH, or non-browser noise) can only be filtered by
+      hostname at the DNS layer; correlate by 5-tuple if needed.
     - Noise requests answered by FakeNet inside the guest never hit this pcap
       if you capture on the guest's vnet with restrict=on; capture on the
       host bridge (detnet0/virbrX) to see everything.
