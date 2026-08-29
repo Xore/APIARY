@@ -16,9 +16,15 @@ addresses, passwords, client secrets, cookies, and realm users out of Git.
 - The administrator host uses Keycloak realm-admin login and mandatory TOTP.
   Do not add HTTP Basic: the admin SPA needs the `Authorization` header for its
   Bearer API calls.
-- Each protected application has its own Keycloak client, oauth2-proxy cookie,
-  client secret, Docker network, and upstream bridge. The dashboard gateway is
-  a compatibility boundary until every live dashboard replica runs native OIDC.
+- Each VPS-fronted application has its own Keycloak client, oauth2-proxy
+  cookie, client secret, Docker network, and upstream bridge -- six gateways
+  total (§3). `apiary-dashboard` is the exception: its oauth2-proxy
+  compatibility gateway was retired once every dashboard replica moved to
+  native OIDC (#1026), so its secret goes straight to the dashboard binary
+  instead of a VPS gateway.
+- Two more confidential clients, `arcane` and `auth-events-poller`, live
+  entirely on the homeserver side and never touch the VPS at all. Realm
+  total: nine confidential clients across three surfaces (§3).
 - `Xore/auth-backend` supplies only the read-only `themes/apiary` directory.
 
 ## Files and host paths
@@ -155,11 +161,12 @@ OIDC_PUBLIC_DOMAIN=honeypot.example
 OIDC_SECRETS_DIR=./secrets/oidc
 ```
 
-For each client below, create its own directory and files:
+For each client below, create its own directory and files. This is six of
+the realm's nine confidential clients -- the ones with a VPS oauth2-proxy
+gateway; see "Non-gateway confidential clients" below for the other three:
 
 | Directory/client | Public consumer |
 |---|---|
-| `apiary-dashboard` | dashboard compatibility gateway |
 | `kibana` | Kibana |
 | `evebox` | EveBox |
 | `arkime` | Arkime |
@@ -179,11 +186,12 @@ sudo chmod 440 ./secrets/oidc/<client>/*
 ```
 
 `client-secret` is different: since `apiary-realm.json` pins no client
-`secret`, Keycloak generates a fresh random one for all 8 confidential
+`secret`, Keycloak generates a fresh random one for all 9 confidential
 clients on every `--import-realm` (including a clean rebuild, #787). Use
 [`keycloak/sync-client-secrets.sh`](../arcane/home/honeypot-keycloak/keycloak/sync-client-secrets.sh) to
-fetch and install all 8 in one pass instead of the manual per-client
-procedure below -- run from the homeserver with SSH access to the VPS:
+fetch and install these 6 gateway secrets in one pass instead of the manual
+per-client procedure below -- run from the homeserver with SSH access to the
+VPS:
 
 ```bash
 KEYCLOAK_ADMIN_USERNAME=<master-realm admin> \
@@ -193,10 +201,10 @@ KEYCLOAK_ADMIN_PASSWORD=<its password> \
 
 It writes each secret directly over SSH (never to a local file or a
 command-line argument), fixes ownership/permissions to match the manual
-steps above, and restarts each of the 8 gateways so the new secret takes
+steps above, and restarts each of the 6 gateways so the new secret takes
 effect immediately. Manual fallback, retrieving a single client secret using
 the already authenticated homeserver `kcadm` (what the script above does for
-all 8):
+all 6):
 
 ```bash
 KC=/opt/keycloak/bin/kcadm.sh
@@ -212,7 +220,26 @@ sudo docker exec hp-keycloak "$KC" get \
 Transfer only the returned `value` into the matching VPS `client-secret` file
 over an encrypted administrative channel. Do not print it into CI logs, store it
 in `.env`, reuse it between clients, or commit it. A clean realm rebuild creates
-new client secrets; rotate all eight VPS files and restart all eight gateways.
+new client secrets; rotate all six VPS files and restart all six gateways.
+
+### Non-gateway confidential clients
+
+The realm's other three confidential clients have no VPS oauth2-proxy
+gateway, so `sync-client-secrets.sh` and the manual procedure above do not
+cover them. Each is rotated by its own idempotent provisioner script, run on
+the homeserver alongside (not instead of) the gateway rotation -- see §7 for
+the full clean-rebuild sequence:
+
+| Client | Surface | Provisioner |
+|---|---|---|
+| `apiary-dashboard` | homeserver -- native OIDC in the dashboard binary itself | [`keycloak/provision-dashboard-oidc-secret.sh`](../arcane/home/honeypot-keycloak/keycloak/provision-dashboard-oidc-secret.sh) |
+| `arcane` | homeserver -- Arcane's own OIDC login | [`keycloak/provision-arcane-oidc-secret.sh`](../arcane/home/honeypot-keycloak/keycloak/provision-arcane-oidc-secret.sh) |
+| `auth-events-poller` | homeserver -- service-account only, no login | [`keycloak/provision-events-poller.sh`](../arcane/home/honeypot-keycloak/keycloak/provision-events-poller.sh) |
+
+`apiary-dashboard` used to be the seventh VPS gateway (`oidc-dashboard`)
+until #1026's follow-up retired that compose service in favor of native
+OIDC; its secret now goes straight to the dashboard binary's own secrets
+file instead of a VPS `client-secret` file.
 
 Deploy `vps/docker-compose.yml`, `vps/traefik/traefik.yml`, and a production-
 rendered `vps/traefik/dynamic.yml` into the existing VPS stack. Do not start a
@@ -331,8 +358,17 @@ sudo KEYCLOAK_RESTORE_CONFIRM=restore-keycloak-database \
 4. Validate Compose and the realm template.
 5. Deploy to a disposable stack and exercise the acceptance tests.
 6. For a deliberate clean rebuild, remove the Keycloak PostgreSQL volume,
-   import the realm, recreate the administrator, rotate all client secrets,
-   restart every gateway, and repeat the full acceptance suite.
+   import the realm, recreate the administrator, then rotate all nine
+   confidential clients' secrets in two steps -- both required, either
+   order:
+   - `keycloak/sync-client-secrets.sh` (§3): the six VPS gateway secrets,
+     restarting every gateway.
+   - `keycloak/provision-dashboard-oidc-secret.sh`,
+     `keycloak/provision-arcane-oidc-secret.sh`, and
+     `keycloak/provision-events-poller.sh` (§3 "Non-gateway confidential
+     clients"): the three homeserver-side clients.
+
+   Then repeat the full acceptance suite.
 7. Never reuse a stale client-secret file after a clean realm rebuild.
 
 ## Troubleshooting
@@ -345,7 +381,8 @@ sudo KEYCLOAK_RESTORE_CONFIRM=restore-keycloak-database \
 | Endless HTTP password prompts | BasicAuth conflicts with Keycloak Bearer calls | Remove BasicAuth and its htpasswd mount; use Keycloak login + MFA. |
 | Password update returns internal error | Unsupported recovery-code required action was imported | Rebuild from the validated realm without that action; do not patch database state. |
 | All gateways restart with secret read errors | UID 65532 cannot traverse/read host secret paths | Use `root:65532`, directory `0750`, files `0440`. |
-| Gateways redirect but callback fails after rebuild | VPS client secrets belong to the old realm | Run `keycloak/sync-client-secrets.sh` to rotate all 8 client-secret files and restart every gateway in one pass. |
+| Gateways redirect but callback fails after rebuild | VPS client secrets belong to the old realm | Run `keycloak/sync-client-secrets.sh` to rotate all 6 gateway client-secret files and restart every gateway in one pass. |
+| Dashboard, Arcane login, or the events poller fail after rebuild with the gateways otherwise fine | Their homeserver-side client secrets belong to the old realm -- `sync-client-secrets.sh` never touches them (§3) | Run `keycloak/provision-dashboard-oidc-secret.sh`, `keycloak/provision-arcane-oidc-secret.sh`, and/or `keycloak/provision-events-poller.sh` as applicable. |
 | WireGuard port is absent | Keycloak is attached only to an internal Docker network | Attach Keycloak to `keycloak-data` and `keycloak-egress`; PostgreSQL uses only `keycloak-data`. |
 | Keycloak fails on a read-only filesystem | Upstream image needs first-start augmentation | Allow its disposable layer to be writable or build a separately reviewed optimized image. |
 | A theme file edit + `docker compose restart keycloak` doesn't reach real browsers, even though `curl` (no compression) and internal checks show the fix is live | Keycloak/Quarkus caches a gzip-compressed copy of every theme resource under `/opt/keycloak/data/tmp/kc-gzip-cache/`, which lives in the container's own writable layer -- it is not bind-mounted or a named volume, so it survives `docker restart` and is never invalidated when the source file on disk changes. Every real browser sends `Accept-Encoding: gzip` by default, so it keeps getting served the stale compiled variant indefinitely. Caught live (#108/#1027): repeated Cloudflare cache purges appeared not to fix a login theme bug because the *origin itself* was still serving the old file under gzip. | After any theme file change, before (or instead of) blaming CDN cache: `docker exec hp-keycloak rm -rf /opt/keycloak/data/tmp/kc-gzip-cache` -- no restart needed, Keycloak regenerates it lazily on the next request. Only a full container recreate (not `restart`) would otherwise clear it. Verify with `curl -H 'Accept-Encoding: gzip' --compressed ...` specifically, not a plain `curl`/`wget` that skips compression -- those two can disagree. |
