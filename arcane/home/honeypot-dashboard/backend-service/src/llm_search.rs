@@ -213,4 +213,40 @@ mod tests {
         assert_eq!(body["foreign_embeddings"], json!(41));
         assert!(body["note"].as_str().unwrap_or_default().contains("different model"));
     }
+
+    /// #2117 acceptance criterion: an index holding docs from two different
+    /// embedding_model generations must resolve to only the matching
+    /// bucket. This crate has no ES mock (search_index() wraps the official
+    /// elasticsearch client directly, nothing to substitute), so this
+    /// replays the one piece of ES behavior that matters here -- a `term`
+    /// clause inside `bool.filter` is an exact-match AND -- against a
+    /// synthetic mixed index, using knn_body()'s own filter clauses rather
+    /// than a second, hand-duplicated notion of what should match.
+    #[test]
+    fn knn_filter_excludes_foreign_model_docs_from_a_mixed_index() {
+        let docs = [
+            ("a", "session", "nomic-embed-text:latest"),
+            ("b", "session", "nomic-embed-text:latest"),
+            ("c", "session", "nomic-embed-text:v2-drifted"),
+            ("d", "session", "nomic-embed-text:v2-drifted"),
+        ];
+        let body = knn_body("nomic-embed-text:latest", &[0.1, 0.2], SEARCH_K);
+        let clauses = body["knn"]["filter"]["bool"]["filter"].as_array().unwrap();
+        let survives = |doc_type: &str, model: &str| {
+            clauses.iter().all(|clause| {
+                let (field, expected) = clause["term"].as_object().unwrap().iter().next().unwrap();
+                match field.as_str() {
+                    "doc_type" => expected == doc_type,
+                    "embedding_model" => expected == model,
+                    other => panic!("unexpected filter field {other}"),
+                }
+            })
+        };
+        let surviving: Vec<&str> = docs
+            .iter()
+            .filter(|(_, doc_type, model)| survives(doc_type, model))
+            .map(|(id, _, _)| *id)
+            .collect();
+        assert_eq!(surviving, vec!["a", "b"]);
+    }
 }
