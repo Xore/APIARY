@@ -493,6 +493,13 @@ class StartupPreflightIntegrationTests(unittest.TestCase):
             patch.object(worker, "STATUS_PATH", self.status_path),
             patch.object(worker, "configure_logging"),
             patch.object(sys, "argv", ["worker.py", "--once"]),
+            # main() gates on compose_route_preflight before es_preflight, and
+            # that gate reads ES_HOST straight from the environment rather than
+            # from Config. An overlay-supplied value is what a real
+            # captured-data bring-up has, so set one: without it every case
+            # below would stop at "compose-route-missing" and assert nothing
+            # about the ES probe this class exists to cover.
+            patch.dict(os.environ, {"ES_HOST": "http://es.invalid:9200"}),
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
