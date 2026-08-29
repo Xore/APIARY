@@ -14,7 +14,8 @@
 # following the standard QLoRA merge-for-deployment practice (train under
 # 4-bit, merge onto full precision) — the bnb-4bit tensor layout itself
 # isn't something llama.cpp's convert_hf_to_gguf.py can consume directly.
-set -euo pipefail
+set -euo
+source "$WORK/rex86_common.sh" pipefail
 
 name="${1:?usage: rex86_run_one.sh <name> <adapter_dir> <base_repo> [base_revision]}"
 adapter_dir="${2:?adapter_dir required}"
@@ -183,7 +184,22 @@ if [[ "$up" -ne 1 ]]; then
   exit 1
 fi
 echo "=== ${name}: llama-server up, running #159 corpus (32 cases) $(date -u +%FT%TZ) ==="
-docker exec rex86-eval python3 /work/corpus_eval.py llama_cpp "http://127.0.0.1:8080" \
-  --manifest /work/manifest.json --rubric /work/rev_cases_v2_rubric.json | tee "$WORK/other-models/${name}.corpus_eval.out"
-free_gpu
-echo "=== ${name}: DONE $(date -u +%FT%TZ) ==="
+# Write to a tmp file and only replace any previous result once the eval
+# pipeline has actually succeeded -- callers (rex86_run_all.sh,
+# rex86_retry_failed_adapters.sh) trust this file's existence to skip
+# already-done work, and an unconditional "tee" left a truncated file in
+# place on a mid-eval failure that those exists-checks treated as done
+# (#2055 item 2).
+result="$WORK/other-models/${name}.corpus_eval.out"
+tmp="${result}.tmp"
+if docker exec rex86-eval python3 /work/corpus_eval.py llama_cpp "http://127.0.0.1:8080" \
+  --manifest /work/manifest.json --rubric /work/rev_cases_v2_rubric.json | tee "$tmp"; then
+  mv -f "$tmp" "$result"
+  free_gpu
+  echo "=== ${name}: DONE $(date -u +%FT%TZ) ==="
+else
+  rm -f "$tmp"
+  free_gpu
+  echo "=== ${name}: eval FAILED, no result file written -- see log above $(date -u +%FT%TZ) ==="
+  exit 1
+fi

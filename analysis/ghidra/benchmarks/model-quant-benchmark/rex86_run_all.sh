@@ -14,7 +14,8 @@
 # official codellama/CodeLlama-34b-hf, not an unsloth repo -- unsloth's own
 # unquantized 34B repos 401'd (gated/private), confirmed by checking, not
 # assumed to be equivalent without noting it here.
-set -uo pipefail
+set -uo
+source "$WORK/rex86_common.sh" pipefail
 WORK=/var/dockge/stacks/rex86-eval/work
 QUEUE_LOG="$WORK/other-models/queue.log"
 cd "$WORK"
@@ -35,7 +36,7 @@ if [[ "$cuda_ok" != "True" ]]; then
 fi
 
 run() {
-  name="$1"; adapter_subdir="$2"; base_repo="$3"
+  name="$1"; adapter_subdir="$2"; base_repo="$3"; base_rev="$4"
   gguf="$WORK/other-models/${name}-f16.gguf"
   result="$WORK/other-models/${name}.corpus_eval.out"
   if [[ -f "$result" ]]; then
@@ -43,19 +44,24 @@ run() {
     return 0
   fi
   echo "=== QUEUE: starting ${name} $(date -u +%FT%TZ) ==="
-  if bash "$WORK/rex86_run_one.sh" "$name" "other-models/${adapter_subdir}" "$base_repo"; then
+  if bash "$WORK/rex86_run_one.sh" "$name" "other-models/${adapter_subdir}" "$base_repo" "$base_rev"; then
     echo "=== QUEUE: ${name} SUCCEEDED $(date -u +%FT%TZ) ==="
   else
     echo "=== QUEUE: ${name} FAILED $(date -u +%FT%TZ) -- continuing with the rest of the queue ==="
   fi
 }
 
-run qwen-3B       "qwen-3B_adapter/qwen-3B-fine-tuned"             "unsloth/Qwen2.5-Coder-3B"
-run codegemma-7B  "codegemma-7B_adapter/codegemma-7B-fine-tuned"   "unsloth/codegemma-7b-it"
-run codellama-7B  "codellama-7B_adapter/codellama-7B-fine-tuned"   "unsloth/codellama-7b"
-run codellama-13B "codellama-13B_adapter/codellama-13B-fine-tuned" "codellama/CodeLlama-13b-hf"
-run qwen-14B      "qwen-14B_adapter/qwen-14B-fine-tuned"           "unsloth/Qwen2.5-Coder-14B"
-run codellama-34B "codellama-34B_adapter/codellama-34B-fine-tuned" "codellama/CodeLlama-34b-hf"
-run qwen-32B      "qwen-32B_adapter/qwen-32B-fine-tuned"           "unsloth/Qwen2.5-Coder-32B"
+# base_revision pinned per repo (resolved 2026-08-29) so a new HF commit
+# landing mid-queue can't silently change the weights a result describes
+# -- rex86_run_one.sh already accepts this as an optional [base_revision]
+# argument (same discipline merge.py applied to the qwen-7B base), but no
+# caller here was passing it (#2055 item 4).
+run qwen-3B       "qwen-3B_adapter/qwen-3B-fine-tuned"             "unsloth/Qwen2.5-Coder-3B"     5860becf0623c7cd81f5467a88de66b668a46d6c
+run codegemma-7B  "codegemma-7B_adapter/codegemma-7B-fine-tuned"   "unsloth/codegemma-7b-it"      f1f500be8b896ae964017b4a3016ea6e47ea09bd
+run codellama-7B  "codellama-7B_adapter/codellama-7B-fine-tuned"   "unsloth/codellama-7b"         52ad3b73e63570b6c57ad1d8d46c6103b9ecfc76
+run codellama-13B "codellama-13B_adapter/codellama-13B-fine-tuned" "codellama/CodeLlama-13b-hf"   8da65ff4ee20f74ecd107ca9d54f9f121b279860
+run qwen-14B      "qwen-14B_adapter/qwen-14B-fine-tuned"           "unsloth/Qwen2.5-Coder-14B"    2918ea29941f20821b1ec4087d774ac0e5fa83e2
+run codellama-34B "codellama-34B_adapter/codellama-34B-fine-tuned" "codellama/CodeLlama-34b-hf"   6008b9656730b71c7d19a15370c7ff6d2902f4ef
+run qwen-32B      "qwen-32B_adapter/qwen-32B-fine-tuned"           "unsloth/Qwen2.5-Coder-32B"    8254c9d762e71c50966e6b0da5a0bcf72fa6fc23
 
 echo "=== QUEUE DONE $(date -u +%FT%TZ) ==="

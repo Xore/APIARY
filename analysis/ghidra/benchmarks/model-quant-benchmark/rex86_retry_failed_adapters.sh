@@ -15,31 +15,38 @@ set -uo pipefail
 WORK=/var/dockge/stacks/rex86-eval/work
 QUEUE_LOG="$WORK/other-models/queue-retry.log"
 cd "$WORK"
+source "$WORK/rex86_common.sh"
 exec > >(tee -a "$QUEUE_LOG") 2>&1
-echo "=== RETRY QUEUE: waiting for base-model queue + deepseek-v2-full $(date -u +%FT%TZ) ==="
+echo "=== RETRY QUEUE: waiting for any other rex86_*.sh driver to finish $(date -u +%FT%TZ) ==="
 
-while pgrep -f 'bash .*rex86_run_all_base\.sh' >/dev/null 2>&1 || pgrep -f 'bash .*rex86_run_deepseek_v2_full\.sh' >/dev/null 2>&1; do
-  sleep 30
-done
+# Shared guard (#2055 item 3, rex86_common.sh) -- the old check named only
+# rex86_run_all_base.sh and rex86_run_deepseek_v2_full.sh by their literal
+# "bash <path>" invocation, so it never waited on rex86_run_all.sh, the
+# backfill/prefetch drivers, or any invocation not prefixed "bash ".
+rex86_wait_for_gpu_drivers
 echo "=== RETRY QUEUE: GPU free, starting $(date -u +%FT%TZ) ==="
 
 retry() {
-  name="$1"; adapter_dir="$2"; base_repo="$3"
+  name="$1"; adapter_dir="$2"; base_repo="$3"; base_rev="$4"
   if [[ -f "$WORK/other-models/${name}.corpus_eval.out" ]]; then
     echo "=== ${name}: already has a corpus_eval result, skipping ==="
     return 0
   fi
   echo "=== RETRY: starting ${name} $(date -u +%FT%TZ) ==="
-  if bash "$WORK/rex86_run_one.sh" "$name" "$adapter_dir" "$base_repo"; then
+  if bash "$WORK/rex86_run_one.sh" "$name" "$adapter_dir" "$base_repo" "$base_rev"; then
     echo "=== RETRY: ${name} SUCCEEDED $(date -u +%FT%TZ) ==="
   else
     echo "=== RETRY: ${name} FAILED AGAIN $(date -u +%FT%TZ) -- continuing with the rest ==="
   fi
 }
 
-retry codellama-13B "codellama-13B_adapter/codellama-13B-fine-tuned" "codellama/CodeLlama-13b-hf"
-retry qwen-14B      "qwen-14B_adapter/qwen-14B-fine-tuned"           "unsloth/Qwen2.5-Coder-14B"
-retry codellama-34B "codellama-34B_adapter/codellama-34B-fine-tuned" "codellama/CodeLlama-34b-hf"
-retry qwen-32B      "qwen-32B_adapter/qwen-32B-fine-tuned"           "unsloth/Qwen2.5-Coder-32B"
+# base_revision pinned per repo (resolved 2026-08-29, same values as
+# rex86_run_all.sh) so a new HF commit can't silently change the weights a
+# retried result describes -- the pinning hook already existed on
+# rex86_run_one.sh but nothing here was passing it (#2055 item 4).
+retry codellama-13B "codellama-13B_adapter/codellama-13B-fine-tuned" "codellama/CodeLlama-13b-hf" 8da65ff4ee20f74ecd107ca9d54f9f121b279860
+retry qwen-14B      "qwen-14B_adapter/qwen-14B-fine-tuned"           "unsloth/Qwen2.5-Coder-14B"   2918ea29941f20821b1ec4087d774ac0e5fa83e2
+retry codellama-34B "codellama-34B_adapter/codellama-34B-fine-tuned" "codellama/CodeLlama-34b-hf"  6008b9656730b71c7d19a15370c7ff6d2902f4ef
+retry qwen-32B      "qwen-32B_adapter/qwen-32B-fine-tuned"           "unsloth/Qwen2.5-Coder-32B"   8254c9d762e71c50966e6b0da5a0bcf72fa6fc23
 
 echo "=== RETRY QUEUE DONE $(date -u +%FT%TZ) ==="

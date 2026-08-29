@@ -27,14 +27,13 @@
 set -uo pipefail
 WORK=/var/dockge/stacks/rex86-eval/work
 cd "$WORK"
+source "$WORK/rex86_common.sh"
 LOG="$WORK/other-models/backfill-extra-quants.log"
 exec > >(tee -a "$LOG") 2>&1
 echo "=== EXTRA QUANTS BACKFILL: starting $(date -u +%FT%TZ) ==="
 
 echo "waiting for any other rex86_*.sh driver to finish..."
-while pgrep -f 'rex86_(run_all|run_one|run_base_model|backfill|prefetch)' | grep -vx "$$" | grep -q .; do
-  sleep 30
-done
+rex86_wait_for_gpu_drivers
 echo "GPU clear of other rex86 drivers, starting $(date -u +%FT%TZ)"
 
 # Swap in the updated corpus_eval.py (--manifest/--rubric flags, adds the
@@ -69,6 +68,7 @@ run_direct() {
   local name="$1" tag="$2" ngl="$3"
   local gguf="/work/other-models/${name}-${tag}.gguf"
   local result="$WORK/other-models/${name}-${tag}.corpus_eval.out"
+  local tmp="${result}.tmp"
   if [[ -s "$result" ]]; then
     echo "=== ${name} (${tag}): result already exists, skipping ==="
     return 0
@@ -88,10 +88,15 @@ run_direct() {
     return 1
   fi
   echo "=== ${name} (${tag}): llama-server up, running #159 corpus (32 cases) $(date -u +%FT%TZ) ==="
-  docker exec rex86-eval python3 /work/corpus_eval.py llama_cpp "http://127.0.0.1:8080" \
-    --manifest /work/manifest.json --rubric /work/rev_cases_v2_rubric.json | tee "$result"
+  if docker exec rex86-eval python3 /work/corpus_eval.py llama_cpp "http://127.0.0.1:8080" \
+    --manifest /work/manifest.json --rubric /work/rev_cases_v2_rubric.json | tee "$tmp"; then
+    mv -f "$tmp" "$result"
+    echo "=== ${name} (${tag}): eval done $(date -u +%FT%TZ) ==="
+  else
+    rm -f "$tmp"
+    echo "=== ${name} (${tag}): eval FAILED, no result file written $(date -u +%FT%TZ) ==="
+  fi
   free_gpu
-  echo "=== ${name} (${tag}): eval done $(date -u +%FT%TZ) ==="
 }
 quantize_from() {
   local src="$1" dst="$2" type="$3"
