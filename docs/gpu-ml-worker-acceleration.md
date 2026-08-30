@@ -194,7 +194,7 @@ or not at all.
 
 | Consumer | Typical VRAM | When active |
 |---|---|---|
-| ollama (`qwen3:14b`, promoted for all 3 slots under #568) | ~10.2 GiB at production's 8k context; up to ~14.1 GiB at the ghidra slot's 32k context (both live-measured, see `docs/local-llm-model-evaluation.md`'s #568 section) | On LLM requests; unloads 10 min after last use (`OLLAMA_KEEP_ALIVE=10m`) |
+| ollama (`qwen3:14b`, promoted for all 3 slots under #568) | ~10.2 GiB at production's 8k context; up to ~14.1 GiB at the ghidra slot's 32k context (both live-measured, see `docs/local-llm-model-evaluation.md`'s #568 section) | On LLM requests; the ghidra/revdeck slots run under the shared server default `OLLAMA_KEEP_ALIVE=30m` (kept resident across a drain's queue, see `analysis/ghidra/docker-compose.ghidra.yml`) — the llm-worker slot overrides that per-request with `LLM_KEEP_ALIVE=10m` and unloads 10 min after its own last use |
 | ml-worker inference (LSTM-AE + embedder) | ~0.5–1 GiB | Every poll cycle (30 s), briefly |
 | ml-worker retrain | ~1–2 GiB | Every 6 h, minutes |
 
@@ -208,7 +208,10 @@ the original 6.1 GiB `qwen3.5:9b` estimate):
   against the real 20475 MiB budget: about 3.3 GiB of headroom, not the
   "comfortable" double-digit margin a naive 6.1 GiB-chat-model estimate
   would suggest. That is enough to not require full separation, but not
-  enough to treat as a non-issue either. Keep the `RETRAIN_INTERVAL` /
+  enough to treat as a non-issue either. This already assumes the ghidra
+  slot's model is resident regardless of any keep-alive window — the 30m
+  server-default residency (above) makes that the common case during a
+  drain, not just a worst-case edge. Keep the `RETRAIN_INTERVAL` /
   `DAILY_REPORT_HOUR` scheduling offset (retrain landing at least 1 h away
   from the LLM daily report — e.g. retrain at 01:00/07:00/13:00/19:00 UTC
   against a 06:00 report) as a cheap way to avoid the worst-case overlap in

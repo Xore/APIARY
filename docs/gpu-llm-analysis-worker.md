@@ -196,9 +196,16 @@ Hard rules:
 
 - `OLLAMA_MAX_LOADED_MODELS=1` and `OLLAMA_NUM_PARALLEL=1` — serialize
   requests, never load chat + embedding models simultaneously.
-- `OLLAMA_KEEP_ALIVE=10m` — unload the model when idle so the ML worker
-  (see [`gpu-ml-worker-acceleration.md`](gpu-ml-worker-acceleration.md))
-  can use the GPU for retraining.
+- `LLM_KEEP_ALIVE=10m` (default in `llm-worker/docker-compose.yml`, sent as
+  this worker's own `keep_alive` on every request) — unload the model after
+  this worker's own requests go idle, so the ML worker (see
+  [`gpu-ml-worker-acceleration.md`](gpu-ml-worker-acceleration.md)) can use
+  the GPU for retraining. This is a per-request override, not the server
+  default: `analysis/ghidra/docker-compose.ghidra.yml` sets the shared
+  `OLLAMA_KEEP_ALIVE=30m` deliberately, to keep the model resident across a
+  ghidra drain's queue of binaries. Ghidra/revdeck traffic, which sends no
+  `keep_alive` of its own, runs under that 30m server default; only this
+  worker's requests unload at 10m.
 - Context: cap prompts at ~6k tokens (truncate attacker content, §8).
   KV cache grows with context; do not raise `num_ctx` beyond 8192.
 - Send `think: false`. Ollama enables thinking by default for this model; the
@@ -486,7 +493,9 @@ docker compose -f llm-worker/docker-compose.yml \
 
 # T7 synthetic idle: the canary uses 30s and fails unless /api/ps confirms
 #    unload within 90s. The one-shot production canary also uses 30s;
-#    a continuously enabled worker retains OLLAMA_KEEP_ALIVE=10m.
+#    a continuously enabled worker retains LLM_KEEP_ALIVE=10m (this
+#    worker's own request-level default; the shared ollama server's
+#    OLLAMA_KEEP_ALIVE defaults to 30m, see gpu-ml-worker-acceleration.md §5).
 nvidia-smi --query-gpu=memory.used --format=csv
 
 # T8 authorized U1-only production acceptance: exactly one result, no U2/report
@@ -543,9 +552,9 @@ sensors.
 - **G5 — Label AI output.** Any UI rendering LLM text must mark it as
   AI-generated and HTML-escape it (the content can quote attacker payloads).
 - **G6 — Resource containment.** Respect the VRAM budget in §5
-  (`MAX_LOADED_MODELS=1`, `NUM_PARALLEL=1`, `KEEP_ALIVE=10m`, 12 GiB RAM
-  limit). The GPU is shared with the ML worker's retraining; coordinate
-  schedules per [`gpu-ml-worker-acceleration.md`](gpu-ml-worker-acceleration.md).
+  (`MAX_LOADED_MODELS=1`, `NUM_PARALLEL=1`, this worker's own
+  `LLM_KEEP_ALIVE=10m`). The GPU is shared with the ML worker's retraining;
+  coordinate schedules per [`gpu-ml-worker-acceleration.md`](gpu-ml-worker-acceleration.md).
 - **G7 — Supply chain.** Pin the `ollama/ollama` image by digest and record
   the model digest (`ollama list` shows it) in the deployment notes. Do not
   auto-update the model in place.
