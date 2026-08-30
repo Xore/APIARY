@@ -7,6 +7,33 @@ flock -n 9 || exit 0
 mkdir -p "$root/inbox"/{queued,running,completed,failed,samples} "$root/export"
 chmod 0700 "$root/inbox"/{queued,running,completed,failed,samples} "$root/export"
 status_export=/usr/local/libexec/honeypot-sandbox/status-export.py
+
+# A job whose worker died mid-run (OOM kill, SIGKILL, the 20min
+# TimeoutStartSec on honeypot-sandbox-worker.service, power loss) is moved
+# into inbox/running/ but the process that would move it back out never
+# gets to run again -- nothing re-queues it, so it sits there forever and
+# status-export.py reports it as "running" indefinitely. Recover it here,
+# unconditionally, before the drain loop below even looks at the queue:
+# a single VM run is bounded by run-linux-sample.sh's own 240s host
+# deadline plus export/Arkime overhead, so anything still in inbox/running/
+# well past that has no living owner left to finish it.
+sweep_stranded_running() {
+  local stale_secs=${WORKER_STALE_RUNNING_SECS:-1800}
+  local running name sha mtime age
+  for running in "$root/inbox/running"/*.json; do
+    [[ -e $running ]] || continue
+    name=$(basename "$running")
+    sha=${name%.json}
+    mtime=$(stat -c %Y "$running" 2>/dev/null) || continue
+    age=$(($(date +%s) - mtime))
+    ((age >= stale_secs)) || continue
+    echo "recovering stranded running job $name (age ${age}s >= ${stale_secs}s, no living worker)" >&2
+    printf 'stranded in inbox/running for %ss with no living worker (recovered at startup)\n' "$age" >"$root/inbox/failed/$name.error"
+    mv -f "$running" "$root/inbox/failed/$name"
+    [[ ! -f $root/inbox/running/$sha.log ]] || mv -f "$root/inbox/running/$sha.log" "$root/inbox/failed/$sha.log"
+  done
+}
+sweep_stranded_running
 "$status_export" --worker-state running
 finish_status() {
   code=$?
