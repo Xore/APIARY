@@ -31,6 +31,29 @@ mkdir -p "$request_dir" "$results_dir"
 chmod 0700 "$request_dir" "$results_dir"
 
 shopt -s nullglob
+
+# The path unit only fires on spool changes, so a claim whose worker died
+# mid-detonation (OOM kill, SIGKILL, host reboot) sits in *.request.running
+# forever: no future spool change globs a *.request that no longer exists,
+# and nothing else re-queues it. Mirrors sandbox/worker.sh's
+# sweep_stranded_running (and sandbox/windows/run_pending.sh's own copy) --
+# age the claim off its mtime and recover it before the drain loop below
+# even looks at the queue.
+sweep_stranded_claims() {
+  local stale_secs=${GHOSTS_SANDBOX_STALE_RUNNING_SECS:-1800}
+  local claimed name mtime age
+  for claimed in "$request_dir"/*.request.running; do
+    [[ -e $claimed ]] || continue
+    name=$(basename "$claimed")
+    mtime=$(stat -c %Y "$claimed" 2>/dev/null) || continue
+    age=$(($(date +%s) - mtime))
+    ((age >= stale_secs)) || continue
+    echo "recovering stranded claim $name (age ${age}s >= ${stale_secs}s, no living worker)" >&2
+    mv -f "$claimed" "${claimed%.running}.failed"
+  done
+}
+sweep_stranded_claims
+
 processed=0
 
 for request in "$request_dir"/*.request; do
