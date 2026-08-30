@@ -1,0 +1,13 @@
+{
+  "_meta": {
+    "description": "Stack-wide fallback so any index this cluster ever creates defaults to zero replicas -- issue #2709 (single-node ES cluster went yellow: every index Elasticsearch's own built-in defaults create carries 1 replica, which can never be assigned with only one node). See also #537.",
+    "source": "#2709"
+  },
+  "index_patterns": ["*"],
+  "priority": 100,
+  "template": {
+    "settings": {
+      "index.number_of_replicas": 0
+    }
+  }
+}
