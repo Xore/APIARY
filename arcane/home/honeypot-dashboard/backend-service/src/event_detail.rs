@@ -757,7 +757,12 @@ fn suricata_detail(eve: &Value) -> String {
 
 /// The first candidate that reads as a non-empty string.
 fn first_non_empty<'a>(candidates: &[&'a Value]) -> &'a str {
-    candidates.iter().map(|v| s(v)).find(|value| !value.is_empty()).unwrap_or("")
+    candidates
+        .iter()
+        .copied()
+        .map(s)
+        .find(|value| !value.is_empty())
+        .unwrap_or("")
 }
 
 /// #2334: suricata.yaml's alert stanza turns on `payload`, `packet` and
@@ -792,7 +797,10 @@ fn captured_bytes_suffix(eve: &Value) -> String {
 fn base64_decoded_len(value: &Value) -> Option<usize> {
     use base64::Engine;
     let encoded = value.as_str().filter(|v| !v.is_empty())?;
-    base64::engine::general_purpose::STANDARD.decode(encoded).ok().map(|bytes| bytes.len())
+    base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()
+        .map(|bytes| bytes.len())
 }
 
 #[cfg(test)]
