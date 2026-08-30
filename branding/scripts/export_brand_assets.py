@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import zlib
 from pathlib import Path
 
@@ -17,9 +16,12 @@ SOURCE = BRAND / "source"
 LOGO = BRAND / "assets" / "logo"
 FAVICON = BRAND / "assets" / "favicon"
 SOCIAL = BRAND / "assets" / "social"
-# #1502: dashboard/ moved under arcane/home/honeypot-dashboard/.
-DASHBOARD_STATIC = ROOT / "arcane" / "home" / "honeypot-dashboard" / "dashboard" / "static"
-PDF_ASSETS = ROOT / "arcane" / "home" / "honeypot-dashboard" / "dashboard" / "assets_pdf"
+# #2220: the Go dashboard tree these used to point at (dashboard/static,
+# dashboard/assets_pdf) was removed. The PDF masks belong to the Rust report
+# composer that actually embeds them via include_bytes!; the favicon masters
+# have no surviving source outside branding/assets/favicon itself, so that
+# directory is now both the source and the destination for the favicon step.
+PDF_ASSETS = ROOT / "arcane" / "home" / "honeypot-dashboard" / "backend-service" / "assets_pdf"
 
 CHARCOAL = (32, 32, 31)
 IVORY = (247, 246, 242)
@@ -176,23 +178,11 @@ def export_logos() -> dict[str, Image.Image]:
 
 
 def export_favicons() -> None:
-    # The dashboard's existing small-size artwork is optically simplified and remains
-    # more legible at 16-32 px than a mechanical downscale of the full emblem.
-    mapping = {
-        "favicon.ico": "favicon.ico",
-        "favicon-16x16.png": "favicon-16x16.png",
-        "favicon-32x32.png": "favicon-32x32.png",
-        "apple-touch-icon.png": "apple-touch-icon.png",
-        "icon-192.png": "icon-192.png",
-        "icon-512.png": "icon-512.png",
-    }
-    for source_name, target_name in mapping.items():
-        shutil.copy2(DASHBOARD_STATIC / source_name, FAVICON / target_name)
-
-    favicon_48 = Image.open(DASHBOARD_STATIC / "brand-mark@2x.png").convert("RGBA")
-    favicon_48 = favicon_48.resize((48, 48), Image.Resampling.LANCZOS)
-    save_png(favicon_48, FAVICON / "favicon-48x48.png")
-
+    # #2220: these were optically-simplified masters copied from the Go
+    # dashboard's static/ tree; that tree is gone and took the only other
+    # copies with it, so favicon.ico/16x16/32x32/apple-touch-icon/icon-192/
+    # icon-512/favicon-48x48 already at rest in FAVICON are the surviving
+    # masters. There is nothing left to regenerate them from.
     manifest = {
         "name": "APIARY",
         "short_name": "APIARY",
@@ -210,9 +200,8 @@ def export_favicons() -> None:
     }
     manifest_text = json.dumps(manifest, indent=2) + "\n"
     (FAVICON / "site.webmanifest").write_text(manifest_text, encoding="utf-8")
-    (DASHBOARD_STATIC / "site.webmanifest").write_text(manifest_text, encoding="utf-8")
 
-    source = Image.open(DASHBOARD_STATIC / "favicon-32x32.png")
+    source = Image.open(FAVICON / "favicon-32x32.png")
     compact_assets: dict[str, Image.Image] = {}
     for name, color in (
         ("apiary-compact-mark-for-dark.png", COPPER_DARK),
@@ -221,7 +210,6 @@ def export_favicons() -> None:
         mark = compact_mark(source, color)
         compact_assets[name] = mark
         save_png(mark, LOGO / name)
-        save_png(mark, DASHBOARD_STATIC / name)
     export_pdf_header_mark(compact_assets["apiary-compact-mark-for-dark.png"])
 
 
