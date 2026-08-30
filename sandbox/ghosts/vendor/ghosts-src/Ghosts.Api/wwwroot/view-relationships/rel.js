@@ -114,7 +114,7 @@ export default function define(runtime, observer) {
             .attr("r", 20)
             .style("stroke", "skyblue")
             .style("stroke-width", 2.25)
-            .attr("fill", d => `url(#d` + GetNpcId(data.links, d.id)) + `)"`;
+            .attr("fill", d => `url(#d${GetNpcId(data.links, d.id)})`);
 
         node.append("text")
             .attr("class", "link")
