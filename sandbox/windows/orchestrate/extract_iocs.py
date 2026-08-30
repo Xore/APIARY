@@ -97,6 +97,7 @@ def parse_sysmon_evtx(evtx_path: Path) -> dict:
 
                 elif eid_val == 1:  # Process Create
                     iocs['processes'].append({
+                        'utc_time': data.get('UtcTime', ''),
                         'image':    data.get('Image', ''),
                         'cmdline':  data.get('CommandLine', ''),
                         'parent':   data.get('ParentImage', ''),

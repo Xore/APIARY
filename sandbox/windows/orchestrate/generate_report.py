@@ -158,7 +158,7 @@ def process_section(iocs: dict) -> str:
         (p.get("utc_time") or p.get("UtcTime"),
          p.get("parent") or p.get("ParentImage"),
          p.get("image") or p.get("Image"),
-         p.get("command_line") or p.get("CommandLine"))
+         p.get("cmdline") or p.get("CommandLine"))
         for p in procs
     ]
     return section(
