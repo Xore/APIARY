@@ -4,7 +4,7 @@ prose survived in two places after Filebeat 9 made `fingerprint` the
 default filestream identity scheme instead of inode/device --
 vps/suricata/suricata.yaml's eve-log comment and the module doc comment in
 backend-service/src/ip_enrichment/rotate.rs both still justified rotation
-safety with the pre-FB9 "Filebeat's default file_identity (inode/device,
+safety with the pre-FB9 "FB9_pre_default_identity_phrase,
 not path)" claim, the same claim #2202 already corrected in
 analysis/filebeat.yml's suricata-eve input comment.
 
@@ -26,7 +26,9 @@ import pytest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
-STALE_PHRASE = "Filebeat's default file_identity (inode/device"
+# Use chr() concatenation so this test file does not contain the literal
+# stale phrase itself (the scanner walks every .py file in the repo).
+STALE_PHRASE = "Filebeat" + chr(39) + "s default file_identity (inode/device"
 
 # Directories that never carry shipped config/comments worth scanning, and
 # would otherwise be slow or noisy to walk (VCS metadata, dependency trees,
@@ -70,7 +72,7 @@ def test_no_shipped_file_still_claims_the_pre_fb9_default():
             offenders.append(str(path.relative_to(REPO_ROOT)))
     assert not offenders, (
         f"stale pre-Filebeat-9 file_identity claim still present in: {offenders} "
-        "-- Filebeat 9 changed the filestream default from inode/device to "
+        "-- Filebeat 9 changed the filestream default from inode-based identity to "
         "fingerprint (see #1776/#2189/#2202)"
     )
 
