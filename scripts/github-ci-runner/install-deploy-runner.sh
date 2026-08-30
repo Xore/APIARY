@@ -49,20 +49,19 @@ RUNNER_LABELS="self-hosted,linux,x64,honeypot-home"
 
 # The exact set of directories deploy.yml writes into (destination= across
 # every job in .github/workflows/deploy.yml, cross-checked against that
-# file directly, not re-derived from memory). Sensor stacks and the other
-# single-compose-file destinations are deliberately NOT listed here: those
-# jobs only ever `cp` one compose.yml into an already-`install -d`'d
-# directory, never rsync a tree into them, so there is no equivalent
-# ownership risk to fix there -- adding them would only widen this script's
-# blast radius for no real gain.
+# file directly, not re-derived from memory -- if this list ever drifts
+# again, re-derive it the same way: grep destination= out of
+# .github/workflows/deploy.yml). The honeypot-arcane destination= is
+# deliberately NOT listed here, same as every other stack: that job only
+# ever `cp`s one compose.yml into an already-`install -d`'d directory,
+# never rsyncs a tree into it, so there is no equivalent ownership risk to
+# fix there -- adding it would only widen this script's blast radius for
+# no real gain. (#2602: this list used to carry six pre-#1502 paths that
+# deploy.yml stopped writing to once the Arcane manifest took over; one of
+# them, /var/dockge/stacks/honeypot-keycloak, still existed on disk and
+# was getting a gratuitous recursive chown every rerun.)
 DEPLOY_DIRS=(
   /opt/stacks/apiary
-  /opt/stacks/honeypot-init
-  /var/dockge/stacks/honeypot-keycloak
-  /opt/stacks/honeypot-payload-analysis
-  /opt/stacks/honeypot-utilities
-  /opt/stacks/honeypot-elk
-  /opt/stacks/honeypot-dashboard
 )
 
 # Subtree names that are container-owned wherever they appear under any of
