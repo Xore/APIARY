@@ -185,15 +185,22 @@ filebeat.inputs:
   # Deliberately kept alongside Suricata rather than replacing it: the two see
   # different things on the same wire, which is the whole point of S5.
   - type: filestream
-    # #1776: pinned rather than left implicit. Filebeat 9 changed the
-    # filestream default from inode+device to fingerprint, and a path whose
-    # identity scheme can change under it is how one file ends up with two
-    # harvester states shipping every line twice. Zeek rotates by
-    # rename-and-reopen, which is stable under either scheme, so this is
-    # about never letting the scheme move rather than about Zeek.
+    # #1776 pinned this to fingerprint (rather than leaving the Filebeat 9
+    # default implicit) because Zeek rotates by rename-and-reopen, which is
+    # stable under either identity scheme -- see the zeek-proxy-logs input
+    # below for the fuller reasoning. #2708 found that fingerprint itself is
+    # the wrong scheme here: it hashes a fixed byte window of the file, and
+    # for high-column-count logs like modbus_detailed that window landed
+    # entirely inside the static #separator/#path/#fields/#types header,
+    # which is byte-identical across every hourly rotation. Filebeat then
+    # treated every rotation after the first as "already known" and silently
+    # skipped it -- 22,807 skip warnings/hour, none of those files ever
+    # reaching Elasticsearch. Pinned to native (inode+device) instead: each
+    # hourly rotation is a brand-new file with a brand-new inode (Zeek never
+    # truncates in place), so native identity can't collide the way a
+    # content-hash window can.
     id: zeek-logs
-    file_identity.fingerprint: ~
-    prospector.scanner.fingerprint.enabled: true
+    file_identity.native: ~
     paths:
       - /logs/zeek/*.log
     parsers:
@@ -210,11 +217,12 @@ filebeat.inputs:
   # one's peer is the tunnel, so its source addresses mean something different
   # and must never be mistaken for attacker IPs.
   - type: filestream
-    # #1776: pinned for the same reason as the zeek input above -- the
-    # identity scheme must not change underneath a rotating file.
+    # #2708: native rather than fingerprint, for the same reason as the
+    # zeek-logs input above -- this directory carries the loudest instance of
+    # the collision (modbus_detailed: 20,838 skip warnings/hour), and native
+    # identity is immune to it because it never hashes file content.
     id: zeek-proxy-logs
-    file_identity.fingerprint: ~
-    prospector.scanner.fingerprint.enabled: true
+    file_identity.native: ~
     paths:
       - /logs/zeek-proxy/*.log
     parsers:
