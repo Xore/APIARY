@@ -79,6 +79,7 @@ RUNNERS = {
 #   just to confirm a socket() call compiles -- same reasoning as above.
 EXCLUDED = {
     "process_and_injection": "forks and execs a real child process; nothing to assert beyond pid != -1",
+    "process_witness_probe": "same fork/execv shape as process_and_injection (#2694 witness twin); same reason",
     "loopback_connect": "opens a real network socket/connect(); no assertion needs a live syscall",
 }
 
