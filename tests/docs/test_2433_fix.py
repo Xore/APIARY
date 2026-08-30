@@ -22,10 +22,28 @@ COMPOSE_YML = STACK_DIR / "compose.yml"
 ENV_EXAMPLE = STACK_DIR / ".env.example"
 
 KEY_LINE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+COMMENT_LINE = re.compile(r"^\s*#")
 
 
 def _compose_text():
     return COMPOSE_YML.read_text(encoding="utf-8")
+
+
+def _compose_interpolated_text():
+    """compose.yml with whole-line comments stripped, i.e. only what Compose
+    actually interpolates.
+
+    The header comment references a *sibling* stack's binding in prose
+    (dionaea's generic ``${HP_BIND}:5060``, written without a default because
+    it names the variable, not that file's literal line) -- that is
+    documentation, not configuration, and must not be held to this stack's
+    own port-binding contract.
+    """
+    return "\n".join(
+        line
+        for line in _compose_text().splitlines()
+        if not COMMENT_LINE.match(line)
+    )
 
 
 def _env_example_text():
@@ -53,7 +71,7 @@ def test_compose_still_defaults_hp_bind_to_tunnel_address():
     :-10.8.0.2 fallback (making HP_BIND genuinely required), this test's
     partner assertion below must be updated too -- it should not silently
     drift back out of sync."""
-    text = _compose_text()
+    text = _compose_interpolated_text()
     binds = re.findall(r"\$\{HP_BIND(:-[^}]*)?\}", text)
     assert binds, f"no ${{HP_BIND...}} interpolation found in {COMPOSE_YML}"
     for suffix in binds:
