@@ -23,6 +23,7 @@ def run_case(*, syncs: list[dict], target: str, dry_run: int, curl_response: str
     syncs_json = json.dumps({"data": syncs})
     bash_script = f"""
 set -uo pipefail
+export ARCANE_BEARER=fixture-bearer
 source {shlex.quote(str(SCRIPT))}
 
 arcane_api() {{

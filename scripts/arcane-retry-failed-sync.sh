@@ -18,7 +18,7 @@
 set -euo pipefail
 
 ARCANE_URL="${ARCANE_URL:-http://10.8.0.2:3552}"
-ARCANE_API_TOKEN="${ARCANE_API_TOKEN:-}"
+ARCANE_BEARER="${ARCANE_BEARER:-}"
 
 usage() {
   cat <<'EOF'
@@ -31,7 +31,7 @@ sync endpoint's own ~5 minute deadline.
 
 Environment:
   ARCANE_URL        Arcane API base URL (default: http://10.8.0.2:3552)
-  ARCANE_API_TOKEN  Arcane API bearer token (required)
+  ARCANE_BEARER     Arcane API bearer token (required)
 
 Options:
   --apply     Actually redeploy. Without it, only prints what would happen.
@@ -44,7 +44,7 @@ EOF
 arcane_api() {
   local method="$1" path="$2" body="${3:-}"
   local -a curl_args=(-sS -X "$method" "${ARCANE_URL%/}/api${path}" \
-    -H "Authorization: Bearer $ARCANE_API_TOKEN" -H "Content-Type: application/json")
+    -H "Authorization: Bearer $ARCANE_BEARER" -H "Content-Type: application/json")
   [[ -n "$body" ]] && curl_args+=(-d "$body")
   curl "${curl_args[@]}"
 }
@@ -104,7 +104,7 @@ process_target() {
   local redeploy_resp
   redeploy_resp=$(curl -sS -N -m 3600 -X POST \
     "${ARCANE_URL%/}/api/environments/0/projects/$project_id/redeploy" \
-    -H "Authorization: Bearer $ARCANE_API_TOKEN" -H "Content-Type: application/json") || {
+    -H "Authorization: Bearer $ARCANE_BEARER" -H "Content-Type: application/json") || {
     echo "FAIL  $target: redeploy request failed"
     return 1
   }
@@ -132,8 +132,8 @@ main() {
     usage >&2
     exit 2
   fi
-  if [[ -z "$ARCANE_API_TOKEN" ]]; then
-    echo "ARCANE_API_TOKEN is required" >&2
+  if [[ -z "$ARCANE_BEARER" ]]; then
+    echo "ARCANE_BEARER is required" >&2
     exit 2
   fi
 
