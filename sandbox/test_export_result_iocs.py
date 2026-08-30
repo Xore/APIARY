@@ -36,6 +36,10 @@ class IOCPatternParity(unittest.TestCase):
         "link 172.16.4.4 and 192.168.9.9 ignored",
         "broadcast 255.255.255.255 ignored",
         "0.0.0.0 ignored",
+        "apipa 169.254.34.12 ignored",
+        "ssdp 239.255.255.250 ignored",
+        "mdns 224.0.0.251 ignored",
+        "reserved 240.0.0.9 ignored",
         "no iocs in this line at all",
     ]
 
@@ -65,7 +69,17 @@ class IOCPatternParity(unittest.TestCase):
 
     def test_private_and_reserved_addresses_are_never_iocs(self):
         found = EXPORT._ioc_scan(self.CORPUS)["remote_ips"]
-        for ignored in ("10.0.0.5", "127.0.0.1", "172.16.4.4", "192.168.9.9", "0.0.0.0"):
+        for ignored in (
+            "10.0.0.5",
+            "127.0.0.1",
+            "172.16.4.4",
+            "192.168.9.9",
+            "0.0.0.0",
+            "169.254.34.12",
+            "239.255.255.250",
+            "224.0.0.251",
+            "240.0.0.9",
+        ):
             self.assertNotIn(ignored, found)
         self.assertIn("203.0.113.9", found)
         self.assertIn("198.51.100.7", found)
