@@ -116,8 +116,26 @@ func (l *logger) rotate() {
 		return
 	}
 	l.f.Close()
-	stamp := time.Now().UTC().Format("20060102-150405")
-	os.Rename(l.path, l.path+"."+stamp)
+	// Second-granularity timestamps collide when two rotations happen within
+	// the same wall-clock second (#1403 -- the same pattern originated in
+	// multipot's logger and was fixed there with a counter suffix; applying
+	// the identical fix here). Disambiguate with a counter suffix instead of
+	// trusting the clock alone.
+	target := l.path + "." + time.Now().UTC().Format("20060102-150405")
+	if _, err := os.Stat(target); err == nil {
+		for n := 2; ; n++ {
+			candidate := fmt.Sprintf("%s.%d", target, n)
+			if _, err := os.Stat(candidate); err != nil {
+				target = candidate
+				break
+			}
+		}
+	}
+	if err := os.Rename(l.path, target); err != nil {
+		// Rename failing (e.g. path already gone) shouldn't stop logging --
+		// reopening O_APPEND on the original path either resumes the same
+		// file or creates a new one, either of which beats losing the fd.
+	}
 	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
 	if err != nil {
 		l.f = nil
