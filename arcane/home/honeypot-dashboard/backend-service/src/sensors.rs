@@ -320,7 +320,7 @@ pub async fn detail(State(state): State<AppState>) -> Result<Json<SensorDetail>,
 /// reason (#1677); this is the rest of it.
 fn excluding_health_checks() -> Vec<Value> {
     vec![
-        json!({"term": {"honeypot.internal_probe": true}}),
+        crate::es::internal_probe_exclusion(),
         json!({"term": {"honeypot.src_ip": "127.0.0.1"}}),
         // Both ends inside the fleet. Zeek's own judgement, from its
         // configured local networks, so it stays correct if the addressing
