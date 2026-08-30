@@ -161,7 +161,7 @@ func handleRedis(c net.Conn, log *sessionLogger, port int) {
 	ip := srcIP(c)
 	r := bufio.NewReader(c)
 	for {
-		args, ok := readRESP(r)
+		args, ok := readRESP(r, log, ip, port)
 		if !ok {
 			return
 		}
@@ -261,8 +261,18 @@ func writeRESPArray(c net.Conn, items []string) {
 	}
 }
 
+// A crafted *N header can claim thousands of elements, and each $-bulk under
+// it is separately capped -- but neither cap bounds the sum, so a stream just
+// under both limits still accumulates unbounded bytes in out before either
+// fires. maxRESPTotalBytes stops that aggregate, dropping the connection
+// before the next bulk is even allocated.
+const (
+	maxRESPElements   = 1024
+	maxRESPTotalBytes = 16 << 20 // 16 MiB
+)
+
 // readRESP parses one command: either a RESP array (*N ...) or an inline line.
-func readRESP(r *bufio.Reader) ([]string, bool) {
+func readRESP(r *bufio.Reader, log *sessionLogger, ip string, port int) ([]string, bool) {
 	prefix, err := r.ReadByte()
 	if err != nil {
 		return nil, false
@@ -284,10 +294,11 @@ func readRESP(r *bufio.Reader) ([]string, bool) {
 		return nil, false
 	}
 	n := atoiSafe(countLine)
-	if n <= 0 || n > 1024 {
+	if n <= 0 || n > maxRESPElements {
 		return []string{}, true
 	}
 	out := make([]string, 0, n)
+	total := 0
 	for i := 0; i < n; i++ {
 		if _, err := r.ReadByte(); err != nil { // '$'
 			return out, len(out) > 0
@@ -296,6 +307,12 @@ func readRESP(r *bufio.Reader) ([]string, bool) {
 		blen := atoiSafe(lenLine)
 		if blen < 0 || blen > 1<<20 {
 			return out, true
+		}
+		total += blen
+		if total > maxRESPTotalBytes {
+			log.emit(event{Proto: "redis", Port: port, SrcIP: ip, Event: "resp_limit",
+				Data: "multi-bulk aggregate exceeded cap, dropping connection"})
+			return out, false
 		}
 		buf := make([]byte, blen)
 		if _, err := readFull(r, buf); err != nil {
