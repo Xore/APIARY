@@ -1316,6 +1316,36 @@ jobs:
                 -f llm-worker/docker-compose.production-session-canary.yml config --quiet
               docker compose -f llm-worker/docker-compose.yml \
                 -f llm-worker/docker-compose.captured-data.yml config --quiet
+              # #2225: docker-compose.captured-data-deploy.yml (#1751) is the
+              # entrypoint live redeploys authorized under #83 actually run --
+              # `include:`, not a stacked `-f base -f overlay` pair, so
+              # neither line above proves anything about it. Unvalidated, a
+              # bad include path or an invalid key sails through both and
+              # first surfaces as a failed (or silently mis-scoped) live
+              # redeploy, which is how #1751's incident happened.
+              docker compose -f llm-worker/docker-compose.captured-data-deploy.yml config --quiet
+              # Syntactic validity alone isn't enough: stripping an include
+              # (e.g. losing docker-compose.captured-data.yml) still resolves
+              # to valid, synthetic-only config. Assert the resolved model
+              # still carries the authorization this file exists to record.
+              resolved="$(docker compose -f llm-worker/docker-compose.captured-data-deploy.yml config --format json)"
+              es_host="$(jq -r '.services["llm-worker"].environment.ES_HOST // empty' <<<"$resolved")"
+              if [ -z "$es_host" ]; then
+                echo "::error::captured-data-deploy.yml resolved with empty ES_HOST -- the captured-data authorization overlay is not being applied (#2225)"
+                exit 1
+              fi
+              for net in honeypot-llm-data honeypot-llm; do
+                if ! jq -e --arg n "$net" '.networks | to_entries[] | select(.value.name == $n)' <<<"$resolved" >/dev/null; then
+                  echo "::error::captured-data-deploy.yml resolved without the $net network attached -- the captured-data authorization overlay is not being applied (#2225)"
+                  exit 1
+                fi
+              done
+              for target in /payloads/cowrie /payloads/scripts; do
+                if ! jq -e --arg t "$target" '.services["llm-worker"].volumes[]? | select(.target == $t and .read_only == true)' <<<"$resolved" >/dev/null; then
+                  echo "::error::captured-data-deploy.yml resolved without a read-only mount at $target -- the captured-data authorization overlay is not being applied (#2225)"
+                  exit 1
+                fi
+              done
 
           - name: Pi-hole/DNSCrypt install topology (#1387)
             home: true
