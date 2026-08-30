@@ -231,6 +231,35 @@ def score(text: str, rubric: dict, *, adjudicate=None) -> dict:
     }
 
 
+# gpt-oss-family checkpoints are rendered through Ollama's harmony template,
+# where `reasoning_effort: "none"` does not suppress the analysis channel -- it
+# empties the answer, returning content:"" with the output budget burned
+# invisibly. Measured on this harness before this branch existed: gpt-oss:20b
+# scored 11/69 on Tier A and 3/69 on Tier B with 11 and 13 of 14 answers empty.
+# Those were null-field artifacts, not model behaviour (#2233). evaluate-models.py
+# got the equivalent adaptation in #2277; this scorer builds its own payload and
+# never did (#2279).
+#
+# The family is read from the /api/tags response resolve_digest() already
+# fetches, so detection costs no extra request and ask_model() stays a single
+# HTTP call (the property AskModelRetryTest pins). Keying on the reported
+# architecture rather than the tag name is deliberate: CyberPal2.0-20B is
+# GptOssForCausalLM and its tag contains no "gpt-oss", so a name test misses it.
+HARMONY_FAMILY = ("gptoss", "gpt-oss", "gpt_oss")
+_harmony_by_tag: dict[str, bool] = {}
+
+
+def is_harmony_served(model: str) -> bool:
+    """True when Ollama renders this tag through the harmony template.
+
+    Falls back to the tag name when the family was never recorded (a caller
+    that skipped resolve_digest), which still catches the gpt-oss:* tags.
+    """
+    if model in _harmony_by_tag:
+        return _harmony_by_tag[model]
+    return any(marker in model.lower() for marker in HARMONY_FAMILY)
+
+
 def resolve_digest(api_base: str, model: str) -> str:
     """Read the installed digest for a tag from Ollama's native /api/tags.
 
@@ -244,6 +273,11 @@ def resolve_digest(api_base: str, model: str) -> str:
         tags = json.loads(r.read()).get("models", [])
     for item in tags:
         if model in (item.get("name"), item.get("model")):
+            details = item.get("details") or {}
+            family = " ".join(
+                [str(details.get("family", ""))] + list(details.get("families") or [])
+            ).lower()
+            _harmony_by_tag[model] = any(m in family for m in HARMONY_FAMILY)
             return (item.get("digest") or "").removeprefix("sha256:")
     raise SystemExit(f"model tag is not installed: {model}")
 
@@ -281,7 +315,18 @@ def ask_model(
         "seed": request["seed"],
         "stream": False,
     }
-    if not request.get("thinking", False):
+    if is_harmony_served(model):
+        # Harmony adaptation (#2279), mirroring evaluate-models.py's #2277
+        # branch. The analysis channel is spent from the same output budget, so
+        # 512 tokens get consumed mid-reasoning and `final` never starts; and
+        # greedy decoding can spiral in that channel on rule-dense prompts,
+        # which a wider anti-repetition window breaks without touching the
+        # prompt. Prompts stay byte-identical across families -- only the wire
+        # shape differs, and it is recorded in the transcript either way.
+        payload["max_tokens"] = max(int(request["output_tokens"]), 4096)
+        payload["reasoning_effort"] = "low"
+        payload["frequency_penalty"] = 0.3
+    elif not request.get("thinking", False):
         # approved-models.json has always specified thinking: false for this
         # slot, and this script silently dropped it. Ollama enables hidden
         # reasoning by default for the Qwen3/3.5 family, so on a real corpus

@@ -583,3 +583,83 @@ class RunCasesIncrementalSaveTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class HarmonyServingTest(unittest.TestCase):
+    """#2279: gpt-oss-family tags are rendered through Ollama's harmony
+    template, where reasoning_effort:"none" empties the answer instead of
+    suppressing the analysis channel. Measured before this branch existed:
+    gpt-oss:20b scored 11/69 Tier A and 3/69 Tier B with 11 and 13 of 14
+    answers empty -- null-field artifacts recorded as if they were scores."""
+
+    REQUEST = {"temperature": 0, "output_tokens": 512, "seed": 144, "thinking": False}
+
+    def setUp(self):
+        record_baseline._harmony_by_tag.clear()
+
+    tearDown = setUp
+
+    def _body(self, model):
+        sent = []
+
+        def fake_urlopen(req, timeout=None):
+            sent.append(json.loads(req.data))
+            return _FakeChatResponse("answer text")
+
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            record_baseline.ask_model("http://fake/v1", model, self.REQUEST, "prompt")
+        return sent[0]
+
+    def test_a_harmony_tag_keeps_the_analysis_channel_and_widens_the_budget(self):
+        body = self._body("gpt-oss:20b")
+        self.assertNotEqual(
+            body.get("reasoning_effort"), "none",
+            'reasoning_effort:"none" is what empties the answer for this family',
+        )
+        self.assertGreaterEqual(
+            body["max_tokens"], 4096,
+            "the analysis channel is spent from the same budget, so 512 is "
+            "consumed mid-reasoning and `final` never starts",
+        )
+
+    def test_a_non_harmony_tag_is_untouched(self):
+        body = self._body("qwen3:14b")
+        self.assertEqual(body.get("reasoning_effort"), "none")
+        self.assertEqual(body["max_tokens"], 512)
+        self.assertNotIn(
+            "frequency_penalty", body,
+            "the harmony branch must not alter any other family's wire shape, "
+            "or the rest of the matrix stops being comparable",
+        )
+
+    def test_the_family_is_read_from_the_reported_architecture_not_the_tag_name(self):
+        """CyberPal2.0-20B is GptOssForCausalLM with a tag that never says
+        'gpt-oss'; a name test would silently miss it."""
+        record_baseline._harmony_by_tag["cyberpal2.0-20b:q4_k_m"] = True
+        body = self._body("cyberpal2.0-20b:q4_k_m")
+        self.assertGreaterEqual(body["max_tokens"], 4096)
+
+    def test_resolve_digest_records_the_family(self):
+        payload = {
+            "models": [
+                {"name": "x:latest", "digest": "sha256:abc",
+                 "details": {"family": "gptoss", "families": ["gptoss"]}}
+            ]
+        }
+
+        class _Raw:
+            def read(self):
+                return json.dumps(payload).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def fake_urlopen(url, timeout=None):
+            return _Raw()
+
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            record_baseline.resolve_digest("http://fake/v1", "x:latest")
+        self.assertTrue(record_baseline.is_harmony_served("x:latest"))
