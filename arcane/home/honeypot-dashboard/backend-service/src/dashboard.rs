@@ -290,7 +290,7 @@ pub async fn dashboard(
         "query": {"bool": {
             "filter": [{"range": {"@timestamp": {"gte": WINDOW}}}],
             "must_not": [
-                {"term": {"honeypot.internal_probe": true}},
+                crate::es::internal_probe_exclusion(),
                 // #1677: and the fleet's own traffic -- see self_addresses().
                 {"terms": {"source.ip": self_addresses()}}
             ]
@@ -355,7 +355,7 @@ pub async fn dashboard(
         "query": {"bool": {
             "filter": [{"range": {"@timestamp": {"gte": WINDOW}}}],
             "must_not": [
-                {"term": {"honeypot.internal_probe": true}},
+                crate::es::internal_probe_exclusion(),
                 // #1677: and the fleet's own traffic -- see self_addresses().
                 {"terms": {"source.ip": self_addresses()}}
             ]
