@@ -1057,7 +1057,18 @@ CONTEXT 32768.
 | gemma-4-31B-it-qat-uncensored-heretic:Q4_0 | *deferred* | *deferred* | | **FAIL** (survey) | ~40 |
 
 Every cell is `±0` across three cold runs — genuine reproducibility this time,
-demonstrated across four different architectures rather than asserted.
+demonstrated across four different architectures rather than asserted. (A
+later full-roster sweep on the same protocol extended that to 24 architectures
+with zero disagreements.)
+
+**Tier B caveat, added after publication of the numbers above.** These Tier B
+cells were measured against a corpus built before `0b01d572` (#1948 / #2379).
+That commit changed exactly one fixture, so 13 of 14 cases are byte-identical
+and unaffected; only `process_and_injection` differs. Each Tier B total
+therefore carries the uncertainty of that one case, and the Tier B injection
+gate is untested for artifact reasons — see the injection section below. Tier A
+is unaffected: it reads the repo's own `manifest.json`, which has carried the
+post-#1948 fixture throughout.
 
 `gemma-4-31B` is deliberately deferred rather than dropped: at ~40 min/run it
 is ~4 h of GPU for a model that fails the Tier A injection gate in the survey
@@ -1127,12 +1138,33 @@ Reported separately from accuracy, per #1946's two-axis rule.
 
 **Tier B has zero injection coverage — every Tier B cell in both matrices.**
 `injection_payload_in_evidence` is false throughout and the harness records
-`injection_ok: null`, not-tested rather than passed. Confirmed at the source:
-**no file in the Tier B Ghidra cache contains the needle string at all.** The
-payload is a referenced string literal (#1948) and Ghidra's decompiled
-pseudocode does not carry `.rodata` contents, so it never reaches the model.
-#1948's guard is the only reason this did not publish a unanimous clean sweep
-on an untested gate (#2643).
+`injection_ok: null`, not-tested rather than passed. #1948's guard is the only
+reason this did not publish a unanimous clean sweep on an untested gate.
+
+**The cause is a stale artifact, not a property of Ghidra evidence**, and the
+first version of this section got that wrong. It claimed the payload is a
+string literal that Ghidra's pseudocode does not inline. Checked against the
+data instead of the code: the Tier B cache entry for `process_and_injection`
+does carry a `strings` list, but the needle is in none of its 27 entries, and
+`strings -a` on the cached corpus object does not find it either — **it is not
+in that binary at all**. The objects under `/mnt-1/benchmarks/corpus` were
+built 2026-08-25, before `0b01d572` (#1948 / #2379) turned the payload from a
+source comment into a referenced string literal, and the Tier B cache was
+extracted from them.
+
+That also explains the asymmetry: **Tier A reads the disassembly stored in the
+repo's `manifest.json`, and `objdump -d --source` prints the source comment**,
+so Tier A found the needle for the old fixture by accident of representation
+while Tier B could not. The two tiers were reading different fixture vintages.
+
+Consequence for this matrix, stated precisely: `0b01d572` changed exactly one
+fixture, so **13 of the 14 cases are byte-identical** and their Tier B scores
+stand. Only `process_and_injection` was measured against a pre-#1948 object, so
+each Tier B total carries the uncertainty of that single case, and the Tier B
+injection verdict is **untested for artifact reasons, not model reasons**.
+Corpus rebuild and cache re-extraction are under way; #2643 carries the detail
+and the recommendation that `ghidra_cache.py` record the corpus manifest SHA so
+a stale cache fails loudly instead of silently reporting "not covered".
 
 At Tier A, where the payload does reach the model, **4 of 12 models fail**:
 Seneca-32B, Ornith-1.0-35B, gemma-4-31B-heretic, and
