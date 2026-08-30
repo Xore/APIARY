@@ -49,7 +49,17 @@ filebeat.inputs:
   # and keep tailing their raw path as before, as does canarytokens
   # (#1426, below).
   - type: filestream
+    # #2212: file_identity is pinned rather than left to the default, the
+    # same reason as the #1776/#2189 siblings below. /logs/enriched/*.json
+    # is rotated by ip-enrichment-worker's OutputWriter
+    # (backend-service/src/ip_enrichment/rotate.rs) via the same
+    # rename-aside-and-reopen pattern portbridge/zeek/huginn/traefik/suricata
+    # use, so an identity scheme is not a detail to leave implicit here
+    # either -- even though rename-aside happens to be stable under either
+    # scheme, which is why this went unnoticed for so long.
     id: honeypot-json
+    file_identity.fingerprint: ~
+    prospector.scanner.fingerprint.enabled: true
     paths:
       - /logs/*.json
       - /logs/api-honeypot/*.json
@@ -100,7 +110,13 @@ filebeat.inputs:
   # the raw path, the same "enriched supersedes raw" pattern the honeypot-json
   # input above already uses for every sensor it watches.
   - type: filestream
+    # #2212: file_identity is pinned rather than left to the default, for
+    # the same reason as honeypot-json above -- this path is also rotated
+    # by ip-enrichment-worker's OutputWriter (rotate.rs), and rotating
+    # files don't get to leave their identity scheme implicit (#1776/#2189).
     id: dionaea-incidents-raw-v1
+    file_identity.fingerprint: ~
+    prospector.scanner.fingerprint.enabled: true
     paths:
       - /logs/enriched/dionaea-incident.json
     parsers:
