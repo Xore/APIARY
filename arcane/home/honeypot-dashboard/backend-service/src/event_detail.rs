@@ -690,11 +690,16 @@ fn suricata_detail(eve: &Value) -> String {
             if !payload.is_empty() {
                 d += &format!("  payload: {payload}");
             } else {
-                let body = s(&eve["http"]["http_body_printable"]);
+                let body = first_non_empty(&[
+                    &eve["http"]["http_request_body_printable"],
+                    &eve["http"]["http_response_body_printable"],
+                    &eve["http"]["http_body_printable"],
+                ]);
                 if !body.is_empty() {
                     d += &format!("  body: {body}");
                 }
             }
+            d += &captured_bytes_suffix(eve);
             d
         }
         "anomaly" => {
@@ -748,6 +753,46 @@ fn suricata_detail(eve: &Value) -> String {
         }
         other => other.to_string(),
     }
+}
+
+/// The first candidate that reads as a non-empty string.
+fn first_non_empty<'a>(candidates: &[&'a Value]) -> &'a str {
+    candidates.iter().map(|v| s(v)).find(|value| !value.is_empty()).unwrap_or("")
+}
+
+/// #2334: suricata.yaml's alert stanza turns on `payload`, `packet` and
+/// `http-body` — the raw, non-printable base64 siblings of the
+/// `*_printable` fields already rendered above. Those bytes were captured
+/// (at real I/O + Elasticsearch storage cost) and then never surfaced
+/// anywhere: not in this detail line, not as a link on the event page.
+/// This flags that they exist without inlining them — a multi-KB base64
+/// blob stretched across a table row is not "surfaced", it's noise, and
+/// operators reach the real bytes by opening the event (its full,
+/// undecoded record already renders on `/event/{id}`). Byte counts, not
+/// content, so the fix stays a pointer rather than a second copy of the
+/// dump.
+fn captured_bytes_suffix(eve: &Value) -> String {
+    let mut parts = Vec::new();
+    if let Some(size) = base64_decoded_len(&eve["packet"]) {
+        parts.push(format!("packet capture: {size} bytes"));
+    }
+    if let Some(size) = base64_decoded_len(&eve["http"]["http_request_body"]) {
+        parts.push(format!("request body: {size} bytes"));
+    }
+    if let Some(size) = base64_decoded_len(&eve["http"]["http_response_body"]) {
+        parts.push(format!("response body: {size} bytes"));
+    }
+    if parts.is_empty() {
+        return String::new();
+    }
+    format!("  [{} — full record on the event page]", parts.join(", "))
+}
+
+/// Decoded byte length of a base64 field, or `None` if absent/empty/invalid.
+fn base64_decoded_len(value: &Value) -> Option<usize> {
+    use base64::Engine;
+    let encoded = value.as_str().filter(|v| !v.is_empty())?;
+    base64::engine::general_purpose::STANDARD.decode(encoded).ok().map(|bytes| bytes.len())
 }
 
 #[cfg(test)]
