@@ -24,28 +24,62 @@
 # account with admin on the repo) -- convenient for an operator re-running
 # this after a token expires, but never required to be long-lived or
 # stored anywhere.
+#
+# --instance N (#2572): registers a SECOND, THIRD, ... independent instance
+# on the same box instead of re-touching the primary one. Before this flag
+# existed, RUNNER_HOME/RUNNER_USER were fixed constants no matter what
+# --name got passed, so a second `--name second-ci` invocation collided
+# with the already-registered $RUNNER_HOME/.runner and either no-opped
+# (leaving only one instance actually running) or clobbered it -- there was
+# no way to actually scale past one executor. Every instance still
+# registers under the SAME RUNNER_LABELS (honeypot-ci): GitHub schedules a
+# queued job onto whichever instance is idle, so quality.yml's matrix rows
+# (each already independent per #2389/#2565) gain real parallelism instead
+# of serializing behind one machine. Default instance "1" reuses the
+# original /opt/github-ci-runner + github-ci-runner user + "$HOSTNAME-ci"
+# name unchanged, so the already-registered instance needs no migration.
 set -euo pipefail
-
-[[ ${EUID} -eq 0 ]] || { echo "Run as root" >&2; exit 1; }
 
 RUNNER_VERSION=2.336.0
 RUNNER_SHA256=04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d
-RUNNER_USER=github-ci-runner
-RUNNER_HOME=/opt/github-ci-runner
 RUNNER_LABELS="self-hosted,linux,x64,honeypot-ci"
 
+# --- BEGIN instance derivation (config test: tests/test_install_ci_runner_instances.py) ---
+# Instance "1" is the original, unsuffixed layout -- anything else gets its
+# own home dir and system user so N instances can run side by side without
+# fighting over the same _work directory, .runner registration file, or
+# systemd unit's working user. Kept between these markers, and pure
+# (no filesystem/network touches), so the test can extract and execute
+# exactly this argument-parsing + derivation logic in isolation.
 repo=""
 token=""
-name="${HOSTNAME:-homeserver}-ci"
+name=""
+instance="1"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo) repo="$2"; shift 2 ;;
     --token) token="$2"; shift 2 ;;
     --name) name="$2"; shift 2 ;;
+    --instance) instance="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
 done
-[[ -n "$repo" ]] || { echo "Usage: $0 --repo OWNER/NAME [--token TOKEN] [--name RUNNER_NAME]" >&2; exit 1; }
+[[ -n "$repo" ]] || { echo "Usage: $0 --repo OWNER/NAME [--token TOKEN] [--name RUNNER_NAME] [--instance N]" >&2; exit 1; }
+
+if [[ -z "$name" ]]; then
+  name="${HOSTNAME:-homeserver}-ci"
+  [[ "$instance" == "1" ]] || name="${name}-${instance}"
+fi
+if [[ "$instance" == "1" ]]; then
+  RUNNER_USER=github-ci-runner
+  RUNNER_HOME=/opt/github-ci-runner
+else
+  RUNNER_USER="github-ci-runner-${instance}"
+  RUNNER_HOME="/opt/github-ci-runner-${instance}"
+fi
+# --- END instance derivation ---
+
+[[ ${EUID} -eq 0 ]] || { echo "Run as root" >&2; exit 1; }
 
 # Only actually needed to register/re-register -- an already-configured
 # runner (found $RUNNER_HOME/.runner below) must not fail here just
