@@ -43,7 +43,7 @@ ENV MAILONEY_DB_URL=sqlite:////data/mailoney.db \
 EXPOSE 25
 
 # 65534 (nobody), not a named user: matches every other non-root sensor
-# here (beelzebub, hellpot) and docker-compose.init.yml's log-dir chown
+# here (beelzebub, hellpot) and honeypot-init's compose.yml log-dir chown
 # convention exactly -- that job chowns /logs/mailoney to literal
 # 65534:65534 on the host, which only lines up if the container actually
 # runs as that UID. No in-image chown needed: /var/log/honeypot is a
