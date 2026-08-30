@@ -408,7 +408,10 @@ services:
     environment:
       - GEOIPUPDATE_ACCOUNT_ID=${MAXMIND_ACCOUNT_ID:-}
       - GEOIPUPDATE_LICENSE_KEY=${MAXMIND_LICENSE_KEY:-}
-      - GEOIPUPDATE_EDITION_IDS=GeoLite2-City GeoLite2-ASN
+      # #2713: GeoLite2-Country added so Arkime (geoLite2Country in
+      # arkime/config.ini) has its own dedicated database rather than
+      # relying on unconfirmed City-db-as-Country-superset behavior.
+      - GEOIPUPDATE_EDITION_IDS=GeoLite2-City GeoLite2-ASN GeoLite2-Country
       - GEOIPUPDATE_FREQUENCY=24
     volumes:
       - /opt/stacks/apiary/analysis/geoip:/usr/share/GeoIP

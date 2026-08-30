@@ -509,7 +509,7 @@ services:
         -- -R file:///opt/arkime/raw --monitor --skip --host honeypot-vps
     volumes:
       - ./arkime/config.ini:/opt/arkime/etc/config.ini:ro
-      - /opt/stacks/apiary/arkime/geo:/opt/arkime/geo:ro
+      - /opt/stacks/apiary/analysis/geoip:/opt/arkime/geo:ro
       - /opt/stacks/apiary/logs/arkime-raw:/opt/arkime/raw:ro
       - arkime-pcap:/opt/arkime/pcap
       - /opt/stacks/apiary/state/init-markers:/markers:ro
@@ -578,7 +578,7 @@ services:
       - ${HP_BIND:-10.8.0.2}:19080:8005
     volumes:
       - ./arkime/config.ini:/opt/arkime/etc/config.ini:ro
-      - /opt/stacks/apiary/arkime/geo:/opt/arkime/geo:ro
+      - /opt/stacks/apiary/analysis/geoip:/opt/arkime/geo:ro
       - /opt/stacks/apiary/logs/arkime-raw:/opt/arkime/raw:ro
       - arkime-pcap:/opt/arkime/pcap
       - /opt/stacks/apiary/state/init-markers:/markers:ro

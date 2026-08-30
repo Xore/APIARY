@@ -23,42 +23,37 @@ box — realistic `/etc/passwd`, inference services, a credential-laden `.env`,
 
 ## GeoIP
 
-The custom dashboard and Elasticsearch share the same local GeoLite2 City/ASN
-MMDB files. Dashboard lookups happen after portbridge real-IP correlation,
-support IPv4/IPv6, and add country, city, coordinates, accuracy radius, ASN,
-organization, and cloud/hosting/scanner classification without sending attacker
-IPs to an external lookup API. For official automatic updates, set
-`MAXMIND_ACCOUNT_ID` and `MAXMIND_LICENSE_KEY` only in Dockge's `.env`, then run
-`docker compose -f compose.yml --profile geoip-update up -d geoipupdate`.
+The custom dashboard, Arkime, and Elasticsearch all share the same local
+MaxMind GeoLite2 MMDB files under `analysis/geoip/`, kept current by the
+`hp-geoipupdate` container (`docker compose -f compose.yml --profile
+geoip-update up -d geoipupdate`, needs `MAXMIND_ACCOUNT_ID` /
+`MAXMIND_LICENSE_KEY` in Dockge's `.env`). Dashboard lookups happen after
+portbridge real-IP correlation, support IPv4/IPv6, and add country, city,
+coordinates, accuracy radius, ASN, organization, and cloud/hosting/scanner
+classification without sending attacker IPs to an external lookup API.
 
-Two independent geo integrations (the home server has **no internet egress** —
-all database downloads must be fetched on the VPS and copied over):
+Two independent geo integrations, same source files:
 
-- **Arkime** reads free [db-ip.com](https://db-ip.com) lite databases from
-  `arkime/geo/{country,asn}.mmdb` (mounted into capture + viewer, configured
-  via `geoLite2Country`/`geoLite2ASN` in [arkime/config.ini](../arcane/home/honeypot-elk/arkime/config.ini)).
-  Sessions get country + ASN. No MaxMind account needed.
+- **Arkime** reads `analysis/geoip/GeoLite2-{Country,ASN}.mmdb`, mounted
+  read-only into both capture and viewer at `/opt/arkime/geo` and configured
+  via `geoLite2Country`/`geoLite2ASN` in
+  [arkime/config.ini](../arcane/home/honeypot-elk/arkime/config.ini). Sessions
+  get country + ASN. (#2713: this used to point at a separate,
+  never-automated `arkime/geo/` directory populated by hand from db-ip.com —
+  retired in favor of the same files everything else already uses.)
 - **Elasticsearch** enriches every `suricata-*` and `honeypot-*` event through
   the `geoip-honeypot` ingest pipeline (set as `index.default_pipeline` on both
   index templates), writing ECS `source.geo` / `source.as` / `destination.geo`
   with city-level lat/lon — this is what powers Kibana maps
-  (`source.geo.location` is mapped as `geo_point`). ES 8.13 rejects db-ip-typed
-  mmdb files, so it uses **GeoLite2** files (P3TERX GitHub mirror) mounted at
+  (`source.geo.location` is mapped as `geo_point`), from
+  `GeoLite2-City.mmdb` mounted at
   `analysis/geoip/ → /usr/share/elasticsearch/config/ingest-geoip`, with
-  `ingest.geoip.downloader.enabled=false` (the auto-downloader can never work
-  without egress).
+  `ingest.geoip.downloader.enabled=false` (ES's own auto-downloader needs
+  egress the home server doesn't have).
 
-The `.mmdb` files are static and not in git — refresh every month or two:
-
-```bash
-# on the VPS (has egress), then scp to the home server:
-curl -fLo /tmp/country.mmdb.gz https://download.db-ip.com/free/dbip-country-lite-$(date +%Y-%m).mmdb.gz
-curl -fLo /tmp/asn.mmdb.gz     https://download.db-ip.com/free/dbip-asn-lite-$(date +%Y-%m).mmdb.gz
-curl -fLo /tmp/GeoLite2-City.mmdb https://github.com/P3TERX/GeoLite.mmdb/releases/latest/download/GeoLite2-City.mmdb
-curl -fLo /tmp/GeoLite2-ASN.mmdb  https://github.com/P3TERX/GeoLite.mmdb/releases/latest/download/GeoLite2-ASN.mmdb
-# gunzip the db-ip files → arkime/geo/{country,asn}.mmdb   (restart arkime-capture/viewer)
-# GeoLite2 files        → analysis/geoip/                  (ES reloads automatically)
-```
+The `.mmdb` files themselves are not in git; `hp-geoipupdate` refreshes them
+on `GEOIPUPDATE_FREQUENCY` (hours) automatically once credentials are set —
+no manual download/copy step.
 
 > **Elasticsearch field limits:** Suricata's EVE output creates so many
 > dynamic fields that the default 1000-field index cap breaks ingest — every
