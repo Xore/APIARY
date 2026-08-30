@@ -212,7 +212,7 @@ AUTH_NEW = '''                    elif request.startswith('auth plain'):
                             _username, _password = _decode_auth_plain(auth_string)
                             _emit_json_event(
                                 "login", addr, self.bind_ip, self.bind_port, self.server_name,
-                                session_id=session_uuid, username=_username, password=_password,
+                                session_id=str(session_record.id), username=_username, password=_password,
                             )
 
                         response = "235 2.7.0 Authentication failed\\n"'''
@@ -229,7 +229,7 @@ ENVELOPE_NEW = '''                    elif request.startswith(('mail from:', 'rc
                         session_log.append({"timestamp": strftime("%Y-%m-%d %H:%M:%S"), "direction": "out", "data": response})
                         _emit_json_event(
                             "envelope", addr, self.bind_ip, self.bind_port, self.server_name,
-                            session_id=session_uuid, command=request,
+                            session_id=str(session_record.id), command=request,
                         )
                         error_count = 0'''
 
@@ -244,7 +244,7 @@ BODY_NEW = '''                        # If self.mail_dir is unset, only metadata
                         session_log.append(body_entry)
                         _emit_json_event(
                             "mail-body", addr, self.bind_ip, self.bind_port, self.server_name,
-                            session_id=session_uuid,
+                            session_id=str(session_record.id),
                             size=body_entry.get("size"),
                             truncated=body_entry.get("truncated"),
                             body_path=body_entry.get("body_path"),
