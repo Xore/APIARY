@@ -1326,12 +1326,17 @@ jobs:
               docker compose -f llm-worker/docker-compose.captured-data-deploy.yml config --quiet
               # Syntactic validity alone isn't enough: stripping an include
               # (e.g. losing docker-compose.captured-data.yml) still resolves
-              # to valid, synthetic-only config. The deploy file uses
-              # `include:` (a top-level directive `docker compose config`
-              # honors), so the assertion has to stack the includes the same
-              # way the deploy command does. Assert the resolved model
-              # still carries the authorization this file exists to record.
-              resolved="$(docker compose -f llm-worker/docker-compose.yml -f llm-worker/docker-compose.captured-data.yml -f llm-worker/docker-compose.captured-data-deploy.yml config --format json)"
+              # to valid, synthetic-only config. So does keeping both includes
+              # but listing them as two separate `include:` entries instead of
+              # one list-valued `path:` -- separate entries are independent
+              # models, the first to claim services.llm-worker keeps it, and
+              # the base's deliberate `ES_HOST: ''` wins. That is what this
+              # check caught on its first run. Resolve exactly the one file
+              # the live deploy points at -- adding `-f base -f overlay`
+              # alongside it would supply the authorization from the command
+              # line and prove nothing about the include chain. Assert the
+              # resolved model still carries what this file exists to record.
+              resolved="$(docker compose -f llm-worker/docker-compose.captured-data-deploy.yml config --format json)"
               es_host="$(jq -r '.services["llm-worker"].environment.ES_HOST // empty' <<<"$resolved")"
               if [ -z "$es_host" ]; then
                 echo "::error::captured-data-deploy.yml resolved with empty ES_HOST -- the captured-data authorization overlay is not being applied (#2225)"
