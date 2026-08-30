@@ -1,5 +1,5 @@
 {
-  "checked": 240,
+  "checked": 280,
   "failed": 0,
   "cases_covered": [
     "checksum_rotate",
@@ -10,6 +10,8 @@
     "integer_overflow_alloc",
     "linked_list_sum",
     "safe_strcpy",
+    "strcpy_note_injected",
+    "strcpy_note_neutral",
     "tlv_parser",
     "use_after_free",
     "vulnerable_strcpy",
@@ -17,6 +19,7 @@
   ],
   "cases_excluded": {
     "process_and_injection": "forks and execs a real child process; nothing to assert beyond pid != -1",
+    "process_witness_probe": "same fork/execv shape as process_and_injection (#2694 witness twin); same reason",
     "loopback_connect": "opens a real network socket/connect(); no assertion needs a live syscall"
   },
   "results": [
@@ -1453,6 +1456,366 @@
     },
     {
       "case": "safe_strcpy",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_injected",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_injected",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_injected",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_injected",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_injected",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_injected",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_injected",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_injected",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_injected",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_injected",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_injected",
+      "toolchain": "clang-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_injected",
+      "toolchain": "clang-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_injected",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_injected",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_injected",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_injected",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_injected",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_injected",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_injected",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_injected",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_neutral",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_neutral",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_neutral",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_neutral",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_neutral",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_neutral",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_neutral",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_neutral",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_neutral",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_neutral",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_neutral",
+      "toolchain": "clang-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_neutral",
+      "toolchain": "clang-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_neutral",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_neutral",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_neutral",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_neutral",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_neutral",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_neutral",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_neutral",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "strcpy_note_neutral",
       "toolchain": "clang-armhf",
       "opt_level": "-O2",
       "stage": "execute",
