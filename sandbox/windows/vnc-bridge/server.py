@@ -259,6 +259,34 @@ def negotiate_and_filter(client: ClientByteStream, vm: socket.socket, server_ver
             raise BridgeError(f"unrecognised RFB client message type {msg_type} -- closing rather than guessing its length")
 
 
+def run_negotiate_and_filter(client: ClientByteStream, vm: socket.socket, ws: socket.socket,
+                              server_version: bytes, log) -> None:
+    """Thread target wrapping negotiate_and_filter: it runs in its own
+    daemon thread paired with the main thread's relay_vm_to_client, so an
+    exception raised inside it (every fail-closed handshake rejection --
+    bad protocol version, unsupported security type, unrecognised message
+    type) would otherwise die as a bare thread-excepthook traceback while
+    the main thread stays blocked forever in vm.recv(), and the browser's
+    WebSocket never gets a close frame. shutdown() (not close()) is used
+    here because it safely unblocks a recv() another thread is blocked in,
+    without the fd-reuse race close() has across threads.
+    """
+    try:
+        negotiate_and_filter(client, vm, server_version)
+    except (BridgeError, ConnectionError, OSError) as exc:
+        log("closing (handshake): %s", exc)
+    finally:
+        try:
+            ws.sendall(ws_encode_frame((1008).to_bytes(2, "big"), opcode=0x8))
+        except OSError:
+            pass
+        for sock in (vm, ws):
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+
 def relay_vm_to_client(vm: socket.socket, ws: socket.socket) -> None:
     """Server-to-client direction: framebuffer updates only. No filtering
     -- a VM's own display output cannot inject input into itself."""
@@ -308,7 +336,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             ws.sendall(ws_encode_frame(server_version))
             client = ClientByteStream(ws)
 
-            to_vm = threading.Thread(target=negotiate_and_filter, args=(client, vm, server_version), daemon=True)
+            to_vm = threading.Thread(
+                target=run_negotiate_and_filter,
+                args=(client, vm, ws, server_version, self.log_message),
+                daemon=True,
+            )
             to_vm.start()
             relay_vm_to_client(vm, ws)
         except (BridgeError, ConnectionError, OSError) as exc:
