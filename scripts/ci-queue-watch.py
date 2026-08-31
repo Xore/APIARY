@@ -135,6 +135,47 @@ def open_stall_issue() -> str:
     return out or ""
 
 
+def runner_capacity_line() -> str:
+    """'X of Y self-hosted runners online (Z busy)', or a note that the
+    check itself failed. #2742: two of five runners sat offline for two
+    days with no signal in this alarm — a stall report that also says how
+    much capacity is actually available would have surfaced that outage
+    immediately instead of two days later. Best-effort: a failure here
+    must not block the (more important) queue-stall report itself.
+    """
+    try:
+        out = subprocess.run(
+            ["gh", "api", f"repos/{REPO}/actions/runners", "--paginate"],
+            capture_output=True, text=True,
+        )
+        if out.returncode != 0:
+            return f"Runner capacity: could not query ({out.stderr.strip()[:120]})"
+        decoder = json.JSONDecoder()
+        runners: list[dict] = []
+        raw, idx = out.stdout, 0
+        while idx < len(raw):
+            while idx < len(raw) and raw[idx] in " \t\r\n":
+                idx += 1
+            if idx >= len(raw):
+                break
+            value, idx = decoder.raw_decode(raw, idx)
+            runners.extend(value.get("runners", []))
+        if not runners:
+            return "Runner capacity: no self-hosted runners registered"
+        online = [r for r in runners if r.get("status") == "online"]
+        busy = [r for r in online if r.get("busy")]
+        offline = [r["name"] for r in runners if r.get("status") != "online"]
+        line = f"Runner capacity: {len(online)} of {len(runners)} online ({len(busy)} busy)"
+        if offline:
+            line += f" — offline: {', '.join(offline)}"
+        return line
+    except Exception as exc:
+        # Best-effort per the docstring above: an unanticipated API/JSON
+        # shape here must not raise past this function and take out the
+        # primary queue-stall report with it.
+        return f"Runner capacity: could not query (unexpected error: {exc})"
+
+
 def main() -> int:
     stale = stalled_runs()
 
@@ -168,6 +209,8 @@ def main() -> int:
         [
             f"Sweep at {now}: **{len(stale)}** run(s) queued for more than "
             f"{STALL_MINUTES} minutes.",
+            "",
+            runner_capacity_line(),
             "",
             "Context: #2499 — the router job every quality matrix waits on shares one",
             "GitHub-hosted pool with all matrices, so repo-wide saturation turns into a",
