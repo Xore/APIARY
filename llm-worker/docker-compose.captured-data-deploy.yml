@@ -24,6 +24,18 @@
 # Deleting this file returns the deployment to synthetic-only, which is the
 # property that makes it a legible record of the decision rather than a
 # workaround.
+#
+# #2225: one include entry whose `path` is a two-file list -- NOT two entries.
+# Each entry under `include:` is an independent model that is imported into
+# this file's model on its own, so two entries do not override each other the
+# way `-f a -f b` does: the first one to claim `services.llm-worker` keeps it,
+# the second is dropped, and the base's deliberate `ES_HOST: ''` won. The
+# entrypoint resolved back to synthetic-only while looking correct -- #1751's
+# failure mode exactly, which is what #2225's CI gate caught. A list-valued
+# `path` is the documented way to say "merge these files, in this order, into
+# one included model": the same override chain as
+# `-f docker-compose.yml -f docker-compose.captured-data.yml`.
 include:
-  - docker-compose.yml
-  - docker-compose.captured-data.yml
+  - path:
+      - docker-compose.yml
+      - docker-compose.captured-data.yml
