@@ -19,6 +19,7 @@ for restoring onto a replacement host see
 | `homeserver/env/*.env` | all 41 Arcane/Dockge stack `.env` files |
 | `homeserver/secrets/` | secret files kept beside a stack rather than in its `.env` |
 | `homeserver/wireguard/` | `wg0.conf` including the private key |
+| `homeserver/installer/` | `install-homeserver.conf` — the installer's answers file, which exists only on the root filesystem a reinstall wipes |
 | `homeserver/pihole/` | hand-maintained Pi-hole config |
 | `homeserver/keycloak/keycloak.sql.gz` | `pg_dump` of the identity DB — realm, clients, client secrets, users |
 | `homeserver/volumes/` | `dashboard-state`, `arcane-data`, `evebox-config`, `canarytokens-redis-data`, `es-importer-state` |
@@ -172,6 +173,11 @@ cat /tmp/restore/MANIFEST.txt
 ```
 
 Then, onto a rebuilt host:
+
+**Before any of the below**, put `homeserver/installer/*-install-homeserver.conf`
+back at the path you intend to pass to `scripts/install-homeserver.sh --config`.
+The installer will not run without it, and it is not reconstructible from the
+repository — `install-homeserver.conf.example` carries only placeholders.
 
 1. **Stack `.env` files.** Copy each `homeserver/env/<stack>.env` back to
    `/var/dockge/stacks/<stack>/.env`. Restore ownership and mode
