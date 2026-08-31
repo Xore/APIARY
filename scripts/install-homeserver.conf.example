@@ -1,4 +1,4 @@
-# Answer file for scripts/install-homeserver.sh — the Ubuntu-side
+# Answer file for scripts/install-homeserver.sh — the Linux-side
 # equivalent of a Windows autounattend.xml: fill this in once, then the
 # installer runs unattended and non-interactively from it.
 #
