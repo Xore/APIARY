@@ -312,23 +312,48 @@ changes.
 
 ### Two facts (still true today)
 
-**A sync does not build, and by default does not even redeploy.** The
+**A sync does not build, but it redeploys anyway when a file changed —
+`redeploy_after_sync = 0` does not prevent that.** #2706 caught this
+live: the log line is explicit, `Redeploying project due to content
+change from Git sync`, and it fires regardless of the stored
+`redeploy_after_sync` flag. 28 of 38 projects were redeployed this way
+during what was intended to be a files-only sync pass on 2026-08-30. The
 live store carries `auto_sync = 0`, `pull_image_after_sync = 0` and
 `redeploy_after_sync = 0` on every sync (re-verified 2026-08-27 against
 the pinned `v2.9.0` image's own sqlite store) — those are Arcane's
 defaults, not manifest-set values: the manifest carries neither field,
 and #2455's schema check confirmed the bulk-import request has no way to
-set them (only the single create-sync request does). A sync therefore
-materializes files onto the host and stops there. Confirmed
-operationally: syncing `honeypot-dashboard` puts new Rust source on the
-host and leaves `apiary-backend:latest` exactly as it was until a
-separate `POST /projects/{id}/build` (a call that belongs to the sibling
+set them (only the single create-sync request does) — but none of the
+three flags gate the content-change redeploy path, so do not read
+`redeploy_after_sync = 0` as "this sync only materializes files." Plan
+every sync as a restart of that stack. Confirmed operationally: syncing
+`honeypot-dashboard` redeploys the dashboard project from whatever image
+is already present — since that project has no `build:` service itself,
+`apiary-backend:latest` is left exactly as it was until a separate
+`POST /projects/{id}/build` (a call that belongs to the sibling
 `honeypot-dashboard-backend` project since #1622 — its `backend-service`
-is the one service in the pair with a `build:`). Without that call a
-redeploy recreates the containers from the *previous* image — green,
-healthy, running the old code.
+is the one service in the pair with a `build:`). Without that call the
+content-change redeploy recreates the containers from the *previous*
+image — green, healthy, running the old code.
 
-**34 of the 37 stacks build an image.** Only `honeypot-elk`,
+**The content-change redeploy runs with `removeOrphans=true`.** A
+compose file that drops a service will delete that service's container
+as a side effect of an ordinary sync — nobody has to ask for it, and
+there is no separate confirmation step. Removing a service from a
+compose file and pushing that change is enough to delete its container
+on the next sync.
+
+**This is also what causes the #2705 5-minute sync deadline.** A
+files-only sync would finish well inside Arcane's ~5 minute internal
+deploy timeout (see "stalled-looking sync" below); it is the implicit
+redeploy documented here that pushes a sync of many/large stacks past
+it. There is currently no known flag that suppresses the content-change
+redeploy — until one is found (or upstream confirms there isn't one),
+treat every sync as a per-project restart and bound the blast radius
+accordingly: scope each run to one stack at a time and verify the result — rather than firing
+ a fleet-wide sync pass and racing the timeout. (A purpose-built
+ single-project script is a natural follow-up; ship it separately so the
+ doc's claim of 'every sync is a restart' is reviewable on its own.)**34 of the 37 stacks build an image.** Only `honeypot-elk`,
 `honeypot-keycloak` and `pihole` pull — re-derived 2026-08-27 from the 37
 manifest compose paths (34 carry `build:`; the same three pullers the
 #1502-era text named, which said "35 of the 38" before #2381 retired
