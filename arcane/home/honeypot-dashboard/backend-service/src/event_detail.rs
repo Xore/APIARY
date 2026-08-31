@@ -690,7 +690,7 @@ fn suricata_detail(eve: &Value) -> String {
             if !payload.is_empty() {
                 d += &format!("  payload: {payload}");
             } else {
-                let body = first_non_empty(&[
+                let body = first_non_empty_value(&[
                     &eve["http"]["http_request_body_printable"],
                     &eve["http"]["http_response_body_printable"],
                     &eve["http"]["http_body_printable"],
@@ -756,7 +756,11 @@ fn suricata_detail(eve: &Value) -> String {
 }
 
 /// The first candidate that reads as a non-empty string.
-fn first_non_empty<'a>(candidates: &[&'a Value]) -> &'a str {
+///
+/// Named apart from `first_non_empty` above deliberately: that one takes
+/// already-extracted `&str`s and returns an owned `String`, this one reads
+/// straight from `Value`s and borrows. Both are wanted; only the name collided.
+fn first_non_empty_value<'a>(candidates: &[&'a Value]) -> &'a str {
     candidates
         .iter()
         .copied()
