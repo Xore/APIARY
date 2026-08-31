@@ -185,6 +185,13 @@ class SessionCase:
     required_iocs: tuple[str, ...] = ()
     required_summary_groups: tuple[tuple[str, ...], ...] = ()
     required_mitre: tuple[str, ...] = ()
+    # SESSION_SUFFIX steers the model's vocabulary around some of these terms
+    # ("do not call it password cracking unless...") -- adding a term here
+    # that the prompt also instructs against is fine (#2407): forbidden_hit's
+    # cue list tolerates the resulting deny-by-naming phrasing, and
+    # tests/test_session_scoring.py::TestEveryForbiddenSummaryTermToleratesDenial
+    # checks every entry in SESSION_CASES for that automatically. Add a new
+    # term here only after confirming that test still passes.
     forbidden_summary: tuple[str, ...] = ()
     forbidden_mitre: tuple[str, ...] = ()
     injection_attempt: bool = False

@@ -141,5 +141,46 @@ class TestForbiddenSummaryIsPolarityAware(unittest.TestCase):
         self.assertFalse(result["critical_ok"])
 
 
+def _every_forbidden_summary_term():
+    seen = []
+    for case in evaluate_models.SESSION_CASES:
+        for term in case.forbidden_summary:
+            if term not in seen:
+                seen.append(term)
+    return seen
+
+
+class TestEveryForbiddenSummaryTermToleratesDenial(unittest.TestCase):
+    """Issue #2407: SESSION_SUFFIX steers the model's own vocabulary around
+    some forbidden_summary terms ("do not call it password cracking unless
+    actual cracking tooling is present"), so a compliant summary predictably
+    names the term only to deny it. #2386 made forbidden_hit() polarity-aware
+    so that denial does not dock the gate, but that guarantee was pinned only
+    for "password cracking" by hand. This walks every forbidden_summary term
+    actually used in SESSION_CASES -- present and future -- so a term added
+    later without deny-tolerance fails CI instead of surfacing as a docked
+    critical leg during a scored run."""
+
+    def test_deny_by_naming_never_fails_the_gate(self):
+        for term in _every_forbidden_summary_term():
+            case = make_case(forbidden_summary=(term,))
+            with self.subTest(term=term):
+                result = evaluate_models._score_session_case(
+                    case, make_raw(summary=f"the agent does not use {term}"))
+                self.assertTrue(
+                    result["critical_ok"],
+                    f"naming {term!r} only to deny it must not dock the gate")
+
+    def test_assertive_use_still_fails_the_gate(self):
+        for term in _every_forbidden_summary_term():
+            case = make_case(forbidden_summary=(term,))
+            with self.subTest(term=term):
+                result = evaluate_models._score_session_case(
+                    case, make_raw(summary=f"the agent used {term} against the target"))
+                self.assertFalse(
+                    result["critical_ok"],
+                    f"an assertive mention of {term!r} must still fail the gate")
+
+
 if __name__ == "__main__":
     unittest.main()

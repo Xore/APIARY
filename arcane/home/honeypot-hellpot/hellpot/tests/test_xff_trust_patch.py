@@ -19,6 +19,12 @@ lives and required to equal the patch constant, instead of a keep-in-step
 comment being trusted to hold them together (#2187 documents how that
 trust worked out).
 
+GalahProxiedPortAgreement extends the same guard to galah's own second
+door (#2211, sibling of #2192 left out of #2199's scope): galah has no
+patch module, so config.yaml's native `ports:` list stands in as the
+reference spelling. wordpot had the same exposure but was retired in
+#2381 before this guard was written, so it is not covered here.
+
 Usage: hellpot/tests/test_xff_trust_patch.py
 """
 import importlib.util
@@ -43,6 +49,29 @@ WORKER_SENSORS = (
     HERE.parents[4]
     / "arcane/home/honeypot-dashboard/backend-service/src/ip_enrichment/sensors.rs"
 )
+
+# galah has the same second-door split (#1891) and the same cross-file
+# exposure (#2211, sibling of #2192): its listen port is native to
+# config.yaml's own `ports:` list rather than a build-time patch constant,
+# but nothing importable ties that list to compose.yml's publish line, the
+# VPS socat dial, or the worker's Rust const either.
+GALAH_COMPOSE = HERE.parents[4] / "arcane/home/honeypot-galah/compose.yml"
+GALAH_CONFIG = HERE.parents[4] / "arcane/home/honeypot-galah/galah/config.yaml"
+
+
+def galah_proxied_port():
+    """The reference spelling for galah's second-door port: config.yaml's
+    own `ports:` list, which galah reads natively -- no patch constant like
+    hellpot's HELLPOT_PROXIED_PORT exists to import instead. The file
+    documents 8888 as the raw door and 8890 as Traefik-only, in that order,
+    so the second entry is taken by position rather than by hardcoding
+    either number here."""
+    ports = re.findall(r"^\s*-\s*port:\s*(\d+)\s*$", GALAH_CONFIG.read_text(), re.M)
+    if len(ports) != 2:
+        raise AssertionError(
+            "expected exactly 2 ports in galah/config.yaml, found %d" % len(ports)
+        )
+    return ports[-1]
 
 
 def vps_service_block(service):
@@ -312,6 +341,60 @@ class ProxiedPortAgreement(unittest.TestCase):
             port,
             declared.group(1),
             "sensors.rs adjudicates DST_PORT {} but the patched listener is on {}".format(
+                declared.group(1), port
+            ),
+        )
+
+
+class GalahProxiedPortAgreement(unittest.TestCase):
+    """#2211, sibling of #2192/ProxiedPortAgreement above: galah's second
+    door (#1891) has the same "spelled in several stacks, nothing can
+    import across them" exposure as hellpot's -- config.yaml, compose.yml's
+    publish line, the VPS socat dial, and the worker's Rust const all name
+    the same port with no shared source of truth. Unlike wordpot (retired
+    in #2381, out of scope here), galah's host and container halves are
+    meant to be equal, same as hellpot's, so this reuses that shape
+    directly rather than modeling a legitimate skew."""
+
+    def test_the_publish_line_matches_the_listener(self):
+        port = galah_proxied_port()
+        published = re.findall(
+            r"^\s*-\s*\$\{HP_BIND:[^}]*\}:(\d+):(\d+)\s*$",
+            GALAH_COMPOSE.read_text(),
+            re.M,
+        )
+        self.assertIn(
+            (port, port),
+            published,
+            "compose.yml publishes {} but config.yaml's second door is {}".format(
+                published, port
+            ),
+        )
+
+    def test_the_socat_dial_matches_the_listener(self):
+        port = galah_proxied_port()
+        dialed = re.findall(
+            r"TCP4:[0-9.]+:(\d+)", vps_service_block("socat-hp-galah")
+        )
+        self.assertEqual(
+            [port],
+            dialed,
+            "socat-hp-galah dials {} but config.yaml's second door is {}".format(
+                dialed, port
+            ),
+        )
+
+    def test_the_worker_adjudicates_on_the_same_port(self):
+        port = galah_proxied_port()
+        declared = re.search(
+            r'const GALAH_PROXIED_PORT:\s*&str\s*=\s*"(\d+)";',
+            WORKER_SENSORS.read_text(),
+        )
+        self.assertIsNotNone(declared, "GALAH_PROXIED_PORT missing from sensors.rs")
+        self.assertEqual(
+            port,
+            declared.group(1),
+            "sensors.rs adjudicates port {} but config.yaml's second door is {}".format(
                 declared.group(1), port
             ),
         )

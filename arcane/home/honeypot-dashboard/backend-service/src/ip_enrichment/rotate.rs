@@ -1,10 +1,13 @@
 //! Ported from ip-enrichment-worker/rotate.go: a self-rotating output file
 //! writer (close, rename aside with a timestamp suffix, reopen fresh) — the
 //! enriched-output equivalent of the raw sensor writers' own rotation, so
-//! OUT_DIR/*.json never grows unbounded. Filebeat's file_identity defaults
-//! to inode/device, not path, so its harvester stays attached to the
-//! renamed file through EOF and picks up the fresh one via the same glob —
-//! no coordination needed with the harvester.
+//! OUT_DIR/*.json never grows unbounded. #1776/#2189: Filebeat 9 changed the
+//! filestream default from inode/device to fingerprint; a rename-aside
+//! keeps both schemes stable, so either way the harvester stays attached to
+//! the renamed file through EOF and picks up the fresh one via the same
+//! glob — no coordination needed with the harvester. See #2212 for why the
+//! honeypot-json and dionaea-incidents-raw-v1 filebeat inputs that tail
+//! these outputs pin file_identity.fingerprint explicitly anyway.
 
 use chrono::Utc;
 use std::fs::{self, File, OpenOptions};

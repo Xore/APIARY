@@ -230,6 +230,12 @@ TryStep "fakenet_stop" {
     if (Test-Path "C:\Logs\fakenet_downloads") {
         Copy-Item "C:\Logs\fakenet_downloads" "$analysisDir\Logs\fakenet_downloads" -Recurse -Force -ErrorAction SilentlyContinue
     }
+    # #2563: [Diverter] DumpPacketsFilePrefix in honeypot_fakenet.ini now
+    # writes real pcaps here (04-tools.ps1 pre-creates the tree) -- copy
+    # them out the same way the HTTP POST dumps above are.
+    if (Test-Path "C:\Logs\fakenet_packets") {
+        Copy-Item "C:\Logs\fakenet_packets" "$analysisDir\Logs\fakenet_packets" -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 Step "DONE"

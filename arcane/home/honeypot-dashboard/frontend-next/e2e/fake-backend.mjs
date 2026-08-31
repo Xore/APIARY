@@ -456,7 +456,22 @@ function route(pathname) {
   if (pathname.startsWith("/api/v1/preferences")) {
     // preferences.rs::get envelope -- {preferences, revision}. The root
     // route's appearance reconcile reads preferences.theme/palette off it.
-    return { preferences: { theme: "dark", palette: "claude" }, revision: 1 };
+    //
+    // No `theme` key on purpose: this fixture is one shared operator record
+    // behind every browser context, and __root's useStoredAppearance() runs
+    // pullAppearance() on mount, which applies a stored mode over whatever
+    // the page booted with (prefs.ts, #1755). A fixed "dark" therefore
+    // raced -- and eventually beat -- the light half of the theme x viewport
+    // matrix, which seeds hp-theme per context via addInitScript: the
+    // fastest-hydrating route flipped data-theme to dark before the spec's
+    // toHaveAttribute could ever observe "light" (#2692, /investigate/lookup
+    // at mobile/light). fetchAppearance maps an absent theme to mode: null,
+    // which is the real "operator has never pinned a mode" state and the one
+    // where the device's own choice stays authoritative -- so both halves of
+    // the matrix keep the theme they seeded. `palette` stays: it matches the
+    // palette the spec seeds, so the reconcile is a no-op on that axis too,
+    // and the envelope keeps its production shape.
+    return { preferences: { palette: "claude" }, revision: 1 };
   }
   if (pathname === "/api/v1/alerts") {
     return { total: 1, offset: 0, rows: [{ id: "alert-1", time: NOW, sensor: "citrix", signature: "test alert", severity: "high", record: {} }], fingerprint_ips: null };

@@ -33,9 +33,14 @@ RE_DOMAIN= re.compile(r'\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b')
 # hardcode a staging/exfil share (\\192.168.1.1\share, \\host\admin$) that
 # none of the patterns above match at all.
 RE_UNC   = re.compile(r'\\\\[a-zA-Z0-9_.-]+\\[^\s\\"\'<>|*?]+(?:\\[^\s\\"\'<>|*?]+)*')
-# Private IP ranges (exclude these from C2 IOCs)
+# Private/non-routable IP ranges (exclude these from C2 IOCs). Covers RFC1918,
+# loopback, link-local/APIPA (169.254.0.0/16), multicast (224.0.0.0/4) and
+# reserved (240.0.0.0/4, 0.0.0.0/8) -- all of which an isolated sandbox run
+# produces as host-stack chatter (DHCP-absent fallback, SSDP/mDNS discovery)
+# rather than as evidence the sample reached a remote host.
 PRIVATE  = re.compile(
-    r'^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|127\.|0\.0\.0\.0|255\.255)'
+    r'^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|127\.|169\.254\.|0\.|'
+    r'2(?:2[4-9]|3[0-9]|4[0-9]|5[0-5])\.)'
 )
 # #482: printable-run string extraction over the sample binary itself, same
 # shape as the classic Unix `strings` tool -- ASCII and UTF-16LE (Windows'
@@ -97,6 +102,7 @@ def parse_sysmon_evtx(evtx_path: Path) -> dict:
 
                 elif eid_val == 1:  # Process Create
                     iocs['processes'].append({
+                        'utc_time': data.get('UtcTime', ''),
                         'image':    data.get('Image', ''),
                         'cmdline':  data.get('CommandLine', ''),
                         'parent':   data.get('ParentImage', ''),

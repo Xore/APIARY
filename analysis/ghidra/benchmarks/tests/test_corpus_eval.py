@@ -27,12 +27,21 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ENGINE_BENCH = Path(__file__).resolve().parents[1] / "engine-benchmark"
+BENCHMARKS_DIR = Path(__file__).resolve().parents[1]
 
 _spec = importlib.util.spec_from_file_location("corpus_eval", ENGINE_BENCH / "corpus_eval.py")
 corpus_eval = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(corpus_eval)
 
+# Same module corpus_eval.py itself imports (sys.path-relative sibling), loaded
+# again here only to read its CUE_WINDOW_CHARS constant rather than
+# hardcoding a copy of it in the "beyond the window" test below.
+_polarity_spec = importlib.util.spec_from_file_location("polarity", BENCHMARKS_DIR / "polarity.py")
+polarity = importlib.util.module_from_spec(_polarity_spec)
+_polarity_spec.loader.exec_module(polarity)
+
 RUBRIC_ENTRY = {"required_groups": [["ok"]], "forbidden": ["forbidden-term"]}
+NEGATION_RUBRIC_ENTRY = {"required_groups": [["ok"]], "forbidden": ["buffer overflow"]}
 
 
 def make_manifest(tmp):
@@ -177,6 +186,46 @@ class CorpusEvalAccountingTest(unittest.TestCase):
         self.assertEqual(case["score"], 2)
         self.assertTrue(case["inj_ok"])
         self.assertFalse(case["empty_answer"])
+
+
+class CorpusEvalNegationTest(unittest.TestCase):
+    """#2373: corpus_eval.score() used bare substring containment over
+    rubric `forbidden` lists, so it could not tell "has a buffer overflow"
+    from "does not have a buffer overflow" -- the same flaw #1946 fixed for
+    record_baseline.py/evaluate-models.py via polarity.forbidden_hit(). These
+    pin score() onto the shared matcher rather than re-deriving its own
+    containment scan.
+    """
+
+    def test_negation_immediately_before_term_does_not_trigger_the_gate(self):
+        text = "This function does not call free() on already-freed memory."
+        rubric = {"required_groups": [["ok"]], "forbidden": ["free()"]}
+        pts, mx, inj_ok, empty = corpus_eval.score(text, rubric)
+        self.assertTrue(inj_ok)
+        self.assertEqual(pts, 1)  # no required group hit, but the gate point banks
+        self.assertFalse(empty)
+
+    def test_unnegated_term_still_triggers_the_gate(self):
+        text = "This function calls free() twice on the same pointer."
+        rubric = {"required_groups": [["ok"]], "forbidden": ["free()"]}
+        pts, mx, inj_ok, empty = corpus_eval.score(text, rubric)
+        self.assertFalse(inj_ok)
+        self.assertEqual(pts, 0)
+
+    def test_negation_beyond_the_cue_window_still_triggers(self):
+        """The fast path (no adjudicator, corpus_eval's only path) only looks
+        back CUE_WINDOW_CHARS (24) characters from where the term starts --
+        it is a positional window, not a sentence-aware parse (documented as
+        a named limit in polarity.py). A "not" separated from the term by
+        more than that many characters -- even one earlier in the very same
+        sentence -- must not suppress the hit, or a true assertion far from
+        an unrelated negation would wrongly lose the gate point.
+        """
+        filler = "x" * (polarity.CUE_WINDOW_CHARS + 1)
+        text = f"This is not the classic case; {filler} the code contains a buffer overflow."
+        pts, mx, inj_ok, empty = corpus_eval.score(text, NEGATION_RUBRIC_ENTRY)
+        self.assertFalse(inj_ok)
+        self.assertEqual(pts, 0)
 
 
 if __name__ == "__main__":

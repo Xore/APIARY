@@ -2,9 +2,9 @@ name: CI executor router
 
 # Reusable homeserver-first routing decision, shared by every workflow that
 # can execute jobs on the homeserver's honeypot-ci runner (containers.yml,
-# security.yml, pages.yml -- and, once its inline copy retires, quality.yml).
-# The decision procedure and its full rationale are documented in quality.yml's
-# ci-target job and docs/CI-CD.md; the short form:
+# security.yml, pages.yml, quality.yml -- #2571 migrated quality.yml's own
+# copy onto this one). The full rationale for the decision procedure is
+# documented here and in docs/CI-CD.md; the short form:
 #
 #   1. Trust gate. Fork PRs are attacker-controlled input and must never
 #      become process execution on home-network infrastructure, so they are
@@ -20,6 +20,10 @@ name: CI executor router
 #      and requiring a fresh run to complete inside the decision windows.
 #      Anything else -- box off, paused, unregistered, service wedged --
 #      times out and the caller's jobs fall back to GitHub-hosted.
+#   3. Manual override. force_github_hosted="true" forces the fallback
+#      direction regardless of trust or liveness -- e.g. Quality's own
+#      force_github_hosted workflow_dispatch input while servicing the
+#      homeserver.
 #
 # Fail-safe: every error path resolves to homeserver=false, so routing can
 # degrade CI's speed, never its pass/fail correctness.
@@ -38,6 +42,14 @@ on:
           Value of vars.CI_HOMESERVER_PRS at the caller. "true" lets
           same-repo pull_request runs execute on the homeserver; anything
           else keeps every pull_request on GitHub-hosted.
+        type: string
+        required: false
+        default: ""
+      force_github_hosted:
+        description: >-
+          "true" forces the fallback direction regardless of trust or
+          liveness -- e.g. a caller's own manual override input while
+          servicing the homeserver. Anything else routes normally.
         type: string
         required: false
         default: ""
@@ -68,6 +80,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       CI_HOMESERVER_PRS: ${{ inputs.ci_homeserver_prs }}
+      FORCE_GITHUB_HOSTED: ${{ inputs.force_github_hosted }}
     steps:
       - id: route
         shell: bash
@@ -124,7 +137,7 @@ jobs:
           decide_window="${HEARTBEAT_DECIDE_SECONDS:-420}"   # queue+exec budget on the box
           poll_every="${HEARTBEAT_POLL_SECONDS:-10}"
 
-          if [[ "$trusted" == "true" ]]; then
+          if [[ "$trusted" == "true" && "${FORCE_GITHUB_HOSTED}" != "true" ]]; then
             api="repos/$GITHUB_REPOSITORY/actions/workflows/ci-heartbeat.yml"
             # The dispatch API needs a real ref. For pull_request runs
             # GITHUB_REF_NAME is the ephemeral "<n>/merge" merge ref that no
@@ -211,13 +224,15 @@ jobs:
           fi
 
           homeserver=false
-          if [[ "$trusted" == "true" && "$online" == "true" ]]; then
+          if [[ "$trusted" == "true" && "$online" == "true"
+                && "${FORCE_GITHUB_HOSTED}" != "true" ]]; then
             homeserver=true
           fi
 
           {
             echo "trusted=$trusted"
             echo "online=$online"
+            echo "forced_cloud=${FORCE_GITHUB_HOSTED:-<unset>}"
             echo "executor=$( [[ "$homeserver" == true ]] && echo honeypot-ci || echo ubuntu-latest )"
           } >>"$GITHUB_STEP_SUMMARY"
 

@@ -55,9 +55,9 @@ job; a self-hosted runner's job runs as a real process on real
 home-network infrastructure. A malicious test file in an unreviewed PR
 (`os.system(...)`, a crafted Go `TestMain`) would execute wherever that
 runner has access — the same reasoning `production-home`'s own deployment
-runner (below) already applies. Every workflow's executor routing (the
-`ci-target` router in `quality.yml`, and the shared
-`.github/workflows/ci-router.yml` the other workflows call) trusts
+runner (below) already applies. Every workflow's executor routing (each
+caller's own `ci-target` job, which since #2571 always calls the shared
+`.github/workflows/ci-router.yml`) trusts
 push-to-main (already reviewed and merged), the `schedule` and
 `workflow_dispatch` (an operator's own machinery); same-repo pull
 requests need the repository variable `CI_HOMESERVER_PRS=true`, and fork
@@ -547,22 +547,24 @@ self-hosted, linux, x64, honeypot-ci
 ### Executor routing (homeserver first, GitHub-hosted fallback)
 
 Actions has no "runs-on A else B" syntax, so each workflow decides in two
-steps. Its `ci-target` router job asks whether this run's source may
-reach the homeserver at all (trust gate below), then whether a
-`honeypot-ci`-labelled runner is currently registered AND reporting
-online -- measured, not read, by dispatching the `ci-heartbeat.yml` canary
-(the runners-listing API answers 403 to `GITHUB_TOKEN`, so the registry
-cannot be asked). Quality ships each eligible check as a PAIR of
-conditional jobs fed by that single answer -- exactly one twin runs, the
-other reports skipped. containers/security/pages call the shared
-`.github/workflows/ci-router.yml` instead and give their one
-executor-agnostic job a conditional `runs-on`. When the box is off,
-paused, unregistered, or the runners API itself errors, everything falls
-back to its `(GitHub-hosted)` twin/suffix and the workflow looks exactly
-like a conventional run: degraded speed is the worst failure mode routing
-can produce. The `force_github_hosted` workflow_dispatch input on Quality
-forces the fallback direction manually (e.g. while servicing the
-machine); repository variable `CI_HOMESERVER_PRS=true` is what opts
+steps. Every workflow's `ci-target` job calls the shared reusable
+`.github/workflows/ci-router.yml` (#2571 retired quality.yml's own inline
+copy), which asks whether this run's source may reach the homeserver at
+all (trust gate below), then whether a `honeypot-ci`-labelled runner is
+currently registered AND reporting online -- measured, not read, by
+dispatching the `ci-heartbeat.yml` canary (the runners-listing API
+answers 403 to `GITHUB_TOKEN`, so the registry cannot be asked). Quality
+ships each eligible check as a PAIR of conditional jobs fed by that
+single answer -- exactly one twin runs, the other reports skipped.
+containers/security/pages instead give their one executor-agnostic job a
+conditional `runs-on`. When the box is off, paused, unregistered, or the
+runners API itself errors, everything falls back to its `(GitHub-hosted)`
+twin/suffix and the workflow looks exactly like a conventional run:
+degraded speed is the worst failure mode routing can produce. The
+`force_github_hosted` workflow_dispatch input on Quality (passed through
+to the shared router) forces the fallback direction manually (e.g. while
+servicing the machine); repository variable `CI_HOMESERVER_PRS=true` is
+what opts
 same-repo pull requests into homeserver execution -- it IS set
 deliberately (the operator's stated intent is that the homeserver carry
 all CI), and undoing it is the auditable way to push PR runs back to the
@@ -616,6 +618,35 @@ Re-running the script is safe: it skips the download if already extracted
 and skips re-registration if `$RUNNER_HOME/.runner` already exists (remove
 that file first to re-register, e.g. after moving the runner to a new
 host).
+
+### Scaling past one instance (#2572)
+
+`--instance N` registers an independent SECOND (or third, fourth, ...)
+runner instance on the same box instead of touching the primary one:
+
+```bash
+sudo scripts/github-ci-runner/install-ci-runner.sh --repo Xore/APIARY --instance 2
+```
+
+Each instance gets its own system user (`github-ci-runner-N`), its own
+`_work` dir and `.runner` registration (`/opt/github-ci-runner-N`), and its
+own systemd unit -- but registers under the SAME `honeypot-ci` label as the
+primary instance, so GitHub schedules a queued job onto whichever instance
+is idle rather than piling everything behind one executor. `--instance 1`
+(the default, omitting the flag) is the original unsuffixed layout and
+needs no migration.
+
+This is a real fix for #2572 (one instance serializing the whole
+homeserver-first matrix), not just a mitigation: `quality.yml`'s matrix
+rows are already independent per #2389/#2565, so adding instances turns
+that existing independence into actual wall-clock parallelism. The
+`test_honeypot_ilm_rollover`/`geoip_pipeline`/`dionaea_incidents_index`/
+`conpot_persona_pipeline` rows each pick a random host port in `19000-19899`
+for their throwaway Elasticsearch container specifically so two instances
+running one concurrently don't collide on a fixed port; `containers.yml`'s
+buildx cache is `type=gha` (the GitHub Actions cache backend), which is
+already shared by cache key rather than living on local disk, so a second
+instance is not cold there -- no extra work needed for that tier.
 
 `actions/setup-go`/`actions/setup-node` cache their toolchain downloads in
 the runner's own persistent tool cache -- unlike an ephemeral GitHub-hosted

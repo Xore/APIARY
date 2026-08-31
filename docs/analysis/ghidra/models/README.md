@@ -17,6 +17,11 @@ python3 /opt/honeypot-ghidra/models/model-governance.py check-runtime \
 
 The status file contains only state and reason codes. It contains no prompts, model replies, captured data, container paths, or credentials, and is written owner-only mode `0600`. If a dashboard later needs it, expose only the sanitized object through a privileged read-only endpoint; do not mount or relax the host file. `approved`, `drift`, and `unavailable` are advisory states: the service exits successfully with `--warn-only`, so an LLM problem never stops ingestion or deterministic analysis. Omit `--warn-only` in an operator check when drift should produce a non-zero exit status. The command only reads `/api/version`, `/api/tags`, Docker inspection metadata, and `nvidia-smi` telemetry.
 
+### Two expected, honest states after #2394 (not regressions)
+
+- **`approved_gpu_uuid_missing`** on the `host` leg: the deployed manifest copy at `/opt/honeypot-ghidra/models/approved-models.json` still predates the `approved_host.gpu_uuid` field until `install-analysis-host.sh` next runs end to end on that host. The checker reports this distinct, advisory-only code rather than silently comparing whichever GPU enumerates as index 0. It clears itself once the host is redeployed with the current manifest.
+- **`host_gpu_uuid_changed`**: any `--snapshot` file captured before #2394 was written under the older schema and has no GPU-identity fields for the new comparison to match against. Replaying it will read as drift under the new schema even though nothing on the host changed -- expected for old snapshots, not evidence of an actual UUID change.
+
 ## When requalification is mandatory
 
 Run the complete workflow before changing any model tag or digest, Ollama image/version, host GPU or driver, context/output/thinking/temperature/seed/concurrency/keepalive setting, benchmark fixture/scoring rule, prompt contract, or generated response schema. Run it after an unexpected drift warning and before accepting the new state. Also rerun it when an upstream mutable tag is republished even if its name is unchanged. A routine quarterly rerun is recommended to expose host/runtime decay; it does not itself authorize promotion.

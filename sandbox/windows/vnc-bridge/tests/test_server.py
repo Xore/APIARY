@@ -190,12 +190,76 @@ def test_non_none_security_type_is_rejected():
     vm_bridge.close()
 
 
+def test_failed_handshake_closes_both_sockets_promptly():
+    """#2280: a fail-closed handshake rejection runs inside the
+    negotiate_and_filter thread, separate from the main thread's
+    relay_vm_to_client. Pins that a bad-version viewer gets both its
+    VM-facing and browser-facing sockets torn down quickly, instead of
+    the relay thread hanging forever in vm.recv() with nothing ever
+    telling the browser the connection died."""
+    ws_client, ws_bridge = socket.socketpair()
+    vm_bridge, vm_observer = socket.socketpair()
+
+    bad_version = b"BAD VERSION!"  # 12 bytes, fails the RFB version regex
+    ws_client.sendall(masked_client_frame(bad_version))
+
+    client = server.ClientByteStream(ws_bridge)
+    log_calls = []
+
+    def log(fmt, *args):
+        log_calls.append(fmt % args)
+
+    start = time.monotonic()
+    negotiate_thread = threading.Thread(
+        target=server.run_negotiate_and_filter,
+        args=(client, vm_bridge, ws_bridge, bad_version, log),
+        daemon=True,
+    )
+    negotiate_thread.start()
+
+    relay_done = threading.Event()
+
+    def run_relay():
+        try:
+            server.relay_vm_to_client(vm_bridge, ws_bridge)
+        except OSError:
+            pass
+        relay_done.set()
+
+    relay_thread = threading.Thread(target=run_relay, daemon=True)
+    relay_thread.start()
+
+    negotiate_thread.join(timeout=1.0)
+    relay_done.wait(timeout=1.0)
+    elapsed_ms = (time.monotonic() - start) * 1000
+
+    check(not negotiate_thread.is_alive(), "negotiate thread exits after a bad version")
+    check(relay_done.is_set(), "relay thread unblocks once the VM-facing socket is shut down")
+    check(elapsed_ms < 1000, f"connection is torn down promptly ({elapsed_ms:.0f}ms), not left dangling")
+    check(any("closing" in c for c in log_calls), f"failure is logged via log_message, not a bare traceback, got {log_calls!r}")
+
+    ws_client.settimeout(1)
+    head = ws_client.recv(2)
+    opcode = head[0] & 0x0F if head else None
+    check(opcode == 0x8, f"browser side receives a WebSocket close frame, got opcode {opcode!r}")
+
+    vm_observer.settimeout(1)
+    eof = vm_observer.recv(4)
+    check(eof == b"", "VM-facing socket is shut down, not left open")
+
+    ws_client.close()
+    ws_bridge.close()
+    vm_bridge.close()
+    vm_observer.close()
+
+
 if __name__ == "__main__":
     test_ws_recv_frame_unmasks_correctly()
     test_ws_recv_frame_rejects_unmasked()
     test_negotiate_and_filter_forwards_allowed_drops_input()
     test_unrecognised_message_type_closes()
     test_non_none_security_type_is_rejected()
+    test_failed_handshake_closes_both_sockets_promptly()
     if fails:
         print(f"\n{len(fails)} check(s) failed: {fails}")
         sys.exit(1)

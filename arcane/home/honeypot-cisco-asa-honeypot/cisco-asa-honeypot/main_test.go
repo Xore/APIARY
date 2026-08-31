@@ -11,6 +11,12 @@ import (
 	"time"
 )
 
+// testIKEMaxSessions is the session cap these tests hand handleIKEPacket. It
+// is deliberately far above the handful of sessions they create, so the
+// cap-and-evict path (#2324) never fires and they keep testing only the
+// one-reply-per-source behavior.
+const testIKEMaxSessions = 4096
+
 func buildIKEPacket(exchangeType byte) []byte {
 	h := ikeHeader(0x1122334455667788, 0, payloadNone, exchangeType, flagInitiator, 0, ikeHeaderSize)
 	return h
@@ -30,7 +36,7 @@ func TestIKEResponderRepliesOnceThenGoesSilent(t *testing.T) {
 
 	log := newLogger("")
 	var mu sync.Mutex
-	sessions := map[string]ikeState{}
+	sessions := map[string]ikeSession{}
 
 	client, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
@@ -63,7 +69,7 @@ func TestIKEResponderRepliesOnceThenGoesSilent(t *testing.T) {
 		}
 		data := make([]byte, n)
 		copy(data, buf[:n])
-		handleIKEPacket(serverConn, raddr, data, log, 500, &mu, sessions)
+		handleIKEPacket(serverConn, raddr, data, log, 500, &mu, sessions, testIKEMaxSessions)
 	}
 
 	// First IKE_SA_INIT -> real reply.
@@ -102,7 +108,7 @@ func TestIKEResponderIgnoresMalformedDatagram(t *testing.T) {
 
 	log := newLogger("")
 	var mu sync.Mutex
-	sessions := map[string]ikeState{}
+	sessions := map[string]ikeSession{}
 
 	client, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
@@ -119,7 +125,7 @@ func TestIKEResponderIgnoresMalformedDatagram(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handleIKEPacket(serverConn, raddr, buf[:n], log, 500, &mu, sessions) // must not panic
+	handleIKEPacket(serverConn, raddr, buf[:n], log, 500, &mu, sessions, testIKEMaxSessions) // must not panic
 
 	client.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
 	if _, err := client.Read(buf); err == nil {

@@ -305,6 +305,42 @@ export async function pullLiveToastPrefs(): Promise<LiveToastPrefs> {
   }
 }
 
+export type MapPrefs = { basemap: string; clustering: boolean; animation: boolean }
+
+export const DEFAULT_MAP_PREFS: MapPrefs = { basemap: 'osm', clustering: true, animation: true }
+
+// #2528: settings.tsx renders and PUTs map_basemap/map_clustering/map_animation
+// (default_preferences in preferences.rs) but nothing read them back, so an
+// operator could toggle "cluster markers" or "map animation", watch it save,
+// and see the attack map render exactly the same either way. Same best-effort
+// read-back pullLiveToastPrefs uses -- AttackMap has no loader of its own (it
+// is mounted from both routes/index.tsx and routes/ips.tsx), so this is its
+// only way to see the server-side value.
+const fetchMapPrefs = createServerFn({ method: 'GET' }).handler(async (): Promise<MapPrefs> => {
+  const { getSessionUser } = await import('./auth')
+  const user = await getSessionUser()
+  if (!user) return DEFAULT_MAP_PREFS
+  const { serviceJSON } = await import('./backend.server')
+  const params = new URLSearchParams({ subject: user.sub, username: user.username, role: user.role })
+  const result = await serviceJSON<{
+    preferences?: { map_basemap?: string; map_clustering?: boolean; map_animation?: boolean }
+  }>(`/api/v1/preferences?${params.toString()}`)
+  const prefs = result?.preferences
+  return {
+    basemap: prefs?.map_basemap ?? DEFAULT_MAP_PREFS.basemap,
+    clustering: prefs?.map_clustering ?? DEFAULT_MAP_PREFS.clustering,
+    animation: prefs?.map_animation ?? DEFAULT_MAP_PREFS.animation,
+  }
+})
+
+export async function pullMapPrefs(): Promise<MapPrefs> {
+  try {
+    return await fetchMapPrefs()
+  } catch {
+    return DEFAULT_MAP_PREFS
+  }
+}
+
 export function useThemeMode(): ThemeMode {
   return useSyncExternalStore(
     (listener) => {
