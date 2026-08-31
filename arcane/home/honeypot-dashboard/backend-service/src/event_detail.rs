@@ -758,12 +758,6 @@ fn suricata_detail(eve: &Value) -> String {
     }
 }
 
-/// (removed by #2734: `first_non_empty<'a>(candidates: &[&'a Value]) -> &'a str`
-/// was introduced by PR #2703 but has no callers in the file. The
-/// `&[&str]`-shaped variant on line 44 (`first_non_empty_strs`)
-/// covers every existing call site. Removed to unblock the
-/// `backend-service` cargo build on main.)
-
 /// #2334: suricata.yaml's alert stanza turns on `payload`, `packet` and
 /// `http-body` — the raw, non-printable base64 siblings of the
 /// `*_printable` fields already rendered above. Those bytes were captured
