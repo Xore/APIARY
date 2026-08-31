@@ -592,7 +592,10 @@ def test_spool(ghidra):
               "function addr mapped to address")
         check(d.get("analyzer_version") == "ghidra-11.3.2",
               "analyzer version recorded from /status")
-        check(d["version"] == 8, "version stamped")
+        # Deliberately a literal, not an import of RESULT_VERSION: the point
+        # is to notice a bump, which a self-referencing assertion cannot do.
+        # 9 is this branch's bump for the slot_generation stamp.
+        check(d["version"] == 9, "version stamped")
         check(all(k in d for k in ("findcrypt", "call_graph_svg", "ai_triage",
                                    "fuzzy_hashes", "lief", "capa", "floss", "revdeck",
                                    "report_pdf", "types", "globals", "annotations",
