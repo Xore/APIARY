@@ -22,10 +22,52 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Approve patch and minor updates
+      - name: Check out the PR head
         if: >-
           steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
           steps.metadata.outputs.update-type == 'version-update:semver-minor'
+        uses: actions/checkout@v7
+
+      # #2741: four times now, a dependabot frontend-next bump has resolved
+      # its lockfile with npm 11/12 (whatever dependabot's own service
+      # ships) and produced a package-lock.json that prunes optional-peer
+      # placements node:22-alpine's npm 10 -- the image the Dockerfile
+      # actually builds on -- still requires. quality.yml's own "lockfile
+      # installs under the image's npm" step (#1816) already catches this,
+      # loudly, but `main` carries no branch protection at all (checked
+      # live: `gh api repos/.../branches/main/protection` -> 404 "Branch
+      # not protected"), so nothing in the repo's actual required-checks
+      # configuration makes that loud failure block anything. The step
+      # below is the same #1816 has -- byte for byte -- run here instead,
+      # at the one choke point dependabot bumps actually go through: this
+      # job's own approve+auto-merge. `gh pr merge --auto` genuinely honors
+      # a branch's required status checks when they exist; since none are
+      # configured, this is the only gate a dependabot PR passes through
+      # before this workflow would otherwise wave it onto `main`
+      # unconditionally. Scoped to this workflow rather than turning on
+      # branch protection repo-wide, which would gate every PR (not just
+      # dependabot's) on a curated required-check list this issue was
+      # never asked to design.
+      - name: lockfile installs under the image's npm (#2741, mirrors #1816)
+        id: lockfile-check
+        if: >-
+          (steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+           steps.metadata.outputs.update-type == 'version-update:semver-minor') &&
+          hashFiles('arcane/home/honeypot-dashboard/frontend-next/package-lock.json') != ''
+        continue-on-error: true
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+        run: |
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -e HOME=/tmp -e npm_config_cache=/tmp/npm-cache \
+            -v "$PWD:/app" -w /app \
+            node:22-alpine npm ci --no-audit --no-fund
+
+      - name: Approve patch and minor updates
+        if: >-
+          (steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+           steps.metadata.outputs.update-type == 'version-update:semver-minor') &&
+          steps.lockfile-check.outcome != 'failure'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
@@ -33,9 +75,19 @@ jobs:
 
       - name: Enable squash auto-merge after required checks
         if: >-
-          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
-          steps.metadata.outputs.update-type == 'version-update:semver-minor'
+          (steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+           steps.metadata.outputs.update-type == 'version-update:semver-minor') &&
+          steps.lockfile-check.outcome != 'failure'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: gh pr merge --auto --squash "$PR_URL"
+
+      - name: Leave the lockfile mismatch for a human
+        if: steps.lockfile-check.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr comment "$PR_URL" --body \
+            "Not auto-merging: this lockfile does not install under node:22-alpine's npm (the Dockerfile's own image), the recurring #2741 failure mode. Regenerate it under that image before merging -- see #2741's canonical command."
