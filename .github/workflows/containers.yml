@@ -123,5 +123,19 @@ jobs:
           load: false
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Scope the layer cache per image (#2771). Without an explicit
+          # scope every matrix row defaults to `buildkit`, so all 18
+          # concurrent builds read and write ONE shared cache index per
+          # ref -- confirmed from the cache listing, which carried exactly
+          # one `index-buildkit-1-<hash>` key per git ref rather than one
+          # per image. Eighteen parallel `mode=max` read-modify-writes
+          # against a single index is a lost-update race: whichever row
+          # exports last wins and the rows it overwrote find their layers
+          # missing next run. dionaea showed it cleanly -- its apt layer
+          # is instruction #1 after a digest-pinned FROM, so nothing can
+          # invalidate it, yet it re-ran in 4 of 4 consecutive runs while
+          # backend-service's equivalent layer hit. Per-image scopes also
+          # keep the over-quota LRU eviction from taking out a
+          # neighbour's layers.
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
