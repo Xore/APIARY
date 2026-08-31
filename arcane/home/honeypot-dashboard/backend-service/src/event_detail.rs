@@ -41,7 +41,10 @@ fn num_float(v: &Value) -> f64 {
     v.as_f64().unwrap_or(0.0)
 }
 
-fn first_non_empty(vals: &[&str]) -> String {
+/// Pick the first non-empty string from a slice of &str.
+/// Renamed from `first_non_empty` to avoid colliding with the
+/// `&[&'a Value]`-shaped sibling further down in this file.
+fn first_non_empty_strs(vals: &[&str]) -> String {
     vals.iter().find(|v| !v.is_empty()).unwrap_or(&"").to_string()
 }
 
@@ -213,7 +216,7 @@ fn cowrie_detail(hp: &Value) -> String {
         "cowrie.command.chpasswd" => format!("chpasswd attempt: {user}"),
         "cowrie.session.file_download" | "cowrie.session.file_upload" => {
             let shasum = s(&hp["shasum"]);
-            let download = first_non_empty(&[s(&hp["destfile"]), s(&hp["url"]), s(&hp["filename"])]);
+            let download = first_non_empty_strs(&[s(&hp["destfile"]), s(&hp["url"]), s(&hp["filename"])]);
             let mut d = format!("payload {}", short_hash(shasum));
             if !download.is_empty() {
                 d += &format!(" -> {download}");
@@ -263,7 +266,7 @@ fn cowrie_detail(hp: &Value) -> String {
                 format!("closed after {dur}ms")
             }
         }
-        _ => first_non_empty(&[s(&hp["message"]), short]),
+        _ => first_non_empty_strs(&[s(&hp["message"]), short]),
     }
 }
 
@@ -547,11 +550,11 @@ fn dionaea_detail(hp: &Value) -> String {
                 d += &format!(" ({cve})");
             }
         }
-        let download = first_non_empty(&[s(&data["url"]), s(&data["path"]), s(&data["file"]), s(&data["filename"])]);
+        let download = first_non_empty_strs(&[s(&data["url"]), s(&data["path"]), s(&data["file"]), s(&data["filename"])]);
         if !download.is_empty() {
             d += &format!(" {download}");
         }
-        let mut shasum = first_non_empty(&[
+        let mut shasum = first_non_empty_strs(&[
             s(&data["sha256"]),
             s(&data["sha256hash"]),
             s(&data["sha1"]),
@@ -589,7 +592,7 @@ fn dionaea_detail(hp: &Value) -> String {
         let transport = s(&conn["transport"]);
         let kind = s(&conn["type"]);
         let mut d = format!("{proto}/{transport} {kind}").trim().to_string();
-        let port = first_non_empty(&[&num(&hp["dst_port"]), &num(&conn["local_port"])]);
+        let port = first_non_empty_strs(&[&num(&hp["dst_port"]), &num(&conn["local_port"])]);
         if !port.is_empty() {
             d += &format!(" -> :{port}");
         }
@@ -601,7 +604,7 @@ fn dionaea_detail(hp: &Value) -> String {
 
 fn conpot_detail(hp: &Value) -> String {
     let proto = s(&hp["data_type"]);
-    let req = first_non_empty(&[s(&hp["request"]), s(&hp["event_type"])]);
+    let req = first_non_empty_strs(&[s(&hp["request"]), s(&hp["event_type"])]);
     let mut d = format!("{proto} {req}").trim().to_string();
     if d.is_empty() {
         d = "probe".to_string();
@@ -690,10 +693,10 @@ fn suricata_detail(eve: &Value) -> String {
             if !payload.is_empty() {
                 d += &format!("  payload: {payload}");
             } else {
-                let body = first_non_empty(&[
-                    &eve["http"]["http_request_body_printable"],
-                    &eve["http"]["http_response_body_printable"],
-                    &eve["http"]["http_body_printable"],
+                let body = first_non_empty_strs(&[
+                    s(&eve["http"]["http_request_body_printable"]),
+                    s(&eve["http"]["http_response_body_printable"]),
+                    s(&eve["http"]["http_body_printable"]),
                 ]);
                 if !body.is_empty() {
                     d += &format!("  body: {body}");
@@ -753,16 +756,6 @@ fn suricata_detail(eve: &Value) -> String {
         }
         other => other.to_string(),
     }
-}
-
-/// The first candidate that reads as a non-empty string.
-fn first_non_empty<'a>(candidates: &[&'a Value]) -> &'a str {
-    candidates
-        .iter()
-        .copied()
-        .map(s)
-        .find(|value| !value.is_empty())
-        .unwrap_or("")
 }
 
 /// #2334: suricata.yaml's alert stanza turns on `payload`, `packet` and

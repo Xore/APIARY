@@ -41,21 +41,87 @@ trap cleanup EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "ok - $*"; }
 
+# Auto-creating an index (or a data stream's first backing index) makes the
+# write block until that primary is active, and Elasticsearch gives up with
+# a 503 unavailable_shards_exception after its own one-minute default. On
+# the self-hosted runner several ES-backed legs of this matrix share a box,
+# so allocation can genuinely take longer than that and the leg dies on a
+# bare "curl: (22) ... error: 503" with the reason thrown away by -f.
+#
+# es_index widens the server-side wait and retries the whole request a few
+# times, then prints the body it actually got so a real rejection (a
+# mapping conflict, say) still reads as one instead of as a timeout.
+es_index() {
+  local path="$1" body="$2" attempt out code
+  for attempt in 1 2 3; do
+    out="$(curl -sS -w '\n%{http_code}' -X POST "$es_url/$path?timeout=120s" \
+      -H 'Content-Type: application/json' -d "$body" 2>&1)"
+    code="${out##*$'\n'}"
+    case "$code" in
+      2*) printf '%s' "${out%$'\n'*}"; return 0 ;;
+      503) sleep $((attempt * 5)) ;;
+      *) break ;;
+    esac
+  done
+  echo "  last response (HTTP $code): ${out%$'\n'*}" >&2
+  # A 503 here means the primary never became active. Which of the many
+  # reasons that can happen is not guessable from the write's own error, so
+  # ask the cluster directly rather than leaving the next reader to
+  # hypothesise (2026-08-31: a 96%-full /var on the CI box was the trigger,
+  # and it cost a morning to establish that from the bare curl exit alone).
+  if [ "$code" = "503" ]; then
+    echo "  --- cluster health ---" >&2
+    curl -sS "$es_url/_cluster/health" >&2 || true
+    echo >&2
+    echo "  --- unassigned shards ---" >&2
+    curl -sS "$es_url/_cat/shards?v&h=index,shard,prirep,state,unassigned.reason" >&2 || true
+    echo "  --- allocation explain ---" >&2
+    curl -sS "$es_url/_cluster/allocation/explain?pretty" \
+      -H 'Content-Type: application/json' \
+      -d "{\"index\":\"${path%%/*}\",\"shard\":0,\"primary\":true}" >&2 || true
+    echo >&2
+    echo "  --- node disk as Elasticsearch sees it ---" >&2
+    curl -sS "$es_url/_cat/allocation?v" >&2 || true
+  fi
+  return 1
+}
+
+# Disk-based allocation is off deliberately. This is a throwaway
+# single-node cluster that indexes a handful of documents and is deleted
+# on exit, but Elasticsearch still applies its watermarks against whatever
+# filesystem backs /var/lib/docker on the host. When the CI box crossed
+# the 95% flood stage the primary of every newly created index simply
+# never became active, and the write died after its own two-minute wait:
+#
+#   unavailable_shards_exception: [.ds-honeypot-v2-test-...][0]
+#   primary shard is not active Timeout: [2m]
+#
+# The host's free space is a real thing to watch, but it is not this
+# test's subject and must not decide whether it passes.
 docker run -d --name "$container" -p "127.0.0.1:${port}:9200" \
   -e discovery.type=single-node -e xpack.security.enabled=false \
+  -e cluster.routing.allocation.disk.threshold_enabled=false \
   -e ES_JAVA_OPTS="-Xms512m -Xmx512m" \
   "$ES_IMAGE" >/dev/null
 
 es_url="http://127.0.0.1:${port}"
+# /_cluster/health answers 200 as soon as the HTTP layer is up, even while
+# the cluster is still red and no shard can be allocated yet. Waiting on
+# that alone let the first write race the recovery and come back 503
+# (unavailable_shards_exception), which is how #585's and #565's legs
+# turned flaky. wait_for_status=yellow makes the endpoint block until at
+# least the primaries are assigned, so the first indexing request has
+# somewhere to land.
 ready=0
 for _ in $(seq 1 40); do
-  if curl -fsS "$es_url/_cluster/health" >/dev/null 2>&1; then
+  if curl -fsS "$es_url/_cluster/health?wait_for_status=yellow&timeout=3s" \
+    >/dev/null 2>&1; then
     ready=1
     break
   fi
   sleep 3
 done
-[ "$ready" -eq 1 ] || fail "Elasticsearch did not become reachable at $es_url"
+[ "$ready" -eq 1 ] || fail "Elasticsearch did not reach at least yellow at $es_url"
 
 # ILM's default poll interval is 10 minutes -- far too slow for a test.
 # Shortening it is the only way to observe a real, automatic (not manually
@@ -121,8 +187,9 @@ curl -fsS -X PUT "$es_url/_index_template/honeypot-events-v2" -H 'Content-Type: 
   --data-binary '{"index_patterns":["honeypot-v2-*"],"priority":500,"data_stream":{},"template":{"settings":{"index.lifecycle.name":"honeypot-30d","index.number_of_replicas":0}}}' >/dev/null ||
   fail "Elasticsearch rejected the honeypot-events-v2 data stream template"
 
-resp="$(curl -fsS -X POST "$es_url/honeypot-v2-test/_doc" -H 'Content-Type: application/json' \
-  -d '{"@timestamp":"2026-08-05T00:00:00Z","msg":"doc1"}')"
+resp="$(es_index honeypot-v2-test/_doc \
+  '{"@timestamp":"2026-08-05T00:00:00Z","msg":"doc1"}')" ||
+  fail "the data stream's first write never landed -- its backing index primary stayed unassigned"
 first_index="$(echo "$resp" | python3 -c "import json,sys; print(json.load(sys.stdin)['_index'])")"
 pass "data stream created, first write landed in $first_index"
 
@@ -146,8 +213,8 @@ status="$(curl -fsS "$es_url/_data_stream/honeypot-v2-test" | python3 -c "import
 [ "$status" = "GREEN" ] || fail "data stream status is $status after the delete, expected GREEN"
 pass "data stream remains healthy (GREEN) after its original backing index was deleted"
 
-curl -fsS -X POST "$es_url/honeypot-v2-test/_doc" -H 'Content-Type: application/json' \
-  -d '{"@timestamp":"2026-08-05T00:10:00Z","msg":"still writable"}' >/dev/null ||
+es_index honeypot-v2-test/_doc \
+  '{"@timestamp":"2026-08-05T00:10:00Z","msg":"still writable"}' >/dev/null ||
   fail "data stream stopped accepting writes after the delete"
 pass "data stream still accepts writes after the delete"
 
