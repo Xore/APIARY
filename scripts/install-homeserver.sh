@@ -425,10 +425,37 @@ step_docker_daemon_config() {
   # rotation (containers run forever, unbounded logs will fill /var), wider
   # default-address-pools (STACK-REBUILD.md documents this box exhausting
   # Docker's default pools once ~15+ Compose projects are up — fix it before
-  # that happens rather than after), and the nvidia runtime registered once
-  # the container toolkit is installed (safe to declare even before the
-  # toolkit exists — dockerd just won't use it until nvidia-container-runtime
-  # is on $PATH).
+  # that happens rather than after), the nvidia runtime registered once the
+  # container toolkit is installed (safe to declare even before the toolkit
+  # exists — dockerd just won't use it until nvidia-container-runtime is on
+  # $PATH), and a builder GC policy (#2743): `docker builder prune -af`
+  # reclaimed 179GB of buildkit cache with zero active entries the day /var
+  # hit 96% and took down two ES-backed CI legs (unavailable_shards_exception
+  # on primary allocation) -- `builder.gc` is on by default, but dockerd
+  # infers its threshold as a *percentage* of the filesystem
+  # (defaultReservedSpacePercentage = 10 in moby's builder-next/worker/gc.go;
+  # in 29.x the full path is daemon/internal/builder-next/worker/gc.go),
+  # which on this 1.8T /var computes to exactly 179GB -- the same 179GB
+  # `docker builder prune -af` reclaimed. Exactly, because diskPercentage()
+  # rounds as `(total*pct/100 / (1<<30) + 1) * 1e9`: 178 GiB-units + 1, times
+  # 1e9. Note that makes it 179 *decimal* GB (166.7 GiB), and that the knob is
+  # ReservedSpace -- a floor GC will not prune below -- not a ceiling; the
+  # nominal ceiling is the inferred MaxUsedSpace (80% = 1.43 TB). On this host
+  # the floor is what binds, so 179GB was the operative target.
+  # The GC was working; its inferred
+  # threshold was simply far too large for this box. `builder.gc` is buildkit's own
+  # supported policy mechanism (no separate systemd timer needed): it runs
+  # automatically as part of normal build activity once enabled, keeping
+  # cache usage near `defaultKeepStorage` rather than the inferred default.
+  # 20GB is generous for any single build on this box (the largest image
+  # here, backend-service's Rust release build, has nowhere near that much
+  # unique layer churn) while still well below the 179GB this issue found.
+  # Careful with the unit: dockerd parses this value with units.RAMInBytes,
+  # which is binary, so "20GB" is read as 20 GiB (21,474,836,480 B) and
+  # `docker buildx inspect` renders it back as "20GiB". Real reduction is
+  # 179.0 GB -> 21.5 GB, about 157.5 GB tighter.
+  # Setting this one knob also skips the whole percentage-inference block, so
+  # MaxUsedSpace/MinFreeSpace stay 0 (disabled) -- tracked in #2750.
   cat >/etc/docker/daemon.json <<'EOF'
 {
     "log-driver": "local",
@@ -443,6 +470,12 @@ step_docker_daemon_config() {
         "nvidia": {
             "args": [],
             "path": "nvidia-container-runtime"
+        }
+    },
+    "builder": {
+        "gc": {
+            "enabled": true,
+            "defaultKeepStorage": "20GB"
         }
     }
 }
