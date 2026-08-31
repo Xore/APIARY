@@ -229,3 +229,45 @@ commands/credentials, payloads, enriched IDS alerts, and ingest failures.
 - **TANNER dashboard** → `https://tanner.<domain>` (Keycloak via the oauth2-proxy gateway) — web-attack analysis.
 - Dionaea/Conpot write their own JSON into the shared volume for jq/ELK; the
   live dashboard ingests them alongside Cowrie, multipot, HTTP, and Suricata.
+
+## Disk space monitoring
+
+`hp-disk-space-monitor` (`arcane/home/honeypot-utilities/analysis/disk-space-check.sh`)
+polls `df` on the bind-mounted host paths in `DISK_CHECK_PATHS` (default:
+`honeypot-logs=/logs:honeypot-state=/state:dionaea-payloads=/dionaea-lib`)
+plus Elasticsearch's own data volume over HTTP (`_cat/allocation`), and
+writes a warning line to `/logs/diagnostics/disk-space.json` whenever a
+checked filesystem's free space drops below `DISK_WARN_PERCENT_FREE`
+(default 15%). Filebeat ships those lines under
+`event.module:disk-space-check`.
+
+**#2707: alerts are grouped by physical filesystem, not by bind-mounted
+path.** `honeypot-logs` (`/logs`) and `honeypot-state` (`/state`) are both
+bind-mounts of the same host directory tree
+(`/opt/stacks/apiary` on the home server), so a low-free-space condition on
+that one filesystem used to fire one near-identical WARNING line per bind
+mount. The monitor now reads the backing device from `df -Pk`'s first
+column, groups every checked path that shares a device into a single
+alert, and names the largest of the grouped paths (by `du`) as
+`top_contributor` so a real spike points straight at a directory instead
+of leaving an operator to compare N identical percentages by hand. Shape:
+
+```json
+{
+  "@timestamp": "2026-08-30T12:00:00Z",
+  "event": {"module": "disk-space-check", "category": "host"},
+  "disk": {
+    "source": "/dev/sda1",
+    "labels": "honeypot-logs,honeypot-state",
+    "percent_free": 8,
+    "available_kb": 1234567,
+    "total_kb": 20000000,
+    "top_contributor": {"label": "honeypot-logs", "path": "/logs", "used_kb": 15000000}
+  },
+  "level": "warning"
+}
+```
+
+`elasticsearch-data` alerts (from `_cat/allocation`, since `es-data` is a
+stack-private volume never bind-mounted cross-stack) are unaffected --
+there is only ever one of them per check.
