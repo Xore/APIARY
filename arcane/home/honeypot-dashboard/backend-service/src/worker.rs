@@ -872,7 +872,7 @@ impl Notifier {
                     "track_total_hits": false,
                     "query": {"bool": {
                         "filter": [{"exists": {"field": "honeypot.timestamp"}}],
-                        "must_not": [{"term": {"honeypot.internal_probe": true}}]
+                        "must_not": [crate::es::internal_probe_exclusion()]
                     }},
                     "sort": [{"@timestamp": {"order": "desc"}}],
                     "_source": ["@timestamp", "honeypot.timestamp"]
@@ -911,7 +911,7 @@ impl Notifier {
                     "track_total_hits": false,
                     "query": {"bool": {
                         "filter": [{"range": {"@timestamp": {"gte": INGEST_LOOKBACK}}}],
-                        "must_not": [{"term": {"honeypot.internal_probe": true}}]
+                        "must_not": [crate::es::internal_probe_exclusion()]
                     }},
                     "aggs": {
                         "newest": {"max": {"field": "@timestamp"}},

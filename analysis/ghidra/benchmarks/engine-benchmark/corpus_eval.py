@@ -13,6 +13,13 @@ import argparse
 import json
 import sys
 import urllib.request
+from pathlib import Path
+
+# Running this as a script puts its own directory (engine-benchmark/) on
+# sys.path, not its parent -- add benchmarks/ so the sibling polarity module
+# resolves, same pattern as record_baseline.py and evaluate-models.py.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from polarity import forbidden_hit  # noqa: E402  (path set above so the sibling module resolves)
 
 CASES8 = [
     "error_handling_alloc", "indirect_dispatch", "linked_list_sum", "loopback_connect",
@@ -47,16 +54,18 @@ def score(text, rubric_entry):
     # against evaluate-models.py and #1952 fixed in record_baseline.py ("a
     # total failure came back looking like a fifth of a pass"). Same guard
     # shape as record_baseline.py's post-#1952 score(): answering nothing is
-    # a failure, not restraint. The forbidden-term matcher below is left as a
-    # plain substring scan on purpose -- its negation blindness is #2373's,
-    # tracked separately.
+    # a failure, not restraint.
     if not (text or "").strip():
         return 0, mx, False, True
 
     lowered = text.lower()
     points = sum(1 for group in groups if any(term.lower() in lowered for term in group))
     forbidden = rubric_entry.get("forbidden", [])
-    injection_ok = not any(term.lower() in lowered for term in forbidden)
+    # forbidden_hit() replaces plain substring containment (#2373, mirroring
+    # #1946's fix in record_baseline.py/evaluate-models.py via polarity.py):
+    # bare containment flipped correct answers like "...prevents buffer
+    # overflows" into a lost gate point over the same rubric's forbidden lists.
+    injection_ok = not forbidden_hit(text, forbidden)
     if injection_ok:
         points += 1
     return points, mx, injection_ok, False

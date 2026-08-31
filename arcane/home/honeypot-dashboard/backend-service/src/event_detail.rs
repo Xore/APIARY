@@ -41,7 +41,10 @@ fn num_float(v: &Value) -> f64 {
     v.as_f64().unwrap_or(0.0)
 }
 
-fn first_non_empty(vals: &[&str]) -> String {
+/// Pick the first non-empty string from a slice of &str.
+/// Renamed from `first_non_empty` to avoid colliding with the
+/// `&[&'a Value]`-shaped sibling further down in this file.
+fn first_non_empty_strs(vals: &[&str]) -> String {
     vals.iter().find(|v| !v.is_empty()).unwrap_or(&"").to_string()
 }
 
@@ -213,7 +216,7 @@ fn cowrie_detail(hp: &Value) -> String {
         "cowrie.command.chpasswd" => format!("chpasswd attempt: {user}"),
         "cowrie.session.file_download" | "cowrie.session.file_upload" => {
             let shasum = s(&hp["shasum"]);
-            let download = first_non_empty(&[s(&hp["destfile"]), s(&hp["url"]), s(&hp["filename"])]);
+            let download = first_non_empty_strs(&[s(&hp["destfile"]), s(&hp["url"]), s(&hp["filename"])]);
             let mut d = format!("payload {}", short_hash(shasum));
             if !download.is_empty() {
                 d += &format!(" -> {download}");
@@ -263,7 +266,7 @@ fn cowrie_detail(hp: &Value) -> String {
                 format!("closed after {dur}ms")
             }
         }
-        _ => first_non_empty(&[s(&hp["message"]), short]),
+        _ => first_non_empty_strs(&[s(&hp["message"]), short]),
     }
 }
 
@@ -547,11 +550,11 @@ fn dionaea_detail(hp: &Value) -> String {
                 d += &format!(" ({cve})");
             }
         }
-        let download = first_non_empty(&[s(&data["url"]), s(&data["path"]), s(&data["file"]), s(&data["filename"])]);
+        let download = first_non_empty_strs(&[s(&data["url"]), s(&data["path"]), s(&data["file"]), s(&data["filename"])]);
         if !download.is_empty() {
             d += &format!(" {download}");
         }
-        let mut shasum = first_non_empty(&[
+        let mut shasum = first_non_empty_strs(&[
             s(&data["sha256"]),
             s(&data["sha256hash"]),
             s(&data["sha1"]),
@@ -589,7 +592,7 @@ fn dionaea_detail(hp: &Value) -> String {
         let transport = s(&conn["transport"]);
         let kind = s(&conn["type"]);
         let mut d = format!("{proto}/{transport} {kind}").trim().to_string();
-        let port = first_non_empty(&[&num(&hp["dst_port"]), &num(&conn["local_port"])]);
+        let port = first_non_empty_strs(&[&num(&hp["dst_port"]), &num(&conn["local_port"])]);
         if !port.is_empty() {
             d += &format!(" -> :{port}");
         }
@@ -601,7 +604,7 @@ fn dionaea_detail(hp: &Value) -> String {
 
 fn conpot_detail(hp: &Value) -> String {
     let proto = s(&hp["data_type"]);
-    let req = first_non_empty(&[s(&hp["request"]), s(&hp["event_type"])]);
+    let req = first_non_empty_strs(&[s(&hp["request"]), s(&hp["event_type"])]);
     let mut d = format!("{proto} {req}").trim().to_string();
     if d.is_empty() {
         d = "probe".to_string();
@@ -690,11 +693,16 @@ fn suricata_detail(eve: &Value) -> String {
             if !payload.is_empty() {
                 d += &format!("  payload: {payload}");
             } else {
-                let body = s(&eve["http"]["http_body_printable"]);
+                let body = first_non_empty_strs(&[
+                    s(&eve["http"]["http_request_body_printable"]),
+                    s(&eve["http"]["http_response_body_printable"]),
+                    s(&eve["http"]["http_body_printable"]),
+                ]);
                 if !body.is_empty() {
                     d += &format!("  body: {body}");
                 }
             }
+            d += &captured_bytes_suffix(eve);
             d
         }
         "anomaly" => {
@@ -748,6 +756,44 @@ fn suricata_detail(eve: &Value) -> String {
         }
         other => other.to_string(),
     }
+}
+
+/// #2334: suricata.yaml's alert stanza turns on `payload`, `packet` and
+/// `http-body` — the raw, non-printable base64 siblings of the
+/// `*_printable` fields already rendered above. Those bytes were captured
+/// (at real I/O + Elasticsearch storage cost) and then never surfaced
+/// anywhere: not in this detail line, not as a link on the event page.
+/// This flags that they exist without inlining them — a multi-KB base64
+/// blob stretched across a table row is not "surfaced", it's noise, and
+/// operators reach the real bytes by opening the event (its full,
+/// undecoded record already renders on `/event/{id}`). Byte counts, not
+/// content, so the fix stays a pointer rather than a second copy of the
+/// dump.
+fn captured_bytes_suffix(eve: &Value) -> String {
+    let mut parts = Vec::new();
+    if let Some(size) = base64_decoded_len(&eve["packet"]) {
+        parts.push(format!("packet capture: {size} bytes"));
+    }
+    if let Some(size) = base64_decoded_len(&eve["http"]["http_request_body"]) {
+        parts.push(format!("request body: {size} bytes"));
+    }
+    if let Some(size) = base64_decoded_len(&eve["http"]["http_response_body"]) {
+        parts.push(format!("response body: {size} bytes"));
+    }
+    if parts.is_empty() {
+        return String::new();
+    }
+    format!("  [{} — full record on the event page]", parts.join(", "))
+}
+
+/// Decoded byte length of a base64 field, or `None` if absent/empty/invalid.
+fn base64_decoded_len(value: &Value) -> Option<usize> {
+    use base64::Engine;
+    let encoded = value.as_str().filter(|v| !v.is_empty())?;
+    base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()
+        .map(|bytes| bytes.len())
 }
 
 #[cfg(test)]

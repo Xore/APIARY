@@ -322,7 +322,7 @@ pub fn suricata_noise_exclusion() -> Value {
         // with a source.ip -- roughly 270k rows a day of the fleet talking
         // to itself, shown as events with no attacker. That is the bulk of
         // what reads as "unattributed" in the explorer.
-        {"term": {"honeypot.internal_probe": true}},
+        crate::es::internal_probe_exclusion(),
         // #1892: a sensor's own startup and error logging, which is not an
         // event about anybody.
         //
