@@ -42,8 +42,21 @@ trap cleanup EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "ok - $*"; }
 
+# Disk-based allocation is off deliberately. This is a throwaway
+# single-node cluster that indexes a handful of documents and is deleted
+# on exit, but Elasticsearch still applies its watermarks against whatever
+# filesystem backs /var/lib/docker on the host. When the CI box crossed
+# the 95% flood stage the primary of every newly created index simply
+# never became active, and the write died after its own two-minute wait:
+#
+#   unavailable_shards_exception: [.ds-honeypot-v2-test-...][0]
+#   primary shard is not active Timeout: [2m]
+#
+# The host's free space is a real thing to watch, but it is not this
+# test's subject and must not decide whether it passes.
 docker run -d --name "$container" -p "127.0.0.1:${port}:9200" \
   -e discovery.type=single-node -e xpack.security.enabled=false \
+  -e cluster.routing.allocation.disk.threshold_enabled=false \
   -e ES_JAVA_OPTS="-Xms512m -Xmx512m" \
   "$ES_IMAGE" >/dev/null
 

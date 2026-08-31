@@ -64,11 +64,43 @@ es_index() {
     esac
   done
   echo "  last response (HTTP $code): ${out%$'\n'*}" >&2
+  # A 503 here means the primary never became active. Which of the many
+  # reasons that can happen is not guessable from the write's own error, so
+  # ask the cluster directly rather than leaving the next reader to
+  # hypothesise (2026-08-31: a 96%-full /var on the CI box was the trigger,
+  # and it cost a morning to establish that from the bare curl exit alone).
+  if [ "$code" = "503" ]; then
+    echo "  --- cluster health ---" >&2
+    curl -sS "$es_url/_cluster/health" >&2 || true
+    echo >&2
+    echo "  --- unassigned shards ---" >&2
+    curl -sS "$es_url/_cat/shards?v&h=index,shard,prirep,state,unassigned.reason" >&2 || true
+    echo "  --- allocation explain ---" >&2
+    curl -sS "$es_url/_cluster/allocation/explain?pretty" \
+      -H 'Content-Type: application/json' \
+      -d "{\"index\":\"${path%%/*}\",\"shard\":0,\"primary\":true}" >&2 || true
+    echo >&2
+    echo "  --- node disk as Elasticsearch sees it ---" >&2
+    curl -sS "$es_url/_cat/allocation?v" >&2 || true
+  fi
   return 1
 }
 
+# Disk-based allocation is off deliberately. This is a throwaway
+# single-node cluster that indexes a handful of documents and is deleted
+# on exit, but Elasticsearch still applies its watermarks against whatever
+# filesystem backs /var/lib/docker on the host. When the CI box crossed
+# the 95% flood stage the primary of every newly created index simply
+# never became active, and the write died after its own two-minute wait:
+#
+#   unavailable_shards_exception: [.ds-honeypot-v2-test-...][0]
+#   primary shard is not active Timeout: [2m]
+#
+# The host's free space is a real thing to watch, but it is not this
+# test's subject and must not decide whether it passes.
 docker run -d --name "$container" -p "127.0.0.1:${port}:9200" \
   -e discovery.type=single-node -e xpack.security.enabled=false \
+  -e cluster.routing.allocation.disk.threshold_enabled=false \
   -e ES_JAVA_OPTS="-Xms512m -Xmx512m" \
   "$ES_IMAGE" >/dev/null
 
