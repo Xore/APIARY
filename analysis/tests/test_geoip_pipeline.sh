@@ -48,15 +48,23 @@ docker run -d --name "$container" -p "127.0.0.1:${port}:9200" \
   "$ES_IMAGE" >/dev/null
 
 es_url="http://127.0.0.1:${port}"
+# /_cluster/health answers 200 as soon as the HTTP layer is up, even while
+# the cluster is still red and no shard can be allocated yet. Waiting on
+# that alone let the first write race the recovery and come back 503
+# (unavailable_shards_exception), which is how #585's and #565's legs
+# turned flaky. wait_for_status=yellow makes the endpoint block until at
+# least the primaries are assigned, so the first indexing request has
+# somewhere to land.
 ready=0
 for _ in $(seq 1 40); do
-  if curl -fsS "$es_url/_cluster/health" >/dev/null 2>&1; then
+  if curl -fsS "$es_url/_cluster/health?wait_for_status=yellow&timeout=3s" \
+    >/dev/null 2>&1; then
     ready=1
     break
   fi
   sleep 3
 done
-[ "$ready" -eq 1 ] || fail "Elasticsearch did not become reachable at $es_url"
+[ "$ready" -eq 1 ] || fail "Elasticsearch did not reach at least yellow at $es_url"
 
 # Extract exactly the geoip-honeypot pipeline's JSON body (the
 # geoip_pipeline_body heredoc) rather than the whole file, so this stays in

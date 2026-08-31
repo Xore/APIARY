@@ -40,21 +40,55 @@ trap cleanup EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "ok - $*"; }
 
+# Auto-creating an index (or a data stream's first backing index) makes the
+# write block until that primary is active, and Elasticsearch gives up with
+# a 503 unavailable_shards_exception after its own one-minute default. On
+# the self-hosted runner several ES-backed legs of this matrix share a box,
+# so allocation can genuinely take longer than that and the leg dies on a
+# bare "curl: (22) ... error: 503" with the reason thrown away by -f.
+#
+# es_index widens the server-side wait and retries the whole request a few
+# times, then prints the body it actually got so a real rejection (a
+# mapping conflict, say) still reads as one instead of as a timeout.
+es_index() {
+  local path="$1" body="$2" attempt out code
+  for attempt in 1 2 3; do
+    out="$(curl -sS -w '\n%{http_code}' -X POST "$es_url/$path?timeout=120s" \
+      -H 'Content-Type: application/json' -d "$body" 2>&1)"
+    code="${out##*$'\n'}"
+    case "$code" in
+      2*) printf '%s' "${out%$'\n'*}"; return 0 ;;
+      503) sleep $((attempt * 5)) ;;
+      *) break ;;
+    esac
+  done
+  echo "  last response (HTTP $code): ${out%$'\n'*}" >&2
+  return 1
+}
+
 docker run -d --name "$container" -p "127.0.0.1:${port}:9200" \
   -e discovery.type=single-node -e xpack.security.enabled=false \
   -e ES_JAVA_OPTS="-Xms512m -Xmx512m" \
   "$ES_IMAGE" >/dev/null
 
 es_url="http://127.0.0.1:${port}"
+# /_cluster/health answers 200 as soon as the HTTP layer is up, even while
+# the cluster is still red and no shard can be allocated yet. Waiting on
+# that alone let the first write race the recovery and come back 503
+# (unavailable_shards_exception), which is how #585's and #565's legs
+# turned flaky. wait_for_status=yellow makes the endpoint block until at
+# least the primaries are assigned, so the first indexing request has
+# somewhere to land.
 ready=0
 for _ in $(seq 1 40); do
-  if curl -fsS "$es_url/_cluster/health" >/dev/null 2>&1; then
+  if curl -fsS "$es_url/_cluster/health?wait_for_status=yellow&timeout=3s" \
+    >/dev/null 2>&1; then
     ready=1
     break
   fi
   sleep 3
 done
-[ "$ready" -eq 1 ] || fail "Elasticsearch did not become reachable at $es_url"
+[ "$ready" -eq 1 ] || fail "Elasticsearch did not reach at least yellow at $es_url"
 
 # The template references the delete-only daily-index policy -- register it
 # so index creation doesn't warn/fail on a missing policy reference.
@@ -136,12 +170,12 @@ pass "remove-then-apply migration clears the old ERROR and starts the delete-onl
 # incompatible value types (int vs string) -- exactly the scenario the
 # previous raw-message design existed to avoid. Field/value shapes match
 # real dionaea log_incident.py output: {timestamp, name, origin, data}.
-curl -fsS -X POST "$es_url/$index/_doc" -H 'Content-Type: application/json' -d '{
+es_index "$index/_doc" '{
   "timestamp":"2026-08-05T00:00:00","name":"dionaea","origin":"dionaea.download.complete",
   "data":{"url":"http://198.51.100.5/x.exe","shasum":"deadbeef","port":445}
 }' >/dev/null || fail "indexing the first (int port) incident was rejected"
 
-curl -fsS -X POST "$es_url/$index/_doc" -H 'Content-Type: application/json' -d '{
+es_index "$index/_doc" '{
   "timestamp":"2026-08-05T00:01:00","name":"dionaea","origin":"dionaea.connection.link",
   "data":{"port":"not-a-number","connection":{"protocol":"smbd","remote_ip":"198.51.100.5"}}
 }' >/dev/null || fail "indexing the second (string port) incident was rejected -- mapping conflict"
