@@ -55,7 +55,7 @@ function classify(raw: string): Shape {
 type HashKindFetch = { state: 'kind'; kind: 'payload' | 'fingerprint' } | { state: 'not-found' } | { state: 'failed' }
 
 const resolveHashKind = createServerFn({ method: 'GET' })
-  .inputValidator((input: { value: string }) => input)
+  .validator((input: { value: string }) => input)
   .handler(async ({ data }): Promise<HashKindFetch> => {
     const { serviceJSONResult } = await import('../lib/backend.server')
     let sawFailure = false

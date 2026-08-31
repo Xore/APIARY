@@ -12,14 +12,14 @@ import { StoreListPage, str, when, type StorePage, type StoreRow } from '../comp
 import type { Column } from '../components/Investigate'
 
 const fetchPage = createServerFn({ method: 'GET' })
-  .inputValidator((input: { offset: number }) => input)
+  .validator((input: { offset: number }) => input)
   .handler(async ({ data }): Promise<StorePage | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<StorePage>(`/api/v1/store/problem-reports?offset=${data.offset}&size=25`)
   })
 
 const setStatus = createServerFn({ method: 'POST' })
-  .inputValidator((input: { id: string; status: 'open' | 'triaged' | 'closed' }) => input)
+  .validator((input: { id: string; status: 'open' | 'triaged' | 'closed' }) => input)
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()

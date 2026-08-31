@@ -23,7 +23,7 @@ type EventRow = {
 type Page = { total: number; offset: number; rows: EventRow[] }
 
 const fetchCommands = createServerFn({ method: 'GET' })
-  .inputValidator((input: { offset: number }) => input)
+  .validator((input: { offset: number }) => input)
   .handler(async ({ data }): Promise<Page | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<Page>(`/api/v1/events?kind=command&offset=${data.offset}&size=25`)

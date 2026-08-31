@@ -56,7 +56,7 @@ type CapeRun = {
 type RunFetch = { state: 'run'; run: CapeRun } | { state: 'missing' } | { state: 'failed' }
 
 const fetchRun = createServerFn({ method: 'GET' })
-  .inputValidator((input: { sha: string }) => input)
+  .validator((input: { sha: string }) => input)
   .handler(async ({ data }): Promise<RunFetch> => {
     const { serviceJSONResult } = await import('../lib/backend.server')
     const result = await serviceJSONResult<CapeRun>(`/api/v1/cape/${encodeURIComponent(data.sha)}`)

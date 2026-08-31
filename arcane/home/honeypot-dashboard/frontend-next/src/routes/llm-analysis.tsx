@@ -11,7 +11,7 @@ import type { Column } from '../components/Investigate'
 type SemanticResult = { available: boolean; reason?: string; hits: (StoreRow & { score?: number })[] }
 
 const semanticSearch = createServerFn({ method: 'GET' })
-  .inputValidator((input: { q: string }) => input)
+  .validator((input: { q: string }) => input)
   .handler(async ({ data }): Promise<SemanticResult | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<SemanticResult>(`/api/v1/llm-search?q=${encodeURIComponent(data.q)}`)
@@ -97,7 +97,7 @@ function SemanticSearchCard() {
 }
 
 const fetchPage = createServerFn({ method: 'GET' })
-  .inputValidator((input: { offset: number }) => input)
+  .validator((input: { offset: number }) => input)
   .handler(async ({ data }): Promise<StorePage | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<StorePage>(`/api/v1/store/llm-analysis?offset=${data.offset}&size=25`)

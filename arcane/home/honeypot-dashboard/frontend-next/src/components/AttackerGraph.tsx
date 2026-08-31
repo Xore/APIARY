@@ -19,7 +19,7 @@ type GraphEdge = { source: string; target: string }
 type Graph = { nodes: GraphNode[]; edges: GraphEdge[] }
 
 const fetchGraph = createServerFn({ method: 'GET' })
-  .inputValidator((input: { id: string }) => input)
+  .validator((input: { id: string }) => input)
   .handler(async ({ data }): Promise<Graph | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<Graph>(`/api/v1/attackers-graph?id=${encodeURIComponent(data.id)}`)

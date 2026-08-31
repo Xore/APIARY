@@ -17,7 +17,7 @@ type SearchResult = { query: string; redirect: string | null; groups: Group[]; t
 type Row = { title: string; group: string; url: string }
 
 const searchFn = createServerFn({ method: 'GET' })
-  .inputValidator((input: { q: string }) => input)
+  .validator((input: { q: string }) => input)
   .handler(async ({ data }): Promise<SearchResult | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<SearchResult>(`/api/v1/search?q=${encodeURIComponent(data.q)}`)

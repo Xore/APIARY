@@ -11,7 +11,7 @@ import { ShieldIcon } from '../components/CardIcons'
 import { pathString } from '../lib/json'
 
 const fetchPage = createServerFn({ method: 'GET' })
-  .inputValidator((input: { offset: number }) => input)
+  .validator((input: { offset: number }) => input)
   .handler(async ({ data }): Promise<StorePage | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<StorePage>(`/api/v1/store/github-analysis?offset=${data.offset}&size=25`)

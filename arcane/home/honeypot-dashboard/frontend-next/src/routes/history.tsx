@@ -24,7 +24,7 @@ type EventRow = {
 type Page = { total: number; offset: number; rows: EventRow[] }
 
 const fetchHistory = createServerFn({ method: 'GET' })
-  .inputValidator((input: { offset: number; q: string }) => input)
+  .validator((input: { offset: number; q: string }) => input)
   .handler(async ({ data }): Promise<Page | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     const query = data.q ? `&q=${encodeURIComponent(data.q)}` : ''

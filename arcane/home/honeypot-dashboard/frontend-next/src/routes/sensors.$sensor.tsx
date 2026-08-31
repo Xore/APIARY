@@ -42,7 +42,7 @@ type Overview = {
 }
 
 const fetchOverview = createServerFn({ method: 'GET' })
-  .inputValidator((input: { sensor: string }) => input)
+  .validator((input: { sensor: string }) => input)
   .handler(async ({ data }): Promise<Overview | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<Overview>(`/api/v1/sensors/${encodeURIComponent(data.sensor)}/overview`)
@@ -58,7 +58,7 @@ const fetchCatalog = createServerFn({ method: 'GET' }).handler(
 )
 
 const fetchEvents = createServerFn({ method: 'GET' })
-  .inputValidator((input: { sensor: string }) => input)
+  .validator((input: { sensor: string }) => input)
   .handler(async ({ data }): Promise<{ sensor: string; total: number; rows: SensorEventRow[] } | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON(`/api/v1/sensors/${encodeURIComponent(data.sensor)}/events?limit=200`)

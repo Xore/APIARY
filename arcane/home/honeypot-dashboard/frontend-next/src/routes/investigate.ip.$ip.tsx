@@ -73,7 +73,7 @@ type BlockState = { IP: string; Blocked: boolean; Active: boolean; BlockedBy?: s
 type ProfileFetch = { state: 'profile'; profile: IpProfile } | { state: 'missing' } | { state: 'failed' }
 
 const fetchProfile = createServerFn({ method: 'GET' })
-  .inputValidator((input: { ip: string }) => input)
+  .validator((input: { ip: string }) => input)
   .handler(async ({ data }): Promise<ProfileFetch> => {
     const { serviceJSONResult } = await import('../lib/backend.server')
     const result = await serviceJSONResult<IpProfile>(`/api/v1/investigate/ip/${encodeURIComponent(data.ip)}`)
@@ -82,7 +82,7 @@ const fetchProfile = createServerFn({ method: 'GET' })
   })
 
 const fetchBlockState = createServerFn({ method: 'GET' })
-  .inputValidator((input: { ip: string }) => input)
+  .validator((input: { ip: string }) => input)
   .handler(async ({ data }): Promise<BlockState | null> => {
     const { serviceFetch } = await import('../lib/backend.server')
     const response = await serviceFetch(`/api/v1/ip-block/${encodeURIComponent(data.ip)}`)
@@ -90,7 +90,7 @@ const fetchBlockState = createServerFn({ method: 'GET' })
   })
 
 const setBlock = createServerFn({ method: 'POST' })
-  .inputValidator((input: { ip: string; blocked: boolean; expires_days?: number }) => input)
+  .validator((input: { ip: string; blocked: boolean; expires_days?: number }) => input)
   .handler(async ({ data }): Promise<boolean> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()

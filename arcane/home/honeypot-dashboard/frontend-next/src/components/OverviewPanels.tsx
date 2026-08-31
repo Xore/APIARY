@@ -117,7 +117,7 @@ export function Heatmap({ rows, failed }: { rows: HeatRow[] | null; failed?: boo
 type Vectors = { sensor: string; ports: Kv[]; protocols: Kv[] }
 
 const fetchVectors = createServerFn({ method: 'GET' })
-  .inputValidator((input: { sensor: string }) => input)
+  .validator((input: { sensor: string }) => input)
   .handler(async ({ data }): Promise<Vectors | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<Vectors>(`/api/v1/attack-vectors?sensor=${encodeURIComponent(data.sensor)}`)

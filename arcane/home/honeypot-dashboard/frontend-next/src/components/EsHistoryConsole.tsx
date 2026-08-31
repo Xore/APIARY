@@ -16,7 +16,7 @@ type ConsoleRow = { record: JsonRecord }
 type ConsolePage = { total: number; rows: ConsoleRow[] }
 
 const fetchConsoleHistory = createServerFn({ method: 'GET' })
-  .inputValidator((input: { q: string }) => input)
+  .validator((input: { q: string }) => input)
   .handler(async ({ data }): Promise<ConsolePage | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     const query = data.q ? `&q=${encodeURIComponent(data.q)}` : ''

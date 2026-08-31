@@ -99,7 +99,7 @@ const fetchAlerts = createServerFn({ method: 'GET' }).handler(async (): Promise<
 })
 
 const acknowledgeAlert = createServerFn({ method: 'POST' })
-  .inputValidator((input: { key: string; ack: boolean }) => input)
+  .validator((input: { key: string; ack: boolean }) => input)
   .handler(async ({ data }): Promise<void> => {
     // Session-checked here as defense in depth (#2123); the global
     // function middleware rejects unauthenticated calls before this runs.
@@ -118,7 +118,7 @@ const acknowledgeAlert = createServerFn({ method: 'POST' })
 // per-row acknowledge uses. Bounded by a rule-group's member count (never
 // the whole board), so no offset-walk like acknowledgeAll needs.
 const acknowledgeKeys = createServerFn({ method: 'POST' })
-  .inputValidator((input: { keys: string[]; ack: boolean }) => input)
+  .validator((input: { keys: string[]; ack: boolean }) => input)
   .handler(async ({ data }): Promise<number> => {
     // Same defense-in-depth session check as acknowledgeAlert (#2123).
     const { getSessionUser } = await import('../lib/auth')

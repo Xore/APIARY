@@ -41,7 +41,7 @@ type DetailFetch =
   | { state: 'failed' }
 
 const fetchDetail = createServerFn({ method: 'GET' })
-  .inputValidator((input: { hash: string }) => input)
+  .validator((input: { hash: string }) => input)
   .handler(async ({ data }): Promise<DetailFetch> => {
     const { serviceJSONResult } = await import('../lib/backend.server')
     const result = await serviceJSONResult<PayloadDetail>(`/api/v1/payloads/${encodeURIComponent(data.hash)}`)
@@ -103,7 +103,7 @@ async function submitAnalysisJob(user: User | null, path: string, body: Record<s
 }
 
 const submitSandbox = createServerFn({ method: 'POST' })
-  .inputValidator((input: { hash: string }) => input)
+  .validator((input: { hash: string }) => input)
   .handler(async ({ data }): Promise<SubmitResult> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
@@ -111,7 +111,7 @@ const submitSandbox = createServerFn({ method: 'POST' })
   })
 
 const submitGhidra = createServerFn({ method: 'POST' })
-  .inputValidator((input: { hash: string }) => input)
+  .validator((input: { hash: string }) => input)
   .handler(async ({ data }): Promise<SubmitResult> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
@@ -127,7 +127,7 @@ const submitGhidra = createServerFn({ method: 'POST' })
 // confirmAction with the publication wording from payloads.html's
 // data-hp-confirm-* attributes.
 const submitGithubAnalysis = createServerFn({ method: 'POST' })
-  .inputValidator((input: { hash: string }) => input)
+  .validator((input: { hash: string }) => input)
   .handler(async ({ data }): Promise<SubmitResult> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
@@ -148,7 +148,7 @@ const submitGithubAnalysis = createServerFn({ method: 'POST' })
 // Admin-gated at the BFF like every other mutation on this page; errors
 // come back as the Rust tier's plain-text body, surfaced verbatim.
 const generatePdfReport = createServerFn({ method: 'POST' })
-  .inputValidator((input: { hash: string }) => input)
+  .validator((input: { hash: string }) => input)
   .handler(async ({ data }): Promise<{ ok: boolean; id?: string; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
@@ -201,7 +201,7 @@ function jnum(value: Json | undefined | null): number | null {
 type CorrelationFetch = { state: 'data'; correlation: Correlation } | { state: 'failed' }
 
 const fetchCorrelation = createServerFn({ method: 'GET' })
-  .inputValidator((input: { key: string }) => input)
+  .validator((input: { key: string }) => input)
   .handler(async ({ data }): Promise<CorrelationFetch> => {
     const { serviceJSON } = await import('../lib/backend.server')
     const key = data.key.toLowerCase()
@@ -270,7 +270,7 @@ type RelatedEvents = {
 type RelatedFetch = { state: 'data'; related: RelatedEvents } | { state: 'failed' }
 
 const fetchRelatedEvents = createServerFn({ method: 'GET' })
-  .inputValidator((input: { hash: string }) => input)
+  .validator((input: { hash: string }) => input)
   .handler(async ({ data }): Promise<RelatedFetch> => {
     const { serviceJSON } = await import('../lib/backend.server')
     type EventsPage = { total: number; rows: { time: string; sensor: string; session: string }[] }

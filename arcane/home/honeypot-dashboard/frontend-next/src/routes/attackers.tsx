@@ -34,7 +34,7 @@ type AttackerRow = {
 type Page = { total: number; rows: AttackerRow[] }
 
 const fetchAttackers = createServerFn({ method: 'GET' })
-  .inputValidator((input: { offset: number }) => input)
+  .validator((input: { offset: number }) => input)
   .handler(async ({ data }) => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<Page>(`/api/v1/attackers?offset=${data.offset}&size=25`)

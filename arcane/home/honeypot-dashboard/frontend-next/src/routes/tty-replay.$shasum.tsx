@@ -108,7 +108,7 @@ type IpProfile = {
 type ReplayFetch = { state: 'replay'; replay: Replay } | { state: 'missing' } | { state: 'failed' }
 
 const fetchReplay = createServerFn({ method: 'GET' })
-  .inputValidator((input: { shasum: string }) => input)
+  .validator((input: { shasum: string }) => input)
   .handler(async ({ data }): Promise<ReplayFetch> => {
     const { serviceJSONResult } = await import('../lib/backend.server')
     const result = await serviceJSONResult<Replay>(`/api/v1/recordings/${encodeURIComponent(data.shasum)}`)
@@ -128,7 +128,7 @@ const fetchReplay = createServerFn({ method: 'GET' })
 type SourceIpFetch = { state: 'ip'; ip: string } | { state: 'none' } | { state: 'failed' }
 
 const fetchSourceIp = createServerFn({ method: 'GET' })
-  .inputValidator((input: { shasum: string }) => input)
+  .validator((input: { shasum: string }) => input)
   .handler(async ({ data }): Promise<SourceIpFetch> => {
     const { serviceJSONResult } = await import('../lib/backend.server')
     const result = await serviceJSONResult<{ rows?: { src_ip: string }[] }>(
@@ -149,7 +149,7 @@ const fetchSourceIp = createServerFn({ method: 'GET' })
 type ProfileFetch = { state: 'profile'; profile: IpProfile } | { state: 'absent' } | { state: 'failed' }
 
 const fetchProfile = createServerFn({ method: 'GET' })
-  .inputValidator((input: { ip: string }) => input)
+  .validator((input: { ip: string }) => input)
   .handler(async ({ data }): Promise<ProfileFetch> => {
     const { serviceJSONResult } = await import('../lib/backend.server')
     const result = await serviceJSONResult<IpProfile>(`/api/v1/investigate/ip/${encodeURIComponent(data.ip)}`)

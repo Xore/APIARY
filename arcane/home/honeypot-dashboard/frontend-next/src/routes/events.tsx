@@ -125,7 +125,7 @@ const PIVOT_KEYS = [
 type FilterValues = { sensors: string[]; countries: string[]; cities?: string[]; protos: string[]; ports: string[]; kinds: string[] }
 
 const fetchEvents = createServerFn({ method: 'GET' })
-  .inputValidator((input: { offset: number; filters?: EventFilters }) => input)
+  .validator((input: { offset: number; filters?: EventFilters }) => input)
   .handler(async ({ data }): Promise<EventsPage | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     const params = new URLSearchParams({ offset: String(data.offset), size: '25' })

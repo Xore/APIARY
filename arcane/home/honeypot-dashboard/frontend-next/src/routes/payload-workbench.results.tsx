@@ -93,35 +93,35 @@ type RunResult = { ok: boolean; run?: WorkbenchRun; reused?: boolean; error?: st
 // extract functions built inside a factory, so the factory form leaks
 // the server import into the client graph.
 const fetchWorkbench = createServerFn({ method: 'GET' })
-  .inputValidator((input: { offset: number }) => input)
+  .validator((input: { offset: number }) => input)
   .handler(async ({ data }): Promise<Page | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<Page>(`/api/v1/store/workbench-runs?offset=${data.offset}&size=25`)
   })
 
 const fetchStatic = createServerFn({ method: 'GET' })
-  .inputValidator((input: { offset: number }) => input)
+  .validator((input: { offset: number }) => input)
   .handler(async ({ data }): Promise<Page | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<Page>(`/api/v1/store/static-analysis?offset=${data.offset}&size=25`)
   })
 
 const fetchYara = createServerFn({ method: 'GET' })
-  .inputValidator((input: { offset: number }) => input)
+  .validator((input: { offset: number }) => input)
   .handler(async ({ data }): Promise<Page | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<Page>(`/api/v1/store/yara?offset=${data.offset}&size=25`)
   })
 
 const fetchSandbox = createServerFn({ method: 'GET' })
-  .inputValidator((input: { offset: number }) => input)
+  .validator((input: { offset: number }) => input)
   .handler(async ({ data }): Promise<Page | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<Page>(`/api/v1/store/sandbox-runs?offset=${data.offset}&size=25`)
   })
 
 const fetchGhidra = createServerFn({ method: 'GET' })
-  .inputValidator((input: { offset: number }) => input)
+  .validator((input: { offset: number }) => input)
   .handler(async ({ data }): Promise<Page | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<Page>(`/api/v1/store/ghidra-runs?offset=${data.offset}&size=25`)
@@ -143,7 +143,7 @@ type CatalogFetch =
   | { state: 'failed' }
 
 const fetchAnalyzerCatalog = createServerFn({ method: 'GET' })
-  .inputValidator((input: { hash: string }) => input)
+  .validator((input: { hash: string }) => input)
   .handler(async ({ data }): Promise<CatalogFetch> => {
     const { serviceJSONResult } = await import('../lib/backend.server')
     const result = await serviceJSONResult<AnalyzersResponse>(
@@ -176,7 +176,7 @@ const fetchOwnRuns = createServerFn({ method: 'GET' }).handler(async (): Promise
 // after cancel/retry (or a manual "Refresh status" click) needs the live
 // reconciled state, not a 15s-old copy.
 const refreshRunFn = createServerFn({ method: 'GET' })
-  .inputValidator((input: { id: string }) => input)
+  .validator((input: { id: string }) => input)
   .handler(async ({ data }): Promise<RunResult> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
@@ -195,7 +195,7 @@ const refreshRunFn = createServerFn({ method: 'GET' })
 // reports.tsx's definition CRUD and settings.tsx's savePresentation —
 // workbench_api.rs itself has no role check, so this is the only gate.
 const submitRun = createServerFn({ method: 'POST' })
-  .inputValidator((input: { payload_sha256: string; recipe_name: string; analyzers: WorkbenchSelection[] }) => input)
+  .validator((input: { payload_sha256: string; recipe_name: string; analyzers: WorkbenchSelection[] }) => input)
   .handler(async ({ data }): Promise<RunResult> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
@@ -221,7 +221,7 @@ const submitRun = createServerFn({ method: 'POST' })
   })
 
 const saveRecipeFn = createServerFn({ method: 'POST' })
-  .inputValidator(
+  .validator(
     (input: { id: string; name: string; description: string; scope: string; analyzers: WorkbenchSelection[]; base_revision: number }) =>
       input,
   )
@@ -241,7 +241,7 @@ const saveRecipeFn = createServerFn({ method: 'POST' })
   })
 
 const childActionFn = createServerFn({ method: 'POST' })
-  .inputValidator((input: { runId: string; analyzerId: string; action: 'cancel' | 'retry' }) => input)
+  .validator((input: { runId: string; analyzerId: string; action: 'cancel' | 'retry' }) => input)
   .handler(async ({ data }): Promise<RunResult> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
@@ -301,7 +301,7 @@ const fetchGpuQueue = createServerFn({ method: 'GET' }).handler(async (): Promis
 // generation is a separate, worker-side problem by the contract at
 // analysis/gpu-queue/gpu_queue.py:51.
 const abortGpuJob = createServerFn({ method: 'POST' })
-  .inputValidator((input: { job_id: string }) => input)
+  .validator((input: { job_id: string }) => input)
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
