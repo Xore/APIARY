@@ -104,6 +104,7 @@ jobs:
           python-version: "3.13"
       - run: python scripts/check-public-leaks.py
       - run: python scripts/validate-oidc-redirects.py
+      - run: bash scripts/check-ghosts-vendored-egress.sh
 
   public-safety-cloud:
     name: Public repository safety (GitHub-hosted)
@@ -117,6 +118,7 @@ jobs:
           python-version: "3.13"
       - run: python scripts/check-public-leaks.py
       - run: python scripts/validate-oidc-redirects.py
+      - run: bash scripts/check-ghosts-vendored-egress.sh
 
   design-lab-readonly:
     # #1828: the design lab serves variants against the real captured-data
