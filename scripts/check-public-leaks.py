@@ -90,8 +90,38 @@ PATTERNS = (
     # and which the sibling `\"?<` placeholder exemption already tolerates a
     # leading quote for.
     (re.compile(r"(?m)^[ \t]*[A-Z][A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_KEY)[ \t]*=[ \t]*(?!(?:(?i:change.?me)|DECOY_ONLY|\"?\$[\{\(]|\"?<|$))[^#\s]{8,}"), "literal credential assignment"),
-    (re.compile(r"(?i)https?://[^/\s:@]+:[^/\s@]+@"), "credential embedded in URL"),
+    (re.compile(r"(?i)https?://[^/\s:@]+:[^/\s@]+@(?P<host>[^/\s:@?#]+)"),
+     "credential embedded in URL"),
 )
+
+# #2290: a match whose host is an RFC 2606 / RFC 6761 reserved name is not a
+# leak and cannot become one -- `.example`, `.test`, `.invalid` and
+# `.localhost` are guaranteed never to resolve to anyone's service, so a
+# credential written against one is unusable by construction.
+#
+# This exists because redaction code has to be tested, and testing it means
+# committing a URL that *looks* like a credential so the sanitiser can be
+# shown removing it. Without an exemption the only ways to land such a test
+# are to assemble the string from fragments or to drop the assertion -- the
+# first is obfuscation that defeats the gate for real leaks too and teaches
+# the next author to do the same, the second removes the proof that
+# redaction works. Naming the reserved-host case keeps the gate honest and
+# the fixture readable.
+#
+# Deliberately narrow: it keys on the reason string, so it applies to this
+# one pattern and not to private keys, GitHub/AWS/Slack tokens, or literal
+# credential assignments, none of which are made harmless by the hostname
+# they sit near. RESERVED_TLDS is the same tuple the VPS Traefik host rule
+# below already trusts for the same reason.
+URL_CREDENTIAL_REASON = "credential embedded in URL"
+
+
+def _is_exempt(reason: str, match: "re.Match[str]") -> bool:
+    """True when a pattern hit is provably not a real leak."""
+    if reason != URL_CREDENTIAL_REASON:
+        return False
+    host = (match.groupdict().get("host") or "").lower().rstrip(".")
+    return host.endswith(RESERVED_TLDS)
 # #1920: the VPS Traefik config is not documentation -- install-vps.sh
 # provisions the live router set straight out of it, so a real hostname
 # committed here is a smoke test that resolves somebody's production DNS
@@ -156,6 +186,8 @@ def main() -> int:
                     findings.append(f"{posix}: contains {reason} ({literal})")
         for pattern, reason in PATTERNS:
             for match in pattern.finditer(content):
+                if _is_exempt(reason, match):
+                    continue
                 line = content.count("\n", 0, match.start()) + 1
                 findings.append(f"{posix}:{line}: possible {reason}")
         if any(relative.match(glob) for glob in GENERIC_DOMAIN_GLOBS):
