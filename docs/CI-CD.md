@@ -126,6 +126,26 @@ reasoning through the exclusion list by hand next time).
 Require a manual reviewer on `production-home`; never accept pull-request code
 on this production runner.
 
+**#2745: never pass an explicit `--name` that collides with the CI fleet's
+name.** `install-deploy-runner.sh` defaults to `${HOSTNAME}-home` specifically
+so its identity can never collide with `install-ci-runner.sh`'s
+`${HOSTNAME}-ci` default. On 2026-08-31 the deploy runner's registration was
+found silently clobbered: both `/opt/github-ci-runner/.runner` and
+`/opt/github-deploy-runner/.runner` claimed the identical `agentName:
+"supermicro"` (the bare hostname, not either script's own `-ci`/`-home`
+suffixed default) -- meaning some prior run of the deploy-runner script was
+given an explicit `--name` override matching the CI runner's plain hostname,
+and GitHub keeps only one live registration per name. The deploy runner's
+unit was left `disabled` as a result, and the Diagnostics workflow's `home`
+job (and any other `honeypot-home`-targeted job, including `deploy.yml`
+itself) queued forever with no online runner able to claim it. Fixed by
+re-registering under the script's own unmodified default name
+(`supermicro-home` on this host) rather than reusing a colliding name --
+always let `--name` default unless there is a specific reason to override
+it, and never reuse the bare `${HOSTNAME}` the live CI fleet's first runner
+is currently registered under (an earlier `--name` override; the script's
+own default is `${HOSTNAME}-ci`).
+
 Run [`../safe-update.sh`](../safe-update.sh) (`STACK_DIR=/opt/stacks/apiary`)
 before a manual deploy to snapshot the current git commit SHA, any
 uncommitted config drift, and every `.env` file -- a lightweight, read-only
