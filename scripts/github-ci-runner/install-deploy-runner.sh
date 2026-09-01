@@ -173,3 +173,39 @@ fi
 
 echo "done. status:"
 ./svc.sh status
+
+# #2749: same hardening #2742 added to install-ci-runner.sh, ported here --
+# this runner has real production write access, so a silently-never-enabled
+# unit (the 2026-08-29 outage shape: `svc.sh install` succeeds, nothing else
+# ever confirms it stuck) is at least as bad here as on the CI fleet. Assert
+# both the local systemd state and GitHub's own view of the runner, and fail
+# loudly rather than leaving either silently unknown.
+unit_name="$(basename "$service_file")"
+if ! systemctl is-enabled --quiet "$unit_name"; then
+  echo "FATAL: $unit_name is not enabled after provisioning -- it will not survive a reboot" >&2
+  exit 1
+fi
+echo "confirmed enabled: $unit_name"
+
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  echo "confirming \"$name\" shows online to GitHub (up to 60s)..."
+  online=""
+  status=""
+  for _ in $(seq 1 12); do
+    status=$(gh api "repos/$repo/actions/runners" --paginate \
+      --jq ".runners[] | select(.name==\"$name\") | .status" 2>/dev/null | tail -1) || status=""
+    if [[ "$status" == "online" ]]; then
+      online="1"
+      break
+    fi
+    sleep 5
+  done
+  if [[ -z "$online" ]]; then
+    echo "FATAL: \"$name\" did not report status=online to the GitHub API within 60s (last seen: '${status:-none}'). The unit is enabled and running locally but GitHub does not consider this runner available -- check $RUNNER_HOME/_diag for the runner's own connection log." >&2
+    exit 1
+  fi
+  echo "confirmed online: $name"
+else
+  echo "WARNING: gh is not authenticated -- could not verify \"$name\" shows online to the GitHub API. Verify manually:" >&2
+  echo "  gh api repos/$repo/actions/runners --jq '.runners[] | select(.name==\"'\"$name\"'\")'" >&2
+fi
