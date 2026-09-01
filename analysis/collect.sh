@@ -37,13 +37,21 @@ COPIED=0
 
 copy_samples() {
     local SRC="$1"
-    local DEST_TYPE="$2"   # ELF, PE, Scripts, UNKNOWN
-    local DEST_DIR="$HONEYPOT_REPO/samples/$DEST_TYPE"
-    mkdir -p "$DEST_DIR"
 
     if [[ ! -d "$SRC" ]]; then
         log "Source not found: $SRC (skipping)"
         return
+    fi
+
+    # The marker's -newer filter is only a scan-time optimization; the
+    # content-addressed dest check below is what actually prevents
+    # duplicate copies, so a stale/missing marker just costs a wider scan,
+    # never a correctness problem.
+    local find_args=(-type f -print0)
+    if [[ -f "$HONEYPOT_REPO/.last_collection" ]]; then
+        find_args=(-type f -newer "$HONEYPOT_REPO/.last_collection" -print0)
+    else
+        log "No .last_collection marker; scanning $SRC in full."
     fi
 
     while IFS= read -r -d '' file; do
@@ -61,21 +69,43 @@ copy_samples() {
         fi
 
         if [[ ! -f "$dest" ]]; then
+            mkdir -p "$(dirname "$dest")"
             cp "$file" "$dest"
             log "Copied: $sha ($magic)"
             COPIED=$((COPIED + 1))
         fi
-    done < <(find "$SRC" -type f -newer "$HONEYPOT_REPO/.last_collection" -print0 2>/dev/null || \
-             find "$SRC" -type f -print0)
+    done < <(find "$SRC" "${find_args[@]}" 2>/dev/null)
 }
 
-copy_samples "$COWRIE_DOWNLOADS"  "ELF"
-copy_samples "$DIONAEA_SAMPLES"   "UNKNOWN"
+copy_samples "$COWRIE_DOWNLOADS"
+copy_samples "$DIONAEA_SAMPLES"
 
-if [[ $COPIED -gt 0 ]]; then
-    log "Copied $COPIED new samples. Committing and pushing..."
-    git add samples/
-    git commit -m "feat: add $COPIED new samples from honeypot [$( date -u +%Y-%m-%d)]"
+# Stage whatever landed this run, then ask git the truth about what is
+# actually pending rather than trusting COPIED alone. A prior run can die
+# in two different places after copying files -- `git commit` (rare) or
+# `git push` (auth, network: "the interesting cases for a manual backfill
+# over SSH") -- and both leave state that COPIED=0 alone would misreport as
+# "no new samples" on every later run, since the content-addressed dest
+# already exists so copy_samples silently skips re-copying it. Checking
+# both "anything staged/uncommitted" and "local ahead of upstream" covers
+# either death point and makes both retryable and honestly reported.
+git add samples/
+UNCOMMITTED=$(git status --porcelain -- samples/ | wc -l)
+
+if [[ $UNCOMMITTED -gt 0 ]]; then
+    git commit -q -m "feat: add samples from honeypot [$(date -u +%Y-%m-%d)]"
+fi
+
+AHEAD=$(git rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)
+
+if [[ $AHEAD -gt 0 ]]; then
+    if [[ $COPIED -gt 0 ]]; then
+        log "Copied $COPIED new sample(s) this run ($UNCOMMITTED newly staged). $AHEAD commit(s) ahead of origin/main, pushing..."
+    elif [[ $UNCOMMITTED -gt 0 ]]; then
+        log "$UNCOMMITTED sample(s) left over from a previous run were staged but never committed (no new samples copied this run). Committed and pushing..."
+    else
+        log "$AHEAD commit(s) with samples left over from a previous run were committed but never pushed (no new samples copied this run). Retrying push..."
+    fi
     git push origin main
     touch "$HONEYPOT_REPO/.last_collection"
     log "Push complete. GitHub Actions analysis pipeline triggered."
