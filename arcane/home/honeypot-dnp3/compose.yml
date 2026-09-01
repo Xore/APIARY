@@ -49,6 +49,15 @@ services:
     # locally (sandboxed Docker, not the homeserver) that the container
     # starts healthy, accepts a real DNP3 frame, and successfully writes it
     # to the bind-mounted log file with read_only: true set.
+    #
+    # #2366: same measured baseline extended to cap_drop -- re-ran the same
+    # local build+run with cap_drop: [ALL] and security_opt no-new-
+    # privileges added on top of read_only: true, and it still accepted a
+    # real TCP connect on 20000.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     read_only: true
     networks: [dnp3_net]
     healthcheck:

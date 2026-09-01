@@ -53,8 +53,15 @@ services:
     volumes:
       - /opt/stacks/apiary/logs/hellpot:/var/log/honeypot
       - /opt/stacks/apiary/state/init-markers:/markers:ro
+    # #2366: measured baseline, same "run it, then reduce" methodology as
+    # #89/#118's cap_drop passes. Verified locally: built this image, ran
+    # it with cap_drop: [ALL] added on top of the existing no-new-
+    # privileges/read_only posture, and got a real HTTP 200 back from both
+    # listeners (8080, 8090).
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
     read_only: true
     networks: [hellpot_net]
     healthcheck:

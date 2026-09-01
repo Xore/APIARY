@@ -33,8 +33,9 @@ func TestLogSessionWritesRelayPortAndClientIP(t *testing.T) {
 	}
 	defer f.Close()
 
-	logSession(f, 42285, "203.0.113.9")
-	logSession(f, 42286, "203.0.113.10")
+	r := &relay{sessionLog: f, sessionLogPath: path}
+	r.logSession(42285, "203.0.113.9")
+	r.logSession(42286, "203.0.113.10")
 	f.Sync()
 
 	rf, err := os.Open(path)
@@ -66,7 +67,8 @@ func TestLogSessionWritesRelayPortAndClientIP(t *testing.T) {
 func TestLogSessionNilFileIsNoop(t *testing.T) {
 	// Must not panic when the session log couldn't be opened -- logging
 	// attribution must never be why the relay itself breaks.
-	logSession(nil, 1, "203.0.113.9")
+	r := &relay{}
+	r.logSession(1, "203.0.113.9")
 }
 
 func TestOpenSessionLogUnwritablePathReturnsNilNotFatal(t *testing.T) {

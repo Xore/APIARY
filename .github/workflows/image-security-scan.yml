@@ -57,7 +57,27 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: List every base image this repo's Dockerfiles/Containerfiles pull
+      # #2763: compose_pulled_images() needs PyYAML to parse compose files
+      # correctly (anchors, multi-line values) rather than a regex that would
+      # rot the same way the coverage gap it closes did.
+      #
+      # Install only if it is actually missing. The weekly cron is
+      # trusted=true, so it routes to the self-hosted runner, whose
+      # interpreter is PEP 668 externally-managed
+      # (/usr/lib/python3.14/EXTERNALLY-MANAGED). There, a plain
+      # `pip install` refuses and exits non-zero -- which under this step
+      # would kill the job before it listed a single image. PyYAML 6.0.3 is
+      # already present on that host, so the guard makes this a no-op there
+      # and a real install on the GitHub-hosted runner.
+      - name: Ensure PyYAML is available
+        run: |
+          if python3 -c 'import yaml' 2>/dev/null; then
+            python3 -c 'import yaml; print("PyYAML " + yaml.__version__ + " already present")'
+          else
+            pip install --quiet pyyaml
+          fi
+
+      - name: List every base image this repo's Dockerfiles/Containerfiles/compose files pull
         run: python3 scripts/list-docker-base-images.py | tee images.txt
 
       - name: Install trivy
@@ -74,16 +94,34 @@ jobs:
         run: |
           set -euo pipefail
           flagged=0
+          unresolved=0
           while IFS= read -r image; do
             [ -z "$image" ] && continue
             echo "::group::$image"
-            if ! trivy image --scanners vuln --severity CRITICAL,HIGH \
-                --ignore-unfixed --exit-code 1 --no-progress "$image"; then
-              flagged=$((flagged + 1))
-              echo "::warning title=Vulnerable base image::$image has fixable CRITICAL/HIGH vulnerabilities"
+            # #2763: trivy exits non-zero both for "found CRITICAL/HIGH CVEs"
+            # and for "could not pull this reference at all". Those are
+            # opposite findings -- one is a real result, the other means we
+            # measured nothing -- so classify them instead of reporting an
+            # unresolvable reference as a vulnerable image forever.
+            if trivy image --scanners vuln --severity CRITICAL,HIGH \
+                --ignore-unfixed --exit-code 1 --no-progress "$image" \
+                > scan.log 2>&1; then
+              cat scan.log
+            else
+              cat scan.log
+              if grep -qiE 'MANIFEST_UNKNOWN|manifest unknown|repository .* not found|name unknown|could not (be )?(found|resolved)|failed to (fetch|resolve|find) the image' scan.log; then
+                unresolved=$((unresolved + 1))
+                echo "::warning title=Unscannable image reference::$image could not be resolved -- NOT scanned. This is a coverage gap, not a vulnerability result. Fix the reference, or add it to UNSCANNABLE in scripts/list-docker-base-images.py with a reason."
+              else
+                flagged=$((flagged + 1))
+                echo "::warning title=Vulnerable base image::$image has fixable CRITICAL/HIGH vulnerabilities"
+              fi
             fi
             echo "::endgroup::"
           done < images.txt
+          if [ "$unresolved" -gt 0 ]; then
+            echo "::warning::$unresolved image reference(s) could not be resolved and were not scanned -- see the grouped logs above."
+          fi
           # Report-only for now: the repo has an existing base-image CVE backlog
           # (measured 21/31 images on introduction), and this PR's new dependabot
           # docker coverage will bump these pinned digests over time. Surface

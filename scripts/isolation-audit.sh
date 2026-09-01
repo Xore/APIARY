@@ -17,8 +17,17 @@
 set -uo pipefail
 
 fail=0
+warns=0
 ok()   { printf '  OK    %s\n' "$*"; }
 bad()  { printf '  FAIL  %s\n' "$*"; fail=1; }
+# A known, triaged gap with a named owner issue: visible on every run, but it
+# does NOT fail the job. diagnostics.yml exits on this script's status, so a
+# finding nobody can act on today would make the whole isolation audit
+# permanently red -- and a check that can never go green is a check people
+# stop reading, which is the exact failure mode #2366 exists to end. WARN is
+# for "triaged, tracked, not yet done"; FAIL stays for "nobody has looked at
+# this", which is always actionable.
+warn() { printf '  WARN  %s\n' "$*"; warns=$((warns + 1)); }
 info() { printf '  --    %s\n' "$*"; }
 section() { printf '\n== %s ==\n' "$*"; }
 
@@ -186,6 +195,147 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+section "Container capability posture (hp-* containers)"
+# #2366: the fourth time capability hardening lapsed for a whole generation
+# of stacks (#89 -> #118 -> #133 -> #2366), because nothing here ever
+# checked capabilities -- a stack could drop every other mitigation and
+# still run with Docker's full default capability set (NET_RAW included)
+# and this script would say nothing. Every hp-* container now must either
+# report cap_drop: ALL, or be named below with the reason it isn't yet --
+# an undocumented gap is a hard FAIL from here on, not a silent absence.
+# sbx-* sandbox-detonation containers are a different, already-audited
+# posture (NET_ADMIN/NET_RAW section above) and are skipped here.
+#
+# Three tiers, because "hardened or FAIL" alone would make this section
+# permanently red on the deployed fleet and therefore ignorable (see warn()'s
+# comment above, and #2366's own review):
+#
+#   OK    -- cap_drop: ALL is actually set on the running container. A
+#            justified cap_add alongside it still counts (yara-scanner's
+#            DAC_READ_SEARCH, for one): dropping the default set and adding
+#            back exactly what was measured IS the target posture.
+#   --    CAP_EXCEPTIONS: deliberate and permanent. Not a to-do, will never
+#         become an OK, and each entry says why in its own words.
+#   WARN  CAP_NOT_YET_HARDENED: a real gap, triaged, with an owner issue.
+#         Reported on every run, does not fail the job.
+#   FAIL  anything else: nobody has looked at this container's capability
+#         posture, which is always actionable -- either harden it or triage
+#         it onto one of the two lists above.
+#
+# Entries are "<container>|<reason>"; the reason is mandatory, and the
+# list-hygiene pass at the end of this section surfaces entries that are
+# stale (already hardened, or no longer deployed) so neither list can quietly
+# rot into a permanent excuse.
+CAP_EXCEPTIONS=(
+  "hp-tanner-docker|deliberate privileged exception -- runs its own disposable nested Docker daemon on an isolated tanner_local network with a tmpfs /var/lib/docker, and never touches the host socket. Its containment is the network and the throwaway daemon, not its capability set"
+  "hp-arcane|the deploy control plane itself -- a third-party manager image that runs as root against the real /var/run/docker.sock, which is root-equivalent by construction. Dropping capabilities inside a container that can create privileged containers on the host buys nothing; the exposure that matters for it is the socket mount, which the 'Stack containers' section above already reports separately, deliberately and by name"
+)
+CAP_NOT_YET_HARDENED=(
+  # #2825, class A: runs as uid 0 and reads/writes the sensor-owned log,
+  # state and payload trees (/opt/stacks/apiary/logs/<sensor> is owned by the
+  # sensor's own UID at drwxrwsr-x; Dionaea captures are mode 0600). Measured,
+  # not assumed: a uid-0 process under cap_drop: ALL has CapEff 0 and so no
+  # CAP_DAC_OVERRIDE, and can no longer create, read or unlink in those trees
+  # -- a bare cap_drop: ALL would silently break log rotation, pcap sync,
+  # disk reporting, payload dedup and the canarytokens log writers. Each needs
+  # cap_drop: ALL plus a measured minimal cap_add, the way yara-scanner
+  # already carries a justified DAC_READ_SEARCH.
+  "hp-log-maintenance|#2825 class A -- uid 0 rotating sensor-owned logs, needs a measured cap_add (DAC_OVERRIDE) rather than a bare drop"
+  "hp-disk-space-monitor|#2825 class A -- uid 0 writing /logs/diagnostics under a non-root-owned tree, needs a measured cap_add"
+  "hp-pcap-sync|#2825 class A -- uid 0 copying between the sshfs-backed raw dir and the arkime-pcap volume, needs a measured cap_add"
+  "hp-payload-dedupe|#2825 class A -- uid 0 hard-linking mode-0600 Dionaea captures, needs a measured cap_add (DAC_OVERRIDE, possibly FOWNER for the hard-link path)"
+  "hp-arkime-capture|#2825 class A -- uid 0 reading the sensor-owned arkime-raw tree (offline import, so no NET_RAW is involved), needs a measured cap_add"
+  "hp-arkime-viewer|#2825 class A -- uid 0 over the same arkime-raw/arkime-pcap trees, needs a measured cap_add"
+  "hp-canarytokens-frontend|#2825 class A -- uid 0 writing /logs/canarytokens/frontend, owned by 65534 at drwxr-xr-x, needs a measured cap_add"
+  "hp-canarytokens-switchboard|#2825 class A -- uid 0 writing the same 65534-owned canarytokens log tree, needs a measured cap_add"
+  # #2825, class B: the process itself already runs capability-free (redis is
+  # uid 999 with CapEff 0 today), but the official entrypoint gets there by
+  # chown-ing /data and calling setpriv as root, which needs CHOWN/SETUID/
+  # SETGID. Verified directly: the image under --cap-drop=ALL dies at startup
+  # with "setpriv: setresuid failed: Operation not permitted". Fix is a pinned
+  # user: or a measured cap_add, both needing a live check of the existing
+  # data volume's ownership.
+  "hp-canarytokens-redis|#2825 class B -- official entrypoint drops privileges itself and needs CHOWN/SETUID/SETGID to do it; a bare cap_drop: ALL kills it at startup"
+  # #2366 scoped itself to the internet-facing sensor stacks. These are the
+  # internal workers and honeypot-init's one-shot jobs it deliberately did not
+  # touch, carried over unchanged and now tracked in #2825 rather than in a
+  # follow-up that was never filed.
+  "hp-attacker-identity-worker|#2825 -- internal worker, out of #2366's internet-facing scope"
+  "hp-correlator-worker|#2825 -- internal worker, out of #2366's internet-facing scope"
+  "hp-payload-inventory-worker|#2825 -- internal worker, out of #2366's internet-facing scope"
+  "hp-persona-apply|#2825 -- honeypot-init job, out of #2366's internet-facing scope"
+  "hp-log-init|#2825 -- honeypot-init job, out of #2366's internet-facing scope"
+  "hp-elasticsearch-setup|#2825 -- honeypot-init job, out of #2366's internet-facing scope"
+  "hp-honeypot-kibana-setup|#2825 -- honeypot-init job, out of #2366's internet-facing scope"
+  "hp-arkime-init|#2825 -- honeypot-init job, out of #2366's internet-facing scope"
+  "hp-snare-clone|#2825 -- honeypot-init job, out of #2366's internet-facing scope"
+  "hp-geoipupdate|#2825 -- honeypot-init refresh job, out of #2366's internet-facing scope"
+  "hp-threat-cidrs-refresh|#2825 -- honeypot-init refresh job, out of #2366's internet-facing scope"
+  # Not a hardening problem at all: this stack was retired in #2469 and has no
+  # compose file left in this repo, so there is nothing here to add cap_drop
+  # to. It is still running on the homeserver, which is the actual bug.
+  "hp-wordpot|#2814 -- retired in #2469, no compose file left in the tree; still deployed, which is the bug to fix (not its capability set)"
+)
+
+# Returns the reason string for $1 if it appears in the remaining arguments.
+cap_listed_reason() {
+  local needle=$1 entry
+  shift
+  for entry in "$@"; do
+    if [ "${entry%%|*}" = "$needle" ]; then
+      printf '%s' "${entry#*|}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+cap_hardened_names=""
+if [ -n "${containers:-}" ]; then
+  while IFS=$'\t' read -r name _; do
+    [ -z "$name" ] && continue
+    case "$name" in sbx-*) continue ;; esac
+    capdrop=$(sudo -n docker inspect "$name" --format '{{.HostConfig.CapDrop}}' 2>/dev/null || echo "")
+    # Checked before either list, so a service that gets hardened starts
+    # reporting OK immediately and its stale list entry is surfaced below --
+    # being on a list can never mask real progress.
+    if grep -qiE '\ball\b' <<<"$capdrop"; then
+      ok "$name has cap_drop: ALL"
+      cap_hardened_names="$cap_hardened_names $name"
+      continue
+    fi
+    if cap_why=$(cap_listed_reason "$name" "${CAP_EXCEPTIONS[@]}"); then
+      info "$name has no cap_drop: ALL -- documented permanent exception: $cap_why"
+      continue
+    fi
+    if cap_why=$(cap_listed_reason "$name" "${CAP_NOT_YET_HARDENED[@]}"); then
+      warn "$name has no cap_drop: ALL -- known gap: $cap_why"
+      continue
+    fi
+    bad "$name has no cap_drop: ALL and is on neither the exception nor the tracked-gap list -- the #2366 gap regressed, or this is a new container that shipped unhardened. Harden it, or triage it onto one of the two lists in this script with a written reason"
+  done <<<"$containers"
+
+  # List hygiene. Neither list is allowed to outlive what it excuses: an entry
+  # for a container that is now hardened, or that is no longer deployed at
+  # all, is dead weight that makes the next reader trust the list less. #2366's
+  # own review caught exactly this (an allow-listed worker that wasn't running
+  # on the host), so it is now checked rather than assumed. Reported, never
+  # fatal -- a stale entry is a tidiness problem, not an isolation failure.
+  for entry in "${CAP_EXCEPTIONS[@]}" "${CAP_NOT_YET_HARDENED[@]}"; do
+    listed_name="${entry%%|*}"
+    if grep -qw -- "$listed_name" <<<"$cap_hardened_names"; then
+      info "list hygiene: $listed_name now reports cap_drop: ALL -- drop its entry from this script's lists"
+    elif ! grep -qE "^${listed_name}\b" <<<"$containers"; then
+      info "list hygiene: $listed_name is listed here but not deployed on this host -- keep it only if the stack is expected back"
+    fi
+  done
+  printf '  (capability posture: %d hardened, %d tracked gaps, see WARN lines)\n' \
+    "$(wc -w <<<"$cap_hardened_names")" "$warns"
+else
+  bad "could not check capability posture (container enumeration failed above)"
+fi
+
+# ---------------------------------------------------------------------------
 section "Host posture (reports only, does not fix)"
 if ss_out=$(sudo -n ss -tlnp 2>/dev/null | grep ':22 '); then
   if grep -qE '10\.8\.0\.|10\.10\.10\.' <<<"$ss_out"; then
@@ -240,5 +390,11 @@ if [ "$fail" -eq 0 ]; then
   printf 'isolation-audit: all checks passed (or skipped as expected)\n'
 else
   printf 'isolation-audit: ONE OR MORE CHECKS FAILED -- see FAIL lines above\n'
+fi
+if [ "$warns" -gt 0 ]; then
+  # Deliberately does not affect the exit status: these are triaged gaps with
+  # an owner issue, not regressions. They are printed after the verdict so
+  # they stay visible without turning the job red forever (#2366 review).
+  printf 'isolation-audit: %d triaged gap(s) reported as WARN -- tracked, not failing this run\n' "$warns"
 fi
 exit "$fail"
