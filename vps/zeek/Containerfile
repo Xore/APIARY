@@ -115,5 +115,16 @@ RUN spicyz -o /usr/local/share/zeek-site/iec104/iec104.hlto \
 
 COPY local.zeek /usr/local/share/zeek-site/local.zeek
 
+# #2716: fail the build, loudly, if any loaded package errors out instead of
+# just warning -- exactly what a `&default`+`&optional` collision becomes at
+# Zeek 8.1 (this file's own hassh patch above exists to prevent that one
+# case, but this check is generic: it catches the next upstream package that
+# breaks the same way, and it would have caught this one before the image
+# ever shipped). `zeek --help` documents -a/--parse-only as "exit
+# immediately after parsing scripts"; verified live on this base that it
+# exits 0 for a warning-only load (the pre-patch hassh pairing) and exits 1
+# for a real script error (a deliberately broken .zeek file).
+RUN zeek -a -C /usr/local/share/zeek-site/local.zeek
+
 WORKDIR /logs/zeek
 ENTRYPOINT ["/usr/local/zeek/bin/zeek"]

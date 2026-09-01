@@ -1,0 +1,53 @@
+name: Disk usage watch
+
+# Scheduled sentinel for #2743: `/var` on the homeserver (backs
+# /var/lib/docker -- every CI container, image build, and Arcane stack)
+# reached 96% full with no warning anywhere, and broke two
+# Elasticsearch-backed CI legs (unavailable_shards_exception on primary
+# allocation) in a way that looked like flake until someone happened to
+# check `df`. `docker builder prune -af` reclaimed 179GB of buildkit cache
+# with zero active entries, taking /var to 89%, after which the same test
+# passed on the same host at the same commit.
+#
+# Runs ON the homeserver-backed fleet (not GitHub-hosted) because it has to
+# measure that host's own filesystem directly -- no separate SSH credential
+# or network path to the thing being measured, same reasoning
+# ci-queue-watch.py's own header gives for keeping detection logic
+# runnable and inspectable outside Actions.
+#
+# Deliberately a separate workflow/script from ci-queue-watch.py rather
+# than folding into it: that script already gained an unrelated
+# runner-capacity report in this same batch of fixes (#2744); piling a
+# second, unrelated concern onto the same function from a second,
+# independent change risked a needless merge collision between the two.
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      warn_percent:
+        description: Override the alarm threshold (percent)
+        required: false
+        default: "90"
+
+permissions:
+  issues: write
+
+concurrency:
+  group: disk-usage-watch
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: [self-hosted, linux, x64, honeypot-ci]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Sweep /var usage on this host
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/disk-usage-watch.py \
+            --path /var \
+            --warn-percent "${{ inputs.warn_percent || '90' }}"
