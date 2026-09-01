@@ -113,7 +113,30 @@ const campaignRow = {
   explanation: "shared session pivots across sensors",
   first: NOW,
   last: NOW,
+  // #2047 scan shape. correlator.rs writes campaigns-v1 with these names
+  // (not attackers-v1's dest_ips/ports_touched), and "" rather than an
+  // absent field when neither threshold applies.
+  scan: "vertical",
+  dst_ips_touched: 2,
+  ports_touched_counted: 41,
 };
+
+// GET /api/v1/cred-reuse — a bare list, not an envelope. The shape matters:
+// the campaigns page renders this response directly, so answering the {}
+// catch-all here is answering with a non-list, which is exactly what took
+// the whole route's shell down once already.
+const credReuseEdges = [
+  {
+    user: "root",
+    pass: "123456",
+    unique_ips: 9,
+    ips: ["203.0.113.7", "203.0.113.9"],
+    sensors: ["citrix", "cowrie"],
+    events: 61,
+    first: NOW,
+    last: NOW,
+  },
+];
 
 const clusterPage = {
   total: 1,
@@ -273,6 +296,7 @@ function route(pathname) {
   if (pathname === "/api/v1/campaigns") {
     return { total: 1, rows: [campaignRow] };
   }
+  if (pathname === "/api/v1/cred-reuse") return credReuseEdges;
   if (pathname === "/api/v1/clusters") {
     return { total: clusterPage.total, rows: clusterPage.rows.slice(0) };
   }

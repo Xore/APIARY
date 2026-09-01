@@ -73,7 +73,15 @@ function CredReuseCard({ edges }: { edges: CredEdge[] | null }) {
   // Silence, not an empty-state complaint, when nothing has been reused
   // yet or the fetch is still in flight — this mirrors the flow_link
   // absence convention on the event page.
-  if (!edges || edges.length === 0) return null
+  //
+  // Array.isArray, not a bare truthiness check: this endpoint's body is the
+  // list itself, so anything the backend answers that is not a list lands
+  // here whole. A non-list object is truthy and its `.length` is undefined,
+  // which passed the old guard and then died on `.slice` — taking the
+  // sidebar and <main> down with it, because a throw during the client
+  // render unmounts the whole root rather than just this card. The shell
+  // renders unconditionally; an unusable value renders nothing.
+  if (!Array.isArray(edges) || edges.length === 0) return null
   return (
     <div className="card wide">
       <h2>Reused credentials</h2>
@@ -213,9 +221,16 @@ function Campaigns() {
   const [credEdges, setCredEdges] = useState<CredEdge[] | null>(null)
   useEffect(() => {
     let cancelled = false
-    streamedCredReuse.then((result) => {
-      if (!cancelled && result) setCredEdges(result)
-    })
+    // Normalise at the boundary: state only ever holds a list, so nothing
+    // downstream has to re-derive whether the backend answered one. The
+    // catch keeps a rejected stream a silent no-op rather than an unhandled
+    // rejection, which is the same degradation the card's absence already
+    // means.
+    streamedCredReuse
+      .then((result) => {
+        if (!cancelled && Array.isArray(result)) setCredEdges(result)
+      })
+      .catch(() => {})
     return () => {
       cancelled = true
     }
