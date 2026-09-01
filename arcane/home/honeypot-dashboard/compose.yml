@@ -72,6 +72,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    labels:
+      - autoheal=true
     read_only: true
     # #1026: quoted -- the unquoted form's comma between size= and mode=
     # was parsed by YAML as a flow-sequence separator, splitting this into
@@ -585,6 +587,11 @@ services:
     # per-worker SSR plus live-stream headroom across all four workers;
     # if real traffic proves it tight, raise it deliberately -- the point
     # of the number is blast-radius containment, not thrift.
+    #
+    # #2051: HEALTHCHECK is baked into dashboard-next's Dockerfile itself,
+    # invisible to a compose-only grep for healthcheck:.
+    labels:
+      - autoheal=true
     deploy:
       resources:
         limits: {cpus: "1.0", memory: 512M}

@@ -43,6 +43,7 @@ def config(**changes):
         max_events_per_cycle=2000,
         max_jobs_per_cycle=20,
         max_payload_scan_files=5000,
+        max_payload_scan_bytes=64 << 20,
         session_idle_seconds=300,
         session_lookback_seconds=3600,
         daily_report_hour=6,
@@ -339,6 +340,7 @@ class CycleStageIsolationTests(unittest.TestCase):
         w.collect_session_events = lambda: 7
         w.analyze_ready_sessions = lambda: 3
         w.analyze_payloads = lambda: 2
+        w.payload_scan_truncated = False
         return w
 
     def test_a_failing_stage_keeps_the_others_results(self):
@@ -927,12 +929,100 @@ class PayloadSafetyTests(unittest.TestCase):
             except OSError:
                 link = None
             parsed = config(payload_roots=(root,), max_payload_bytes=1024)
-            found = worker.LLMWorker(parsed).iter_text_payloads()
+            found = list(worker.LLMWorker(parsed).iter_text_payloads())
             self.assertEqual(len(found), 1)
             self.assertEqual(found[0][1], text_path.read_bytes())
             if link is not None:
                 self.assertNotEqual(found[0][0], worker.hashlib.sha256(outside.read_bytes()).hexdigest())
             outside.unlink()
+
+    def test_scan_candidates_never_retain_raw_bytes(self):
+        """#2228: the collection pass must be stats-only -- (mtime, path,
+        size), never a fourth element carrying file content. This is the
+        tuple-shape assertion the fix's acceptance criteria calls for."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "one").write_text("x" * 100, encoding="utf-8")
+            (root / "two").write_text("y" * 100, encoding="utf-8")
+            parsed = config(payload_roots=(root,), max_payload_bytes=1024)
+            candidates = worker.LLMWorker(parsed).scan_payload_candidates()
+            self.assertEqual(len(candidates), 2)
+            for entry in candidates:
+                self.assertEqual(len(entry), 3, "candidate tuple must be (mtime, path, size) only")
+                mtime, path, size = entry
+                self.assertIsInstance(mtime, float)
+                self.assertIsInstance(path, Path)
+                self.assertIsInstance(size, int)
+
+    def test_iter_text_payloads_stops_at_aggregate_byte_cap(self):
+        """#2228: a synthetic root exceeding a low aggregate cap must not
+        buffer every qualifying file -- iter_text_payloads yields fewer
+        candidates than exist on disk once the byte ceiling is crossed,
+        with MAX_JOBS_PER_CYCLE=1 unable to mask that (this asserts the
+        scan-side cap, independent of the job-count cap)."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            body = "z" * 500 + "\n"
+            for index in range(10):
+                (root / f"payload-{index}").write_text(body, encoding="utf-8")
+            parsed = config(
+                payload_roots=(root,),
+                max_payload_bytes=4096,
+                max_jobs_per_cycle=1,
+                max_payload_scan_bytes=1200,  # room for ~2 files of len(body), not all 10
+            )
+            w = worker.LLMWorker(parsed)
+            found = list(w.iter_text_payloads())
+            self.assertLess(len(found), 10, "byte cap must stop the scan before every file is read")
+            self.assertGreaterEqual(len(found), 1)
+            self.assertTrue(w.payload_scan_truncated)
+
+    def test_cycles_advance_through_the_backlog_as_files_are_analyzed(self):
+        """#2228: with MAX_JOBS_PER_CYCLE=1, a truncated cycle must not wedge
+        on the same oldest file forever -- once analyze_payloads records it
+        (es.exists becomes True for that document), the *next* cycle's scan
+        reaches the following oldest file instead of re-attempting the same
+        one, proving the backlog genuinely drains rather than looping."""
+        analysis = contracts.PayloadAnalysis(
+            summary="Benign test payload.",
+            language="text",
+            behaviors=[],
+            mitre_attack=[],
+            iocs=[],
+            severity="low",
+            confidence="low",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for i in range(3):
+                path = root / f"payload-{i}"
+                path.write_text(f"payload body {i}\n", encoding="utf-8")
+                os.utime(path, (1000 + i, 1000 + i))  # deterministic oldest-first order
+
+            fake_model = MagicMock()
+            fake_model.analyze.return_value = (analysis, {"prompt_tokens": 5, "output_tokens": 5})
+            fake_es = MagicMock()
+            indexed_ids: list[str] = []
+            fake_es.index.side_effect = lambda index, id, document: indexed_ids.append(id)
+            fake_es.exists.side_effect = lambda index, id: id in indexed_ids
+
+            parsed = config(
+                payload_roots=(root,),
+                max_payload_bytes=4096,
+                max_jobs_per_cycle=1,
+                max_payload_scan_bytes=1_000_000,
+            )
+            w = worker.LLMWorker(parsed, es=fake_es, model=fake_model)
+
+            self.assertEqual(w.analyze_payloads(), 1)
+            self.assertEqual(len(indexed_ids), 1)
+            self.assertEqual(w.analyze_payloads(), 1)
+            self.assertEqual(len(indexed_ids), 2)
+            self.assertEqual(w.analyze_payloads(), 1)
+            self.assertEqual(len(indexed_ids), 3)
+            self.assertEqual(len(set(indexed_ids)), 3, "each cycle must analyze a different file, not repeat one")
+            # A fourth cycle has nothing new left to analyze.
+            self.assertEqual(w.analyze_payloads(), 0)
 
 
 class OfflineSelftestTests(unittest.TestCase):

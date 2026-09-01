@@ -59,6 +59,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    labels:
+      - autoheal=true
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
