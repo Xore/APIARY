@@ -174,11 +174,21 @@ def wait_for_winrm(max_wait: int = 300):
 
 def copy_sample_to_vm(sample_path: Path, sha: str) -> str:
     dest_name = f'{sha[:16]}.exe'
-    subprocess.run(
+    result = subprocess.run(
         ['smbclient', SAMPLE_SHARE, '-U', f'{VM_USER}%{VM_PASS}',
          '-c', f'put {sample_path} {dest_name}'],
         capture_output=True, timeout=60,
     )
+    # #2252: an SMB hiccup (share briefly unavailable post-boot, auth blip,
+    # transient reset) used to return here unchecked -- the sample never
+    # lands in C:\Inbox, but the caller has no way to know and the run
+    # sails through to a false 'completed' result with every IOC field
+    # empty. smbclient exits non-zero on a failed `put` inside `-c`.
+    if result.returncode != 0:
+        raise RuntimeError(
+            f'smbclient put failed (rc={result.returncode}): '
+            f'{result.stderr.decode(errors="replace").strip()}'
+        )
     log.info(f'Sample copied to VM as {dest_name}')
     return f'C:\\Inbox\\{dest_name}'
 
@@ -260,12 +270,23 @@ def sysmon_snapshot(tag: str):
 
 def execute_sample(vm_path: str):
     log.info(f'Executing sample: {vm_path}')
-    winrm_run(
+    result = winrm_run(
         f'$proc = Start-Process -FilePath "{vm_path}" '
         '-PassThru -WindowStyle Normal; '
         f'Write-Output "PID: $($proc.Id)"',
         timeout=30,
     )
+    # #2252: a delivery failure upstream (the sample never actually landed
+    # in C:\Inbox) makes Start-Process error out ("cannot find path
+    # C:\Inbox\<sha>.exe") -- both the non-zero status_code and the missing
+    # "PID:" line were previously discarded, so this looked identical to a
+    # real execution to every caller downstream.
+    if result['status_code'] != 0 or 'PID:' not in result['stdout']:
+        raise RuntimeError(
+            f"execute_sample: Start-Process did not report a PID "
+            f"(status_code={result['status_code']}): "
+            f"stdout={result['stdout'].strip()!r} stderr={result['stderr'].strip()!r}"
+        )
 
 
 def get_guest_hostname() -> str:
@@ -320,11 +341,20 @@ def collect_artifacts(sha: str, out_dir: Path) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     files_to_get = ['sysmon_before.evtx', 'sysmon_after.evtx']
     for fname in files_to_get:
-        subprocess.run(
+        result = subprocess.run(
             ['smbclient', LOGS_SHARE, '-U', f'{VM_USER}%{VM_PASS}',
              '-c', f'get {fname} {out_dir}/{fname}'],
             capture_output=True, timeout=60,
         )
+        # #2252: an unchecked failure here left a missing sysmon evtx
+        # silently absent -- the run still reported 'completed' with no
+        # process/network telemetry to show for it. Same SMB path as
+        # copy_sample_to_vm, so the same rc check applies.
+        if result.returncode != 0:
+            raise RuntimeError(
+                f'smbclient get {fname} failed (rc={result.returncode}): '
+                f'{result.stderr.decode(errors="replace").strip()}'
+            )
     try:
         hostname = get_guest_hostname()
     except Exception as e:

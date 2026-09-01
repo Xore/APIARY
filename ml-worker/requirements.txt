@@ -81,7 +81,7 @@ numpy==2.4.6
 pandas==3.0.5
 
 # Deep learning (CPU-only PyTorch)
-torch==2.13.0+cpu
+torch==2.14.0+cpu
 --extra-index-url https://download.pytorch.org/whl/cpu
 
 # Outlier detection (HBOS). Pulls in numba+llvmlite -- see the numpy pin
