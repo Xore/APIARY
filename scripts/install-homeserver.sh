@@ -446,16 +446,51 @@ step_docker_daemon_config() {
   # threshold was simply far too large for this box. `builder.gc` is buildkit's own
   # supported policy mechanism (no separate systemd timer needed): it runs
   # automatically as part of normal build activity once enabled, keeping
-  # cache usage near `defaultKeepStorage` rather than the inferred default.
+  # cache usage near the explicit values below rather than the inferred
+  # default.
   # 20GB is generous for any single build on this box (the largest image
   # here, backend-service's Rust release build, has nowhere near that much
   # unique layer churn) while still well below the 179GB this issue found.
-  # Careful with the unit: dockerd parses this value with units.RAMInBytes,
-  # which is binary, so "20GB" is read as 20 GiB (21,474,836,480 B) and
-  # `docker buildx inspect` renders it back as "20GiB". Real reduction is
-  # 179.0 GB -> 21.5 GB, about 157.5 GB tighter.
-  # Setting this one knob also skips the whole percentage-inference block, so
-  # MaxUsedSpace/MinFreeSpace stay 0 (disabled) -- tracked in #2750.
+  # Careful with the unit: dockerd parses these values with units.RAMInBytes
+  # (confirmed for all three fields, not just the deprecated one --
+  # daemon/internal/builder-next/controller.go on the docker-29.x branch
+  # calls units.RAMInBytes on ReservedSpace, MaxUsedSpace and MinFreeSpace
+  # alike), which is binary, so "20GB" is read as 20 GiB (21,474,836,480 B)
+  # and `docker buildx inspect` renders it back as "20GiB". Real reduction
+  # from the pre-#2743 inferred floor is 179.0 GB -> 21.5 GB, about 157.5 GB
+  # tighter.
+  #
+  # #2750: `defaultKeepStorage` alone was wrong in two ways. First, setting
+  # only it means `reservedSpace != 0` in DefaultGCPolicy's guard below, so
+  # the whole percentage-inference block that used to also fill in
+  # MaxUsedSpace/MinFreeSpace never runs -- both silently stay 0 (disabled).
+  # Confirmed directly against the moby source for the docker-29.x branch
+  # (the version actually running here, `docker version` -> 29.7.2),
+  # daemon/internal/builder-next/worker/gc.go:
+  #   if reservedSpace == 0 && maxUsedSpace == 0 && minFreeSpace == 0 {
+  #       reservedSpace = diskPercentage(dstat, defaultReservedSpacePercentage)  // 10%
+  #       maxUsedSpace  = diskPercentage(dstat, defaultMaxUsedPercentage)        // 80%
+  #       minFreeSpace  = diskPercentage(dstat, defaultMinFreePercentage)        // 20%
+  #   }
+  # Before #2743 this host had an inferred MinFreeSpace of ~358GB (20% of
+  # 1.8T) -- a guard that pruned build cache whenever /var free space fell
+  # below that, regardless of what was actually consuming the disk. Setting
+  # only defaultKeepStorage silently dropped that guard entirely; buildkit
+  # now holds its 20GB cap and never reacts to disk pressure from a
+  # non-buildkit source (Elasticsearch growth, a large writable container
+  # layer, log growth).
+  # Second, `defaultKeepStorage` is deprecated -- confirmed in
+  # daemon/config/builder.go's own doc comment ("Deprecated option is now
+  # equivalent to DefaultReservedSpace") -- with no deprecation warning
+  # logged when set, so a future Docker upgrade could drop the key outright
+  # and silently revert to the inferred ~179GB cap on this 1.8T /var while
+  # this comment still promised 20GB.
+  # Fix: the non-deprecated spelling plus an explicit floor. /var sits at
+  # 93% (131G free of 1.8T) as of 2026-08-31 -- tighter than the 90% this
+  # script's other guidance assumes -- so 100GB is a real, load-bearing
+  # floor here, not a formality: buildkit GC now starts pruning once /var
+  # free space drops within about 31GB of that floor, not after the disk is
+  # already critical.
   cat >/etc/docker/daemon.json <<'EOF'
 {
     "log-driver": "local",
@@ -475,7 +510,9 @@ step_docker_daemon_config() {
     "builder": {
         "gc": {
             "enabled": true,
-            "defaultKeepStorage": "20GB"
+            "defaultReservedSpace": "20GB",
+            "defaultMaxUsedSpace": "100GB",
+            "defaultMinFreeSpace": "100GB"
         }
     }
 }
