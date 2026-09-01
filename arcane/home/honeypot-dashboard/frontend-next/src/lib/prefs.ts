@@ -33,7 +33,7 @@ function emit() {
 // swallowed — this is a write-through on top of the local apply, never a
 // gate on it.
 const pushAppearancePreference = createServerFn({ method: 'POST' })
-  .inputValidator((input: { theme?: ThemeMode; palette?: string }) => input)
+  .validator((input: { theme?: ThemeMode; palette?: string }) => input)
   .handler(async ({ data }): Promise<void> => {
     const { getSessionUser } = await import('./auth')
     const user = await getSessionUser()

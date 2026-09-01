@@ -45,7 +45,7 @@ type ClusterCorrelation = {
 type SearchParams = { kind: string; value: string }
 
 const fetchCorrelation = createServerFn({ method: 'GET' })
-  .inputValidator((input: SearchParams) => input)
+  .validator((input: SearchParams) => input)
   .handler(async ({ data }): Promise<ClusterCorrelation | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     const params = new URLSearchParams({ kind: data.kind, value: data.value })

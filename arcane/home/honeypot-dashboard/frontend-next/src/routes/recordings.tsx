@@ -42,7 +42,7 @@ type Replay = {
 }
 
 const fetchRecordings = createServerFn({ method: 'GET' })
-  .inputValidator((input: { offset: number; ip?: string }) => input)
+  .validator((input: { offset: number; ip?: string }) => input)
   .handler(async ({ data }) => {
     const { serviceJSON } = await import('../lib/backend.server')
     const ip = data.ip ? `&ip=${encodeURIComponent(data.ip)}` : ''
@@ -50,7 +50,7 @@ const fetchRecordings = createServerFn({ method: 'GET' })
   })
 
 const fetchReplay = createServerFn({ method: 'GET' })
-  .inputValidator((input: { shasum: string }) => input)
+  .validator((input: { shasum: string }) => input)
   .handler(async ({ data }): Promise<Replay | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<Replay>(`/api/v1/recordings/${encodeURIComponent(data.shasum)}`)

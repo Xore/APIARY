@@ -13,7 +13,7 @@ type ArtifactRow = {
 }
 
 const fetchArtifacts = createServerFn({ method: 'GET' })
-  .inputValidator((input: { kind: string; key: string }) => input)
+  .validator((input: { kind: string; key: string }) => input)
   .handler(async ({ data }): Promise<{ rows: ArtifactRow[] } | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<{ rows: ArtifactRow[] }>(

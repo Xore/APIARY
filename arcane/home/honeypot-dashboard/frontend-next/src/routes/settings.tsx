@@ -172,7 +172,7 @@ const fetchServices = createServerFn({ method: 'GET' }).handler(async (): Promis
 })
 
 const fetchServiceLogs = createServerFn({ method: 'GET' })
-  .inputValidator((input: { name: string }) => input)
+  .validator((input: { name: string }) => input)
   .handler(async ({ data }): Promise<{ name: string; lines: number; log: string } | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<{ name: string; lines: number; log: string }>(
@@ -186,7 +186,7 @@ const fetchHistory = createServerFn({ method: 'GET' }).handler(async (): Promise
 })
 
 const fetchAudit = createServerFn({ method: 'GET' })
-  .inputValidator((input: { action: string }) => input)
+  .validator((input: { action: string }) => input)
   .handler(async ({ data }): Promise<AuditResponse | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     const query = data.action ? `?action=${encodeURIComponent(data.action)}` : ''
@@ -246,7 +246,7 @@ const fetchPreferences = createServerFn({ method: 'GET' }).handler(async (): Pro
 })
 
 const putPreferences = createServerFn({ method: 'POST' })
-  .inputValidator((input: { patch: Prefs }) => input)
+  .validator((input: { patch: Prefs }) => input)
   .handler(async ({ data }): Promise<{ ok: boolean; preferences?: Prefs; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
@@ -310,7 +310,7 @@ type ConfigSaveResult = {
 }
 
 const savePresentation = createServerFn({ method: 'POST' })
-  .inputValidator((input: { value: Presentation; revision: number }) => input)
+  .validator((input: { value: Presentation; revision: number }) => input)
   .handler(async ({ data }): Promise<ConfigSaveResult> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
@@ -333,7 +333,7 @@ const savePresentation = createServerFn({ method: 'POST' })
 // /api/v1/config/{section}, mirroring savePresentation's admin gate,
 // If-Match precondition and 409 handling exactly.
 const saveConfigSection = createServerFn({ method: 'POST' })
-  .inputValidator((input: { section: 'honeypot' | 'behavior' | 'report-presets'; value: unknown; revision: number }) => input)
+  .validator((input: { section: 'honeypot' | 'behavior' | 'report-presets'; value: unknown; revision: number }) => input)
   .handler(async ({ data }): Promise<ConfigSaveResult> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
@@ -355,7 +355,7 @@ const saveConfigSection = createServerFn({ method: 'POST' })
 // validate). null means the validator itself was unreachable; the save
 // still runs and decides (the backend applies the same rules on write).
 const validateConfig = createServerFn({ method: 'POST' })
-  .inputValidator((input: { patch: unknown }) => input)
+  .validator((input: { patch: unknown }) => input)
   .handler(async ({ data }): Promise<{ ok: boolean; problems: string[] } | null> => {
     const { serviceFetch } = await import('../lib/backend.server')
     const response = await serviceFetch('/api/v1/config/validate', {
@@ -370,7 +370,7 @@ const validateConfig = createServerFn({ method: 'POST' })
   })
 
 const runServiceAction = createServerFn({ method: 'POST' })
-  .inputValidator((input: { name: string; action: 'start' | 'stop' | 'restart' }) => input)
+  .validator((input: { name: string; action: 'start' | 'stop' | 'restart' }) => input)
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
@@ -388,7 +388,7 @@ const runServiceAction = createServerFn({ method: 'POST' })
   })
 
 const rollbackConfig = createServerFn({ method: 'POST' })
-  .inputValidator((input: { revision: number }) => input)
+  .validator((input: { revision: number }) => input)
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()

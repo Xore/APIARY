@@ -24,7 +24,7 @@ type SourceRow = {
 type SourcesPage = { total_unique: number; rows: SourceRow[] }
 
 const fetchSources = createServerFn({ method: 'GET' })
-  .inputValidator((input: { offset: number }) => input)
+  .validator((input: { offset: number }) => input)
   .handler(async ({ data }) => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<SourcesPage>(`/api/v1/sources?offset=${data.offset}&size=25`)

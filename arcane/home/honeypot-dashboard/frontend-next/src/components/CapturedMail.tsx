@@ -33,7 +33,7 @@ export type Mail = {
 }
 
 export const fetchMail = createServerFn({ method: 'GET' })
-  .inputValidator((input: { id: string }) => input)
+  .validator((input: { id: string }) => input)
   .handler(async ({ data }): Promise<Mail | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<Mail>(`/api/v1/mail/${encodeURIComponent(data.id)}`)
@@ -119,7 +119,7 @@ export function MailMessage({ mail }: { mail: Mail }) {
 type MailFetch = { state: 'mail'; mail: Mail } | { state: 'missing' } | { state: 'failed' }
 
 const fetchMailDetailed = createServerFn({ method: 'GET' })
-  .inputValidator((input: { id: string }) => input)
+  .validator((input: { id: string }) => input)
   .handler(async ({ data }): Promise<MailFetch> => {
     const { serviceJSONResult } = await import('../lib/backend.server')
     const result = await serviceJSONResult<Mail>(`/api/v1/mail/${encodeURIComponent(data.id)}`)

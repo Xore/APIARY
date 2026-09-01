@@ -136,7 +136,7 @@ function ModelHealthCard() {
 }
 
 const setAck = createServerFn({ method: 'POST' })
-  .inputValidator((input: { key: string; ack: boolean }) => input)
+  .validator((input: { key: string; ack: boolean }) => input)
   .handler(async ({ data }): Promise<boolean> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
@@ -154,7 +154,7 @@ const setAck = createServerFn({ method: 'POST' })
 // detail.rs's ml_anomaly_disposition does a partial `_update` on the
 // anomaly document (reason free-text, valued for the labelled corpus).
 const setDisposition = createServerFn({ method: 'POST' })
-  .inputValidator((input: { key: string; status: string; reason?: string }) => input)
+  .validator((input: { key: string; status: string; reason?: string }) => input)
   .handler(async ({ data }): Promise<boolean> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
@@ -276,7 +276,7 @@ function DispositionControl({ docIds, row, onChanged }: { docIds: string[]; row:
 }
 
 const fetchPage = createServerFn({ method: 'GET' })
-  .inputValidator((input: { offset: number }) => input)
+  .validator((input: { offset: number }) => input)
   .handler(async ({ data }): Promise<StorePage | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<StorePage>(`/api/v1/store/ml-anomalies?offset=${data.offset}&size=25`)

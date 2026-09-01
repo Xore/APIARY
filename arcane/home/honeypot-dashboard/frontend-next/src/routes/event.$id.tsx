@@ -47,7 +47,7 @@ type EventPage = {
 type EventFetch = { state: 'event'; event: EventPage } | { state: 'missing' } | { state: 'failed' }
 
 const fetchEvent = createServerFn({ method: 'GET' })
-  .inputValidator((input: { id: string }) => input)
+  .validator((input: { id: string }) => input)
   .handler(async ({ data }): Promise<EventFetch> => {
     const { serviceJSONResult } = await import('../lib/backend.server')
     const result = await serviceJSONResult<EventPage>(`/api/v1/event/${encodeURIComponent(data.id)}`)

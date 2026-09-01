@@ -162,7 +162,7 @@ type GhidraDoc = {
 type RunFetch = { state: 'run'; run: Run } | { state: 'missing' } | { state: 'failed' }
 
 const fetchRun = createServerFn({ method: 'GET' })
-  .inputValidator((input: { sha: string }) => input)
+  .validator((input: { sha: string }) => input)
   .handler(async ({ data }): Promise<RunFetch> => {
     const { serviceJSONResult } = await import('../lib/backend.server')
     const result = await serviceJSONResult<Run>(`/api/v1/ghidra/${encodeURIComponent(data.sha)}`)
@@ -175,7 +175,7 @@ type SubmitResult = { ok: boolean; error?: string }
 // Same admin-gated submission seam as payload-analysis.$hash.tsx's
 // submitGhidra — the detail page's Re-analyze button posts the same marker.
 const submitReanalysis = createServerFn({ method: 'POST' })
-  .inputValidator((input: { hash: string }) => input)
+  .validator((input: { hash: string }) => input)
   .handler(async ({ data }): Promise<SubmitResult> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()

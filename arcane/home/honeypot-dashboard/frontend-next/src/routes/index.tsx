@@ -93,7 +93,7 @@ const fetchPresentation = createServerFn({ method: 'GET' }).handler(async (): Pr
 })
 
 const fetchDashboard = createServerFn({ method: 'GET' })
-  .inputValidator((parts: string[]) => parts)
+  .validator((parts: string[]) => parts)
   .handler(async ({ data }): Promise<Dashboard | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     // Empty list = the whole payload (#1963); otherwise only those slices
