@@ -48,13 +48,17 @@ type session struct {
 // handlers can be plain methods instead of six-parameter functions whose
 // callers (and tests) have to keep the argument order straight (#2489).
 type relay struct {
-	server      replySink
-	target      *net.UDPAddr
-	maxSessions int
-	sessionLog  *os.File
-	listenPort  int
-	lock        sync.Mutex
-	sessions    map[string]*session
+	server         replySink
+	target         *net.UDPAddr
+	maxSessions    int
+	sessionLog     *os.File
+	sessionLogPath string
+	sessionLogSize int64
+	sessionLogMax  int64
+	sessionLogMu   sync.Mutex
+	listenPort     int
+	lock           sync.Mutex
+	sessions       map[string]*session
 }
 
 func main() {
@@ -67,9 +71,16 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	sessionLog := openSessionLog(getenv("SESSION_LOG", "/logs/sessions.json"))
+	sessionLogPath := getenv("SESSION_LOG", "/logs/sessions.json")
+	sessionLog := openSessionLog(sessionLogPath)
 	if sessionLog != nil {
 		defer sessionLog.Close()
+	}
+	var sessionLogSize int64
+	if sessionLog != nil {
+		if st, err := sessionLog.Stat(); err == nil {
+			sessionLogSize = st.Size()
+		}
 	}
 	// #882: UDP has no handshake, so a source (client) address on an
 	// incoming datagram is trivially spoofable, and every not-yet-seen one
@@ -80,12 +91,15 @@ func main() {
 	maxSessions := getenvInt("TFTP_MAX_SESSIONS", 1024)
 	log.Printf("tftp relay %s -> %s (max %d concurrent sessions)", listen, target, maxSessions)
 	r := &relay{
-		server:      server,
-		target:      target,
-		maxSessions: maxSessions,
-		sessionLog:  sessionLog,
-		listenPort:  server.LocalAddr().(*net.UDPAddr).Port,
-		sessions:    map[string]*session{},
+		server:         server,
+		target:         target,
+		maxSessions:    maxSessions,
+		sessionLog:     sessionLog,
+		sessionLogPath: sessionLogPath,
+		sessionLogSize: sessionLogSize,
+		sessionLogMax:  getenvInt64("LOG_MAX_BYTES", 67108864),
+		listenPort:     server.LocalAddr().(*net.UDPAddr).Port,
+		sessions:       map[string]*session{},
 	}
 	buf := make([]byte, 65535)
 	for {
@@ -139,7 +153,7 @@ func (r *relay) handleDatagram(datagram []byte, client *net.UDPAddr) {
 		// the client's own port stays fixed for the session" contract)
 		// lets ip-enrichment-worker join on it the same way it already
 		// joins portbridge's via_port for every other affected sensor.
-		logSession(r.sessionLog, upstream.LocalAddr().(*net.UDPAddr).Port, client.IP.String())
+		r.logSession(upstream.LocalAddr().(*net.UDPAddr).Port, client.IP.String())
 		current = &session{conn: upstream, target: r.target}
 		r.sessions[key] = current
 		go r.relayReplies(client, key, current)
@@ -244,8 +258,8 @@ func openSessionLog(path string) *os.File {
 	return f
 }
 
-func logSession(f *os.File, relayPort int, clientIP string) {
-	if f == nil {
+func (r *relay) logSession(relayPort int, clientIP string) {
+	if r.sessionLog == nil {
 		return
 	}
 	line, err := json.Marshal(map[string]any{
@@ -257,5 +271,55 @@ func logSession(f *os.File, relayPort int, clientIP string) {
 		return
 	}
 	line = append(line, '\n')
-	_, _ = f.Write(line)
+	r.sessionLogMu.Lock()
+	defer r.sessionLogMu.Unlock()
+	if r.sessionLog == nil {
+		return
+	}
+	if r.sessionLogMax > 0 && r.sessionLogSize >= r.sessionLogMax {
+		r.rotateSessionLog()
+	}
+	if r.sessionLog != nil {
+		n, _ := r.sessionLog.Write(line)
+		r.sessionLogSize += int64(n)
+	}
+}
+
+// rotateSessionLog closes the current session log, renames it aside with a
+// timestamp suffix, and reopens a fresh file at the original path -- #120's
+// contract, ported from multipot's logger (see that package's rotate() for
+// the full reasoning). Callers must hold r.sessionLogMu.
+func (r *relay) rotateSessionLog() {
+	if r.sessionLog == nil || r.sessionLogPath == "" {
+		return
+	}
+	r.sessionLog.Close()
+	target := r.sessionLogPath + "." + time.Now().UTC().Format("20060102-150405")
+	if _, err := os.Stat(target); err == nil {
+		for n := 2; ; n++ {
+			candidate := fmt.Sprintf("%s.%d", target, n)
+			if _, err := os.Stat(candidate); err != nil {
+				target = candidate
+				break
+			}
+		}
+	}
+	os.Rename(r.sessionLogPath, target)
+	f, err := os.OpenFile(r.sessionLogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
+	if err != nil {
+		r.sessionLog = nil
+		log.Printf("tftp relay: session log %s unavailable after rotation: %v", r.sessionLogPath, err)
+		return
+	}
+	r.sessionLog = f
+	r.sessionLogSize = 0
+}
+
+func getenvInt64(k string, def int64) int64 {
+	if v := os.Getenv(k); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return n
+		}
+	}
+	return def
 }
