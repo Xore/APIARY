@@ -34,6 +34,7 @@ import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { routeTree } from '../routeTree.gen'
 
 const ROUTES = dirname(fileURLToPath(import.meta.url))
 
@@ -311,6 +312,127 @@ describe('settings admin write-path (#2311)', () => {
       'String(revision ?? 0)',
     ])
     expect(values("headers: { 'if-match': '0' },")).toEqual(["'0'"])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #2215: the TanStack family (react-router/react-start/router-cli and the
+// transitives route-tree generation depends on) is upgraded deliberately
+// rather than left to float, but `npm run typecheck` passing after a bump
+// only proves the *types* still line up -- it says nothing about whether the
+// generator still produces the same routing behaviour. A bump that changes
+// how `_addFileChildren` joins parent/child paths, how splat or optional
+// segments are named, or how trailing slashes are normalised would pass
+// typecheck and a clean `npm run build` while silently changing which URL
+// serves which route. This walks the actual generated `routeTree` at
+// runtime and pins every route's resolved id/path, so that kind of
+// regression fails a test run instead of shipping unnoticed.
+// ---------------------------------------------------------------------------
+
+interface RouteShape {
+  id: string
+  path: string | null
+}
+
+/** Walks the generated route tree, collecting every node's resolved id/path. */
+function collectRouteShape(root: unknown): RouteShape[] {
+  const rows: RouteShape[] = []
+  function walk(route: any) {
+    const opts = route.options ?? {}
+    rows.push({ id: opts.id ?? '__root__', path: opts.path ?? null })
+    for (const child of route.children ?? []) walk(child)
+  }
+  walk(root)
+  rows.sort((a, b) => a.id.localeCompare(b.id))
+  return rows
+}
+
+// Captured from the real `routeTree.gen.ts` output -- regenerate deliberately
+// (`npm run build` or the dev server) and re-dump this list whenever a route
+// is genuinely added, removed or renamed. This is the routing *contract*:
+// which paths the app actually serves.
+const EXPECTED_ROUTE_SHAPE: RouteShape[] = [
+  { id: '__root__', path: null },
+  { id: '/', path: '/' },
+  { id: '/agent-campaigns', path: '/agent-campaigns' },
+  { id: '/alerts', path: '/alerts' },
+  { id: '/api/artifact/$kind/$key/$filename', path: '/api/artifact/$kind/$key/$filename' },
+  { id: '/api/canarytoken/$id/download', path: '/api/canarytoken/$id/download' },
+  { id: '/api/chart/$name', path: '/api/chart/$name' },
+  { id: '/api/export/$name', path: '/api/export/$name' },
+  { id: '/api/live', path: '/api/live' },
+  { id: '/api/payload/$hash/download', path: '/api/payload/$hash/download' },
+  { id: '/api/raw-report/$kind/$sha', path: '/api/raw-report/$kind/$sha' },
+  { id: '/api/recording/$shasum/$format', path: '/api/recording/$shasum/$format' },
+  { id: '/api/report/$id/pdf', path: '/api/report/$id/pdf' },
+  { id: '/api/topology/flow', path: '/api/topology/flow' },
+  { id: '/attackers', path: '/attackers' },
+  { id: '/auth-events', path: '/auth-events' },
+  { id: '/auth/callback', path: '/auth/callback' },
+  { id: '/auth/login', path: '/auth/login' },
+  { id: '/auth/logout', path: '/auth/logout' },
+  { id: '/bff-mounted/$', path: '/bff-mounted/$' },
+  { id: '/bff/$', path: '/bff/$' },
+  { id: '/campaigns', path: '/campaigns' },
+  { id: '/canarytokens', path: '/canarytokens' },
+  { id: '/cape/', path: '/cape/' },
+  { id: '/cape/$sha', path: '/cape/$sha' },
+  { id: '/clusters', path: '/clusters' },
+  { id: '/commands', path: '/commands' },
+  { id: '/credentials', path: '/credentials' },
+  { id: '/dead-letters', path: '/dead-letters' },
+  { id: '/event/$id', path: '/event/$id' },
+  { id: '/events', path: '/events' },
+  { id: '/export/portbridge-manual-blackhole.txt', path: '/export/portbridge-manual-blackhole.txt' },
+  { id: '/ghidra/$sha', path: '/ghidra/$sha' },
+  { id: '/github-analysis/', path: '/github-analysis/' },
+  { id: '/github-analysis/$sha', path: '/github-analysis/$sha' },
+  { id: '/healthz', path: '/healthz' },
+  { id: '/history', path: '/history' },
+  { id: '/investigate/cidr/$cidr', path: '/investigate/cidr/$cidr' },
+  { id: '/investigate/cluster', path: '/investigate/cluster' },
+  { id: '/investigate/ip/$ip', path: '/investigate/ip/$ip' },
+  { id: '/investigate/lookup', path: '/investigate/lookup' },
+  { id: '/ips', path: '/ips' },
+  { id: '/kill-chain', path: '/kill-chain' },
+  { id: '/llm-analysis', path: '/llm-analysis' },
+  { id: '/metrics', path: '/metrics' },
+  { id: '/ml-anomalies', path: '/ml-anomalies' },
+  { id: '/payload-analysis/$hash', path: '/payload-analysis/$hash' },
+  { id: '/payload-workbench/results', path: '/payload-workbench/results' },
+  { id: '/payloads', path: '/payloads' },
+  { id: '/problem-reports', path: '/problem-reports' },
+  { id: '/recordings', path: '/recordings' },
+  { id: '/reports', path: '/reports' },
+  { id: '/revdeck/', path: '/revdeck/' },
+  { id: '/revdeck/$sha', path: '/revdeck/$sha' },
+  { id: '/sandbox/$job', path: '/sandbox/$job' },
+  { id: '/sandbox/vnc', path: '/sandbox/vnc' },
+  { id: '/search', path: '/search' },
+  { id: '/sensors/', path: '/sensors/' },
+  { id: '/sensors/$sensor', path: '/sensors/$sensor' },
+  { id: '/sessions/$id', path: '/sessions/$id' },
+  { id: '/settings', path: '/settings' },
+  { id: '/source-health', path: '/source-health' },
+  { id: '/topology', path: '/topology' },
+  { id: '/tty-replay/$shasum', path: '/tty-replay/$shasum' },
+]
+
+describe('generated route tree contract (#2215)', () => {
+  it('resolves every route to the pinned id/path shape', () => {
+    expect(collectRouteShape(routeTree)).toEqual(EXPECTED_ROUTE_SHAPE)
+  })
+
+  it('recognises a route-shape regression, not just a route being added', () => {
+    // A dynamic segment silently renamed (e.g. a TanStack bump changing how
+    // `$sha` is parsed out of a file name) would still produce the same
+    // *count* of routes, so a length-only check would miss it. Mutate one
+    // captured id and confirm the equality check -- not a count check -- is
+    // what catches it.
+    const mutated = collectRouteShape(routeTree).map((row) =>
+      row.id === '/ghidra/$sha' ? { ...row, id: '/ghidra/:sha' } : row,
+    )
+    expect(mutated).not.toEqual(EXPECTED_ROUTE_SHAPE)
   })
 })
 
