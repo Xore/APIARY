@@ -23,6 +23,16 @@ string search() uses to embed the query -- no extra network call, no new
 failure mode. A search that comes back empty after filtering stays
 available:true, with a note when foreign-model docs exist, instead of
 silently falling back to an unfiltered query.
+
+#2291 note: llm-search gained a `source` selector (session summaries, the
+default, or vault notes), so `knn_body()` and `empty_hits_response()` each
+took a leading `source` argument. That is a signature change, not a
+contract change -- the same `model` variable still flows from `embed()`
+into the kNN filter, and the empty-after-filter path still returns the
+explicit response. The patterns below were widened to tolerate that extra
+argument, and deliberately no further: they still require the model to be
+a bare identifier passed by reference (so an expression cannot smuggle a
+second model in), and still require exactly one production call site.
 """
 
 import re
@@ -49,7 +59,13 @@ def test_query_vector_model_and_filter_model_are_the_same_identifier():
     future edit could let drift apart."""
     src = _read()
     embed_call = re.search(r"embed\(&base,\s*&(\w+),\s*&text\)", src)
-    knn_call = re.search(r"knn_body\(&(\w+),\s*&vector,\s*limit\)", src)
+    # The optional leading group is #2291's `source` argument. The model is
+    # still required to be `&<identifier>` -- an expression here would be
+    # exactly the "second separately-sourced model" this test exists to
+    # prevent.
+    knn_call = re.search(
+        r"knn_body\(\s*(?:\w+,\s*)?&(\w+),\s*&vector,\s*limit\s*\)", src
+    )
     assert embed_call, "could not find the embed() call site in search()"
     assert knn_call, "could not find the knn_body() call site in search()"
     assert embed_call.group(1) == knn_call.group(1), (
@@ -76,14 +92,20 @@ def test_empty_after_filter_reports_available_true_without_fallback():
     """A filtered-out result must return a clear empty response, never a
     silent retry of the kNN query without the embedding_model filter."""
     src = _read()
-    assert "return Json(empty_hits_response(foreign_count));" in src, (
-        "the empty-after-filter path must return the explicit empty response"
-    )
+    assert re.search(
+        r"return Json\(empty_hits_response\(\s*(?:\w+,\s*)?foreign_count\s*\)\);", src
+    ), "the empty-after-filter path must return the explicit empty response"
     assert 'fn empty_hits_response' in src and '"available": true' in src, (
         "empty_hits_response must still report available: true (filtered-out, not failed)"
     )
-    # Exactly one call site building the kNN body, and it always carries the
-    # model filter -- no second, unfiltered query path to fall back to.
-    assert src.count("knn_body(&model") == 1, (
-        "knn_body must be called exactly once, always with the model filter"
+    # Exactly one *production* call site building the kNN body, and it always
+    # carries the model filter -- no second, unfiltered query path to fall
+    # back to. Matching `&model` specifically is what separates it from the
+    # in-file unit tests, which pass a model string literal.
+    production = re.findall(
+        r"knn_body\(\s*(?:\w+,\s*)?&model,\s*&vector,\s*limit\s*\)", src
+    )
+    assert len(production) == 1, (
+        "knn_body must be called exactly once from the request path, always "
+        f"with the model filter; found {len(production)}"
     )
