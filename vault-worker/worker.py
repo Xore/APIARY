@@ -15,11 +15,18 @@ sha256-keyed note filenames so a re-render overwrites the same file instead
 of creating a duplicate; bounding + secret-stripping (sanitize.py, ported
 from llm-worker/contracts.py's sanitize_text) applied to every attacker-
 supplied string before it reaches a note body, per #2289's redaction
-posture. No Ollama call is made anywhere in this worker -- v1 renders
-deterministically from analysis results llm-worker has already produced,
-so "expected-digest pinning on any Ollama call" (the fourth idiom #2290
-names) has nothing to pin against; it applies starting at #2292, the first
-stage that calls a completion model.
+posture.
+
+#2291 stage: after a note renders, its already-bounded/sanitized body is
+optionally embedded (embeddings only, no completion model -- GPU impact
+stays at the ~0.3 GiB embed model) via the same nomic-embed-text pipeline
+llm-worker uses, gated by its own VAULT_EMBEDDING_ENABLED flag and pinned
+by VAULT_EMBEDDING_EXPECTED_DIGEST -- the "expected-digest pinning on any
+Ollama call" idiom #2290 named as inapplicable to itself finally applies
+here. Written to knowledge-vault-search-v1, stamped doc_type "vault-note"
++ embedding_model, so backend-service/src/llm_search.rs's #2117 double
+filter (#2291) keeps ranking inside one vector space exactly as it already
+does for llm-analysis session summaries.
 
 Batch-run on an interval (main loop below), never per-event: a capture
 flood advances the checkpoint by at most VAULT_MAX_DOCS_PER_CYCLE per
@@ -32,6 +39,7 @@ import argparse
 import hashlib
 import logging
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass
@@ -39,12 +47,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import requests
 import yaml
 from elasticsearch import Elasticsearch, NotFoundError
 
 from sanitize import sanitize_list, sanitize_text
 
 STATE_INDEX = "knowledge-vault-state-v1"
+SEARCH_INDEX = "knowledge-vault-search-v1"
+MODEL_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 
 PIPELINE_INDICES = [
     "ghidra-analysis-v1",
@@ -97,6 +108,10 @@ class Config:
     max_docs_per_cycle: int
     max_text_chars: int
     max_list_items: int
+    embedding_enabled: bool
+    ollama_url: str
+    embedding_model: str
+    embedding_expected_digest: str
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -110,6 +125,13 @@ class Config:
             max_docs_per_cycle=env_int("VAULT_MAX_DOCS_PER_CYCLE", 500, 1, 20000),
             max_text_chars=env_int("VAULT_MAX_TEXT_CHARS", 4000, 200, 50000),
             max_list_items=env_int("VAULT_MAX_LIST_ITEMS", 30, 1, 500),
+            # #2291: embeddings-only, gated independently of the render
+            # gate above so an operator can turn note *rendering* on
+            # without also turning semantic *search* on.
+            embedding_enabled=env_bool("VAULT_EMBEDDING_ENABLED", False),
+            ollama_url=os.getenv("OLLAMA_URL", "http://ollama:11434").rstrip("/"),
+            embedding_model=os.getenv("VAULT_EMBEDDING_MODEL", "nomic-embed-text:latest").strip(),
+            embedding_expected_digest=os.getenv("VAULT_EMBEDDING_EXPECTED_DIGEST", "").strip().lower(),
         )
 
     def validate_mode(self) -> None:
@@ -124,6 +146,10 @@ class Config:
                 "non-dry-run mode requires both VAULT_ENABLED=true and "
                 "VAULT_ALLOW_CAPTURED_DATA=true; #2289 owns that authorization"
             )
+        if self.embedding_expected_digest and not MODEL_DIGEST_RE.fullmatch(self.embedding_expected_digest):
+            raise ValueError("VAULT_EMBEDDING_EXPECTED_DIGEST must be an exact lowercase SHA-256")
+        if self.embedding_enabled and not self.embedding_expected_digest:
+            raise ValueError("VAULT_EMBEDDING_ENABLED requires VAULT_EMBEDDING_EXPECTED_DIGEST")
 
 
 def frontmatter_dump(fields: dict[str, Any]) -> str:
@@ -158,6 +184,67 @@ def atomic_write(path: Path, content: str) -> bool:
     tmp.write_text(content)
     os.replace(tmp, path)
     return True
+
+
+class ModelRequestError(RuntimeError):
+    pass
+
+
+class OllamaEmbedder:
+    """#2291: embeddings only, no completion model. `digest`/`embed` are
+    the same idiom llm-worker/worker.py's OllamaClient uses for its own
+    embedding path -- fetch the installed model's digest from /api/tags and
+    refuse to embed if it doesn't match the pinned VAULT_EMBEDDING_EXPECTED_DIGEST,
+    the same protection against a silently-swapped model this stack already
+    applies everywhere else Ollama is called."""
+
+    def __init__(self, config: Config):
+        self.base_url = config.ollama_url
+        self.model = config.embedding_model
+        self.configured_digest = config.embedding_expected_digest
+        self.http = requests.Session()
+        self.http.trust_env = False
+        self._digest: str | None = None
+
+    def digest(self) -> str:
+        if self._digest is not None:
+            return self._digest
+        try:
+            response = self.http.get(f"{self.base_url}/api/tags", timeout=10, allow_redirects=False)
+            if response.is_redirect or response.is_permanent_redirect:
+                raise ModelRequestError("Ollama metadata endpoint redirected")
+            response.raise_for_status()
+            for item in response.json().get("models", []):
+                if item.get("name") == self.model or item.get("model") == self.model:
+                    found = str(item.get("digest") or "")[:128]
+                    if not MODEL_DIGEST_RE.fullmatch(found):
+                        raise ModelRequestError("Ollama returned an invalid embedding model digest")
+                    if self.configured_digest and found != self.configured_digest:
+                        raise ModelRequestError("configured embedding digest does not match the installed model")
+                    self._digest = found
+                    return found
+        except (requests.RequestException, ValueError, TypeError) as error:
+            raise ModelRequestError("Ollama embedding-model metadata unavailable") from error
+        raise ModelRequestError("configured embedding model is not installed")
+
+    def embed(self, text: str) -> list[float]:
+        try:
+            response = self.http.post(
+                f"{self.base_url}/api/embed",
+                json={"model": self.model, "input": text},
+                timeout=30,
+                allow_redirects=False,
+            )
+            if response.is_redirect or response.is_permanent_redirect:
+                raise ModelRequestError("Ollama embed endpoint redirected")
+            response.raise_for_status()
+            payload = response.json()
+            vector = payload.get("embeddings", [[]])[0]
+            if not vector:
+                raise ModelRequestError("Ollama embed response carried no vector")
+            return [float(v) for v in vector]
+        except (requests.RequestException, ValueError, TypeError, IndexError, KeyError) as error:
+            raise ModelRequestError(f"embed call failed: {error}") from error
 
 
 class VaultIndex:
@@ -208,10 +295,71 @@ class VaultIndex:
 
 
 class VaultWorker:
-    def __init__(self, config: Config, es: Elasticsearch | None = None):
+    def __init__(self, config: Config, es: Elasticsearch | None = None, embedder: OllamaEmbedder | None = None):
         self.config = config
         self.es = es or Elasticsearch(config.es_host, request_timeout=30)
         self.index = VaultIndex(config.output_dir)
+        self.embedder = embedder or (OllamaEmbedder(config) if config.embedding_enabled else None)
+
+    def ensure_search_index(self) -> None:
+        """#2291: knowledge-vault-search-v1, the vault's own kNN index --
+        deliberately separate from llm-analysis (a different document
+        lifecycle/owner) rather than commingled with it, per #2289's
+        storage decision. `embedding`'s dims must match whatever
+        VAULT_EMBEDDING_MODEL actually produces; nomic-embed-text is 768."""
+        if not self.es.indices.exists(index=SEARCH_INDEX):
+            self.es.indices.create(
+                index=SEARCH_INDEX,
+                mappings={
+                    "properties": {
+                        "doc_type": {"type": "keyword"},
+                        "embedding_model": {"type": "keyword"},
+                        "embedding": {"type": "dense_vector", "dims": 768, "similarity": "cosine"},
+                        "entity_type": {"type": "keyword"},
+                        "entity_id": {"type": "keyword"},
+                        "note_path": {"type": "keyword"},
+                        "summary": {"type": "text"},
+                        "updated_at": {"type": "date"},
+                    }
+                },
+            )
+
+    def index_note_embedding(self, stem: str, entity_type: str, entity_id: str, body: str) -> None:
+        """Embed a note's own already-bounded/sanitized body (not a
+        separately-derived summary -- one text, one redaction pass) and
+        upsert it into SEARCH_INDEX keyed by the same stem the note's
+        filename uses, so a re-render overwrites the same vector doc
+        instead of accumulating stale ones. Best-effort: an embedding
+        failure must never fail the note render itself (matches
+        llm-worker's own degrade-without-stopping contract for embed()),
+        so every error here is logged and swallowed.
+        """
+        if not self.embedder:
+            return
+        try:
+            self.embedder.digest()  # #2291: pins/verifies before ever embedding, raises on mismatch
+            vector = self.embedder.embed(body[: self.config.max_text_chars])
+        except ModelRequestError as error:
+            logging.warning("vault embedding failed for %s: %s", stem, error)
+            return
+        doc = {
+            "doc_type": "vault-note",
+            # Same bare model-name format llm-worker/worker.py stamps on its
+            # own session embeddings (LLM_EMBEDDING_MODEL's literal value,
+            # not digest-suffixed) -- llm_search.rs's #2117 filter compares
+            # against this exact string, so the two must agree byte-for-byte.
+            "embedding_model": self.embedder.model,
+            "embedding": vector,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "note_path": f"{stem}.md",
+            "summary": body[: self.config.max_text_chars],
+            "updated_at": iso_now(),
+        }
+        try:
+            self.es.index(index=SEARCH_INDEX, id=stem, document=doc)
+        except Exception as error:  # noqa: BLE001 - an indexing hiccup must not crash the render pass
+            logging.warning("vault embedding index write failed for %s: %s", stem, error)
 
     def ensure_state_index(self) -> None:
         if not self.es.indices.exists(index=STATE_INDEX):
@@ -357,6 +505,8 @@ class VaultWorker:
 
         changed = atomic_write(self.config.output_dir / f"{stem}.md", frontmatter_dump(frontmatter) + "\n" + body)
         self.index.register(stem, hashes, ips, None)
+        if changed:
+            self.index_note_embedding(stem, "payload", sha256, body)
         return changed
 
     def _pipeline_section(self, pipeline_index: str, source: dict[str, Any]) -> str:
@@ -406,6 +556,8 @@ class VaultWorker:
 
         changed = atomic_write(self.config.output_dir / f"{stem}.md", frontmatter_dump(frontmatter) + "\n" + body)
         self.index.register(stem, hashes, ips, None)
+        if changed:
+            self.index_note_embedding(stem, "llm-session", session_id, body)
         return changed
 
     def _llm_assessment_section(self, heading: str, source: dict[str, Any]) -> str:
@@ -498,9 +650,12 @@ def main() -> int:
     args = parser.parse_args()
 
     config = Config.from_env()
+    config.validate_mode()
     worker = VaultWorker(config)
     if not config.dry_run:
         worker.ensure_state_index()
+        if config.embedding_enabled:
+            worker.ensure_search_index()
 
     if args.once:
         result = worker.run_once()

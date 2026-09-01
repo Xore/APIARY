@@ -4,3 +4,6 @@
 elasticsearch==8.19.3
 
 pyyaml==6.0.3
+
+# #2291: local-only Ollama embed client. Same pin as llm-worker/requirements.txt.
+requests==2.34.2

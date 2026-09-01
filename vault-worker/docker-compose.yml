@@ -32,6 +32,13 @@ services:
       VAULT_MAX_DOCS_PER_CYCLE: '${VAULT_MAX_DOCS_PER_CYCLE:-500}'
       VAULT_MAX_TEXT_CHARS: '${VAULT_MAX_TEXT_CHARS:-4000}'
       VAULT_MAX_LIST_ITEMS: '${VAULT_MAX_LIST_ITEMS:-30}'
+      VAULT_EMBEDDING_ENABLED: '${VAULT_EMBEDDING_ENABLED:-false}'
+      # Deliberately not ${OLLAMA_URL:-...} either -- same forced-empty
+      # safety as ES_HOST above; the captured-data overlay is what grants
+      # real Ollama reachability.
+      OLLAMA_URL: ''
+      VAULT_EMBEDDING_MODEL: '${VAULT_EMBEDDING_MODEL:-nomic-embed-text:latest}'
+      VAULT_EMBEDDING_EXPECTED_DIGEST: '${VAULT_EMBEDDING_EXPECTED_DIGEST:-}'
     volumes:
       - vault-data:/vault
     networks:
