@@ -40,7 +40,8 @@ stack, not a reuse of one, even though it is a trivial one to stand up
 precedent for "git as a sync/deploy substrate" in this repo is Arcane's own
 GitOps machinery (`docs/ARCANE-GIT-SYNC.md`), which already runs a
 git-pull-and-apply loop against `main` with `auto_sync = 0` set deliberately
-on rows that must not auto-follow (`docs/ARCANE-GIT-SYNC.md:321,374`) — i.e.
+on rows that must not auto-follow (`docs/ARCANE-GIT-SYNC.md:321` and
+`docs/ARCANE-GIT-SYNC.md:374`) — i.e.
 this codebase's existing git-sync tooling defaults to *manual* triggers for
 anything sensitive, which is the posture this decision adopts too (see §4).
 
@@ -196,7 +197,8 @@ inferring it from a directory glob matching by accident.
 ### Worker authorization gate
 
 The vault-ingest worker (#2290) must gate non-dry-run writes the same way
-`llm-worker` gates captured-data mode. Reading `llm-worker/worker.py:200-202,254-264`:
+`llm-worker` gates captured-data mode. Reading `llm-worker/worker.py:200-202`
+and `llm-worker/worker.py:254-264`:
 non-dry-run requires `LLM_ENABLED=true` **and** `LLM_ALLOW_CAPTURED_DATA=true`
 together, with the error message naming both. The vault worker adopts the
 same two-flag shape (its own env var names, e.g. `VAULT_ENABLED` /
