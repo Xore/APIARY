@@ -123,6 +123,7 @@ jobs:
           python-version: "3.13"
       - run: python scripts/check-public-leaks.py
       - run: python scripts/validate-oidc-redirects.py
+      - run: bash scripts/check-ghosts-vendored-egress.sh
 
   public-safety-cloud:
     name: Public repository safety (GitHub-hosted)
@@ -136,6 +137,7 @@ jobs:
           python-version: "3.13"
       - run: python scripts/check-public-leaks.py
       - run: python scripts/validate-oidc-redirects.py
+      - run: bash scripts/check-ghosts-vendored-egress.sh
 
   design-lab-readonly:
     # #1828: the design lab serves variants against the real captured-data
@@ -768,17 +770,26 @@ jobs:
               # not the template.
               python scripts/check-timestamp-utc.py
 
-          - name: "JSON sink retention parity (#120, #2196)"
+          - name: "JSON sink retention parity (#120, #2196, #2216)"
             home: true
             run: |
               # Every self-rotating JSON directory under /logs must have BOTH
               # halves of the #120 contract present -- a writer that actually
               # rotates (proven by its rotation token in source) and a pruner
-              # glob line in log-maintenance.sh -- plus every find line there
-              # must belong to a ledgered sink. #2196 shipped because mailoney
-              # lacked both halves at once and nothing structural connected
-              # compose volumes to vendored writers to this script; adding a
-              # sensor now means adding one reviewable ledger row instead.
+              # glob line in log-maintenance.sh, credited to that directory's
+              # own find line -- plus every find line there must belong to a
+              # ledgered sink. #2196 shipped because mailoney lacked both
+              # halves at once and nothing structural connected compose
+              # volumes to vendored writers to this script; adding a sensor
+              # now means adding one reviewable ledger row instead.
+              #
+              # #2216: the checks above only see halves an author already
+              # touched, so the script also enumerates every
+              # /opt/stacks/apiary/logs/<dir> bind mount in arcane/home/*/
+              # compose.yml -- a new stack's mount is the one thing it cannot
+              # omit and still write to disk. Each must be a ledger row, an
+              # EXEMPT entry with a written reason, or a KNOWN_UNCOVERED entry
+              # naming the issue tracking the gap.
               python scripts/check-json-sink-retention-parity.py
 
           # #1982: compose.yml is the only place a stack's knobs are exercised,
@@ -795,6 +806,20 @@ jobs:
           - name: Compose interpolation documented per stack (#1982)
             home: true
             run: python scripts/check-compose-env-docs.py
+
+          # #119/#2051: a healthcheck (compose-level or baked into the
+          # service's own Dockerfile) with no autoheal=true label just
+          # detects a wedge and does nothing about it. #119 fixed the fleet
+          # once; the gap came back on every stack that didn't exist yet
+          # when it closed, so this is the standing guard #119 itself asked
+          # for, scanning both layers -- a compose-only matcher reproduces
+          # the exact blind spot that let four image-level-HEALTHCHECK
+          # services hide from the first audit.
+          - name: Healthcheck/autoheal label pairing (#2051)
+            home: true
+            run: |
+              python -m pip install -q pyyaml
+              python scripts/check-autoheal-labels.py
 
           # #2320: every WORKER_LOOPS consumer boots through the same
           # apiary-backend entrypoint whose gate (#2183) refuses an empty
@@ -1023,6 +1048,10 @@ jobs:
           - name: Windows sandbox static/dynamic IOC extraction (#482)
             home: true
             run: python3 sandbox/windows/orchestrate/test_extract_iocs.py -v
+
+          - name: Windows sandbox post-reclone golden-image checklist (#100, #2023)
+            home: true
+            run: python3 sandbox/windows/orchestrate/test_run_sample_golden_check.py -v
 
           - name: Shell syntax and high-severity ShellCheck
             home: true

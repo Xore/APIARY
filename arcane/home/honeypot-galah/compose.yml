@@ -73,8 +73,16 @@ services:
     volumes:
       - /opt/stacks/apiary/logs/galah:/var/log/honeypot
       - /opt/stacks/apiary/state/init-markers:/markers:ro
+    # #2366: measured baseline, same "run it, then reduce" methodology as
+    # #89/#118's cap_drop passes. Verified locally: built this image, ran
+    # it with cap_drop: [ALL] added on top of the existing
+    # no-new-privileges/read_only posture, and confirmed both HTTP servers
+    # (8888, 8890) start and the SQLite cache database (bind-mounted, so
+    # unaffected by read_only) opens successfully.
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
     read_only: true
     networks: [galah_net]
     healthcheck:
@@ -118,8 +126,15 @@ services:
       # galah's own deadline doesn't cut the connection before the broker's
       # does.
       - UPSTREAM_TIMEOUT_SECONDS=90
+    # #2366: measured baseline, same "run it, then reduce" methodology as
+    # #89/#118's cap_drop passes. Verified locally: built this image, ran
+    # it with cap_drop: [ALL] added on top of the existing
+    # no-new-privileges/read_only posture, confirmed it still starts and
+    # answers HTTP requests.
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
     read_only: true
     networks:
       galah_net:
@@ -131,6 +146,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+    labels:
+      - autoheal=true
     deploy:
       resources:
         limits:

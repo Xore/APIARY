@@ -54,6 +54,7 @@ Env vars:
   VM_DOMAIN          libvirt domain name (default: win11-sandbox)
   VIRSH_PATH         Path to the virsh binary (default: /usr/bin/virsh)
   GUESTFISH_PATH     Path to the guestfish binary (default: /usr/bin/guestfish)
+  VIRT_WIN_REG_PATH  Path to virt-win-reg (default: /usr/bin/virt-win-reg)
   GOLDEN_IMAGE       Path to the golden qcow2 (default:
                      /var/dockge/sandbox/golden-images/win11-analysis.qcow2)
   VM_DISK            Path to the per-run CoW clone (default:
@@ -100,6 +101,7 @@ VM_USER         = os.environ.get('VM_USER',          'analyst')
 VM_PASS         = os.environ.get('VM_PASS',          'malware123!')
 VIRSH_PATH      = os.environ.get('VIRSH_PATH',       '/usr/bin/virsh')
 GUESTFISH_PATH  = os.environ.get('GUESTFISH_PATH',   '/usr/bin/guestfish')
+VIRT_WIN_REG_PATH = os.environ.get('VIRT_WIN_REG_PATH', '/usr/bin/virt-win-reg')
 VIRT_COPY_IN_PATH  = os.environ.get('VIRT_COPY_IN_PATH',  '/usr/bin/virt-copy-in')
 VIRT_COPY_OUT_PATH = os.environ.get('VIRT_COPY_OUT_PATH', '/usr/bin/virt-copy-out')
 LIBVIRT_URI     = os.environ.get('LIBVIRT_URI',      'qemu:///system')
@@ -249,11 +251,231 @@ def revert_to_golden(start: bool = True):
         ['qemu-img', 'create', '-f', 'qcow2', '-F', 'qcow2', '-b', str(GOLDEN_IMAGE), str(VM_DISK)],
         check=True, capture_output=True, text=True,
     )
+    # #100/#2023: verify the clone before booting it, not after -- offline,
+    # via guestfish against the disk file directly, so this applies
+    # identically whether the caller boots now (start=True) or stages a job
+    # offline first (start=False, #490's default in-guest path, which
+    # otherwise never establishes a live WinRM session at all). Must run
+    # strictly before virsh start: libguestfs and a running qemu process
+    # cannot both hold the same qcow2 open (see ntfsfix_disk()'s docstring
+    # for the confirmed-live crash this exact ordering avoids).
+    verify_golden_image_contents(VM_DISK)
     if start:
         virsh(['start', VM_DOMAIN])
         log.info('Domain reset and running')
     else:
         log.info('Fresh clone created; domain left stopped for offline staging')
+
+
+# #100/#2023: the five-point checklist #100's own thread promised before
+# every "revert to golden" and which fell through when #358/#361 replaced
+# snapshot-revert with destroy-and-reclone (the snapshot step that would
+# have owned it stopped existing; the checklist had nowhere to land).
+# Verified against packer/scripts/04-tools.ps1 as it exists today
+# (2026-09-01), not transcribed from #100's original wording -- the
+# provisioner may have moved since:
+#   - C:\Tools\Regshot\Regshot-x64-Unicode.exe        (04-tools.ps1 ~L363)
+#   - C:\Tools\FakeNet\fakenet.exe                    (04-tools.ps1 ~L218)
+#   - C:\Tools\FakeNet\configs\honeypot_fakenet.ini   (04-tools.ps1 ~L252-256)
+#   - C:\Tools\SysinternalsSuite\Procmon64.exe         (installed as part of
+#     the Sysinternals suite at 04-tools.ps1 ~L83; run from this path by
+#     packer/scripts/11-detonation-orchestrator.ps1)
+#   - the 'Inbox' and 'Logs' SMB shares (04-tools.ps1 ~L413-414), which
+#     run_sample.py's own SAMPLE_SHARE/LOGS_SHARE constants above depend on
+GOLDEN_TOOL_FILES = {
+    'Regshot': '/Tools/Regshot/Regshot-x64-Unicode.exe',
+    'FakeNet exe': '/Tools/FakeNet/fakenet.exe',
+    'FakeNet config': '/Tools/FakeNet/configs/honeypot_fakenet.ini',
+    'Procmon': '/Tools/SysinternalsSuite/Procmon64.exe',
+}
+REQUIRED_SMB_SHARES = ('Inbox', 'Logs')
+
+
+def evaluate_golden_tools_check(file_present: dict, smb_share_names) -> list:
+    """Pure pass/fail logic for the #100 checklist, split out from
+    verify_golden_image_contents() so it can be unit tested against
+    fabricated evidence without a real disk or guest (see
+    test_run_sample_golden_check.py) -- the whole point of #2023 is that a
+    check nobody ever ran against a *failing* golden image is
+    indistinguishable from a check that always passes.
+
+    `file_present` maps each GOLDEN_TOOL_FILES label to whether guestfish
+    reported it present. `smb_share_names` is the set of share names decoded
+    out of the offline SYSTEM hive by read_smb_share_names() -- an exact set
+    membership test, not a substring search over raw export text. A
+    substring test over the raw export is not meaningful here: virt-win-reg
+    renders REG_MULTI_SZ as `hex(7):43,00,...` (UTF-16LE bytes), so the
+    share name never appears as literal text to match against.
+
+    Returns the list of missing items; empty means all five checks passed.
+    """
+    missing = [label for label, present in file_present.items() if not present]
+    for share in REQUIRED_SMB_SHARES:
+        if share not in smb_share_names:
+            missing.append(f"SMB share '{share}'")
+    return missing
+
+
+def _guestfish_ro(args: list, disk_path: Path, timeout: int = 60) -> str:
+    """Run a read-only guestfish command against `disk_path`'s own OS
+    volume. `-i` (inspect) finds and mounts that volume automatically,
+    read-only (`--ro`) -- no ntfsfix needed, matching ntfsfix_disk()'s own
+    note that read-only libguestfs operations never need the dirty-bit
+    workaround writes do."""
+    result = subprocess.run(
+        [GUESTFISH_PATH, '--ro', '-a', str(disk_path), '-i'] + args,
+        capture_output=True, text=True, timeout=timeout,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f'guestfish {" ".join(args)} failed: {result.stderr.strip()}')
+    return result.stdout
+
+
+SMB_SHARES_KEY = (
+    r'HKLM\SYSTEM\ControlSet001\Services\LanmanServer\Shares'
+)
+_SHARES_SECTION = (
+    r'[HKEY_LOCAL_MACHINE\SYSTEM\ControlSet001\Services\LanmanServer\Shares]'
+)
+
+
+def decode_smb_share_names(reg_text: str) -> set:
+    """Pull the defined share names out of virt-win-reg's export of the
+    LanmanServer\\Shares key.
+
+    Split out from read_smb_share_names() so the parse can be tested
+    against real captured export text without a disk image (see
+    test_run_sample_golden_check.py).
+
+    Two properties of the real export drive this, both confirmed against
+    a live Windows disk rather than assumed:
+
+    - Each share is one REG_MULTI_SZ value rendered as
+      `"Logs"=hex(7):43,00,41,00,...` -- UTF-16LE bytes, NUL-separated
+      `Field=Value` pairs. `ShareName=` inside the decoded blob is the
+      authoritative name, so that is what is read; the value name outside
+      it agrees by convention but is not the definition.
+    - The key has a `\\Shares\\Security` subkey that repeats the same value
+      names against ACL blobs. Those describe permissions on a share, not
+      the existence of one, so the scan is scoped to the Shares section
+      itself and stops at the next `[...]` header.
+    """
+    names: set = set()
+    in_section = False
+
+    # .reg exports may wrap a long hex value across lines with a trailing
+    # backslash; rejoin before parsing.
+    joined: list = []
+    for raw in reg_text.splitlines():
+        if joined and joined[-1].endswith('\\'):
+            joined[-1] = joined[-1][:-1] + raw.strip()
+        else:
+            joined.append(raw.strip())
+
+    for line in joined:
+        if line.startswith('['):
+            in_section = (line == _SHARES_SECTION)
+            continue
+        if not in_section:
+            continue
+        match = re.match(r'^"([^"]+)"=hex\(7\):(.*)$', line)
+        if not match:
+            continue
+        try:
+            blob = bytes(
+                int(b, 16) for b in match.group(2).split(',') if b.strip()
+            )
+        except ValueError:
+            continue
+        for field in blob.decode('utf-16-le', errors='replace').split('\x00'):
+            if field.startswith('ShareName='):
+                name = field[len('ShareName='):].strip()
+                if name:
+                    names.add(name)
+    return names
+
+
+def read_smb_share_names(disk_path: Path, timeout: int = 900) -> set:
+    """Read the SMB share names defined in `disk_path`'s offline SYSTEM hive.
+
+    Uses virt-win-reg, which is purpose-built for offline Windows registry
+    reads and is already a declared dependency of this sandbox's tooling
+    (see provision-loldrivers.sh's tool preflight). It is read-only unless
+    handed a merge file, so this cannot modify the image.
+
+    Not guestfish's `hivex-*` commands: `guestfish --ro -a DISK -i
+    hivex-open --unsafe ...` exits 1 with `unrecognized option '--unsafe'`
+    before it ever touches a disk (verified live), and
+    `hivex-node-get-value` takes an integer node handle plus a key name and
+    returns a value handle -- not a path, and not text. Reaching the value
+    that way needs a hivex-root/node-get-child traversal per path segment,
+    which virt-win-reg already implements correctly.
+
+    Raises RuntimeError if the read fails. Callers must not convert that
+    into a pass: see verify_golden_image_contents().
+    """
+    result = subprocess.run(
+        [VIRT_WIN_REG_PATH, str(disk_path), SMB_SHARES_KEY],
+        capture_output=True, text=True, timeout=timeout,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f'Could not read {SMB_SHARES_KEY} from {disk_path} via '
+            f'{VIRT_WIN_REG_PATH}: {result.stderr.strip()}. The SMB-share '
+            'half of the #100 golden-image check could not run; refusing '
+            'to report it as passed.'
+        )
+    return decode_smb_share_names(result.stdout)
+
+
+def verify_golden_image_contents(disk_path: Path):
+    """Assert #100's five tools/shares are present on a freshly cloned
+    disk before a detonation is allowed to proceed against it.
+
+    Deliberately offline (guestfish against the qcow2 file itself, before
+    virsh ever starts it) rather than a live WinRM probe after boot: it is
+    cheap (no boot, no WinRM wait), and it applies identically to both
+    revert_to_golden() call shapes -- immediate boot (start=True) and
+    #490's default offline-staging path (start=False), which otherwise
+    never establishes a live WinRM session in its normal course at all.
+
+    Raises RuntimeError on any missing item, uncaught -- it propagates
+    through detonate()/main() to a nonzero process exit, which
+    run_pending.sh already turns into `.request.failed` next to the spool
+    (the established pattern; see observe_with_early_stop()'s docstring
+    for the same mechanism from the other direction). This is a content
+    regression in the golden image itself, not a per-run fluke: every
+    clone taken from the same golden image would fail identically until
+    the image is rebuilt, so failing loudly here is exactly the point --
+    a silently degraded report is what let #100 happen in the first place.
+    """
+    file_present = {}
+    for label, guest_path in GOLDEN_TOOL_FILES.items():
+        out = _guestfish_ro(['is-file', guest_path], disk_path)
+        file_present[label] = out.strip() == 'true'
+
+    # SMB share persistence lives in the registry, not the filesystem --
+    # HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Shares. On disk
+    # that's ControlSet001 (CurrentControlSet is a boot-time alias with no
+    # hive of its own to read offline).
+    #
+    # This is NOT best-effort and does not degrade to a pass. An earlier
+    # shape of this code caught every exception and substituted the
+    # passing value, which made check 5 report success on every run
+    # whether or not it had read anything -- the exact failure #2023
+    # exists to prevent, reintroduced inside the fix for it. A check that
+    # could not run is not a check that passed, so a read failure raises.
+    smb_share_names = read_smb_share_names(disk_path)
+
+    missing = evaluate_golden_tools_check(file_present, smb_share_names)
+    if missing:
+        raise RuntimeError(
+            f'Golden image content check failed: missing {", ".join(missing)}. '
+            'The provisioner (packer/scripts/04-tools.ps1) may have regressed '
+            '-- see #100/#2023. Refusing to detonate against an incomplete '
+            'golden image; rebuild it before retrying.'
+        )
+    log.info('Golden image content check passed (Regshot, FakeNet, Procmon, SMB shares present)')
 
 
 def ntfsfix_disk(disk_path: Path):
@@ -577,11 +799,21 @@ def copy_sample_to_vm(sample_path: Path, sha: str):
     """Copy sample to C:\\Inbox\\ via SMB (#956 -- was C:\\Samples\\)."""
     dest_name = f'{sha[:16]}.exe'
     # Mount SMB share and copy
-    subprocess.run(
+    result = subprocess.run(
         ['smbclient', SAMPLE_SHARE, '-U', f'{VM_USER}%{VM_PASS}',
          '-c', f'put {sample_path} {dest_name}'],
         capture_output=True, timeout=60
     )
+    # #2252: an SMB hiccup (share briefly unavailable post-boot, auth blip,
+    # transient reset) used to return here unchecked -- the sample never
+    # lands in C:\Inbox, but the caller has no way to know and the run
+    # sails through to a false 'completed' result with every IOC field
+    # empty. smbclient exits non-zero on a failed `put` inside `-c`.
+    if result.returncode != 0:
+        raise RuntimeError(
+            f'smbclient put failed (rc={result.returncode}): '
+            f'{result.stderr.decode(errors="replace").strip()}'
+        )
     log.info(f'Sample copied to VM as {dest_name}')
     return f'C:\\Inbox\\{dest_name}'
 
@@ -739,11 +971,22 @@ def autoruns_after():
 def execute_sample(vm_path: str):
     """Execute the sample on the Windows VM."""
     log.info(f'Executing sample: {vm_path}')
-    winrm_run(
+    result = winrm_run(
         f'$proc = Start-Process -FilePath "{vm_path}" '
         '-PassThru -WindowStyle Normal; '
         f'Write-Output "PID: $($proc.Id)"'
     )
+    # #2252: a delivery failure upstream (the sample never actually landed
+    # in C:\Inbox) makes Start-Process error out ("cannot find path
+    # C:\Inbox\<sha>.exe") -- both the non-zero status_code and the missing
+    # "PID:" line were previously discarded, so this looked identical to a
+    # real execution to every caller downstream.
+    if result['status_code'] != 0 or 'PID:' not in result['stdout']:
+        raise RuntimeError(
+            f"execute_sample: Start-Process did not report a PID "
+            f"(status_code={result['status_code']}): "
+            f"stdout={result['stdout'].strip()!r} stderr={result['stderr'].strip()!r}"
+        )
 
 
 def regshot_after():
@@ -823,11 +1066,37 @@ def collect_artifacts(sha: str, out_dir: Path):
         'C:\\Logs\\powershell_scriptblock.evtx'
     )
 
-    # Mount share and download everything
+    # #2252: sysmon.evtx / powershell_scriptblock.evtx are the core Windows
+    # Event Log telemetry this whole detonation exists to capture -- both
+    # were just freshly (re)created by the wevtutil calls immediately
+    # above, in this same run, so unlike everything else pulled below they
+    # are never legitimately absent. An unchecked failure here (an SMB
+    # hiccup, same class as copy_sample_to_vm/execute_sample) silently
+    # produced a "completed" result with no process/network telemetry --
+    # exactly the false-clean shape this issue is about. Checked eagerly,
+    # separate from the best-effort loop below.
+    for fname in ('sysmon.evtx', 'powershell_scriptblock.evtx'):
+        result = subprocess.run(
+            ['smbclient', LOGS_SHARE, '-U', f'{VM_USER}%{VM_PASS}',
+             '-c', f'get {fname} {out_dir}/{fname}'],
+            capture_output=True, timeout=60
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f'smbclient get {fname} failed (rc={result.returncode}): '
+                f'{result.stderr.decode(errors="replace").strip()}'
+            )
+
+    # Mount share and download everything else. Best-effort, deliberately
+    # not hard-failed like the two essential files above: procmon.csv can
+    # legitimately be missing (stop_procmon()'s own export step already
+    # tolerates that), regshot_diff.txt/autoruns/services files depend on
+    # tools this image may not have installed, and none of these carry the
+    # core telemetry sysmon/PowerShell logging does. A failure here is
+    # still worth knowing about, so it's logged rather than silently
+    # discarded as before.
     files_to_get = [
         'procmon.csv',
-        'sysmon.evtx',
-        'powershell_scriptblock.evtx',
         'regshot_diff.txt',
         # #480 tracks storing these efficiently (golden-image baseline
         # cache + ES pipeline); for now they're pulled as plain artifact
@@ -848,11 +1117,16 @@ def collect_artifacts(sha: str, out_dir: Path):
         'services_diff.txt',
     ]
     for fname in files_to_get:
-        subprocess.run(
+        result = subprocess.run(
             ['smbclient', LOGS_SHARE, '-U', f'{VM_USER}%{VM_PASS}',
              '-c', f'get {fname} {out_dir}/{fname}'],
             capture_output=True, timeout=60
         )
+        if result.returncode != 0:
+            log.warning(
+                f'smbclient get {fname} failed (rc={result.returncode}), '
+                f'continuing without it: {result.stderr.decode(errors="replace").strip()}'
+            )
 
     # Get PS transcripts dir
     subprocess.run(

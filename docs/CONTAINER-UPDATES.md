@@ -2,6 +2,31 @@
 
 [← back to README](../README.md)
 
+## Cadence: who checks, who bumps
+
+Nothing here auto-updates, and until #2315 nothing checked either — the
+Elastic trio's pin sat one full patch behind for weeks, found only by
+accident during an unrelated audit. `.github/workflows/elastic-release-watch.yml`
+(`scripts/elastic-release-watch.py`) now owns the recurring half of that:
+runs monthly, resolves the current docker.elastic.co tag for
+elasticsearch/kibana/filebeat, and files (or updates) one tracking issue
+when the pin has fallen behind. It never bumps anything itself.
+
+It reads the pins out of **both** `arcane/home/honeypot-elk/compose.yml`
+and `arcane/home/honeypot-init/compose.yml` — elasticsearch is pinned in
+both, and the honeypot-init copy is exactly the one #2315 found stale. If
+those two pins ever disagree (tag *or* digest), the watch fails loudly
+rather than picking one. It also fails — non-zero, naming the image —
+whenever it cannot reach the registry for any of the three: a run that
+checked one image must never look like a run that checked three.
+
+The verification half stays a person's job, every time the watch files an
+issue: work through this document's checklist (real release notes, the
+Arkime-as-second-consumer check, running the `ES_IMAGE`-hardcoding tests
+under `analysis/tests/` for real) before merging. The rest of the pinned
+fleet (postgres, ollama, arkime, the base images, etc.) has no automated
+watch yet — still a manual pass, same as #1402's.
+
 Every third-party image in this repo is pinned by tag+digest
 (`image: repo:tag@sha256:...`). Nothing auto-updates — a stale pin is safe by
 construction, but it means checking for updates is a deliberate, periodic

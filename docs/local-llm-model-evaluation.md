@@ -24,7 +24,18 @@ does not make their quality requirements interchangeable.
 
 ## Test system
 
-The live analysis host was measured rather than inferred from the roadmap:
+> **Historical — superseded hardware.** The card recorded below is *not* the
+> analysis host's card. It was believed to be at the time of the #144/#158
+> matrix; the [#518](https://github.com/Xore/APIARY/issues/518) smoke test
+> later established via live `nvidia-smi` that the host is an **RTX 4000 Ada
+> Generation, 20475 MiB, compute capability 8.9** — a different card, not a
+> corrected VRAM figure. See
+> [#568 re-evaluation](#issue-568-re-evaluation-real-20gb-card) below, which
+> re-runs the matrix on the real hardware. Read this section only as the
+> record of what the superseded runs were measured on.
+
+The host was measured rather than inferred from the roadmap — as it was then
+understood to be:
 
 - NVIDIA Quadro RTX 4000, 8192 MiB VRAM, driver 580.173.02;
 - Ollama 0.32.0, upgraded from 0.12.11 for current model-family support;
@@ -325,7 +336,8 @@ session cases. `qwen3:8b` resisted those strings but misclassified payload
 deployment and cryptomining as persistence. Accuracy therefore required the
 larger `qwen3.5:9b` session model despite lower throughput and higher VRAM use.
 
-Final approved v2 results on the recorded RTX 4000 host:
+Final approved v2 results on the then-recorded (since superseded — see #568
+below) RTX 4000 host:
 
 | Slot | Exact model | Score | Required safety result |
 |---|---|---:|---|

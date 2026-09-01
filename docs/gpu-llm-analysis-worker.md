@@ -5,8 +5,11 @@
 > records the verified runtime. [#83](https://github.com/Xore/APIARY/issues/83)
 > has passed both its synthetic real-model phase and its authorized, bounded
 > production U1 canary. U2 and daily reports remain disabled. Build order
-> continues with [#84](https://github.com/Xore/APIARY/issues/84),
-> which shares the GPU with the ML worker.
+> was to continue with [#84](https://github.com/Xore/APIARY/issues/84)
+> (shared-GPU slot scheduling, collision drills, the 72-hour soak), but #84
+> is closed, not completed — consolidated into
+> [#1523](https://github.com/Xore/APIARY/issues/1523)'s AFTER RELEASE 0.1.0
+> checklist; reopen/re-file when this work is picked up.
 > **Audience:** A human operator or an AI coding agent implementing this feature.
 > **Prerequisite reading:** [`ml-worker-plan.md`](ml-worker-plan.md) (data
 > sources, ES layout, dashboard SSE pattern),
@@ -80,11 +83,18 @@ Exact measurements, model IDs, scoring, and the CPU/offload trade-offs are in
 still owns the broader reproducible host-capability record used by later GPU
 worker milestones.
 
+**Settled by [#602](https://github.com/Xore/APIARY/issues/602)** — an
+earlier draft of this table (before #602) named the card as a Quadro RTX
+4000 at compute capability 7.5/Turing; that card was never on this host.
+`lspci` shows a single AD104GL controller and containers enumerate exactly
+one device. Also pinned as the runtime-governance authority in
+`analysis/ghidra/models/approved-models.json`.
+
 | Fact | Value | Verify with |
 |---|---|---|
-| GPU | NVIDIA Quadro RTX 4000 | `nvidia-smi -L` |
+| GPU | NVIDIA RTX 4000 Ada Generation | `nvidia-smi -L` |
 | VRAM | 20475 MiB (~20 GB) total | `nvidia-smi --query-gpu=memory.total --format=csv` |
-| Compute capability | 7.5 (Turing) | `nvidia-smi --query-gpu=compute_cap --format=csv` |
+| Compute capability | 8.9 (Ada Lovelace) | `nvidia-smi --query-gpu=compute_cap --format=csv` |
 | Driver / CUDA | 580.173.02 / CUDA 13.0 | `nvidia-smi` |
 | Container GPU passthrough | nvidia-container-toolkit 1.19.1, `nvidia` runtime registered | `docker info \| grep -i runtime` |
 | End-to-end container test | `docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi -L` lists the GPU | run it |
@@ -102,8 +112,12 @@ worker milestones.
   is still the deployed default (serialization for predictability, not a
   VRAM necessity) — whether the extra headroom is worth using (larger
   model, multiple loaded models) is a re-evaluation, not assumed here.
-- Turing (sm_75) has no bf16 support; use quantized GGUF via Ollama/llama.cpp,
-  not raw fp16 transformers inference.
+- Use quantized GGUF via Ollama/llama.cpp, not raw fp16 transformers
+  inference — the backend choice this guide assumes throughout (§598's
+  comparison), not a hardware requirement. (An earlier draft justified this
+  as forced by "Turing has no bf16 support"; the real card is Ada Lovelace,
+  cc 8.9, which has native bf16 support — that reasoning no longer applies,
+  and never described this host's actual GPU.)
 - GPU occupancy is dynamic. Never infer availability from the historical idle
   sample; check it immediately before a canary or benchmark. CPU/system-RAM
   offload is allowed, and this project prioritizes accuracy over latency.
@@ -465,7 +479,7 @@ that later canary.
 ```bash
 # T1 GPU visible inside the ollama container
 docker compose -f analysis/ghidra/docker-compose.ghidra.yml exec ollama nvidia-smi -L
-# expect: GPU 0: Quadro RTX 4000 ...
+# expect: GPU 0: NVIDIA RTX 4000 Ada Generation ...
 
 # T2 model present and loadable
 docker compose -f analysis/ghidra/docker-compose.ghidra.yml exec ollama ollama list | grep qwen3

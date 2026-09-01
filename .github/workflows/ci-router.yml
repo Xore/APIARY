@@ -130,12 +130,33 @@ jobs:
           # dispatch latency (the loop exits early when the run appears,
           # so the cost is paid only in the worst case).
           # 420s decide: the canary is tiny, but it rides a queue behind
-          # whatever else the single box instance is executing; #2572
-          # tracks real capacity. Fan-out deeper than ~2 canaries still
-          # overflows this window and falls back -- fail-safe direction.
+          # whatever else the box is executing.
           appear_window="${HEARTBEAT_APPEAR_SECONDS:-120}"   # event->run-object lag (API indexing included)
           decide_window="${HEARTBEAT_DECIDE_SECONDS:-420}"   # queue+exec budget on the box
           poll_every="${HEARTBEAT_POLL_SECONDS:-10}"
+
+          # #2849: how long a canary result stays usable as evidence for a
+          # *different* router. This is the knob that stops the probe storm.
+          #
+          # The probe measures the box, not the branch, so one canary can
+          # vouch for every router running against that box in its wake.
+          # Without this, every workflow on every PR dispatches its own:
+          # a 20-PR fan-out over ~4 routing workflows is ~80 canaries, all
+          # queued on the same executors as the jobs they gate, so the
+          # busier the box the more likely each router is to time out and
+          # declare it *offline* -- backwards, and self-reinforcing. That
+          # is #2849, and it is why an all-self-hosted-capable run went
+          # entirely GitHub-hosted while five runners sat there executing
+          # jobs and every canary completed successfully.
+          #
+          # The cost of reuse is staleness: a box that dies immediately
+          # after a successful canary keeps being vouched for until the
+          # window expires, and jobs routed there queue until their own
+          # timeout. 300s bounds that, and is still long enough to collapse
+          # a fan-out onto one probe. Fail-safe is preserved in the
+          # direction that matters -- no *failed* or absent canary is ever
+          # reused as evidence of life.
+          fresh_window="${HEARTBEAT_FRESH_SECONDS:-300}"    # reuse TTL for another router's canary
 
           if [[ "$trusted" == "true" && "${FORCE_GITHUB_HOSTED}" != "true" ]]; then
             api="repos/$GITHUB_REPOSITORY/actions/workflows/ci-heartbeat.yml"
@@ -152,73 +173,132 @@ jobs:
             if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
               dispatch_ref="$(jq -r '.pull_request.head.ref // ""' "$EVENT_PATH")"
             fi
-            echo "heartbeat: dispatching ci-heartbeat on ${dispatch_ref:-<none>}"
+
+            # #2849 phase 0: before dispatching anything, look for a canary
+            # that already answers the question. Two shapes count, and the
+            # ref they ran on deliberately does not matter -- ci-heartbeat
+            # is a no-op job whose only output is "a honeypot-ci runner
+            # picked this up", which is a fact about the box.
+            #
+            # Cross-ref reuse does widen one thing worth naming: a
+            # same-repo branch that edits ci-heartbeat.yml can now vouch
+            # for other refs' routers, not just its own. That is bounded by
+            # the trust gate above -- fork PRs never reach this code, and a
+            # same-repo author could already self-vouch by editing the
+            # canary on their own branch, which the router has always
+            # dispatched at the PR head. So this changes who a bad canary
+            # can mislead, not whether one can exist.
+            # Both initialised here, not just on the paths that assign
+            # them: under `set -u` a later read of an unbound name kills
+            # the step, and #2568 was exactly that failure mode in this
+            # block. The wait guard below reads both.
+            adopted=""
             http=""
-            if [[ -n "$dispatch_ref" ]]; then
-              # No -f: a refused dispatch must land its HTTP code in $http,
-              # not abort the capture (with -f a 422 printed as "422X").
-              http="$(curl -sS -o "${RUNNER_TEMP:-/tmp}/hb-disp.out" -w '%{http_code}' -X POST \
-                -H "Authorization: Bearer $GH_TOKEN" \
-                -H 'Accept: application/vnd.github+json' \
-                "$GITHUB_API_URL/$api/dispatches" \
-                -d "{\"ref\":\"${dispatch_ref}\"}" || true)"
-            fi
-            [[ "$http" == "204" ]] \
-              && echo "heartbeat: dispatch accepted" \
-              || { echo "::warning::heartbeat dispatch refused (HTTP ${http:-none}); routing fallback"; http=""; }
+            reuse_cutoff="$(date -u -d "$fresh_window seconds ago" +%FT%TZ)"
+            runs_json="$(gh api "$api/runs?per_page=50" 2>/dev/null || true)"
 
-            # cutoff predates the dispatch by 2min so minor runner/GitHub
-            # clock skew cannot out-veto a real fresh run. Must be assigned
-            # BEFORE Phase A -- under set -u an unbound $cutoff kills the
-            # pipeline subshell every poll iteration and rid silently stays
-            # empty (live on #2568: canaries succeeded while every router
-            # still concluded offline because this line was dropped in the
-            # dispatch-ref edit).
-            cutoff="$(date -u -d '2 minutes ago' +%FT%TZ)"
+            # (a) A recent SUCCESS -- strongest and cheapest evidence.
+            # updated_at on a completed run is its completion time, so this
+            # asks "did the box finish a canary in the last fresh_window",
+            # not "was one started then".
+            reusable="$(printf '%s' "$runs_json" | jq -r --arg cutoff "$reuse_cutoff" '
+              [.workflow_runs[]
+               | select(.event == "workflow_dispatch"
+                        and .status == "completed"
+                        and .conclusion == "success"
+                        and .updated_at >= $cutoff)
+               | .id][0] // ""' 2>/dev/null || true)"
 
-            # Phase A: wait for a FRESH heartbeat run to appear -- created
-            # after the cutoff (dispatch minus skew allowance) and not yet
-            # completed. The ref is the branch name (the dispatch API
-            # rejects commit SHAs with 422 "No ref found for"), so
-            # freshness -- not a SHA pin -- guards against counting old
-            # runs: only something genuinely recent may vouch, and it must
-            # still reach success inside this cycle's own window. Runs
-            # dispatched concurrently by sibling workflows' routers on the
-            # same ref may be consumed as evidence; they measure the same
-            # box (ci-heartbeat.yml therefore carries no concurrency group:
-            # cancelling a sibling's canary would un-vouch exactly the
-            # evidence this router is waiting on).
-            rid=""
-            deadline=$(( $(date +%s) + appear_window ))
-            while [[ "$(date +%s)" -lt "$deadline" ]]; do
-              # system jq (not `gh api --jq`, which cannot bind
-              # variables) so the cutoff is a proper parameter.
-              runs_json="$(gh api "$api/runs?per_page=20" 2>/dev/null || true)"
-              rid="$(printf '%s' "$runs_json" | jq -r --arg cutoff "$cutoff" '
+            if [[ -n "$reusable" ]]; then
+              online=true
+              echo "heartbeat: reusing successful canary $reusable (finished within ${fresh_window}s); no dispatch"
+            else
+              # (b) One already in flight -- adopt it rather than adding to
+              # the queue it is sitting in. Waiting on a sibling's canary is
+              # strictly better than dispatching a second one that must
+              # queue behind it.
+              adopted="$(printf '%s' "$runs_json" | jq -r --arg cutoff "$reuse_cutoff" '
                 [.workflow_runs[]
                  | select(.event == "workflow_dispatch"
                           and .status != "completed"
                           and .run_started_at >= $cutoff)
                  | .id][0] // ""' 2>/dev/null || true)"
-              [[ -n "$rid" ]] && break
-              sleep "$poll_every"
-            done
 
-            # Phase B: give the found run its window to finish.
-            if [[ -n "$rid" ]]; then
-              deadline=$(( $(date +%s) + decide_window ))
-              while [[ "$(date +%s)" -lt "$deadline" ]]; do
-                line="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$rid" \
-                  --jq '"\(.status) \(.conclusion)"' 2>/dev/null || true)"
-                case "$line" in
-                  "completed success") online=true ;;
-                  completed*) : ;;                # finished badly -> stays offline
-                  # empty = transient API hiccup; anything else = still
-                  # running. Both keep polling inside the window.
-                  *) sleep "$poll_every"; continue ;;
-                esac
-                break
-              done
+              http=""
+              if [[ -n "$adopted" ]]; then
+                echo "heartbeat: canary $adopted already in flight (started within ${fresh_window}s); waiting on it instead of dispatching"
+              else
+                # (c) Nothing usable: dispatch our own.
+                echo "heartbeat: dispatching ci-heartbeat on ${dispatch_ref:-<none>}"
+                if [[ -n "$dispatch_ref" ]]; then
+                  # No -f: a refused dispatch must land its HTTP code in $http,
+                  # not abort the capture (with -f a 422 printed as "422X").
+                  http="$(curl -sS -o "${RUNNER_TEMP:-/tmp}/hb-disp.out" -w '%{http_code}' -X POST \
+                    -H "Authorization: Bearer $GH_TOKEN" \
+                    -H 'Accept: application/vnd.github+json' \
+                    "$GITHUB_API_URL/$api/dispatches" \
+                    -d "{\"ref\":\"${dispatch_ref}\"}" || true)"
+                fi
+                [[ "$http" == "204" ]] \
+                  && echo "heartbeat: dispatch accepted" \
+                  || { echo "::warning::heartbeat dispatch refused (HTTP ${http:-none}); routing fallback"; http=""; }
+              fi
+            fi
+
+            # cutoff predates the dispatch by 2min so minor runner/GitHub
+            # clock skew cannot out-veto a real fresh run. Must be assigned
+            # BEFORE the wait loop -- under set -u an unbound $cutoff kills
+            # the pipeline subshell every poll iteration and the result
+            # silently stays empty (live on #2568: canaries succeeded while
+            # every router still concluded offline because this line was
+            # dropped in the dispatch-ref edit).
+            cutoff="$(date -u -d '2 minutes ago' +%FT%TZ)"
+
+            # #2849: one wait, for the thing actually being waited on -- a
+            # canary that reaches SUCCESS after the cutoff. This replaces
+            # the previous appear-then-follow pair, which latched onto the
+            # first in-flight run object it saw and then tracked only that
+            # id: if the run it picked was a sibling's that later failed or
+            # was cancelled, the router concluded offline while a different
+            # canary succeeded seconds later. Asking the question directly
+            # ("has any canary succeeded since the cutoff?") is both
+            # simpler and strictly more accurate, and it means an adopted
+            # in-flight run needs no separate code path.
+            #
+            # The window is the sum of the two former phases, so the
+            # worst-case router cost is unchanged and still bounded well
+            # inside this job's timeout-minutes.
+            #
+            # ci-heartbeat.yml deliberately carries no concurrency group:
+            # cancelling a sibling's canary would un-vouch exactly the
+            # evidence some other router is waiting on here.
+            if [[ "$online" != "true" ]]; then
+              if [[ -z "$adopted" && "$http" != "204" ]]; then
+                # Nothing in flight to wait for and our own dispatch was
+                # refused, so no canary is coming. Waiting the full window
+                # for a run that cannot exist just burns router minutes.
+                echo "heartbeat: no canary dispatched or adopted; not waiting"
+              else
+                deadline=$(( $(date +%s) + appear_window + decide_window ))
+                while [[ "$(date +%s)" -lt "$deadline" ]]; do
+                  # system jq (not `gh api --jq`, which cannot bind
+                  # variables) so the cutoff is a proper parameter.
+                  runs_json="$(gh api "$api/runs?per_page=50" 2>/dev/null || true)"
+                  ok="$(printf '%s' "$runs_json" | jq -r --arg cutoff "$cutoff" '
+                    [.workflow_runs[]
+                     | select(.event == "workflow_dispatch"
+                              and .status == "completed"
+                              and .conclusion == "success"
+                              and .updated_at >= $cutoff)
+                     | .id][0] // ""' 2>/dev/null || true)"
+                  if [[ -n "$ok" ]]; then
+                    online=true
+                    echo "heartbeat: canary $ok succeeded"
+                    break
+                  fi
+                  sleep "$poll_every"
+                done
+              fi
             fi
             echo "heartbeat verdict: online=$online"
           fi

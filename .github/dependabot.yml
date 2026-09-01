@@ -124,6 +124,10 @@ updates:
   - package-ecosystem: docker
     directories:
       - /arcane/home/honeypot-init/snare  # #1502
+      - /arcane/home/honeypot-tanner/snare  # #2316: byte-identical twin of
+        # honeypot-init/snare's Dockerfile, verified blob-equal -- was
+        # absent from every dependabot entry, so the exact #1116 regression
+        # this entry exists to prevent was still reachable through it.
       - /arcane/home/honeypot-tanner/tanner/tanner  # #1502
     schedule:
       interval: weekly

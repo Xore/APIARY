@@ -75,8 +75,19 @@ services:
       - /opt/stacks/apiary/state/init-markers:/markers:ro
     tmpfs:
       - /opt/sentrypeer:uid=2000,gid=2000,mode=0700
+    # #2366: measured baseline, same "run it, then reduce" methodology as
+    # #89/#118's cap_drop passes -- this one was flagged in #2366 itself as
+    # uncertain ("sentrypeer's raw sockets?") because it's a vendored SIP
+    # stack. Answered by testing it directly: built this image, ran it with
+    # cap_drop: [ALL] added on top of the existing no-new-privileges/
+    # read_only/tmpfs posture, and it not only started (TCP/UDP/TLS
+    # listeners all came up, including the on-first-run cert.pem/key.pem
+    # generation into the tmpfs) but answered a real SIP OPTIONS probe with
+    # a 200 OK and logged the bad-actor JSON event -- no raw socket needed.
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
     read_only: true
     networks: [sentrypeer_net]
     # #2337: protocol-level liveness per the #2107/#111 doctrine -- a TCP

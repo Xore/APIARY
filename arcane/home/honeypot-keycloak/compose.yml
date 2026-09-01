@@ -24,6 +24,15 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
+    # #2051: autoheal only acts on a container Docker still reports
+    # "running" with Health: unhealthy -- an intentional `docker stop`
+    # (or `compose down`) moves it out of "running" immediately on SIGTERM,
+    # before pg_isready has a chance to fail 10 times at a 10s interval
+    # (100s), so a legitimate graceful shutdown is not observed as a wedge
+    # and does not get restarted mid-shutdown. stop_grace_period above
+    # covers the case where shutdown itself hangs.
+    labels:
+      - autoheal=true
     stop_grace_period: 60s
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
@@ -112,6 +121,8 @@ services:
       timeout: 5s
       retries: 12
       start_period: 60s
+    labels:
+      - autoheal=true
     stop_grace_period: 60s
     # The pinned upstream image performs Quarkus augmentation on startup.
     # Keeping the root filesystem read-only would require a custom image build,
