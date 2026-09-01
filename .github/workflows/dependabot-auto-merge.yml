@@ -103,7 +103,25 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
-        run: gh pr merge --auto --squash "$PR_URL"
+        run: |
+          # Arm GitHub's native auto-merge so the PR merges once its required
+          # checks pass. This needs branch protection (or a ruleset) on the base
+          # branch; without it the enablePullRequestAutoMerge mutation returns
+          # "Protected branch rules not configured for this branch". Treat only
+          # that specific case as non-fatal -- a human still merges manually --
+          # instead of failing this required check on every dependabot PR.
+          if err="$(gh pr merge --auto --squash "$PR_URL" 2>&1)"; then
+            echo "$err"
+            exit 0
+          fi
+          echo "$err"
+          if printf '%s' "$err" | grep -q "Protected branch rules not configured"; then
+            echo "::warning::Auto-merge could not be armed: the base branch has no branch protection / ruleset. Merge this dependabot PR manually once its checks pass."
+            gh pr comment "$PR_URL" --body \
+              "Auto-merge is unavailable because the base branch has no branch protection or ruleset configured, so GitHub cannot arm \`--auto\`. This compatible dependabot update is fine to merge manually once its checks pass. (Configuring a branch-protection rule or ruleset on the default branch would restore automatic merging.)" || true
+            exit 0
+          fi
+          exit 1
 
       - name: Leave the lockfile mismatch for a human
         if: steps.lockfile-check.outcome == 'failure'
