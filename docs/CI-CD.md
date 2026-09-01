@@ -573,7 +573,31 @@ copy), which asks whether this run's source may reach the homeserver at
 all (trust gate below), then whether a `honeypot-ci`-labelled runner is
 currently registered AND reporting online -- measured, not read, by
 dispatching the `ci-heartbeat.yml` canary (the runners-listing API
-answers 403 to `GITHUB_TOKEN`, so the registry cannot be asked). Quality
+answers 403 to `GITHUB_TOKEN`, so the registry cannot be asked).
+
+**The canary is shared, not per-router (#2849).** Before dispatching, a
+router looks for one that already answers the question: a canary that
+*succeeded* within `HEARTBEAT_FRESH_SECONDS` (300s default) is reused
+outright, and one already *in flight* within that window is adopted and
+waited on. Only if neither exists does it dispatch its own. The ref a
+canary ran on is deliberately ignored — `ci-heartbeat.yml` is a no-op job
+whose sole output is "a `honeypot-ci` runner picked this up", which is a
+fact about the box rather than about a branch.
+
+This is not an optimisation, it is a correctness fix. Each router used to
+dispatch its own canary, and those canaries queue on the same executors as
+the jobs they gate — so a fan-out deep enough to fill the queue made every
+router time out and declare a healthy box *offline*, and the busier the
+box got the more certainly it was mis-declared dead. Measured on run
+33553809659: five runners online and executing, every canary in the
+surrounding hour `success`, and the router still concluded
+`online=false`. A 20-PR fan-out across ~4 routing workflows dispatched
+roughly 80 canaries to measure one machine; it now converges on ~1.
+
+Reuse trades a bounded staleness for that: a box dying immediately after a
+successful canary keeps being vouched for until the window expires. Only a
+*success* ever vouches — a failed or absent canary is never reused — so
+the fail-safe direction is preserved. Quality
 ships each eligible check as a PAIR of conditional jobs fed by that
 single answer -- exactly one twin runs, the other reports skipped.
 containers/security/pages instead give their one executor-agnostic job a
