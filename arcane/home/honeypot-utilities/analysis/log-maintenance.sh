@@ -131,5 +131,20 @@ while true; do
   # <file-id>.bin, so the glob is exact.
   find /logs/zeek-proxy-extract -maxdepth 1 -name '*.bin' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
 
+  # #2216: nine writers had neither leg of the #120 contract at all -- no
+  # self-rotation, no pruner glob -- so their sinks grew unbounded forever.
+  # Their Go writers now self-rotate the same way multipot/http-honeypot do
+  # (close/rename/reopen, suffixing .json.<stamp>[.N]), so the same
+  # digit-leading glob shape prunes the aged-out segments here.
+  find /logs/rdp-honeypot -maxdepth 1 -name 'rdp-honeypot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  find /logs/citrix-honeypot -maxdepth 1 -name 'citrix-honeypot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  find /logs/dns-honeypot -maxdepth 1 -name 'dns-honeypot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  find /logs/cisco-asa-honeypot -maxdepth 1 -name 'cisco-asa-honeypot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  find /logs/dicompot -maxdepth 1 -name 'dicompot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  find /logs/dnp3 -maxdepth 1 -name 'dnp3.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  find /logs/endlessh -maxdepth 1 -name 'endlessh.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  find /logs/canarytokens -maxdepth 1 -name 'canarytokens.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  find /logs/tftp-relay -maxdepth 1 -name 'sessions.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+
   sleep "$interval"
 done
