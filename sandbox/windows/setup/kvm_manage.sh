@@ -25,6 +25,10 @@
 
 set -euo pipefail
 
+# #2023: used to locate orchestrate/run_sample.py, whose
+# decode_smb_share_names() this script reuses rather than reimplementing.
+KVM_MANAGE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
 VM_NAME="${VM_NAME:-win11-sandbox}"
 # Defaults follow win11-analysis.pkr.hcl: the build deliberately puts both the
 # ISO and the 25-35 GB golden image on the large /var spindle rather than the
@@ -84,10 +88,84 @@ clone_disk() {
     log "Disk created: $VM_DISK (thin clone, CoW)"
 }
 
+verify_golden_image_contents() {
+    # #100/#2023: the same five-point checklist
+    # orchestrate/run_sample.py's verify_golden_image_contents() enforces on
+    # every automated detonation (that is the canonical implementation, with
+    # the reasoning and unit tests) — this is the manual/operator-path twin
+    # so a `kvm_manage.sh revert` run by hand gets the same guard, not just
+    # the automated pipeline. Offline via guestfish against "$1", before
+    # `virsh start` — same ordering constraint as clone_disk() callers below:
+    # libguestfs and a running qemu process cannot both hold the qcow2 open.
+    local disk="$1"
+    local -a tool_files=(
+        "/Tools/Regshot/Regshot-x64-Unicode.exe"
+        "/Tools/FakeNet/fakenet.exe"
+        "/Tools/FakeNet/configs/honeypot_fakenet.ini"
+        "/Tools/SysinternalsSuite/Procmon64.exe"
+    )
+    local -a missing=()
+    local path present
+    for path in "${tool_files[@]}"; do
+        present="$(guestfish --ro -a "$disk" -i is-file "$path" 2>/dev/null || echo "false")"
+        [[ "$present" == "true" ]] || missing+=("$path")
+    done
+
+    # Share names come out of the offline SYSTEM hive via virt-win-reg, the
+    # same tool and key the Python twin uses. Not guestfish's hivex-*
+    # commands: `guestfish --ro -a DISK -i hivex-open --unsafe ...` exits 1
+    # with `unrecognized option '--unsafe'` before it opens the disk at all
+    # (verified live), and hivex-node-get-value wants an integer node handle
+    # plus a key name, not a path.
+    #
+    # This is NOT best-effort and does not degrade to a pass: a read failure
+    # is a check that did not run, and reporting that as success is exactly
+    # the defect #2023 exists to remove.
+    #
+    # virt-win-reg renders REG_MULTI_SZ as `hex(7):43,00,...` (UTF-16LE), so
+    # the share name is never literal text in the export -- decode it and
+    # read the authoritative `ShareName=` field. Scoped to the Shares key
+    # itself; the \Shares\Security subkey repeats the same value names
+    # against ACL blobs, which do not tell us a share exists.
+    local shares_reg share_names
+    if ! shares_reg="$(virt-win-reg "$disk" \
+        'HKLM\SYSTEM\ControlSet001\Services\LanmanServer\Shares' 2>&1)"; then
+        die "Could not read the SMB share registry state from $disk via virt-win-reg: ${shares_reg}. The SMB-share half of the #100 check could not run; refusing to report it as passed."
+    fi
+    # Decoding is delegated to run_sample.py's decode_smb_share_names()
+    # rather than reimplemented here. That is deliberate: the first cut of
+    # this twin hand-rolled the UTF-16LE decode in awk and silently returned
+    # *no* share names, because gawk evaluates ("0x" byte)+0 as 0 without
+    # --non-decimal-data -- so every byte decoded to NUL and the check
+    # reported both shares missing on an image that has one of them. Two
+    # implementations of one parse is how the twins drift; there is now one.
+    local decoder="${KVM_MANAGE_DIR}/../orchestrate/run_sample.py"
+    if [[ ! -f "$decoder" ]]; then
+        die "Cannot find the share-name decoder at $decoder; refusing to report the #100 SMB-share check as passed."
+    fi
+    share_names="$(printf '%s' "$shares_reg" | python3 -c '
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("run_sample", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+print("\n".join(sorted(mod.decode_smb_share_names(sys.stdin.read()))))
+' "$decoder")" || die "Could not decode the SMB share registry export from $disk; refusing to report the #100 SMB-share check as passed."
+    local want
+    for want in Inbox Logs; do
+        grep -qxF "$want" <<<"$share_names" || missing+=("SMB share '$want'")
+    done
+
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        die "Golden image content check failed: missing ${missing[*]}. The provisioner (packer/scripts/04-tools.ps1) may have regressed -- see #100/#2023. Refusing to start this VM against an incomplete golden image; rebuild it before retrying."
+    fi
+    log "Golden image content check passed (Regshot, FakeNet, Procmon, SMB shares present)."
+}
+
 create_vm() {
     log "Creating thin-clone VM disk from golden image..."
     [[ -f "$VM_XML" ]] || die "Domain XML not found: $VM_XML"
     clone_disk
+    verify_golden_image_contents "$VM_DISK"
     if ! grep -q "$VM_DISK" "$VM_XML"; then
         log "WARNING: $VM_XML does not reference $VM_DISK — the domain will boot the wrong disk."
     fi
@@ -101,6 +179,7 @@ revert_vm() {
     virsh destroy "$VM_NAME" >/dev/null 2>&1 || true
     [[ -e "$VM_DISK" ]] && rm -f "$VM_DISK"
     clone_disk
+    verify_golden_image_contents "$VM_DISK"
     virsh start "$VM_NAME"
     log "VM reset and running. WinRM available at 10.10.10.2:5985 in ~1-2min (cold boot)."
 }

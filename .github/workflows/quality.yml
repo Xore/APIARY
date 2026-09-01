@@ -1005,6 +1005,10 @@ jobs:
             home: true
             run: python3 sandbox/windows/orchestrate/test_extract_iocs.py -v
 
+          - name: Windows sandbox post-reclone golden-image checklist (#100, #2023)
+            home: true
+            run: python3 sandbox/windows/orchestrate/test_run_sample_golden_check.py -v
+
           - name: Shell syntax and high-severity ShellCheck
             home: true
             run: |
