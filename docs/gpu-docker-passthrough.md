@@ -230,14 +230,18 @@ gets a CUDA out-of-memory error, not a scheduling wait.
 This repo's own answer to that (see
 [`gpu-ml-worker-acceleration.md` §5, "GPU Sharing Contract with the LLM
 Worker"](gpu-ml-worker-acceleration.md#5-gpu-sharing-contract-with-the-llm-worker))
-is architectural, not a Docker feature: only **one** container
+is architectural, not a Docker feature: today, only **one** container
 (`ollama`, in the `ghidra` stack) is ever given the GPU reservation.
-`ml-worker` and `llm-worker` are deliberately CPU-only — they talk to
-Ollama over HTTP instead of touching the GPU directly. If you're adding a
-second GPU-bound container to this stack, read that section before doing
-it; the scheduling offset between ml-worker's retrain window and Ollama's
-daily report window exists specifically to avoid two GPU-hungry processes
-running at once.
+`llm-worker` is CPU-only and talks to Ollama over HTTP rather than touching
+the GPU directly. `ml-worker` is also CPU-only today, but for a different
+reason: it runs its own PyTorch/scikit-learn models locally and simply has
+no GPU access yet — `gpu-ml-worker-acceleration.md` is the not-yet-deployed
+plan to give it one. If you're adding a second GPU-bound container to this
+stack (including deploying that plan), read that section before doing it;
+its scheduling offset between ml-worker's retrain window and Ollama's daily
+report window is a rule for that future state, not a protection already
+active today — right now there is only one GPU-bound process
+(`ollama`), so there is nothing yet to avoid overlapping.
 
 Check available headroom before adding a second consumer:
 
