@@ -257,5 +257,15 @@ class SessionFeatureTracker:
             self._state.ip_ports[ip] = collections.deque(tuple(entry) for entry in entries)
         for ip, entries in payload.get("ip_failed_logins", {}).items():
             self._state.ip_failed_logins[ip] = collections.deque(entries)
-        self._ip_last_seen.update(payload.get("ip_last_seen", {}))
-        self._session_last_seen.update(payload.get("session_last_seen", {}))
+        # #2229: save() builds ip_last_seen/session_last_seen by iterating
+        # kept_ips/kept_sessions -- Python sets, so serialization order is
+        # arbitrary (not even a guaranteed inversion, unlike the LSTM-AE
+        # sibling instance of this bug). A plain .update() hands that
+        # arbitrary document order straight to these OrderedDicts, whose
+        # whole contract (see __init__) is least->most-recency for _touch's
+        # popitem(last=False) eviction. Re-sort ascending on restore, same
+        # fix shape as LSTMAEModel._load_buffers().
+        for ip, ts in sorted(payload.get("ip_last_seen", {}).items(), key=lambda kv: kv[1]):
+            self._ip_last_seen[ip] = ts
+        for session, ts in sorted(payload.get("session_last_seen", {}).items(), key=lambda kv: kv[1]):
+            self._session_last_seen[session] = ts
