@@ -30,11 +30,11 @@
 // lists announces that emptiness is normal. Same mechanical rule, second
 // clause: a component-ful parent must reference Outlet, or it has no
 // children at all.
-import { describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { routeTree } from '../routeTree.gen'
+import { DEV_UNAUTH_OVERRIDE_ENV } from '../lib/serviceToken.server'
 
 const ROUTES = dirname(fileURLToPath(import.meta.url))
 
@@ -419,6 +419,26 @@ const EXPECTED_ROUTE_SHAPE: RouteShape[] = [
 ]
 
 describe('generated route tree contract (#2215)', () => {
+  // The import is dynamic, and the dev override set before it, for the same
+  // reason backendRetryAfter.test.ts and bffProxyTargetEncoding.test.ts do
+  // it: `routeTree.gen.ts` statically imports every route module, several of
+  // which reach lib/backend.server.ts, whose module scope runs #2183's boot
+  // gate (`assertServiceTokenPolicy`). That gate is exactly what should
+  // happen — an unset SERVICE_TOKEN must refuse to boot — so this takes the
+  // sanctioned dev door for the duration of the file rather than weakening
+  // it or fabricating a token. The env var is scoped here, not to the whole
+  // suite or to any deployed config.
+  let routeTree: unknown
+
+  beforeAll(async () => {
+    process.env[DEV_UNAUTH_OVERRIDE_ENV] = '1'
+    ;({ routeTree } = await import('../routeTree.gen'))
+  })
+
+  afterAll(() => {
+    delete process.env[DEV_UNAUTH_OVERRIDE_ENV]
+  })
+
   it('resolves every route to the pinned id/path shape', () => {
     expect(collectRouteShape(routeTree)).toEqual(EXPECTED_ROUTE_SHAPE)
   })
