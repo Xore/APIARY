@@ -46,8 +46,18 @@ services:
       - /opt/stacks/apiary/state/init-markers:/markers:ro
     tmpfs:
       - /data
+    # #2366: measured baseline, same "run it, then reduce" methodology as
+    # #89/#118's cap_drop passes. No cap_add needed for the privileged
+    # port 25 bind above -- see honeypot-dns-honeypot/compose.yml's
+    # equivalent comment for why. Verified locally: built this image, ran
+    # it with cap_drop: [ALL] added on top of the existing no-new-
+    # privileges/read_only/tmpfs posture, and confirmed the SQLite session
+    # DB under /data initializes (alembic migrations run clean) and the
+    # SMTP port accepts a real TCP connect.
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
     read_only: true
     networks: [mailoney_net]
     healthcheck:
