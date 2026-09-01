@@ -25,6 +25,28 @@ import { fieldText, meaningfulFields, protocolFor, readField } from '../lib/sens
 
 type RelatedEvent = { time: string; sensor: string; src_ip: string; detail: string }
 type Relation = { key: string; total: number; rows: RelatedEvent[] }
+// #2047's materialized cross-family summary (flow-links-v1). GET
+// /api/v1/event/{id} (event_page.rs) embeds this as the raw flv1-* doc via
+// a plain get_doc — it does NOT splice `this_event_in_sample` the way the
+// sibling GET /api/v1/event/{id}/connections endpoint does (correlations.rs's
+// event_connections); that splice lives on a different route this page
+// doesn't call. Rather than add a second fetch just for one boolean, the
+// same fact is derived client-side below from `event_ids`, which this raw
+// doc already carries. Absent whenever the flow never reached 2+ sensor
+// families — most flows never qualify, and that's a normal answer, not an
+// error, so this stays optional rather than a field the page can assume.
+type FlowLink = {
+  community_id: string
+  families: string[]
+  sensors: string[]
+  src_ip: string
+  dst_ip: string
+  dst_port: number
+  first: string
+  last: string
+  events: number
+  event_ids: string[]
+}
 type EventPage = {
   id: string
   index: string
@@ -38,6 +60,7 @@ type EventPage = {
   session_events: Relation
   flow_events: Relation
   source_events: Relation
+  flow_link?: FlowLink | null
 }
 
 // #2178: serviceJSON collapsed "no event with this id" (a real 404 — the
@@ -116,6 +139,56 @@ function RelationCard({
           </a>
         </p>
       ) : null}
+    </div>
+  )
+}
+
+// #2047's cross-family flow summary. An absent flow_link means this event's
+// connection never reached two sensor families — normal, not an error — so
+// this renders nothing at all rather than an empty-state card that would
+// read as a complaint about a common case.
+function FlowLinkCard({ link, currentId }: { link: FlowLink; currentId: string }) {
+  return (
+    <div className="card wide">
+      <h2>Same connection, seen by {link.families.length} pipelines</h2>
+      <p className="note">
+        <code>{link.community_id}</code> — {link.src_ip || '—'} → {link.dst_ip || '—'}
+        {link.dst_port ? `:${link.dst_port}` : ''}, {link.events.toLocaleString('en-US')} events across{' '}
+        {formatTimestamp(link.first)} – {formatTimestamp(link.last)}.
+      </p>
+      <p className="note">
+        {link.families.map((family) => (
+          <span key={family} className="badge badge--muted">
+            {family}
+          </span>
+        ))}
+      </p>
+      {link.event_ids.length > 0 ? (
+        <ul>
+          {link.event_ids.map((id) =>
+            // #2047's this_event_in_sample marker: when this event's own id
+            // is in the sample, say so plainly rather than rendering it as
+            // just another link that happens to point at the page you're
+            // already on.
+            id === currentId ? (
+              <li key={id}>
+                <code>{id}</code> — this record
+              </li>
+            ) : (
+              <li key={id}>
+                <Link to="/event/$id" params={{ id }}>
+                  <code>{id}</code>
+                </Link>
+              </li>
+            ),
+          )}
+        </ul>
+      ) : null}
+      <p className="note">
+        <a className="section-link" href={`/events?community_id=${encodeURIComponent(link.community_id)}`}>
+          Open the full flow in the event explorer →
+        </a>
+      </p>
     </div>
   )
 }
@@ -315,6 +388,7 @@ function EventDetailPage() {
         href={event.community_id ? `/events?community_id=${encodeURIComponent(event.community_id)}` : undefined}
         hrefLabel="Open the flow in the event explorer"
       />
+      {event.flow_link ? <FlowLinkCard link={event.flow_link} currentId={event.id} /> : null}
       <RelationCard
         title="What else this source did"
         hint="Last 24 hours from"
