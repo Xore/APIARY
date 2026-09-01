@@ -63,6 +63,7 @@ services:
       MAX_EVENTS_PER_CYCLE: '${MAX_EVENTS_PER_CYCLE:-2000}'
       MAX_JOBS_PER_CYCLE: '${MAX_JOBS_PER_CYCLE:-20}'
       MAX_PAYLOAD_SCAN_FILES: '${MAX_PAYLOAD_SCAN_FILES:-5000}'
+      MAX_PAYLOAD_SCAN_BYTES: '${MAX_PAYLOAD_SCAN_BYTES:-67108864}'
       SESSION_IDLE_SECONDS: '${SESSION_IDLE_SECONDS:-300}'
       SESSION_LOOKBACK_SECONDS: '${SESSION_LOOKBACK_SECONDS:-3600}'
       DAILY_REPORT_HOUR: '${DAILY_REPORT_HOUR:-6}'
@@ -81,6 +82,8 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+    labels:
+      - autoheal=true
     deploy:
       resources:
         limits:

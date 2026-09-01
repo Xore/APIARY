@@ -202,6 +202,8 @@ services:
     # HEALTHCHECK is baked into honeyfs-implant/Dockerfile itself (scratch
     # image, no shell/curl available for a compose-level CMD check --
     # same reasoning as canarytokens-adapter's own compose entry).
+    labels:
+      - autoheal=true
     deploy:
       resources:
         limits:

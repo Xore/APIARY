@@ -313,7 +313,9 @@
     "dockerComposePath": "sandbox/ghosts/compose.yml",
     "autoSync": false,
     "syncDirectory": true,
-    "syncInterval": 300
+    "syncInterval": 300,
+    "maxSyncFiles": 1500,
+    "maxSyncTotalSize": 209715200
   },
   {
     "syncName": "pihole",

@@ -124,6 +124,10 @@ updates:
   - package-ecosystem: docker
     directories:
       - /arcane/home/honeypot-init/snare  # #1502
+      - /arcane/home/honeypot-tanner/snare  # #2316: byte-identical twin of
+        # honeypot-init/snare's Dockerfile, verified blob-equal -- was
+        # absent from every dependabot entry, so the exact #1116 regression
+        # this entry exists to prevent was still reachable through it.
       - /arcane/home/honeypot-tanner/tanner/tanner  # #1502
     schedule:
       interval: weekly
@@ -211,6 +215,42 @@ updates:
   # requirements.txt, not every Python stack's).
   - package-ecosystem: pip
     directory: /auth-events-worker
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Berlin
+    groups:
+      python-compatible:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: elasticsearch
+    labels: [dependencies, python]
+
+  # #2221: es-results-importer and llm-worker were the pre-existing pip
+  # coverage gap the shared entry above flagged but never filed. Both pin
+  # elasticsearch==8.19.3 with the same in-file compatibility doctrine as
+  # ml-worker/auth-events-worker above (re-verified live against the 9.5.1
+  # server, #2090) -- same split-entry-with-ignore treatment, not a range
+  # limit, for the same reason: a code comment is invisible to Dependabot.
+  - package-ecosystem: pip
+    directory: /arcane/home/honeypot-dashboard/analysis/es-results-importer
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Berlin
+    groups:
+      python-compatible:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: elasticsearch
+    labels: [dependencies, python]
+
+  - package-ecosystem: pip
+    directory: /llm-worker
     schedule:
       interval: weekly
       day: monday

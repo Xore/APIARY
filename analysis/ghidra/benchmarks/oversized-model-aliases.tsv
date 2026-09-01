@@ -1,0 +1,43 @@
+# #2738: local-alias -> upstream mapping for roster models Ollama's client-side
+# hf.co name validation refuses to pull directly.
+#
+# Bisected live against Ollama 0.32.13: `ollama pull hf.co/<owner>/<repo>:<tag>`
+# rejects the request with a bare `400 Bad Request: invalid model name` in
+# under a second -- before any network transfer -- whenever the REPO NAME
+# SEGMENT (the part between the owner slash and the colon) exceeds 80
+# characters. It is the segment, not the total string: an 81-char segment
+# under the short `hf.co/ab/` prefix still fails; a 100-char total with an
+# 80-char segment passes. `ollama create ... -f Modelfile` with a `FROM
+# hf.co/...` source hits the identical validation (confirmed live) -- the
+# check is on parsing/resolving the hf.co-shaped reference itself, not on
+# which end (pull destination vs. create source) it appears on. The only
+# path around it is a `FROM /local/file.gguf` Modelfile source, which never
+# constructs an hf.co-shaped name at all. recover-oversized-models.sh reads
+# this file and does exactly that: download the raw GGUF, import it under
+# the short local alias below, and record the mapping here so provenance
+# isn't lost once the roster line itself is shortened to the alias.
+#
+# The alias tag below is deliberately uppercase (Q4_K_M) because that is what
+# Ollama actually writes: `ollama create <name>:q4_k_m` lands on disk as a
+# manifest named `Q4_K_M`. The rewrite covers only a subset of
+# quantisation-shaped tags -- not tags in general, and NOT only local-file
+# imports. Measured on Ollama 0.32.13 by creating throwaway models and
+# reading the manifest path back:
+#   rewritten to uppercase: q4_0, q8_0, q3_k_m, q4_k_m, q5_k_m
+#   left exactly as given:  q4_1, q5_0, q5_1, q2_k, q3_k_s, q3_k_l, q4_k_s,
+#                           q5_k_s, q6_k, iq4_xs, f16, latest, and any
+#                           non-quantisation tag (e.g. foobar, MiXeD-tag)
+# A registry-sourced `FROM` behaved identically to a `FROM /local/file.gguf`
+# one (both rewrote `:q4_k_m` -> `:Q4_K_M`), so the source form is not the
+# variable. The rule inside Ollama was not determined; what is established is
+# that the tag you ask for is not necessarily the tag on disk.
+#
+# Ollama *resolves* names case-insensitively (`ollama show <name>:q4_k_m`
+# finds the `Q4_K_M` manifest), so this only affects text comparisons against
+# `ollama list` output -- those must match case-insensitively.
+#
+# Format: local-alias<TAB>upstream-hf-ref<TAB>gguf-filename-in-that-repo
+#
+# local-alias         upstream-hf-ref                                                                                                    gguf-filename
+ravenx-cyberagent-35b:Q4_K_M	hf.co/deadbydawn101/RavenX-CyberAgent-Qwen3.6-35B-A3B-Opus-4.7-OpenMythos-Pentester-BugHunter-RATH-GGUF:Q4_K_M	RavenX-CyberAgent-35B-v5.1-Q4_K_M.gguf
+ravenx-chaos-agent-27b:Q4_K_M	hf.co/deadbydawn101/RavenXAiLabs-Chaos-Agent-Qwen3.8-27B-Frontier-Intelligence-Injected-OBLITERATED-GGUF:Q4_K_M	RavenX-Chaos-Agent-Q4_K_M.gguf

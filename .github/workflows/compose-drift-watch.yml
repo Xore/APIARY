@@ -1,0 +1,40 @@
+name: Compose drift watch
+
+# Scheduled sentinel for #2747: a `systemctl restart docker` (#2743)
+# surfaced four always-on services (three DB/backing-store sidecars plus
+# their stack's dependent app containers kept running regardless) that had
+# no container at all -- not even a stopped one -- across three Dockge
+# stacks. Nothing alarmed; it was found by hand while working an unrelated
+# issue. This sweep turns "compose says this service should exist and a
+# sibling is actively running, but it doesn't" into a labeled tracking
+# issue, mirroring disk-usage-watch.yml's (#2743) and ci-queue-watch.yml's
+# (#2499) shape.
+#
+# Runs ON the homeserver-backed fleet (not GitHub-hosted): it has to walk
+# /var/dockge/stacks and run `docker compose config`/`ps` against each
+# project directly on that host -- no separate SSH credential or network
+# path to the thing being measured, same reasoning the other two watchers
+# give for their own designs.
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+concurrency:
+  group: compose-drift-watch
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: [self-hosted, linux, x64, honeypot-ci]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Sweep the fleet for compose services missing all containers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/compose-drift-watch.py
