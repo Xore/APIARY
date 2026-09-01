@@ -104,6 +104,21 @@ def check_manifest() -> dict:
                 fail(f"builds[{i}].{kind}: sha256 {artifact['sha256']!r} is not 64 lowercase hex chars")
             if not artifact["disassembly"].strip():
                 fail(f"builds[{i}].{kind}: empty disassembly")
+            # #2036: objdump's echoed invocation path leaking into a stored
+            # disassembly blob means normalize_disassembly() failed to strip
+            # it -- turns that drift back into a CI failure instead of a
+            # silent build-directory dependency baked into the artifact.
+            # Scoped to the first non-empty line only (the exact line
+            # normalize_disassembly is responsible for): unstripped builds
+            # run objdump with --source, which legitimately interleaves the
+            # original C source -- including comment lines starting with
+            # "/*" -- deeper in the blob, and those are not a path leak.
+            first_line = next(
+                (l for l in artifact["disassembly"].splitlines() if l.strip()), "")
+            if first_line.startswith("/"):
+                fail(f"builds[{i}].{kind}: disassembly's first line starts with '/' "
+                     f"(looks like an unnormalized absolute-path objdump header): "
+                     f"{first_line[:80]!r}")
 
     # Every source file must be covered by at least one build -- an orphaned
     # fixture with no build entries would silently never reach the manifest
