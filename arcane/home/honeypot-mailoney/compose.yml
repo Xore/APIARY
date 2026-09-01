@@ -44,10 +44,47 @@ services:
     volumes:
       - /opt/stacks/apiary/logs/mailoney:/var/log/honeypot
       - /opt/stacks/apiary/state/init-markers:/markers:ro
+    # #2743: pin the tmpfs owner and mode rather than inheriting a default.
+    # During #2743's `systemctl restart docker` this container crash-looped
+    # on `sqlite3.OperationalError: unable to open database file` and was
+    # recreated from this corrected file.
+    #
+    # The cause originally recorded here -- that an unqualified
+    # `tmpfs: [/data]` mounts `755 root:root`, locking out this image's
+    # `USER 65534` -- does NOT reproduce, so it has been removed rather than
+    # left standing: on this host (Docker 29.7.2) the exact pre-fix shape
+    # (this image, read_only, USER 65534, bare `tmpfs: [/data]`) mounts
+    # `1777 root:root` and sqlite3 opens the db successfully, because /data
+    # does not exist in the image and Docker's default for an absent path is
+    # 1777. The real trigger of that crash loop is unexplained -- see #2754.
+    #
+    # These options are still worth keeping: they drop the world-writable
+    # bit, and they make the mount independent of the image-directory mode a
+    # tmpfs inherits when the path *does* exist in the image (measured:
+    # image dirs at 755/1777/700 each come back through the tmpfs unchanged,
+    # so a root-owned /data added to the image later would lock this UID out).
     tmpfs:
-      - /data
+      - /data:uid=65534,gid=65534,mode=1770
+    # #2366: measured baseline, same "run it, then reduce" methodology as
+    # #89/#118's cap_drop passes. No cap_add needed for the privileged
+    # port 25 bind above -- see honeypot-dns-honeypot/compose.yml's
+    # equivalent comment for why. Verified locally: built this image, ran
+    # it with cap_drop: [ALL] added on top of the existing no-new-
+    # privileges/read_only/tmpfs posture, and confirmed the SQLite session
+    # DB under /data initializes (alembic migrations run clean) and the
+    # SMTP port accepts a real TCP connect.
+    #
+    # That run measured the then-current bare `tmpfs: [/data]`, which Docker
+    # mounts 1777 root:root; the uid/gid/mode above landed separately while
+    # this branch was open. The measurement carries over rather than needing
+    # a re-run: the container runs as 65534, and a mount it *owns* at 1770
+    # needs strictly fewer privileges to write than a root-owned 1777 one --
+    # neither requires a capability, since DAC_OVERRIDE is only consulted
+    # when the ordinary ownership/mode check fails, and here it succeeds.
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
     read_only: true
     networks: [mailoney_net]
     healthcheck:

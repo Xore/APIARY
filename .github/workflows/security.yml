@@ -47,7 +47,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - if: matrix.language == 'go'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           # CodeQL's Go autobuild shell-outs to `go` to enumerate build
           # targets; neither the homeserver runner nor the GitHub-hosted
@@ -55,6 +55,14 @@ jobs:
           # it on every path. Pinned minor to keep the lockfile
           # reproducible.
           go-version: '1.23'
+          # Cache only on the GitHub-hosted path -- mirror of this job's
+          # own runs-on expression. The homeserver runners keep GOMODCACHE
+          # on disk at /opt/github-ci-runner and Go writes its module dirs
+          # mode 0555, so setup-go's restore `tar -x` cannot recreate an
+          # already-present file: the whole archive downloads, fails to
+          # unpack, and gets re-uploaded from the post step. Same
+          # reasoning as the quality.yml Go jobs.
+          cache: ${{ needs.ci-target.outputs.homeserver != 'true' }}
       - uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}

@@ -11,9 +11,14 @@ Companion pages carry the detail this page summarizes: data flow in
 **Status basis:** everything here describes the live deployment as of the
 dashboard cutover (#1628, completed 2026-08-22) — the Go dashboard is
 deleted from compose, and the TanStack Start + Rust tiers serve traffic.
-There is no runtime fallback and no profile gating left on any core stack;
-the only compose profile in the repo is the optional on-demand
-`geoip-update` maintenance job.
+There is no runtime fallback and no profile gating left on the dashboard
+serving path (`dashboard-next` runs unconditionally). Other compose
+profiles still exist for optional/on-demand jobs and deprecated services
+elsewhere in the repo — `grep -rn 'profiles:' --include='*.yml'` finds
+all of them rather than this sentence trying to enumerate them and
+rotting again; as of this writing that turns up eight distinct groups
+(`geoip-update`, `threat-intel`, `mitm`, `test`, `blackhole`,
+`file-extract`, `revdeck`, `legacy`).
 
 ## The ten-second version
 

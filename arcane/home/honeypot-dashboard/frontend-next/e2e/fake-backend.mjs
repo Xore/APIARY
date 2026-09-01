@@ -456,7 +456,22 @@ function route(pathname) {
   if (pathname.startsWith("/api/v1/preferences")) {
     // preferences.rs::get envelope -- {preferences, revision}. The root
     // route's appearance reconcile reads preferences.theme/palette off it.
-    return { preferences: { theme: "dark", palette: "claude" }, revision: 1 };
+    //
+    // No `theme` key on purpose: this fixture is one shared operator record
+    // behind every browser context, and __root's useStoredAppearance() runs
+    // pullAppearance() on mount, which applies a stored mode over whatever
+    // the page booted with (prefs.ts, #1755). A fixed "dark" therefore
+    // raced -- and eventually beat -- the light half of the theme x viewport
+    // matrix, which seeds hp-theme per context via addInitScript: the
+    // fastest-hydrating route flipped data-theme to dark before the spec's
+    // toHaveAttribute could ever observe "light" (#2692, /investigate/lookup
+    // at mobile/light). fetchAppearance maps an absent theme to mode: null,
+    // which is the real "operator has never pinned a mode" state and the one
+    // where the device's own choice stays authoritative -- so both halves of
+    // the matrix keep the theme they seeded. `palette` stays: it matches the
+    // palette the spec seeds, so the reconcile is a no-op on that axis too,
+    // and the envelope keeps its production shape.
+    return { preferences: { palette: "claude" }, revision: 1 };
   }
   if (pathname === "/api/v1/alerts") {
     return { total: 1, offset: 0, rows: [{ id: "alert-1", time: NOW, sensor: "citrix", signature: "test alert", severity: "high", record: {} }], fingerprint_ips: null };
@@ -496,6 +511,18 @@ function route(pathname) {
   if (pathname === "/api/v1/ml-anomalies/acks") return {};
   if (pathname.startsWith("/api/v1/store/")) return { rows: [], total: 0 };
   if (pathname === "/api/v1/search") return { results: [] };
+  if (pathname === "/api/v1/live") {
+    // STUB pending the live-shared-poller workstream (4b9cae88/bf8d4740:
+    // "serve the live feed from one shared poller per process", "coalesce
+    // live-tail frames"). routes/api/live.ts proxies this path straight
+    // through as an SSE body (limitedStreamProxy forces the response's
+    // content-type/headers regardless of what's returned here), so the
+    // exact frame format isn't exercised by this fixture either way --
+    // this just needs to stop answering the bare {} catch-all (#2542)
+    // without pinning a real-backend contract that workstream is still
+    // reshaping. Replace with a shape-correct frame/envelope once it lands.
+    return { entries: [], cursor: null };
+  }
   // #2507: an unrecognized /api/v1/* path used to answer {} invisibly, so
   // every new page silently inherited fallback coverage and its smoke test
   // verified little more than the skeleton. Say so, once per path, so a

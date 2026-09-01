@@ -209,6 +209,16 @@ services:
     # own internal address, never the real attacker.
     volumes:
       - /opt/stacks/apiary/logs/tftp-relay:/logs
+    # #2366: measured baseline, same "run it, then reduce" methodology as
+    # #89/#118's cap_drop passes -- this service had none of no-new-
+    # privileges/read_only/cap_drop at all. Verified locally: built this
+    # image, ran it with all three added, and confirmed the relay still
+    # starts and logs its listen line.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
     depends_on:
       dionaea:
         condition: service_started

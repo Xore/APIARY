@@ -94,7 +94,70 @@ jobs:
             context: vps/portbridge
     steps:
       - uses: actions/checkout@v7
+      # #2819: point buildkit at the self-hosted executor's Docker Hub
+      # pull-through cache when there is one. This has to be buildkit's
+      # own config -- the docker-container driver runs its own containerd
+      # and never reads the host daemon's /etc/docker/daemon.json, so a
+      # mirror configured there would be silently ignored. The address
+      # comes from repo variable CI_REGISTRY_MIRROR (host:port) and is
+      # applied ONLY when ci-target actually routed us to the homeserver:
+      # a GitHub-hosted fallback runner cannot reach that address, and a
+      # mirror it cannot dial turns every base-image resolve into a
+      # timeout instead of a pull. Written as a file rather than an
+      # inline expression because the "no mirror" case still needs a
+      # valid (empty) config -- an unset buildkitd-config would be one
+      # more conditional step to keep in sync.
+      - name: Compose the buildkit registry config
+        id: buildkit
+        env:
+          MIRROR: ${{ needs.ci-target.outputs.homeserver == 'true' && vars.CI_REGISTRY_MIRROR || '' }}
+        run: |
+          set -euo pipefail
+          cfg="$RUNNER_TEMP/buildkitd.toml"
+          if [ -n "$MIRROR" ]; then
+            # http = true: the mirror is a plain-HTTP service bound to a
+            # container-only address on the executor, not a public
+            # registry, so there is no certificate to verify. Built with
+            # printf rather than a heredoc because a heredoc terminator
+            # has to sit at column 0, which is outside this YAML block
+            # scalar's indentation.
+            printf '%s\n' \
+              '[registry."docker.io"]' \
+              "  mirrors = [\"$MIRROR\"]" \
+              "[registry.\"$MIRROR\"]" \
+              '  http = true' >"$cfg"
+            echo "using registry mirror $MIRROR"
+            cat "$cfg"
+          else
+            echo '# no registry mirror configured for this executor' >"$cfg"
+          fi
+          echo "config=$cfg" >>"$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v4
+        with:
+          # Concurrent matrix rows share the single self-hosted runner
+          # instance; without an explicit stop+rm at job end, a builder
+          # left mid-flight after a graceful_stop aborts the next row's
+          # GHA cache export against the same builder (#2639).
+          cleanup: true
+          buildkitd-config: ${{ steps.buildkit.outputs.config }}
+      # #2819: authenticate to Docker Hub, INCLUDING on pull_request --
+      # that is precisely the event where the gap bites. Docker Hub meters
+      # anonymous pulls per source IP, all 18 matrix rows leave the
+      # homeserver through one address, and the tree carries 74 non-scratch
+      # Hub FROM lines, so a single cold run spends roughly three quarters
+      # of the ~100/6h anonymous budget and the run after it 429s. The
+      # layer cache does not help here: #2771's type=gha scopes store our
+      # own layers, never the base image, so every run re-resolves every
+      # FROM against the registry. Guarded on the secret being non-empty
+      # so a fork pull_request -- which by design cannot see secrets --
+      # keeps building anonymously rather than failing on empty creds.
+      - uses: docker/login-action@v4
+        if: env.DOCKERHUB_USERNAME != ''
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - uses: docker/login-action@v4
         if: github.event_name != 'pull_request'
         with:
@@ -117,5 +180,19 @@ jobs:
           load: false
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Scope the layer cache per image (#2771). Without an explicit
+          # scope every matrix row defaults to `buildkit`, so all 18
+          # concurrent builds read and write ONE shared cache index per
+          # ref -- confirmed from the cache listing, which carried exactly
+          # one `index-buildkit-1-<hash>` key per git ref rather than one
+          # per image. Eighteen parallel `mode=max` read-modify-writes
+          # against a single index is a lost-update race: whichever row
+          # exports last wins and the rows it overwrote find their layers
+          # missing next run. dionaea showed it cleanly -- its apt layer
+          # is instruction #1 after a digest-pinned FROM, so nothing can
+          # invalidate it, yet it re-ran in 4 of 4 consecutive runs while
+          # backend-service's equivalent layer hit. Per-image scopes also
+          # keep the over-quota LRU eviction from taking out a
+          # neighbour's layers.
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

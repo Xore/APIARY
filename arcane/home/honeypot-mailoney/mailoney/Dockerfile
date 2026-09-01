@@ -43,13 +43,21 @@ ENV MAILONEY_DB_URL=sqlite:////data/mailoney.db \
 EXPOSE 25
 
 # 65534 (nobody), not a named user: matches every other non-root sensor
-# here (beelzebub, hellpot) and docker-compose.init.yml's log-dir chown
+# here (beelzebub, hellpot) and honeypot-init's compose.yml log-dir chown
 # convention exactly -- that job chowns /logs/mailoney to literal
 # 65534:65534 on the host, which only lines up if the container actually
-# runs as that UID. No in-image chown needed: /var/log/honeypot is a
-# bind mount (ownership comes from the host side, not the image) and
-# /data is tmpfs (Docker's own default tmpfs mode is 1777, world-
-# writable, no extra config required).
+# runs as that UID. No in-image chown needed for /var/log/honeypot (a bind
+# mount; ownership comes from the host side, not the image). /data is a
+# tmpfs, declared in compose.yml as `/data:uid=65534,gid=65534,mode=1770`.
+# Those options are a deliberate tightening, not a functional requirement:
+# /data does not exist in this image, and a tmpfs on a path absent from the
+# image gets Docker's default 1777 root:root, which this UID can already
+# write (measured on the homeserver, Docker 29.7.2). Keep them anyway --
+# they drop the world-writable bit, and a tmpfs on a path that *does* exist
+# in the image inherits that directory's mode and owner instead of the
+# default, so adding a root-owned /data to this image later would silently
+# lock this UID out. See #2754 for the #2743 crash loop whose recorded
+# cause (an unqualified tmpfs mounting 755 root:root) does not reproduce.
 USER 65534
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

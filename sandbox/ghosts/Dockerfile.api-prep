@@ -35,6 +35,40 @@
 #     review sweep's second comment). Defense-in-depth: the socket is also
 #     source-pinned by network-filter.sh.
 #
+# #2257 additionally strips the two pieces of upstream's *anonymous read*
+# surface that survive the deletions above, because the API has no
+# authentication of any kind -- no UseAuthentication/UseAuthorization in
+# Program.cs's pipeline and no [Authorize] anywhere -- so every route it
+# does serve is served to whoever reaches the socket. network-filter.sh
+# source-pins tcp/5000 to the enrolled clients, but the enrolled client is
+# win11-ghosts: the guest this deployment exists to detonate real malware
+# on (#325/#331). Anything reachable from it is reachable post-compromise,
+# so the firewall pin cannot be the only control:
+#   Swagger (app.UseSwagger/UseSwaggerUI)
+#     An interactive, self-describing map of every remaining endpoint,
+#     served anonymously at /swagger. Unlike the controllers above it is
+#     wired in Program.cs rather than its own file, so it is patched out of
+#     the build copy instead of deleted -- the assertions around the sed
+#     make a silently-missed strip a build failure, matching the rm list's
+#     fail-loud-by-path property. Only the two middleware calls go; the
+#     AddSwaggerGen service registrations stay, since nothing routes to
+#     them once the middleware is gone and removing them would touch the
+#     SwaggerExamples attributes scattered across the controllers.
+#   ASPNETCORE_ENVIRONMENT=DEVELOPMENT -> Production
+#     Upstream's Dockerfile-api bakes DEVELOPMENT, which makes
+#     Program.cs:198's `app.UseDeveloperExceptionPage()` live: any request
+#     that trips an unhandled exception answers an anonymous caller with a
+#     stack trace and framework internals. That IsDevelopment() check is
+#     the tree's only environment-name branch and there is no
+#     appsettings.DEVELOPMENT.json, so Production changes nothing else
+#     about how the app binds its configuration.
+#
+# What #2257 deliberately does NOT do: add authentication. That is a real
+# gap, not a closed one -- see compose.yml's header for the residual-risk
+# statement and issue #2257's step 3 for the medium-term options (mTLS, a
+# minimal auth middleware, or a docker-side proxy in front of the guest
+# net). This wrapper only shrinks what an anonymous caller can read.
+#
 # Everything below this header is upstream's Dockerfile-api with only the
 # COPY paths adjusted for this wrapper's wider build context (the stack
 # root instead of vendor/ghosts-src) and the rm layer above, kept in
@@ -52,6 +86,17 @@ RUN rm /app/Ghosts.Api/Controllers/Api/AnimationJobsController.cs \
        /app/Ghosts.Api/Controllers/AnimationsController.cs \
        /app/Ghosts.Api/Controllers/Api/AttackController.cs
 
+# Swagger's middleware lives in Program.cs, so it is patched rather than
+# deleted (#2257). Both assertions are load-bearing: the first fails the
+# build if upstream's two `app.UseSwagger*` lines are no longer exactly
+# two (a bump that reshapes the block must re-decide this strip), and the
+# second fails it if the sed matched nothing, so the image can never
+# silently ship the routes back.
+RUN test "$(grep -c 'app\.UseSwagger' /app/Ghosts.Api/Program.cs)" = 2 \
+ && sed -i '/^        app\.UseSwagger();$/,/^        });$/c\        // Swagger middleware stripped at build time -- see Dockerfile.api-prep (APIARY #2257).' \
+        /app/Ghosts.Api/Program.cs \
+ && ! grep -q 'app\.UseSwagger' /app/Ghosts.Api/Program.cs
+
 WORKDIR /app/Ghosts.Api
 RUN dotnet publish -c Release -o /app/dist
 COPY vendor/ghosts-src/Ghosts.Api/config /app/dist/config
@@ -67,10 +112,10 @@ WORKDIR /app
 
 LABEL "product"="GHOSTS API"
 LABEL "maintainer"="Dustin Updyke <ddupdyke[-@-]sei.cmu.edu>"
-LABEL "version"="Browse to /swagger"
+LABEL "version"="GHOSTS API (Swagger stripped, see #2257)"
 
 EXPOSE 5000
 ENV ASPNETCORE_URLS=http://*:5000 \
-    ASPNETCORE_ENVIRONMENT=DEVELOPMENT
+    ASPNETCORE_ENVIRONMENT=Production
 
 CMD ["dotnet", "ghosts.api.dll"]

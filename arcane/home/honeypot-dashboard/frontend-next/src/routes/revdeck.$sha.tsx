@@ -40,7 +40,7 @@ type RevdeckRun = {
 type RunFetch = { state: 'run'; run: RevdeckRun } | { state: 'missing' } | { state: 'failed' }
 
 const fetchRun = createServerFn({ method: 'GET' })
-  .inputValidator((input: { sha: string }) => input)
+  .validator((input: { sha: string }) => input)
   .handler(async ({ data }): Promise<RunFetch> => {
     const { serviceJSONResult } = await import('../lib/backend.server')
     const result = await serviceJSONResult<RevdeckRun>(`/api/v1/revdeck/${encodeURIComponent(data.sha)}`)

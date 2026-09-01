@@ -55,14 +55,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-# 8: added revdeck_chat_threads/revdeck_recovery (#1193). Informational
-# only — nothing reads this field to decide how to parse the rest of the
-# document; it exists so a result can be tied to the worker version that
-# produced it. (7: added memory_map (#1167). 6: added the v1 deep-dive --
-# pseudocode/callers/callees/types/globals/annotations (#1168). 5: added
-# floss (#207). 4: added revdeck (#78). 3: added capa. 2: added fuzzy_hashes
-# and lief (#138).)
-RESULT_VERSION = 8
+# 9: added ai_triage.slot_generation (#2646). Informational only — nothing
+# reads this field to decide how to parse the rest of the document; it exists
+# so a result can be tied to the worker version that produced it. (8: added
+# revdeck_chat_threads/revdeck_recovery (#1193). 7: added memory_map (#1167).
+# 6: added the v1 deep-dive -- pseudocode/callers/callees/types/globals/
+# annotations (#1168). 5: added floss (#207). 4: added revdeck (#78). 3: added
+# capa. 2: added fuzzy_hashes and lief (#138).)
+RESULT_VERSION = 9
 
 REQUEST_DIR = Path(os.environ.get("GHIDRA_REQUEST_DIR", "/ghidra-requests"))
 RESULTS_DIR = Path(os.environ.get("GHIDRA_RESULTS_DIR", "/ghidra-results"))
@@ -221,6 +221,37 @@ TRIAGE_MODEL = os.environ.get("GHIDRA_TRIAGE_MODEL", "qwen3:14b")
 TRIAGE_TIMEOUT = int(os.environ.get("GHIDRA_TRIAGE_TIMEOUT", "300"))
 TRIAGE_OUTPUT_TOKENS = int(os.environ.get("GHIDRA_TRIAGE_OUTPUT_TOKENS", "512"))
 TRIAGE_SEED = int(os.environ.get("GHIDRA_TRIAGE_SEED", "144"))
+
+# #2646: temperature 0 and a fixed seed do not make two runs agree. Ollama
+# keeps the model resident between samples (OLLAMA_KEEP_ALIVE=30m in
+# docker-compose.ghidra.yml, deliberately -- reloading several GB of weights
+# per workflow call costs more than the inference does), and a warm slot's
+# answers drift where a freshly loaded one's do not. Production therefore runs
+# permanently in the drifting regime, and there is no setting here that fixes
+# that without paying the reload.
+#
+# What can be fixed is the accounting: a stored assessment should say which
+# resident instance produced it, so two results are never compared as though
+# they came from the same one. Ollama's native API (not the /v1 dialect the
+# workflows speak) reports what is loaded at /api/ps; the base is derived from
+# TRIAGE_API_BASE by dropping the OpenAI suffix. Override it when the /v1
+# endpoint is behind a proxy path where that derivation does not hold, or set
+# it to "none" to skip the probe -- a server that is not Ollama has no /api/ps
+# and simply records "unavailable" either way. The probe is a GET carrying no
+# sample-derived text, so #103's local-only rule is not at stake in it.
+def _derive_runtime_base(api_base: str) -> str:
+    base = api_base.rstrip("/")
+    for suffix in ("/v1", "/api/v1"):
+        if base.endswith(suffix):
+            return base[: -len(suffix)]
+    return base
+
+
+_RUNTIME_BASE_ENV = os.environ.get("GHIDRA_TRIAGE_RUNTIME_BASE", "").strip()
+TRIAGE_RUNTIME_BASE = (
+    "" if _RUNTIME_BASE_ENV.lower() == "none"
+    else (_RUNTIME_BASE_ENV or _derive_runtime_base(TRIAGE_API_BASE)).rstrip("/"))
+TRIAGE_RUNTIME_TIMEOUT = int(os.environ.get("GHIDRA_TRIAGE_RUNTIME_TIMEOUT", "10"))
 
 # GPU job queue (#637 follow-up): a queue drain (gpu-queue-drain.py) or another
 # GPU-bound consumer may already have the card's headroom claimed when a
@@ -1788,6 +1819,68 @@ def _triage(parts: dict, sha: str) -> dict | None:
     return run_triage_workflows(evidence, note)
 
 
+def slot_fingerprint() -> str:
+    """Identify the resident model instance that would serve the next call.
+
+    Never raises and never returns an empty string. The result this stamps is
+    worth keeping whether or not the runtime API answered, so a probe failure
+    costs the detail and nothing else — same fail-soft contract as the rest of
+    triage.
+
+    Three answers, and the distinction between them is the point:
+
+    - ``cold``: the model is not loaded, so the next call loads a fresh
+      instance. #2642 measured that regime as reproducible.
+    - a fingerprint (``<digest>/ctx<n>/vram<n>mib``): a resident instance is
+      already serving, which is where the drift in #2646 lives. The context
+      length and the VRAM footprint are in it because an instance resident
+      under someone else's parameters answers at *those* parameters, not the
+      ones this worker would have asked for — #2644 is the same trap on the
+      benchmark side.
+    - ``unavailable``: no runtime API to ask (not Ollama, probe disabled, or
+      unreachable). Explicitly not the same as ``cold``; not knowing which
+      instance answered must not read as knowing it was a fresh one.
+    """
+    if not TRIAGE_RUNTIME_BASE:
+        return "unavailable"
+    req = urllib.request.Request(f"{TRIAGE_RUNTIME_BASE}/api/ps", method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=TRIAGE_RUNTIME_TIMEOUT) as r:
+            loaded = json.loads(r.read()).get("models")
+    except Exception as e:  # noqa: BLE001
+        log(f"  [i] triage: no slot state from {TRIAGE_RUNTIME_BASE}/api/ps ({e!r}); "
+            f"recording the assessment without it")
+        return "unavailable"
+    for entry in loaded if isinstance(loaded, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        # Ollama repeats the tag under both keys; other servers pick one.
+        if TRIAGE_MODEL not in (entry.get("model"), entry.get("name")):
+            continue
+        parts = [str(entry.get("digest") or "nodigest")[:12]]
+        ctx, vram = entry.get("context_length"), entry.get("size_vram")
+        if isinstance(ctx, int):
+            parts.append(f"ctx{ctx}")
+        if isinstance(vram, int):
+            parts.append(f"vram{vram // (1024 * 1024)}mib")
+        return "/".join(parts)
+    return "cold"
+
+
+def slot_generation(before: str, after: str) -> str:
+    """The slot_generation stamp for a run observed to start at `before` and
+    end at `after`.
+
+    Sampling both ends is what makes this an honest field rather than a
+    decoration. A 30-minute keep-alive does not mean the slot survives a whole
+    analysis: a queue drain, an eviction, or another consumer of the same card
+    can swap the instance out between the two workflow calls, and a stamp taken
+    only at the start would claim an instance that did not finish the work.
+    When the ends disagree the stamp says so instead of picking one.
+    """
+    return before if before == after else f"{before}->{after}"
+
+
 def run_triage_workflows(evidence: str, note: str, should_abort=None) -> dict | None:
     """Ask the model both workflows and assemble the ai_triage result.
 
@@ -1798,12 +1891,14 @@ def run_triage_workflows(evidence: str, note: str, should_abort=None) -> dict | 
     """
     results: dict = {}
     ran: list[str] = []
+    slot_before = slot_fingerprint()
     for workflow in ("program_triage", "suspicious_behavior"):
         answer = _ask_model(workflow, evidence, should_abort)
         if answer is None:
             continue
         results.update(answer)
         ran.append(workflow)
+    slot_after = slot_fingerprint()
 
     # Neither workflow answered: no endpoint, no model pulled, or a server
     # error. Say nothing rather than showing an empty assessment.
@@ -1827,6 +1922,13 @@ def run_triage_workflows(evidence: str, note: str, should_abort=None) -> dict | 
         # of the assessment, and an unverified claim from an unknown source is
         # worse than no claim.
         "model": TRIAGE_MODEL,
+        # #2646: which resident instance of that model answered. The tag alone
+        # is not enough to compare two assessments -- a warm slot returns
+        # different text for the same prompt at temperature 0 with a fixed
+        # seed, so "same model" does not imply "comparable answers". Always
+        # present, "unavailable" included, so its absence never has to be
+        # interpreted.
+        "slot_generation": slot_generation(slot_before, slot_after),
         # What the model was actually shown. The assessment can only be as good
         # as this, and on a large binary it is a small fraction of the sample.
         "evidence_shown": note,

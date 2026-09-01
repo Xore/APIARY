@@ -45,7 +45,7 @@ x-runtime-defaults: &runtime-defaults
 services:
   elasticsearch:
     <<: *runtime-defaults
-    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.1@sha256:b70b3017fbd35310bc57e7e3f8c0ca42ca0b94df3331f747b7cdcfddae430a5a
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.2@sha256:9c1e1afc2bda921b35025e21c72ec6e392266995aa35ad6a47887363592718be
     container_name: hp-elasticsearch
     restart: unless-stopped
     environment:
@@ -132,7 +132,7 @@ services:
           memory: 12G
   kibana:
     <<: *runtime-defaults
-    image: docker.elastic.co/kibana/kibana:9.5.1@sha256:f1e3cb03928b2c88590579445cd3ea3fad750a1b1ced653193ce4211051d2206
+    image: docker.elastic.co/kibana/kibana:9.5.2@sha256:861d93114b756dd214f6d5c8824f90ac92e07d5b6223fd4a20212f7504eec2ad
     container_name: hp-kibana
     restart: unless-stopped
     environment:
@@ -162,7 +162,7 @@ services:
           memory: 2G
   filebeat:
     <<: *runtime-defaults
-    image: docker.elastic.co/beats/filebeat:9.5.1@sha256:38859149a6ed96da7326ee67033e1e463d5ed31166a95933e18a5d3e6735497c
+    image: docker.elastic.co/beats/filebeat:9.5.2@sha256:17aafbe925a43919b2eee539b1b0712e19aefd01247d4a1b855c91ca8e1ba2d6
     container_name: hp-filebeat
     restart: unless-stopped
     user: root
@@ -484,8 +484,8 @@ services:
     # offline files", merged 2026-05-19, first released in v6.4.0) fixes
     # the exact deadlock this container hit live -- "Waiting for reader
     # slot N to drain, finishWaiting=255" repeating forever until manually
-    # restarted. v6.6.0 is the latest stable release and includes it.
-    image: ghcr.io/arkime/arkime/arkime:v6.6.0@sha256:c43159c5b8f486c1ca0d74a7754b28df6f784e36741595bac0ec582ae93bb2ca
+    # restarted. v6.7.0 is the latest stable release and includes it.
+    image: ghcr.io/arkime/arkime/arkime:v6.7.0@sha256:754ac8d50c8d4136462c3bb3701c400be66310020ab01d5ea94a4e73942b0127
     container_name: hp-arkime-capture
     restart: unless-stopped
     # Offline import mode: -R watches the locally synced pcap dir (see
@@ -509,7 +509,7 @@ services:
         -- -R file:///opt/arkime/raw --monitor --skip --host honeypot-vps
     volumes:
       - ./arkime/config.ini:/opt/arkime/etc/config.ini:ro
-      - /opt/stacks/apiary/arkime/geo:/opt/arkime/geo:ro
+      - /opt/stacks/apiary/analysis/geoip:/opt/arkime/geo:ro
       - /opt/stacks/apiary/logs/arkime-raw:/opt/arkime/raw:ro
       - arkime-pcap:/opt/arkime/pcap
       - /opt/stacks/apiary/state/init-markers:/markers:ro
@@ -562,7 +562,7 @@ services:
     <<: *runtime-defaults
     # #1497: pinned for the same reason as arkime-capture above -- keep
     # both in lockstep, same image either way.
-    image: ghcr.io/arkime/arkime/arkime:v6.6.0@sha256:c43159c5b8f486c1ca0d74a7754b28df6f784e36741595bac0ec582ae93bb2ca
+    image: ghcr.io/arkime/arkime/arkime:v6.7.0@sha256:754ac8d50c8d4136462c3bb3701c400be66310020ab01d5ea94a4e73942b0127
     container_name: hp-arkime-viewer
     restart: unless-stopped
     # #126: waits on the marker directly instead of depends_on-ing
@@ -578,7 +578,7 @@ services:
       - ${HP_BIND:-10.8.0.2}:19080:8005
     volumes:
       - ./arkime/config.ini:/opt/arkime/etc/config.ini:ro
-      - /opt/stacks/apiary/arkime/geo:/opt/arkime/geo:ro
+      - /opt/stacks/apiary/analysis/geoip:/opt/arkime/geo:ro
       - /opt/stacks/apiary/logs/arkime-raw:/opt/arkime/raw:ro
       - arkime-pcap:/opt/arkime/pcap
       - /opt/stacks/apiary/state/init-markers:/markers:ro

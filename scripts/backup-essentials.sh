@@ -169,6 +169,24 @@ if [ -d /etc/wireguard ]; then
   echo "  wireguard: $(find "$stage/wireguard" -type f | wc -l) files"
 fi
 
+# The installer's answers file. install-homeserver.sh refuses to run without
+# one, and it holds the real hostnames, key paths and git remote that
+# install-homeserver.conf.example only placeholds. It lives on the root
+# filesystem -- exactly what a reinstall wipes -- so a rebuild that starts
+# from a wiped disk has no way to reconstruct it. Collected under sudo
+# because it is 0600 and owned by the operator, not root.
+mkdir -p "$stage/installer"
+for conf in /root/install-homeserver.conf /home/*/install-homeserver.conf; do
+  [ -f "$conf" ] || continue
+  cp -- "$conf" "$stage/installer/$(basename "$(dirname "$conf")")-$(basename "$conf")"
+done
+if [ "$(find "$stage/installer" -type f | wc -l)" -gt 0 ]; then
+  echo "  installer: $(find "$stage/installer" -type f | wc -l) answers file(s)"
+else
+  rmdir "$stage/installer"
+  echo "  installer: no install-homeserver.conf found -- a restore will need one written by hand"
+fi
+
 # Pi-hole: hand-maintained config only. gravity.db is a rebuildable blocklist
 # compile and pihole-FTL.db is the DNS query log — 689 MB of bulk between
 # them, and neither is needed to bring Pi-hole back with the same behaviour.
@@ -348,6 +366,7 @@ Layout:
   homeserver/env/*.env        one file per Arcane/Dockge stack
   homeserver/secrets/         out-of-band secret files kept beside a stack
   homeserver/wireguard/       wg0.conf including the private key
+  homeserver/installer/       install-homeserver.conf, the installer's answers file
   homeserver/pihole/          hand-maintained Pi-hole config only
   homeserver/keycloak/        keycloak.sql.gz — pg_dump of the identity DB
   homeserver/volumes/         small config-bearing docker volumes

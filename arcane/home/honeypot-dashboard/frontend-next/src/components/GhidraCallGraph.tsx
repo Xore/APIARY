@@ -26,7 +26,7 @@ type GraphEdge = { source: string; target: string }
 type Graph = { nodes: GraphNode[]; edges: GraphEdge[]; truncated: boolean }
 
 const fetchCallGraph = createServerFn({ method: 'GET' })
-  .inputValidator((input: { sha: string }) => input)
+  .validator((input: { sha: string }) => input)
   .handler(async ({ data }): Promise<Graph | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<Graph>(`/api/v1/ghidra-callgraph/${encodeURIComponent(data.sha)}`)

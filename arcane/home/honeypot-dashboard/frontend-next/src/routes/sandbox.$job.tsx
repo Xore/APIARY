@@ -26,7 +26,7 @@ type Run = JsonRecord
 type RunFetch = { state: 'run'; run: Run } | { state: 'missing' } | { state: 'failed' }
 
 const fetchRun = createServerFn({ method: 'GET' })
-  .inputValidator((input: { job: string }) => input)
+  .validator((input: { job: string }) => input)
   .handler(async ({ data }): Promise<RunFetch> => {
     const { serviceJSONResult } = await import('../lib/backend.server')
     const result = await serviceJSONResult<Run>(`/api/v1/sandbox/${encodeURIComponent(data.job)}`)
@@ -38,7 +38,7 @@ const fetchRun = createServerFn({ method: 'GET' })
 // payload-analysis.$hash.tsx's submitSandbox — admin-gated at the BFF, the
 // Rust tier's own trust boundary being the service token.
 const resubmitSandbox = createServerFn({ method: 'POST' })
-  .inputValidator((input: { hash: string }) => input)
+  .validator((input: { hash: string }) => input)
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()

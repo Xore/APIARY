@@ -23,42 +23,37 @@ box — realistic `/etc/passwd`, inference services, a credential-laden `.env`,
 
 ## GeoIP
 
-The custom dashboard and Elasticsearch share the same local GeoLite2 City/ASN
-MMDB files. Dashboard lookups happen after portbridge real-IP correlation,
-support IPv4/IPv6, and add country, city, coordinates, accuracy radius, ASN,
-organization, and cloud/hosting/scanner classification without sending attacker
-IPs to an external lookup API. For official automatic updates, set
-`MAXMIND_ACCOUNT_ID` and `MAXMIND_LICENSE_KEY` only in Dockge's `.env`, then run
-`docker compose -f compose.yml --profile geoip-update up -d geoipupdate`.
+The custom dashboard, Arkime, and Elasticsearch all share the same local
+MaxMind GeoLite2 MMDB files under `analysis/geoip/`, kept current by the
+`hp-geoipupdate` container (`docker compose -f compose.yml --profile
+geoip-update up -d geoipupdate`, needs `MAXMIND_ACCOUNT_ID` /
+`MAXMIND_LICENSE_KEY` in Dockge's `.env`). Dashboard lookups happen after
+portbridge real-IP correlation, support IPv4/IPv6, and add country, city,
+coordinates, accuracy radius, ASN, organization, and cloud/hosting/scanner
+classification without sending attacker IPs to an external lookup API.
 
-Two independent geo integrations (the home server has **no internet egress** —
-all database downloads must be fetched on the VPS and copied over):
+Two independent geo integrations, same source files:
 
-- **Arkime** reads free [db-ip.com](https://db-ip.com) lite databases from
-  `arkime/geo/{country,asn}.mmdb` (mounted into capture + viewer, configured
-  via `geoLite2Country`/`geoLite2ASN` in [arkime/config.ini](../arcane/home/honeypot-elk/arkime/config.ini)).
-  Sessions get country + ASN. No MaxMind account needed.
+- **Arkime** reads `analysis/geoip/GeoLite2-{Country,ASN}.mmdb`, mounted
+  read-only into both capture and viewer at `/opt/arkime/geo` and configured
+  via `geoLite2Country`/`geoLite2ASN` in
+  [arkime/config.ini](../arcane/home/honeypot-elk/arkime/config.ini). Sessions
+  get country + ASN. (#2713: this used to point at a separate,
+  never-automated `arkime/geo/` directory populated by hand from db-ip.com —
+  retired in favor of the same files everything else already uses.)
 - **Elasticsearch** enriches every `suricata-*` and `honeypot-*` event through
   the `geoip-honeypot` ingest pipeline (set as `index.default_pipeline` on both
   index templates), writing ECS `source.geo` / `source.as` / `destination.geo`
   with city-level lat/lon — this is what powers Kibana maps
-  (`source.geo.location` is mapped as `geo_point`). ES 8.13 rejects db-ip-typed
-  mmdb files, so it uses **GeoLite2** files (P3TERX GitHub mirror) mounted at
+  (`source.geo.location` is mapped as `geo_point`), from
+  `GeoLite2-City.mmdb` mounted at
   `analysis/geoip/ → /usr/share/elasticsearch/config/ingest-geoip`, with
-  `ingest.geoip.downloader.enabled=false` (the auto-downloader can never work
-  without egress).
+  `ingest.geoip.downloader.enabled=false` (ES's own auto-downloader needs
+  egress the home server doesn't have).
 
-The `.mmdb` files are static and not in git — refresh every month or two:
-
-```bash
-# on the VPS (has egress), then scp to the home server:
-curl -fLo /tmp/country.mmdb.gz https://download.db-ip.com/free/dbip-country-lite-$(date +%Y-%m).mmdb.gz
-curl -fLo /tmp/asn.mmdb.gz     https://download.db-ip.com/free/dbip-asn-lite-$(date +%Y-%m).mmdb.gz
-curl -fLo /tmp/GeoLite2-City.mmdb https://github.com/P3TERX/GeoLite.mmdb/releases/latest/download/GeoLite2-City.mmdb
-curl -fLo /tmp/GeoLite2-ASN.mmdb  https://github.com/P3TERX/GeoLite.mmdb/releases/latest/download/GeoLite2-ASN.mmdb
-# gunzip the db-ip files → arkime/geo/{country,asn}.mmdb   (restart arkime-capture/viewer)
-# GeoLite2 files        → analysis/geoip/                  (ES reloads automatically)
-```
+The `.mmdb` files themselves are not in git; `hp-geoipupdate` refreshes them
+on `GEOIPUPDATE_FREQUENCY` (hours) automatically once credentials are set —
+no manual download/copy step.
 
 > **Elasticsearch field limits:** Suricata's EVE output creates so many
 > dynamic fields that the default 1000-field index cap breaks ingest — every
@@ -234,3 +229,45 @@ commands/credentials, payloads, enriched IDS alerts, and ingest failures.
 - **TANNER dashboard** → `https://tanner.<domain>` (Keycloak via the oauth2-proxy gateway) — web-attack analysis.
 - Dionaea/Conpot write their own JSON into the shared volume for jq/ELK; the
   live dashboard ingests them alongside Cowrie, multipot, HTTP, and Suricata.
+
+## Disk space monitoring
+
+`hp-disk-space-monitor` (`arcane/home/honeypot-utilities/analysis/disk-space-check.sh`)
+polls `df` on the bind-mounted host paths in `DISK_CHECK_PATHS` (default:
+`honeypot-logs=/logs:honeypot-state=/state:dionaea-payloads=/dionaea-lib`)
+plus Elasticsearch's own data volume over HTTP (`_cat/allocation`), and
+writes a warning line to `/logs/diagnostics/disk-space.json` whenever a
+checked filesystem's free space drops below `DISK_WARN_PERCENT_FREE`
+(default 15%). Filebeat ships those lines under
+`event.module:disk-space-check`.
+
+**#2707: alerts are grouped by physical filesystem, not by bind-mounted
+path.** `honeypot-logs` (`/logs`) and `honeypot-state` (`/state`) are both
+bind-mounts of the same host directory tree
+(`/opt/stacks/apiary` on the home server), so a low-free-space condition on
+that one filesystem used to fire one near-identical WARNING line per bind
+mount. The monitor now reads the backing device from `df -Pk`'s first
+column, groups every checked path that shares a device into a single
+alert, and names the largest of the grouped paths (by `du`) as
+`top_contributor` so a real spike points straight at a directory instead
+of leaving an operator to compare N identical percentages by hand. Shape:
+
+```json
+{
+  "@timestamp": "2026-08-30T12:00:00Z",
+  "event": {"module": "disk-space-check", "category": "host"},
+  "disk": {
+    "source": "/dev/sda1",
+    "labels": "honeypot-logs,honeypot-state",
+    "percent_free": 8,
+    "available_kb": 1234567,
+    "total_kb": 20000000,
+    "top_contributor": {"label": "honeypot-logs", "path": "/logs", "used_kb": 15000000}
+  },
+  "level": "warning"
+}
+```
+
+`elasticsearch-data` alerts (from `_cat/allocation`, since `es-data` is a
+stack-private volume never bind-mounted cross-stack) are unaffected --
+there is only ever one of them per check.

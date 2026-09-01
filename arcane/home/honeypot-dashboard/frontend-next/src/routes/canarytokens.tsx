@@ -22,7 +22,7 @@ type TokenType = {
 }
 
 const fetchPage = createServerFn({ method: 'GET' })
-  .inputValidator((input: { offset: number }) => input)
+  .validator((input: { offset: number }) => input)
   .handler(async ({ data }): Promise<StorePage | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<StorePage>(`/api/v1/store/canarytokens?offset=${data.offset}&size=25`)
@@ -55,7 +55,7 @@ const fetchTypes = createServerFn({ method: 'GET' }).handler(async (): Promise<T
 })
 
 const createToken = createServerFn({ method: 'POST' })
-  .inputValidator(
+  .validator(
     (input: {
       token_type: string
       memo: string

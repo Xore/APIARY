@@ -55,6 +55,10 @@ services:
     read_only: true
     networks:
       - dicompot_net
+    # #2051: healthcheck is baked into the image (Dockerfile HEALTHCHECK,
+    # `nc -z 127.0.0.1 11112`), invisible to a compose-only grep.
+    labels:
+      - autoheal=true
     deploy:
       resources:
         limits:

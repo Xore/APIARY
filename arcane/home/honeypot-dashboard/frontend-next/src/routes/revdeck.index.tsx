@@ -10,7 +10,7 @@ import { pathString } from '../lib/json'
 import { CodeIcon } from '../components/CardIcons'
 
 const fetchPage = createServerFn({ method: 'GET' })
-  .inputValidator((input: { offset: number }) => input)
+  .validator((input: { offset: number }) => input)
   .handler(async ({ data }): Promise<StorePage | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<StorePage>(`/api/v1/store/revdeck?offset=${data.offset}&size=25`)

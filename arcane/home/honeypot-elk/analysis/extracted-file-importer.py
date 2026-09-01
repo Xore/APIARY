@@ -46,21 +46,28 @@ def log(message: str) -> None:
     print(f"extracted-file-importer: {message}", file=sys.stderr, flush=True)
 
 
-def load_state() -> set:
+def load_state() -> dict:
     try:
-        return set(json.loads(STATE_PATH.read_text())["seen"])
+        data = json.loads(STATE_PATH.read_text())
+        return {
+            "seen": set(data.get("seen", [])),
+            # byte offset already consumed per files*.log filename (#2645):
+            # without this, every cycle re-reads and re-parses the entire
+            # on-disk log history, which only grows over the day.
+            "offsets": {k: int(v) for k, v in data.get("offsets", {}).items()},
+        }
     except Exception:
-        return set()
+        return {"seen": set(), "offsets": {}}
 
 
-def save_state(seen: set) -> None:
+def save_state(state: dict) -> None:
     try:
         STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
         # Bounded: keeping every hash forever would grow without limit, and the
         # index itself is the real duplicate guard. This only avoids re-reading
         # the same files each cycle.
-        trimmed = list(seen)[-50000:]
-        STATE_PATH.write_text(json.dumps({"seen": trimmed}))
+        trimmed = list(state["seen"])[-50000:]
+        STATE_PATH.write_text(json.dumps({"seen": trimmed, "offsets": state["offsets"]}))
     except OSError as exc:
         log(f"could not persist state: {exc}")
 
@@ -86,23 +93,65 @@ def already_indexed(sha256: str) -> bool:
         raise
 
 
-def read_files_log() -> list:
-    """Every files.log Zeek has written, including rotated ones -- an artefact
-    extracted just before a rotation would otherwise never be paired."""
+def read_files_log(offsets: dict) -> list:
+    """New lines from every files.log Zeek has written, including rotated
+    ones -- an artefact extracted just before a rotation would otherwise
+    never be paired.
+
+    #2645: this used to re-read every byte of every files*.log from scratch
+    on every cycle. Rotated logs are never deleted here, so that on-disk
+    corpus only grows across the day, and re-parsing all of it into a fresh
+    `records` list every INTERVAL seconds meant the transient working set
+    -- and with it, resident memory the allocator does not hand back to the
+    OS -- grew right along with it, independent of how many records were
+    actually new or skipped. Tracking a per-file byte offset bounds each
+    cycle's work to only what was appended since the last one.
+    """
     records = []
+    seen_names = set()
     for path in sorted(FILES_LOG_DIR.glob("files*.log")):
+        name = path.name
+        seen_names.add(name)
         try:
-            with path.open() as handle:
-                for line in handle:
-                    line = line.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    try:
-                        records.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        continue
+            size = path.stat().st_size
+        except OSError as exc:
+            log(f"could not stat {path}: {exc}")
+            continue
+        start = offsets.get(name, 0)
+        if size < start:
+            # Rotated or truncated since we last looked: start over.
+            start = 0
+        if start >= size:
+            offsets[name] = start
+            continue
+        try:
+            with path.open("rb") as handle:
+                handle.seek(start)
+                chunk = handle.read()
         except OSError as exc:
             log(f"could not read {path}: {exc}")
+            continue
+        # Only advance past complete lines. A trailing partial line means
+        # Zeek is mid-write; leave those bytes unconsumed so the next cycle
+        # reads the whole record instead of a half one.
+        pieces = chunk.split(b"\n")
+        if chunk.endswith(b"\n"):
+            complete, consumed = pieces[:-1], len(chunk)
+        else:
+            complete, consumed = pieces[:-1], len(chunk) - len(pieces[-1])
+        for raw_line in complete:
+            line = raw_line.strip()
+            if not line or line.startswith(b"#"):
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        offsets[name] = start + consumed
+    # Drop offsets for files that no longer exist so this dict does not grow
+    # without bound as logs get rotated away.
+    for stale in set(offsets) - seen_names:
+        del offsets[stale]
     return records
 
 
@@ -134,26 +183,42 @@ def _first(value):
     return value
 
 
-def build_document(record: dict, path: Path, raw: bytes) -> dict:
-    # Hash the bytes we actually hold rather than trusting the log's value:
-    # if they disagree, the file on disk is what got shipped, so it is what
-    # should be identified.
-    sha256 = hashlib.sha256(raw).hexdigest()
+def hash_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
+    """sha256 of a file read in fixed-size windows, so a single artefact --
+    including one over MAX_BYTES -- never has to be held whole in memory
+    just to identify it."""
+    hasher = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(chunk_size), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def build_document(record: dict, path: Path, sha256: str, size: int, raw: bytes | None) -> dict:
+    file_doc = {
+        "hash": {
+            "sha256": sha256,
+            "md5": record.get("md5"),
+            "sha1": record.get("sha1"),
+        },
+        "size": size,
+        "mime_type": record.get("mime_type"),
+        "source": record.get("source"),
+        "extracted_name": path.name,
+    }
+    if raw is None:
+        # #2645: over MAX_BYTES. The bytes are deliberately never shipped
+        # (that is the whole point of the cap), but the artefact's
+        # existence must still be auditable instead of vanishing with no
+        # trace -- see the module docstring's "re-send" note for why
+        # sha256 is the identity key either way.
+        file_doc["oversized"] = True
+    else:
+        file_doc["bytes"] = base64.b64encode(raw).decode("ascii")
     return {
         "@timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
         "event": {"sensor": "zeek", "category": "extracted_file"},
-        "file": {
-            "hash": {
-                "sha256": sha256,
-                "md5": record.get("md5"),
-                "sha1": record.get("sha1"),
-            },
-            "size": len(raw),
-            "mime_type": record.get("mime_type"),
-            "source": record.get("source"),
-            "extracted_name": path.name,
-            "bytes": base64.b64encode(raw).decode("ascii"),
-        },
+        "file": file_doc,
         # Field names verified against real Zeek 8 JSON output rather than
         # assumed: this schema carries `uid` and `id.orig_h`/`id.resp_h`, not
         # the `conn_uids`/`tx_hosts`/`rx_hosts` of older documentation. The
@@ -174,9 +239,30 @@ def build_document(record: dict, path: Path, raw: bytes) -> dict:
     }
 
 
-def import_once(seen: set) -> int:
+def _ship(seen: set, record: dict, path: Path, sha256: str, size: int, raw: bytes | None) -> bool:
+    """Index one document (full or metadata-only) unless it is already
+    seen or already indexed. Returns whether it was actually shipped."""
+    if sha256 in seen:
+        return False
+    try:
+        if already_indexed(sha256):
+            seen.add(sha256)
+            return False
+        document = build_document(record, path, sha256, size, raw)
+        index = "extracted-files-v1-" + time.strftime("%Y.%m.%d", time.gmtime())
+        es_post(f"/{index}/_doc", json.dumps(document).encode())
+        seen.add(sha256)
+        return True
+    except (error.URLError, error.HTTPError, OSError) as exc:
+        # Leave it unseen so the next cycle retries rather than losing it.
+        log(f"could not ship {path.name}: {exc}")
+        return False
+
+
+def import_once(state: dict) -> int:
+    seen = state["seen"]
     shipped = 0
-    for record in read_files_log():
+    for record in read_files_log(state["offsets"]):
         path = find_extracted(record)
         if path is None:
             continue
@@ -184,9 +270,22 @@ def import_once(seen: set) -> int:
             size = path.stat().st_size
         except OSError:
             continue
-        if size == 0 or size > MAX_BYTES:
-            if size > MAX_BYTES:
-                log(f"skipping {path.name}: {size} bytes exceeds the {MAX_BYTES} cap")
+        if size == 0:
+            continue
+        if size > MAX_BYTES:
+            # #2645: over cap does not mean invisible any more -- the bytes
+            # are still never shipped, but a metadata-only record is, so the
+            # artefact is auditable instead of vanishing with no trace.
+            # Hashed in fixed windows so an oversized file never has to be
+            # held whole in memory just to identify it.
+            try:
+                sha256 = hash_file(path)
+            except OSError as exc:
+                log(f"could not hash {path}: {exc}")
+                continue
+            log(f"{path.name}: {size} bytes exceeds the {MAX_BYTES} cap; indexing metadata only")
+            if _ship(seen, record, path, sha256, size, None):
+                shipped += 1
             continue
         try:
             raw = path.read_bytes()
@@ -195,34 +294,24 @@ def import_once(seen: set) -> int:
             continue
 
         sha256 = hashlib.sha256(raw).hexdigest()
-        if sha256 in seen:
-            continue
-        try:
-            if already_indexed(sha256):
-                seen.add(sha256)
-                continue
-            document = build_document(record, path, raw)
-            index = "extracted-files-v1-" + time.strftime("%Y.%m.%d", time.gmtime())
-            es_post(f"/{index}/_doc", json.dumps(document).encode())
-            seen.add(sha256)
+        if _ship(seen, record, path, sha256, size, raw):
             shipped += 1
-        except (error.URLError, error.HTTPError, OSError) as exc:
-            # Leave it unseen so the next cycle retries rather than losing it.
-            log(f"could not ship {path.name}: {exc}")
     return shipped
 
 
 def main() -> int:
     log(f"watching {EXTRACT_DIR} against {FILES_LOG_DIR}, every {INTERVAL}s")
-    seen = load_state()
+    state = load_state()
     while True:
         try:
-            shipped = import_once(seen)
+            shipped = import_once(state)
             if shipped:
                 log(f"shipped {shipped} artefact(s)")
-                save_state(seen)
         except Exception as exc:  # keep the loop alive; a bad cycle is not fatal
             log(f"cycle failed: {exc}")
+        # Always persist: offsets must survive a restart even on a cycle
+        # that shipped nothing, or a restart forces a full log re-scan.
+        save_state(state)
         time.sleep(INTERVAL)
 
 

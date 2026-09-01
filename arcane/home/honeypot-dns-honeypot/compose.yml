@@ -35,6 +35,18 @@ services:
     volumes:
       - /opt/stacks/apiary/logs/dns-honeypot:/var/log/honeypot
       - /opt/stacks/apiary/state/init-markers:/markers:ro
+    # #2366: measured baseline, same "run it, then reduce" methodology as
+    # #89/#118's cap_drop passes. No cap_add needed for the privileged
+    # port 53 bind below -- this fleet's Docker/kernel combination (checked
+    # on the homeserver directly) runs every container's network namespace
+    # with net.ipv4.ip_unprivileged_port_start=0, so a non-root process can
+    # bind <1024 with zero capabilities. Verified locally: built this image,
+    # ran it with cap_drop: [ALL] + read_only: true, and got a real answer
+    # back from a DNS query against the bound port.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     read_only: true
     networks: [dns_honeypot_net]
     healthcheck:

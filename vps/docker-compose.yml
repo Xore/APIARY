@@ -15,7 +15,7 @@
 #         /opt/stacks/apiary/logs/suricata -o ro,allow_other
 
 x-oidc-gateway: &oidc-gateway
-  image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.3@sha256:10a1165743a192e1940b4708fb9647027185ce11a681a1c5519b442ff7f1f561
+  image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.4@sha256:b1b2021fe8f4004573e8d690dec6c7bb29cc44364572cf8510a05bf3a0ae2ded
   restart: unless-stopped
   read_only: true
   security_opt: [no-new-privileges:true]
@@ -114,7 +114,7 @@ services:
 
   # ===== TRAEFIK =====
   traefik:
-    image: traefik:v3.7.10@sha256:9c3b91d5fb7770853ca5c1124a23c34bf2d9b47ffaebeab2614cbaf410dcb2ac
+    image: traefik:v3.7.12@sha256:9c2a54d87f76f5c2f5f2682c68394af92fb12c0a2686798d6462a3f84bd78eaf
     container_name: traefik
     restart: unless-stopped
     ports:
@@ -154,6 +154,14 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    # #2762: labeled despite being the reverse-proxy itself -- a healthcheck-
+    # unhealthy Traefik has already stopped serving the /ping liveness check
+    # it exists to answer, so it is already failing every request behind it.
+    # A restart triggered by that state is strictly better than leaving it
+    # wedged; `restart: unless-stopped` already covers a hard crash, this
+    # covers the "process alive but not answering" gap that leaves open.
+    labels:
+      - autoheal=true
     deploy:
       resources:
         limits:
@@ -777,6 +785,8 @@ services:
     volumes:
       - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/kibana:/run/oidc-secrets:ro
     networks: [oidc-kibana]
+    labels:
+      - autoheal=true
 
   socat-hp-tanner:
     image: alpine/socat:latest@sha256:68b28fed1e6f5dc5cc7574315284573d89a655b0bc528720be4164f36b998680
@@ -800,6 +810,8 @@ services:
     volumes:
       - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/tanner:/run/oidc-secrets:ro
     networks: [oidc-tanner]
+    labels:
+      - autoheal=true
 
   socat-hp-evebox:
     image: alpine/socat:latest@sha256:68b28fed1e6f5dc5cc7574315284573d89a655b0bc528720be4164f36b998680
@@ -823,6 +835,8 @@ services:
     volumes:
       - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/evebox:/run/oidc-secrets:ro
     networks: [oidc-evebox]
+    labels:
+      - autoheal=true
 
   socat-hp-arkime:
     image: alpine/socat:latest@sha256:68b28fed1e6f5dc5cc7574315284573d89a655b0bc528720be4164f36b998680
@@ -846,6 +860,8 @@ services:
     volumes:
       - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/arkime:/run/oidc-secrets:ro
     networks: [oidc-arkime]
+    labels:
+      - autoheal=true
 
   # Rev·Deck (analysis/ghidra/docker-compose.ghidra.yml, profile: revdeck) --
   # not part of this stack's home-side compose file, but reachable the same
@@ -872,6 +888,8 @@ services:
     volumes:
       - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/revdeck:/run/oidc-secrets:ro
     networks: [oidc-revdeck]
+    labels:
+      - autoheal=true
 
   # #1185: Arcane, the homeserver's stack-management UI (Dockge's
   # replacement -- Dockge itself decommissioned, see the commit that
@@ -908,6 +926,8 @@ services:
     volumes:
       - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/traefik-dashboard:/run/oidc-secrets:ro
     networks: [oidc-traefik]
+    labels:
+      - autoheal=true
 
   # #1026: the oidc-dashboard compatibility gateway that used to live here
   # (a temporary shim for dashboard deployments predating its native OIDC
@@ -1138,6 +1158,59 @@ services:
     deploy:
       resources: { limits: { cpus: "0.1", memory: 32M } }
 
+  # #2762: this host had no autoheal at all -- traefik and the 6 oidc-*
+  # gateways all carry a real healthcheck with nothing watching it, unlike
+  # every comparable service on the homeserver (honeypot-utilities' own
+  # autoheal + docker-socket-proxy pair, see that stack's compose.yml for
+  # the full reasoning this mirrors). Same narrow-proxy shape, not a raw
+  # docker.sock bind: CONTAINERS=1 + POST=1 is the same minimal grant
+  # autoheal actually needs (its polling loop calls GET /containers/json,
+  # a restart is POST /containers/{id}/restart -- nothing else). Verified
+  # locally before deploying here: a real docker-socket-proxy + autoheal
+  # pair against a container that reports unhealthy on purpose gets
+  # restarted through the proxy, and /images/json, /info, /volumes all
+  # still 403 through it -- same check honeypot-utilities' own comment
+  # documents having done for that instance.
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
+    container_name: docker-socket-proxy
+    restart: unless-stopped
+    environment:
+      - CONTAINERS=1
+      - POST=1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    security_opt:
+      - no-new-privileges:true
+    # Private to this pair, same isolation reasoning as the homeserver's
+    # instance -- nothing else in this stack talks to the proxy.
+    networks:
+      - docker-socket-proxy_net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+
+  autoheal:
+    image: willfarrell/autoheal@sha256:3cb356f1dd297d24cdfbb910a9c142cdf735c39d550ff2d9b8ed818d63d23282
+    container_name: autoheal
+    restart: unless-stopped
+    environment:
+      - DOCKER_SOCK=tcp://docker-socket-proxy:2375
+      - AUTOHEAL_CONTAINER_LABEL=autoheal
+      - AUTOHEAL_INTERVAL=30
+      - AUTOHEAL_START_PERIOD=60
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - docker-socket-proxy_net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+
 networks:
   proxy:
     name: proxy
@@ -1155,6 +1228,8 @@ networks:
   oidc-traefik:
     driver: bridge
   oidc-dashboard:
+    driver: bridge
+  docker-socket-proxy_net:
     driver: bridge
 
 volumes:

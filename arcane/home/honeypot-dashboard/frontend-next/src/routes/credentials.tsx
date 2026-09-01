@@ -50,7 +50,7 @@ const fetchLinkableTokens = createServerFn({ method: 'GET' }).handler(async (): 
 })
 
 const createCredential = createServerFn({ method: 'POST' })
-  .inputValidator((input: { path: string; username: string; password: string; memo: string; content_template: string }) => input)
+  .validator((input: { path: string; username: string; password: string; memo: string; content_template: string }) => input)
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
@@ -68,7 +68,7 @@ const createCredential = createServerFn({ method: 'POST' })
   })
 
 const rotateCredential = createServerFn({ method: 'POST' })
-  .inputValidator((input: { id: string; password: string }) => input)
+  .validator((input: { id: string; password: string }) => input)
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
@@ -84,7 +84,7 @@ const rotateCredential = createServerFn({ method: 'POST' })
   })
 
 const linkCredentialToken = createServerFn({ method: 'POST' })
-  .inputValidator((input: { id: string; token_id: string }) => input)
+  .validator((input: { id: string; token_id: string }) => input)
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()

@@ -193,14 +193,21 @@ class ClientByteStream:
 
 def negotiate_and_filter(client: ClientByteStream, vm: socket.socket, server_version: bytes) -> None:
     """Walks the RFB pre-message-loop handshake on the client-to-server
-    side, forwarding every byte verbatim (none of it is an input event),
-    then enters the message loop and filters per FORWARD_TYPES/DROP_TYPES.
+    side, forwarding every byte verbatim once it validates (none of it is
+    an input event), then enters the message loop and filters per
+    FORWARD_TYPES/DROP_TYPES.
     Runs in its own thread; the caller pairs it with an unfiltered
     vm-to-client relay thread.
     """
     client_version = client.take(12)
-    vm.sendall(client_version)
 
+    # #2280: each handshake step is validated *before* the bytes it
+    # validates are relayed on, so a handshake this bridge is going to
+    # reject never puts a single byte in front of the VM's VNC server --
+    # the VM only ever sees the connection go away. Shutting the VM
+    # socket down afterwards is not enough on its own: shutdown() sets
+    # EOF but does not retract bytes already queued to the peer.
+    #
     # "RFB 003.008\n" -> (3, 8). RFB 3.3 has no client response to the
     # security-type step at all (the server unilaterally picks and sends
     # a 4-byte type, already relayed on the vm-to-client side); 3.7+ has
@@ -210,17 +217,19 @@ def negotiate_and_filter(client: ClientByteStream, vm: socket.socket, server_ver
         raise BridgeError(f"unrecognised client RFB version: {client_version!r}")
     major, minor = int(match.group(1)), int(match.group(2))
 
-    if (major, minor) >= (3, 7):
-        chosen_type = client.take(1)
-        vm.sendall(chosen_type)
-        security_type = chosen_type[0]
-    else:
+    if (major, minor) < (3, 7):
         # #805: 3.3 never happens in practice against a current QEMU/
         # libvirt VNC server (it offers 3.8), kept only so an unexpected
         # older server fails closed here instead of hanging on a read
         # that will never come.
         raise SecurityHandshakeUnsupported(f"RFB {major}.{minor} (3.3) is not implemented")
 
+    # Accepted: relay it now, not later -- the client is blocked waiting
+    # on the security-types list the VM only sends once it has this.
+    vm.sendall(client_version)
+
+    chosen_type = client.take(1)
+    security_type = chosen_type[0]
     if security_type != 1:
         # Type 2 (VNC auth) and anything else needs its own handshake
         # this bridge does not implement -- see the module docstring for
@@ -228,6 +237,7 @@ def negotiate_and_filter(client: ClientByteStream, vm: socket.socket, server_ver
         # in later. This deployment's graphics element sets no password,
         # so type 1 (None) is what a correctly configured host presents.
         raise SecurityHandshakeUnsupported(f"security type {security_type} is not implemented")
+    vm.sendall(chosen_type)
 
     # Type 1 (None): no challenge/response. Straight to ClientInit.
     client_init = client.take(1)
@@ -257,6 +267,34 @@ def negotiate_and_filter(client: ClientByteStream, vm: socket.socket, server_ver
             client.take(length)  # text -- discarded
         else:
             raise BridgeError(f"unrecognised RFB client message type {msg_type} -- closing rather than guessing its length")
+
+
+def run_negotiate_and_filter(client: ClientByteStream, vm: socket.socket, ws: socket.socket,
+                              server_version: bytes, log) -> None:
+    """Thread target wrapping negotiate_and_filter: it runs in its own
+    daemon thread paired with the main thread's relay_vm_to_client, so an
+    exception raised inside it (every fail-closed handshake rejection --
+    bad protocol version, unsupported security type, unrecognised message
+    type) would otherwise die as a bare thread-excepthook traceback while
+    the main thread stays blocked forever in vm.recv(), and the browser's
+    WebSocket never gets a close frame. shutdown() (not close()) is used
+    here because it safely unblocks a recv() another thread is blocked in,
+    without the fd-reuse race close() has across threads.
+    """
+    try:
+        negotiate_and_filter(client, vm, server_version)
+    except (BridgeError, ConnectionError, OSError) as exc:
+        log("closing (handshake): %s", exc)
+    finally:
+        try:
+            ws.sendall(ws_encode_frame((1008).to_bytes(2, "big"), opcode=0x8))
+        except OSError:
+            pass
+        for sock in (vm, ws):
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
 
 
 def relay_vm_to_client(vm: socket.socket, ws: socket.socket) -> None:
@@ -308,7 +346,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             ws.sendall(ws_encode_frame(server_version))
             client = ClientByteStream(ws)
 
-            to_vm = threading.Thread(target=negotiate_and_filter, args=(client, vm, server_version), daemon=True)
+            to_vm = threading.Thread(
+                target=run_negotiate_and_filter,
+                args=(client, vm, ws, server_version, self.log_message),
+                daemon=True,
+            )
             to_vm.start()
             relay_vm_to_client(vm, ws)
         except (BridgeError, ConnectionError, OSError) as exc:

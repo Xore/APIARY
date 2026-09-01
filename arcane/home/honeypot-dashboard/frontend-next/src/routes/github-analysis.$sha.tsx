@@ -46,7 +46,7 @@ type GithubAnalysisRun = {
 type RunFetch = { state: 'run'; run: GithubAnalysisRun } | { state: 'missing' } | { state: 'failed' }
 
 const fetchRun = createServerFn({ method: 'GET' })
-  .inputValidator((input: { sha: string }) => input)
+  .validator((input: { sha: string }) => input)
   .handler(async ({ data }): Promise<RunFetch> => {
     const { serviceJSONResult } = await import('../lib/backend.server')
     const result = await serviceJSONResult<GithubAnalysisRun>(`/api/v1/github-analysis/${encodeURIComponent(data.sha)}`)
@@ -59,7 +59,7 @@ const fetchRun = createServerFn({ method: 'GET' })
 // shape as payloads.tsx's submitGithubAnalysis — confirm:'publish' is the
 // backend's explicit-consent gate, actor fields feed the audit log.
 const resubmitAnalysis = createServerFn({ method: 'POST' })
-  .inputValidator((input: { hash: string }) => input)
+  .validator((input: { hash: string }) => input)
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()

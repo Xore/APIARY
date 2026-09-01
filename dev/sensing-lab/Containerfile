@@ -137,5 +137,10 @@ COPY local.zeek /usr/local/share/zeek-lab/local.zeek
 RUN zeek -N | sort > /usr/local/share/zeek-lab/loaded-plugins.txt && \
     cat /usr/local/share/zeek-lab/loaded-plugins.txt
 
+# #2716: same load-check as vps/zeek/Containerfile -- fail the build,
+# loudly, if any package errors out during load instead of just warning,
+# rather than silently shipping an image with fields quietly missing.
+RUN zeek -a -C /usr/local/share/zeek-lab/local.zeek
+
 WORKDIR /work
 ENTRYPOINT ["/bin/bash"]

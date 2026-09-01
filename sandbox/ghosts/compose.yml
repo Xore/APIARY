@@ -62,6 +62,28 @@
 # change by design: a static <host mac=... ip=.../> entry in network.xml
 # and its address in network-filter.sh's GHOSTS_API_CLIENTS, together.
 #
+# #2257: the accepted residual risk on that socket, written down rather
+# than inherited. ghosts-api has no authentication of any kind -- no
+# UseAuthentication/UseAuthorization in its pipeline, no [Authorize]
+# anywhere, and appsettings.json's InitSettings block
+# (scotty@cert.org/Password@1) is bound and then discarded by
+# ApiDetails.LoadConfiguration(), so it reads like a credentialed surface
+# while gating nothing. Everything the API still serves -- machine
+# inventory, timelines, surveys, results, the SignalR hubs -- is therefore
+# anonymous to anything that reaches tcp/5000, and the one host allowed
+# through the firewall pin is win11-ghosts, the guest we deliberately
+# detonate malware on. What #2257 changed is the blast radius, not the
+# auth model: Dockerfile.api-prep patches Swagger's middleware out (no
+# anonymous endpoint map) and ships ASPNETCORE_ENVIRONMENT=Production (no
+# developer exception pages leaking stack traces). What remains accepted
+# is that a compromised ghost can still read and rewrite NPC state --
+# notably TimelinePartial updates, which silently steer what the NPCs do
+# and poison experiments built on that activity. Treat NPC-authored data
+# as attacker-influenceable until #2257's step 3 lands a real gate (mTLS,
+# a minimal auth middleware, or a docker-side proxy so the raw platform
+# never faces the guest net); do not put anything on this API that a
+# compromised guest must not read or forge.
+#
 # #1502: migrated into arcane/home/ghosts/ for Arcane directory-aware Git
 # sync (kept its previous sandbox/ghosts/ path's contents together as-is --
 # already self-contained, and the build context is a remote git URL, not a
@@ -91,6 +113,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    # #2051's autoheal-labels guard flags this service; deliberately not
+    # labeled here -- #2747 owns finishing this container's live bring-up
+    # (it isn't fully stood up yet) and its own standing compose-vs-running
+    # sweep, so the autoheal decision belongs with that work, not this one.
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true

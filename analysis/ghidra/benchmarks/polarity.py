@@ -6,20 +6,32 @@ prevents buffer overflows". On #159's benign near-neighbour control
 (`safe_strcpy`) that flipped a correct answer into a failed gate, purely on
 wording -- twice in four temperature-0 runs of the same digest (issue #1946).
 
-This module is option 1 from that issue, deliberately simple and deterministic
-because the scorers that use it run at temperature 0 with fixed seeds: an
-occurrence of a forbidden term is discarded when a small, fixed character
-window immediately before it carries one of a closed list of negation or
-prevention cues (#1946/#2393), or when the occurrence itself sits glued inside
-a snake_case identifier rather than in prose (#2037). Anything else still
-counts as a hit. Same input, same verdict, every time.
+An occurrence of a forbidden term is discarded when the answer does not
+actually assert it, and counts otherwise. Two paths decide that, and #2408
+added the first:
 
-Known limits, accepted on purpose rather than papered over:
+  * **Adjudicated (#1805-f).** Hand `forbidden_hit` an `adjudicate` callable --
+    `claims.forbidden_claim_adjudicator` builds one from the claim pool -- and
+    the clause the occurrence sits in is decomposed into atomic claims, each
+    restated as a plain assertion, and read against the term stated both ways
+    ("the code has X" / "the code prevents X"). Polarity then lives in the
+    claim text where an embedding can see it, so paraphrase tolerance is a
+    property of the pool rather than a list maintained here.
+  * **Fast path.** With no adjudicator -- every offline run, since the pool
+    needs a live extractor and embedder -- a small, fixed character window
+    immediately before the occurrence is searched for one of the closed list of
+    negation or prevention cues below (#1946/#2393). Deterministic and free:
+    same input, same verdict, every time.
+
+Either way an occurrence glued inside a snake_case identifier rather than
+standing in prose is exempt before either path runs (#2037).
+
+Limits of the fast path, accepted on purpose rather than papered over. Every
+one of them is a limit of the *enumeration*, which is why the adjudicated path
+is subject to none of them:
   * The cue list stays closed and spelling-literal. #2393 added the gerund and
-    past forms of its own prevention cues ("prevented", "preventing",
-    "avoided", "protecting against", "protected against"); everything it never
-    enumerated still is not a cue -- bare "avoid" (only avoids / avoiding /
-    avoided are listed), nominalizations ("protection against", "a
+    past forms of its own prevention cues; everything it never enumerated still
+    is not a cue -- bare "avoid", nominalizations ("protection against", "a
     preventative"), "keeps/kept ... from", negated auxiliaries other than
     does-not ("cannot/can't", "will not/won't"), "rules out". Contractions
     match literally ("doesn't"); variant spellings of the same words do not.
@@ -30,20 +42,29 @@ Known limits, accepted on purpose rather than papered over:
     path, so the function is safe" long after "exploit") behaves exactly as
     containment would.
 
-It is an interim measure either way. The durable home for false-positive
-control is claim-pool adjudication (#1805-f), where a wrong assertion is
-adjudicated as a false claim instead of matched lexically.
+The adjudicated path is not free of failure modes, only of those three: it
+costs an extractor and an embedder call per occurrence, and it abstains --
+deferring to the fast path -- whenever neither reading of a clause comes out
+ahead by `claims.POLARITY_MARGIN`, because a pool that quietly guesses is worse
+than a small pool.
+
+The closed list is kept as the fast path rather than retired because retiring it
+needs the measurement #2408 asks for: no verdict change across the 187
+committed stored responses. That run needs the lab's embedder and extractor and
+is not reproducible on a workstation, so the list stays until it is measured.
 """
 
 import re
-from typing import Iterable
+from typing import Callable, Iterable, Optional
 
 # The cue list scoped in issue #1946, widened by #2393 with the gerund and past
 # forms of its own prevention cues (the live Tier A run of 2026-08-27 docked
 # safe_strcpy for "...thus preventing buffer overflow"). Still enumerated by
 # hand: no stemming, no parsing, nothing inferred at match time. Matching is on
 # word boundaries so "not" does not fire inside "nothing" and the inflected
-# cues stay out of larger words alike.
+# cues stay out of larger words alike. Deliberately NOT widened again by #2408:
+# the residue it names is answered by the adjudicated path, not by more entries
+# here.
 NEGATION_CUES = (
     "prevent",
     "prevents",
@@ -79,11 +100,32 @@ _CUE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Sentence boundaries, used to hand the adjudicator the clause an occurrence
+# stands in. A sentence is the unit an atomic claim is extracted from, so this
+# is not the fast path's fixed window under another name: the window exists to
+# bound how far a cue may sit from its term, while this exists to give the
+# extractor a whole assertion to decompose.
+_CLAUSE_BOUNDARY = re.compile(r"[.!?\n]")
+
+# What `forbidden_hit` accepts as `adjudicate`: (clause, term) -> True when the
+# clause asserts the term of the code, False when it denies or prevents it,
+# None when the reading is not settled and the fast path should decide.
+PolarityAdjudicator = Callable[[str, str], Optional[bool]]
+
 
 def _negated_before(lowered_text: str, start: int) -> bool:
     """True iff a cue occurs wholly inside the window ending where the hit starts."""
     window_start = max(0, start - CUE_WINDOW_CHARS)
     return _CUE_PATTERN.search(lowered_text[window_start:start]) is not None
+
+
+def _clause_around(text: str, start: int, end: int) -> str:
+    """The sentence the occurrence sits in, terminator included."""
+    left = 0
+    for boundary in _CLAUSE_BOUNDARY.finditer(text, 0, start):
+        left = boundary.end()
+    closing = _CLAUSE_BOUNDARY.search(text, end)
+    return text[left:closing.end() if closing else len(text)].strip()
 
 
 def _inside_identifier(lowered_text: str, start: int, end: int) -> bool:
@@ -103,30 +145,61 @@ def _inside_identifier(lowered_text: str, start: int, end: int) -> bool:
         or (end < len(lowered_text) and lowered_text[end] == "_")
 
 
-def forbidden_hit(text: str, terms: Iterable[str]) -> bool:
+def _asserted(text: str, lowered: str, start: int, end: int, term: str,
+              adjudicate: Optional[PolarityAdjudicator]) -> bool:
+    """True iff this one occurrence stands as a claim the gate should fire on.
+
+    The adjudicated path is asked first and obeyed whenever it settles the
+    reading; the closed cue list answers the rest. Ordering them this way is
+    what "supersedes NEGATION_CUES at those sites" means in practice (#2408):
+    when the pool is available no verdict is ever decided by the enumeration,
+    and when it is not, nothing has changed.
+    """
+    if adjudicate is not None:
+        verdict = adjudicate(_clause_around(text, start, end), term)
+        if verdict is not None:
+            return verdict
+    return not _negated_before(lowered, start)
+
+
+def forbidden_hit(text: str, terms: Iterable[str], *,
+                  adjudicate: Optional[PolarityAdjudicator] = None) -> bool:
     """Polarity-aware replacement for plain substring containment (#1946).
 
-    True iff some occurrence of some term stands WITHOUT a negation/prevention
-    cue immediately before it -- i.e. only then should a gate fire and the
-    answer lose its point. Case-insensitive; every occurrence is examined, so a
-    single unnegated mention anywhere fires even if other mentions were negated.
+    True iff some occurrence of some term stands as an assertion of that term
+    -- i.e. only then should a gate fire and the answer lose its point.
+    Case-insensitive; every occurrence is examined, so a single asserted
+    mention anywhere fires even if other mentions were negated.
+
+    `adjudicate` opts an occurrence into claim-pool adjudication (#2408; see
+    `claims.forbidden_claim_adjudicator`). Left at None the verdict is exactly
+    the one this module has always returned, which is what keeps the offline
+    scorers deterministic and network-free.
 
     Occurrences glued into snake_case identifiers are exempt (#2037, see
-    _inside_identifier); plural and inflected prose forms are deliberately NOT
-    exempt -- "buffer overflows are possible" still fires, because losing a
-    trailing-s mention would blunt the gate against genuine overclaims.
+    _inside_identifier) and never reach either path; plural and inflected prose
+    forms are deliberately NOT exempt -- "buffer overflows are possible" still
+    fires, because losing a trailing-s mention would blunt the gate against
+    genuine overclaims.
     """
-    lowered = (text or "").lower()
+    text = text or ""
+    lowered = text.lower()
+    # Case folding is length-preserving for every character this corpus can
+    # contain, but not for all of Unicode ("İ" lowercases to two chars).
+    # Offsets are found in the folded text, so hand the adjudicator the
+    # original prose only while the two still line up.
+    clause_source = text if len(lowered) == len(text) else lowered
     for term in terms:
         needle = (term or "").lower()
         if not needle:
             continue
         start = lowered.find(needle)
         while start != -1:
-            if not _inside_identifier(lowered, start, start + len(needle)) \
-                    and not _negated_before(lowered, start):
+            end = start + len(needle)
+            if not _inside_identifier(lowered, start, end) \
+                    and _asserted(clause_source, lowered, start, end, term, adjudicate):
                 return True
-            start = lowered.find(needle, start + len(needle))
+            start = lowered.find(needle, end)
     return False
 
 

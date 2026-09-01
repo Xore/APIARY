@@ -5,6 +5,7 @@
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useRef, useState } from 'react'
 import { ErrorStateBlock } from './ErrorState'
+import { DEFAULT_MAP_PREFS, pullMapPrefs, type MapPrefs } from '../lib/prefs'
 
 export type Kv = { key: string; count: number; link: string }
 
@@ -116,7 +117,7 @@ export function Heatmap({ rows, failed }: { rows: HeatRow[] | null; failed?: boo
 type Vectors = { sensor: string; ports: Kv[]; protocols: Kv[] }
 
 const fetchVectors = createServerFn({ method: 'GET' })
-  .inputValidator((input: { sensor: string }) => input)
+  .validator((input: { sensor: string }) => input)
   .handler(async ({ data }): Promise<Vectors | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<Vectors>(`/api/v1/attack-vectors?sensor=${encodeURIComponent(data.sensor)}`)
@@ -241,12 +242,70 @@ export type MapPoint = { city: string; country: string; lat: number; lon: number
 // ground radius was never the right unit for it.
 const MARKER_RADIUS_PX = 6
 
+// #2528: basemap -> tile source. `osm` is the only value preferences.rs's
+// BASEMAPS (and config.rs's behavior.map_provider enum) accept today, so
+// this table has one entry -- but it is a lookup keyed on the preference
+// value rather than a hardcoded URL, so a second basemap becomes selectable
+// the moment it is added here, the same way a vendored theme becomes
+// selectable without a frontend redeploy (prefs.ts's isThemeName). An
+// unrecognised value (an old preference doc, a config rollback) falls back
+// to `osm` rather than rendering no tiles.
+const BASEMAP_TILES: Record<string, { url: string; attribution: string }> = {
+  osm: { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: '© OpenStreetMap contributors' },
+}
+
+export function basemapTile(basemap: string | undefined): { url: string; attribution: string } {
+  return BASEMAP_TILES[basemap ?? 'osm'] ?? BASEMAP_TILES.osm
+}
+
+export type MapCluster = { lat: number; lon: number; points: MapPoint[] }
+
+// Coarse grid clustering for the "Cluster markers" preference. Not
+// zoom-aware -- before this control was wired, every point always rendered
+// as its own marker regardless of the saved preference, so any merging is
+// the meaningful behaviour change; a zoom-tracking implementation is future
+// work if this grid proves too coarse or too fine.
+//
+// `clustering: false` is the point-per-marker behaviour AttackMap always had
+// (each point comes back as its own single-point cluster, unmerged).
+const CLUSTER_GRID_DEGREES = 4
+
+export function clusterPoints(points: MapPoint[], clustering: boolean): MapCluster[] {
+  if (!clustering) return points.map((point) => ({ lat: point.lat, lon: point.lon, points: [point] }))
+  const cells = new Map<string, MapCluster>()
+  for (const point of points) {
+    const cellLat = Math.round(point.lat / CLUSTER_GRID_DEGREES) * CLUSTER_GRID_DEGREES
+    const cellLon = Math.round(point.lon / CLUSTER_GRID_DEGREES) * CLUSTER_GRID_DEGREES
+    const key = `${cellLat}:${cellLon}`
+    const existing = cells.get(key)
+    if (existing) existing.points.push(point)
+    else cells.set(key, { lat: cellLat, lon: cellLon, points: [point] })
+  }
+  return [...cells.values()]
+}
+
 export function AttackMap({ points, failed }: { points: MapPoint[] | null; failed?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<import('leaflet').Map | null>(null)
   // Torn down alongside the map itself; the ResizeObserver outlives the
   // async import that creates it, so it needs its own handle.
   const cleanupRef = useRef<(() => void) | null>(null)
+  // #2528: settings.tsx PUTs these and, until now, nothing read them back --
+  // an operator could toggle "cluster markers" or "map animation", watch the
+  // save succeed, and see this map render identically either way. Same
+  // best-effort client fetch LiveToasts uses for its own preferences: instant
+  // paint with the compiled defaults, reconciled once the request lands.
+  const [prefs, setPrefs] = useState<MapPrefs>(DEFAULT_MAP_PREFS)
+
+  useEffect(() => {
+    let cancelled = false
+    pullMapPrefs().then((result) => {
+      if (!cancelled) setPrefs(result)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     const container = containerRef.current
@@ -256,7 +315,16 @@ export function AttackMap({ points, failed }: { points: MapPoint[] | null; faile
       const L = (await import('leaflet')).default
       await import('leaflet/dist/leaflet.css')
       if (disposed || mapRef.current) return
-      const map = L.map(container, { worldCopyJump: true, minZoom: 1 })
+      const map = L.map(container, {
+        worldCopyJump: true,
+        minZoom: 1,
+        // `map_animation`: off means off everywhere Leaflet animates --
+        // zoom transitions, the fade-in on tile/marker load, and markers
+        // easing to their new screen position during a zoom.
+        zoomAnimation: prefs.animation,
+        fadeAnimation: prefs.animation,
+        markerZoomAnimation: prefs.animation,
+      })
       mapRef.current = map
 
       // #1565: the map is built before the card has settled at its final
@@ -282,33 +350,20 @@ export function AttackMap({ points, failed }: { points: MapPoint[] | null; faile
       const observer = new ResizeObserver(fitWorld)
       observer.observe(container)
       cleanupRef.current = () => observer.disconnect()
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors',
-      }).addTo(map)
-      for (const point of points) {
-        const circle = L.circleMarker([point.lat, point.lon], {
-          radius: MARKER_RADIUS_PX,
-          color: 'var(--accent)',
-          weight: 1,
-          fillOpacity: 0.35,
-        }).bindTooltip(
-          `${point.city || 'Unknown city'}, ${point.country} — ${point.ips.toLocaleString('en-US')} IPs, ${point.events.toLocaleString('en-US')} events`,
-        )
-        // Markers navigate to the place's events, keyboard included
-        // (hp-app.js:519-533): tabbable, announced as a link, Enter/Space.
-        const go = () => {
-          if (point.url) location.assign(point.url)
-        }
+      const tile = basemapTile(prefs.basemap)
+      L.tileLayer(tile.url, { attribution: tile.attribution }).addTo(map)
+
+      // Tabbable, announced, Enter/Space-activated -- the same wiring the
+      // single-point markers always had (hp-app.js:519-533), now shared with
+      // cluster markers so grouping points does not cost them keyboard access.
+      const activate = (circle: import('leaflet').CircleMarker, label: string, go: () => void) => {
         circle.on('click', go)
         circle.on('add', () => {
           const el = circle.getElement()
           if (!el) return
           el.setAttribute('tabindex', '0')
           el.setAttribute('role', 'link')
-          el.setAttribute(
-            'aria-label',
-            `${point.city && point.country ? `${point.city}, ${point.country}` : point.city || point.country || 'Unknown location'}, ${point.events.toLocaleString('en-US')} events`,
-          )
+          el.setAttribute('aria-label', label)
           el.addEventListener('keydown', (event) => {
             const key = (event as KeyboardEvent).key
             if (key === 'Enter' || key === ' ') {
@@ -317,6 +372,50 @@ export function AttackMap({ points, failed }: { points: MapPoint[] | null; faile
             }
           })
         })
+      }
+
+      for (const cluster of clusterPoints(points, prefs.clustering)) {
+        if (cluster.points.length === 1) {
+          const point = cluster.points[0]
+          const circle = L.circleMarker([point.lat, point.lon], {
+            radius: MARKER_RADIUS_PX,
+            color: 'var(--accent)',
+            weight: 1,
+            fillOpacity: 0.35,
+          }).bindTooltip(
+            `${point.city || 'Unknown city'}, ${point.country} — ${point.ips.toLocaleString('en-US')} IPs, ${point.events.toLocaleString('en-US')} events`,
+          )
+          activate(
+            circle,
+            `${point.city && point.country ? `${point.city}, ${point.country}` : point.city || point.country || 'Unknown location'}, ${point.events.toLocaleString('en-US')} events`,
+            () => {
+              if (point.url) location.assign(point.url)
+            },
+          )
+          circle.addTo(map)
+          continue
+        }
+        // A cluster: same fixed pixel radius as a single marker (#1846 --
+        // growing it by count is what made dense cities overlap), a denser
+        // fill so it reads as several origins merged rather than one, and a
+        // tooltip naming how many. There is no single canonical URL for a
+        // merged group, so activating one zooms in on it instead of
+        // navigating -- close enough to split it back into its members.
+        const events = cluster.points.reduce((sum, point) => sum + point.events, 0)
+        const ips = cluster.points.reduce((sum, point) => sum + point.ips, 0)
+        const circle = L.circleMarker([cluster.lat, cluster.lon], {
+          radius: MARKER_RADIUS_PX,
+          color: 'var(--accent)',
+          weight: 2,
+          fillOpacity: 0.75,
+        }).bindTooltip(
+          `${cluster.points.length} sources near here — ${ips.toLocaleString('en-US')} IPs, ${events.toLocaleString('en-US')} events`,
+        )
+        activate(
+          circle,
+          `${cluster.points.length} sources near here, ${events.toLocaleString('en-US')} events`,
+          () => map.setView([cluster.lat, cluster.lon], Math.min(map.getZoom() + 3, 8)),
+        )
         circle.addTo(map)
       }
     })()
@@ -327,7 +426,7 @@ export function AttackMap({ points, failed }: { points: MapPoint[] | null; faile
       mapRef.current?.remove()
       mapRef.current = null
     }
-  }, [points])
+  }, [points, prefs.basemap, prefs.clustering, prefs.animation])
 
   if (points === null)
     return failed ? (

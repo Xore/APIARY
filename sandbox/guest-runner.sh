@@ -167,6 +167,8 @@ if ((${#runner[@]})); then
     configure_wine_proxy
     runner=(xvfb-run -a -s '-screen 0 1024x768x24' "${runner[@]}")
   fi
+  errexit_was_set=false
+  case $- in *e*) errexit_was_set=true ;; esac
   set +e
   timeout --signal=TERM --kill-after=10s 120s \
     strace -ff -tt -yy -s 512 -o "$result/trace/strace" -- \
@@ -176,7 +178,7 @@ if ((${#runner[@]})); then
     WINEDLLOVERRIDES=winemenubuilder.exe=d "${runner[@]}" \
     >"$result/stdout.txt" 2>"$result/stderr.txt"
   status=$?
-  set -e
+  $errexit_was_set && set -e
   if $wine_route; then
     setpriv --reuid=1500 --regid=1500 --init-groups --no-new-privs \
       env HOME=/home/sandbox WINEPREFIX=/home/sandbox/.wine wineserver -k >/dev/null 2>&1 || true

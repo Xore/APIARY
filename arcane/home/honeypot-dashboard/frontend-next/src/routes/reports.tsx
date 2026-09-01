@@ -86,7 +86,7 @@ type ReportDefinition = {
 type DefinitionsResponse = { definitions: ReportDefinition[] }
 
 const fetchGenerated = createServerFn({ method: 'GET' })
-  .inputValidator((input: { offset: number }) => input)
+  .validator((input: { offset: number }) => input)
   .handler(async ({ data }): Promise<Page | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<Page>(`/api/v1/store/generated-reports?offset=${data.offset}&size=25`)
@@ -117,7 +117,7 @@ const fetchSandboxJobs = createServerFn({ method: 'GET' }).handler(async (): Pro
 // inventory's own capture sources instead.
 type PayloadOption = { hash: string; kind: string; size: string; sources: string[] }
 const searchPayloads = createServerFn({ method: 'GET' })
-  .inputValidator((input: { q: string }) => input)
+  .validator((input: { q: string }) => input)
   .handler(async ({ data }): Promise<PayloadOption[] | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     // /api/v1/payloads' q is a Lucene query_string passthrough; the term is
@@ -150,7 +150,7 @@ const fetchDefinitions = createServerFn({ method: 'GET' }).handler(async (): Pro
 // trust boundary is the service token, so the BFF-side check is the only
 // one that exists (same posture as settings.tsx's savePresentation).
 const createDefinition = createServerFn({ method: 'POST' })
-  .inputValidator((input: ReportDefinition) => input)
+  .validator((input: ReportDefinition) => input)
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
@@ -166,7 +166,7 @@ const createDefinition = createServerFn({ method: 'POST' })
   })
 
 const updateDefinition = createServerFn({ method: 'POST' })
-  .inputValidator((input: { id: string; definition: ReportDefinition }) => input)
+  .validator((input: { id: string; definition: ReportDefinition }) => input)
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
@@ -182,7 +182,7 @@ const updateDefinition = createServerFn({ method: 'POST' })
   })
 
 const deleteDefinition = createServerFn({ method: 'POST' })
-  .inputValidator((input: { id: string }) => input)
+  .validator((input: { id: string }) => input)
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
@@ -194,7 +194,7 @@ const deleteDefinition = createServerFn({ method: 'POST' })
   })
 
 const deleteGenerated = createServerFn({ method: 'POST' })
-  .inputValidator((input: { id: string }) => input)
+  .validator((input: { id: string }) => input)
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
@@ -206,7 +206,7 @@ const deleteGenerated = createServerFn({ method: 'POST' })
   })
 
 const generateDefinition = createServerFn({ method: 'POST' })
-  .inputValidator((input: { id: string }) => input)
+  .validator((input: { id: string }) => input)
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()

@@ -24,28 +24,64 @@
 # account with admin on the repo) -- convenient for an operator re-running
 # this after a token expires, but never required to be long-lived or
 # stored anywhere.
+#
+# --instance N (#2572): registers a SECOND, THIRD, ... independent instance
+# on the same box instead of re-touching the primary one. Before this flag
+# existed, RUNNER_HOME/RUNNER_USER were fixed constants no matter what
+# --name got passed, so a second `--name second-ci` invocation collided
+# with the already-registered $RUNNER_HOME/.runner and either no-opped
+# (leaving only one instance actually running) or clobbered it -- there was
+# no way to actually scale past one executor. Every instance still
+# registers under the SAME RUNNER_LABELS (honeypot-ci): GitHub schedules a
+# queued job onto whichever instance is idle, so quality.yml's matrix rows
+# (each already independent per #2389/#2565) gain real parallelism instead
+# of serializing behind one machine. Default instance "1" reuses the
+# original /opt/github-ci-runner + github-ci-runner user + "$HOSTNAME-ci"
+# name unchanged, so the already-registered instance needs no migration.
 set -euo pipefail
 
-[[ ${EUID} -eq 0 ]] || { echo "Run as root" >&2; exit 1; }
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 RUNNER_VERSION=2.336.0
 RUNNER_SHA256=04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d
-RUNNER_USER=github-ci-runner
-RUNNER_HOME=/opt/github-ci-runner
 RUNNER_LABELS="self-hosted,linux,x64,honeypot-ci"
 
+# --- BEGIN instance derivation (config test: tests/test_install_ci_runner_instances.py) ---
+# Instance "1" is the original, unsuffixed layout -- anything else gets its
+# own home dir and system user so N instances can run side by side without
+# fighting over the same _work directory, .runner registration file, or
+# systemd unit's working user. Kept between these markers, and pure
+# (no filesystem/network touches), so the test can extract and execute
+# exactly this argument-parsing + derivation logic in isolation.
 repo=""
 token=""
-name="${HOSTNAME:-homeserver}-ci"
+name=""
+instance="1"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo) repo="$2"; shift 2 ;;
     --token) token="$2"; shift 2 ;;
     --name) name="$2"; shift 2 ;;
+    --instance) instance="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
 done
-[[ -n "$repo" ]] || { echo "Usage: $0 --repo OWNER/NAME [--token TOKEN] [--name RUNNER_NAME]" >&2; exit 1; }
+[[ -n "$repo" ]] || { echo "Usage: $0 --repo OWNER/NAME [--token TOKEN] [--name RUNNER_NAME] [--instance N]" >&2; exit 1; }
+
+if [[ -z "$name" ]]; then
+  name="${HOSTNAME:-homeserver}-ci"
+  [[ "$instance" == "1" ]] || name="${name}-${instance}"
+fi
+if [[ "$instance" == "1" ]]; then
+  RUNNER_USER=github-ci-runner
+  RUNNER_HOME=/opt/github-ci-runner
+else
+  RUNNER_USER="github-ci-runner-${instance}"
+  RUNNER_HOME="/opt/github-ci-runner-${instance}"
+fi
+# --- END instance derivation ---
+
+[[ ${EUID} -eq 0 ]] || { echo "Run as root" >&2; exit 1; }
 
 # Only actually needed to register/re-register -- an already-configured
 # runner (found $RUNNER_HOME/.runner below) must not fail here just
@@ -71,11 +107,66 @@ if ! id "$RUNNER_USER" >/dev/null 2>&1; then
 fi
 install -d -m 0755 -o "$RUNNER_USER" -g "$RUNNER_USER" "$RUNNER_HOME"
 
+# #2764: the one deliberate, narrow exception to "no sudo BY DESIGN" above.
+# compose-drift-watch.py needs `docker compose config` AND `docker compose
+# ps` on every stack under /var/dockge/stacks/, and four of them have a
+# root/deploy-runner-owned .env this user can't read -- confirmed live,
+# permission denied for both subcommands, regardless of the 600/640 split.
+# Widening group membership (e.g. adding this user to deploy-runner) was the
+# simpler option and explicitly rejected: it would hand a scheduled,
+# gh-token-bearing job direct read access to Keycloak admin credentials and
+# every other secret those .env files hold. Instead: a dedicated group whose
+# only grant is running one specific, narrow root-run helper
+# (scripts/compose-project-state.py) that resolves the project as root but
+# returns nothing except {"services": {name: restart_policy}, "containers":
+# [{Service, State}]} -- never a secret value, an image, a label or a
+# command line. Every instance's RUNNER_USER joins this same group, so N
+# runner instances share one sudoers grant instead of needing one per
+# instance.
+#
+# Note this script is NOT invoked by install-homeserver.sh -- it is a manual
+# runbook step (docs/CI-CD.md), so a rebuild only replays this grant if the
+# operator runs it.
+compose_drift_group=compose-drift-ro
+if ! getent group "$compose_drift_group" >/dev/null 2>&1; then
+  groupadd --system "$compose_drift_group"
+fi
+usermod -aG "$compose_drift_group" "$RUNNER_USER"
+
+install -d -m 0755 -o root -g root /opt/github-ci-runner-helpers
+install -m 0755 -o root -g root \
+  "$here/compose-project-state.py" \
+  /opt/github-ci-runner-helpers/compose-project-state.py
+
+# The trailing '*' only ever reaches this helper's own argument validation
+# (rejects anything but a clean path under /var/dockge/stacks or
+# /opt/stacks -- see compose-project-state.py's own header), not a general
+# command -- sudoers itself grants nothing broader than "run this one file
+# as root."
+#
+# Written to a temp file and validated BEFORE it is installed: a syntax
+# error in a file already sitting in /etc/sudoers.d breaks sudo host-wide
+# for as long as it is there, however briefly.
+sudoers_file=/etc/sudoers.d/compose-drift-ro
+sudoers_tmp="$(mktemp)"
+cat > "$sudoers_tmp" <<EOF
+%${compose_drift_group} ALL=(root) NOPASSWD: /usr/bin/python3 /opt/github-ci-runner-helpers/compose-project-state.py *
+EOF
+if ! visudo -cf "$sudoers_tmp"; then
+  echo "generated sudoers file failed validation, not installing it" >&2
+  rm -f "$sudoers_tmp"
+  exit 1
+fi
+install -m 0440 -o root -g root "$sudoers_tmp" "$sudoers_file"
+rm -f "$sudoers_tmp"
+
 # Host provision for the routed checks, kept idempotent so re-running this
-# script restores a drifted box. The runner user has no sudo BY DESIGN, so
-# every sudo-apt path inside a workflow check would be a guaranteed
-# relocation failure -- everything a check needs is preinstalled here
-# instead, and checks that would install on a missing dep fail loudly.
+# script restores a drifted box. The runner user has no general sudo BY
+# DESIGN -- the one exception above (#2764) is a single, narrow, output-
+# filtered helper, not a shell -- so every sudo-apt path inside a workflow
+# check would be a guaranteed relocation failure -- everything a check
+# needs is preinstalled here instead, and checks that would install on a
+# missing dep fail loudly.
 #   redis-server: the frontend-next browser fixture spawns its own
 #     (daemon disabled -- only the binary is wanted).
 #   nodejs/npm: the dashboard OIDC suites run the BFF build against the
@@ -153,3 +244,44 @@ fi
 
 echo "done. status:"
 ./svc.sh status
+
+# #2742: writing and starting a unit is necessary but not sufficient. The
+# 2026-08-29 outage was two units -- byte-identical in shape to the ones
+# that worked -- that were simply never `enable`d, so they silently vanished
+# on the next reboot without a single command failing anywhere along the
+# way. `svc.sh install` above already calls `systemctl enable` internally
+# and fails loudly if that call itself fails, but nothing previously
+# confirmed the enabled state actually stuck, and nothing confirmed
+# GitHub's own view of this runner -- a unit can be enabled and running
+# locally and still never show up `online` (wrong labels, a stale/duplicate
+# registration, a network path that can't reach GitHub). Assert both below
+# and fail loudly rather than leaving either silently unknown.
+unit_name="$(basename "$service_file")"
+if ! systemctl is-enabled --quiet "$unit_name"; then
+  echo "FATAL: $unit_name is not enabled after provisioning -- it will not survive a reboot" >&2
+  exit 1
+fi
+echo "confirmed enabled: $unit_name"
+
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  echo "confirming \"$name\" shows online to GitHub (up to 60s)..."
+  online=""
+  status=""
+  for _ in $(seq 1 12); do
+    status=$(gh api "repos/$repo/actions/runners" --paginate \
+      --jq ".runners[] | select(.name==\"$name\") | .status" 2>/dev/null | tail -1) || status=""
+    if [[ "$status" == "online" ]]; then
+      online="1"
+      break
+    fi
+    sleep 5
+  done
+  if [[ -z "$online" ]]; then
+    echo "FATAL: \"$name\" did not report status=online to the GitHub API within 60s (last seen: '${status:-none}'). The unit is enabled and running locally but GitHub does not consider this runner available -- check $RUNNER_HOME/_diag for the runner's own connection log." >&2
+    exit 1
+  fi
+  echo "confirmed online: $name"
+else
+  echo "WARNING: gh is not authenticated -- could not verify \"$name\" shows online to the GitHub API. Verify manually:" >&2
+  echo "  gh api repos/$repo/actions/runners --jq '.runners[] | select(.name==\"'\"$name\"'\")'" >&2
+fi

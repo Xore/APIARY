@@ -49,7 +49,7 @@ type AgentCampaignRow = {
 }
 
 const fetchPage = createServerFn({ method: 'GET' })
-  .inputValidator((input: { offset: number }) => input)
+  .validator((input: { offset: number }) => input)
   .handler(async ({ data }): Promise<StorePage<AgentCampaignRow> | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<StorePage<AgentCampaignRow>>(`/api/v1/store/agent-campaigns?offset=${data.offset}&size=25`)

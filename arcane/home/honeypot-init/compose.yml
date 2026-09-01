@@ -176,7 +176,7 @@ services:
 
   elasticsearch-setup:
     <<: *runtime-defaults
-    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.1@sha256:b70b3017fbd35310bc57e7e3f8c0ca42ca0b94df3331f747b7cdcfddae430a5a
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.2@sha256:9c1e1afc2bda921b35025e21c72ec6e392266995aa35ad6a47887363592718be
     container_name: hp-elasticsearch-setup
     restart: no
     entrypoint:
@@ -408,7 +408,10 @@ services:
     environment:
       - GEOIPUPDATE_ACCOUNT_ID=${MAXMIND_ACCOUNT_ID:-}
       - GEOIPUPDATE_LICENSE_KEY=${MAXMIND_LICENSE_KEY:-}
-      - GEOIPUPDATE_EDITION_IDS=GeoLite2-City GeoLite2-ASN
+      # #2713: GeoLite2-Country added so Arkime (geoLite2Country in
+      # arkime/config.ini) has its own dedicated database rather than
+      # relying on unconfirmed City-db-as-Country-superset behavior.
+      - GEOIPUPDATE_EDITION_IDS=GeoLite2-City GeoLite2-ASN GeoLite2-Country
       - GEOIPUPDATE_FREQUENCY=24
     volumes:
       - /opt/stacks/apiary/analysis/geoip:/usr/share/GeoIP

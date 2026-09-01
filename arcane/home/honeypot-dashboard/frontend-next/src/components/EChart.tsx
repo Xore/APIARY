@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { copyWithFlash } from '../lib/flash'
 import { useAppearanceKey } from '../lib/prefs'
 import { stepZoom, zoomFromWheel } from '../lib/chartZoom'
+import { sessionAwareFetch } from '../lib/reauth'
 
 export type ChartKind = 'sankey' | 'timeline' | 'heatmap' | 'pie' | 'line' | 'bar' | 'barh' | 'scatter' | 'radar'
 
@@ -451,7 +452,11 @@ export function EChart({ kind, url, height, zoomable }: { kind: ChartKind; url: 
     let disposed = false
     ;(async () => {
       try {
-        const response = await fetch(url, { cache: 'no-store', headers: { Accept: 'application/json' } })
+        // #1975: through sessionAwareFetch, so an expired session routes to
+        // re-auth instead of settling as "Chart failed to load: 401" -- a
+        // message that names the symptom and hides the remedy. Every other
+        // status still lands in the catch below unchanged.
+        const response = await sessionAwareFetch(url, { cache: 'no-store', headers: { Accept: 'application/json' } })
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
         const data = await response.json()
         if (disposed) return

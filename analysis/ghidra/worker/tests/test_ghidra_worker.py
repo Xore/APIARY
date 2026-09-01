@@ -164,6 +164,29 @@ class ModelStub(BaseHTTPRequestHandler):
         self.wfile.write(b)
 
 
+class SlotStub(BaseHTTPRequestHandler):
+    """Ollama's native /api/ps, the runtime view the /v1 dialect does not carry.
+
+    Shape taken from ollama 0.32.13's own response: the tag repeated under both
+    `name` and `model`, a `digest` over the weights, and `size_vram` in bytes.
+    `loaded` is swapped by the test to move the slot between warm and cold
+    without restarting the server.
+    """
+
+    loaded = []
+
+    def log_message(self, *a): pass
+
+    def do_GET(self):
+        if self.path != "/api/ps":
+            self.send_response(404); self.end_headers()
+            return
+        b = json.dumps({"models": SlotStub.loaded}).encode()
+        self.send_response(200); self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b))); self.end_headers()
+        self.wfile.write(b)
+
+
 class TruncatingModelStub(ModelStub):
     """A server whose context window is too small, behaving as Ollama does.
 
@@ -569,7 +592,10 @@ def test_spool(ghidra):
               "function addr mapped to address")
         check(d.get("analyzer_version") == "ghidra-11.3.2",
               "analyzer version recorded from /status")
-        check(d["version"] == 8, "version stamped")
+        # Deliberately a literal, not an import of RESULT_VERSION: the point
+        # is to notice a bump, which a self-referencing assertion cannot do.
+        # 9 is this branch's bump for the slot_generation stamp.
+        check(d["version"] == 9, "version stamped")
         check(all(k in d for k in ("findcrypt", "call_graph_svg", "ai_triage",
                                    "fuzzy_hashes", "lief", "capa", "floss", "revdeck",
                                    "report_pdf", "types", "globals", "annotations",
@@ -915,6 +941,71 @@ def test_triage_gpu_queue_defers_end_to_end(ghidra, model):
     check("kernel32.dll!CreateProcessA" in payload.get("evidence", ""),
           "the evidence reached the queued job through the real transport")
     check(bool(payload.get("note")), "so did the evidence note")
+
+
+def test_slot_generation(model, slot):
+    """#2646: every assessment records which resident instance produced it.
+
+    A warm Ollama slot answers the same prompt differently at temperature 0
+    with a fixed seed, so `model` alone does not make two results comparable.
+    The check that matters is the last one: whatever the runtime API says --
+    warm, cold, or unreachable -- run_triage_workflows() must never hand back
+    an assessment without the stamp, because a missing field would have to be
+    guessed at later, and the wrong guess is "these two are comparable".
+    """
+    w = load_worker()
+    print("--- slot_generation ---")
+
+    check(w._derive_runtime_base("http://ollama:11434/v1") == "http://ollama:11434",
+          "the OpenAI suffix is dropped to reach the native API")
+    check(w._derive_runtime_base("http://ollama:11434/") == "http://ollama:11434",
+          "a base without the suffix is left alone")
+
+    check(w.slot_generation("abc/ctx32768", "abc/ctx32768") == "abc/ctx32768",
+          "a slot that did not move stamps as itself")
+    check(w.slot_generation("cold", "abc/ctx32768") == "cold->abc/ctx32768",
+          "a slot that loaded mid-analysis says both ends, not one")
+
+    w.TRIAGE_MODEL = "stub-model"
+    w.TRIAGE_RUNTIME_BASE = slot
+    SlotStub.loaded = [{"name": "stub-model", "model": "stub-model",
+                        "digest": "0123456789abcdef" * 4,
+                        "context_length": 32768,
+                        "size_vram": 14336 * 1024 * 1024}]
+    check(w.slot_fingerprint() == "0123456789ab/ctx32768/vram14336mib",
+          "a resident instance is identified by digest, context and footprint")
+
+    SlotStub.loaded = [{"name": "someone-elses-model", "model": "someone-elses-model",
+                        "digest": "ff" * 32, "context_length": 4096}]
+    check(w.slot_fingerprint() == "cold",
+          "another model holding the card is cold for this one, not a match")
+
+    SlotStub.loaded = []
+    check(w.slot_fingerprint() == "cold", "an empty slot reads as cold")
+
+    w.TRIAGE_RUNTIME_BASE = "http://127.0.0.1:1/"
+    check(w.slot_fingerprint() == "unavailable",
+          "an unreachable runtime API is unavailable, never mistaken for cold")
+    w.TRIAGE_RUNTIME_BASE = ""
+    check(w.slot_fingerprint() == "unavailable", "no runtime API configured is unavailable")
+
+    # The field is not optional. Run the assembly with the probe in each of its
+    # three states and require the stamp out of all of them.
+    w.TRIAGE_API_BASE = f"{model}/v1"
+    for label, base, expected in (("warm", slot, "0123456789ab/ctx32768/vram14336mib"),
+                                  ("cold", slot, "cold"),
+                                  ("unavailable", "", "unavailable")):
+        SlotStub.loaded = ([{"name": "stub-model", "model": "stub-model",
+                             "digest": "0123456789abcdef" * 4,
+                             "context_length": 32768,
+                             "size_vram": 14336 * 1024 * 1024}]
+                           if label == "warm" else [])
+        w.TRIAGE_RUNTIME_BASE = base
+        assessment = w.run_triage_workflows("kernel32.dll!CreateProcessA", "note")
+        check(isinstance(assessment, dict)
+              and assessment.get("slot_generation") == expected,
+              f"{label} slot stamps slot_generation={expected}: "
+              f"{(assessment or {}).get('slot_generation')!r}")
 
 
 def test_statictools(ghidra, statictools):
@@ -1386,6 +1477,7 @@ def main():
     truncating = serve(TruncatingModelStub)
     statictools = serve(StaticToolsStub)
     revdeck = serve(RevDeckStub)
+    slot = serve(SlotStub)
     test_unit()
     test_sweep_stranded_claims()
     test_on_stranded_spares_completed_results()
@@ -1395,6 +1487,7 @@ def main():
     test_triage_gpu_queue_falls_back_when_enqueue_fails(ghidra, model)
     test_triage_gpu_queue_defers_when_headroom_exhausted(model)
     test_triage_gpu_queue_defers_end_to_end(ghidra, model)
+    test_slot_generation(model, slot)
     test_statictools(ghidra, statictools)
     test_revdeck(ghidra, revdeck)
     test_revdeck_standalone(revdeck)

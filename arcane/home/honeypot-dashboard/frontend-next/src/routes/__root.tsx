@@ -9,6 +9,7 @@ import { AppShell } from '../components/AppShell'
 import { getSessionUser, type User } from '../lib/auth'
 import { activeBanner, type BannerView, type BehaviorConfig, type PresentationConfig } from '../lib/banner'
 import { pullAppearance } from '../lib/prefs'
+import { useSessionWatch } from '../lib/useSessionWatch'
 import { type Appearance } from '../lib/appearanceCookie'
 // Inlined verbatim by Vite (?raw) at build time; "types": ["vite/client"] in
 // tsconfig.json is what types it. Read as text rather than fs because head()
@@ -250,6 +251,11 @@ function RootDocument({ children }: { children: React.ReactNode }) {
   // profile widget and topbar avatar show a real identity (#1653).
   const { user } = Route.useRouteContext() as { user?: User | null }
   useStoredAppearance()
+  // #1975: a tab that sat hidden long enough for its session to die finds
+  // out the moment it comes back, not the next time the operator clicks
+  // something and gets an unexplained failure. Root-mounted because it has
+  // to outlive every navigation; it no-ops on /auth/* itself.
+  useSessionWatch()
   return (
     // #1833: rendered, not scripted. Viewing source now shows the
     // operator's theme on <html> rather than only a script that will set

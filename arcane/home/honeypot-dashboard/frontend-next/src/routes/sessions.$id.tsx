@@ -51,7 +51,7 @@ type SessionDetail = {
 type SessionFetch = { state: 'session'; session: SessionDetail } | { state: 'missing' } | { state: 'failed' }
 
 const fetchSession = createServerFn({ method: 'GET' })
-  .inputValidator((input: { id: string }) => input)
+  .validator((input: { id: string }) => input)
   .handler(async ({ data }): Promise<SessionFetch> => {
     const { serviceJSONResult } = await import('../lib/backend.server')
     const result = await serviceJSONResult<SessionDetail>(`/api/v1/sessions/${encodeURIComponent(data.id)}`)

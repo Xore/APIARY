@@ -20,52 +20,62 @@ on:
 
 permissions:
   contents: read
+  # The ci-target router dispatches the ci-heartbeat canary with
+  # GITHUB_TOKEN, and a called reusable workflow can never exceed the
+  # caller's envelope -- under-granting it startup-fails the whole run
+  # as "Invalid workflow file" (containers.yml/security.yml/pages.yml
+  # grant this same way for the same reusable ci-router.yml).
+  actions: write
 
 concurrency:
-  group: quality-${{ github.ref }}
-  # Cancellation stays on for pull_request runs (a superseded run was for a
-  # commit we already stopped caring about) and off for push-to-main -- on
-  # main the cancelled run is the ONLY verification that commit ever gets,
-  # so serializing beats superseding (#2347): cbb5ef3f landed non-compiling
-  # Rust and its own quality run never finished, because each next main
-  # push cancelled the previous in-flight one down the chain to #2317.
+  # #2753: this used to be group: quality-${{ github.ref }} with
+  # cancel-in-progress off for push-to-main, on the theory that turning
+  # cancellation off makes main pushes serialize -- wait for the previous
+  # run before starting. That is not what a GitHub Actions concurrency group
+  # does: with cancel-in-progress:false, GitHub keeps only the currently
+  # running run and the single most recent pending one per group, and
+  # cancels -- with ZERO jobs ever started -- every push queued in between.
+  # Reproduced live 2026-08-31: ten consecutive main pushes (including the
+  # #2724/#2725 merge commits) got a Quality run that was `cancelled` with
+  # `.jobs | length == 0`, not superseded by a later run that re-verified
+  # the same tree; only the first and last commit in the batch were ever
+  # actually checked. That is exactly the #2317/#2347 failure class this
+  # config exists to prevent (cbb5ef3f landed non-compiling Rust and its own
+  # quality run never finished) -- the shared per-ref group didn't close
+  # that hole, it just changed which commits fall through it.
+  #
+  # Fix: give every push-to-main commit its own group (keyed on github.sha
+  # instead of github.ref), so no two main commits can ever share a group
+  # and cancel one another. This trades true FIFO serialization -- which
+  # GitHub's concurrency primitive cannot express at all -- for the
+  # guarantee #2317/#2347 actually needed: every commit that reaches `main`
+  # gets its own Quality run and none of them get cancelled by a sibling.
+  # pull_request runs keep the previous shared-per-ref/cancel-on behavior
+  # unchanged -- a superseded PR run is genuinely for a commit nobody cares
+  # about anymore.
+  group: quality-${{ startsWith(github.ref, 'refs/heads/main') && github.sha || github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/heads/main') }}
 
 jobs:
   # -------------------------------------------------------------------------
   # Executor routing ("homeserver first, GitHub-hosted fallback")
   #
-  # ci-target answers two questions, and every home-executable check below
-  # ships as a PAIR of conditional jobs that take turns off that answer --
-  # exactly one twin does real work per run, the other reports skipped.
+  # ci-target's trust-gate + heartbeat-liveness decision procedure is
+  # shared with every other homeserver-eligible workflow via the reusable
+  # .github/workflows/ci-router.yml -- its header carries the full
+  # rationale (also documented in docs/CI-CD.md's "Executor routing"
+  # section), so it isn't repeated here. Two things stay specific to
+  # Quality:
   #
-  #   1. May this run's source code reach the homeserver at all?
-  #      Trust boundary per docs/CI-CD.md ("Why this can never see
-  #      pull_request"): fork PRs are attacker-controlled input and must
-  #      never become process execution on home-network infrastructure.
-  #      push-to-main only fires for commits reviewed on their own PR
-  #      before merging, and workflow_dispatch is an operator's own click,
-  #      so those pass. Same-repo pull_request branches stay excluded too
-  #      (one compromised contributor account away from untrusted) unless
-  #      the repository variable CI_HOMESERVER_PRS=true makes allowing them
-  #      a deliberate, auditable act.
-  #
-  #   2. Can a honeypot-ci-labelled runner ACTUALLY execute this commit
-  #      right now? Answering costs one measurement, because the obvious
-  #      ask-the-registry approach does not exist for CI tokens: GET
-  #      /actions/runners answers HTTP 403 "Resource not accessible by
-  #      integration" to GITHUB_TOKEN under every permission shape (live-
-  #      verified 2026-08-27). So ci-target dispatches the one-job
-  #      ci-heartbeat.yml canary pinned to [honeypot-ci] at a real ref
-  #      (the triggering branch; a same-repo PR's head branch -- the
-  #      pull_request merge ref backs no branch and dispatches refuse
-  #      with 422) and gives it a bounded window; success means a real
-  #      box really
-  #      ran our code seconds ago. Paused, powered-off, unregistered,
-  #      network-stalled or service-wedged all fail the window ->
-  #      "GitHub-hosted". Routing infrastructure can degrade CI's speed,
-  #      never its pass/fail correctness: any router error lands on the
-  #      fallback and Quality still looks exactly like a conventional run.
+  #   - force_github_hosted (the workflow_dispatch input above) forces the
+  #     fallback direction manually -- e.g. while servicing the
+  #     homeserver, or when a suspect result needs ruling out as
+  #     runner-specific.
+  #   - Unlike containers.yml/security.yml/pages.yml's single
+  #     executor-agnostic job, every home-executable check below ships as
+  #     a PAIR of conditional jobs that take turns off ci-target's answer
+  #     -- exactly one twin does real work per run, the other reports
+  #     skipped.
   #
   # #2565: the no-docker CI-runner design is retired. The runner's
   # dedicated user now carries a docker-group membership (the same grant
@@ -81,180 +91,13 @@ jobs:
   # apt-install), and every docker-bound scripts-and-compose row is
   # flagged `home: true` (#2389's docker-less audit criterion graduated
   # to "docker or no engine needed").
-  #
-  # containers.yml / security.yml (CodeQL) / pages.yml (build) route the
-  # same way via the shared .github/workflows/ci-router.yml.
   # -------------------------------------------------------------------------
   ci-target:
     name: Pick CI executor
-    runs-on: ubuntu-latest
-    # Must comfortably outlive the heartbeat window below
-    # (dispatch + appear-wait + terminal-wait + API slack; worst case
-    # 120s + 420s plus slack).
-    timeout-minutes: 15
-    # actions:write exists solely to launch the ci-heartbeat canary.
-    permissions:
-      contents: read
-      actions: write
-    outputs:
-      # Always written ('true'/'false', never empty) so downstream
-      # `== 'true'` comparisons cannot misread an absent string as truthy.
-      homeserver: ${{ steps.route.outputs.homeserver }}
-    env:
-      GH_TOKEN: ${{ github.token }}
-      CI_HOMESERVER_PRS: ${{ vars.CI_HOMESERVER_PRS || '' }}
-      FORCE_GITHUB_HOSTED: ${{ inputs.force_github_hosted || '' }}
-    steps:
-      - id: route
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          # The runner always exposes the webhook payload natively as
-          # GITHUB_EVENT_PATH; there is no github.event_path expression to
-          # map through env (the key silently vanishes and, under set -u,
-          # reading the bare name aborts the step -- seen live on a PR run).
-          EVENT_PATH="${EVENT_PATH:-${GITHUB_EVENT_PATH:-}}"
-
-          # Defaults are the fallback path; the guards below may only set
-          # them to true.
-          trusted=false
-          online=false
-
-          case "$GITHUB_EVENT_NAME" in
-            push)
-              # This workflow's push trigger is branches:[main] only --
-              # everything arriving here was already reviewed and merged.
-              trusted=true ;;
-            workflow_dispatch)
-              trusted=true ;;
-            pull_request)
-              base="$(jq -r '.pull_request.base.repo.full_name // ""' "$EVENT_PATH")"
-              head_repo="$(jq -r '.pull_request.head.repo.full_name // ""' "$EVENT_PATH")"
-              if [[ -n "$base" && "$base" == "$head_repo" && "${CI_HOMESERVER_PRS}" == "true" ]]; then
-                trusted=true
-              fi ;;
-          esac
-
-          # Decision-window knobs: env-overridable so local unit tests run
-          # in seconds while production keeps these defaults. The two
-          # windows together bound worst-case router cost well under this
-          # job's own timeout-minutes.
-          # GH_TOKEN arrives via the job-level env mapping above and is
-          # therefore always present -- no shell-side default guard here,
-          # which scripts/check-public-leaks.py would flag as a literal
-          # credential assignment.
-
-          # 120s appear: seen live on #2568 -- the dispatch is accepted and
-          # the canary still not visible in /runs 45s later while GitHub's
-          # run indexing lags, so the window must cover API lag, not just
-          # dispatch latency (the loop exits early when the run appears,
-          # so the cost is paid only in the worst case).
-          # 420s decide: the canary is tiny, but it rides a queue behind
-          # whatever else the single box instance is executing; #2572
-          # tracks real capacity. Fan-out deeper than ~2 canaries still
-          # overflows this window and falls back -- fail-safe direction.
-          appear_window="${HEARTBEAT_APPEAR_SECONDS:-120}"   # event->run-object lag (API indexing included)
-          decide_window="${HEARTBEAT_DECIDE_SECONDS:-420}"   # queue+exec budget on the box
-          poll_every="${HEARTBEAT_POLL_SECONDS:-10}"
-
-          if [[ "$trusted" == "true" && "${FORCE_GITHUB_HOSTED}" != "true" ]]; then
-            api="repos/$GITHUB_REPOSITORY/actions/workflows/ci-heartbeat.yml"
-            # The dispatch API needs a real ref. For pull_request runs
-            # GITHUB_REF_NAME is the ephemeral "<n>/merge" merge ref that no
-            # branch backs, so dispatching there is refused with 422 "No ref
-            # found for" -- seen live on #2568, and it would have routed
-            # every same-repo PR to the fallback forever. Same-repo PRs
-            # therefore dispatch at the PR's head branch (whose
-            # ci-heartbeat.yml is the branch's own; fork PRs never get this
-            # far, trusted=false). push/workflow_dispatch/schedule carry a
-            # real branch in GITHUB_REF_NAME already.
-            dispatch_ref="$GITHUB_REF_NAME"
-            if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-              dispatch_ref="$(jq -r '.pull_request.head.ref // ""' "$EVENT_PATH")"
-            fi
-            echo "heartbeat: dispatching ci-heartbeat on ${dispatch_ref:-<none>}"
-            http=""
-            if [[ -n "$dispatch_ref" ]]; then
-              # No -f: a refused dispatch must land its HTTP code in $http,
-              # not abort the capture (with -f a 422 printed as "422X").
-              http="$(curl -sS -o "${RUNNER_TEMP:-/tmp}/hb-disp.out" -w '%{http_code}' -X POST \
-                -H "Authorization: Bearer $GH_TOKEN" \
-                -H 'Accept: application/vnd.github+json' \
-                "$GITHUB_API_URL/$api/dispatches" \
-                -d "{\"ref\":\"${dispatch_ref}\"}" || true)"
-            fi
-            [[ "$http" == "204" ]] \
-              && echo "heartbeat: dispatch accepted" \
-              || { echo "::warning::heartbeat dispatch refused (HTTP ${http:-none}); routing fallback"; http=""; }
-
-            # cutoff predates the dispatch by 2min so minor runner/GitHub
-            # clock skew cannot out-veto a real fresh run. Must be assigned
-            # BEFORE Phase A -- under set -u an unbound $cutoff kills the
-            # pipeline subshell every poll iteration and rid silently stays
-            # empty (live on #2568: canaries succeeded while every router
-            # still concluded offline because this line was dropped in the
-            # dispatch-ref edit).
-            cutoff="$(date -u -d '2 minutes ago' +%FT%TZ)"
-
-            # Phase A: wait for a FRESH heartbeat run to appear -- created
-            # after the cutoff (dispatch minus skew allowance) and not yet
-            # completed. The ref is the branch name (the dispatch API
-            # rejects commit SHAs with 422 "No ref found for"), so
-            # freshness -- not a SHA pin -- guards against counting old
-            # runs: only something genuinely recent may vouch, and it must
-            # still reach success inside this cycle's own window. A run
-            # triggered concurrently elsewhere on the same branch may be
-            # consumed as evidence; it measures the same box.
-            rid=""
-            deadline=$(( $(date +%s) + appear_window ))
-            while [[ "$(date +%s)" -lt "$deadline" ]]; do
-              # system jq (not `gh api --jq`, which cannot bind
-              # variables) so the cutoff is a proper parameter.
-              runs_json="$(gh api "$api/runs?per_page=20" 2>/dev/null || true)"
-              rid="$(printf '%s' "$runs_json" | jq -r --arg cutoff "$cutoff" '
-                [.workflow_runs[]
-                 | select(.event == "workflow_dispatch"
-                          and .status != "completed"
-                          and .run_started_at >= $cutoff)
-                 | .id][0] // ""' 2>/dev/null || true)"
-              [[ -n "$rid" ]] && break
-              sleep "$poll_every"
-            done
-
-            # Phase B: give the found run its window to finish.
-            if [[ -n "$rid" ]]; then
-              deadline=$(( $(date +%s) + decide_window ))
-              while [[ "$(date +%s)" -lt "$deadline" ]]; do
-                line="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$rid" \
-                  --jq '"\(.status) \(.conclusion)"' 2>/dev/null || true)"
-                case "$line" in
-                  "completed success") online=true ;;
-                  completed*) : ;;                # finished badly -> stays offline
-                  # empty = transient API hiccup; anything else = still
-                  # running. Both keep polling inside the window.
-                  *) sleep "$poll_every"; continue ;;
-                esac
-                break
-              done
-            fi
-            echo "heartbeat verdict: online=$online"
-          fi
-
-          homeserver=false
-          if [[ "$trusted" == "true" && "$online" == "true"
-                && "${FORCE_GITHUB_HOSTED}" != "true" ]]; then
-            homeserver=true
-          fi
-
-          {
-            echo "trusted=$trusted"
-            echo "online=$online"
-            echo "forced_cloud=${FORCE_GITHUB_HOSTED:-<unset>}"
-            echo "executor=$( [[ "$homeserver" == true ]] && echo honeypot-ci || echo ubuntu-latest )"
-          } >>"$GITHUB_STEP_SUMMARY"
-
-          echo "homeserver=$homeserver" >>"$GITHUB_OUTPUT"
+    uses: ./.github/workflows/ci-router.yml
+    with:
+      ci_homeserver_prs: ${{ vars.CI_HOMESERVER_PRS || '' }}
+      force_github_hosted: ${{ inputs.force_github_hosted || '' }}
 
   # Naming rule for every pair below: the homeserver twin carries the
   # canonical check name (it is what normally runs); its GitHub-hosted
@@ -280,6 +123,7 @@ jobs:
           python-version: "3.13"
       - run: python scripts/check-public-leaks.py
       - run: python scripts/validate-oidc-redirects.py
+      - run: bash scripts/check-ghosts-vendored-egress.sh
 
   public-safety-cloud:
     name: Public repository safety (GitHub-hosted)
@@ -293,6 +137,7 @@ jobs:
           python-version: "3.13"
       - run: python scripts/check-public-leaks.py
       - run: python scripts/validate-oidc-redirects.py
+      - run: bash scripts/check-ghosts-vendored-egress.sh
 
   design-lab-readonly:
     # #1828: the design lab serves variants against the real captured-data
@@ -337,7 +182,20 @@ jobs:
           # 1.26.2 in its own go.mod -- the module graph forces that as the
           # floor for every module in this repo, not just dicompot's.
           go-version: "1.26.x"
-          cache-dependency-path: "**/go.sum"
+          # The homeserver runners keep GOMODCACHE/GOCACHE on disk at
+          # /opt/github-ci-runner (shared by all four runner instances), so
+          # setup-go's default module cache is pure loss here -- and worse
+          # than loss. Go writes module directories mode 0555, so the
+          # restore's `tar -x` cannot recreate a single already-present
+          # file: every job downloaded ~466 MB, spent ~45s failing to
+          # unpack it ("Cannot open: File exists" x thousands, tar exit 2),
+          # reported "Cache is not found", then re-uploaded the whole
+          # module cache from the post step. Six same-key 465 MB copies
+          # piled up in one evening and pushed the repo's 10 GB Actions
+          # cache over quota, evicting the buildkit layer caches. Same
+          # reasoning as the Rust job below, which carries no
+          # actions/cache block for exactly this reason.
+          cache: false
       - name: Check formatting
         shell: bash
         run: |
@@ -381,7 +239,20 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: "1.26.x"
-          cache-dependency-path: "**/go.sum"
+          # The homeserver runners keep GOMODCACHE/GOCACHE on disk at
+          # /opt/github-ci-runner (shared by all four runner instances), so
+          # setup-go's default module cache is pure loss here -- and worse
+          # than loss. Go writes module directories mode 0555, so the
+          # restore's `tar -x` cannot recreate a single already-present
+          # file: every job downloaded ~466 MB, spent ~45s failing to
+          # unpack it ("Cannot open: File exists" x thousands, tar exit 2),
+          # reported "Cache is not found", then re-uploaded the whole
+          # module cache from the post step. Six same-key 465 MB copies
+          # piled up in one evening and pushed the repo's 10 GB Actions
+          # cache over quota, evicting the buildkit layer caches. Same
+          # reasoning as the Rust job below, which carries no
+          # actions/cache block for exactly this reason.
+          cache: false
       - name: Test every Go module
         shell: bash
         run: |
@@ -899,17 +770,26 @@ jobs:
               # not the template.
               python scripts/check-timestamp-utc.py
 
-          - name: "JSON sink retention parity (#120, #2196)"
+          - name: "JSON sink retention parity (#120, #2196, #2216)"
             home: true
             run: |
               # Every self-rotating JSON directory under /logs must have BOTH
               # halves of the #120 contract present -- a writer that actually
               # rotates (proven by its rotation token in source) and a pruner
-              # glob line in log-maintenance.sh -- plus every find line there
-              # must belong to a ledgered sink. #2196 shipped because mailoney
-              # lacked both halves at once and nothing structural connected
-              # compose volumes to vendored writers to this script; adding a
-              # sensor now means adding one reviewable ledger row instead.
+              # glob line in log-maintenance.sh, credited to that directory's
+              # own find line -- plus every find line there must belong to a
+              # ledgered sink. #2196 shipped because mailoney lacked both
+              # halves at once and nothing structural connected compose
+              # volumes to vendored writers to this script; adding a sensor
+              # now means adding one reviewable ledger row instead.
+              #
+              # #2216: the checks above only see halves an author already
+              # touched, so the script also enumerates every
+              # /opt/stacks/apiary/logs/<dir> bind mount in arcane/home/*/
+              # compose.yml -- a new stack's mount is the one thing it cannot
+              # omit and still write to disk. Each must be a ledger row, an
+              # EXEMPT entry with a written reason, or a KNOWN_UNCOVERED entry
+              # naming the issue tracking the gap.
               python scripts/check-json-sink-retention-parity.py
 
           # #1982: compose.yml is the only place a stack's knobs are exercised,
@@ -926,6 +806,20 @@ jobs:
           - name: Compose interpolation documented per stack (#1982)
             home: true
             run: python scripts/check-compose-env-docs.py
+
+          # #119/#2051: a healthcheck (compose-level or baked into the
+          # service's own Dockerfile) with no autoheal=true label just
+          # detects a wedge and does nothing about it. #119 fixed the fleet
+          # once; the gap came back on every stack that didn't exist yet
+          # when it closed, so this is the standing guard #119 itself asked
+          # for, scanning both layers -- a compose-only matcher reproduces
+          # the exact blind spot that let four image-level-HEALTHCHECK
+          # services hide from the first audit.
+          - name: Healthcheck/autoheal label pairing (#2051)
+            home: true
+            run: |
+              python -m pip install -q pyyaml
+              python scripts/check-autoheal-labels.py
 
           # #2320: every WORKER_LOOPS consumer boots through the same
           # apiary-backend entrypoint whose gate (#2183) refuses an empty
@@ -1154,6 +1048,10 @@ jobs:
           - name: Windows sandbox static/dynamic IOC extraction (#482)
             home: true
             run: python3 sandbox/windows/orchestrate/test_extract_iocs.py -v
+
+          - name: Windows sandbox post-reclone golden-image checklist (#100, #2023)
+            home: true
+            run: python3 sandbox/windows/orchestrate/test_run_sample_golden_check.py -v
 
           - name: Shell syntax and high-severity ShellCheck
             home: true
@@ -1492,6 +1390,44 @@ jobs:
                 -f llm-worker/docker-compose.production-session-canary.yml config --quiet
               docker compose -f llm-worker/docker-compose.yml \
                 -f llm-worker/docker-compose.captured-data.yml config --quiet
+              # #2225: docker-compose.captured-data-deploy.yml (#1751) is the
+              # entrypoint live redeploys authorized under #83 actually run --
+              # `include:`, not a stacked `-f base -f overlay` pair, so
+              # neither line above proves anything about it. Unvalidated, a
+              # bad include path or an invalid key sails through both and
+              # first surfaces as a failed (or silently mis-scoped) live
+              # redeploy, which is how #1751's incident happened.
+              docker compose -f llm-worker/docker-compose.captured-data-deploy.yml config --quiet
+              # Syntactic validity alone isn't enough: stripping an include
+              # (e.g. losing docker-compose.captured-data.yml) still resolves
+              # to valid, synthetic-only config. So does keeping both includes
+              # but listing them as two separate `include:` entries instead of
+              # one list-valued `path:` -- separate entries are independent
+              # models, the first to claim services.llm-worker keeps it, and
+              # the base's deliberate `ES_HOST: ''` wins. That is what this
+              # check caught on its first run. Resolve exactly the one file
+              # the live deploy points at -- adding `-f base -f overlay`
+              # alongside it would supply the authorization from the command
+              # line and prove nothing about the include chain. Assert the
+              # resolved model still carries what this file exists to record.
+              resolved="$(docker compose -f llm-worker/docker-compose.captured-data-deploy.yml config --format json)"
+              es_host="$(jq -r '.services["llm-worker"].environment.ES_HOST // empty' <<<"$resolved")"
+              if [ -z "$es_host" ]; then
+                echo "::error::captured-data-deploy.yml resolved with empty ES_HOST -- the captured-data authorization overlay is not being applied (#2225)"
+                exit 1
+              fi
+              for net in honeypot-llm-data honeypot-llm; do
+                if ! jq -e --arg n "$net" '.networks | to_entries[] | select(.value.name == $n)' <<<"$resolved" >/dev/null; then
+                  echo "::error::captured-data-deploy.yml resolved without the $net network attached -- the captured-data authorization overlay is not being applied (#2225)"
+                  exit 1
+                fi
+              done
+              for target in /payloads/cowrie /payloads/scripts; do
+                if ! jq -e --arg t "$target" '.services["llm-worker"].volumes[]? | select(.target == $t and .read_only == true)' <<<"$resolved" >/dev/null; then
+                  echo "::error::captured-data-deploy.yml resolved without a read-only mount at $target -- the captured-data authorization overlay is not being applied (#2225)"
+                  exit 1
+                fi
+              done
 
           - name: Pi-hole/DNSCrypt install topology (#1387)
             home: true
@@ -1512,6 +1448,11 @@ jobs:
         with:
           go-version: "1.26.x"
           cache-dependency-path: "**/go.sum"
+          # Cache only on the GitHub-hosted path -- mirror of this job's
+          # own runs-on expression. On the homeserver runners the module
+          # cache is already on disk and setup-go's restore cannot unpack
+          # over it; see the go-fmt job for the full account.
+          cache: ${{ !(matrix.home == true && needs.ci-target.outputs.homeserver == 'true') }}
       - name: ${{ matrix.name }}
         shell: bash
         run: ${{ matrix.run }}

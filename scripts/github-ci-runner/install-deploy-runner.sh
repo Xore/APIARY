@@ -49,20 +49,19 @@ RUNNER_LABELS="self-hosted,linux,x64,honeypot-home"
 
 # The exact set of directories deploy.yml writes into (destination= across
 # every job in .github/workflows/deploy.yml, cross-checked against that
-# file directly, not re-derived from memory). Sensor stacks and the other
-# single-compose-file destinations are deliberately NOT listed here: those
-# jobs only ever `cp` one compose.yml into an already-`install -d`'d
-# directory, never rsync a tree into them, so there is no equivalent
-# ownership risk to fix there -- adding them would only widen this script's
-# blast radius for no real gain.
+# file directly, not re-derived from memory -- if this list ever drifts
+# again, re-derive it the same way: grep destination= out of
+# .github/workflows/deploy.yml). The honeypot-arcane destination= is
+# deliberately NOT listed here, same as every other stack: that job only
+# ever `cp`s one compose.yml into an already-`install -d`'d directory,
+# never rsyncs a tree into it, so there is no equivalent ownership risk to
+# fix there -- adding it would only widen this script's blast radius for
+# no real gain. (#2602: this list used to carry six pre-#1502 paths that
+# deploy.yml stopped writing to once the Arcane manifest took over; one of
+# them, /var/dockge/stacks/honeypot-keycloak, still existed on disk and
+# was getting a gratuitous recursive chown every rerun.)
 DEPLOY_DIRS=(
   /opt/stacks/apiary
-  /opt/stacks/honeypot-init
-  /var/dockge/stacks/honeypot-keycloak
-  /opt/stacks/honeypot-payload-analysis
-  /opt/stacks/honeypot-utilities
-  /opt/stacks/honeypot-elk
-  /opt/stacks/honeypot-dashboard
 )
 
 # Subtree names that are container-owned wherever they appear under any of
@@ -174,3 +173,39 @@ fi
 
 echo "done. status:"
 ./svc.sh status
+
+# #2749: same hardening #2742 added to install-ci-runner.sh, ported here --
+# this runner has real production write access, so a silently-never-enabled
+# unit (the 2026-08-29 outage shape: `svc.sh install` succeeds, nothing else
+# ever confirms it stuck) is at least as bad here as on the CI fleet. Assert
+# both the local systemd state and GitHub's own view of the runner, and fail
+# loudly rather than leaving either silently unknown.
+unit_name="$(basename "$service_file")"
+if ! systemctl is-enabled --quiet "$unit_name"; then
+  echo "FATAL: $unit_name is not enabled after provisioning -- it will not survive a reboot" >&2
+  exit 1
+fi
+echo "confirmed enabled: $unit_name"
+
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  echo "confirming \"$name\" shows online to GitHub (up to 60s)..."
+  online=""
+  status=""
+  for _ in $(seq 1 12); do
+    status=$(gh api "repos/$repo/actions/runners" --paginate \
+      --jq ".runners[] | select(.name==\"$name\") | .status" 2>/dev/null | tail -1) || status=""
+    if [[ "$status" == "online" ]]; then
+      online="1"
+      break
+    fi
+    sleep 5
+  done
+  if [[ -z "$online" ]]; then
+    echo "FATAL: \"$name\" did not report status=online to the GitHub API within 60s (last seen: '${status:-none}'). The unit is enabled and running locally but GitHub does not consider this runner available -- check $RUNNER_HOME/_diag for the runner's own connection log." >&2
+    exit 1
+  fi
+  echo "confirmed online: $name"
+else
+  echo "WARNING: gh is not authenticated -- could not verify \"$name\" shows online to the GitHub API. Verify manually:" >&2
+  echo "  gh api repos/$repo/actions/runners --jq '.runners[] | select(.name==\"'\"$name\"'\")'" >&2
+fi

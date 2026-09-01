@@ -22,7 +22,7 @@ is the single source of truth for which 37 stacks exist, what branch/path
 each syncs from, and any per-stack sync limits — `scripts/install-homeserver.sh`,
 CI, and this doc all read from it rather than maintaining separate lists.
 
-- The 33 `honeypot-*` stacks live under `arcane/home/<name>/`: their build
+- The 31 `honeypot-*` stacks live under `arcane/home/<name>/`: their build
   context and git-tracked config were moved there from repository root
   (see each compose file's own `#1502` comment for what moved and why).
 - The 6 other stacks (`auth-events-worker`, `llm-worker`, `ml-worker`,
@@ -176,6 +176,31 @@ alone. Re-verify against whatever Arcane version is pinned in
   vendored/generated tree, expect the same `file count limit exceeded`
   failure and raise that stack's own `maxSyncFiles` rather than assuming
   the default is enough.
+- **The directory-sync walk has no exclude/scope mechanism at all** —
+  confirmed against the source (`pkg/gitutil/git.go`'s `WalkDirectory`):
+  it walks everything under `filepath.Dir(composePath)` except `.git` and
+  symlinks, with no glob, no `.gitopsignore`, no sub-path option. #2711:
+  `ghosts`'s sync (`sandbox/ghosts/compose.yml`) always failed — either a
+  ~40s-then-500 with no detail, or (once `maxSyncTotalSize` alone was
+  raised) a fast `file count limit exceeded` — because
+  `sandbox/ghosts/vendor/ghosts-src/` (963 tracked files, ~132 MB) sits in
+  the same directory tree as the compose file, so the sync's whole-directory
+  walk of `sandbox/ghosts/` (989 files, 135,789,139 bytes in total) blows
+  past *both* defaults (`maxSyncFiles: 500`, `maxSyncTotalSize: 50MB`), not
+  just the one either failure message names. Fixed the same way as the
+  `honeypot-dashboard` case above — both limits raised on the sync record
+  and mirrored into the manifest (`arcane/manifests/home-production.json`:
+  `maxSyncFiles: 1500`, `maxSyncTotalSize: 209715200`, ~1.5x headroom over
+  the measured size). Verified live 2026-08-31: `Directory walk complete
+  syncId=... totalFiles=989 totalSize=135789139 skippedBinaries=0`, sync
+  request returned `200` with `"Successfully synced directory with 989
+  files to project ghosts"`, `ghosts-api` rebuilt and redeployed from the
+  synced tree, confirmed serving real data afterward. Total request time
+  was **227s** — comfortably under the #2705 ~5 minute internal deploy
+  timeout today, but with much less margin than any other project in this
+  manifest; if the vendored tree grows further (see #2256, which questions
+  whether it belongs in the repo at all — deliberately not addressed
+  here), this is the first sync that will hit that deadline again.
 - **A destroyed project can leave a stale path/sync binding.** Deleting a
   *sync* does not always fully clear the *project* record Arcane created
   for it — a subsequent sync attempt at the same path can fail with
@@ -312,23 +337,48 @@ changes.
 
 ### Two facts (still true today)
 
-**A sync does not build, and by default does not even redeploy.** The
+**A sync does not build, but it redeploys anyway when a file changed —
+`redeploy_after_sync = 0` does not prevent that.** #2706 caught this
+live: the log line is explicit, `Redeploying project due to content
+change from Git sync`, and it fires regardless of the stored
+`redeploy_after_sync` flag. 28 of 38 projects were redeployed this way
+during what was intended to be a files-only sync pass on 2026-08-30. The
 live store carries `auto_sync = 0`, `pull_image_after_sync = 0` and
 `redeploy_after_sync = 0` on every sync (re-verified 2026-08-27 against
 the pinned `v2.9.0` image's own sqlite store) — those are Arcane's
 defaults, not manifest-set values: the manifest carries neither field,
 and #2455's schema check confirmed the bulk-import request has no way to
-set them (only the single create-sync request does). A sync therefore
-materializes files onto the host and stops there. Confirmed
-operationally: syncing `honeypot-dashboard` puts new Rust source on the
-host and leaves `apiary-backend:latest` exactly as it was until a
-separate `POST /projects/{id}/build` (a call that belongs to the sibling
+set them (only the single create-sync request does) — but none of the
+three flags gate the content-change redeploy path, so do not read
+`redeploy_after_sync = 0` as "this sync only materializes files." Plan
+every sync as a restart of that stack. Confirmed operationally: syncing
+`honeypot-dashboard` redeploys the dashboard project from whatever image
+is already present — since that project has no `build:` service itself,
+`apiary-backend:latest` is left exactly as it was until a separate
+`POST /projects/{id}/build` (a call that belongs to the sibling
 `honeypot-dashboard-backend` project since #1622 — its `backend-service`
-is the one service in the pair with a `build:`). Without that call a
-redeploy recreates the containers from the *previous* image — green,
-healthy, running the old code.
+is the one service in the pair with a `build:`). Without that call the
+content-change redeploy recreates the containers from the *previous*
+image — green, healthy, running the old code.
 
-**34 of the 37 stacks build an image.** Only `honeypot-elk`,
+**The content-change redeploy runs with `removeOrphans=true`.** A
+compose file that drops a service will delete that service's container
+as a side effect of an ordinary sync — nobody has to ask for it, and
+there is no separate confirmation step. Removing a service from a
+compose file and pushing that change is enough to delete its container
+on the next sync.
+
+**This is also what causes the #2705 5-minute sync deadline.** A
+files-only sync would finish well inside Arcane's ~5 minute internal
+deploy timeout (see "stalled-looking sync" below); it is the implicit
+redeploy documented here that pushes a sync of many/large stacks past
+it. There is currently no known flag that suppresses the content-change
+redeploy — until one is found (or upstream confirms there isn't one),
+treat every sync as a per-project restart and bound the blast radius
+accordingly: scope each run to one stack at a time and verify the result — rather than firing
+ a fleet-wide sync pass and racing the timeout. (A purpose-built
+ single-project script is a natural follow-up; ship it separately so the
+ doc's claim of 'every sync is a restart' is reviewable on its own.)**34 of the 37 stacks build an image.** Only `honeypot-elk`,
 `honeypot-keycloak` and `pihole` pull — re-derived 2026-08-27 from the 37
 manifest compose paths (34 carry `build:`; the same three pullers the
 #1502-era text named, which said "35 of the 38" before #2381 retired

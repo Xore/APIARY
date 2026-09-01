@@ -40,7 +40,7 @@ type CidrCorrelation = {
 }
 
 const fetchCorrelation = createServerFn({ method: 'GET' })
-  .inputValidator((input: { cidr: string }) => input)
+  .validator((input: { cidr: string }) => input)
   .handler(async ({ data }): Promise<CidrCorrelation | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<CidrCorrelation>(`/api/v1/investigate/cidr/${encodeURIComponent(data.cidr)}`)

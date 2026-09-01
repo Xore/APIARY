@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
-# Unattended homeserver provisioning for APIARY — the Ubuntu-side
+# Unattended homeserver provisioning for APIARY — the Linux-side
 # equivalent of a Windows autounattend.xml. This is the single entry point
 # described in issue #518; it covers everything smoke-test-verified so far
 # (see docs/research/518-smoke-test-research.md) and is expected to grow.
 #
-# Scope: this script provisions a MANUALLY installed base Ubuntu Server
-# system into a running APIARY homeserver (Docker, NVIDIA/GPU
+# Scope: this script provisions a MANUALLY installed base Ubuntu Server or
+# Rocky Linux 10 system into a running APIARY homeserver (Docker, NVIDIA/GPU
 # stack, Arcane, WireGuard, the repo checkout, secret restore, and starting
 # the Compose stacks in dependency order). It does NOT partition disks or
-# install the OS itself — that's docs/autoinstall/homeserver-user-data.yaml,
-# run once, separately, before this script ever sees the box.
+# install the OS itself — that's docs/autoinstall/homeserver-user-data.yaml
+# on Ubuntu, or a kickstart on Rocky (#2730), run once, separately, before
+# this script ever sees the box.
+#
+# Distro support: every package operation goes through the pkg_* shim rather
+# than calling apt-get directly, and $DISTRO_FAMILY (debian|rhel) is resolved
+# once at source time. Only genuinely distro-specific things branch on it --
+# package names, repository format, and the NVIDIA driver path.
 #
 # Design goals (per #518): a single entry point, live status as it runs,
 # a clear non-fatal-by-default failure report at the end so a partial run
@@ -244,11 +250,91 @@ RUN_LOG="$LOG_DIR/install-$(date -u +%Y%m%dT%H%M%SZ).log"
 : >"$RUN_LOG"
 
 # ---------------------------------------------------------------------------
+# Distro shim
+# ---------------------------------------------------------------------------
+# The homeserver is moving from Ubuntu to Rocky Linux 10, so every package
+# operation goes through pkg_* rather than calling apt-get directly. Only the
+# places where the two distros genuinely differ -- package names, repository
+# format, the NVIDIA driver path -- branch on $DISTRO_FAMILY. Everything else
+# (Docker, WireGuard, libvirt, the whole APIARY provisioning flow) is
+# identical once the packages are on disk.
+#
+# Set once, at source time, so a step cannot disagree with preflight.
+if [[ -r /etc/os-release ]]; then
+  DISTRO_ID="$(. /etc/os-release && echo "${ID:-}")"
+  DISTRO_ID_LIKE="$(. /etc/os-release && echo "${ID_LIKE:-}")"
+else
+  DISTRO_ID=""; DISTRO_ID_LIKE=""
+fi
+
+case "$DISTRO_ID" in
+  ubuntu|debian)              DISTRO_FAMILY=debian ;;
+  rocky|rhel|centos|almalinux|fedora) DISTRO_FAMILY=rhel ;;
+  *)
+    case " $DISTRO_ID_LIKE " in
+      *debian*) DISTRO_FAMILY=debian ;;
+      *rhel*|*fedora*) DISTRO_FAMILY=rhel ;;
+      *) DISTRO_FAMILY=unknown ;;
+    esac
+    ;;
+esac
+export DISTRO_FAMILY
+
+pkg_update() {
+  case "$DISTRO_FAMILY" in
+    debian) with_retry 3 10 env DEBIAN_FRONTEND=noninteractive apt-get update -y ;;
+    rhel)   with_retry 3 10 dnf -y makecache ;;
+    *) echo "unsupported distro family: $DISTRO_FAMILY" >&2; return 1 ;;
+  esac
+}
+
+pkg_install() {
+  case "$DISTRO_FAMILY" in
+    debian) with_retry 3 15 env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$@" ;;
+    rhel)   with_retry 3 15 dnf install -y "$@" ;;
+    *) echo "unsupported distro family: $DISTRO_FAMILY" >&2; return 1 ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
 # Phase 0 — preflight
 # ---------------------------------------------------------------------------
 step_preflight_os() {
-  . /etc/os-release
-  [[ "$ID" == "ubuntu" ]] || { echo "Not Ubuntu ($ID)" >&2; return 1; }
+  case "$DISTRO_FAMILY" in
+    debian|rhel) : ;;
+    *) echo "Unsupported OS '$DISTRO_ID' (need an Ubuntu/Debian or Rocky/RHEL family host)" >&2; return 1 ;;
+  esac
+  echo "OS: ${DISTRO_ID} (family: ${DISTRO_FAMILY})"
+}
+
+# Rocky enforces SELinux and ships firewalld enabled; Ubuntu did neither.
+# Both can silently break a honeypot host -- containers hitting EACCES on a
+# bind mount, or published sensor ports being filtered. Deliberately REPORTS
+# rather than changes: turning off a firewall or SELinux is a security
+# decision for the operator, not something an installer should do quietly.
+# Non-fatal by design, exactly like step_preflight_disks.
+step_preflight_rhel_platform() {
+  [[ "$DISTRO_FAMILY" == "rhel" ]] || { echo "not a RHEL-family host, nothing to check"; return 0; }
+
+  local mode="unknown"
+  command -v getenforce >/dev/null 2>&1 && mode="$(getenforce 2>/dev/null)"
+  echo "SELinux: $mode"
+  if [[ "$mode" == "Enforcing" ]]; then
+    echo "WARNING: SELinux is enforcing. Compose bind mounts written for Ubuntu"
+    echo "         carry no :z/:Z labels, so containers can fail with permission"
+    echo "         denied on paths under /var/dockge/stacks. Verify container"
+    echo "         health after the run and check 'ausearch -m avc -ts recent'."
+  fi
+
+  if systemctl is-active --quiet firewalld 2>/dev/null; then
+    echo "WARNING: firewalld is active. The Ubuntu build installed ufw but never"
+    echo "         enabled it, so this host previously ran with no host firewall."
+    echo "         Confirm the sensor ports are actually reachable from outside"
+    echo "         before treating the install as good."
+  else
+    echo "firewalld: inactive"
+  fi
+  return 0
 }
 
 step_preflight_disks() {
@@ -269,33 +355,68 @@ step_set_hostname() {
 # ---------------------------------------------------------------------------
 # Phase 1 — base packages
 # ---------------------------------------------------------------------------
-step_apt_update() {
-  with_retry 3 10 env DEBIAN_FRONTEND=noninteractive apt-get update -y
+step_pkg_update() {
+  pkg_update
 }
 
 step_base_packages() {
-  with_retry 3 10 env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    ca-certificates curl dnsutils gnupg lsb-release git jq rsync ufw \
-    xfsprogs nvme-cli openssh-client
+  # Same tools either way; four of them are simply named differently.
+  #   dnsutils      -> bind-utils        (dig, nslookup)
+  #   gnupg         -> gnupg2
+  #   openssh-client -> openssh-clients  (note the plural)
+  #   ufw           -> firewalld         (RHEL's host firewall; see
+  #                                       step_preflight_rhel_platform, which
+  #                                       reports rather than configures it)
+  # lsb-release is Debian-only and unused on RHEL, where /etc/os-release
+  # carries the same information.
+  case "$DISTRO_FAMILY" in
+    debian)
+      pkg_install ca-certificates curl dnsutils gnupg lsb-release git jq rsync ufw \
+        xfsprogs nvme-cli openssh-client
+      ;;
+    rhel)
+      pkg_install ca-certificates curl bind-utils gnupg2 git jq rsync firewalld \
+        xfsprogs nvme-cli openssh-clients
+      ;;
+  esac
 }
 
 # ---------------------------------------------------------------------------
 # Phase 2 — Docker + Compose plugin
 # ---------------------------------------------------------------------------
 step_docker_repo() {
-  install -m 0755 -d /etc/apt/keyrings
-  with_retry 3 10 curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-    -o /etc/apt/keyrings/docker.asc
-  chmod a+r /etc/apt/keyrings/docker.asc
-  . /etc/os-release
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" \
-    > /etc/apt/sources.list.d/docker.list
-  with_retry 3 10 apt-get update -y
+  case "$DISTRO_FAMILY" in
+    debian)
+      install -m 0755 -d /etc/apt/keyrings
+      with_retry 3 10 curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+        -o /etc/apt/keyrings/docker.asc
+      chmod a+r /etc/apt/keyrings/docker.asc
+      . /etc/os-release
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" \
+        > /etc/apt/sources.list.d/docker.list
+      with_retry 3 10 apt-get update -y
+      ;;
+    rhel)
+      # Docker's own CentOS repofile, dropped in verbatim rather than added
+      # via `dnf config-manager`: that plugin's syntax changed between dnf4
+      # and dnf5, and writing the file works identically on both.
+      #
+      # Its baseurl interpolates $releasever, which on Rocky resolves to the
+      # major version ("10") and not the point release -- checked, because
+      # Docker publishes centos/10 but no centos/10.2, so a point-release
+      # $releasever would 404 every package.
+      with_retry 3 10 curl -fsSL https://download.docker.com/linux/centos/docker-ce.repo \
+        -o /etc/yum.repos.d/docker-ce.repo
+      chmod 0644 /etc/yum.repos.d/docker-ce.repo
+      with_retry 3 10 dnf -y makecache
+      ;;
+  esac
 }
 
 step_docker_install() {
-  with_retry 3 15 env DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  # Package names are the same on both -- Docker ships them under identical
+  # names in the deb and rpm repos.
+  pkg_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
   systemctl enable --now docker
 }
 
@@ -304,10 +425,72 @@ step_docker_daemon_config() {
   # rotation (containers run forever, unbounded logs will fill /var), wider
   # default-address-pools (STACK-REBUILD.md documents this box exhausting
   # Docker's default pools once ~15+ Compose projects are up — fix it before
-  # that happens rather than after), and the nvidia runtime registered once
-  # the container toolkit is installed (safe to declare even before the
-  # toolkit exists — dockerd just won't use it until nvidia-container-runtime
-  # is on $PATH).
+  # that happens rather than after), the nvidia runtime registered once the
+  # container toolkit is installed (safe to declare even before the toolkit
+  # exists — dockerd just won't use it until nvidia-container-runtime is on
+  # $PATH), and a builder GC policy (#2743): `docker builder prune -af`
+  # reclaimed 179GB of buildkit cache with zero active entries the day /var
+  # hit 96% and took down two ES-backed CI legs (unavailable_shards_exception
+  # on primary allocation) -- `builder.gc` is on by default, but dockerd
+  # infers its threshold as a *percentage* of the filesystem
+  # (defaultReservedSpacePercentage = 10 in moby's builder-next/worker/gc.go;
+  # in 29.x the full path is daemon/internal/builder-next/worker/gc.go),
+  # which on this 1.8T /var computes to exactly 179GB -- the same 179GB
+  # `docker builder prune -af` reclaimed. Exactly, because diskPercentage()
+  # rounds as `(total*pct/100 / (1<<30) + 1) * 1e9`: 178 GiB-units + 1, times
+  # 1e9. Note that makes it 179 *decimal* GB (166.7 GiB), and that the knob is
+  # ReservedSpace -- a floor GC will not prune below -- not a ceiling; the
+  # nominal ceiling is the inferred MaxUsedSpace (80% = 1.43 TB). On this host
+  # the floor is what binds, so 179GB was the operative target.
+  # The GC was working; its inferred
+  # threshold was simply far too large for this box. `builder.gc` is buildkit's own
+  # supported policy mechanism (no separate systemd timer needed): it runs
+  # automatically as part of normal build activity once enabled, keeping
+  # cache usage near the explicit values below rather than the inferred
+  # default.
+  # 20GB is generous for any single build on this box (the largest image
+  # here, backend-service's Rust release build, has nowhere near that much
+  # unique layer churn) while still well below the 179GB this issue found.
+  # Careful with the unit: dockerd parses these values with units.RAMInBytes
+  # (confirmed for all three fields, not just the deprecated one --
+  # daemon/internal/builder-next/controller.go on the docker-29.x branch
+  # calls units.RAMInBytes on ReservedSpace, MaxUsedSpace and MinFreeSpace
+  # alike), which is binary, so "20GB" is read as 20 GiB (21,474,836,480 B)
+  # and `docker buildx inspect` renders it back as "20GiB". Real reduction
+  # from the pre-#2743 inferred floor is 179.0 GB -> 21.5 GB, about 157.5 GB
+  # tighter.
+  #
+  # #2750: `defaultKeepStorage` alone was wrong in two ways. First, setting
+  # only it means `reservedSpace != 0` in DefaultGCPolicy's guard below, so
+  # the whole percentage-inference block that used to also fill in
+  # MaxUsedSpace/MinFreeSpace never runs -- both silently stay 0 (disabled).
+  # Confirmed directly against the moby source for the docker-29.x branch
+  # (the version actually running here, `docker version` -> 29.7.2),
+  # daemon/internal/builder-next/worker/gc.go:
+  #   if reservedSpace == 0 && maxUsedSpace == 0 && minFreeSpace == 0 {
+  #       reservedSpace = diskPercentage(dstat, defaultReservedSpacePercentage)  // 10%
+  #       maxUsedSpace  = diskPercentage(dstat, defaultMaxUsedPercentage)        // 80%
+  #       minFreeSpace  = diskPercentage(dstat, defaultMinFreePercentage)        // 20%
+  #   }
+  # Before #2743 this host had an inferred MinFreeSpace of ~358GB (20% of
+  # 1.8T) -- a guard that pruned build cache whenever /var free space fell
+  # below that, regardless of what was actually consuming the disk. Setting
+  # only defaultKeepStorage silently dropped that guard entirely; buildkit
+  # now holds its 20GB cap and never reacts to disk pressure from a
+  # non-buildkit source (Elasticsearch growth, a large writable container
+  # layer, log growth).
+  # Second, `defaultKeepStorage` is deprecated -- confirmed in
+  # daemon/config/builder.go's own doc comment ("Deprecated option is now
+  # equivalent to DefaultReservedSpace") -- with no deprecation warning
+  # logged when set, so a future Docker upgrade could drop the key outright
+  # and silently revert to the inferred ~179GB cap on this 1.8T /var while
+  # this comment still promised 20GB.
+  # Fix: the non-deprecated spelling plus an explicit floor. /var sits at
+  # 93% (131G free of 1.8T) as of 2026-08-31 -- tighter than the 90% this
+  # script's other guidance assumes -- so 100GB is a real, load-bearing
+  # floor here, not a formality: buildkit GC now starts pruning once /var
+  # free space drops within about 31GB of that floor, not after the disk is
+  # already critical.
   cat >/etc/docker/daemon.json <<'EOF'
 {
     "log-driver": "local",
@@ -322,6 +505,14 @@ step_docker_daemon_config() {
         "nvidia": {
             "args": [],
             "path": "nvidia-container-runtime"
+        }
+    },
+    "builder": {
+        "gc": {
+            "enabled": true,
+            "defaultReservedSpace": "20GB",
+            "defaultMaxUsedSpace": "100GB",
+            "defaultMinFreeSpace": "100GB"
         }
     }
 }
@@ -383,24 +574,68 @@ EOF
 # Phase 3 — NVIDIA GPU stack (driver + container toolkit), skippable
 # ---------------------------------------------------------------------------
 step_gpu_driver() {
-  with_retry 3 10 env DEBIAN_FRONTEND=noninteractive apt-get install -y ubuntu-drivers-common
-  # `ubuntu-drivers autoinstall` was removed in this box's ubuntu-drivers-common
-  # (1:0.10.9, Ubuntu 26.04) -- the CLI now uses `install` with no args to mean
-  # "install the recommended driver for every detected device", confirmed via
-  # `ubuntu-drivers -h` live on this box. Keep the old subcommand as a fallback
-  # in case a different target runs an older ubuntu-drivers-common.
-  ubuntu-drivers install || ubuntu-drivers autoinstall
+  case "$DISTRO_FAMILY" in
+    debian)
+      pkg_install ubuntu-drivers-common
+      # `ubuntu-drivers autoinstall` was removed in this box's ubuntu-drivers-common
+      # (1:0.10.9, Ubuntu 26.04) -- the CLI now uses `install` with no args to mean
+      # "install the recommended driver for every detected device", confirmed via
+      # `ubuntu-drivers -h` live on this box. Keep the old subcommand as a fallback
+      # in case a different target runs an older ubuntu-drivers-common.
+      ubuntu-drivers install || ubuntu-drivers autoinstall
+      ;;
+    rhel)
+      # There is no ubuntu-drivers equivalent, so this is explicit: NVIDIA's
+      # CUDA repository plus the `cuda-drivers` meta-package, which pulls the
+      # proprietary driver and its DKMS kernel module.
+      #
+      # dkms lives in EPEL, not in Rocky's own repos, and the module will not
+      # build without headers matching the *running* kernel -- so both are
+      # installed before the driver rather than letting the driver fail late.
+      pkg_install epel-release
+      pkg_install dkms gcc make "kernel-devel-$(uname -r)" "kernel-headers-$(uname -r)" \
+        || pkg_install dkms gcc make kernel-devel kernel-headers
+      with_retry 3 10 curl -fsSL \
+        "https://developer.download.nvidia.com/compute/cuda/repos/rhel10/$(uname -m)/cuda-rhel10.repo" \
+        -o /etc/yum.repos.d/cuda-rhel10.repo
+      chmod 0644 /etc/yum.repos.d/cuda-rhel10.repo
+      with_retry 3 10 dnf -y makecache
+      # Deliberately `cuda-drivers` (proprietary) and not `nvidia-open`: the
+      # open kernel modules only support Turing and newer. This box also holds
+      # a Pascal Quadro P2200 alongside the Ada compute card, and while the
+      # P2200 is meant to be bound to vfio-pci for the Windows sandbox rather
+      # than driven by the host, picking the open modules here would make that
+      # card unusable if it ever is needed on the host.
+      pkg_install cuda-drivers
+      ;;
+  esac
 }
 
 step_gpu_container_toolkit() {
-  curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
-    | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-  curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
-    | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
-    > /etc/apt/sources.list.d/nvidia-container-toolkit.list
-  with_retry 3 10 apt-get update -y
-  with_retry 3 15 env DEBIAN_FRONTEND=noninteractive apt-get install -y nvidia-container-toolkit
+  case "$DISTRO_FAMILY" in
+    debian)
+      curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+        | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+      curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+        | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+        > /etc/apt/sources.list.d/nvidia-container-toolkit.list
+      with_retry 3 10 apt-get update -y
+      ;;
+    rhel)
+      with_retry 3 10 curl -fsSL \
+        https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo \
+        -o /etc/yum.repos.d/nvidia-container-toolkit.repo
+      chmod 0644 /etc/yum.repos.d/nvidia-container-toolkit.repo
+      with_retry 3 10 dnf -y makecache
+      ;;
+  esac
+  pkg_install nvidia-container-toolkit
   nvidia-ctk runtime configure --runtime=docker
+  # SELinux blocks a container from touching the GPU device nodes unless the
+  # toolkit's own boolean is set. No-op where SELinux is not enforcing.
+  if [[ "$DISTRO_FAMILY" == "rhel" ]] && command -v setsebool >/dev/null 2>&1; then
+    setsebool -P container_use_devices 1 || echo "WARNING: could not set container_use_devices"
+  fi
   systemctl restart docker
 }
 
@@ -430,7 +665,12 @@ step_gpu_verify_or_note_reboot() {
 # Phase 4 — WireGuard tunnel to the VPS
 # ---------------------------------------------------------------------------
 step_wireguard_install() {
-  with_retry 3 10 env DEBIAN_FRONTEND=noninteractive apt-get install -y wireguard
+  # Ubuntu's `wireguard` is a metapackage; RHEL ships the userspace tools as
+  # wireguard-tools (the kernel module is in-tree on both).
+  case "$DISTRO_FAMILY" in
+    debian) pkg_install wireguard ;;
+    rhel)   pkg_install wireguard-tools ;;
+  esac
 }
 
 step_wireguard_config() {
@@ -1290,7 +1530,7 @@ step_fix_apiary_backend_permissions() {
   # one's install/process script, not here) since those are host directories
   # this script doesn't own; dashboard-state/dionaea-lib/services-adapter-
   # socket are plain Docker-managed named volumes with no other natural home.
-  command -v setfacl >/dev/null 2>&1 || apt-get install -y acl
+  command -v setfacl >/dev/null 2>&1 || pkg_install acl
 
   local dashboard_state dionaea_lib adapter_socket
   dashboard_state=$(docker volume inspect dashboard-state --format '{{.Mountpoint}}' 2>/dev/null) || return 0
@@ -1372,7 +1612,11 @@ step_auth_events_worker_start() {
 # job is what creates the mount-point directories in the first place.
 # ---------------------------------------------------------------------------
 step_sshfs_install() {
-  with_retry 3 10 env DEBIAN_FRONTEND=noninteractive apt-get install -y sshfs
+  # Debian calls it sshfs; RHEL ships the same FUSE client as fuse-sshfs.
+  case "$DISTRO_FAMILY" in
+    debian) pkg_install sshfs ;;
+    rhel)   pkg_install fuse-sshfs ;;
+  esac
   mkdir -p /root/.ssh
   install -m 600 "$VPS_SSH_KEY" /root/.ssh/strato_vps
 }
@@ -1720,10 +1964,29 @@ step_verify_elasticsearch_events() {
 # Phase 0) that this unattended install flow should not silently trigger.
 # ---------------------------------------------------------------------------
 step_libvirt_install() {
-  with_retry 3 15 env DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    qemu-system-x86 libvirt-daemon-system libvirt-clients bridge-utils \
-    virtinst libguestfs-tools ovmf
-  systemctl enable --now libvirtd
+  case "$DISTRO_FAMILY" in
+    debian)
+      pkg_install qemu-system-x86 libvirt-daemon-system libvirt-clients bridge-utils \
+        virtinst libguestfs-tools ovmf
+      ;;
+    rhel)
+      # Same stack, different names throughout: qemu-kvm, libvirt-daemon-kvm,
+      # libvirt-client, virt-install, guestfs-tools, edk2-ovmf (the UEFI
+      # firmware the Windows sandbox domains boot from).
+      pkg_install qemu-kvm libvirt libvirt-daemon-kvm libvirt-client bridge-utils \
+        virt-install guestfs-tools edk2-ovmf
+      ;;
+  esac
+  # RHEL 9+ splits libvirtd into modular per-driver daemons and may ship no
+  # libvirtd.service at all. Enable whichever this host actually has rather
+  # than assuming the monolithic one.
+  if systemctl list-unit-files libvirtd.service >/dev/null 2>&1 \
+     && systemctl cat libvirtd.service >/dev/null 2>&1; then
+    systemctl enable --now libvirtd
+  else
+    systemctl enable --now virtqemud.socket virtnetworkd.socket virtstoraged.socket \
+      || echo "WARNING: could not enable the modular libvirt sockets"
+  fi
 
   # libvirt-daemon-config-nwfilter's postinst only copies the built-in
   # filter templates (clean-traffic, no-mac-spoofing, etc.) from
@@ -1898,14 +2161,15 @@ step_linux_sandbox_verify() {
 # ---------------------------------------------------------------------------
 log "install-homeserver.sh starting — log: $RUN_LOG"
 
-run_step preflight-os          "Confirm Ubuntu"                    step_preflight_os
+run_step preflight-os          "Confirm supported OS"               step_preflight_os
 run_step preflight-disks       "Check disk layout against docs"    step_preflight_disks
+run_step preflight-platform    "Report SELinux/firewalld state"     step_preflight_rhel_platform
 run_step hostname-timezone     "Set hostname/timezone"              step_set_hostname
 
-run_step apt-update            "apt-get update"                     step_apt_update
+run_step pkg-update            "Refresh package metadata"           step_pkg_update
 run_step base-packages         "Install base packages"              step_base_packages
 
-run_step docker-repo           "Add Docker apt repo"                step_docker_repo
+run_step docker-repo           "Add Docker package repo"            step_docker_repo
 run_step docker-install        "Install Docker Engine + Compose"    step_docker_install
 run_step docker-daemon-config  "Write /etc/docker/daemon.json"      step_docker_daemon_config
 

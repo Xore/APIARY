@@ -32,7 +32,7 @@ function pushCapped<T>(ring: T[], item: T, max: number) {
 }
 
 const submitReport = createServerFn({ method: 'POST' })
-  .inputValidator(
+  .validator(
     (input: {
       page: string
       expected: string

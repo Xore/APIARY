@@ -31,6 +31,17 @@ services:
     volumes:
       - /opt/stacks/apiary/logs/citrix-honeypot:/var/log/honeypot
       - /opt/stacks/apiary/state/init-markers:/markers:ro
+    # #2366: measured baseline, same "run it, then reduce" methodology as
+    # #89/#118's cap_drop passes. No cap_add needed for the privileged
+    # port 443 bind below -- see honeypot-dns-honeypot/compose.yml's
+    # equivalent comment for why. Verified locally: built this image, ran
+    # it with cap_drop: [ALL] + read_only: true (including the self-signed
+    # TLS cert generated fresh at startup), and got a real HTTP 200 back
+    # over TLS from the bound port.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     read_only: true
     networks: [citrix_honeypot_net]
     healthcheck:

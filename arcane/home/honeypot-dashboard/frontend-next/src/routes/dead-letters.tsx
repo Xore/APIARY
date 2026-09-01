@@ -14,7 +14,7 @@ import { str, when, type StorePage, type StoreRow } from '../components/StoreLis
 import type { Column } from '../components/Investigate'
 
 const fetchPage = createServerFn({ method: 'GET' })
-  .inputValidator((input: { offset: number; q: string }) => input)
+  .validator((input: { offset: number; q: string }) => input)
   .handler(async ({ data }): Promise<StorePage | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     const params = new URLSearchParams({ offset: String(data.offset), size: '25' })
@@ -23,7 +23,7 @@ const fetchPage = createServerFn({ method: 'GET' })
   })
 
 const purgeDeadLetters = createServerFn({ method: 'POST' })
-  .inputValidator((input: { q: string }) => input)
+  .validator((input: { q: string }) => input)
   .handler(async ({ data }): Promise<{ ok: boolean; deleted?: number; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()

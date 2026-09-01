@@ -38,7 +38,7 @@ function sourceQuery(source: string): string {
 }
 
 const fetchPayloads = createServerFn({ method: 'GET' })
-  .inputValidator((input: { offset: number; source?: string }) => input)
+  .validator((input: { offset: number; source?: string }) => input)
   .handler(async ({ data }) => {
     const { serviceJSON } = await import('../lib/backend.server')
     const filter = data.source ? `&q=${encodeURIComponent(sourceQuery(data.source))}` : ''
@@ -126,7 +126,7 @@ const fetchGithubVerdicts = createServerFn({ method: 'GET' }).handler(async (): 
 // cross-route import, so the two route bundles stay independent). Only
 // ever called from behind confirmAction's publication dialog.
 const submitGithubAnalysis = createServerFn({ method: 'POST' })
-  .inputValidator((input: { hash: string }) => input)
+  .validator((input: { hash: string }) => input)
   .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()

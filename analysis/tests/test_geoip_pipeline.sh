@@ -13,7 +13,7 @@
 # Usage: analysis/tests/test_geoip_pipeline.sh
 set -euo pipefail
 
-ES_IMAGE="docker.elastic.co/elasticsearch/elasticsearch:9.5.1@sha256:b70b3017fbd35310bc57e7e3f8c0ca42ca0b94df3331f747b7cdcfddae430a5a"
+ES_IMAGE="docker.elastic.co/elasticsearch/elasticsearch:9.5.2@sha256:9c1e1afc2bda921b35025e21c72ec6e392266995aa35ad6a47887363592718be"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "SKIP: docker is not installed"
@@ -42,21 +42,42 @@ trap cleanup EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "ok - $*"; }
 
+# Disk-based allocation is off deliberately. This is a throwaway
+# single-node cluster that indexes a handful of documents and is deleted
+# on exit, but Elasticsearch still applies its watermarks against whatever
+# filesystem backs /var/lib/docker on the host. When the CI box crossed
+# the 95% flood stage the primary of every newly created index simply
+# never became active, and the write died after its own two-minute wait:
+#
+#   unavailable_shards_exception: [.ds-honeypot-v2-test-...][0]
+#   primary shard is not active Timeout: [2m]
+#
+# The host's free space is a real thing to watch, but it is not this
+# test's subject and must not decide whether it passes.
 docker run -d --name "$container" -p "127.0.0.1:${port}:9200" \
   -e discovery.type=single-node -e xpack.security.enabled=false \
+  -e cluster.routing.allocation.disk.threshold_enabled=false \
   -e ES_JAVA_OPTS="-Xms512m -Xmx512m" \
   "$ES_IMAGE" >/dev/null
 
 es_url="http://127.0.0.1:${port}"
+# /_cluster/health answers 200 as soon as the HTTP layer is up, even while
+# the cluster is still red and no shard can be allocated yet. Waiting on
+# that alone let the first write race the recovery and come back 503
+# (unavailable_shards_exception), which is how #585's and #565's legs
+# turned flaky. wait_for_status=yellow makes the endpoint block until at
+# least the primaries are assigned, so the first indexing request has
+# somewhere to land.
 ready=0
 for _ in $(seq 1 40); do
-  if curl -fsS "$es_url/_cluster/health" >/dev/null 2>&1; then
+  if curl -fsS "$es_url/_cluster/health?wait_for_status=yellow&timeout=3s" \
+    >/dev/null 2>&1; then
     ready=1
     break
   fi
   sleep 3
 done
-[ "$ready" -eq 1 ] || fail "Elasticsearch did not become reachable at $es_url"
+[ "$ready" -eq 1 ] || fail "Elasticsearch did not reach at least yellow at $es_url"
 
 # Extract exactly the geoip-honeypot pipeline's JSON body (the
 # geoip_pipeline_body heredoc) rather than the whole file, so this stays in
