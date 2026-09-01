@@ -62,8 +62,13 @@ jobs:
 
       - name: Install trivy
         run: |
+          # Install into a runner-writable dir: the self-hosted honeypot-ci
+          # runner has no write access to /usr/local/bin (install: Permission
+          # denied), and $RUNNER_TEMP is writable on both runner types.
+          mkdir -p "$RUNNER_TEMP/trivy-bin"
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sh -s -- -b /usr/local/bin
+            | sh -s -- -b "$RUNNER_TEMP/trivy-bin"
+          echo "$RUNNER_TEMP/trivy-bin" >> "$GITHUB_PATH"
 
       - name: Scan each image for known CRITICAL/HIGH vulnerabilities
         run: |
