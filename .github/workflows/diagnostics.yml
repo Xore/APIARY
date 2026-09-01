@@ -12,6 +12,31 @@ name: Diagnostics
 #
 # Every command here must stay read-only. No up/down/restart/build/rm/pull, no
 # writes into the stack directory, no secret or address echoed into the log.
+#
+# #2222: a scheduled run's own red X is the alert -- there is no human
+# reading GITHUB_STEP_SUMMARY on a cron trigger (#1225's rationale above).
+# That alarm semantics originally reached only two checks (isolation
+# invariants, OIDC discovery). Policy as of #2222: on a schedule trigger,
+# these degraded states also turn the run red (::error:: + nonzero exit),
+# because each is a deterministic, low-flake read (a local mountpoint check,
+# a stat'd file age, a same-host curl, or an SSH round trip whose failure
+# already means the run produced zero VPS visibility) rather than something
+# prone to crying wolf on a transient blip:
+#   - dashboard healthz unreachable
+#   - source-health unreachable / unauthorized / token missing
+#   - VPS Suricata sshfs mount gone
+#   - freshest eve-*.json over fifteen minutes old
+#   - compiled suricata.rules missing or over twelve hours old
+#   - SSH to the VPS failing outright
+# Left as report-only, deliberately: Elasticsearch not answering inside its
+# own container on the home stack. It is not in the acceptance list #2222
+# specifies, and source-health (now fatal) already carries a
+# cluster_status field derived from the same Elasticsearch, so a fully-down
+# cluster is very likely to already fail that check -- adding a second
+# fatal path for the same underlying condition would double-alert without
+# adding coverage. A manual (workflow_dispatch) run never turns red for any
+# of the above; it keeps the original browsable report-only style, since a
+# human is already looking at it.
 
 on:
   workflow_dispatch:
@@ -58,7 +83,20 @@ jobs:
         run: |
           set -uo pipefail
           stack=/opt/stacks/apiary
+          # #2222: on a scheduled run, alert() additionally turns the
+          # condition into the run's own red X (no human reads
+          # GITHUB_STEP_SUMMARY on a cron trigger); on workflow_dispatch it
+          # behaves exactly like report().
+          is_schedule=${{ github.event_name == 'schedule' && 'true' || 'false' }}
+          schedule_failed=0
           report() { printf '%s\n' "$*" >> "$GITHUB_STEP_SUMMARY"; printf '%s\n' "$*"; }
+          alert() {
+            report "$*"
+            if [ "$is_schedule" = "true" ]; then
+              printf '::error::%s\n' "$*"
+              schedule_failed=1
+            fi
+          }
           section() { report ''; report "## $*"; report ''; }
 
           report "# Home stack diagnostics"
@@ -96,7 +134,7 @@ jobs:
           if curl -fsS --max-time 10 "http://$bind:19090/healthz" >/dev/null 2>&1; then
             report "healthz: responding"
           else
-            report "healthz: **unreachable** — the dashboard container is down or not bound"
+            alert "healthz: **unreachable** — the dashboard container is down or not bound"
           fi
 
           section "Sensor to Elasticsearch to Dashboard"
@@ -115,7 +153,7 @@ jobs:
           report '```'
           token=$(sed -n 's/^DASHBOARD_SERVICE_TOKEN=//p' /opt/stacks/honeypot-dashboard/.env 2>/dev/null | head -1)
           if [ -z "$token" ]; then
-            report "metrics unavailable: no DASHBOARD_SERVICE_TOKEN in /opt/stacks/honeypot-dashboard/.env"
+            alert "metrics unavailable: no DASHBOARD_SERVICE_TOKEN in /opt/stacks/honeypot-dashboard/.env"
           elif source_health=$(curl -fsS --max-time 15 -H "X-Service-Token: $token" \
                  "http://$bind:19090/bff/api/v1/source-health" 2>/dev/null) \
                && printf '%s' "$source_health" | jq -e . >/dev/null 2>&1; then
@@ -127,7 +165,7 @@ jobs:
               "filebeat: \(.pipeline.state)",
               "unattributed_24h: \(.unattributed_24h)"' | tee -a "$GITHUB_STEP_SUMMARY"
           else
-            report "metrics unavailable: source-health unreachable or unauthorized (401 = wrong/missing service token)"
+            alert "metrics unavailable: source-health unreachable or unauthorized (401 = wrong/missing service token)"
           fi
           report '```'
           report 'cluster_status: 1 green, 2 yellow, 3 red. sensor state ACTIVE means the feed'
@@ -149,7 +187,7 @@ jobs:
           # window (suricata-log-maintenance.sh prunes past it).
           suricata_dir="$stack/logs/suricata"
           if ! mountpoint -q "$suricata_dir"; then
-            report "\`logs/suricata\` is **not a mount point** — the sshfs mount from the VPS is gone."
+            alert "\`logs/suricata\` is **not a mount point** — the sshfs mount from the VPS is gone."
             report "Filebeat and EveBox are reading a stale local directory, if anything."
           else
             report "\`logs/suricata\` is mounted."
@@ -160,7 +198,7 @@ jobs:
             total=$(du -cb "$suricata_dir"/eve-*.json 2>/dev/null | tail -1 | cut -f1)
             report "\`$(basename "$latest")\`: last written ${age}s ago. Retained eve-*.json total: ${total} bytes."
             if [ "$age" -gt 900 ]; then
-              report "That is over fifteen minutes old — treat the Suricata feed as **stale**."
+              alert "That is over fifteen minutes old — treat the Suricata feed as **stale**."
             fi
           else
             report "No \`eve-*.json\` files found."
@@ -171,6 +209,14 @@ jobs:
           report '```'
           docker logs --tail 20 hp-filebeat 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || report "no Filebeat container"
           report '```'
+
+          # #2222: every degraded state above ran through alert() rather
+          # than exiting early, so the summary is always complete; the
+          # schedule-only red X happens here, after everything has been
+          # reported.
+          if [ "$schedule_failed" -eq 1 ]; then
+            exit 1
+          fi
 
       - name: Isolation invariants (#88)
         # Independent of the previous step: this reads no Compose state and
@@ -211,7 +257,19 @@ jobs:
           VPS_PORT: ${{ secrets.VPS_PORT }}
         run: |
           set -uo pipefail
+          # #2222: on a scheduled run, alert() additionally turns the
+          # condition into the run's own red X; on workflow_dispatch it
+          # behaves exactly like report().
+          is_schedule=${{ github.event_name == 'schedule' && 'true' || 'false' }}
+          schedule_failed=0
           report() { printf '%s\n' "$*" >> "$GITHUB_STEP_SUMMARY"; printf '%s\n' "$*"; }
+          alert() {
+            report "$*"
+            if [ "$is_schedule" = "true" ]; then
+              printf '::error::%s\n' "$*"
+              schedule_failed=1
+            fi
+          }
           ssh_options=(-i ~/.ssh/honeypot_vps -p "${VPS_PORT:-2222}" -o StrictHostKeyChecking=accept-new)
           report "# VPS edge diagnostics"
           report '```'
@@ -223,7 +281,21 @@ jobs:
           # hourly into eve-<timestamp>.json (see suricata.yaml), so this
           # reports the freshest rotated file plus the retained total and
           # free disk space on the VPS's own partition.
-          ssh "${ssh_options[@]}" "${VPS_USER:-root}@${VPS_HOST}" \
+          #
+          # #2222: output is captured (rather than piped straight to tee) so
+          # the two ruleset states below can be turned into a schedule
+          # alert() locally, without changing anything the remote script
+          # itself measures.
+          #
+          # Completion is decided by the "end of vps report" sentinel, not by
+          # ssh's exit status. ssh propagates the remote script's status, and
+          # that status is whatever its *last* command returned -- previously a
+          # `wg show | grep`, which exits 1 whenever WireGuard is down or `wg`
+          # is off PATH. That turned a fully delivered report into the
+          # "SSH to the VPS failed" alert, i.e. a scheduled red X naming the
+          # wrong cause. The sentinel only appears when the script ran to the
+          # end, so a genuine connection failure still takes the else branch.
+          vps_output=$(ssh "${ssh_options[@]}" "${VPS_USER:-root}@${VPS_HOST}" \
             'cd /root/vps && docker compose -f docker-compose.yml ps -a
              echo
              echo "--- suricata eve-*.json ---"
@@ -253,9 +325,22 @@ jobs:
              df -h /
              echo
              echo "--- wireguard peers ---"
-             wg show 2>&1 | grep -E "interface|latest handshake|transfer"' \
-            2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || report "SSH to the VPS failed"
+             wg show 2>&1 | grep -E "interface|latest handshake|transfer" || echo "(no wireguard peer lines -- wg unavailable or no peer handshake)"
+             echo "--- end of vps report ---"' 2>&1) || true
+          printf '%s\n' "$vps_output" | tee -a "$GITHUB_STEP_SUMMARY"
+          if printf '%s\n' "$vps_output" | grep -q -- '--- end of vps report ---'; then
+            if printf '%s\n' "$vps_output" | grep -q 'No compiled suricata.rules found'; then
+              alert "VPS: compiled suricata.rules is missing."
+            elif printf '%s\n' "$vps_output" | grep -q 'over twelve hours old'; then
+              alert "VPS: compiled suricata.rules is over twelve hours old."
+            fi
+          else
+            alert "SSH to the VPS failed"
+          fi
           report '```'
+          if [ "$schedule_failed" -eq 1 ]; then
+            exit 1
+          fi
       # #1225: catches exactly the drift a scheduled run exists for --
       # the live traefik/dynamic.yml reverting to the repo's own committed
       # placeholder domain independent of (and undetected between) actual
@@ -263,7 +348,13 @@ jobs:
       # hard-fails (does not just report(1) and continue) so a scheduled
       # run's own red X is the alert -- there is no human reading
       # GITHUB_STEP_SUMMARY on a cron trigger.
+      #
+      # #2222: "Inspect the VPS edge" can now also exit nonzero on a
+      # schedule trigger, and a failed step skips every following step by
+      # default -- if: always() keeps this check independent of that one,
+      # same reasoning as the home job's "Isolation invariants" step.
       - name: OIDC discovery is reachable (#1225)
+        if: always()
         shell: bash
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}

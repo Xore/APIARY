@@ -110,8 +110,26 @@ services:
     # even with the pin in place. Watch for it.
     tmpfs:
       - /data:uid=65534,gid=65534,mode=1770
+    # #2366: measured baseline, same "run it, then reduce" methodology as
+    # #89/#118's cap_drop passes. No cap_add needed for the privileged
+    # port 25 bind above -- see honeypot-dns-honeypot/compose.yml's
+    # equivalent comment for why. Verified locally: built this image, ran
+    # it with cap_drop: [ALL] added on top of the existing no-new-
+    # privileges/read_only/tmpfs posture, and confirmed the SQLite session
+    # DB under /data initializes (alembic migrations run clean) and the
+    # SMTP port accepts a real TCP connect.
+    #
+    # That run measured the then-current bare `tmpfs: [/data]`, which Docker
+    # mounts 1777 root:root; the uid/gid/mode above landed separately while
+    # this branch was open. The measurement carries over rather than needing
+    # a re-run: the container runs as 65534, and a mount it *owns* at 1770
+    # needs strictly fewer privileges to write than a root-owned 1777 one --
+    # neither requires a capability, since DAC_OVERRIDE is only consulted
+    # when the ordinary ownership/mode check fails, and here it succeeds.
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
     read_only: true
     networks: [mailoney_net]
     healthcheck:

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -44,19 +45,63 @@ func (e event) MarshalJSON() ([]byte, error) {
 type logger struct {
 	out  io.Writer
 	file *os.File
+	path string
+	size int64
+	max  int64
 	mu   sync.Mutex
 }
 
 func newLogger(path string) *logger {
-	l := &logger{out: os.Stdout}
+	l := &logger{out: os.Stdout, path: path, max: getenvInt64("LOG_MAX_BYTES", 67108864)}
 	if path != "" {
 		var err error
 		l.file, err = os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0640)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "dnp3-honeypot: log file %q unavailable, continuing with stdout only: %v\n", path, err)
+		} else if st, err := l.file.Stat(); err == nil {
+			l.size = st.Size()
 		}
 	}
 	return l
+}
+
+// rotate closes the current file, renames it aside with a timestamp suffix,
+// and reopens a fresh file at the original path -- #120's contract, ported
+// from multipot's logger (see that package's rotate() for the full
+// reasoning). Callers must hold l.mu.
+func (l *logger) rotate() {
+	if l.file == nil || l.path == "" {
+		return
+	}
+	l.file.Close()
+	target := l.path + "." + time.Now().UTC().Format("20060102-150405")
+	if _, err := os.Stat(target); err == nil {
+		for n := 2; ; n++ {
+			candidate := fmt.Sprintf("%s.%d", target, n)
+			if _, err := os.Stat(candidate); err != nil {
+				target = candidate
+				break
+			}
+		}
+	}
+	os.Rename(l.path, target)
+	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0640)
+	if err != nil {
+		l.file = nil
+		fmt.Fprintf(os.Stderr, "dnp3-honeypot: log file %q unavailable after rotation, continuing with stdout only: %v\n", l.path, err)
+		return
+	}
+	l.file = f
+	l.size = 0
+}
+
+func getenvInt64(k string, def int64) int64 {
+	if v := os.Getenv(k); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return n
+		}
+	}
+	return def
 }
 func (l *logger) emit(e event) {
 	l.mu.Lock()
@@ -68,9 +113,16 @@ func (l *logger) emit(e event) {
 	e.Asset = "rtu-sub23-b"
 	e.Organization = "ElbeGrid Distribution"
 	b, _ := json.Marshal(e)
-	l.out.Write(append(b, '\n'))
+	line := append(b, '\n')
+	l.out.Write(line)
 	if l.file != nil {
-		l.file.Write(append(b, '\n'))
+		if l.max > 0 && l.size >= l.max {
+			l.rotate()
+		}
+		if l.file != nil {
+			n, _ := l.file.Write(line)
+			l.size += int64(n)
+		}
 	}
 }
 

@@ -16,7 +16,7 @@
 # Usage: analysis/tests/test_honeypot_ilm_rollover.sh
 set -euo pipefail
 
-ES_IMAGE="docker.elastic.co/elasticsearch/elasticsearch:9.5.1@sha256:b70b3017fbd35310bc57e7e3f8c0ca42ca0b94df3331f747b7cdcfddae430a5a"
+ES_IMAGE="docker.elastic.co/elasticsearch/elasticsearch:9.5.2@sha256:9c1e1afc2bda921b35025e21c72ec6e392266995aa35ad6a47887363592718be"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "SKIP: docker is not installed"

@@ -60,21 +60,57 @@ type event struct {
 }
 
 type logger struct {
-	mu  sync.Mutex
-	out *os.File
+	mu   sync.Mutex
+	out  *os.File
+	path string
+	size int64
+	max  int64
 }
 
 func newLogger(path string) *logger {
-	l := &logger{}
+	l := &logger{path: path, max: getenvInt64("LOG_MAX_BYTES", 67108864)}
 	if path == "" {
 		return l
 	}
 	if f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640); err == nil {
 		l.out = f
+		if st, err := f.Stat(); err == nil {
+			l.size = st.Size()
+		}
 	} else {
 		fmt.Fprintf(os.Stderr, "dicompot: log file %q unavailable, continuing with stdout only: %v\n", path, err)
 	}
 	return l
+}
+
+// rotate closes the current file, renames it aside with a timestamp suffix,
+// and reopens a fresh file at the original path -- #120's contract, ported
+// from multipot's logger (see that package's rotate() for the full
+// reasoning). Callers must hold l.mu.
+func (l *logger) rotate() {
+	if l.out == nil || l.path == "" {
+		return
+	}
+	l.out.Close()
+	target := l.path + "." + time.Now().UTC().Format("20060102-150405")
+	if _, err := os.Stat(target); err == nil {
+		for n := 2; ; n++ {
+			candidate := fmt.Sprintf("%s.%d", target, n)
+			if _, err := os.Stat(candidate); err != nil {
+				target = candidate
+				break
+			}
+		}
+	}
+	os.Rename(l.path, target)
+	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
+	if err != nil {
+		l.out = nil
+		fmt.Fprintf(os.Stderr, "dicompot: log file %q unavailable after rotation, continuing with stdout only: %v\n", l.path, err)
+		return
+	}
+	l.out = f
+	l.size = 0
 }
 
 func (l *logger) emit(e event) {
@@ -94,14 +130,29 @@ func (l *logger) emit(e event) {
 	os.Stdout.Write(line)
 	os.Stdout.Write([]byte("\n"))
 	if l.out != nil {
-		l.out.Write(line)
-		l.out.Write([]byte("\n"))
+		if l.max > 0 && l.size >= l.max {
+			l.rotate()
+		}
+		if l.out != nil {
+			n1, _ := l.out.Write(line)
+			n2, _ := l.out.Write([]byte("\n"))
+			l.size += int64(n1 + n2)
+		}
 	}
 }
 
 func getenv(k, def string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
+	}
+	return def
+}
+
+func getenvInt64(k string, def int64) int64 {
+	if v := os.Getenv(k); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return n
+		}
 	}
 	return def
 }

@@ -49,22 +49,67 @@ type event struct {
 }
 
 type logger struct {
-	mu  sync.Mutex
-	out io.Writer // stdout in production; swapped in tests
-	f   *os.File
+	mu   sync.Mutex
+	out  io.Writer // stdout in production; swapped in tests
+	f    *os.File
+	path string
+	size int64
+	max  int64
 }
 
 func newLogger(path string) *logger {
-	l := &logger{out: os.Stdout}
+	l := &logger{out: os.Stdout, path: path, max: getenvInt64("LOG_MAX_BYTES", 67108864)}
 	if path == "" {
 		return l
 	}
 	if f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640); err == nil {
 		l.f = f
+		if st, err := f.Stat(); err == nil {
+			l.size = st.Size()
+		}
 	} else {
 		fmt.Fprintf(os.Stderr, "endlessh: log file %q unavailable, continuing with stdout only: %v\n", path, err)
 	}
 	return l
+}
+
+// rotate closes the current file, renames it aside with a timestamp suffix,
+// and reopens a fresh file at the original path -- #120's contract, ported
+// from multipot's logger (see that package's rotate() for the full
+// reasoning). Callers must hold l.mu.
+func (l *logger) rotate() {
+	if l.f == nil || l.path == "" {
+		return
+	}
+	l.f.Close()
+	target := l.path + "." + time.Now().UTC().Format("20060102-150405")
+	if _, err := os.Stat(target); err == nil {
+		for n := 2; ; n++ {
+			candidate := fmt.Sprintf("%s.%d", target, n)
+			if _, err := os.Stat(candidate); err != nil {
+				target = candidate
+				break
+			}
+		}
+	}
+	os.Rename(l.path, target)
+	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
+	if err != nil {
+		l.f = nil
+		fmt.Fprintf(os.Stderr, "endlessh: log file %q unavailable after rotation, continuing with stdout only: %v\n", l.path, err)
+		return
+	}
+	l.f = f
+	l.size = 0
+}
+
+func getenvInt64(k string, def int64) int64 {
+	if v := os.Getenv(k); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return n
+		}
+	}
+	return def
 }
 
 func (l *logger) emit(e event) {
@@ -90,8 +135,14 @@ func (l *logger) emit(e event) {
 		l.out.Write([]byte("\n"))
 	}
 	if l.f != nil {
-		l.f.Write(line)
-		l.f.Write([]byte("\n"))
+		if l.max > 0 && l.size >= l.max {
+			l.rotate()
+		}
+		if l.f != nil {
+			n1, _ := l.f.Write(line)
+			n2, _ := l.f.Write([]byte("\n"))
+			l.size += int64(n1 + n2)
+		}
 	}
 }
 
