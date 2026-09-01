@@ -1,0 +1,50 @@
+name: Elastic release watch
+
+# The #2315 monthly cadence: docker.elastic.co pins sat unbumped (9.5.1,
+# one full patch behind) until someone found it by hand during an
+# unrelated audit sweep -- exactly the "drift that happened to nobody
+# noticing" #1956 warned about for the data plane. This owns the recurring
+# check so the next patch release doesn't wait for another accidental
+# discovery: resolves the current tag available for each pinned image in
+# arcane/home/honeypot-elk/compose.yml *and* arcane/home/honeypot-init/
+# compose.yml (elasticsearch is pinned in both, and the honeypot-init copy
+# is the one #2315 found stale) against docker.elastic.co directly (no web
+# search, same as docs/CONTAINER-UPDATES.md's own method) and files (or
+# updates) one tracking issue when the trio has fallen behind.
+#
+# The script exits non-zero -- failing this job -- if any image could not
+# be checked, or if the two elasticsearch pins have diverged. A watcher
+# that cannot reach the registry must go red, not report "trio is current"
+# off a partial check.
+#
+# Does not bump anything itself -- verification is deliberately a human
+# step (docs/CONTAINER-UPDATES.md's checklist: real release notes, the
+# Arkime-as-second-consumer check, running the ES_IMAGE-hardcoding tests
+# for real). This workflow's only job is making sure nobody has to
+# remember to look.
+
+on:
+  schedule:
+    - cron: "0 9 1 * *" # 09:00 UTC on the 1st of each month
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+concurrency:
+  group: elastic-release-watch
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    # Each tag list is ~2.5 MB / ~48k tags and measures 15-18s; the script
+    # allows 90s per fetch with one retry, so the worst case is ~9 min of
+    # network. 5 minutes would have cut a slow-but-working run short.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the pinned Elastic trio against docker.elastic.co
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/elastic-release-watch.py
