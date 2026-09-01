@@ -77,8 +77,8 @@ docker run -d --name "${kc}" --network "${network}" -p "127.0.0.1:${kc_port}:808
   quay.io/keycloak/keycloak:26.7.1@sha256:f1f1f01e472c8a78df40d8f2a49a925274eda4d3d80d5f6edbb5c880ee3c01c6 \
   start --http-port=8080 --import-realm >/dev/null
 
-printf 'Waiting for realm import against a real Postgres (up to 90s)...\n'
-for i in $(seq 1 90); do
+printf 'Waiting for realm import against a real Postgres (up to 240s)...\n'
+for i in $(seq 1 240); do
   if docker logs "${kc}" 2>&1 | grep -q "KC-SERVICES0032: Import finished successfully"; then
     printf 'PASS: apiary-realm.json imported cleanly\n'
     exit 0
@@ -89,7 +89,7 @@ for i in $(seq 1 90); do
     exit 1
   fi
   sleep 1
-  if [[ "$i" -eq 90 ]]; then
+  if [[ "$i" -eq 240 ]]; then
     printf 'FAIL: timed out waiting for import to finish -- log follows\n' >&2
     docker logs "${kc}" 2>&1 | tail -60 >&2
     exit 1

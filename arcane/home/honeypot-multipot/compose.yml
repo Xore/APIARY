@@ -53,6 +53,10 @@ services:
     read_only: true
     networks:
       - multipot_net
+    # #2051: healthcheck is baked into the image (Dockerfile HEALTHCHECK,
+    # `/multipot -healthcheck`), invisible to a compose-only grep.
+    labels:
+      - autoheal=true
     deploy:
       resources:
         limits:

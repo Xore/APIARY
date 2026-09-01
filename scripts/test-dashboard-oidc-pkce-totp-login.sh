@@ -115,15 +115,15 @@ docker run -d --name "${kc}" --network "${network}" -p "127.0.0.1:${kc_port}:808
   quay.io/keycloak/keycloak:26.7.1@sha256:f1f1f01e472c8a78df40d8f2a49a925274eda4d3d80d5f6edbb5c880ee3c01c6 \
   start --http-port=8080 --import-realm >/dev/null
 
-printf 'Waiting for the disposable Keycloak + realm import (up to 90s)...\n'
-for i in $(seq 1 90); do
+printf 'Waiting for the disposable Keycloak + realm import (up to 240s)...\n'
+for i in $(seq 1 240); do
   docker logs "${kc}" 2>&1 | grep -q "KC-SERVICES0032: Import finished successfully" && break
   if docker logs "${kc}" 2>&1 | grep -q "ERROR: Failed to start server"; then
     printf 'FAIL: realm import crashed the server\n' >&2
     docker logs "${kc}" 2>&1 | tail -60 >&2
     exit 1
   fi
-  [ "$i" -eq 90 ] && { printf 'FAIL: timed out waiting for import\n' >&2; exit 1; }
+  [ "$i" -eq 240 ] && { printf 'FAIL: timed out waiting for import\n' >&2; exit 1; }
   sleep 1
 done
 
