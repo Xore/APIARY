@@ -199,6 +199,7 @@ flowchart TB
 | ml-worker / llm-worker | payloads + events | anomaly scores + `dashboard-ml-anomaly-ack-v1` | continuous | scoring semantics tracked in #1969/#1974 |
 | payload-inventory | disk stores | `dashboard-payload-inventory-v1/-bytes-v1` | periodic scan | HEAD-exists fast path (#1221) |
 | es-results-importer | root-owned result spools | `*-analysis-v1` | continuous | read-only mirror, shard-partitionable |
+| vault-worker (#2290) | `*-analysis-v1`, `llm-analysis` | markdown notes under the knowledge-vault directory (#2289) | `VAULT_POLL_INTERVAL_SECONDS`, default 900s | one note per payload/session entity, sha256-keyed filename ⇒ upsert not duplicate; checkpointed via `knowledge-vault-state-v1`, batch-run so a capture flood can't swamp the vault |
 
 Operational caveat from #1980 — worker panics used to kill the whole
 container on one malformed document — is fixed: every runloop carries a

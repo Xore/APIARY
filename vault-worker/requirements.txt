@@ -1,0 +1,6 @@
+# Same client version llm-worker pins and the reasoning behind holding it --
+# see llm-worker/requirements.txt's comment (server is 9.5.1/9.5.2,
+# compatible-with=8 header accepted, compatible-with=9 was not).
+elasticsearch==8.19.3
+
+pyyaml==6.0.3
