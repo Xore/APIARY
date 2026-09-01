@@ -577,11 +577,21 @@ def copy_sample_to_vm(sample_path: Path, sha: str):
     """Copy sample to C:\\Inbox\\ via SMB (#956 -- was C:\\Samples\\)."""
     dest_name = f'{sha[:16]}.exe'
     # Mount SMB share and copy
-    subprocess.run(
+    result = subprocess.run(
         ['smbclient', SAMPLE_SHARE, '-U', f'{VM_USER}%{VM_PASS}',
          '-c', f'put {sample_path} {dest_name}'],
         capture_output=True, timeout=60
     )
+    # #2252: an SMB hiccup (share briefly unavailable post-boot, auth blip,
+    # transient reset) used to return here unchecked -- the sample never
+    # lands in C:\Inbox, but the caller has no way to know and the run
+    # sails through to a false 'completed' result with every IOC field
+    # empty. smbclient exits non-zero on a failed `put` inside `-c`.
+    if result.returncode != 0:
+        raise RuntimeError(
+            f'smbclient put failed (rc={result.returncode}): '
+            f'{result.stderr.decode(errors="replace").strip()}'
+        )
     log.info(f'Sample copied to VM as {dest_name}')
     return f'C:\\Inbox\\{dest_name}'
 
@@ -739,11 +749,22 @@ def autoruns_after():
 def execute_sample(vm_path: str):
     """Execute the sample on the Windows VM."""
     log.info(f'Executing sample: {vm_path}')
-    winrm_run(
+    result = winrm_run(
         f'$proc = Start-Process -FilePath "{vm_path}" '
         '-PassThru -WindowStyle Normal; '
         f'Write-Output "PID: $($proc.Id)"'
     )
+    # #2252: a delivery failure upstream (the sample never actually landed
+    # in C:\Inbox) makes Start-Process error out ("cannot find path
+    # C:\Inbox\<sha>.exe") -- both the non-zero status_code and the missing
+    # "PID:" line were previously discarded, so this looked identical to a
+    # real execution to every caller downstream.
+    if result['status_code'] != 0 or 'PID:' not in result['stdout']:
+        raise RuntimeError(
+            f"execute_sample: Start-Process did not report a PID "
+            f"(status_code={result['status_code']}): "
+            f"stdout={result['stdout'].strip()!r} stderr={result['stderr'].strip()!r}"
+        )
 
 
 def regshot_after():
@@ -823,11 +844,37 @@ def collect_artifacts(sha: str, out_dir: Path):
         'C:\\Logs\\powershell_scriptblock.evtx'
     )
 
-    # Mount share and download everything
+    # #2252: sysmon.evtx / powershell_scriptblock.evtx are the core Windows
+    # Event Log telemetry this whole detonation exists to capture -- both
+    # were just freshly (re)created by the wevtutil calls immediately
+    # above, in this same run, so unlike everything else pulled below they
+    # are never legitimately absent. An unchecked failure here (an SMB
+    # hiccup, same class as copy_sample_to_vm/execute_sample) silently
+    # produced a "completed" result with no process/network telemetry --
+    # exactly the false-clean shape this issue is about. Checked eagerly,
+    # separate from the best-effort loop below.
+    for fname in ('sysmon.evtx', 'powershell_scriptblock.evtx'):
+        result = subprocess.run(
+            ['smbclient', LOGS_SHARE, '-U', f'{VM_USER}%{VM_PASS}',
+             '-c', f'get {fname} {out_dir}/{fname}'],
+            capture_output=True, timeout=60
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f'smbclient get {fname} failed (rc={result.returncode}): '
+                f'{result.stderr.decode(errors="replace").strip()}'
+            )
+
+    # Mount share and download everything else. Best-effort, deliberately
+    # not hard-failed like the two essential files above: procmon.csv can
+    # legitimately be missing (stop_procmon()'s own export step already
+    # tolerates that), regshot_diff.txt/autoruns/services files depend on
+    # tools this image may not have installed, and none of these carry the
+    # core telemetry sysmon/PowerShell logging does. A failure here is
+    # still worth knowing about, so it's logged rather than silently
+    # discarded as before.
     files_to_get = [
         'procmon.csv',
-        'sysmon.evtx',
-        'powershell_scriptblock.evtx',
         'regshot_diff.txt',
         # #480 tracks storing these efficiently (golden-image baseline
         # cache + ES pipeline); for now they're pulled as plain artifact
@@ -848,11 +895,16 @@ def collect_artifacts(sha: str, out_dir: Path):
         'services_diff.txt',
     ]
     for fname in files_to_get:
-        subprocess.run(
+        result = subprocess.run(
             ['smbclient', LOGS_SHARE, '-U', f'{VM_USER}%{VM_PASS}',
              '-c', f'get {fname} {out_dir}/{fname}'],
             capture_output=True, timeout=60
         )
+        if result.returncode != 0:
+            log.warning(
+                f'smbclient get {fname} failed (rc={result.returncode}), '
+                f'continuing without it: {result.stderr.decode(errors="replace").strip()}'
+            )
 
     # Get PS transcripts dir
     subprocess.run(
