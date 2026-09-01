@@ -23,7 +23,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any, TypeVar
 from urllib.parse import urlsplit
 
@@ -177,6 +177,7 @@ class Config:
     max_events_per_cycle: int
     max_jobs_per_cycle: int
     max_payload_scan_files: int
+    max_payload_scan_bytes: int
     session_idle_seconds: int
     session_lookback_seconds: int
     daily_report_hour: int
@@ -229,6 +230,16 @@ class Config:
             max_events_per_cycle=env_int("MAX_EVENTS_PER_CYCLE", 2000, 20, 10000),
             max_jobs_per_cycle=env_int("MAX_JOBS_PER_CYCLE", 20, 1, 100),
             max_payload_scan_files=env_int("MAX_PAYLOAD_SCAN_FILES", 5000, 20, 50000),
+            # #2228: bounds total bytes *read* (qualifying or not) per cycle by
+            # iter_text_payloads' lazy pass, independent of the file-count cap
+            # above -- a cycle full of small files near the count cap and a
+            # cycle full of few-MiB files near the byte cap are different
+            # failure shapes, so both ceilings are disclosed and enforced
+            # separately. Default gives ~3x headroom over one cycle's nominal
+            # intended workload (MAX_JOBS_PER_CYCLE * MAX_PAYLOAD_BYTES,
+            # 20 * 1MiB = 20MiB) for the qualify-checked-but-rejected/
+            # already-analyzed reads that don't count toward max_jobs_per_cycle.
+            max_payload_scan_bytes=env_int("MAX_PAYLOAD_SCAN_BYTES", 64 << 20, 1 << 20, 512 << 20),
             session_idle_seconds=env_int("SESSION_IDLE_SECONDS", 300, 30, 86400),
             session_lookback_seconds=env_int("SESSION_LOOKBACK_SECONDS", 3600, 300, 604800),
             daily_report_hour=env_int("DAILY_REPORT_HOUR", 6, 0, 23),
@@ -671,6 +682,14 @@ def state_mapping() -> dict[str, Any]:
 
 
 class LLMWorker:
+    # #2228: class-level default (not just set in __init__) so a test
+    # fixture built via LLMWorker.__new__() to bypass __init__ (see
+    # CycleStageIsolationTests._worker) still has this attribute. Set by
+    # scan_payload_candidates/iter_text_payloads when the most recent
+    # payload-scan cycle hit either cap; surfaced in the cycle status
+    # document so a truncated scan is never silently read as full coverage.
+    payload_scan_truncated = False
+
     def __init__(self, config: Config, es: Elasticsearch | None = None, model: OllamaClient | None = None):
         self.config = config
         self.es = es
@@ -979,14 +998,17 @@ class LLMWorker:
             self.es.index(index=STATE_INDEX, id=state_id, document=accumulator.document())
         return completed
 
-    def iter_text_payloads(self) -> list[tuple[str, bytes, int]]:
-        candidates: list[tuple[float, str, bytes, int]] = []
+    def scan_payload_candidates(self) -> list[tuple[float, Path, int]]:
+        """Stats-only walk: (mtime, path, size), no content read.
+
+        #2228: this is the collection half, split from retention so the
+        per-cycle job/byte budgets below apply *before* any file content is
+        read, not after every qualifying file's bytes are already resident.
+        Bounded by max_payload_scan_files; each entry costs a stat, never a
+        read.
+        """
+        candidates: list[tuple[float, Path, int]] = []
         inspected = 0
-        seen: set[str] = set()
-        # O_NOFOLLOW is effective on Linux (the deployment target). Windows
-        # exposes the constant in some Python builds but rejects it at open(),
-        # so tests rely on the lstat check there instead.
-        nofollow = getattr(os, "O_NOFOLLOW", 0) if os.name != "nt" else 0
         for root in self.config.payload_roots:
             if not root.is_dir():
                 continue
@@ -1001,36 +1023,69 @@ class LLMWorker:
                         info = path.lstat()
                         if not stat.S_ISREG(info.st_mode) or info.st_size <= 0 or info.st_size > self.config.max_payload_bytes:
                             continue
-                        descriptor = os.open(path, os.O_RDONLY | nofollow | getattr(os, "O_BINARY", 0))
-                        try:
-                            opened = os.fstat(descriptor)
-                            if not stat.S_ISREG(opened.st_mode) or opened.st_size != info.st_size:
-                                continue
-                            data = os.read(descriptor, self.config.max_payload_bytes + 1)
-                        finally:
-                            os.close(descriptor)
                     except OSError:
                         continue
-                    if len(data) != info.st_size or b"\x00" in data:
-                        continue
-                    decoded = data.decode("utf-8", "replace")
-                    printable = sum(char.isprintable() or char in "\n\r\t" for char in decoded)
-                    if not decoded or printable / len(decoded) < 0.85:
-                        continue
-                    sha256 = hashlib.sha256(data).hexdigest()
-                    if sha256 in seen:
-                        continue
-                    seen.add(sha256)
-                    candidates.append((info.st_mtime, sha256, data, info.st_size))
+                    candidates.append((info.st_mtime, path, info.st_size))
                 if inspected > self.config.max_payload_scan_files:
                     break
             if inspected > self.config.max_payload_scan_files:
                 break
+        if inspected > self.config.max_payload_scan_files:
+            self.payload_scan_truncated = True
         candidates.sort(key=lambda item: item[0])
-        return [(sha256, data, size) for _, sha256, data, size in candidates]
+        return candidates
+
+    def iter_text_payloads(self) -> Iterator[tuple[str, bytes, int]]:
+        """Lazily read, qualify and hash oldest-first candidates.
+
+        #2228: reads at most one candidate's bytes at a time (a generator,
+        not a pre-built list) and stops once max_payload_scan_bytes has been
+        read this cycle -- a hard aggregate ceiling independent of
+        max_jobs_per_cycle, since a qualify-checked-but-rejected or
+        already-analyzed file still costs the read. The caller's own
+        max_jobs_per_cycle bound stops pulling from this generator once its
+        budget is met, so peak buffered bytes per cycle are bounded by
+        configuration on both axes, never by "however many files matched."
+        """
+        # O_NOFOLLOW is effective on Linux (the deployment target). Windows
+        # exposes the constant in some Python builds but rejects it at open(),
+        # so tests rely on the lstat check there instead.
+        nofollow = getattr(os, "O_NOFOLLOW", 0) if os.name != "nt" else 0
+        seen: set[str] = set()
+        total_bytes_read = 0
+        candidates = self.scan_payload_candidates()
+        for index, (_, path, size) in enumerate(candidates):
+            if total_bytes_read >= self.config.max_payload_scan_bytes:
+                if index + 1 < len(candidates):
+                    self.payload_scan_truncated = True
+                break
+            try:
+                descriptor = os.open(path, os.O_RDONLY | nofollow | getattr(os, "O_BINARY", 0))
+                try:
+                    opened = os.fstat(descriptor)
+                    if not stat.S_ISREG(opened.st_mode) or opened.st_size != size:
+                        continue
+                    data = os.read(descriptor, self.config.max_payload_bytes + 1)
+                finally:
+                    os.close(descriptor)
+            except OSError:
+                continue
+            total_bytes_read += len(data)
+            if len(data) != size or b"\x00" in data:
+                continue
+            decoded = data.decode("utf-8", "replace")
+            printable = sum(char.isprintable() or char in "\n\r\t" for char in decoded)
+            if not decoded or printable / len(decoded) < 0.85:
+                continue
+            sha256 = hashlib.sha256(data).hexdigest()
+            if sha256 in seen:
+                continue
+            seen.add(sha256)
+            yield sha256, data, size
 
     def analyze_payloads(self) -> int:
         assert self.es is not None and self.model is not None
+        self.payload_scan_truncated = False
         completed = 0
         attempted = 0
         for sha256, data, byte_count in self.iter_text_payloads():
@@ -1170,6 +1225,11 @@ class LLMWorker:
             "payloads": payloads,
             "reports": reports,
         }
+        # #2228: disclose a truncated payload scan on the status document
+        # itself, not just in .env.example -- a run that hit either cap must
+        # never read as full coverage.
+        if self.config.payload_enabled:
+            result["payload_scan_truncated"] = self.payload_scan_truncated
         if stage_errors:
             result["stage_errors"] = stage_errors
         return result

@@ -53,6 +53,13 @@ services:
     read_only: true
     networks:
       - http_honeypot_net
+    # #2051: healthcheck is baked into the image (Dockerfile HEALTHCHECK,
+    # `/honeypot -healthcheck`), invisible to a compose-only grep for
+    # `healthcheck:` -- the label still applies since autoheal watches
+    # Docker's own container health status regardless of which layer
+    # defined the check.
+    labels:
+      - autoheal=true
     deploy:
       resources:
         limits:
@@ -92,6 +99,10 @@ services:
     cap_drop: [ALL]
     read_only: true
     networks: [api_honeypot_net]
+    # #2051: inherits http-honeypot's image-level HEALTHCHECK above (same
+    # image, same `-healthcheck` binary flag).
+    labels:
+      - autoheal=true
     deploy:
       resources: { limits: { cpus: "0.5", memory: 128M } }
 

@@ -126,6 +126,26 @@ reasoning through the exclusion list by hand next time).
 Require a manual reviewer on `production-home`; never accept pull-request code
 on this production runner.
 
+**#2745: never pass an explicit `--name` that collides with the CI fleet's
+name.** `install-deploy-runner.sh` defaults to `${HOSTNAME}-home` specifically
+so its identity can never collide with `install-ci-runner.sh`'s
+`${HOSTNAME}-ci` default. On 2026-08-31 the deploy runner's registration was
+found silently clobbered: both `/opt/github-ci-runner/.runner` and
+`/opt/github-deploy-runner/.runner` claimed the identical `agentName:
+"supermicro"` (the bare hostname, not either script's own `-ci`/`-home`
+suffixed default) -- meaning some prior run of the deploy-runner script was
+given an explicit `--name` override matching the CI runner's plain hostname,
+and GitHub keeps only one live registration per name. The deploy runner's
+unit was left `disabled` as a result, and the Diagnostics workflow's `home`
+job (and any other `honeypot-home`-targeted job, including `deploy.yml`
+itself) queued forever with no online runner able to claim it. Fixed by
+re-registering under the script's own unmodified default name
+(`supermicro-home` on this host) rather than reusing a colliding name --
+always let `--name` default unless there is a specific reason to override
+it, and never reuse the bare `${HOSTNAME}` the live CI fleet's first runner
+is currently registered under (an earlier `--name` override; the script's
+own default is `${HOSTNAME}-ci`).
+
 Run [`../safe-update.sh`](../safe-update.sh) (`STACK_DIR=/opt/stacks/apiary`)
 before a manual deploy to snapshot the current git commit SHA, any
 uncommitted config drift, and every `.env` file -- a lightweight, read-only
@@ -653,6 +673,67 @@ the runner's own persistent tool cache -- unlike an ephemeral GitHub-hosted
 runner, that cache survives between job runs on this same machine, so the
 second and every later run skips the download entirely. This is most of
 where the actual speed win comes from, not raw CPU.
+
+### Docker Hub authentication and the pull-through cache (#2819)
+
+`containers.yml` used to hold no Docker Hub credentials at all. Its single
+`docker/login-action` targets `ghcr.io` and is gated
+`if: github.event_name != 'pull_request'`, so on a PR every base-image pull
+went out anonymous -- and Docker Hub meters anonymous pulls **per source
+IP**, at roughly 100 per 6h. With `CI_HOMESERVER_PRS=true` all 18 matrix
+rows leave this box through one address, and the tree carries **74
+non-`scratch` Hub `FROM` lines**. One cold run spends most of the budget;
+the run after it fails with `toomanyrequests` on whichever rows happen to
+ask last. #2771's per-image `type=gha` scopes do not help: that cache holds
+*our* layers, never the base image, so every run re-resolves every `FROM`
+against the registry.
+
+Two halves, both required.
+
+**Authentication.** Repo secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`
+(a "Public repo read-only" personal access token), consumed by a
+`docker/login-action` step that deliberately runs on `pull_request` too --
+that is the event where the gap bites. The step is guarded on the secret
+being non-empty so a fork `pull_request`, which by design cannot read
+secrets, keeps building anonymously instead of failing on empty
+credentials. Authenticated pulls meter against the account rather than the
+shared IP.
+
+**Pull-through cache.** The durable half, and the one that actually cuts
+traffic rather than raising the ceiling:
+
+```bash
+sudo scripts/github-ci-runner/install-registry-mirror.sh \
+    --username <hub-user> --token <hub-read-only-PAT>
+gh variable set CI_REGISTRY_MIRROR --repo Xore/APIARY --body '172.16.0.1:5555'
+```
+
+A `registry:3` proxy in front of Docker Hub, run under
+`ci-registry-mirror.service`, storing to `/mnt-1/ci-registry-mirror` (not
+`/var`, which is the docker data root and sits near full) with a 168h
+upstream TTL. Eighteen rows times N bases collapse to one upstream fetch,
+and it keeps them across runs.
+
+Two things about it are easy to get wrong:
+
+- **It is configured on buildkit, not on the host daemon.** buildx's
+  `docker-container` driver runs its own containerd and never reads
+  `/etc/docker/daemon.json`, so a `registry-mirrors` entry there is
+  silently ignored by every build in this repo. `containers.yml` composes a
+  `buildkitd.toml` from `CI_REGISTRY_MIRROR` and passes it to
+  `setup-buildx-action` as `buildkitd-config`. Installing the service
+  without setting the variable changes nothing.
+- **It is applied only on the self-hosted executor.** The address is bound
+  to the docker0 gateway (`172.16.0.1:5555`), reachable from any container
+  on the box but not from the LAN -- an unauthenticated proxy pulling with
+  our Hub credentials should not be an open relay. A GitHub-hosted fallback
+  runner cannot dial it, and a mirror it cannot dial turns every `FROM`
+  into a timeout, so the workflow gates the config on
+  `needs.ci-target.outputs.homeserver == 'true'`.
+
+The installer authenticates the host daemon with the same credentials
+before pulling `registry:3`, because the bootstrap otherwise 429s on
+exactly the limit it is being installed to fix.
 
 ## VPS deployment
 

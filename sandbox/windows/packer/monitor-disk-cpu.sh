@@ -4,13 +4,23 @@
 # 97.8MB, zero growth" signature from #288) and the qemu process's CPU%.
 set -euo pipefail
 
-OUT="/var/dockge/sandbox/golden-images/win11-analysis.qcow2"
+FINAL_OUT="/var/dockge/sandbox/golden-images/win11-analysis.qcow2"
+# build-with-retry.sh builds into this scratch dir and only moves the
+# artifact into FINAL_OUT on success (its own "output directory already
+# exists" workaround) -- while a build is in flight this is the file that is
+# actually growing; FINAL_OUT still holds the previous golden image.
+SCRATCH_OUT="/var/dockge/sandbox/golden-images/.build-tmp-win11-analysis/win11-analysis.qcow2"
 LOG="/var/dockge/sandbox/monitor-disk-cpu.log"
 ts="$(date -u +%FT%TZ)"
 
-if [[ -f "$OUT" ]]; then
+if [[ -f "$SCRATCH_OUT" ]]; then
+  OUT="$SCRATCH_OUT"
+  size="$(stat -c %s "$OUT")"
+elif [[ -f "$FINAL_OUT" ]]; then
+  OUT="$FINAL_OUT"
   size="$(stat -c %s "$OUT")"
 else
+  OUT="$FINAL_OUT"
   size="MISSING"
 fi
 
@@ -23,4 +33,4 @@ else
   cpu="NOPROC"; mem="NOPROC"; etimes="NOPROC"
 fi
 
-echo "${ts} qcow2_bytes=${size} qemu_cpu%=${cpu} qemu_mem%=${mem} qemu_uptime_s=${etimes}" >> "$LOG"
+echo "${ts} qcow2_bytes=${size} qcow2_path=${OUT} qemu_cpu%=${cpu} qemu_mem%=${mem} qemu_uptime_s=${etimes}" >> "$LOG"

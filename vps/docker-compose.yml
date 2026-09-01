@@ -15,7 +15,7 @@
 #         /opt/stacks/apiary/logs/suricata -o ro,allow_other
 
 x-oidc-gateway: &oidc-gateway
-  image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.3@sha256:10a1165743a192e1940b4708fb9647027185ce11a681a1c5519b442ff7f1f561
+  image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.4@sha256:b1b2021fe8f4004573e8d690dec6c7bb29cc44364572cf8510a05bf3a0ae2ded
   restart: unless-stopped
   read_only: true
   security_opt: [no-new-privileges:true]
@@ -114,7 +114,7 @@ services:
 
   # ===== TRAEFIK =====
   traefik:
-    image: traefik:v3.7.10@sha256:9c3b91d5fb7770853ca5c1124a23c34bf2d9b47ffaebeab2614cbaf410dcb2ac
+    image: traefik:v3.7.12@sha256:9c2a54d87f76f5c2f5f2682c68394af92fb12c0a2686798d6462a3f84bd78eaf
     container_name: traefik
     restart: unless-stopped
     ports:
