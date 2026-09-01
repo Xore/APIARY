@@ -83,8 +83,13 @@ PATTERNS = (
     # convention, #1506) in one exemption. \$\( alongside \$\{ exempts
     # command-substitution-generated secrets (e.g. install-homeserver.sh's
     # `$(openssl rand ...)` bootstrap values, #1504) the same way variable
-    # expansion was already exempt.
-    (re.compile(r"(?m)^[ \t]*[A-Z][A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_KEY)[ \t]*=[ \t]*(?!(?:(?i:change.?me)|DECOY_ONLY|\$[\{\(]|\"?<|$))[^#\s]{8,}"), "literal credential assignment"),
+    # expansion was already exempt. The `\"?` before `\$[\{\(]` matches a
+    # *quoted* expansion default too -- `FOO_TOKEN="${FOO_TOKEN:-}"`, the
+    # idiomatic shell form for "use the env value or an empty default" --
+    # which is as much a not-a-literal as the bare `${...}`/`$(...)` cases
+    # and which the sibling `\"?<` placeholder exemption already tolerates a
+    # leading quote for.
+    (re.compile(r"(?m)^[ \t]*[A-Z][A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_KEY)[ \t]*=[ \t]*(?!(?:(?i:change.?me)|DECOY_ONLY|\"?\$[\{\(]|\"?<|$))[^#\s]{8,}"), "literal credential assignment"),
     (re.compile(r"(?i)https?://[^/\s:@]+:[^/\s@]+@"), "credential embedded in URL"),
 )
 # #1920: the VPS Traefik config is not documentation -- install-vps.sh

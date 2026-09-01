@@ -197,6 +197,10 @@ services:
       - honeypot-llm
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
+    # #2051: HEALTHCHECK is baked into backend-service/Dockerfile itself,
+    # invisible to a compose-only grep for healthcheck:.
+    labels:
+      - autoheal=true
     deploy:
       resources:
         limits: {cpus: "2.0", memory: 512M}

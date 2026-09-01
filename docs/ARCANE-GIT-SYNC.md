@@ -176,6 +176,31 @@ alone. Re-verify against whatever Arcane version is pinned in
   vendored/generated tree, expect the same `file count limit exceeded`
   failure and raise that stack's own `maxSyncFiles` rather than assuming
   the default is enough.
+- **The directory-sync walk has no exclude/scope mechanism at all** —
+  confirmed against the source (`pkg/gitutil/git.go`'s `WalkDirectory`):
+  it walks everything under `filepath.Dir(composePath)` except `.git` and
+  symlinks, with no glob, no `.gitopsignore`, no sub-path option. #2711:
+  `ghosts`'s sync (`sandbox/ghosts/compose.yml`) always failed — either a
+  ~40s-then-500 with no detail, or (once `maxSyncTotalSize` alone was
+  raised) a fast `file count limit exceeded` — because
+  `sandbox/ghosts/vendor/ghosts-src/` (963 tracked files, ~132 MB) sits in
+  the same directory tree as the compose file, so the sync's whole-directory
+  walk of `sandbox/ghosts/` (989 files, 135,789,139 bytes in total) blows
+  past *both* defaults (`maxSyncFiles: 500`, `maxSyncTotalSize: 50MB`), not
+  just the one either failure message names. Fixed the same way as the
+  `honeypot-dashboard` case above — both limits raised on the sync record
+  and mirrored into the manifest (`arcane/manifests/home-production.json`:
+  `maxSyncFiles: 1500`, `maxSyncTotalSize: 209715200`, ~1.5x headroom over
+  the measured size). Verified live 2026-08-31: `Directory walk complete
+  syncId=... totalFiles=989 totalSize=135789139 skippedBinaries=0`, sync
+  request returned `200` with `"Successfully synced directory with 989
+  files to project ghosts"`, `ghosts-api` rebuilt and redeployed from the
+  synced tree, confirmed serving real data afterward. Total request time
+  was **227s** — comfortably under the #2705 ~5 minute internal deploy
+  timeout today, but with much less margin than any other project in this
+  manifest; if the vendored tree grows further (see #2256, which questions
+  whether it belongs in the repo at all — deliberately not addressed
+  here), this is the first sync that will hit that deadline again.
 - **A destroyed project can leave a stale path/sync binding.** Deleting a
   *sync* does not always fully clear the *project* record Arcane created
   for it — a subsequent sync attempt at the same path can fail with

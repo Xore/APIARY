@@ -44,8 +44,27 @@ services:
     volumes:
       - /opt/stacks/apiary/logs/mailoney:/var/log/honeypot
       - /opt/stacks/apiary/state/init-markers:/markers:ro
+    # #2743: pin the tmpfs owner and mode rather than inheriting a default.
+    # During #2743's `systemctl restart docker` this container crash-looped
+    # on `sqlite3.OperationalError: unable to open database file` and was
+    # recreated from this corrected file.
+    #
+    # The cause originally recorded here -- that an unqualified
+    # `tmpfs: [/data]` mounts `755 root:root`, locking out this image's
+    # `USER 65534` -- does NOT reproduce, so it has been removed rather than
+    # left standing: on this host (Docker 29.7.2) the exact pre-fix shape
+    # (this image, read_only, USER 65534, bare `tmpfs: [/data]`) mounts
+    # `1777 root:root` and sqlite3 opens the db successfully, because /data
+    # does not exist in the image and Docker's default for an absent path is
+    # 1777. The real trigger of that crash loop is unexplained -- see #2754.
+    #
+    # These options are still worth keeping: they drop the world-writable
+    # bit, and they make the mount independent of the image-directory mode a
+    # tmpfs inherits when the path *does* exist in the image (measured:
+    # image dirs at 755/1777/700 each come back through the tmpfs unchanged,
+    # so a root-owned /data added to the image later would lock this UID out).
     tmpfs:
-      - /data
+      - /data:uid=65534,gid=65534,mode=1770
     security_opt:
       - no-new-privileges:true
     read_only: true
