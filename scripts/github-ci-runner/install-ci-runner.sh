@@ -40,6 +40,8 @@
 # name unchanged, so the already-registered instance needs no migration.
 set -euo pipefail
 
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 RUNNER_VERSION=2.336.0
 RUNNER_SHA256=04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d
 RUNNER_LABELS="self-hosted,linux,x64,honeypot-ci"
@@ -105,11 +107,66 @@ if ! id "$RUNNER_USER" >/dev/null 2>&1; then
 fi
 install -d -m 0755 -o "$RUNNER_USER" -g "$RUNNER_USER" "$RUNNER_HOME"
 
+# #2764: the one deliberate, narrow exception to "no sudo BY DESIGN" above.
+# compose-drift-watch.py needs `docker compose config` AND `docker compose
+# ps` on every stack under /var/dockge/stacks/, and four of them have a
+# root/deploy-runner-owned .env this user can't read -- confirmed live,
+# permission denied for both subcommands, regardless of the 600/640 split.
+# Widening group membership (e.g. adding this user to deploy-runner) was the
+# simpler option and explicitly rejected: it would hand a scheduled,
+# gh-token-bearing job direct read access to Keycloak admin credentials and
+# every other secret those .env files hold. Instead: a dedicated group whose
+# only grant is running one specific, narrow root-run helper
+# (scripts/compose-project-state.py) that resolves the project as root but
+# returns nothing except {"services": {name: restart_policy}, "containers":
+# [{Service, State}]} -- never a secret value, an image, a label or a
+# command line. Every instance's RUNNER_USER joins this same group, so N
+# runner instances share one sudoers grant instead of needing one per
+# instance.
+#
+# Note this script is NOT invoked by install-homeserver.sh -- it is a manual
+# runbook step (docs/CI-CD.md), so a rebuild only replays this grant if the
+# operator runs it.
+compose_drift_group=compose-drift-ro
+if ! getent group "$compose_drift_group" >/dev/null 2>&1; then
+  groupadd --system "$compose_drift_group"
+fi
+usermod -aG "$compose_drift_group" "$RUNNER_USER"
+
+install -d -m 0755 -o root -g root /opt/github-ci-runner-helpers
+install -m 0755 -o root -g root \
+  "$here/compose-project-state.py" \
+  /opt/github-ci-runner-helpers/compose-project-state.py
+
+# The trailing '*' only ever reaches this helper's own argument validation
+# (rejects anything but a clean path under /var/dockge/stacks or
+# /opt/stacks -- see compose-project-state.py's own header), not a general
+# command -- sudoers itself grants nothing broader than "run this one file
+# as root."
+#
+# Written to a temp file and validated BEFORE it is installed: a syntax
+# error in a file already sitting in /etc/sudoers.d breaks sudo host-wide
+# for as long as it is there, however briefly.
+sudoers_file=/etc/sudoers.d/compose-drift-ro
+sudoers_tmp="$(mktemp)"
+cat > "$sudoers_tmp" <<EOF
+%${compose_drift_group} ALL=(root) NOPASSWD: /usr/bin/python3 /opt/github-ci-runner-helpers/compose-project-state.py *
+EOF
+if ! visudo -cf "$sudoers_tmp"; then
+  echo "generated sudoers file failed validation, not installing it" >&2
+  rm -f "$sudoers_tmp"
+  exit 1
+fi
+install -m 0440 -o root -g root "$sudoers_tmp" "$sudoers_file"
+rm -f "$sudoers_tmp"
+
 # Host provision for the routed checks, kept idempotent so re-running this
-# script restores a drifted box. The runner user has no sudo BY DESIGN, so
-# every sudo-apt path inside a workflow check would be a guaranteed
-# relocation failure -- everything a check needs is preinstalled here
-# instead, and checks that would install on a missing dep fail loudly.
+# script restores a drifted box. The runner user has no general sudo BY
+# DESIGN -- the one exception above (#2764) is a single, narrow, output-
+# filtered helper, not a shell -- so every sudo-apt path inside a workflow
+# check would be a guaranteed relocation failure -- everything a check
+# needs is preinstalled here instead, and checks that would install on a
+# missing dep fail loudly.
 #   redis-server: the frontend-next browser fixture spawns its own
 #     (daemon disabled -- only the binary is wanted).
 #   nodejs/npm: the dashboard OIDC suites run the BFF build against the

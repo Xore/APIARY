@@ -20,14 +20,14 @@ only that one exists.
 
 Scope: every `compose.yml`/`docker-compose.yml` this repo actually deploys
 from -- `arcane/home/*/compose.yml` plus the handful of root-level and
-sandbox operational composes. Excluded: `vps/docker-compose.yml` -- the VPS
-runs no autoheal container at all (confirmed: no `autoheal` reference
-anywhere in that file), so a missing label there is a different, larger
-question ("should the VPS run autoheal too") than the pairing gap this
-guard exists to catch on the fleet that already has it; and anything under
-a vendored tree (upstream-verbatim per VENDORED.md, not this repo's own service definition)
-and the honeyfs decoy filesystem prop under honeypot-cowrie (a fake file
-served *to* attackers, not a real compose stack).
+sandbox operational composes, and now `vps/docker-compose.yml` too (#2762:
+the VPS runs its own docker-socket-proxy + autoheal pair as of that issue,
+the same narrow-proxy shape as honeypot-utilities' instance on the
+homeserver, so the pairing gap this guard exists to catch now applies there
+the same way). Excluded: anything under a vendored tree (upstream-verbatim
+per VENDORED.md, not this repo's own service definition) and the honeyfs
+decoy filesystem prop under honeypot-cowrie (a fake file served *to*
+attackers, not a real compose stack).
 
 Usage: python3 scripts/check-autoheal-labels.py
 """
@@ -41,7 +41,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 EXCLUDE_SUBSTRINGS = ("/vendor/", "/honeyfs/")
-EXCLUDE_FILES = ("vps/docker-compose.yml",)
+EXCLUDE_FILES = ()
 
 HEALTHCHECK_INSTRUCTION_RE = re.compile(r"^\s*HEALTHCHECK\b", re.IGNORECASE | re.MULTILINE)
 HEALTHCHECK_NONE_RE = re.compile(r"^\s*HEALTHCHECK\s+NONE\b", re.IGNORECASE | re.MULTILINE)

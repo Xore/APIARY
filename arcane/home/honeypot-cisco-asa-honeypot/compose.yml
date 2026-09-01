@@ -39,6 +39,17 @@ services:
     volumes:
       - /opt/stacks/apiary/logs/cisco-asa-honeypot:/var/log/honeypot
       - /opt/stacks/apiary/state/init-markers:/markers:ro
+    # #2366: measured baseline, same "run it, then reduce" methodology as
+    # #89/#118's cap_drop passes. No cap_add needed for the privileged
+    # port 500/udp bind below -- see honeypot-dns-honeypot/compose.yml's
+    # equivalent comment for why. Verified locally: built this image, ran
+    # it with cap_drop: [ALL] + read_only: true, and confirmed both the
+    # WebVPN (8443, real HTTP 200) and IKE (500/udp, logged "ike_listening")
+    # sides came up.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     read_only: true
     networks: [cisco_asa_honeypot_net]
     healthcheck:

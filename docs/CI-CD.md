@@ -573,7 +573,31 @@ copy), which asks whether this run's source may reach the homeserver at
 all (trust gate below), then whether a `honeypot-ci`-labelled runner is
 currently registered AND reporting online -- measured, not read, by
 dispatching the `ci-heartbeat.yml` canary (the runners-listing API
-answers 403 to `GITHUB_TOKEN`, so the registry cannot be asked). Quality
+answers 403 to `GITHUB_TOKEN`, so the registry cannot be asked).
+
+**The canary is shared, not per-router (#2849).** Before dispatching, a
+router looks for one that already answers the question: a canary that
+*succeeded* within `HEARTBEAT_FRESH_SECONDS` (300s default) is reused
+outright, and one already *in flight* within that window is adopted and
+waited on. Only if neither exists does it dispatch its own. The ref a
+canary ran on is deliberately ignored — `ci-heartbeat.yml` is a no-op job
+whose sole output is "a `honeypot-ci` runner picked this up", which is a
+fact about the box rather than about a branch.
+
+This is not an optimisation, it is a correctness fix. Each router used to
+dispatch its own canary, and those canaries queue on the same executors as
+the jobs they gate — so a fan-out deep enough to fill the queue made every
+router time out and declare a healthy box *offline*, and the busier the
+box got the more certainly it was mis-declared dead. Measured on run
+33553809659: five runners online and executing, every canary in the
+surrounding hour `success`, and the router still concluded
+`online=false`. A 20-PR fan-out across ~4 routing workflows dispatched
+roughly 80 canaries to measure one machine; it now converges on ~1.
+
+Reuse trades a bounded staleness for that: a box dying immediately after a
+successful canary keeps being vouched for until the window expires. Only a
+*success* ever vouches — a failed or absent canary is never reused — so
+the fail-safe direction is preserved. Quality
 ships each eligible check as a PAIR of conditional jobs fed by that
 single answer -- exactly one twin runs, the other reports skipped.
 containers/security/pages instead give their one executor-agnostic job a
@@ -673,6 +697,67 @@ the runner's own persistent tool cache -- unlike an ephemeral GitHub-hosted
 runner, that cache survives between job runs on this same machine, so the
 second and every later run skips the download entirely. This is most of
 where the actual speed win comes from, not raw CPU.
+
+### Docker Hub authentication and the pull-through cache (#2819)
+
+`containers.yml` used to hold no Docker Hub credentials at all. Its single
+`docker/login-action` targets `ghcr.io` and is gated
+`if: github.event_name != 'pull_request'`, so on a PR every base-image pull
+went out anonymous -- and Docker Hub meters anonymous pulls **per source
+IP**, at roughly 100 per 6h. With `CI_HOMESERVER_PRS=true` all 18 matrix
+rows leave this box through one address, and the tree carries **74
+non-`scratch` Hub `FROM` lines**. One cold run spends most of the budget;
+the run after it fails with `toomanyrequests` on whichever rows happen to
+ask last. #2771's per-image `type=gha` scopes do not help: that cache holds
+*our* layers, never the base image, so every run re-resolves every `FROM`
+against the registry.
+
+Two halves, both required.
+
+**Authentication.** Repo secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`
+(a "Public repo read-only" personal access token), consumed by a
+`docker/login-action` step that deliberately runs on `pull_request` too --
+that is the event where the gap bites. The step is guarded on the secret
+being non-empty so a fork `pull_request`, which by design cannot read
+secrets, keeps building anonymously instead of failing on empty
+credentials. Authenticated pulls meter against the account rather than the
+shared IP.
+
+**Pull-through cache.** The durable half, and the one that actually cuts
+traffic rather than raising the ceiling:
+
+```bash
+sudo scripts/github-ci-runner/install-registry-mirror.sh \
+    --username <hub-user> --token <hub-read-only-PAT>
+gh variable set CI_REGISTRY_MIRROR --repo Xore/APIARY --body '172.16.0.1:5555'
+```
+
+A `registry:3` proxy in front of Docker Hub, run under
+`ci-registry-mirror.service`, storing to `/mnt-1/ci-registry-mirror` (not
+`/var`, which is the docker data root and sits near full) with a 168h
+upstream TTL. Eighteen rows times N bases collapse to one upstream fetch,
+and it keeps them across runs.
+
+Two things about it are easy to get wrong:
+
+- **It is configured on buildkit, not on the host daemon.** buildx's
+  `docker-container` driver runs its own containerd and never reads
+  `/etc/docker/daemon.json`, so a `registry-mirrors` entry there is
+  silently ignored by every build in this repo. `containers.yml` composes a
+  `buildkitd.toml` from `CI_REGISTRY_MIRROR` and passes it to
+  `setup-buildx-action` as `buildkitd-config`. Installing the service
+  without setting the variable changes nothing.
+- **It is applied only on the self-hosted executor.** The address is bound
+  to the docker0 gateway (`172.16.0.1:5555`), reachable from any container
+  on the box but not from the LAN -- an unauthenticated proxy pulling with
+  our Hub credentials should not be an open relay. A GitHub-hosted fallback
+  runner cannot dial it, and a mirror it cannot dial turns every `FROM`
+  into a timeout, so the workflow gates the config on
+  `needs.ci-target.outputs.homeserver == 'true'`.
+
+The installer authenticates the host daemon with the same credentials
+before pulling `registry:3`, because the bootstrap otherwise 429s on
+exactly the limit it is being installed to fix.
 
 ## VPS deployment
 

@@ -97,6 +97,15 @@ def project_dirs(stacks_root: Path) -> list[Path]:
     return dirs
 
 
+# #2764: fixed deployed path, not this checkout's sibling file -- the
+# sudoers NOPASSWD grant (scripts/github-ci-runner/install-ci-runner.sh)
+# matches this exact interpreter + script path, and a self-hosted runner's
+# checkout directory is not guaranteed stable the way this root-owned
+# install location is. scripts/compose-project-state.py is that same file's
+# source of truth -- re-run install-ci-runner.sh after changing it.
+PRIVILEGED_HELPER = "/opt/github-ci-runner-helpers/compose-project-state.py"
+
+
 def resolved_services(project: Path) -> dict[str, str] | None:
     """service name -> resolved restart policy. None on resolution failure."""
     out = subprocess.run(
@@ -136,6 +145,54 @@ def actual_containers(project: Path) -> list[dict] | None:
     return containers
 
 
+def privileged_project_state(project: Path) -> tuple[dict[str, str], list[dict]] | None:
+    """Same two answers, obtained through the narrow root-run helper.
+
+    #2764: a handful of stacks' .env files aren't readable by whichever
+    unprivileged user runs this sweep (root/deploy-runner-owned, 600/640).
+    `docker compose config` AND `docker compose ps` both fail on those with
+    permission denied -- `ps` has to load the project too, so patching only
+    the config half leaves the stack just as unresolved as before. Hence one
+    helper call that returns both halves, and one place that can fail.
+
+    The helper resolves everything as root but only ever prints
+    {"services": {name: restart}, "containers": [{Service, State}]} -- never
+    a secret value, an image, a label or a command line. Silently absent
+    (not installed, or the sudoers grant isn't there) just means this
+    fallback fails too and the project stays "unresolved", same as before
+    #2764 -- this can never make a resolution failure look like a clean
+    pass.
+    """
+    out = subprocess.run(
+        ["sudo", "-n", "/usr/bin/python3", PRIVILEGED_HELPER, str(project)],
+        capture_output=True, text=True,
+    )
+    if out.returncode != 0:
+        return None
+    try:
+        data = json.loads(out.stdout)
+    except json.JSONDecodeError:
+        return None
+    services = data.get("services")
+    containers = data.get("containers")
+    if not isinstance(services, dict) or not isinstance(containers, list):
+        return None
+    return services, containers
+
+
+def project_state(project: Path) -> tuple[dict[str, str], list[dict]] | None:
+    """(resolved services, existing containers), or None if this project
+    can't be resolved at all. Tries unprivileged first and only reaches for
+    the root helper when either half fails -- so an ordinary run stays
+    entirely unprivileged, and the four .env-locked stacks resolve through
+    exactly one sudo call instead of two half-fixes."""
+    services = resolved_services(project)
+    containers = actual_containers(project) if services is not None else None
+    if services is not None and containers is not None:
+        return services, containers
+    return privileged_project_state(project)
+
+
 def sweep(stacks_root: Path) -> tuple[list[dict], list[str]]:
     """Returns (drift findings, project names that failed to resolve)."""
     findings: list[dict] = []
@@ -143,11 +200,11 @@ def sweep(stacks_root: Path) -> tuple[list[dict], list[str]]:
 
     for project in project_dirs(stacks_root):
         name = project.name
-        services = resolved_services(project)
-        containers = actual_containers(project) if services is not None else None
-        if services is None or containers is None:
+        state = project_state(project)
+        if state is None:
             unresolved.append(name)
             continue
+        services, containers = state
 
         has_any_container = {c["Service"] for c in containers}
         has_running_container = {

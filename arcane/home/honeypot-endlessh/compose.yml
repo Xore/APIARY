@@ -66,6 +66,15 @@ services:
     # service definition -- main.go's only file write is LOG_PATH, already
     # the bind mount above; no tmpfs needed (confirmed against source: the
     # only os.OpenFile/os.Create/os.Mkdir call in this binary is the logger).
+    #
+    # #2366: same measured baseline extended to cap_drop -- re-ran the same
+    # local build+run with cap_drop: [ALL] and security_opt no-new-
+    # privileges added on top, and it still accepted a real TCP connect and
+    # logged "listening" on 2222.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     read_only: true
     networks: [endlessh_net]
     healthcheck:
