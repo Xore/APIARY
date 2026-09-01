@@ -17,6 +17,10 @@ Multi-stage builds are handled: a `FROM <name>` that refers to an `AS <name>`
 declared earlier in the *same file* is a build-stage reference, not an
 external image, and is excluded.
 
+The virtual `scratch` base (and any `FROM ${ARG}` still carrying an
+unexpanded build-arg) is excluded too: neither resolves to a pullable image,
+and trivy FATALs the whole scan when handed one.
+
 Usage: python3 scripts/list-docker-base-images.py
 Prints one deduplicated image reference per line, sorted.
 """
@@ -31,6 +35,23 @@ FROM_RE = re.compile(
     r"^\s*FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?\s*$",
     re.IGNORECASE,
 )
+
+# Virtual/non-pullable bases that have no registry image to scan. `scratch`
+# is Docker's reserved empty base; trivy aborts on it with a FATAL
+# "unable to find the specified image \"scratch\"" that fails the whole scan
+# job. It carries nothing to have a CVE, so dropping it is correct, not a
+# coverage gap.
+VIRTUAL_BASES = {"scratch"}
+
+
+def is_scannable(ref: str) -> bool:
+    """A base is scannable only if it resolves to a real pullable image.
+
+    Excludes the virtual `scratch` base and any `FROM ${ARG}` whose ref still
+    carries an unexpanded build-arg substitution -- trivy can pull neither,
+    and both would FATAL the scan.
+    """
+    return ref.lower() not in VIRTUAL_BASES and "$" not in ref
 
 
 def tracked_dockerfiles() -> list[str]:
@@ -52,7 +73,7 @@ def images_in(path: Path) -> set[str]:
         if not m:
             continue
         ref, alias = m.group(1), m.group(2)
-        if ref not in stage_names:
+        if ref not in stage_names and is_scannable(ref):
             images.add(ref)
         if alias:
             stage_names.add(alias)
