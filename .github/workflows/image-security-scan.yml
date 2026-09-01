@@ -1,0 +1,81 @@
+name: Container base image security scan
+
+# #2316: closes the "nothing watches container base images for advisories"
+# gap Dependabot's docker updater cannot close on its own. Confirmed against
+# this repo's own Dependabot PR history: every digest-pinned docker-ecosystem
+# PR examined (#1813, #1518, #1116, #1070, #855, #854, #853, #852) paired a
+# digest change with a tag/version-string change -- none was a same-tag
+# digest-only refresh. A base image rebuilt under an unchanged tag (a
+# security patch to alpine:3.24, say) is invisible to Dependabot forever.
+# Trivy scans the resolved image directly, so it catches that class of drift
+# regardless of whether a newer tag exists.
+#
+# scripts/list-docker-base-images.py walks every Dockerfile/Containerfile in
+# the tree itself (not dependabot.yml's `directories:` list), so this also
+# covers every directory #2316 found missing from dependabot's docker
+# section, and the vendored/floating-tag cases (sandbox/ghosts's vendored
+# dotnet SDK images) that a tag-based updater cannot pin without breaking
+# VENDORED.md's verbatim-upstream protocol -- scanning whatever they
+# currently resolve to still catches a known CVE in wide use.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/Dockerfile*"
+      - "**/Containerfile*"
+      - "scripts/list-docker-base-images.py"
+      - ".github/workflows/image-security-scan.yml"
+  pull_request:
+    paths:
+      - "**/Dockerfile*"
+      - "**/Containerfile*"
+      - "scripts/list-docker-base-images.py"
+      - ".github/workflows/image-security-scan.yml"
+  schedule:
+    # Same slot as dependabot.yml's docker section (Monday 04:45
+    # Europe/Berlin) so a base-image advisory and a tag-bump proposal land
+    # in the same operator sweep instead of two different days.
+    - cron: "45 3 * * 1"
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  ci-target:
+    name: Pick CI executor
+    uses: ./.github/workflows/ci-router.yml
+    with:
+      ci_homeserver_prs: ${{ vars.CI_HOMESERVER_PRS || '' }}
+
+  scan:
+    name: Scan base images${{ needs.ci-target.outputs.homeserver != 'true' && ' (GitHub-hosted)' || '' }}
+    needs: [ci-target]
+    runs-on: ${{ needs.ci-target.outputs.homeserver == 'true' && fromJSON('["self-hosted", "linux", "x64", "honeypot-ci"]') || fromJSON('["ubuntu-latest"]') }}
+    timeout-minutes: ${{ needs.ci-target.outputs.homeserver == 'true' && 60 || 360 }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: List every base image this repo's Dockerfiles/Containerfiles pull
+        run: python3 scripts/list-docker-base-images.py | tee images.txt
+
+      - name: Install trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin
+
+      - name: Scan each image for known CRITICAL/HIGH vulnerabilities
+        run: |
+          set -euo pipefail
+          fail=0
+          while IFS= read -r image; do
+            [ -z "$image" ] && continue
+            echo "::group::$image"
+            if ! trivy image --scanners vuln --severity CRITICAL,HIGH \
+                --ignore-unfixed --exit-code 1 --no-progress "$image"; then
+              fail=1
+            fi
+            echo "::endgroup::"
+          done < images.txt
+          exit "$fail"
