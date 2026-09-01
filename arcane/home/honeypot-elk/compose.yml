@@ -499,6 +499,20 @@ services:
     # The arkime image has no ENTRYPOINT of its own, only this CMD, so the
     # wait is spliced straight into command: rather than needing a separate
     # entrypoint: override.
+    # #2710: --nolockpcap ("Don't lock offline pcap files (ie., allow
+    # deletion)") is required for retention to do anything at all.
+    # writer-inplace.c (the offline/monitor-mode reader this container
+    # uses) locks every imported file's record by default -- confirmed
+    # live: all 275k+ existing arkime_files_v30 docs under this node have
+    # locked=1, and the pcap-expire job's own query hard-excludes locked
+    # files (`must_not: term: locked: 1`), so retention was silently a
+    # no-op for every file capture has ever indexed, on top of (not
+    # instead of) the node-identity mismatch fixed on arkime-viewer below.
+    # This only changes files indexed from here on -- it does not
+    # retroactively unlock the existing backlog (a bulk ES update, and a
+    # real decision about whether previously-protected captured data
+    # should become deletable, deliberately left to a human; see the
+    # issue for the exact query if that's wanted).
     command:
       - sh
       - -c
@@ -506,7 +520,7 @@ services:
         until [ -f /markers/arkime-init.done ] && [ -f /markers/log-init.done ]; do sleep 3; done;
         exec /opt/arkime/bin/docker.sh capture --wait-for-db http://elasticsearch:9200
         --db 'http://elasticsearch:9200 upgradenoprompt --ifneeded'
-        -- -R file:///opt/arkime/raw --monitor --skip --host honeypot-vps
+        -- -R file:///opt/arkime/raw --monitor --skip --host honeypot-vps --nolockpcap
     volumes:
       - ./arkime/config.ini:/opt/arkime/etc/config.ini:ro
       - /opt/stacks/apiary/analysis/geoip:/opt/arkime/geo:ro
@@ -568,12 +582,25 @@ services:
     # #126: waits on the marker directly instead of depends_on-ing
     # init-wait-arkime-init (same-project-only mechanism). No ENTRYPOINT on
     # this image, only this CMD, so the wait goes straight into command:.
+    #
+    # #2710: --host honeypot-vps, same flag arkime-capture below passes,
+    # is required here too -- without it, viewer's own node identity
+    # defaults to the container's OS hostname (viewer.js: "Host name to
+    # use, default os hostname"), which changes on every recreate and
+    # never matches "honeypot-vps", the node every indexed file actually
+    # belongs to (capture's own --host). Confirmed live: the pcap-expire
+    # job queries the files index for *its own* node, found zero matches
+    # under the container-hostname identity against 275k+ real docs under
+    # "honeypot-vps", and concluded there was nothing to expire -- not
+    # because retention was misconfigured, but because viewer was quietly
+    # asking about a node that never wrote anything.
     command:
       - sh
       - -c
       - >
         until [ -f /markers/arkime-init.done ]; do sleep 3; done;
         exec /opt/arkime/bin/docker.sh viewer --wait-for-db http://elasticsearch:9200
+        --host honeypot-vps
     ports:
       - ${HP_BIND:-10.8.0.2}:19080:8005
     volumes:
