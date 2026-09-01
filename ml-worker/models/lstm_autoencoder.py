@@ -491,4 +491,12 @@ class LSTMAEModel:
             self._buffers[ip] = collections.deque(
                 (np.array(vec, dtype=np.float32) for vec in vectors), maxlen=SEQ_LEN
             )
-        self._last_seen.update(payload.get("last_seen", {}))
+        # #2229: save_buffers() writes `last_seen` sorted by timestamp
+        # descending (newest first, so the [:MAX_PERSISTED_IPS] slice keeps
+        # the most-recently-active entries); a plain .update() would hand
+        # that document order straight to this OrderedDict, inverting the
+        # least->most-recent invariant __init__ documents and score()'s
+        # popitem(last=False) eviction depends on. Re-sort ascending here so
+        # the restored order matches what a live-built _last_seen would be.
+        for ip, ts in sorted(payload.get("last_seen", {}).items(), key=lambda kv: kv[1]):
+            self._last_seen[ip] = ts
