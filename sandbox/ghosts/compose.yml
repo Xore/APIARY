@@ -113,6 +113,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    # #2051's autoheal-labels guard flags this service; deliberately not
+    # labeled here -- #2747 owns finishing this container's live bring-up
+    # (it isn't fully stood up yet) and its own standing compose-vs-running
+    # sweep, so the autoheal decision belongs with that work, not this one.
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
