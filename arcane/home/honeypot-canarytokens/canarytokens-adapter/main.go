@@ -25,11 +25,13 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -72,7 +74,50 @@ type alertPayload struct {
 var (
 	logMu   sync.Mutex
 	logFile *os.File
+	logPath string
+	logSize int64
+	logMax  int64
 )
+
+// rotateLog closes the current log file, renames it aside with a timestamp
+// suffix, and reopens a fresh file at the original path -- #120's contract,
+// ported from multipot's logger (see that package's rotate() for the full
+// reasoning: Filebeat tracks by inode so a rename-then-reopen never loses a
+// harvester). Callers must hold logMu.
+func rotateLog() {
+	if logFile == nil || logPath == "" {
+		return
+	}
+	logFile.Close()
+	target := logPath + "." + time.Now().UTC().Format("20060102-150405")
+	if _, err := os.Stat(target); err == nil {
+		for n := 2; ; n++ {
+			candidate := fmt.Sprintf("%s.%d", target, n)
+			if _, err := os.Stat(candidate); err != nil {
+				target = candidate
+				break
+			}
+		}
+	}
+	os.Rename(logPath, target)
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		logFile = nil
+		log.Printf("canarytokens-adapter: log file %q unavailable after rotation: %v", logPath, err)
+		return
+	}
+	logFile = f
+	logSize = 0
+}
+
+func getenvInt64(k string, def int64) int64 {
+	if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return n
+		}
+	}
+	return def
+}
 
 // buildEvent maps a webhook payload to this repo's shared sensor-log
 // shape. now is the fallback timestamp used when p.Time doesn't parse
@@ -126,7 +171,15 @@ func writeEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logMu.Lock()
-	_, werr := logFile.Write(append(line, '\n'))
+	if logMax > 0 && logSize >= logMax {
+		rotateLog()
+	}
+	var werr error
+	if logFile != nil {
+		var n int
+		n, werr = logFile.Write(append(line, '\n'))
+		logSize += int64(n)
+	}
 	logMu.Unlock()
 	if werr != nil {
 		log.Printf("log write error: %v", werr)
@@ -155,12 +208,17 @@ func main() {
 
 	waitForMarker("/markers/log-init.done")
 
-	logPath := getenv("LOG_PATH", "/var/log/honeypot/canarytokens.json")
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	path := getenv("LOG_PATH", "/var/log/honeypot/canarytokens.json")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		log.Fatalf("cannot open log file %s: %v", logPath, err)
+		log.Fatalf("cannot open log file %s: %v", path, err)
 	}
 	logFile = f
+	logPath = path
+	logMax = getenvInt64("LOG_MAX_BYTES", 67108864)
+	if st, err := f.Stat(); err == nil {
+		logSize = st.Size()
+	}
 
 	addr := getenv("LISTEN_ADDR", ":8090")
 	http.HandleFunc("/", writeEvent)

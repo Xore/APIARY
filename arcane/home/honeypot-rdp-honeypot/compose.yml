@@ -36,6 +36,14 @@ services:
     volumes:
       - /opt/stacks/apiary/logs/rdp-honeypot:/var/log/honeypot
       - /opt/stacks/apiary/state/init-markers:/markers:ro
+    # #2366: measured baseline, same "run it, then reduce" methodology as
+    # #89/#118's cap_drop passes. Verified locally: built this image, ran
+    # it with cap_drop: [ALL] + read_only: true, and confirmed it accepts a
+    # real TCP connect and logs "listening" on 3389.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     read_only: true
     networks: [rdp_honeypot_net]
     healthcheck:

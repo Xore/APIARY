@@ -1,8 +1,11 @@
 # GPU Acceleration for the ML Worker — Implementation Guide
 
-> **Status:** Implementation guide — not yet deployed. Tracked in
-> [#67](https://github.com/Xore/APIARY/issues/67). The ML worker itself
-> is scaffolded (see [`ml-worker-plan.md`](ml-worker-plan.md), roadmap v0.1).
+> **Status:** Implementation guide — not yet deployed. Originally tracked in
+> [#67](https://github.com/Xore/APIARY/issues/67) (closed, not completed) —
+> consolidated into [#1523](https://github.com/Xore/APIARY/issues/1523)'s
+> AFTER RELEASE 0.1.0 checklist; reopen/re-file when this work is picked up.
+> The ML worker itself is scaffolded (see
+> [`ml-worker-plan.md`](ml-worker-plan.md), roadmap v0.1).
 > **Audience:** A human operator or an AI coding agent implementing this feature.
 > **Companion guide:** [`gpu-llm-analysis-worker.md`](gpu-llm-analysis-worker.md)
 > — the GPU is shared between both workloads; §5 here is the coordination
@@ -69,13 +72,18 @@ parts, and it does not make the models more accurate.
 
 ## 3. Hardware & Compatibility Contract
 
-Observed on the homeserver on 2026-07-28 (same machine as the LLM guide) and
-not re-checked since. [#82](https://github.com/Xore/APIARY/issues/82)
-produces the record that replaces this list; re-verify before pinning anything.
+**Settled by [#602](https://github.com/Xore/APIARY/issues/602)** (verbatim
+host evidence: `lspci` shows a single AD104GL controller, containers
+enumerate exactly one device — the earlier two-card / Turing-plus-Ada
+hypothesis is refuted) and pinned as the runtime-governance authority in
+`analysis/ghidra/models/approved-models.json`, which
+`model-governance.py check-runtime` diffs live `nvidia-smi` against every
+5 minutes:
 
-- GPU: Quadro RTX 4000, 20475 MiB (~20 GB, corrected from an earlier 8192 MiB
-  figure that didn't match the live card — see #518), **compute capability
-  7.5 (Turing)**.
+- GPU: **NVIDIA RTX 4000 Ada Generation, 20475 MiB (~20 GB), compute
+  capability 8.9.** (An earlier draft of this document, before #602,
+  mis-recorded this as a Quadro RTX 4000 at compute capability 7.5/Turing —
+  that card was never on this host; see #602 for the full correction.)
 - Driver 580.173.02 (CUDA 13.0) — backward-compatible with CUDA 12.x
   runtime wheels.
 - nvidia-container-toolkit 1.19.1 present; `docker run --rm --gpus all
@@ -86,11 +94,17 @@ produces the record that replaces this list; re-verify before pinning anything.
   (its own Dockge stack), which joins `honeynet` as an external network —
   resolved under #61.
 
-**Wheel compatibility rule for Turing (sm_75):** PyTorch CUDA wheels
-(`+cu126`) ship sm_75 kernels; they work. Flash-attention and
-some xformers builds do not — do not add them. No bf16 on Turing: any
-training code must use fp32 (default) or fp16 with loss scaling, never
-bare `bfloat16`.
+**Wheel compatibility rule for Ada (sm_89), compute capability 8.9:**
+PyTorch CUDA wheels (`+cu126`) ship `sm_89` kernels; they work. Re-verify
+flash-attention/xformers build availability for `sm_89` specifically before
+adding either — do not assume the prior Turing-era "unsupported" note still
+applies, but do not assume support either without checking. **bf16 is
+native on Ada** (cc 8.9 has tensor cores with bf16 support) — the earlier
+blanket "no bf16, fp32/fp16-with-loss-scaling only" rule was transplanted
+from the wrong (Turing, cc 7.5) architecture and forbade using hardware
+capability that is actually present. Training code may use `bfloat16`
+directly; fp16-with-loss-scaling remains a valid alternative but is no
+longer mandatory.
 
 ---
 
@@ -119,11 +133,16 @@ Replace the CPU wheel lines:
 
 > **Verified pin (2026-08-01, #82):** `torch==2.13.0+cu124` does not exist;
 > that index ends at 2.6.0. `torch==2.13.0+cu126` installed cleanly and passed
-> a real RTX 4000 tensor check with CUDA 12.6, cuDNN 9.10.2, and `sm_75` in
-> the wheel's architecture list. Never silently fall back to the `+cpu`
-> wheel; a CPU
-> wheel in a GPU deployment must fail the acceptance test T2, not pass
-> unnoticed.
+> a real tensor check on this host's card, with CUDA 12.6 and cuDNN 9.10.2.
+> (#82's original note named the card "RTX 4000" and cited `sm_75` in the
+> wheel's architecture list — written nine days before #602 settled the
+> card's actual identity as RTX 4000 Ada Generation / cc 8.9 / `sm_89`.
+> Standard PyTorch CUDA wheels bundle kernels for multiple architectures
+> including both `sm_75` and `sm_89`, so the wheel's `sm_75` inclusion says
+> nothing about which kernel the live card actually used; the underlying
+> install-and-tensor-check result stands, only the architecture label was
+> wrong.) Never silently fall back to the `+cpu` wheel; a CPU wheel in a GPU
+> deployment must fail the acceptance test T2, not pass unnoticed.
 
 ### 4.2 `ml-worker/Dockerfile`
 
@@ -312,11 +331,11 @@ separate design doc.
 ```bash
 # T1 GPU visible in the ml-worker container
 docker exec hp-ml-worker python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
-# expect: True Quadro RTX 4000
+# expect: True NVIDIA RTX 4000 Ada Generation
 
 # T2 worker actually selected CUDA
 docker logs hp-ml-worker 2>&1 | grep -i "device"
-# expect one line like: device=cuda:0 (Quadro RTX 4000)
+# expect one line like: device=cuda:0 (NVIDIA RTX 4000 Ada Generation)
 
 # T3 retrain completes on GPU within budget
 docker exec hp-ml-worker python -c "..."  # trigger one retrain manually
@@ -360,7 +379,7 @@ The CPU-only image builds from the reverted files with no further changes
   captured payload text in code, docs, tests, or sample data. TEST-NET
   ranges and `example.com` only (same policy as the README).
 - **G2 — Version verification, not assumption.** Confirm the pinned
-  `+cu126` wheel exists (§4.1) and supports sm_75 (§3) before building;
+  `+cu126` wheel exists (§4.1) and supports sm_89 (§3) before building;
   confirm the sentence-transformers pin and immutable model revision install
   offline-prefetchable
   weights. Record verified pins in this document when deploying.

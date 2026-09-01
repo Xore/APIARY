@@ -62,10 +62,10 @@ HOST_FILES_ONLY=0
 USE_GPU=auto
 SKIP_PULL=0
 MODEL=""
-# The compose project name comes from the directory holding the compose file,
-# and it prefixes the volume names — ghidra_ollama_models holds several GB of
-# weights. Keep this directory called "ghidra" or the next run pulls them again
-# into a differently named volume and orphans the old one.
+# The compose project name is pinned in the file itself (`name: ghidra`,
+# #1502) precisely so it can't drift with the directory holding the compose
+# file -- it no longer has to be named "ghidra" for the volume names
+# (ghidra_ollama_models etc.) to stay put.
 STACK_DIR="$([ -d /opt/stacks ] && echo /opt/stacks/ghidra || true)"
 
 while [ $# -gt 0 ]; do
@@ -138,12 +138,34 @@ if [ -n "$STACK_DIR" ]; then
   # Every service in this file defined with a build: instead of an image:
   # needs its build context present next to the copied compose file, or the
   # stack copy cannot build ("unable to prepare context: path not found" --
-  # caught deploying this the first time, back when statictools was the only
-  # such service). Ghidra has been a build: service too since #245 (its
-  # context is ./service). Making sure every build: service's context
-  # survives this copy is the deploy-context gap tracked in #2063.
-  rm -rf "$STACK_DIR/statictools"
-  cp -r "$here/statictools" "$STACK_DIR/statictools"
+  # first caught deploying statictools, then again for ghidra after #793 gave
+  # it a build context too, because this step only ever knew statictools'
+  # name; see #2063). Derived, not enumerated, so a future build-context
+  # service needs no edit here. `compose config` (no --profile) naturally
+  # excludes profile-gated services like revdeck, whose context is a
+  # manually-cloned repo (docs/analysis/ghidra/revdeck/README.md) that may
+  # not exist on this host at all -- it must stay excluded, not mirrored.
+  build_contexts="$(docker compose -f "$compose_file" config --format json 2>/dev/null |
+    jq -r '.services[] | select(.build != null) | .build.context' 2>/dev/null || true)"
+  if [ -z "$build_contexts" ]; then
+    # jq or `compose config --format json` unavailable here -- fall back to
+    # grepping the compose file's own build:/context: lines. Cruder: it
+    # cannot see profiles, so it may also list revdeck's context, which then
+    # gets skipped below the same way any other missing directory does.
+    build_contexts="$(grep -E '^\s*(build|context):\s*\./' "$compose_file" |
+      sed -E 's/^\s*(build|context):\s*//')"
+  fi
+  while IFS= read -r ctx; do
+    [ -n "$ctx" ] || continue
+    ctx_name="$(basename "$ctx")"
+    ctx_src="$here/$ctx_name"
+    if [ ! -d "$ctx_src" ]; then
+      echo "  note: build context '$ctx_name' not present in $here, skipping (profile-gated service?)" >&2
+      continue
+    fi
+    rm -rf "${STACK_DIR:?}/$ctx_name"
+    cp -r "$ctx_src" "$STACK_DIR/$ctx_name"
+  done <<< "$build_contexts"
   if [ "$USE_GPU" = yes ]; then
     cp "$gpu_file" "$STACK_DIR/compose.override.yml"
   else

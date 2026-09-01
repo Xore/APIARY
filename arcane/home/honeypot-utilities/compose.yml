@@ -134,6 +134,16 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     security_opt:
       - no-new-privileges:true
+    # #2366: the container this whole pattern exists to protect everything
+    # else from, and it was the last one still running with Docker's full
+    # default capability set. Measured, not assumed: ran this exact digest
+    # with --cap-drop=ALL against a real docker.sock -- HAProxy loaded its
+    # config and served, /containers/json and /images/json both answered
+    # HTTP 200 through it, and /volumes (not granted above) still answered
+    # 403, so the allow-list it enforces is unchanged. It binds the
+    # unprivileged 2375 and never drops privileges, so it needs nothing back.
+    cap_drop:
+      - ALL
     # Private to this pair -- nothing else in the stack talks to the proxy,
     # and the proxy has no reason to reach honeynet or the internet.
     networks:
@@ -222,6 +232,16 @@ services:
       - AUTOHEAL_START_PERIOD=60
     security_opt:
       - no-new-privileges:true
+    # #2366: measured the same way as docker-socket-proxy above, and end to
+    # end rather than just "it starts" -- ran this exact digest with
+    # --cap-drop=ALL against a real docker-socket-proxy, gave it a labelled
+    # container with a deliberately failing healthcheck, and it went healthy,
+    # detected the unhealthy peer and issued the restart through the proxy.
+    # It is a shell loop plus an HTTP client against a TCP endpoint: no
+    # privileged port, no privilege drop, no host filesystem, nothing to
+    # grant back.
+    cap_drop:
+      - ALL
     # No docker.sock bind mount at all any more -- every Docker API call
     # goes through docker-socket-proxy instead. Joins the proxy's private
     # network only, same "no other network need" reasoning the old
