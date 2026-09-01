@@ -229,13 +229,19 @@ def compiler_version(cc: list[str]) -> str:
 
 
 def normalize_disassembly(text: str, path: Path) -> str:
+    # objdump's actual first line is blank -- the path-bearing header comes
+    # after it -- so this must search the first non-empty line, not lines[0]
+    # (confirmed: lines[0] == "" on every objdump invocation this builds).
     # objdump's first line echoes the absolute path it was given, which
     # differs by build directory/machine and would otherwise make two
     # deterministic builds look byte-different for a reason that has
     # nothing to do with the compiled code.
     lines = text.splitlines()
-    if lines and str(path) in lines[0]:
-        lines[0] = lines[0].replace(str(path), path.name)
+    for i, line in enumerate(lines):
+        if line.strip():
+            if str(path) in line:
+                lines[i] = line.replace(str(path), path.name)
+            break
     return "\n".join(lines)
 
 
