@@ -373,7 +373,12 @@ loop every POLL_INTERVAL seconds (default: 30s):
   7. Write events with composite_score ≥ ML_ALERT_THRESHOLD
      to ES index: ml-anomalies
      with fields: source_event_id, source_index, composite_score,
-                  model_scores{}, explanation, src_ip, @timestamp, severity
+                  model_scores{}, contributing_detectors[], explanation,
+                  src_ip/src_port/src_country, dst_ip/dst_port/proto,
+                  sensor, community_id, model_state_id, alert_threshold,
+                  src_internal, status (#1968: every context field
+                  an operator needs without re-querying the 30-day source
+                  index; see §7's mapping for the full list)
 
   8. Best-effort Redis publish to 'ml-anomaly-events' IF REDIS_URL is set
      (#62: absent by default, ES write is the authoritative action and never
@@ -407,6 +412,9 @@ Every 6 hours (RETRAIN_INTERVAL):
       "source_index":          { "type": "keyword" },
       "src_ip":                { "type": "ip" },
       "src_country":           { "type": "keyword" },
+      "src_port":              { "type": "integer" },
+      "dst_ip":                { "type": "ip" },
+      "sensor":                { "type": "keyword" },
       "composite_score":       { "type": "float" },
       "severity":              { "type": "keyword" },
       "model_scores": {
@@ -416,15 +424,36 @@ Every 6 hours (RETRAIN_INTERVAL):
           "hbos":               { "type": "float" }
         }
       },
+      "contributing_detectors": { "type": "keyword" },
       "feature_contributions": { "type": "object", "enabled": false },
       "explanation":           { "type": "text" },
       "event_type":            { "type": "keyword" },
       "dst_port":              { "type": "integer" },
-      "proto":                 { "type": "keyword" }
+      "proto":                 { "type": "keyword" },
+      "community_id":          { "type": "keyword" },
+      "model_state_id":        { "type": "keyword" },
+      "alert_threshold":       { "type": "float" },
+      "src_internal":          { "type": "boolean" },
+      "status":                { "type": "keyword" },
+      "disposition_reason":    { "type": "text" },
+      "disposition_by":        { "type": "keyword" },
+      "disposed_at":           { "type": "date" }
     }
   }
 }
 ```
+
+The `#1968` group answers, from one document and without a second query
+against a source index that expires after 30 days:
+
+| Field | Question |
+|-------|----------|
+| `sensor`, `dst_ip`, `dst_port`, `src_port` | What was attacked, by whom (which decoy drew it) |
+| `model_state_id` | Which trained state produced this score -- sha256 over the promoted checkpoint artifacts' `(name, mtime_ns, size)`, stable across restarts, changed only by an accepted retrain's atomic promotion. #1959's forensics reconstructed scoring configurations from container restart times because no stamp existed. |
+| `alert_threshold` | Under what alert bar THAT day's score was judged, since `ML_ALERT_THRESHOLD` is per-deployment configurable |
+| `src_internal` | Is this source even routable/actionable -- same `HOME_NET` definition `is_our_own_address()` suppresses on (#1959), so a dashboard filter can never disagree with the worker |
+| `community_id` | Copy of the source flow's Community ID (zeek conn logs carry one) for cross-index pivots |
+| `status`, `disposition_reason`, `disposition_by`, `disposed_at` | Operator disposition lifecycle (below) |
 
 **Severity mapping:**
 
@@ -433,6 +462,12 @@ Every 6 hours (RETRAIN_INTERVAL):
 | 0.75 – 0.85 | `medium` |
 | 0.85 – 0.95 | `high` |
 | ≥ 0.95 | `critical` |
+
+(Since #1969 the bands are no longer constants: they derive from
+`ML_ALERT_THRESHOLD` as [t, t+0.10, t+0.20] -- §4.4 -- and this table is
+their shape at the default threshold of 0.75. The document's own
+`alert_threshold` field (#1968) records which table an alert was banded
+by.)
 
 ### `ml-worker-state` index
 
@@ -456,6 +491,46 @@ source_event_id)`, deterministic from the source event's own identity
 rather than an ES-assigned random one, so a replayed event (checkpoint
 reset, crash-retry, or the equal-timestamp requery above) overwrites the
 same finding instead of duplicating it.
+
+That overwrite is also disposition-safe as of #1968: before indexing a
+rewrite, `write_anomaly()` reads the existing document (best-effort -- if
+the read fails the write proceeds unpreserved rather than dropping the
+alert) and carries any operator-set `status`/`disposition_reason`/
+`disposition_by`/`disposed_at` through into the new document verbatim --
+the four names in `DISPOSITION_FIELDS` (`worker.py:83`), which is the single
+list the preservation loop iterates, so the doc and the code cannot drift
+apart field-by-field. Machine-owned fields
+(`composite_score`, `model_scores`, ...) always update to the newest
+opinion; an operator's verdict never resets to `open` because a checkpoint
+got rewound.
+
+### Retention
+
+One deliberate decision (#1968), recorded here so it doesn't get
+rediscovered from an empty index:
+
+- **`ml-anomalies`: 365-day delete-only ILM, not permanent.**
+  `ML_ANOMALIES_RETENTION_DAYS` defaults to `365`
+  (`ml-worker/worker.py:73`); `run_worker()` installs a delete-only policy
+  (`ANOMALY_ILM_POLICY = "ml-anomalies-retention"`) via
+  `ensure_ilm_policy(es, ANOMALY_ILM_POLICY,
+  build_ilm_policy(ML_ANOMALIES_RETENTION_DAYS))` (`worker.py:939`) before
+  the index itself is created, because an index whose
+  `index.lifecycle.name` points at a missing policy fails its own
+  creation. These documents are the labelled-corpus substrate
+  #1794/#1797 stall on -- operator dispositions accumulate on them
+  directly -- so a year's retention keeps that substrate around well past
+  `honeypot-30d`'s own 30-day source window, while still bounding the
+  index rather than leaving it permanent. The window is an env-tunable
+  default, not a hardcoded constant, per #261's convention.
+- **`ml-worker-metrics`: delete after 180d** (`ML_METRICS_RETENTION`,
+  ILM policy `ml-worker-metrics-retention`, installed idempotently by
+  the same `ensure_ilm_policy()` call at startup and bound via index
+  settings when the index is created). Diagnostic evidence for
+  retrains/drift/outages decays once newer evidence exists and carries no
+  operator input.
+  If policy installation fails, metrics stay unbounded exactly as before --
+  degraded behaviour is logged, not fatal (#188 convention).
 
 ---
 
@@ -498,6 +573,9 @@ documented as present):
   "source_index": "honeypot-v2-2026.07.26",
   "src_ip": "1.2.3.4",
   "src_country": "CN",
+  "src_port": 51422,
+  "dst_ip": "203.0.113.10",
+  "sensor": "cowrie",
   "composite_score": 0.91,
   "severity": "high",
   "model_scores": {
@@ -505,12 +583,22 @@ documented as present):
     "lstm_ae": 0.94,
     "hbos": 0.82
   },
+  "contributing_detectors": ["isolation_forest", "lstm_ae", "hbos"],
   "explanation": "Unusual port scan pattern: 47 unique ports in 60s from new ASN.",
   "event_type": "conn",
   "dst_port": 8545,
-  "proto": "tcp"
+  "proto": "tcp",
+  "community_id": "1:hRQPPXnFe+UxVlMLpaudi6QGpo4=",
+  "model_state_id": "9f2c1ab77e04d3e5",
+  "alert_threshold": 0.75,
+  "src_internal": false,
+  "status": "open"
 }
 ```
+
+(Values are illustrative; TEST-NET addressing per the repo's fixture rule.
+`disposition_reason`/`disposition_by`/`disposed_at` are absent until an
+operator disposes of the alert.)
 
 ---
 
@@ -523,7 +611,14 @@ and mixing the two on one page risked implying scores could be acted on the
 same way. That gap has since been closed: `dashboard/ml_anomaly_ack.go`
 (#918, closing #913) adds an acknowledge/dismiss workflow for ml-anomalies
 too, backed by a `dashboard-ml-anomaly-ack-v1` ES index, modeled directly on
-`alertManager`'s pattern. Follows the existing read-only diagnostics pages (`/source-health`,
+`alertManager`'s pattern. Note (#1968): the anomaly documents themselves now
+also carry a disposition lifecycle (`status`/`disposition_reason`/
+`disposition_by`/`disposed_at`, preserved across idempotent rewrites) --
+the ack index and the on-document fields are two stores until the ack path
+is joined onto the document fields, which is what will turn acknowledged
+rows into the labelled corpus #1794/#1797 need; see the `ml-anomalies`
+Retention section in §7.
+Follows the existing read-only diagnostics pages (`/source-health`,
 `/dead-letters`): server-rendered from the in-memory cache on each request,
 refreshed on page load, no client-side polling and no changes to
 `stream.go`'s SSE contract.
