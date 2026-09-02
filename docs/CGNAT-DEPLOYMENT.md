@@ -232,7 +232,7 @@ intervention.
    credentials, cookie secrets, and TOTP values.
 5. Copy `vps/` contents to `/root/vps/`.
 6. Validate with `docker compose -f /root/vps/docker-compose.yml config`.
-7. Start with `docker compose -f /root/vps/docker-compose.yml up -d --build`.
+7. Start with `docker compose -f /root/vps/docker-compose.yml up -d --build --remove-orphans`.
 8. Apply `vps/honeypot-firewall.sh` only after reviewing the exposed ports —
    it opens every raw (non-Traefik) port `portbridge` forwards, including
    `21`/`22`/`23`/`25` (Dionaea FTP, cowrie SSH/Telnet, multipot SMTP).
