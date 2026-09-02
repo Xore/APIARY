@@ -199,7 +199,7 @@ func TestSpawnServeDoesNotBlockOnSilentPeer(t *testing.T) {
 
 	done := make(chan struct{}, 1)
 	go func() {
-		spawnServe(server, true, newLogger(""), 3389)
+		spawnServe(server, true, newLogger(""), 3389, func() {})
 		done <- struct{}{}
 	}()
 
@@ -207,5 +207,56 @@ func TestSpawnServeDoesNotBlockOnSilentPeer(t *testing.T) {
 	case <-done:
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("spawnServe blocked on a silent peer -- the decode ran outside its goroutine")
+	}
+}
+
+// TestNextAcceptBackoffDoublesAndCaps covers #2328: repeated Accept()
+// errors must back off instead of retrying unconditionally (which spins a
+// CPU core at 100% under persistent fd exhaustion), and the backoff must
+// not grow unbounded. Ported from endlessh-honeypot/main_test.go.
+func TestNextAcceptBackoffDoublesAndCaps(t *testing.T) {
+	d := time.Duration(0)
+	d = nextAcceptBackoff(d)
+	if d != 5*time.Millisecond {
+		t.Fatalf("first backoff = %s, want 5ms", d)
+	}
+	d = nextAcceptBackoff(d)
+	if d != 10*time.Millisecond {
+		t.Fatalf("second backoff = %s, want 10ms", d)
+	}
+	for i := 0; i < 20; i++ {
+		d = nextAcceptBackoff(d)
+	}
+	if d != maxAcceptBackoff {
+		t.Fatalf("backoff after many failures = %s, want it capped at %s", d, maxAcceptBackoff)
+	}
+}
+
+// TestSpawnServeReleasesSemaphoreOnCompletion covers #2328: the MAX_CLIENTS
+// semaphore slot must be released when the connection handler actually
+// finishes, not when spawnServe returns (spawnServe returns immediately,
+// per TestSpawnServeDoesNotBlockOnSilentPeer above).
+func TestSpawnServeReleasesSemaphoreOnCompletion(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+
+	released := make(chan struct{}, 1)
+	spawnServe(server, false, newLogger(""), 3389, func() { released <- struct{}{} })
+
+	select {
+	case <-released:
+		t.Fatal("release fired before the connection handler ran -- semaphore slot freed too early")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// handleConn's serve() reads with a 10s deadline and returns once the
+	// peer sends nothing more and closes -- closing the client conn ends
+	// the read and lets serve() (and therefore release) proceed.
+	client.Close()
+
+	select {
+	case <-released:
+	case <-time.After(time.Second):
+		t.Fatal("release never fired after the connection closed")
 	}
 }

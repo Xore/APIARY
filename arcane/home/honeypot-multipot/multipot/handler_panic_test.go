@@ -80,7 +80,7 @@ func TestServeContainsHandlerPanicAndKeepsServing(t *testing.T) {
 	// proxy=true is what makes the dialProxied harness work: without it the
 	// connections would keep their real (loopback) address and #1677's
 	// healthcheck guard would drop them before any handler ran.
-	go serve(service{proto: "test-proto", port: testPort, handler: handler}, log, true)
+	go serve(service{proto: "test-proto", port: testPort, handler: handler}, log, true, make(chan struct{}, 4096))
 
 	c1 := dialProxied(t, testPort, "203.0.113.9")
 	select {

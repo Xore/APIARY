@@ -30,6 +30,10 @@ services:
       # Parse the PROXY header portbridge prepends (":pp" rule on 3389) so
       # events carry the real attacker IP instead of tunnel peer 10.8.0.1.
       - PROXY_PROTOCOL=1
+      # #2328: caps concurrent held connections so a botnet holding enough
+      # of them to exhaust this container's fd ulimit can't turn Accept()
+      # into a permanent EMFILE hot-spin. Same default as endlessh-honeypot.
+      - MAX_CLIENTS=4096
       - TZ=Europe/Berlin
     ports:
       - ${HP_BIND:-10.8.0.2}:3389:3389
