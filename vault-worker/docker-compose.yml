@@ -1,0 +1,46 @@
+# Safe bring-up: dry-run only, no route to Elasticsearch.
+#
+#   docker compose -f vault-worker/docker-compose.yml up -d --build
+#
+# Mirrors llm-worker/docker-compose.yml's safety shape: ES_HOST is forced
+# empty here regardless of a shared .env, and VAULT_ENABLED/
+# VAULT_ALLOW_CAPTURED_DATA both default false. Real ingestion needs
+# docker-compose.captured-data.yml layered on top, which sets ES_HOST and
+# joins the honeypot-llm-data network -- see #2289's worker-gate decision.
+
+name: vault-worker
+
+services:
+  vault-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hp-vault-worker
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      VAULT_ENABLED: '${VAULT_ENABLED:-false}'
+      VAULT_DRY_RUN: '${VAULT_DRY_RUN:-true}'
+      VAULT_ALLOW_CAPTURED_DATA: '${VAULT_ALLOW_CAPTURED_DATA:-false}'
+      # Deliberately not ${ES_HOST:-...} -- forced empty regardless of .env,
+      # same reasoning as llm-worker/docker-compose.yml's ES_HOST override.
+      ES_HOST: ''
+      VAULT_OUTPUT_DIR: '/vault'
+      VAULT_POLL_INTERVAL_SECONDS: '${VAULT_POLL_INTERVAL_SECONDS:-900}'
+      VAULT_MAX_DOCS_PER_CYCLE: '${VAULT_MAX_DOCS_PER_CYCLE:-500}'
+      VAULT_MAX_TEXT_CHARS: '${VAULT_MAX_TEXT_CHARS:-4000}'
+      VAULT_MAX_LIST_ITEMS: '${VAULT_MAX_LIST_ITEMS:-30}'
+    volumes:
+      - vault-data:/vault
+    networks:
+      - synthetic-only
+
+networks:
+  synthetic-only:
+    name: vault-worker-synthetic-only
+
+volumes:
+  vault-data:
+    name: knowledge-vault-data

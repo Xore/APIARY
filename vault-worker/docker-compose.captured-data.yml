@@ -1,0 +1,23 @@
+# Exposure override for real ingestion, layered on the safe base file.
+# Grants read-only route to Elasticsearch and switches the vault to a host
+# bind mount under the stack's state/ directory -- deliberately inside
+# analysis/backup-honeypot.sh's existing archive scope (`./state`), per
+# #2289's redaction-and-backup-blast-radius decision (docs/knowledge-store-design.md).
+#
+#   docker compose -f vault-worker/docker-compose.yml \
+#     -f vault-worker/docker-compose.captured-data.yml up -d --build
+
+services:
+  vault-worker:
+    environment:
+      ES_HOST: 'http://elasticsearch:9200'
+    networks:
+      - synthetic-only
+      - llm-data
+    volumes:
+      - /opt/stacks/apiary/state/knowledge-vault:/vault
+
+networks:
+  llm-data:
+    name: honeypot-llm-data
+    external: true

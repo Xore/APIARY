@@ -83,6 +83,15 @@ chmod 700 "$destination"
 
 # Config/state archive. Excludes event logs, PCAP, Elasticsearch data, captured
 # malware and generated databases.
+#
+# ./state also carries state/knowledge-vault/ once #2290's worker creates it
+# (#1634 stage 2): curated, bounded/redacted markdown notes derived from
+# attacker material. #2289's design record decided this inclusion is
+# deliberate, not an oversight -- the vault's redaction posture
+# (docs/knowledge-store-design.md) already keeps its content closer in
+# sensitivity to the config material this script already carries than to
+# the bulk payload/PCAP data excluded above, so it inherits this script's
+# existing scope rather than needing a separate backup path or an exclusion.
 set -- ./compose.yml
 for candidate in ./.env ./README.md ./analysis ./dashboard ./personas ./state; do
   [ ! -e "$candidate" ] || set -- "$@" "$candidate"
