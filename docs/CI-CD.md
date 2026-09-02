@@ -641,6 +641,73 @@ detects. The `CI_HOMESERVER_PRS` escape hatch exists for a deliberate,
 auditable decision to trade that margin away; fork PRs are excluded even
 from that.
 
+### Docker-group membership is an accepted trade-off, not an isolation gap (#2780)
+
+Earlier prose in this section (and in `install-ci-runner.sh`'s own header)
+described `github-ci-runner` as having "no production-directory/sensor-state
+access" and "no access to `/var/lib/honeypot-*`, `/opt/stacks`, or any
+sensor state." **That overstated the isolation.** #2780 measured, live on
+the homeserver:
+
+```
+$ id github-ci-runner
+uid=995(github-ci-runner) gid=981(github-ci-runner) groups=981(github-ci-runner),983(docker)
+$ sudo -u github-ci-runner test -r /opt/stacks/apiary/scripts/isolation-audit.sh && echo READABLE
+READABLE
+$ sudo -u github-ci-runner test -r /opt/stacks/honeypot-dashboard/.env && echo READABLE
+READABLE
+```
+
+Two separate findings, both real:
+
+1. **Docker-group membership is host-root-equivalent.** A member can
+   `docker run -v /:/host ...` and read, write, or chroot into anything on
+   the host, including other stacks' volumes and host binaries -- this is
+   the same grant `github-deploy-runner` (the *production* runner) carries,
+   for the same reason (#2565 added it here so `containers.yml`, the
+   frontend lockfile check, and the Keycloak/OIDC suites could run on this
+   pool at all).
+2. **`/opt/stacks/apiary` is plain world-readable throughout**, so
+   `github-ci-runner` can already read e.g. `honeypot-dashboard`'s live
+   `.env` directly, with no Docker involved.
+
+**Decision: this is an accepted trade-off, not a gap to close.** Reasoning:
+
+- The alternative considered was a scoped Docker socket proxy for exactly
+  the checks that need it (`containers.yml`'s build/push, the lockfile
+  check's `npm ci` inside a container, the Keycloak/OIDC suites' compose-up)
+  plus tightened permissions on `/opt/stacks/apiary`. That is real,
+  bounded engineering work across three separate workflow surfaces, each
+  with a different Docker access shape (build-and-push vs. compose-up vs.
+  read-only inspection) -- not a one-line permission change, and a partial
+  version (proxying one job, leaving the group membership on the others) is
+  strictly worse than doing nothing: it leaves the same actual capability in
+  place while adding a second mechanism to reason about and maintain.
+- The property that actually bounds this runner's blast radius was never
+  "it can't reach much" -- it's **which code gets to run on it at all**.
+  The ci-target router's trust gate (previous subsection) keeps
+  attacker-controlled fork-PR code off this pool entirely; only
+  push-to-main (already reviewed), `workflow_dispatch` (an operator's own
+  choice), and `CI_HOMESERVER_PRS`-opted same-repo PRs (a deliberate,
+  auditable trade against a compromised-contributor scenario) ever execute
+  here. That gate is real containment. Docker-group membership was never
+  a second, independent containment layer behind it -- treating it as one
+  in the header comments was the actual bug.
+- Net effect: **`github-ci-runner`'s practical host capability is not
+  meaningfully smaller than `github-deploy-runner`'s** (the production
+  runner). The two pools differ in *what triggers execute on them* and in
+  `github-deploy-runner`'s additional `deploy-runner` group and its role in
+  `deploy.yml`'s actual production-write jobs -- not in what a compromised
+  process on either one could reach on the host. Anyone reasoning about
+  compromise of one pool should reason about the other the same way.
+
+This is a decision, not a patch: no code changed as a result of it beyond
+correcting the header comments in `install-ci-runner.sh` and this doc to
+stop asserting an isolation boundary that measurement shows doesn't exist.
+If the trade-off is revisited later (e.g. because the socket-proxy work
+above becomes worth doing), do all three routed surfaces in one pass, not
+one at a time, per the reasoning above.
+
 ### Install
 
 ```bash
@@ -650,8 +717,12 @@ sudo scripts/github-ci-runner/install-ci-runner.sh --repo Xore/APIARY
 Registers a dedicated `github-ci-runner` system user (sudo-less, with a
 docker-group membership and a preinstalled host provision for the routed
 checks -- redis-server, node 22, shellcheck, and playwright's chromium
-library set -- but no access to `/var/lib/honeypot-*`, `/opt/stacks`, or
-any sensor state), downloads and
+library set). This user carries no group grant scoped specifically to
+`/var/lib/honeypot-*`, `/opt/stacks`, or sensor state -- but see
+"Docker-group membership is an accepted trade-off" below: that phrasing
+used to appear here as "no access to `/opt/stacks`", which #2780 found is
+not true (the checkout there is world-readable) and has been corrected.
+Downloads and
 checksum-verifies the pinned `actions/runner` release, registers it with
 the given repository using a registration token (fetched automatically via
 `gh api` if `--token` is not passed and `gh auth login` has already been
