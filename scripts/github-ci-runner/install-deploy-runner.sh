@@ -112,6 +112,44 @@ else
   usermod -aG "docker,$RUNNER_GROUP" "$RUNNER_USER"
 fi
 
+# #2778: scripts/isolation-audit.sh (deployed under /opt/stacks/apiary,
+# run by Diagnostics' "Isolation invariants (#88)" step against this
+# runner) needs read access to libvirt (virsh net-info/net-dumpxml,
+# nwfilter-dumpxml) and NOPASSWD root for exactly the read-only host
+# commands it cannot reach any other way (iptables -S FORWARD, ss -tlnp,
+# aa-status). Plain `docker ps`/`docker inspect`/`docker network inspect`
+# are already covered by docker-group membership above and the script no
+# longer routes those through sudo. Nothing here is broader than the
+# audit script's own use, and nothing here touches github-ci-runner --
+# that pool's trust boundary is #2780's decision, not this one's.
+if getent group libvirt >/dev/null; then
+  usermod -aG libvirt "$RUNNER_USER"
+else
+  echo "warning: no 'libvirt' group on this host -- isolation-audit.sh's virsh checks will keep reporting permission errors for $RUNNER_USER" >&2
+fi
+
+sudoers_file=/etc/sudoers.d/isolation-audit-github-deploy-runner
+sudoers_tmp=$(mktemp)
+cat > "$sudoers_tmp" <<EOF
+# Managed by scripts/github-ci-runner/install-deploy-runner.sh (#2778).
+# Read-only commands scripts/isolation-audit.sh needs and cannot reach via
+# docker-group membership or libvirt-group membership alone. Do not widen
+# past exactly these three invocations.
+$RUNNER_USER ALL=(root) NOPASSWD: /usr/sbin/iptables -S FORWARD
+$RUNNER_USER ALL=(root) NOPASSWD: /usr/bin/ss -tlnp
+$RUNNER_USER ALL=(root) NOPASSWD: /usr/sbin/aa-status
+EOF
+if visudo -cf "$sudoers_tmp" >/dev/null 2>&1; then
+  install -m 0440 -o root -g root "$sudoers_tmp" "$sudoers_file"
+  echo "installed $sudoers_file"
+else
+  echo "error: generated sudoers fragment failed visudo -cf, not installing $sudoers_file" >&2
+  visudo -cf "$sudoers_tmp" >&2 || true
+  rm -f "$sudoers_tmp"
+  exit 1
+fi
+rm -f "$sudoers_tmp"
+
 # --- #1143: precisely scoped ownership fix, the actual replacement for the
 # broad manual chown that caused this issue. ---
 for dir in "${DEPLOY_DIRS[@]}"; do
