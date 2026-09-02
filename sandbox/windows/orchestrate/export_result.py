@@ -37,6 +37,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 MAX_TEXT = 32768
+# #2775: failure_reason carries str(e) for a failed legacy-WinRM run. One
+# sentence of cause is the point; a full argv dump is not.
+MAX_FAILURE_REASON = 512
 MAX_LINES = 200
 # #480: dashboard/sandbox.go serves *.diagnostics.zip up to 16MiB
 # (serveSandboxExport's maxSize for artifactKind=="diagnostics") -- these
@@ -208,16 +211,39 @@ def build_result(out_dir: Path) -> dict:
     # function at all meant success (true only for the pre-#490 WinRM path,
     # where a failed run raised before ever getting here). Map
     # detonate_inguest()'s own metadata.json run_status onto the vocabulary
-    # dashboard/sandbox.go's normalizeSandboxResult() already understands --
-    # RunStatus == "failed" or a non-empty TimeoutReason both set
-    # Incomplete, which is what actually drives Workbench's pass/fail
-    # decision (workbench_orchestrator.go's reconcileWorkbenchRun).
+    # the dashboard already understands -- run_status == "failed" or a
+    # non-empty timeout_reason both mark the run incomplete, which is what
+    # actually drives Workbench's pass/fail decision.
+    #
+    # #2775 review: this comment used to name dashboard/sandbox.go's
+    # normalizeSandboxResult() and workbench_orchestrator.go's
+    # reconcileWorkbenchRun. The Go dashboard is gone and neither file exists;
+    # the live consumers are backend-service/src/workbench_orchestrator.rs
+    # (run_status == "failed" -> incomplete, and child.reason taken from
+    # failure_reason, falling back to timeout_reason) and
+    # frontend-next/src/routes/sandbox.$job.tsx, which renders
+    # "Analysis did not run to completion." followed by failure_reason.
     watchdog_timeout = meta.get('run_status') == 'watchdog_timeout'
-    run_status = 'failed' if watchdog_timeout else 'completed'
+    # #2775: detonate_legacy_winrm() now stamps this the same way
+    # detonate_inguest() always has -- 'legacy_winrm_failed' on any
+    # exception raised before it reached its own success path, 'completed'
+    # otherwise. Previously meta.get('run_status') was only ever
+    # 'watchdog_timeout' or absent (the legacy path set nothing), so this
+    # was a two-way branch; it is a three-way one now, and any *other*
+    # legacy failure that isn't the watchdog case must still map to
+    # Incomplete rather than fall through to the 'completed' default.
+    legacy_winrm_failed = meta.get('run_status') == 'legacy_winrm_failed'
+    run_status = 'failed' if (watchdog_timeout or legacy_winrm_failed) else 'completed'
     timeout_reason = (
         'watchdog timeout: guest did not self-shutdown within the deadline (#490)'
         if watchdog_timeout else ''
     )
+    # Capped like every other free-text field here (evidence[:256],
+    # changed_files[:200], MAX_TEXT): this carries str(e) from an arbitrary
+    # exception, and a CalledProcessError's repr includes the whole argv.
+    # It is rendered verbatim in the dashboard's job view.
+    failure_reason = (meta.get('run_status_detail', '')[:MAX_FAILURE_REASON]
+                      if legacy_winrm_failed else '')
 
     return {
         'version': 2,
@@ -232,7 +258,7 @@ def build_result(out_dir: Path) -> dict:
         'exit_status': '0',
         'run_status': run_status,
         'guest_started': True,
-        'failure_reason': '',
+        'failure_reason': failure_reason,
         'timeout_reason': timeout_reason,
         'risk_score': risk_score,
         'risk_level': risk_level,

@@ -1063,13 +1063,21 @@ jobs:
             home: true
             run: python3 sandbox/test_guest_clean_strings.py -v
 
-          - name: Windows sandbox static/dynamic IOC extraction (#482)
+          # #2878: these two rows used to name test_extract_iocs.py (#482) and
+          # test_run_sample_golden_check.py (#100, #2023) individually, so the
+          # two delivery-check suites #2252 added next to them (Windows and
+          # GHOSTS) ran nowhere at all -- a regression test nothing runs is a
+          # file, not a check. Discovery instead, the way the worker suites
+          # are already run, so the next test_*.py dropped in these
+          # directories is picked up without a workflow edit. #2775's
+          # legacy-WinRM result test is the first to arrive that way.
+          - name: Windows sandbox orchestrator suites (#482, #2023, #2252, #2775)
             home: true
-            run: python3 sandbox/windows/orchestrate/test_extract_iocs.py -v
+            run: python3 -m unittest discover -s sandbox/windows/orchestrate -p 'test_*.py' -v
 
-          - name: Windows sandbox post-reclone golden-image checklist (#100, #2023)
+          - name: GHOSTS sandbox orchestrator suites (#2252)
             home: true
-            run: python3 sandbox/windows/orchestrate/test_run_sample_golden_check.py -v
+            run: python3 -m unittest discover -s sandbox/ghosts/orchestrate -p 'test_*.py' -v
 
           - name: Shell syntax and high-severity ShellCheck
             home: true
