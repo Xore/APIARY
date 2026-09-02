@@ -389,25 +389,46 @@ jobs:
           rm -rf node_modules
       - run: npm ci
         working-directory: arcane/home/honeypot-dashboard/frontend-next
-      # #2180: the TanStack family is pinned spec-exact so upgrades can only
-      # be deliberate, and the route tree the family regenerates on a cache
-      # miss stays reproducible. The locked minors are still skewed, so this
-      # warns (never fails) whenever @tanstack/react-* 1.x siblings span more
-      # than one minor in one install -- exactly the state that must surface
-      # loudly now that it can only arrive through a partial family bump.
-      - name: TanStack minors diverge inside one install (#2180)
-        working-directory: arcane/home/honeypot-dashboard/frontend-next
-        run: |
-          rows="$(jq -r '[.packages | to_entries[]
-              | select(.key | test("^node_modules/@tanstack/react-"))
-              | select(.value.version | startswith("1."))
-              | "\(.key | sub("node_modules/@tanstack/"; "")) \(.value.version)"]
-            | sort | .[]' package-lock.json)"
-          echo "$rows"
-          minors="$(cut -d" " -f2 <<<"$rows" | cut -d. -f1-2 | sort -u)"
-          if [ "$(wc -l <<<"$minors")" -gt 1 ]; then
-            echo "::warning file=arcane/home/honeypot-dashboard/frontend-next/package-lock.json::@tanstack/react-* 1.x span multiple minors in one install ($(paste -sd/ <<<"$minors")) -- bump the family together and verify route-tree behaviour (#2180)"
-          fi
+      # #2180 / #2804: there was a "TanStack minors diverge inside one
+      # install" step here. It warned whenever the 1.x @tanstack/react-*
+      # packages in package-lock.json spanned more than one minor. It has
+      # been RETIRED, not narrowed, because the condition it asserts cannot
+      # be satisfied by any installable version of this family and therefore
+      # never carried information -- it fired on every run since #2180 added
+      # it. Measured 2026-09-02, recorded here so the next reader does not
+      # rediscover it a fourth time:
+      #
+      #   1. @tanstack/react-start pins its siblings as EXACT versions
+      #      spanning three minors. `npm view @tanstack/react-start@latest
+      #      dependencies` on 1.168.49 (which IS latest) gives
+      #      react-router 1.170.32, react-start-client 1.168.30,
+      #      react-start-server 1.167.37 -- 1.170 / 1.168 / 1.167. Installing
+      #      react-start fixes the rest outright, so package.json has no
+      #      lever over them and no bump converges the set.
+      #   2. Narrowing the filter to the packages package.json declares
+      #      directly (react-router, react-start, router-cli) yields the
+      #      IDENTICAL minor set, 1.167/1.168/1.170 -- router-cli is
+      #      independently versioned and has never published past 1.167.
+      #      Verified against the real lockfile; it is a no-op, not a fix.
+      #   3. Replacing the assertion with "the family moved together in one
+      #      PR" does not work either, in both directions. Over the
+      #      exact-pinned closure it can never fire: npm's own resolution
+      #      already makes react-start-client/-server move atomically with
+      #      react-start, so the check would assert something npm
+      #      guarantees. Widen it to include router-cli and it always fires,
+      #      since router-cli moves on its own cadence. Separately,
+      #      .github/dependabot.yml groups every frontend minor/patch update
+      #      into one `frontend-compatible` PR, so "moved together in one
+      #      PR" is already true by construction here.
+      #
+      # What #2180 actually wanted -- that upgrades be deliberate -- is
+      # carried by the spec-exact pins in package.json (#2208), not by this
+      # comparison. Asserting THOSE stay exact is a real, satisfiable check
+      # and is the one piece of coverage this retirement drops; tracked in
+      # #2867 rather than swapped in here unreviewed. The lockfile carries
+      # no duplicate @tanstack copies today (every package appears exactly
+      # once), so nothing is diverging inside one install in the literal
+      # sense either.
       - run: npm run typecheck
         working-directory: arcane/home/honeypot-dashboard/frontend-next
       # #1831: the tier's first behavioural check. typecheck and build were
@@ -459,19 +480,9 @@ jobs:
           rm -rf node_modules
       - run: npm ci
         working-directory: arcane/home/honeypot-dashboard/frontend-next
-      - name: TanStack minors diverge inside one install (#2180)
-        working-directory: arcane/home/honeypot-dashboard/frontend-next
-        run: |
-          rows="$(jq -r '[.packages | to_entries[]
-              | select(.key | test("^node_modules/@tanstack/react-"))
-              | select(.value.version | startswith("1."))
-              | "\(.key | sub("node_modules/@tanstack/"; "")) \(.value.version)"]
-            | sort | .[]' package-lock.json)"
-          echo "$rows"
-          minors="$(cut -d" " -f2 <<<"$rows" | cut -d. -f1-2 | sort -u)"
-          if [ "$(wc -l <<<"$minors")" -gt 1 ]; then
-            echo "::warning file=arcane/home/honeypot-dashboard/frontend-next/package-lock.json::@tanstack/react-* 1.x span multiple minors in one install ($(paste -sd/ <<<"$minors")) -- bump the family together and verify route-tree behaviour (#2180)"
-          fi
+      # #2180 / #2804: the twin of the retired "TanStack minors diverge
+      # inside one install" step lived here. Retired for the same reason --
+      # see the full rationale on the homeserver copy above.
       - run: npm run typecheck
         working-directory: arcane/home/honeypot-dashboard/frontend-next
       - run: npm test
