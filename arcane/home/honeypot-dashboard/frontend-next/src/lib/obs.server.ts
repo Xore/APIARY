@@ -15,12 +15,52 @@
 //     line, so the #1942-style question "how often is this failing and
 //     since when" stops needing stdout archaeology.
 //   - Durable line: same deal as the Rust tier — DASHBOARD_BFF_LOG_FILE on
-//     the filebeat-tailed mount, one ECS-ish JSON object per line.
+//     the filebeat-tailed mount, one ECS-ish JSON object per line, size-capped
+//     with the same rename-rotation shape as obs.rs's rotate_if_oversized
+//     (#2826 — this sink shipped without it, unbounded by construction while
+//     the Rust tier's twin was already capped at 2 x MAX_SINK_BYTES, #2468).
 //
 // A /metrics route (routes/metrics.ts) renders these in Prometheus text;
 // exposition format kept deliberately parallel to the Rust tier's.
-import { appendFile } from 'node:fs/promises'
+import { appendFile, rename, stat, unlink } from 'node:fs/promises'
 import { monitorEventLoopDelay } from 'node:perf_hooks'
+
+// Mirrors obs.rs's MAX_SINK_BYTES exactly: one live generation + one retired
+// `.1` bounds the sink at 25 MiB + <=25 MiB on disk. This tier logs far less
+// than the Rust tier (named OIDC events only, not every request), so this
+// cap is reached far more slowly in practice -- but "slowly" is not "never",
+// which is the whole defect this closes.
+const MAX_SINK_BYTES = 25 * 1024 * 1024
+
+export function rotatedPath(path: string): string {
+  return `${path}.1`
+}
+
+/** Same shape as backend-service's audit::rotate_if_oversized: rename the
+ * live file aside as `<path>.1` (dropping any previous `.1`) once it exceeds
+ * the cap, then let the caller's append re-create the live file fresh. A
+ * missing file or a failed stat/rename/unlink is silently a no-op -- shipping
+ * logs must never take the BFF down with it, same rule obs.rs's own comment
+ * states for its rotate call. */
+export async function rotateIfOversized(path: string, maxBytes: number): Promise<void> {
+  try {
+    const meta = await stat(path)
+    if (meta.size <= maxBytes) return
+  } catch {
+    return
+  }
+  const rotated = rotatedPath(path)
+  try {
+    await unlink(rotated)
+  } catch {
+    /* no previous generation to drop */
+  }
+  try {
+    await rename(path, rotated)
+  } catch {
+    /* rotation failed: next append just keeps growing the live file */
+  }
+}
 
 // Counters. Bounded label values only — reasons/results/names come from our
 // own call sites, never from request bytes.
@@ -74,14 +114,40 @@ export function recordNamedEvent(name: string, fields: Record<string, unknown> =
   // label values.
   const safe = /^[\w.-]{1,64}$/.test(name) ? name : 'unnamed_event'
   inc(`bff_named_events_total{name="${safe}"}`)
-  appendNamedEventLine(safe, fields)
+  void appendNamedEventLine(safe, fields)
 }
 
-async function appendNamedEventLine(name: string, fields: Record<string, unknown>): Promise<void> {
-  if (!logFile()) return
+// obs.rs holds a tokio Mutex across the whole rotate->open->write sequence and
+// its comment says why: an await between them "lets tokio's lazy file
+// lifecycle interleave or defer them across tasks (measured in the tests
+// below)". The same hazard is real here and worse, because recordNamedEvent
+// fires this off without awaiting: two events crossing the cap concurrently
+// both see an oversized file, and the second one's unlink deletes the retired
+// generation the first just renamed aside -- leaving zero generations instead
+// of one. A single-slot promise chain is Node's equivalent of that mutex.
+// Writes never reject (writeNamedEventLine swallows its own errors), so the
+// tail can never poison the chain.
+let sinkTail: Promise<void> = Promise.resolve()
+
+function appendNamedEventLine(name: string, fields: Record<string, unknown>): Promise<void> {
+  sinkTail = sinkTail.then(() => writeNamedEventLine(name, fields))
+  return sinkTail
+}
+
+/** Awaits every named-event line queued so far. Tests need it because
+ * recordNamedEvent is deliberately fire-and-forget; nothing in the serving
+ * path calls it. */
+export function flushNamedEventSink(): Promise<void> {
+  return sinkTail
+}
+
+async function writeNamedEventLine(name: string, fields: Record<string, unknown>): Promise<void> {
+  const file = logFile()
+  if (!file) return
   try {
+    await rotateIfOversized(file, MAX_SINK_BYTES)
     await appendFile(
-      logFile(),
+      file,
       `${JSON.stringify({
         '@timestamp': new Date().toISOString(),
         'event.category': 'dashboard_app',

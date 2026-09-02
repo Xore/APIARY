@@ -67,6 +67,18 @@ while true; do
     rotate "$f"
   done
   rotate /logs/cowrie/cowrie.log
+  # #2826: plain human-readable text logs that had neither retention half --
+  # the writer-side self-rotation used for the JSON sinks below doesn't apply
+  # to these (no such knob exists in the vendored binaries), but they are
+  # exactly the shape this loop's copytruncate rotate() already handles for
+  # dionaea/cowrie/conpot above, so the fix is adding the filename, not new
+  # machinery. hellpot's own -maxdepth-1-unreachable canarytokens siblings
+  # get the same treatment (#120's -maxdepth 1 pruner glob for
+  # /logs/canarytokens is a JSON-only reach and was never meant to cover
+  # these two vendored-app subdirectories).
+  rotate /logs/hellpot/HellPot.log
+  rotate /logs/canarytokens/frontend/frontend.log
+  rotate /logs/canarytokens/switchboard/switchboard.log
 
   # #120: prune self-rotated JSON files once they age past retention. The
   # currently-open file is always being actively written, so -mmin naturally
@@ -144,6 +156,12 @@ while true; do
   find /logs/dnp3 -maxdepth 1 -name 'dnp3.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
   find /logs/endlessh -maxdepth 1 -name 'endlessh.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
   find /logs/canarytokens -maxdepth 1 -name 'canarytokens.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  # #2826: elasticpot already self-rotates daily to elasticpot.json.<date>
+  # (its own writer, not one of ours) -- the writer half exists, only the
+  # pruner half was missing, so every generation back to first deploy was
+  # still on disk. Same digit-leading glob shape covers the YYYY-MM-DD
+  # suffix (the first character after the dot is always a digit).
+  find /logs/elasticpot -maxdepth 1 -name 'elasticpot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
   find /logs/tftp-relay -maxdepth 1 -name 'sessions.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
 
   sleep "$interval"

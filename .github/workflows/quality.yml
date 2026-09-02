@@ -801,6 +801,13 @@ jobs:
               # omit and still write to disk. Each must be a ledger row, an
               # EXEMPT entry with a written reason, or a KNOWN_UNCOVERED entry
               # naming the issue tracking the gap.
+              #
+              # #2826: and a written reason is not evidence. An EXEMPT entry
+              # that asserts a mechanism ("log-maintenance.sh rotates it",
+              # "the writer self-bounds") now carries that mechanism as a
+              # checked key -- deleting the rotate line, or the ported
+              # rotateIfOversized, fails here instead of leaving the ledger
+              # asserting coverage that no longer exists.
               python scripts/check-json-sink-retention-parity.py
 
           # #1982: compose.yml is the only place a stack's knobs are exercised,
