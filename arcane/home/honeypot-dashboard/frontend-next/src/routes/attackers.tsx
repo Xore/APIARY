@@ -29,6 +29,14 @@ type AttackerRow = {
   // Entity skips serializing empty verdicts/techniques, same as Go.
   verdicts?: string[]
   techniques?: string[]
+  // #2047 scan shape over this entity's evidence window: >=25 distinct
+  // destinations is "horizontal", >=25 ports across <=5 hosts is
+  // "vertical". Absent (not empty string) when neither threshold applies —
+  // attacker_identity.rs skip_serializing_if's it, same absent-not-empty
+  // convention as verdicts/techniques above.
+  scan?: 'horizontal' | 'vertical'
+  dest_ips?: number
+  ports_touched?: number
 }
 
 type Page = { total: number; rows: AttackerRow[] }
@@ -69,6 +77,13 @@ const COLUMNS: Column<AttackerRow>[] = [
   {
     header: 'verdict',
     render: (row) => (row.verdicts?.length ? <span className="badge badge--accent">verdict</span> : null),
+  },
+  // #2047 scan-shape badge, same row as the verdict chip above — absent
+  // (not a badge reading "none") when the entity's window never crossed
+  // either threshold.
+  {
+    header: 'scan',
+    render: (row) => (row.scan ? <span className="badge badge--warning">{row.scan}</span> : null),
   },
 ]
 
@@ -155,6 +170,17 @@ function Dossier({ row }: { row: AttackerRow }) {
           <span className="card__label">last seen</span>
           <span className="card__value">{row.last ? formatTimestamp(row.last) : 'not recorded'}</span>
         </div>
+        {row.scan ? (
+          <div className="card__row">
+            <span className="card__label">scan shape</span>
+            <span className="card__value">
+              <span className="badge badge--warning">{row.scan}</span>{' '}
+              {row.scan === 'horizontal'
+                ? `${row.dest_ips ?? 0} distinct destinations`
+                : `${row.ports_touched ?? 0} distinct ports across ${row.dest_ips ?? 0} hosts`}
+            </span>
+          </div>
+        ) : null}
         {recordingsURL ? (
           <div className="card__footer">
             <a className="lnk" href={recordingsURL} title="TTY session recordings from this entity's member IPs, if any">
