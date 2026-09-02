@@ -152,12 +152,40 @@ const INGEST_FEEDS: &[IngestFeed] = &[
         // not for a flow log, so freshness gets more rope.
         indices: &[IngestIndex { pattern: "extracted-files-*", stale_after: minutes(180) }],
     },
+    // #2333: flow and netflow were monitored here until #1741 removed both
+    // from suricata.yaml's eve-log types (80.1% of Suricata's document
+    // volume, the thinnest records it wrote; Zeek's conn.log covers the
+    // same ground and more). Removing a producer never removed its
+    // watcher, but the leftovers never alarmed either: a pattern matching
+    // no index makes `ingest_sample` return None (Elasticsearch answers a
+    // zero-index wildcard with `_shards.total: 0` and no `aggregations`
+    // section at all, so `aggs["newest"]["value"].as_f64()?` short-
+    // circuits) and `ingest_lag_alerts` then skips the entry without
+    // counting it in `checked`. Neither ever produced a single alert --
+    // what they actually cost was two futile Elasticsearch searches per
+    // poll cycle. Confirmed against today's suricata.yaml (no
+    // `flow`/`netflow` entries under eve-log `types:`) and against the
+    // live cluster (no suricata-v2-flow-*/netflow-* index of any date
+    // exists). Every other pattern in this feed was checked the same way
+    // and still has a real, current producer.
+    //
+    // Not derived from filebeat.yml's producer registry, the alternative
+    // the issue names: filebeat.yml has no per-event-type suricata entries
+    // to derive from in the first place -- one dynamic line,
+    // `suricata-v2-%{[suricata.eve.event_type]}-*`, matches whatever
+    // event_type Suricata itself decides to emit. The real source of truth
+    // for which of these indices exist is suricata.yaml's `types:` list on
+    // a different host in a different language; wiring worker.rs to read
+    // that file live would be new cross-host infrastructure for one list
+    // of ten entries. Deleting the two dead ones is the whole fix.
+    // suricata-v2-netflow-* is also read directly by charts.rs's Zeek/
+    // Suricata traffic-chart fallback (#2112) and rollups.rs -- unrelated
+    // in cause (that code already treats an empty index as "no fallback
+    // data" rather than alarming on it) and out of scope here; left as-is.
     IngestFeed {
         name: "suricata",
         indices: &[
             IngestIndex { pattern: "suricata-v2-alert-*", stale_after: minutes(90) },
-            IngestIndex { pattern: "suricata-v2-flow-*", stale_after: minutes(90) },
-            IngestIndex { pattern: "suricata-v2-netflow-*", stale_after: minutes(90) },
             IngestIndex { pattern: "suricata-v2-http-*", stale_after: minutes(90) },
             IngestIndex { pattern: "suricata-v2-tls-*", stale_after: minutes(90) },
             IngestIndex { pattern: "suricata-v2-ssh-*", stale_after: minutes(90) },
