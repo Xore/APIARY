@@ -785,7 +785,7 @@ function Overview() {
           <div className="card wide" id="ics-functions-card">
             <h2>ICS function codes — what they asked the PLCs to do</h2>
             <p className="note">
-              Per-transaction detail from the ICS parsers, across Modbus, S7comm and DNP3. These events are rare and
+              Per-transaction detail from the ICS parsers, across Modbus, S7comm, DNP3 and IEC-104. These events are rare and
               the scanning around them is not — one sample held 3,600 connections to the DNP3 port and two actual DNP3
               requests, both filesystem reconnaissance. An alert-only view loses exactly those two.
             </p>

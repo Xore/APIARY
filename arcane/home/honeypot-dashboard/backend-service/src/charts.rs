@@ -492,11 +492,19 @@ async fn fingerprint_bar(state: &AppState, indices: &[&str], body: Value, agg: &
 ///
 /// Each ICSNPP parser names its function field differently, so this runs one
 /// terms aggregation per field rather than pretending a single field spans
-/// them, and labels each bar with the protocol it came from. Only the three
+/// them, and labels each bar with the protocol it came from. Only the four
 /// fields observed on real captured traffic are queried — modbus_detailed's
-/// `func`, s7comm's `function_name` and dnp3's `fc_request`. BACnet, ENIP and
-/// OPC-UA are parsed and indexed but have not yet produced a record here, so
-/// guessing their field names would add rows that can only ever read zero.
+/// `func`, s7comm's `function_name`, dnp3's `fc_request` and iec104_asdu's
+/// `type_id` (#2322: the elbegrid persona's zeek documents were indexed and
+/// queryable but surfaced nowhere on the dashboard -- this is the same tier
+/// modbus/s7comm/dnp3 already use, not a new page). `zeek.type_id` is the
+/// ASDU type identifier (e.g. 100 = C_IC_NA_1 general interrogation, 45/46 =
+/// single/double command) -- the closest IEC-104 equivalent to a "function
+/// code", and it comes back as a string key here because the `zeek` field is
+/// mapped `flattened` (confirmed against the live index), not because it was
+/// cast. BACnet, ENIP and OPC-UA are parsed and indexed but have not yet
+/// produced a record here, so guessing their field names would add rows that
+/// can only ever read zero.
 ///
 /// Worth knowing when reading this chart: the interesting ICS events are rare
 /// and the noise around them is not. One sample held 3 600 connections to
@@ -507,6 +515,7 @@ pub async fn ics_functions(State(state): State<AppState>) -> Result<Json<Bar>, (
         ("modbus", "zeek-v1-modbus_detailed-*", "zeek.func"),
         ("s7comm", "zeek-v1-s7comm-*", "zeek.function_name"),
         ("dnp3", "zeek-v1-dnp3-*", "zeek.fc_request"),
+        ("iec104", "zeek-v1-iec104_asdu-*", "zeek.type_id"),
     ];
 
     let mut bar = Bar { categories: Vec::new(), values: Vec::new() };
