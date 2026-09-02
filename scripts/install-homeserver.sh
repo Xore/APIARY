@@ -1337,6 +1337,48 @@ step_create_shared_resources() {
   install -d -m 777 "$REPO_DIR/state/init-markers"
 }
 
+step_provision_buildx_cache() {
+  # #2822: .github/workflows/containers.yml exports every image's layer
+  # cache to type=local under /mnt-1/buildx-cache/<image> when the build
+  # lands on this box's self-hosted runners, because the type=gha cache was
+  # measured ~2x over GitHub's 10 GB per-repository ceiling and therefore
+  # being LRU-evicted while in use.
+  #
+  # The runners execute as github-ci-runner (systemd User= on the
+  # actions.runner.*.supermicro-ci* units), and /mnt-1 is root:root 0755 --
+  # so the workflow cannot create this directory itself. Measured live
+  # 2026-09-02: `sudo -u github-ci-runner mkdir -p /mnt-1/buildx-cache/x`
+  # -> "Permission denied", exit 1, which under a step's default `bash -e`
+  # fails every one of the Containers matrix rows. Provisioning it here
+  # rather than by hand on the live host is the point: #1609 replays this
+  # script on a rebuild, and a hand-made directory would not survive that.
+  #
+  # 0775 with the runner as group owner (not 0777) so the deploy runner and
+  # an interactive admin can also write it without making it world-writable
+  # on a filesystem that also holds /mnt-1/benchmarks. setgid keeps
+  # per-image subdirectories group-owned as builds create them.
+  local cache_dir=/mnt-1/buildx-cache
+  local runner_user=github-ci-runner
+
+  if ! id -u "$runner_user" >/dev/null 2>&1; then
+    echo "  $runner_user does not exist yet -- creating $cache_dir root-owned;"
+    echo "  re-run this step after the CI runners are installed."
+    install -d -m 0755 "$cache_dir"
+    return 0
+  fi
+
+  install -d -m 2775 -o "$runner_user" -g "$runner_user" "$cache_dir"
+
+  # Prove it, rather than assuming install(1) implies the runner can write:
+  # the check that was missing is the whole reason this step exists.
+  if ! runuser -u "$runner_user" -- test -w "$cache_dir"; then
+    echo "  ERROR: $cache_dir is not writable by $runner_user" >&2
+    ls -ld "$cache_dir" >&2
+    return 1
+  fi
+  echo "  $cache_dir writable by $runner_user (verified)"
+}
+
 step_build_zeek_image() {
   # honeypot-elk's zeek-proxy runs the same Zeek build as the VPS sensor, so
   # both load an identical parser set -- a divergence there would quietly make
@@ -2199,6 +2241,7 @@ run_step seed-canary-hostname "Seed honeypot-canarytokens' CANARY_PUBLIC_HOSTNAM
 run_step provision-keycloak-secrets "Generate Keycloak secrets, reset bootstrap admin to admin/admin123" step_provision_keycloak_secrets
 
 run_step shared-resources      "Create honeynet + placeholder volumes" step_create_shared_resources
+run_step provision-buildx-cache "Create /mnt-1/buildx-cache for the CI runners (#2822)" step_provision_buildx_cache
 run_step build-zeek-image      "Build xore-zeek:local for zeek-proxy" step_build_zeek_image
 run_step start-elasticsearch   "Start honeypot-elk, wait healthy"   step_start_elasticsearch_first
 run_step start-init            "Start honeypot-init, wait for one-shots" step_start_init

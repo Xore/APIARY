@@ -26,7 +26,7 @@ reinstall of the OS disk alone doesn't touch captured evidence.
 |---|---|---|---|---|---|---|
 | `nvme0n1` | Samsung MZVLW256HEHP | 238.5G | GPT | vfat (p1) / ext4 (p2) | `/boot/efi`, `/` | OS + EFI, boot disk |
 | `sdb` | AVAGO MR9440-8i (RAID LUN) | 1.7T | whole-disk (no partition table) | xfs | `/var` | Docker root, Arcane-managed stacks, container state — this is where `/var/lib/docker` and `/var/dockge` actually live |
-| `sdc` | AVAGO MR9440-8i (RAID LUN) | 1.7T | GPT, 1 partition | xfs | `/mnt-1` | Secondary bulk storage (in use: `github` checkouts) |
+| `sdc` | AVAGO MR9440-8i (RAID LUN) | 1.7T | GPT, 1 partition | xfs | `/mnt-1` | Secondary bulk storage (in use: `github` checkouts, `benchmarks`, `buildx-cache`) |
 | `sda` | Intel SSDSC2KB480G8L | 447.1G | GPT, 1 partition | xfs | `/mnt-2` | Reserved bulk storage (currently empty) |
 | `sr0` | ATAPI optical | — | — | — | — | Unused |
 

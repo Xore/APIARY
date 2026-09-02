@@ -173,6 +173,41 @@ jobs:
             type=ref,event=tag
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
+      # #2822: the type=gha layer cache measured 10.59 GB against GitHub's
+      # 10 GB per-repository ceiling -- over quota means GitHub is
+      # continuously LRU-evicting while the cache is in use, so it was not
+      # occasionally missing, it was being actively deleted between runs.
+      # On the homeserver executor (the common case -- see ci-target above)
+      # there is a persistent local disk right there, so export to
+      # type=local under /mnt-1/buildx-cache/<image> instead: it never
+      # touches the GHA quota, never crosses the network, and that box has
+      # 1.6 TB free on /mnt-1 (measured 2026-09-02). The GitHub-hosted
+      # fallback path has no persistent disk between runs, so it keeps
+      # type=gha -- a cold cache there is the expected cost of falling
+      # back, not a regression. type=local has no eviction of any kind, so
+      # the prune step below bounds it; without that step this trades one
+      # unbounded-growth incident for a slower one.
+      - name: Pick cache backend
+        id: cache
+        run: |
+          # scripts/install-homeserver.sh's provision-buildx-cache step owns
+          # creating /mnt-1/buildx-cache as github-ci-runner (/mnt-1 itself
+          # is root:root 0755, so this step cannot create it). Degrade to
+          # type=gha rather than `bash -e`-failing all 18 matrix rows if
+          # that step has not run on this box yet -- losing the local cache
+          # is a slow build, failing here is a Containers outage.
+          dir="/mnt-1/buildx-cache/${{ matrix.image }}"
+          if [ "${{ needs.ci-target.outputs.homeserver }}" = "true" ] \
+             && mkdir -p "$dir" 2>/dev/null && [ -w "$dir" ]; then
+            echo "from=type=local,src=$dir" >> "$GITHUB_OUTPUT"
+            echo "to=type=local,dest=$dir,mode=max" >> "$GITHUB_OUTPUT"
+          else
+            if [ "${{ needs.ci-target.outputs.homeserver }}" = "true" ]; then
+              echo "::warning::$dir is not writable by $(id -un) -- falling back to type=gha. Run scripts/install-homeserver.sh's provision-buildx-cache step (#2822)."
+            fi
+            echo "from=type=gha,scope=${{ matrix.image }}" >> "$GITHUB_OUTPUT"
+            echo "to=type=gha,mode=max,scope=${{ matrix.image }}" >> "$GITHUB_OUTPUT"
+          fi
       - uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
@@ -193,6 +228,16 @@ jobs:
           # invalidate it, yet it re-ran in 4 of 4 consecutive runs while
           # backend-service's equivalent layer hit. Per-image scopes also
           # keep the over-quota LRU eviction from taking out a
-          # neighbour's layers.
-          cache-from: type=gha,scope=${{ matrix.image }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+          # neighbour's layers. (#2822 moved the homeserver's export off
+          # type=gha entirely, but the per-image scope stays -- the
+          # GitHub-hosted fallback still uses it and the local dest= path
+          # above is per-image on its own account.)
+          cache-from: ${{ steps.cache.outputs.from }}
+          cache-to: ${{ steps.cache.outputs.to }}
+      - name: Prune local buildx cache (#2822)
+        # type=local has no eviction of any kind -- run unconditionally
+        # (always(), not just on success) so a failed build still gets
+        # the chance to trim a cache dir it may have partially written.
+        # No-ops instantly on the GitHub-hosted fallback (script check).
+        if: always() && needs.ci-target.outputs.homeserver == 'true'
+        run: scripts/prune-buildx-cache.sh "/mnt-1/buildx-cache/${{ matrix.image }}"
