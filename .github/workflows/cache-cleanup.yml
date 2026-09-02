@@ -1,0 +1,40 @@
+name: Cache cleanup
+
+# #2822: GitHub scopes Actions cache READS by ref (a PR reads its own ref,
+# then the base branch) but counts EVERY ref against one repository-wide
+# 10 GB quota. A closed PR's ref can never be read again -- nothing will
+# ever check it out -- but its type=gha cache entries (containers.yml's
+# per-image layer caches among them) keep counting until they age out
+# naturally (7 days unused) or get evicted. Deleting them the moment the
+# PR closes reclaims that quota immediately instead of waiting on the
+# 7-day GC, which is exactly the gap #2822 measured: 10.59 GB against a
+# 10 GB ceiling, so the wait matters.
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  sweep:
+    name: Delete this PR's caches
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete caches scoped to this PR's ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REF: refs/pull/${{ github.event.pull_request.number }}/merge
+          HEAD_REF: refs/pull/${{ github.event.pull_request.number }}/head
+        run: |
+          set -euo pipefail
+          for ref in "$REF" "$HEAD_REF"; do
+            echo "Deleting caches for $ref"
+            gh cache list --repo "$REPO" --ref "$ref" --limit 100 --json id -q '.[].id' \
+              | while read -r id; do
+                  [ -n "$id" ] || continue
+                  gh api -X DELETE "repos/$REPO/actions/caches/$id" || true
+                done
+          done
