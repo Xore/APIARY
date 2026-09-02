@@ -311,7 +311,10 @@ EXEMPT = {
 # waiting for the whole fleet to be clean first. Every entry names the issue
 # that tracks it, and closing that issue means deleting the entry.
 KNOWN_UNCOVERED = {
-    # Still open after #2826's first pass: these four are vendored binaries
+    # Tracked on #2892. #2826 made the first pass and closed with these nine
+    # rows still here, so they were repointed at its successor rather than
+    # left naming a closed issue -- the contract above is that every entry
+    # names the issue that tracks it. These four are vendored binaries
     # (C/Rust for sentrypeer, Go for beelzebub/galah, a pinned upstream
     # Docker image for conpot) whose JSON writer has no in-tree source this
     # checker's ROWS writer-proof mechanism can grep a token from, and
@@ -333,15 +336,15 @@ KNOWN_UNCOVERED = {
     # separate patches across three languages -- left as debt rather than
     # guessed at.
     # Sizes measured on the homeserver 2026-09-02; 393MiB across these nine.
-    "/logs/sentrypeer": "sentrypeer.json, 94MB and growing, vendored C/Rust writer, no self-rotation knob found in SENTRYPEER_JSON_LOG_FILE's consumer (#2826)",
-    "/logs/beelzebub": "beelzebub.json, 81MB and growing, vendored Go writer (core.yaml's logsPath), no rotation flag in beelzebub's CLI (#2826)",
-    "/logs/conpot": "conpot.json (32MB) has neither half; only conpot.log rotates. Needs a 7th conpot patch file alongside persona_patch.py etc (#2826)",
-    "/logs/conpot-s7-1200": "same conpot.json gap as /logs/conpot, 35MB (#2826)",
-    "/logs/conpot-s7-1500": "same conpot.json gap as /logs/conpot, 31MB (#2826)",
-    "/logs/conpot-iec104": "same conpot.json gap as /logs/conpot, 21MB (#2826)",
-    "/logs/conpot-guardian": "same conpot.json gap as /logs/conpot, 48MB (#2826)",
-    "/logs/conpot-kamstrup": "same conpot.json gap as /logs/conpot, 55MB (#2826)",
-    "/logs/galah": "event_log.json (157KB -- small only because galah sees little traffic, not because anything bounds it), vendored Go writer (ENTRYPOINT's -o flag), no rotation flag exposed (#2826)",
+    "/logs/sentrypeer": "sentrypeer.json, 94MB and growing, vendored C/Rust writer, no self-rotation knob found in SENTRYPEER_JSON_LOG_FILE's consumer (#2892)",
+    "/logs/beelzebub": "beelzebub.json, 81MB and growing, vendored Go writer (core.yaml's logsPath), no rotation flag in beelzebub's CLI (#2892)",
+    "/logs/conpot": "conpot.json (32MB) has neither half; only conpot.log rotates. Needs a 7th conpot patch file alongside persona_patch.py etc (#2892)",
+    "/logs/conpot-s7-1200": "same conpot.json gap as /logs/conpot, 35MB (#2892)",
+    "/logs/conpot-s7-1500": "same conpot.json gap as /logs/conpot, 31MB (#2892)",
+    "/logs/conpot-iec104": "same conpot.json gap as /logs/conpot, 21MB (#2892)",
+    "/logs/conpot-guardian": "same conpot.json gap as /logs/conpot, 48MB (#2892)",
+    "/logs/conpot-kamstrup": "same conpot.json gap as /logs/conpot, 55MB (#2892)",
+    "/logs/galah": "event_log.json (157KB -- small only because galah sees little traffic, not because anything bounds it), vendored Go writer (ENTRYPOINT's -o flag), no rotation flag exposed (#2892)",
 }
 
 
