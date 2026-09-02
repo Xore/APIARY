@@ -44,25 +44,70 @@ services:
     volumes:
       - /opt/stacks/apiary/logs/mailoney:/var/log/honeypot
       - /opt/stacks/apiary/state/init-markers:/markers:ro
-    # #2743: pin the tmpfs owner and mode rather than inheriting a default.
-    # During #2743's `systemctl restart docker` this container crash-looped
-    # on `sqlite3.OperationalError: unable to open database file` and was
-    # recreated from this corrected file.
+    # #2743/#2754: pin the tmpfs owner and mode rather than inheriting a
+    # default. This container crash-looped on `sqlite3.OperationalError:
+    # unable to open database file` for ~20.5 hours before being recreated
+    # from this corrected file on 2026-08-31.
     #
     # The cause originally recorded here -- that an unqualified
     # `tmpfs: [/data]` mounts `755 root:root`, locking out this image's
-    # `USER 65534` -- does NOT reproduce, so it has been removed rather than
-    # left standing: on this host (Docker 29.7.2) the exact pre-fix shape
-    # (this image, read_only, USER 65534, bare `tmpfs: [/data]`) mounts
-    # `1777 root:root` and sqlite3 opens the db successfully, because /data
-    # does not exist in the image and Docker's default for an absent path is
-    # 1777. The real trigger of that crash loop is unexplained -- see #2754.
+    # `USER 65534` -- does NOT reproduce for a freshly-created container: on
+    # this host (Docker 29.7.2) the exact pre-fix shape (this image,
+    # read_only, USER 65534, bare `tmpfs: [/data]`) mounts `1777 root:root`
+    # on `docker compose up`/create and sqlite3 opens the db successfully,
+    # because /data does not exist in the image and Docker's default for an
+    # absent path is 1777.
     #
-    # These options are still worth keeping: they drop the world-writable
-    # bit, and they make the mount independent of the image-directory mode a
-    # tmpfs inherits when the path *does* exist in the image (measured:
-    # image dirs at 755/1777/700 each come back through the tmpfs unchanged,
-    # so a root-owned /data added to the image later would lock this UID out).
+    # #2754 found what actually triggered it, from autoheal's own retained
+    # logs (`docker logs hp-autoheal`, which cover this window): the crash
+    # loop began at 2026-08-30T20:57:30Z -- 73 seconds after `journalctl -u
+    # docker` shows `docker.service` came back up (20:56:17Z) from a
+    # `systemctl restart docker` the PREVIOUS DAY, not the 2026-08-31
+    # restart originally blamed. The crash-looping container
+    # (`e1cef35de723`, confirmed via autoheal's per-event container ID) was
+    # never recreated across the whole ~20.5-hour window -- Docker's own
+    # `restart: unless-stopped` was cycling the SAME container repeatedly
+    # (autoheal correctly declined to intervene throughout, logging "found
+    # to be restarting - don't restart" every ~30s), and a restart of an
+    # existing container remounts tmpfs using whatever was captured at that
+    # container's own original creation, not by re-reading compose.yml. The
+    # image itself was unchanged throughout (built 2026-08-27, no rebuild
+    # near the incident), ruling out an intermediate image.
+    #
+    # A second, independent data point corroborates the restart trigger: an
+    # earlier crash-loop episode on a DIFFERENT container (`ff7594c0ec5b`,
+    # ~8.3h, 2026-08-24T15:21:13Z-23:41:37Z in the same autoheal log) began
+    # ~47s after `journalctl -u docker` shows a `systemctl restart docker`
+    # completed (docker back up 2026-08-24T15:20:26Z). Both crash loops --
+    # the only two in the retained autoheal history -- started under 90s
+    # after a daemon restart, which is stronger evidence for the
+    # restart-across-bounce narrowing than the single 2026-08-30 episode.
+    #
+    # This narrows the trigger to "restarting an already-running container
+    # across a full `systemctl restart docker`" rather than "any unqualified
+    # tmpfs create" (which is measured NOT to reproduce) or "an intermediate
+    # image" (ruled out) -- but the literal mechanism (why that restart path
+    # would produce a restrictive tmpfs mode when a fresh create does not)
+    # was not directly observed: the crashed container no longer exists to
+    # inspect, and reproducing it means deliberately restarting the daemon
+    # again while a test container is running, not attempted here to avoid
+    # a third disk-pressure-adjacent daemon restart on this host in one
+    # session. If this recurs, capture `docker inspect <container>` and
+    # `stat /data` from inside it *before* recreating, across a live
+    # `systemctl restart docker` -- that is the one experiment that would
+    # close this out completely.
+    #
+    # These options are still worth keeping regardless of the exact
+    # mechanism: they drop the world-writable bit, and they make the mount
+    # independent of the image-directory mode a tmpfs inherits when the path
+    # *does* exist in the image (measured: image dirs at 755/1777/700 each
+    # come back through the tmpfs unchanged, so a root-owned /data added to
+    # the image later would lock this UID out). Whether an explicit pin also
+    # protects against the still-unconfirmed restart-across-daemon-bounce
+    # mechanism above is NOT verified -- if that mechanism is real and
+    # ignores a container's own captured tmpfs options the same way it may
+    # have ignored whatever was in effect on 2026-08-30, this could recur
+    # even with the pin in place. Watch for it.
     tmpfs:
       - /data:uid=65534,gid=65534,mode=1770
     # #2366: measured baseline, same "run it, then reduce" methodology as
