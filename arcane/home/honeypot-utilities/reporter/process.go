@@ -23,6 +23,10 @@ type processor struct {
 	cooldown time.Duration
 	minHits  int            // #ip-reporting-plan.md's false-positive mitigation: require >=N events before reporting
 	hits     map[string]int // in-memory count of events seen this run, keyed by ip -- resets on restart, which is fine: the threshold exists to smooth out a single stray probe, not to survive restarts
+
+	// hitsResetAt is when hits was last cleared -- see resetHitsIfStale
+	// (#2342). Zero value means "never yet", handled there.
+	hitsResetAt time.Time
 }
 
 func newProcessor(wl *whitelist, gn *greynoiseChecker, st *store, send sender, sendBD blocklistDeSender, audit *auditLog, cooldown time.Duration, minHits int) *processor {
@@ -30,6 +34,36 @@ func newProcessor(wl *whitelist, gn *greynoiseChecker, st *store, send sender, s
 		minHits = 1
 	}
 	return &processor{wl: wl, gn: gn, st: st, send: send, sendBD: sendBD, audit: audit, cooldown: cooldown, minHits: minHits, hits: map[string]int{}}
+}
+
+// resetHitsIfStale clears the in-memory hits map once per cooldown window
+// (#2342). hits was always documented as existing only to smooth a stray
+// probe, with the comment on the struct field reasoning that forgetting old
+// counts on restart is fine for that purpose -- but the same reasoning was
+// never applied to a reporter that simply keeps running: one map entry
+// accumulates per unique attacker IP ever seen, unbounded, for as long as
+// the process lives, inside a 128MB-limited container. A honeypot's unique
+// scanning-source count over months can reach the hundreds of thousands.
+//
+// Deliberately coarse -- clearing the whole map rather than tracking a
+// per-IP last-seen time and evicting individually -- because the
+// consequence of the coarse version (an IP mid-threshold at the reset
+// instant loses its partial count and starts over) is exactly the same
+// "forgets across a boundary" behavior already accepted for restarts, now
+// just possible mid-run instead of only at redeploys. cooldown (not a new
+// env var) is the reset interval: it is already the window this reporter
+// treats as "long enough that an old signal about this IP no longer
+// matters" everywhere else (recentlyReported, vacuum below), so reusing it
+// here needs no new configuration and no new meaning to explain.
+func (p *processor) resetHitsIfStale(now time.Time) {
+	if p.hitsResetAt.IsZero() {
+		p.hitsResetAt = now
+		return
+	}
+	if now.Sub(p.hitsResetAt) >= p.cooldown {
+		p.hits = map[string]int{}
+		p.hitsResetAt = now
+	}
 }
 
 func (p *processor) handle(sensor string, line []byte) {
@@ -63,6 +97,7 @@ func (p *processor) handle(sensor string, line []byte) {
 		return
 	}
 
+	p.resetHitsIfStale(time.Now())
 	p.hits[ev.IP]++
 	if p.hits[ev.IP] < p.minHits {
 		p.audit.log(auditEntry{Action: "skipped", IP: ev.IP, Sensor: sensor, Kind: ev.Kind, Reason: "below minimum event threshold", At: ev.When})

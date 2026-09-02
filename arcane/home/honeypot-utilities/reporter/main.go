@@ -67,6 +67,20 @@ func main() {
 	}
 	defer st.Close()
 
+	cooldown := time.Duration(getenvInt("REPORTER_COOLDOWN_HOURS", 24)) * time.Hour
+
+	// #2342: reports/tail_offsets rows accumulate indefinitely otherwise --
+	// see vacuum's own doc comment (dedup.go) for why cooldown (not
+	// JSON_RETENTION_MINUTES) is the right age bound, and why tail_offsets
+	// prunes on file existence instead of age. Once at startup, before the
+	// poll loop starts touching either table.
+	reportsDropped, tailOffsetsDropped, err := st.vacuum(cooldown)
+	if err != nil {
+		log.Printf("reporter: startup vacuum failed (continuing anyway): %v", err)
+	} else if reportsDropped > 0 || tailOffsetsDropped > 0 {
+		log.Printf("reporter: startup vacuum dropped %d stale reports row(s) and %d stale tail_offsets row(s)", reportsDropped, tailOffsetsDropped)
+	}
+
 	wl, err := loadWhitelist(getenv("REPORTER_WHITELIST", "/config/whitelist.txt"))
 	if err != nil {
 		log.Fatalf("reporter: loading whitelist: %v", err)
@@ -103,7 +117,6 @@ func main() {
 		log.Print("reporter: reporting credentials set but REPORTER_LIVE is unset -- every sender stays in dry-run")
 	}
 
-	cooldown := time.Duration(getenvInt("REPORTER_COOLDOWN_HOURS", 24)) * time.Hour
 	minHits := getenvInt("REPORTER_MIN_EVENTS", 3)
 
 	// GreyNoise RIOT reputation guard (#153, Phase 3) -- optional. Unset
