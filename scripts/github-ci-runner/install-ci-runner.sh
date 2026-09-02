@@ -4,17 +4,24 @@
 # (scripts referenced from docs/CI-CD.md's "Home deployment" section,
 # labels self-hosted/linux/x64/honeypot-home, environment production-home).
 # This is a second, separate runner registration with its own labels, own
-# sudo-less system user, docker-group access (#2565: containers, the
-# frontend lockfile check and the Keycloak/OIDC suites route here), and no
-# production-directory/sensor-state access. Its trust boundary is
-# different from the deployment runner's: it only ever runs workflows
-# gated by the ci-target router (push/workflow_dispatch, plus same-repo
-# pull_request when repo variable CI_HOMESERVER_PRS=true -- see
-# docs/CI-CD.md's "GitHub CI runner" section for why fork pull_request
-# must never be wired to it -- a public repo's fork PRs are
-# attacker-controlled input, and self-hosted runner code execution is
-# real code execution on this network, not a sandboxed ephemeral VM the
-# way GitHub-hosted runners are).
+# sudo-less system user, and docker-group access (#2565: containers, the
+# frontend lockfile check and the Keycloak/OIDC suites route here). Its
+# trust boundary is different from the deployment runner's, but NOT
+# because it lacks host-level capability -- docker-group membership is
+# effectively root-equivalent on this host (a member can
+# `docker run -v /:/host ...` and read/write anything), and this runner's
+# checkout at /opt/stacks/apiary is also plain world-readable, so it can
+# read e.g. /opt/stacks/honeypot-dashboard/.env directly without even
+# touching Docker. #2780 measured both and confirmed neither is a
+# containment boundary. What actually keeps this runner's blast radius
+# below the deployment runner's is WHICH CODE gets to run on it: the
+# ci-target router (push/workflow_dispatch, plus same-repo pull_request
+# only when repo variable CI_HOMESERVER_PRS=true -- see docs/CI-CD.md's
+# "GitHub CI runner" section, "Docker-group membership is an accepted
+# trade-off" subsection, for the full decision) keeps fork-PR (attacker-
+# controlled) code off this runner entirely. If that gate is ever wrong,
+# the practical blast radius here is not meaningfully smaller than the
+# deployment runner's -- treat a compromise of either the same way.
 #
 # Usage:
 #   sudo scripts/github-ci-runner/install-ci-runner.sh --repo Xore/APIARY [--token TOKEN]
@@ -92,16 +99,22 @@ if [[ -z "$token" && ! -f "$RUNNER_HOME/.runner" ]]; then
   token=$(gh api -X POST "repos/$repo/actions/runners/registration-token" --jq .token)
 fi
 
-# Dedicated, unprivileged system user -- no sudo, and no access to
-# /var/lib/honeypot-*, /opt/stacks, or any sensor state. Since #2565 it
-# DOES carry a docker-group membership (the same grant
+# Dedicated system user -- no sudo. It carries no group grant scoped to
+# /var/lib/honeypot-*, /opt/stacks or sensor state specifically, but #2780
+# measured that this does not amount to "no access": the checkout at
+# /opt/stacks/apiary is plain world-readable (verified: this user can
+# `cat` the deploy runner's own .env files without elevation), and the
+# docker-group membership below is separately host-root-equivalent. Since
+# #2565 it DOES carry that docker-group membership (the same grant
 # github-deploy-runner always had) because the homeserver-first routing
 # sends docker-bound checks here: containers.yml, the frontend lockfile
 # check, the Keycloak/oauth2-proxy/OIDC suites, compose validation. The
 # trust gate in quality.yml's ci-target router (and the shared
-# ci-router.yml) is what makes that acceptable -- only push-to-main,
-# workflow_dispatch, and CI_HOMESERVER_PRS'd same-repo pull requests ever
-# execute here; fork PRs can never qualify.
+# ci-router.yml) is what makes carrying that capability an accepted
+# trade-off rather than a gap -- only push-to-main, workflow_dispatch, and
+# CI_HOMESERVER_PRS'd same-repo pull requests ever execute here; fork PRs
+# can never qualify. See docs/CI-CD.md's "Docker-group membership is an
+# accepted trade-off" subsection for the full decision.
 if ! id "$RUNNER_USER" >/dev/null 2>&1; then
   useradd --system --create-home --home-dir "$RUNNER_HOME" --shell /usr/sbin/nologin "$RUNNER_USER"
 fi
