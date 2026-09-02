@@ -104,7 +104,11 @@ fi
 
 # ---------------------------------------------------------------------------
 section "sbx-* macvlan network (docker-compose.sandbox.yml)"
-if net_json=$(sudo -n docker network inspect sandbox_sandbox 2>/dev/null || sudo -n docker network inspect honeypot-sandbox_sandbox 2>/dev/null); then
+# docker-group membership (already granted, see #2565/#2780) covers plain
+# 'docker' commands without sudo -- the isolation-audit sudoers grant this
+# script otherwise references is only for iptables/ss/aa-status, which do
+# need root (#2778).
+if net_json=$(docker network inspect sandbox_sandbox 2>/dev/null || docker network inspect honeypot-sandbox_sandbox 2>/dev/null); then
   if grep -q '"Internal": true' <<<"$net_json"; then
     ok "docker sandbox network is internal: true"
   else
@@ -155,15 +159,15 @@ done
 
 # ---------------------------------------------------------------------------
 section "Stack containers (hp-*/sbx-* only -- this host also runs unrelated stacks: dockge, pihole, ghidra/ollama, ghosts-*, etc.)"
-if containers=$(sudo -n docker ps -a --format '{{.Names}}\t{{.Image}}' 2>&1 | grep -E '^(hp-|sbx-)'); then
+if containers=$(docker ps -a --format '{{.Names}}\t{{.Image}}' 2>&1 | grep -E '^(hp-|sbx-)'); then
   privileged_others=""
   while IFS=$'\t' read -r name _; do
     [ -z "$name" ] && continue
-    is_priv=$(sudo -n docker inspect "$name" --format '{{.HostConfig.Privileged}}' 2>/dev/null || echo false)
+    is_priv=$(docker inspect "$name" --format '{{.HostConfig.Privileged}}' 2>/dev/null || echo false)
     if [ "$is_priv" = "true" ] && [ "$name" != "hp-tanner-docker" ]; then
       privileged_others="$privileged_others $name"
     fi
-    sock=$(sudo -n docker inspect "$name" --format '{{range .Mounts}}{{.Source}} {{end}}' 2>/dev/null | grep -o '/var/run/docker.sock' || true)
+    sock=$(docker inspect "$name" --format '{{range .Mounts}}{{.Source}} {{end}}' 2>/dev/null | grep -o '/var/run/docker.sock' || true)
     if [ -n "$sock" ] && [ "$name" != "hp-tanner-docker" ] && [ "$name" != "hp-services-adapter" ] && [ "$name" != "hp-autoheal" ] && [ "$name" != "hp-docker-socket-proxy" ]; then
       bad "$name mounts /var/run/docker.sock (root-equivalent) -- not one of the known, deliberate exceptions"
     fi
@@ -177,7 +181,7 @@ if containers=$(sudo -n docker ps -a --format '{{.Names}}\t{{.Image}}' 2>&1 | gr
   cap_offenders=""
   for name in $(printf '%s\n' "$containers" | cut -f1); do
     [ -z "$name" ] && continue
-    caps=$(sudo -n docker inspect "$name" --format '{{range .HostConfig.CapAdd}}{{.}} {{end}}' 2>/dev/null || true)
+    caps=$(docker inspect "$name" --format '{{range .HostConfig.CapAdd}}{{.}} {{end}}' 2>/dev/null || true)
     if grep -qE 'NET_ADMIN|NET_RAW' <<<"$caps"; then
       case "$name" in
         sbx-zeek|sbx-suricata|sbx-tcpdump) : ;;
@@ -191,7 +195,7 @@ if containers=$(sudo -n docker ps -a --format '{{.Names}}\t{{.Image}}' 2>&1 | gr
     ok "NET_ADMIN/NET_RAW confined to sbx-zeek/sbx-suricata/sbx-tcpdump"
   fi
 else
-  bad "could not enumerate containers (sudo -n docker ps failed: needs the isolation-audit sudoers grant)"
+  bad "could not enumerate containers (docker ps failed)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -295,7 +299,7 @@ if [ -n "${containers:-}" ]; then
   while IFS=$'\t' read -r name _; do
     [ -z "$name" ] && continue
     case "$name" in sbx-*) continue ;; esac
-    capdrop=$(sudo -n docker inspect "$name" --format '{{.HostConfig.CapDrop}}' 2>/dev/null || echo "")
+    capdrop=$(docker inspect "$name" --format '{{.HostConfig.CapDrop}}' 2>/dev/null || echo "")
     # Checked before either list, so a service that gets hardened starts
     # reporting OK immediately and its stale list entry is surfaced below --
     # being on a list can never mask real progress.
