@@ -127,6 +127,40 @@ letting Arcane's own directory check block the whole import.
    `up` (not just `docker restart`) was what actually cleared that,
    confirmed live during the `pihole` cutover.
 
+## Retirement procedure (per stack)
+
+Deleting a stack's `arcane/home/<name>/` directory from this repo only ever
+removes the *source*. It does nothing to what is already deployed — Arcane
+has no "this project's directory disappeared, tear it down" behavior, and a
+homeserver whose last sync predates the deletion just keeps its
+already-synced compose file and already-running containers on disk exactly
+as they were. #2813/#2814 (wordpot's retirement in #2381) both surfaced
+this the same way: the repo said the stack was gone, but a live container
+was still up weeks later — on the VPS because `docker compose up -d`
+without `--remove-orphans` never removes a service dropped from the compose
+file (fixed for the VPS's own deploy path in #2813), and on the homeserver
+because nothing ever told Arcane to tear the project down at all. Retiring
+a stack means:
+
+1. Remove the stack's `arcane/home/<name>/` directory (or its VPS
+   equivalent block in `vps/docker-compose.yml`) from this repo, same as
+   any other change.
+2. On every host that had it deployed, actually stop and remove the live
+   containers — `docker compose -f compose.yml down` in the stack's
+   directory, not just deleting the repo source and waiting for the next
+   sync. Another, still-tracked stack's `--remove-orphans` redeploy will
+   not do this for you — that flag only cleans up orphans within its own
+   compose file's project, not a sibling stack entirely.
+3. For an Arcane-managed (homeserver) stack, also delete the corresponding
+   `gitops-syncs` record (`DELETE /environments/0/gitops-syncs/{id}`) and
+   remove the on-disk stack directory under `/var/dockge/stacks/<name>/` —
+   an orphaned sync record with no matching repo directory is itself a
+   confusing half-retired state.
+4. Re-run the live verification a normal cutover would (`docker ps -a
+   --filter name=<stack>` on every host it was ever deployed to), not just
+   a repo grep — the repo can be fully clean while the live fleet still
+   isn't.
+
 ## Known Arcane v2.8.0 limitations, confirmed live
 
 These are platform behaviors, not something fixable from a compose file
