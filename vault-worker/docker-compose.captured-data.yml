@@ -11,13 +11,20 @@ services:
   vault-worker:
     environment:
       ES_HOST: 'http://elasticsearch:9200'
+      # #2291: same alias llm-worker's own captured-data overlay uses on
+      # honeypot-llm -- only reachable once llm-backend is joined below.
+      OLLAMA_URL: 'http://ollama:11434'
     networks:
       - synthetic-only
       - llm-data
+      - llm-backend
     volumes:
       - /opt/stacks/apiary/state/knowledge-vault:/vault
 
 networks:
   llm-data:
     name: honeypot-llm-data
+    external: true
+  llm-backend:
+    name: honeypot-llm
     external: true

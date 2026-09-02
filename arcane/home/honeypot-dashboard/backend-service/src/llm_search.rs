@@ -5,6 +5,16 @@
 //! kNN over the versioned embedding field. Local-only endpoint contract
 //! preserved; unreachable Ollama reports unavailable, never a broken
 //! page or a fake non-semantic result set.
+//!
+//! #2291: an optional `source=vault` selector switches the same kNN
+//! machinery onto knowledge-vault-search-v1 — the notes #2290's vault-
+//! ingest worker renders and embeds — instead of llm-analysis's session
+//! summaries. Deliberately a selector, not a merged multi-index query:
+//! the two sources are different document lifecycles/owners (#2289), and
+//! a selector keeps `available:false`/foreign-embedding accounting exact
+//! per source rather than blended across both. `source` defaults to
+//! "session" so every existing caller's behavior is byte-for-byte
+//! unchanged.
 
 use axum::{
     extract::{Query, State},
@@ -19,17 +29,40 @@ use crate::AppState;
 const SEARCH_K: usize = 10;
 const SEARCH_CANDIDATES: usize = 100;
 
+/// Which corpus this request searches. Each variant names its own index
+/// and the doc_type value that index's writer stamps — llm-worker's
+/// "session" on llm-analysis, the vault-ingest worker's "vault-note" on
+/// knowledge-vault-search-v1 (#2291).
+#[derive(Clone, Copy)]
+struct Source {
+    index: &'static str,
+    doc_type: &'static str,
+    noun: &'static str,
+}
+
+const SESSION_SOURCE: Source = Source { index: "llm-analysis", doc_type: "session", noun: "session summaries" };
+const VAULT_SOURCE: Source =
+    Source { index: "knowledge-vault-search-v1", doc_type: "vault-note", noun: "vault notes" };
+
+fn resolve_source(raw: &str) -> Source {
+    match raw {
+        "vault" | "vault-note" => VAULT_SOURCE,
+        _ => SESSION_SOURCE,
+    }
+}
+
 /// The kNN request for one query vector (#2117): the filter pins BOTH
 /// doc_type and embedding_model, so ranking happens only inside the vector
-/// space the query was embedded in. The write side (llm-worker) stamps
-/// embedding_model on every document precisely because a model switch —
-/// an env edit, or a registry tag moving under `:latest` — leaves the
-/// index holding two incompatible same-dimension spaces that ES will
-/// otherwise happily score against each other: plausible-looking
-/// similarities, wrong ranking, no error anywhere. Documents from other
-/// models drop out of results until the planned digest-keyed backfill
-/// re-embeds them; search() reports that shrink rather than disguising it.
-fn knn_body(model: &str, vector: &[f64], limit: usize) -> Value {
+/// space the query was embedded in. The write side (llm-worker for
+/// sessions, vault-worker for notes, #2291) stamps embedding_model on
+/// every document precisely because a model switch — an env edit, or a
+/// registry tag moving under `:latest` — leaves the index holding two
+/// incompatible same-dimension spaces that ES will otherwise happily score
+/// against each other: plausible-looking similarities, wrong ranking, no
+/// error anywhere. Documents from other models drop out of results until
+/// the planned digest-keyed backfill re-embeds them; search() reports that
+/// shrink rather than disguising it.
+fn knn_body(source: Source, model: &str, vector: &[f64], limit: usize) -> Value {
     json!({
         "knn": {
             "field": "embedding",
@@ -37,7 +70,7 @@ fn knn_body(model: &str, vector: &[f64], limit: usize) -> Value {
             "k": limit,
             "num_candidates": SEARCH_CANDIDATES,
             "filter": {"bool": {"filter": [
-                {"term": {"doc_type": "session"}},
+                {"term": {"doc_type": source.doc_type}},
                 {"term": {"embedding_model": model}}
             ]}}
         },
@@ -46,17 +79,17 @@ fn knn_body(model: &str, vector: &[f64], limit: usize) -> Value {
 }
 
 /// The empty-result body, made explicit about WHY it is empty when the
-/// index does hold session embeddings from other models (#2117): "no
-/// matches" and "matches exist but are not re-embedded yet" need different
-/// operator responses. Either way available stays true — this is a
-/// filtered-out result, not a failure.
-fn empty_hits_response(foreign_embeddings: u64) -> Value {
+/// index does hold embeddings from other models (#2117): "no matches" and
+/// "matches exist but are not re-embedded yet" need different operator
+/// responses. Either way available stays true — this is a filtered-out
+/// result, not a failure.
+fn empty_hits_response(source: Source, foreign_embeddings: u64) -> Value {
     if foreign_embeddings > 0 {
         json!({
             "available": true,
             "hits": [],
             "foreign_embeddings": foreign_embeddings,
-            "note": format!("{foreign_embeddings} session summaries are embedded by a different model and are excluded until re-embedding")
+            "note": format!("{foreign_embeddings} {} are embedded by a different model and are excluded until re-embedding", source.noun)
         })
     } else {
         json!({"available": true, "hits": []})
@@ -69,6 +102,11 @@ pub struct SearchQuery {
     pub q: String,
     #[serde(default)]
     pub limit: usize,
+    /// #2291: "session" (default) or "vault"/"vault-note". Any other/empty
+    /// value falls back to "session" rather than erroring — an unknown
+    /// source is a caller bug, not a reason to break existing callers.
+    #[serde(default)]
+    pub source: String,
 }
 
 /// Mirrors llm-worker's endpoint_is_local(): plain http, bare host, and a
@@ -122,6 +160,7 @@ pub async fn search(State(state): State<AppState>, Query(query): Query<SearchQue
     if text.is_empty() {
         return Json(json!({"available": true, "hits": []}));
     }
+    let source = resolve_source(query.source.trim());
     let Some(base) = ollama_url() else {
         return Json(json!({"available": false, "reason": "semantic search is not configured on this deployment"}));
     };
@@ -134,7 +173,7 @@ pub async fn search(State(state): State<AppState>, Query(query): Query<SearchQue
         }
     };
     let limit = if query.limit == 0 || query.limit > SEARCH_K { SEARCH_K } else { query.limit };
-    match state.es.search_index(&["llm-analysis"], knn_body(&model, &vector, limit)).await {
+    match state.es.search_index(&[source.index], knn_body(source, &model, &vector, limit)).await {
         Ok(result) => {
             let hits: Vec<Value> = result["hits"]["hits"]
                 .as_array()
@@ -153,15 +192,15 @@ pub async fn search(State(state): State<AppState>, Query(query): Query<SearchQue
                 let foreign = json!({
                     "size": 0,
                     "query": {"bool": {
-                        "filter": [{"term": {"doc_type": "session"}}],
+                        "filter": [{"term": {"doc_type": source.doc_type}}],
                         "must_not": [{"term": {"embedding_model": model}}]
                     }}
                 });
-                let foreign_count = match state.es.search_index(&["llm-analysis"], foreign).await {
+                let foreign_count = match state.es.search_index(&[source.index], foreign).await {
                     Ok(count) => count["hits"]["total"]["value"].as_u64().unwrap_or(0),
                     Err(_) => 0,
                 };
-                return Json(empty_hits_response(foreign_count));
+                return Json(empty_hits_response(source, foreign_count));
             }
             Json(json!({"available": true, "hits": hits}))
         }
@@ -178,7 +217,7 @@ mod tests {
     /// same-dimension vector spaces.
     #[test]
     fn knn_filter_pins_both_doc_type_and_embedding_model() {
-        let body = knn_body("nomic-embed-text:latest", &[0.1, 0.2], 5);
+        let body = knn_body(SESSION_SOURCE, "nomic-embed-text:latest", &[0.1, 0.2], 5);
         let filter = &body["knn"]["filter"]["bool"]["filter"];
         assert_eq!(filter[0]["term"]["doc_type"], json!("session"));
         assert_eq!(filter[1]["term"]["embedding_model"], json!("nomic-embed-text:latest"));
@@ -191,7 +230,7 @@ mod tests {
 
     #[test]
     fn a_different_configured_model_filters_by_that_model() {
-        let body = knn_body("all-minimal:l6", &[0.0], SEARCH_K);
+        let body = knn_body(SESSION_SOURCE, "all-minimal:l6", &[0.0], SEARCH_K);
         assert_eq!(body["knn"]["filter"]["bool"]["filter"][1]["term"]["embedding_model"], json!("all-minimal:l6"));
     }
 
@@ -199,7 +238,7 @@ mod tests {
     /// filtered-out result, not an error (#2117 acceptance criterion 3).
     #[test]
     fn empty_without_foreign_embeddings_stays_plain() {
-        let body = empty_hits_response(0);
+        let body = empty_hits_response(SESSION_SOURCE, 0);
         assert_eq!(body["available"], json!(true));
         assert_eq!(body["hits"], json!([]));
         assert!(body.get("note").is_none());
@@ -207,7 +246,7 @@ mod tests {
 
     #[test]
     fn empty_with_foreign_embeddings_reports_the_exclusion() {
-        let body = empty_hits_response(41);
+        let body = empty_hits_response(SESSION_SOURCE, 41);
         assert_eq!(body["available"], json!(true));
         assert_eq!(body["hits"], json!([]));
         assert_eq!(body["foreign_embeddings"], json!(41));
@@ -230,7 +269,7 @@ mod tests {
             ("c", "session", "nomic-embed-text:v2-drifted"),
             ("d", "session", "nomic-embed-text:v2-drifted"),
         ];
-        let body = knn_body("nomic-embed-text:latest", &[0.1, 0.2], SEARCH_K);
+        let body = knn_body(SESSION_SOURCE, "nomic-embed-text:latest", &[0.1, 0.2], SEARCH_K);
         let clauses = body["knn"]["filter"]["bool"]["filter"].as_array().unwrap();
         let survives = |doc_type: &str, model: &str| {
             clauses.iter().all(|clause| {
@@ -248,5 +287,33 @@ mod tests {
             .map(|(id, _, _)| *id)
             .collect();
         assert_eq!(surviving, vec!["a", "b"]);
+    }
+
+    // -- #2291: source selector --
+
+    #[test]
+    fn resolve_source_defaults_to_session_for_empty_or_unknown_values() {
+        assert_eq!(resolve_source("").index, "llm-analysis");
+        assert_eq!(resolve_source("bogus").index, "llm-analysis");
+        assert_eq!(resolve_source("session").index, "llm-analysis");
+    }
+
+    #[test]
+    fn resolve_source_routes_vault_aliases_to_the_vault_index() {
+        assert_eq!(resolve_source("vault").index, "knowledge-vault-search-v1");
+        assert_eq!(resolve_source("vault-note").index, "knowledge-vault-search-v1");
+    }
+
+    #[test]
+    fn vault_source_knn_filters_by_vault_note_doc_type_not_session() {
+        let body = knn_body(VAULT_SOURCE, "nomic-embed-text:latest", &[0.1, 0.2], SEARCH_K);
+        assert_eq!(body["knn"]["filter"]["bool"]["filter"][0]["term"]["doc_type"], json!("vault-note"));
+    }
+
+    #[test]
+    fn vault_source_empty_response_names_vault_notes_not_sessions() {
+        let body = empty_hits_response(VAULT_SOURCE, 3);
+        assert!(body["note"].as_str().unwrap().contains("vault notes"));
+        assert!(!body["note"].as_str().unwrap().contains("session summaries"));
     }
 }
