@@ -185,12 +185,40 @@ ROWS = [
         "writer": ("arcane/home/honeypot-dionaea/tftp-relay",
                    ["LOG_MAX_BYTES", "func (r *relay) rotateSessionLog()"]),
     },
+    # #2826: elasticpot self-rotates daily to elasticpot.json.<date>, but the
+    # implementation is vendor-internal (baked into the pinned
+    # dtagdevsec/elasticpot image, not built from source in this tree), so
+    # there is no grep token to prove it from -- writer=None + writer_note
+    # records how it was actually confirmed (live `ls` on the homeserver
+    # showing daily-dated generations back to first deploy, per #2826's own
+    # measurement table). Only the pruner half needed adding here.
+    {
+        "dir": "/logs/elasticpot",
+        "globs": ["'elasticpot.json.[0-9]*'"],
+        "writer": None,
+        "writer_note": "vendor-internal daily logrotate, confirmed live "
+                        "(elasticpot.json.<YYYY-MM-DD> generations present "
+                        "back to 2026-08-15 on the homeserver, #2826)",
+    },
 ]
 
 # Mounted log directories that are deliberately outside the two-sided
 # contract. Each reason has to say what the directory actually holds and why
 # nothing needs pruning it -- "it looked fine" is not a reason, and a wrong
 # one here is how a sink hides in plain sight.
+#
+# #2826 review: prose alone is how a sink hides in plain sight the SECOND
+# time. An exemption whose reason asserts a concrete mechanism ("rotate()
+# covers it", "the writer self-bounds") was a claim nothing checked --
+# deleting the rotate line left the ledger asserting coverage that no longer
+# existed and the guardrail still green. So a value may be either a bare
+# reason string (nothing mechanical to assert -- evidence corpora, VPS-written
+# trees) or a dict carrying the mechanism as a checked key:
+#
+# - "rotates": the exact /logs/... paths log-maintenance.sh's copytruncate
+#   rotate() must name, asserted per-path the way ROWS asserts "globs";
+# - "writer": (subtree, [grep tokens]) proving a self-bounding writer, the
+#   same proof shape ROWS uses for its own writer half.
 EXEMPT = {
     "/logs/cowrie/downloads":
         "attacker payload corpus, not an event sink -- files are content-"
@@ -213,6 +241,45 @@ EXEMPT = {
     "/logs/dashboard-backend-mounted":
         "the same obs.rs sink under the honeypot-dashboard project's own "
         "mount name; identical self-bounding (#2468).",
+    "/logs/dashboard-bff": {
+        "reason":
+            "the BFF tier's app.jsonl. #2826 ported obs.rs's "
+            "rotate_if_oversized shape into obs.server.ts's rotateIfOversized "
+            "(same 25MiB cap, one retired .1 generation, rename-not-truncate) "
+            "-- self-bounded the same way /logs/dashboard-backend is, so it "
+            "needs no pruner find line either.",
+        "writer": ("arcane/home/honeypot-dashboard/frontend-next/src/lib/obs.server.ts",
+                   ["async function rotateIfOversized(", "MAX_SINK_BYTES"]),
+    },
+    "/logs/canarytokens/frontend": {
+        "reason":
+            "vendored Canarytokens app's own frontend.log -- a plain text log, "
+            "not a JSON sink, so it is rotated by log-maintenance.sh's "
+            "copytruncate rotate() (added by #2826) rather than the "
+            "find-glob/ROWS mechanism the JSON sinks above use; frontend/ is "
+            "empty on the live host today so there is nothing to rotate yet, "
+            "but the line is in place.",
+        "rotates": ["/logs/canarytokens/frontend/frontend.log"],
+    },
+    "/logs/canarytokens/switchboard": {
+        "reason":
+            "vendored Canarytokens app's own switchboard.log, same "
+            "copytruncate-rotate() treatment as frontend.log above (#2826). "
+            "Bounded at MAX_LOG_BYTES (256MiB default) plus four gzipped "
+            "generations, not rotated on a schedule: 1.7MB after ~3 weeks "
+            "live, so the first rotation is a long way out.",
+        "rotates": ["/logs/canarytokens/switchboard/switchboard.log"],
+    },
+    "/logs/hellpot": {
+        "reason":
+            "HellPot.log is a plain human-readable text log (not a JSON event "
+            "sink), so #2826 gave it log-maintenance.sh's copytruncate rotate() "
+            "the same way dionaea.log/cowrie.log/conpot.log already get it, "
+            "rather than a find-glob/ROWS entry. Same caveat as switchboard "
+            "above: the cap is 256MiB and the file is 11.4MB after ~18 days, "
+            "so this bounds the directory rather than shrinking it today.",
+        "rotates": ["/logs/hellpot/HellPot.log"],
+    },
     "/logs/suricata":
         "written on the VPS, mounted read-only here for Filebeat. Its "
         "retention is vps/suricata-log-maintenance.sh's eve-*.json prune, "
@@ -244,28 +311,37 @@ EXEMPT = {
 # waiting for the whole fleet to be clean first. Every entry names the issue
 # that tracks it, and closing that issue means deleting the entry.
 KNOWN_UNCOVERED = {
-    "/logs/sentrypeer": "sentrypeer.json, 87.9MB and growing, vendored writer (#2826)",
-    "/logs/beelzebub": "beelzebub.json, 84.6MB and growing, vendored writer (#2826)",
-    "/logs/conpot": "conpot.json (32.1MB) has neither half; only conpot.log rotates (#2826)",
-    "/logs/conpot-s7-1200": "same conpot.json gap as /logs/conpot (#2826)",
-    "/logs/conpot-s7-1500": "same conpot.json gap as /logs/conpot (#2826)",
-    "/logs/conpot-iec104": "same conpot.json gap as /logs/conpot (#2826)",
-    "/logs/conpot-guardian": "same conpot.json gap as /logs/conpot (#2826)",
-    "/logs/conpot-kamstrup": "same conpot.json gap as /logs/conpot (#2826)",
-    "/logs/hellpot": "HellPot.log (11.4MB) is in neither the rotate() list nor a glob (#2826)",
-    "/logs/galah": "event_log.json, no writer-side rotation, no glob (#2826)",
-    "/logs/elasticpot":
-        "writer half only -- self-rotates daily to elasticpot.json.<date>, but "
-        "no find line prunes the generations (#2826)",
-    "/logs/canarytokens/frontend":
-        "vendored Canarytokens app's own frontend.log; the /logs/canarytokens "
-        "prune line is -maxdepth 1 and cannot reach it (#2826)",
-    "/logs/canarytokens/switchboard":
-        "vendored Canarytokens app's own switchboard.log, same -maxdepth 1 "
-        "reach problem (#2826)",
-    "/logs/dashboard-bff":
-        "the BFF tier's app.jsonl -- obs.server.ts mirrors obs.rs's shape but "
-        "not its rotate_if_oversized, so this one is unbounded (#2826)",
+    # Still open after #2826's first pass: these four are vendored binaries
+    # (C/Rust for sentrypeer, Go for beelzebub/galah, a pinned upstream
+    # Docker image for conpot) whose JSON writer has no in-tree source this
+    # checker's ROWS writer-proof mechanism can grep a token from, and
+    # (unlike elasticpot) none of them self-rotate on their own -- the sink
+    # genuinely appends forever today. The established fix shape already
+    # exists twice in this repo (dionaea/log_rotation_patch.py,
+    # mailoney/json_log_patch.py: an exact-match Python source patch applied
+    # at Docker build time that wraps the writer's file handle with the same
+    # close/rename/reopen self-rotation multipot/http-honeypot's Go loggers
+    # use, plus a matching pruner find line here). conpot's Dockerfile
+    # already applies six such patches (persona_patch.py etc, see
+    # arcane/home/honeypot-conpot/conpot/Dockerfile) against its vendored
+    # Python source at /usr/lib/python3.12/site-packages/conpot, so a
+    # seventh patch targeting whichever ihandler backs conpot.json's
+    # FileHandler is the same shape as dionaea's. sentrypeer/beelzebub/galah
+    # would each need the equivalent patch in their own language against
+    # their own git-cloned build stage. None of the four were attempted in
+    # this pass for lack of session budget to write, build and verify four
+    # separate patches across three languages -- left as debt rather than
+    # guessed at.
+    # Sizes measured on the homeserver 2026-09-02; 393MiB across these nine.
+    "/logs/sentrypeer": "sentrypeer.json, 94MB and growing, vendored C/Rust writer, no self-rotation knob found in SENTRYPEER_JSON_LOG_FILE's consumer (#2826)",
+    "/logs/beelzebub": "beelzebub.json, 81MB and growing, vendored Go writer (core.yaml's logsPath), no rotation flag in beelzebub's CLI (#2826)",
+    "/logs/conpot": "conpot.json (32MB) has neither half; only conpot.log rotates. Needs a 7th conpot patch file alongside persona_patch.py etc (#2826)",
+    "/logs/conpot-s7-1200": "same conpot.json gap as /logs/conpot, 35MB (#2826)",
+    "/logs/conpot-s7-1500": "same conpot.json gap as /logs/conpot, 31MB (#2826)",
+    "/logs/conpot-iec104": "same conpot.json gap as /logs/conpot, 21MB (#2826)",
+    "/logs/conpot-guardian": "same conpot.json gap as /logs/conpot, 48MB (#2826)",
+    "/logs/conpot-kamstrup": "same conpot.json gap as /logs/conpot, 55MB (#2826)",
+    "/logs/galah": "event_log.json (157KB -- small only because galah sees little traffic, not because anything bounds it), vendored Go writer (ENTRYPOINT's -o flag), no rotation flag exposed (#2826)",
 }
 
 
@@ -289,6 +365,32 @@ def pruner_find_lines(text: str) -> dict[str, set[str]]:
         }
         found.setdefault(match.group(1), set()).update(globs)
     return found
+
+
+def rotate_targets(text: str) -> set[str]:
+    """Every literal `/logs/...` file path log-maintenance.sh's copytruncate
+    rotate() is called on.
+
+    Only literal arguments are collected: the conpot loop's `rotate "$f"`
+    resolves from a glob at runtime and cannot be attributed to a directory
+    from source, so it is skipped rather than guessed at. That is the
+    conservative direction -- an EXEMPT entry can only be proven by a path
+    spelled out in the file, never by one this parser inferred.
+    """
+    return {
+        match.group(1)
+        for match in (
+            re.search(r"^\s*rotate\s+(/logs/\S+)", line)
+            for line in text.splitlines()
+        )
+        if match
+    }
+
+
+def exemption_reason(value: str | dict) -> str:
+    """EXEMPT values are a bare reason string or a dict carrying that reason
+    alongside the mechanism keys checked below."""
+    return value if isinstance(value, str) else value.get("reason", "")
 
 
 def mounted_log_dirs() -> dict[str, list[str]]:
@@ -339,6 +441,7 @@ def main() -> int:
     findings: list[str] = []
     maintenance_text = MAINTENANCE.read_text()
     pruned = pruner_find_lines(maintenance_text)
+    rotated = rotate_targets(maintenance_text)
     mounts = mounted_log_dirs()
 
     for row in ROWS:
@@ -349,13 +452,64 @@ def main() -> int:
                     f"pruner half missing: {MAINTENANCE.relative_to(ROOT)} has "
                     f"no `find {row['dir']} ... -name {glob}` line"
                 )
-        rel_root, tokens = row["writer"]
-        for token in tokens:
-            if not tree_contains(rel_root, token):
+        writer = row["writer"]
+        if writer is None:
+            # #2826: elasticpot's writer is vendor-internal (baked into the
+            # pinned dtagdevsec/elasticpot image), so there is no in-tree
+            # token to grep -- the ROWS ledger still requires a
+            # "writer_note" explaining how the self-rotation was confirmed
+            # (live measurement, not source) rather than silently skipping
+            # the proof.
+            if not row.get("writer_note"):
                 findings.append(
-                    f"writer half missing: no rotation implementation carrying "
-                    f"{token!r} found under {rel_root} (row {row_id})"
+                    f"writer half unproven: row {row_id} has writer=None but "
+                    f"no writer_note explaining how self-rotation was confirmed"
                 )
+        else:
+            rel_root, tokens = writer
+            for token in tokens:
+                if not tree_contains(rel_root, token):
+                    findings.append(
+                        f"writer half missing: no rotation implementation carrying "
+                        f"{token!r} found under {rel_root} (row {row_id})"
+                    )
+
+    # #2826 review: an exemption that asserts a mechanism must prove it, or
+    # the ledger becomes a place to write a coverage claim down instead of a
+    # place to record one. Deleting the rotate() line these three entries name
+    # left the reasons asserting coverage that no longer existed, and the
+    # check stayed green -- exactly the failure this script exists to end.
+    for exempt_dir, value in sorted(EXEMPT.items()):
+        if not exemption_reason(value).strip():
+            findings.append(
+                f"exemption without a reason: EXEMPT claims {exempt_dir} but "
+                f"says nothing about what it holds or why nothing prunes it"
+            )
+        if isinstance(value, str):
+            continue
+        for target in value.get("rotates", []):
+            if not (target == exempt_dir or target.startswith(exempt_dir + "/")):
+                findings.append(
+                    f"exemption mis-attributed: EXEMPT[{exempt_dir}] claims "
+                    f"rotate {target}, which is not inside {exempt_dir}"
+                )
+            elif target not in rotated:
+                findings.append(
+                    f"exemption unproven: EXEMPT[{exempt_dir}] says "
+                    f"log-maintenance.sh rotates {target}, but "
+                    f"{MAINTENANCE.relative_to(ROOT)} has no `rotate {target}` "
+                    f"line -- restore it or reword the exemption"
+                )
+        writer = value.get("writer")
+        if writer:
+            rel_root, tokens = writer
+            for token in tokens:
+                if not tree_contains(rel_root, token):
+                    findings.append(
+                        f"exemption unproven: EXEMPT[{exempt_dir}] claims a "
+                        f"self-bounding writer, but no {token!r} was found "
+                        f"under {rel_root}"
+                    )
 
     # Reverse direction: claim every find line the pruner actually carries.
     for find_dir in sorted(pruned):
