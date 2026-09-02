@@ -90,6 +90,21 @@ class TestNewAlertAnswersWithoutSecondQuery:
         worker.write_anomaly(es, None, ev, SCORES, "explanation")
         assert _written_doc(es)["sensor"] == "dionaea"
 
+    def test_sensor_stays_null_when_absent_from_both_namespaces(self):
+        # #2423 residue item 2: a zeek v1-conn document carries no sensor
+        # identity anywhere (no top-level "sensor", no "event.sensor").
+        # sensor must stay honestly null rather than defaulting to a guess,
+        # while the rest of the context still lands from the flow fields.
+        es = _writing_es(get_error=NotFoundError("absent", None, {"found": False}))
+        ev = _event()
+        del ev["_source"]["sensor"]
+        worker.write_anomaly(es, None, ev, SCORES, "explanation")
+        doc = _written_doc(es)
+        assert doc.get("sensor") is None
+        assert doc["dst_ip"] == "192.168.1.50"
+        assert doc["src_port"] == 51234
+        assert doc["community_id"] == "1:synthetic-flow-key"
+
 
 class TestDispositionSurvivesScoringRewrites:
     def test_operator_verdict_survives_a_deterministic_replay(self):
