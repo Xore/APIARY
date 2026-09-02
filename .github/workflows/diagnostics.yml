@@ -127,7 +127,15 @@ jobs:
           report '```'
 
           # HP_BIND is an internal WireGuard address; read it, never print it.
-          bind=$(sed -n 's/^HP_BIND=//p' "$stack/.env" 2>/dev/null | head -1)
+          # `$stack` ("/opt/stacks/apiary") is the deploy runner's own repo
+          # checkout, not a deployed Compose stack -- it has no .env of its
+          # own (#2779), so this read is expected to miss on every run and
+          # fall through to the fallback below, which already matches every
+          # real stack's HP_BIND value. Actions' default step shell runs
+          # with `-e`, so a bare `sed` on a missing file (exit 2, even with
+          # stderr suppressed) kills the whole step here instead of falling
+          # through -- `|| true` on the substitution keeps this a soft miss.
+          bind=$(sed -n 's/^HP_BIND=//p' "$stack/.env" 2>/dev/null | head -1) || true
           bind=${bind:-10.8.0.2}
 
           section "Dashboard"
@@ -151,7 +159,12 @@ jobs:
           report 'The backend derives these from its own tail plus a live Elasticsearch query,'
           report 'so a coherent set here is the end-to-end pipeline check Gate 0 asks for.'
           report '```'
-          token=$(sed -n 's/^DASHBOARD_SERVICE_TOKEN=//p' /opt/stacks/honeypot-dashboard/.env 2>/dev/null | head -1)
+          # Same class of bug as the HP_BIND read above (#2779): guard against
+          # `bash -e` killing the step outright if this file is ever absent,
+          # so a missing token falls through to the empty-token branch below
+          # instead of aborting before the Elasticsearch/Suricata/Filebeat
+          # sections ever run.
+          token=$(sed -n 's/^DASHBOARD_SERVICE_TOKEN=//p' /opt/stacks/honeypot-dashboard/.env 2>/dev/null | head -1) || true
           if [ -z "$token" ]; then
             alert "metrics unavailable: no DASHBOARD_SERVICE_TOKEN in /opt/stacks/honeypot-dashboard/.env"
           elif source_health=$(curl -fsS --max-time 15 -H "X-Service-Token: $token" \
