@@ -103,6 +103,32 @@ func getenvInt64(k string, def int64) int64 {
 	}
 	return def
 }
+
+func getenvInt(k string, def int) int {
+	if v := os.Getenv(k); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+const maxAcceptBackoff = time.Second
+
+// nextAcceptBackoff returns the next Accept() retry delay given the
+// previous one: start small, double each consecutive failure, cap at
+// maxAcceptBackoff. Ported verbatim from endlessh-honeypot/main.go (#2328).
+func nextAcceptBackoff(prev time.Duration) time.Duration {
+	if prev == 0 {
+		return 5 * time.Millisecond
+	}
+	next := prev * 2
+	if next > maxAcceptBackoff {
+		return maxAcceptBackoff
+	}
+	return next
+}
+
 func (l *logger) emit(e event) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -276,10 +302,41 @@ func main() {
 		ln = &proxyListener{ln}
 	}
 	log := newLogger(os.Getenv("LOG_PATH"))
+
+	// maxClients bounds concurrent held connections, mirroring
+	// endlessh-honeypot's own default (4096): a botnet opening far more
+	// connections than this host has file descriptors for would otherwise
+	// turn the honeypot into a self-inflicted resource problem instead of
+	// the scanner's (#2328).
+	maxClients := getenvInt("MAX_CLIENTS", 4096)
+	sem := make(chan struct{}, maxClients)
+
+	// acceptBackoff mirrors net/http.Server.Serve's own tempDelay handling
+	// (and endlessh-honeypot's port of it, #2328): the previous
+	// `if err == nil { go serve(...) }` shape retried an EMFILE-class
+	// Accept() error unconditionally with no delay, spinning a CPU core at
+	// 100% accepting nothing once a botnet holds enough connections to
+	// exhaust this container's fd ulimit. Back off (and log) instead.
+	var acceptBackoff time.Duration
 	for {
 		c, err := ln.Accept()
-		if err == nil {
-			go serve(c, log)
+		if err != nil {
+			acceptBackoff = nextAcceptBackoff(acceptBackoff)
+			log.emit(event{Port: 20000, Event: "accept_error", Data: err.Error() + "; retrying in " + acceptBackoff.String()})
+			time.Sleep(acceptBackoff)
+			continue
+		}
+		acceptBackoff = 0
+		select {
+		case sem <- struct{}{}:
+			go func() {
+				defer func() { <-sem }()
+				serve(c, log)
+			}()
+		default:
+			// At capacity -- close immediately rather than queueing
+			// indefinitely, the same choice endlessh-honeypot makes.
+			c.Close()
 		}
 	}
 }

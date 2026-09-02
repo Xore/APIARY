@@ -175,7 +175,7 @@ func TestServeSkipsLoggingOwnHealthcheck(t *testing.T) {
 
 	go serve(service{proto: "test", port: testPort, handler: func(net.Conn, *sessionLogger, int) {
 		handlerCalled <- struct{}{}
-	}}, log, false)
+	}}, log, false, make(chan struct{}, 4096))
 
 	// Give the listener a moment to come up before dialing it.
 	var conn net.Conn

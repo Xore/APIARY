@@ -149,6 +149,15 @@ func getenvInt64(k string, def int64) int64 {
 	return def
 }
 
+func getenvInt(k string, def int) int {
+	if v := os.Getenv(k); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
 func getenv(k, def string) string {
 	if v := strings.TrimSpace(os.Getenv(k)); v != "" {
 		return v
@@ -308,12 +317,38 @@ func main() {
 	log := newLogger(getenv("LOG_FILE", "/var/log/honeypot/rdp-honeypot.json"))
 	log.emit(event{Port: port, Event: "listening"})
 
+	// maxClients bounds concurrent held connections, mirroring
+	// endlessh-honeypot's own default (4096, see main.go there): a botnet
+	// opening far more connections than this host has file descriptors for
+	// would otherwise turn the honeypot into a self-inflicted resource
+	// problem instead of the scanner's (#2328).
+	maxClients := getenvInt("MAX_CLIENTS", 4096)
+	sem := make(chan struct{}, maxClients)
+
+	// acceptBackoff mirrors net/http.Server.Serve's own tempDelay handling
+	// (and endlessh-honeypot's port of it, #2328): a bare
+	// `if err != nil { continue }` retries an EMFILE-class Accept() error
+	// unconditionally, spinning a CPU core at 100% accepting nothing once a
+	// botnet holds enough connections to exhaust this container's fd
+	// ulimit. Back off (and log) instead.
+	var acceptBackoff time.Duration
 	for {
 		c, err := ln.Accept()
 		if err != nil {
+			acceptBackoff = nextAcceptBackoff(acceptBackoff)
+			log.emit(event{Port: port, Event: "accept_error", Data: err.Error() + "; retrying in " + acceptBackoff.String()})
+			time.Sleep(acceptBackoff)
 			continue
 		}
-		spawnServe(c, proxy, log, port)
+		acceptBackoff = 0
+		select {
+		case sem <- struct{}{}:
+			spawnServe(c, proxy, log, port, func() { <-sem })
+		default:
+			// At capacity -- close immediately rather than queueing
+			// indefinitely, the same choice endlessh-honeypot makes.
+			c.Close()
+		}
 	}
 }
 
@@ -324,7 +359,28 @@ func main() {
 // decode on the shared accept loop before serve ever started -- one
 // silent connection stalled admission of every other connection for up
 // to 5s each (the same defect #1346 fixed in cisco-asa and #2099 ports
-// into citrix/endlessh/http/dnp3).
-func spawnServe(c net.Conn, proxy bool, log *logger, port int) {
-	go handleConn(c, proxy, log, port)
+// into citrix/endlessh/http/dnp3). release (#2328) frees the caller's
+// MAX_CLIENTS semaphore slot when the connection is fully done, not when
+// spawnServe returns -- spawnServe itself must still return immediately.
+func spawnServe(c net.Conn, proxy bool, log *logger, port int, release func()) {
+	go func() {
+		defer release()
+		handleConn(c, proxy, log, port)
+	}()
+}
+
+const maxAcceptBackoff = time.Second
+
+// nextAcceptBackoff returns the next Accept() retry delay given the
+// previous one: start small, double each consecutive failure, cap at
+// maxAcceptBackoff. Ported verbatim from endlessh-honeypot/main.go (#2328).
+func nextAcceptBackoff(prev time.Duration) time.Duration {
+	if prev == 0 {
+		return 5 * time.Millisecond
+	}
+	next := prev * 2
+	if next > maxAcceptBackoff {
+		return maxAcceptBackoff
+	}
+	return next
 }

@@ -45,6 +45,12 @@ services:
       # Parse the PROXY header portbridge prepends (:pp rules) so every event
       # carries the real attacker IP instead of the tunnel peer 10.8.0.1.
       - PROXY_PROTOCOL=1
+      # #2328: caps concurrent held connections, shared across every
+      # protocol multipot serves, so a botnet holding enough of them to
+      # exhaust this container's fd ulimit can't turn any one listener's
+      # Accept() into a permanent EMFILE hot-spin. Same default as
+      # endlessh-honeypot.
+      - MAX_CLIENTS=4096
       - TZ=Europe/Berlin
     security_opt:
       - no-new-privileges:true

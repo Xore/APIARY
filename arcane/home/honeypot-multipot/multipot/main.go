@@ -199,6 +199,31 @@ func getenvInt64(k string, def int64) int64 {
 	return def
 }
 
+func getenvInt(k string, def int) int {
+	if v := os.Getenv(k); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+const maxAcceptBackoff = time.Second
+
+// nextAcceptBackoff returns the next Accept() retry delay given the
+// previous one: start small, double each consecutive failure, cap at
+// maxAcceptBackoff. Ported verbatim from endlessh-honeypot/main.go (#2328).
+func nextAcceptBackoff(prev time.Duration) time.Duration {
+	if prev == 0 {
+		return 5 * time.Millisecond
+	}
+	next := prev * 2
+	if next > maxAcceptBackoff {
+		return maxAcceptBackoff
+	}
+	return next
+}
+
 // waitForMarker blocks until path exists, polling every 3s. See #128.
 func waitForMarker(path string) {
 	for {
@@ -269,19 +294,43 @@ func services() []service {
 	return out
 }
 
-func serve(s service, log *logger, proxy bool) {
+// serve runs one protocol's accept loop. sem is shared across every
+// protocol's serve() goroutine (#2328): the fd ulimit and CPU quota it
+// guards against are process-wide, not per-listener, so one protocol under
+// scan pressure must draw down the same budget as the rest.
+func serve(s service, log *logger, proxy bool, sem chan struct{}) {
 	ln, err := net.Listen("tcp", ":"+strconv.Itoa(s.port))
 	if err != nil {
 		log.emit(event{Proto: s.proto, Port: s.port, Event: "listen_error", Data: err.Error()})
 		return
 	}
 	log.emit(event{Proto: s.proto, Port: s.port, Event: "listening"})
+	// acceptBackoff mirrors net/http.Server.Serve's own tempDelay handling
+	// (and endlessh-honeypot's port of it): a bare
+	// `if err != nil { continue }` retries an EMFILE-class Accept() error
+	// unconditionally, spinning a CPU core at 100% accepting nothing once a
+	// botnet holds enough connections to exhaust this container's fd
+	// ulimit. Back off (and log) instead.
+	var acceptBackoff time.Duration
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
+			acceptBackoff = nextAcceptBackoff(acceptBackoff)
+			log.emit(event{Proto: s.proto, Port: s.port, Event: "accept_error", Data: err.Error() + "; retrying in " + acceptBackoff.String()})
+			time.Sleep(acceptBackoff)
+			continue
+		}
+		acceptBackoff = 0
+		select {
+		case sem <- struct{}{}:
+		default:
+			// At capacity -- close immediately rather than queueing
+			// indefinitely, the same choice endlessh-honeypot makes.
+			conn.Close()
 			continue
 		}
 		go func() {
+			defer func() { <-sem }()
 			// #2186: protocol handlers parse attacker bytes directly on this
 			// goroutine with no recover underneath, and in Go one unrecovered
 			// panic kills the whole binary -- every listener with it, while
@@ -343,12 +392,21 @@ func main() {
 	log := newLogger(getenv("LOG_FILE", "/var/log/honeypot/multipot.json"))
 	proxy := getenv("PROXY_PROTOCOL", "") == "1"
 
+	// maxClients bounds concurrent held connections across ALL of
+	// multipot's protocols combined, mirroring endlessh-honeypot's own
+	// default (4096): a botnet opening far more connections than this
+	// host has file descriptors for would otherwise turn the honeypot
+	// into a self-inflicted resource problem instead of the scanner's
+	// (#2328). Shared, not per-protocol, because the fd ulimit and CPU
+	// quota it guards are process-wide.
+	sem := make(chan struct{}, getenvInt("MAX_CLIENTS", 4096))
+
 	var wg sync.WaitGroup
 	for _, s := range services() {
 		wg.Add(1)
 		go func(s service) {
 			defer wg.Done()
-			serve(s, log, proxy)
+			serve(s, log, proxy, sem)
 		}(s)
 	}
 	log.emit(event{Proto: "-", Event: "multipot_started", Data: strconv.Itoa(len(services())) + " listeners"})
