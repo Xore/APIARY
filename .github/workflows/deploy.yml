@@ -273,8 +273,12 @@ jobs:
             --exclude 'secrets/' \
             -e "ssh ${ssh_options[*]}" vps/ "${VPS_USER:-root}@${VPS_HOST}:/root/vps/"
 
+          # --remove-orphans: a service removed from docker-compose.yml
+          # otherwise leaves its container running forever -- #2813 found
+          # socat-hp-wordpot still up a week after wordpot's retirement
+          # (#2469) removed its forwarder rule from this file.
           ssh "${ssh_options[@]}" "${VPS_USER:-root}@${VPS_HOST}" \
-            'cd /root/vps && { test ! -f .env || chmod 600 .env; } && docker compose -f docker-compose.yml config --quiet && docker compose -f docker-compose.yml up -d --build'
+            'cd /root/vps && { test ! -f .env || chmod 600 .env; } && docker compose -f docker-compose.yml config --quiet && docker compose -f docker-compose.yml up -d --build --remove-orphans'
 
       - name: Deploy Traefik dynamic config with the real domain substituted
         shell: bash

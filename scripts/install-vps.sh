@@ -498,7 +498,7 @@ step_compose_up() {
   cd /root/vps || return 1
   { test ! -f .env || chmod 600 .env; }
   docker compose -f docker-compose.yml config --quiet
-  docker compose -f docker-compose.yml up -d --build
+  docker compose -f docker-compose.yml up -d --build --remove-orphans
 }
 
 step_wireguard_verify() {
@@ -584,7 +584,7 @@ run_step capture-interface       "Pin the capture NIC to this host's own name" s
 run_step restore-certs           "Restore Traefik origin certs from LAN backup" step_restore_certs
 run_step render-traefik-dynamic  "Substitute real domain into dynamic.yml" step_render_traefik_dynamic
 run_step prepare-log-dirs        "Create host-side log/pcap directories"   step_prepare_log_dirs
-run_step compose-up              "docker compose up -d --build"            step_compose_up
+run_step compose-up              "docker compose up -d --build --remove-orphans" step_compose_up
 run_step wireguard-verify        "Verify wg0 interface is up"              step_wireguard_verify
 run_step verify-containers       "Verify no unhealthy/restarting containers" step_verify_containers_healthy
 
