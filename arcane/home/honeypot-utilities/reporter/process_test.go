@@ -164,3 +164,29 @@ func TestProcessorIgnoresLinesWithNoIP(t *testing.T) {
 		t.Fatalf("a line with no IP should produce no audit entry at all, got: %s", audit.String())
 	}
 }
+
+// TestResetHitsIfStaleClearsAfterCooldownNotBefore covers #2342: the
+// in-memory hits map must be cleared once per cooldown window (bounding
+// its growth for a reporter that runs for months without a restart), but
+// not before -- clearing early would let an attacker dodge the min-hits
+// threshold by pausing between probes for less than a cooldown.
+func TestResetHitsIfStaleClearsAfterCooldownNotBefore(t *testing.T) {
+	proc, _ := newTestProcessor(t, 1) // 24h cooldown, per newTestProcessor
+	proc.hits["203.0.113.7"] = 5
+
+	t0 := time.Now()
+	proc.resetHitsIfStale(t0)
+	if proc.hits["203.0.113.7"] != 5 {
+		t.Fatal("the first call (hitsResetAt was zero) must only initialize the clock, not clear hits")
+	}
+
+	proc.resetHitsIfStale(t0.Add(23 * time.Hour))
+	if proc.hits["203.0.113.7"] != 5 {
+		t.Fatal("hits must survive a call inside the cooldown window")
+	}
+
+	proc.resetHitsIfStale(t0.Add(25 * time.Hour))
+	if len(proc.hits) != 0 {
+		t.Fatalf("hits must be cleared once cooldown has elapsed, still has %d entries", len(proc.hits))
+	}
+}
