@@ -161,12 +161,49 @@ a stack means:
    a repo grep — the repo can be fully clean while the live fleet still
    isn't.
 
-## Known Arcane v2.8.0 limitations, confirmed live
+## Known Arcane limitations, confirmed live
 
 These are platform behaviors, not something fixable from a compose file
 alone. Re-verify against whatever Arcane version is pinned in
 `docker-compose.arcane.yml` if it's ever upgraded.
 
+- **`"project directory is not inside a mounted directory"` is a false
+  warning against every stack with a relative bind-mount source, under
+  Arcane's identity bind mount (`/var/dockge/stacks -> /var/dockge/stacks`)
+  (#2712).** Traced to Arcane's own source
+  (`getarcaneapp/arcane` pinned `v2.9.0`, `pkg/projects/path_mapper.go`):
+  `hostWorkingDirInternal`'s `ContainerToHost` call treats
+  `hostWorkingDir == containerWorkingDir` as failure —
+  ```go
+  if hostWorkingDir == "" || filepath.Clean(hostWorkingDir) == filepath.Clean(containerWorkingDir) {
+      slog.WarnContext(ctx, "project directory is not inside a mounted directory...")
+      return "", false
+  }
+  ```
+  — even though that equality is the *correct* answer for an identity bind
+  mount, not evidence of a broken one. `ProjectsDirectory` is the wrong
+  knob (it governs an unrelated subsystem, `pkg/projects/fs_util.go`); there
+  is no per-message log-suppression Arcane exposes, and `hp-arcane`'s
+  container logs aren't ingested into this repo's ELK pipeline (it tails
+  application log files, not `docker logs` streams), so there is no
+  repo-side filter either. Fires for exactly the 9 stacks with at least one
+  relative-source bind mount under this identity mount (`honeypot-cowrie`,
+  `honeypot-dionaea`, `honeypot-elk`, `honeypot-init`, `honeypot-keycloak`,
+  `honeypot-payload-analysis`, `honeypot-tanner`, `honeypot-utilities`,
+  `pihole`) — every relative mount on the 7 of those 9 with running
+  containers was confirmed to resolve to its real, existing host path, zero
+  missing-on-host mounts. (`pihole` and `honeypot-keycloak` were the two
+  without running containers, so their mounts were reasoned from the same
+  identity-mount arithmetic rather than observed — #2853, #2764. `pihole`
+  has since been replaced by `technitium` in the manifest, #2911; the
+  warning's mechanism is per-relative-mount and unchanged by the swap, but
+  the stack name in this list is the pre-#2911 one.) **Decision: live with it — this repo has no fix
+  available, and the warning is confirmed harmless.** Re-verified live
+  2026-09-03: still firing at the same 9 stacks, ~1 warning per relative
+  mount per sync. Not reported upstream (`getarcaneapp/arcane`) as of this
+  writing — posting to a third-party repo needs separate authorization this
+  work didn't have; the code citation above is what to attach if that's
+  ever decided.
 - **A `:?required` compose variable used inside a port-binding host-IP
   position breaks Arcane's own compose validator.** The same `:?required`
   pattern works correctly inside an `environment:` block (Arcane surfaces
