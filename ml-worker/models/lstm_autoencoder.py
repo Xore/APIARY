@@ -38,7 +38,7 @@ torch.set_num_threads(1)
 
 from models.isolation_forest import (
     _get_ip, _get_port, _get_transport_proto, _proto_enc, _ts_to_hour,
-    _accept_decision, HOLDOUT_FRACTION, HOLDOUT_MIN, MAX_CMD_COUNT,
+    _accept_decision, _percentile_normalize, HOLDOUT_FRACTION, HOLDOUT_MIN, MAX_CMD_COUNT,
     RetrainResult,
 )
 from models.session_features import compute_batch_session_features
@@ -178,6 +178,13 @@ class LSTMAEModel:
         self.device    = torch.device("cpu")
         self.net       = BiLSTMAE().to(self.device)
         self.threshold = 0.05  # initial reconstruction loss threshold
+        # #2894: p50/p99 of THIS model's own holdout reconstruction loss,
+        # recomputed every accepted retrain -- see score()'s own comment
+        # for why the fixed-divisor formula this replaces saturated.
+        # None until the first accepted retrain (or a model saved before
+        # this existed is loaded); score() falls back to the old formula
+        # in that case, same posture isolation_forest.py's hp_calib takes.
+        self.calib: "dict | None" = None
         # Per-IP sliding window buffers: ip → deque of feature vectors
         self._buffers: dict = collections.defaultdict(
             lambda: collections.deque(maxlen=SEQ_LEN)
@@ -265,7 +272,23 @@ class LSTMAEModel:
             logger.warning(f"LSTM-AE inference failed for {ip}, abstaining (no opinion, excluded from the composite): {exc}")
             return None
 
-        # Normalise: above threshold → score > 0.5
+        # #2894: percentile-anchored normalisation, mirroring
+        # isolation_forest.py's #174 fix for the identical failure mode.
+        # The fixed-divisor formula this replaces (`min(loss / (threshold
+        # * 4), 1.0)`) saturated at the 1.0 ceiling for real production
+        # traffic -- measured live against 7 days / 1.2M real alerts
+        # (2026-09-03): mean lstm_ae score 0.9966, 92.9% of alerts sitting
+        # at exactly 1.0. #174's own finding for IsoForest/HBOS before its
+        # fix was the same shape (100% saturated in a 4000-event sample) --
+        # a fixed constant assuming a hand-picked "typical loss range" goes
+        # stale the moment real reconstruction losses run higher than that
+        # guess, same as HBOS's old /10 divisor did.
+        if self.calib is not None:
+            return _percentile_normalize(loss, self.calib["p50"], self.calib["p99"], lower_is_more_anomalous=False)
+        # Fallback for a model saved before this existed (no calib
+        # attached yet) -- the original fixed-range formula, kept only so
+        # an in-flight model isn't left with no score() until its next
+        # accepted retrain computes real anchors.
         return float(min(loss / (self.threshold * 4), 1.0))
 
     def retrain(self, sources: list) -> RetrainResult:
@@ -413,6 +436,21 @@ class LSTMAEModel:
         if accept:
             self.threshold = candidate_threshold
             self._trained = True
+            # #2894: recalibrate score()'s normalisation anchors from this
+            # accepted candidate's own holdout reconstruction loss, same
+            # holdout split _anomaly_rate just scored above -- p50/p99 of
+            # the SAME distribution the acceptance decision itself used,
+            # not a fresh measurement of anything.
+            if len(X_holdout) > 0:
+                self.net.eval()
+                with torch.no_grad():
+                    recon = self.net(X_holdout)
+                    holdout_losses = nn.functional.mse_loss(recon, X_holdout, reduction="none").mean(dim=(1, 2))
+                holdout_losses = holdout_losses.cpu().numpy()
+                self.calib = {
+                    "p50": float(np.percentile(holdout_losses, 50)),
+                    "p99": float(np.percentile(holdout_losses, 99)),
+                }
             self._save(result)
         else:
             self.net.load_state_dict(original_state)  # undo the in-place fine-tune
@@ -433,7 +471,7 @@ class LSTMAEModel:
         ts   = int(time.time())
         path = os.path.join(self.model_dir, f"lstm_ae_{ts}.pt")
         os.makedirs(self.model_dir, exist_ok=True)
-        torch.save({"model": self.net.state_dict(), "threshold": self.threshold}, path)
+        torch.save({"model": self.net.state_dict(), "threshold": self.threshold, "calib": self.calib}, path)
         link = os.path.join(self.model_dir, "current_lstm_ae.pt")
         _symlink(path, link)  # atomic promotion (#169) -- shared with IsoForestModel
         # Version metadata + retention (#65, docs/ml-worker-plan.md §11.3) --
@@ -447,6 +485,7 @@ class LSTMAEModel:
             ckpt = torch.load(link, map_location=self.device)
             self.net.load_state_dict(ckpt["model"])
             self.threshold = ckpt.get("threshold", 0.05)
+            self.calib = ckpt.get("calib")  # #2894: absent on a pre-#2894 checkpoint
             self._trained = True
 
     def _buffers_path(self) -> str:

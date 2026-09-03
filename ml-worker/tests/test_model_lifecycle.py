@@ -24,7 +24,7 @@ import models.isolation_forest as iso_mod  # noqa: E402
 import models.lstm_autoencoder as lstm_mod  # noqa: E402
 import worker  # noqa: E402
 from models.isolation_forest import CONTAMINATION, IsoForestModel, RetrainResult  # noqa: E402
-from models.lstm_autoencoder import LSTMAEModel  # noqa: E402
+from models.lstm_autoencoder import LSTMAEModel, SEQ_LEN  # noqa: E402
 from models import lifecycle  # noqa: E402
 
 
@@ -33,6 +33,19 @@ def _lstm_sources(n=140):
     (n - SEQ_LEN + 1) to clear BATCH_SIZE + HOLDOUT_MIN for a real
     train/holdout split."""
     return [fixtures._cowrie_command_at(i * 2.0, f"cmd-{i}")["_source"] for i in range(n)]
+
+
+def _replay_window(model, events):
+    """Push a full window through the real `LSTMAEModel.score()` entry point
+    from a clean per-IP buffer and return the last score. Used instead of
+    recomputing a normalisation formula inline, so the production branch is
+    what gets exercised."""
+    model._buffers.clear()
+    model._last_seen.clear()
+    score = None
+    for source in events:
+        score = model.score(source)
+    return score
 
 
 def _lstm_sources_with_shifted_tail(n_normal=150, n_shift=70):
@@ -277,6 +290,117 @@ class TestRetrainAttachesCalibration:
         for name, values in [("iso", iso_scores), ("hbos", hbos_scores)]:
             assert not all(v == 1.0 for v in values), f"{name} scores must not all saturate at the ceiling post-calibration"
             assert len(set(values)) > 1, f"{name} scores must show real spread across genuinely different inputs, not a single tied value"
+
+
+class TestLstmRetrainAttachesCalibration:
+    """#2894: the identical failure mode #174 already fixed for
+    IsoForest/HBOS (TestRetrainAttachesCalibration above), found live in
+    LSTMAEModel.score()'s own fixed-divisor formula
+    (`min(loss / (threshold * 4), 1.0)`): measured against 7 days / 1.2M
+    real production alerts on 2026-09-03, mean lstm_ae score 0.9966, 92.9%
+    of alerts pinned at exactly the 1.0 ceiling. Same fix, same shape:
+    p50/p99 anchors computed from the accepted candidate's own holdout
+    reconstruction-loss distribution, persisted alongside the model."""
+
+    def test_accepted_retrain_attaches_calibration_to_lstm(self, tmp_path):
+        torch.manual_seed(12)
+        model = LSTMAEModel(model_dir=str(tmp_path))
+        result = model.retrain(_lstm_sources(n=150))
+        assert result.accepted is True
+        assert model.calib is not None
+        assert "p50" in model.calib and "p99" in model.calib
+
+    def test_lstm_calibration_survives_a_save_and_reload(self, tmp_path):
+        torch.manual_seed(12)
+        model = LSTMAEModel(model_dir=str(tmp_path))
+        model.retrain(_lstm_sources(n=150))
+        original_calib = model.calib
+
+        reloaded = LSTMAEModel(model_dir=str(tmp_path))
+        assert reloaded.calib == original_calib
+
+    def test_lstm_scores_no_longer_saturate_after_a_calibrated_retrain(self, tmp_path):
+        # The actual live symptom this issue reports, reproduced at the
+        # measured real-world shape rather than hoped for from a stochastic
+        # fine-tune: queried live against 7 days / 1.2M real production
+        # alerts (homeserver, 2026-09-03), the OLD fixed-divisor formula
+        # (`min(loss / (threshold * 4), 1.0)`) put 92.9% of scored events
+        # at exactly 1.0, mean 0.9966 -- i.e. most real reconstruction
+        # losses run well past 4x the retrain-time mean training loss.
+        # Model these same proportions directly as reconstruction-loss
+        # values (most well past old_threshold*4, a few near/below it),
+        # which is deterministic and immune to how much discriminating
+        # power one particular unseeded/short synthetic fine-tune happens
+        # to produce (the BiLSTMAE integration path above already proves
+        # calibration attaches and survives reload; this proves the
+        # SATURATION claim itself, old formula vs new, on the same inputs).
+        old_threshold = 0.05
+        losses = [0.06, 0.30, 0.45, 0.60, 0.90, 1.20, 1.80, 2.20, 2.50, 4.00]  # mirrors the live shape: mostly saturating
+
+        old_scores = [min(loss / (old_threshold * 4), 1.0) for loss in losses]
+        saturated_fraction = sum(1 for s in old_scores if s == 1.0) / len(old_scores)
+        assert saturated_fraction >= 0.9, (
+            "test fixture must reproduce the live saturation shape (>=90% at the 1.0 ceiling) "
+            "for this to be a faithful regression test of the reported defect"
+        )
+
+        p50, p99 = float(np.percentile(losses, 50)), float(np.percentile(losses, 99))
+        new_scores = [iso_mod._percentile_normalize(loss, p50, p99, lower_is_more_anomalous=False) for loss in losses]
+
+        assert not all(s == 1.0 for s in new_scores), \
+            "percentile-calibrated scores must not all saturate at the ceiling the way the old formula did"
+        assert len(set(new_scores)) > 1, \
+            "percentile-calibrated scores must show real spread across genuinely different loss values"
+        # The formula comparison above is arithmetic, not coverage -- it
+        # never calls LSTMAEModel.score(). The test below does, and is what
+        # fails if score()'s calibration branch is disabled.
+
+    def test_score_normalises_through_the_calibration_not_the_fixed_divisor(self, tmp_path):
+        """The guardrail for the fix itself, on the production entry point.
+
+        Reverting score() to the fixed-divisor formula -- or short-circuiting
+        the `if self.calib is not None` branch -- makes this fail, which the
+        formula-comparison test above cannot do. Deterministic: one seeded
+        fine-tune, the same window replayed through score() three times with
+        only `calib`/`threshold` changed between replays, and the expected
+        value derived from the model's own measured reconstruction loss
+        rather than hardcoded.
+        """
+        torch.manual_seed(12)
+        model = LSTMAEModel(model_dir=str(tmp_path))
+        assert model.retrain(_lstm_sources(n=150)).accepted is True
+        assert model.calib is not None
+        p50, p99 = model.calib["p50"], model.calib["p99"]
+
+        window = _lstm_sources(n=SEQ_LEN)
+        calibrated = _replay_window(model, window)
+        assert calibrated is not None, "a trained model must have an opinion on a full window"
+
+        # Same weights, same window, calibration removed -> the pre-#2894
+        # fallback. Different answer for identical input is what proves the
+        # calibrated branch is the one that ran.
+        model.calib = None
+        uncalibrated = _replay_window(model, window)
+        assert calibrated != uncalibrated, (
+            "score() returned the same value with and without self.calib -- the calibration "
+            "branch is not being taken, so the fix is inert on the production path"
+        )
+
+        # threshold * 4 == 1.0 makes the fallback return this window's raw
+        # reconstruction loss unchanged, which is how the expected value
+        # below is derived instead of being hardcoded.
+        model.threshold = 0.25
+        raw_loss = _replay_window(model, window)
+        assert 0.0 < raw_loss < 1.0, f"raw reconstruction loss out of the range this derivation assumes: {raw_loss}"
+        assert calibrated == pytest.approx(
+            iso_mod._percentile_normalize(raw_loss, p50, p99, lower_is_more_anomalous=False)
+        ), "score() must normalise this loss through self.calib's p50/p99 anchors"
+
+        # The live symptom, on the real path: with no calibration, any loss
+        # above threshold * 4 -- 92.9% of scored events in the 7-day/1.2M
+        # measurement -- pins at exactly the 1.0 ceiling.
+        model.threshold = raw_loss / 8.0
+        assert _replay_window(model, window) == 1.0
 
 
 class TestBatchedScoringMatchesPerRow:
