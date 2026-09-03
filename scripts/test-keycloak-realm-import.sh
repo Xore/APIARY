@@ -33,7 +33,20 @@ kc_port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0));
 rendered_realm="$(mktemp)"
 
 cleanup() {
-  docker rm -f "${kc}" "${pg}" >/dev/null 2>&1 || true
+  # -v matters: postgres:18.4-bookworm declares an anonymous VOLUME for
+  # /var/lib/postgresql and redis:7-alpine one for /data. Without -v,
+  # `docker rm -f` deletes the container but leaves that volume behind,
+  # dangling and unnamed, on every run.
+  #
+  # Four scripts in the quality.yml matrix share this trap and leak six
+  # anonymous volumes per full run between them: test-keycloak-realm-import.sh
+  # (1 postgres), test-oauth2-proxy-gateway-resilience.sh (1 postgres),
+  # test-dashboard-oidc-pkce-totp-login.sh (1 postgres + 1 redis) and
+  # test-dashboard-oidc-chaos.sh (1 postgres + 1 redis). All four are fixed
+  # together; the 913 dangling volumes (52+ GB) that #2859's disk audit
+  # found already on the homeserver came from all four, not from any one of
+  # them, and are filed as #2904 for removal.
+  docker rm -fv "${kc}" "${pg}" >/dev/null 2>&1 || true
   docker network rm "${network}" >/dev/null 2>&1 || true
   rm -f "${rendered_realm}"
 }
