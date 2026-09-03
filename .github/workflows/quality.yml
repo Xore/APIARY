@@ -746,6 +746,24 @@ jobs:
               # rotation/data-loss behavior.
               python arcane/home/honeypot-dionaea/dionaea/tests/test_log_rotation_patch.py
 
+          - name: Conpot PROXY-protocol accept-race patch (#2883)
+            home: true
+            run: |
+              # #2883: the peek used to run in gevent's Hub context
+              # (StreamServer.do_read), which cannot block to wait for a
+              # header that hasn't landed yet from across the WireGuard
+              # tunnel -- misattributing conpot TCP sessions to the tunnel
+              # peer. The share is load-dependent (~25-53% of NEW_CONNECTION
+              # events during scanning bursts, ~0% on quiet days), not the
+              # flat ~35% the issue headlines. This suite checks the patch
+              # applies/is idempotent, exercises the header-parsing logic
+              # against fake sockets, and covers the do_handle restructuring
+              # itself against a faithful stand-in for gevent's spawn/close
+              # contract -- what a stdlib-only suite cannot fake is gevent's
+              # real greenlet scheduling, which was exercised live against
+              # the pinned image instead.
+              python arcane/home/honeypot-conpot/conpot/tests/test_proxy_patch.py
+
           - name: HellPot X-Forwarded-For trust patch (#1876)
             home: true
             run: |
