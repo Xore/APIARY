@@ -61,8 +61,19 @@ mechanism doesn't appear silently:
    starts (entrypoints poll `log-init.done`).
 2. **Arcane** provisions a few dirs at deploy time with its own
    uid/gid (`994:979`) — consumers join that group explicitly.
-3. **Docker autocreate** covers root-writer-only paths (e.g.
-   zeek-proxy-extract): harmless only because that writer runs as root.
+3. **Docker autocreate** covers root-writer-only paths: nothing mkdirs
+   them and nothing chowns them, so Docker creates the bind source
+   root-owned on first start and it works only because the writer is
+   root. Live example (measured 2026-09-02): `state/extracted-files` is
+   `0:979` — owner from the autocreate, group inherited from the setgid
+   `state/` parent — and its writer, `extracted-file-importer`, is root
+   only because `python:3.12-alpine` declares no `USER`. That is the
+   shape of the dependency every time: implicit, never declared, so a
+   grep for `user:` will not find it. `zeek-proxy-extract` was the
+   example here until #2521 added it to honeypot-init's mkdir list on
+   2026-08-27; only its *creation* moved to mechanism 1, no chown line
+   came with it, so it is still `root:root` and still safe only because
+   zeek-proxy runs as root.
 
 ## Elasticsearch
 
