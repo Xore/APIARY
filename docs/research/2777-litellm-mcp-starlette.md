@@ -53,10 +53,17 @@ it cannot even be pointed at a hosted proxy. There is no LiteLLM proxy, no
 `/mcp-rest/test/*` surface, and nothing for CVE-2026-42271 or
 CVE-2026-59822 to land on. **This half of the original claim stands.**
 
-### 0.2 Starlette — present, at an affected version, and internet-reachable
+### 0.2 Starlette — present, at an affected version, and (as first written) believed internet-reachable
+
+> **Superseded in part (2026-09-03, #2866).** The "internet-reachable" half of this
+> heading and the two sentences it rests on are wrong. The corrected route analysis is
+> the 2026-09-03 correction at the end of §0.3 — read it before relying on anything in
+> this section. The Starlette *version* finding below is unaffected and still holds.
 
 `hp-canarytokens-frontend` and `hp-canarytokens-switchboard` are live
-`uvicorn`/FastAPI (hence Starlette) services, both from the same image
+`uvicorn`/FastAPI (hence Starlette) services *(superseded — see the
+2026-09-03 correction at the end of §0.3: only `frontend` runs uvicorn/ASGI;
+`switchboard` runs `twistd`)*, both from the same image
 (`sha256:95df46c3a9d2…`), built from `thinkst/canarytokens` pinned at
 `CANARYTOKENS_REF=dd92bf29bd0f6d1b446fb41e3b8114c6fc7a6205`
 (`arcane/home/honeypot-canarytokens/canarytokens/Dockerfile:36`). Measured
@@ -68,7 +75,10 @@ $ docker exec hp-canarytokens-frontend \
 starlette-0.50.0.dist-info
 fastapi-0.125.0.dist-info
 uvicorn-0.17.6.dist-info
-# identical output from hp-canarytokens-switchboard (same image digest)
+# (excerpted -- the real command lists the whole venv; these are the three
+#  relevant lines. Identical output from hp-canarytokens-switchboard, same
+#  image digest. Independently corroborated without a host by upstream's
+#  own uv.lock at our exact pinned ref -- see §6.)
 ```
 
 **Starlette 0.50.0 is inside CVE-2026-48710's affected range (0.8.3 through
@@ -76,7 +86,11 @@ uvicorn-0.17.6.dist-info
 here, on a service that is deliberately internet-reachable — the VPS Traefik
 router `honeypot-canarytokens` (`vps/traefik/dynamic.yml:346`) forwards a
 wildcard host under the apex domain to it, unauthenticated by design
-(`dynamic.yml:308`), because it is a decoy.
+(`dynamic.yml:308`), because it is a decoy. *(Superseded — see the 2026-09-03
+correction at the end of §0.3: that router forwards to `socat-hp-canarytokens`
+→ the in-repo Go `canarytokens-http-router` → switchboard's `twisted.web`
+channel, never to a Starlette app. The Starlette process, `frontend`, publishes
+only `${HP_BIND:-10.8.0.2}:19426` and has no Traefik router at all.)*
 
 ### 0.3 What that does and does not mean for exposure
 
@@ -104,13 +118,69 @@ path-based auth middleware anywhere in the app for the bypass to defeat.
 
 So the honest statement, with each half separated as §"read the producer"
 discipline requires: **the affected version is deployed and reachable
-(observed), and this particular application contains no consumer of the
+(observed) *(superseded — see the 2026-09-03 correction below: the affected
+version is deployed, but the process running it is not reachable from the
+internet)*, and this particular application contains no consumer of the
 bypass primitive (observed), so no privilege boundary in it is currently
 known to be crossable by CVE-2026-48710 (inferred).** That inference covers
 only APIARY's own use of the library; it is not a claim that Starlette
 0.50.0 is safe, and the pinned upstream ref should still be moved to a
 build that ships Starlette ≥ 1.0.1. That is tracked separately rather than
 buried here — filed as **#2866**, see §7.
+
+**Correction (2026-09-03, from #2866's investigation).** "Internet-reachable"
+above is wrong for the frontend and imprecise for the switchboard — this
+section never read `arcane/home/honeypot-canarytokens/compose.yml`'s port
+bindings or checked which web framework switchboard's exposed channel
+actually runs. Both matter for whether the bypass primitive has anything to
+cross, and both narrow the exposure further than §0.3 already did:
+
+- `canarytokens-frontend` publishes only `${HP_BIND:-10.8.0.2}:19426:8082` —
+  the WireGuard-tunnel IP, not a public one. The compose file's own header
+  comment is explicit: *"frontend (token management UI + REST API) stays
+  WireGuard-tunnel-only ... the dashboard's own backend is the only
+  caller."* **The frontend is not internet-reachable at all.** Nothing in
+  `vps/traefik/dynamic.yml` routes to it either — grepped the whole file for
+  `canarytokens-frontend` and found zero matches; the only `hp-canarytokens*`
+  target Traefik forwards to is `socat-hp-canarytokens` / the http-router
+  below, both of which front switchboard, never frontend.
+- `canarytokens-switchboard` itself has **no published port** in the current
+  compose file — its HTTP channel used to be published directly (per the
+  compose file's own comment on the `canarytokens-http-router` service) but
+  is now only reachable through `canarytokens-http-router`, this repo's own
+  Go reverse proxy, which is what `vps/traefik/dynamic.yml:346`'s
+  `honeypot-canarytokens` router actually forwards to. So switchboard *is*
+  the component an internet request eventually reaches — but measured
+  directly inside the container, its HTTP channel is built on
+  **`twisted.web`**, not Starlette/FastAPI/ASGI at all:
+
+  ```
+  $ docker exec hp-canarytokens-switchboard \
+      grep -n 'class ChannelHTTP\|twisted.web\|resource.Resource' \
+      /srv/canarytokens/channel_http.py
+  10:from twisted.web import resource, server
+  11:from twisted.web.resource import EncodingResourceWrapper, Resource
+  350:class ChannelHTTP:
+  ```
+
+  Starlette 0.50.0 is present in switchboard's venv (it's a transitive
+  dependency of the shared `canarytokens` package, imported at module load
+  for settings validation — see the compose file's own comment on why
+  `FrontendSettings()` gets instantiated in the switchboard process too),
+  but it is never the thing serving HTTP requests there. CVE-2026-48710's
+  primitive is a divergence between Starlette's ASGI routing and
+  `request.url`; a Twisted `Resource` tree has no ASGI routing layer for
+  that divergence to occur in.
+
+**Corrected bottom line: the one component with an internet-facing Starlette
+app (`frontend`) is not internet-reachable, and the one component that is
+internet-reachable (`switchboard`, via `canarytokens-http-router`) does not
+run Starlette as its web server.** §0.3's "no consumer of the bypass
+primitive" finding for the frontend's own `app.py` routes stands as
+additional, now-moot, defense in depth. This is a stronger "not exploitable"
+finding than the original text claimed, arrived at for a different (and more
+directly dispositive) reason. Full writeup and the upstream-pin question:
+**#2866**.
 
 ### 0.4 The `analysis/ghidra` "FastAPI" strings are stale, not a second ASGI service
 
@@ -330,7 +400,7 @@ stack's indices, and would silently return zero results.**
 | Stage | Would APIARY see it? | Where | Gap, if any |
 |---|---|---|---|
 | CVE-2026-42271 request against a *real* LiteLLM instance | N/A — no LiteLLM instance exists in this fleet (§0.1) | — | Not applicable; nothing to protect |
-| CVE-2026-48710 (`Host`-header confusion) against `hp-canarytokens-frontend`/`-switchboard` | **No** | — | These *do* run an affected Starlette (0.50.0, §0.2) and are internet-reachable via the VPS Traefik router. Nothing inspects the `Host` header for anomalies at any layer: Traefik routes on it rather than validating it, and no Suricata rule covers malformed `Host` on the canarytokens path. The app has no path-based auth for the bypass to cross (§0.3), so today this is an unmonitored-but-unexploitable surface — a version bump, not a detection gap |
+| CVE-2026-48710 (`Host`-header confusion) against `hp-canarytokens-frontend`/`-switchboard` | **No** | — | `frontend` runs the affected Starlette (0.50.0, §0.2) but is WireGuard-tunnel-only, not internet-reachable (§0.3 correction). `switchboard` is the internet-reachable half (via `canarytokens-http-router`) but its exposed HTTP channel runs `twisted.web`, not Starlette — no ASGI routing layer for the bypass to occur in (§0.3 correction). Nothing inspects the `Host` header for anomalies at any layer either way: Traefik routes on it rather than validating it, and no Suricata rule covers malformed `Host` on the canarytokens path. Not a detection gap worth building — there is no crossable primitive on either component |
 | Same request pattern against the `beelzebub` MCP decoy | **No** | — | The decoy has no `/mcp-rest/test/*` route; the request 404s outside any traced code path (§2) |
 | `Bearer x` / malformed-auth probe against the MCP decoy | **No** | — | `WithHTTPContextFunc` never reads `Authorization` (§2, confirms #2737) |
 | A genuine `tools/call` invocation against either of the two real decoy tools | **Yes** | `honeypot-v2-*` via the beelzebub log path, `Command`/`CommandOutput`/`SourceIp` fields (#2737 already established this) | None — this is the one path the sensor actually instruments |
@@ -356,16 +426,42 @@ stack's indices, and would silently return zero results.**
   like drifting from "what does this sensor capture" into "audit the entire
   vendored binary," which #2737 also stopped short of for the same sensor's
   own transport layer.
-- Whether any *other* container in the fleet ships an affected Starlette.
-  §0.2's measurement covered the two canarytokens services (the only
+- ~~Whether any *other* container in the fleet ships an affected Starlette.~~
+  **Answered 2026-09-03 for the VPS half; still open for the homeserver
+  half.** §0.2's measurement covered the two canarytokens services (the only
   `uvicorn` invocation in the repo) and §0.4 cleared the two ghidra
-  containers; it was not run against every running container image on
-  either host. A fleet-wide `dist-info` sweep is the obvious next step and
-  is ask (2) of **#2866**.
-- Whether the pinned `thinkst/canarytokens` ref has an upstream build that
-  carries Starlette ≥ 1.0.1. §0.3 states the version we run and that it is
-  in range; it does not establish that a drop-in newer pin exists, which is
-  an upstream-compatibility question, not a measurement.
+  containers. Ask (2) of **#2866** asked for a fleet-wide sweep; the result
+  is recorded here rather than only in the issue, so it survives that issue
+  closing:
+
+  ```
+  # method, per running container: no shell -> distroless/scratch, no Python
+  # by construction (verified by exporting the image filesystem and grepping
+  # it); shell but no interpreter -> not a Python container; interpreter
+  # present -> importlib.metadata.version("starlette") plus
+  # `find / -xdev -maxdepth 8 -name 'starlette-*.dist-info'`
+  VPS, 46 running containers, 2026-09-03:
+    36  no Python interpreter
+     3  Python present, no starlette (hp-suricata, hp-suricata-rules-refresh, hp-zeek)
+     7  no shell -- xore-portbridge:local (13 fs entries) and
+        oauth2-proxy:v7.15.4 (1394 fs entries); `docker export | tar -t`
+        over both returns zero matches for starlette/site-packages/bin/python
+    => no Starlette of any version anywhere on the VPS.
+  ```
+
+  The homeserver half could **not** be run: at the time of this sweep that
+  host was mid-rebuild with `ContainersRunning=0` (`docker info`), so there
+  was nothing to exec into. The two canarytokens services and the two ghidra
+  containers measured in §0.2/§0.4 remain the only homeserver-side data
+  points. `find`'s absence was never used as evidence of absence, which was
+  the weakness of the earlier partial sweep.
+- ~~Whether the pinned `thinkst/canarytokens` ref has an upstream build that
+  carries Starlette ≥ 1.0.1.~~ **Answered: no such build exists.** Read from
+  upstream's own lockfile rather than inferred, re-checked 2026-09-03:
+  `uv.lock` at our pinned ref `dd92bf29` resolves `starlette 0.50.0`, and so
+  does `master` at `0c017218` (committed 2026-09-02). There is no newer pin
+  to move to, so ask (1) of #2866 has no available action and the correct
+  disposition is a re-check cadence, not a ref bump.
 - Independent confirmation of the exact byte sequence Wiz used for the
   malformed `Host` header exploiting CVE-2026-48710 — none of the sources
   fetched (including Horizon3.ai's dedicated chain writeup) states it
@@ -374,16 +470,19 @@ stack's indices, and would silently return zero results.**
 
 ## 7. Bottom line
 
-**The one action item this assessment produced.** `hp-canarytokens-frontend`
-and `hp-canarytokens-switchboard` run Starlette 0.50.0, inside
-CVE-2026-48710's affected range, on an internet-reachable service (§0.2).
-No privilege boundary in that application consumes the bypass primitive
-(§0.3), so this is not an incident — but running a known-affected library on
-a reachable service is a version-hygiene defect regardless, and the
-"no consumer today" finding is only true of the code as it stands. Moving
-the pinned `CANARYTOKENS_REF` to a build carrying Starlette ≥ 1.0.1, plus
-the fleet-wide `dist-info` sweep §6 names, is filed as **#2866** rather
-than left in this document.
+**Superseded by #2866's follow-up investigation, see the §0.3 correction
+above.** The original text here claimed both canarytokens services were
+internet-reachable and treated the version-hygiene defect as the one action
+item this assessment produced. #2866 found that claim wrong: `frontend`
+(the Starlette app) is WireGuard-tunnel-only, and `switchboard` (the
+internet-reachable half, via `canarytokens-http-router`) runs its HTTP
+channel on `twisted.web`, not Starlette. The upstream-pin question §6 flagged
+as unverified is now answered — no code or config change is available, since
+`thinkst/canarytokens`'s own `master` branch still resolved Starlette 0.50.0
+on 2026-09-03 (head `0c017218`), three weeks after this image's pin date. The
+fleet-wide `dist-info` sweep is answered for the VPS (46/46 containers, no
+Starlette) and **still outstanding for the homeserver**, which had no running
+containers when the sweep was attempted; both results are recorded in §6.
 
 Building MCP `/test`-endpoint bait or a `tools/list` interpretation layer
 into `beelzebub`'s decoy configuration is real, scoped follow-on work — but
