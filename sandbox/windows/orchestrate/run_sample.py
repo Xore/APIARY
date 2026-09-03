@@ -1464,34 +1464,91 @@ def detonate_inguest(sample_path: Path, sha: str, out: Path):
         )
 
 
+def _mark_legacy_winrm_status(out: Path, run_status: str, detail: str = '') -> None:
+    """Stamp metadata.json with a truthful run_status for the legacy WinRM
+    path (#2775). detonate_inguest() has always done the equivalent for its
+    own path (meta['run_status'] = 'completed'/'watchdog_timeout' just
+    before post_process()); this path never did, so export_result.py's
+    write_result() had nothing to read and defaulted every legacy run --
+    success or failure -- to a hardcoded 'completed'."""
+    try:
+        meta = json.loads((out / 'metadata.json').read_text())
+    except (OSError, ValueError):
+        # #2775 review: writing back a dict holding only run_status would
+        # discard sha256/filename/detonated_at/observation_secs -- and sha256
+        # is the dashboard's key for the whole document. Seed it from the out
+        # dir, which detonate() names after the sha (the same fallback
+        # export_result.build_result() already makes), and say so loudly
+        # rather than swallowing the read failure.
+        log.error('metadata.json unreadable; stamping run_status onto a '
+                  'minimal replacement seeded from the out dir name',
+                  exc_info=True)
+        meta = {'sha256': out.name}
+    if not isinstance(meta, dict):
+        log.error('metadata.json is not an object; replacing it')
+        meta = {'sha256': out.name}
+    meta['run_status'] = run_status
+    if detail:
+        meta['run_status_detail'] = detail
+    (out / 'metadata.json').write_text(json.dumps(meta, indent=2))
+
+
 def detonate_legacy_winrm(sample_path: Path, sha: str, out: Path):
     """Pre-#490 path: drive the whole sequence over a live WinRM channel to
     the running guest, sample injected/results pulled over SMB. Preserved
     behind WINDOWS_SANDBOX_LEGACY_WINRM=1 as a rollback path -- see this
-    module's docstring."""
-    revert_to_golden()
-    wait_for_winrm()
-    vm_path = copy_sample_to_vm(sample_path, sha)
-    start_fakenet()
-    start_procmon()
-    regshot_before()
-    autoruns_before()
+    module's docstring.
 
-    execute_sample(vm_path)
-    log.info(f'Observing for {OBS_SECS} seconds...')
-    actual_secs = observe_with_early_stop(OBS_SECS)
-    if actual_secs != OBS_SECS:
-        meta = json.loads((out / 'metadata.json').read_text())
-        meta['observation_secs_actual'] = actual_secs
-        meta['observation_cut_short'] = True
-        (out / 'metadata.json').write_text(json.dumps(meta, indent=2))
+    #2775: this used to call post_process() (the only thing that writes the
+    dashboard-facing windows-<job>.json, see that function's #53 note) as
+    its last step, after collect_artifacts(). Any exception raised earlier --
+    wait_for_winrm() timing out, or #2252's delivery checks inside
+    copy_sample_to_vm()/execute_sample()/collect_artifacts() raising -- aborted
+    before post_process() ever ran, so a failed legacy run wrote NO result
+    document at all, not even a false one. And a successful run's document
+    hardcoded run_status: 'completed' regardless of what actually happened,
+    because nothing here ever set meta['run_status'] the way
+    detonate_inguest() does for its own path. Both are fixed the same way:
+    every reachable exit -- success or failure -- stamps a truthful
+    run_status and calls post_process() exactly once."""
+    try:
+        revert_to_golden()
+        wait_for_winrm()
+        vm_path = copy_sample_to_vm(sample_path, sha)
+        start_fakenet()
+        start_procmon()
+        regshot_before()
+        autoruns_before()
 
-    capture_memory_dump(out)
-    regshot_after()
-    autoruns_after()
-    stop_procmon()
-    collect_artifacts(sha, out)
-    post_process(out, sample_path)
+        execute_sample(vm_path)
+        log.info(f'Observing for {OBS_SECS} seconds...')
+        actual_secs = observe_with_early_stop(OBS_SECS)
+        if actual_secs != OBS_SECS:
+            meta = json.loads((out / 'metadata.json').read_text())
+            meta['observation_secs_actual'] = actual_secs
+            meta['observation_cut_short'] = True
+            (out / 'metadata.json').write_text(json.dumps(meta, indent=2))
+
+        capture_memory_dump(out)
+        regshot_after()
+        autoruns_after()
+        stop_procmon()
+        collect_artifacts(sha, out)
+    except Exception as e:
+        log.error('Legacy WinRM detonation failed before completion', exc_info=True)
+        # Best-effort: pull whatever artifacts exist even from a partial run
+        # (mirrors detonate_inguest()'s "collect offline no matter what"
+        # behaviour) -- a second failure here must not swallow the first.
+        try:
+            collect_artifacts(sha, out)
+        except Exception:
+            log.error('Artifact collection after the failure also failed', exc_info=True)
+        _mark_legacy_winrm_status(out, 'legacy_winrm_failed', detail=str(e))
+        post_process(out, sample_path)
+        raise
+    else:
+        _mark_legacy_winrm_status(out, 'completed')
+        post_process(out, sample_path)
 
 
 def detonate(sample_path: Path, results_dir: Path = None):
