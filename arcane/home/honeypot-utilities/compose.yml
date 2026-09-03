@@ -317,6 +317,12 @@ services:
       - REPORTER_COOLDOWN_HOURS=${REPORTER_COOLDOWN_HOURS:-24}
       - REPORTER_MIN_EVENTS=${REPORTER_MIN_EVENTS:-3}
       - REPORTER_POLL_SECONDS=30
+      # #2882: audit.json grew unbounded -- 5.99GB over 25 days, no rotation
+      # (~240MB/day lifetime average, ~62MB/day currently; the ~2.9GB/day in
+      # the issue body divided the whole file by ~2 days and is wrong).
+      # Same default/shape as log-maintenance.sh's MAX_LOG_BYTES/ROTATIONS.
+      - REPORTER_AUDIT_MAX_BYTES=${REPORTER_AUDIT_MAX_BYTES:-268435456}
+      - REPORTER_AUDIT_ROTATIONS=${REPORTER_AUDIT_ROTATIONS:-4}
       # #153 Phase 3: optional GreyNoise RIOT reputation guard, skips
       # known-benign infrastructure (DNS resolvers, CDN edges, SaaS
       # scanners) before it ever reaches a reporting decision. Disabled by

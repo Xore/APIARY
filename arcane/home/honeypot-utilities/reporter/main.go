@@ -87,7 +87,14 @@ func main() {
 	}
 
 	auditPath := getenv("REPORTER_AUDIT_LOG", dataDir+"/audit.json")
-	auditFile, err := os.OpenFile(auditPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
+	// #2882: unbounded before this -- 5.99 GB accumulated over 25 days
+	// (~240 MB/day) on a 128M-limited container. Same knob shape as
+	// log-maintenance.sh's MAX_LOG_BYTES/ROTATIONS (268435456 bytes = 256 MB,
+	// 4 rotations kept), applied here in-process since audit.go already owns
+	// the file handle.
+	auditMaxBytes := int64(getenvInt("REPORTER_AUDIT_MAX_BYTES", 268435456))
+	auditRotations := getenvInt("REPORTER_AUDIT_ROTATIONS", 4)
+	auditFile, err := newRotatingWriter(auditPath, auditMaxBytes, auditRotations)
 	if err != nil {
 		log.Fatalf("reporter: opening audit log: %v", err)
 	}
