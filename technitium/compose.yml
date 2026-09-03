@@ -14,7 +14,15 @@ name: technitium
 
 services:
   technitium:
-    image: technitium/dns-server:11.5.1@sha256:6a0c0d308d6b98a23fc57cc786f1039b140001e19f7eb1a8626465439a0cc425
+    # 15.x, not 11.5.1. This node is the SECONDARY of a two-node cluster whose
+    # primary runs 15.x, and Technitium's on-disk config files are versioned:
+    # an 11.5.1 server refuses config written by a 15.x peer outright --
+    #   System.IO.InvalidDataException: DnsServer log config version not supported.
+    # -- and crash-loops. Restoring this node's own backed-up state onto the
+    # pinned 11.5.1 image reproduced exactly that on the 2026-09-04 rebuild.
+    # Cluster members have to agree on major version; pin both, and move them
+    # together.
+    image: technitium/dns-server:15.4.0@sha256:df7d90ef0f7b6fff6916d291a7022cd902290cc31c3141d4158b6c375a641b41
     container_name: technitium-dns
     restart: unless-stopped
     ports:
@@ -32,7 +40,20 @@ services:
       DNS_SERVER_WEB_SERVICE_LOCAL_ADDRESSES: ""
     volumes:
       # All server state (zones, settings, blocklists, logs config) lives here.
-      - ./config:/etc/dns/config
+      #
+      # The target is /etc/dns, NOT /etc/dns/config. Technitium's config folder
+      # IS /etc/dns -- it says so on every boot ("Using config folder:
+      # /etc/dns") and the healthy cluster peer mounts it that way. Mounting a
+      # level deeper left the server reading its own ephemeral container layer
+      # instead: every restart started from a default config, the
+      # forwarders.config the installer provisions was never read, and no zone
+      # or setting ever survived a `compose up --force-recreate`. The node
+      # answered nothing at all -- `dig @127.0.0.1` inside the container timed
+      # out, so its healthcheck could never pass. Confirmed live on the
+      # 2026-09-04 rebuild by listing both paths inside the container: /etc/dns
+      # held a fresh 275-byte dns.config while the whole real state sat unread
+      # under /etc/dns/config.
+      - ./config:/etc/dns
     # Port 53 requires the standard binding capability; no NET_ADMIN needed.
     deploy:
       resources:
