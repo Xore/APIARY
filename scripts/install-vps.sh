@@ -173,6 +173,30 @@ for var in GIT_REPO_URL GIT_REF VPS_WG_ADDRESS HOME_WG_ADDRESS \
     exit 1
   fi
 done
+
+# DOMAIN is the BASE domain. step_render_traefik_dynamic substitutes it for the
+# literal "honeypot.example" in vps/traefik/dynamic.yml, and every router in
+# that file is written as <service>.honeypot.example -- so DOMAIN must be the
+# bare zone. Given a value that already carries a service label, all 40 routers
+# render as second-level subdomains (auth.honeypot.xore.rocks), which a
+# *.xore.rocks wildcard origin certificate does not cover: it matches exactly
+# one label. The live conf was found holding "honeypot.xore.rocks" on
+# 2026-09-03, one install run away from rewriting every public hostname to an
+# uncertificated name. Nothing downstream would have caught it -- the render
+# step only checks that no "honeypot.example" placeholder survives, which is
+# just as true of the wrong answer as of the right one.
+if [[ -n "${DOMAIN:-}" ]]; then
+  for label in auth arcane dashboard kibana arkime evebox traefik tanner snare rev api honeypot; do
+    if [[ "$DOMAIN" == "$label."* ]]; then
+      echo "DOMAIN is \"$DOMAIN\", which starts with the service label \"$label.\"." >&2
+      echo "This must be the BASE domain only -- vps/traefik/dynamic.yml already" >&2
+      echo "prefixes each service, so this would render ${label}.${DOMAIN} and" >&2
+      echo "friends, outside any *.<domain> wildcard certificate." >&2
+      echo "Use \"${DOMAIN#"$label".}\" instead." >&2
+      exit 1
+    fi
+  done
+fi
 # VPS_WG_PRIVATE_KEY may be left empty -- a fresh keypair is generated if so
 # (same convention as install-homeserver.conf's HOME_WG_PRIVATE_KEY).
 # HOME_WG_PUBLIC_KEY may also be left empty on a genuinely simultaneous
@@ -389,13 +413,19 @@ step_firewall_base() {
     # firewalld equivalent of the ufw rule set above. The honeypot decoy
     # ports come from vps/honeypot-firewall.sh (its dnf branch below uses
     # firewall-cmd against the same zone), so this base set must also live
-    # in that zone. 'admin_ssh' would collide with the standard ssh service
-    # on 22 -- the REAL admin port here is 22 (fresh Rocky install), which
-    # firewalld already allows via its built-in ssh service.
+    # in that zone.
+    #
+    # The default here must match the ufw branch's 2222. It briefly defaulted
+    # to 22 instead, which is the honeypot's own port (cowrie via
+    # hp-portbridge) -- the two branches disagreeing is how the 2026-09-03
+    # Rocky rebuild ended up with admin sshd sitting on 22 and portbridge
+    # unable to bind it (#2923). The built-in `ssh` service is removed for the
+    # same reason: it pins 22 to sshd. Port 22 still gets opened, by
+    # vps/honeypot-firewall.sh, which lists it as a decoy port for cowrie.
     systemctl enable --now firewalld
     firewall-cmd --permanent --zone=public --remove-service=ssh \
-      --add-port="${SSH_ADMIN_PORT:-22}/tcp" 2>/dev/null || \
-    firewall-cmd --permanent --zone=public --add-port="${SSH_ADMIN_PORT:-22}/tcp"
+      --add-port="${SSH_ADMIN_PORT:-2222}/tcp" 2>/dev/null || \
+    firewall-cmd --permanent --zone=public --add-port="${SSH_ADMIN_PORT:-2222}/tcp"
     firewall-cmd --permanent --zone=public --add-port=51820/udp
     # Cloudflare's published IPv4 ranges -- same list, same rationale as the
     # ufw branch (443 restricted to Cloudflare because everything real is
@@ -410,6 +440,86 @@ step_firewall_base() {
     firewall-cmd --reload
     ;;
   esac
+}
+
+# ---------------------------------------------------------------------------
+# Move the real admin sshd off port 22 so hp-portbridge can bind it for cowrie.
+#
+# This used to be the one step docs/CGNAT-DEPLOYMENT.md told the operator to do
+# by hand ("there is no script for this step"). A reinstall replays everything
+# that is scripted, so a manual-only step is guaranteed to be lost on every
+# rebuild -- and it was, on 2026-09-03: sshd came back on 22, and exactly one
+# of hp-portbridge's 60 rules failed to bind. SSH is the highest-volume attack
+# surface here, so it silently captured nothing while every container looked
+# healthy (#2923).
+#
+# Runs after firewall-base (which opens SSH_ADMIN_PORT) and well before
+# compose-up, so portbridge finds 22 free when it starts.
+# ---------------------------------------------------------------------------
+step_admin_ssh_port() {
+  local port="${SSH_ADMIN_PORT:-2222}"
+
+  if [[ "$port" == "22" ]]; then
+    echo "SSH_ADMIN_PORT is 22, which belongs to the honeypot (cowrie via" >&2
+    echo "hp-portbridge). Set it to something else -- 2222 is this fleet's" >&2
+    echo "convention. See #2923." >&2
+    return 1
+  fi
+
+  local dropin=/etc/ssh/sshd_config.d/10-apiary-admin-port.conf
+  if [[ -f "$dropin" ]] && grep -qx "Port $port" "$dropin" && \
+     ss -ltn "sport = :$port" 2>/dev/null | grep -q LISTEN; then
+    echo "sshd already on $port"
+    return 0
+  fi
+
+  # SELinux confines which ports sshd may bind. On RHEL-family hosts
+  # ssh_port_t covers 22 only, so writing the config alone leaves sshd
+  # logging "Bind to port $port failed: Permission denied" and still holding
+  # 22 -- measured on the live Rocky 9 VPS. Label the port before restarting.
+  if [[ "$PKG" == "dnf" ]] && command -v getenforce >/dev/null 2>&1 && \
+     [[ "$(getenforce 2>/dev/null)" != "Disabled" ]]; then
+    command -v semanage >/dev/null 2>&1 || \
+      with_retry 3 10 dnf install -y policycoreutils-python-utils
+    semanage port -a -t ssh_port_t -p tcp "$port" 2>/dev/null || \
+      semanage port -m -t ssh_port_t -p tcp "$port" 2>/dev/null || true
+  fi
+
+  local backup=""
+  [[ -f "$dropin" ]] && { backup="$(mktemp)"; cp "$dropin" "$backup"; }
+
+  mkdir -p /etc/ssh/sshd_config.d
+  cat > "$dropin" <<EOF
+# Managed by install-vps.sh (step_admin_ssh_port, #2923). Real admin SSH lives
+# here so hp-portbridge can bind 22 for cowrie. Port 22 stays OPEN in the
+# firewall on purpose -- it belongs to the honeypot, not to sshd.
+Port $port
+EOF
+
+  # Validate before restarting: a bad drop-in plus a restart is a lockout on a
+  # host whose only path in is this daemon.
+  if ! sshd -t 2>&1; then
+    echo "sshd config invalid after writing $dropin -- rolling back" >&2
+    if [[ -n "$backup" ]]; then cp "$backup" "$dropin"; else rm -f "$dropin"; fi
+    return 1
+  fi
+
+  systemctl restart sshd
+  sleep 2
+
+  # Confirm it actually bound. If it did not (SELinux, a conflicting listener,
+  # anything else), put the previous config back and restart again rather than
+  # leaving the operator with an sshd that is listening nowhere reachable.
+  if ! ss -ltn "sport = :$port" 2>/dev/null | grep -q LISTEN; then
+    echo "sshd did not bind $port after restart -- rolling back" >&2
+    journalctl -u sshd -n 10 --no-pager 2>/dev/null | tail -5 >&2
+    if [[ -n "$backup" ]]; then cp "$backup" "$dropin"; else rm -f "$dropin"; fi
+    systemctl restart sshd
+    return 1
+  fi
+
+  [[ -n "$backup" ]] && rm -f "$backup"
+  echo "admin sshd now on $port; port 22 left free for hp-portbridge/cowrie"
 }
 
 step_firewall_honeypot_ports() {
@@ -644,6 +754,7 @@ run_step docker-install          "Install Docker Engine + Compose"         step_
 run_step docker-daemon-config    "Write /etc/docker/daemon.json"           step_docker_daemon_config
 run_step wireguard-config        "Write wg0.conf and enable tunnel"        step_wireguard_config
 run_step firewall-base           "Apply base firewall rules"               step_firewall_base
+run_step admin-ssh-port          "Move admin sshd off 22 (cowrie owns it)" step_admin_ssh_port
 run_step clone-repo              "Clone/update APIARY to $REPO_DIR"        step_clone_repo
 run_step firewall-honeypot-ports "Open honeypot ports (vps/honeypot-firewall.sh)" step_firewall_honeypot_ports
 run_step nic-gro-fix             "Disable virtio-net hardware GRO (#342)"  step_nic_gro_fix
