@@ -275,10 +275,6 @@ CAP_NOT_YET_HARDENED=(
   "hp-snare-clone|#2825 -- honeypot-init job, out of #2366's internet-facing scope"
   "hp-geoipupdate|#2825 -- honeypot-init refresh job, out of #2366's internet-facing scope"
   "hp-threat-cidrs-refresh|#2825 -- honeypot-init refresh job, out of #2366's internet-facing scope"
-  # Not a hardening problem at all: this stack was retired in #2469 and has no
-  # compose file left in this repo, so there is nothing here to add cap_drop
-  # to. It is still running on the homeserver, which is the actual bug.
-  "hp-wordpot|#2814 -- retired in #2469, no compose file left in the tree; still deployed, which is the bug to fix (not its capability set)"
 )
 
 # Returns the reason string for $1 if it appears in the remaining arguments.
