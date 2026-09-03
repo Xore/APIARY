@@ -60,6 +60,36 @@ func getenv(k, def string) string {
 // planted document/script, far below anything that would strain the host.
 const maxImplantBytes = 8 << 20 // 8MB
 
+// maxImplantPathBytes bounds implantRequest.Path for the sole purpose of
+// sizing maxImplantWireBytes below -- it is not itself an enforced limit on
+// req.Path (resolveHoneyfsPath's containment check is what actually
+// validates the path). 4096 matches Linux's own PATH_MAX; no real honeyfs
+// path from the dashboard is remotely close to it, so this is pure margin.
+const maxImplantPathBytes = 4096
+
+// maxImplantWireBytes bounds the raw HTTP request body http.MaxBytesReader
+// accepts, in encoded-JSON bytes -- not maxImplantBytes, which bounds the
+// *decoded* content (#2338). Base64 standard encoding of n bytes produces
+// exactly 4*ceil(n/3) characters, so an 8MiB implant's content_base64 value
+// alone is already ~11.18MB before any JSON syntax is added; capping the
+// reader at maxImplantBytes+64KiB (the previous shape) meant every implant
+// whose raw size exceeded roughly maxImplantBytes*3/4 (~6.15MiB) died
+// inside json.Decode with a generic "invalid request" 400 instead of ever
+// reaching the len(content) > maxImplantBytes check below -- silently
+// cutting off the top ~30% of the documented 0-8MiB implant range, and
+// making that check dead code for every request that actually needed it.
+//
+// The formula below is derived, not padded by feel: exact base64 ceiling
+// for the largest content this handler will ever accept, plus
+// maxImplantPathBytes of headroom for req.Path, plus 256 bytes for the
+// struct's own JSON punctuation (field names, quotes, braces, the comma,
+// and base64's own up-to-2 bytes of "=" padding) -- enough that a
+// maximally-sized, validly-encoded request can never be rejected by the
+// reader cap, while a request that pads content_base64 with garbage past
+// what a real base64 encoding of maxImplantBytes could ever produce still
+// hits this cap instead of being handed to json.Decode unbounded.
+const maxImplantWireBytes = ((maxImplantBytes + 2) / 3 * 4) + maxImplantPathBytes + 256
+
 type server struct {
 	honeyfsDir string
 	markerPath string
@@ -122,7 +152,17 @@ func (s *server) handleImplant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req implantRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxImplantBytes+64<<10)).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxImplantWireBytes)).Decode(&req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			// Distinct message from both the generic "invalid request"
+			// below and the post-decode "content exceeds 8MB implant
+			// limit" further down -- this is the wire-size limit
+			// (base64-encoded content plus JSON envelope), tripped before
+			// the request body is even valid JSON yet.
+			writeError(w, http.StatusBadRequest, "request body exceeds the base64-encoded implant size limit")
+			return
+		}
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid request: %v", err))
 		return
 	}
