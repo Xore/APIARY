@@ -163,6 +163,19 @@ while true; do
   # suffix (the first character after the dot is always a digit).
   find /logs/elasticpot -maxdepth 1 -name 'elasticpot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
   find /logs/tftp-relay -maxdepth 1 -name 'sessions.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  # #2892: conpot/json_log_rotation_patch.py gives conpot.json the same
+  # self-rotation the sinks above already have (close/rename/reopen at
+  # CONPOT_JSON_LOG_MAX_BYTES, digit-leading .<stamp>[.N] suffix). All six
+  # personas share the vendored source, so one patch produces six sinks --
+  # one prune line per directory, same as the conpot.log rotate() glob
+  # above cannot be reused for -maxdepth 1 find (each persona's conpot.json
+  # lives in its own /logs/conpot* directory, not a shared parent).
+  find /logs/conpot -maxdepth 1 -name 'conpot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  find /logs/conpot-s7-1200 -maxdepth 1 -name 'conpot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  find /logs/conpot-s7-1500 -maxdepth 1 -name 'conpot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  find /logs/conpot-iec104 -maxdepth 1 -name 'conpot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  find /logs/conpot-guardian -maxdepth 1 -name 'conpot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  find /logs/conpot-kamstrup -maxdepth 1 -name 'conpot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
 
   sleep "$interval"
 done
