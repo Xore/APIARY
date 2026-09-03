@@ -15,6 +15,7 @@ import base64
 import io
 import json
 import os
+import socket
 import stat
 import subprocess
 import sys
@@ -179,6 +180,17 @@ def wait_status(base, job_id, timeout=10):
     raise TimeoutError(f"job {job_id} did not finish in {timeout}s")
 
 
+def free_port():
+    """A port the kernel just handed out, not a hardcoded one. Several CI
+    jobs share one self-hosted runner host, so two concurrent runs of this
+    file on fixed ports collide: the loser's server exits on EADDRINUSE
+    while its own wait_health() happily talks to the winner's server, and
+    both then drive one server's job directory."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 def run_server(fake_headless_script, port, data_dir):
     script_path = Path(data_dir) / "fake_headless.sh"
     script_path.write_text(fake_headless_script)
@@ -209,7 +221,7 @@ def wait_health(base, timeout=10):
 
 def test_success_path():
     with tempfile.TemporaryDirectory() as tmp:
-        port = 19191
+        port = free_port()
         proc = run_server(FAKE_HEADLESS, port, tmp)
         try:
             base = f"http://127.0.0.1:{port}"
@@ -243,7 +255,7 @@ def test_analyze_b64_success_path():
     # pipeline underneath, verified against the real failure this was
     # written to fix (POST /upload -> 500, "404 ... /analyze_b64").
     with tempfile.TemporaryDirectory() as tmp:
-        port = 19194
+        port = free_port()
         proc = run_server(FAKE_HEADLESS, port, tmp)
         try:
             base = f"http://127.0.0.1:{port}"
@@ -280,7 +292,7 @@ def test_tools_endpoints():
     # webui/ghidra_assistant.py TOOLS schema declares, against the fixture
     # xrefs.json/decompiled.json FAKE_HEADLESS now also writes.
     with tempfile.TemporaryDirectory() as tmp:
-        port = 19196
+        port = free_port()
         proc = run_server(FAKE_HEADLESS, port, tmp)
         try:
             base = f"http://127.0.0.1:{port}"
@@ -331,7 +343,7 @@ def test_v1_capabilities_and_results():
     # #1164: a locally-evaluated Rev·Deck rewrite's own main branch prefers
     # this v1 surface over /tools/*, probing /v1/capabilities first.
     with tempfile.TemporaryDirectory() as tmp:
-        port = 19197
+        port = free_port()
         proc = run_server(FAKE_HEADLESS, port, tmp)
         try:
             base = f"http://127.0.0.1:{port}"
@@ -383,7 +395,7 @@ def test_v1_capabilities_and_results():
 
 def test_v1_decompile_xrefs_query_graph():
     with tempfile.TemporaryDirectory() as tmp:
-        port = 19198
+        port = free_port()
         proc = run_server(FAKE_HEADLESS, port, tmp)
         try:
             base = f"http://127.0.0.1:{port}"
@@ -415,7 +427,7 @@ def test_v1_decompile_xrefs_query_graph():
 
 def test_v1_types_globals_hexdump():
     with tempfile.TemporaryDirectory() as tmp:
-        port = 19199
+        port = free_port()
         proc = run_server(FAKE_HEADLESS, port, tmp)
         try:
             base = f"http://127.0.0.1:{port}"
@@ -463,7 +475,7 @@ def test_v1_security_index():
     # command_execution, high weight) -- so main is the one function that
     # should score, and FUN_00401100 should have zero signals.
     with tempfile.TemporaryDirectory() as tmp:
-        port = 19200
+        port = free_port()
         proc = run_server(FAKE_HEADLESS, port, tmp)
         try:
             base = f"http://127.0.0.1:{port}"
@@ -529,7 +541,7 @@ def test_v1_security_index_low_decompile_success():
     # coverage.score 1.0 for any job at or under the cap, no matter how many
     # decompiles actually failed.
     with tempfile.TemporaryDirectory() as tmp:
-        port = 19200
+        port = free_port()
         proc = run_server(FAKE_HEADLESS_LOW_DECOMPILE, port, tmp)
         try:
             base = f"http://127.0.0.1:{port}"
@@ -629,7 +641,7 @@ def test_security_index_coverage_unit():
 
 def test_v1_annotations():
     with tempfile.TemporaryDirectory() as tmp:
-        port = 19200
+        port = free_port()
         proc = run_server(FAKE_HEADLESS, port, tmp)
         try:
             base = f"http://127.0.0.1:{port}"
@@ -680,7 +692,7 @@ def test_v1_annotations():
 
 def test_v1_job_lifecycle_and_dedup():
     with tempfile.TemporaryDirectory() as tmp:
-        port = 19201
+        port = free_port()
         proc = run_server(FAKE_HEADLESS, port, tmp)
         try:
             base = f"http://127.0.0.1:{port}"
@@ -697,6 +709,12 @@ def test_v1_job_lifecycle_and_dedup():
 
             different = post_file(f"{base}/analyze", b"a totally different sample")
             check(different["job_id"] != job_id, "a different sample gets its own job, not deduped")
+            # Let this second job finish before leaving the block: the
+            # server is SIGTERMed in the finally below, which does not kill
+            # the analyzeHeadless child it spawned, and an orphan still
+            # writing into jobs/<id>/artifacts races the TemporaryDirectory
+            # cleanup into "OSError: [Errno 39] Directory not empty".
+            wait_status(base, different["job_id"])
 
             listing = get(f"{base}/v1/jobs")
             check(any(j["job_id"] == job_id for j in listing["items"]), "v1 jobs list uses the {items:[...]} shape")
@@ -725,7 +743,7 @@ def test_v1_job_lifecycle_and_dedup():
 
 def test_v1_job_cancel():
     with tempfile.TemporaryDirectory() as tmp:
-        port = 19202
+        port = free_port()
         proc = run_server(FAKE_HEADLESS_SLOW, port, tmp)
         try:
             base = f"http://127.0.0.1:{port}"
@@ -763,7 +781,7 @@ def test_v1_job_cancel():
 
 def test_jobs_list_and_delete():
     with tempfile.TemporaryDirectory() as tmp:
-        port = 19195
+        port = free_port()
         proc = run_server(FAKE_HEADLESS, port, tmp)
         try:
             base = f"http://127.0.0.1:{port}"
@@ -801,7 +819,7 @@ def test_jobs_list_and_delete():
 
 def test_failure_path():
     with tempfile.TemporaryDirectory() as tmp:
-        port = 19192
+        port = free_port()
         proc = run_server(FAKE_HEADLESS_FAIL, port, tmp)
         try:
             base = f"http://127.0.0.1:{port}"
@@ -817,7 +835,7 @@ def test_failure_path():
 
 def test_unknown_job_404s():
     with tempfile.TemporaryDirectory() as tmp:
-        port = 19193
+        port = free_port()
         proc = run_server(FAKE_HEADLESS, port, tmp)
         try:
             base = f"http://127.0.0.1:{port}"
