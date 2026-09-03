@@ -1001,6 +1001,60 @@ secrets where possible, and require environment approval before the job can
 read it. `DOMAIN` is not itself sensitive (it is public DNS), but keep it in
 the same protected environment as the other VPS secrets for consistency.
 
+### Why these five are still repository secrets, and how to move them (#2027)
+
+The section above describes the intended end state. The live state is not
+that: as of 2026-09-03 all five values sit at **repository** scope and both
+`production-vps` and `production-home` are empty environments.
+
+```
+$ gh secret list -R Xore/APIARY
+DOCKERHUB_TOKEN  DOCKERHUB_USERNAME  DOMAIN  VPS_HOST  VPS_PORT  VPS_SSH_KEY  VPS_USER
+$ gh secret list -R Xore/APIARY --env production-vps    # empty
+$ gh secret list -R Xore/APIARY --env production-home   # empty
+```
+
+This is written down because the migration has now been re-derived from
+scratch twice, reaching the same blocker both times.
+
+**No workflow edit is needed.** Every `secrets.VPS_*` / `secrets.DOMAIN`
+reference already sits inside a job that declares
+`environment: production-vps` — `deploy.yml`'s `vps` job (`:207`, environment
+at `:210`), `diagnostics.yml`'s `vps` job (`:252`/`:255`), and
+`vps-start-blackhole.yml`'s `start-blackhole-profile` job (`:22`/`:24`). The
+`home` jobs (`deploy.yml:21`, `diagnostics.yml:76`) read none of the five.
+Environment secrets also shadow repository secrets of the same name, so
+*writing* the environment copies is non-breaking on its own.
+
+**What blocks it is that GitHub's secrets API is write-only.** There is no
+read-back and no copy operation at either scope, so completing the move needs
+a human to re-enter five plaintexts — one of which is the live VPS deployment
+private key. Automation cannot do this half, and pulling key material through
+a tool to "migrate" it would be worse than the drift it fixes.
+
+**Migration order that keeps deploys green**, when someone does it by hand:
+
+1. Write all five into `production-vps` (`gh secret set <NAME> --env
+   production-vps`). Deploys keep working throughout — the environment copy
+   shadows the repository one.
+2. Run one deploy per target and confirm it is green. This is the acceptance
+   criterion, and it must happen *before* step 3.
+3. Only then delete the repository-scoped copies. Deleting first, or deleting
+   against an unverified `DOMAIN`/`VPS_HOST`, silently breaks the next deploy —
+   `DOMAIN` is substituted into `traefik/dynamic.yml` at deploy time, so a
+   wrong or empty value reaches Traefik rather than failing loudly.
+
+**Rotation is a separate decision.** If a value is re-entered from an unknown
+source rather than the password manager, rotate it deliberately rather than
+as a side effect of the move.
+
+`DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` (added 2026-09-01) are read only by
+`containers.yml:157-160`, which declares **no** `environment:` at all — so
+they have to stay repository-scoped until that workflow gains one, and they
+are correctly out of this migration's scope rather than merely deferred. They
+are still the reason the repository-secret set grew from five to seven, which
+is #2027's own argument for doing the VPS half before it grows again.
+
 ## Diagnostics
 
 `diagnostics.yml` is the read-only counterpart to `deploy.yml`, and it is
