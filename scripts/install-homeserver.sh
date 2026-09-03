@@ -829,14 +829,35 @@ text = open(conf).read()
 blocks = re.split(r'(?=\[Peer\])', text)
 out = []
 matched = 0
+# Every pattern here is line-anchored with re.M and uses [ \t] rather than
+# \s around the '=', deliberately. \s matches newlines, so the previous
+# `PresharedKey\s*=\s*\S+` would, on a key line with an EMPTY value, run
+# past the end of its own line and swallow the first token of the next one:
+#
+#   PresharedKey =            ->  PresharedKey = <psk> = 10.8.0.2/32
+#   AllowedIPs = 10.8.0.2/32
+#
+# because \s* crossed the newline and \S+ then matched "AllowedIPs". That is
+# not hypothetical -- the live VPS had exactly `PresharedKey = ` with no
+# value, and this produced a wg0.conf that wg-quick refused outright:
+#   Key is not the correct length or format: `<psk>=10.8.0.2/32'
+#   Configuration parsing error
+# It then deleted the interface, so the step failed with the tunnel DOWN
+# rather than merely unchanged. Measured on the 2026-09-04 rebuild.
+#
+# \S* (not \S+) so an empty value is matched and replaced in place instead of
+# falling through to the insert branch and producing a duplicate key line.
 for b in blocks:
     if b.startswith('[Peer]') and f"{peer_ip}/32" in b:
         matched += 1
-        b = re.sub(r'PublicKey\s*=\s*\S+', f'PublicKey = {new_pub}', b)
-        if re.search(r'^PresharedKey\s*=', b, re.MULTILINE):
-            b = re.sub(r'PresharedKey\s*=\s*\S+', f'PresharedKey = {new_psk}', b)
+        b = re.sub(r'^PublicKey[ \t]*=[ \t]*\S*[ \t]*$',
+                   f'PublicKey = {new_pub}', b, flags=re.M)
+        if re.search(r'^PresharedKey[ \t]*=', b, re.M):
+            b = re.sub(r'^PresharedKey[ \t]*=[ \t]*\S*[ \t]*$',
+                       f'PresharedKey = {new_psk}', b, flags=re.M)
         else:
-            b = re.sub(r'(PublicKey\s*=\s*\S+\n)', rf'\1PresharedKey = {new_psk}\n', b)
+            b = re.sub(r'^(PublicKey[ \t]*=[ \t]*\S*[ \t]*)$',
+                       rf'\1\nPresharedKey = {new_psk}', b, flags=re.M)
     out.append(b)
 # Fail loudly on 0 or >1 matches instead of silently no-op-ing (0 matches)
 # or updating the wrong/multiple peers (>1) -- exactly the kind of mistake
@@ -847,7 +868,23 @@ if matched != 1:
     sys.exit(1)
 open(conf, 'w').write(''.join(out))
 PY
+# Validate the rewritten config BEFORE restarting. wg-quick's failure mode
+# here is to `ip link delete dev wg0` on a parse error, so a bad edit does
+# not leave the tunnel merely unchanged -- it takes it DOWN, on the one host
+# whose reachability everything else on the homeserver depends on. `wg-quick
+# strip` parses without touching the interface, so a malformed file is caught
+# while the tunnel is still up and the backup taken above is restored.
+if ! wg-quick strip wg0 >/dev/null 2>&1; then
+  echo "rewritten $conf does not parse -- restoring the backup, tunnel untouched" >&2
+  wg-quick strip wg0 2>&1 | tail -3 >&2 || true
+  cp -p "$(ls -1t "$conf".bak.* | head -1)" "$conf"
+  exit 1
+fi
 systemctl restart wg-quick@wg0
+# Confirm the interface actually came back; a restart that fails leaves no
+# device at all, and the caller should hear about it here rather than three
+# steps later when an sshfs mount times out.
+ip link show wg0 >/dev/null 2>&1 || { echo "wg0 did not come up after restart" >&2; exit 1; }
 REMOTE
 }
 
