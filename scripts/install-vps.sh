@@ -485,6 +485,21 @@ step_capture_interface() {
   echo "capture interface: $(sed -n 's/^CAPTURE_INTERFACE=//p' /root/vps/.env | tail -1)"
 }
 
+# #2898: dockerd's own restart-manager has twice been observed silently
+# giving up on a container after a failed restart attempt (a race in
+# dockerd/containerd, not an application bug -- see
+# container-restart-watchdog.sh's own comment), leaving it Exited for days
+# despite carrying `restart: unless-stopped`. This installs a coarse safety
+# net underneath that: force-start anything Docker's own policy should have
+# already restarted.
+step_container_watchdog() {
+  install -m 0755 /root/vps/container-restart-watchdog.sh /usr/local/sbin/container-restart-watchdog.sh
+  install -m 0644 /root/vps/apiary-container-watchdog.service /etc/systemd/system/apiary-container-watchdog.service
+  install -m 0644 /root/vps/apiary-container-watchdog.timer /etc/systemd/system/apiary-container-watchdog.timer
+  systemctl daemon-reload
+  systemctl enable --now apiary-container-watchdog.timer
+}
+
 step_restore_env() {
   local src="${BACKUP_HOST_PATH}/vps/.env"
   if with_retry 3 5 scp -i "$BACKUP_HOST_KEY" -P 22 -o StrictHostKeyChecking=accept-new \
@@ -650,6 +665,7 @@ run_step nic-gro-fix             "Disable virtio-net hardware GRO (#342)"  step_
 run_step stage-vps-dir           "Stage vps/ into /root/vps"               step_stage_vps_dir
 run_step restore-env             "Restore .env from LAN backup"            step_restore_env
 run_step capture-interface       "Pin the capture NIC to this host's own name" step_capture_interface
+run_step container-watchdog      "Force-start containers dockerd's restart policy failed to bring back (#2898)" step_container_watchdog
 run_step restore-certs           "Restore Traefik origin certs from LAN backup" step_restore_certs
 run_step render-traefik-dynamic  "Substitute real domain into dynamic.yml" step_render_traefik_dynamic
 run_step prepare-log-dirs        "Create host-side log/pcap directories"   step_prepare_log_dirs

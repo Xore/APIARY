@@ -1131,6 +1131,25 @@ services:
       # volume (root:root by default) is all this needs.
       - p0f-api-socket:/run/p0f
     environment: [TZ=Europe/Berlin]
+    # #2898: connects to the API socket and immediately closes -- proves the
+    # listener is actually accepting connections (p0f.c's accept() path,
+    # same one that exhausted under load and crashed the process), not just
+    # that the p0f binary is running. Deliberately not a full query/response
+    # round-trip: p0f has no client tool baked in to build one from without
+    # vendoring more of its own binary protocol, so this catches "listener
+    # dead or refusing" but not "listener alive but hung mid-response".
+    # Labeled for the same #2762 autoheal + docker-socket-proxy pair this
+    # host already runs for traefik/the oidc gateways -- p0f now carries a
+    # real healthcheck with the same "nothing watching it" gap they had
+    # before that fix.
+    healthcheck:
+      test: ["CMD-SHELL", "echo | socat -T2 - UNIX-CONNECT:/run/p0f/p0f.sock"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    labels:
+      - autoheal=true
     deploy:
       resources: { limits: { cpus: "0.5", memory: 256M } }
 

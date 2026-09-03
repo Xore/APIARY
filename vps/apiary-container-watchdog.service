@@ -1,0 +1,15 @@
+# #2898: dockerd's restart-manager can silently give up on a container
+# after a failed restart attempt (see container-restart-watchdog.sh's own
+# comment for the two confirmed cases). This unit runs that script once;
+# the paired .timer fires it every 5 minutes.
+[Unit]
+Description=Force-start containers dockerd's own restart policy failed to bring back
+Documentation=https://github.com/Xore/APIARY/issues/2898
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/container-restart-watchdog.sh
+StandardOutput=journal
+StandardError=journal
