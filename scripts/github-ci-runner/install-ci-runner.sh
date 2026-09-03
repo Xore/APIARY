@@ -195,14 +195,67 @@ rm -f "$sudoers_tmp"
 #     frontend-next/package-lock.json (1.62.1 at the time of writing) --
 #     when that pin moves, re-extract the list from the new
 #     playwright-core and update here.
-apt-get update -qq
-apt-get install -y -qq \
-  redis-server nodejs npm shellcheck \
-  libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64 \
-  libcairo2 libcups2t64 libdbus-1-3 libdrm2 libgbm1 libglib2.0-0t64 \
-  libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 libxcomposite1 \
-  libxdamage1 libxext6 libxfixes3 libxkbcommon0 libxrandr2
-systemctl disable --now redis-server.service 2>/dev/null || true
+#
+# Both distro families are handled: the homeserver moved from Ubuntu to Rocky
+# Linux 10 in the 2026-09-03 rebuild, where this block was still
+# unconditionally apt and every one of the five instances died on
+# "apt-get: command not found" (exit 127) before a single runner was
+# registered.
+. /etc/os-release
+case "${ID:-}" in
+  ubuntu|debian) PKG_FAMILY=debian ;;
+  rocky|rhel|centos|almalinux|fedora) PKG_FAMILY=rhel ;;
+  *) case "${ID_LIKE:-}" in
+       *debian*) PKG_FAMILY=debian ;;
+       *rhel*|*fedora*) PKG_FAMILY=rhel ;;
+       *) echo "unsupported distro '${ID:-unknown}' -- add a branch here" >&2; exit 1 ;;
+     esac ;;
+esac
+
+case "$PKG_FAMILY" in
+debian)
+  apt-get update -qq
+  apt-get install -y -qq \
+    redis-server nodejs npm shellcheck \
+    libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64 \
+    libcairo2 libcups2t64 libdbus-1-3 libdrm2 libgbm1 libglib2.0-0t64 \
+    libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 libxcomposite1 \
+    libxdamage1 libxext6 libxfixes3 libxkbcommon0 libxrandr2
+  systemctl disable --now redis-server.service 2>/dev/null || true
+  ;;
+rhel)
+  # Two repos beyond the Rocky defaults, both required:
+  #   EPEL -- ShellCheck.
+  #   CRB  -- lttng-ust, which the runner's OWN bin/installdependencies.sh
+  #           (called further down) hard-requires. CRB ships disabled on
+  #           Rocky, so without this that script exits with
+  #           "Error: Unable to find a match: lttng-ust" ->
+  #           "Can't install dotnet core dependencies" and the install fails.
+  dnf install -y epel-release
+  dnf config-manager --set-enabled crb
+  # Same roles as the Debian list above, RHEL names. Two differ in substance
+  # rather than spelling:
+  #   npm   is a separate package here (nodejs-npm), not bundled with nodejs.
+  #   redis is not packaged for EL10 at all -- valkey replaced it. Valkey 8 is
+  #         a fork of Redis 7.2 and speaks the same protocol, which is all the
+  #         frontend-next browser fixture wants from it.
+  dnf install -y \
+    valkey nodejs nodejs-npm ShellCheck \
+    alsa-lib at-spi2-atk atk at-spi2-core \
+    cairo cups-libs dbus-libs libdrm mesa-libgbm glib2 \
+    nspr nss pango libX11 libxcb libXcomposite \
+    libXdamage libXext libXfixes libxkbcommon libXrandr
+  systemctl disable --now valkey.service 2>/dev/null || true
+  # quality.yml checks `command -v redis-server` and fails the row loudly if
+  # it is absent (see its own "#2565's homeserver provision list" error).
+  # Valkey installs only valkey-server, so bridge the name rather than
+  # teaching every consumer a second one.
+  if [[ ! -e /usr/local/bin/redis-server ]] && [[ -x /usr/bin/valkey-server ]]; then
+    ln -s /usr/bin/valkey-server /usr/local/bin/redis-server
+    echo "linked /usr/local/bin/redis-server -> valkey-server (EL10 has no redis package)"
+  fi
+  ;;
+esac
 if ! id -nG "$RUNNER_USER" | tr ' ' '\n' | grep -qx docker; then
   usermod -aG docker "$RUNNER_USER"
   echo "added $RUNNER_USER to the docker group -- the runner service will be restarted below to pick it up"

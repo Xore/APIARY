@@ -180,6 +180,15 @@ if [[ ! -f "$RUNNER_HOME/run.sh" ]]; then
   chown "$RUNNER_USER:$RUNNER_USER" "$RUNNER_HOME"
   find "$RUNNER_HOME" -maxdepth 1 -mindepth 1 -exec chown -R "$RUNNER_USER:$RUNNER_USER" {} +
   echo "extracted actions-runner v${RUNNER_VERSION} to $RUNNER_HOME"
+  # installdependencies.sh installs the .NET runtime's prerequisites. On a
+  # RHEL-family host one of them, lttng-ust, lives in CRB, which Rocky ships
+  # disabled -- so the script fails with "Error: Unable to find a match:
+  # lttng-ust" followed by "Can't install dotnet core dependencies", and the
+  # whole install aborts. Hit live on the 2026-09-03 Rocky 10 rebuild. Enable
+  # CRB first so its own dependency resolution can succeed.
+  if command -v dnf >/dev/null 2>&1; then
+    dnf config-manager --set-enabled crb 2>/dev/null || true
+  fi
   "$RUNNER_HOME/bin/installdependencies.sh"
 else
   echo "runner already extracted at $RUNNER_HOME, skipping download"
