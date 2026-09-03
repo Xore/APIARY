@@ -190,7 +190,7 @@ for var in GIT_REPO_URL GIT_REF REPO_DIR HOME_WG_ADDRESS \
            VPS_WG_ADDRESS VPS_WG_ENDPOINT VPS_WG_PUBLIC_KEY \
            VPS_SSH_HOST VPS_SSH_PORT VPS_SSH_USER VPS_SSH_KEY ENABLE_GPU_STACK \
            INSTALL_TIMEZONE BACKUP_HOST BACKUP_HOST_USER BACKUP_HOST_KEY BACKUP_HOST_PATH \
-           PIHOLE_LAN_IP ENABLE_SANDBOX_RESTORE AUTH_THEME_REPO_URL \
+           TECHNITIUM_LAN_IP ENABLE_SANDBOX_RESTORE AUTH_THEME_REPO_URL \
            KEYCLOAK_PUBLIC_DOMAIN ARCANE_URL ARCANE_API_TOKEN; do
   if [[ -z "${!var:-}" || "${!var}" == *'<'*'>'* ]]; then
     echo "Config value $var is unset or still a <PLACEHOLDER> in $CONFIG_FILE." >&2
@@ -979,14 +979,14 @@ EOF
 # Maps Dockge stack name -> "<name>.env" file directly under BACKUP_HOST_PATH
 # (a flat directory, not "<name>/.env" subdirectories -- confirmed against
 # the real backup host live during #787's homeserver reinstall, 2026-08-09).
-# 1:1 for everything except pihole, which the backup captured a bare .env for
-# (no compose file was ever backed up for it -- see step_pihole_provision,
+# 1:1 for everything except the DNS stack, which the backup captured a bare .env for
+# (no compose file was ever backed up for it -- see step_technitium_provision,
 # which reconstructs a minimal one since it isn't part of this git repo).
 ENV_RESTORE_STACKS=(
   honeypot-keycloak honeypot-init honeypot-cowrie honeypot-dionaea honeypot-conpot honeypot-dnp3
   honeypot-http honeypot-multipot honeypot-dashboard honeypot-payload-analysis
   honeypot-tanner honeypot-elk honeypot-utilities honeypot-stack ghidra ghosts
-  pihole
+  technitium
 )
 
 step_restore_env_files() {
@@ -1024,7 +1024,7 @@ step_restore_env_files() {
 # /var/stacks/apiary checkout. Each one's build context and config now
 # lives self-contained under arcane/home/<name>/ (or, for the 6 stacks that
 # were already self-contained before this migration -- auth-events-worker,
-# llm-worker, ml-worker, analysis/ghidra, sandbox/ghosts, pihole -- at its
+# llm-worker, ml-worker, analysis/ghidra, sandbox/ghosts, technitium -- at its
 # existing path), and Arcane's own directory-aware Git sync owns
 # materializing and deploying it, driven by this manifest.
 #
@@ -1042,8 +1042,8 @@ step_restore_env_files() {
 #
 # The other 3 stay fully on their own dedicated steps, deliberately not
 # folded in:
-#   - pihole (step_pihole_provision/-start/-verify): real host-local state
-#     beyond .env -- etc-pihole/, etc-dnsmasq.d/, and a dnscrypt-proxy/
+#   - technitium (step_technitium_provision/-start/-verify): real host-local state
+#     beyond .env -- config/ (zones, settings, blocklists)
 #     directory that needs non-root ownership for its distroless image
 #     (chown 65532:65532). #1502's own cutover lost this exact state once
 #     already (disclosed in that issue's own comments) when it wasn't
@@ -1726,51 +1726,32 @@ step_sshfs_boot_ordering() {
 }
 
 # ---------------------------------------------------------------------------
-# Phase 8b — Pi-hole + DNSCrypt. The LAN backup only captured pihole/.env;
-# the complete, tested deployment definition now lives under pihole/.
+# Phase 8b — Technitium DNS (replaced Pi-hole 2026-09-03). The LAN backup only
+# captured the DNS stack .env; the deployment definition lives under technitium/.
 # ---------------------------------------------------------------------------
-step_pihole_provision() {
-  local dir="/var/dockge/stacks/pihole"
-  mkdir -p "$dir/etc-pihole" "$dir/etc-dnsmasq.d" "$dir/dnscrypt-proxy"
+step_technitium_provision() {
+  local dir="/var/dockge/stacks/technitium"
+  mkdir -p "$dir/config"
 
   # Binding 0.0.0.0:53 collides with hp-dns-honeypot, which already publishes
   # 53/udp on 10.8.0.2 (the WireGuard bind IP every honeypot sensor uses,
   # per HP_BIND / CGNAT-DEPLOYMENT.md's "never reachable from your home LAN"
   # design) -- 0.0.0.0 overlaps every interface including that one, so
-  # Docker's port allocator refuses the bind. Confirmed live (#518 test run):
-  # deterministic "address already in use" on every attempt, not a race.
-  # Pihole is real home-LAN infra, not a honeypot component, so it belongs on
-  # the actual LAN-facing IP instead. A box with more than one LAN interface
-  # (see docs/research/518-smoke-test-research.md's NIC inventory for this
-  # deployment's specifics) may have more than one candidate address --
-  # which one pihole should actually serve is an operator choice, not
-  # something to auto-detect via the default route (that picked the wrong
-  # one of two on this box's first pass, confirmed live #518), hence
-  # PIHOLE_LAN_IP is an explicit config value, not inferred.
-  local lan_ip="$PIHOLE_LAN_IP"
-  install -m 0644 "$REPO_DIR/pihole/compose.yml" "$dir/compose.yml"
-  install -m 0444 "$REPO_DIR/pihole/dnscrypt-proxy.toml" \
-    "$dir/dnscrypt-proxy/dnscrypt-proxy.toml"
-  # klutchell/dnscrypt-proxy is a distroless image pinned above and runs as
-  # the standard nonroot uid/gid 65532. It must be able to atomically refresh
-  # public-resolvers.md in this directory, while the config itself stays
-  # read-only.
-  chown 65532:65532 "$dir/dnscrypt-proxy"
+  # Docker's port allocator refuses the bind (confirmed live, #518).
+  # Technitium is real home-LAN infra, not a honeypot component, so it binds
+  # the actual LAN-facing IP. TECHNITIUM_LAN_IP is an explicit config value,
+  # not inferred from the default route (auto-detection picked the wrong one
+  # of two NICs on this box, confirmed live #518).
+  local lan_ip="$TECHNITIUM_LAN_IP"
+  install -m 0644 "$REPO_DIR/technitium/compose.yml" "$dir/compose.yml"
 
-  # #1505: pihole/compose.yml dropped its literal __LAN_IP__ placeholder for
-  # ${LAN_IP:-127.0.0.1} Compose interpolation instead (part of #1502's own
-  # Arcane compose-validator fix -- a `:?required` var in a port-binding
-  # host-IP position broke Arcane's own pre-flight check, see
-  # docs/ARCANE-GIT-SYNC.md). The sed this step used to run here had nothing
-  # left to match -- a confirmed no-op, not a working code path -- so the
-  # only thing that actually set the real LAN address was whatever LAN_IP
-  # value happened to already be in a restored .env from a prior install.
-  # Written explicitly here instead, so a genuinely fresh install (no
-  # backed-up .env at all) gets the operator-configured PIHOLE_LAN_IP
-  # rather than silently falling back to compose's own 127.0.0.1 default
-  # and binding to loopback only.
-  if [[ ! -f "$dir/.env" && -f "$REPO_DIR/pihole/.env.example" ]]; then
-    install -m 0644 "$REPO_DIR/pihole/.env.example" "$dir/.env"
+  # Same ${LAN_IP} interpolation mechanism the old pihole stack used since #1502
+  # (a `:?required` var in a port-binding host-IP position broke Arcane's
+  # own pre-flight check, see docs/ARCANE-GIT-SYNC.md). Written explicitly so
+  # a genuinely fresh install gets the operator-configured address rather
+  # than silently falling back to compose's 127.0.0.1 default.
+  if [[ ! -f "$dir/.env" && -f "$REPO_DIR/technitium/.env.example" ]]; then
+    install -m 0644 "$REPO_DIR/technitium/.env.example" "$dir/.env"
   fi
   if [[ -f "$dir/.env" ]]; then
     if grep -q '^LAN_IP=' "$dir/.env"; then
@@ -1782,30 +1763,23 @@ step_pihole_provision() {
   fi
 }
 
-step_pihole_start() {
-  [[ -f /var/dockge/stacks/pihole/.env ]] || { echo "no pihole .env restored — skipping start"; return 1; }
-  (cd /var/dockge/stacks/pihole && with_retry 3 15 docker compose -f compose.yml up -d --wait)
+step_technitium_start() {
+  [[ -f /var/dockge/stacks/technitium/.env ]] || { echo "no technitium .env restored — skipping start"; return 1; }
+  (cd /var/dockge/stacks/technitium && with_retry 3 15 docker compose -f compose.yml up -d --wait)
 }
 
-step_pihole_verify() {
-  local dir="/var/dockge/stacks/pihole"
-  local dnscrypt_answer pihole_answer lan_answer
+step_technitium_verify() {
+  local dir="/var/dockge/stacks/technitium"
+  local container_answer lan_answer
 
   # Probe each hop separately so an unattended install failure identifies
-  # whether the encrypted upstream, Pi-hole forwarding, or LAN bind is bad.
-  dnscrypt_answer="$(cd "$dir" && docker compose exec -T dnscrypt \
-    dnscrypt-proxy -config /config/dnscrypt-proxy.toml \
-    -resolve example.com,127.0.0.1:5053 2>&1)" || return
-  pihole_answer="$(docker exec pihole \
+  # whether the container-internal path or the LAN bind is bad.
+  container_answer="$(docker exec technitium-dns \
     dig @127.0.0.1 example.com A +time=3 +tries=1 +short)" || return
-  lan_answer="$(dig @"$PIHOLE_LAN_IP" example.com A +time=3 +tries=1 +short)" || return
+  lan_answer="$(dig @"$TECHNITIUM_LAN_IP" example.com A +time=3 +tries=1 +short)" || return
 
-  [[ "$dnscrypt_answer" == *"Resolver IP"* ]] || {
-    echo "DNSCrypt returned no resolver answer: $dnscrypt_answer" >&2
-    return 1
-  }
-  [[ -n "$pihole_answer" ]] || { echo "Pi-hole returned no recursive answer" >&2; return 1; }
-  [[ -n "$lan_answer" ]] || { echo "Pi-hole returned no LAN-side answer" >&2; return 1; }
+  [[ -n "$container_answer" ]] || { echo "Technitium returned no recursive answer" >&2; return 1; }
+  [[ -n "$lan_answer" ]] || { echo "Technitium returned no LAN-side answer" >&2; return 1; }
 }
 
 # ---------------------------------------------------------------------------
@@ -2258,9 +2232,9 @@ run_step sshfs-install         "Install sshfs, place VPS key"        step_sshfs_
 run_step sshfs-mounts          "Mount VPS Suricata/portbridge logs"  step_sshfs_mounts
 run_step sshfs-boot-ordering   "Install WireGuard-aware mount ordering" step_sshfs_boot_ordering
 
-run_step pihole-provision      "Install Pi-hole + DNSCrypt config"  step_pihole_provision
-run_step pihole-start          "Start Pi-hole after DNSCrypt ready" step_pihole_start
-run_step pihole-verify         "Resolve DNSCrypt, Pi-hole, and LAN"  step_pihole_verify
+run_step technitium-provision  "Install Technitium DNS config"       step_technitium_provision
+run_step technitium-start      "Start Technitium DNS"                step_technitium_start
+run_step technitium-verify     "Resolve container and LAN"           step_technitium_verify
 
 if [[ "$ENABLE_GPU_STACK" == "true" ]]; then
   run_step ghidra-provision      "Link ghidra compose.yml"            step_ghidra_stack_provision

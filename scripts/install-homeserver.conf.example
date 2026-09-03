@@ -121,9 +121,9 @@ BACKUP_HOST_PATH="<PATH_ON_BACKUP_HOST>" # e.g. /home/<user>/honeypot-backups/<d
 # since hp-dns-honeypot already owns port 53/udp there and a wildcard bind
 # collides with it (confirmed live, #518). Pick the actual home-LAN-facing
 # interface IP on this box -- if it has more than one LAN interface, use the
-# one you want pihole actually serving, not whichever the default route
+# one you want the DNS server actually serving, not whichever the default route
 # happens to prefer.
-PIHOLE_LAN_IP="<HOME_LAN_IP>"            # e.g. 192.168.1.10
+TECHNITIUM_LAN_IP="<HOME_LAN_IP>"         # e.g. 192.168.1.10
 
 # --- Sandbox VM restore (GHOSTS + Windows detonation) ----------------------
 # Optional and gated separately from everything above: this is a 170G+

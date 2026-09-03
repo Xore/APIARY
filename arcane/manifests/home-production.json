@@ -318,10 +318,10 @@
     "maxSyncTotalSize": 209715200
   },
   {
-    "syncName": "pihole",
+    "syncName": "technitium",
     "gitRepo": "apiary",
     "branch": "production",
-    "dockerComposePath": "pihole/compose.yml",
+    "dockerComposePath": "technitium/compose.yml",
     "autoSync": true,
     "syncDirectory": true,
     "syncInterval": 300
