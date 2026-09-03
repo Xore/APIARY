@@ -810,6 +810,20 @@ jobs:
               # asserting coverage that no longer exists.
               python scripts/check-json-sink-retention-parity.py
 
+          # #2424 asked for this guard and never wrote it -- the gap is what
+          # let two of its three findings (shadow hash length, passwd/group
+          # and passwd/shadow closure) regress silently past a closed issue
+          # until #2885 spot-checked the tree instead of trusting the closed
+          # state. Four checks: every tracked SSH key parses, every $6$
+          # shadow body is 86 characters -- the length of real sha512crypt
+          # output, which is what a scanner fingerprints on; without the
+          # plaintext the guard cannot check the body is a genuine hash --
+          # and both closures (passwd GID -> group, passwd account -> shadow)
+          # hold.
+          - name: "Cowrie honeyfs realism guard (#2424, #2885)"
+            home: true
+            run: python scripts/check-cowrie-honeyfs-realism.py
+
           # #1982: compose.yml is the only place a stack's knobs are exercised,
           # .env.example is what a deployer copies when standing the stack up
           # manually -- drift between them means a variable exists at runtime
