@@ -56,6 +56,26 @@ Usage (the .github/workflows/compose-drift-watch.yml cron runs the first
 form, on the homeserver-backed self-hosted runner):
   scripts/compose-drift-watch.py [--dry-run] [--stacks-root /var/dockge/stacks]
   --dry-run prints the would-be action and exits (no issue writes).
+
+#2855: this sweep originally only checked a live stack directory against
+*itself* (does a service that should persist have a container). It never
+asked the reverse question -- does this live directory's project still
+exist anywhere in the repo at all? A stack fully retired from the repo
+(its whole `arcane/home/<name>/` directory deleted, as #2469 did for
+wordpot) is invisible to the original check: its live directory under
+`/var/dockge/stacks/` still has a stale `compose.yml` copy from before
+retirement, so it resolves and gets checked for *internal* drift like any
+other project, but nothing ever flagged "this project doesn't exist in the
+repo any more and is still running" -- confirmed live: `hp-wordpot` ran
+healthy for weeks after #2469 with zero alarms from this sweep (#2814).
+Fixed by cross-checking each live stack directory's name against
+`arcane/manifests/home-production.json`'s `syncName` list -- the same
+canonical source of truth `scripts/install-homeserver.sh` and this repo's
+own docs already treat as authoritative for "which 37 stacks exist"
+(`docs/ARCANE-GIT-SYNC.md`), rather than re-deriving a second list by
+grepping `arcane/home/*` (which would also miss the manifest's six
+self-contained, non-`arcane/home/`-nested entries: `auth-events-worker`,
+`llm-worker`, `ml-worker`, `ghidra`, `ghosts`, `pihole`).
 """
 from __future__ import annotations
 
@@ -71,6 +91,25 @@ from pathlib import Path
 LABEL = "compose-drift-alarm"
 REPO = os.environ.get("GITHUB_REPOSITORY", "")
 PERSISTENT_RESTART_POLICIES = {"unless-stopped", "always", "on-failure"}
+# Relative to this script's own location, not the checkout root -- the
+# same "fixed deployed path" caution #2764 gives for PRIVILEGED_HELPER
+# below doesn't apply here (this file has no separate root-owned install
+# location), but resolving relative to the script keeps this correct
+# whether it's invoked from the repo root (the CI workflow's case) or from
+# some other cwd.
+MANIFEST_PATH = Path(__file__).resolve().parent.parent / "arcane" / "manifests" / "home-production.json"
+# Live directories under the stacks root that are never in the manifest by
+# design, not by omission -- confirmed against docs/ARCANE-GIT-SYNC.md and
+# live inspection, not guessed:
+#   - honeypot-arcane: "not in the manifest and never will be -- syncing
+#     the thing that has to already be running before any sync can happen
+#     is a bootstrap loop." Installer/deploy.yml-managed instead.
+#   - apiary: Arcane's own internal git-repository clone (registered via
+#     POST /customize/git-repositories), the source directory-sync reads
+#     individual stacks' files from -- not a deployed project itself. It
+#     happens to carry a top-level compose.yml (this repo's own), which is
+#     what made it look like a stack directory to a naive glob.
+KNOWN_NON_PROJECT_DIRS = {"honeypot-arcane", "apiary"}
 
 
 def fail(msg: str) -> "None":
@@ -95,6 +134,46 @@ def project_dirs(stacks_root: Path) -> list[Path]:
     if not dirs:
         fail(f"no compose.yml found under {stacks_root} -- refusing to read this as a healthy fleet")
     return dirs
+
+
+def manifest_project_names() -> set[str] | None:
+    """The canonical set of live stack names, from the manifest's own
+    `syncName` field. None (not an empty set) if the manifest can't be
+    read -- the caller must treat that as "can't check this", never as
+    "every live directory is retired"."""
+    try:
+        entries = json.loads(MANIFEST_PATH.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(entries, list) or not entries:
+        return None
+    names = {e.get("syncName") for e in entries if isinstance(e, dict)}
+    names.discard(None)
+    return names or None
+
+
+def retired_projects(stacks_root: Path, known_names: set[str]) -> list[str]:
+    """Live stack directories (compose.yml present) whose name is not in
+    the manifest at all -- a project retired from the repo (its whole
+    arcane/home/<name>/ directory deleted) but never torn down on this
+    host. Distinct from project_dirs()'s callers, which only care about
+    resolvable projects; this one only cares about the name.
+
+    Deliberately one-directional: it flags "live directory, no manifest
+    entry" and NOT the reverse, "manifest entry, no live directory". The
+    reverse looks non-empty but is benign -- as of 2026-09-03 four entries
+    are in that state (auth-events-worker, ghidra, llm-worker, ml-worker)
+    purely because their stack directories use `docker-compose.yml` rather
+    than `compose.yml`, exactly as their manifest `dockerComposePath` says.
+    Alarming on those would be four permanent false positives, which is the
+    failure mode this whole check exists to avoid."""
+    return sorted(
+        d.name for d in stacks_root.iterdir()
+        if d.is_dir()
+        and (d / "compose.yml").is_file()
+        and d.name not in known_names
+        and d.name not in KNOWN_NON_PROJECT_DIRS
+    )
 
 
 # #2764: fixed deployed path, not this checkout's sibling file -- the
@@ -254,6 +333,18 @@ def main() -> int:
     findings, unresolved = sweep(stacks_root)
     host = os.environ.get("RUNNER_NAME") or os.uname().nodename
 
+    known_names = manifest_project_names()
+    if known_names is None:
+        print(
+            f"note: could not read {MANIFEST_PATH} -- skipping the "
+            "retired-from-repo check this sweep (not read as healthy, just "
+            "not checked)",
+            file=sys.stderr,
+        )
+        retired: list[str] = []
+    else:
+        retired = retired_projects(stacks_root, known_names)
+
     if unresolved:
         print(
             f"note: {len(unresolved)} project(s) could not be resolved and "
@@ -261,9 +352,9 @@ def main() -> int:
             file=sys.stderr,
         )
 
-    if not findings:
+    if not findings and not retired:
         print(f"healthy on {host}: no always-on service is missing all its containers "
-              "while a sibling runs")
+              "while a sibling runs, and no live stack directory is missing from the repo manifest")
         if args.dry_run:
             return 0
         if not REPO:
@@ -280,20 +371,27 @@ def main() -> int:
             print(f"closed compose-drift-alarm issue #{open_issue} (recovered)")
         return 0
 
-    print(f"DRIFT: {len(findings)} service(s) missing all containers while a sibling runs")
+    print(f"DRIFT: {len(findings)} service(s) missing all containers while a sibling runs, "
+          f"{len(retired)} live stack(s) retired from the repo")
     lines = [
         f"- `{f['project']}` / **{f['service']}** — zero containers "
         f"(running siblings: {', '.join(f['siblings_running'])})"
         for f in findings
     ]
-    print("\n".join(lines))
+    retired_lines = [f"- `{name}` — still deployed, no matching entry in the manifest" for name in retired]
+    print("\n".join(lines + retired_lines))
 
     now = datetime.now(timezone.utc).strftime("%FT%TZ")
-    body = "\n".join(
-        [
-            f"Sweep at {now} on `{host}`: **{len(findings)}** compose-defined, "
-            "always-on service(s) have no container at all (not even stopped) "
-            "while another service in the same project is running.",
+    body_sections = [
+        f"Sweep at {now} on `{host}`: **{len(findings)}** compose-defined, "
+        "always-on service(s) have no container at all (not even stopped) "
+        f"while another service in the same project is running, and "
+        f"**{len(retired)}** live stack(s) no longer exist in the repo manifest.",
+        "",
+    ]
+    if lines:
+        body_sections += [
+            "## Missing services",
             "",
             "Context: #2747 — this is exactly the shape that let a live "
             "Elasticsearch cluster and two other DB sidecars silently not "
@@ -308,13 +406,31 @@ def main() -> int:
             "",
             *lines,
             "",
-            (
-                f"Also unresolved this sweep (skipped, not counted as "
-                f"healthy): {', '.join(unresolved)}"
-                if unresolved else ""
-            ),
         ]
-    ).strip() + "\n"
+    if retired_lines:
+        body_sections += [
+            "## Retired from the repo, still deployed",
+            "",
+            "Context: #2855 — a stack whose `arcane/home/<name>/` directory "
+            "(or manifest entry, for one of the six self-contained stacks) "
+            "was removed from the repo, but never torn down on this host. "
+            "Deleting the repo source does nothing to what is already "
+            "deployed (`docs/ARCANE-GIT-SYNC.md`'s \"Retirement procedure\" "
+            "section). Confirm the retirement was intentional, then stop "
+            "and remove the live containers (`docker compose -f compose.yml "
+            "down` in the stack's own directory) and delete the "
+            "corresponding Arcane gitops-sync record and stack directory — "
+            "never `docker volume prune`/`rm` as part of this.",
+            "",
+            *retired_lines,
+            "",
+        ]
+    if unresolved:
+        body_sections.append(
+            f"Also unresolved this sweep (skipped, not counted as "
+            f"healthy): {', '.join(unresolved)}"
+        )
+    body = "\n".join(body_sections).strip() + "\n"
 
     if args.dry_run:
         print(f"--- dry run: would open/update {LABEL} issue with the body above")
@@ -337,9 +453,14 @@ def main() -> int:
         gh("issue", "comment", open_issue, "-R", REPO, "--body-file", str(body_path))
         print(f"appended to compose-drift-alarm issue #{open_issue}")
     else:
+        title = (
+            f"ops: {len(findings)} compose service(s) drifted out of existence, "
+            f"{len(retired)} stack(s) retired from the repo but still deployed (#2747/#2855 watch)"
+            if retired else
+            f"ops: {len(findings)} compose service(s) drifted out of existence (#2747 watch)"
+        )
         gh(
-            "issue", "create", "-R", REPO, "--title",
-            f"ops: {len(findings)} compose service(s) drifted out of existence (#2747 watch)",
+            "issue", "create", "-R", REPO, "--title", title,
             "--label", LABEL, "--body-file", str(body_path),
         )
         print("opened compose-drift-alarm issue")
