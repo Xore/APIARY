@@ -19,6 +19,15 @@ sizes, setting realfile + plausible perms/owners). The [`Dockerfile`](Dockerfile
 overlays honeyfs + txtcmds onto the official Cowrie image and runs the sync at
 build time. `docker compose build cowrie` bakes it all in.
 
+> **A rebuild is not a delivery.** `bin/entrypoint.sh` seeds the bind-mounted
+> honeyfs from the image's `honeyfs.dist` **only when that mount is empty**, so
+> that the honeyfs-implant service (#1487) can plant a live artifact without
+> being overwritten on the next boot. On a host where cowrie has already
+> booted once, rebuilding the image changes `honeyfs.dist` and changes nothing
+> an attacker sees. Tracked in #2913; until it is fixed, a honeyfs change
+> reaches a running honeypot only via a one-time copy into the host's state
+> mount or a mount that starts empty (a fresh install).
+
 ## What an attacker finds
 
 | Path | Bait |
@@ -33,10 +42,20 @@ build time. `docker compose build cowrie` bakes it all in.
 | `/var/log/auth.log` | normal admin logins + a couple of failed brute-force lines |
 | `df` / `free` / `lscpu` | canned output ([txtcmds/](txtcmds)) |
 
-**Everything is fictional.** No real company, domains (`*.example.com` /
-`*.internal`), IPs (RFC 5737/1918), keys or credentials. The fake secrets look
-real but authenticate to nothing — that's the point: an attacker wastes time
-chasing them while you capture exactly what they grep for and try.
+**Everything is fictional.** No real company, domains (`*.nexusai.local` /
+`*.nexusai.example` / `*.nexusai.internal`), IPs (RFC 5737/1918), keys or
+credentials. The fake secrets look real but authenticate to nothing — that's
+the point: an attacker wastes time chasing them while you capture exactly what
+they grep for and try.
+
+> Corrected 2026-09-03 (#2884): this used to say `*.example.com` / `*.internal`,
+> which described neither this persona's actual domains (`nexusai.local`
+> dominates; `nexusai.example` and `nexusai.internal` cover a handful of
+> external-facing/error-reporting hosts) nor real reserved fictional-domain
+> space (`example.com` is itself a real registered domain reserved by IANA for
+> documentation, distinct from the unregistrable `.example` TLD). Keep this
+> paragraph in sync with the domains actually used under `honeyfs/` — grep for
+> `nexusai\.(local|example|internal)` before editing either.
 
 ## Customising
 
