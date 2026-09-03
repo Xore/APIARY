@@ -23,7 +23,8 @@ RUN apk --no-cache -U upgrade && \
         jansson-dev \
         libcap \
         libpcap \
-        libpcap-dev && \
+        libpcap-dev \
+        socat && \
     addgroup -g 2000 p0f && \
     adduser -S -s /bin/bash -u 2000 -D -g 2000 p0f && \
     cd /opt/p0f && \
@@ -61,4 +62,21 @@ WORKDIR /opt/p0f
 # banner and per-fingerprint summary to stdout by default, which is pure
 # noise for a query-mode daemon. stderr is left alone so `docker logs` still
 # shows real startup failures.
-CMD ["/bin/bash", "-c", "exec /opt/p0f/p0f -u p0f -s /run/p0f/p0f.sock -i $(ip route | grep '^default' | awk '{ print $5 }') > /dev/null"]
+#
+# #2898: portbridge dials a fresh API-socket connection per attacker
+# connection (vps/portbridge/p0f.go), and at this host's real connection
+# rate (100-450k/day) the unset default `-S` (20 parallel API connections,
+# p0f.c's API_MAX_CONN) is far too small. What was *observed* on 2026-08-27:
+# the container's log history was ~15.5k lines of p0f's own "Too many API
+# connections" warning, and the process then exited 1. The mechanism joining
+# those two -- a client that had already given up on a queued connection
+# producing a write-after-close that hits p0f's PFATAL("write() on API
+# socket fails despite POLLOUT") -- is inference from p0f's own source, not
+# something observed directly, and it is no longer re-derivable: the
+# container was rebuilt and that log history is gone. `-S 100` is p0f's hard
+# ceiling (p0f.c rejects any value over 100); it raises the headroom before
+# the warning path is reached and does not claim to remove the crash. The other half of the fix is
+# container-restart-watchdog.sh: dockerd's restart-manager failed to bring
+# this container back on its own after that crash and left it dead for six
+# days with `restart: unless-stopped` still set.
+CMD ["/bin/bash", "-c", "exec /opt/p0f/p0f -u p0f -s /run/p0f/p0f.sock -S 100 -i $(ip route | grep '^default' | awk '{ print $5 }') > /dev/null"]
