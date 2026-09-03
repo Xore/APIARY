@@ -31,7 +31,16 @@ AUTH_THEME_REPO_URL="<GIT_REMOTE_URL>"   # e.g. git@github.com:<org>/auth-backen
 # (https://auth.<domain>/realms/apiary) from this for the honeypot-arcane
 # .env it generates. Use the SAME value as honeypot-keycloak's
 # KEYCLOAK_PUBLIC_DOMAIN.
-KEYCLOAK_PUBLIC_DOMAIN="<KEYCLOAK_PUBLIC_DOMAIN>"   # e.g. honeypot.example
+#
+# This is the BASE domain, NOT a service hostname. Set "example.com", never
+# "auth.example.com" -- the installer prefixes the service label itself, so the
+# latter yields arcane.auth.example.com and issuer auth.auth.example.com. Both
+# are second-level subdomains, which a *.example.com wildcard certificate does
+# not cover (it matches exactly one label). The 2026-09-03 rebuild was
+# configured this way and the failure only surfaced later as OIDC discovery
+# errors; the installer now rejects a value starting with a known service
+# label, but the value still has to be right for labels it cannot guess.
+KEYCLOAK_PUBLIC_DOMAIN="<KEYCLOAK_PUBLIC_DOMAIN>"   # e.g. honeypot.example (NOT auth.honeypot.example)
 
 # #1502: Arcane manages the 32 honeypot-* stacks via directory-aware Git
 # sync now, driven by arcane/manifests/home-production.json -- these two

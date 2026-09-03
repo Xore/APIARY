@@ -198,6 +198,27 @@ for var in GIT_REPO_URL GIT_REF REPO_DIR HOME_WG_ADDRESS \
     exit 1
   fi
 done
+
+# KEYCLOAK_PUBLIC_DOMAIN is the BASE domain -- every public hostname is derived
+# from it by prefixing a service label (auth.<domain>, arcane.<domain>,
+# dashboard.<domain>, ...). Handing it a hostname that already carries one of
+# those labels silently produces a second-level subdomain: the 2026-09-03
+# rebuild was configured with "auth.xore.rocks" and generated
+# https://arcane.auth.xore.rocks plus issuer https://auth.auth.xore.rocks,
+# neither of which resolves or is covered by the wildcard origin certificate
+# (*.xore.rocks matches one label only). Nothing downstream validated it, so it
+# surfaced as OIDC discovery failures far from the cause. Reject it here.
+for label in auth arcane dashboard kibana arkime evebox traefik tanner snare rev; do
+  if [[ "$KEYCLOAK_PUBLIC_DOMAIN" == "$label."* ]]; then
+    echo "KEYCLOAK_PUBLIC_DOMAIN is \"$KEYCLOAK_PUBLIC_DOMAIN\", which already starts with the" >&2
+    echo "service label \"$label.\". This value must be the BASE domain only --" >&2
+    echo "the installer derives auth.<domain>, arcane.<domain> and friends from it," >&2
+    echo "so this would generate ${label}.${KEYCLOAK_PUBLIC_DOMAIN} (a second-level" >&2
+    echo "subdomain that a *.<domain> wildcard certificate does not cover)." >&2
+    echo "Use \"${KEYCLOAK_PUBLIC_DOMAIN#"$label".}\" instead." >&2
+    exit 1
+  fi
+done
 # INSTALL_HOSTNAME is intentionally excluded from the loop above and
 # allowed to be genuinely empty -- this file's own header comment (and
 # install-homeserver.conf.example's) already documented "leave empty to
@@ -375,6 +396,14 @@ step_base_packages() {
         xfsprogs nvme-cli openssh-client
       ;;
     rhel)
+      # EPEL first, and unconditionally: Rocky's own repos do not carry
+      # fuse-sshfs (step_sshfs_install) or dkms (the GPU branch). It used to be
+      # installed only inside the GPU branch, so a host with
+      # ENABLE_GPU_STACK=false reached step_sshfs_install with no repo
+      # providing sshfs at all and failed there -- hit live on the 2026-09-03
+      # Rocky 10 rebuild ("No match for argument: fuse-sshfs"). Installing it
+      # here makes it available to every later step regardless of profile.
+      pkg_install epel-release
       pkg_install ca-certificates curl bind-utils gnupg2 git jq rsync firewalld \
         xfsprogs nvme-cli openssh-clients
       ;;
@@ -990,7 +1019,22 @@ ENV_RESTORE_STACKS=(
 )
 
 step_restore_env_files() {
-  local failures=0
+  # A missing *individual* .env is a warning -- a stack may genuinely not have
+  # existed before the rebuild. But *every* restore failing is not that: it
+  # means the backup host, key or path is wrong, and there are no real secrets
+  # on this host at all. That case used to return 0 anyway, so the step marked
+  # itself done, step_bootstrap_missing_envs filled all 38 stacks in from
+  # .env.example placeholders, and the whole stack came up authenticated
+  # against nothing with no failed step to show for it. Hit live on the
+  # 2026-09-03 Rocky 10 rebuild: BACKUP_HOST_KEY pointed at a key file that did
+  # not exist, all 38 scps failed, and the run reported restore-env-files OK.
+  # Fail closed instead, and say which of the three inputs to check.
+  local restored=0 missing=0
+  if [[ ! -r "$BACKUP_HOST_KEY" ]]; then
+    echo "BACKUP_HOST_KEY is not readable: $BACKUP_HOST_KEY" >&2
+    echo "  Nothing can be restored without it -- fix the path or place the key." >&2
+    return 1
+  fi
   for name in "${ENV_RESTORE_STACKS[@]}"; do
     local src="${BACKUP_HOST_PATH}/${name}.env"
     local dest_dir="/var/dockge/stacks/${name}"
@@ -999,11 +1043,21 @@ step_restore_env_files() {
         -o ConnectTimeout=10 "${BACKUP_HOST_USER}@${BACKUP_HOST}:${src}" "$dest_dir/.env" 2>/dev/null; then
       chmod 600 "$dest_dir/.env"
       echo "restored .env for $name"
+      restored=$((restored + 1))
     else
       echo "WARNING: no backed-up .env found for $name at $src (may not have existed pre-rebuild)"
+      missing=$((missing + 1))
     fi
   done
-  return 0   # missing individual .envs is a warning, not a hard failure -- see summary
+  echo "restored $restored .env file(s), $missing missing"
+  if [[ $restored -eq 0 ]]; then
+    echo "FAILED: not a single .env was restored from ${BACKUP_HOST_USER}@${BACKUP_HOST}:${BACKUP_HOST_PATH}" >&2
+    echo "  Check BACKUP_HOST / BACKUP_HOST_PATH / BACKUP_HOST_KEY. The path must" >&2
+    echo "  hold one <stack>.env per stack (e.g. \$BACKUP_HOST_PATH/honeypot-elk.env)." >&2
+    echo "  Continuing would bootstrap every stack from .env.example placeholders." >&2
+    return 1
+  fi
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -1070,6 +1124,15 @@ step_restore_env_files() {
 # test host to break, which wasn't a safe call to make unilaterally.
 ARCANE_STACK_MANIFEST="$REPO_DIR/arcane/manifests/home-production.json"
 
+# The four Keycloak provisioner scripts moved under arcane/home/honeypot-keycloak/
+# in #1502's per-stack restructure; the installer kept calling them at the
+# pre-#1502 top-level $REPO_DIR/keycloak/ path. That made all four steps fail
+# with "No such file or directory" on the 2026-09-03 rebuild -- leaving the
+# dashboard, Arcane and the events poller without their real OIDC secrets.
+# One variable so a single fix keeps covering all four, as their own comments
+# intend.
+KEYCLOAK_PROVISION_DIR="$REPO_DIR/arcane/home/honeypot-keycloak/keycloak"
+
 # arcane_api <method> <path> [json-body] -- authenticated call against this
 # host's own Arcane instance. ARCANE_URL/ARCANE_API_TOKEN are operator-
 # provided config (see install-homeserver.conf.example): an unattended
@@ -1078,10 +1141,18 @@ ARCANE_STACK_MANIFEST="$REPO_DIR/arcane/manifests/home-production.json"
 # -> API Keys, after its first login) the same way step_provision_keycloak_secrets
 # requires the Keycloak realm to already exist rather than creating one
 # from nothing.
+# Arcane authenticates API keys with its own `X-API-Key` header, NOT
+# `Authorization: Bearer`. Sending Bearer returns 401 with an ErrorModel body
+# and no `data` field, which every caller below then reads as an empty result
+# rather than as an auth failure -- so the import "failed" with an empty error
+# message and every downstream step cascaded off it. Measured live on the
+# 2026-09-03 Rocky 10 rebuild against Arcane v2.9.0:
+#   Authorization: Bearer <key> -> 401 {"title":"Unauthorized",...}
+#   X-API-Key: <key>            -> 200 {"success":true,"data":[...]}
 arcane_api() {
   local method="$1" path="$2" body="${3:-}"
   local -a curl_args=(-sS -X "$method" "${ARCANE_URL%/}/api${path}" \
-    -H "Authorization: Bearer $ARCANE_API_TOKEN" -H "Content-Type: application/json")
+    -H "X-API-Key: $ARCANE_API_TOKEN" -H "Content-Type: application/json")
   [[ -n "$body" ]] && curl_args+=(-d "$body")
   curl "${curl_args[@]}"
 }
@@ -1496,7 +1567,7 @@ step_provision_events_poller_secrets() {
   }
   KEYCLOAK_ADMIN_USERNAME="${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}" \
   KEYCLOAK_ADMIN_PASSWORD="$(< "$secrets_dir/bootstrap-admin-password")" \
-    "$REPO_DIR/keycloak/provision-events-poller.sh"
+    "$KEYCLOAK_PROVISION_DIR/provision-events-poller.sh"
 }
 
 step_provision_dashboard_oidc_secret() {
@@ -1515,7 +1586,7 @@ step_provision_dashboard_oidc_secret() {
   }
   KEYCLOAK_ADMIN_USERNAME="${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}" \
   KEYCLOAK_ADMIN_PASSWORD="$(< "$secrets_dir/bootstrap-admin-password")" \
-    "$REPO_DIR/keycloak/provision-dashboard-oidc-secret.sh"
+    "$KEYCLOAK_PROVISION_DIR/provision-dashboard-oidc-secret.sh"
 }
 
 step_provision_arcane_oidc_secret() {
@@ -1533,7 +1604,7 @@ step_provision_arcane_oidc_secret() {
   }
   KEYCLOAK_ADMIN_USERNAME="${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}" \
   KEYCLOAK_ADMIN_PASSWORD="$(< "$secrets_dir/bootstrap-admin-password")" \
-    "$REPO_DIR/keycloak/provision-arcane-oidc-secret.sh"
+    "$KEYCLOAK_PROVISION_DIR/provision-arcane-oidc-secret.sh"
 }
 
 step_provision_account_console_scopes() {
@@ -1551,7 +1622,7 @@ step_provision_account_console_scopes() {
   }
   KEYCLOAK_ADMIN_USERNAME="${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}" \
   KEYCLOAK_ADMIN_PASSWORD="$(< "$secrets_dir/bootstrap-admin-password")" \
-    "$REPO_DIR/keycloak/provision-account-console-scopes.sh"
+    "$KEYCLOAK_PROVISION_DIR/provision-account-console-scopes.sh"
 }
 
 step_fix_apiary_backend_permissions() {
