@@ -66,7 +66,7 @@ installer at those paths:
 [`auth-events-worker/`](auth-events-worker/),
 [`llm-worker/`](llm-worker/), [`ml-worker/`](ml-worker/),
 [`analysis/ghidra/`](analysis/ghidra/), [`sandbox/ghosts/`](sandbox/ghosts/),
-[`pihole/`](pihole/).
+[`technitium/`](technitium/).
 
 The root [`docker-compose.yml`](docker-compose.yml) is an empty marker kept
 only so `docker compose config` has something to validate against in this
