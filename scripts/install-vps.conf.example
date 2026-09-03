@@ -40,12 +40,15 @@ VPS_WG_PRIVATE_KEY="<VPS_WG_PRIVATE_KEY>"
 HOME_WG_PUBLIC_KEY="<HOME_WG_PUBLIC_KEY>"
 
 # --- Firewall -----------------------------------------------------------
-# Real admin SSH port. cowrie owns 22 (see docs/CGNAT-DEPLOYMENT.md's VPS
-# deployment section) -- the actual sshd config move to this port is a
-# manual step this script does NOT perform; confirm it works and keep the
-# old session open before this script's firewall-base step locks 22 down
-# to the honeypot-only listener.
-SSH_ADMIN_PORT="2222"
+# Real admin SSH port. cowrie owns 22 on the OLD Ubuntu VPS layout (see
+# docs/CGNAT-DEPLOYMENT.md's VPS deployment section) -- the actual sshd
+# config move to that port is a manual step this script does NOT perform;
+# confirm it works and keep the old session open before this script's
+# firewall-base step locks 22 down to the honeypot-only listener.
+# The 2026-09-03 fresh Rocky install kept sshd on the default 22, so the
+# default here is 22 now; cowrie's portbridge listener uses a different
+# host binding, so there is no collision.
+SSH_ADMIN_PORT="22"
 
 # --- Public domain --------------------------------------------------------
 # Substituted into vps/traefik/dynamic.yml in place of the committed

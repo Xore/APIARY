@@ -37,10 +37,12 @@ extract_rules_ports() {
 
 extract_fw_ports() {
     proto="$1"
-    grep -B1 "ufw allow \"\${port}/${proto}\"" "$firewall_script" \
-        | grep 'for port in' \
-        | grep -oE '[0-9]+' \
-        | sort -u
+    # Both backends now share the TCP_PORTS/UDP_PORTS variables (the ufw loop
+    # iterates them too), so one extraction serves both.
+    case "$proto" in
+        tcp) grep -oE '^TCP_PORTS=".*"' "$firewall_script" | grep -oE '[0-9]+' | sort -u ;;
+        udp) grep -oE '^UDP_PORTS=".*"' "$firewall_script" | grep -oE '[0-9]+' | sort -u ;;
+    esac
 }
 
 is_excepted() {
