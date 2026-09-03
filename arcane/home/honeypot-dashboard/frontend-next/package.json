@@ -41,7 +41,7 @@
     "@types/node": "^26.4.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.5",
-    "@vitejs/plugin-react": "^6.1.0",
+    "@vitejs/plugin-react": "^6.1.1",
     "jsdom": "^30.0.1",
     "lru-cache": "^11.2.6",
     "typescript": "^7.0.2",
