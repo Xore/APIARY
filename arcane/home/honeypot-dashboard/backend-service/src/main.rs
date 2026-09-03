@@ -87,6 +87,7 @@ mod threat_intel;
 mod topology;
 mod zeek_proxy_attribution;
 mod worker;
+mod vault_rag;
 mod workbench_api;
 mod workbench_domain;
 mod workbench_es;
@@ -338,6 +339,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/services/{name}/logs", get(services_control::logs))
         .route("/api/v1/services/{name}/{action}", post(services_control::action))
         .route("/api/v1/llm-search", get(llm_search::search))
+        .route("/api/v1/vault-rag", get(vault_rag::ask))
         .route("/api/v1/ip-block", post(ip_block::set_block))
         .route("/api/v1/ip-block/{ip}", get(ip_block::get_block))
         .route("/api/v1/ip-block-export", get(ip_block::export))
