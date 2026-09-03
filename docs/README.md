@@ -50,7 +50,8 @@ autoinstall).
 [KVM traffic analysis](kvm-network-traffic-analysis.md) ·
 [snapshot-vs-golden-image](kvm-snapshot-vs-golden-image.md) ·
 [Windows 11 malware lab](windows11-malware-lab-hardening.md) ·
-[ES consume patterns](ES-CONSUME-PATTERNS.md)
+[ES consume patterns](ES-CONSUME-PATTERNS.md) ·
+[dionaea bistreams retention](dionaea-bistreams-retention.md)
 
 ## Plans and evaluations — forward-looking or comparative
 
