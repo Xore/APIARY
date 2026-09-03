@@ -1011,12 +1011,33 @@ EOF
 # 1:1 for everything except the DNS stack, which the backup captured a bare .env for
 # (no compose file was ever backed up for it -- see step_technitium_provision,
 # which reconstructs a minimal one since it isn't part of this git repo).
-ENV_RESTORE_STACKS=(
-  honeypot-keycloak honeypot-init honeypot-cowrie honeypot-dionaea honeypot-conpot honeypot-dnp3
-  honeypot-http honeypot-multipot honeypot-dashboard honeypot-payload-analysis
-  honeypot-tanner honeypot-elk honeypot-utilities honeypot-stack ghidra ghosts
-  technitium
-)
+# Stacks whose .env is restored from the backup host. This used to be a
+# hardcoded list of 17 and had silently drifted: the manifest carries 37
+# stacks, and the 2026-09-03 rebuild's backup held 38 real .env files, so 20
+# stacks with genuine secrets in the backup were never even looked for and got
+# .env.example placeholders from step_bootstrap_missing_envs instead
+# (honeypot-canarytokens, -beelzebub, -galah, -hellpot, -elasticpot,
+# -sentrypeer, -mailoney, -dicompot, -dns-honeypot, -citrix-honeypot,
+# -cisco-asa-honeypot, -rdp-honeypot, -endlessh, -dashboard-backend, the five
+# workers, ...). Derived from the Arcane manifest now -- the same single source
+# of truth step_arcane_import_stacks and step_bootstrap_missing_envs already
+# drive off -- so adding a stack there cannot leave its secrets behind again.
+#
+# honeypot-stack is appended explicitly: it is not in the manifest but does
+# hold a real, populated .env on the live host (confirmed during #1609's backup
+# pass), so dropping it would lose real configuration.
+env_restore_stacks() {
+  local manifest="$REPO_DIR/arcane/manifests/home-production.json"
+  if [[ -r "$manifest" ]]; then
+    { jq -r '.[].syncName' "$manifest"; echo honeypot-stack; } | sort -u
+  else
+    # Pre-clone fallback only -- the manifest lives in the repo checkout.
+    printf '%s\n' honeypot-keycloak honeypot-init honeypot-cowrie honeypot-dionaea \
+      honeypot-conpot honeypot-dnp3 honeypot-http honeypot-multipot honeypot-dashboard \
+      honeypot-payload-analysis honeypot-tanner honeypot-elk honeypot-utilities \
+      honeypot-stack ghidra ghosts technitium
+  fi
+}
 
 step_restore_env_files() {
   # A missing *individual* .env is a warning -- a stack may genuinely not have
@@ -1035,7 +1056,9 @@ step_restore_env_files() {
     echo "  Nothing can be restored without it -- fix the path or place the key." >&2
     return 1
   fi
-  for name in "${ENV_RESTORE_STACKS[@]}"; do
+  local name
+  while read -r name; do
+    [[ -n "$name" ]] || continue
     local src="${BACKUP_HOST_PATH}/${name}.env"
     local dest_dir="/var/dockge/stacks/${name}"
     mkdir -p "$dest_dir"
@@ -1048,7 +1071,7 @@ step_restore_env_files() {
       echo "WARNING: no backed-up .env found for $name at $src (may not have existed pre-rebuild)"
       missing=$((missing + 1))
     fi
-  done
+  done < <(env_restore_stacks)
   echo "restored $restored .env file(s), $missing missing"
   if [[ $restored -eq 0 ]]; then
     echo "FAILED: not a single .env was restored from ${BACKUP_HOST_USER}@${BACKUP_HOST}:${BACKUP_HOST_PATH}" >&2
