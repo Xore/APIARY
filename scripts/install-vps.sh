@@ -8,7 +8,11 @@
 # clearly set up by hand at some point. A genuinely wiped/reimaged VPS could
 # not be brought back up by anything in this repo before this script.
 #
-# Scope: this script provisions a MANUALLY installed base Ubuntu Server
+# Scope: this script provisions a MANUALLY installed base Ubuntu Server or
+# Rocky Linux 9 system. On Rocky, SELinux stays enforcing -- the Compose
+# stack's bind mounts use :z/:Z relabelling where needed (see vps/ compose
+# files); if a container hits an SELinux denial, check 'ausearch -m avc'
+# before disabling enforcing.
 # system into a running APIARY VPS edge host (Docker, WireGuard, the
 # firewall, the NIC offload fix, the vps/ stack checkout, secret restore
 # from the LAN backup, and starting the Compose stack). It does NOT
@@ -187,20 +191,41 @@ RUN_LOG="$LOG_DIR/install-$(date -u +%Y%m%dT%H%M%SZ).log"
 # ---------------------------------------------------------------------------
 step_preflight_os() {
   . /etc/os-release
-  [[ "$ID" == "ubuntu" ]] || { echo "Not Ubuntu ($ID)" >&2; return 1; }
+  case "$ID" in
+    ubuntu) PKG=apt ;;
+    rocky|almalinux|rhel) PKG=dnf ;;
+    *) echo "Unsupported OS ($ID) -- need ubuntu or rocky/almalinux/rhel" >&2; return 1 ;;
+  esac
+  echo "Detected $ID -- using $PKG"
 }
 
 # ---------------------------------------------------------------------------
 # Phase 1 -- base packages
 # ---------------------------------------------------------------------------
-step_apt_update() {
-  with_retry 3 10 env DEBIAN_FRONTEND=noninteractive apt-get update -y
+step_pkg_update() {
+  case "$PKG" in
+    apt) with_retry 3 10 env DEBIAN_FRONTEND=noninteractive apt-get update -y ;;
+    dnf) with_retry 3 10 dnf makecache --refresh -y ;;
+  esac
 }
 
 step_base_packages() {
-  with_retry 3 10 env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    ca-certificates curl gnupg lsb-release git jq rsync ufw wireguard wireguard-tools \
-    openssh-client ethtool
+  case "$PKG" in
+    apt)
+      with_retry 3 10 env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates curl gnupg lsb-release git jq rsync ufw wireguard wireguard-tools \
+        openssh-client ethtool
+      ;;
+    dnf)
+      with_retry 3 10 dnf install -y --setopt=install_weak_deps=False \
+        ca-certificates curl gnupg git jq rsync firewalld wireguard-tools \
+        openssh-clients ethtool tar
+      # epel is required for jq on Rocky
+      with_retry 3 10 dnf install -y epel-release
+      with_retry 3 10 dnf install -y jq
+      systemctl enable --now firewalld
+      ;;
+  esac
 }
 
 # ---------------------------------------------------------------------------
@@ -210,19 +235,35 @@ step_base_packages() {
 # than the wide address-pool/nvidia-runtime tuning the homeserver needs)
 # ---------------------------------------------------------------------------
 step_docker_repo() {
-  install -m 0755 -d /etc/apt/keyrings
-  with_retry 3 10 curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-    -o /etc/apt/keyrings/docker.asc
-  chmod a+r /etc/apt/keyrings/docker.asc
-  . /etc/os-release
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" \
-    > /etc/apt/sources.list.d/docker.list
-  with_retry 3 10 apt-get update -y
+  case "$PKG" in
+    apt)
+      install -m 0755 -d /etc/apt/keyrings
+      with_retry 3 10 curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+        -o /etc/apt/keyrings/docker.asc
+      chmod a+r /etc/apt/keyrings/docker.asc
+      . /etc/os-release
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" \
+        > /etc/apt/sources.list.d/docker.list
+      with_retry 3 10 apt-get update -y
+      ;;
+    dnf)
+      with_retry 3 10 dnf config-manager --add-repo \
+        https://download.docker.com/linux/centos/docker-ce.repo
+      ;;
+  esac
 }
 
 step_docker_install() {
-  with_retry 3 15 env DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  case "$PKG" in
+    apt)
+      with_retry 3 15 env DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+      ;;
+    dnf)
+      with_retry 3 15 dnf install -y \
+        docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+      ;;
+  esac
   systemctl enable --now docker
 }
 
@@ -318,33 +359,61 @@ EOF
 # here.
 # ---------------------------------------------------------------------------
 step_firewall_base() {
-  ufw --force reset
-  ufw default deny incoming
-  ufw default allow outgoing
-  ufw default deny routed
+  case "$PKG" in
+  apt)
+    ufw --force reset
+    ufw default deny incoming
+    ufw default allow outgoing
+    ufw default deny routed
 
-  ufw allow 51820/udp comment 'WireGuard'
-  ufw allow "${SSH_ADMIN_PORT:-2222}/tcp" comment 'REAL admin SSH'
+    ufw allow 51820/udp comment 'WireGuard'
+    ufw allow "${SSH_ADMIN_PORT:-2222}/tcp" comment 'REAL admin SSH'
 
-  # Cloudflare's published IPv4 ranges (https://www.cloudflare.com/ips-v4/,
-  # captured 2026-08-09 from this VPS's own live ufw state) -- Traefik's
-  # public HTTPS listener only accepts 443 from these, since Cloudflare
-  # proxies every real hostname and a direct-origin connection bypassing it
-  # would skip Cloudflare's own WAF/rate-limiting. Cloudflare does add/retire
-  # ranges occasionally; re-fetch and diff against the live list if a real
-  # request starts getting refused that shouldn't be.
-  for cidr in 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 \
-              141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 \
-              197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 \
-              104.24.0.0/14 172.64.0.0/13 131.0.72.0/22; do
-    ufw allow from "$cidr" to any port 443 proto tcp comment 'Traefik (Cloudflare)'
-  done
+    # Cloudflare's published IPv4 ranges (https://www.cloudflare.com/ips-v4/,
+    # captured 2026-08-09 from this VPS's own live ufw state) -- Traefik's
+    # public HTTPS listener only accepts 443 from these, since Cloudflare
+    # proxies every real hostname and a direct-origin connection bypassing it
+    # would skip Cloudflare's own WAF/rate-limiting. Cloudflare does add/retire
+    # ranges occasionally; re-fetch and diff against the live list if a real
+    # request starts getting refused that shouldn't be.
+    for cidr in 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 \
+                141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 \
+                197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 \
+                104.24.0.0/14 172.64.0.0/13 131.0.72.0/22; do
+      ufw allow from "$cidr" to any port 443 proto tcp comment 'Traefik (Cloudflare)'
+    done
 
-  ufw --force enable
+    ufw --force enable
+    ;;
+  dnf)
+    # firewalld equivalent of the ufw rule set above. The honeypot decoy
+    # ports come from vps/honeypot-firewall.sh (its dnf branch below uses
+    # firewall-cmd against the same zone), so this base set must also live
+    # in that zone. 'admin_ssh' would collide with the standard ssh service
+    # on 22 -- the REAL admin port here is 22 (fresh Rocky install), which
+    # firewalld already allows via its built-in ssh service.
+    systemctl enable --now firewalld
+    firewall-cmd --permanent --zone=public --remove-service=ssh \
+      --add-port="${SSH_ADMIN_PORT:-22}/tcp" 2>/dev/null || \
+    firewall-cmd --permanent --zone=public --add-port="${SSH_ADMIN_PORT:-22}/tcp"
+    firewall-cmd --permanent --zone=public --add-port=51820/udp
+    # Cloudflare's published IPv4 ranges -- same list, same rationale as the
+    # ufw branch (443 restricted to Cloudflare because everything real is
+    # proxied; a direct-origin hit would bypass Cloudflare's WAF).
+    for cidr in 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 \
+                141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 \
+                197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 \
+                104.24.0.0/14 172.64.0.0/13 131.0.72.0/22; do
+      firewall-cmd --permanent --zone=public \
+        --add-rich-rule="rule family=ipv4 source address='$cidr' port port=443 protocol=tcp accept"
+    done
+    firewall-cmd --reload
+    ;;
+  esac
 }
 
 step_firewall_honeypot_ports() {
-  bash "${REPO_DIR}/vps/honeypot-firewall.sh"
+  bash "${REPO_DIR}/vps/honeypot-firewall.sh" --backend "$PKG"
   sh "${REPO_DIR}/vps/check-firewall-portbridge-sync.sh" "${REPO_DIR}/vps/docker-compose.yml"
 }
 
@@ -567,14 +636,14 @@ step_verify_containers_healthy() {
 # ---------------------------------------------------------------------------
 # Run
 # ---------------------------------------------------------------------------
-run_step preflight-os            "Confirm Ubuntu"                          step_preflight_os
-run_step apt-update              "apt-get update"                          step_apt_update
+run_step preflight-os            "Detect OS (ubuntu/rocky) + package manager" step_preflight_os
+run_step pkg-update              "Update package index"                    step_pkg_update
 run_step base-packages           "Install base packages"                   step_base_packages
-run_step docker-repo             "Add Docker apt repo"                     step_docker_repo
+run_step docker-repo             "Add Docker repo"                         step_docker_repo
 run_step docker-install          "Install Docker Engine + Compose"         step_docker_install
 run_step docker-daemon-config    "Write /etc/docker/daemon.json"           step_docker_daemon_config
 run_step wireguard-config        "Write wg0.conf and enable tunnel"        step_wireguard_config
-run_step firewall-base           "Reset ufw, apply base rules"             step_firewall_base
+run_step firewall-base           "Apply base firewall rules"               step_firewall_base
 run_step clone-repo              "Clone/update APIARY to $REPO_DIR"        step_clone_repo
 run_step firewall-honeypot-ports "Open honeypot ports (vps/honeypot-firewall.sh)" step_firewall_honeypot_ports
 run_step nic-gro-fix             "Disable virtio-net hardware GRO (#342)"  step_nic_gro_fix

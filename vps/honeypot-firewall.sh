@@ -28,10 +28,41 @@
 # editing either file.
 set -eu
 
-for port in 21 22 23 25 102 110 135 143 389 445 502 1025 1080 1102 1433 1502 1723 1883 2022 2102 2200 2375 2404 2502 2575 3306 3389 4443 5060 5070 5432 5555 5900 6379 8000 8080 8081 8443 8880 8888 8889 9100 9200 9201 10001 11112 11211 20000 27017 44818 50100; do
-    ufw allow "${port}/tcp" comment honeypot
-done
+# --backend apt (ufw, the Ubuntu/original path) | dnf (firewalld, Rocky).
+# Defaults to ufw so existing invocations behave exactly as before. The port
+# lists below are the single source of truth either way -- only the firewall
+# backend differs.
+BACKEND=ufw
+if [ "${1:-}" = "--backend" ]; then
+    BACKEND="$2"
+    shift 2
+fi
 
-for port in 53 69 161 500 623 1900 5060 5070 47808; do
-    ufw allow "${port}/udp" comment honeypot
-done
+TCP_PORTS="21 22 23 25 102 110 135 143 389 445 502 1025 1080 1102 1433 1502 1723 1883 2022 2102 2200 2375 2404 2502 2575 3306 3389 4443 5060 5070 5432 5555 5900 6379 8000 8080 8081 8443 8880 8888 8889 9100 9200 9201 10001 11112 11211 20000 27017 44818 50100"
+UDP_PORTS="53 69 161 500 623 1900 5060 5070 47808"
+
+case "$BACKEND" in
+apt|ufw)
+    for port in $TCP_PORTS; do
+        ufw allow "${port}/tcp" comment honeypot
+    done
+    for port in $UDP_PORTS; do
+        ufw allow "${port}/udp" comment honeypot
+    done
+    ;;
+dnf|firewalld)
+    # firewalld: idempotent adds into the public zone. --permanent + reload,
+    # same two-phase pattern the installer's own base step uses.
+    for port in $TCP_PORTS; do
+        firewall-cmd --permanent --zone=public --add-port="${port}/tcp"
+    done
+    for port in $UDP_PORTS; do
+        firewall-cmd --permanent --zone=public --add-port="${port}/udp"
+    done
+    firewall-cmd --reload
+    ;;
+*)
+    echo "unknown backend: $BACKEND (use apt|ufw or dnf|firewalld)" >&2
+    exit 1
+    ;;
+esac
