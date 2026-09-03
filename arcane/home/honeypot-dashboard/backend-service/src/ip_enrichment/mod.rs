@@ -19,7 +19,7 @@ mod attck;
 mod canonical;
 mod pending;
 mod rotate;
-mod sensors;
+pub(crate) mod sensors;
 mod tail;
 mod tftp;
 mod viamap;
