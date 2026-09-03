@@ -26,6 +26,7 @@ import http.server
 import os
 import pathlib
 import re
+import socket
 import subprocess
 import sys
 import threading
@@ -167,12 +168,35 @@ class _OKHandler(http.server.BaseHTTPRequestHandler):
         pass
 
 
+def _mock_host():
+    """A per-process loopback address for the mock backends.
+
+    The port numbers below are fixed by debug-backends.sh itself, so they
+    cannot be randomised -- but several CI jobs share one self-hosted
+    runner host, and two concurrent runs of this file both binding
+    127.0.0.1:19090 lose with EADDRINUSE. 127/8 is entirely loopback on
+    Linux, so give each process its own address instead. Falls back to
+    127.0.0.1 where only that one address is configured (macOS).
+    """
+    pid = os.getpid()
+    candidate = f"127.{(pid >> 8) & 0xFF}.{pid & 0xFF}.1"
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind((candidate, 0))
+        return candidate
+    except OSError:
+        return "127.0.0.1"
+
+
+MOCK_HOST = _mock_host()
+
+
 @contextlib.contextmanager
 def _servers_on(ports):
     servers = []
     try:
         for port in ports:
-            server = http.server.ThreadingHTTPServer(("127.0.0.1", port), _OKHandler)
+            server = http.server.ThreadingHTTPServer((MOCK_HOST, port), _OKHandler)
             servers.append(server)
             threading.Thread(target=server.serve_forever, daemon=True).start()
         yield
@@ -186,7 +210,7 @@ def _run_script():
     return subprocess.run(
         ["bash", str(SCRIPT)],
         cwd=REPO_ROOT,
-        env=os.environ | {"WG": "127.0.0.1"},
+        env=os.environ | {"WG": MOCK_HOST},
         capture_output=True,
         text=True,
         timeout=60,
