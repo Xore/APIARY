@@ -347,6 +347,24 @@ KNOWN_UNCOVERED = {
     "/logs/galah": "event_log.json (157KB -- small only because galah sees little traffic, not because anything bounds it), vendored Go writer (ENTRYPOINT's -o flag), no rotation flag exposed (#2892)",
 }
 
+# #2882: sinks that live in a named Docker volume rather than a
+# /opt/stacks/apiary/logs/<dir> bind mount are architecturally invisible to
+# mounted_log_dirs() above -- that enumeration only walks LOGS_HOST_ROOT
+# mounts, and reporter-data:/data (arcane/home/honeypot-utilities/compose.yml)
+# is a different mount entirely. Tracked here as its own checked entry
+# instead of being silently uncovered the way audit.json was before this
+# row existed: 5.99 GB over 25 days (~240 MB/day), no rotation, on a 128M-limited
+# container -- found while auditing the same disk-pressure incident #2820
+# tracks. Same writer-proof shape ROWS uses (a grep token the rotation
+# implementation cannot sensibly drop without stopping being one).
+VOLUME_SINKS = [
+    {
+        "name": "reporter-data/audit.json",
+        "writer": ("arcane/home/honeypot-utilities/reporter",
+                   ["rotatingWriter", "REPORTER_AUDIT_MAX_BYTES"]),
+    },
+]
+
 
 def pruner_find_lines(text: str) -> dict[str, set[str]]:
     """Maps each `/logs/...` directory the pruner walks to the -name globs
@@ -477,6 +495,19 @@ def main() -> int:
                         f"{token!r} found under {rel_root} (row {row_id})"
                     )
 
+    # #2882: volume-backed sinks outside /logs, checked the same way ROWS
+    # proves its writer half -- a grep token the rotation implementation
+    # cannot drop without stopping being one.
+    for sink in VOLUME_SINKS:
+        rel_root, tokens = sink["writer"]
+        for token in tokens:
+            if not tree_contains(rel_root, token):
+                findings.append(
+                    f"volume sink writer half missing: no rotation "
+                    f"implementation carrying {token!r} found under "
+                    f"{rel_root} (sink {sink['name']})"
+                )
+
     # #2826 review: an exemption that asserts a mechanism must prove it, or
     # the ledger becomes a place to write a coverage claim down instead of a
     # place to record one. Deleting the rotate() line these three entries name
@@ -556,7 +587,8 @@ def main() -> int:
     print(f"JSON sink retention parity check passed "
           f"({len(ROWS)} rotating directories, both halves present; "
           f"{len(mounts)} mounted log directories all accounted for, "
-          f"{len(KNOWN_UNCOVERED)} of them known-uncovered).")
+          f"{len(KNOWN_UNCOVERED)} of them known-uncovered; "
+          f"{len(VOLUME_SINKS)} volume-backed sink(s) outside /logs proven).")
     return 0
 
 
