@@ -410,8 +410,23 @@ Start-Service QEMU-GA -ErrorAction SilentlyContinue
 @('C:\Inbox','C:\Logs','C:\Drops','C:\Captures') | ForEach-Object {
     New-Item $_ -ItemType Directory -Force | Out-Null
 }
-New-SmbShare -Name 'Inbox' -Path 'C:\Inbox' -FullAccess 'analyst' -ErrorAction SilentlyContinue
-New-SmbShare -Name 'Logs'  -Path 'C:\Logs'  -ReadAccess 'analyst' -ErrorAction SilentlyContinue
+# #2827: these two used to carry -ErrorAction SilentlyContinue, which is
+# exactly how a golden image shipped with the pre-#956 'Samples' share
+# and no 'Inbox' share at all -- a failed New-SmbShare here (e.g. the
+# share already existing under a stale name from a prior provisioner run)
+# produced no error and no trace in the packer log, and the image still
+# passed every check that doesn't inspect the actual share list. #2023's
+# post-build content check now inspects the registry directly and would
+# have caught this at build time instead of at first detonation attempt --
+# failing the build loudly here is the other half: don't let a silent
+# share-creation failure reach the point where that check even runs.
+New-SmbShare -Name 'Inbox' -Path 'C:\Inbox' -FullAccess 'analyst'
+New-SmbShare -Name 'Logs'  -Path 'C:\Logs'  -ReadAccess 'analyst'
+foreach ($shareName in @('Inbox', 'Logs')) {
+    if (-not (Get-SmbShare -Name $shareName -ErrorAction SilentlyContinue)) {
+        throw "New-SmbShare succeeded without error but Get-SmbShare cannot find '$shareName' -- aborting the build rather than shipping an image #2023's content check will refuse to detonate against."
+    }
+}
 
 # Decoy user environment (fake documents, a decoy SMB share, realistic
 # recent-files) lives in scripts/05-decoy-content.ps1, the next provisioner
