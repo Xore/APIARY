@@ -1429,6 +1429,22 @@ step_create_shared_resources() {
   # exits 1 and looks like a real failure even though nothing is actually
   # broken.
   install -d -m 777 "$REPO_DIR/state/init-markers"
+
+  # honeypot-cowrie bind-mounts state/honeyfs/{cowrie,cowrie-share} and runs as
+  # uid 2000 (its Dockerfile's `USER cowrie`); hp-honeyfs-implant deliberately
+  # shares that uid so both can write the same tree -- see honeypot-cowrie's
+  # own compose comment on the honeyfs-implant service. Nothing created these
+  # directories on the host, so on a from-scratch install Docker made them as
+  # root:root and cowrie's entrypoint could not seed the empty mount from
+  # honeyfs.dist. Measured on the 2026-09-03 Rocky 10 rebuild -- hp-cowrie
+  # crash-looped indefinitely on:
+  #   cp: cannot create directory '/cowrie/cowrie-git/honeyfs/./etc': Permission denied
+  # No SELinux denial involved (ausearch clean): plain ownership. Create them
+  # owned correctly up front rather than letting the bind mount invent them.
+  local d
+  for d in "$REPO_DIR/state/honeyfs/cowrie" "$REPO_DIR/state/honeyfs/cowrie-share"; do
+    install -d -m 755 -o 2000 -g 2000 "$d"
+  done
 }
 
 step_provision_buildx_cache() {
