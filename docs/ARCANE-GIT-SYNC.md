@@ -177,7 +177,7 @@ alone. Re-verify against whatever Arcane version is pinned in
   placeholder — the resulting error (`invalid IP address:
   /placeholder-undefined`) doesn't point at the real cause. Workaround:
   don't use `:?required` for a variable in that position; use `:-` with a
-  safe, non-functional default instead (see `pihole/compose.yml`'s
+  safe, non-functional default instead (see `technitium/compose.yml`'s
   `LAN_IP` — defaults to `127.0.0.1`, deliberately not the real LAN
   address, since a real deployment-specific address in a public compose
   file would also trip `scripts/check-public-leaks.py`).

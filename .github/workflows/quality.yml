@@ -1455,9 +1455,9 @@ jobs:
                 fi
               done
 
-          - name: Pi-hole/DNSCrypt install topology (#1387)
+          - name: Technitium DNS install topology
             home: true
-            run: python3 scripts/tests/test_pihole_install.py
+            run: python3 scripts/tests/test_technitium_install.py
 
     steps:
       - uses: actions/checkout@v7

@@ -20,7 +20,7 @@ for restoring onto a replacement host see
 | `homeserver/secrets/` | secret files kept beside a stack rather than in its `.env` |
 | `homeserver/wireguard/` | `wg0.conf` including the private key |
 | `homeserver/installer/` | `install-homeserver.conf` — the installer's answers file, which exists only on the root filesystem a reinstall wipes |
-| `homeserver/pihole/` | hand-maintained Pi-hole config |
+| `homeserver/technitium/` | hand-maintained Technitium DNS config |
 | `homeserver/keycloak/keycloak.sql.gz` | `pg_dump` of the identity DB — realm, clients, client secrets, users |
 | `homeserver/volumes/` | `dashboard-state`, `arcane-data`, `evebox-config`, `canarytokens-redis-data`, `es-importer-state` |
 | `vps/env/vps.env`, `vps/secrets/`, `vps/traefik/`, `vps/wireguard/` | the VPS's entire config surface, including the Traefik origin certificates |
@@ -40,7 +40,7 @@ need any of them to come back up (sizes measured live 2026-08-23):
 | `arcane-trivy-cache` | 5.6 GB | rebuildable scanner cache |
 | `reporter-data` | 2.8 GB | generated reports |
 | `ghidra_ghidra_projects` | 158 MB | analysis output derived from payloads |
-| Pi-hole `gravity.db`, `pihole-FTL.db` | 689 MB | recompiled blocklists, DNS query log |
+| Technitium query logs, stats DBs | varies | recompiled blocklist hits, DNS query log |
 | sensor logs, PCAP, Filebeat registries | | |
 
 The runbooks ride along on purpose. Without them a rebuild that starts from one
@@ -206,9 +206,10 @@ repository — `install-homeserver.conf.example` carries only placeholders.
      busybox:1.36 tar -C /dst -xzf /src/<name>.tar.gz
    ```
    Never unpack into a running container's volume.
-6. **Pi-hole.** `homeserver/pihole/etc-pihole/*` back into the stack's
-   `etc-pihole/`. `gravity.db` is not in the archive by design — run
-   `pihole -g` once to recompile it from the restored `adlists.list`.
+6. **Technitium DNS.** `homeserver/technitium/*` back into the stack's
+   `config/`. Query logs and stats DBs are not in the archive by design —
+   they rebuild themselves as the server runs. Re-apply the admin password
+   and upstream (DoH/DoT) settings if the config dir was not captured.
 7. **VPS.** `vps/env/vps.env` to `/root/vps/.env`; `vps/secrets/` and
    `vps/traefik/` back to `/root/vps/`; `vps/wireguard/wg0.conf` to
    `/etc/wireguard/`. The Traefik origin certificates matter — they are valid

@@ -187,21 +187,23 @@ else
   echo "  installer: no install-homeserver.conf found -- a restore will need one written by hand"
 fi
 
-# Pi-hole: hand-maintained config only. gravity.db is a rebuildable blocklist
-# compile and pihole-FTL.db is the DNS query log — 689 MB of bulk between
-# them, and neither is needed to bring Pi-hole back with the same behaviour.
-pihole_src=$stacks/pihole/etc-pihole
-if [ -d "$pihole_src" ]; then
-  mkdir -p "$stage/pihole/etc-pihole"
-  for f in pihole.toml dnsmasq.conf adlists.list hosts custom.list cli_pw versions \
-           tls.crt tls.pem tls_ca.crt; do
-    [ -e "$pihole_src/$f" ] && cp -a "$pihole_src/$f" "$stage/pihole/etc-pihole/"
+# Technitium DNS (replaced Pi-hole 2026-09-03): hand-maintained config only.
+# Query logs and statistics databases are rebuildable bulk and are skipped;
+# zones, settings and blocklist config come along so the server returns with
+# the same behaviour. The .env (LAN_IP etc.) is captured separately with the
+# other stack env files.
+tns_src=$stacks/technitium/config
+if [ -d "$tns_src" ]; then
+  mkdir -p "$stage/technitium"
+  # Everything except logs* and the stats databases.
+  for f in "$tns_src"/*; do
+    base=$(basename "$f")
+    case "$base" in
+      log*|*queryLogs*|*stats*) continue ;;
+    esac
+    cp -a "$f" "$stage/technitium/"
   done
-  for extra in "$stacks/pihole/etc-dnsmasq.d" "$stacks/pihole/dnscrypt-proxy" \
-               "$stacks/pihole/dnscrypt-proxy.toml"; do
-    [ -e "$extra" ] && cp -a "$extra" "$stage/pihole/"
-  done
-  echo "  pihole: config only (gravity.db and pihole-FTL.db deliberately skipped)"
+  echo "  technitium: config only (query logs and stats deliberately skipped)"
 fi
 
 # Keycloak identity database. A pg_dump, not a tar of the live PGDATA: the
@@ -367,7 +369,7 @@ Layout:
   homeserver/secrets/         out-of-band secret files kept beside a stack
   homeserver/wireguard/       wg0.conf including the private key
   homeserver/installer/       install-homeserver.conf, the installer's answers file
-  homeserver/pihole/          hand-maintained Pi-hole config only
+  homeserver/technitium/      hand-maintained Technitium DNS config only
   homeserver/keycloak/        keycloak.sql.gz — pg_dump of the identity DB
   homeserver/volumes/         small config-bearing docker volumes
   homeserver/manifest/        host reference notes, not restorable state

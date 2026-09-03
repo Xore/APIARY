@@ -1,0 +1,55 @@
+# Source of truth for the homeserver's LAN DNS stack (Technitium DNS Server,
+# replacing Pi-hole — user decision 2026-09-03). Binding to every interface
+# would collide with dns-honeypot on the WireGuard address (see
+# scripts/install-homeserver.sh and #518), so DNS binds only to the LAN IP
+# via ${LAN_IP} interpolation, set via this stack's own .env (see
+# .env.example). Same mechanism every other stack in this repo already uses
+# for host-specific config.
+#
+# Technitium handles its own encrypted upstreams (DoH/DoT/DoQ are configured
+# in the server's zone/settings UI and persisted in ./config), so the old
+# dnscrypt-proxy sidecar is gone — one service, one container.
+
+name: technitium
+
+services:
+  technitium:
+    image: technitium/dns-server:11.5.1@sha256:6a0c0d308d6b98a23fc57cc786f1039b140001e19f7eb1a8626465439a0cc425
+    container_name: technitium-dns
+    restart: unless-stopped
+    ports:
+      - "${LAN_IP:-127.0.0.1}:53:53/tcp"
+      - "${LAN_IP:-127.0.0.1}:53:53/udp"
+      - "${LAN_IP:-127.0.0.1}:5380:5380/tcp"
+    environment:
+      # The built-in DNS_SERVER_ADMIN_PASSWORD var only applies on first
+      # bootstrap; afterwards the password lives in ./config and this var is
+      # ignored (documented upstream). Required on first boot so a fresh
+      # install is never left with the default "admin" password.
+      DNS_SERVER_ADMIN_PASSWORD: "${TECHNITIUM_PASSWORD:?set TECHNITIUM_PASSWORD in .env}"
+      DNS_SERVER_DOMAIN: "${DNS_SERVER_DOMAIN:-homeserver.lan}"
+      DNS_SERVER_PREFER_IPV6: "false"
+      DNS_SERVER_WEB_SERVICE_LOCAL_ADDRESSES: ""
+    volumes:
+      # All server state (zones, settings, blocklists, logs config) lives here.
+      - ./config:/etc/dns/config
+    # Port 53 requires the standard binding capability; no NET_ADMIN needed.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 1GB
+    healthcheck:
+      # A response to a cache-busting recursive query proves the complete
+      # path is working (same pipeline principle as the old Pi-hole check).
+      # NXDOMAIN is a valid external DNS response; a timeout produces no
+      # status line and fails the pipeline.
+      test:
+        - CMD-SHELL
+        - 'dig @127.0.0.1 "$(date +%s).healthcheck.example.com" A +time=3 +tries=1 +noall +comments | grep -Eq "status: (NOERROR|NXDOMAIN)"'
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    labels:
+      - autoheal=true
