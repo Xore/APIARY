@@ -1558,6 +1558,40 @@ curl -fsS -X PUT "$es_url/_all/_settings?expand_wildcards=all" \
 # arkime_* index (dstats, files, stats, users, etc) has no legacy template
 # of its own and still needs this catch-all, so the exclusion is scoped to
 # exactly these two, not arkime_* broadly.
+# Wait for Arkime's own legacy template before adding ANY composable template that overlaps it.
+# Elasticsearch allows a composable template to overlap an existing legacy one
+# (it only warns), but REFUSES the reverse:
+#
+#   illegal_argument_exception: legacy template [arkime_sessions3_template] has
+#   index patterns [arkime_sessions3-*] matching patterns from existing
+#   composable templates [arkime-sessions3-ip-fix, ...] -- use composable
+#   templates (/_index_template) instead
+#
+# arkime-init and elasticsearch-setup are both honeypot-init one-shots with no
+# depends_on between them, so they race. On the 2026-09-04 rebuild this script
+# won, and `db.pl init` then failed with the above and exited 255 -- Arkime got
+# no session indices at all, while hp-arkime-capture and -viewer both looked
+# healthy. Ordering the composable templates behind it makes Arkime win deterministically,
+# without coupling the whole of this script to arkime-init succeeding (a hard
+# depends_on would let one Arkime failure block every template here).
+#
+# Bounded, and non-fatal on timeout: a deployment with arkime-init disabled
+# entirely should still get this mapping fix rather than hang.
+arkime_legacy_wait=60
+while (( arkime_legacy_wait > 0 )); do
+  if curl -fsS -o /dev/null "$es_url/_template/arkime_sessions3_template" 2>/dev/null; then
+    echo "elasticsearch-setup: Arkime legacy template present, adding ip-fix overlay"
+    break
+  fi
+  sleep 2
+  arkime_legacy_wait=$(( arkime_legacy_wait - 2 ))
+done
+if (( arkime_legacy_wait <= 0 )); then
+  echo "elasticsearch-setup: Arkime legacy template did not appear within 60s --" \
+       "adding the composable templates anyway (arkime-init may be disabled; if it" \
+       "runs later it will fail its own template creation, see #2961)"
+fi
+
 curl -fsS -X PUT "$es_url/_index_template/single-node-replica-default" \
   -H 'Content-Type: application/json' \
   --data-binary '{"index_patterns":["*","-arkime_sessions3-*","-arkime_history_v1-*"],"priority":1,"template":{"settings":{"index.number_of_replicas":0}}}' >/dev/null
@@ -1594,40 +1628,6 @@ curl -fsS -X PUT "$es_url/_index_template/single-node-replica-default" \
 # already-existing indices self-heal on their next daily rotation; a live
 # reindex of the current day's index is a separate, one-time operation if
 # immediate correction is needed rather than waiting for that rotation.
-# Wait for Arkime's own legacy template before adding this composable one.
-# Elasticsearch allows a composable template to overlap an existing legacy one
-# (it only warns), but REFUSES the reverse:
-#
-#   illegal_argument_exception: legacy template [arkime_sessions3_template] has
-#   index patterns [arkime_sessions3-*] matching patterns from existing
-#   composable templates [arkime-sessions3-ip-fix, ...] -- use composable
-#   templates (/_index_template) instead
-#
-# arkime-init and elasticsearch-setup are both honeypot-init one-shots with no
-# depends_on between them, so they race. On the 2026-09-04 rebuild this script
-# won, and `db.pl init` then failed with the above and exited 255 -- Arkime got
-# no session indices at all, while hp-arkime-capture and -viewer both looked
-# healthy. Ordering just this one PUT makes Arkime win deterministically,
-# without coupling the whole of this script to arkime-init succeeding (a hard
-# depends_on would let one Arkime failure block every template here).
-#
-# Bounded, and non-fatal on timeout: a deployment with arkime-init disabled
-# entirely should still get this mapping fix rather than hang.
-arkime_legacy_wait=60
-while (( arkime_legacy_wait > 0 )); do
-  if curl -fsS -o /dev/null "$es_url/_template/arkime_sessions3_template" 2>/dev/null; then
-    echo "elasticsearch-setup: Arkime legacy template present, adding ip-fix overlay"
-    break
-  fi
-  sleep 2
-  arkime_legacy_wait=$(( arkime_legacy_wait - 2 ))
-done
-if (( arkime_legacy_wait <= 0 )); then
-  echo "elasticsearch-setup: Arkime legacy template did not appear within 60s --" \
-       "adding the ip-fix template anyway (arkime-init may be disabled; if it" \
-       "runs later it will fail its own template creation, see #2961)"
-fi
-
 curl -fsS -X PUT "$es_url/_index_template/arkime-sessions3-ip-fix" \
   -H 'Content-Type: application/json' \
   --data-binary '{"index_patterns":["arkime_sessions3-*"],"priority":10,"template":{"mappings":{"properties":{"source":{"properties":{"ip":{"type":"ip"}}},"destination":{"properties":{"ip":{"type":"ip"}}}}}}}' >/dev/null
