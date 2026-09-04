@@ -37,7 +37,16 @@ REPO = Path(__file__).resolve().parents[2]
 # checkout maps back to a repo-relative file whose git mode we control.
 DEPLOYED_CHECKOUT_PREFIXES = ("/opt/stacks/apiary/", "/var/dockge/stacks/apiary/")
 
-EXECSTART_RE = re.compile(r"^\s*ExecStart=-?(?P<path>/\S+)", re.MULTILINE)
+EXECSTART_RE = re.compile(r"^\s*ExecStart=-?(?P<rest>/\S+.*)$", re.MULTILINE)
+
+# A unit may exec the script directly, or exec an interpreter and pass the
+# script as its argument. The second form exists because SELinux forbids
+# systemd's init_t from exec'ing a var_t file, so a script living in the
+# deployed checkout under /var cannot be an ExecStart target directly (see
+# backup-honeypot.service). Only the FIRST form actually requires the
+# executable bit -- `/bin/sh foo.sh` reads foo.sh, it does not exec it.
+INTERPRETERS = ("/bin/sh", "/bin/bash", "/usr/bin/sh", "/usr/bin/bash",
+                "/usr/bin/env", "/usr/bin/python3", "/usr/bin/python")
 
 
 def _tracked_unit_files() -> list[Path]:
@@ -56,28 +65,38 @@ def _git_mode(rel: str) -> str | None:
     return out.split()[0] if out else None
 
 
-def _execstart_scripts() -> list[tuple[str, str]]:
-    """(unit file, repo-relative script) for every ExecStart inside the checkout."""
-    found: list[tuple[str, str]] = []
+def _execstart_scripts() -> list[tuple[str, str, bool]]:
+    """(unit file, repo-relative script, needs_exec_bit) for in-checkout ExecStarts."""
+    found: list[tuple[str, str, bool]] = []
     for unit in _tracked_unit_files():
         text = unit.read_text(encoding="utf-8", errors="replace")
         for m in EXECSTART_RE.finditer(text):
-            path = m.group("path")
-            for prefix in DEPLOYED_CHECKOUT_PREFIXES:
-                if path.startswith(prefix):
-                    rel = path[len(prefix):]
-                    if rel.endswith((".sh", ".py")):
-                        found.append((str(unit.relative_to(REPO)), rel))
+            parts = m.group("rest").split()
+            if not parts:
+                continue
+            if parts[0] in INTERPRETERS:
+                # interpreter form: the script is an argument, and is read not exec'd
+                candidates, needs_exec = parts[1:], False
+            else:
+                candidates, needs_exec = parts[:1], True
+            for path in candidates:
+                for prefix in DEPLOYED_CHECKOUT_PREFIXES:
+                    if path.startswith(prefix):
+                        rel = path[len(prefix):]
+                        if rel.endswith((".sh", ".py")):
+                            found.append((str(unit.relative_to(REPO)), rel, needs_exec))
     return found
 
 
 def test_execstart_targets_are_executable_in_git():
     """Every in-checkout ExecStart target is mode 100755 in the index."""
     offenders = []
-    for unit, rel in _execstart_scripts():
+    for unit, rel, needs_exec in _execstart_scripts():
         if not (REPO / rel).exists():
             offenders.append(f"{unit}: ExecStart target {rel} does not exist in the repo")
             continue
+        if not needs_exec:
+            continue  # interpreter-invoked: read, not exec'd
         mode = _git_mode(rel)
         if mode != "100755":
             offenders.append(
@@ -92,6 +111,10 @@ def test_the_backup_script_specifically_is_executable():
     """The #1609 regression itself, named explicitly so it cannot be lost in a refactor."""
     rel = "analysis/backup-honeypot.sh"
     assert (REPO / rel).exists(), f"{rel} is gone; if it moved, update this test and #1609's history"
+    # Its unit now invokes it via /bin/sh (SELinux cannot exec a var_t file), so
+    # the bit is no longer strictly load-bearing for THAT unit. Kept asserted
+    # anyway: it is still the documented posture, it costs nothing, and anyone
+    # running the script by hand or from cron would hit the original failure.
     assert _git_mode(rel) == "100755", (
         f"{rel} is not executable in git. This is the exact regression that made "
         f"backup-honeypot.service fail 203/EXEC nightly and is the mechanism behind "
