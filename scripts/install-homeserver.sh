@@ -2220,11 +2220,25 @@ step_llm_worker_selftest() {
   # matches step_ghidra_worker_install's own "reconcile in place, don't
   # deploy a second copy" precedent. `up -d --build --wait` on an
   # already-running, unchanged stack is a safe no-op here, same reasoning.
+  # Resolve the compose file from the manifest, not by guessing. llm-worker's
+  # base docker-compose.yml is the Safe #66 synthetic-only file and forces
+  # ES_HOST empty on purpose (#2234); captured-data mode lives in
+  # docker-compose.captured-data-deploy.yml, which `include`s both. Starting the
+  # base file on a host authorized for captured data gives a container that
+  # believes it is in captured-data mode (LLM_ALLOW_CAPTURED_DATA=true) while
+  # unable to resolve elasticsearch -- it crash-loops on
+  #   configuration error: ES_HOST must be an uncredentialed local/internal HTTP endpoint
+  # which is #1751's exact failure, hit again on the 2026-09-04 rebuild.
   local dir="/var/dockge/stacks/llm-worker" cf
-  cf="$(stack_compose_file "$dir")" || {
-    echo "no compose.yml or docker-compose.yml in $dir -- was arcane-import-stacks skipped or llm-worker not yet synced?"
-    return 1
-  }
+  cf="$(jq -r '.[] | select(.syncName=="llm-worker") | .dockerComposePath' \
+        "$ARCANE_STACK_MANIFEST" 2>/dev/null)"
+  cf="${cf##*/}"
+  if [[ -z "$cf" || ! -f "$dir/$cf" ]]; then
+    cf="$(stack_compose_file "$dir")" || {
+      echo "no compose file in $dir -- was arcane-import-stacks skipped or llm-worker not yet synced?"
+      return 1
+    }
+  fi
   ( cd "$dir" && \
     with_retry 3 15 docker compose -f "$cf" up -d --build --wait && \
     docker exec hp-llm-worker python worker.py --selftest )

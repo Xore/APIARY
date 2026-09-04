@@ -292,7 +292,7 @@
     "syncName": "llm-worker",
     "gitRepo": "apiary",
     "branch": "production",
-    "dockerComposePath": "llm-worker/docker-compose.yml",
+    "dockerComposePath": "llm-worker/docker-compose.captured-data-deploy.yml",
     "autoSync": false,
     "syncDirectory": true,
     "syncInterval": 300
