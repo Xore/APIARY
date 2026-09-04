@@ -1,0 +1,32 @@
+# honeypot-arcane — GPU-monitoring overlay (#2950).
+#
+# Arcane's GPU panel needs an NVIDIA device reserved for the container. That
+# reservation is a HARD requirement: Docker refuses to start the container at
+# all when no nvidia device driver is present —
+#
+#   Error response from daemon: could not select device driver "nvidia" with capabilities: [[gpu]]
+#
+# — and `count: 0` does not soften it (measured on a driverless host: both
+# `count: all` and `count: 0` fail identically). Since Arcane is the control
+# plane that materializes every other stack via its gitops syncs, having that
+# requirement in the base file meant one optional monitoring panel could take
+# out the entire install on a host whose GPU driver was not up yet. That is
+# exactly what happened on the 2026-09-03 Rocky 10 rebuild.
+#
+# So the base docker-compose.arcane.yml is GPU-free and always startable, and
+# install-homeserver.sh merges this overlay into the rendered compose.yml only
+# after it has confirmed a working NVIDIA runtime on the host. Nothing here is
+# required for Arcane to manage stacks.
+services:
+  arcane:
+    environment:
+      GPU_MONITORING_ENABLED: "true"
+      GPU_TYPE: nvidia
+      NVIDIA_VISIBLE_DEVICES: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

@@ -76,11 +76,12 @@ services:
       # business phoning home to a third party; disabled outright rather
       # than left as an opt-out default.
       ANALYTICS_DISABLED: "true"
-      # GPU monitoring (#1185) -- the homeserver's own RTX 4000 Ada,
-      # nvidia-container-toolkit already installed, confirmed live.
-      GPU_MONITORING_ENABLED: "true"
-      GPU_TYPE: nvidia
-      NVIDIA_VISIBLE_DEVICES: all
+      # GPU monitoring (#1185) is NOT configured here. It lives in
+      # docker-compose.arcane.gpu.yml, which install-homeserver.sh merges into
+      # the rendered compose.yml only when this host actually has a working
+      # NVIDIA runtime -- see #2950 for why. Arcane is the control plane that
+      # materializes every other stack, so it must be able to start on a host
+      # with no GPU at all.
       TZ: ${TZ:-UTC}
     ports:
       - ${HP_BIND:-10.8.0.2}:${ARCANE_PORT:-3552}:3552
@@ -92,13 +93,6 @@ services:
     # resource-stat collection (not GPU-specific) -- see
     # getarcane.app/docs/setup/installation.
     cgroup: host
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     # Arcane's own documented healthcheck command (getarcane.app), not a
     # hand-rolled probe -- it hits /api/health locally and exits non-zero
     # if the server isn't responding.
