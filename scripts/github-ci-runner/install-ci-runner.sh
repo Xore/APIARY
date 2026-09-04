@@ -289,9 +289,18 @@ rhel)
   # it is absent (see its own "#2565's homeserver provision list" error).
   # Valkey installs only valkey-server, so bridge the name rather than
   # teaching every consumer a second one.
-  if [[ ! -e /usr/local/bin/redis-server ]] && [[ -x /usr/bin/valkey-server ]]; then
-    ln -s /usr/bin/valkey-server /usr/local/bin/redis-server
-    echo "linked /usr/local/bin/redis-server -> valkey-server (EL10 has no redis package)"
+  #
+  # /usr/bin, NOT /usr/local/bin. The runner user's PATH on this distro is
+  #   /opt/<runner>/.local/bin:/opt/<runner>/bin:/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin
+  # -- it carries /usr/local/sbin but NOT /usr/local/bin, so a shim placed
+  # there exists and is still invisible to every job. Measured after the first
+  # attempt did exactly that: the symlink was correct, pointed at the right
+  # binary, and quality.yml still failed with "redis-server missing on the
+  # runner host". No package owns /usr/bin/redis-server on EL10 (redis is not
+  # packaged for it at all), so there is nothing to collide with.
+  if [[ -x /usr/bin/valkey-server ]]; then
+    ln -sf /usr/bin/valkey-server /usr/bin/redis-server
+    echo "linked /usr/bin/redis-server -> valkey-server (EL10 has no redis package)"
   fi
   ;;
 esac
