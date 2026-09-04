@@ -53,6 +53,29 @@ RUNNER_VERSION=2.336.0
 RUNNER_SHA256=04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d
 RUNNER_LABELS="self-hosted,linux,x64,honeypot-ci"
 
+# Give actions/setup-python a locally-resolvable interpreter. It looks for
+# $RUNNER_TOOL_CACHE/Python/<x.y.z>/x64 plus a sibling <x64>.complete marker,
+# and a workflow asking for "3.13" resolves to the newest matching entry.
+#
+# Symlinks rather than a copied tree: python resolves its own sys.prefix
+# through the symlink to /usr, so the stdlib, pip and `python -m venv` all keep
+# working from the real installation. Verified on the live runner -- venv
+# creation, which is what most jobs actually do, succeeds through the link.
+seed_python_tool_cache() {
+  local py=/usr/bin/python3.13 ver tool dir
+  [[ -x "$py" ]] || { echo "no $py, skipping tool-cache seed" >&2; return 0; }
+  ver="$("$py" -c 'import sys;print("%d.%d.%d"%sys.version_info[:3])')"
+  tool="$RUNNER_HOME/_work/_tool"
+  dir="$tool/Python/$ver/x64"
+  install -d "$dir/bin"
+  local n
+  for n in python python3 python3.13; do ln -sf "$py" "$dir/bin/$n"; done
+  [[ -x /usr/bin/pip3.13 ]] && for n in pip pip3; do ln -sf /usr/bin/pip3.13 "$dir/bin/$n"; done
+  touch "$tool/Python/$ver/x64.complete"
+  chown -R "$RUNNER_USER:$RUNNER_USER" "$tool/Python"
+  echo "seeded actions/setup-python tool cache with Python $ver at $dir"
+}
+
 # --- BEGIN instance derivation (config test: tests/test_install_ci_runner_instances.py) ---
 # Instance "1" is the original, unsuffixed layout -- anything else gets its
 # own home dir and system user so N instances can run side by side without
@@ -246,6 +269,22 @@ rhel)
     nspr nss pango libX11 libxcb libXcomposite \
     libXdamage libXext libXfixes libxkbcommon libXrandr
   systemctl disable --now valkey.service 2>/dev/null || true
+
+  # actions/setup-python ships no prebuilt interpreter for RHEL-family hosts.
+  # After the homeserver moved to Rocky 10 every job using it failed with:
+  #
+  #   The version '3.13' with architecture 'x64' was not found for rocky 10.2
+  #
+  # ...which took out 58 checks at once, because setup-python is a shared step
+  # rather than one job's dependency. It was invisible before the OS change:
+  # the runners were Ubuntu, which that action does publish builds for.
+  #
+  # The fix is the standard self-hosted one: give the action a tool-cache entry
+  # it can find locally, so no workflow has to know the runner is not Ubuntu.
+  # Seeded from the distro's own python3.13 rather than downloading a build,
+  # since EPEL already packages it.
+  dnf install -y python3.13 python3.13-devel python3.13-pip
+  seed_python_tool_cache
   # quality.yml checks `command -v redis-server` and fails the row loudly if
   # it is absent (see its own "#2565's homeserver provision list" error).
   # Valkey installs only valkey-server, so bridge the name rather than
