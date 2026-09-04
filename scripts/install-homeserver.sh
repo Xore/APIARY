@@ -2208,6 +2208,27 @@ step_ghidra_stack_provision() {
 }
 
 step_ghidra_stack_start() {
+  # Rocky enables cockpit.socket by default and it listens on *:9090, which is
+  # the port analysis/ghidra/docker-compose.ghidra.yml publishes ghidra's API on
+  # (127.0.0.1:9090). A wildcard listener blocks the loopback bind, so the
+  # container never starts:
+  #
+  #   failed to bind host port 127.0.0.1:9090/tcp: address already in use
+  #
+  # and it fails at CREATE, so it sits in "Created" rather than restarting --
+  # easy to miss in a `docker ps` that only lists running containers. Hit on the
+  # 2026-09-04 rebuild; invisible on Ubuntu, which does not ship cockpit enabled.
+  #
+  # Cockpit is not part of this deployment: nothing in this repo references it,
+  # and the live host had zero cockpit sessions in the preceding week. Disabled
+  # rather than moving ghidra's port, because the port is baked into that
+  # stack's healthcheck and GHIDRA_API_BASE as well as the published mapping.
+  # Re-enable it on a host that wants it, and move ghidra instead.
+  if systemctl is-active --quiet cockpit.socket 2>/dev/null; then
+    echo "cockpit.socket holds :9090, which ghidra needs -- disabling it"
+    systemctl disable --now cockpit.socket 2>/dev/null || true
+    systemctl stop cockpit.service 2>/dev/null || true
+  fi
   local dir="/var/dockge/stacks/ghidra"
   local files=(-f compose.yml)
   [[ -f "$dir/compose.gpu.yml" ]] && files+=(-f compose.gpu.yml)
