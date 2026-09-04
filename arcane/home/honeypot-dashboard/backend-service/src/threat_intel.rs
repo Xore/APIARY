@@ -214,7 +214,29 @@ async fn tag_ip(state: &AppState, ip: &str, label: &str, since: &str) -> anyhow:
     });
     state
         .es
-        .update_by_query(EVENT_INDICES, query, "ctx._source.source.as.type = params.label", json!({"label": label}))
+        // Null-safe on purpose. The query selects any doc with this source.ip
+        // that does not already carry the label -- and an ABSENT source.as.type
+        // satisfies that must_not just as well as a different value does. So
+        // docs with no source.as at all are selected, and a bare
+        // `ctx._source.source.as.type = ...` then dies on them:
+        //
+        //   null_pointer_exception: cannot access method/field [type]
+        //     from a null def reference
+        //
+        // Two ordinary ways a doc has source.ip but no source.as: the ASN
+        // lookup found nothing for that address, or the geoip pipeline was not
+        // resolving its databases when the doc was indexed. The latter produced
+        // 1203 of these warnings in ten minutes on the live host after the
+        // GeoLite2 databases were repaired, because the backlog of
+        // previously-indexed documents all lacked source.as.
+        .update_by_query(
+            EVENT_INDICES,
+            query,
+            "if (ctx._source.source == null) { ctx._source.source = [:]; } \
+             if (ctx._source.source.as == null) { ctx._source.source.as = [:]; } \
+             ctx._source.source.as.type = params.label;",
+            json!({"label": label}),
+        )
         .await
 }
 
