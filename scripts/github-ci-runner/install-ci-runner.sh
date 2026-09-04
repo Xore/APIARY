@@ -91,9 +91,27 @@ relocate_runner_data() {
     ln -sfn "$dst" "$src"
     chown -h "$RUNNER_USER:$RUNNER_USER" "$src"
   done
-  # Stale externals.<version> trees are left behind by every runner self-update
-  # and are never read again; three copies per runner was ~1.2 GB apiece.
-  rm -rf "$RUNNER_HOME"/externals.[0-9]* 2>/dev/null || true
+  # Prune externals.<version> trees left by runner self-updates -- EXCEPT the
+  # one the live `externals` symlink points at.
+  #
+  # Not hypothetical: assuming every externals.<version> was a stale backup
+  # deleted the LIVE tree on two runners. After a self-update the runner does
+  # not keep `externals` as a real directory -- it replaces it with a symlink
+  # into the new versioned tree:
+  #
+  #   externals -> /opt/github-ci-runner-6/externals.2.337.0
+  #
+  # so deleting the versioned directory left a dangling symlink, and the
+  # service died with
+  #   ./externals/node20/bin/node: No such file or directory   (exit 127)
+  local live_ext=""
+  [[ -L "$RUNNER_HOME/externals" ]] && live_ext="$(basename "$(readlink -f "$RUNNER_HOME/externals")")"
+  local ext
+  for ext in "$RUNNER_HOME"/externals.[0-9]*; do
+    [[ -e "$ext" ]] || continue
+    [[ -n "$live_ext" && "$(basename "$ext")" == "$live_ext" ]] && continue
+    rm -rf "$ext"
+  done
   echo "runner data relocated to $base/$name (executables stay in $RUNNER_HOME)"
 }
 
