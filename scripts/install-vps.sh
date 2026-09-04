@@ -178,9 +178,9 @@ done
 # literal "honeypot.example" in vps/traefik/dynamic.yml, and every router in
 # that file is written as <service>.honeypot.example -- so DOMAIN must be the
 # bare zone. Given a value that already carries a service label, all 40 routers
-# render as second-level subdomains (auth.honeypot.xore.rocks), which a
-# *.xore.rocks wildcard origin certificate does not cover: it matches exactly
-# one label. The live conf was found holding "honeypot.xore.rocks" on
+# render as second-level subdomains (auth.honeypot.<domain>), which a
+# *.<domain> wildcard origin certificate does not cover: it matches exactly
+# one label. The live conf was found holding a "<label>.<domain>" value on
 # 2026-09-03, one install run away from rewriting every public hostname to an
 # uncertificated name. Nothing downstream would have caught it -- the render
 # step only checks that no "honeypot.example" placeholder survives, which is

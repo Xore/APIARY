@@ -203,10 +203,11 @@ done
 # from it by prefixing a service label (auth.<domain>, arcane.<domain>,
 # dashboard.<domain>, ...). Handing it a hostname that already carries one of
 # those labels silently produces a second-level subdomain: the 2026-09-03
-# rebuild was configured with "auth.xore.rocks" and generated
-# https://arcane.auth.xore.rocks plus issuer https://auth.auth.xore.rocks,
-# neither of which resolves or is covered by the wildcard origin certificate
-# (*.xore.rocks matches one label only). Nothing downstream validated it, so it
+# rebuild was configured with the auth HOSTNAME rather than the base domain,
+# and generated https://arcane.auth.<domain> plus issuer
+# https://auth.auth.<domain> -- neither of which resolves or is covered by the
+# wildcard origin certificate (*.<domain> matches one label only). Nothing
+# downstream validated it, so it
 # surfaced as OIDC discovery failures far from the cause. Reject it here.
 for label in auth arcane dashboard kibana arkime evebox traefik tanner snare rev; do
   if [[ "$KEYCLOAK_PUBLIC_DOMAIN" == "$label."* ]]; then

@@ -16,3 +16,13 @@ __pycache__/
 # directory a browser session was driven from; they are session scratch, not
 # source, and one already reached main inside a backend-service commit.
 .playwright-mcp/
+
+# Filled-in installer answer files. These carry real WireGuard private keys,
+# SSH key paths, backup-host addresses and the deployment's real public domain
+# -- scripts/check-public-leaks.py fails on exactly that content, which is the
+# point. Both .conf.example templates are tracked; the filled-in copies must
+# never be. Untracked-but-not-ignored was one `git add .` away from putting
+# them in a public repository.
+conf-local/
+install-homeserver.conf
+install-vps.conf
