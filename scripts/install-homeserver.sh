@@ -1630,6 +1630,66 @@ step_start_elasticsearch_first() {
   with_retry 3 15 docker compose -f compose.yml up -d --wait --no-recreate elasticsearch
 }
 
+# #1609 follow-up: make Elasticsearch actually load the GeoIP databases.
+#
+# ES resolves a geoip processor's database when the processor is instantiated.
+# On a from-scratch install it starts (step_start_elasticsearch_first) BEFORE
+# honeypot-init's geoipupdate job has downloaded anything, so every processor in
+# the geoip-honeypot pipeline caches "database unavailable" and every document
+# is tagged _geoip_database_unavailable_GeoLite2-City.mmdb instead of being
+# geolocated. The attack-origin map stays empty and no error is raised anywhere.
+#
+# Measured on the 2026-09-04 rebuild, and the recovery is narrower than it
+# looks: ES DOES log "database file changed ... reloading database" when the
+# files appear, and that is not enough. Touching the files to re-trigger the
+# watcher did not clear it, and neither did re-PUTting the pipeline. A bare
+# pipeline created after the databases existed geolocated the same IP correctly
+# the whole time, which is what isolated it to stale processor instances rather
+# than a missing or unreadable database. Only restarting the node cleared them.
+#
+# So: restart ES once, after the databases are on disk, and only if the tag is
+# actually being produced. Cheap, idempotent, and a no-op on a host where the
+# databases were already present at boot.
+step_geoip_reload_elasticsearch() {
+  local geo_dir="$REPO_DIR/analysis/geoip"
+  if ! compgen -G "$geo_dir/GeoLite2-*.mmdb" >/dev/null; then
+    echo "no GeoLite2 databases in $geo_dir -- nothing to reload (MaxMind credentials unset?)"
+    return 0
+  fi
+
+  # Ask the live pipeline whether it can geolocate. Any public IP will do.
+  local probe='{"docs":[{"_source":{"honeypot":{"src_ip":"8.8.8.8"}}}]}'
+  local out
+  out=$(docker run --rm --network honeynet curlimages/curl:latest -sS -m 20 \
+        -X POST "http://elasticsearch:9200/_ingest/pipeline/geoip-honeypot/_simulate" \
+        -H 'Content-Type: application/json' -d "$probe" 2>/dev/null) || {
+    echo "could not reach Elasticsearch to probe the geoip pipeline -- skipping"
+    return 0
+  }
+
+  if ! grep -q '_geoip_database_unavailable' <<<"$out"; then
+    echo "geoip pipeline already resolves its databases -- no restart needed"
+    return 0
+  fi
+
+  echo "geoip pipeline reports _geoip_database_unavailable despite the databases"
+  echo "being present -- restarting Elasticsearch to reinstantiate its processors"
+  docker restart hp-elasticsearch >/dev/null
+  local waited=0
+  while (( waited < 180 )); do
+    [[ "$(docker inspect hp-elasticsearch --format '{{.State.Health.Status}}' 2>/dev/null)" == healthy ]] && break
+    sleep 5; waited=$(( waited + 5 ))
+  done
+  out=$(docker run --rm --network honeynet curlimages/curl:latest -sS -m 20 \
+        -X POST "http://elasticsearch:9200/_ingest/pipeline/geoip-honeypot/_simulate" \
+        -H 'Content-Type: application/json' -d "$probe" 2>/dev/null) || true
+  if grep -q '_geoip_database_unavailable' <<<"$out"; then
+    echo "geoip STILL unavailable after restart -- check the mmdb mount and file modes" >&2
+    return 1
+  fi
+  echo "geoip databases now resolve; new documents will carry source.geo"
+}
+
 step_start_init() {
   # #1255's investigation: honeypot-init.env.example already carries
   # MAXMIND_ACCOUNT_ID/MAXMIND_LICENSE_KEY placeholders (optional, empty by
@@ -1783,6 +1843,44 @@ step_provision_events_poller_secrets() {
   KEYCLOAK_ADMIN_USERNAME="${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}" \
   KEYCLOAK_ADMIN_PASSWORD="$(< "$secrets_dir/bootstrap-admin-password")" \
     "$KEYCLOAK_PROVISION_DIR/provision-events-poller.sh"
+}
+
+# #1609 follow-up: pin the real deploy-runner GID into honeypot-dashboard's .env.
+#
+# That stack's compose joins dashboard-next to a group so the unprivileged
+# `node` user can read the OIDC client secret, and a group_add must be a
+# numeric GID because /etc/group does not exist inside the image. It used to be
+# the literal 980. System GIDs are assigned in creation order, so they describe
+# how a host was built rather than being constants: after the 2026-09-03
+# rebuild 980 was github-ci-runner-3 and deploy-runner had become 977. The
+# container joined an unrelated CI group, could not read the secret, and every
+# sign-in failed with EACCES -- surfaced to users as "Sign-in is temporarily
+# unavailable ... the identity provider or session store did not answer", which
+# points at Keycloak for a local file-permission problem.
+step_pin_deploy_runner_gid() {
+  local group="${DASHBOARD_SECRETS_GROUP:-deploy-runner}" gid env_file
+  gid="$(getent group "$group" | cut -d: -f3)"
+  [[ -n "$gid" ]] || { echo "group '$group' does not exist -- cannot pin DEPLOY_RUNNER_GID" >&2; return 1; }
+  # The two directories the enrichment worker writes, group-owned by the same
+  # group its container joins. It runs as nobody(65534) and both were left
+  # root:root 755 by the rebuild, so it could not write either -- and it says so
+  # at WARN and stays healthy, which is how it shipped zero enrichment output
+  # while looking fine. 2775: setgid keeps new files in the group.
+  local d
+  for d in "$REPO_DIR/logs/enriched" "$REPO_DIR/state/ip-enrichment-worker"; do
+    install -d -m 2775 -o root -g "$gid" "$d"
+  done
+  echo "provisioned enrichment output/state dirs group-owned by $group"
+
+  env_file=/var/dockge/stacks/honeypot-dashboard/.env
+  [[ -f "$env_file" ]] || { echo "no $env_file yet"; return 1; }
+  if grep -q '^DEPLOY_RUNNER_GID=' "$env_file"; then
+    sed -i "s/^DEPLOY_RUNNER_GID=.*/DEPLOY_RUNNER_GID=${gid}/" "$env_file"
+  else
+    printf '\n# GID of %s on THIS host, for honeypot-dashboard compose group_add.\n' "$group" >> "$env_file"
+    printf 'DEPLOY_RUNNER_GID=%s\n' "$gid" >> "$env_file"
+  fi
+  echo "pinned DEPLOY_RUNNER_GID=$gid ($group)"
 }
 
 step_provision_dashboard_oidc_secret() {
@@ -2110,6 +2208,27 @@ step_ghidra_stack_provision() {
 }
 
 step_ghidra_stack_start() {
+  # Rocky enables cockpit.socket by default and it listens on *:9090, which is
+  # the port analysis/ghidra/docker-compose.ghidra.yml publishes ghidra's API on
+  # (127.0.0.1:9090). A wildcard listener blocks the loopback bind, so the
+  # container never starts:
+  #
+  #   failed to bind host port 127.0.0.1:9090/tcp: address already in use
+  #
+  # and it fails at CREATE, so it sits in "Created" rather than restarting --
+  # easy to miss in a `docker ps` that only lists running containers. Hit on the
+  # 2026-09-04 rebuild; invisible on Ubuntu, which does not ship cockpit enabled.
+  #
+  # Cockpit is not part of this deployment: nothing in this repo references it,
+  # and the live host had zero cockpit sessions in the preceding week. Disabled
+  # rather than moving ghidra's port, because the port is baked into that
+  # stack's healthcheck and GHIDRA_API_BASE as well as the published mapping.
+  # Re-enable it on a host that wants it, and move ghidra instead.
+  if systemctl is-active --quiet cockpit.socket 2>/dev/null; then
+    echo "cockpit.socket holds :9090, which ghidra needs -- disabling it"
+    systemctl disable --now cockpit.socket 2>/dev/null || true
+    systemctl stop cockpit.service 2>/dev/null || true
+  fi
   local dir="/var/dockge/stacks/ghidra"
   local files=(-f compose.yml)
   [[ -f "$dir/compose.gpu.yml" ]] && files+=(-f compose.gpu.yml)
@@ -2700,10 +2819,12 @@ run_step sshfs-install         "Install sshfs, place VPS key"        step_sshfs_
 run_step sshfs-mounts          "Mount VPS Suricata/portbridge logs"  step_sshfs_mounts
 run_step sshfs-boot-ordering   "Install WireGuard-aware mount ordering" step_sshfs_boot_ordering
 
+run_step geoip-reload-es       "Reload ES if geoip databases arrived after it started" step_geoip_reload_elasticsearch
 run_step fix-snare-ownership   "Set logs/snare root-owned (snare drops caps)" step_fix_snare_ownership
 run_step start-remaining       "Start remaining sensor/dashboard stacks" step_start_remaining_stacks
 
 run_step provision-events-poller-secrets "Grant auth-events-poller view-events + write its secret" step_provision_events_poller_secrets
+run_step pin-deploy-runner-gid  "Pin deploy-runner GID + enrichment dirs for honeypot-dashboard" step_pin_deploy_runner_gid
 run_step provision-dashboard-oidc-secret "Write dashboard's OIDC client secret from Keycloak" step_provision_dashboard_oidc_secret
 run_step fix-apiary-backend-permissions "Grant apiary-backend's nobody uid ACL access to dashboard-state/dionaea-lib/services-adapter-socket" step_fix_apiary_backend_permissions
 run_step provision-arcane-oidc-secret "Sync Arcane's real OIDC client secret from Keycloak, re-up" step_provision_arcane_oidc_secret

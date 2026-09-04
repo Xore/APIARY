@@ -49,10 +49,33 @@ secret="$(docker exec "$KC_CONTAINER" "$KC" get \
 install -d -m 750 "$SECRETS_DIR"
 umask 077
 printf '%s' "$secret" > "$SECRETS_DIR/oidc-client-secret"
-# dashboard/dashboard-b have no explicit `user:` in arcane/home/honeypot-dashboard/compose.yml
-# and no USER in their Dockerfile, so they run as root:root -- matching
-# ownership here, same as step_provision_keycloak_secrets' own
-# postgres-password/bootstrap-admin-password convention.
-chown root:root "$SECRETS_DIR/oidc-client-secret"
+
+# Group-own the secret by the group honeypot-dashboard's compose joins the
+# container to, so dashboard-next can actually read it.
+#
+# The comment that used to sit here said these services "run as root:root" and
+# matched ownership accordingly. That described the RETIRED Go dashboard, which
+# had no USER in its Dockerfile and so bypassed file permissions entirely.
+# dashboard-next runs as the frontend-next image's unprivileged `node` user
+# (uid 1000), which is exactly why its compose carries a group_add -- and
+# root:root 440 defeats that, because no group membership can grant read on a
+# file whose group IS root. Live symptom, found after the 2026-09-03 rebuild:
+#
+#   [auth] /auth/login could not start sign-in:
+#     Error: EACCES: permission denied, open '/run/dashboard-secrets/oidc-client-secret'
+#
+# which the dashboard surfaces to users as "Sign-in is temporarily unavailable
+# -- the identity provider or session store did not answer", pointing at
+# Keycloak for what is a local file-permission problem.
+DASHBOARD_SECRETS_GROUP="${DASHBOARD_SECRETS_GROUP:-deploy-runner}"
+if secret_gid="$(getent group "$DASHBOARD_SECRETS_GROUP" | cut -d: -f3)" && [[ -n "$secret_gid" ]]; then
+  chown "root:$secret_gid" "$SECRETS_DIR" "$SECRETS_DIR/oidc-client-secret"
+  echo "secret group-owned by $DASHBOARD_SECRETS_GROUP (gid $secret_gid)"
+else
+  chown root:root "$SECRETS_DIR/oidc-client-secret"
+  echo "WARNING: group '$DASHBOARD_SECRETS_GROUP' does not exist -- left root:root." >&2
+  echo "         dashboard-next runs unprivileged and will fail with EACCES reading this." >&2
+fi
+chmod 750 "$SECRETS_DIR"
 chmod 440 "$SECRETS_DIR/oidc-client-secret"
 echo "wrote client secret to $SECRETS_DIR/oidc-client-secret"

@@ -53,6 +53,68 @@ RUNNER_VERSION=2.336.0
 RUNNER_SHA256=04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d
 RUNNER_LABELS="self-hosted,linux,x64,honeypot-ci"
 
+# Keep the runner's bulky, regenerable data off the root filesystem.
+#
+# A runner accumulates ~8-11 GB apiece: its checkout and build output (_work),
+# plus the caches its jobs populate (.cache, .rustup, .cargo, go). With seven
+# instances that is ~60 GB, and $RUNNER_HOME lives under /opt, which on this
+# host is the 70 GB root LV while /var has terabytes. Root hit 98% and the Rust
+# build died in the LINKER:
+#
+#   collect2: fatal error: ld terminated with signal 7 [Bus error], core dumped
+#
+# not with a disk-space message -- /tmp is on / too, and a linker that runs out
+# of room mid-mmap gets SIGBUS. It reads as a compiler crash, which is a long
+# way from "the disk is full".
+#
+# Only DATA is relocated. The runner's own executables stay in $RUNNER_HOME on
+# /opt deliberately: files under /var are labelled var_t, and systemd's init_t
+# cannot exec a var_t file -- the same SELinux rule that broke
+# backup-honeypot.service. Moving the whole runner would trade a full disk for a
+# runner that will not start.
+relocate_runner_data() {
+  local base=/var/lib/github-runner-data
+  local name; name="$(basename "$RUNNER_HOME")"
+  local sub src dst
+  install -d -m 755 "$base"
+  install -d -m 755 -o "$RUNNER_USER" -g "$RUNNER_USER" "$base/$name"
+  for sub in _work .cache .rustup .cargo go; do
+    src="$RUNNER_HOME/$sub"
+    dst="$base/$name/$sub"
+    [[ -L "$src" ]] && continue                 # already relocated
+    install -d -m 755 -o "$RUNNER_USER" -g "$RUNNER_USER" "$dst"
+    if [[ -d "$src" ]]; then
+      # existing install: move the contents, then replace with the link
+      cp -a "$src/." "$dst/" 2>/dev/null || true
+      rm -rf "$src"
+    fi
+    ln -sfn "$dst" "$src"
+    chown -h "$RUNNER_USER:$RUNNER_USER" "$src"
+  done
+  # Prune externals.<version> trees left by runner self-updates -- EXCEPT the
+  # one the live `externals` symlink points at.
+  #
+  # Not hypothetical: assuming every externals.<version> was a stale backup
+  # deleted the LIVE tree on two runners. After a self-update the runner does
+  # not keep `externals` as a real directory -- it replaces it with a symlink
+  # into the new versioned tree:
+  #
+  #   externals -> /opt/github-ci-runner-6/externals.2.337.0
+  #
+  # so deleting the versioned directory left a dangling symlink, and the
+  # service died with
+  #   ./externals/node20/bin/node: No such file or directory   (exit 127)
+  local live_ext=""
+  [[ -L "$RUNNER_HOME/externals" ]] && live_ext="$(basename "$(readlink -f "$RUNNER_HOME/externals")")"
+  local ext
+  for ext in "$RUNNER_HOME"/externals.[0-9]*; do
+    [[ -e "$ext" ]] || continue
+    [[ -n "$live_ext" && "$(basename "$ext")" == "$live_ext" ]] && continue
+    rm -rf "$ext"
+  done
+  echo "runner data relocated to $base/$name (executables stay in $RUNNER_HOME)"
+}
+
 # Give actions/setup-python a locally-resolvable interpreter. It looks for
 # $RUNNER_TOOL_CACHE/Python/<x.y.z>/x64 plus a sibling <x64>.complete marker,
 # and a workflow asking for "3.13" resolves to the newest matching entry.
@@ -285,6 +347,7 @@ rhel)
   # since EPEL already packages it.
   dnf install -y python3.13 python3.13-devel python3.13-pip
   seed_python_tool_cache
+  relocate_runner_data
   # quality.yml checks `command -v redis-server` and fails the row loudly if
   # it is absent (see its own "#2565's homeserver provision list" error).
   # Valkey installs only valkey-server, so bridge the name rather than
