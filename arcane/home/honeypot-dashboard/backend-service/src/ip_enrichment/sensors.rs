@@ -16,7 +16,12 @@ pub const TUNNEL_PEER_IP: &str = "10.8.0.1";
 
 /// Loopback sources. A honeypot is reached from the network; nothing on this
 /// fleet is legitimately attacked from inside its own container.
-const LOOPBACK_IPS: [&str; 2] = ["127.0.0.1", "::1"];
+///
+/// `pub(crate)` (#2900): attacker_identity.rs's entity-prune pass reuses
+/// this exact constant rather than a second hand-copied list, so the
+/// retrieval side and `mark_internal_probe` below can never disagree about
+/// what counts as loopback.
+pub(crate) const LOOPBACK_IPS: [&str; 2] = ["127.0.0.1", "::1"];
 
 /// #1677: mark self-generated probe traffic instead of counting it as an attack.
 ///

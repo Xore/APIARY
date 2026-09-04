@@ -1392,6 +1392,94 @@ async fn run_cycle(state: &AppState, window: Duration) {
     );
 }
 
+/// #2900: every IP `fetch_recent_events` would now refuse to build an
+/// entity from — loopback (the same `LOOPBACK_IPS` ip-enrichment-worker's
+/// `mark_internal_probe` uses to set `honeypot.internal_probe`, #2145's
+/// exclusion source) plus this deployment's own configured/tunnel
+/// addresses (`dashboard::self_addresses()`, #1677/#1779). An entity whose
+/// full `ips` membership is a subset of this set could only have been
+/// built by a cycle that ran *before* the exclusion existed — going
+/// forward, none of these IPs can ever reach `build_ip_observations`, so
+/// such an entity can never be revisited by `run_cycle` (its IP never
+/// reappears as a candidate) and stays frozen indefinitely otherwise.
+fn self_only_prune_candidates() -> Vec<String> {
+    let mut ips: Vec<String> = crate::ip_enrichment::sensors::LOOPBACK_IPS
+        .iter()
+        .map(|ip| ip.to_string())
+        .collect();
+    ips.extend(crate::dashboard::self_addresses());
+    ips
+}
+
+/// True if every ip this entity ever accumulated is one this deployment
+/// now treats as self/probe traffic, never a real attacker. An entity with
+/// mixed membership (a real attacker IP that also happens to share a
+/// signal with a self address, however that could occur) is deliberately
+/// NOT pruned — only entities that are self-traffic *and nothing else*.
+fn is_self_only_entity(ips: &[String], self_ips: &HashSet<String>) -> bool {
+    !ips.is_empty() && ips.iter().all(|ip| self_ips.contains(ip))
+}
+
+/// #2900: one-time-in-spirit, cheap-every-cycle-in-practice cleanup for
+/// entities like the pre-#2145 `127.0.0.1` one (16.1M events, still #1 by
+/// score on the live `/attackers` page): built entirely from traffic that
+/// predates the ingest-time exclusion, and never touched again since,
+/// because that same exclusion is what stops the IP from ever reappearing
+/// as a cycle candidate. This is a narrow, deliberate exception to this
+/// module's own "entities are durable... never deleted for going quiet"
+/// invariant (see the file's own top-of-file doc comment) — going quiet is
+/// not the trigger here; the entity's *entire* membership having always
+/// been self-traffic is. The query only ever fetches entities whose `ips`
+/// contains one of a small, fixed self/loopback list, so this stays cheap
+/// regardless of `attackers-v1`'s total size.
+/// The retrieval half of the prune, split out so the field it matches on is
+/// pinned by a test rather than by inspection.
+///
+/// `ips.keyword`, not `ips`. `attackers-v1` has no explicit mapping, so
+/// dynamic mapping makes `ips` a `text` field with a `keyword` subfield.
+/// Under the standard analyzer a dotted-quad IPv4 survives as one token --
+/// which is why a `terms` query on bare `ips` still matched `127.0.0.1` --
+/// but `::1` analyzes to the token `1`, so the literal `::1` could never
+/// match a document whose `ips` is `::1`, silently killing half of
+/// `LOOPBACK_IPS` on the retrieval side. `collect_entities_by_terms` above
+/// already queries `ips.keyword` for the same reason; this matches it.
+fn prune_query(candidates: &[String]) -> serde_json::Value {
+    json!({
+        "size": 100,
+        "query": {"terms": {"ips.keyword": candidates}},
+        "_source": ["ips"]
+    })
+}
+
+async fn prune_self_only_entities(state: &AppState) -> anyhow::Result<usize> {
+    let candidates = self_only_prune_candidates();
+    if candidates.is_empty() {
+        return Ok(0);
+    }
+    let self_ips: HashSet<String> = candidates.iter().cloned().collect();
+    let result = state.es.search_index(&[ATTACKERS_INDEX], prune_query(&candidates)).await?;
+    let mut pruned = 0;
+    for hit in result["hits"]["hits"].as_array().into_iter().flatten() {
+        let id = hit["_id"].as_str().unwrap_or_default();
+        let ips: Vec<String> = hit["_source"]["ips"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
+        if !is_self_only_entity(&ips, &self_ips) {
+            continue;
+        }
+        if let Err(error) = state.es.delete_doc(ATTACKERS_INDEX, id).await {
+            tracing::warn!(%error, id, "attacker-identity: prune self-only entity failed");
+            continue;
+        }
+        tracing::info!(id, ?ips, "attacker-identity: pruned entity built entirely from now-excluded self/loopback traffic");
+        pruned += 1;
+    }
+    Ok(pruned)
+}
+
 pub async fn attacker_identity_loop(state: AppState) {
     let window = env_duration("EVIDENCE_WINDOW", Duration::from_secs(6 * 3600));
     let interval = env_duration("ATTACKER_IDENTITY_RUN_INTERVAL", Duration::from_secs(15 * 60));
@@ -1403,6 +1491,14 @@ pub async fn attacker_identity_loop(state: AppState) {
         // cycle self-heals: entities rebuild from scratch over the full
         // window next interval.
         crate::isolate::cycle("attacker-identity", run_cycle(&state, window)).await;
+        // Behind the same panic boundary run_cycle uses (#2181): an
+        // anyhow::Result catches errors but not a panic, and a panic here
+        // would unwind the whole loop task, not just this pass.
+        if let Some(Err(error)) =
+            crate::isolate::cycle("attacker-identity-prune", prune_self_only_entities(&state)).await
+        {
+            tracing::warn!(%error, "attacker-identity: self-only entity prune failed");
+        }
         tokio::time::sleep(interval).await;
     }
 }
@@ -1991,5 +2087,75 @@ mod tests {
             sandbox_projection_label(&json!({"sandbox": {"risk_level": "low"}})),
             None
         );
+    }
+
+    // -- #2900: self-only entity pruning --
+
+    #[test]
+    fn loopback_only_membership_is_self_only() {
+        let self_ips: HashSet<String> = self_only_prune_candidates().into_iter().collect();
+        assert!(is_self_only_entity(&["127.0.0.1".to_string()], &self_ips));
+        assert!(is_self_only_entity(&["::1".to_string()], &self_ips));
+    }
+
+    #[test]
+    fn a_real_attacker_ip_is_never_pruned() {
+        let self_ips: HashSet<String> = self_only_prune_candidates().into_iter().collect();
+        assert!(!is_self_only_entity(&["203.0.113.55".to_string()], &self_ips));
+    }
+
+    /// The exact regression case (#2900): an entity that merged a genuine
+    /// attacker IP together with loopback (e.g. via a shared signal) must
+    /// survive pruning — only entities that are self-traffic and *nothing
+    /// else* qualify.
+    #[test]
+    fn mixed_membership_survives_even_with_a_self_ip_present() {
+        let self_ips: HashSet<String> = self_only_prune_candidates().into_iter().collect();
+        assert!(!is_self_only_entity(
+            &["127.0.0.1".to_string(), "203.0.113.55".to_string()],
+            &self_ips
+        ));
+    }
+
+    #[test]
+    fn empty_ips_is_never_pruned() {
+        let self_ips: HashSet<String> = self_only_prune_candidates().into_iter().collect();
+        assert!(!is_self_only_entity(&[], &self_ips));
+    }
+
+    /// #2900: the prune must match on the `keyword` subfield. On the
+    /// analyzed `ips` field the literal `::1` tokenises to `1` and can never
+    /// match a document whose `ips` is `::1`, which would leave half of
+    /// LOOPBACK_IPS dead on the retrieval side while the membership tests
+    /// below still passed.
+    #[test]
+    fn the_prune_query_matches_the_keyword_subfield_not_the_analyzed_one() {
+        let candidates = self_only_prune_candidates();
+        let body = prune_query(&candidates);
+        assert!(
+            body["query"]["terms"]["ips.keyword"].is_array(),
+            "prune query must filter on ips.keyword, got: {body}"
+        );
+        assert!(
+            body["query"]["terms"]["ips"].is_null(),
+            "prune query must not filter on the analyzed ips field, got: {body}"
+        );
+        let queried: Vec<&str> = body["query"]["terms"]["ips.keyword"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert!(queried.contains(&"127.0.0.1"));
+        assert!(queried.contains(&"::1"));
+    }
+
+    #[test]
+    fn prune_candidates_include_loopback_and_the_configured_self_addresses() {
+        let candidates = self_only_prune_candidates();
+        assert!(candidates.contains(&"127.0.0.1".to_string()));
+        assert!(candidates.contains(&"::1".to_string()));
+        // dashboard::self_addresses() always includes the tunnel peer.
+        assert!(candidates.iter().any(|ip| ip == "10.8.0.1"));
     }
 }
