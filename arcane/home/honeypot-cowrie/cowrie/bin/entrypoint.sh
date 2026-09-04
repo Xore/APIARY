@@ -28,10 +28,39 @@ FS_PICKLE_DIST=/cowrie/cowrie-git/fs.pickle.dist
 # sync-fs.py's own fixed CTIME constant is what an attacker's `ls -la`
 # actually sees, never the real copied files' mtimes, so there is nothing
 # real to preserve here.
+# #2913: seeding only when the mount is empty meant a honeyfs change merged to
+# the repo never reached a running honeypot -- the mount is non-empty from the
+# first boot onward, so every later image rebuild shipped content the container
+# then ignored forever. A merged honeyfs fix was not a deployed honeyfs fix.
+#
+# A blind re-copy on every boot is not the answer either: honeyfs-implant
+# plants live artifacts into this same tree, and clobbering those on each
+# restart is exactly what the original "first boot only" guard was protecting
+# against.
+#
+# So refresh when, and only when, the IMAGE's content actually changed.
+# The .dist fingerprint is recorded under var/lib/cowrie (already bind-mounted
+# for host-key/uuid persistence, so it survives restarts). On a boot where the
+# fingerprint differs -- i.e. a genuinely new image -- .dist is copied over the
+# mount again. `cp -r "$HONEYFS_DIST"/. ` only writes paths that exist in
+# .dist, so implanted files the image knows nothing about are left in place.
+# An implant that overwrote a path .dist also ships does get reverted, but only
+# on an image change, which is precisely when the repo's version should win.
+HONEYFS_STAMP=/cowrie/cowrie-git/var/lib/cowrie/.honeyfs-dist-id
+dist_id="$(find "$HONEYFS_DIST" -type f -exec sha256sum {} + 2>/dev/null \
+    | sort | sha256sum | cut -d' ' -f1)"
+prev_id=""
+[ -f "$HONEYFS_STAMP" ] && prev_id="$(cat "$HONEYFS_STAMP" 2>/dev/null || true)"
+
 if [ -z "$(ls -A "$HONEYFS_DIR" 2>/dev/null)" ]; then
     echo "entrypoint: seeding empty honeyfs bind mount from $HONEYFS_DIST"
     cp -r "$HONEYFS_DIST"/. "$HONEYFS_DIR"/
+elif [ "$dist_id" != "$prev_id" ]; then
+    echo "entrypoint: honeyfs.dist changed (image rebuilt) -- refreshing image-owned files, implants preserved"
+    cp -r "$HONEYFS_DIST"/. "$HONEYFS_DIR"/
 fi
+mkdir -p "$(dirname "$HONEYFS_STAMP")" 2>/dev/null || true
+printf '%s\n' "$dist_id" > "$HONEYFS_STAMP" 2>/dev/null || true
 if [ ! -f "$FS_PICKLE" ]; then
     echo "entrypoint: seeding empty fs.pickle bind mount from $FS_PICKLE_DIST"
     cp "$FS_PICKLE_DIST" "$FS_PICKLE"
