@@ -1301,30 +1301,41 @@ step_arcane_import_stacks() {
     [[ -d "$dir" ]] && rm -rf "$dir"
 
     echo "-- importing $name via Arcane directory sync"
-    local resp status project_id
+    local resp status
     resp=$(arcane_api POST /environments/0/gitops-syncs \
       "$(jq -n --arg name "$name" --arg repo "$existing_repo_id" \
              --arg branch "$GIT_REF" --arg path "$compose_path" \
         '{name:$name, repositoryId:$repo, branch:$branch, composePath:$path,
           autoSync:false, syncDirectory:true, syncInterval:300}')")
     status=$(echo "$resp" | jq -r '.data.lastSyncStatus // "unknown"')
-    project_id=$(echo "$resp" | jq -r '.data.projectId // empty')
 
     if [[ -n "$staged_env" ]]; then
       mkdir -p "$dir"
       mv "$staged_env" "$dir/.env"
       chmod 600 "$dir/.env"
-      if [[ -n "$project_id" ]]; then
-        arcane_api POST "/environments/0/projects/$project_id/up" >/dev/null
-      fi
     fi
+    # #2959: deliberately NO deploy here. This loop walks the manifest in file
+    # order, and honeypot-init sorts before honeypot-elk -- so bringing each
+    # stack up as it is imported started honeypot-init's one-shot jobs while
+    # the stack that defines elasticsearch was still queued behind them in this
+    # same loop. They then looped forever on
+    #   curl: (6) Could not resolve host: elasticsearch
+    # while the import blocked on their `up --wait`, and the whole step
+    # deadlocked on itself until honeypot-elk was imported out of band by hand.
+    #
+    # Deploy order is not this step's job. start-elasticsearch -> start-init ->
+    # start-remaining exist precisely to honour the ordering
+    # docs/STACK-REBUILD.md documents, they run immediately after this step,
+    # and they cover every stack imported here. Syncing without deploying keeps
+    # exactly one place responsible for start order.
 
-    if [[ "$status" != "success" && -z "$staged_env" ]]; then
-      # Matches this repo's own live experience migrating #1502: a stack
-      # whose required secrets aren't in place yet fails its first deploy
-      # closed rather than starting broken -- step_bootstrap_missing_envs
-      # (below) and the per-stack secret-provisioning steps run right
-      # after this one and re-trigger a deploy once real values exist.
+    if [[ "$status" != "success" ]]; then
+      # Reported for every stack now, not only ones without a staged .env: the
+      # old carve-out existed because this loop used to deploy, so a stack that
+      # had its secrets was expected to come up. Nothing deploys here any more,
+      # so a non-success sync means the same thing either way -- and it is
+      # informational regardless, since the start-* steps below re-deploy once
+      # real secrets are in place.
       echo "  $name: sync reported '$status' (often expected pre-secrets -- see: $resp)"
       failures=$((failures + 1))
     fi
@@ -1581,8 +1592,28 @@ step_build_zeek_image() {
   docker image inspect xore-zeek:local >/dev/null
 }
 
+# #2959: start the whole honeypot-elk stack, but only GATE on elasticsearch.
+#
+# `up -d --wait` waits for every service in the stack, and one of them --
+# pcap-sync -- cannot become healthy at this point by construction. Its
+# healthcheck asserts that the newest file under /src is recent, and /src is
+# the sshfs-backed VPS Suricata pcap directory, which is mounted by
+# step_sshfs_mounts. Those mounts need logs/<name> to exist, which
+# honeypot-init's log-init job creates, which needs a healthy elasticsearch --
+# i.e. this step. The dependency is circular, so on a from-scratch host this
+# step burned all three retries and failed every time, on pcap-sync alone,
+# while elasticsearch, kibana, evebox, filebeat, zeek-proxy, arkime-capture and
+# arkime-viewer all reached Healthy. Measured on the 2026-09-04 rebuild.
+#
+# Everything still gets started; only the readiness gate is narrowed to the
+# service the next step actually depends on. pcap-sync is left to come healthy
+# on its own once sshfs-mounts runs -- it has restart: unless-stopped and
+# autoheal watches it, and this was confirmed live: the moment the mounts
+# appeared it went healthy without intervention.
 step_start_elasticsearch_first() {
-  (cd /var/dockge/stacks/honeypot-elk && with_retry 3 15 docker compose -f compose.yml up -d --wait)
+  cd /var/dockge/stacks/honeypot-elk || return 1
+  with_retry 3 15 docker compose -f compose.yml up -d
+  with_retry 3 15 docker compose -f compose.yml up -d --wait --no-recreate elasticsearch
 }
 
 step_start_init() {
@@ -2428,6 +2459,16 @@ run_step provision-buildx-cache "Create /mnt-1/buildx-cache for the CI runners (
 run_step build-zeek-image      "Build xore-zeek:local for zeek-proxy" step_build_zeek_image
 run_step start-elasticsearch   "Start honeypot-elk, wait healthy"   step_start_elasticsearch_first
 run_step start-init            "Start honeypot-init, wait for one-shots" step_start_init
+# #2959: the sshfs mounts move up here, ahead of start-remaining. They can only
+# run after start-init (honeypot-init's log-init job is what creates the
+# logs/<name> mount points), but honeypot-elk's pcap-sync reads them, so
+# leaving them until after every sensor had started meant pcap-sync sat
+# unhealthy for the whole middle of the run and start-elasticsearch could never
+# gate on it. Placed at the first point in the run where they can succeed.
+run_step sshfs-install         "Install sshfs, place VPS key"        step_sshfs_install
+run_step sshfs-mounts          "Mount VPS Suricata/portbridge logs"  step_sshfs_mounts
+run_step sshfs-boot-ordering   "Install WireGuard-aware mount ordering" step_sshfs_boot_ordering
+
 run_step fix-snare-ownership   "Set logs/snare root-owned (snare drops caps)" step_fix_snare_ownership
 run_step start-remaining       "Start remaining sensor/dashboard stacks" step_start_remaining_stacks
 
@@ -2438,9 +2479,6 @@ run_step provision-arcane-oidc-secret "Sync Arcane's real OIDC client secret fro
 run_step provision-account-console-scopes "Give Keycloak's account-console client its default scopes (#1697)" step_provision_account_console_scopes
 run_step auth-events-worker-start "Start auth-events-worker" step_auth_events_worker_start
 
-run_step sshfs-install         "Install sshfs, place VPS key"        step_sshfs_install
-run_step sshfs-mounts          "Mount VPS Suricata/portbridge logs"  step_sshfs_mounts
-run_step sshfs-boot-ordering   "Install WireGuard-aware mount ordering" step_sshfs_boot_ordering
 
 run_step technitium-provision  "Install Technitium DNS config"       step_technitium_provision
 run_step technitium-start      "Start Technitium DNS"                step_technitium_start
