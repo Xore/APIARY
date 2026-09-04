@@ -1887,6 +1887,27 @@ step_pin_deploy_runner_gid() {
     printf 'DEPLOY_RUNNER_GID=%s\n' "$gid" >> "$env_file"
   fi
   echo "pinned DEPLOY_RUNNER_GID=$gid ($group)"
+
+  # Writing the .env is not enough. group_add is a CREATE-time property: an
+  # already-running container keeps whatever supplementary GID it was built
+  # with, and `restart: unless-stopped` will never change it -- only a
+  # recreate re-reads the value. This step runs after step_start_remaining_
+  # stacks, so the containers already exist by now and are still on the
+  # compose fallback GID.
+  #
+  # Left unrecreated, the enrichment worker joins the wrong group and cannot
+  # write its own offset files:
+  #
+  #   WARN apiary_backend::ip_enrichment: ip-enrichment: save offset failed
+  #        source=tanner error=Permission denied (os error 13)
+  #
+  # It logs that at WARN, stays healthy, and re-reads the same input every
+  # tick forever -- a spin that ships no enrichment while `docker ps` shows
+  # nothing wrong. Confirmed live on the 2026-09-04 rebuild: the container
+  # carried GID 979 (the compose fallback) while deploy-runner was 977.
+  (cd /var/dockge/stacks/honeypot-dashboard \
+    && docker compose up -d backend-worker-enrichment dashboard-next) \
+    || echo "could not recreate honeypot-dashboard services -- DEPLOY_RUNNER_GID will not take effect until they are"
 }
 
 step_provision_dashboard_oidc_secret() {

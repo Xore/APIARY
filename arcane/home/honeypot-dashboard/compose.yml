@@ -760,7 +760,14 @@ services:
     # and the container reporting healthy throughout while every Filebeat
     # consumer of /logs/enriched/*.json went stale.
     group_add:
-      - "${DEPLOY_RUNNER_GID:-979}"
+      # Same value as dashboard-next's group_add above, deliberately. These two
+      # disagreed (980 vs 979) while naming the same group, so whichever
+      # fallback happened to be wrong on a given host silently mis-grouped one
+      # of the two containers. Neither number is meaningful on its own: a GID
+      # is host-specific, and step_pin_deploy_runner_gid writes the real one
+      # into this stack's .env. The literal only covers a host that has not
+      # been through that step, so both must at least agree.
+      - "${DEPLOY_RUNNER_GID:-980}"
     security_opt:
       - no-new-privileges:true
     cap_drop: [ALL]
