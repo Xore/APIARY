@@ -71,7 +71,27 @@ for old in "$backup_root"/*/; do
 done
 
 cd "$stack_dir"
-docker compose -f compose.yml config -q
+
+# Resolve the compose file rather than assuming compose.yml. Dockge treated
+# compose.yml as canonical and the deployed stack directory carried that name;
+# the repo checkout this now runs against has docker-compose.yml, and
+# compose.yml has never existed in the repo at all. After the 2026-09-03
+# rebuild replaced the deployed tree with a plain checkout, this validation
+# gate aborted every run before any backup was written:
+#
+#   compose file "/opt/stacks/apiary/compose.yml" is invalid: no such file or directory
+#
+# Accept either name, and skip the gate rather than fail if neither is present:
+# its job is to catch a corrupted compose file, not to require one to exist.
+compose_file=""
+for candidate in compose.yml docker-compose.yml; do
+  [ -f "$candidate" ] && { compose_file=$candidate; break; }
+done
+if [ -n "$compose_file" ]; then
+  docker compose -f "$compose_file" config -q
+else
+  echo "no compose.yml or docker-compose.yml in $stack_dir -- skipping compose validation" >&2
+fi
 
 # Only create this run's directories once validation has passed (#2025): a
 # failed validation used to leave an empty stamped directory behind for a
@@ -92,7 +112,10 @@ chmod 700 "$destination"
 # sensitivity to the config material this script already carries than to
 # the bulk payload/PCAP data excluded above, so it inherits this script's
 # existing scope rather than needing a separate backup path or an exclusion.
-set -- ./compose.yml
+# Same resolution as the validation gate above: back up whichever compose file
+# this layout actually has, instead of a name that may not exist.
+set --
+[ -n "$compose_file" ] && set -- "./$compose_file"
 for candidate in ./.env ./README.md ./analysis ./dashboard ./personas ./state; do
   [ ! -e "$candidate" ] || set -- "$@" "$candidate"
 done

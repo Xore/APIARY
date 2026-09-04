@@ -6,5 +6,18 @@ Requires=docker.service
 [Service]
 Type=oneshot
 EnvironmentFile=-/etc/default/honeypot-backup
-ExecStart=/opt/stacks/apiary/analysis/backup-honeypot.sh
+# Invoked via the interpreter, not directly. The checkout lives under /var
+# (/opt/stacks/apiary is a symlink to /var/dockge/stacks/apiary), so its files
+# are labelled var_t, and systemd's init_t cannot EXEC a var_t file -- the unit
+# failed 203/EXEC with "Unable to locate executable ... Permission denied" even
+# with the script mode 0755 and no AVC logged. Measured on the Rocky 10 rebuild;
+# this never bit on Ubuntu, which runs no SELinux.
+#
+# /bin/sh is bin_t and execs fine, and READING a var_t script is permitted, so
+# this runs the script in place. That matters: install-backup-timer.sh's header
+# explains why this script is deliberately NOT copied to /usr/local/libexec like
+# its siblings -- it tars up the very checkout it lives in, and a copied-out
+# copy would silently drift from what it is backing up. Exec'ing the interpreter
+# keeps that property while satisfying SELinux.
+ExecStart=/bin/sh /opt/stacks/apiary/analysis/backup-honeypot.sh
 UMask=0077
