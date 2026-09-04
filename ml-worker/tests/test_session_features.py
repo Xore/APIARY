@@ -11,6 +11,8 @@ and models/session_features.py's module docstring for why.
 
 Run: python3 -m pytest ml-worker/tests/test_session_features.py -v
 """
+import tempfile
+import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -26,6 +28,26 @@ from models.lstm_autoencoder import LSTMAEModel  # noqa: E402
 from models.session_features import (  # noqa: E402
     SessionFeatureTracker, compute_batch_session_features,
 )
+
+
+# #1609: these model_dir values are placeholders -- most tests using them never
+# write. But `/tmp/does-not-matter*` is a SHARED path, and CI now runs seven
+# self-hosted runner instances each under its OWN system user on one host with
+# PrivateTmp=no. The first user to run a test that DOES write creates the
+# directory 0755 as itself, and every other runner user then fails inside it:
+#
+#   RuntimeError: [enforce fail at inline_container.cc:747] . open file failed
+#
+# from torch's PyTorchFileWriter, in the bounded-CPU retrain test below.
+# Harmless with one runner; a cross-user collision with several. A per-process
+# mkdtemp is unique, 0700, and owned by whoever is running.
+_PLACEHOLDER_MODEL_ROOT = tempfile.mkdtemp(prefix="ml-worker-tests-")
+
+
+def _placeholder_model_dir(name: str) -> str:
+    """Writable per-process stand-in for a model_dir the test does not care about."""
+    return os.path.join(_PLACEHOLDER_MODEL_ROOT, name)
+
 
 
 def _cowrie_login_failed_at(offset_s, src_ip="203.0.113.9"):
@@ -192,7 +214,7 @@ class TestExtractFeaturesUsesRealValues:
     proven by observing the actual feature-vector positions change."""
 
     def test_cmd_count_changes_feature_index_5(self):
-        model = IsoForestModel(model_dir="/tmp/does-not-matter")
+        model = IsoForestModel(model_dir=_placeholder_model_dir("does-not-matter"))
         src = fixtures.COWRIE_COMMAND_INPUT["_source"]
         no_commands = model.extract_features(src)
         many_commands = model.extract_features(src, cmd_count=150)
@@ -200,7 +222,7 @@ class TestExtractFeaturesUsesRealValues:
         assert many_commands[0][5] == pytest.approx(150 / MAX_CMD_COUNT)
 
     def test_failed_logins_and_unique_ports_change_indices_10_and_11(self):
-        model = IsoForestModel(model_dir="/tmp/does-not-matter")
+        model = IsoForestModel(model_dir=_placeholder_model_dir("does-not-matter"))
         src = fixtures.COWRIE_LOGIN_FAILED["_source"]
         neutral = model.extract_features(src)
         real = model.extract_features(src, failed_logins_1h=50, unique_ports_1h=12)
@@ -211,7 +233,7 @@ class TestExtractFeaturesUsesRealValues:
     def test_default_call_without_context_keeps_the_pre_277_neutral_shape(self):
         # Direct callers with no session/window context (most unit tests)
         # must still get a valid, neutral feature vector -- not an error.
-        model = IsoForestModel(model_dir="/tmp/does-not-matter")
+        model = IsoForestModel(model_dir=_placeholder_model_dir("does-not-matter"))
         features = model.extract_features(fixtures.COWRIE_LOGIN_FAILED["_source"])
         assert features.shape == (1, 15)
 
@@ -223,7 +245,7 @@ class TestExplainSurfacesRealPortScanSignal:
     normalised-equivalent of 1. Proves it now fires for a real value."""
 
     def test_port_scan_explanation_fires_with_a_real_unique_ports_value(self):
-        model = IsoForestModel(model_dir="/tmp/does-not-matter")
+        model = IsoForestModel(model_dir=_placeholder_model_dir("does-not-matter"))
         src = fixtures.COWRIE_LOGIN_FAILED["_source"]
         features = model.extract_features(src, unique_ports_1h=1000)
         explanation = model.explain(features, {"isolation_forest": 0.5})
@@ -237,8 +259,8 @@ class TestScoreAndWriteEventsWiresSessionTracker:
     in isolation."""
 
     def test_observe_is_called_once_per_event_and_feeds_extract_features(self):
-        iso_model = IsoForestModel(model_dir="/tmp/does-not-matter")
-        lstm_model = LSTMAEModel(model_dir="/tmp/does-not-matter")
+        iso_model = IsoForestModel(model_dir=_placeholder_model_dir("does-not-matter"))
+        lstm_model = LSTMAEModel(model_dir=_placeholder_model_dir("does-not-matter"))
         es = MagicMock()
         recent_flags = []
 
@@ -266,8 +288,8 @@ class TestScoreAndWriteEventsWiresSessionTracker:
     def test_no_tracker_falls_back_to_neutral_defaults(self):
         # Backward compatibility: existing callers (and tests) that don't
         # pass a session_tracker must keep working exactly as before #277.
-        iso_model = IsoForestModel(model_dir="/tmp/does-not-matter")
-        lstm_model = LSTMAEModel(model_dir="/tmp/does-not-matter")
+        iso_model = IsoForestModel(model_dir=_placeholder_model_dir("does-not-matter"))
+        lstm_model = LSTMAEModel(model_dir=_placeholder_model_dir("does-not-matter"))
         es = MagicMock()
         recent_flags = []
         event = {

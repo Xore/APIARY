@@ -11,6 +11,8 @@ emits at all, e.g. Conpot's transport or HTTP-honeypot's own port).
 
 Run: python3 -m pytest ml-worker/tests/test_schema_contract.py -v
 """
+import tempfile
+import os
 import ipaddress
 import sys
 from pathlib import Path
@@ -24,9 +26,29 @@ from models.isolation_forest import IsoForestModel, _get_ip, _get_port, _get_tra
 import fixtures  # noqa: E402
 
 
+# #1609: these model_dir values are placeholders -- most tests using them never
+# write. But `/tmp/does-not-matter*` is a SHARED path, and CI now runs seven
+# self-hosted runner instances each under its OWN system user on one host with
+# PrivateTmp=no. The first user to run a test that DOES write creates the
+# directory 0755 as itself, and every other runner user then fails inside it:
+#
+#   RuntimeError: [enforce fail at inline_container.cc:747] . open file failed
+#
+# from torch's PyTorchFileWriter, in the bounded-CPU retrain test below.
+# Harmless with one runner; a cross-user collision with several. A per-process
+# mkdtemp is unique, 0700, and owned by whoever is running.
+_PLACEHOLDER_MODEL_ROOT = tempfile.mkdtemp(prefix="ml-worker-tests-")
+
+
+def _placeholder_model_dir(name: str) -> str:
+    """Writable per-process stand-in for a model_dir the test does not care about."""
+    return os.path.join(_PLACEHOLDER_MODEL_ROOT, name)
+
+
+
 @pytest.fixture
 def model():
-    return IsoForestModel(model_dir="/tmp/does-not-matter")
+    return IsoForestModel(model_dir=_placeholder_model_dir("does-not-matter"))
 
 
 class TestIpAndPortNowCorrectlyResolvedPerSource:
