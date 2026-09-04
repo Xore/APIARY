@@ -2304,6 +2304,32 @@ step_ollama_model_pull() {
   # fresh install with "model \"nomic-embed-text:latest\" not found, try
   # pulling it first" until someone happened to pull it by hand.
   docker exec ghidra-ollama-1 ollama pull nomic-embed-text:latest
+
+  # galah is a fourth consumer of this same ollama, reaching it through
+  # hp-galah-llm-broker, and it needs a model none of the above provide.
+  # Exactly the #1236 failure repeated: without this the sensor comes up
+  # "healthy", accepts connections, and returns HTTP 500 to every request --
+  #
+  #   ERRO GALAH: error generating response: contentGenerationError:
+  #                model 'qwen2.5:7b-instruct-q4_K_M' not found
+  #
+  # -- so it captures nothing while looking fine in `docker ps`. Found on the
+  # 2026-09-04 rebuild, live, with zero galah events in 24h.
+  #
+  # Its model is deliberately NOT one of the qwen3 family (galah's vendored
+  # langchaingo client cannot send `think: false`, and Qwen3's unsuppressable
+  # thinking mode blows past galah's hardcoded 10s WriteTimeout) -- see
+  # arcane/home/honeypot-galah/compose.yml's own comment for the full
+  # reasoning. Resolved from that compose file rather than hardcoded here so
+  # the two cannot drift apart.
+  local galah_model
+  galah_model=$(sed -n 's/^[[:space:]]*-[[:space:]]*LLM_MODEL=\(.*\)$/\1/p' \
+    "$REPO_DIR/arcane/home/honeypot-galah/compose.yml" 2>/dev/null | head -1)
+  if [[ -n "$galah_model" ]]; then
+    docker exec ghidra-ollama-1 ollama pull "$galah_model"
+  else
+    echo "could not resolve galah's LLM_MODEL from its compose -- galah will 500 on every request"
+  fi
 }
 
 step_ghidra_worker_install() {
