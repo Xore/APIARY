@@ -449,7 +449,7 @@ against a source index that expires after 30 days:
 | Field | Question |
 |-------|----------|
 | `sensor`, `dst_ip`, `dst_port`, `src_port` | What was attacked, by whom (which decoy drew it) |
-| `model_state_id` | Which trained state produced this score -- sha256 over the promoted checkpoint artifacts' `(name, mtime_ns, size)`, stable across restarts, changed only by an accepted retrain's atomic promotion. #1959's forensics reconstructed scoring configurations from container restart times because no stamp existed. |
+| `model_state_id` | Which trained state produced this score -- a readable `iso:<ts>\|hbos:<ts>\|lstm:<ts>` marker built from the promoted checkpoint symlinks' own realpath basenames (`worker.py`'s `model_state_id()`), not a hash: `_save()` promotes via atomic symlink retarget and never edits a promoted file in place, so equal ids guarantee equal artifacts regardless of filesystem timestamp resolution or container image layer copies -- stable across restarts, changed only by an accepted retrain's atomic promotion. #1959's forensics reconstructed scoring configurations from container restart times because no stamp existed. (#2423: the readable form was a deliberate choice over an opaque hash, for ops debugging.) |
 | `alert_threshold` | Under what alert bar THAT day's score was judged, since `ML_ALERT_THRESHOLD` is per-deployment configurable |
 | `src_internal` | Is this source even routable/actionable -- same `HOME_NET` definition `is_our_own_address()` suppresses on (#1959), so a dashboard filter can never disagree with the worker |
 | `community_id` | Copy of the source flow's Community ID (zeek conn logs carry one) for cross-index pivots |
@@ -589,7 +589,7 @@ documented as present):
   "dst_port": 8545,
   "proto": "tcp",
   "community_id": "1:hRQPPXnFe+UxVlMLpaudi6QGpo4=",
-  "model_state_id": "9f2c1ab77e04d3e5",
+  "model_state_id": "iso:1788339625|hbos:1788339625|lstm:1788339647",
   "alert_threshold": 0.75,
   "src_internal": false,
   "status": "open"
