@@ -37,9 +37,15 @@ VM_NAME="${VM_NAME:-win11-sandbox}"
 SANDBOX_ROOT="${SANDBOX_ROOT:-/var/dockge/sandbox}"
 GOLDEN_IMAGE="${GOLDEN_IMAGE:-$SANDBOX_ROOT/golden-images/win11-analysis.qcow2}"
 VM_DISK="${VM_DISK:-$SANDBOX_ROOT/vms/${VM_NAME}.qcow2}"
-VM_XML="$(dirname "$0")/../packer/win11-kvm.xml"
-NET_NAME="sandbox"
-NET_XML="$(dirname "$0")/sandbox-network.xml"
+# Overridable for the same reason VM_NAME/GOLDEN_IMAGE/VM_DISK above are: this
+# host runs more than one Windows domain off this script. win11-cape has its
+# own domain XML and its own libvirt network (sandbox/cape/win11-cape-kvm.xml,
+# sandbox/cape/network.xml, network name "cape"), and before these three were
+# overridable there was no way to drive it from here at all -- which is why
+# nothing in the installer ever created that VM (#1609 Phase 7).
+VM_XML="${VM_XML:-$(dirname "$0")/../packer/win11-kvm.xml}"
+NET_NAME="${NET_NAME:-sandbox}"
+NET_XML="${NET_XML:-$(dirname "$0")/sandbox-network.xml}"
 
 log()  { echo "[$(date '+%H:%M:%S')] $*"; }
 die()  { echo "[ERROR] $*" >&2; exit 1; }

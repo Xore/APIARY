@@ -53,6 +53,29 @@ RUNNER_VERSION=2.336.0
 RUNNER_SHA256=04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d
 RUNNER_LABELS="self-hosted,linux,x64,honeypot-ci"
 
+# Give actions/setup-python a locally-resolvable interpreter. It looks for
+# $RUNNER_TOOL_CACHE/Python/<x.y.z>/x64 plus a sibling <x64>.complete marker,
+# and a workflow asking for "3.13" resolves to the newest matching entry.
+#
+# Symlinks rather than a copied tree: python resolves its own sys.prefix
+# through the symlink to /usr, so the stdlib, pip and `python -m venv` all keep
+# working from the real installation. Verified on the live runner -- venv
+# creation, which is what most jobs actually do, succeeds through the link.
+seed_python_tool_cache() {
+  local py=/usr/bin/python3.13 ver tool dir
+  [[ -x "$py" ]] || { echo "no $py, skipping tool-cache seed" >&2; return 0; }
+  ver="$("$py" -c 'import sys;print("%d.%d.%d"%sys.version_info[:3])')"
+  tool="$RUNNER_HOME/_work/_tool"
+  dir="$tool/Python/$ver/x64"
+  install -d "$dir/bin"
+  local n
+  for n in python python3 python3.13; do ln -sf "$py" "$dir/bin/$n"; done
+  [[ -x /usr/bin/pip3.13 ]] && for n in pip pip3; do ln -sf /usr/bin/pip3.13 "$dir/bin/$n"; done
+  touch "$tool/Python/$ver/x64.complete"
+  chown -R "$RUNNER_USER:$RUNNER_USER" "$tool/Python"
+  echo "seeded actions/setup-python tool cache with Python $ver at $dir"
+}
+
 # --- BEGIN instance derivation (config test: tests/test_install_ci_runner_instances.py) ---
 # Instance "1" is the original, unsuffixed layout -- anything else gets its
 # own home dir and system user so N instances can run side by side without
@@ -246,14 +269,47 @@ rhel)
     nspr nss pango libX11 libxcb libXcomposite \
     libXdamage libXext libXfixes libxkbcommon libXrandr
   systemctl disable --now valkey.service 2>/dev/null || true
+
+  # actions/setup-python ships no prebuilt interpreter for RHEL-family hosts.
+  # After the homeserver moved to Rocky 10 every job using it failed with:
+  #
+  #   The version '3.13' with architecture 'x64' was not found for rocky 10.2
+  #
+  # ...which took out 58 checks at once, because setup-python is a shared step
+  # rather than one job's dependency. It was invisible before the OS change:
+  # the runners were Ubuntu, which that action does publish builds for.
+  #
+  # The fix is the standard self-hosted one: give the action a tool-cache entry
+  # it can find locally, so no workflow has to know the runner is not Ubuntu.
+  # Seeded from the distro's own python3.13 rather than downloading a build,
+  # since EPEL already packages it.
+  dnf install -y python3.13 python3.13-devel python3.13-pip
+  seed_python_tool_cache
   # quality.yml checks `command -v redis-server` and fails the row loudly if
   # it is absent (see its own "#2565's homeserver provision list" error).
   # Valkey installs only valkey-server, so bridge the name rather than
   # teaching every consumer a second one.
-  if [[ ! -e /usr/local/bin/redis-server ]] && [[ -x /usr/bin/valkey-server ]]; then
-    ln -s /usr/bin/valkey-server /usr/local/bin/redis-server
-    echo "linked /usr/local/bin/redis-server -> valkey-server (EL10 has no redis package)"
-  fi
+  #
+  # /usr/bin, NOT /usr/local/bin. The runner user's PATH on this distro is
+  #   /opt/<runner>/.local/bin:/opt/<runner>/bin:/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin
+  # -- it carries /usr/local/sbin but NOT /usr/local/bin, so a shim placed
+  # there exists and is still invisible to every job. Measured after the first
+  # attempt did exactly that: the symlink was correct, pointed at the right
+  # binary, and quality.yml still failed with "redis-server missing on the
+  # runner host". No package owns /usr/bin/redis-server on EL10 (redis is not
+  # packaged for it at all), so there is nothing to collide with.
+  # The whole redis-* command set, not just redis-server. The frontend-next
+  # browser harness spawns `redis-cli` to seed state, and a server-only shim
+  # left it failing with `spawn redis-cli ENOENT` -- the same mistake twice in
+  # one fix. Valkey ships each of these under its own name.
+  # No `local` here: this block is top-level inside a case, not a function, and
+  # `local` outside a function is a hard bash error (SC2168) -- it would have
+  # aborted the rhel branch at runtime under set -e.
+  for rn in server cli benchmark check-aof check-rdb sentinel; do
+    [[ -x "/usr/bin/valkey-$rn" ]] || continue
+    ln -sf "/usr/bin/valkey-$rn" "/usr/bin/redis-$rn"
+  done
+  echo "linked redis-* -> valkey-* in /usr/bin (EL10 has no redis package)"
   ;;
 esac
 if ! id -nG "$RUNNER_USER" | tr ' ' '\n' | grep -qx docker; then

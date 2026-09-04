@@ -58,6 +58,14 @@ HOME_WG_PUBLIC_KEY="<HOME_WG_PUBLIC_KEY>"
 # sshd here for you and refuses to run at all if this is set to 22.
 SSH_ADMIN_PORT="2222"
 
+# --- Repo checkout --------------------------------------------------------
+# Where this script clones/updates the APIARY checkout it deploys vps/ from.
+# Optional: defaults to /root/apiary-repo, which is where the live VPS keeps
+# it. Named here because install-homeserver.conf.example has always exposed
+# the equivalent and this file did not (#1609 Phase 5) -- the two scripts now
+# agree on which paths are settable.
+#REPO_DIR="/root/apiary-repo"
+
 # --- Public domain --------------------------------------------------------
 # Substituted into vps/traefik/dynamic.yml in place of the committed
 # honeypot.example placeholder (same mechanism

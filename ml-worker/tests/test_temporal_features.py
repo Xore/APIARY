@@ -6,6 +6,8 @@ contract, the same way test_schema_contract.py proves it for the point
 
 Run: python3 -m pytest ml-worker/tests/test_temporal_features.py -v
 """
+import tempfile
+import os
 import sys
 from pathlib import Path
 
@@ -19,6 +21,26 @@ import worker  # noqa: E402
 from models.lstm_autoencoder import (  # noqa: E402
     LSTMAEModel, MAX_TRAIN_WINDOWS, SEQ_LEN, featurise_temporal,
 )
+
+
+# #1609: these model_dir values are placeholders -- most tests using them never
+# write. But `/tmp/does-not-matter*` is a SHARED path, and CI now runs seven
+# self-hosted runner instances each under its OWN system user on one host with
+# PrivateTmp=no. The first user to run a test that DOES write creates the
+# directory 0755 as itself, and every other runner user then fails inside it:
+#
+#   RuntimeError: [enforce fail at inline_container.cc:747] . open file failed
+#
+# from torch's PyTorchFileWriter, in the bounded-CPU retrain test below.
+# Harmless with one runner; a cross-user collision with several. A per-process
+# mkdtemp is unique, 0700, and owned by whoever is running.
+_PLACEHOLDER_MODEL_ROOT = tempfile.mkdtemp(prefix="ml-worker-tests-")
+
+
+def _placeholder_model_dir(name: str) -> str:
+    """Writable per-process stand-in for a model_dir the test does not care about."""
+    return os.path.join(_PLACEHOLDER_MODEL_ROOT, name)
+
 
 
 class TestFeaturiseTemporalReadsTheRealSchema:
@@ -46,13 +68,13 @@ class TestLSTMScoreTakesTheRealSourceDict:
     def test_score_abstains_before_the_window_fills(self):
         # #1969: "no signal yet" is None (no opinion), not an exact-0.0
         # that the composite would read as a real low score.
-        model = LSTMAEModel(model_dir="/tmp/does-not-matter-1")
+        model = LSTMAEModel(model_dir=_placeholder_model_dir("does-not-matter-1"))
         src = fixtures.COWRIE_LOGIN_FAILED["_source"]
         for _ in range(SEQ_LEN - 1):
             assert model.score(src) is None
 
     def test_score_produces_a_real_value_once_the_window_fills(self):
-        model = LSTMAEModel(model_dir="/tmp/does-not-matter-2")
+        model = LSTMAEModel(model_dir=_placeholder_model_dir("does-not-matter-2"))
         src = fixtures.COWRIE_LOGIN_FAILED["_source"]
         # #1969: score() abstains (None) on a net whose weights were never
         # fitted or loaded -- random-weight reconstruction loss is noise,
@@ -65,7 +87,7 @@ class TestLSTMScoreTakesTheRealSourceDict:
         assert 0.0 <= scores[-1] <= 1.0
 
     def test_untrained_net_never_scores_even_with_a_full_window(self):
-        model = LSTMAEModel(model_dir="/tmp/does-not-matter-2b")
+        model = LSTMAEModel(model_dir=_placeholder_model_dir("does-not-matter-2b"))
         src = fixtures.COWRIE_LOGIN_FAILED["_source"]
         for _ in range(SEQ_LEN + 5):  # window full and overflowing
             assert model.score(src) is None, (
@@ -73,7 +95,7 @@ class TestLSTMScoreTakesTheRealSourceDict:
             )
 
     def test_inter_arrival_is_tracked_per_ip_across_calls(self):
-        model = LSTMAEModel(model_dir="/tmp/does-not-matter-3")
+        model = LSTMAEModel(model_dir=_placeholder_model_dir("does-not-matter-3"))
         for doc in fixtures.COWRIE_SAME_IP_SEQUENCE[:3]:
             model.score(doc["_source"])
         ip = "203.0.113.9"
@@ -92,7 +114,7 @@ class TestBoundedCPUFallback:
     and never a low score that would read as "confirmed normal"."""
 
     def test_inference_exception_abstains_instead_of_scoring(self, monkeypatch):
-        model = LSTMAEModel(model_dir="/tmp/does-not-matter-4")
+        model = LSTMAEModel(model_dir=_placeholder_model_dir("does-not-matter-4"))
         src = fixtures.COWRIE_LOGIN_FAILED["_source"]
         # _trained plus a full window so the fault actually reaches forward()
         # rather than being masked by an earlier abstention path.
@@ -117,7 +139,7 @@ class TestBoundedCPUFallback:
         # patched here, not on the module it was originally defined in.
         monkeypatch.setattr(lstm_mod, "MAX_TRAIN_WINDOWS", 40)
         monkeypatch.setattr(lstm_mod, "HOLDOUT_MIN", 5)
-        model = LSTMAEModel(model_dir="/tmp/does-not-matter-5")
+        model = LSTMAEModel(model_dir=_placeholder_model_dir("does-not-matter-5"))
         sources = [doc["_source"] for doc in fixtures.COWRIE_SAME_IP_SEQUENCE] * 5  # far over the patched cap
 
         seen_dataset_sizes = []

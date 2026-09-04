@@ -27,7 +27,8 @@ The custom dashboard, Arkime, and Elasticsearch all share the same local
 MaxMind GeoLite2 MMDB files under `analysis/geoip/`, kept current by the
 `hp-geoipupdate` container (`docker compose -f compose.yml --profile
 geoip-update up -d geoipupdate`, needs `MAXMIND_ACCOUNT_ID` /
-`MAXMIND_LICENSE_KEY` in Dockge's `.env`). Dashboard lookups happen after
+`MAXMIND_LICENSE_KEY` in the honeypot-init stack's `.env`, managed by
+Arcane). Dashboard lookups happen after
 portbridge real-IP correlation, support IPv4/IPv6, and add country, city,
 coordinates, accuracy radius, ASN, organization, and cloud/hosting/scanner
 classification without sending attacker IPs to an external lookup API.

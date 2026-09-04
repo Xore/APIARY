@@ -1,4 +1,5 @@
-# APIARY — multi-service honeypot (HOME side, runs under Dockge).
+# APIARY — multi-service honeypot (HOME side). Kept only as a marker file;
+# see the note below for what actually runs the stacks.
 #
 # #258: every service that used to live in this file has long since split
 # into its own stack (see README.md's stack table). #1502 finished the

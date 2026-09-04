@@ -11,6 +11,8 @@ Run: python3 -m pytest ml-worker/tests/test_worker_audit.py -v
 (needs the packages in requirements.txt; see README note on the numpy/pyod
 conflict below before trying to install them together)
 """
+import tempfile
+import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -24,6 +26,26 @@ import worker  # noqa: E402
 from worker import contributing_detectors  # noqa: E402
 from models.isolation_forest import IsoForestModel  # noqa: E402
 from models.lstm_autoencoder import LSTMAEModel, SEQ_LEN  # noqa: E402
+
+
+# #1609: these model_dir values are placeholders -- most tests using them never
+# write. But `/tmp/does-not-matter*` is a SHARED path, and CI now runs seven
+# self-hosted runner instances each under its OWN system user on one host with
+# PrivateTmp=no. The first user to run a test that DOES write creates the
+# directory 0755 as itself, and every other runner user then fails inside it:
+#
+#   RuntimeError: [enforce fail at inline_container.cc:747] . open file failed
+#
+# from torch's PyTorchFileWriter, in the bounded-CPU retrain test below.
+# Harmless with one runner; a cross-user collision with several. A per-process
+# mkdtemp is unique, 0700, and owned by whoever is running.
+_PLACEHOLDER_MODEL_ROOT = tempfile.mkdtemp(prefix="ml-worker-tests-")
+
+
+def _placeholder_model_dir(name: str) -> str:
+    """Writable per-process stand-in for a model_dir the test does not care about."""
+    return os.path.join(_PLACEHOLDER_MODEL_ROOT, name)
+
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +109,7 @@ class TestNeutralScoreCannotAlert:
     at a constant."""
 
     def test_untrained_scores_are_none_not_a_placeholder_vote(self):
-        model = IsoForestModel(model_dir="/tmp/does-not-matter")
+        model = IsoForestModel(model_dir=_placeholder_model_dir("does-not-matter"))
         features = model.extract_features(REAL_SHAPED_DOCUMENT["_source"])
         assert model.score(features) is None
         assert model.hbos_score(features) is None
@@ -288,7 +310,7 @@ class TestUnhandledEventErrorsCrashTheBatch:
     anything."""
 
     def test_extract_features_still_raises_on_a_non_numeric_port(self):
-        model = IsoForestModel(model_dir="/tmp/does-not-matter")
+        model = IsoForestModel(model_dir=_placeholder_model_dir("does-not-matter"))
         malformed = {"@timestamp": "2026-07-31T00:00:00Z", "destination": {"port": "not-a-port"}}
         with pytest.raises(ValueError):
             # extract_features() itself is intentionally NOT made
@@ -300,8 +322,8 @@ class TestUnhandledEventErrorsCrashTheBatch:
     def test_one_malformed_event_does_not_stop_the_rest_of_the_batch(self):
         import worker
 
-        iso_model = IsoForestModel(model_dir="/tmp/does-not-matter")
-        lstm_model = LSTMAEModel(model_dir="/tmp/does-not-matter")
+        iso_model = IsoForestModel(model_dir=_placeholder_model_dir("does-not-matter"))
+        lstm_model = LSTMAEModel(model_dir=_placeholder_model_dir("does-not-matter"))
         es = MagicMock()
         recent_flags = []
 

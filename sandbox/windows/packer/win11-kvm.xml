@@ -228,11 +228,26 @@
       </model>
     </video>
 
-    <!-- #368 GPU passthrough: a real AMD Radeon PRO WX 2100 (17:00.0 plus
-         its 17:00.1 HDMI audio function), VFIO-passed-through rather than
-         emulated. Confirmed live: IOMMU group 8 contains only these two
-         functions, so no ACS override is needed and nothing else gets
-         pulled in. Not primary: the plain-VGA <video> above stays primary
+    <!-- #368 GPU passthrough: a real discrete GPU (17:00.0 plus its 17:00.1
+         HDMI audio function), VFIO-passed-through rather than emulated.
+
+         The card is an NVIDIA Quadro P2200 (GP106GL, 10de:1c31, with its
+         10de:10f1 audio function). This comment previously described "a real
+         AMD Radeon PRO WX 2100"; that card is not in this machine and never
+         was at this address, re-verified against `lspci -nn -s 17:00.` on the
+         live host during #1609's rebuild. The host also carries a second,
+         larger NVIDIA card (RTX 4000 Ada at 65:00.0) which is the COMPUTE GPU
+         for ghidra/ollama and is deliberately NOT passed through; this domain
+         gets the P2200 precisely because nothing else wants it.
+
+         Confirmed live: IOMMU group 8 contains only these two functions, so no
+         ACS override is needed and nothing else gets pulled in. That part was
+         and remains accurate. Note IOMMU is NOT enabled by default on this
+         hardware: the Rocky 10 rebuild came up with zero IOMMU groups until
+         intel_iommu=on was added to the kernel cmdline, which
+         install-homeserver.sh's step_vfio_gpu_passthrough now provisions.
+
+         Not primary: the plain-VGA <video> above stays primary
          so VNC console access (screenshots, diagnostics) keeps working
          exactly as before; this card has no monitor attached and Windows
          will just install its real driver against it as a second, idle
@@ -247,11 +262,18 @@
          also simply normal on a lot of real desktops/workstations, not a
          tell by itself.
 
-         managed='yes': libvirt itself detaches these from the host driver
-         (vfio-pci, already bound at boot via
-         /etc/modprobe.d/vfio-gpu-passthrough.conf) when this domain starts,
-         and reattaches them to the host when it stops, so no manual
-         unbind/rebind is needed around each detonation. -->
+         managed='yes': libvirt itself detaches these from whatever host driver
+         holds them when this domain starts, and reattaches them when it stops,
+         so no manual unbind/rebind is needed around each detonation. This
+         works whether or not the card is pre-bound to vfio-pci.
+
+         /etc/modprobe.d/vfio-gpu-passthrough.conf is written by
+         install-homeserver.sh's step_vfio_gpu_passthrough, which pre-binds
+         this card by device ID so the host's NVIDIA driver never claims it.
+         That file was previously described here as already existing; it did
+         not exist on the live host at all, and no script wrote it (#1609
+         Phase 7). Pre-binding is an optimisation rather than a requirement,
+         since managed='yes' covers the unbind either way. -->
     <hostdev mode='subsystem' type='pci' managed='yes'>
       <source>
         <address domain='0x0000' bus='0x17' slot='0x00' function='0x0'/>

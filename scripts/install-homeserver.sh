@@ -2293,6 +2293,97 @@ step_verify_elasticsearch_events() {
 # multi-hour production action (see docs/sandbox/windows/IMPLEMENTATION_PLAN.md
 # Phase 0) that this unattended install flow should not silently trigger.
 # ---------------------------------------------------------------------------
+# #1609 Phase 7: bind the passthrough GPU to vfio-pci and make sure IOMMU is
+# actually on.
+#
+# sandbox/windows/packer/win11-kvm.xml passes a discrete GPU through to the
+# Windows detonation domain, and its comment used to assert that
+# /etc/modprobe.d/vfio-gpu-passthrough.conf already existed and had the card
+# "already bound at boot". Neither was true: the file did not exist on the live
+# host and no script in this repo wrote it. This step is that missing half.
+#
+# IOMMU is checked here rather than assumed. #1609 recorded 87 IOMMU groups on
+# the old Ubuntu host with no explicit kernel flag and concluded it was enabled
+# by default on this hardware. That did not survive the OS change: the Rocky 10
+# rebuild came up with ZERO groups, which would have made every hostdev
+# assignment fail at domain start with no obvious cause.
+#
+# Deliberately opt-in via VFIO_PASSTHROUGH_PCI_IDS rather than auto-detected.
+# Binding the wrong device to vfio-pci takes it away from the host, and "the
+# GPU that is not the compute GPU" is not something to guess at on a box that
+# has two NVIDIA cards. The operator names the IDs; this step refuses anything
+# that looks like the boot display.
+step_vfio_gpu_passthrough() {
+  if [[ -z "${VFIO_PASSTHROUGH_PCI_IDS:-}" ]]; then
+    echo "VFIO_PASSTHROUGH_PCI_IDS unset -- no GPU passthrough configured, skipping"
+    echo "  (set it to the vendor:device IDs of the card to hand to the Windows"
+    echo "   sandbox, e.g. from 'lspci -nn'; leave unset if not using passthrough)"
+    return 0
+  fi
+
+  # Refuse to hand over the card the host is booting its console on. vfio-pci
+  # claiming the boot VGA leaves a headless box with no console to recover from.
+  local boot_vga id
+  for boot_vga in /sys/bus/pci/devices/*/boot_vga; do
+    [[ -r "$boot_vga" && "$(cat "$boot_vga" 2>/dev/null)" == "1" ]] || continue
+    local dev; dev="$(basename "$(dirname "$boot_vga")")"
+    local vd; vd="$(lspci -n -s "${dev#0000:}" 2>/dev/null | awk '{print $3}')"
+    for id in ${VFIO_PASSTHROUGH_PCI_IDS//,/ }; do
+      if [[ -n "$vd" && "$vd" == "$id" ]]; then
+        echo "REFUSING: $id is the boot VGA ($dev). Binding it to vfio-pci would" >&2
+        echo "  leave this host with no console. Pick the non-primary card." >&2
+        return 1
+      fi
+    done
+  done
+
+  # IOMMU: enable on the kernel cmdline if the groups are not already present.
+  local reboot_needed=0
+  if [[ ! -d /sys/kernel/iommu_groups ]] || [[ -z "$(ls -A /sys/kernel/iommu_groups 2>/dev/null)" ]]; then
+    local iommu_arg="intel_iommu=on"
+    grep -qi '^vendor_id.*AuthenticAMD' /proc/cpuinfo && iommu_arg="amd_iommu=on"
+    if command -v grubby >/dev/null 2>&1; then
+      grubby --update-kernel=ALL --args="$iommu_arg iommu=pt"
+      echo "IOMMU was not active; added '$iommu_arg iommu=pt' to the kernel cmdline"
+      reboot_needed=1
+    else
+      echo "WARNING: IOMMU is not active and grubby is unavailable -- add" >&2
+      echo "         '$iommu_arg iommu=pt' to the kernel cmdline by hand." >&2
+    fi
+  else
+    echo "IOMMU active ($(ls /sys/kernel/iommu_groups | wc -l) groups)"
+  fi
+
+  local conf=/etc/modprobe.d/vfio-gpu-passthrough.conf
+  local desired="options vfio-pci ids=${VFIO_PASSTHROUGH_PCI_IDS}"
+  if [[ -f "$conf" ]] && grep -qxF "$desired" "$conf"; then
+    echo "$conf already binds ${VFIO_PASSTHROUGH_PCI_IDS}"
+  else
+    cat > "$conf" <<EOF
+# Written by install-homeserver.sh (step_vfio_gpu_passthrough, #1609 Phase 7).
+# Pre-binds the Windows sandbox's passthrough GPU to vfio-pci so the host's
+# own GPU driver never claims it. sandbox/windows/packer/win11-kvm.xml passes
+# these functions through with managed='yes', so libvirt can detach them either
+# way; pre-binding avoids the host driver grabbing the card first at boot.
+$desired
+softdep nvidia pre: vfio-pci
+softdep nouveau pre: vfio-pci
+softdep amdgpu pre: vfio-pci
+EOF
+    echo "wrote $conf binding ${VFIO_PASSTHROUGH_PCI_IDS} to vfio-pci"
+    command -v dracut >/dev/null 2>&1 && dracut --force >/dev/null 2>&1 \
+      && echo "regenerated initramfs so the binding applies at boot"
+    reboot_needed=1
+  fi
+
+  if (( reboot_needed )); then
+    echo
+    echo "REBOOT REQUIRED for the vfio binding / IOMMU change to take effect."
+    echo "After rebooting, re-run with: --force-rerun-from vfio-gpu-passthrough"
+    echo "Verify with: lspci -nnk -d ${VFIO_PASSTHROUGH_PCI_IDS%%,*} | grep -i 'driver in use'"
+  fi
+}
+
 step_libvirt_install() {
   case "$DISTRO_FAMILY" in
     debian)
@@ -2452,9 +2543,75 @@ step_windows_sandbox_vm_start() {
   virsh domstate win11-sandbox | grep -q running || virsh start win11-sandbox
 }
 
+# #1609 Phase 7: create and start win11-cape.
+#
+# This was the concrete gap that blocked #1524's "all three golden images boot
+# cleanly" acceptance item from being able to pass at all: win11-cape.qcow2 sat
+# on disk with no automated path to a running VM. `virsh list --all` showed only
+# win11-ghosts and win11-sandbox, and grepping this installer for "cape" found
+# nothing but a comment about the golden-image file itself.
+#
+# Mirrors step_windows_sandbox_vm_create's thin-clone pattern, driven through
+# the same kvm_manage.sh -- which needed VM_XML/NET_NAME/NET_XML made
+# overridable to be usable for a second domain at all. CAPE's own machinery
+# config (sandbox/cape/capev2-overrides/conf/capekvm.conf) already pins the
+# same paths and the "win11-cape" label, so these must agree with it:
+#   golden_image = /var/dockge/sandbox/golden-images/win11-cape.qcow2
+#   vm_disk      = /var/dockge/sandbox/vms/win11-cape.qcow2
+step_cape_network_setup() {
+  local net_xml="$REPO_DIR/sandbox/cape/network.xml"
+  [[ -f "$net_xml" ]] || { echo "missing $net_xml"; return 1; }
+  if virsh net-info cape >/dev/null 2>&1; then
+    virsh net-info cape | grep -qi 'Active:.*yes' || virsh net-start cape
+    echo "cape network already defined"
+    return 0
+  fi
+  virsh net-define "$net_xml"
+  virsh net-start cape
+  virsh net-autostart cape
+}
+
+step_cape_vm_create() {
+  local golden="/var/dockge/sandbox/golden-images/win11-cape.qcow2"
+  if [[ ! -f "$golden" ]]; then
+    echo "no $golden -- win11-cape golden image not restored, skipping VM create"
+    echo "  (build it with sandbox/cape/packer/win11-cape.pkr.hcl, or restore it"
+    echo "   from the sandbox backup; nothing else here can synthesise it)"
+    return 0
+  fi
+  ensure_nvram_vars /var/lib/libvirt/qemu/nvram/win11-cape_VARS.qcow2
+  if virsh list --all --name | grep -qx win11-cape; then
+    echo "win11-cape already defined -- skipping create"
+    return 0
+  fi
+  # Same reasoning as win11-sandbox's create: kvm_manage.sh refuses to clone
+  # over an existing $VM_DISK, and a restore can leave a stale thin-clone from
+  # before the backup. Safe to clear here because the domain is not defined yet.
+  rm -f /var/dockge/sandbox/vms/win11-cape.qcow2
+  VM_NAME=win11-cape \
+  GOLDEN_IMAGE="$golden" \
+  VM_DISK=/var/dockge/sandbox/vms/win11-cape.qcow2 \
+  VM_XML="$REPO_DIR/sandbox/cape/win11-cape-kvm.xml" \
+  NET_NAME=cape \
+  NET_XML="$REPO_DIR/sandbox/cape/network.xml" \
+    bash "$REPO_DIR/sandbox/windows/setup/kvm_manage.sh" create
+}
+
+step_cape_vm_start() {
+  virsh list --all --name | grep -qx win11-cape || {
+    echo "win11-cape not defined (golden image absent?) -- nothing to start"
+    return 0
+  }
+  virsh domstate win11-cape | grep -q running || virsh start win11-cape
+}
+
 step_sandbox_verify_running() {
   local dom rc=0
-  for dom in win11-ghosts win11-sandbox; do
+  # win11-cape is included only when defined: its golden image is optional (see
+  # step_cape_vm_create), and a host without it should not fail this check.
+  local doms=(win11-ghosts win11-sandbox)
+  virsh list --all --name | grep -qx win11-cape && doms+=(win11-cape)
+  for dom in "${doms[@]}"; do
     local state; state=$(virsh domstate "$dom" 2>&1)
     echo "$dom: $state"
     [[ "$state" == "running" ]] || rc=1
@@ -2581,6 +2738,7 @@ run_step verify-es-events      "Check Elasticsearch is reachable"   step_verify_
 
 if [[ "$ENABLE_SANDBOX_RESTORE" == "true" ]]; then
   run_step libvirt-install        "Install libvirt/KVM/QEMU"              step_libvirt_install
+  run_step vfio-gpu-passthrough   "Bind the sandbox GPU to vfio-pci (#1609 Phase 7)" step_vfio_gpu_passthrough
   run_step sandbox-restore        "Pull sandbox backup from LAN host"     step_sandbox_backup_restore
   run_step sandbox-checksum       "Verify golden-image checksums"         step_sandbox_checksum_verify
   run_step ghosts-network         "Set up GHOSTS isolated libvirt network" step_ghosts_network_setup
@@ -2589,7 +2747,10 @@ if [[ "$ENABLE_SANDBOX_RESTORE" == "true" ]]; then
   run_step windows-sandbox-network "Set up Windows sandbox libvirt network" step_windows_sandbox_network_setup
   run_step windows-sandbox-create "Create win11-sandbox thin-clone VM"     step_windows_sandbox_vm_create
   run_step windows-sandbox-start  "Start win11-sandbox VM"                 step_windows_sandbox_vm_start
-  run_step sandbox-verify         "Verify both sandbox VMs running"        step_sandbox_verify_running
+  run_step cape-network           "Set up CAPE libvirt network"            step_cape_network_setup
+  run_step cape-vm-create         "Create win11-cape thin-clone VM (#1609 Phase 7)" step_cape_vm_create
+  run_step cape-vm-start          "Start win11-cape VM"                    step_cape_vm_start
+  run_step sandbox-verify         "Verify sandbox VMs running"             step_sandbox_verify_running
   run_step sandbox-host-foundation "Set up Linux sandbox network + dirs"   step_sandbox_host_foundation
   run_step linux-sandbox-base     "Download + verify Linux base image"    step_linux_sandbox_base
   run_step linux-sandbox-verify   "Run Linux sandbox smoke test"          step_linux_sandbox_verify
