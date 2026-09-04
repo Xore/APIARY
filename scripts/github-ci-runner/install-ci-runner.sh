@@ -298,10 +298,18 @@ rhel)
   # binary, and quality.yml still failed with "redis-server missing on the
   # runner host". No package owns /usr/bin/redis-server on EL10 (redis is not
   # packaged for it at all), so there is nothing to collide with.
-  if [[ -x /usr/bin/valkey-server ]]; then
-    ln -sf /usr/bin/valkey-server /usr/bin/redis-server
-    echo "linked /usr/bin/redis-server -> valkey-server (EL10 has no redis package)"
-  fi
+  # The whole redis-* command set, not just redis-server. The frontend-next
+  # browser harness spawns `redis-cli` to seed state, and a server-only shim
+  # left it failing with `spawn redis-cli ENOENT` -- the same mistake twice in
+  # one fix. Valkey ships each of these under its own name.
+  # No `local` here: this block is top-level inside a case, not a function, and
+  # `local` outside a function is a hard bash error (SC2168) -- it would have
+  # aborted the rhel branch at runtime under set -e.
+  for rn in server cli benchmark check-aof check-rdb sentinel; do
+    [[ -x "/usr/bin/valkey-$rn" ]] || continue
+    ln -sf "/usr/bin/valkey-$rn" "/usr/bin/redis-$rn"
+  done
+  echo "linked redis-* -> valkey-* in /usr/bin (EL10 has no redis package)"
   ;;
 esac
 if ! id -nG "$RUNNER_USER" | tr ' ' '\n' | grep -qx docker; then
