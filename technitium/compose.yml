@@ -58,8 +58,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.5"
-          memory: 1GB
+          cpus: "3.0"
+          # Raised from 1GB: measured at 750.9 MiB / 1 GiB (73%) on the live
+          # node once it was actually serving its restored zones and
+          # blocklists -- the second-tightest container on the host.
+          memory: 2GB
     healthcheck:
       # A response to a cache-busting recursive query proves the complete
       # path is working (same pipeline principle as the old Pi-hole check).

@@ -84,8 +84,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.25"
-          memory: 128M
+          cpus: "0.5"
+          memory: 256M
 
   # docker-socket-proxy is the one service in this stack that still holds
   # the real host /var/run/docker.sock -- narrowing what autoheal below can
@@ -151,8 +151,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.25"
-          memory: 64M
+          cpus: "0.5"
+          memory: 256M
 
   # tanner_docker (arcane/home/honeypot-tanner/compose.yml) looks similar to the old
   # direct-socket-mount arrangement here but is not the same trust boundary
@@ -201,8 +201,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.1"
-          memory: 32M
+          cpus: "0.5"
+          memory: 64M
 
   # A healthcheck alone does not restart anything: Docker's restart policy
   # reacts to the container process exiting, not to health status, so an
@@ -252,8 +252,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.25"
-          memory: 64M
+          cpus: "0.5"
+          memory: 256M
 
   # #252: a narrow, safe subset of what T-Pot's own daily cron does (full
   # container/image/volume prune + forced reboot) -- age-bounded dangling-
@@ -283,8 +283,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.1"
-          memory: 32M
+          cpus: "0.5"
+          memory: 64M
 
   # #68 (Phase 1 of docs/ip-reporting-plan.md): tails the same sensor JSON
   # logs Filebeat does, and would report attacker IPs to AbuseIPDB. Ships
@@ -342,8 +342,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 128M
+          cpus: "1.0"
+          memory: 256M
 
 networks:
   # Shared with the main stack -- explicit fixed name, not project-prefixed,

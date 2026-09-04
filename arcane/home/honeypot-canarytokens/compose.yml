@@ -97,8 +97,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 256M
+          cpus: "1.0"
+          memory: 512M
 
   canarytokens-frontend:
     <<: *runtime-defaults
@@ -178,8 +178,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
-          memory: 512M
+          cpus: "2.0"
+          memory: 1G
 
   canarytokens-switchboard:
     <<: *runtime-defaults
@@ -245,8 +245,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
-          memory: 512M
+          cpus: "2.0"
+          memory: 1G
 
   # #1487 follow-up: this repo's own code, not vendored -- see
   # canarytokens-http-router/main.go's package doc for the full writeup
@@ -282,8 +282,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.25"
-          memory: 64M
+          cpus: "0.5"
+          memory: 128M
 
   canarytokens-adapter:
     <<: *runtime-defaults
@@ -317,8 +317,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.25"
-          memory: 64M
+          cpus: "0.5"
+          memory: 128M
 
 networks:
   canarytokens_net:

@@ -91,7 +91,7 @@ services:
     cap_add: [CHOWN, SETUID, SETGID]
     deploy:
       resources:
-        limits: {cpus: "0.25", memory: 160M}
+        limits: {cpus: "0.5", memory: 320M}
 
 
   # ------------------------------------------------------------------
@@ -255,7 +255,7 @@ services:
     cap_drop: [ALL]
     deploy:
       resources:
-        limits: {cpus: "1.0", memory: 512M}
+        limits: {cpus: "2.0", memory: 1G}
 
   # Worker role (#1610): the same apiary-backend image with WORKER_LOOPS
   # enabled and no service port — movable to any docker host that can
@@ -449,7 +449,7 @@ services:
         # footprint). 1536M for real headroom this time rather than another
         # minimum-viable guess -- same "no real reason to keep this tight"
         # reasoning as the 768M bump itself already gave.
-        limits: {cpus: "1.0", memory: 1536M}
+        limits: {cpus: "2.0", memory: 1536M}
 
   dashboard-next:
     <<: *runtime-defaults
@@ -594,7 +594,7 @@ services:
       - autoheal=true
     deploy:
       resources:
-        limits: {cpus: "1.0", memory: 512M}
+        limits: {cpus: "2.0", memory: 1G}
 
   # #1610 worker migration: Rust port of the retired Python
   # es-results-importer (removed with the completed cutover — an older git
@@ -681,8 +681,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 256M
+          cpus: "1.0"
+          memory: 512M
 
   # #1610: ip-enrichment-worker. Unlike every other backend-* service in
   # this file, this loop never touches Elasticsearch (or any network) at
@@ -752,8 +752,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 128M
+          cpus: "1.0"
+          memory: 256M
 
   # #1610 worker migration, closing the last unwired gap: payload_inventory.rs
   # (payload-inventory-worker's Rust port) has existed since #1610 and even
@@ -821,8 +821,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 256M
+          cpus: "1.0"
+          memory: 512M
 
   services-adapter:
     <<: *runtime-defaults
@@ -848,8 +848,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.25"
-          memory: 64M
+          cpus: "0.5"
+          memory: 128M
 
 networks:
   oidc-session:

@@ -143,8 +143,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
-          memory: 512M
+          cpus: "2.0"
+          memory: 1G
 
   # Three separately fingerprintable Siemens PLCs are exposed: the built-in
   # S7-200 above on TCP/102, plus these S7-1200 and S7-1500 personas on
@@ -211,7 +211,7 @@ services:
     read_only: true
     networks: [conpot_s7_1200_net]
     deploy:
-      resources: { limits: { cpus: "0.75", memory: 384M } }
+      resources: { limits: { cpus: "1.5", memory: 768M } }
 
   conpot-s7-1500:
     <<: *runtime-defaults
@@ -265,7 +265,7 @@ services:
     read_only: true
     networks: [conpot_s7_1500_net]
     deploy:
-      resources: { limits: { cpus: "0.75", memory: 384M } }
+      resources: { limits: { cpus: "1.5", memory: 768M } }
 
   # Additional industrial attack surfaces from Conpot's maintained templates.
   conpot-iec104:
@@ -320,7 +320,7 @@ services:
     read_only: true
     networks: [conpot_iec104_net]
     deploy:
-      resources: { limits: { cpus: "0.5", memory: 256M } }
+      resources: { limits: { cpus: "1.0", memory: 512M } }
 
   conpot-guardian:
     <<: *runtime-defaults
@@ -381,7 +381,7 @@ services:
     read_only: true
     networks: [conpot_guardian_net]
     deploy:
-      resources: { limits: { cpus: "0.5", memory: 256M } }
+      resources: { limits: { cpus: "1.0", memory: 512M } }
 
   conpot-kamstrup:
     <<: *runtime-defaults
@@ -438,7 +438,7 @@ services:
     read_only: true
     networks: [conpot_kamstrup_net]
     deploy:
-      resources: { limits: { cpus: "0.5", memory: 256M } }
+      resources: { limits: { cpus: "1.0", memory: 512M } }
 
 networks:
   conpot_net:

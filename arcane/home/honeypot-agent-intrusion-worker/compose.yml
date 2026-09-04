@@ -71,8 +71,8 @@ services:
           # Pure correlation/rule logic over a bounded rolling window, no
           # ML training -- a fraction of ml-worker's own 2g allotment
           # covers this comfortably.
-          cpus: "0.5"
-          memory: 256M
+          cpus: "1.0"
+          memory: 512M
 
 networks:
   honeynet:

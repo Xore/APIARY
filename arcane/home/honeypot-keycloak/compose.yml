@@ -39,8 +39,8 @@ services:
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
     deploy:
       resources:
-        limits: {cpus: "1.0", memory: 1G}
-        reservations: {memory: 256M}
+        limits: {cpus: "2.0", memory: 1G}
+        reservations: {memory: 512M}
 
   keycloak:
     # Unpinned on purpose: this is the identity provider for the whole stack,
@@ -134,7 +134,7 @@ services:
     cap_drop: [ALL]
     deploy:
       resources:
-        limits: {cpus: "2.0", memory: 2G}
+        limits: {cpus: "4.0", memory: 2G}
         reservations: {memory: 768M}
 
 networks:

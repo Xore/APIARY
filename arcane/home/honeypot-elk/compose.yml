@@ -128,7 +128,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "6.0"
+          cpus: "8.0"
           memory: 12G
   kibana:
     <<: *runtime-defaults
@@ -158,7 +158,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2.0"
+          cpus: "4.0"
           memory: 2G
   filebeat:
     <<: *runtime-defaults
@@ -213,7 +213,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "3.0"
+          cpus: "6.0"
           memory: 2G
   # ===================== EveBox — Suricata EVE web GUI =====================
   # EveBox queries Elasticsearch directly, where Filebeat already ships the
@@ -297,8 +297,8 @@ services:
       resources:
         limits:
           # A query proxy over Elasticsearch, not a database host.
-          cpus: "1.0"
-          memory: 512M
+          cpus: "2.0"
+          memory: 1G
   # ===================== Arkime — full PCAP search & analysis =====================
   #
   # Image: ghcr.io/arkime/arkime/arkime:v6-latest
@@ -474,8 +474,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
-          memory: 512M
+          cpus: "2.0"
+          memory: 1G
   arkime-capture:
     <<: *runtime-defaults
     # #1497: was the floating v6-latest tag -- pinned per docs/CONTAINER-UPDATES.md's
@@ -556,7 +556,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "4.0"
+          cpus: "8.0"
           memory: 6G
   arkime-viewer:
     <<: *runtime-defaults
@@ -608,7 +608,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
+          cpus: "2.0"
           memory: 1G
 
   # #1738 decision 5: ship extracted file bytes into Elasticsearch, so an
@@ -651,7 +651,7 @@ services:
       - honeynet
     deploy:
       resources:
-        limits: { cpus: "0.5", memory: 256M }
+        limits: { cpus: "1.0", memory: 512M }
 
   # #1742 decision 8: decoy-side Zeek. Watches the honeynet bridge, where
   # requests to the TLS-terminated decoys arrive in plaintext -- the one
@@ -738,7 +738,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
+          cpus: "2.0"
           memory: 1G
 
 networks:
