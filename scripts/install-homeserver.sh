@@ -2293,6 +2293,97 @@ step_verify_elasticsearch_events() {
 # multi-hour production action (see docs/sandbox/windows/IMPLEMENTATION_PLAN.md
 # Phase 0) that this unattended install flow should not silently trigger.
 # ---------------------------------------------------------------------------
+# #1609 Phase 7: bind the passthrough GPU to vfio-pci and make sure IOMMU is
+# actually on.
+#
+# sandbox/windows/packer/win11-kvm.xml passes a discrete GPU through to the
+# Windows detonation domain, and its comment used to assert that
+# /etc/modprobe.d/vfio-gpu-passthrough.conf already existed and had the card
+# "already bound at boot". Neither was true: the file did not exist on the live
+# host and no script in this repo wrote it. This step is that missing half.
+#
+# IOMMU is checked here rather than assumed. #1609 recorded 87 IOMMU groups on
+# the old Ubuntu host with no explicit kernel flag and concluded it was enabled
+# by default on this hardware. That did not survive the OS change: the Rocky 10
+# rebuild came up with ZERO groups, which would have made every hostdev
+# assignment fail at domain start with no obvious cause.
+#
+# Deliberately opt-in via VFIO_PASSTHROUGH_PCI_IDS rather than auto-detected.
+# Binding the wrong device to vfio-pci takes it away from the host, and "the
+# GPU that is not the compute GPU" is not something to guess at on a box that
+# has two NVIDIA cards. The operator names the IDs; this step refuses anything
+# that looks like the boot display.
+step_vfio_gpu_passthrough() {
+  if [[ -z "${VFIO_PASSTHROUGH_PCI_IDS:-}" ]]; then
+    echo "VFIO_PASSTHROUGH_PCI_IDS unset -- no GPU passthrough configured, skipping"
+    echo "  (set it to the vendor:device IDs of the card to hand to the Windows"
+    echo "   sandbox, e.g. from 'lspci -nn'; leave unset if not using passthrough)"
+    return 0
+  fi
+
+  # Refuse to hand over the card the host is booting its console on. vfio-pci
+  # claiming the boot VGA leaves a headless box with no console to recover from.
+  local boot_vga id
+  for boot_vga in /sys/bus/pci/devices/*/boot_vga; do
+    [[ -r "$boot_vga" && "$(cat "$boot_vga" 2>/dev/null)" == "1" ]] || continue
+    local dev; dev="$(basename "$(dirname "$boot_vga")")"
+    local vd; vd="$(lspci -n -s "${dev#0000:}" 2>/dev/null | awk '{print $3}')"
+    for id in ${VFIO_PASSTHROUGH_PCI_IDS//,/ }; do
+      if [[ -n "$vd" && "$vd" == "$id" ]]; then
+        echo "REFUSING: $id is the boot VGA ($dev). Binding it to vfio-pci would" >&2
+        echo "  leave this host with no console. Pick the non-primary card." >&2
+        return 1
+      fi
+    done
+  done
+
+  # IOMMU: enable on the kernel cmdline if the groups are not already present.
+  local reboot_needed=0
+  if [[ ! -d /sys/kernel/iommu_groups ]] || [[ -z "$(ls -A /sys/kernel/iommu_groups 2>/dev/null)" ]]; then
+    local iommu_arg="intel_iommu=on"
+    grep -qi '^vendor_id.*AuthenticAMD' /proc/cpuinfo && iommu_arg="amd_iommu=on"
+    if command -v grubby >/dev/null 2>&1; then
+      grubby --update-kernel=ALL --args="$iommu_arg iommu=pt"
+      echo "IOMMU was not active; added '$iommu_arg iommu=pt' to the kernel cmdline"
+      reboot_needed=1
+    else
+      echo "WARNING: IOMMU is not active and grubby is unavailable -- add" >&2
+      echo "         '$iommu_arg iommu=pt' to the kernel cmdline by hand." >&2
+    fi
+  else
+    echo "IOMMU active ($(ls /sys/kernel/iommu_groups | wc -l) groups)"
+  fi
+
+  local conf=/etc/modprobe.d/vfio-gpu-passthrough.conf
+  local desired="options vfio-pci ids=${VFIO_PASSTHROUGH_PCI_IDS}"
+  if [[ -f "$conf" ]] && grep -qxF "$desired" "$conf"; then
+    echo "$conf already binds ${VFIO_PASSTHROUGH_PCI_IDS}"
+  else
+    cat > "$conf" <<EOF
+# Written by install-homeserver.sh (step_vfio_gpu_passthrough, #1609 Phase 7).
+# Pre-binds the Windows sandbox's passthrough GPU to vfio-pci so the host's
+# own GPU driver never claims it. sandbox/windows/packer/win11-kvm.xml passes
+# these functions through with managed='yes', so libvirt can detach them either
+# way; pre-binding avoids the host driver grabbing the card first at boot.
+$desired
+softdep nvidia pre: vfio-pci
+softdep nouveau pre: vfio-pci
+softdep amdgpu pre: vfio-pci
+EOF
+    echo "wrote $conf binding ${VFIO_PASSTHROUGH_PCI_IDS} to vfio-pci"
+    command -v dracut >/dev/null 2>&1 && dracut --force >/dev/null 2>&1 \
+      && echo "regenerated initramfs so the binding applies at boot"
+    reboot_needed=1
+  fi
+
+  if (( reboot_needed )); then
+    echo
+    echo "REBOOT REQUIRED for the vfio binding / IOMMU change to take effect."
+    echo "After rebooting, re-run with: --force-rerun-from vfio-gpu-passthrough"
+    echo "Verify with: lspci -nnk -d ${VFIO_PASSTHROUGH_PCI_IDS%%,*} | grep -i 'driver in use'"
+  fi
+}
+
 step_libvirt_install() {
   case "$DISTRO_FAMILY" in
     debian)
@@ -2581,6 +2672,7 @@ run_step verify-es-events      "Check Elasticsearch is reachable"   step_verify_
 
 if [[ "$ENABLE_SANDBOX_RESTORE" == "true" ]]; then
   run_step libvirt-install        "Install libvirt/KVM/QEMU"              step_libvirt_install
+  run_step vfio-gpu-passthrough   "Bind the sandbox GPU to vfio-pci (#1609 Phase 7)" step_vfio_gpu_passthrough
   run_step sandbox-restore        "Pull sandbox backup from LAN host"     step_sandbox_backup_restore
   run_step sandbox-checksum       "Verify golden-image checksums"         step_sandbox_checksum_verify
   run_step ghosts-network         "Set up GHOSTS isolated libvirt network" step_ghosts_network_setup

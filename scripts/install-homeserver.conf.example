@@ -143,3 +143,22 @@ ENABLE_SANDBOX_RESTORE="false"
 # BACKUP_HOST above, different subdirectory -- the one holding golden-images/,
 # isos/, vms/, etc. (e.g. <path>/home-sandbox).
 BACKUP_HOST_SANDBOX_PATH="<PATH_ON_BACKUP_HOST>"
+
+# --- Windows sandbox GPU passthrough (#1609 Phase 7) ----------------------
+# vendor:device IDs of the discrete GPU handed to the Windows detonation
+# domain, comma-separated, INCLUDING its HDMI-audio function -- both functions
+# of the card have to move together or the IOMMU group is split. Read them off
+# `lspci -nn`, e.g. a card shown as
+#     17:00.0 VGA compatible controller [0300]: ... [10de:1c31]
+#     17:00.1 Audio device [0403]: ...             [10de:10f1]
+# gives VFIO_PASSTHROUGH_PCI_IDS="10de:1c31,10de:10f1".
+#
+# Leave EMPTY to skip passthrough entirely; step_vfio_gpu_passthrough is a
+# no-op then. This is deliberately not auto-detected: on a host with more than
+# one GPU, picking the wrong one takes it away from the host. The step refuses
+# outright if the IDs match the boot VGA, and requires a reboot to take effect.
+#
+# Note this also enables IOMMU if it is not already active. Do not assume it
+# is: the 2026-09-03 Rocky rebuild came up with zero IOMMU groups on hardware
+# that had 87 of them under the previous OS.
+VFIO_PASSTHROUGH_PCI_IDS=""
