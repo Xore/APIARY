@@ -1607,6 +1607,33 @@ step_start_init() {
   return 1
 }
 
+# snare is the one Tanner-group sensor whose log directory must be root-owned.
+# honeypot-init's log-init job creates every logs/<sensor> directory uniformly
+# as 65534:65534, which is right for all of them except this one, so this runs
+# between start-init (which creates the directory) and start-remaining (which
+# starts the container that needs it).
+#
+# The mechanism, which docs/STACK-REBUILD.md already records: hp-snare runs as
+# root but with cap_drop: ALL and only SETGID/SETUID added -- deliberately no
+# DAC_OVERRIDE, because snare's own check_privileges() runs before it drops
+# privileges. Root without DAC_OVERRIDE cannot write a file it does not own,
+# so snare's first act, writing /opt/snare/snare.pid, fails:
+#
+#   PermissionError: [Errno 13] Permission denied: '/opt/snare/snare.pid'
+#
+# and the container crash-loops (13 restarts before this was caught on the
+# 2026-09-04 rebuild). Note the recursion: chowning only the directory is not
+# enough once a previous crashing run has already left snare.cfg/.log/.err/.pid
+# behind owned by nobody -- measured, the container still failed on the
+# pre-existing pid file. The directory is left mode-unchanged; only ownership
+# is corrected.
+step_fix_snare_ownership() {
+  local d="$REPO_DIR/logs/snare"
+  [[ -d "$d" ]] || { echo "logs/snare does not exist yet -- did start-init run?"; return 1; }
+  chown -R root:root "$d"
+  echo "logs/snare (and its contents) set root:root for snare's pre-drop check_privileges()"
+}
+
 step_start_remaining_stacks() {
   # #1502: Arcane's own directory sync already brought each stack up as
   # part of step_arcane_import_stacks -- this step is now a safety-net
@@ -2366,6 +2393,7 @@ run_step provision-buildx-cache "Create /mnt-1/buildx-cache for the CI runners (
 run_step build-zeek-image      "Build xore-zeek:local for zeek-proxy" step_build_zeek_image
 run_step start-elasticsearch   "Start honeypot-elk, wait healthy"   step_start_elasticsearch_first
 run_step start-init            "Start honeypot-init, wait for one-shots" step_start_init
+run_step fix-snare-ownership   "Set logs/snare root-owned (snare drops caps)" step_fix_snare_ownership
 run_step start-remaining       "Start remaining sensor/dashboard stacks" step_start_remaining_stacks
 
 run_step provision-events-poller-secrets "Grant auth-events-poller view-events + write its secret" step_provision_events_poller_secrets
