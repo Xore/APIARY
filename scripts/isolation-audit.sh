@@ -168,7 +168,20 @@ if containers=$(docker ps -a --format '{{.Names}}\t{{.Image}}' 2>&1 | grep -E '^
       privileged_others="$privileged_others $name"
     fi
     sock=$(docker inspect "$name" --format '{{range .Mounts}}{{.Source}} {{end}}' 2>/dev/null | grep -o '/var/run/docker.sock' || true)
-    if [ -n "$sock" ] && [ "$name" != "hp-tanner-docker" ] && [ "$name" != "hp-services-adapter" ] && [ "$name" != "hp-autoheal" ] && [ "$name" != "hp-docker-socket-proxy" ]; then
+    # #2877: hp-arcane's socket mount is deliberate and already documented --
+    # it is the deploy control plane, and a manager that creates containers on
+    # this host cannot do its job without the socket. So FAIL was the wrong
+    # tier. But it must NOT become silence: CAP_EXCEPTIONS below grants
+    # hp-arcane its capability exception *on the express grounds that* "the
+    # exposure that matters for it is the socket mount, which the 'Stack
+    # containers' section above already reports separately, deliberately and
+    # by name". Suppressing the line outright would make that sentence false
+    # and would quietly retire the only report of a root-equivalent mount on
+    # the deploy control plane. It is reported here as an info line instead:
+    # named on every run, not failing the run.
+    if [ -n "$sock" ] && [ "$name" = "hp-arcane" ]; then
+      info "$name mounts /var/run/docker.sock (root-equivalent) -- deliberate and permanent: the deploy control plane cannot create containers on this host without it. Reported, not failed; see CAP_EXCEPTIONS below, which depends on this line existing"
+    elif [ -n "$sock" ] && [ "$name" != "hp-tanner-docker" ] && [ "$name" != "hp-services-adapter" ] && [ "$name" != "hp-autoheal" ] && [ "$name" != "hp-docker-socket-proxy" ]; then
       bad "$name mounts /var/run/docker.sock (root-equivalent) -- not one of the known, deliberate exceptions"
     fi
   done <<<"$containers"
@@ -184,7 +197,14 @@ if containers=$(docker ps -a --format '{{.Names}}\t{{.Image}}' 2>&1 | grep -E '^
     caps=$(docker inspect "$name" --format '{{range .HostConfig.CapAdd}}{{.}} {{end}}' 2>/dev/null || true)
     if grep -qE 'NET_ADMIN|NET_RAW' <<<"$caps"; then
       case "$name" in
-        sbx-zeek|sbx-suricata|sbx-tcpdump) : ;;
+        # #2877: hp-zeek-proxy triaged -- a genuine, deliberate NET_RAW/
+        # NET_ADMIN grant, never allow-listed here. It runs
+        # network_mode: host and sniffs a live honeynet interface via
+        # af_packet/libpcap (arcane/home/honeypot-elk/compose.yml), the
+        # same real-traffic-capture role sbx-zeek/sbx-suricata/sbx-tcpdump
+        # play for sandbox-detonation traffic -- not a regression, a
+        # fourth member of the same class this list already exists for.
+        sbx-zeek|sbx-suricata|sbx-tcpdump|hp-zeek-proxy) : ;;
         *) cap_offenders="$cap_offenders $name" ;;
       esac
     fi
