@@ -317,6 +317,19 @@ pkg_install() {
   esac
 }
 
+# Arcane materializes each stack's directory with its compose file named exactly
+# as the manifest's dockerComposePath says -- which is compose.yml for the 33
+# honeypot-* stacks but docker-compose.yml for auth-events-worker, llm-worker
+# and ml-worker. Steps that hardcoded compose.yml silently did nothing for
+# those three (#2817). Resolve it instead of assuming.
+stack_compose_file() {
+  local dir="$1" f
+  for f in compose.yml docker-compose.yml; do
+    [[ -f "$dir/$f" ]] && { printf '%s\n' "$f"; return 0; }
+  done
+  return 1
+}
+
 # ---------------------------------------------------------------------------
 # Phase 0 — preflight
 # ---------------------------------------------------------------------------
@@ -1712,9 +1725,25 @@ step_start_remaining_stacks() {
   while IFS=$'\t' read -r name compose_path; do
     [[ "$name" == "honeypot-elk" || "$name" == "honeypot-init" ]] && continue
     local dir="/var/dockge/stacks/$name"
-    [[ -f "$dir/compose.yml" ]] || continue
-    echo "-- $name: docker compose up -d --wait"
-    if ! (cd "$dir" && with_retry 3 15 docker compose -f compose.yml up -d --wait); then
+    # Use the manifest's OWN dockerComposePath basename, not a hardcoded
+    # "compose.yml". Arcane materializes each stack's directory with the file
+    # named exactly as the manifest says, and three of the stacks this loop
+    # covers -- auth-events-worker, llm-worker, ml-worker -- carry
+    # docker-compose.yml. Testing for compose.yml therefore skipped all three
+    # silently (`|| continue`, no message), so they were never started at all
+    # on a from-scratch install. Their dedicated readiness steps below then
+    # reported nonsense about containers that had never been created
+    # ("running but never logged its startup line"), because `docker logs` on a
+    # nonexistent container just fails the grep. That is #2817: llm-worker
+    # completely undeployed, zero containers, and nothing saying so.
+    local compose_file="${compose_path##*/}"
+    [[ -n "$compose_file" ]] || compose_file="compose.yml"
+    if [[ ! -f "$dir/$compose_file" ]]; then
+      echo "-- $name: no $compose_file in $dir, skipping"
+      continue
+    fi
+    echo "-- $name: docker compose -f $compose_file up -d --wait"
+    if ! (cd "$dir" && with_retry 3 15 docker compose -f "$compose_file" up -d --wait); then
       echo "FAILED: $name"
       failures=$((failures + 1))
     fi
@@ -2164,10 +2193,13 @@ step_llm_worker_selftest() {
   # matches step_ghidra_worker_install's own "reconcile in place, don't
   # deploy a second copy" precedent. `up -d --build --wait` on an
   # already-running, unchanged stack is a safe no-op here, same reasoning.
-  local dir="/var/dockge/stacks/llm-worker"
-  [[ -f "$dir/compose.yml" ]] || { echo "no $dir/compose.yml -- was arcane-import-stacks skipped or llm-worker not yet synced?"; return 1; }
+  local dir="/var/dockge/stacks/llm-worker" cf
+  cf="$(stack_compose_file "$dir")" || {
+    echo "no compose.yml or docker-compose.yml in $dir -- was arcane-import-stacks skipped or llm-worker not yet synced?"
+    return 1
+  }
   ( cd "$dir" && \
-    with_retry 3 15 docker compose -f compose.yml up -d --build --wait && \
+    with_retry 3 15 docker compose -f "$cf" up -d --build --wait && \
     docker exec hp-llm-worker python worker.py --selftest )
 }
 
