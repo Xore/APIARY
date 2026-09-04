@@ -198,6 +198,28 @@ for var in GIT_REPO_URL GIT_REF REPO_DIR HOME_WG_ADDRESS \
     exit 1
   fi
 done
+
+# KEYCLOAK_PUBLIC_DOMAIN is the BASE domain -- every public hostname is derived
+# from it by prefixing a service label (auth.<domain>, arcane.<domain>,
+# dashboard.<domain>, ...). Handing it a hostname that already carries one of
+# those labels silently produces a second-level subdomain: the 2026-09-03
+# rebuild was configured with the auth HOSTNAME rather than the base domain,
+# and generated https://arcane.auth.<domain> plus issuer
+# https://auth.auth.<domain> -- neither of which resolves or is covered by the
+# wildcard origin certificate (*.<domain> matches one label only). Nothing
+# downstream validated it, so it
+# surfaced as OIDC discovery failures far from the cause. Reject it here.
+for label in auth arcane dashboard kibana arkime evebox traefik tanner snare rev; do
+  if [[ "$KEYCLOAK_PUBLIC_DOMAIN" == "$label."* ]]; then
+    echo "KEYCLOAK_PUBLIC_DOMAIN is \"$KEYCLOAK_PUBLIC_DOMAIN\", which already starts with the" >&2
+    echo "service label \"$label.\". This value must be the BASE domain only --" >&2
+    echo "the installer derives auth.<domain>, arcane.<domain> and friends from it," >&2
+    echo "so this would generate ${label}.${KEYCLOAK_PUBLIC_DOMAIN} (a second-level" >&2
+    echo "subdomain that a *.<domain> wildcard certificate does not cover)." >&2
+    echo "Use \"${KEYCLOAK_PUBLIC_DOMAIN#"$label".}\" instead." >&2
+    exit 1
+  fi
+done
 # INSTALL_HOSTNAME is intentionally excluded from the loop above and
 # allowed to be genuinely empty -- this file's own header comment (and
 # install-homeserver.conf.example's) already documented "leave empty to
@@ -296,6 +318,19 @@ pkg_install() {
   esac
 }
 
+# Arcane materializes each stack's directory with its compose file named exactly
+# as the manifest's dockerComposePath says -- which is compose.yml for the 33
+# honeypot-* stacks but docker-compose.yml for auth-events-worker, llm-worker
+# and ml-worker. Steps that hardcoded compose.yml silently did nothing for
+# those three (#2817). Resolve it instead of assuming.
+stack_compose_file() {
+  local dir="$1" f
+  for f in compose.yml docker-compose.yml; do
+    [[ -f "$dir/$f" ]] && { printf '%s\n' "$f"; return 0; }
+  done
+  return 1
+}
+
 # ---------------------------------------------------------------------------
 # Phase 0 — preflight
 # ---------------------------------------------------------------------------
@@ -375,6 +410,14 @@ step_base_packages() {
         xfsprogs nvme-cli openssh-client
       ;;
     rhel)
+      # EPEL first, and unconditionally: Rocky's own repos do not carry
+      # fuse-sshfs (step_sshfs_install) or dkms (the GPU branch). It used to be
+      # installed only inside the GPU branch, so a host with
+      # ENABLE_GPU_STACK=false reached step_sshfs_install with no repo
+      # providing sshfs at all and failed there -- hit live on the 2026-09-03
+      # Rocky 10 rebuild ("No match for argument: fuse-sshfs"). Installing it
+      # here makes it available to every later step regardless of profile.
+      pkg_install epel-release
       pkg_install ca-certificates curl bind-utils gnupg2 git jq rsync firewalld \
         xfsprogs nvme-cli openssh-clients
       ;;
@@ -639,9 +682,13 @@ step_gpu_container_toolkit() {
   systemctl restart docker
 }
 
+# One pin, used by both step_gpu_verify and step_arcane_install's #2950 check
+# for whether the nvidia runtime actually works on this host.
+GPU_SMOKE_IMAGE="nvidia/cuda:12.4.0-base-ubuntu22.04"
+
 step_gpu_verify() {
   nvidia-smi -L || return 1
-  docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi -L
+  docker run --rm --gpus all "$GPU_SMOKE_IMAGE" nvidia-smi -L
 }
 
 # GPU driver installs a new kernel module -- on a genuinely fresh box this
@@ -800,14 +847,35 @@ text = open(conf).read()
 blocks = re.split(r'(?=\[Peer\])', text)
 out = []
 matched = 0
+# Every pattern here is line-anchored with re.M and uses [ \t] rather than
+# \s around the '=', deliberately. \s matches newlines, so the previous
+# `PresharedKey\s*=\s*\S+` would, on a key line with an EMPTY value, run
+# past the end of its own line and swallow the first token of the next one:
+#
+#   PresharedKey =            ->  PresharedKey = <psk> = 10.8.0.2/32
+#   AllowedIPs = 10.8.0.2/32
+#
+# because \s* crossed the newline and \S+ then matched "AllowedIPs". That is
+# not hypothetical -- the live VPS had exactly `PresharedKey = ` with no
+# value, and this produced a wg0.conf that wg-quick refused outright:
+#   Key is not the correct length or format: `<psk>=10.8.0.2/32'
+#   Configuration parsing error
+# It then deleted the interface, so the step failed with the tunnel DOWN
+# rather than merely unchanged. Measured on the 2026-09-04 rebuild.
+#
+# \S* (not \S+) so an empty value is matched and replaced in place instead of
+# falling through to the insert branch and producing a duplicate key line.
 for b in blocks:
     if b.startswith('[Peer]') and f"{peer_ip}/32" in b:
         matched += 1
-        b = re.sub(r'PublicKey\s*=\s*\S+', f'PublicKey = {new_pub}', b)
-        if re.search(r'^PresharedKey\s*=', b, re.MULTILINE):
-            b = re.sub(r'PresharedKey\s*=\s*\S+', f'PresharedKey = {new_psk}', b)
+        b = re.sub(r'^PublicKey[ \t]*=[ \t]*\S*[ \t]*$',
+                   f'PublicKey = {new_pub}', b, flags=re.M)
+        if re.search(r'^PresharedKey[ \t]*=', b, re.M):
+            b = re.sub(r'^PresharedKey[ \t]*=[ \t]*\S*[ \t]*$',
+                       f'PresharedKey = {new_psk}', b, flags=re.M)
         else:
-            b = re.sub(r'(PublicKey\s*=\s*\S+\n)', rf'\1PresharedKey = {new_psk}\n', b)
+            b = re.sub(r'^(PublicKey[ \t]*=[ \t]*\S*[ \t]*)$',
+                       rf'\1\nPresharedKey = {new_psk}', b, flags=re.M)
     out.append(b)
 # Fail loudly on 0 or >1 matches instead of silently no-op-ing (0 matches)
 # or updating the wrong/multiple peers (>1) -- exactly the kind of mistake
@@ -818,7 +886,23 @@ if matched != 1:
     sys.exit(1)
 open(conf, 'w').write(''.join(out))
 PY
+# Validate the rewritten config BEFORE restarting. wg-quick's failure mode
+# here is to `ip link delete dev wg0` on a parse error, so a bad edit does
+# not leave the tunnel merely unchanged -- it takes it DOWN, on the one host
+# whose reachability everything else on the homeserver depends on. `wg-quick
+# strip` parses without touching the interface, so a malformed file is caught
+# while the tunnel is still up and the backup taken above is restored.
+if ! wg-quick strip wg0 >/dev/null 2>&1; then
+  echo "rewritten $conf does not parse -- restoring the backup, tunnel untouched" >&2
+  wg-quick strip wg0 2>&1 | tail -3 >&2 || true
+  cp -p "$(ls -1t "$conf".bak.* | head -1)" "$conf"
+  exit 1
+fi
 systemctl restart wg-quick@wg0
+# Confirm the interface actually came back; a restart that fails leaves no
+# device at all, and the caller should hear about it here rather than three
+# steps later when an sshfs mount times out.
+ip link show wg0 >/dev/null 2>&1 || { echo "wg0 did not come up after restart" >&2; exit 1; }
 REMOTE
 }
 
@@ -968,7 +1052,38 @@ EOF
   # run before any sync can happen is a bootstrap loop, see
   # docs/ARCANE-GIT-SYNC.md), so it's installer-/deploy.yml-managed by a
   # plain file copy from the repo checkout.
-  cp "$REPO_DIR/docker-compose.arcane.yml" "$dir/compose.yml"
+  # #2950: the base compose is deliberately GPU-free, because Arcane's optional
+  # GPU-monitoring panel needs a *hard* NVIDIA device reservation and Docker
+  # refuses to start the container at all without a working nvidia runtime
+  # ("could not select device driver \"nvidia\""). Arcane is the control plane
+  # that materializes every other stack, so it must be able to start on a host
+  # whose GPU driver is absent or not yet loaded -- on the 2026-09-03 rebuild
+  # that single reservation blocked the entire install.
+  #
+  # The overlay is merged in only after confirming the runtime actually works,
+  # rather than trusting ENABLE_GPU_STACK: the driver needs a reboot before its
+  # kernel module loads, so "GPU requested" and "GPU usable" are different
+  # facts, and this step can run in between them.
+  #
+  # --no-interpolate matters: `config` would otherwise resolve ${...} against
+  # this stack's .env and bake ENCRYPTION_KEY/JWT_SECRET/the OIDC secret as
+  # literals into a world-readable compose.yml.
+  local gpu_overlay="$REPO_DIR/docker-compose.arcane.gpu.yml"
+  if [[ "$ENABLE_GPU_STACK" == "true" && -f "$gpu_overlay" ]] \
+     && docker run --rm --gpus all "$GPU_SMOKE_IMAGE" true >/dev/null 2>&1; then
+    if docker compose -f "$REPO_DIR/docker-compose.arcane.yml" -f "$gpu_overlay" \
+         config --no-interpolate > "$dir/compose.yml.tmp" 2>/dev/null; then
+      mv "$dir/compose.yml.tmp" "$dir/compose.yml"
+      echo "Arcane: GPU monitoring enabled (nvidia runtime verified)"
+    else
+      rm -f "$dir/compose.yml.tmp"
+      cp "$REPO_DIR/docker-compose.arcane.yml" "$dir/compose.yml"
+      echo "Arcane: GPU overlay failed to render -- continuing without GPU monitoring" >&2
+    fi
+  else
+    cp "$REPO_DIR/docker-compose.arcane.yml" "$dir/compose.yml"
+    echo "Arcane: no usable NVIDIA runtime -- GPU monitoring left off (see #2950)"
+  fi
   (cd "$dir" && docker compose -f compose.yml config --quiet \
     && with_retry 3 15 docker compose -f compose.yml up -d --wait)
 }
@@ -982,16 +1097,54 @@ EOF
 # 1:1 for everything except the DNS stack, which the backup captured a bare .env for
 # (no compose file was ever backed up for it -- see step_technitium_provision,
 # which reconstructs a minimal one since it isn't part of this git repo).
-ENV_RESTORE_STACKS=(
-  honeypot-keycloak honeypot-init honeypot-cowrie honeypot-dionaea honeypot-conpot honeypot-dnp3
-  honeypot-http honeypot-multipot honeypot-dashboard honeypot-payload-analysis
-  honeypot-tanner honeypot-elk honeypot-utilities honeypot-stack ghidra ghosts
-  technitium
-)
+# Stacks whose .env is restored from the backup host. This used to be a
+# hardcoded list of 17 and had silently drifted: the manifest carries 37
+# stacks, and the 2026-09-03 rebuild's backup held 38 real .env files, so 20
+# stacks with genuine secrets in the backup were never even looked for and got
+# .env.example placeholders from step_bootstrap_missing_envs instead
+# (honeypot-canarytokens, -beelzebub, -galah, -hellpot, -elasticpot,
+# -sentrypeer, -mailoney, -dicompot, -dns-honeypot, -citrix-honeypot,
+# -cisco-asa-honeypot, -rdp-honeypot, -endlessh, -dashboard-backend, the five
+# workers, ...). Derived from the Arcane manifest now -- the same single source
+# of truth step_arcane_import_stacks and step_bootstrap_missing_envs already
+# drive off -- so adding a stack there cannot leave its secrets behind again.
+#
+# honeypot-stack is appended explicitly: it is not in the manifest but does
+# hold a real, populated .env on the live host (confirmed during #1609's backup
+# pass), so dropping it would lose real configuration.
+env_restore_stacks() {
+  local manifest="$REPO_DIR/arcane/manifests/home-production.json"
+  if [[ -r "$manifest" ]]; then
+    { jq -r '.[].syncName' "$manifest"; echo honeypot-stack; } | sort -u
+  else
+    # Pre-clone fallback only -- the manifest lives in the repo checkout.
+    printf '%s\n' honeypot-keycloak honeypot-init honeypot-cowrie honeypot-dionaea \
+      honeypot-conpot honeypot-dnp3 honeypot-http honeypot-multipot honeypot-dashboard \
+      honeypot-payload-analysis honeypot-tanner honeypot-elk honeypot-utilities \
+      honeypot-stack ghidra ghosts technitium
+  fi
+}
 
 step_restore_env_files() {
-  local failures=0
-  for name in "${ENV_RESTORE_STACKS[@]}"; do
+  # A missing *individual* .env is a warning -- a stack may genuinely not have
+  # existed before the rebuild. But *every* restore failing is not that: it
+  # means the backup host, key or path is wrong, and there are no real secrets
+  # on this host at all. That case used to return 0 anyway, so the step marked
+  # itself done, step_bootstrap_missing_envs filled all 38 stacks in from
+  # .env.example placeholders, and the whole stack came up authenticated
+  # against nothing with no failed step to show for it. Hit live on the
+  # 2026-09-03 Rocky 10 rebuild: BACKUP_HOST_KEY pointed at a key file that did
+  # not exist, all 38 scps failed, and the run reported restore-env-files OK.
+  # Fail closed instead, and say which of the three inputs to check.
+  local restored=0 missing=0
+  if [[ ! -r "$BACKUP_HOST_KEY" ]]; then
+    echo "BACKUP_HOST_KEY is not readable: $BACKUP_HOST_KEY" >&2
+    echo "  Nothing can be restored without it -- fix the path or place the key." >&2
+    return 1
+  fi
+  local name
+  while read -r name; do
+    [[ -n "$name" ]] || continue
     local src="${BACKUP_HOST_PATH}/${name}.env"
     local dest_dir="/var/dockge/stacks/${name}"
     mkdir -p "$dest_dir"
@@ -999,11 +1152,21 @@ step_restore_env_files() {
         -o ConnectTimeout=10 "${BACKUP_HOST_USER}@${BACKUP_HOST}:${src}" "$dest_dir/.env" 2>/dev/null; then
       chmod 600 "$dest_dir/.env"
       echo "restored .env for $name"
+      restored=$((restored + 1))
     else
       echo "WARNING: no backed-up .env found for $name at $src (may not have existed pre-rebuild)"
+      missing=$((missing + 1))
     fi
-  done
-  return 0   # missing individual .envs is a warning, not a hard failure -- see summary
+  done < <(env_restore_stacks)
+  echo "restored $restored .env file(s), $missing missing"
+  if [[ $restored -eq 0 ]]; then
+    echo "FAILED: not a single .env was restored from ${BACKUP_HOST_USER}@${BACKUP_HOST}:${BACKUP_HOST_PATH}" >&2
+    echo "  Check BACKUP_HOST / BACKUP_HOST_PATH / BACKUP_HOST_KEY. The path must" >&2
+    echo "  hold one <stack>.env per stack (e.g. \$BACKUP_HOST_PATH/honeypot-elk.env)." >&2
+    echo "  Continuing would bootstrap every stack from .env.example placeholders." >&2
+    return 1
+  fi
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -1070,6 +1233,15 @@ step_restore_env_files() {
 # test host to break, which wasn't a safe call to make unilaterally.
 ARCANE_STACK_MANIFEST="$REPO_DIR/arcane/manifests/home-production.json"
 
+# The four Keycloak provisioner scripts moved under arcane/home/honeypot-keycloak/
+# in #1502's per-stack restructure; the installer kept calling them at the
+# pre-#1502 top-level $REPO_DIR/keycloak/ path. That made all four steps fail
+# with "No such file or directory" on the 2026-09-03 rebuild -- leaving the
+# dashboard, Arcane and the events poller without their real OIDC secrets.
+# One variable so a single fix keeps covering all four, as their own comments
+# intend.
+KEYCLOAK_PROVISION_DIR="$REPO_DIR/arcane/home/honeypot-keycloak/keycloak"
+
 # arcane_api <method> <path> [json-body] -- authenticated call against this
 # host's own Arcane instance. ARCANE_URL/ARCANE_API_TOKEN are operator-
 # provided config (see install-homeserver.conf.example): an unattended
@@ -1078,10 +1250,18 @@ ARCANE_STACK_MANIFEST="$REPO_DIR/arcane/manifests/home-production.json"
 # -> API Keys, after its first login) the same way step_provision_keycloak_secrets
 # requires the Keycloak realm to already exist rather than creating one
 # from nothing.
+# Arcane authenticates API keys with its own `X-API-Key` header, NOT
+# `Authorization: Bearer`. Sending Bearer returns 401 with an ErrorModel body
+# and no `data` field, which every caller below then reads as an empty result
+# rather than as an auth failure -- so the import "failed" with an empty error
+# message and every downstream step cascaded off it. Measured live on the
+# 2026-09-03 Rocky 10 rebuild against Arcane v2.9.0:
+#   Authorization: Bearer <key> -> 401 {"title":"Unauthorized",...}
+#   X-API-Key: <key>            -> 200 {"success":true,"data":[...]}
 arcane_api() {
   local method="$1" path="$2" body="${3:-}"
   local -a curl_args=(-sS -X "$method" "${ARCANE_URL%/}/api${path}" \
-    -H "Authorization: Bearer $ARCANE_API_TOKEN" -H "Content-Type: application/json")
+    -H "X-API-Key: $ARCANE_API_TOKEN" -H "Content-Type: application/json")
   [[ -n "$body" ]] && curl_args+=(-d "$body")
   curl "${curl_args[@]}"
 }
@@ -1135,30 +1315,41 @@ step_arcane_import_stacks() {
     [[ -d "$dir" ]] && rm -rf "$dir"
 
     echo "-- importing $name via Arcane directory sync"
-    local resp status project_id
+    local resp status
     resp=$(arcane_api POST /environments/0/gitops-syncs \
       "$(jq -n --arg name "$name" --arg repo "$existing_repo_id" \
              --arg branch "$GIT_REF" --arg path "$compose_path" \
         '{name:$name, repositoryId:$repo, branch:$branch, composePath:$path,
           autoSync:false, syncDirectory:true, syncInterval:300}')")
     status=$(echo "$resp" | jq -r '.data.lastSyncStatus // "unknown"')
-    project_id=$(echo "$resp" | jq -r '.data.projectId // empty')
 
     if [[ -n "$staged_env" ]]; then
       mkdir -p "$dir"
       mv "$staged_env" "$dir/.env"
       chmod 600 "$dir/.env"
-      if [[ -n "$project_id" ]]; then
-        arcane_api POST "/environments/0/projects/$project_id/up" >/dev/null
-      fi
     fi
+    # #2959: deliberately NO deploy here. This loop walks the manifest in file
+    # order, and honeypot-init sorts before honeypot-elk -- so bringing each
+    # stack up as it is imported started honeypot-init's one-shot jobs while
+    # the stack that defines elasticsearch was still queued behind them in this
+    # same loop. They then looped forever on
+    #   curl: (6) Could not resolve host: elasticsearch
+    # while the import blocked on their `up --wait`, and the whole step
+    # deadlocked on itself until honeypot-elk was imported out of band by hand.
+    #
+    # Deploy order is not this step's job. start-elasticsearch -> start-init ->
+    # start-remaining exist precisely to honour the ordering
+    # docs/STACK-REBUILD.md documents, they run immediately after this step,
+    # and they cover every stack imported here. Syncing without deploying keeps
+    # exactly one place responsible for start order.
 
-    if [[ "$status" != "success" && -z "$staged_env" ]]; then
-      # Matches this repo's own live experience migrating #1502: a stack
-      # whose required secrets aren't in place yet fails its first deploy
-      # closed rather than starting broken -- step_bootstrap_missing_envs
-      # (below) and the per-stack secret-provisioning steps run right
-      # after this one and re-trigger a deploy once real values exist.
+    if [[ "$status" != "success" ]]; then
+      # Reported for every stack now, not only ones without a staged .env: the
+      # old carve-out existed because this loop used to deploy, so a stack that
+      # had its secrets was expected to come up. Nothing deploys here any more,
+      # so a non-success sync means the same thing either way -- and it is
+      # informational regardless, since the start-* steps below re-deploy once
+      # real secrets are in place.
       echo "  $name: sync reported '$status' (often expected pre-secrets -- see: $resp)"
       failures=$((failures + 1))
     fi
@@ -1335,6 +1526,22 @@ step_create_shared_resources() {
   # exits 1 and looks like a real failure even though nothing is actually
   # broken.
   install -d -m 777 "$REPO_DIR/state/init-markers"
+
+  # honeypot-cowrie bind-mounts state/honeyfs/{cowrie,cowrie-share} and runs as
+  # uid 2000 (its Dockerfile's `USER cowrie`); hp-honeyfs-implant deliberately
+  # shares that uid so both can write the same tree -- see honeypot-cowrie's
+  # own compose comment on the honeyfs-implant service. Nothing created these
+  # directories on the host, so on a from-scratch install Docker made them as
+  # root:root and cowrie's entrypoint could not seed the empty mount from
+  # honeyfs.dist. Measured on the 2026-09-03 Rocky 10 rebuild -- hp-cowrie
+  # crash-looped indefinitely on:
+  #   cp: cannot create directory '/cowrie/cowrie-git/honeyfs/./etc': Permission denied
+  # No SELinux denial involved (ausearch clean): plain ownership. Create them
+  # owned correctly up front rather than letting the bind mount invent them.
+  local d
+  for d in "$REPO_DIR/state/honeyfs/cowrie" "$REPO_DIR/state/honeyfs/cowrie-share"; do
+    install -d -m 755 -o 2000 -g 2000 "$d"
+  done
 }
 
 step_provision_buildx_cache() {
@@ -1399,8 +1606,28 @@ step_build_zeek_image() {
   docker image inspect xore-zeek:local >/dev/null
 }
 
+# #2959: start the whole honeypot-elk stack, but only GATE on elasticsearch.
+#
+# `up -d --wait` waits for every service in the stack, and one of them --
+# pcap-sync -- cannot become healthy at this point by construction. Its
+# healthcheck asserts that the newest file under /src is recent, and /src is
+# the sshfs-backed VPS Suricata pcap directory, which is mounted by
+# step_sshfs_mounts. Those mounts need logs/<name> to exist, which
+# honeypot-init's log-init job creates, which needs a healthy elasticsearch --
+# i.e. this step. The dependency is circular, so on a from-scratch host this
+# step burned all three retries and failed every time, on pcap-sync alone,
+# while elasticsearch, kibana, evebox, filebeat, zeek-proxy, arkime-capture and
+# arkime-viewer all reached Healthy. Measured on the 2026-09-04 rebuild.
+#
+# Everything still gets started; only the readiness gate is narrowed to the
+# service the next step actually depends on. pcap-sync is left to come healthy
+# on its own once sshfs-mounts runs -- it has restart: unless-stopped and
+# autoheal watches it, and this was confirmed live: the moment the mounts
+# appeared it went healthy without intervention.
 step_start_elasticsearch_first() {
-  (cd /var/dockge/stacks/honeypot-elk && with_retry 3 15 docker compose -f compose.yml up -d --wait)
+  cd /var/dockge/stacks/honeypot-elk || return 1
+  with_retry 3 15 docker compose -f compose.yml up -d
+  with_retry 3 15 docker compose -f compose.yml up -d --wait --no-recreate elasticsearch
 }
 
 step_start_init() {
@@ -1460,6 +1687,33 @@ step_start_init() {
   return 1
 }
 
+# snare is the one Tanner-group sensor whose log directory must be root-owned.
+# honeypot-init's log-init job creates every logs/<sensor> directory uniformly
+# as 65534:65534, which is right for all of them except this one, so this runs
+# between start-init (which creates the directory) and start-remaining (which
+# starts the container that needs it).
+#
+# The mechanism, which docs/STACK-REBUILD.md already records: hp-snare runs as
+# root but with cap_drop: ALL and only SETGID/SETUID added -- deliberately no
+# DAC_OVERRIDE, because snare's own check_privileges() runs before it drops
+# privileges. Root without DAC_OVERRIDE cannot write a file it does not own,
+# so snare's first act, writing /opt/snare/snare.pid, fails:
+#
+#   PermissionError: [Errno 13] Permission denied: '/opt/snare/snare.pid'
+#
+# and the container crash-loops (13 restarts before this was caught on the
+# 2026-09-04 rebuild). Note the recursion: chowning only the directory is not
+# enough once a previous crashing run has already left snare.cfg/.log/.err/.pid
+# behind owned by nobody -- measured, the container still failed on the
+# pre-existing pid file. The directory is left mode-unchanged; only ownership
+# is corrected.
+step_fix_snare_ownership() {
+  local d="$REPO_DIR/logs/snare"
+  [[ -d "$d" ]] || { echo "logs/snare does not exist yet -- did start-init run?"; return 1; }
+  chown -R root:root "$d"
+  echo "logs/snare (and its contents) set root:root for snare's pre-drop check_privileges()"
+}
+
 step_start_remaining_stacks() {
   # #1502: Arcane's own directory sync already brought each stack up as
   # part of step_arcane_import_stacks -- this step is now a safety-net
@@ -1472,11 +1726,43 @@ step_start_remaining_stacks() {
   while IFS=$'\t' read -r name compose_path; do
     [[ "$name" == "honeypot-elk" || "$name" == "honeypot-init" ]] && continue
     local dir="/var/dockge/stacks/$name"
-    [[ -f "$dir/compose.yml" ]] || continue
-    echo "-- $name: docker compose up -d --wait"
-    if ! (cd "$dir" && with_retry 3 15 docker compose -f compose.yml up -d --wait); then
-      echo "FAILED: $name"
-      failures=$((failures + 1))
+    # Use the manifest's OWN dockerComposePath basename, not a hardcoded
+    # "compose.yml". Arcane materializes each stack's directory with the file
+    # named exactly as the manifest says, and three of the stacks this loop
+    # covers -- auth-events-worker, llm-worker, ml-worker -- carry
+    # docker-compose.yml. Testing for compose.yml therefore skipped all three
+    # silently (`|| continue`, no message), so they were never started at all
+    # on a from-scratch install. Their dedicated readiness steps below then
+    # reported nonsense about containers that had never been created
+    # ("running but never logged its startup line"), because `docker logs` on a
+    # nonexistent container just fails the grep. That is #2817: llm-worker
+    # completely undeployed, zero containers, and nothing saying so.
+    local compose_file="${compose_path##*/}"
+    [[ -n "$compose_file" ]] || compose_file="compose.yml"
+    if [[ ! -f "$dir/$compose_file" ]]; then
+      echo "-- $name: no $compose_file in $dir, skipping"
+      continue
+    fi
+    # A stack whose every service sits behind a Compose profile has nothing to
+    # start by default: `up` exits non-zero with "no service selected". That is
+    # the correct state, not a failure -- honeypot-correlator-worker,
+    # -attacker-identity-worker, -payload-inventory-worker and
+    # -agent-intrusion-worker are all gated behind the "legacy" profile,
+    # deliberately off since the #1628 Go-worker retirement. Counting them as
+    # failures put four spurious FAILEDs in the summary of every clean install,
+    # which is exactly the expected-noise problem that trains an operator to
+    # skim past a real one.
+    echo "-- $name: docker compose -f $compose_file up -d --wait"
+    local out rc
+    out=$( (cd "$dir" && with_retry 3 15 docker compose -f "$compose_file" up -d --wait) 2>&1 ); rc=$?
+    printf '%s\n' "$out"
+    if (( rc != 0 )); then
+      if printf '%s' "$out" | grep -qi 'no service selected'; then
+        echo "   $name: all services are profile-gated, nothing to start by default -- skipping"
+      else
+        echo "FAILED: $name"
+        failures=$((failures + 1))
+      fi
     fi
   done < <(jq -r '.[] | select((.syncName | startswith("honeypot-")) or (.syncName as $n | ["auth-events-worker","llm-worker","ml-worker"] | index($n) != null)) | [.syncName, .dockerComposePath] | @tsv' "$ARCANE_STACK_MANIFEST")
   [[ $failures -eq 0 ]]
@@ -1496,7 +1782,7 @@ step_provision_events_poller_secrets() {
   }
   KEYCLOAK_ADMIN_USERNAME="${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}" \
   KEYCLOAK_ADMIN_PASSWORD="$(< "$secrets_dir/bootstrap-admin-password")" \
-    "$REPO_DIR/keycloak/provision-events-poller.sh"
+    "$KEYCLOAK_PROVISION_DIR/provision-events-poller.sh"
 }
 
 step_provision_dashboard_oidc_secret() {
@@ -1515,7 +1801,7 @@ step_provision_dashboard_oidc_secret() {
   }
   KEYCLOAK_ADMIN_USERNAME="${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}" \
   KEYCLOAK_ADMIN_PASSWORD="$(< "$secrets_dir/bootstrap-admin-password")" \
-    "$REPO_DIR/keycloak/provision-dashboard-oidc-secret.sh"
+    "$KEYCLOAK_PROVISION_DIR/provision-dashboard-oidc-secret.sh"
 }
 
 step_provision_arcane_oidc_secret() {
@@ -1533,7 +1819,7 @@ step_provision_arcane_oidc_secret() {
   }
   KEYCLOAK_ADMIN_USERNAME="${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}" \
   KEYCLOAK_ADMIN_PASSWORD="$(< "$secrets_dir/bootstrap-admin-password")" \
-    "$REPO_DIR/keycloak/provision-arcane-oidc-secret.sh"
+    "$KEYCLOAK_PROVISION_DIR/provision-arcane-oidc-secret.sh"
 }
 
 step_provision_account_console_scopes() {
@@ -1551,7 +1837,7 @@ step_provision_account_console_scopes() {
   }
   KEYCLOAK_ADMIN_USERNAME="${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}" \
   KEYCLOAK_ADMIN_PASSWORD="$(< "$secrets_dir/bootstrap-admin-password")" \
-    "$REPO_DIR/keycloak/provision-account-console-scopes.sh"
+    "$KEYCLOAK_PROVISION_DIR/provision-account-console-scopes.sh"
 }
 
 step_fix_apiary_backend_permissions() {
@@ -1660,7 +1946,18 @@ step_sshfs_install() {
     rhel)   pkg_install fuse-sshfs ;;
   esac
   mkdir -p /root/.ssh
-  install -m 600 "$VPS_SSH_KEY" /root/.ssh/strato_vps
+  # Skip the copy when the configured key already IS the destination. `install`
+  # errors with "are the same file" and, under set -e, fails the whole step --
+  # which is what happened on the 2026-09-04 rebuild once VPS_SSH_KEY was
+  # pointed at /root/.ssh/strato_vps (the natural value on a host where the key
+  # has already been placed). Nothing was actually wrong.
+  if [[ "$(readlink -f "$VPS_SSH_KEY" 2>/dev/null)" != "$(readlink -f /root/.ssh/strato_vps 2>/dev/null)" ]]; then
+    install -m 600 "$VPS_SSH_KEY" /root/.ssh/strato_vps.tmp
+    mv /root/.ssh/strato_vps.tmp /root/.ssh/strato_vps
+  else
+    echo "VPS_SSH_KEY is already /root/.ssh/strato_vps -- leaving it in place"
+  fi
+  chmod 600 /root/.ssh/strato_vps
 }
 
 # Every VPS-side log directory Filebeat, pcap-sync or the payload pipeline
@@ -1924,10 +2221,27 @@ step_llm_worker_selftest() {
   # matches step_ghidra_worker_install's own "reconcile in place, don't
   # deploy a second copy" precedent. `up -d --build --wait` on an
   # already-running, unchanged stack is a safe no-op here, same reasoning.
-  local dir="/var/dockge/stacks/llm-worker"
-  [[ -f "$dir/compose.yml" ]] || { echo "no $dir/compose.yml -- was arcane-import-stacks skipped or llm-worker not yet synced?"; return 1; }
+  # Resolve the compose file from the manifest, not by guessing. llm-worker's
+  # base docker-compose.yml is the Safe #66 synthetic-only file and forces
+  # ES_HOST empty on purpose (#2234); captured-data mode lives in
+  # docker-compose.captured-data-deploy.yml, which `include`s both. Starting the
+  # base file on a host authorized for captured data gives a container that
+  # believes it is in captured-data mode (LLM_ALLOW_CAPTURED_DATA=true) while
+  # unable to resolve elasticsearch -- it crash-loops on
+  #   configuration error: ES_HOST must be an uncredentialed local/internal HTTP endpoint
+  # which is #1751's exact failure, hit again on the 2026-09-04 rebuild.
+  local dir="/var/dockge/stacks/llm-worker" cf
+  cf="$(jq -r '.[] | select(.syncName=="llm-worker") | .dockerComposePath' \
+        "$ARCANE_STACK_MANIFEST" 2>/dev/null)"
+  cf="${cf##*/}"
+  if [[ -z "$cf" || ! -f "$dir/$cf" ]]; then
+    cf="$(stack_compose_file "$dir")" || {
+      echo "no compose file in $dir -- was arcane-import-stacks skipped or llm-worker not yet synced?"
+      return 1
+    }
+  fi
   ( cd "$dir" && \
-    with_retry 3 15 docker compose -f compose.yml up -d --build --wait && \
+    with_retry 3 15 docker compose -f "$cf" up -d --build --wait && \
     docker exec hp-llm-worker python worker.py --selftest )
 }
 
@@ -2219,6 +2533,17 @@ run_step provision-buildx-cache "Create /mnt-1/buildx-cache for the CI runners (
 run_step build-zeek-image      "Build xore-zeek:local for zeek-proxy" step_build_zeek_image
 run_step start-elasticsearch   "Start honeypot-elk, wait healthy"   step_start_elasticsearch_first
 run_step start-init            "Start honeypot-init, wait for one-shots" step_start_init
+# #2959: the sshfs mounts move up here, ahead of start-remaining. They can only
+# run after start-init (honeypot-init's log-init job is what creates the
+# logs/<name> mount points), but honeypot-elk's pcap-sync reads them, so
+# leaving them until after every sensor had started meant pcap-sync sat
+# unhealthy for the whole middle of the run and start-elasticsearch could never
+# gate on it. Placed at the first point in the run where they can succeed.
+run_step sshfs-install         "Install sshfs, place VPS key"        step_sshfs_install
+run_step sshfs-mounts          "Mount VPS Suricata/portbridge logs"  step_sshfs_mounts
+run_step sshfs-boot-ordering   "Install WireGuard-aware mount ordering" step_sshfs_boot_ordering
+
+run_step fix-snare-ownership   "Set logs/snare root-owned (snare drops caps)" step_fix_snare_ownership
 run_step start-remaining       "Start remaining sensor/dashboard stacks" step_start_remaining_stacks
 
 run_step provision-events-poller-secrets "Grant auth-events-poller view-events + write its secret" step_provision_events_poller_secrets
@@ -2228,9 +2553,6 @@ run_step provision-arcane-oidc-secret "Sync Arcane's real OIDC client secret fro
 run_step provision-account-console-scopes "Give Keycloak's account-console client its default scopes (#1697)" step_provision_account_console_scopes
 run_step auth-events-worker-start "Start auth-events-worker" step_auth_events_worker_start
 
-run_step sshfs-install         "Install sshfs, place VPS key"        step_sshfs_install
-run_step sshfs-mounts          "Mount VPS Suricata/portbridge logs"  step_sshfs_mounts
-run_step sshfs-boot-ordering   "Install WireGuard-aware mount ordering" step_sshfs_boot_ordering
 
 run_step technitium-provision  "Install Technitium DNS config"       step_technitium_provision
 run_step technitium-start      "Start Technitium DNS"                step_technitium_start

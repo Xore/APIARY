@@ -153,8 +153,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
-          memory: 512M
+          cpus: "2.0"
+          memory: 1G
 
   # #1487: honeyfs-implant plants a dashboard-created token/credential into
   # cowrie's fake filesystem live -- see honeyfs-implant/main.go's package
@@ -207,8 +207,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.25"
-          memory: 128M
+          cpus: "0.5"
+          memory: 256M
 
 networks:
   # #269: outbound is allowed by default, matching this repo's previous de

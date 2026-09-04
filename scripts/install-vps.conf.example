@@ -40,15 +40,23 @@ VPS_WG_PRIVATE_KEY="<VPS_WG_PRIVATE_KEY>"
 HOME_WG_PUBLIC_KEY="<HOME_WG_PUBLIC_KEY>"
 
 # --- Firewall -----------------------------------------------------------
-# Real admin SSH port. cowrie owns 22 on the OLD Ubuntu VPS layout (see
-# docs/CGNAT-DEPLOYMENT.md's VPS deployment section) -- the actual sshd
-# config move to that port is a manual step this script does NOT perform;
-# confirm it works and keep the old session open before this script's
-# firewall-base step locks 22 down to the honeypot-only listener.
-# The 2026-09-03 fresh Rocky install kept sshd on the default 22, so the
-# default here is 22 now; cowrie's portbridge listener uses a different
-# host binding, so there is no collision.
-SSH_ADMIN_PORT="22"
+# Real admin SSH port. Port 22 belongs to the HONEYPOT on every VPS layout:
+# hp-portbridge binds it on the host and tunnels it to cowrie, which is the
+# highest-volume attack surface this deployment has. See
+# docs/CGNAT-DEPLOYMENT.md step 1.
+#
+# Do not set this to 22. A previous revision of this file defaulted to 22 and
+# claimed "cowrie's portbridge listener uses a different host binding, so
+# there is no collision". That is not true, and the live host disproved it --
+# with sshd on 22, exactly one of portbridge's 60 rules failed, and it was
+# port 22:
+#
+#   portbridge: listen tcp 0.0.0.0:22: bind: address already in use
+#
+# Everything else looked healthy, so SSH capture silently reached nothing
+# from 2026-09-03 until it was caught (#2923). step_admin_ssh_port now moves
+# sshd here for you and refuses to run at all if this is set to 22.
+SSH_ADMIN_PORT="2222"
 
 # --- Public domain --------------------------------------------------------
 # Substituted into vps/traefik/dynamic.yml in place of the committed

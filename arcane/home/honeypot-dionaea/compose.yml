@@ -187,7 +187,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2.0"
+          cpus: "4.0"
           memory: 1024M
 
   # TFTP selects a dynamic server transfer port after the request. Relay that
@@ -225,8 +225,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.25"
-          memory: 64M
+          cpus: "0.5"
+          memory: 128M
 
 networks:
   # One honeypot per network (#235), each with no other honeypot as a peer --

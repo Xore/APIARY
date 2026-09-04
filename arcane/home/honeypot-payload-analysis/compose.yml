@@ -84,7 +84,7 @@ services:
           # dmesg cgroup OOM kills every ~28s). 2048M gives a comfortable
           # margin for a from-scratch catch-up pass; steady-state usage
           # once the backlog is pruned down should be far lower.
-          cpus: "0.5"
+          cpus: "1.0"
           memory: 2048M
 
   # Real static YARA scanning in a networkless least-privilege sidecar. It has
@@ -135,8 +135,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
-          memory: 512M
+          cpus: "2.0"
+          memory: 1G
 
 volumes:
   # Shared with arcane/home/honeypot-dionaea/compose.yml -- dionaea writes here, both

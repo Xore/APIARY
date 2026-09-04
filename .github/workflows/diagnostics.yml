@@ -239,6 +239,42 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
+          # #2908: measure how stale the deployed copy is BEFORE trusting its
+          # output. /opt/stacks/apiary is refreshed only by deploy.yml's rsync
+          # step, which is workflow_dispatch-only, so it drifts silently -- it
+          # was found 18 days behind main, running a pre-#2839 isolation-audit
+          # whose capability-posture section simply did not exist yet. Nothing
+          # measured that channel: #2858's drift reporting reads the Arcane
+          # gitops-syncs API, which has no record covering this directory at
+          # all, so every project could report lastSyncCommit == main while
+          # every rsynced script was weeks old.
+          #
+          # This job deliberately has no actions/checkout (see the job header:
+          # it inspects the stack as deployed, not the triggering ref), but the
+          # deployed tree is itself a git clone, so its WORKING TREE can be
+          # diffed against origin/main in place -- which catches rsync-applied
+          # changes too, not just an un-advanced HEAD.
+          #
+          # Reported, not fatal: drift is legitimate mid-maintenance, and
+          # failing here would hide the audit output this step exists to
+          # produce. The point is that it stops being invisible.
+          printf '\n## Deployed-tree freshness (#2908)\n\n' >> "$GITHUB_STEP_SUMMARY"
+          if git -C /opt/stacks/apiary -c safe.directory=/opt/stacks/apiary \
+               fetch -q origin main 2>/dev/null; then
+            if git -C /opt/stacks/apiary -c safe.directory=/opt/stacks/apiary \
+                 diff --quiet origin/main -- scripts/ 2>/dev/null; then
+              printf 'deployed `scripts/` matches `origin/main`.\n' >> "$GITHUB_STEP_SUMMARY"
+            else
+              drift=$(git -C /opt/stacks/apiary -c safe.directory=/opt/stacks/apiary \
+                        diff --stat origin/main -- scripts/ 2>/dev/null | tail -20)
+              echo "::warning title=Deployed scripts differ from main::isolation-audit.sh below ran from a copy that does not match origin/main (see #2908)"
+              printf 'deployed `scripts/` DIFFERS from `origin/main` -- the audit below ran from that copy:\n\n```\n%s\n```\n' \
+                "$drift" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            printf 'could not reach origin to compare (offline runner?) -- freshness unknown.\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
           printf '\n## Isolation audit\n\n```\n' >> "$GITHUB_STEP_SUMMARY"
           # Runs the deployed stack's own copy, same as every other step in
           # this job -- this workflow has no actions/checkout, by design

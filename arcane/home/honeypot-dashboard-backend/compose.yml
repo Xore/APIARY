@@ -203,7 +203,7 @@ services:
       - autoheal=true
     deploy:
       resources:
-        limits: {cpus: "2.0", memory: 512M}
+        limits: {cpus: "4.0", memory: 1G}
 
 networks:
   # Shared with the main honeypot-dashboard stack (and the wider APIARY

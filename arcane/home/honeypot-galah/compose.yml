@@ -96,8 +96,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 256M
+          cpus: "1.0"
+          memory: 512M
     depends_on:
       galah-llm-broker:
         condition: service_healthy
@@ -151,8 +151,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.25"
-          memory: 64M
+          cpus: "0.5"
+          memory: 128M
 
 networks:
   galah_net:

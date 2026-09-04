@@ -63,8 +63,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 128M
+          cpus: "1.0"
+          memory: 256M
 
   # Raw API/cloud decoy: cloud metadata, Kubernetes, Docker Registry,
   # DevOps admin panels and OpenAI-compatible bearer-token probes.
@@ -104,7 +104,7 @@ services:
     labels:
       - autoheal=true
     deploy:
-      resources: { limits: { cpus: "0.5", memory: 128M } }
+      resources: { limits: { cpus: "1.0", memory: 256M } }
 
 networks:
   http_honeypot_net:

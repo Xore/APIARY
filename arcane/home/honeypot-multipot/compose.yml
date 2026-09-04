@@ -66,8 +66,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 128M
+          cpus: "1.0"
+          memory: 256M
 
 networks:
   multipot_net:
