@@ -1742,10 +1742,26 @@ step_start_remaining_stacks() {
       echo "-- $name: no $compose_file in $dir, skipping"
       continue
     fi
+    # A stack whose every service sits behind a Compose profile has nothing to
+    # start by default: `up` exits non-zero with "no service selected". That is
+    # the correct state, not a failure -- honeypot-correlator-worker,
+    # -attacker-identity-worker, -payload-inventory-worker and
+    # -agent-intrusion-worker are all gated behind the "legacy" profile,
+    # deliberately off since the #1628 Go-worker retirement. Counting them as
+    # failures put four spurious FAILEDs in the summary of every clean install,
+    # which is exactly the expected-noise problem that trains an operator to
+    # skim past a real one.
     echo "-- $name: docker compose -f $compose_file up -d --wait"
-    if ! (cd "$dir" && with_retry 3 15 docker compose -f "$compose_file" up -d --wait); then
-      echo "FAILED: $name"
-      failures=$((failures + 1))
+    local out rc
+    out=$( (cd "$dir" && with_retry 3 15 docker compose -f "$compose_file" up -d --wait) 2>&1 ); rc=$?
+    printf '%s\n' "$out"
+    if (( rc != 0 )); then
+      if printf '%s' "$out" | grep -qi 'no service selected'; then
+        echo "   $name: all services are profile-gated, nothing to start by default -- skipping"
+      else
+        echo "FAILED: $name"
+        failures=$((failures + 1))
+      fi
     fi
   done < <(jq -r '.[] | select((.syncName | startswith("honeypot-")) or (.syncName as $n | ["auth-events-worker","llm-worker","ml-worker"] | index($n) != null)) | [.syncName, .dockerComposePath] | @tsv' "$ARCANE_STACK_MANIFEST")
   [[ $failures -eq 0 ]]
@@ -1929,7 +1945,18 @@ step_sshfs_install() {
     rhel)   pkg_install fuse-sshfs ;;
   esac
   mkdir -p /root/.ssh
-  install -m 600 "$VPS_SSH_KEY" /root/.ssh/strato_vps
+  # Skip the copy when the configured key already IS the destination. `install`
+  # errors with "are the same file" and, under set -e, fails the whole step --
+  # which is what happened on the 2026-09-04 rebuild once VPS_SSH_KEY was
+  # pointed at /root/.ssh/strato_vps (the natural value on a host where the key
+  # has already been placed). Nothing was actually wrong.
+  if [[ "$(readlink -f "$VPS_SSH_KEY" 2>/dev/null)" != "$(readlink -f /root/.ssh/strato_vps 2>/dev/null)" ]]; then
+    install -m 600 "$VPS_SSH_KEY" /root/.ssh/strato_vps.tmp
+    mv /root/.ssh/strato_vps.tmp /root/.ssh/strato_vps
+  else
+    echo "VPS_SSH_KEY is already /root/.ssh/strato_vps -- leaving it in place"
+  fi
+  chmod 600 /root/.ssh/strato_vps
 }
 
 # Every VPS-side log directory Filebeat, pcap-sync or the payload pipeline
