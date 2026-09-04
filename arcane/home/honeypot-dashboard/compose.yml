@@ -557,11 +557,20 @@ services:
     # Dockerfile's unprivileged `node` user instead, so it needs actual
     # group membership -- confirmed live (EACCES reading oidc-client-
     # secret, #1628) that nothing had granted it that. group_add joins
-    # the container process to deploy-runner's GID (literal 980, not a
-    # name -- /etc/group only exists on the host, not inside this image)
-    # without loosening the file's own permissions for anything else.
+    # the container process to deploy-runner's GID without loosening the
+    # file's own permissions for anything else. It has to be a GID rather than
+    # a name: /etc/group exists on the host, not inside this image.
+    #
+    # Interpolated, NOT the literal 980 it used to be. System GIDs are handed
+    # out in creation order, so they are a property of how a host was built
+    # rather than a constant. After the 2026-09-03 rebuild, 980 belonged to
+    # github-ci-runner-3 and deploy-runner had become 977 -- so the container
+    # joined an unrelated CI group, could not read the secret, and every
+    # sign-in failed with EACCES while the UI blamed Keycloak. The installer
+    # writes the host's real GID into this stack's .env; the 980 default only
+    # preserves the historical value for a host that has not been through it.
     group_add:
-      - "980"
+      - "${DEPLOY_RUNNER_GID:-980}"
     networks:
       - honeynet
       - oidc-session
@@ -743,9 +752,15 @@ services:
     # (everything Filebeat tails from /logs/enriched/*.json -- see
     # honeypot-elk/analysis/filebeat.yml's own #746 comment for the full
     # list) went STALE the moment the retired Go worker's last write aged
-    # out. Same group_add fix as dashboard-next's identical EACCES above.
+    # out. Same group_add fix as dashboard-next's identical EACCES above -- and
+    # the same interpolation, for the same reason. This was the literal 979,
+    # which after the 2026-09-03 rebuild belonged to github-ci-runner-4 rather
+    # than deploy-runner. The failure was exactly what this comment predicts:
+    # 22 "open output failed ... Permission denied" WARNs, /logs/enriched empty,
+    # and the container reporting healthy throughout while every Filebeat
+    # consumer of /logs/enriched/*.json went stale.
     group_add:
-      - "979"
+      - "${DEPLOY_RUNNER_GID:-979}"
     security_opt:
       - no-new-privileges:true
     cap_drop: [ALL]
