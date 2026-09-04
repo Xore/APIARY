@@ -1242,6 +1242,12 @@ ARCANE_STACK_MANIFEST="$REPO_DIR/arcane/manifests/home-production.json"
 # intend.
 KEYCLOAK_PROVISION_DIR="$REPO_DIR/arcane/home/honeypot-keycloak/keycloak"
 
+# Rev·Deck's upstream source (see step_revdeck_source). Deliberately NOT in the
+# required-config list above: revdeck is an optional analyst UI, and a host that
+# cannot reach GitHub should still complete an install without it. Override in
+# the answer file to build from a fork or an internal mirror.
+REVDECK_REPO_URL="${REVDECK_REPO_URL:-https://github.com/biniamf/ai-reverse-engineering}"
+
 # arcane_api <method> <path> [json-body] -- authenticated call against this
 # host's own Arcane instance. ARCANE_URL/ARCANE_API_TOKEN are operator-
 # provided config (see install-homeserver.conf.example): an unattended
@@ -2207,6 +2213,42 @@ step_ghidra_stack_provision() {
   [[ -f "$src/docker-compose.ghidra.gpu.yml" ]] && ln -sf "$src/docker-compose.ghidra.gpu.yml" "$src/compose.gpu.yml"
 }
 
+step_revdeck_source() {
+  # Rev·Deck's build context is upstream source this repo deliberately does not
+  # vendor: analysis/ghidra/docker-compose.ghidra.yml builds it from
+  # ./revdeck/ai-reverse-engineering, and that directory has only ever been
+  # created by hand. So every rebuild silently loses the service -- the
+  # 2026-09-04 rebuild included, where rev.<domain> answered 302 from a healthy
+  # oauth2-proxy on the VPS while no revdeck container existed on this host at
+  # all. Nothing reported a fault: the profile keeps it out of `docker compose
+  # up`, so an absent service is indistinguishable from a disabled one, and a
+  # health sweep that counts running containers can never see it.
+  #
+  # Same class as #2923 (a manual step that no script owned, lost on rebuild).
+  # Cloning it here is what makes `--profile revdeck` below safe to pass
+  # unconditionally.
+  local dest="$REPO_DIR/analysis/ghidra/revdeck/ai-reverse-engineering"
+  if [[ -d "$dest/.git" ]]; then
+    # Already present: fast-forward, but never fail the install over it. A
+    # network blip must not take out the whole run for an optional analyst UI.
+    (cd "$dest" && git fetch -q origin && git merge -q --ff-only FETCH_HEAD) 2>/dev/null || \
+      echo "revdeck source present but could not be updated -- keeping the existing checkout"
+    return 0
+  fi
+  mkdir -p "$(dirname "$dest")"
+  if ! with_retry 3 10 git clone -q "$REVDECK_REPO_URL" "$dest"; then
+    echo "could not clone revdeck source from $REVDECK_REPO_URL -- revdeck will stay absent"
+    rm -rf "$dest"
+    return 0
+  fi
+  # webui/Dockerfile is the build target the compose file names; a clone that
+  # lacks it would fail the build rather than skip the service.
+  [[ -f "$dest/webui/Dockerfile" ]] || {
+    echo "revdeck clone has no webui/Dockerfile -- upstream layout changed, leaving revdeck disabled"
+    rm -rf "$dest"
+  }
+}
+
 step_ghidra_stack_start() {
   # Rocky enables cockpit.socket by default and it listens on *:9090, which is
   # the port analysis/ghidra/docker-compose.ghidra.yml publishes ghidra's API on
@@ -2232,7 +2274,13 @@ step_ghidra_stack_start() {
   local dir="/var/dockge/stacks/ghidra"
   local files=(-f compose.yml)
   [[ -f "$dir/compose.gpu.yml" ]] && files+=(-f compose.gpu.yml)
-  (cd "$dir" && with_retry 3 15 docker compose "${files[@]}" up -d --wait)
+  # Bring up revdeck too, but only when step_revdeck_source actually produced a
+  # build context. Passing --profile revdeck without one fails the whole
+  # `up` ("unable to prepare context"), taking ghidra and ollama down with it --
+  # which is exactly why the service is profile-gated in the first place.
+  local profiles=()
+  [[ -f "$dir/revdeck/ai-reverse-engineering/webui/Dockerfile" ]] && profiles=(--profile revdeck)
+  (cd "$dir" && with_retry 3 15 docker compose "${files[@]}" "${profiles[@]}" up -d --wait)
 }
 
 step_ollama_model_pull() {
@@ -2838,6 +2886,7 @@ run_step technitium-verify     "Resolve container and LAN"           step_techni
 
 if [[ "$ENABLE_GPU_STACK" == "true" ]]; then
   run_step ghidra-provision      "Link ghidra compose.yml"            step_ghidra_stack_provision
+  run_step revdeck-source        "Clone Rev·Deck build context"       step_revdeck_source
   run_step ghidra-start          "Start ghidra/ollama stack"          step_ghidra_stack_start
   run_step ollama-model-pull     "Pull pinned Ollama model"           step_ollama_model_pull
   run_step ghidra-worker-install "Install ghidra-worker.py systemd service" step_ghidra_worker_install

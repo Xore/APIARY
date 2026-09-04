@@ -138,9 +138,16 @@ SAME_VERSION_REFRESHES = {
             "arcane/home/honeypot-galah/galah/Dockerfile",
         ],
     },
-    "valkey/valkey:9.1.1-alpine3.24": {
+    # Superseded by a real version bump: the session store moved to
+    # 9.1.2-alpine3.24 upstream, so #2314's same-version refresh of the
+    # 9.1.1 alias no longer describes the pin. What still matters -- and is
+    # what this entry now guards -- is that neither of the two superseded
+    # 9.1.1 digests can come back. `old` remains #2314's stale digest;
+    # `superseded` is the refreshed 9.1.1 digest this bump replaced.
+    "valkey/valkey:9.1.2-alpine3.24": {
         "old": "sha256:ee91f7a174ac4d6a6b0685b3a60e321f0a9dbbb691f9b0e285be2ba1d1be8328",
-        "new": "sha256:de31910896150d5e754a07d57d227cfdde4e258ddd0d1aa4607f2d2f95843715",
+        "superseded": "sha256:de31910896150d5e754a07d57d227cfdde4e258ddd0d1aa4607f2d2f95843715",
+        "new": "sha256:ccfa19b0d743e48927e1c8c14e39e0acb97b5cea347fef0bfe340247fea920cd",
         "files": [
             "arcane/home/honeypot-dashboard/compose.yml",
         ],
@@ -319,6 +326,13 @@ def test_same_version_refresh_applied(image, spec):
         assert spec["old"] not in text, (
             f"{relpath} still pins {image} at the stale digest {spec['old']} -- #2314"
         )
+        # An entry that has since been superseded by a real version bump also
+        # names the digest that bump replaced; it must not come back either.
+        if "superseded" in spec:
+            assert spec["superseded"] not in text, (
+                f"{relpath} pins {image} at {spec['superseded']}, the digest a later "
+                f"version bump replaced -- #2314"
+            )
         assert spec["new"] in text, (
             f"{relpath} does not pin {image} at the refreshed digest {spec['new']} -- #2314"
         )

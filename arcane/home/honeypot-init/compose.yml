@@ -68,7 +68,7 @@ services:
   # Dionaea's FTP/TFTP/UPnP/printer files are copied into its persistent volume.
   persona-apply:
     <<: *runtime-defaults
-    image: python:3.12-alpine@sha256:d09d15e60962ca365d1cd544a48773bac9d33f2fb1b00f2aa0deec78ade7dc31
+    image: python:3.12-alpine@sha256:b64631e04e4920160c50fbe8d8df828f7f35f06f425cb44aa09bca53e708a35a
     container_name: hp-persona-apply
     restart: no
     working_dir: /stack
@@ -176,7 +176,7 @@ services:
 
   elasticsearch-setup:
     <<: *runtime-defaults
-    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.2@sha256:9c1e1afc2bda921b35025e21c72ec6e392266995aa35ad6a47887363592718be
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.3@sha256:f456578fc2a620a8a4f4c21d070fff1f6070345adb2be5e5626b65be72aea350
     container_name: hp-elasticsearch-setup
     restart: no
     entrypoint:

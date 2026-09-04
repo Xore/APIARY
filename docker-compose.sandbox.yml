@@ -146,7 +146,7 @@ services:
   # identically to everything else in this repository.
   suricata:
     <<: *gateway-defaults
-    image: jasonish/suricata:latest@sha256:4f51f6e6ab355cfb6288a2186b0a2e884618c0a45d0fe140023293441fc2176a
+    image: jasonish/suricata:latest@sha256:51a59543dcb6e5f9d586c06053c6b71d462cea919b45719090443f4af1428780
     container_name: sbx-suricata
     network_mode: host
     cap_drop:
