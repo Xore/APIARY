@@ -62,7 +62,7 @@ x-runtime-defaults: &runtime-defaults
 services:
   oidc-sessions:
     <<: *runtime-defaults
-    image: valkey/valkey:9.1.1-alpine3.24@sha256:de31910896150d5e754a07d57d227cfdde4e258ddd0d1aa4607f2d2f95843715
+    image: valkey/valkey:9.1.2-alpine3.24@sha256:ccfa19b0d743e48927e1c8c14e39e0acb97b5cea347fef0bfe340247fea920cd
     container_name: hp-dashboard-oidc-sessions
     restart: unless-stopped
     command: ["valkey-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
@@ -760,7 +760,14 @@ services:
     # and the container reporting healthy throughout while every Filebeat
     # consumer of /logs/enriched/*.json went stale.
     group_add:
-      - "${DEPLOY_RUNNER_GID:-979}"
+      # Same value as dashboard-next's group_add above, deliberately. These two
+      # disagreed (980 vs 979) while naming the same group, so whichever
+      # fallback happened to be wrong on a given host silently mis-grouped one
+      # of the two containers. Neither number is meaningful on its own: a GID
+      # is host-specific, and step_pin_deploy_runner_gid writes the real one
+      # into this stack's .env. The literal only covers a host that has not
+      # been through that step, so both must at least agree.
+      - "${DEPLOY_RUNNER_GID:-980}"
     security_opt:
       - no-new-privileges:true
     cap_drop: [ALL]

@@ -23,7 +23,7 @@ services:
       LLM_DAILY_REPORT_ENABLED: 'false'
       ES_HOST: 'http://elasticsearch:9200'
       OLLAMA_URL: 'http://ollama:11434'
-      LLM_EXPECTED_MODEL_DIGEST: '6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7'
+      LLM_EXPECTED_MODEL_DIGEST: 'bdbd181c33f2ed1b31c972991882db3cf4d192569092138a7d29e973cd9debe8'
       LLM_KEEP_ALIVE: '30s'
       MAX_EVENTS_PER_CYCLE: '2000'
       MAX_JOBS_PER_CYCLE: '1'

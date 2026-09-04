@@ -29,7 +29,26 @@ name: honeypot-arcane
 
 services:
   arcane:
-    image: ghcr.io/getarcaneapp/manager:v2.9.0@sha256:f10f95d1123d7209956ac084b52486414c09ddca58199e211794f9f6bd136229
+    # Digest-pinned per #2382. Note what that costs: Arcane's own GUI
+    # "check for updates / restart to apply" can never work here, and it does
+    # not fail loudly -- it reports success and changes nothing.
+    #
+    # Its upgrader reads the image reference off the RUNNING container, which is
+    # this pin, so it pulls the exact image already in use and recreates
+    # hp-arcane from it:
+    #
+    #   INF Pulling upgrader image image=ghcr.io/getarcaneapp/manager:v2.9.0@sha256:f10f95d...
+    #   INF Upgrade container started upgraderId=... upgraderName=hp-arcane-upgrader-...
+    #
+    # ...after which `docker inspect hp-arcane` still showed restarts=0 and the
+    # original StartedAt. Both steps genuinely succeeded, which is why the UI
+    # says it worked.
+    #
+    # So Arcane is upgraded HERE and nowhere else: bump the tag and digest in
+    # this file, then redeploy the stack. Get the digest with
+    #   docker pull ghcr.io/getarcaneapp/manager:<tag>
+    #   docker image inspect ghcr.io/getarcaneapp/manager:<tag> --format '{{index .RepoDigests 0}}'
+    image: ghcr.io/getarcaneapp/manager:v2.10.1@sha256:5695ac9b3ffb4dc8ac33030e92c87f2fa64f431b03d63605316af0cb713156de
     container_name: hp-arcane
     restart: unless-stopped
     environment:

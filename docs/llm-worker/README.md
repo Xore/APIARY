@@ -45,7 +45,7 @@ idle-unload errors. The 30-second canary keep-alive is deliberately short;
 normal worker requests retain the bounded 10-minute default.
 
 The current session default is the #158-qualified
-`qwen3.5:9b@6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7`.
+`qwen3:14b@bdbd181c33f2ed1b31c972991882db3cf4d192569092138a7d29e973cd9debe8`.
 Its tag, digest, generated-schema hash, `session-v5` prompt hash, request
 settings, host/runtime record, and per-case gates are controlled by
 [`../analysis/ghidra/models/approved-models.json`](../../analysis/ghidra/models/approved-models.json).

@@ -78,7 +78,24 @@ relocate_runner_data() {
   local sub src dst
   install -d -m 755 "$base"
   install -d -m 755 -o "$RUNNER_USER" -g "$RUNNER_USER" "$base/$name"
-  for sub in _work .cache .rustup .cargo go; do
+  # _work is deliberately NOT in this list. It is GITHUB_WORKSPACE's parent,
+  # and a symlinked component there breaks setup-node's cache-dependency-path
+  # resolution for every job (see the RUNNER_HOME comment above). It needs no
+  # relocating anyway now that the whole runner home is on /var.
+  #
+  # An existing install may still carry the old _work symlink; replace it with
+  # the real directory. Both sides are on /var, so this is a rename.
+  src="$RUNNER_HOME/_work"
+  if [[ -L "$src" ]]; then
+    dst="$(readlink -f "$src")"
+    if [[ -d "$dst" ]]; then
+      rm -f "$src"
+      mv "$dst" "$src"
+      chown -h "$RUNNER_USER:$RUNNER_USER" "$src"
+      echo "  _work un-symlinked (setup-node cache resolution needs a real path)"
+    fi
+  fi
+  for sub in .cache .rustup .cargo go; do
     src="$RUNNER_HOME/$sub"
     dst="$base/$name/$sub"
     [[ -L "$src" ]] && continue                 # already relocated
@@ -164,13 +181,36 @@ if [[ -z "$name" ]]; then
   name="${HOSTNAME:-homeserver}-ci"
   [[ "$instance" == "1" ]] || name="${name}-${instance}"
 fi
+# The runner home itself lives on /var, not /opt.
+#
+# /opt is on this host's 70 GB root LV; /var has terabytes. Seven runners at
+# ~8-11 GB apiece filled root to 98% and killed the Rust build in the LINKER
+# (`ld terminated with signal 7 [Bus error]`) rather than with a disk-space
+# message, because /tmp was on / too and a linker that runs out of room
+# mid-mmap gets SIGBUS.
+#
+# The obvious alternative -- keep the home on /opt and symlink only the bulky
+# subdirectories to /var -- is what this script used to do, and it broke CI in
+# a way that took a while to see: with _work symlinked, GITHUB_WORKSPACE
+# contains a symlinked path component, and @actions/glob (which setup-node uses
+# to resolve `cache-dependency-path`) does not resolve through one. Every job
+# using `cache: npm` died at setup with
+#
+#   ##[error]Some specified paths were not resolved, unable to cache dependencies.
+#
+# before running a single test, while the lockfile it named was plainly there.
+# So the home moves wholesale and _work stays a real directory inside it.
+#
+# /opt/<name> is kept as a compatibility symlink: the runner user's HOME, and
+# anything else still referring to the old path, keep working.
+RUNNER_ROOT=/var/lib/github-runners
 if [[ "$instance" == "1" ]]; then
   RUNNER_USER=github-ci-runner
-  RUNNER_HOME=/opt/github-ci-runner
 else
   RUNNER_USER="github-ci-runner-${instance}"
-  RUNNER_HOME="/opt/github-ci-runner-${instance}"
 fi
+RUNNER_HOME="${RUNNER_ROOT}/${RUNNER_USER}"
+RUNNER_COMPAT_LINK="/opt/${RUNNER_USER}"
 # --- END instance derivation ---
 
 [[ ${EUID} -eq 0 ]] || { echo "Run as root" >&2; exit 1; }
@@ -204,6 +244,26 @@ if ! id "$RUNNER_USER" >/dev/null 2>&1; then
   useradd --system --create-home --home-dir "$RUNNER_HOME" --shell /usr/sbin/nologin "$RUNNER_USER"
 fi
 install -d -m 0755 -o "$RUNNER_USER" -g "$RUNNER_USER" "$RUNNER_HOME"
+
+# SELinux: files under /var are labelled var_t, and systemd's init_t cannot
+# exec a var_t file -- the unit fails 203/EXEC with no AVC logged, the same
+# rule that broke backup-honeypot.service. The runner's own executables
+# (runsvc.sh and everything it spawns) now live here, so the tree has to be
+# labelled bin_t.
+#
+# semanage fcontext, not chcon: chcon is undone by the next restorecon, which
+# would silently break every runner on a relabel.
+if command -v semanage >/dev/null 2>&1; then
+  semanage fcontext -a -t bin_t "${RUNNER_ROOT}(/.*)?" 2>/dev/null || \
+    semanage fcontext -m -t bin_t "${RUNNER_ROOT}(/.*)?" 2>/dev/null || true
+  restorecon -R "$RUNNER_ROOT" 2>/dev/null || true
+fi
+
+# Compatibility symlink so the old /opt path (and the user's recorded HOME)
+# keeps resolving. Only ever create it when nothing real is in the way.
+if [[ ! -e "$RUNNER_COMPAT_LINK" || -L "$RUNNER_COMPAT_LINK" ]]; then
+  ln -sfn "$RUNNER_HOME" "$RUNNER_COMPAT_LINK"
+fi
 
 # #2764: the one deliberate, narrow exception to "no sudo BY DESIGN" above.
 # compose-drift-watch.py needs `docker compose config` AND `docker compose

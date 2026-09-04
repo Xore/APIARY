@@ -45,7 +45,7 @@ x-runtime-defaults: &runtime-defaults
 services:
   elasticsearch:
     <<: *runtime-defaults
-    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.2@sha256:9c1e1afc2bda921b35025e21c72ec6e392266995aa35ad6a47887363592718be
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.3@sha256:f456578fc2a620a8a4f4c21d070fff1f6070345adb2be5e5626b65be72aea350
     container_name: hp-elasticsearch
     restart: unless-stopped
     environment:
@@ -132,7 +132,7 @@ services:
           memory: 12G
   kibana:
     <<: *runtime-defaults
-    image: docker.elastic.co/kibana/kibana:9.5.2@sha256:861d93114b756dd214f6d5c8824f90ac92e07d5b6223fd4a20212f7504eec2ad
+    image: docker.elastic.co/kibana/kibana:9.5.3@sha256:4530cd98c529bc913ae364067f0233ab6cfb9a560644480b365b45f74a18dbf3
     container_name: hp-kibana
     restart: unless-stopped
     environment:
@@ -162,7 +162,7 @@ services:
           memory: 2G
   filebeat:
     <<: *runtime-defaults
-    image: docker.elastic.co/beats/filebeat:9.5.2@sha256:17aafbe925a43919b2eee539b1b0712e19aefd01247d4a1b855c91ca8e1ba2d6
+    image: docker.elastic.co/beats/filebeat:9.5.3@sha256:ea135eb5b97f2f4cbcf519464b922c5f794e6ebc2dd93822d4ac0be74ef0e29f
     container_name: hp-filebeat
     restart: unless-stopped
     user: root
@@ -646,7 +646,7 @@ services:
   # Networkless except for Elasticsearch: it reads two local paths and posts.
   # It never fetches anything, and it never executes what it reads.
   extracted-file-importer:
-    image: docker.io/library/python:3.12-alpine@sha256:d09d15e60962ca365d1cd544a48773bac9d33f2fb1b00f2aa0deec78ade7dc31
+    image: docker.io/library/python:3.12-alpine@sha256:b64631e04e4920160c50fbe8d8df828f7f35f06f425cb44aa09bca53e708a35a
     container_name: hp-extracted-file-importer
     restart: unless-stopped
     profiles: ["file-extract"]
