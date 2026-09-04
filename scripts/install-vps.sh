@@ -59,9 +59,24 @@ with_retry() {
   local max="$1" base="$2"; shift 2
   local attempt=1 rc=0
   while (( attempt <= max )); do
-    if "$@"; then
-      return 0
-    fi
+    # Must be `"$@" && return 0`, NOT `if "$@"; then return 0; fi`. A plain
+    # if/fi with no else that takes neither branch has an exit status of zero
+    # regardless of what the condition actually returned, so the following
+    # `rc=$?` read 0 for a FAILED command -- and on the last attempt this
+    # function then did `return "$rc"`, i.e. returned success for a command
+    # that had just failed max times. Every with_retry call in this script was
+    # therefore incapable of reporting failure.
+    #
+    # This is the same defect #787 found and fixed in install-homeserver.sh,
+    # where it had silently reported success for all 17 stacks while every scp
+    # was genuinely failing. The fix was never ported here; the two scripts'
+    # "identical framework, deliberately not reimplemented differently" claim
+    # was not true. Verified empirically rather than from the spec:
+    #   if false; then :; fi; rc=$?  -> rc=0
+    #   false && return 0;    rc=$?  -> rc=1
+    # `&&` short-circuits without touching $? when the command fails, so the
+    # following `rc=$?` captures the real code.
+    "$@" && return 0
     rc=$?
     if (( attempt == max )); then
       return "$rc"
@@ -545,7 +560,12 @@ step_nic_gro_fix() {
 # checkout secrets/ directory (#2294: this script didn't inherit it, so a
 # --force-rerun-from stage-vps-dir replayed the same deletion locally).
 # ---------------------------------------------------------------------------
-REPO_DIR="/root/apiary-repo"
+# Configurable, matching install-homeserver.sh, whose REPO_DIR comes from its
+# own answers file. #1609 named this exact line as the concrete instance of the
+# two scripts not agreeing on what is configurable: this one hardcoded the path
+# with no config variable at all, while its sibling made it fully settable. The
+# default preserves the existing behaviour for anyone who does not set it.
+REPO_DIR="${REPO_DIR:-/root/apiary-repo}"
 
 step_clone_repo() {
   if [[ -d "$REPO_DIR/.git" ]]; then
