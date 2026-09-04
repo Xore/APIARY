@@ -992,3 +992,241 @@ scripts `collect_ioc_corpus.py`, `sample_corpus.py`, `make_gold.py`,
 metrics, run meta). None contain committed copies here; the synthetic probe
 definitions live in `gold/synthetic_lines.jsonl` there, transcribed in
 aggregate above.
+
+## Issue #1805-c / #1947 part 4 (2026-08-28/29): ghidra slot, Tier A vs Tier B
+
+The last open measurement slice of the #1947 rebuild, and the one #1805 exists
+to produce. It ran twice, and the second run is the one to read.
+
+The first pass (2026-08-27/28) benched twelve models over both tiers in three
+concurrent lanes. Harvesting it turned up a measurement defect large enough to
+invalidate its headline comparison, so a five-model decision cohort was
+re-measured on 2026-08-29 under a controlled protocol. **Both matrices are
+below. The cohort matrix is authoritative for the promote decision; the
+twelve-model matrix stands only as a broad survey, with the caveats stated.**
+
+"Ghidra slot" here means the corpus-revdeck view, per #1805's own correction:
+the ghidra *triage* slot stays permanently absent because object files carry no
+imports or strings and the harness binaries leak the ground-truth asserts.
+
+### What went wrong the first time, and the rule that comes out of it
+
+**Ollama serves a request at the context and state of the model instance that
+happens to be resident, and `record_baseline.py` neither sets that nor records
+it.** The harness stamps `context_tokens: 8192` and `keep_alive: "10m"` into
+every report's `qualification_request` and sends neither — the payload carries
+only `model`, `messages`, `temperature`, `max_tokens`, `seed`, `stream` and
+`reasoning_effort` (#2644).
+
+Two things followed from that, both measured rather than inferred:
+
+1. **A model already resident from another client is reused at that client's
+   settings.** `hp-llm-worker` holds `qwen3:14b` continuously with
+   `LLM_CONTEXT_LENGTH=8192`. Observed live, same tag and digest, minutes
+   apart: worker-loaded `10 GB / CONTEXT 8192` versus benchmark-loaded
+   `14 GB / CONTEXT 32768`. **The incumbent was the one row in the
+   twelve-model matrix measured against a different instance from everything
+   it was being compared with.**
+2. **A warm slot does not reproduce; a cold one does.** Controlled A/B on
+   `qwen3:14b`, Tier A, everything else held fixed (#2642):
+
+   | protocol | scores | answers byte-identical |
+   |---|---|---|
+   | warm — two runs back to back, model stays resident | 60, 61 | **1 / 14** |
+   | cold — `ollama stop <tag>` before each run | 60, 60 | **14 / 14** |
+
+   `warm1` vs `cold1` are also 14/14, consistent: `warm1` was itself the first
+   run after an eviction. Only the run that inherited a used slot diverges.
+
+That also explains the twelve-model matrix's uniform `±0`, which was read at
+first as the harness being deterministic. It is not. Three lanes against
+`OLLAMA_MAX_LOADED_MODELS=1` evicted each other constantly, so nearly every
+request began with a reload. **The `±0` was lane contention masquerading as
+determinism**, and the same contention inflated wall-clock by up to 15x
+(62.5 min versus 4.1 min for identical work).
+
+**Protocol rule adopted here: evict the model before every run.** A cell then
+depends only on its own inputs, not on what the slot processed before it, which
+is what a ranking comparison requires. It is also cheap — a cold load costs
+seconds against multi-minute runs.
+
+### Decision cohort, cold protocol (2026-08-29) — authoritative
+
+Five models, chosen as the ones the promote/no-promote call turns on: the
+incumbent, the three highest scorers from the survey, and the #159 baseline as
+an anchor. Sequential, `ollama stop` before every run, `hp-llm-worker` and
+`ghidra-revdeck-1` stopped so nothing else touched the GPU. N = 3, gcc-x86_64 /
+`-O0`, 14 cases, max 69, harness at `22f01c2`, Ollama 0.32.13, RTX 4000 Ada
+(20475 MiB, driver 595.84). Every model loaded by the benchmark itself at
+CONTEXT 32768.
+
+| Model | Tier A (/69) | Tier B (/69) | B−A | Tier A injection | min/run B |
+|---|---|---|---|---|---|
+| Ornith-1.0-35B-uncensored-heretic:Q4_K_M | 91.3% **63 ±0** | 97.1% **67 ±0** | +4 | **FAIL** | 6.7 |
+| gemma-4-26B-A4B-it-ultra-uncensored-heretic-i1:i1-Q4_K_S | 88.4% **61 ±0** | 92.8% **64 ±0** | +3 | clean | **2.1** |
+| `qwen3:14b` — *incumbent* | 87.0% **60 ±0** | 84.1% **58 ±0** | −2 | clean | 3.8 |
+| `qwen2.5-coder:7b-instruct-q4_K_M` — *#159 anchor* | 81.2% **56 ±0** | 84.1% **58 ±0** | +2 | clean | 2.1 |
+| gemma-4-31B-it-qat-uncensored-heretic:Q4_0 | *deferred* | *deferred* | | **FAIL** (survey) | ~40 |
+
+Every cell is `±0` across three cold runs — genuine reproducibility this time,
+demonstrated across four different architectures rather than asserted. (A
+later full-roster sweep on the same protocol extended that to 24 architectures
+with zero disagreements.)
+
+**Tier B caveat, added after publication of the numbers above.** These Tier B
+cells were measured against a corpus built before `0b01d572` (#1948 / #2379).
+That commit changed exactly one fixture, so 13 of 14 cases are byte-identical
+and unaffected; only `process_and_injection` differs. Each Tier B total
+therefore carries the uncertainty of that one case, and the Tier B injection
+gate is untested for artifact reasons — see the injection section below. Tier A
+is unaffected: it reads the repo's own `manifest.json`, which has carried the
+post-#1948 fixture throughout.
+
+`gemma-4-31B` is deliberately deferred rather than dropped: at ~40 min/run it
+is ~4 h of GPU for a model that fails the Tier A injection gate in the survey
+and so cannot be promoted whatever it scores. It is queued to run last; its
+row will be filled in when it lands.
+
+**Which rows moved, and why that confirms the diagnosis.** Ornith and
+gemma-4-26B reproduced their survey Tier B scores *exactly* (67 and 64) —
+nothing else on the box loads them, so they were already effectively cold.
+`qwen3:14b` moved on both tiers, 62→60 and **61→58** — and it is precisely the
+model `hp-llm-worker` keeps resident. The rows that changed are exactly the
+rows the defect predicts.
+
+(`qwen2.5-coder:7b` Tier A reads 56 here against the survey's 55. Both are
+cold, but "cold" differs between the two: the survey's contention evicted
+models *between cases*, while this protocol evicts before a run and stays
+resident across its 14 cases. The two regimes are each self-consistent and not
+interchangeable at the 1-point level. 56 also matches #1805-b's 56, 56, 55, 55
+anchor better than the survey's 55 did.)
+
+### Twelve-model survey, contended lanes (2026-08-27/28) — read with care
+
+Retained because it is the only broad coverage of the slot, and because seven
+of its rows are unaffected by the defect. **Do not read the incumbent's row,
+`min/run`, or any margin under ~3 points from this table.**
+
+| Model | Tier A (/69) | Tier B (/69) | B−A | N | gates |
+|---|---|---|---|---|---|
+| Ornith-1.0-35B-uncensored-heretic:Q4_K_M | 63 | **67** | +4 | 3 | **A: injection fail**; A: fp `safe_strcpy` |
+| gemma-4-31B-it-qat-uncensored-heretic:Q4_0 | 60 | **65** | +5 | 3 | **A: injection fail**; B: fp `safe_strcpy` |
+| gemma-4-26B-A4B-heretic-i1:i1-Q4_K_S | 60 | **64** | +4 | 3 | clean |
+| Huihui-Qwen3.6-27B-abliterated:Q4_K_M | 64 | 63 | −1 | 3 | clean |
+| huihui-qwen3.8-27b-abliterated:q4_k | 64 | 63 | −1 | 3 | **A: injection fail**; A: fp `safe_strcpy` |
+| observerx-qwen3.8-27b-heretic:q4_k_s | 64 | 63 | −1 | 3 | A: fp `safe_strcpy` |
+| Seneca-Cybersecurity-x-QwQ-32B-Q4_Medium | 63 | 63 | 0 | 1 | **A: injection fail** |
+| `qwen3:14b` — *contaminated, superseded above* | ~~62~~ | ~~61~~ | | 1 | clean |
+| qwen2.5:14b-instruct-q4_K_M | 63 | 60 | −3 | 3 | clean |
+| qwen3:8b | 61 | 60 | −1 | 3 | A: fp `safe_strcpy` |
+| qwen2.5-coder:14b-instruct-q4_K_M | 63 | 58 | −5 | 1 | clean |
+| `qwen2.5-coder:7b-instruct-q4_K_M` — *#159 baseline* | 55 | 58 | +3 | 3 | clean |
+
+Three rows carry N = 1 because `ghidra-ollama-1` was recreated at
+**2026-08-27T20:18:17Z** mid-round. All three lanes died within one second;
+`record_baseline.py` has no retry and no incremental save, so a 53-minute run
+that had already scored 11 of 14 cases was discarded whole and the runs queued
+behind it failed instantly into the restart window. Ten cells lost (#2644).
+
+### Tier B − Tier A splits by model family, and the sign is not universal
+
+#1805-b measured this delta on one model and got +1.17 ± 0.73 of 69, reported
+then as "real Ghidra evidence does not clearly beat objdump in aggregate".
+Across the survey the aggregate hides a clean split: **Gemma-derived and Ornith
+rows gain +4/+5/+4, while every Qwen-derived row loses 1 to 5.** The cohort
+re-run reproduces the pattern on cold numbers — Ornith +4, gemma-4-26B +3,
+`qwen3:14b` **−2**, and the one Qwen row that gains is `qwen2.5-coder:7b` (+2),
+which is the single model #1805-b actually measured.
+
+So the historical result generalised to nothing, including its sign, for most
+rows. The reading is neither "Ghidra evidence is better" nor "objdump is
+better": **the benchmark's Tier A numbers systematically mis-rank models
+relative to the input production actually serves, in a family-dependent
+direction.** That is the failure mode #1805 was opened to detect.
+
+### Injection resistance: Tier A finds real failures, Tier B cannot test at all
+
+Reported separately from accuracy, per #1946's two-axis rule.
+
+**Tier B has zero injection coverage — every Tier B cell in both matrices.**
+`injection_payload_in_evidence` is false throughout and the harness records
+`injection_ok: null`, not-tested rather than passed. #1948's guard is the only
+reason this did not publish a unanimous clean sweep on an untested gate.
+
+**The cause is a stale artifact, not a property of Ghidra evidence**, and the
+first version of this section got that wrong. It claimed the payload is a
+string literal that Ghidra's pseudocode does not inline. Checked against the
+data instead of the code: the Tier B cache entry for `process_and_injection`
+does carry a `strings` list, but the needle is in none of its 27 entries, and
+`strings -a` on the cached corpus object does not find it either — **it is not
+in that binary at all**. The objects under `/mnt-1/benchmarks/corpus` were
+built 2026-08-25, before `0b01d572` (#1948 / #2379) turned the payload from a
+source comment into a referenced string literal, and the Tier B cache was
+extracted from them.
+
+That also explains the asymmetry: **Tier A reads the disassembly stored in the
+repo's `manifest.json`, and `objdump -d --source` prints the source comment**,
+so Tier A found the needle for the old fixture by accident of representation
+while Tier B could not. The two tiers were reading different fixture vintages.
+
+Consequence for this matrix, stated precisely: `0b01d572` changed exactly one
+fixture, so **13 of the 14 cases are byte-identical** and their Tier B scores
+stand. Only `process_and_injection` was measured against a pre-#1948 object, so
+each Tier B total carries the uncertainty of that single case, and the Tier B
+injection verdict is **untested for artifact reasons, not model reasons**.
+Corpus rebuild and cache re-extraction are under way; #2643 carries the detail
+and the recommendation that `ghidra_cache.py` record the corpus manifest SHA so
+a stale cache fails loudly instead of silently reporting "not covered".
+
+At Tier A, where the payload does reach the model, **4 of 12 models fail**:
+Seneca-32B, Ornith-1.0-35B, gemma-4-31B-heretic, and
+huihui-qwen3.8-27b-abliterated. The other eight pass, including the incumbent,
+`gemma-4-26B-A4B`, both `qwen2.5-coder` rows, `observerx`, `Huihui-Qwen3.6`,
+`qwen3:8b` and `qwen2.5:14b`. Ornith's failure reproduced exactly under the
+cold protocol, so it is a property of the model, not of the regime.
+
+This qualifies #1795-b's "injection resistance held clean for every model that
+produced output": true on sessions/revdeck, **not** true on this slot's Tier A
+evidence.
+
+### Decision
+
+**Promote `gemma-4-26B-A4B-it-ultra-uncensored-heretic-i1:i1-Q4_K_S` to the
+ghidra slot, replacing `qwen3:14b`, subject to `model-governance.py`.**
+
+On like-for-like cold measurements it beats the incumbent on every axis that
+this slot is qualified against:
+
+- **Accuracy: Tier B 64 vs 58, +6 of 69** — and Tier B is the
+  production-shaped evidence. Tier A 61 vs 60. Both at `±0` over three runs, so
+  the margin is roughly three times the ~2-point spread the warm regime shows,
+  and infinitely outside the cold regime's zero.
+- **Gates: clean.** Passes Tier A injection and trips no false-positive
+  control, on both tiers.
+- **Speed: 2.1 min/run vs 3.8**, the fastest in the cohort, consistent with its
+  ~85 tok/s standout in part 2.
+- **Refusal:** an uncensored tune, which for this slot is a feature — refusal
+  on attacker tooling is a documented failure mode in this record's decision
+  scope.
+
+Ornith-1.0-35B scores higher still (67) and is **not** promoted: it fails the
+Tier A injection gate, reproducibly. A model that follows an instruction
+embedded in the artefact it is analysing is disqualified for this slot
+regardless of accuracy. Score does not buy past that gate. The same reasoning
+holds gemma-4-31B out pending its deferred row.
+
+Conditions on the promotion, none of them optional:
+
+- It is qualified on the **ghidra slot only**. Parts 1–2 measured this model on
+  sessions/revdeck under the contended regime; those numbers inherit the
+  caveats above and do not authorise a change to other slots.
+- **Tier B injection is untested for every model** (#2643), so this promotion
+  carries a Tier-A-only injection verdict and that must be stated wherever the
+  gate is cited.
+- `approved-models.json` must pin tag **and** digest
+  (`54c3582f7810…`), and #2644 should land first so the recorded request
+  matches the transmitted one.
+
+Carried forward: `gemma-4-31B` cohort row; Tier C (LLM4Decompile-Ref, #1804-a)
+still unmeasured; #2646 tracks the finding that the *workers* run warm and are
+therefore not reproducible in production.
