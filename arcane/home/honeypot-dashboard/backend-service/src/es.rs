@@ -345,6 +345,47 @@ impl Es {
         Ok(())
     }
 
+    /// Builds `delete_by_query_except`'s "everything except these ids"
+    /// query as **one** `ids` clause holding every kept id in its `values`
+    /// array, rather than one `must_not` clause per id (#2899).
+    ///
+    /// Some callers build large `keep` lists — correlations.rs's flow sweep
+    /// caps at 2,000 (`FLOW_BUCKET_CAP`), its credential-reuse sweep at 800
+    /// (`CRED_PAIR_CAP * 4`), correlator.rs's cluster sweep at 1,000 (four
+    /// `terms` aggs of `size: 250`) — and correlator.rs's campaign sweep
+    /// derives its ids from `ip_prefix` aggregations that carry no `size`
+    /// key at all, so its keep list is unbounded by construction. The
+    /// per-id form made the query's own bool clause count scale with
+    /// `keep.len()`, independent of how many documents actually exist.
+    ///
+    /// What that risks, measured rather than assumed.
+    /// `indices.query.bool.max_clause_count` reports **4096** as its default
+    /// and is untuned on the deployed cluster (`persistent` and `transient`
+    /// both empty) — but 4096 is not the number that gets enforced. The node
+    /// derives the limit it actually applies from its own heap. Reproduced
+    /// on Elasticsearch 9.5.1 / Lucene 10.5.0, same version the deployment
+    /// runs, 2026-09-03:
+    ///
+    /// | node heap | setting reports | actually enforced | 5,000 clauses | 20,000 clauses |
+    /// |---|---|---|---|---|
+    /// | 1 GiB | 4096 | 3449 | rejected, 0.9 s | — |
+    /// | 4 GiB | 4096 | 13797 | accepted, 1.4 s | rejected, 11.2 s (688 KB body) |
+    ///
+    /// So the wall is a property of the node, not a constant a caller can
+    /// reason about, and it moves under the deployment: the same 5,000-clause
+    /// probe that fails on a small node succeeded against the production
+    /// cluster (HTTP 200, 2.3 s), while a 20,000-clause probe there never
+    /// returned at all and coincided with that node going hard-down (#2914).
+    /// Crossing it is a `query_shard_exception` — which aborts the whole
+    /// resync sweep, after the node has already spent real time parsing the
+    /// request. A single `ids` clause holds an arbitrary number of values
+    /// without adding bool clauses, so the growth disappears regardless of
+    /// how large any caller's keep list gets, and the primitive stops
+    /// depending on how much heap the cluster happens to have.
+    fn except_query(keep: &[String]) -> Value {
+        serde_json::json!({"query": {"bool": {"must_not": [{"ids": {"values": keep}}]}}})
+    }
+
     /// Deletes every document in `index` whose id is not in `keep` — a
     /// "delete-by-query minus explicit ids" full-resync primitive for a
     /// worker that recomputes its whole output set every cycle and is the
@@ -356,11 +397,7 @@ impl Es {
     /// aborting the sweep over. A missing index (404, first run) is not an
     /// error, same idempotent posture as `delete_doc`.
     pub async fn delete_by_query_except(&self, index: &str, keep: &[String]) -> anyhow::Result<()> {
-        let must_not: Vec<Value> = keep
-            .iter()
-            .map(|id| serde_json::json!({"ids": {"values": [id]}}))
-            .collect();
-        let body = serde_json::json!({"query": {"bool": {"must_not": must_not}}});
+        let body = Self::except_query(keep);
         let response = self
             .client
             .delete_by_query(elasticsearch::DeleteByQueryParts::Index(&[index]))
@@ -619,5 +656,79 @@ mod tests {
         assert_eq!(should[2]["bool"]["filter"][0]["term"]["event.sensor"], "rdp-honeypot");
         assert_eq!(should[2]["bool"]["filter"][1]["exists"]["field"], "honeypot.username");
         assert_eq!(should[3]["exists"]["field"], "honeypot.canonical_user");
+    }
+
+    // -- #2899: delete_by_query_except must not scale bool clause count
+    // with keep.len() --
+
+    /// The clause ceiling this test holds the construction to. 4096 is what
+    /// `indices.query.bool.max_clause_count` reports as its default on the
+    /// deployed cluster, untuned -- not 1024, which is what an earlier draft
+    /// of this fix asserted. It is a *reference point*, not the enforced
+    /// limit: the enforced value is derived from node heap and was measured
+    /// at 3449 (1 GiB heap) and 13797 (4 GiB heap) on Elasticsearch 9.5.1,
+    /// so no single number is the wall. See `Es::except_query` for the
+    /// measurements. What matters is the contract below -- clause count
+    /// independent of `keep.len()` -- which holds at any of them.
+    const REPORTED_MAX_CLAUSE_COUNT: usize = 4096;
+
+    /// The largest keep list any *bounded* caller can produce today:
+    /// correlations.rs's `FLOW_BUCKET_CAP`. correlator.rs's campaign sweep
+    /// has no cap at all.
+    const LARGEST_BOUNDED_CALLER_KEEP: usize = 2_000;
+
+    fn bool_clause_count(body: &Value) -> usize {
+        body["query"]["bool"]["must_not"].as_array().map(|clauses| clauses.len()).unwrap_or(0)
+    }
+
+    /// The actual contract, and the one assertion that fails against the
+    /// pre-fix construction at every size: the clause count is O(1) in
+    /// `keep.len()`. Stated against the largest bounded caller's keep list
+    /// (correlations.rs's flow sweep, 2,000 ids) so a regression shows up
+    /// at a size a real caller reaches, not only past the cluster ceiling.
+    #[test]
+    fn clause_count_does_not_scale_with_keep_len() {
+        let keep: Vec<String> = (0..LARGEST_BOUNDED_CALLER_KEEP).map(|i| format!("id-{i}")).collect();
+        let body = Es::except_query(&keep);
+        assert_eq!(
+            bool_clause_count(&body),
+            1,
+            "built {} bool clauses for {} kept ids — the query must stay one `ids` clause regardless of keep.len()",
+            bool_clause_count(&body),
+            keep.len()
+        );
+    }
+
+    /// The regression case the correlator's real callers can actually
+    /// produce (#2047/#2238): the campaign path's `ip_prefix` aggregation
+    /// carries no `size` key, so its keep list is unbounded. At 8,192 ids a
+    /// must_not-per-id query builds 8,192 bool clauses — past every enforced
+    /// limit measured on 9.5.1 (3449 at 1 GiB heap, 13797 at 4 GiB is the
+    /// only one it stays under) — and this assertion fails against that
+    /// construction, which is what this test exists to catch.
+    #[test]
+    fn stays_under_the_clause_ceiling_past_the_wall() {
+        let keep: Vec<String> = (0..(REPORTED_MAX_CLAUSE_COUNT * 2)).map(|i| format!("id-{i}")).collect();
+        let body = Es::except_query(&keep);
+        assert!(
+            bool_clause_count(&body) <= REPORTED_MAX_CLAUSE_COUNT,
+            "built {} bool clauses for {} kept ids — must_not-per-id would run past the cluster's clause ceiling",
+            bool_clause_count(&body),
+            keep.len()
+        );
+    }
+
+    #[test]
+    fn keep_list_survives_intact_in_the_single_ids_clause() {
+        let keep = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let body = Es::except_query(&keep);
+        assert_eq!(bool_clause_count(&body), 1, "expected exactly one must_not clause regardless of keep.len()");
+        assert_eq!(body["query"]["bool"]["must_not"][0]["ids"]["values"], serde_json::json!(["a", "b", "c"]));
+    }
+
+    #[test]
+    fn empty_keep_list_still_produces_a_valid_query() {
+        let body = Es::except_query(&[]);
+        assert_eq!(body["query"]["bool"]["must_not"][0]["ids"]["values"], serde_json::json!([]));
     }
 }
