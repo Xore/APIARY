@@ -14,7 +14,23 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from polarity import forbidden_hit  # noqa: E402  (path set above so the sibling module resolves)
+
 CORPUS_DIR = Path(__file__).resolve().parent
+
+# Kept in sync by hand with build_corpus.py's TOOLCHAINS/OPT_LEVELS (#2038).
+# Not imported directly: build_corpus.py chdir()s to "/" and creates
+# /work/corpus as import-time side effects -- assumptions of the build
+# container this validator, which runs in ordinary CI with nothing installed
+# beyond stdlib Python, must not inherit.
+EXPECTED_TOOLCHAINS = {
+    "gcc-x86_64", "clang-x86_64", "gcc-aarch64", "clang-aarch64",
+    "gcc-i686", "clang-i686", "gcc-mipsel", "clang-mipsel",
+    "gcc-armhf", "clang-armhf",
+}
+EXPECTED_OPT_LEVELS = {"-O0", "-O1", "-O2", "-O3", "-Os"}
+
 ALLOWED_SPLITS = {"train", "validation", "test"}
 REQUIRED_BUILD_KEYS = {
     "case_source", "split", "toolchain", "arch", "compiler",
@@ -128,6 +144,23 @@ def check_manifest() -> dict:
     if orphaned:
         fail(f"src/*.c files with no manifest.json build entries: {sorted(orphaned)}")
 
+    # #2038 gap 3: build_corpus.py builds every source against the full
+    # (toolchain x opt_level) grid uniformly, no per-source exceptions
+    # (confirmed against its own `for toolchain in TOOLCHAINS: for opt in
+    # OPT_LEVELS:` loop). A partially regenerated manifest -- a toolchain
+    # dropped mid-run -- still passed before this check as long as every
+    # source had >=1 build; this catches "silently fewer variants" per source.
+    expected_combo_count = len(EXPECTED_TOOLCHAINS) * len(EXPECTED_OPT_LEVELS)
+    combos_by_source: dict[str, set] = {}
+    for source, toolchain, opt_level in seen_combos:
+        combos_by_source.setdefault(source, set()).add((toolchain, opt_level))
+    full_grid = {(tc, opt) for tc in EXPECTED_TOOLCHAINS for opt in EXPECTED_OPT_LEVELS}
+    for source in sorted(covered):
+        missing_combos = full_grid - combos_by_source.get(source, set())
+        if missing_combos:
+            fail(f"{source}: missing {len(missing_combos)} of {expected_combo_count} "
+                 f"expected (toolchain, opt_level) combos: {sorted(missing_combos)}")
+
     return manifest
 
 
@@ -144,6 +177,16 @@ def check_rubric_and_harness_coverage(manifest: dict) -> None:
     missing_rubric = case_stems - rubric_cases
     if missing_rubric:
         fail(f"cases in manifest.json with no rev_cases_v2_rubric.json entry: {sorted(missing_rubric)}")
+
+    # #2038 gap 2: the reverse direction was unchecked. A rubric entry whose
+    # fixture was deleted or never built passes every existing check, and
+    # record_baseline.py iterates *builds* -- so the case is simply never
+    # scored. total_max_score drops, percentages stay self-consistent, and
+    # nothing flags that the exam lost a question.
+    orphaned_rubric = rubric_cases - case_stems
+    if orphaned_rubric:
+        fail(f"rev_cases_v2_rubric.json entries with no matching manifest.json build: "
+             f"{sorted(orphaned_rubric)}")
 
     harness_dir = CORPUS_DIR / "harness"
     covered_by_harness = {p.stem[: -len("_harness")] for p in harness_dir.glob("*_harness.c")}
@@ -180,10 +223,45 @@ def check_scoring_contract() -> None:
              f"does not match the actual case count ({len(actual_cases)})")
 
 
+def check_required_forbidden_overlap() -> None:
+    """#2038 gap 1: a required alternative that also trips `forbidden` means
+    the correct answer, phrased the natural way, can score worse than a vague
+    one -- the exact defect #2037 found by hand in `safe_strcpy`.
+
+    Not a naive substring check: `record_baseline.py` scores `forbidden`
+    through `polarity.forbidden_hit()` (negation- and identifier-aware since
+    #2393/#2517), so a required alternative like `"not vulnerable"` is *not*
+    a real collision against forbidden `"vulnerable"` -- the runtime scorer
+    never fires on it. This check asks the same question the runtime scorer
+    answers: would stating this required alternative, verbatim, on its own,
+    trip one of this case's own forbidden terms? Reusing forbidden_hit
+    directly means this check can never disagree with what actually happens
+    at scoring time (and never regresses to the false-positive #2517 fixed).
+    """
+    rubric_path = CORPUS_DIR / "rev_cases_v2_rubric.json"
+    try:
+        rubric = json.loads(rubric_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        fail(f"rev_cases_v2_rubric.json does not parse: {exc}")
+        return
+
+    for case_name, case in rubric.get("cases", {}).items():
+        forbidden = case.get("forbidden") or []
+        if not forbidden:
+            continue
+        for group in case.get("required_groups", []):
+            for alt in group:
+                if forbidden_hit(alt, forbidden):
+                    fail(f"{case_name}: required alternative {alt!r} trips this case's own "
+                         f"forbidden list {forbidden!r} -- a correct answer phrased this way "
+                         f"would lose the forbidden gate it should never have touched")
+
+
 def main() -> int:
     manifest = check_manifest()
     check_source_safety()
     check_scoring_contract()
+    check_required_forbidden_overlap()
     if manifest:
         check_rubric_and_harness_coverage(manifest)
 
