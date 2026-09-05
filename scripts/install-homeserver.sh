@@ -2628,22 +2628,20 @@ step_sandbox_checksum_verify() {
 # every time.
 ensure_nvram_vars() {
   local target="$1"
-  [[ -f "$target" ]] && return 0
-  # The template path and the QEMU file owner are both distro-dependent, and
+  # The vars template and the QEMU file owner are both distro-dependent, and
   # both were hardcoded to Debian's until #1609's Rocky rebuild ran this for
   # the first time on EL:
   #   qemu-img: Could not open '/usr/share/OVMF/OVMF_VARS_4M.ms.fd'
   #   chown: invalid user: 'libvirt-qemu:kvm'
-  # Resolved through the same helper kvm_manage.sh uses, so the installer and
-  # a hand-run kvm_manage.sh cannot disagree about which firmware a domain got.
+  # It also produced a qcow2, which EL's libvirt then refuses to boot from
+  # ("conversion of the nvram template to another target format is not
+  # supported") -- so the shared helper makes a raw copy instead, and
+  # sandbox_define_domain rewrites the XML to match. Same helper kvm_manage.sh
+  # uses, so the installer and a hand-run kvm_manage.sh cannot disagree about
+  # which firmware a domain got.
   # shellcheck source=/dev/null
   . "$REPO_DIR/sandbox/windows/setup/host-paths.sh"
-  local template owner
-  template="$(sandbox_ovmf_vars_template)" || return 1
-  owner="$(sandbox_qemu_owner)" || return 1
-  mkdir -p "$(dirname "$target")"
-  qemu-img convert -f raw -O qcow2 "$template" "$target"
-  chown "$owner" "$target"
+  sandbox_ensure_nvram "$(sandbox_nvram_raw_path "$target")"
 }
 
 step_ghosts_network_setup() {
@@ -2681,25 +2679,16 @@ step_ghosts_vm_start() {
     mkdir -p "$(dirname "$disk")"
     qemu-img create -f qcow2 -F qcow2 -b "$golden" "$disk"
   fi
-  ensure_nvram_vars /var/lib/libvirt/qemu/nvram/win11-ghosts_VARS.qcow2
-  # Defines through the same path-rendering helper kvm_manage.sh uses -- this
-  # step calls `virsh define` directly rather than going through
-  # kvm_manage.sh, so on EL it failed with "Cannot check QEMU binary
-  # /usr/bin/qemu-system-x86_64" while the other two domains, which do go
-  # through kvm_manage.sh, defined fine.
+  # Defines through the same helper kvm_manage.sh uses -- this step calls
+  # libvirt directly rather than going through kvm_manage.sh, so on EL it
+  # failed twice over: "Cannot check QEMU binary /usr/bin/qemu-system-x86_64"
+  # at define, then "conversion of the nvram template to another target format
+  # is not supported" at start.
   # shellcheck source=/dev/null
   . "$REPO_DIR/sandbox/windows/setup/host-paths.sh"
-  if ! virsh list --all --name | grep -qx win11-ghosts; then
-    local rendered
-    rendered="$(mktemp /tmp/win11-ghosts-domain.XXXXXX.xml)"
-    if sandbox_render_domain_xml "$REPO_DIR/sandbox/ghosts/win11-ghosts-kvm.xml" > "$rendered"; then
-      virsh define "$rendered"
-      rm -f "$rendered"
-    else
-      rm -f "$rendered"
-      return 1
-    fi
-  fi
+  virsh list --all --name | grep -qx win11-ghosts \
+    || sandbox_define_domain "$REPO_DIR/sandbox/ghosts/win11-ghosts-kvm.xml" \
+    || return 1
   virsh domstate win11-ghosts | grep -q running || virsh start win11-ghosts
 }
 

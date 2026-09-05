@@ -194,20 +194,13 @@ create_vm() {
         log "WARNING: $VM_XML does not reference $VM_DISK — the domain will boot the wrong disk."
     fi
     log "Defining VM in libvirt..."
-    # The XMLs name Debian's QEMU/OVMF paths literally, which do not exist on
-    # EL -- `virsh define` failed there with "Cannot check QEMU binary
-    # /usr/bin/qemu-system-x86_64" (#1609). host-paths.sh rewrites those three
-    # paths to whatever this host actually has, and returns the file unchanged
-    # on a host that has the literal ones.
-    local rendered
-    rendered="$(mktemp "/tmp/${VM_NAME}-domain.XXXXXX.xml")"
-    if sandbox_render_domain_xml "$VM_XML" > "$rendered"; then
-        virsh define "$rendered"
-        rm -f "$rendered"
-    else
-        rm -f "$rendered"
-        die "could not resolve this host's QEMU/OVMF paths -- see the message above"
-    fi
+    # Through host-paths.sh rather than a bare `virsh define`: the XMLs name
+    # Debian's QEMU/OVMF paths literally and ask libvirt to build the nvram as
+    # qcow2 from a raw template, neither of which works on EL (#1609). That
+    # helper rewrites the paths to this host's, creates the domain's nvram from
+    # the enrolled-keys template, and defines the result.
+    sandbox_define_domain "$VM_XML" \
+        || die "could not define $VM_NAME -- see the message above"
     log "VM '$VM_NAME' defined. Run: $0 start"
 }
 
