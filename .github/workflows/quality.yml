@@ -1406,6 +1406,10 @@ jobs:
                 analysis/ghidra/benchmarks/corpus/ci_verify.sh
               '
 
+          - name: Container restart watchdog namespace escalation (#2907)
+            home: true
+            run: python3 scripts/tests/test_container_restart_watchdog.py
+
           - name: Validate home and VPS Compose
             home: true
             run: |
