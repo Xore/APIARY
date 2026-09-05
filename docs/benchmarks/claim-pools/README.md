@@ -17,7 +17,7 @@ was computed against is unreadable one round later.
 
 | | |
 |---|---|
-| pool version | `02c9e4ccc5677a58` |
+| pool version | `1229beafd8e8d9ed` (migrated from `02c9e4ccc5677a58` — #2031: `pool_version` now folds `made_by` into the hash, not only `claim_id:verdict`; content unchanged, see `meta.pool_version_migration` in the pool file) |
 | claims | 382 |
 | scored models | `qwen2.5-coder:7b-instruct-q4_K_M`, `qwen3:14b` |
 | adjudicator | `qwen2.5:7b-instruct-q4_K_M` (not a contestant) |
