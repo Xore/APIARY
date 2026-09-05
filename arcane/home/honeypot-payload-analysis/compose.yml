@@ -72,6 +72,35 @@ services:
     # to yara-scanner right below and to autoheal/services-adapter in
     # earlier #258 splits.
     network_mode: none
+    # #2825 class A: runs as uid 0; every payload root it hashes and
+    # hard-links (dionaea-lib's binaries/bistreams, cowrie's downloads,
+    # dashboard-state) is owned by a different UID with no "other" access.
+    # Measured, not assumed: cap_drop: ALL with no cap_add couldn't even
+    # `ls` the dionaea-lib binaries directory ("Permission denied");
+    # DAC_OVERRIDE alone fixed the read, the state-dir write, and a real
+    # hard-link against an existing dionaea capture -- no FOWNER needed,
+    # correcting this entry's own prior "possibly FOWNER" guess.
+    #
+    # Then verified behaviourally rather than by proxy: a full pass of the
+    # real `python3 /app/dedupe-payloads.py --once`, on this image, under
+    # exactly these capabilities, over a tree reproducing the real ownership
+    # shape (payload roots owned 2000/65534/1000, captures mode 0600, an
+    # over-retention YYYY-MM-DD bistreams directory):
+    #
+    #   cap_drop: ALL, no cap_add  -> PermissionError on
+    #                                 /payloads/dionaea/bistreams, pass aborts
+    #   cap_drop: ALL + DAC_OVERRIDE ->
+    #     {"bistreams_prune": {"directories_removed": 1, "bytes_removed": 8192}}
+    #     {"paths_examined": 2, "files_hashed": 2, "duplicates_linked": 1,
+    #      "bytes_reclaimed": 65536, "errors": []}
+    #
+    # i.e. prune, hash, and the hard-link path all complete, and the linked
+    # captures keep their 2000:2000 ownership and 0600 mode. This is the
+    # production command completing, not a `touch` standing in for it.
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
     deploy:
       resources:
         limits:

@@ -94,6 +94,21 @@ services:
     networks: [canarytokens_net]
     security_opt:
       - no-new-privileges:true
+    # #2825 class B: the official redis entrypoint starts as root, chowns
+    # /data to the redis user and setpriv's down to it -- needs CHOWN,
+    # SETUID, SETGID to do that. Measured, not assumed, and the tracked
+    # gap this replaces under-stated it: against the real volume, CHOWN+
+    # SETUID+SETGID alone still failed ("find: ./appendonlydir: Permission
+    # denied") on the existing 700-mode appendonlydir; only adding
+    # DAC_OVERRIDE alongside them let the real container start clean and
+    # load the existing AOF/RDB data.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
     deploy:
       resources:
         limits:
@@ -175,6 +190,15 @@ services:
     networks: [canarytokens_net]
     security_opt:
       - no-new-privileges:true
+    # #2825 class A: runs as uid 0 (image sets no USER); /logs is owned
+    # 65534:65534 with no "other" write bit, /uploads is root:root so
+    # owner-match already covers it. Measured, not assumed: cap_drop: ALL
+    # with no cap_add failed a plain write to the real /logs mount
+    # ("Permission denied"); DAC_OVERRIDE alone fixed it.
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
     deploy:
       resources:
         limits:
@@ -242,6 +266,24 @@ services:
     networks: [canarytokens_net]
     security_opt:
       - no-new-privileges:true
+    # #2825 class A: same shape as canarytokens-frontend above -- uid 0,
+    # same image/entrypoint pattern, /logs owned 65534:65534 with no
+    # "other" write bit.
+    #
+    # Verified behaviourally against the live deployment (2026-09-04, ~8h
+    # after the redeploy, RestartCount 0), which is what this comment used
+    # to owe: inside the running container the effective set is exactly
+    # cap_drop ALL + CAP_DAC_OVERRIDE, `id` reports uid 0, /logs is
+    # nobody:nogroup mode 0755 -- so a write by root is a DAC_OVERRIDE
+    # decision and nothing else -- and a create/read/unlink under /logs
+    # succeeds. switchboard.log is being appended to live (340 KB, mtime
+    # within the hour), and GET / through the published port answers 200
+    # while the twisted access log records real inbound requests. The
+    # frontend container was probed the same way, with the same result.
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
     deploy:
       resources:
         limits:
