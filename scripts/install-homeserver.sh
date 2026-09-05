@@ -2620,8 +2620,21 @@ step_sandbox_checksum_verify() {
 ensure_nvram_vars() {
   local target="$1"
   [[ -f "$target" ]] && return 0
-  qemu-img convert -f raw -O qcow2 /usr/share/OVMF/OVMF_VARS_4M.ms.fd "$target"
-  chown libvirt-qemu:kvm "$target"
+  # The template path and the QEMU file owner are both distro-dependent, and
+  # both were hardcoded to Debian's until #1609's Rocky rebuild ran this for
+  # the first time on EL:
+  #   qemu-img: Could not open '/usr/share/OVMF/OVMF_VARS_4M.ms.fd'
+  #   chown: invalid user: 'libvirt-qemu:kvm'
+  # Resolved through the same helper kvm_manage.sh uses, so the installer and
+  # a hand-run kvm_manage.sh cannot disagree about which firmware a domain got.
+  # shellcheck source=/dev/null
+  . "$REPO_DIR/sandbox/windows/setup/host-paths.sh"
+  local template owner
+  template="$(sandbox_ovmf_vars_template)" || return 1
+  owner="$(sandbox_qemu_owner)" || return 1
+  mkdir -p "$(dirname "$target")"
+  qemu-img convert -f raw -O qcow2 "$template" "$target"
+  chown "$owner" "$target"
 }
 
 step_ghosts_network_setup() {
