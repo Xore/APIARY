@@ -1491,6 +1491,10 @@ jobs:
             home: true
             run: python3 scripts/tests/test_technitium_install.py
 
+          - name: Arcane sync drift report exit-code contract (#2858)
+            home: true
+            run: python3 scripts/tests/test_arcane_sync_drift_report.py
+
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
