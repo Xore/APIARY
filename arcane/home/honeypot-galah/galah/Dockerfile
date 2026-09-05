@@ -39,6 +39,16 @@
 # (confirmed live: 15.1s load_duration alone for qwen2.5:7b-instruct-q4_K_M
 # after its default 5-minute idle unload). See that patch's own docstring.
 #
+# json_log_rotation_patch.py DOES patch source (#2892): event_log.json had
+# neither half of the #120 contract -- internal/logger/logger.go's New()
+# os.OpenFile()s it once and hands the raw *os.File straight to cblog's
+# EventLogger.SetOutput() with no size check and no rotation flag anywhere
+# on galah's CLI. Same shape as dionaea/mailoney/conpot's own source
+# patches: a close/rename/reopen writer inserted at build time, this one
+# wrapping the file handle in a small io.Writer since Go has no
+# string-replace-a-method-body shape as convenient as those three Python
+# targets. See that patch's own docstring.
+#
 # LLM_PROVIDER/LLM_MODEL/LLM_SERVER_URL are set via environment (they carry
 # `env:` tags in internal/app/args.go); everything else needs an explicit
 # CLI flag below since ConfigFile/EventLogFile/CacheDBFile/RulesConfigFile
@@ -68,6 +78,8 @@ RUN git clone https://github.com/0x4d31/galah /build \
  && git checkout "$GALAH_REF"
 COPY timeout_patch.py /tmp/timeout_patch.py
 RUN python3 /tmp/timeout_patch.py
+COPY json_log_rotation_patch.py /tmp/json_log_rotation_patch.py
+RUN python3 /tmp/json_log_rotation_patch.py
 RUN go mod download
 RUN CGO_ENABLED=1 GOOS=linux go build -trimpath \
     -ldflags "-s -w -X main.version=$GALAH_REF" \

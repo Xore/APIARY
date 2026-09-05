@@ -801,6 +801,16 @@ jobs:
               # close/rename/reopen rotation actually fires.
               python arcane/home/honeypot-conpot/conpot/tests/test_json_log_rotation_patch.py
 
+          - name: Galah JSON log rotation patch (#2892)
+            home: true
+            run: |
+              # Same shape as the conpot row above, but the target is Go
+              # rather than Python: the suite extracts the patch's added
+              # rotatingWriter type into a standalone Go program and
+              # `go run`s it, confirming the close/rename/reopen rotation
+              # actually fires -- skips (not fails) if `go` isn't on PATH.
+              python arcane/home/honeypot-galah/galah/tests/test_json_log_rotation_patch.py
+
           - name: HellPot X-Forwarded-For trust patch (#1876)
             home: true
             run: |
