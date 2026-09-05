@@ -758,8 +758,17 @@ jobs:
     #
     # Unflagged rows stay on ubuntu-latest: the inert "Set up Node for the
     # dashboard OIDC suites" row (a matrix can't inject a use-step -- its
-    # node arrives from the runner image either way), and nothing else --
-    # every remaining row is flagged.
+    # node arrives from the runner image either way), and the
+    # "Sandbox shell tests (#2268, #2253)" row -- that one is eligible
+    # under the criterion above (toolchain-only: bash, coreutils, a
+    # mktemp workdir) but is deliberately kept off the metal anyway,
+    # because it drives guest-runner.sh's tail through a PATH-stubbed
+    # `systemctl poweroff` and run_pending.sh's flock path. Both are
+    # neutralised by the stubs and by WINDOWS_SANDBOX_* redirection into
+    # the temp dir, but a disposable GitHub-hosted VM is the right blast
+    # radius for a suite whose production form powers a machine off and
+    # takes the shared KVM detonation lock. Nothing else -- every
+    # remaining row is flagged.
     name: ${{ matrix.name }}${{ matrix.home == true && needs.ci-target.outputs.homeserver != 'true' && ' (GitHub-hosted)' || '' }}
     needs: [ci-target]
     runs-on: ${{ matrix.home == true && needs.ci-target.outputs.homeserver == 'true' && fromJSON('["self-hosted", "linux", "x64", "honeypot-ci"]') || fromJSON('["ubuntu-latest"]') }}
@@ -929,6 +938,29 @@ jobs:
           # that also names its real home (or carries an inline waiver).
           - name: Docs cite moved trees by their real home (#2352)
             run: python scripts/check-doc-stale-paths.py
+
+          # #2962: the orphaned-script sweep (#1609 Phase 6) found these two
+          # regression tests describe real coverage in their own headers
+          # (guest-runner.sh's post-detonation poweroff-on-artifact-failure
+          # path, #2268; run_pending.sh's stale-claim reconciliation, #2253)
+          # but were never referenced by name, glob, or doc anywhere in the
+          # tree -- unlike analysis/github/tests/*.sh, nothing ran them.
+          # Neither needs a hypervisor or network (both stub the
+          # orchestrator/guest side per their own headers), so plain
+          # ubuntu-latest is enough -- not the self-hosted KVM host
+          # guest-runner.sh and run_pending.sh actually run on in
+          # production. Fixed here as part of wiring them in:
+          # run_pending.sh's ${VAR:-default} treated the stale-claims test's
+          # explicit `export WINDOWS_SANDBOX_KVM_SHARED_LOCK=""` (meant to
+          # disable the shared lock, per the script's own "Empty disables
+          # it" comment) the same as unset, so the never-run test would
+          # have flocked the real production lock path the first time it
+          # ran anywhere with permission to.
+          - name: Sandbox shell tests (#2268, #2253)
+            run: |
+              for t in sandbox/windows/tests/*.sh; do
+                echo "=== $t ==="; bash "$t" || exit 1
+              done
 
           # #2456: vps/zeek and dev/sensing-lab build the same parser set on
           # purpose -- the lab's measurements are only evidence for production

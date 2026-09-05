@@ -26,7 +26,14 @@ lock_file=${WINDOWS_SANDBOX_LOCK:-/run/lock/honeypot-windows-sandbox-worker.lock
 # across BOTH pipelines, not just within this one. Held only around the
 # actual detonation call below, not the whole drain loop, so an idle worker
 # never blocks the other pipeline. Empty disables it.
-kvm_lock_file=${WINDOWS_SANDBOX_KVM_SHARED_LOCK:-/run/lock/honeypot-kvm-detonation.lock}
+#
+# #2962: ${VAR:-default} treats an explicitly-empty override the same as
+# unset, so `export WINDOWS_SANDBOX_KVM_SHARED_LOCK=""` (exactly what
+# tests/test_run_pending_stale_claims.sh does, to stay hypervisor-free) fell
+# through to the real production lock path instead of disabling it -- the
+# comment above already documented "empty disables it" as the intent.
+# ${VAR-default} (no colon) only substitutes when VAR is truly unset.
+kvm_lock_file=${WINDOWS_SANDBOX_KVM_SHARED_LOCK-/run/lock/honeypot-kvm-detonation.lock}
 
 # The path unit fires on every spool change, so several invocations can race
 # during a burst. Only one may talk to the guest: a second concurrent
