@@ -7,18 +7,24 @@ the bounded, non-executing decoder and two correlators phase 2 asks for
 ("Decode and correlate before LLM analysis"), the deterministic
 criticality rules phase 3 asks for ("Escalate independently of an LLM
 when combinations cross trust boundaries"), and (phase 5) a worker that
-wires all of the above against real Elasticsearch data plus the dashboard
-page (`dashboard/agent_campaigns.go`, route `/agent-campaigns`) that
-renders its output — all proven against that one corpus rather than
-hand-built fixtures alone. The prerequisite research (mapping the
-campaign to APIARY's actual trust boundaries) is
+wires all of the above against real Elasticsearch data plus the
+`/agent-campaigns` route (`backend-service`'s Rust `src/agent_intrusion.rs`
+as the writer, `stores.rs`'s generic index-store passthrough as the
+reader — the Go dashboard's `dashboard/agent_campaigns.go` was the
+original consumer and is retired) that renders its output — all proven
+against that one corpus rather than hand-built fixtures alone. The
+prerequisite research (mapping the campaign to APIARY's actual trust
+boundaries) is
 [`docs/agent-intrusion-threat-model.md`](../../docs/agent-intrusion-threat-model.md);
 phase 4's preventive-control audits (Dockerfile digest pinning, an
 assessed ARKIME secret-delivery finding) are documented there, not here,
 since they touch the wider repo rather than this directory. Phases 1-5
-are now all done, including deployment: `agent-intrusion-worker` is a
-real, running production service (deploy.yml's own "Synchronize
-honeypot-agent-intrusion-worker" step), not just built-and-tested.
+are now all done, including deployment: `agent-intrusion-worker` is
+retired (#1649) in favor of `backend-service`'s Rust port, wired live as
+`WORKER_LOOPS=agent-intrusion` — same index, same poll shape, confirmed
+before retiring with 14 clean cycles over 5h of dual-writing. This
+Python worker stays defined with `profiles: ["legacy"]` for rollback,
+not as the live writer.
 
 ## What's here
 
@@ -107,32 +113,33 @@ honeypot-agent-intrusion-worker" step), not just built-and-tested.
   (some repeated ES query cost) for a lot less state-management
   complexity, since campaign correlation needs to see the *whole* window
   at once regardless of what's new since the last poll.
-- **`dashboard/agent_campaigns.go`** (route `/agent-campaigns`, repo root
-  `dashboard/`) — the operator-facing half of phase 5: polls
-  `agent-intrusion-campaigns` on the dashboard's existing 1-minute ES
-  ticker (matching `ml_anomalies.go`'s own transport decision), caches
-  in-memory keyed by `campaign_id` (a still-active campaign gets its ES
-  document *replaced*, not duplicated, on every re-poll — unlike
-  `mlAnomalyStore`'s append-only shape), and renders, per campaign, every
-  member event's matched rule, its trust boundary, its decode-chain hashes,
-  and a link straight back to the raw source document via `/history`.
-  Gated behind the same `show_ml_panels` setting `/ml-anomalies` and
-  `/llm-analysis` already use (an operator may not have this worker
-  deployed either). No model-generated narrative text is ever rendered on
-  this page — every field traces to a deterministic rule match, so there's
-  no untrusted free-text output to guard against here the way
-  `llm_analysis.go` has to.
+- **`/agent-campaigns`** — the operator-facing half of phase 5, now served
+  by `backend-service`'s Rust cutover: `src/agent_intrusion.rs` writes
+  `agent-intrusion-campaigns`, and `src/stores.rs`'s generic index-store
+  passthrough serves it to the route (`agent_intrusion.rs`'s own doc
+  comment: "`/agent-campaigns` route reads this — see src/stores.rs's
+  generic index store"). This was originally the Go dashboard's
+  `dashboard/agent_campaigns.go`, since retired along with the rest of
+  `dashboard/`. Every member event's matched rule, trust boundary, and
+  decode-chain hashes still render the same way; no model-generated
+  narrative text is rendered on this page — every field traces to a
+  deterministic rule match, so there's no untrusted free-text output to
+  guard against here the way `llm_analysis.go` (also retired) had to.
 - **`Dockerfile`** / **`arcane/home/honeypot-agent-intrusion-worker/compose.yml`**
   (repo root) — builds and runs `worker.py` as its own Dockge stack,
   modelled directly on `ml-worker/docker-compose.yml`'s own shape (joins
   `honeynet` as an external network, same hardening: `no-new-privileges`,
-  `cap_drop: [ALL]`, `read_only`). Deployed by `deploy.yml`'s own
-  "Synchronize honeypot-agent-intrusion-worker" step, the same #560
-  (`ip-enrichment-worker`) pattern: `build:` uses an absolute
-  `/opt/stacks/apiary/...` path, not a relative one, since deploy.yml
-  copies this compose file into its own stack directory
-  (`/opt/stacks/honeypot-agent-intrusion-worker/`), not the checkout
-  itself — a relative context would resolve against the wrong directory.
+  `cap_drop: [ALL]`, `read_only`). Retired (#1649) now that
+  `backend-service`'s Rust port (`src/agent_intrusion.rs`) dual-wrote and
+  then took over the same index — this stack's own compose header
+  documents the retirement. It carries `profiles: ["legacy"]` for
+  rollback and is no longer deployed by `deploy.yml`'s per-stack
+  "Synchronize ..." copy step (gone since #1502's Arcane transition for
+  every stack that lives under `arcane/home/`) — the whole directory now
+  ships as an Arcane-managed, directory-aware git sync
+  (`arcane/manifests/home-production.json`: `syncName
+  honeypot-agent-intrusion-worker`), with a relative build context since
+  there's no shared checkout for an absolute path to point at.
   Also built/scanned in `containers.yml` and provisioned by
   `scripts/install-homeserver.sh`'s `STACK_DEFS` for a fresh install.
 - **`tests/test_worker.py`** — a hand-rolled fake Elasticsearch client (no
@@ -259,10 +266,11 @@ note here, not silently reinterpret old corpus rows under a new meaning.
 
 ## What this directory does *not* do
 
-`worker.py` closes the "not wired into production" gap for reading real
-sensor data and writing real verdicts, and `dashboard/agent_campaigns.go`
-closes the read side -- a real `critical` campaign is now visible on
-`/agent-campaigns`, not just via a direct Elasticsearch query. `matched_rule` in every
+`worker.py` closed the "not wired into production" gap for reading real
+sensor data and writing real verdicts (now superseded by `backend-service`'s
+Rust port, `src/agent_intrusion.rs`), and the `/agent-campaigns` route
+closes the read side -- a real `critical` campaign is visible there, not
+just via a direct Elasticsearch query. `matched_rule` in every
 *corpus* event (a separate thing from the real index above) is still
 either `null` or a descriptive placeholder string, not cross-referenced
 back into the corpus fixture itself -- `criticality_rules.py`'s own
@@ -277,11 +285,12 @@ identity across a NAT/mesh boundary where its own address changes. Both
 limits carry through to `worker.py` unchanged -- it's the same function,
 called against real events instead of corpus ones.
 
-`arcane/home/honeypot-agent-intrusion-worker/compose.yml` is now wired into
-`deploy.yml` (deployed with explicit operator go-ahead, not silently as a
-side effect of an earlier PR -- see its own entry in "What's here" above)
--- `agent-intrusion-campaigns` gets real production verdicts, not just
-whatever this repo's own tests write to a fake ES client.
+This directory's stack was wired into production with explicit operator
+go-ahead, not silently as a side effect of an earlier PR (see its own entry
+in "What's here" above, including its subsequent #1649 retirement in favor
+of the Rust port) -- `agent-intrusion-campaigns` gets real production
+verdicts, not just whatever this repo's own tests write to a fake ES
+client.
 
 Phase 4's preventive-control audits (ARKIME secret delivery, image digest
 pinning — see `docs/agent-intrusion-threat-model.md`'s own "Follow-up
