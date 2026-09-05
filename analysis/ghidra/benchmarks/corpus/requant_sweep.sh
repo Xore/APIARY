@@ -130,10 +130,15 @@ print('snapshot ok')
 # e.g.
 #   Qwen/Qwen3-32B | Q5_K_M Q4_K_M Q3_K_M | qwen3-32b-selfquant
 
+# Trim with bash builtins, not `xargs`: xargs treats quotes as special, so an
+# apostrophe anywhere in this file's prose comments makes it error out --
+# noisily and, worse, it would mangle any plan value that contained one.
+trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; printf '%s' "${s%"${s##*[![:space:]]}"}"; }
+
 while IFS='|' read -r REPO_ID LEVELS PREFIX; do
-  REPO_ID=$(echo "${REPO_ID:-}" | xargs); LEVELS=$(echo "${LEVELS:-}" | xargs); PREFIX=$(echo "${PREFIX:-}" | xargs)
-  [ -z "$REPO_ID" ] && continue
-  case "$REPO_ID" in \#*) continue;; esac
+  # comment/blank check happens BEFORE any processing of the line
+  case "$(trim "${REPO_ID:-}")" in \#*|'') continue;; esac
+  REPO_ID=$(trim "${REPO_ID:-}"); LEVELS=$(trim "${LEVELS:-}"); PREFIX=$(trim "${PREFIX:-}")
   [ -n "$LEVELS" ] && [ -n "$PREFIX" ] || { log "SKIP malformed plan line for '$REPO_ID'"; continue; }
 
   name=$(echo "$REPO_ID" | tr '/' '_')
