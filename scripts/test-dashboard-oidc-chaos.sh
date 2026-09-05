@@ -36,6 +36,46 @@ set -euo pipefail
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 realm_file="${repo_root}/arcane/home/honeypot-keycloak/keycloak/realm/apiary-realm.json"
 
+# #2915: the `trap ... EXIT` below does not fire on SIGKILL (a runner OOM-kill,
+# a cancelled CI job escalating past SIGTERM, a hard timeout). A killed run
+# leaves its containers -- still *running*, so `--rm` would never fire --
+# together with their anonymous volumes and their network, for the life of the
+# runner. That accumulation is the harm #2915 reports; it is not a port
+# collision, since every port this script binds is picked ephemerally by
+# `bind(("127.0.0.1", 0))`.
+#
+# So reap survivors of an earlier killed run before creating this run's own,
+# skipping anything younger than ${reap_min_age_s}. The fleet runs several
+# self-hosted runners against one Docker daemon and the names below carry `$$`
+# precisely so runs may overlap -- an unguarded sweep would delete a concurrent
+# run's containers out from under it. The threshold is deliberately far longer
+# than any full run of this script takes.
+reap_min_age_s="${APIARY_TEST_REAP_MIN_AGE_S:-3600}"
+# `docker inspect` renders a container's .Created as RFC3339, but a network's as
+# Go's default layout ("2026-09-04 23:32:36.321 +0200 CEST"), which GNU date
+# rejects until the trailing zone abbreviation is dropped. Normalise both.
+fixture_created_epoch() {
+  local ts
+  ts="$(printf '%s' "$1" | sed -E 's/ [A-Z]{2,5}$//')"
+  [ -n "${ts}" ] || return 1
+  date -u -d "${ts}" +%s 2>/dev/null
+}
+reap_stale_fixtures() {
+  local prefix="$1" now id epoch
+  now="$(date -u +%s)"
+  for id in $(docker ps -aq --filter "name=^/${prefix}" 2>/dev/null); do
+    epoch="$(fixture_created_epoch "$(docker inspect -f '{{.Created}}' "${id}" 2>/dev/null)")" || continue
+    [ "$(( now - epoch ))" -ge "${reap_min_age_s}" ] || continue
+    docker rm -fv "${id}" >/dev/null 2>&1 || true
+  done
+  for id in $(docker network ls -q --filter "name=^${prefix}" 2>/dev/null); do
+    epoch="$(fixture_created_epoch "$(docker network inspect -f '{{.Created}}' "${id}" 2>/dev/null)")" || continue
+    [ "$(( now - epoch ))" -ge "${reap_min_age_s}" ] || continue
+    docker network rm "${id}" >/dev/null 2>&1 || true
+  done
+}
+reap_stale_fixtures 'dashkcchaos-'
+
 network="dashkcchaos-$$"
 pg="dashkcchaos-pg-$$"
 kc="dashkcchaos-kc-$$"
