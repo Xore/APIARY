@@ -35,7 +35,9 @@ from transcripts import (  # noqa: E402
     DEFAULT_SYNTHETIC_ROOT,
     PROVENANCES,
     PROVENANCE_SYNTHETIC,
+    SCHEMA_VERSION,
     TIERS,
+    TRANSCRIPT_FILENAME,
     Reproducibility,
     RunMetadata,
     SlotRecorder,
@@ -971,6 +973,150 @@ def write_atomic(path: str, value: dict[str, Any]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def scorer_git_sha() -> str | None:
+    """The commit this scorer's logic was checked out at, for a rescore
+    report's own provenance (#2266) -- mirrors sha256_file's "record what's
+    knowable, don't except out" rule for a reproducibility input that can be
+    unavailable (no .git, shallow clone).
+
+    Suffixed `-dirty` when the tree has uncommitted changes. The documented
+    comparison workflow is "run the tool at two commits and diff the reports,
+    using this field to tell the sides apart" -- a bare HEAD sha names a commit
+    that may not contain the scorer that produced the report at all, and two
+    reports from two different working trees can carry the identical sha. The
+    marker keeps the field from claiming a clean provenance it does not have.
+    """
+    cwd = str(Path(__file__).resolve().parent)
+
+    def git(*args: str) -> subprocess.CompletedProcess[str] | None:
+        try:
+            return subprocess.run(["git", *args], capture_output=True, text=True,
+                                  timeout=10, cwd=cwd)
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    head = git("rev-parse", "HEAD")
+    if head is None or head.returncode != 0:
+        return None
+    sha = head.stdout.strip()
+    status = git("status", "--porcelain")
+    if status is None or status.returncode != 0:
+        # HEAD is knowable but cleanliness is not; say so rather than implying clean.
+        return f"{sha}-unknown-dirty"
+    return f"{sha}-dirty" if status.stdout.strip() else sha
+
+
+def rescore_from(run_dir: Path) -> dict[str, Any]:
+    """Replay a stored transcript run through the *current* scorer, no model
+    contact (#2266).
+
+    Stored transcripts hold raw model output, not a score -- scoring always
+    happened at evaluate_slot() time, against whatever scorer revision was
+    live then. This function is the missing other half: it groups records
+    back into the same (case, workflow) shapes _score_session_case(),
+    _score_triage_case() and _score_revdeck_case() were extracted to accept,
+    and calls them directly -- so a rescore can never compute anything
+    differently from what a live run with today's code would have scored.
+
+    Never writes into run_dir; stored transcripts are append-only by policy
+    (transcripts.py's TranscriptWriter already refuses to reopen an existing
+    path for exactly this reason).
+
+    To see what a scorer change moved (the issue's "old vs new" ask): run
+    this once on the pre-change commit (`git worktree add` or `git stash`),
+    once on the post-change commit, and diff the two JSON reports -- the
+    `scorer_git_sha` each carries makes the two sides unambiguous. There is
+    no "old score" stored anywhere to diff against automatically; the
+    published report at the time was the only prior record; a JSONL of raw
+    answers was never such a record.
+    """
+    transcripts_path = Path(run_dir) / TRANSCRIPT_FILENAME
+    records = []
+    for lineno, line in enumerate(transcripts_path.read_text().splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            records.append(json.loads(line))
+        except ValueError as exc:
+            print(f"  skipping malformed transcript line {transcripts_path}:{lineno}: {exc}",
+                  file=sys.stderr)
+
+    by_case: dict[tuple[str, str], dict[str, list[dict[str, Any]]]] = {}
+    skipped_error = 0
+    for rec in records:
+        if rec.get("schema_version") != SCHEMA_VERSION:
+            print(f"  skipping record with schema_version {rec.get('schema_version')!r}, "
+                  f"expected {SCHEMA_VERSION!r}: {rec.get('case')!r}", file=sys.stderr)
+            continue
+        if rec.get("outcome") != "ok":
+            skipped_error += 1
+            continue
+        key = (rec["slot"], rec["model"]["tag"])
+        by_case.setdefault(key, {}).setdefault(rec["case"], []).append(rec)
+
+    session_by_name = {c.name: c for c in SESSION_CASES}
+    triage_by_name = {c.name: c for c in TRIAGE_CASES}
+    rev_by_name = {c.name: c for c in REV_CASES}
+
+    models: dict[str, dict[str, Any]] = {}
+    unmatched: list[str] = []
+    for (slot, model_tag), cases_by_name in by_case.items():
+        case_results = []
+        for case_name, recs in cases_by_name.items():
+            if slot == "sessions":
+                case = session_by_name.get(case_name)
+                if case is None:
+                    unmatched.append(f"sessions/{case_name}")
+                    continue
+                raw = {"parsed": recs[0]["response"]["parsed"]}
+                case_results.append(_score_session_case(case, raw))
+            elif slot == "revdeck":
+                case = rev_by_name.get(case_name)
+                if case is None:
+                    unmatched.append(f"revdeck/{case_name}")
+                    continue
+                raw = {"content": recs[0]["response"]["raw"]}
+                case_results.append(_score_revdeck_case(case, raw))
+            elif slot == "ghidra":
+                case = triage_by_name.get(case_name)
+                if case is None:
+                    unmatched.append(f"ghidra/{case_name}")
+                    continue
+                workflow_outputs = {
+                    rec["workflow"]: {"parsed": rec["response"]["parsed"], "content": rec["response"]["raw"]}
+                    for rec in recs
+                }
+                if {"program_triage", "suspicious_behavior"} - workflow_outputs.keys():
+                    unmatched.append(f"ghidra/{case_name} (incomplete workflow pair)")
+                    continue
+                case_results.append(_score_triage_case(case, workflow_outputs))
+            else:
+                unmatched.append(f"{slot}/{case_name} (unknown slot)")
+                continue
+        if not case_results:
+            continue
+        score = {
+            "score": sum(item["score"] for item in case_results),
+            "max_score": sum(item["max_score"] for item in case_results),
+        }
+        score["percent"] = round(100 * score["score"] / score["max_score"], 1) if score["max_score"] else None
+        models.setdefault(model_tag, {})[slot] = {
+            "score": score,
+            "cases": {item["case"]: item for item in case_results},
+        }
+
+    return {
+        "rescore_of": str(run_dir),
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "scorer_git_sha": scorer_git_sha(),
+        "transcript_schema_version": SCHEMA_VERSION,
+        "records_read": len(records),
+        "records_skipped_error_outcome": skipped_error,
+        "unmatched_cases": unmatched,
+        "models": models,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("models", nargs="*", help="Legacy: exact model tags to run through every suite")
@@ -1000,7 +1146,19 @@ def main() -> int:
         "--no-transcripts", action="store_true",
         help="Skip transcript capture. Scores can be recomputed later; answers cannot be recovered later.",
     )
+    parser.add_argument(
+        "--rescore-from", type=Path,
+        help="Offline: replay a stored run's transcripts.jsonl through the current scorer, no model "
+             "contact, and print the report to stdout. Never touches the run directory. Mutually "
+             "exclusive with everything else (#2266).",
+    )
     args = parser.parse_args()
+    if args.rescore_from:
+        if args.models or args.manifest or args.no_transcripts:
+            parser.error("--rescore-from cannot be combined with a live-model run")
+        report = rescore_from(args.rescore_from)
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 0
     base_url = args.base_url.rstrip("/")
     args.slots = tuple(s.strip() for s in args.slots.split(",") if s.strip())
     unknown = [s for s in args.slots if s not in ("ghidra", "sessions", "revdeck")]
