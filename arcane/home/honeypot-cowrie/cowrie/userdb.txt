@@ -1,6 +1,6 @@
 # Cowrie credential database.
 # Only active when auth_class = UserDB in cowrie.cfg.
-# The shipped config uses AuthRandom — this file is the fallback / override.
+# The shipped config uses AuthRandom - this file is the fallback / override.
 #
 # Format:  username:x:password
 #   *  matches any password
