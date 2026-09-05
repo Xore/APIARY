@@ -21,9 +21,22 @@ available_kib=$(df -Pk "$root_dir" | awk 'NR==2 {print $4}')
   exit 1
 }
 
-apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y \
-  ca-certificates curl gpgv ubuntu-cloudimage-keyring libguestfs-tools
+# Same class of fix as sandbox/install-host.sh (#1609/#3015): this was an
+# unconditional apt-get, which is exit-127 on EL and takes every later step
+# with it (#3019). ubuntu-cloudimage-keyring does not exist as an EL package
+# at all -- see the keyring block below -- so gnupg2 (which ships gpgv) and
+# guestfs-tools (EL's name for libguestfs-tools) go in its place.
+if command -v apt-get >/dev/null 2>&1; then
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    ca-certificates curl gpgv ubuntu-cloudimage-keyring libguestfs-tools
+elif command -v dnf >/dev/null 2>&1; then
+  dnf install -y \
+    ca-certificates curl gnupg2 guestfs-tools
+else
+  echo "no apt-get or dnf on this host -- install ca-certificates, curl, a gpgv-capable gnupg and libguestfs by hand" >&2
+  exit 1
+fi
 
 curl --fail --location --proto '=https' --tlsv1.2 \
   --output "$work/$image_name" "$image_url/$image_name"
@@ -33,6 +46,63 @@ curl --fail --location --proto '=https' --tlsv1.2 \
   --output "$work/SHA256SUMS.gpg" "$image_url/SHA256SUMS.gpg"
 
 keyring=/usr/share/keyrings/ubuntu-cloudimage-keyring.gpg
+if [[ ! -r $keyring ]]; then
+  # EL has no ubuntu-cloudimage-keyring package (#3019), so there is nothing
+  # at the Debian/Ubuntu path above. Build an equivalent keyring locally from
+  # Ubuntu's own "UEC Image Automatic Signing Key <cdimage@ubuntu.com>" --
+  # the same key that package ships -- fetched by PINNED fingerprint, never
+  # trusted on TLS alone (that would defeat the entire point of the gpgv
+  # check two lines down). The fingerprint below is a deliberate, reviewed
+  # choice (issue #3019), cross-checked 2026-09 against Ubuntu's own
+  # published cloud-image verification docs and independent mirrors of the
+  # UEC signing key -- do not change it without re-verifying against an
+  # official Ubuntu source.
+  uec_key_fpr="D2EB44626FDDC30B513D5BB71A5D6C4C7DB87C81"
+  el_keyring_dir=/etc/apiary/sandbox-keyrings
+  el_keyring="$el_keyring_dir/ubuntu-cloudimage-keyring.gpg"
+  if [[ ! -r $el_keyring ]]; then
+    command -v gpg >/dev/null 2>&1 || {
+      echo "gpg is required to build the EL cloud-image keyring (install gnupg2)" >&2
+      exit 1
+    }
+    mkdir -p "$el_keyring_dir"
+    rm -f -- "$el_keyring"
+    # gpg writes a keybox here, not a legacy keyring, despite the .gpg suffix.
+    # gpgv 2.4.5 (EL10's gnupg2) reads it -- verified live against a real
+    # cloud-images SHA256SUMS.gpg signature, not assumed. A gpgv too old to
+    # read a keybox would fail closed at the verify step below, never open.
+    #
+    # The fetch runs in a throwaway GNUPGHOME: on a host where the invoking
+    # account has never run gpg there is no ~/.gnupg, and gpg then dies on its
+    # own lockfile ("failed to create temporary file ... No such file or
+    # directory") before it ever reaches the keyserver. Observed on a clean EL
+    # host. This also keeps the operator's own keyring out of the picture.
+    gnupg_home="$work/gnupg"
+    mkdir -p "$gnupg_home"
+    chmod 700 "$gnupg_home"
+    GNUPGHOME="$gnupg_home" gpg --no-default-keyring --keyring "$el_keyring" \
+      --keyserver hkps://keyserver.ubuntu.com \
+      --recv-keys "$uec_key_fpr" \
+      || { echo "Failed to fetch the Ubuntu cloud-image signing key ($uec_key_fpr) from keyserver.ubuntu.com" >&2; rm -f -- "$el_keyring"; exit 1; }
+  fi
+  # Re-read the fingerprint on EVERY run, not only on the run that creates the
+  # keyring: a file that is already at $el_keyring would otherwise be trusted
+  # forever on the strength of a check some earlier run made.
+  gnupg_read_home="$work/gnupg-read"
+  mkdir -p "$gnupg_read_home"
+  chmod 700 "$gnupg_read_home"
+  fetched_fpr=$(
+    GNUPGHOME="$gnupg_read_home" gpg --no-default-keyring --keyring "$el_keyring" \
+      --with-colons --fingerprint \
+      | awk -F: '$1=="fpr"{print $10; exit}'
+  )
+  [[ $fetched_fpr == "$uec_key_fpr" ]] || {
+    echo "Cloud-image keyring fingerprint ($fetched_fpr) does not match the pinned fingerprint ($uec_key_fpr) -- refusing to trust it" >&2
+    rm -f -- "$el_keyring"
+    exit 1
+  }
+  keyring="$el_keyring"
+fi
 [[ -r $keyring ]] || { echo "Ubuntu cloud-image keyring is missing" >&2; exit 1; }
 gpgv --keyring "$keyring" "$work/SHA256SUMS.gpg" "$work/SHA256SUMS"
 (cd "$work" && grep " \*$image_name\|  $image_name" SHA256SUMS | sha256sum --check -)

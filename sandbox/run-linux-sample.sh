@@ -43,6 +43,12 @@ memory_mb=${SANDBOX_VM_MEMORY_MB:-3072}
 virsh net-info honeypot-sandbox >/dev/null
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# The account QEMU runs as is libvirt-qemu on Debian and qemu on EL (#3019,
+# same class of fix as repair-permissions.sh in #3015/#3020). Resolved
+# through the same helper the Windows sandbox uses.
+# shellcheck source=windows/setup/host-paths.sh
+. "$script_dir/windows/setup/host-paths.sh"
+qemu_user="$(sandbox_qemu_user)" || exit 1
 hash=$(sha256sum "$sample" | awk '{print $1}')
 # Only used for job/overlay/result directory naming below -- the real,
 # authoritative classification runs inside the guest (guest-runner.sh calls
@@ -107,10 +113,10 @@ virt-customize -a "$overlay" \
 # libguestfs may replace the overlay inode during customization, so explicitly
 # restore the narrow per-file ACL after it finishes instead of relying only on
 # the overlay directory's default ACL.
-setfacl -m u:libvirt-qemu:rw "$overlay"
+setfacl -m "u:${qemu_user}:rw" "$overlay"
 touch "$result/console.log"
-setfacl -m u:libvirt-qemu:rwx "$result"
-setfacl -m u:libvirt-qemu:rw "$result/console.log"
+setfacl -m "u:${qemu_user}:rwx" "$result"
+setfacl -m "u:${qemu_user}:rw" "$result/console.log"
 
 # Capture on the host bridge, filtered to this job's fixed MAC. The guest never
 # receives packet-capture access and cannot alter the root-owned PCAP.
