@@ -10,17 +10,26 @@ alias then failed `Permission denied (publickey)` for six days while the
 homeserver-hop route (which uses the separate `strato_vps` key installed by
 `scripts/install-homeserver.sh`) kept working and masked the drift.
 
-## Two independent keys reach the VPS as root
+## Keys that reach the VPS as root (audited #2920, 2026-09-04)
+
+`/root/.ssh/authorized_keys` had 6 lines / 4 distinct keys before this audit:
+`strato_vps` and `apiary-hermes-control` each listed twice (harmless duplicates,
+removed), plus the retired `kimi-cli-honeypot-admin` key — the one this doc's
+opening paragraph already documents as replaced on 2026-08-31 — still present
+and still granting access six days after its replacement. Removed as a
+credential-hygiene fix; the two keys below are the ones actually in current use,
+plus one whose owner this doc cannot confirm.
 
 | key | private key location | purpose |
 |---|---|---|
 | workstation admin key | `~/.ssh/id_ed25519_apiary` (comment `apiary-hermes-control`) | direct `ssh vps` alias from the workstation |
 | `strato_vps` | `/root/.ssh/strato_vps` on the homeserver, installed by `install-homeserver.sh:step_provision_secrets` (`install -m 600 "$VPS_SSH_KEY" /root/.ssh/strato_vps`) | the homeserver-hop route: `ssh homeserver` → `sudo ssh -p 2222 -i /root/.ssh/strato_vps root@<wireguard-addr>` |
+| `claude-code-vps-access` | no matching private key found on the workstation or the homeserver as of this audit | **owner unconfirmed.** Left in place rather than revoked blind — revoking a key that turns out to be in active use is the harder-to-reverse mistake. #2920 stays open until the owner is confirmed; if it is stale, remove it the same way the retired key above was removed |
 
-Both must independently be present in the VPS's `/root/.ssh/authorized_keys`.
-Rotating one does not rotate the other, and neither installer asserts the
-workstation admin key — that entry is manual and must be re-added by hand
-after any workstation key rotation:
+The first two are the ones in current use, and each must independently be
+present in the VPS's `/root/.ssh/authorized_keys`: rotating one does not rotate
+the other. Neither installer asserts the workstation admin key — that entry is
+manual and must be re-added by hand after any workstation key rotation:
 
 ```
 ssh homeserver "sudo ssh -p 2222 -i /root/.ssh/strato_vps root@<wireguard-addr> \
