@@ -1018,6 +1018,15 @@ jobs:
               # a different decompiler) and the injection assertion, which must
               # report honestly that the payload never reached the evidence.
               python analysis/ghidra/benchmarks/tests/test_ghidra_cache.py
+              # Corpus manifest validator (#2038). Pure structural checks over
+              # fixture manifests -- no compiler, no corpus rebuild. Covers the
+              # three gaps that let a broken corpus pass: a required alternative
+              # that trips its own case's forbidden list, a rubric case whose
+              # build has disappeared, and a partial toolchain/opt-level grid.
+              # The overlap check reuses polarity.forbidden_hit(), so the guard
+              # that keeps it from regressing to #2517's naive-substring false
+              # positives lives here too and has to run on every change.
+              python analysis/ghidra/benchmarks/tests/test_validate_manifest.py
               # Claim-pool scoring (#1805). Embedder is stubbed, so no Ollama.
               # Covers the properties that decide whether a claim-pool score can
               # be believed: the adjudicator cannot be a contestant, rephrasing
