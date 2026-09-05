@@ -649,6 +649,35 @@ timestamp or an unreadable one" — never "the fleet is deployed":
 
 Judge a project by its containers before concluding it is deployed.
 
+`scripts/arcane-verify-recreate.sh` is the host-side complement that closes
+the #2910 row above: run **on** the Arcane host (needs `docker inspect` and
+Arcane's own sqlite database, not the HTTP API — the API key on file for
+this fleet is dead as of the 2026-09-04 rebuild, so a host-local read is
+also the only path that currently works at all), it compares every
+project's containers' creation time against its `last_sync_at` and fails
+the specific containers that were not recreated since a `success` record.
+
+```
+sudo scripts/arcane-verify-recreate.sh honeypot-sentrypeer   # one project
+sudo scripts/arcane-verify-recreate.sh --all                 # whole fleet
+```
+
+**A `FAIL` from it is a prompt, not a verdict.** "Container older than the
+last successful sync" is also exactly what a legitimate no-op sync looks
+like: if a project's compose config is unchanged, `docker compose up -d`
+correctly recreates nothing, so its containers stay older than the sync
+record. Arcane records nothing this script can read about *what* a given
+sync actually changed, so the defect and the healthy case are
+indistinguishable by this measure. Read a `FAIL` as "no redeploy happened
+since that sync" and decide from there whether one was expected. The same
+applies to run-once containers (`hp-*-init`, `hp-*-setup`), which are
+created once and never again and so will `FAIL` on every sync after their
+first.
+
+That is also why it is on-demand rather than scheduled: at the fleet's
+current sync cadence it would be mostly noise. Run it after a batch of
+redeploys, when you know what should have moved.
+
 This does not close the gap by itself — it is a report someone has to run,
 not an alert that reaches anyone unprompted. Wiring it into a scheduled,
 alerting check (the `compose-drift-watch.py`/`disk-usage-watch.py` pattern)
