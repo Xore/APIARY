@@ -103,3 +103,16 @@ func TestServeHTTPLogsRealRequests(t *testing.T) {
 		t.Fatalf("a genuine request was not logged: %s", buf.String())
 	}
 }
+
+// TestClassifySwitchvoxCVE covers #2919 (CVE-2026-9586): an exact match on
+// the vulnerable Switchvox /pa endpoint, distinct from generic "scan", and
+// confirms the exact-match guard doesn't false-positive on an unrelated
+// path that merely contains "pa".
+func TestClassifySwitchvoxCVE(t *testing.T) {
+	if got := classify("/pa"); got != "switchvox-cve-2026-9586" {
+		t.Fatalf("classify(%q) = %q, want switchvox-cve-2026-9586", "/pa", got)
+	}
+	if got := classify("/api/params"); got == "switchvox-cve-2026-9586" {
+		t.Fatalf("classify(%q) false-positived as switchvox-cve-2026-9586", "/api/params")
+	}
+}

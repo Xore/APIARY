@@ -650,6 +650,17 @@ func classify(path string) string {
 		return "wordpress-cve-2020-11738"
 	case strings.Contains(p, "/wp-content/plugins/wp-file-manager/") && strings.HasSuffix(p, "readme.txt"):
 		return "wordpress-cve-2020-25213"
+	// #2919: CVE-2026-9586, Sangoma Switchvox unauth SQLi/RCE via the
+	// public /pa endpoint's PhoneIP XML field, mass-exploited since
+	// 2026-08-30. Exact match, not Contains -- "/pa" is short enough that a
+	// substring match would false-positive on unrelated paths, and the
+	// vulnerable route itself is exact. This fleet runs no Switchvox
+	// instance; the value is recognizing the campaign's own signature
+	// against the generic decoy rather than letting it fall into
+	// undifferentiated "scan", same reasoning as the wordpress-cve cases
+	// above.
+	case p == "/pa":
+		return "switchvox-cve-2026-9586"
 	case strings.Contains(p, "wp-login"), strings.Contains(p, "wp-admin"),
 		strings.Contains(p, "xmlrpc"), strings.Contains(p, "wp-content"),
 		strings.Contains(p, "/readme.html"):
