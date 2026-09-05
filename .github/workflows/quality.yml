@@ -1059,6 +1059,28 @@ jobs:
               # comes back empty; pins the dispatch so the calibrated Qwen
               # request shape is untouched.
               python analysis/ghidra/benchmarks/tests/test_harmony_chat.py
+              # Offline transcript re-scoring (#2266). No GPU and no Ollama --
+              # the fixtures are written through the real TranscriptWriter and
+              # replayed, so this pins the property the tool exists for: a
+              # rescore of a stored answer scores identically to what a live
+              # evaluate_slot() would have scored for it. Also pins
+              # scorer_git_sha's dirty marker, without which the documented
+              # "run at two commits and diff the reports" workflow silently
+              # attributes both sides to the same commit.
+              python analysis/ghidra/benchmarks/tests/test_rescore_from.py
+              # #2980: the four files below existed with no workflow running
+              # them. This block is hand-enumerated -- there is no pytest
+              # discovery over analysis/ghidra/benchmarks/tests/ -- so a test
+              # file lands here only if someone remembers, and four had drifted
+              # off. test_injection_gate.py is the sharpest case: its 48 tests
+              # are the whole regression guarantee the #2694 Tier B gate rests
+              # on, and they were executing only by hand. All four are stubbed
+              # the same way as the rows above (no model, no Ghidra, no
+              # network) and run standalone.
+              python analysis/ghidra/benchmarks/tests/test_injection_gate.py
+              python analysis/ghidra/benchmarks/tests/test_corpus_eval.py
+              python analysis/ghidra/benchmarks/tests/test_run_real_corpus_eval.py
+              python analysis/ghidra/benchmarks/tests/test_regenerate_pre_2393.py
               # full_capabilities.py (#800): inventories env vars straight out of
               # the real pipeline source, so its own test runs against the real
               # tree rather than fixtures -- proving that stays true.

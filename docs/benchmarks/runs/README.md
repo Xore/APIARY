@@ -35,6 +35,33 @@ aggregate results. `evaluate-models.py --provenance captured` refuses to write
 into the repository, and `analysis/ghidra/benchmarks/tests/test_transcripts.py`
 gates that on every change.
 
+## Rescoring a stored run against the current scorer (#2266)
+
+`evaluate-models.py --rescore-from <run_dir>` replays a run written by
+*evaluate-models.py itself* (slots `ghidra`/`sessions`/`revdeck`) through the
+current `_score_session_case`/`_score_triage_case`/`_score_revdeck_case`
+logic, no GPU or Ollama contact, and prints a report to stdout — this is the
+"needs no GPU time" rescoring path this directory's transcripts were
+committed to make possible, previously unimplemented. It never writes into
+the run directory. To see what a scorer change moved, run it once on the
+pre-change commit and once on the post-change commit (`git worktree add` or
+`git stash`) and diff the two JSON reports — each carries its own
+`scorer_git_sha`, so which side is which is never ambiguous. That field is
+suffixed `-dirty` when the tree it ran from had uncommitted changes (and
+`-unknown-dirty` where git can name HEAD but not answer for cleanliness), so
+a report produced from a working tree can never pass itself off as one
+produced from the commit it happens to sit on.
+
+Runs written by `record_baseline.py` (`benchmark:
+"honeypot-stack-issue-159-corpus-baseline"` in their first record, rather
+than `"honeypot-stack-issue-158-v2"`) use a different case/rubric system
+(`rev_cases_v2_rubric.json`) and are not covered by this flag — their offline
+rescorer is `corpus/rescore_injection_v2.py`. `--rescore-from` reports any
+case name it can't match against the current scorer's roster in
+`unmatched_cases` rather than guessing or crashing, which is how a run from
+the other producer (or a genuinely retired case name) shows up if pointed at
+by mistake.
+
 ## Rules
 
 - **Never edit a stored transcript.** A misconfigured run is superseded by a new
