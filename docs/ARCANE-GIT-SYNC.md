@@ -492,8 +492,169 @@ manual process, because it is unattended.
   schema has no way to carry (see the fact above), so they would be
   single-sync PATCH work.
 
-Activating any of that is live-store work, collected with the wordpot
-cleanup in #2577.
+#2577 closed (PR #2704) having done only the wordpot-orphan half of its own
+scope — the #1507 activation itself was never done, and #2858 (below)
+decided explicitly not to do it in this round either.
+
+## autoSync decision (#2858)
+
+Re-measured 2026-09-03 against `GET /environments/0/gitops-syncs?limit=100`
+(37 records, matching #2577's cleanup): **`autoSync` is still `false` on
+every one**, unchanged since #1507 and #2577. Note that this is the *live
+store*, and it disagrees with this repo's own manifest:
+`arcane/manifests/home-production.json` declares `autoSync: true` for
+`honeypot-elk`, `honeypot-keycloak` and `pihole`/`technitium` — the "`autoSync`
+is 0 everywhere, including the three the manifest flags" bullet earlier in this
+document. So #1507's three-puller policy is not merely unactivated; it is
+**declared in the repo and inert in Arcane**, and the decision below is a
+decision to leave that discrepancy standing for now, not a decision made on a
+blank slate. `honeypot-tanner`, `ghidra` and
+`ml-worker` are 957–979 commits (~18 days) behind `main`; every stack synced
+on 2026-08-30/31 is 77–125 commits behind; even the dozen synced by hand on
+2026-09-02 are already 30 commits behind by the next morning. This drift is
+the shared root cause behind #2815, #2816 and #2817 — three separately
+investigated "a merged PR never reached the host" issues.
+
+**Decision: leave `autoSync: false` fleet-wide. Do not activate #1507's
+three-puller policy in this round either.** Reasoning:
+
+- Turning `autoSync` on for all 37 projects means every merge to `main`
+  redeploys the fleet unattended — a real increase in blast radius, and
+  exactly the kind of change that should not happen as a side effect of
+  fixing a visibility gap. (This round's own brief calls this out
+  explicitly as the wrong move.)
+- #1507's narrower proposal — `autoSync: true` for the three pull-only
+  stacks (`honeypot-elk`, `honeypot-keycloak`, `pihole`) — is not safe to
+  *reconcile into the live store* today either. Two of the three are
+  currently in a broken or undeployed state for reasons unrelated to sync
+  policy: `pihole` has **zero containers** on the host right now (#2853, same
+  "removed not stopped" shape as #2817), and `honeypot-keycloak`'s `.env` has
+  a known host-permission gap that already blocks unprivileged inspection
+  (#2764). Since this was measured, #2911 has replaced the `pihole` manifest
+  entry with `technitium`, carrying the same `autoSync: true` flag — so the
+  third slot is now a freshly-introduced stack that has never run under
+  auto-sync at all, which is a reason to re-measure before activating, not a
+  reason to treat the question as settled.
+  Auto-syncing a stack that is not currently deployed correctly would just
+  make the drift-tracking problem *less* visible — Arcane would report
+  `success` on a sync that changed nothing observable, the same
+  "green means nothing" shape #2854 already found for `honeypot-init`.
+  Revisit #1507's activation once #2853 and #2764 are resolved and both
+  stacks are confirmed healthy from a fresh deploy, not before.
+
+  **Status as of round 6 (2026-09-04):** both blockers are now closed — #2853
+  and #2764 were resolved by the #1609 rebuild, and live-checked here:
+  `technitium-dns` and `hp-keycloak`/`hp-keycloak-postgres` are all `healthy`
+  on the homeserver. That clears the stated precondition for revisiting
+  #1507's narrower activation, but flipping `autoSync` on production stacks
+  is a deploy-posture change, not a drift-visibility fix — deliberately left
+  for a separate, dedicated decision rather than folded into this round's
+  ops-triage pass. `autoSync` therefore remains `false` fleet-wide for now.
+- #2854's one-shot-abort hazard (a `restart: no` job's clean `exit(0)`
+  making Arcane report `failed` on a deploy that actually completed) is
+  fully scoped to `honeypot-init`. It is **not** the only file in the repo
+  with that shape, and a grep alone does not establish the claim — YAML
+  writes it three ways, so the check has to be
+  `git grep -nE "restart:[[:space:]]*[\"']?no[\"']?"`, which on `origin/main`
+  returns fourteen hits — twelve real declarations across seven files (all
+  seven are in the table below), plus two prose matches, in this document and
+  in `scripts/compose-drift-watch.py`'s header. What scopes the hazard is that
+  only one of the seven is a service Arcane actually starts:
+
+  | hit | why it cannot trip the hazard |
+  |---|---|
+  | `arcane/home/honeypot-init/compose.yml` (6×) | **this is the exposed one** |
+  | `sandbox/ghosts/compose.yml:162` | `ghosts` *is* an Arcane project, but the service is `ghosts-client-test`, gated behind `profiles: ["test"]`, so a default `up` never creates it |
+  | `llm-worker/docker-compose.{production-session-canary,synthetic-canary}.yml` | canary overlays; the manifest deploys `llm-worker/docker-compose.yml`, which has no `restart: no` |
+  | `docker-compose.sandbox.yml:48` | per-detonation sandbox lifecycle, not an Arcane manifest entry |
+  | `vps/docker-compose.yml:956` | the VPS stack, deployed by a different mechanism entirely |
+  | `sandbox/ghosts/vendor/ghosts-src/Ghosts.Api/docker-compose.yml:85` | vendored upstream source, never deployed |
+
+  All six excluded files were checked against
+  `arcane/manifests/home-production.json`'s 37 entries and their
+  `dockerComposePath` values, not inferred from the file paths.
+  `honeypot-init` is not one of #1507's three auto-sync candidates, so this
+  decision doesn't change its exposure either way: it keeps deploying
+  through `scripts/arcane-deploy-honeypot-init.sh --apply` (#2794),
+  regardless of what happens to `autoSync` elsewhere. Round 5 recorded that
+  wrapper as absent from the homeserver; that is no longer true — re-derived
+  2026-09-04, it is at
+  `/var/dockge/stacks/apiary/scripts/arcane-deploy-honeypot-init.sh`, mode
+  0755, owned by `github-deploy-runner`, dated 2026-09-03 23:07. #2908 is
+  closed.
+
+**What makes Arcane gitops-sync drift visible, since nothing did before:**
+`scripts/arcane-sync-drift-report.py` — read-only, on-demand (not wired into
+a scheduled workflow: that would need an Arcane API key available to a CI
+runner, which is a separate credential-handling decision this issue does not
+make). Run it by hand:
+
+```
+ARCANE_API_KEY=... scripts/arcane-sync-drift-report.py [--behind-days N]
+```
+
+It queries the same `gitops-syncs?limit=100` endpoint, computes each
+project's commits-behind-`main` via `git rev-list --count
+<lastSyncCommit>..origin/main` against a real local clone (point
+`--repo-root` at one you can write to — a CI runner's own checkout is
+usually owned by a different user and can't be `git fetch`ed from an
+interactive session), and exits non-zero if any record is stale past the
+threshold (default 3 days), or reports `lastSyncStatus: failed` **and is
+not named in the script's `KNOWN_STRUCTURAL_FAILURES` table**.
+
+That exemption is load-bearing, not a softening. `honeypot-init` reports
+`failed` on every deploy for a structural reason Arcane never rewrites
+(#2854), so without it the script would exit non-zero on a perfectly
+healthy fleet on the day it merged and every day after — the same
+permanently-red-and-therefore-ignored failure mode
+`scripts/isolation-audit.sh`'s own tiering comment was written against.
+Exempted projects are still **printed**, with the reason, under an `EXEMPT`
+heading; they are not silenced. Any project that reports `failed` without
+being named there still fails the run.
+
+Exit-code behaviour was demonstrated in both directions (2026-09-03) by
+driving the shipped `main()` with a synthetic record set: a fleet whose only
+`failed` record is `honeypot-init` exits **0**; adding a second `failed`
+project that is not exempt exits **1**; a project stale past
+`--behind-days` exits **1**. It has **not** yet been run against the live
+Arcane API: the homeserver is reachable again as of 2026-09-04, but the
+Arcane API key on file was rotated in the #1609 rebuild and now returns
+`401 invalid API key` from the host itself, so the first real run is still
+owed and worth one look once a current key is to hand.
+
+**What this report cannot see.**
+
+*A second deployment channel.* It covers the Arcane gitops-sync channel only.
+The fleet has a second one — `deploy.yml`'s rsync into `/opt/stacks/apiary`
+(the same inode as `/var/dockge/stacks/apiary`) — that no sync record covers.
+That channel had gone 18 days without a successful run, which is what made a
+fleet reading `lastSyncCommit == main` on all 37 records still run a
+weeks-old copy of every rsynced script: `diagnostics.yml`'s
+isolation-invariants step executes the *deployed* `isolation-audit.sh` from
+that path. Tracked and fixed as **#2908**, now closed — re-derived
+2026-09-04, `/var/dockge/stacks/apiary/scripts/` was last rewritten
+2026-09-04 12:15. The blind spot itself is structural and remains: a green
+run of this report still says nothing about the rsync channel's freshness.
+Extending it to cover that channel is separate work.
+
+*Whether a project is actually deployed.* `lastSyncStatus` is unreliable in
+both directions, so exit 0 means "no record reports a failure, a stale
+timestamp or an unreadable one" — never "the fleet is deployed":
+
+| shape | issue | what this report does |
+|---|---|---|
+| `failed` on a deploy that in fact succeeded — a `restart: no` one-shot's clean `exit(0)` read as an abort | #2854 | exempts it by name and prints the reason, so the exit code keeps carrying information |
+| `success` when nothing was recreated — Arcane's 5-minute sync deadline elapses, the retry reports success, the container is untouched | #2910 | **cannot see it.** Nothing in the API response separates that from a real deploy; only comparing container creation time against `lastSyncAt` can, and that needs host access this report deliberately does not take |
+| a project that has never synced, `lastSyncAt` present and null | #2853 | fails the run rather than printing `?`, since a never-synced project is exactly what this report exists to surface |
+
+Judge a project by its containers before concluding it is deployed.
+
+This does not close the gap by itself — it is a report someone has to run,
+not an alert that reaches anyone unprompted. Wiring it into a scheduled,
+alerting check (the `compose-drift-watch.py`/`disk-usage-watch.py` pattern)
+is future work gated on deciding how a CI runner gets the Arcane
+credential; deliberately not done here, to keep this round's change to a
+decision plus a manual tool, not a new secret-handling surface.
 
 ### Arcane cannot track a tag
 
