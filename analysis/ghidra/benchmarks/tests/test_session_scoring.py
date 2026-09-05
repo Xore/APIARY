@@ -182,5 +182,59 @@ class TestEveryForbiddenSummaryTermToleratesDenial(unittest.TestCase):
                     f"an assertive mention of {term!r} must still fail the gate")
 
 
+class TestAgenticExfiltrationSummaryGroupAliases(unittest.TestCase):
+    """#2267: three real paraphrasings from the committed
+    docs/benchmarks/runs/2026-08-26-* transcripts that describe the same
+    alternate-egress mechanism as the original tokens but missed all of
+    them. Pinned against the production SESSION_CASES roster (not
+    make_case()'s smaller synthetic fixture) so a future edit to the real
+    group can't silently regress these without a test noticing. Scored-only
+    (summary_groups_ok) -- #2232 already removed this leg from critical_ok,
+    and this issue must not reintroduce it there."""
+
+    CASE = next(c for c in evaluate_models.SESSION_CASES
+                if c.name == "agentic-encoded-exfiltration")
+
+    def _summary_group_4_hit(self, summary):
+        group = self.CASE.required_summary_groups[3]
+        lowered = summary.lower()
+        return any(term in lowered for term in group)
+
+    def test_secondary_connection_paraphrase_now_counts(self):
+        """huihui-qwen3.6-35b-a3b-abliterated:q3_k, 2026-08-26 run."""
+        self.assertTrue(self._summary_group_4_hit(
+            "with a secondary connection established to 192.0.2.44:8080"))
+
+    def test_reverse_connection_paraphrase_now_counts(self):
+        """qwen3.8:27b, 2026-08-26 run."""
+        self.assertTrue(self._summary_group_4_hit(
+            "establish a reverse connection, followed by anti-forensics"))
+
+    def test_possessive_hosts_paraphrase_now_counts(self):
+        """Foundation-Sec-1.1-8B-Instruct, 2026-08-26 run: "hosts" alone
+        doesn't match the possessive singular "host's"."""
+        self.assertTrue(self._summary_group_4_hit(
+            "modifying the host's DNS resolution to an alternate domain"))
+
+    def test_unrelated_text_still_misses(self):
+        """The expansion must stay scoped -- it should not turn the group
+        into a near-always-true check."""
+        self.assertFalse(self._summary_group_4_hit(
+            "the attacker only ran reconnaissance commands"))
+
+    def test_expansion_does_not_touch_critical_ok(self):
+        """This case is critical=True; confirm summary_groups_ok staying
+        False for an unrelated summary has no effect on critical_ok, which
+        #2232 already scoped to MITRE/forbidden/severity only."""
+        raw = make_raw(
+            summary="the attacker only ran reconnaissance commands",
+            intent="data-theft", severity="critical",
+            mitre=list(self.CASE.required_mitre), iocs=list(self.CASE.required_iocs),
+        )
+        result = evaluate_models._score_session_case(self.CASE, raw)
+        self.assertFalse(result["summary_groups_ok"])
+        self.assertTrue(result["critical_ok"])
+
+
 if __name__ == "__main__":
     unittest.main()
