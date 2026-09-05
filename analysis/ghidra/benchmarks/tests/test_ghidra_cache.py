@@ -6,18 +6,23 @@ result is trustworthy -- that the key changes when anything shaping the evidence
 changes, and that the injection assertion reports honestly.
 """
 
+import contextlib
+import io
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import ghidra_cache  # noqa: E402
 from ghidra_cache import (  # noqa: E402
     ANALYSIS_OPTIONS,
     GhidraCacheError,
     assert_injection_present,
     cache_key,
+    service_version,
     sha256_bytes,
 )
 
@@ -85,6 +90,87 @@ class HashingTest(unittest.TestCase):
     def test_sha256_bytes_matches_hashlib(self):
         import hashlib
         self.assertEqual(sha256_bytes(b"abc"), hashlib.sha256(b"abc").hexdigest())
+
+
+# #2983: the service now reads application.version out of its own Ghidra
+# install and publishes it on /v1/capabilities. The served value is the only
+# one that cannot be wrong about what actually decompiled the binary, so it
+# wins; GHIDRA_VERSION survives only for images built before that change.
+class ServiceVersionTest(unittest.TestCase):
+    def setUp(self):
+        self._real_request = ghidra_cache._request
+        self._real_environ = dict(os.environ)
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        ghidra_cache._request = self._real_request
+        os.environ.clear()
+        os.environ.update(self._real_environ)
+
+    def _serve(self, payload):
+        ghidra_cache._request = lambda *a, **k: payload
+
+    def _set_env(self, value):
+        if value is None:
+            os.environ.pop("GHIDRA_VERSION", None)
+        else:
+            os.environ["GHIDRA_VERSION"] = value
+
+    def test_served_version_is_used(self):
+        self._serve({"capabilities": {}, "ghidra_version": "11.3.2"})
+        self._set_env(None)
+        self.assertEqual(service_version("http://x"), "11.3.2")
+
+    def test_served_version_beats_the_env_override(self):
+        self._serve({"capabilities": {}, "ghidra_version": "11.3.2"})
+        self._set_env("10.1.5")
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(service_version("http://x"), "11.3.2")
+
+    def test_disagreement_warns_instead_of_resolving_silently(self):
+        self._serve({"capabilities": {}, "ghidra_version": "11.3.2"})
+        self._set_env("10.1.5")
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            service_version("http://x")
+        warning = stderr.getvalue()
+        self.assertIn("WARNING", warning)
+        self.assertIn("10.1.5", warning)
+        self.assertIn("11.3.2", warning)
+
+    def test_agreement_is_silent(self):
+        self._serve({"capabilities": {}, "ghidra_version": "11.3.2"})
+        self._set_env("11.3.2")
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            self.assertEqual(service_version("http://x"), "11.3.2")
+        self.assertEqual(stderr.getvalue(), "")
+
+    def test_bare_version_key_is_still_accepted(self):
+        # A service that publishes "version" rather than "ghidra_version".
+        self._serve({"capabilities": {}, "version": "11.4.0"})
+        self._set_env(None)
+        self.assertEqual(service_version("http://x"), "11.4.0")
+
+    def test_env_only_still_works_for_a_pre_2983_image(self):
+        self._serve({"capabilities": {}})
+        self._set_env("11.3.2")
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            self.assertEqual(service_version("http://x"), "11.3.2")
+        self.assertEqual(stderr.getvalue(), "")
+
+    def test_neither_present_still_raises(self):
+        self._serve({"capabilities": {}})
+        self._set_env(None)
+        with self.assertRaises(GhidraCacheError):
+            service_version("http://x")
+
+    def test_an_empty_response_still_raises(self):
+        self._serve(None)
+        self._set_env(None)
+        with self.assertRaises(GhidraCacheError):
+            service_version("http://x")
 
 
 class ErrorTypeTest(unittest.TestCase):

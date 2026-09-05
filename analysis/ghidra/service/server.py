@@ -65,6 +65,11 @@ PORT = int(os.environ.get("PORT", "9090"))
 # same default) -- read here only to report an honest decompile-coverage
 # ratio in the security index (#1180), never to change what gets exported.
 GHIDRA_MAX_DECOMPILE_FUNCTIONS = int(os.environ.get("GHIDRA_MAX_DECOMPILE_FUNCTIONS", "500"))
+# #2983: the directory Dockerfile unzips the official release into (the same
+# root GHIDRA_BIN and export_json.py's own scripting API both run against),
+# not a separately-tracked value -- if this ever drifted from the actual
+# install, GHIDRA_BIN would already be broken.
+GHIDRA_INSTALL_DIR = os.environ.get("GHIDRA_INSTALL_DIR", "/opt/ghidra")
 
 REQUIRED_ARTIFACTS = ("functions.json", "strings.json", "imports.json")
 
@@ -756,6 +761,38 @@ V1_CAPABILITIES = {
 }
 
 
+def _read_ghidra_version() -> str | None:
+    """The Ghidra release this container actually runs, from its own install.
+
+    #2983: the container knew its version all along -- Ghidra ships it in
+    application.properties, the same file the launcher reads -- but the API
+    never said it, so every consumer had to be told out of band. Read the
+    install rather than an environment variable: an env value is whatever the
+    operator typed, and a cache key built from it silently mislabels evidence
+    when the two drift.
+
+    Returns None rather than raising: an unreadable properties file must not
+    stop the service from serving, and a caller that needs the version can
+    still fall back (see benchmarks/ghidra_cache.py:service_version).
+    """
+    path = os.path.join(GHIDRA_INSTALL_DIR, "Ghidra", "application.properties")
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                key, sep, value = line.partition("=")
+                if sep and key.strip() == "application.version":
+                    return value.strip() or None
+    except OSError:
+        return None
+    return None
+
+
+# Resolved once at import, not per request: the install cannot change under a
+# running container, and /v1/capabilities is on the hot path for every client
+# that probes before uploading.
+GHIDRA_VERSION = _read_ghidra_version()
+
+
 def _build_summary(job_id: str) -> dict:
     with _lock:
         job = dict(_jobs.get(job_id) or {})
@@ -1063,7 +1100,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/v1/capabilities":
-            self._json(200, {"capabilities": V1_CAPABILITIES})
+            # ghidra_version is a SIBLING of "capabilities", not a member of
+            # it (#2983): "capabilities" is documented as a flat name->bool
+            # map, and ghidra_cache.py reads the version off the top-level
+            # object. Omitted entirely when unreadable, so a client can tell
+            # "this build does not report it" from "it reported nothing".
+            payload = {"capabilities": V1_CAPABILITIES}
+            if GHIDRA_VERSION:
+                payload["ghidra_version"] = GHIDRA_VERSION
+            self._json(200, payload)
             return
 
         match = re.match(r"^/v1/results/([a-f0-9]{32})/(functions|imports|strings|summary)$", path)

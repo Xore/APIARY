@@ -191,7 +191,7 @@ def free_port():
         return s.getsockname()[1]
 
 
-def run_server(fake_headless_script, port, data_dir):
+def run_server(fake_headless_script, port, data_dir, extra_env=None):
     script_path = Path(data_dir) / "fake_headless.sh"
     script_path.write_text(fake_headless_script)
     script_path.chmod(script_path.stat().st_mode | stat.S_IEXEC)
@@ -202,8 +202,27 @@ def run_server(fake_headless_script, port, data_dir):
         "GHIDRA_DATA_DIR": str(Path(data_dir) / "jobs"),
         "PORT": str(port),
     })
+    if extra_env:
+        env.update(extra_env)
     return subprocess.Popen([sys.executable, SERVER], env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+
+def fake_ghidra_install(root, version):
+    """A minimal stand-in for an unpacked Ghidra release.
+
+    Only application.properties matters here -- that is the file the real
+    launcher reads its version out of, and the one #2983 made the service
+    read too.
+    """
+    install = Path(root) / "ghidra"
+    (install / "Ghidra").mkdir(parents=True, exist_ok=True)
+    (install / "Ghidra" / "application.properties").write_text(
+        "application.name=Ghidra\n"
+        "application.version=" + version + "\n"
+        "application.release.name=PUBLIC\n"
+    )
+    return install
 
 
 def wait_health(base, timeout=10):
@@ -334,6 +353,58 @@ def test_tools_endpoints():
 
             code = post_json_expect_error(f"{base}/tools/nonexistent_tool", {"job_id": job_id})
             check(code == 404, "unknown tool name 404s")
+        finally:
+            proc.terminate()
+            proc.wait(timeout=5)
+
+
+# #2983: the container always knew which Ghidra it runs -- the release ships
+# application.version in application.properties -- but /v1/capabilities never
+# said so, leaving ghidra_cache.py's cache key to be labelled by whatever an
+# operator typed into GHIDRA_VERSION. These pin the published field down: it
+# has to be a SIBLING of "capabilities" (ghidra_cache.py reads it off the
+# top-level object), it has to come from the install rather than the
+# environment, and an unreadable install must degrade to omitting the key
+# rather than taking the service down.
+def test_v1_capabilities_reports_the_installed_ghidra_version():
+    with tempfile.TemporaryDirectory() as tmp:
+        install = fake_ghidra_install(tmp, "11.3.2")
+        port = free_port()
+        proc = run_server(FAKE_HEADLESS, port, tmp,
+                          extra_env={"GHIDRA_INSTALL_DIR": str(install),
+                                     "GHIDRA_VERSION": "0.0.0-operator-typo"})
+        try:
+            base = f"http://127.0.0.1:{port}"
+            wait_health(base)
+            caps = get(f"{base}/v1/capabilities")
+
+            check(caps.get("ghidra_version") == "11.3.2",
+                  "v1/capabilities publishes the version from application.properties")
+            check("ghidra_version" not in caps["capabilities"],
+                  "ghidra_version is a sibling of capabilities, not a member of the boolean map")
+            check(all(isinstance(v, bool) for v in caps["capabilities"].values()),
+                  "the capabilities map stays a pure name->bool map")
+            check(caps.get("ghidra_version") != "0.0.0-operator-typo",
+                  "the install wins over a GHIDRA_VERSION env value that disagrees with it")
+        finally:
+            proc.terminate()
+            proc.wait(timeout=5)
+
+
+def test_v1_capabilities_omits_the_version_when_the_install_is_unreadable():
+    with tempfile.TemporaryDirectory() as tmp:
+        port = free_port()
+        proc = run_server(FAKE_HEADLESS, port, tmp,
+                          extra_env={"GHIDRA_INSTALL_DIR": str(Path(tmp) / "no-such-install")})
+        try:
+            base = f"http://127.0.0.1:{port}"
+            wait_health(base)
+            caps = get(f"{base}/v1/capabilities")
+
+            check("ghidra_version" not in caps,
+                  "an unreadable install omits ghidra_version rather than reporting a blank one")
+            check(caps["capabilities"]["types"] is True,
+                  "an unreadable install does not stop the service from serving capabilities")
         finally:
             proc.terminate()
             proc.wait(timeout=5)
@@ -878,6 +949,8 @@ if __name__ == "__main__":
     test_success_path()
     test_analyze_b64_success_path()
     test_tools_endpoints()
+    test_v1_capabilities_reports_the_installed_ghidra_version()
+    test_v1_capabilities_omits_the_version_when_the_install_is_unreadable()
     test_v1_capabilities_and_results()
     test_v1_decompile_xrefs_query_graph()
     test_v1_types_globals_hexdump()

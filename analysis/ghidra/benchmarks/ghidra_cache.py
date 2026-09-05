@@ -117,21 +117,40 @@ def service_version(base: str) -> str:
 
     Read from the running service rather than configured here: the point of the
     key is to notice when the thing that produced the evidence changed.
+
+    The served value always wins (#2983). Since that issue the service reads
+    application.version out of its own Ghidra install and publishes it on
+    /v1/capabilities, so it is the only source that cannot be wrong about what
+    actually decompiled the binary. GHIDRA_VERSION stays as a fallback for
+    images built before that change, and a disagreement between the two is
+    reported rather than silently resolved -- an operator whose env says one
+    release while the container runs another has a mislabelled cache, which is
+    exactly the unattributable state this key exists to prevent.
     """
     caps = _request(f"{base}/v1/capabilities", timeout=30) or {}
-    version = caps.get("ghidra_version") or caps.get("version")
-    if version:
-        return str(version)
-    # The current service does not publish its version through the API. Fall
-    # back to the env override so the key is never silently blank -- an empty
-    # component would make two different Ghidras look like one.
-    version = os.environ.get("GHIDRA_VERSION")
-    if not version:
-        raise GhidraCacheError(
-            "service does not report a Ghidra version and GHIDRA_VERSION is unset; "
-            "refusing to build a cache whose key cannot identify the decompiler"
+    served = caps.get("ghidra_version") or caps.get("version")
+    served = str(served) if served else None
+    configured = os.environ.get("GHIDRA_VERSION") or None
+
+    if served and configured and served != configured:
+        print(
+            f"  WARNING: GHIDRA_VERSION={configured!r} disagrees with the version the "
+            f"service reports ({served!r}); using the served value. The cache key -- and "
+            f"every result recorded under it -- names the Ghidra that actually ran.",
+            file=sys.stderr,
+            flush=True,
         )
-    return version
+    if served:
+        return served
+    if configured:
+        # Pre-#2983 image: it does not publish a version, so the env override
+        # is all there is. Keep the key non-blank -- an empty component would
+        # make two different Ghidras look like one.
+        return configured
+    raise GhidraCacheError(
+        "service does not report a Ghidra version and GHIDRA_VERSION is unset; "
+        "refusing to build a cache whose key cannot identify the decompiler"
+    )
 
 
 def post_script_sha256() -> str:
