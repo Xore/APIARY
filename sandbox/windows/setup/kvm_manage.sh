@@ -116,10 +116,23 @@ verify_golden_image_contents() {
         "/Tools/SysinternalsSuite/Procmon64.exe"
     )
     local -a missing=()
-    local path present
+    local path dir base listing
     for path in "${tool_files[@]}"; do
-        present="$(guestfish --ro -a "$disk" -i is-file "$path" 2>/dev/null || echo "false")"
-        [[ "$present" == "true" ]] || missing+=("$path")
+        dir="$(dirname "$path")"
+        base="$(basename "$path")"
+        # virt-ls, not `guestfish -i is-file`: RHEL's libguestfs-winsupport
+        # permits NTFS to the virt-* tools only and refuses it to guestfish
+        # itself ("mount: unsupported filesystem type"). On the Rocky
+        # homeserver that made all four of these report MISSING against a
+        # golden image that demonstrably contains all four -- verified live
+        # (#1609, 2026-09-05) with virt-ls on the same host in the same
+        # second. A check that cannot read the disk must not answer
+        # "missing"; that is #2023's defect inverted.
+        if ! listing="$(virt-ls -a "$disk" "$dir" 2>&1)"; then
+            die "Could not list $dir in $disk via virt-ls: ${listing}. The file half of the #100 check could not run; refusing to report it as passed."
+        fi
+        # Windows paths are case-insensitive; virt-ls prints the on-disk case.
+        grep -qix -- "$base" <<<"$listing" || missing+=("$path")
     done
 
     # Share names come out of the offline SYSTEM hive via virt-win-reg, the

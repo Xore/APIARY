@@ -2682,8 +2682,24 @@ step_ghosts_vm_start() {
     qemu-img create -f qcow2 -F qcow2 -b "$golden" "$disk"
   fi
   ensure_nvram_vars /var/lib/libvirt/qemu/nvram/win11-ghosts_VARS.qcow2
-  virsh list --all --name | grep -qx win11-ghosts \
-    || virsh define "$REPO_DIR/sandbox/ghosts/win11-ghosts-kvm.xml"
+  # Defines through the same path-rendering helper kvm_manage.sh uses -- this
+  # step calls `virsh define` directly rather than going through
+  # kvm_manage.sh, so on EL it failed with "Cannot check QEMU binary
+  # /usr/bin/qemu-system-x86_64" while the other two domains, which do go
+  # through kvm_manage.sh, defined fine.
+  # shellcheck source=/dev/null
+  . "$REPO_DIR/sandbox/windows/setup/host-paths.sh"
+  if ! virsh list --all --name | grep -qx win11-ghosts; then
+    local rendered
+    rendered="$(mktemp /tmp/win11-ghosts-domain.XXXXXX.xml)"
+    if sandbox_render_domain_xml "$REPO_DIR/sandbox/ghosts/win11-ghosts-kvm.xml" > "$rendered"; then
+      virsh define "$rendered"
+      rm -f "$rendered"
+    else
+      rm -f "$rendered"
+      return 1
+    fi
+  fi
   virsh domstate win11-ghosts | grep -q running || virsh start win11-ghosts
 }
 
