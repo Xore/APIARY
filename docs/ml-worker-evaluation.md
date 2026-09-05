@@ -57,6 +57,51 @@ deployed detectors have not been run through it as a qualification; doing so is
 the next step, along with the live-threshold measurement
 (#1794-b) that the alert-budget metric and the promotion gate both need.
 
+### 2026-09-05 — #1797 has ruled; Tier 2 is no longer blocked on it
+
+The paragraph above is superseded. Both [#1794](https://github.com/Xore/APIARY/issues/1794)
+and [#1797](https://github.com/Xore/APIARY/issues/1797) are closed, so neither
+is a live blocker any more, and Tier 2 has two named label sources instead of
+one open question.
+
+**BETH's verdict: usable as a sanity rail, never as ground truth for our
+traffic.** Recorded in full on #1797, in short here:
+
+- CC0, downloadable anonymously (39.8 MB archive, 927 MB uncompressed), frozen
+  since 2021-07-29 — treat version 3 as final.
+- Its labels are real and match the paper: 763,144 / 188,967 / 188,967 rows
+  across the three published splits, host-disjoint by construction with the
+  attacked host held out of train and val.
+- Its features are eBPF process calls (`processId`, `mountNamespace`,
+  `eventId`, `returnValue`). Ours are `dst_port`, `payload_entropy`,
+  `inter_arrival_log`, GeoIP, Cowrie credentials. **No honest mapping exists in
+  either direction**, so this corpus can validate our *architectures* and can
+  never validate the *deployment*.
+- The DNS/network half is not usable at all: all six `*-dns.csv` files are
+  byte-identical, 269 rows total, 21 `sus` / 4 `evil`.
+- Adoption protocol (splits as published, the authors' own feature encoding,
+  AUROC headline with AUPRC alongside, mean ± std over ≥5 seeds, per-split base
+  rates printed beside every number) is written out on #1797 and is what this
+  tier should implement.
+
+**The ranking corpus for our own traffic is the disposition corpus, not BETH.**
+The operator disposition lifecycle shipped in
+[#1968](https://github.com/Xore/APIARY/issues/1968) /
+[#2395](https://github.com/Xore/APIARY/issues/2395) is live and accumulating
+labels on the traffic the deployed detectors actually score. That is the source
+a precision/recall number for this deployment has to come from; BETH is the rail
+that catches a pipeline defect before such a number is trusted.
+
+**No change to the composite's 0.4/0.4/0.2 weights or to `ML_ALERT_THRESHOLD`
+may be argued from BETH**, per its own decision rule. If our iForest does not
+land near the 0.850 AUROC of the paper's Table 3 under the authors' features,
+the defect is in our pipeline, not in the dataset.
+
+Wiring Tier 2 — the BETH rail and disposition-corpus calibration — is tracked in
+[#2986](https://github.com/Xore/APIARY/issues/2986) under epic
+[#1974](https://github.com/Xore/APIARY/issues/1974). It is not tracked by this
+paragraph.
+
 ## Findings carried in from the research phase
 
 Recorded so they are not rediscovered, each with the reason it matters here.
@@ -82,8 +127,10 @@ Recorded so they are not rediscovered, each with the reason it matters here.
 - **Calibration is label-gated.** ECE, Brier and reliability diagrams need a
   probability *and* a ground-truth label; our detectors emit neither. An ECDF
   rank transform makes the three commensurable before blending but is **not**
-  calibration. Platt scaling on a held-out labelled split is, and it depends on
-  #1797.
+  calibration. Platt scaling on a held-out labelled split is — and #1797 settled
+  where that split can come from: BETH's published splits make ECE/Brier
+  computable for the *architectures*, the #1968/#2395 disposition corpus is the
+  only label source for the *deployment*. See the 2026-09-05 status entry.
 
 ## Promotion
 
