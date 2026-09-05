@@ -2092,6 +2092,38 @@ step_technitium_provision() {
   fi
 }
 
+step_technitium_lan_route() {
+  # #3068: this host has two NICs on the same /24, and whichever one has
+  # the lower route metric wins outbound traffic regardless of which
+  # address Technitium is configured and listening on. Technitium's peer
+  # identity, zone-transfer ACLs and cluster membership are all pinned to
+  # TECHNITIUM_LAN_IP -- if the kernel actually sources LAN traffic from
+  # the *other* NIC's address, every AXFR from a real peer gets REFUSED,
+  # with a symptom (RCODE=Refused) that looks like a TSIG problem and
+  # burns time debugging the wrong layer (confirmed live, #3068). Catch
+  # the metric/interface mismatch here, before Technitium ever starts.
+  local lan_ip="$TECHNITIUM_LAN_IP"
+  local iface actual_src default_gw
+
+  iface="$(ip -o addr show | awk -v ip="$lan_ip" '$4 ~ "^"ip"/" {print $2; exit}')"
+  if [[ -z "$iface" ]]; then
+    echo "no local interface holds TECHNITIUM_LAN_IP=$lan_ip" >&2
+    return 1
+  fi
+
+  default_gw="$(ip route show default | awk '{print $3; exit}')"
+  if [[ -z "$default_gw" ]]; then
+    echo "no default route to probe the outbound source address against" >&2
+    return 1
+  fi
+
+  actual_src="$(ip route get "$default_gw" | grep -oP 'src \K\S+' | head -1)"
+  if [[ "$actual_src" != "$lan_ip" ]]; then
+    echo "outbound traffic sources from $actual_src, not TECHNITIUM_LAN_IP=$lan_ip on $iface -- a second NIC on the same LAN with a lower route metric will source zone transfers from the wrong address and get every AXFR REFUSED (see #3068); fix the route metric (e.g. nmcli connection modify <conn> ipv4.route-metric <n>) so $lan_ip's interface wins" >&2
+    return 1
+  fi
+}
+
 step_technitium_start() {
   [[ -f /var/dockge/stacks/technitium/.env ]] || { echo "no technitium .env restored — skipping start"; return 1; }
   (cd /var/dockge/stacks/technitium && with_retry 3 15 docker compose -f compose.yml up -d --wait)
@@ -2887,6 +2919,7 @@ run_step auth-events-worker-start "Start auth-events-worker" step_auth_events_wo
 
 
 run_step technitium-provision  "Install Technitium DNS config"       step_technitium_provision
+run_step technitium-lan-route  "Assert LAN NIC owns lowest-metric route" step_technitium_lan_route
 run_step technitium-start      "Start Technitium DNS"                step_technitium_start
 run_step technitium-verify     "Resolve container and LAN"           step_technitium_verify
 
