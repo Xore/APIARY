@@ -2554,6 +2554,30 @@ step_sandbox_backup_restore() {
   # SANDBOX_ROOT default, provision-golden-image.sh's default arg) -- it
   # must land exactly there, not somewhere symlinked or renamed.
   mkdir -p /var/dockge/sandbox
+
+  # A "local:" prefix restores from a directory on this host instead of over
+  # SSH. The golden images are ~66G and the copy that matters is often already
+  # attached to the box being rebuilt: on 2026-09-05 all three images plus
+  # isos/, vms/ and libvirt-defs.xml were sitting on the homeserver's own
+  # backup drive at /mnt/usb-recovery, while #1609 recorded them as not being
+  # in the backup set at all and Phase 8 as blocked on a multi-hundred-GB
+  # transfer nobody had scheduled. Pulling 66G out of a local ext4 drive and
+  # back over the LAN to the same machine is the only thing that was actually
+  # missing.
+  if [[ "$BACKUP_HOST_SANDBOX_PATH" == local:* ]]; then
+    local src="${BACKUP_HOST_SANDBOX_PATH#local:}"
+    if [[ ! -d "$src" ]]; then
+      echo "BACKUP_HOST_SANDBOX_PATH names a local path that does not exist: $src" >&2
+      echo "  (mount the backup drive first -- an unmounted mountpoint reads as" >&2
+      echo "   an empty directory or a missing one, and rsync would happily" >&2
+      echo "   'restore' nothing at all)" >&2
+      return 1
+    fi
+    echo "restoring sandbox tree from local path: $src"
+    rsync -a --info=progress2 "${src%/}/" /var/dockge/sandbox/
+    return
+  fi
+
   with_retry 2 30 rsync -a -e "ssh -i $BACKUP_HOST_KEY -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10" \
     "${BACKUP_HOST_USER}@${BACKUP_HOST}:${BACKUP_HOST_SANDBOX_PATH}/" /var/dockge/sandbox/
 }
@@ -2880,6 +2904,7 @@ if [[ "$ENABLE_SANDBOX_RESTORE" == "true" ]]; then
   run_step linux-sandbox-verify   "Run Linux sandbox smoke test"          step_linux_sandbox_verify
 else
   skip_step libvirt-install "Install libvirt/KVM/QEMU" "ENABLE_SANDBOX_RESTORE=false"
+  skip_step vfio-gpu-passthrough "Bind the sandbox GPU to vfio-pci (#1609 Phase 7)" "ENABLE_SANDBOX_RESTORE=false"
   skip_step sandbox-restore "Pull sandbox backup from LAN host" "ENABLE_SANDBOX_RESTORE=false"
   skip_step sandbox-checksum "Verify golden-image checksums" "ENABLE_SANDBOX_RESTORE=false"
   skip_step ghosts-network "Set up GHOSTS isolated libvirt network" "ENABLE_SANDBOX_RESTORE=false"
@@ -2888,7 +2913,10 @@ else
   skip_step windows-sandbox-network "Set up Windows sandbox libvirt network" "ENABLE_SANDBOX_RESTORE=false"
   skip_step windows-sandbox-create "Create win11-sandbox thin-clone VM" "ENABLE_SANDBOX_RESTORE=false"
   skip_step windows-sandbox-start "Start win11-sandbox VM" "ENABLE_SANDBOX_RESTORE=false"
-  skip_step sandbox-verify "Verify both sandbox VMs running" "ENABLE_SANDBOX_RESTORE=false"
+  skip_step cape-network "Set up CAPE libvirt network" "ENABLE_SANDBOX_RESTORE=false"
+  skip_step cape-vm-create "Create win11-cape thin-clone VM (#1609 Phase 7)" "ENABLE_SANDBOX_RESTORE=false"
+  skip_step cape-vm-start "Start win11-cape VM" "ENABLE_SANDBOX_RESTORE=false"
+  skip_step sandbox-verify "Verify sandbox VMs running" "ENABLE_SANDBOX_RESTORE=false"
   skip_step sandbox-host-foundation "Set up Linux sandbox network + dirs" "ENABLE_SANDBOX_RESTORE=false"
   skip_step linux-sandbox-base "Download + verify Linux base image" "ENABLE_SANDBOX_RESTORE=false"
   skip_step linux-sandbox-verify "Run Linux sandbox smoke test" "ENABLE_SANDBOX_RESTORE=false"
