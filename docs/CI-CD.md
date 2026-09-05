@@ -809,6 +809,41 @@ runner, that cache survives between job runs on this same machine, so the
 second and every later run skips the download entirely. This is most of
 where the actual speed win comes from, not raw CPU.
 
+#### How many instances, and why it is 2 during a benchmark window
+
+The box ran **seven** `honeypot-ci` instances (`supermicro`,
+`supermicro-ci-2` .. `-7`) plus the separate `honeypot-home` deploy runner.
+Reduced to **two** (`supermicro` + `supermicro-ci-2`) on 2026-09-05.
+
+This is a shared box, not a CI box. The homeserver is also the GPU host for
+the #1947 model benchmark, and CI is that benchmark's largest source of
+measurement noise: identical work on the same model spread **62%** (78.2 vs
+126.7 min/run) purely from runner contention, and load average sat at
+**15-27** with seven instances live. #1947's whole premise is that scores
+separated by less than the error bar are not results, so a benchmark run
+taken against an unknown, CI-driven load is not a measurement -- see
+`docs/benchmarks/plans/2026-09-05-1947-resume-plan.md` step P5, which cannot
+be answered at all without this.
+
+Seven was never a measured optimum; it was the ceiling #2572 allowed once
+one instance stopped serialising the matrix. The CPU swap (Xeon Silver 4110
+8c/16t -> Xeon Gold 5220R 24c/48t) also means two instances today have more
+cores behind them than four did before.
+
+To restore the extra instances once the benchmark window closes:
+
+```bash
+ssh homeserver 'for n in 3 4 5 6 7; do
+  sudo systemctl enable --now actions.runner.Xore-APIARY.supermicro-ci-$n.service
+done'
+```
+
+They are only `systemctl disable --now`, not deregistered -- the registration,
+`_work` dir and tool cache all survive, so re-enabling costs nothing and needs
+no token. **Stopping a busy instance fails its in-flight job**, so cancel the
+run first or wait for idle; the 2026-09-05 reduction cancelled a run and cost
+16 jobs a re-run.
+
 ### Buildx layer cache: `type=local` on the homeserver (#2822)
 
 `containers.yml` used to export every image's layer cache to `type=gha`,
