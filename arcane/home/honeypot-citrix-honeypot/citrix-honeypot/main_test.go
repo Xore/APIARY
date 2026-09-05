@@ -150,6 +150,50 @@ func TestPOSTNewbmCapturesTitlePayload(t *testing.T) {
 	}
 }
 
+func TestGETQueryStringIsCapturedInLoggedEvent(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = orig }()
+
+	req := httptest.NewRequest("GET", "/oauth/idp/.well-known/openid-configuration?SAMLRequest=fZ1LmZvbw", nil)
+	rec := httptest.NewRecorder()
+	newTestHandler().ServeHTTP(rec, req)
+
+	w.Close()
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+
+	if !strings.Contains(buf.String(), `"query":"SAMLRequest=fZ1LmZvbw"`) {
+		t.Fatalf("expected query string in logged event, got %q", buf.String())
+	}
+}
+
+func TestGETWithoutQueryStringOmitsQueryField(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = orig }()
+
+	req := httptest.NewRequest("GET", "/some/random/path", nil)
+	rec := httptest.NewRecorder()
+	newTestHandler().ServeHTTP(rec, req)
+
+	w.Close()
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+
+	if strings.Contains(buf.String(), `"query"`) {
+		t.Fatalf("expected no query field for a request without one, got %q", buf.String())
+	}
+}
+
 func TestPOSTOtherPathReturnsEmpty200(t *testing.T) {
 	req := httptest.NewRequest("POST", "/whatever", strings.NewReader("data"))
 	w := httptest.NewRecorder()

@@ -51,7 +51,7 @@ func webvpnSrcIP(r *http.Request) (string, int) {
 
 func (h *webvpnHandler) log2(r *http.Request, kind, reqPath, data string) {
 	ip, port := webvpnSrcIP(r)
-	h.log.emit(event{Port: h.port, SrcIP: ip, SrcPort: port, Event: kind, Path: reqPath, Data: data,
+	h.log.emit(event{Port: h.port, SrcIP: ip, SrcPort: port, Event: kind, Path: reqPath, Query: r.URL.RawQuery, Data: data,
 		UserAgent: r.UserAgent(), Headers: webvpnHeaderMap(r)})
 }
 

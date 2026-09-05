@@ -62,6 +62,7 @@ type event struct {
 	SrcPort   int               `json:"src_port"`
 	Event     string            `json:"event"`
 	Path      string            `json:"path,omitempty"`
+	Query     string            `json:"query,omitempty"`
 	Data      string            `json:"data,omitempty"`
 	UserAgent string            `json:"user_agent,omitempty"`
 	Headers   map[string]string `json:"headers,omitempty"`
@@ -195,7 +196,7 @@ func (h *handler) log2(r *http.Request, kind, reqPath, data string) {
 			hdr["x-ja4"] = fp
 		}
 	}
-	h.log.emit(event{Port: h.port, SrcIP: ip, SrcPort: port, Event: kind, Path: reqPath, Data: data,
+	h.log.emit(event{Port: h.port, SrcIP: ip, SrcPort: port, Event: kind, Path: reqPath, Query: r.URL.RawQuery, Data: data,
 		UserAgent: r.UserAgent(), Headers: hdr})
 }
 
