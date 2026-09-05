@@ -107,6 +107,43 @@ llama() { # <args...>
     --entrypoint "$1" "$IMAGE" "${@:2}"
 }
 
+# Some published repos ship `extra_special_tokens` as a bare LIST where
+# transformers requires a dict, and the conversion dies deep inside the
+# tokenizer with a bare AttributeError:
+#
+#   tokenization_utils_base.py: self.SPECIAL_TOKENS_ATTRIBUTES + list(special_tokens.keys())
+#   AttributeError: 'list' object has no attribute 'keys'
+#
+# Seen on llmfan46/gemma-4-26B-A4B-it-ultra-uncensored-heretic, whose own
+# sibling field `model_specific_special_tokens` IS a correctly-formed dict
+# ({"audio_token": "<|audio|>", "boi_token": "<|image>", ...}), so the intended
+# shape is unambiguous and the list is simply malformed upstream.
+#
+# The token is real -- <|video|> is in tokenizer.json's vocab -- so DELETING the
+# field would silently drop a token the weights know about. Re-key it instead,
+# following the sibling field's own <|x|> -> x_token convention, and log the
+# rewrite: this is a deviation from the published artifact and #1947 rule 5
+# requires deviations to be recorded rather than quietly applied.
+normalize_snapshot() { # snapshot_dir
+  python3 - "$1" <<'EOF'
+import json, pathlib, re, sys
+p = pathlib.Path(sys.argv[1]) / "tokenizer_config.json"
+if not p.exists():
+    sys.exit(0)
+cfg = json.loads(p.read_text())
+v = cfg.get("extra_special_tokens")
+if isinstance(v, list):
+    fixed = {}
+    for tok in v:
+        m = re.fullmatch(r"<\|(.+?)\|>", str(tok))
+        key = (m.group(1) if m else re.sub(r"\W+", "_", str(tok)).strip("_")) + "_token"
+        fixed[key] = tok
+    cfg["extra_special_tokens"] = fixed
+    p.write_text(json.dumps(cfg, indent=2))
+    print(f"NORMALIZED extra_special_tokens: list {v} -> dict {fixed}")
+EOF
+}
+
 snapshot_dl() { # repo dest
   local repo="$1" dest="$2"
   docker run --rm \
@@ -157,6 +194,7 @@ while IFS='|' read -r REPO_ID LEVELS PREFIX; do
     else
       log "snapshot already present, reusing"
     fi
+    normalize_snapshot "$snap" | while read -r l; do log "$l"; done
     log "converting to f16"
     if ! llama python3 /app/convert_hf_to_gguf.py "/work/${name}-snapshot" \
            --outfile "/work/${name}-f16.gguf" --outtype f16; then
