@@ -2515,8 +2515,16 @@ step_libvirt_install() {
       # Same stack, different names throughout: qemu-kvm, libvirt-daemon-kvm,
       # libvirt-client, virt-install, guestfs-tools, edk2-ovmf (the UEFI
       # firmware the Windows sandbox domains boot from).
+      #
+      # virt-win-reg and libguestfs-winsupport are separate packages here,
+      # where Debian's libguestfs-tools carries both. kvm_manage.sh's
+      # verify_golden_image_contents reads the guest's SMB share registry keys
+      # through virt-win-reg before every clone (#100/#2023), so without them
+      # EVERY create fails on a golden image that is perfectly fine:
+      #   [ERROR] Could not read the SMB share registry state ... via virt-win-reg
+      # winsupport is what makes the guest's NTFS filesystem readable at all.
       pkg_install qemu-kvm libvirt libvirt-daemon-kvm libvirt-client bridge-utils \
-        virt-install guestfs-tools edk2-ovmf
+        virt-install guestfs-tools virt-win-reg libguestfs-winsupport edk2-ovmf
       ;;
   esac
   # RHEL 9+ splits libvirtd into modular per-driver daemons and may ship no
@@ -2544,7 +2552,8 @@ step_libvirt_install() {
   # with "referenced filter '...' is missing" the first time a sandbox step
   # runs -- confirmed live, see #518. Restore them unconditionally here so
   # apt's install-vs-upgrade heuristic can't leave the sandbox chain broken.
-  cp -n /usr/share/libvirt/nwfilter/*.xml /etc/libvirt/nwfilter/
+  mkdir -p /etc/libvirt/nwfilter
+  cp -n /usr/share/libvirt/nwfilter/*.xml /etc/libvirt/nwfilter/ 2>/dev/null || true
   systemctl restart libvirtd
 }
 
