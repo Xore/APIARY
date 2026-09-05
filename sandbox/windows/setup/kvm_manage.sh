@@ -49,6 +49,17 @@ VM_DISK="${VM_DISK:-$SANDBOX_ROOT/vms/${VM_NAME}.qcow2}"
 # overridable there was no way to drive it from here at all -- which is why
 # nothing in the installer ever created that VM (#1609 Phase 7).
 VM_XML="${VM_XML:-$(dirname "$0")/../packer/win11-kvm.xml}"
+# Which golden-image content check applies to $GOLDEN_IMAGE. "analysis" is
+# #100/#2023's five-point check for the win11-analysis image (Regshot,
+# FakeNet, Procmon, the Inbox/Logs SMB shares); "none" for an image that is
+# not built from that provisioner at all.
+#
+# win11-cape is the concrete case: its golden image is CAPE's own agent build
+# -- C:\CAPE, no C:\Tools -- so running the analysis check against it fails on
+# four tools that were never supposed to be there. #2963 made this script
+# drive that second domain without giving it a way to say so, and every
+# cape-vm-create since has failed on the mismatch (#1609, verified live).
+GOLDEN_CONTENT_CHECK="${GOLDEN_CONTENT_CHECK:-analysis}"
 NET_NAME="${NET_NAME:-sandbox}"
 NET_XML="${NET_XML:-$(dirname "$0")/sandbox-network.xml}"
 
@@ -100,6 +111,10 @@ clone_disk() {
 }
 
 verify_golden_image_contents() {
+    if [[ "$GOLDEN_CONTENT_CHECK" == "none" ]]; then
+        log "Golden image content check skipped (GOLDEN_CONTENT_CHECK=none: $GOLDEN_IMAGE is not a win11-analysis build)."
+        return 0
+    fi
     # #100/#2023: the same five-point checklist
     # orchestrate/run_sample.py's verify_golden_image_contents() enforces on
     # every automated detonation (that is the canonical implementation, with
@@ -116,10 +131,23 @@ verify_golden_image_contents() {
         "/Tools/SysinternalsSuite/Procmon64.exe"
     )
     local -a missing=()
-    local path present
+    local path dir base listing
     for path in "${tool_files[@]}"; do
-        present="$(guestfish --ro -a "$disk" -i is-file "$path" 2>/dev/null || echo "false")"
-        [[ "$present" == "true" ]] || missing+=("$path")
+        dir="$(dirname "$path")"
+        base="$(basename "$path")"
+        # virt-ls, not `guestfish -i is-file`: RHEL's libguestfs-winsupport
+        # permits NTFS to the virt-* tools only and refuses it to guestfish
+        # itself ("mount: unsupported filesystem type"). On the Rocky
+        # homeserver that made all four of these report MISSING against a
+        # golden image that demonstrably contains all four -- verified live
+        # (#1609, 2026-09-05) with virt-ls on the same host in the same
+        # second. A check that cannot read the disk must not answer
+        # "missing"; that is #2023's defect inverted.
+        if ! listing="$(virt-ls -a "$disk" "$dir" 2>&1)"; then
+            die "Could not list $dir in $disk via virt-ls: ${listing}. The file half of the #100 check could not run; refusing to report it as passed."
+        fi
+        # Windows paths are case-insensitive; virt-ls prints the on-disk case.
+        grep -qix -- "$base" <<<"$listing" || missing+=("$path")
     done
 
     # Share names come out of the offline SYSTEM hive via virt-win-reg, the
@@ -181,20 +209,13 @@ create_vm() {
         log "WARNING: $VM_XML does not reference $VM_DISK — the domain will boot the wrong disk."
     fi
     log "Defining VM in libvirt..."
-    # The XMLs name Debian's QEMU/OVMF paths literally, which do not exist on
-    # EL -- `virsh define` failed there with "Cannot check QEMU binary
-    # /usr/bin/qemu-system-x86_64" (#1609). host-paths.sh rewrites those three
-    # paths to whatever this host actually has, and returns the file unchanged
-    # on a host that has the literal ones.
-    local rendered
-    rendered="$(mktemp "/tmp/${VM_NAME}-domain.XXXXXX.xml")"
-    if sandbox_render_domain_xml "$VM_XML" > "$rendered"; then
-        virsh define "$rendered"
-        rm -f "$rendered"
-    else
-        rm -f "$rendered"
-        die "could not resolve this host's QEMU/OVMF paths -- see the message above"
-    fi
+    # Through host-paths.sh rather than a bare `virsh define`: the XMLs name
+    # Debian's QEMU/OVMF paths literally and ask libvirt to build the nvram as
+    # qcow2 from a raw template, neither of which works on EL (#1609). That
+    # helper rewrites the paths to this host's, creates the domain's nvram from
+    # the enrolled-keys template, and defines the result.
+    sandbox_define_domain "$VM_XML" \
+        || die "could not define $VM_NAME -- see the message above"
     log "VM '$VM_NAME' defined. Run: $0 start"
 }
 

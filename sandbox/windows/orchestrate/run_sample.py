@@ -55,6 +55,7 @@ Env vars:
   VIRSH_PATH         Path to the virsh binary (default: /usr/bin/virsh)
   GUESTFISH_PATH     Path to the guestfish binary (default: /usr/bin/guestfish)
   VIRT_WIN_REG_PATH  Path to virt-win-reg (default: /usr/bin/virt-win-reg)
+  VIRT_LS_PATH       Path to virt-ls (default: /usr/bin/virt-ls)
   GOLDEN_IMAGE       Path to the golden qcow2 (default:
                      /var/dockge/sandbox/golden-images/win11-analysis.qcow2)
   VM_DISK            Path to the per-run CoW clone (default:
@@ -102,6 +103,7 @@ VM_PASS         = os.environ.get('VM_PASS',          'malware123!')
 VIRSH_PATH      = os.environ.get('VIRSH_PATH',       '/usr/bin/virsh')
 GUESTFISH_PATH  = os.environ.get('GUESTFISH_PATH',   '/usr/bin/guestfish')
 VIRT_WIN_REG_PATH = os.environ.get('VIRT_WIN_REG_PATH', '/usr/bin/virt-win-reg')
+VIRT_LS_PATH    = os.environ.get('VIRT_LS_PATH',      '/usr/bin/virt-ls')
 VIRT_COPY_IN_PATH  = os.environ.get('VIRT_COPY_IN_PATH',  '/usr/bin/virt-copy-in')
 VIRT_COPY_OUT_PATH = os.environ.get('VIRT_COPY_OUT_PATH', '/usr/bin/virt-copy-out')
 LIBVIRT_URI     = os.environ.get('LIBVIRT_URI',      'qemu:///system')
@@ -321,7 +323,11 @@ def _guestfish_ro(args: list, disk_path: Path, timeout: int = 60) -> str:
     volume. `-i` (inspect) finds and mounts that volume automatically,
     read-only (`--ro`) -- no ntfsfix needed, matching ntfsfix_disk()'s own
     note that read-only libguestfs operations never need the dirty-bit
-    workaround writes do."""
+    workaround writes do.
+
+    NOT usable for reading the Windows volume on an EL host: see
+    _virt_ls_ro() below. Kept for anything that touches a filesystem
+    libguestfs will mount from guestfish on either distro."""
     result = subprocess.run(
         [GUESTFISH_PATH, '--ro', '-a', str(disk_path), '-i'] + args,
         capture_output=True, text=True, timeout=timeout,
@@ -329,6 +335,34 @@ def _guestfish_ro(args: list, disk_path: Path, timeout: int = 60) -> str:
     if result.returncode != 0:
         raise RuntimeError(f'guestfish {" ".join(args)} failed: {result.stderr.strip()}')
     return result.stdout
+
+
+def _virt_ls_ro(guest_dir: str, disk_path: Path, timeout: int = 60) -> list:
+    """List a directory inside the guest's own OS volume, read-only.
+
+    virt-ls rather than `guestfish -i is-file`, because RHEL's
+    libguestfs-winsupport permits NTFS only to the virt-* tools and refuses
+    it to guestfish itself:
+
+        libguestfs: error: mount: unsupported filesystem type
+
+    Confirmed live on the Rocky homeserver (2026-09-05, #1609): every one of
+    #100's four tool-file checks reported MISSING against a golden image that
+    demonstrably contains all four -- `virt-ls -a <disk> /Tools/Regshot` lists
+    Regshot-x64-Unicode.exe on the same host, in the same second. A content
+    check that cannot read the disk must not answer "missing"; it is the same
+    class of defect as #2023's "could not run" reported as a pass, inverted.
+
+    Raises on failure rather than returning an empty list, so a check that did
+    not run can never be read as a file that is not there.
+    """
+    result = subprocess.run(
+        [VIRT_LS_PATH, '-a', str(disk_path), guest_dir],
+        capture_output=True, text=True, timeout=timeout,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f'virt-ls {guest_dir} failed: {result.stderr.strip()}')
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
 SMB_SHARES_KEY = (
@@ -450,9 +484,14 @@ def verify_golden_image_contents(disk_path: Path):
     a silently degraded report is what let #100 happen in the first place.
     """
     file_present = {}
+    listings: dict = {}
     for label, guest_path in GOLDEN_TOOL_FILES.items():
-        out = _guestfish_ro(['is-file', guest_path], disk_path)
-        file_present[label] = out.strip() == 'true'
+        guest_dir, _, base = guest_path.rpartition('/')
+        guest_dir = guest_dir or '/'
+        if guest_dir not in listings:
+            listings[guest_dir] = _virt_ls_ro(guest_dir, disk_path)
+        # Windows paths are case-insensitive; virt-ls prints the on-disk case.
+        file_present[label] = base.lower() in {e.lower() for e in listings[guest_dir]}
 
     # SMB share persistence lives in the registry, not the filesystem --
     # HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Shares. On disk

@@ -112,9 +112,25 @@ class DecodeSmbShareNamesTest(unittest.TestCase):
         )
 
 
+# Directory listing -> the entry each of #100's tool paths expects to find in
+# it. virt-ls lists a directory, so a fake has to answer per directory rather
+# than per file; a real listing carries other entries too, which is what the
+# case-insensitive membership test in verify_golden_image_contents handles.
+_ALL_TOOL_ENTRIES = {
+    guest_path.rpartition("/")[0]: guest_path.rpartition("/")[2]
+    for guest_path in MODULE.GOLDEN_TOOL_FILES.values()
+}
+
+
+def _present_everywhere(guest_dir, disk_path, timeout=60):
+    """Every tool file present, plus unrelated entries and mixed case -- a
+    real /Tools/FakeNet has more in it than fakenet.exe."""
+    return ["README.txt", _ALL_TOOL_ENTRIES[guest_dir].upper()]
+
+
 class VerifyGoldenImageContentsTest(unittest.TestCase):
     """verify_golden_image_contents() itself, with the two acquisition calls
-    mocked out -- proves the wiring (guestfish/virt-win-reg -> evaluate ->
+    mocked out -- proves the wiring (virt-ls/virt-win-reg -> evaluate ->
     raise) without needing a real qcow2.
 
     The acquisition layer is deliberately not tested only here: it was run
@@ -123,12 +139,12 @@ class VerifyGoldenImageContentsTest(unittest.TestCase):
     """
 
     def test_raises_and_names_the_missing_tool_when_a_file_is_absent(self):
-        def fake_guestfish_ro(args, disk_path, timeout=60):
-            if args[:2] == ["is-file", "/Tools/Regshot/Regshot-x64-Unicode.exe"]:
-                return "false\n"
-            return "true\n"
+        def fake_virt_ls_ro(guest_dir, disk_path, timeout=60):
+            if guest_dir == "/Tools/Regshot":
+                return ["some-other-file.exe"]
+            return [_ALL_TOOL_ENTRIES[guest_dir]]
 
-        with patch.object(MODULE, "_guestfish_ro", side_effect=fake_guestfish_ro), \
+        with patch.object(MODULE, "_virt_ls_ro", side_effect=fake_virt_ls_ro), \
                 patch.object(MODULE, "read_smb_share_names",
                              return_value={"Inbox", "Logs"}):
             with self.assertRaises(RuntimeError) as ctx:
@@ -137,7 +153,7 @@ class VerifyGoldenImageContentsTest(unittest.TestCase):
         self.assertIn("#100", str(ctx.exception))
 
     def test_does_not_raise_when_everything_is_present(self):
-        with patch.object(MODULE, "_guestfish_ro", return_value="true\n"), \
+        with patch.object(MODULE, "_virt_ls_ro", side_effect=_present_everywhere), \
                 patch.object(MODULE, "read_smb_share_names",
                              return_value={"Inbox", "Logs"}):
             MODULE.verify_golden_image_contents(Path("/fake/disk.qcow2"))  # must not raise
@@ -147,7 +163,7 @@ class VerifyGoldenImageContentsTest(unittest.TestCase):
         # caught this exception and substituted the passing value, so check
         # 5 of 5 reported success on every run without ever reading a hive.
         # A check that could not run is not a check that passed.
-        with patch.object(MODULE, "_guestfish_ro", return_value="true\n"), \
+        with patch.object(MODULE, "_virt_ls_ro", side_effect=_present_everywhere), \
                 patch.object(MODULE, "read_smb_share_names",
                              side_effect=RuntimeError("virt-win-reg failed: simulated")):
             with self.assertRaises(RuntimeError) as ctx:
@@ -155,12 +171,12 @@ class VerifyGoldenImageContentsTest(unittest.TestCase):
         self.assertIn("simulated", str(ctx.exception))
 
     def test_a_failed_share_read_does_not_mask_a_missing_tool(self):
-        def fake_guestfish_ro(args, disk_path, timeout=60):
-            if args[:2] == ["is-file", "/Tools/FakeNet/fakenet.exe"]:
-                return "false\n"
-            return "true\n"
+        def fake_virt_ls_ro(guest_dir, disk_path, timeout=60):
+            if guest_dir == "/Tools/FakeNet":
+                return ["configs"]
+            return [_ALL_TOOL_ENTRIES[guest_dir]]
 
-        with patch.object(MODULE, "_guestfish_ro", side_effect=fake_guestfish_ro), \
+        with patch.object(MODULE, "_virt_ls_ro", side_effect=fake_virt_ls_ro), \
                 patch.object(MODULE, "read_smb_share_names",
                              side_effect=RuntimeError("virt-win-reg failed: simulated")):
             with self.assertRaises(RuntimeError):
