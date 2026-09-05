@@ -1,5 +1,8 @@
 # Working Agreement
 
+> Deleted by the 2026-08-30 bulk purge and restored verbatim by #2896/#2947
+> on 2026-09-04. Nothing below was updated during that window.
+
 **Work is tracked in [GitHub issues](https://github.com/Xore/APIARY/issues), not in this file.**
 
 This file used to carry a table of open work items. That table is gone: every

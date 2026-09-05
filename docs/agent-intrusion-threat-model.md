@@ -132,7 +132,8 @@ own code.**
   (confirmed: "yara(1) refuses to start on a corpus with one bad rule rather
   than skipping it").
 - Every sensor's JSON log line is untrusted, attacker-controlled structured
-  data by construction — `dashboard/classify.go` parses it. Escaping
+  data by construction — then `dashboard/classify.go` parsed it, in the
+  Rust cutover the sensor-ingest path in `backend-service` does. Escaping
   discipline here is already established: dashboard pages render event
   fields through `html/template` (auto-escaped), and `llm_analysis.go`
   (#150, just landed) explicitly re-derives this same reasoning for model
@@ -164,7 +165,9 @@ bounding discipline.
 
 **Partially mitigated already; inconsistent across services.**
 
-- `dashboard/authorization.go`'s `secretFromEnvironment()` already supports
+- `dashboard/authorization.go`'s `secretFromEnvironment()` (retired with the
+  Go dashboard; the file-based secret delivery pattern it described carried
+  into the Rust cutover) already supported
   a `<NAME>_FILE` indirection (read the secret from a file path named by
   `<NAME>_FILE`, falling back to the plain env var) for
   `AUTH_INTROSPECTION_TOKEN` — the file-based delivery pattern #154's
@@ -273,7 +276,7 @@ traffic in the first place).**
 - Sensors like `http-honeypot`/`tanner` are the intended **capture** surface
   for exactly this technique — an attacker probing a honeypot is expected to
   attempt encoded C2/dead-drop patterns, and that's signal, not an incident.
-  `dashboard/classify.go`'s handling of tanner's `post_data`/cookies (#578,
+  then `dashboard/classify.go`'s handling of tanner's `post_data`/cookies (#578,
   landed) and Suricata's `payload_printable`/`http_body_printable` (#581,
   landed) are the current mechanisms for surfacing that content to an
   operator — neither currently *decodes* base64/gzip/chunked payloads
@@ -309,7 +312,8 @@ were detected but not escalated with the right criticality" — and it
 matches a real, already-partially-built mechanism in this repo.**
 
 - `ml-worker`'s three unsupervised models (Isolation Forest, LSTM-AE, HBOS,
-  delivered to the dashboard via `dashboard/ml_anomalies.go`, #64) are
+  delivered to the dashboard via what was then `dashboard/ml_anomalies.go`
+  (#64) are
   exactly the "statistical outlier across many low-signal events" detector
   this campaign's own postmortem says was missing at Hugging Face — but
   `ml_anomalies.go`'s own doc comment is explicit that its output is
@@ -325,7 +329,7 @@ matches a real, already-partially-built mechanism in this repo.**
   technical timeline is structured.
 - No component in this repo currently escalates severity based on a
   *combination* of otherwise-individually-low-severity events crossing a
-  trust boundary (phase 2/3's core ask) — `dashboard/alerts.go`'s alert
+  trust boundary (phase 2/3's core ask) — then `dashboard/alerts.go`'s alert
   manager fires on individual conditions crossing their own threshold
   (queue stalls, high-verdict samples, etc.), not on cross-signal
   combinations.
@@ -356,9 +360,12 @@ reference implementation.**
 - `GH_PAT` (the credential that write path uses) lives in
   `/etc/honeypot-github.env` on the host, read only by the root-owned host
   publisher script — the dashboard/worker side never holds it directly
-  (per `dashboard/github_analysis.go`'s own doc comment: "the dashboard
-  never writes one of these files, never calls git or the GitHub API, and
-  never holds a `GH_PAT`").
+  (per then-`dashboard/github_analysis.go`'s own doc comment, since
+  retired with the Go dashboard: "the dashboard never writes one of these
+  files, never calls git or the GitHub API, and never holds a `GH_PAT`" —
+  the same non-possession property holds for the Rust cutover's
+  `github_analysis_submit.rs`, which still only submits to the host
+  publisher and never touches `GH_PAT` itself).
 - Artifact digest/provenance: container images built by `.github/workflows/containers.yml`
   are not currently pinned by digest anywhere this research found (compose
   files reference services by `build:` context, not a pinned upstream
@@ -387,10 +394,11 @@ concrete gap found here.
 rather than one correlated view — matches this campaign's own core
 finding.**
 
-- Current alert sources, confirmed independent of each other (each own
-  `*Alerts` function in `dashboard/*.go`, all feeding the same
+- Current alert sources, confirmed independent of each other (each its own
+  `*Alerts` function, then in `dashboard/*.go`, all feeding the same
   `s.alerts`/`alertManager` sink but never cross-referencing each other's
-  state): Suricata/sensor event alerts, `ghidraAlerts`, `githubAnalysisAlerts`,
+  state; the same fragmentation carried into the Rust cutover's per-source
+  worker functions): Suricata/sensor event alerts, `ghidraAlerts`, `githubAnalysisAlerts`,
   sandbox queue/verdict alerts, ML anomaly severity, and (as of #150) the
   new `llm-analysis` index's own severity field is not yet wired into
   `alerts.go` at all — it is currently browse-only via `/llm-analysis`.
@@ -421,7 +429,7 @@ pass.
 | 2 | Untrusted structured-data processing | Yes, broadly | `html/template` auto-escaping; CI YARA corpus gate | No archive/container-format parsing exists yet — must inherit this discipline when added |
 | 3 | Env/`/proc/*/environ` secret exposure | Yes | `secretFromEnvironment`'s `_FILE` pattern (one use) | Pattern not applied to `ARKIME_*`, `GH_PAT`, VPS SSH key |
 | 4 | Metadata-service / RFC 1918 reachability | No cloud metadata surface exists | Per-sensor private Docker networks | Outbound-to-internet egress policy (tracked in #538) |
-| 5 | Credential lifetime / workload identity | Yes | dashboard/services-adapter split (strong pattern) | `hp-autoheal`'s standing daemon-wide docker.sock grant |
+| 5 | Credential lifetime / workload identity | Yes | dashboard/services-adapter split (strong pattern, since carried into the backend-service/worker split) | `hp-autoheal`'s standing daemon-wide docker.sock grant |
 | 6 | Encoded/chunked C2 | Yes, as honeypot capture surface | Raw payload capture (tanner/Suricata); narrow fixed-destination outbound HTTP clients | No network-layer egress enforcement (folds into #538) |
 | 7 | Repeated recon / low-signal escalation | Yes — core motivating gap | ml-worker anomaly scoring; dashboard campaign clustering | No behavioral-phase correlation or combination-based severity escalation |
 | 8 | Source-control/CI write paths | Yes | `analysis/github/` publish gate (CI-tested); vendored-dep hash pinning | No image digest pinning for this repo's own built images |
@@ -449,9 +457,9 @@ route to:
     verified end-to-end against a real unhealthy container.
   - ~~Wire `llm-analysis` severity into the existing dashboard alert sink
     (item 9's smallest, most immediate piece).~~ **Done** —
-    `dashboard/llm_analysis.go`'s `llmAnalysisAlerts`, wired into
-    `store.go`'s alert refresh and covered by dedicated tests
-    (`llm_analysis_test.go`).
+    then-`dashboard/llm_analysis.go`'s `llmAnalysisAlerts`, retired with the
+    Go dashboard; the equivalent alert-refresh wiring lives in the Rust
+    cutover's worker loop today.
   - ~~Extend `secretFromEnvironment`'s file-based delivery pattern to the
     other plain-env secrets (item 3).~~ **Assessed, closed as acceptable
     residual risk — no code change.** `ARKIME_PASSWORD_SECRET` (the one
