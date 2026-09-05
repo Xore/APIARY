@@ -2762,6 +2762,7 @@ step_cape_vm_create() {
   rm -f /var/dockge/sandbox/vms/win11-cape.qcow2
   VM_NAME=win11-cape \
   GOLDEN_IMAGE="$golden" \
+  GOLDEN_CONTENT_CHECK=none \
   VM_DISK=/var/dockge/sandbox/vms/win11-cape.qcow2 \
   VM_XML="$REPO_DIR/sandbox/cape/win11-cape-kvm.xml" \
   NET_NAME=cape \
