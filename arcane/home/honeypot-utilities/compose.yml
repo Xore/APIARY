@@ -81,6 +81,49 @@ services:
       - /opt/stacks/apiary/state/init-markers:/markers:ro
     networks:
       - honeynet
+    # #2825 class A: runs as uid 0 and rotates/prunes files under
+    # /opt/stacks/apiary/logs/<sensor>, each owned by its own sensor's UID
+    # (2775, no "other" write bit). Measured, not assumed: with
+    # cap_drop: ALL and no cap_add, a plain `touch`/`rm` against every
+    # UID-owned subdirectory checked (dionaea, cowrie, conpot,
+    # canarytokens) failed "Permission denied"; adding back exactly
+    # DAC_OVERRIDE let the same create+delete succeed against all four.
+    #
+    # The whole of rotate() was then run under these exact capabilities, on
+    # this image, against a tree reproducing the real ownership shape (dir
+    # and log owned 2775:2775, modes 755/644):
+    #
+    #   cp -p test.log test.log.1   -> "cp: can't preserve ownership of
+    #                                   'test.log.1': Operation not permitted"
+    #                                  on stderr, **exit 0**
+    #   : > test.log                -> ok
+    #   gzip -f test.log.1          -> exit 0
+    #
+    # Two things follow, and the first is the one to remember when reading a
+    # log: rotation emits that "Operation not permitted" line on every single
+    # rotation now, and it is NOT a failure. `cp -p` returns 0, log-maintenance
+    # runs under `set -eu` and does not abort, and rotate() completes -- only
+    # the chown half of -p is refused, which nothing downstream depends on.
+    # rotate() already writes its own "rotated <file>" line to stderr, so
+    # stderr here is not an error channel.
+    #
+    # Second: the rotated `.gz` is owned root:root rather than by the sensor
+    # UID -- but that is NOT caused by this cap_drop. Measured on the same
+    # image with **no cap_drop at all and full default capabilities**, busybox
+    # `gzip` still produces a root-owned .gz from a 2775-owned source: it does
+    # not chown its output, whether or not it holds CAP_CHOWN. Identical before
+    # and after this change.
+    #
+    # So no CHOWN grant here: measured, it does not restore the .gz ownership
+    # (it only changes the stderr line to "can't preserve permissions"), and
+    # only CHOWN+FOWNER together silence the line -- two capabilities bought
+    # for a cosmetic warning, in the issue whose whole point is granting the
+    # minimum. DAC_OVERRIDE stays the measured minimum, and #2892's rotation
+    # contract runs through it.
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
     deploy:
       resources:
         limits:
@@ -198,6 +241,16 @@ services:
       - dionaea-lib:/dionaea-lib:ro
     networks:
       - honeynet
+    # #2825 class A: writes /logs/diagnostics, owned by a different UID
+    # (2775, no "other" write bit) than this container's uid 0. Measured,
+    # not assumed: cap_drop: ALL with no cap_add failed a plain write
+    # there ("Permission denied"); adding back exactly DAC_OVERRIDE let
+    # the same write (and cleanup) succeed. /state and dionaea-lib stay
+    # read-only mounts, so nothing else needs a grant.
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
     deploy:
       resources:
         limits:

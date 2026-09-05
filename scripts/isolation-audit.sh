@@ -264,22 +264,30 @@ CAP_NOT_YET_HARDENED=(
   # disk reporting, payload dedup and the canarytokens log writers. Each needs
   # cap_drop: ALL plus a measured minimal cap_add, the way yara-scanner
   # already carries a justified DAC_READ_SEARCH.
-  "hp-log-maintenance|#2825 class A -- uid 0 rotating sensor-owned logs, needs a measured cap_add (DAC_OVERRIDE) rather than a bare drop"
-  "hp-disk-space-monitor|#2825 class A -- uid 0 writing /logs/diagnostics under a non-root-owned tree, needs a measured cap_add"
+  #
+  # #2825 round 2: hp-log-maintenance, hp-disk-space-monitor,
+  # hp-canarytokens-frontend, hp-canarytokens-switchboard and
+  # hp-payload-dedupe moved off this list -- each now carries
+  # cap_drop: ALL + cap_add: [DAC_OVERRIDE] in its compose file, measured
+  # live against the real bind mount (a plain touch/write/hard-link failed
+  # with no cap_add, and succeeded with DAC_OVERRIDE alone added back --
+  # for hp-payload-dedupe this also settles its own prior "possibly
+  # FOWNER" guess: not needed). hp-canarytokens-redis moved too, see below.
+  # They will FAIL here (deploy drift, same shape as #2877) until the
+  # affected projects (honeypot-utilities, honeypot-canarytokens,
+  # honeypot-payload-analysis) are actually re-synced and redeployed --
+  # that is expected, not a regression.
   "hp-pcap-sync|#2825 class A -- uid 0 copying between the sshfs-backed raw dir and the arkime-pcap volume, needs a measured cap_add"
-  "hp-payload-dedupe|#2825 class A -- uid 0 hard-linking mode-0600 Dionaea captures, needs a measured cap_add (DAC_OVERRIDE, possibly FOWNER for the hard-link path)"
-  "hp-arkime-capture|#2825 class A -- uid 0 reading the sensor-owned arkime-raw tree (offline import, so no NET_RAW is involved), needs a measured cap_add"
+  "hp-arkime-capture|#2825 class A -- uid 0 reading the sensor-owned arkime-raw tree (offline import, so no NET_RAW is involved), needs a measured cap_add. Round 2 attempted to measure this live (a parallel --skip capture instance against the real ES) and could not get a clean answer inside this round's budget -- the test instance stalled on Elasticsearch readiness before reaching the privilege-drop question. Still unmeasured; do not guess dropUser=nobody's actual capability need from this comment"
   "hp-arkime-viewer|#2825 class A -- uid 0 over the same arkime-raw/arkime-pcap trees, needs a measured cap_add"
-  "hp-canarytokens-frontend|#2825 class A -- uid 0 writing /logs/canarytokens/frontend, owned by 65534 at drwxr-xr-x, needs a measured cap_add"
-  "hp-canarytokens-switchboard|#2825 class A -- uid 0 writing the same 65534-owned canarytokens log tree, needs a measured cap_add"
   # #2825, class B: the process itself already runs capability-free (redis is
   # uid 999 with CapEff 0 today), but the official entrypoint gets there by
   # chown-ing /data and calling setpriv as root, which needs CHOWN/SETUID/
-  # SETGID. Verified directly: the image under --cap-drop=ALL dies at startup
-  # with "setpriv: setresuid failed: Operation not permitted". Fix is a pinned
-  # user: or a measured cap_add, both needing a live check of the existing
-  # data volume's ownership.
-  "hp-canarytokens-redis|#2825 class B -- official entrypoint drops privileges itself and needs CHOWN/SETUID/SETGID to do it; a bare cap_drop: ALL kills it at startup"
+  # SETGID. Round 2: re-measured live against the real data volume and this
+  # was incomplete -- CHOWN+SETUID+SETGID alone still failed ("find:
+  # ./appendonlydir: Permission denied") against the existing 700-mode
+  # appendonlydir; DAC_OVERRIDE was also required. hp-canarytokens-redis now
+  # carries cap_drop: ALL + cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE].
   # #2366 scoped itself to the internet-facing sensor stacks. These are the
   # internal workers and honeypot-init's one-shot jobs it deliberately did not
   # touch, carried over unchanged and now tracked in #2825 rather than in a
@@ -332,7 +340,7 @@ if [ -n "${containers:-}" ]; then
       warn "$name has no cap_drop: ALL -- known gap: $cap_why"
       continue
     fi
-    bad "$name has no cap_drop: ALL and is on neither the exception nor the tracked-gap list -- the #2366 gap regressed, or this is a new container that shipped unhardened. Harden it, or triage it onto one of the two lists in this script with a written reason"
+    bad "$name has no cap_drop: ALL and is on neither the exception nor the tracked-gap list -- deploy drift (the repo compose has cap_drop but the running container predates it -- #2858/#2877: re-sync and redeploy that project), or the #2366 gap regressed, or this is a new container that shipped unhardened. Check the project's compose file before assuming a regression. Harden it, or triage it onto one of the two lists in this script with a written reason"
   done <<<"$containers"
 
   # List hygiene. Neither list is allowed to outlive what it excuses: an entry
