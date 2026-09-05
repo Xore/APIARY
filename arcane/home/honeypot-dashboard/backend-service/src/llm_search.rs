@@ -34,14 +34,14 @@ const SEARCH_CANDIDATES: usize = 100;
 /// "session" on llm-analysis, the vault-ingest worker's "vault-note" on
 /// knowledge-vault-search-v1 (#2291).
 #[derive(Clone, Copy)]
-struct Source {
-    index: &'static str,
-    doc_type: &'static str,
-    noun: &'static str,
+pub(crate) struct Source {
+    pub(crate) index: &'static str,
+    pub(crate) doc_type: &'static str,
+    pub(crate) noun: &'static str,
 }
 
 const SESSION_SOURCE: Source = Source { index: "llm-analysis", doc_type: "session", noun: "session summaries" };
-const VAULT_SOURCE: Source =
+pub(crate) const VAULT_SOURCE: Source =
     Source { index: "knowledge-vault-search-v1", doc_type: "vault-note", noun: "vault notes" };
 
 fn resolve_source(raw: &str) -> Source {
@@ -62,7 +62,7 @@ fn resolve_source(raw: &str) -> Source {
 /// error anywhere. Documents from other models drop out of results until
 /// the planned digest-keyed backfill re-embeds them; search() reports that
 /// shrink rather than disguising it.
-fn knn_body(source: Source, model: &str, vector: &[f64], limit: usize) -> Value {
+pub(crate) fn knn_body(source: Source, model: &str, vector: &[f64], limit: usize) -> Value {
     json!({
         "knn": {
             "field": "embedding",
@@ -111,7 +111,7 @@ pub struct SearchQuery {
 
 /// Mirrors llm-worker's endpoint_is_local(): plain http, bare host, and a
 /// known service name / localhost / private address only.
-fn ollama_url() -> Option<String> {
+pub(crate) fn ollama_url() -> Option<String> {
     let raw = std::env::var("OLLAMA_URL").ok().filter(|value| !value.is_empty())?;
     let url = reqwest::Url::parse(&raw).ok()?;
     if url.scheme() != "http" || !url.username().is_empty() || url.query().is_some() {
@@ -130,7 +130,7 @@ fn ollama_url() -> Option<String> {
     local.then(|| raw.trim_end_matches('/').to_string())
 }
 
-async fn embed(base: &str, model: &str, text: &str) -> anyhow::Result<Vec<f64>> {
+pub(crate) async fn embed(base: &str, model: &str, text: &str) -> anyhow::Result<Vec<f64>> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build()?;

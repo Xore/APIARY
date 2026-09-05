@@ -206,6 +206,23 @@ not a hard VRAM constraint at this card size).
 | Rejected lower-memory candidate | `qwen3.5:4b` | ~3.4-3.7 GiB (8k-16k ctx) | Failed both adversarial field-value gates under the exact production schema; aggregate score cannot override that |
 | Embeddings (optional, §10) | `nomic-embed-text` | ~0.3 GiB | Only loaded when embedding endpoints are used |
 
+A fourth consumer, `/api/v1/vault-rag` (#2292), joined these three slots
+against the same shared card: grounded RAG answers over the knowledge-store
+vault, shipped dark (operator-invoked only, no nav entry) until measured
+contention shows it coexists with the incumbent slots. It gates every
+completion on headroom first, but it cannot use `nvidia-smi` the way
+`analysis/gpu-queue/gpu_queue.py` does — it runs inside `apiary-backend`,
+whose image carries no CUDA layer and whose container reserves no GPU, so
+that probe can only ever fail, and `gpu_queue.py`'s deliberate fail-*open*
+contract would turn the gate into a no-op. It reads Ollama's own
+`GET /api/ps` residency report instead (reachable, and Ollama is the process
+holding the VRAM), treats our own model already being loaded as headroom
+since that allocates nothing new, and fails **closed** — unreadable
+telemetry enqueues onto `gpu-job-queue` rather than assuming the card idle.
+Its `keep_alive` defaults to `5m` (`LLM_KEEP_ALIVE`), shorter than the 30m
+server default, so an operator's follow-up questions stay warm without one
+dark endpoint pinning ~10 GiB for half an hour.
+
 Hard rules:
 
 - `OLLAMA_MAX_LOADED_MODELS=1` and `OLLAMA_NUM_PARALLEL=1` — serialize

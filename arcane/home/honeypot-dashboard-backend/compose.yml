@@ -107,6 +107,16 @@ services:
       # below) -- the same address honeypot-galah's galah-llm-broker and
       # llm-worker's captured-data override already reach it by.
       - OLLAMA_URL=http://ollama:11434
+      # #2292: /api/v1/vault-rag's generation model and per-request
+      # keep_alive. Same keys llm-worker already uses
+      # (llm-worker/docker-compose.yml, llm-worker/.env.example), so the
+      # chat/analysis model is set in one place for the whole stack rather
+      # than under a second name only this endpoint would read. keep_alive
+      # is deliberately shorter than the shared OLLAMA_KEEP_ALIVE=30m server
+      # default: this endpoint is operator-invoked and occasional, and it
+      # shares a 20 GiB card with the ghidra/revdeck/session slots.
+      - LLM_MODEL=${LLM_MODEL:-qwen3:14b}
+      - LLM_KEEP_ALIVE=${LLM_KEEP_ALIVE:-5m}
       # #1677: addresses belonging to this fleet, excluded from the
       # dashboard's attacker aggregations. Suricata records `source.ip` as
       # whichever end it saw as the source, so our own hosts appear as
