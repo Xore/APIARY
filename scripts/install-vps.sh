@@ -32,6 +32,10 @@
 #   sudo ./scripts/install-vps.sh --config /path/to/answers.conf
 #   sudo ./scripts/install-vps.sh --config answers.conf --force-rerun-from docker-install
 #   sudo ./scripts/install-vps.sh --config answers.conf --reset-markers   # ignore all markers, redo everything
+#   sudo ./scripts/install-vps.sh --install-self      # stage this script + its library under /usr/local
+#
+# scripts/install.sh --profile vps is the same thing with the answers file
+# defaulted to /etc/apiary/install-vps.conf.
 #
 # The answers file follows scripts/install-vps.conf.example -- copy it,
 # fill in every <PLACEHOLDER>, keep the filled-in copy OUT of version
@@ -40,130 +44,59 @@
 set -uo pipefail
 
 # ---------------------------------------------------------------------------
-# Status tracking / resumability -- identical framework to
-# install-homeserver.sh, deliberately not reimplemented differently. See
-# that script's own header comment for the full rationale.
+# Status tracking / resumability -- the retry/step/logging framework is shared
+# with install-homeserver.sh via scripts/lib/install-common.sh (#1609 Phase 5).
+# It used to be a second copy in this file, and this script's header claimed
+# the two were "identical ... deliberately not reimplemented differently".
+# They were not: with_retry here could not report failure at all (see the
+# library's own comment). Only this script's identity is set below.
 # ---------------------------------------------------------------------------
-declare -A STEP_STATUS
-declare -a STEP_ORDER
+INSTALLER_NAME="install-vps.sh"
+INSTALLER_CONF_EXAMPLE="scripts/install-vps.conf.example"
+INSTALLER_SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 LOG_DIR="/var/log/honeypot-install-vps"
 MARKER_DIR="/var/lib/honeypot-install-vps/markers"
-RUN_LOG=""
-FORCE_FROM=""
-RESET_MARKERS=0
-FORCE_ACTIVE=0
+SUMMARY_WIDTH=28
 
-log() { printf '[%s] %s\n' "$(date -Iseconds)" "$*"; }
+# Resolve the shared library: explicit override, then next to this script (a
+# checkout), then the installed location (see --install-self). Hard-exit
+# rather than sourcing nothing: `set -u` without `-e` lets a failed `source`
+# continue, after which every framework call is a "command not found" and the
+# run limps on half-executed.
+APIARY_INSTALL_LIB_RESOLVED=""
+for _cand in \
+  "${APIARY_INSTALL_LIB:-}" \
+  "$(dirname "$INSTALLER_SELF_PATH")/lib/install-common.sh" \
+  "/usr/local/lib/apiary/install-common.sh"; do
+  if [[ -n "$_cand" && -r "$_cand" ]]; then APIARY_INSTALL_LIB_RESOLVED="$_cand"; break; fi
+done
+if [[ -z "$APIARY_INSTALL_LIB_RESOLVED" ]]; then
+  echo "Cannot find install-common.sh (the shared installer framework)." >&2
+  echo "Looked at: \$APIARY_INSTALL_LIB, $(dirname "$INSTALLER_SELF_PATH")/lib/, /usr/local/lib/apiary/" >&2
+  echo "Run this script from a repo checkout, or re-run 'sudo $0 --install-self'" >&2
+  echo "from one so the script and its library are staged together." >&2
+  exit 2
+fi
+# shellcheck source=lib/install-common.sh
+source "$APIARY_INSTALL_LIB_RESOLVED"
+install_common_require
 
-with_retry() {
-  local max="$1" base="$2"; shift 2
-  local attempt=1 rc=0
-  while (( attempt <= max )); do
-    # Must be `"$@" && return 0`, NOT `if "$@"; then return 0; fi`. A plain
-    # if/fi with no else that takes neither branch has an exit status of zero
-    # regardless of what the condition actually returned, so the following
-    # `rc=$?` read 0 for a FAILED command -- and on the last attempt this
-    # function then did `return "$rc"`, i.e. returned success for a command
-    # that had just failed max times. Every with_retry call in this script was
-    # therefore incapable of reporting failure.
-    #
-    # This is the same defect #787 found and fixed in install-homeserver.sh,
-    # where it had silently reported success for all 17 stacks while every scp
-    # was genuinely failing. The fix was never ported here; the two scripts'
-    # "identical framework, deliberately not reimplemented differently" claim
-    # was not true. Verified empirically rather than from the spec:
-    #   if false; then :; fi; rc=$?  -> rc=0
-    #   false && return 0;    rc=$?  -> rc=1
-    # `&&` short-circuits without touching $? when the command fails, so the
-    # following `rc=$?` captures the real code.
-    "$@" && return 0
-    rc=$?
-    if (( attempt == max )); then
-      return "$rc"
-    fi
-    local wait=$(( base * attempt ))
-    echo "attempt $attempt/$max failed (exit $rc), retrying in ${wait}s: $*" >&2
-    sleep "$wait"
-    attempt=$(( attempt + 1 ))
-  done
-  return "$rc"
-}
-
-run_step() {
-  local id="$1" desc="$2"
-  shift 2
-  STEP_ORDER+=("$id")
-
-  if [[ -n "$FORCE_FROM" && "$id" == "$FORCE_FROM" ]]; then
-    FORCE_ACTIVE=1
-  fi
-
-  local marker="$MARKER_DIR/$id.done"
-  if [[ $RESET_MARKERS -eq 0 && -f "$marker" && "$FORCE_ACTIVE" -eq 0 ]]; then
-    STEP_STATUS["$id"]="SKIPPED (already done -- marker $marker)"
-    log "==> [$id] $desc -- SKIPPED (marker present)"
-    return 0
-  fi
-
-  log "==> [$id] $desc"
-  if "$@" >>"$RUN_LOG" 2>&1; then
-    STEP_STATUS["$id"]="OK"
-    log "    [$id] OK"
-    mkdir -p "$MARKER_DIR"
-    date -Iseconds > "$marker"
-  else
-    local rc=$?
-    STEP_STATUS["$id"]="FAILED (exit $rc)"
-    log "    [$id] FAILED (exit $rc) -- see $RUN_LOG"
-  fi
-}
-
-print_summary() {
-  echo
-  echo "==================== install-vps.sh summary ===================="
-  local failed=0
-  for id in "${STEP_ORDER[@]}"; do
-    local status="${STEP_STATUS[$id]}"
-    printf '  %-28s %s\n' "$id" "$status"
-    [[ "$status" == FAILED* ]] && failed=1
-  done
-  echo "==================================================================="
-  echo "Full log: $RUN_LOG"
-  if [[ $failed -eq 1 ]]; then
-    echo "One or more steps FAILED. Fix the underlying issue and re-run this"
-    echo "script -- completed steps are skipped via markers under $MARKER_DIR,"
-    echo "so re-running only retries what actually failed. Use"
-    echo "--force-rerun-from <step-id> to redo a step whose marker exists but"
-    echo "whose result you don't trust."
-    return 1
-  fi
-  echo "All steps completed."
+# This script's summary carries a trailer the homeserver's does not: the
+# freshly generated WireGuard public key, which is the value the operator has
+# to paste into install-homeserver.conf before running the other half.
+print_summary_extra() {
   if [[ -f /etc/wireguard/wg0.conf ]]; then
     echo
     echo "This VPS's WireGuard public key (feed into install-homeserver.conf's"
     echo "VPS_WG_PUBLIC_KEY before running install-homeserver.sh):"
     grep '^PrivateKey' /etc/wireguard/wg0.conf | awk '{print $3}' | wg pubkey
   fi
-  return 0
 }
 
 # ---------------------------------------------------------------------------
 # Args / config
 # ---------------------------------------------------------------------------
-CONFIG_FILE=""
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --config) CONFIG_FILE="$2"; shift 2 ;;
-    --force-rerun-from) FORCE_FROM="$2"; shift 2 ;;
-    --reset-markers) RESET_MARKERS=1; shift ;;
-    -h|--help)
-      echo "Usage: sudo $0 --config /path/to/answers.conf [--force-rerun-from <step-id>] [--reset-markers]"
-      echo "See scripts/install-vps.conf.example for the template."
-      exit 0
-      ;;
-    *) echo "Unknown argument: $1" >&2; exit 2 ;;
-  esac
-done
+install_common_parse_args "$@"
 
 if [[ $EUID -ne 0 ]]; then
   echo "Run as root: sudo $0 --config <file>" >&2
@@ -221,21 +154,34 @@ fi
 # already know home's real public key (re-provisioning the VPS only, home
 # stays untouched), set it here and skip the round-trip.
 
-mkdir -p "$LOG_DIR" "$MARKER_DIR"
-RUN_LOG="$LOG_DIR/install-$(date -u +%Y%m%dT%H%M%SZ).log"
-: >"$RUN_LOG"
+install_common_open_run_log
+
+# ---------------------------------------------------------------------------
+# Distro shim
+# ---------------------------------------------------------------------------
+# $PKG used to be assigned inside step_preflight_os, which meant a resumed run
+# never had it: run_step skips a step whose marker exists, so on any re-run
+# (or --force-rerun-from base-packages) every later `case "$PKG"` hit
+# `PKG: unbound variable` under `set -u` and the step failed for a reason that
+# had nothing to do with what it was doing. Resolved at source time now, from
+# the same detection install-homeserver.sh uses -- its own comment already
+# said "set once, at source time, so a step cannot disagree with preflight".
+install_common_detect_distro
+case "$DISTRO_FAMILY" in
+  debian) PKG=apt ;;
+  rhel)   PKG=dnf ;;
+  *)      PKG="" ;;
+esac
 
 # ---------------------------------------------------------------------------
 # Phase 0 -- preflight
 # ---------------------------------------------------------------------------
 step_preflight_os() {
-  . /etc/os-release
-  case "$ID" in
-    ubuntu) PKG=apt ;;
-    rocky|almalinux|rhel) PKG=dnf ;;
-    *) echo "Unsupported OS ($ID) -- need ubuntu or rocky/almalinux/rhel" >&2; return 1 ;;
-  esac
-  echo "Detected $ID -- using $PKG"
+  if [[ -z "$PKG" ]]; then
+    echo "Unsupported OS ($DISTRO_ID) -- need ubuntu/debian or rocky/almalinux/rhel" >&2
+    return 1
+  fi
+  echo "Detected $DISTRO_ID -- using $PKG"
 }
 
 # ---------------------------------------------------------------------------
