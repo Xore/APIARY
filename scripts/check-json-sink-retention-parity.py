@@ -51,13 +51,55 @@ Usage: python scripts/check-json-sink-retention-parity.py
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MAINTENANCE = ROOT / "arcane" / "home" / "honeypot-utilities" / "analysis" / "log-maintenance.sh"
 STACKS = ROOT / "arcane" / "home"
-SKIP_DIRS = {"vendor", "node_modules"}
+SKIP_DIRS = {"vendor", "node_modules", "__pycache__"}
+
+# #2921: a test file is evidence the implementation was ONCE correct, never
+# evidence it is PRESENT -- DIONAEA_LOG_MAX_BYTES lives in both
+# dionaea/log_rotation_patch.py and dionaea/tests/test_log_rotation_patch.py,
+# so deleting the former and keeping the latter must not satisfy the proof.
+_TEST_PATH_RE = re.compile(r"(?:^|/)tests?(?:/|$)")
+
+
+def _is_test_path(rel_posix: str) -> bool:
+    name = rel_posix.rsplit("/", 1)[-1]
+    return bool(
+        _TEST_PATH_RE.search(rel_posix)
+        or name.endswith("_test.go")
+        or (name.startswith("test_") and name.endswith(".py"))
+    )
+
+
+_tracked_cache: set[Path] | None = None
+
+
+def _tracked_files() -> set[Path]:
+    """Files `git` actually tracks, resolved to absolute paths.
+
+    #2921: tree_contains() used to rglob the filesystem directly, which
+    reads gitignored and untracked files too -- a stale __pycache__/*.pyc
+    left over from running a row's tests carries its tokens as bytecode
+    constants and satisfies the writer proof on its own, even with both the
+    implementation and its tests deleted. A build artifact must never stand
+    in for source.
+    """
+    global _tracked_cache
+    if _tracked_cache is None:
+        out = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=ROOT, capture_output=True, check=True,
+        ).stdout
+        _tracked_cache = {
+            (ROOT / part.decode("utf-8", "replace"))
+            for part in out.split(b"\0") if part
+        }
+    return _tracked_cache
 
 # Host side of every sensor log bind mount, and where the maintenance
 # container sees it (honeypot-utilities/compose.yml mounts the whole parent).
@@ -482,13 +524,31 @@ def mounted_log_dirs() -> dict[str, list[str]]:
 
 
 def tree_contains(rel_root: str, needle: str) -> bool:
+    """True if some tracked, non-test file under rel_root contains needle.
+
+    #2921: two things used to let a deleted implementation still pass. (1)
+    A token that also appears verbatim in the row's own test file (common,
+    since a test asserts on the constant it exercises) satisfied the proof
+    with the implementation gone -- test paths are excluded now. (2) A
+    stale __pycache__/*.pyc left over from a previous test run carries the
+    token as a bytecode constant and is invisible to `git status` -- only
+    files `git ls-files` actually tracks are read now.
+    """
     base = ROOT / rel_root
+    tracked = _tracked_files()
     if base.is_file():
+        if base not in tracked or _is_test_path(base.relative_to(ROOT).as_posix()):
+            return False
         return needle in base.read_text(encoding="utf-8", errors="replace")
     for path in base.rglob("*"):
         if not path.is_file():
             continue
         if SKIP_DIRS.intersection(path.parts):
+            continue
+        if path not in tracked:
+            continue
+        rel_posix = path.relative_to(ROOT).as_posix()
+        if _is_test_path(rel_posix):
             continue
         try:
             if needle in path.read_text(encoding="utf-8", errors="replace"):

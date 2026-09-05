@@ -864,6 +864,13 @@ jobs:
               # rotateIfOversized, fails here instead of leaving the ledger
               # asserting coverage that no longer exists.
               python scripts/check-json-sink-retention-parity.py
+              #
+              # #2921: the writer proof above is a grep, and a grep can't
+              # tell source from a test asserting on the same token or a
+              # stale __pycache__/*.pyc left over from a previous run --
+              # this exercises tree_contains() against a synthetic fixture
+              # to prove both false-positive paths stay closed.
+              python3 -B scripts/tests/test_check_json_sink_retention_parity.py
 
           # #1982: compose.yml is the only place a stack's knobs are exercised,
           # .env.example is what a deployer copies when standing the stack up
