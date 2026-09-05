@@ -2,7 +2,8 @@
 """Generate randomised-but-plausible txtcmd output files.
 
 Covers:
-  dynamic system state  : free, df, dd, ss, top, w, uptime, lscpu, last, lastlog, uname
+  dynamic system state  : free, df, ss, top, w, uptime, lscpu, nproc,
+                           last, lastlog
   hardware identity     : /proc/version, /proc/cpuinfo, /proc/meminfo
 
 All generators share a single SimState so values are internally
@@ -278,17 +279,24 @@ def gen_df(out_dir: Path) -> None:
     _write(out_dir / "bin" / "df", content)
 
 
-def gen_dd(out_dir: Path) -> None:
-    rate_mbs    = random.randint(380, 550)
-    size_bytes  = 134_217_728
-    elapsed_s   = size_bytes / (rate_mbs * 1_000_000)
-    content = (
-        f"0+1 records in\n"
-        f"0+1 records out\n"
-        f"{size_bytes} bytes ({size_bytes / 1e6:.0f} MB, {size_bytes / 2**20:.0f} MiB) "
-        f"copied, {elapsed_s:.6f} s, {rate_mbs} MB/s\n"
-    )
-    _write(out_dir / "bin" / "dd", content)
+# #2926: gen_dd() used to write a canned "0+1 records in ... 516 MB/s" block
+# to bin/dd. It was never reachable -- cowrie keys `dd` AND `/bin/dd` to
+# Command_dd, so getCommand() returned the builtin for either invocation
+# form and the file was dead on arrival in every session cowrie has ever
+# served. It is retired rather than promoted through txtcmds_priority_patch's
+# allow-list, because Command_dd is strictly better than the canned text:
+# it parses if=/of=/bs=/count=, resolves paths against the honeyfs, and
+# captures self.input_data -- `cat payload | dd of=/tmp/x` is a real payload
+# capture path that a static overlay would silently kill.
+#
+# Same reasoning retires gen_uname(): `uname`/`/bin/uname` are both
+# Command_uname keys, and Command_uname renders the persona from
+# cowrie.cfg's [shell] kernel_version/kernel_build_string/
+# hardware_platform/operating_system keys (whose own comment requires them
+# to match fakefs /proc/version). The overlay was the literal string
+# "Linux", so promoting it would have replaced
+# "Linux gpu01 5.15.0-119-generic #129-Ubuntu SMP ... x86_64 GNU/Linux"
+# with one word -- a bigger persona tell than the one #2926 was filed for.
 
 
 def gen_ss(out_dir: Path) -> None:
@@ -473,8 +481,14 @@ def gen_lastlog(out_dir: Path, s: SimState) -> None:
     _write(out_dir / "usr" / "bin" / "lastlog", "\n".join(lines) + "\n")
 
 
-def gen_uname(out_dir: Path) -> None:
-    _write(out_dir / "bin" / "uname", "Linux\n")
+def gen_nproc(out_dir: Path) -> None:
+    # #2926: cowrie ships its own static txtcmds/data/usr/bin/nproc (a
+    # hardcoded "2") with no generator overriding it, so it silently
+    # disagreed with gen_lscpu's CPU(s): 128 in the same session -- the
+    # cheapest two-command tell of a faked persona. Matches gen_lscpu's own
+    # hardcoded 128 (no shared SimState core-count field exists to derive
+    # this from instead).
+    _write(out_dir / "usr" / "bin" / "nproc", "128\n")
 
 
 # ---------------------------------------------------------------------------
@@ -490,15 +504,14 @@ def main() -> None:
     gen_proc_files(root, s)
     gen_free(root, s)
     gen_df(root)
-    gen_dd(root)
     gen_ss(root)
     gen_uptime(root, s)
     gen_w(root, s)
     gen_top(root, s)
     gen_lscpu(root)
+    gen_nproc(root)
     gen_last(root, s)
     gen_lastlog(root, s)
-    gen_uname(root)
 
 
 if __name__ == "__main__":
