@@ -2,8 +2,8 @@
 # Preserves the two-stage build, uid 2000, sync-fs.py, and the dropin cache
 # pre-build from the original honeypot-stack Dockerfile.
 #
-# Dynamic txtcmds (free / df / dd / ss / proc/*) are generated at runtime by
-# bin/gen-dynamic-txtcmds.py via the entrypoint wrapper so values differ
+# Dynamic txtcmds (free / df / ss / top / proc/* ...) are generated at runtime
+# by bin/gen-dynamic-txtcmds.py via the entrypoint wrapper so values differ
 # between sessions and don't look static/canned.
 #
 # Scripts are placed in /cowrie/cowrie-git/bin/ -- a directory that already
@@ -31,6 +31,16 @@ RUN git init -q /cowrie/cowrie-git \
  && git checkout -q FETCH_HEAD
 
 WORKDIR /cowrie/cowrie-git
+
+# #2926: make a bare-name txtcmds_path overlay take priority over a
+# same-named builtin -- upstream returned the builtin for both the bare and
+# the path form (it keys self.commands by each), so this persona's overlay
+# entries for free/uptime/w/id/... were silently unreachable however an
+# attacker typed them. Scoped to bare names and an allow-list of
+# argument-insensitive informational commands; see the patch's docstring
+# for the two regressions that scoping prevents.
+COPY txtcmds_priority_patch.py /tmp/txtcmds_priority_patch.py
+RUN python3 /tmp/txtcmds_priority_patch.py && rm /tmp/txtcmds_priority_patch.py
 
 RUN python3 -m venv /cowrie/cowrie-env \
  && /cowrie/cowrie-env/bin/pip install --no-cache-dir --upgrade pip setuptools wheel \
@@ -66,8 +76,17 @@ RUN mkdir -p share/cowrie \
 # shadow this image's own baked content with an empty host directory on
 # first run, so the real content stays here, outside the mount points, as a
 # seed source entrypoint.sh copies from on first boot.
+#
+# #2926: txtcmds lands at txtcmds.dist for the same reason, one mount type
+# further along -- compose.yml tmpfs-mounts /cowrie/cowrie-git/txtcmds (the
+# generator rewrites it every boot, so it is deliberately ephemeral), and a
+# tmpfs masks whatever the image baked at that path. Before this, every
+# committed overlay file the generator does NOT rewrite -- netstat, ps, id,
+# lspci, who, klist, nmap, nvcc, nvidia-smi, wbinfo, smbstatus, dmesg,
+# mount -- simply did not exist in a running container. entrypoint.sh seeds
+# the tmpfs from .dist before running the generator.
 COPY honeyfs/   /cowrie/cowrie-git/honeyfs.dist/
-COPY txtcmds/   /cowrie/cowrie-git/txtcmds/
+COPY txtcmds/   /cowrie/cowrie-git/txtcmds.dist/
 
 # sync-fs.py now also runs at every container startup (entrypoint.sh) to
 # merge whatever's live in the bind-mounted honeyfs/ into fs.pickle -- kept

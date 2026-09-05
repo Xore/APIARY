@@ -19,6 +19,19 @@
 #   analysis/ghidra/benchmarks/corpus/ci_verify.sh
 set -euo pipefail
 
+# This script runs as root (it apt-installs a toolchain) against a bind-mounted
+# checkout, so every python3 invocation below would drop root-owned
+# __pycache__/*.pyc into the caller's working tree. On a self-hosted runner
+# that is not cosmetic: actions/checkout's clean step then cannot unlink them,
+#
+#   ##[error]File was unable to be removed Error: EACCES: permission denied,
+#   unlink '.../analysis/ghidra/benchmarks/__pycache__/polarity.cpython-313.pyc'
+#
+# and EVERY subsequent job on that runner fails at checkout until someone
+# deletes the files by hand -- one green job poisons the runner for all of
+# them. Seen live on 2026-09-05, where it took out most of two PRs' checks.
+export PYTHONDONTWRITEBYTECODE=1
+
 corpus_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "::group::install toolchains"

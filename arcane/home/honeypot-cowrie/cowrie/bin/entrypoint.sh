@@ -1,13 +1,28 @@
 #!/bin/sh
 set -e
 
-# Generate dynamic txtcmds (free / df / dd / ss / proc/*) with
-# randomised-but-plausible values before Cowrie starts.
+# #2926: seed the txtcmds tmpfs from the image's .dist copy first.
+# compose.yml mounts a tmpfs over /cowrie/cowrie-git/txtcmds (the generator
+# rewrites it every boot, so it is deliberately ephemeral) -- which also
+# masked everything the Dockerfile baked there, so every committed overlay
+# entry the generator does not itself write (netstat, ps, id, lspci, who,
+# klist, nmap, nvcc, nvidia-smi, wbinfo, smbstatus, dmesg, mount) was
+# absent at runtime. Unconditional, unlike the honeyfs seed below: a tmpfs
+# starts empty on every boot, so there is never live content to preserve.
+TXTCMDS_DIR=/cowrie/cowrie-git/txtcmds
+TXTCMDS_DIST=/cowrie/cowrie-git/txtcmds.dist
+mkdir -p "$TXTCMDS_DIR"
+# cp -r, not -a -- same EPERM-on-directory-mtime reasoning as the honeyfs
+# copy below.
+cp -r "$TXTCMDS_DIST"/. "$TXTCMDS_DIR"/
+
+# Generate dynamic txtcmds (free / df / ss / top / proc/* ...) with
+# randomised-but-plausible values before Cowrie starts, over the seed.
 # Each container boot produces fresh numbers so repeated sessions
 # never see identical output.
 /cowrie/cowrie-env/bin/python3 \
     /cowrie/cowrie-git/bin/gen-dynamic-txtcmds.py \
-    /cowrie/cowrie-git/txtcmds
+    "$TXTCMDS_DIR"
 
 # #1487: honeyfs/ and share/cowrie/ are now bind-mounted from the host (see
 # compose.yml and the Dockerfile's honeyfs.dist/fs.pickle.dist comments) so
