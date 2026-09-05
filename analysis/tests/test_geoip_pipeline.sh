@@ -221,6 +221,64 @@ result="$(simulate_flow "$tmp/alert_to_client.json")"
   fail "a to_client alert's flow-level attribution was not preferred over its packet-level fields (got: '$result')"
 pass "a to_client alert uses the flow's attacker-as-source, not the responding packet's own src_ip"
 
+# #2978: beelzebub's `Init service` records write honeypot.port as a Go
+# listen address (":8880"). It used to be copied verbatim into
+# destination.port, which maps as `integer` -- so the value never reached
+# the index, but stayed in _source, where ml-worker read it and int(":8880")
+# crash-looped the worker. norm_port() must turn it into a real port number.
+cat > "$tmp/beelzebub_listen_addr_port.json" <<'EOF'
+{"docs":[{"_source":{"honeypot":{"sensor":"beelzebub","msg":"Init service: Wordpress 6.0","port":":8880"}}}]}
+EOF
+result="$(simulate_flow "$tmp/beelzebub_listen_addr_port.json")"
+[ "$result" = "  8880" ] ||
+  fail "a Go listen-address honeypot.port was not normalised to a port number (got: '$result')"
+pass "a Go listen-address honeypot.port (\":8880\") is normalised to 8880"
+
+# The host-qualified forms Go also emits, including IPv6, must not have the
+# host half swallow the port.
+cat > "$tmp/beelzebub_host_qualified_port.json" <<'EOF'
+{"docs":[{"_source":{"honeypot":{"sensor":"beelzebub","port":"0.0.0.0:389","src_ip":"198.51.100.77"}}}]}
+EOF
+result="$(simulate_flow "$tmp/beelzebub_host_qualified_port.json")"
+[ "$result" = "198.51.100.77  389" ] ||
+  fail "a host-qualified honeypot.port was not normalised (got: '$result')"
+pass "a host-qualified honeypot.port (\"0.0.0.0:389\") is normalised to 389"
+
+cat > "$tmp/ipv6_listen_addr_port.json" <<'EOF'
+{"docs":[{"_source":{"honeypot":{"sensor":"beelzebub","port":"[::]:8880","src_ip":"198.51.100.77"}}}]}
+EOF
+result="$(simulate_flow "$tmp/ipv6_listen_addr_port.json")"
+[ "$result" = "198.51.100.77  8880" ] ||
+  fail "an IPv6 listen-address honeypot.port was not normalised (got: '$result')"
+pass "an IPv6 listen-address honeypot.port (\"[::]:8880\") is normalised to 8880"
+
+# Unparseable or out-of-range values write nothing at all, rather than
+# planting a wrong number -- the caller treats them like an absent field.
+cat > "$tmp/junk_port.json" <<'EOF'
+{"docs":[{"_source":{"honeypot":{"sensor":"beelzebub","port":"not-a-port","src_ip":"198.51.100.77"}}}]}
+EOF
+result="$(simulate_flow "$tmp/junk_port.json")"
+[ "$result" = "198.51.100.77  " ] ||
+  fail "an unparseable honeypot.port was not dropped (got: '$result')"
+pass "an unparseable honeypot.port writes no destination.port at all"
+
+cat > "$tmp/out_of_range_port.json" <<'EOF'
+{"docs":[{"_source":{"honeypot":{"sensor":"beelzebub","port":99999,"src_ip":"198.51.100.77"}}}]}
+EOF
+result="$(simulate_flow "$tmp/out_of_range_port.json")"
+[ "$result" = "198.51.100.77  " ] ||
+  fail "an out-of-range honeypot.port was not dropped (got: '$result')"
+pass "an out-of-range honeypot.port writes no destination.port at all"
+
+# A plain numeric port -- the overwhelmingly common case -- is unchanged.
+cat > "$tmp/plain_numeric_port.json" <<'EOF'
+{"docs":[{"_source":{"honeypot":{"sensor":"http-honeypot","dst_port":8080,"src_ip":"198.51.100.77"}}}]}
+EOF
+result="$(simulate_flow "$tmp/plain_numeric_port.json")"
+[ "$result" = "198.51.100.77  8080" ] ||
+  fail "a plain numeric honeypot.dst_port regressed (got: '$result')"
+pass "a plain numeric honeypot.dst_port is unaffected"
+
 # Ordinary to_server alert: flow and packet-level fields already agree --
 # confirms preferring flow doesn't change the overwhelmingly common case.
 cat > "$tmp/alert_to_server.json" <<'EOF'

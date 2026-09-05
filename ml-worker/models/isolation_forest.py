@@ -262,18 +262,46 @@ def _get_ip(src: dict) -> str:
     return eve.get("src_ip") or ""
 
 
+def _parse_port(value) -> int:
+    """int(), but it also understands a Go listen address (#2978).
+
+    beelzebub's `Init service` records write honeypot.port as the address it
+    bound -- ":8880", ":389" -- and the honeypot ingest pipeline copied
+    honeypot.port straight into destination.port. destination.port maps as
+    `integer`, so Elasticsearch dropped the value from the index and no
+    aggregation could see it, but the string stayed in `_source`, which is
+    what this worker reads. A bare int(":8880") is a ValueError, and on the
+    retrain path (models.session_features, which has no per-event guard of
+    its own) it took the whole worker down: 366 crashes in two hours over
+    fifteen bad documents in a 20 000-event training window.
+
+    ":8880" is a *known* representation of a port, not junk, so it is parsed
+    rather than tolerated. Anything genuinely uninterpretable still raises,
+    exactly as before -- #171 deliberately keeps extract_features() raising
+    on a malformed field so the caller can quarantine the event as
+    reviewable rather than silently score it on a wrong value.
+
+    The pipeline now normalises this at ingest too (elasticsearch-setup.sh's
+    norm_port), but documents already indexed keep the old shape forever.
+    """
+    if isinstance(value, str) and ":" in value:
+        # rsplit, so an IPv6 host part ("[::]:8880") cannot swallow the port.
+        value = value.rsplit(":", 1)[1].strip()
+    return int(value)
+
+
 def _get_port(src: dict) -> int:
     _, local = _resolve_flow_sides(src)
     if local.get("port") is not None:
-        return int(local["port"])
+        return _parse_port(local["port"])
     hp = src.get("honeypot") or {}
     if hp.get("dst_port") is not None:
-        return int(hp["dst_port"])
+        return _parse_port(hp["dst_port"])
     if hp.get("port") is not None:
-        return int(hp["port"])
+        return _parse_port(hp["port"])
     eve = ((src.get("suricata") or {}).get("eve")) or {}
     if eve.get("dest_port") is not None:
-        return int(eve["dest_port"])
+        return _parse_port(eve["dest_port"])
     return 0
 
 
@@ -332,13 +360,13 @@ def _get_src_port(src: dict) -> int:
     """
     remote, _ = _resolve_flow_sides(src)
     if remote.get("port") is not None:
-        return int(remote["port"])
+        return _parse_port(remote["port"])
     hp = src.get("honeypot") or {}
     if hp.get("src_port") is not None:
-        return int(hp["src_port"])
+        return _parse_port(hp["src_port"])
     eve = ((src.get("suricata") or {}).get("eve")) or {}
     if eve.get("src_port") is not None:
-        return int(eve["src_port"])
+        return _parse_port(eve["src_port"])
     return 0
 
 
