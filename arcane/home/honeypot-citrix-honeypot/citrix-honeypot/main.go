@@ -211,6 +211,50 @@ func headerMap(r *http.Request) map[string]string {
 	return m
 }
 
+// authSurfaceEvent maps a request path onto one of the NetScaler
+// authentication surfaces a scanner probes when it is looking for an AAA
+// virtual server / SAML-configured Gateway, returning "" for everything
+// else. #2977: CVE-2026-19490 is an auth bypass against exactly that
+// configuration class, and this decoy -- built for CVE-2019-19781's
+// /vpns/ traversal -- had no way to say "someone went looking for the
+// auth surface" at all; such requests logged as an undifferentiated
+// "get"/"post" alongside every other 404-shaped scan.
+//
+// Every literal below is taken from an Emerging Threats signature loaded
+// on this fleet's own Suricata (79k rules, ET Open), each carrying a
+// vendor-research reference -- not guessed from the shape of a NetScaler
+// URL:
+//
+//	/oauth/idp/.well-known/openid-configuration  sid 2048930  CVE-2023-4966
+//	/oauth/rp/.well-known/openid-configuration   sid 2048931  CVE-2023-4966
+//	/p/u/doAuthentication.do                     sid 2063315  CVE-2025-5777
+//	/cgi/logout                                  sid 2065742  CVE-2025-12101
+//	/saml/login                                  sid 2068631  CVE-2026-3055
+//	/wsfed/passive                               sid 2068632  CVE-2026-3055
+//	/cgi/samlauth                                sid 2071537  CVE-2026-8452
+//
+// This classifies the probe; it does not make the decoy *present* as an
+// AAA/SAML-configured vserver (responses are unchanged -- the caller logs
+// and falls through). Presenting that surface is a deception-design change
+// tracked separately in #3032, as is a CVE-2026-19490-specific event type
+// once that CVE's own literal request shape is confirmed.
+func authSurfaceEvent(reqPath string) string {
+	p := strings.ToLower(reqPath)
+	if len(p) > 1 {
+		p = strings.TrimRight(p, "/")
+	}
+	switch p {
+	case "/saml/login", "/cgi/samlauth", "/wsfed/passive", "/cgi/logout":
+		return "netscaler_saml_surface_probe"
+	case "/oauth/idp/.well-known/openid-configuration",
+		"/oauth/rp/.well-known/openid-configuration":
+		return "netscaler_oauth_surface_probe"
+	case "/p/u/doauthentication.do":
+		return "netscaler_aaa_surface_probe"
+	}
+	return ""
+}
+
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// http.Request.URL.Path is already unescaped by net/http, matching
 	// upstream's urllib.parse.unquote(self.path).
@@ -230,6 +274,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) serveGET(w http.ResponseWriter, r *http.Request, reqPath string) {
 	h.log2(r, "get", reqPath, "")
+	if kind := authSurfaceEvent(reqPath); kind != "" {
+		h.log2(r, kind, reqPath, "")
+	}
 
 	urlParts := splitNonEmpty(reqPath)
 	if len(urlParts) == 0 || (len(urlParts) == 1 && urlParts[0] == "vpn") {
@@ -271,6 +318,9 @@ func (h *handler) serveGET(w http.ResponseWriter, r *http.Request, reqPath strin
 func (h *handler) servePOST(w http.ResponseWriter, r *http.Request, reqPath string) {
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	h.log2(r, "post", reqPath, string(body))
+	if kind := authSurfaceEvent(reqPath); kind != "" {
+		h.log2(r, kind, reqPath, string(body))
+	}
 
 	if len(body) > 0 && path.Clean(reqPath) == "/vpns/portal/scripts/newbm.pl" {
 		if form, err := url.ParseQuery(string(body)); err == nil {
