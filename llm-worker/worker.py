@@ -28,7 +28,7 @@ from typing import Any, TypeVar
 from urllib.parse import urlsplit
 
 import requests
-from elasticsearch import Elasticsearch, NotFoundError
+from elasticsearch import ApiError, Elasticsearch, NotFoundError
 from pydantic import ValidationError
 
 from contracts import (
@@ -1210,13 +1210,14 @@ class LLMWorker:
         # A failing stage is still surfaced (stage_errors, and the cycle is
         # reported not-ok) -- it just no longer takes the others with it.
         stage_errors: dict[str, str] = {}
+        sink_errors: dict[str, str] = {}
         if self.config.session_enabled:
-            events = self._run_stage("session_events", self.collect_session_events, stage_errors)
-            sessions = self._run_stage("sessions", self.analyze_ready_sessions, stage_errors)
+            events = self._run_stage("session_events", self.collect_session_events, stage_errors, sink_errors)
+            sessions = self._run_stage("sessions", self.analyze_ready_sessions, stage_errors, sink_errors)
         if self.config.payload_enabled:
-            payloads = self._run_stage("payloads", self.analyze_payloads, stage_errors)
+            payloads = self._run_stage("payloads", self.analyze_payloads, stage_errors, sink_errors)
         if self.config.daily_report_enabled:
-            reports = self._run_stage("daily_report", self.analyze_daily_report, stage_errors)
+            reports = self._run_stage("daily_report", self.analyze_daily_report, stage_errors, sink_errors)
         result = {
             "mode": "captured-data",
             "selftest": False,
@@ -1232,19 +1233,54 @@ class LLMWorker:
             result["payload_scan_truncated"] = self.payload_scan_truncated
         if stage_errors:
             result["stage_errors"] = stage_errors
+        # #2917: a sink-unavailable stage is surfaced here for visibility but
+        # deliberately excluded from stage_errors, so it does not flip `ok`.
+        if sink_errors:
+            result["sink_errors"] = sink_errors
         return result
 
-    def _run_stage(self, name: str, stage: Callable[[], int], errors: dict[str, str]) -> int:
+    @staticmethod
+    def _sink_unavailable(exc: Exception) -> bool:
+        """True when `exc` means "Elasticsearch is refusing writes to protect
+        itself", not "this worker is broken" (#2917).
+
+        429 is Elasticsearch's status for `cluster_block_exception` /
+        `TOO_MANY_REQUESTS` -- what a disk-flood-stage watermark or a
+        temporarily overloaded cluster returns. The worker reached the API
+        call and got a well-formed refusal; restarting it fixes nothing and
+        cannot free disk. 503 is included for the same reason (cluster
+        temporarily unable to serve, e.g. mid-recovery) -- both are the
+        cluster's own problem, not this process's.
+        """
+        return isinstance(exc, ApiError) and exc.status_code in (429, 503)
+
+    def _run_stage(
+        self, name: str, stage: Callable[[], int], errors: dict[str, str], sink_errors: dict[str, str]
+    ) -> int:
         """Run one cycle stage, recording rather than propagating its failure.
 
         Only the exception *type* is recorded, never its message: these come
         from a model fed attacker-controlled text, and a message can carry that
         text back out into the status file. Same reasoning the outer cycle
         handler already applies.
+
+        A sink-unavailable failure (#2917) is routed to `sink_errors` instead
+        of `errors`: it is real and worth surfacing, but it is not evidence
+        this worker needs restarting, and putting it in `errors` is exactly
+        what made auto-heal restart-loop a container that was working
+        correctly and only failing to write into an already-full cluster.
         """
         try:
             return stage()
         except Exception as exc:  # noqa: BLE001 - deliberately broad, see docstring
+            if self._sink_unavailable(exc):
+                sink_errors[name] = type(exc).__name__
+                LOG.warning(
+                    "stage %s deferred: Elasticsearch is refusing writes (status %s), "
+                    "not a worker fault -- continuing with the rest of the cycle",
+                    name, getattr(exc, "status_code", "?"),
+                )
+                return 0
             errors[name] = type(exc).__name__
             LOG.error("stage %s failed, continuing with the rest of the cycle: %s",
                       name, type(exc).__name__)
@@ -1278,6 +1314,9 @@ def healthcheck_failure(status: dict[str, Any], maximum_age: int) -> str:
     stage_errors = status.get("stage_errors")
     if isinstance(stage_errors, dict) and stage_errors:
         failure += ", failing stages=" + ",".join(sorted(stage_errors))
+    sink_errors = status.get("sink_errors")
+    if isinstance(sink_errors, dict) and sink_errors:
+        failure += ", deferred (sink unavailable)=" + ",".join(sorted(sink_errors))
     return failure
 
 
