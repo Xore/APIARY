@@ -98,6 +98,45 @@ The repository setting **Allow auto-merge** and the Actions permission
 **Allow GitHub Actions to create and approve pull requests** must remain
 enabled for this workflow.
 
+## Pull request workflow
+
+### Stacked PRs and `Closes #N` (#2922)
+
+GitHub only auto-closes a linked issue when the PR that carries `Closes #N`
+merges into the repository's **default branch** (`main`). A stacked PR —
+one whose base is another feature branch, not `main` — can carry a perfectly
+correct `Closes #N` line that never fires: by the time the parent branch
+merges into `main`, that `Closes` line was already consumed by the earlier
+merge into the (non-default) parent branch. This is not a GitHub bug or a
+malformed keyword; it is a predictable property of stacking, and it costs a
+real fix a real closed issue every time it happens (#2749 and #2750, both
+merged and fixed for two days before a later pass rediscovered them as if
+still open, because the tracker still showed them open).
+
+**Policy, in order of preference:**
+
+1. **Prefer not to stack.** Rebase each independent fix onto `main` and open
+   PRs sequentially instead of onto each other. This is the only option that
+   needs no follow-up step.
+2. **If a stack is unavoidable** (a later fix genuinely depends on an
+   earlier, not-yet-merged one), put every `Closes #N` for the whole stack
+   on the **root PR** — the one PR in the stack whose base is `main` — not
+   on the children. List every issue the stack resolves there, even the
+   ones a child PR's own commits actually fixed.
+3. **If a child PR already shipped with its own `Closes #N`** (as #2798 and
+   #2799 did), treat that line as decoration once the child merges into a
+   non-`main` base: it will not fire. Close the issue by hand at the same
+   time the child PR merges, don't wait for the parent to reach `main`.
+
+**Mandatory check at the end of every merge batch:** for each PR merged in
+the window, confirm every issue it claims to close (via any GitHub closing
+keyword: close/closes/closed, fix/fixes/fixed, resolve/resolves/resolved) is
+actually in the `closed` state — not just that the PR merged cleanly.
+`scripts/check-merged-prs-closed-issues.py` automates this (see its
+docstring for usage); run it after every merge wave, not only at the end of
+a round, since the failure mode is a *quietly done* issue inflating the next
+census, and the cost of catching it is one script run.
+
 ## Home deployment
 
 Home deployment uses a dedicated self-hosted runner with these labels:
