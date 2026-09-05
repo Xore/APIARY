@@ -842,6 +842,25 @@ jobs:
             home: true
             run: python scripts/check-cowrie-honeyfs-realism.py
 
+          # #2926: the persona overlay's bare-name entries (free, uptime,
+          # id, ...) were shadowed by cowrie's own builtins and silently
+          # unreachable -- nproc disagreeing with lscpu in the same session
+          # was the cheapest tell. Asserts the priority patch still matches
+          # upstream's getCommand() exactly once and is idempotent, plus the
+          # persona-consistency fixtures it unblocks (nproc == lscpu's CPU
+          # count, free's static seed is persona-scale).
+          #
+          # The behavioural half is what earns the row: it execs the patched
+          # getCommand() and pins the two regressions an unscoped version
+          # causes -- a path-form invocation (/bin/echo, and 66 other real
+          # binaries in the runtime image) reading the container's own ELF
+          # instead of being emulated, and a canned overlay outranking
+          # uname's cowrie.cfg-driven persona or dd's operand parsing and
+          # input_data capture.
+          - name: "Cowrie txtcmds overlay priority patch (#2926)"
+            home: true
+            run: python arcane/home/honeypot-cowrie/cowrie/tests/test_txtcmds_priority_patch.py
+
           # #1982: compose.yml is the only place a stack's knobs are exercised,
           # .env.example is what a deployer copies when standing the stack up
           # manually -- drift between them means a variable exists at runtime

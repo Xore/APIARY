@@ -110,10 +110,12 @@ services:
     # #239: measured via a real read_only:true run against the actual
     # compose service definition, not assumed. Every other write cowrie
     # makes lands in one of the bind mounts above; the one remaining path,
-    # bin/gen-dynamic-txtcmds.py's per-boot regenerated free/df/dd/ss/proc/*
+    # bin/gen-dynamic-txtcmds.py's per-boot regenerated free/df/ss/top/proc/*
     # output (txtcmds/), is deliberately ephemeral -- fresh values every
     # container start is the whole point (see that script's own header) --
-    # so tmpfs, not a persistent mount.
+    # so tmpfs, not a persistent mount. #2926: this tmpfs also masks the
+    # image's static overlay entries, so entrypoint.sh seeds it from
+    # txtcmds.dist before the generator runs.
     read_only: true
     tmpfs:
       - /cowrie/cowrie-git/txtcmds:uid=2000,gid=2000
