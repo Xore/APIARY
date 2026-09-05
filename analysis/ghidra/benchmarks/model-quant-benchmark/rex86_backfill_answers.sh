@@ -4,9 +4,9 @@
 # Reuses the existing idempotent scripts unchanged -- deletes only the
 # stale score-only result files first so their own "already has a result,
 # skipping" checks correctly redo just those.
-set -uo
-source "$WORK/rex86_common.sh" pipefail
+set -uo pipefail
 WORK=/var/dockge/stacks/rex86-eval/work
+source "$WORK/rex86_common.sh"
 cd "$WORK"
 LOG="$WORK/other-models/backfill-answers.log"
 exec > >(tee -a "$LOG") 2>&1

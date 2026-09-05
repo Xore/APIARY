@@ -14,8 +14,7 @@
 # following the standard QLoRA merge-for-deployment practice (train under
 # 4-bit, merge onto full precision) — the bnb-4bit tensor layout itself
 # isn't something llama.cpp's convert_hf_to_gguf.py can consume directly.
-set -euo
-source "$WORK/rex86_common.sh" pipefail
+set -euo pipefail
 
 name="${1:?usage: rex86_run_one.sh <name> <adapter_dir> <base_repo> [base_revision]}"
 adapter_dir="${2:?adapter_dir required}"
@@ -23,6 +22,7 @@ base_repo="${3:?base_repo required}"
 base_rev="${4:-main}"
 
 WORK=/var/dockge/stacks/rex86-eval/work
+source "$WORK/rex86_common.sh"
 LOG="$WORK/other-models/${name}.pipeline.log"
 mkdir -p "$WORK/other-models"
 cd "$WORK"

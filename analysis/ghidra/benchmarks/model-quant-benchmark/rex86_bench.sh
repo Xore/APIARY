@@ -1,7 +1,7 @@
 #!/bin/bash
-set -uo
-source "$WORK/rex86_common.sh" pipefail
+set -uo pipefail
 WORK=/var/dockge/stacks/rex86-eval/work
+source "$WORK/rex86_common.sh"
 LOG=$WORK/bench.log
 cd "$WORK"
 exec > >(tee -a "$LOG") 2>&1
@@ -68,7 +68,10 @@ with urllib.request.urlopen(req) as resp:
     d = json.load(resp)
 t1=time.time()
 timings = d.get('timings', {})
-print('wall_s=%.3f prompt_tokens=%s prompt_ms=%s prompt_tps=%s predicted_tokens=%s predicted_ms=%s predicted_tps=%s' % (
+# #2054: predicted_tps is llama-server's own server-side measurement
+# (excludes this script's HTTP/queue overhead) -- labeled explicitly so it's
+# never read as the same quantity as vLLM's wall-clock-inclusive rate below.
+print('wall_s=%.3f prompt_tokens=%s prompt_ms=%s prompt_tps=%s predicted_tokens=%s predicted_ms=%s predicted_tps_server_measured=%s' % (
     t1-t0, timings.get('prompt_n'), timings.get('prompt_ms'), timings.get('prompt_per_second'),
     timings.get('predicted_n'), timings.get('predicted_ms'), timings.get('predicted_per_second')))
 "
@@ -116,7 +119,11 @@ with urllib.request.urlopen(req) as resp:
 t1=time.time()
 pc = d.get('prompt_eval_count'); pd = d.get('prompt_eval_duration',0)/1e9
 ec = d.get('eval_count'); ed = d.get('eval_duration',0)/1e9
-print('wall_s=%.3f prompt_tokens=%s prompt_s=%.3f prompt_tps=%.1f eval_tokens=%s eval_s=%.3f eval_tps=%.1f' % (
+# #2054: eval_tps is Ollama's own server-side measurement (excludes this
+# script's HTTP/queue overhead), same basis as llama.cpp's predicted_tps
+# above -- labeled explicitly, see the vLLM section's wall-clock-inclusive
+# rate for the one column that measures something different.
+print('wall_s=%.3f prompt_tokens=%s prompt_s=%.3f prompt_tps=%.1f eval_tokens=%s eval_s=%.3f eval_tps_server_measured=%.1f' % (
     t1-t0, pc, pd, (pc/pd if pd else 0), ec, ed, (ec/ed if ed else 0)))
 "
 done
@@ -132,11 +139,17 @@ docker run -d --name vllm-bench --gpus all -v "$WORK/rex86-merged":/model -p 180
   vllm/vllm-openai:v0.26.0@sha256:ffb2d59b1c059a5bd8d781320c9f5189de8293693b7d95da54befddaa54abf52 --model /model --dtype float16 --max-model-len 4096 --gpu-memory-utilization 0.85
 for i in $(seq 1 40); do curl -sf http://127.0.0.1:18000/v1/models >/dev/null 2>&1 && break; sleep 5; done
 curl -sf http://127.0.0.1:18000/v1/models >/dev/null && echo " -- vllm up"
+# #2054: top_k/repetition_penalty must be set explicitly on every vLLM
+# request. Omitted, vLLM falls back to top_k unset / repetition_penalty=1.0
+# (no penalty) -- not equivalent to llama.cpp/Ollama's repeat_penalty=1.1,
+# top_k=1 above (#832; corpus_eval.py's --vllm-top-k/--vllm-repetition-penalty
+# docstrings say the same). 1/1.1 is the parity setting vllm_tuning_run.sh
+# already validated against this corpus, not a new guess.
 echo "-- warmup --"
 python3 -c "
 import json, urllib.request
 prompt = open('$PROMPT_FILE').read()
-body = json.dumps({'model':'/model','prompt':prompt,'max_tokens':10,'temperature':0,'seed':66}).encode()
+body = json.dumps({'model':'/model','prompt':prompt,'max_tokens':10,'temperature':0,'seed':66,'top_k':1,'repetition_penalty':1.1}).encode()
 req = urllib.request.Request('http://127.0.0.1:18000/v1/completions', data=body, headers={'Content-Type':'application/json'})
 urllib.request.urlopen(req)
 print('warmup done')
@@ -146,7 +159,7 @@ for r in $(seq 1 $RUNS); do
   python3 -c "
 import json, urllib.request, time
 prompt = open('$PROMPT_FILE').read()
-body = json.dumps({'model':'/model','prompt':prompt,'max_tokens':$N_PREDICT,'temperature':0,'seed':66}).encode()
+body = json.dumps({'model':'/model','prompt':prompt,'max_tokens':$N_PREDICT,'temperature':0,'seed':66,'top_k':1,'repetition_penalty':1.1}).encode()
 req = urllib.request.Request('http://127.0.0.1:18000/v1/completions', data=body, headers={'Content-Type':'application/json'})
 t0=time.time()
 with urllib.request.urlopen(req) as resp:
@@ -154,13 +167,18 @@ with urllib.request.urlopen(req) as resp:
 t1=time.time()
 u = d['usage']
 wall = t1-t0
-print('wall_s=%.3f prompt_tokens=%s completion_tokens=%s overall_tps=%.1f' % (wall, u['prompt_tokens'], u['completion_tokens'], u['completion_tokens']/wall))
+# #2054: this is the only wall-clock-inclusive (HTTP + queue overhead) rate
+# in this script -- llama.cpp's predicted_tps and Ollama's eval_tps above are
+# both server-measured, excluding that overhead. Label kept explicit so the
+# three engines' throughput columns are never read as the same quantity.
+print('wall_s=%.3f prompt_tokens=%s completion_tokens=%s overall_tps_wallclock_incl_http=%.1f' % (wall, u['prompt_tokens'], u['completion_tokens'], u['completion_tokens']/wall))
 "
 done
 
 echo "--- vLLM: full 32-case corpus ---"
 python3 "$WORK/corpus_eval.py" vllm "http://127.0.0.1:18000" --model /model \
-  --manifest "$WORK/manifest.json" --rubric "$WORK/rev_cases_v2_rubric.json"
+  --manifest "$WORK/manifest.json" --rubric "$WORK/rev_cases_v2_rubric.json" \
+  --vllm-top-k 1 --vllm-repetition-penalty 1.1
 free_gpu
 
 echo "=== BENCH DONE $(date -u +%FT%TZ) ==="
