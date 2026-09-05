@@ -1,0 +1,37 @@
+# #1947 phase 3 / #2245 -- clean f16 quantization ladder.
+#
+#   <hf_repo> | <space-separated llama-quantize levels> | <ollama tag prefix>
+#
+# These are ORIGINAL safetensors repos, not GGUF repos. convert_hf_to_gguf.py
+# needs the original weights; a GGUF repo has nothing to convert. Each row's
+# base_model was read off the corresponding GGUF repo's card and verified to
+# exist, be ungated, and carry config.json + safetensors shards (2026-09-05).
+#
+# Level choice is anchored on the measured envelope, not on habit: the RTX 4000
+# Ada holds 20475 MiB, and KV cache at the benchmark's served CONTEXT 32768
+# costs ~3-5 GB on a 26-35B model, so a fully-resident model has a WEIGHTS
+# budget of roughly 16-17 GB. Every row therefore brackets that budget -- one
+# level above it (spills, measured with offload), one at it, one or two below --
+# because the whole question #2245 asks is whether buying parameters with bits
+# pays off, and that is only answerable if the ladder crosses the residency line.
+#
+# Each row's top level deliberately matches a quant already measured
+# as-published in the phase-1/2 matrix, so every ladder has a same-base,
+# same-scorer control rather than floating free.
+#
+# Two arms, per #2245 step 1: one dense, one MoE/A3B for the latency axis.
+
+# --- dense arm --------------------------------------------------------------
+# Ornith-1.0-35B: 70 GB of safetensors. Published Q4_K_M is 22 GB and spills
+# (6.7 min/run against gemma-4-26B-A4B's 2.1 for identical work), which is
+# exactly the "published quants stop where our card cannot use them" case.
+# Scored 67/69 on ghidra Tier B in #1805-c -- the highest in that cohort -- so
+# whether it can be made to fit is a real question and not an academic one.
+llmfan46/Ornith-1.0-35B-uncensored-heretic | Q4_K_M Q3_K_M Q3_K_S IQ3_M | ornith-35b-selfquant
+
+# --- MoE arm ----------------------------------------------------------------
+# gemma-4-26B-A4B: 52 GB of safetensors. This is the promote candidate from
+# PR #2641 -- fastest in the cohort at 2.1 min/run, clean on both gates. Its
+# published ladder stops at Q4/Q5, so Q5_K_M (over budget, measured spilling)
+# and Q3_K_M (under) are both points nobody has published for this card.
+llmfan46/gemma-4-26B-A4B-it-ultra-uncensored-heretic | Q5_K_M Q4_K_M Q3_K_M | gemma4-26b-a4b-selfquant

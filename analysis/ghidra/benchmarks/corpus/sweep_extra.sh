@@ -31,11 +31,16 @@
 # used to go to /dev/null, which is what made #2728 slow to diagnose -- it
 # now lands in a per-model log under $BASE/logs.
 set -u
-BASE=/mnt-1/benchmarks/1947full
-REPO=/mnt-1/benchmarks/APIARY
-LIST=/mnt-1/benchmarks/models_extra_all.txt
-PRESEED=/mnt-1/benchmarks/preseed.sh
-MAXTRY=3
+# Overridable so a second roster can reuse this driver instead of copying its
+# run/escalation/UNRESOLVED logic. requant_sweep.sh (#2245) builds a ladder of
+# self-quantized tags and then runs exactly this script over them, so the
+# self-quant rows are scored by the same code, at the same pin, as every
+# as-published row they are meant to be compared against.
+BASE=${BASE:-/mnt-1/benchmarks/1947full}
+REPO=${REPO:-/mnt-1/benchmarks/APIARY}
+LIST=${LIST:-/mnt-1/benchmarks/models_extra_all.txt}
+PRESEED=${PRESEED:-/mnt-1/benchmarks/preseed.sh}
+MAXTRY=${MAXTRY:-3}
 
 # #2738: fail fast on any roster entry Ollama's client-side hf.co name
 # validation would reject before a sweep wastes time discovering it --
