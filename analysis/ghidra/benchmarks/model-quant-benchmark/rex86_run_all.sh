@@ -14,9 +14,9 @@
 # official codellama/CodeLlama-34b-hf, not an unsloth repo -- unsloth's own
 # unquantized 34B repos 401'd (gated/private), confirmed by checking, not
 # assumed to be equivalent without noting it here.
-set -uo
-source "$WORK/rex86_common.sh" pipefail
+set -uo pipefail
 WORK=/var/dockge/stacks/rex86-eval/work
+source "$WORK/rex86_common.sh"
 QUEUE_LOG="$WORK/other-models/queue.log"
 cd "$WORK"
 exec > >(tee -a "$QUEUE_LOG") 2>&1

@@ -1,7 +1,7 @@
 #!/bin/bash
-set -uo
-source "$WORK/rex86_common.sh" pipefail
+set -uo pipefail
 WORK=/var/dockge/stacks/rex86-eval/work
+source "$WORK/rex86_common.sh"
 RC=$WORK/real-corpus
 LOG=$WORK/vllm_tuning.log
 cd "$WORK"

@@ -63,10 +63,11 @@ GPU_LAUNCH_RE = re.compile(r"llama-server|vllm/vllm-openai|ollama\s+serve")
 
 # A whole line that is a `source .../rex86_common.sh` statement. `args`
 # captures whatever trails the sourced path -- empty in a correct prologue,
-# but the eight drivers whose `set -euo pipefail` got split leave `pipefail`
-# stranded there. Matching that shape rather than refusing to match it keeps
-# "does this driver source the helper at all?" from re-reporting a defect
-# that already has its own contract (test_driver_prologues_are_runnable).
+# but the eight drivers whose `set -euo pipefail` got split (#2979) left
+# `pipefail` stranded there. Matching that shape rather than refusing to
+# match it keeps "does this driver source the helper at all?" from
+# re-reporting a defect that has its own contract below
+# (test_driver_prologues_are_runnable).
 SOURCE_RE = re.compile(
     r"""^\s*(?:source|\.)\s+"\$\{?(?P<var>\w+)\}?/rex86_common\.sh"(?P<args>.*)$"""
 )
@@ -330,24 +331,6 @@ def test_every_driver_sources_the_common_helper_on_its_own_line():
         )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "KNOWN DEFECT, still live on main as of f03eb727. Eight drivers "
-        "shipped with `set -uo` / `set -euo` split from their `pipefail` "
-        "argument, which was absorbed into the following source line: "
-        "`source \"$WORK/rex86_common.sh\" pipefail`. Two consequences, both "
-        "verified by running the prologue: (a) bare `set -o` prints the whole "
-        "shell-option table to stdout, polluting every driver's log; (b) $WORK "
-        "is not assigned until the *next* line, so under `set -u` the source "
-        "aborts the script with 'WORK: unbound variable' and exit 1 -- these "
-        "drivers cannot start. pipefail is also never enabled. The repair is "
-        "to restore `set -euo pipefail` and move the source below the "
-        "WORK= assignment; the source file is out of scope for this test-only "
-        "change. This marker is strict so that repairing the drivers turns "
-        "the suite red and forces the marker to be deleted in the same commit."
-    ),
-)
 def test_driver_prologues_are_runnable():
     """A driver that aborts on its own second line satisfies every
     text-matching contract in this file and still runs nothing.
@@ -355,6 +338,18 @@ def test_driver_prologues_are_runnable():
     Two things must hold: ``set -...o`` keeps its ``pipefail`` argument, and
     the ``source`` of the helper happens *after* the variable holding its
     directory is assigned.
+
+    This carried a ``strict=True`` xfail from the day it was written: #2055
+    inserted the ``source`` line into eight drivers by splitting their
+    ``set -uo pipefail`` / ``set -euo pipefail``, stranding ``pipefail`` as an
+    ignored argument to the sourced file and putting the ``source`` *above*
+    the ``WORK=`` assignment it depends on. Bare ``set -o`` then printed the
+    whole shell-option table into every driver log, ``pipefail`` was never
+    enabled, and under ``set -u`` the source aborted the script with
+    ``WORK: unbound variable`` before it reached a single line of its own
+    work. All eight are repaired (#2979, alongside #2054, which could not
+    otherwise be verified against a script that cannot start), so the marker
+    is gone and this is now a live contract.
     """
     broken = []
     for path in _drivers():

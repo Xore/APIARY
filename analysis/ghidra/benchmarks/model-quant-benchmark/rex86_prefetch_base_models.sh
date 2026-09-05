@@ -12,9 +12,9 @@
 # whenever rex86_run_all_base.sh's own per-spec quantize step would
 # otherwise reuse an already-converted f16 file; skips cleanly if that file
 # already exists, same check that script uses.
-set -uo
-source "$WORK/rex86_common.sh" pipefail
+set -uo pipefail
 WORK=/var/dockge/stacks/rex86-eval/work
+source "$WORK/rex86_common.sh"
 LOG="$WORK/other-models/prefetch.log"
 cd "$WORK"
 exec > >(tee -a "$LOG") 2>&1

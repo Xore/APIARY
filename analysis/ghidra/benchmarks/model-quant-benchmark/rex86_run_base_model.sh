@@ -24,8 +24,7 @@
 #
 # f16 GGUF and every quantized GGUF are kept on disk afterward (not
 # deleted) so re-running one spec doesn't force regenerating the others.
-set -euo
-source "$WORK/rex86_common.sh" pipefail
+set -euo pipefail
 
 name="${1:?usage: rex86_run_base_model.sh <name> <hf_repo> <spec:TAG:NGL> [...]}"
 hf_repo="${2:?hf_repo required}"
@@ -37,6 +36,7 @@ if [[ ${#specs[@]} -eq 0 ]]; then
 fi
 
 WORK=/var/dockge/stacks/rex86-eval/work
+source "$WORK/rex86_common.sh"
 LOG="$WORK/other-models/${name}.pipeline.log"
 mkdir -p "$WORK/other-models"
 cd "$WORK"
