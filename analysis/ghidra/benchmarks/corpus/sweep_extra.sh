@@ -65,6 +65,44 @@ json.dump({"tag": tag, "status": "UNMEASURED", "reason": reason,
 EOF
 }
 
+# #3036: the third state. mark_unmeasured() separates "never ran" from "ran and
+# scored badly"; this separates both from "ran fine, five times, and the harness
+# still cannot say what the score is". Writes a marker only when no value has a
+# plurality, and records every run so the spread is visible rather than summarised.
+mark_unresolved_if_no_majority() { # tier slug tag
+  python3 - "$BASE" "$1" "$2" "$3" <<'EOF'
+import json, sys, datetime, collections, pathlib
+base, tier, slug, tag = sys.argv[1:5]
+scores = []
+for n in range(1, 6):
+    p = pathlib.Path(base) / f"tier{tier}_{slug}_run{n}.json"
+    if p.exists():
+        try:
+            scores.append(json.loads(p.read_text())["total_score"])
+        except Exception:
+            pass
+if not scores:
+    sys.exit(0)
+counts = collections.Counter(scores)
+top, n_top = counts.most_common(1)[0]
+# A plurality needs to be strictly more common than every other value; a 2-2 tie
+# is not a result either.
+tied = [v for v, c in counts.items() if c == n_top]
+out = pathlib.Path(base) / f"UNRESOLVED_tier{tier}_{slug}.status"
+if len(tied) > 1 or n_top < 2:
+    out.write_text(json.dumps({
+        "tag": tag, "tier": tier, "status": "UNRESOLVED",
+        "reason": f"no majority across {len(scores)} runs",
+        "runs": scores, "counts": dict(counts),
+        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }))
+    print(f"UNRESOLVED tier{tier} {slug} runs={scores}")
+else:
+    out.unlink(missing_ok=True)
+    print(f"resolved tier{tier} {slug} runs={scores} -> {top} (x{n_top}, N={len(scores)})")
+EOF
+}
+
 do_run() { # tier slug tag n
   local tier="$1" slug="$2" tag="$3" n="$4"
   local out="$BASE/tier${tier}_${slug}_run${n}.json"
@@ -145,6 +183,22 @@ while read -r TAG; do
       echo "$(date -u +%H:%M:%S) ESCALATE $tier $slug ($s1 != $s2)"
       echo "$tier $slug $s1 $s2" >> "$BASE/escalated.txt"
       do_run "$tier" "$slug" "$TAG" 3
+      # #3036: run 3 is decisive only if it AGREES with one of the first two.
+      # Nothing used to check that. A cell whose three runs are all distinct has
+      # no majority and therefore no defensible score -- it looked identical to
+      # a resolved cell, and an aggregator reading total_score would pick one
+      # arbitrarily. Measured live: GLM-4.6-REAP-218B:i1-IQ1_S tier B came back
+      # 55 / 57 / 54.
+      s3=$(score_of "$BASE/tier${tier}_${slug}_run3.json")
+      if [ -n "$s3" ] && [ "$s1" != "$s3" ] && [ "$s2" != "$s3" ]; then
+        # Bounded, not unbounded: the row that provoked this costs ~45 min/run
+        # (57 GB served, 65% on CPU), so an open-ended escalation could spend a
+        # day on one cell. Two more runs, then stop and say so.
+        echo "$(date -u +%H:%M:%S) NOMAJORITY $tier $slug ($s1/$s2/$s3) -> N=5"
+        do_run "$tier" "$slug" "$TAG" 4
+        do_run "$tier" "$slug" "$TAG" 5
+        mark_unresolved_if_no_majority "$tier" "$slug" "$TAG"
+      fi
     fi
   done
 
