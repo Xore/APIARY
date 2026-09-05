@@ -82,6 +82,9 @@ the only internet-facing component.
 ## Home deployment
 
 > **Prefer the script.** [`scripts/install-homeserver.sh`](../scripts/install-homeserver.sh)
+> — or [`scripts/install.sh --profile home`](../scripts/install.sh), the single
+> entry point that runs it with the answers file defaulted to
+> `/etc/apiary/install-home.conf` ([#1609](https://github.com/Xore/APIARY/issues/1609)) —
 > automates Docker, GPU/NVIDIA, WireGuard, Arcane, the repo checkout,
 > per-stack provisioning, secret restore, and starting every stack in the
 > correct order (plus the GPU/LLM/ML worker chain and, optionally, the
@@ -197,6 +200,8 @@ intervention.
 ## VPS deployment
 
 > **Prefer the script.** [`scripts/install-vps.sh`](../scripts/install-vps.sh)
+> — or [`scripts/install.sh --profile vps`](../scripts/install.sh), the same
+> thing with the answers file defaulted to `/etc/apiary/install-vps.conf` —
 > automates Docker, WireGuard, the firewall, the NIC offload fix, the `vps/`
 > checkout, secret restore, and starting the stack against a
 > manually-installed base Ubuntu system — fill in
