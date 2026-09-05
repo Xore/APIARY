@@ -71,6 +71,7 @@ import json
 import re
 import sys
 import time
+import urllib.error
 import urllib.request
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -159,6 +160,30 @@ def cosine(a: list[float], b: list[float]) -> float:
     return 0.0 if not na or not nb else dot / (na * nb)
 
 
+def _post_json(url: str, body: dict[str, Any], *, timeout: int, retries: int = 3) -> dict[str, Any]:
+    """POST with 2-3 retries and backoff (#2032 item 1).
+
+    A bare `urlopen` had no retry at all: one transient connection reset on a
+    multi-hour local-GPU run lost every extraction since process start,
+    because the pool was only ever written at the very end. Retrying the
+    request is the cheap half of that fix; `main`'s incremental save is the
+    other half.
+    """
+    data = json.dumps(body).encode()
+    last_exc: Exception | None = None
+    for attempt in range(retries):
+        req = urllib.request.Request(url, data=data, method="POST")
+        req.add_header("Content-Type", "application/json")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                return json.loads(response.read())
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            last_exc = exc
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)
+    raise ClaimError(f"{url} failed after {retries} attempts: {last_exc}")
+
+
 def ollama_embedder(api_base: str, model: str = "nomic-embed-text:latest") -> Callable[[str], list[float]]:
     """Embeddings from the local Ollama, for semantic deduplication.
 
@@ -174,11 +199,7 @@ def ollama_embedder(api_base: str, model: str = "nomic-embed-text:latest") -> Ca
         key = canonical(text)
         if key in cache:
             return cache[key]
-        body = json.dumps({"model": model, "input": key}).encode()
-        req = urllib.request.Request(f"{base}/api/embed", data=body, method="POST")
-        req.add_header("Content-Type", "application/json")
-        with urllib.request.urlopen(req, timeout=120) as response:
-            payload = json.loads(response.read())
+        payload = _post_json(f"{base}/api/embed", {"model": model, "input": key}, timeout=120)
         vectors = payload.get("embeddings") or ([payload["embedding"]] if "embedding" in payload else [])
         if not vectors:
             raise ClaimError(f"no embedding returned for {key[:60]!r}")
@@ -390,30 +411,60 @@ def adjudicate_pool(pool: list[Claim], rubric: dict[str, Any], embed: Callable[[
 
     if review_queue is not None and pending:
         review_queue.parent.mkdir(parents=True, exist_ok=True)
-        rows = [{"claim_id": c.claim_id, "case": c.case, "text": c.text, "kind": c.kind,
-                 "first_seen": c.first_seen, "made_by": c.made_by,
-                 "ground_truth": (rubric.get(c.case) or {}).get("ground_truth", ""),
-                 "verdict": "<< true | false | unsupported >>"} for c in pending]
+        # #2032 item 2: a plain overwrite would clobber a human's
+        # partially-completed rulings the moment extraction re-runs for any
+        # reason (a new transcript merged, a rubric fix). Any row already
+        # filled with a real verdict in the existing file is carried forward
+        # verbatim instead of being regenerated as a placeholder.
+        previously_ruled: dict[str, dict[str, Any]] = {}
+        if review_queue.exists():
+            try:
+                for row in json.loads(review_queue.read_text()):
+                    verdict = (row.get("verdict") or "").strip()
+                    if verdict in (VERDICT_TRUE, VERDICT_FALSE, VERDICT_UNSUPPORTED):
+                        previously_ruled[row.get("claim_id")] = row
+            except (ValueError, OSError):
+                pass  # a corrupt/missing existing file loses nothing new
+        rows = [
+            previously_ruled.get(c.claim_id) or
+            {"claim_id": c.claim_id, "case": c.case, "text": c.text, "kind": c.kind,
+             "first_seen": c.first_seen, "made_by": c.made_by,
+             "ground_truth": (rubric.get(c.case) or {}).get("ground_truth", ""),
+             "verdict": "<< true | false | unsupported >>"}
+            for c in pending
+        ]
         review_queue.write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
     return counts
 
 
 def apply_rulings(pool: list[Claim], rulings: Path) -> int:
-    """Fold a completed human review file back into the pool."""
+    """Fold a completed human review file back into the pool.
+
+    #2032 item 3: a ruling whose `claim_id` is not in the pool (typo, stale
+    queue file from before a pool rebuild) used to vanish without a trace --
+    "applied N" gave no denominator, so a mostly-stale file looked identical
+    to a mostly-applied one. Unmatched ids are printed by name so a stale
+    file is noticed instead of assumed complete.
+    """
     rows = json.loads(rulings.read_text())
     by_id = {c.claim_id: c for c in pool}
     applied = 0
+    dropped = []
     for row in rows:
         verdict = (row.get("verdict") or "").strip()
         if verdict not in (VERDICT_TRUE, VERDICT_FALSE, VERDICT_UNSUPPORTED):
             continue
         claim = by_id.get(row.get("claim_id"))
         if claim is None:
+            dropped.append(row.get("claim_id"))
             continue
         claim.verdict = verdict
         claim.verdict_source = "human"
         claim.verdict_note = row.get("note")
         applied += 1
+    if dropped:
+        print(f"  {len(dropped)} ruling(s) skipped, claim_id not in pool: {dropped}",
+              file=sys.stderr)
     return applied
 
 
@@ -460,8 +511,17 @@ def pool_version(pool: list[Claim]) -> str:
     Stated in every report next to the Ghidra cache key. Coverage is a fraction
     of this set, so a report that does not name the version is unreadable a round
     later.
+
+    `made_by` is folded in, not just `claim_id:verdict` (#2031): every per-model
+    figure (`unique_true`, `missed_true`, coverage) is a function of provenance,
+    not only of the verdict. A later round that only merges into existing
+    claims -- no new claim ids, no verdict changes -- still moves those figures
+    by appending to `made_by`, and the version must move with it or two reports
+    can cite the same version while disagreeing.
     """
-    payload = sorted(f"{c.claim_id}:{c.verdict}" for c in pool)
+    payload = sorted(
+        f"{c.claim_id}:{c.verdict}:{','.join(sorted(c.made_by))}" for c in pool
+    )
     return _sha256("|".join(payload))[:16]
 
 
@@ -479,7 +539,21 @@ def save_pool(path: Path, pool: list[Claim], meta: dict[str, Any]) -> str:
 
 
 def load_pool(path: Path) -> tuple[list[Claim], dict[str, Any]]:
+    """Load a frozen pool, rejecting a schema mismatch loudly (#2032 item 4).
+
+    `Claim(**row)` raises a bare TypeError on an unrecognised field with no
+    indication *why* -- a future schema bump would surface as a confusing
+    crash deep in dataclass construction instead of a message naming both
+    schema versions. A pool with no `schema_version` at all predates this
+    field and is rejected the same way: too old to trust the shape of.
+    """
     data = json.loads(path.read_text())
+    found = data.get("schema_version")
+    if found != POOL_SCHEMA_VERSION:
+        raise ClaimError(
+            f"{path}: schema_version {found!r} does not match this claims.py's "
+            f"{POOL_SCHEMA_VERSION!r} -- migrate the pool or pin an older claims.py"
+        )
     claims = []
     for row in data.get("claims", []):
         row.pop("claim_id", None)
@@ -488,8 +562,24 @@ def load_pool(path: Path) -> tuple[list[Claim], dict[str, Any]]:
 
 
 def load_transcripts(run_dir: Path) -> list[dict[str, Any]]:
+    """Parse a run's transcripts, one JSON object per line.
+
+    #2032 item 5: one malformed line used to crash the whole load with a bare
+    JSONDecodeError naming neither the file nor the line. Each line is parsed
+    individually and a bad one is reported with file+line and skipped,
+    consistent with how a single failed extraction is already handled
+    per-record in `main` rather than aborting the run.
+    """
     path = run_dir / "transcripts.jsonl"
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    records = []
+    for lineno, line in enumerate(path.read_text().splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            records.append(json.loads(line))
+        except ValueError as exc:
+            print(f"  skipping malformed transcript line {path}:{lineno}: {exc}")
+    return records
 
 
 def main() -> int:
@@ -525,38 +615,65 @@ def main() -> int:
         print(f"applied {applied} human rulings")
     else:
         def chat(system: str, prompt: str) -> str:
-            body = json.dumps({
+            body = {
                 "model": args.adjudicator,
                 "messages": [{"role": "system", "content": system},
                              {"role": "user", "content": prompt}],
                 "stream": False, "think": False, "format": "json",
                 "options": {"temperature": 0, "seed": 144, "num_ctx": 8192, "num_predict": 1024},
-            }).encode()
-            req = urllib.request.Request(f"{args.api_base.rstrip('/')}/api/chat", data=body, method="POST")
-            req.add_header("Content-Type", "application/json")
-            with urllib.request.urlopen(req, timeout=300) as response:
-                return json.loads(response.read()).get("message", {}).get("content", "")
+            }
+            payload = _post_json(f"{args.api_base.rstrip('/')}/api/chat", body, timeout=300)
+            return payload.get("message", {}).get("content", "")
 
+        # #2032 item 1: save after every record, not once at the end. A
+        # multi-hour local-GPU extraction run that dies partway (Ollama
+        # restart, network blip surviving the retries above) loses at most
+        # one record's work instead of everything since process start -- the
+        # pool file already round-trips through load_pool, so there is
+        # nothing incremental-save-specific to reconcile on the next run.
         totals = {"new": 0, "merged": 0}
         for record in records:
-            if record.get("outcome") != "ok" or not record["response"].get("raw"):
+            # #2032 item 5: a record missing a required key (malformed or
+            # from an older transcript shape) is skipped with a message that
+            # names what's missing, not a raw KeyError from deep inside the
+            # loop.
+            case = record.get("case")
+            model_tag = (record.get("model") or {}).get("tag")
+            run_id = record.get("run_id")
+            raw = (record.get("response") or {}).get("raw")
+            missing = [name for name, val in
+                       (("case", case), ("model.tag", model_tag), ("run_id", run_id))
+                       if not val]
+            if missing:
+                print(f"  skipping record missing {missing}: {json.dumps(record)[:120]!r}")
+                continue
+            if record.get("outcome") != "ok" or not raw:
                 continue
             try:
-                claims = extract_claims(record["response"]["raw"], record["case"], chat=chat)
+                claims = extract_claims(raw, case, chat=chat)
             except ClaimError as exc:
-                print(f"  extract failed {record['case']} ({record['model']['tag']}): {exc}")
+                print(f"  extract failed {case} ({model_tag}): {exc}")
                 continue
-            stats = merge_into_pool(pool, claims, embed,
-                                    model=record["model"]["tag"], run_id=record["run_id"])
+            stats = merge_into_pool(pool, claims, embed, model=model_tag, run_id=run_id)
             totals["new"] += stats["new"]
             totals["merged"] += stats["merged"]
-            print(f"  {record['case']:24s} {record['model']['tag']:34s} "
+            print(f"  {case:24s} {model_tag:34s} "
                   f"+{stats['new']} new, {stats['merged']} merged")
+            save_pool(args.pool, pool, {**meta, "scored_models": list(scored_models),
+                                        "adjudicator": args.adjudicator,
+                                        "runs": [str(r) for r in args.runs],
+                                        "extraction_in_progress": True})
         print(f"\n{totals['new']} new claims, {totals['merged']} merged into existing")
 
     counts = adjudicate_pool(pool, rubric, embed, review_queue=args.review_queue)
     print(f"verdicts: {counts}")
 
+    # `meta` is loaded verbatim from the pool file on every run and `update()`
+    # only ever adds keys, so a single crashed extraction would otherwise stamp
+    # `extraction_in_progress` on every pool built afterwards -- including
+    # complete ones. Clear it here: reaching this line means the extraction
+    # loop finished, so the marker is false by construction.
+    meta.pop("extraction_in_progress", None)
     meta.update({"scored_models": list(scored_models), "adjudicator": args.adjudicator,
                  "runs": [str(r) for r in args.runs]})
     version = save_pool(args.pool, pool, meta)

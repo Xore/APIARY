@@ -6532,9 +6532,14 @@
       "verdict_source": null
     }
   ],
-  "frozen_at": "2026-08-25T20:39:31Z",
+  "frozen_at": "2026-09-04T13:54:02Z",
   "meta": {
     "adjudicator": "qwen2.5:7b-instruct-q4_K_M",
+    "pool_version_migration": {
+      "from": "02c9e4ccc5677a58",
+      "reason": "#2031: pool_version now folds in made_by provenance, not just claim_id:verdict",
+      "to": "1229beafd8e8d9ed"
+    },
     "runs": [
       "/mnt-1/benchmarks/APIARY/docs/benchmarks/runs/2026-08-25-20260825T174843Z-adf42c75",
       "/mnt-1/benchmarks/APIARY/docs/benchmarks/runs/2026-08-25-20260825T195231Z-ad890c7d"
@@ -6544,6 +6549,6 @@
       "qwen3:14b"
     ]
   },
-  "pool_version": "02c9e4ccc5677a58",
+  "pool_version": "1229beafd8e8d9ed",
   "schema_version": "apiary-claim-pool-v1"
 }
