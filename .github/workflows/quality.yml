@@ -1515,10 +1515,6 @@ jobs:
                 analysis/ghidra/benchmarks/corpus/ci_verify.sh
               '
 
-          - name: Container restart watchdog namespace escalation (#2907)
-            home: true
-            run: python3 scripts/tests/test_container_restart_watchdog.py
-
           - name: Validate home and VPS Compose
             home: true
             run: |
@@ -1600,13 +1596,17 @@ jobs:
                 fi
               done
 
-          - name: Technitium DNS install topology
+          # #2981: these used to be named individually, the same shape #2878
+          # fixed for sandbox/windows/orchestrate and sandbox/ghosts/orchestrate
+          # -- test_install_ci_runner_instances.py sat unwired and red for days
+          # because nothing ran it, and two more files in this directory
+          # (test_arcane_retry_failed_sync.py, test_audit_sensor_event_coverage.py)
+          # were never run by CI at all. Discovery instead, so the next
+          # test_*.py dropped in scripts/tests/ is picked up without a
+          # workflow edit.
+          - name: scripts/tests suite
             home: true
-            run: python3 scripts/tests/test_technitium_install.py
-
-          - name: Arcane sync drift report exit-code contract (#2858)
-            home: true
-            run: python3 scripts/tests/test_arcane_sync_drift_report.py
+            run: python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
 
     steps:
       - uses: actions/checkout@v7
