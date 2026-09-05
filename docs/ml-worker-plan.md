@@ -13,8 +13,10 @@
 > mirroring `analysis/ghidra/`), builds, connects to Elasticsearch, and polls
 > without crashing (#62). `extract_features()`/`featurise_temporal()` read
 > the real per-sensor schema (#62 task 33, #63). The dashboard delivers
-> scores via `/api/ml/anomalies`+`/api/ml/stats`+`/ml-anomalies`,
-> Elasticsearch-polled, no Redis (#64). Retraining acceptance, versioning,
+> scores via the backend-service's `/api/v1/store/ml-anomalies` +
+> `/api/v1/ml-anomalies/stats` + the `/ml-anomalies` route (originally
+> `/api/ml/anomalies`+`/api/ml/stats` on the retired Go dashboard, #64),
+> Elasticsearch-polled, no Redis. Retraining acceptance, versioning,
 > rollback, drift detection, and operator threshold controls are #65 —
 > see §11.
 > **Worker location:** [`ml-worker/`](../ml-worker/)  
@@ -135,14 +137,13 @@ flowchart TD
     end
 
     MLIndex[("ES index: ml-anomalies")]
-    DashboardGo["Dashboard (Go) —<br/>ml_anomalies.go: ES poll on the<br/>existing 1-min ticker (main.go),<br/>same cadence esClient.refresh()<br/>already runs. No Redis, no SSE —<br/>a broker is only justified once<br/>polling is measured insufficient,<br/>which hasn't happened (§10)"]
-    DashboardCache[("in-memory cache,<br/>capped at mlAnomalyCacheCap —<br/>same pattern as payloadCache/ipsCache")]
-    DashboardAPI["GET /api/ml/anomalies,<br/>/api/ml/stats"]
-    DashboardUI["Dashboard UI<br/>ML Anomalies panel"]
+    DashboardBackend["Dashboard backend-service (Rust) —<br/>stores.rs generic store read plus<br/>detail.rs/charts.rs handlers, queried<br/>per request. No Redis, no SSE — a<br/>broker is only justified once polling<br/>is measured insufficient, which<br/>hasn't happened (§10)"]
+    DashboardAPI["GET /api/v1/store/ml-anomalies,<br/>/api/v1/ml-anomalies/stats"]
+    DashboardUI["Dashboard UI<br/>ml-anomalies.tsx route"]
 
     ES -->|"poll every POLL_INTERVAL"| Ingestor
     Scorer -->|write findings| MLIndex
-    MLIndex --> DashboardGo --> DashboardCache --> DashboardAPI --> DashboardUI
+    MLIndex --> DashboardBackend --> DashboardAPI --> DashboardUI
 ```
 
 `worker.py` does still `import redis` and can publish a best-effort
@@ -536,29 +537,56 @@ rediscovered from an empty index:
 
 ## 8. Dashboard API Contract
 
-**Implemented (#64):** `dashboard/ml_anomalies.go`.
+**Implemented, current (#1628 cutover retired the Go dashboard on
+2026-08-22; see `docs/DASHBOARD-CUTOVER.md`).** The live consumer is the
+Rust `backend-service`, not `dashboard/ml_anomalies.go` (deleted, no longer
+present anywhere in the repo).
 
 ```
-GET  /api/ml/anomalies
-     Query params: limit (default 50, capped at mlAnomalyCacheCap=200),
-     severity, since (RFC3339 timestamp)
-     Response: JSON array of ml-anomaly documents, newest @timestamp first
+GET  /api/v1/store/ml-anomalies
+     Generic paged store read (stores.rs), same handler every other
+     store-backed list uses -- not a bespoke ml-anomalies endpoint.
+     Query params: offset (default 0), size (default 25), q (free-text
+     Lucene query string)
+     Response: JSON page of ml-anomalies documents, sorted by @timestamp
+     then a deterministic tiebreak (stores.rs)
 
-GET  /api/ml/stats
-     Response: { total_anomalies_24h, by_severity, top_src_ips }
+GET  /api/v1/ml-anomalies/stats
+     Response: { open, dispositioned, total, ... } -- the all-time backlog
+     numbers (#2396), computed by unioning the disposition-on-document
+     population with the ack-sidecar population (detail.rs::ml_anomaly_stats)
+
+GET  /api/v1/ml-anomalies/acks
+     Response: map of anomaly _id -> { Acknowledged, AckedBy, AckedAt }
+     (the ack sidecar index, dashboard-ml-anomaly-ack-v1)
+
+POST /api/v1/ml-anomalies/ack        body: { key, ack, actor }
+POST /api/v1/ml-anomalies/ack-all    body: { actor }
+POST /api/v1/ml-anomalies/disposition
+     body: { key, status, reason, actor } -- writes the #1968 disposition
+     lifecycle (status/disposition_reason/disposition_by/disposed_at)
+     onto the anomaly document itself, distinct from the ack sidecar (see
+     the two-stores note in §9 below)
+
+GET  /api/v1/charts/ml-anomaly-scores
+     Response: Vec<Series> -- the score-over-time chart data
+     (charts.rs::ml_anomaly_scores)
+
+GET  /api/v1/ml-health
+     Response: JSON array of per-model retrain outcomes (#1611 workstream
+     E.5): { model, timestamp, accepted, reason, anomaly_rate_new,
+     anomaly_rate_previous, train_samples } (ml_health.rs)
 ```
 
-No `/api/ml/anomalies/stream` SSE endpoint and no Redis pub/sub -- #64's own
-rule ("do not add Redis until file or Elasticsearch polling has been
-measured and shown to be insufficient") and
-`ml-gpu-coordinated-roadmap.md` §1 decision 1 both rule it out, and neither
-has happened. The transport is Elasticsearch polling on the dashboard's
-existing 1-minute ES ticker (the same cadence `esClient.refresh()` already
-runs), landing in a capped in-memory cache -- the same pattern every other
-cheap, read-mostly dashboard dataset (`payloadCache`, `ipsCache`) already
-uses. `model_last_retrained` and `events_processed_total` from the original
-draft aren't served: neither is written anywhere by `ml-worker/worker.py`
-today, so exposing them would be fabricated, not delivered.
+No SSE stream endpoint and no Redis pub/sub, same as the original Go
+implementation's decision and for the same reason: the transport is
+Elasticsearch polling via the store/stats/acks reads above, which the
+frontend calls on page load (see §9) -- no server-side push, no background
+cache to keep warm. `model_last_retrained` and `events_processed_total`
+from the original draft still aren't served as top-level fields: neither is
+written anywhere by `ml-worker/worker.py` today (the per-model retrain
+history above is the closest live equivalent), so exposing them would be
+fabricated, not delivered.
 
 Response document format (unchanged from the original draft except
 `feature_contributions`, which `write_anomaly()` in `worker.py` has never
@@ -604,35 +632,53 @@ operator disposes of the alert.)
 
 ## 9. Dashboard UI Integration
 
-**Implemented (#64)** as its own route, `/ml-anomalies` (sidebar: Monitor
-group, next to Alerts), not an overview-page panel -- at the time, alerts had
-their own acknowledge/reopen workflow that didn't apply to anomaly scores,
-and mixing the two on one page risked implying scores could be acted on the
-same way. That gap has since been closed: `dashboard/ml_anomaly_ack.go`
-(#918, closing #913) adds an acknowledge/dismiss workflow for ml-anomalies
-too, backed by a `dashboard-ml-anomaly-ack-v1` ES index, modeled directly on
-`alertManager`'s pattern. Note (#1968): the anomaly documents themselves now
-also carry a disposition lifecycle (`status`/`disposition_reason`/
-`disposition_by`/`disposed_at`, preserved across idempotent rewrites) --
-the ack index and the on-document fields are two stores until the ack path
-is joined onto the document fields, which is what will turn acknowledged
-rows into the labelled corpus #1794/#1797 need; see the `ml-anomalies`
-Retention section in §7.
-Follows the existing read-only diagnostics pages (`/source-health`,
-`/dead-letters`): server-rendered from the in-memory cache on each request,
-refreshed on page load, no client-side polling and no changes to
-`stream.go`'s SSE contract.
+**Implemented, current** as its own route,
+`arcane/home/honeypot-dashboard/frontend-next/src/routes/ml-anomalies.tsx`
+(sidebar: Monitor group, next to Alerts) -- not an overview-page panel, for
+the same reason as the original Go implementation: alerts have their own
+acknowledge/reopen workflow that doesn't apply to anomaly scores, and mixing
+the two on one page risked implying scores could be acted on the same way.
 
-`dashboard/ml_anomalies.go`:
-- `refreshMLAnomalies()` polls `ml-anomalies`, called from the dashboard's
-  existing 1-minute Elasticsearch ticker (`main.go`, the same one
-  `esClient.refresh()` already runs on).
-- `mlAnomalyStore` is the capped (`mlAnomalyCacheCap`=200) in-memory cache,
-  same pattern as `payloadCache`/`ipsCache`.
-- Serves `/api/ml/anomalies`, `/api/ml/stats`, and `/ml-anomalies` (via the
-  shared `renderPage()` / CSP nonce path, #58) from that cache -- the
-  request path never calls Elasticsearch directly, so response cost is
-  bounded by the cache size regardless of query params.
+The #1653 fidelity pass ported and extended the settled UX from the old
+`ml_anomalies.html`: a KPI tile row (#1566), bulk acknowledge-all (#1566),
+severity/type/status filters (via the shared `FiltersModal` component, also
+used by `events.tsx`), per-model score breakdown, source-event pivot (#173),
+and the 24h top-source-IPs card, on top of the store-paged table
+(`MasterDetailTable` / `StoreList` components) and a per-model retrain
+history panel backed by `/api/v1/ml-health`.
+
+Acknowledge/dismiss (originally #918, closing #913) is backed by the
+`dashboard-ml-anomaly-ack-v1` ES index (`ML_ACK_INDEX` in `detail.rs`), same
+sidecar-index shape as the old `alertManager` pattern. Note (#1968): the
+anomaly documents themselves also carry a disposition lifecycle
+(`status`/`disposition_reason`/`disposition_by`/`disposed_at`, written via
+`POST /api/v1/ml-anomalies/disposition`, preserved across idempotent
+rewrites) -- the ack index and the on-document fields are **two stores**
+until the ack path is joined onto the document fields, which is what will
+turn acknowledged rows into the labelled corpus #1794/#1797 need; see the
+`ml-anomalies` Retention section in §7. `ml_anomaly_stats` (detail.rs)
+already unions both stores for the one place that needs a single "open"
+count (#2396); the join itself hasn't happened.
+
+Follows the existing read-only diagnostics pages
+(`/source-health`, `/dead-letters`): a shell renders synchronously and does
+its `fetch()` calls client-side on page load (`fetchAcks`/`fetchModelHealth`
+server functions plus the paged store read) -- no client-side polling, no
+SSE.
+
+`frontend-next/src/routes/ml-anomalies.tsx` and
+`backend-service/src/{detail,charts,stores,ml_health}.rs`:
+- The anomalies table reads `GET /api/v1/store/ml-anomalies` (the generic
+  store handler in `stores.rs` -- no bespoke ml-anomalies cache or ticker;
+  Elasticsearch is queried per request, paged by offset/size).
+- `GET /api/v1/ml-anomalies/acks` and `GET /api/v1/ml-health` are fetched
+  once per page load via `createServerFn` wrappers (`fetchAcks`,
+  `fetchModelHealth`) and merged into the table client-side.
+- Acknowledge/ack-all/disposition actions call the corresponding `POST`
+  routes in `detail.rs` directly from the row/bulk-action handlers, then
+  refetch.
+- `GET /api/v1/charts/ml-anomaly-scores` (`charts.rs`) feeds the score
+  trend chart (`EChart` component).
 
 The KPI-tile-plus-table layout below replaces the original sparkline/emoji
 mockup -- the 24h trend sparkline was cosmetic and out of scope for "deliver
@@ -798,15 +844,19 @@ things worse) rather than any automatic response to the traffic itself.
 
 ### 11.5 Operator-facing threshold controls
 
-`ML_ALERT_THRESHOLD` becomes a Tier-2 staged field in the dashboard's
-`honeypotConfig` (`dashboard/settings_domain.go`), following the exact
-existing pattern every other field there already uses (`AlertCooldown`,
-`YaraScanIntervalSeconds`, ...): a default, an environment-variable pin
-(`ML_ALERT_THRESHOLD` — the same variable name `worker.py` itself reads, so
-a dashboard-staged value and the deployment environment can never mean two
-different things), and an explicit "staged only, apply with an operator
-restart" contract — this is not a new capability for the dashboard to grow,
-it is the same one it already has for six other fields.
+`ML_ALERT_THRESHOLD` is a staged field in the dashboard's config
+(`ml_alert_threshold` in `backend-service/src/config.rs`, range-checked
+0.5–0.99, surfaced in `frontend-next/src/routes/settings.tsx`), following
+the exact existing pattern every other field there already uses
+(`alert_cooldown`, `yara_scan_interval_seconds`, ...): a default, an
+environment-variable pin (`ML_ALERT_THRESHOLD` — the same variable name
+`worker.py` itself reads, so a dashboard-staged value and the deployment
+environment can never mean two different things), and an explicit "staged
+only, apply with an operator restart" contract — this is not a new
+capability for the dashboard to grow, it is the same one it already has for
+several other fields. (Originally landed against the Go dashboard's
+`dashboard/settings_domain.go`, which #1628's cutover retired; the field and
+its contract carried over unchanged to the Rust config module.)
 
 ### 11.6 New/changed constants (`ml-worker/models/isolation_forest.py`,
 `ml-worker/models/lstm_autoencoder.py`, `ml-worker/models/lifecycle.py`)
@@ -830,7 +880,7 @@ it is the same one it already has for six other fields.
 | **v0.2** | HBOS fast filter + feature engineering for all 5 sources | [#62](https://github.com/Xore/APIARY/issues/62) |
 | **v0.3** | LSTM-AE temporal model + sequence windowing | [#63](https://github.com/Xore/APIARY/issues/63) |
 | **v0.4** | Composite scoring + explanation generation | [#63](https://github.com/Xore/APIARY/issues/63) |
-| **v0.5–v0.7** | Elasticsearch-polled delivery to the dashboard: `dashboard/ml_anomalies.go`, `/api/ml/anomalies`+`/api/ml/stats`, and the `/ml-anomalies` page — no Redis, per #64's own rule | Done ([#64](https://github.com/Xore/APIARY/issues/64), closed) |
+| **v0.5–v0.7** | Elasticsearch-polled delivery to the dashboard: originally `dashboard/ml_anomalies.go`, `/api/ml/anomalies`+`/api/ml/stats`, and the `/ml-anomalies` page — no Redis, per #64's own rule. Ported by #1628's cutover to the Rust backend-service (`stores.rs`/`detail.rs`/`charts.rs`), `/api/v1/store/ml-anomalies`+`/api/v1/ml-anomalies/stats`, and the same `/ml-anomalies` route, same no-Redis rule | Done ([#64](https://github.com/Xore/APIARY/issues/64), closed) |
 | **v0.8** | Retraining scheduler + model versioning | [#65](https://github.com/Xore/APIARY/issues/65) |
 | **v1.0** | Drift detection + alert threshold tuning UI | [#65](https://github.com/Xore/APIARY/issues/65) |
 
