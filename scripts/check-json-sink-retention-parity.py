@@ -185,6 +185,50 @@ ROWS = [
         "writer": ("arcane/home/honeypot-dionaea/tftp-relay",
                    ["LOG_MAX_BYTES", "func (r *relay) rotateSessionLog()"]),
     },
+    # #2892: conpot.json had neither half of the #120 contract -- only
+    # conpot.log rotated. conpot/json_log_rotation_patch.py gives JsonLogger
+    # the same close/rename/reopen self-rotation dionaea/mailoney already
+    # have, applied at Docker build time against the vendored source (same
+    # shape as persona_patch.py etc, see conpot/Dockerfile). All six conpot
+    # personas share that one vendored tree, so one writer proof covers all
+    # six directories -- each persona's conpot.json lives in its own
+    # /logs/conpot* bind mount (compose.yml), hence six rows.
+    {
+        "dir": "/logs/conpot",
+        "globs": ["'conpot.json.[0-9]*'"],
+        "writer": ("arcane/home/honeypot-conpot/conpot",
+                   ["CONPOT_JSON_LOG_MAX_BYTES", "def _rotate(self)"]),
+    },
+    {
+        "dir": "/logs/conpot-s7-1200",
+        "globs": ["'conpot.json.[0-9]*'"],
+        "writer": ("arcane/home/honeypot-conpot/conpot",
+                   ["CONPOT_JSON_LOG_MAX_BYTES", "def _rotate(self)"]),
+    },
+    {
+        "dir": "/logs/conpot-s7-1500",
+        "globs": ["'conpot.json.[0-9]*'"],
+        "writer": ("arcane/home/honeypot-conpot/conpot",
+                   ["CONPOT_JSON_LOG_MAX_BYTES", "def _rotate(self)"]),
+    },
+    {
+        "dir": "/logs/conpot-iec104",
+        "globs": ["'conpot.json.[0-9]*'"],
+        "writer": ("arcane/home/honeypot-conpot/conpot",
+                   ["CONPOT_JSON_LOG_MAX_BYTES", "def _rotate(self)"]),
+    },
+    {
+        "dir": "/logs/conpot-guardian",
+        "globs": ["'conpot.json.[0-9]*'"],
+        "writer": ("arcane/home/honeypot-conpot/conpot",
+                   ["CONPOT_JSON_LOG_MAX_BYTES", "def _rotate(self)"]),
+    },
+    {
+        "dir": "/logs/conpot-kamstrup",
+        "globs": ["'conpot.json.[0-9]*'"],
+        "writer": ("arcane/home/honeypot-conpot/conpot",
+                   ["CONPOT_JSON_LOG_MAX_BYTES", "def _rotate(self)"]),
+    },
     # #2826: elasticpot self-rotates daily to elasticpot.json.<date>, but the
     # implementation is vendor-internal (baked into the pinned
     # dtagdevsec/elasticpot image, not built from source in this tree), so
@@ -314,36 +358,32 @@ KNOWN_UNCOVERED = {
     # Tracked on #2892. #2826 made the first pass and closed with these nine
     # rows still here, so they were repointed at its successor rather than
     # left naming a closed issue -- the contract above is that every entry
-    # names the issue that tracks it. These four are vendored binaries
-    # (C/Rust for sentrypeer, Go for beelzebub/galah, a pinned upstream
-    # Docker image for conpot) whose JSON writer has no in-tree source this
-    # checker's ROWS writer-proof mechanism can grep a token from, and
-    # (unlike elasticpot) none of them self-rotate on their own -- the sink
-    # genuinely appends forever today. The established fix shape already
-    # exists twice in this repo (dionaea/log_rotation_patch.py,
-    # mailoney/json_log_patch.py: an exact-match Python source patch applied
-    # at Docker build time that wraps the writer's file handle with the same
+    # names the issue that tracks it. The six conpot rows moved to ROWS
+    # above (conpot/json_log_rotation_patch.py, #2892) -- the remaining
+    # three are vendored binaries (C for sentrypeer, Go for beelzebub/galah)
+    # whose JSON writer has no in-tree source this checker's ROWS
+    # writer-proof mechanism can grep a token from, and none of them
+    # self-rotate on their own -- the sink genuinely appends forever today.
+    # The established fix shape already exists three times in this repo now
+    # (dionaea/log_rotation_patch.py, mailoney/json_log_patch.py,
+    # conpot/json_log_rotation_patch.py: an exact-match source patch applied
+    # at build time that wraps the writer's file handle with the same
     # close/rename/reopen self-rotation multipot/http-honeypot's Go loggers
-    # use, plus a matching pruner find line here). conpot's Dockerfile
-    # already applies six such patches (persona_patch.py etc, see
-    # arcane/home/honeypot-conpot/conpot/Dockerfile) against its vendored
-    # Python source at /usr/lib/python3.12/site-packages/conpot, so a
-    # seventh patch targeting whichever ihandler backs conpot.json's
-    # FileHandler is the same shape as dionaea's. sentrypeer/beelzebub/galah
+    # use, plus a matching pruner find line here). sentrypeer/beelzebub/galah
     # would each need the equivalent patch in their own language against
-    # their own git-cloned build stage. None of the four were attempted in
-    # this pass for lack of session budget to write, build and verify four
-    # separate patches across three languages -- left as debt rather than
+    # their own git-cloned build stage. None of the three were attempted in
+    # this pass for lack of session budget to write, build and verify three
+    # separate patches across two languages -- left as debt rather than
     # guessed at.
-    # Sizes measured on the homeserver 2026-09-02; 393MiB across these nine.
-    "/logs/sentrypeer": "sentrypeer.json, 94MB and growing, vendored C/Rust writer, no self-rotation knob found in SENTRYPEER_JSON_LOG_FILE's consumer (#2892)",
+    # The sizes below were measured on the homeserver on 2026-09-02 and are
+    # illustrative, not a bound: they had already drifted a day later
+    # (sentrypeer 160MB, beelzebub 82MB, galah 192KB), and #1609's rebuild
+    # resets every one of them to zero without changing anything this ledger
+    # cares about. What puts these three rows here is that nothing bounds
+    # them, not how large they happen to be on a given day -- so do not do
+    # arithmetic on these numbers or treat them as a backlog total.
+    "/logs/sentrypeer": "sentrypeer.json, 94MB and growing, vendored C writer, no self-rotation knob found in SENTRYPEER_JSON_LOG_FILE's consumer (#2892)",
     "/logs/beelzebub": "beelzebub.json, 81MB and growing, vendored Go writer (core.yaml's logsPath), no rotation flag in beelzebub's CLI (#2892)",
-    "/logs/conpot": "conpot.json (32MB) has neither half; only conpot.log rotates. Needs a 7th conpot patch file alongside persona_patch.py etc (#2892)",
-    "/logs/conpot-s7-1200": "same conpot.json gap as /logs/conpot, 35MB (#2892)",
-    "/logs/conpot-s7-1500": "same conpot.json gap as /logs/conpot, 31MB (#2892)",
-    "/logs/conpot-iec104": "same conpot.json gap as /logs/conpot, 21MB (#2892)",
-    "/logs/conpot-guardian": "same conpot.json gap as /logs/conpot, 48MB (#2892)",
-    "/logs/conpot-kamstrup": "same conpot.json gap as /logs/conpot, 55MB (#2892)",
     "/logs/galah": "event_log.json (157KB -- small only because galah sees little traffic, not because anything bounds it), vendored Go writer (ENTRYPOINT's -o flag), no rotation flag exposed (#2892)",
 }
 

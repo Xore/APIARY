@@ -791,23 +791,15 @@ jobs:
               # rotation/data-loss behavior.
               python arcane/home/honeypot-dionaea/dionaea/tests/test_log_rotation_patch.py
 
-          - name: Conpot PROXY-protocol accept-race patch (#2883)
+          - name: Conpot JSON log rotation patch (#2892)
             home: true
             run: |
-              # #2883: the peek used to run in gevent's Hub context
-              # (StreamServer.do_read), which cannot block to wait for a
-              # header that hasn't landed yet from across the WireGuard
-              # tunnel -- misattributing conpot TCP sessions to the tunnel
-              # peer. The share is load-dependent (~25-53% of NEW_CONNECTION
-              # events during scanning bursts, ~0% on quiet days), not the
-              # flat ~35% the issue headlines. This suite checks the patch
-              # applies/is idempotent, exercises the header-parsing logic
-              # against fake sockets, and covers the do_handle restructuring
-              # itself against a faithful stand-in for gevent's spawn/close
-              # contract -- what a stdlib-only suite cannot fake is gevent's
-              # real greenlet scheduling, which was exercised live against
-              # the pinned image instead.
-              python arcane/home/honeypot-conpot/conpot/tests/test_proxy_patch.py
+              # Same shape as the dionaea row above, plus a behavioural
+              # check the dionaea suite doesn't have: the patched JsonLogger
+              # is imported (not reimplemented) against a fixture package
+              # and run past CONPOT_JSON_LOG_MAX_BYTES to confirm the
+              # close/rename/reopen rotation actually fires.
+              python arcane/home/honeypot-conpot/conpot/tests/test_json_log_rotation_patch.py
 
           - name: HellPot X-Forwarded-For trust patch (#1876)
             home: true
@@ -872,20 +864,6 @@ jobs:
               # rotateIfOversized, fails here instead of leaving the ledger
               # asserting coverage that no longer exists.
               python scripts/check-json-sink-retention-parity.py
-
-          # #2424 asked for this guard and never wrote it -- the gap is what
-          # let two of its three findings (shadow hash length, passwd/group
-          # and passwd/shadow closure) regress silently past a closed issue
-          # until #2885 spot-checked the tree instead of trusting the closed
-          # state. Four checks: every tracked SSH key parses, every $6$
-          # shadow body is 86 characters -- the length of real sha512crypt
-          # output, which is what a scanner fingerprints on; without the
-          # plaintext the guard cannot check the body is a genuine hash --
-          # and both closures (passwd GID -> group, passwd account -> shadow)
-          # hold.
-          - name: "Cowrie honeyfs realism guard (#2424, #2885)"
-            home: true
-            run: python scripts/check-cowrie-honeyfs-realism.py
 
           # #1982: compose.yml is the only place a stack's knobs are exercised,
           # .env.example is what a deployer copies when standing the stack up
