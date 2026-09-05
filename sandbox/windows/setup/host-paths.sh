@@ -78,6 +78,46 @@ sandbox_qemu_owner() {
   fi
 }
 
+# Per-domain UEFI variables file.
+#
+# The XMLs ask libvirt to build the domain's nvram as qcow2 from a raw
+# template (<nvram template='...' templateFormat='raw' format='qcow2'>). EL's
+# libvirt refuses that outright:
+#
+#   error: Failed to start domain 'win11-ghosts'
+#   error: Operation not supported: conversion of the nvram template to
+#          another target format is not supported
+#
+# and it refuses it even when the qcow2 already exists, so pre-creating one
+# (which is what the installer did, for the Debian-side variant of this same
+# libvirt refusal) does not help. Verified live on 2026-09-05: with a raw copy
+# of the vars template and <nvram format='raw'>, the identical domain starts.
+#
+# A raw copy is what the qcow2 held anyway -- 528 KiB of UEFI variables, no
+# compression worth having -- so both distros now get the same simple thing.
+sandbox_nvram_raw_path() {
+  local declared="$1"
+  printf '%s\n' "${declared%.qcow2}.fd"
+}
+
+# sandbox_ensure_nvram <path> -- create the domain's nvram from this host's
+# enrolled-keys template if it is not there yet. Idempotent.
+sandbox_ensure_nvram() {
+  local target="$1" template owner
+  [[ -f "$target" ]] && return 0
+  template="$(sandbox_ovmf_vars_template)" || return 1
+  owner="$(sandbox_qemu_owner)" || return 1
+  mkdir -p "$(dirname "$target")"
+  cp "$template" "$target" || return 1
+  chown "$owner" "$target" || return 1
+  chmod 0600 "$target"
+}
+
+# Print the nvram path a domain XML declares (the qcow2 one, as written).
+sandbox_nvram_path_in_xml() {
+  sed -n "s#.*<nvram[^>]*>\\(.*\\)</nvram>.*#\\1#p" "$1" | head -1
+}
+
 # Print a domain XML with the Debian paths rewritten to this host's, on stdout.
 # A host that already has the literal paths (Debian) gets the file back byte
 # for byte, so nothing changes where this was already working.
@@ -86,9 +126,31 @@ sandbox_render_domain_xml() {
   emulator="$(sandbox_qemu_emulator)" || return 1
   code="$(sandbox_ovmf_code)" || return 1
   vars="$(sandbox_ovmf_vars_template)" || return 1
+  local declared raw
+  declared="$(sandbox_nvram_path_in_xml "$xml")"
+  raw="$(sandbox_nvram_raw_path "$declared")"
   sed \
     -e "s#/usr/bin/qemu-system-x86_64#${emulator}#g" \
     -e "s#/usr/share/OVMF/OVMF_CODE_4M.secboot.fd#${code}#g" \
     -e "s#/usr/share/OVMF/OVMF_VARS_4M.ms.fd#${vars}#g" \
+    -e "s#<nvram[^>]*>${declared}</nvram>#<nvram format='raw'>${raw}</nvram>#" \
     "$xml"
+}
+
+# sandbox_define_domain <xml> -- render the XML for this host, make sure the
+# domain's nvram exists, and define it. The single place both the installer
+# and kvm_manage.sh go through, so they cannot disagree.
+sandbox_define_domain() {
+  local xml="$1" rendered raw rc=0
+  raw="$(sandbox_nvram_raw_path "$(sandbox_nvram_path_in_xml "$xml")")"
+  [[ -n "$raw" ]] || { echo "no <nvram> element in $xml" >&2; return 1; }
+  sandbox_ensure_nvram "$raw" || return 1
+  rendered="$(mktemp /tmp/apiary-domain.XXXXXX.xml)"
+  if sandbox_render_domain_xml "$xml" > "$rendered"; then
+    virsh define "$rendered" || rc=1
+  else
+    rc=1
+  fi
+  rm -f "$rendered"
+  return "$rc"
 }
