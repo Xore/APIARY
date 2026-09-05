@@ -14,8 +14,8 @@
 [#914](https://github.com/Xore/APIARY/issues/914) noted that portbridge already
 drops connections from addresses in `BLACKHOLE_LIST` (#268,
 `vps/portbridge/blackhole.go`), and that IP-centric dashboard pages
-(`/investigate/ip/{ip}`, IOC correlation in `dashboard/ioc_correlation.go`)
-already surface confirmed-malicious IPs with pivot/investigate links — but
+(`/investigate/ip/{ip}`, IOC correlation then in `dashboard/ioc_correlation.go`, now
+`backend-service/src/ioc_correlation.rs`) already surfaced confirmed-malicious IPs with pivot/investigate links — but
 there is no "block" action anywhere in the dashboard. Unlike
 [#912](https://github.com/Xore/APIARY/issues/912)/[#913](https://github.com/Xore/APIARY/issues/913),
 this is not a drop-in wiring fix: `BLACKHOLE_LIST` today is wholly owned by
@@ -27,7 +27,7 @@ made to close that gap.
 
 Decided explicitly, overriding an earlier draft of this document that
 proposed gating the block action to only IPs the IOC correlation pipeline
-(#680, `dashboard/ioc_correlation.go`) had marked `ConfirmedAtRuntime`. That
+(#680, then `dashboard/ioc_correlation.go`, now `backend-service/src/ioc_correlation.rs`) had marked `ConfirmedAtRuntime`. That
 gate would have made the correlation pipeline's own judgment a hard
 precondition for an operator's; the operator investigating a specific
 attacker on `/investigate/ip/{ip}` is the actual judgment call, and the
@@ -66,7 +66,9 @@ expired block enforced past its stated expiry.
 
 ## Decision 3: state and audit trail — dashboard-owned, ES-backed
 
-`dashboard/ip_block.go` adds `ipBlockManager`, a direct structural copy of
+`dashboard/ip_block.go` added `ipBlockManager` (ported to
+`backend-service/src/ip_block.rs` in the Rust cutover; same ES-backed shape),
+a direct structural copy of
 `mlAnomalyAckManager` (#913): a dedicated Elasticsearch index
 (`dashboard-ip-block-v1`), the same `docGet`/`docIndex`/`errESConflict`
 optimistic-concurrency retry loop, keyed by the IP address itself (already a
@@ -99,7 +101,8 @@ that already exists** (home is reachable at `10.8.0.2`,
 `portbridge-blackhole-refresh.sh` already uses against GitHub. Concretely:
 
 - The dashboard exposes `GET /export/portbridge-manual-blackhole.txt`
-  (`dashboard/ip_block.go`, `serveManualBlackholeExport`) — plain text, one
+  (then `dashboard/ip_block.go`'s `serveManualBlackholeExport`, now
+  `backend-service/src/ip_block.rs`'s `export`) — plain text, one
   IPv4 address per line, the exact format `blackhole.go`'s existing parser
   already reads. No admin auth on the handler itself, the same posture every
   other `/export/*.csv` GET already takes (access control is the network

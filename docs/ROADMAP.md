@@ -10,6 +10,10 @@ no issue behind it, that is a gap: open one.
 
 Last audited: 2026-08-05
 
+> Deleted by the 2026-08-30 bulk purge and restored verbatim by #2896/#2947
+> on 2026-09-04. Nothing below was updated during that window — treat
+> "last audited" above as still true, not as of the restore date.
+
 ## Current baseline
 
 - The VPS edge, WireGuard peer, Suricata, and portbridge are producing fresh
