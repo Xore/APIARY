@@ -876,8 +876,7 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request, e *event) {
 		// up -- this only needs to look like a real XML-RPC endpoint that
 		// rejected the call, not actually parse or dispatch one.
 		e.Status = http.StatusOK
-		w.Header().Set("Content-Type", "text/xml; charset=UTF-8")
-		writeHTML(w, http.StatusOK, wpXMLRPCFault)
+		writeXML(w, http.StatusOK, wpXMLRPCFault)
 
 	case strings.Contains(p, "/wp-content/plugins/duplicator/") && strings.HasSuffix(p, "readme.txt"):
 		// CVE-2020-11738 (Duplicator arbitrary file read/RCE via installer.php)
@@ -899,6 +898,26 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request, e *event) {
 		// distinct in case a future plugin gets its own case above.
 		e.Status = http.StatusNotFound
 		writeHTML(w, http.StatusNotFound, nginx404)
+
+	case p == "/pa":
+		// #2973 / CVE-2026-9586: the Sangoma Switchvox provisioning endpoint
+		// the classifier already recognises (see classify()). Exact match for
+		// the same reason it is exact there -- "/pa" is short enough that a
+		// substring match would swallow unrelated paths.
+		//
+		// A real vulnerable appliance answers a provisioning request it
+		// cannot parse with an XML error envelope over HTTP 200, not a 404:
+		// neither a bare GET probe nor a PhoneIP field stuffed with SQL is a
+		// well-formed request, so both land here. The exploitation attempt
+		// itself is already captured onto e.Body by ServeHTTP before this
+		// runs -- answering plausibly is what buys the follow-on request.
+		//
+		// The Server header stays the persona's (#2926): this fleet presents
+		// one host with one banner, and a /pa that suddenly claimed a
+		// different server than / would be the inconsistency that gives the
+		// decoy away.
+		e.Status = http.StatusOK
+		writeXML(w, http.StatusOK, switchvoxPAFault)
 
 	case strings.Contains(p, "phpmyadmin") || strings.Contains(p, "/pma") || strings.Contains(p, "adminer"):
 		e.Status = http.StatusOK
@@ -930,6 +949,16 @@ func writeHTML(w http.ResponseWriter, status int, body string) {
 
 func writeJSON(w http.ResponseWriter, status int, body string) {
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	io.WriteString(w, body)
+}
+
+// writeXML is the same mechanism as its siblings, for the endpoints that
+// answer in XML. It exists because setting Content-Type at the call site and
+// then calling writeHTML does not work -- writeHTML sets the header itself,
+// so the XML declared by the caller went out as text/html (#2973).
+func writeXML(w http.ResponseWriter, status int, body string) {
+	w.Header().Set("Content-Type", "text/xml; charset=UTF-8")
 	w.WriteHeader(status)
 	io.WriteString(w, body)
 }
