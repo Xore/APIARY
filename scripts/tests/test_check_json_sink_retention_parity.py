@@ -15,6 +15,11 @@ calls) has something real to answer from:
    case) but a stale __pycache__/*.pyc left over from a previous test run
    still carries the token as a bytecode constant -- a build artifact must
    never stand in for tracked source.
+3. The same two, in a tree that is not a git checkout at all -- the shape
+   tests/docs/test_2216_* and test_2826_* run the script out of, and the
+   shape an exported tarball has. `git ls-files` cannot answer there, and
+   an unanswerable question is not a finding: the proof falls back to
+   reading the tree, with both false-positive paths still closed.
 
 Usage: scripts/tests/test_check_json_sink_retention_parity.py
 """
@@ -136,11 +141,63 @@ def test_stale_pyc_does_not_satisfy_the_proof(tmp_path):
         mod._tracked_cache = None
 
 
+def test_a_tree_that_is_not_a_git_checkout_still_checks(tmp_path):
+    """ROOT is not always a git checkout, and 128 is not a verdict.
+
+    tests/docs/test_2216_* and test_2826_* run this script out of a
+    throwaway root assembled under tmp_path, and an exported tarball has
+    the same shape. `git ls-files` fails there, so tree_contains() reads
+    the tree directly -- and both #2921 paths must stay closed anyway,
+    which they do without git: __pycache__ is in SKIP_DIRS and test paths
+    are excluded by path.
+    """
+    root = tmp_path / "not-a-repo"
+    impl_dir = root / "widget"
+    (impl_dir / "tests").mkdir(parents=True)
+    (impl_dir / "widget.py").write_text("WIDGET_MAX_BYTES = 1024\n")
+
+    orig_root = mod.ROOT
+    mod.ROOT = root
+    mod._tracked_cache = None
+    try:
+        check(
+            mod._tracked_files() is None,
+            "a non-checkout reports tracking as unavailable instead of raising",
+        )
+        check(
+            mod.tree_contains("widget", "WIDGET_MAX_BYTES") is True,
+            "the writer proof still holds against real source outside git",
+        )
+
+        (impl_dir / "tests" / "test_widget.py").write_text(
+            "from widget import WIDGET_MAX_BYTES\nassert WIDGET_MAX_BYTES == 1024\n"
+        )
+        pycache = impl_dir / "__pycache__"
+        pycache.mkdir()
+        py_compile.compile(
+            str(impl_dir / "widget.py"),
+            cfile=str(pycache / "widget.cpython-311.pyc"),
+        )
+        (impl_dir / "widget.py").unlink()
+        mod._tracked_cache = None
+
+        check(
+            mod.tree_contains("widget", "WIDGET_MAX_BYTES") is False,
+            "#2921: outside git, neither the test file nor the stale .pyc "
+            "may satisfy the writer proof either",
+        )
+    finally:
+        mod.ROOT = orig_root
+        mod._tracked_cache = None
+
+
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as tmp:
         test_test_file_alone_does_not_satisfy_the_proof(Path(tmp))
     with tempfile.TemporaryDirectory() as tmp:
         test_stale_pyc_does_not_satisfy_the_proof(Path(tmp))
+    with tempfile.TemporaryDirectory() as tmp:
+        test_a_tree_that_is_not_a_git_checkout_still_checks(Path(tmp))
     if fails:
         print(f"\n{len(fails)} check(s) failed: {fails}")
         sys.exit(1)
