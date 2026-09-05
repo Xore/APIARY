@@ -42,6 +42,24 @@ LIST=${LIST:-/mnt-1/benchmarks/models_extra_all.txt}
 PRESEED=${PRESEED:-/mnt-1/benchmarks/preseed.sh}
 MAXTRY=${MAXTRY:-3}
 
+# #3023: the cold-slot protocol #2641 established requires that nothing else
+# touches the GPU -- `ollama stop` on the tag under test is necessary but not
+# sufficient. Phase 2 ran without this and hp-llm-worker spent ~11 hours issuing
+# a competing /api/chat every ~4 minutes against the same
+# OLLAMA_MAX_LOADED_MODELS=1 slot. The measured consequence was extra escalations
+# rather than wrong scores, but "the protocol depended on an operator
+# remembering" is the defect. Enforce it here, and put the workers back on exit
+# however the run ends.
+STOP_WORKERS=${STOP_WORKERS:-1}
+LIVE_WORKERS=${LIVE_WORKERS:-"hp-llm-worker ghidra-revdeck-1"}
+
+# #2245/#3031: `ollama rm` after every model was correct when /var sat at 92%,
+# and is actively harmful now that it has terabytes free -- it destroyed all ten
+# of the requant plan's source models, and it is why a cold re-run of 89 models
+# has to re-download 80 of them. Keep weights while there is room; the floor
+# still protects the filesystem that holds the Docker volumes and the ES data.
+KEEP_WEIGHTS_ABOVE_GB=${KEEP_WEIGHTS_ABOVE_GB:-1000}
+
 # #2738: fail fast on any roster entry Ollama's client-side hf.co name
 # validation would reject before a sweep wastes time discovering it --
 # see /mnt-1/benchmarks/oversized-model-aliases.tsv for the bisection and
@@ -53,6 +71,27 @@ fi
 
 mkdir -p "$BASE/logs"
 cd "$REPO" || exit 1
+
+STOPPED_WORKERS=""
+restore_workers() {
+  [ -n "$STOPPED_WORKERS" ] || return 0
+  for c in $STOPPED_WORKERS; do
+    docker start "$c" >/dev/null 2>&1 \
+      && echo "$(date -u +%H:%M:%S) restored $c" \
+      || echo "$(date -u +%H:%M:%S) WARN could not restart $c -- do it by hand"
+  done
+  STOPPED_WORKERS=""
+}
+if [ "$STOP_WORKERS" = "1" ]; then
+  for c in $LIVE_WORKERS; do
+    if docker ps --format '{{.Names}}' | grep -qx "$c"; then
+      docker stop "$c" >/dev/null 2>&1 && STOPPED_WORKERS="$STOPPED_WORKERS $c" \
+        && echo "$(date -u +%FT%TZ) cold protocol: stopped $c"
+    fi
+  done
+  # EXIT alone is not enough: this script is routinely killed between models.
+  trap 'restore_workers' EXIT INT TERM
+fi
 
 score_of() { python3 -c "import json;print(json.load(open('$1'))['total_score'])" 2>/dev/null; }
 
@@ -209,8 +248,13 @@ while read -r TAG; do
 
   if [ "$PULLED" = "1" ]; then
     docker exec ghidra-ollama-1 ollama stop "$TAG" >/dev/null 2>&1
-    docker exec ghidra-ollama-1 ollama rm "$TAG" >/dev/null 2>&1 \
-      && echo "$(date -u +%H:%M:%S) removed $TAG (free now $(df --output=avail -BG /var | tail -1 | tr -dc '0-9')G)"
+    free_now=$(df --output=avail -BG /var | tail -1 | tr -dc '0-9')
+    if [ "$free_now" -lt "$KEEP_WEIGHTS_ABOVE_GB" ]; then
+      docker exec ghidra-ollama-1 ollama rm "$TAG" >/dev/null 2>&1 \
+        && echo "$(date -u +%H:%M:%S) removed $TAG (free was ${free_now}G, floor ${KEEP_WEIGHTS_ABOVE_GB}G)"
+    else
+      echo "$(date -u +%H:%M:%S) kept $TAG (${free_now}G free, above the ${KEEP_WEIGHTS_ABOVE_GB}G floor)"
+    fi
   fi
   echo "$(date -u +%H:%M:%S) MODEL_DONE $TAG"
 done < "$LIST"
