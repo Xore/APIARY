@@ -28,6 +28,17 @@
 #   sudo ./scripts/install-homeserver.sh --config /path/to/answers.conf
 #   sudo ./scripts/install-homeserver.sh --config answers.conf --force-rerun-from docker-install
 #   sudo ./scripts/install-homeserver.sh --config answers.conf --reset-markers   # ignore all markers, redo everything
+#   sudo ./scripts/install-homeserver.sh --install-self      # stage this script + its library under /usr/local
+#
+# scripts/install.sh --profile home is the same thing with the answers file
+# defaulted to /etc/apiary/install-home.conf.
+#
+# --install-self exists because this script does not only run from the
+# checkout: systemd under SELinux cannot exec it out of /home or /root, so the
+# homeserver runs a copy at /usr/local/sbin/apiary-install-homeserver.sh. That
+# copy was made by hand, which is how the shared library it now sources would
+# go missing; --install-self stages both halves together. Re-run it after every
+# checkout update, or the installed copy keeps running the old code.
 #
 # The answers file follows scripts/install-homeserver.conf.example --
 # copy it, fill in every <PLACEHOLDER>, keep the filled-in copy OUT of
@@ -41,135 +52,48 @@ set -uo pipefail
 # recorded and printed in a final summary. Steps that already succeeded on a
 # prior run (a marker file exists under $MARKER_DIR) are skipped unless
 # --reset-markers or --force-rerun-from <step-id> is passed.
+#
+# That framework now lives in scripts/lib/install-common.sh, shared with
+# install-vps.sh (#1609 Phase 5) instead of being copied into both. Only this
+# script's own identity is set here.
 # ---------------------------------------------------------------------------
-declare -A STEP_STATUS
-declare -a STEP_ORDER
+INSTALLER_NAME="install-homeserver.sh"
+INSTALLER_CONF_EXAMPLE="scripts/install-homeserver.conf.example"
+INSTALLER_SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 LOG_DIR="/var/log/honeypot-install"
 MARKER_DIR="/var/lib/honeypot-install/markers"
-RUN_LOG=""
-FORCE_FROM=""
-RESET_MARKERS=0
-FORCE_ACTIVE=0
+SUMMARY_WIDTH=36
 
-log() { printf '[%s] %s\n' "$(date -Iseconds)" "$*"; }
-
-# with_retry <max_attempts> <sleep_base_seconds> -- cmd args...
-# Retries transient (network/pull) failures with linear backoff. Does NOT
-# swallow the final failure -- after the last attempt, the real exit code
-# propagates so run_step still records FAILED correctly. (This comment was
-# aspirational until #787's homeserver reinstall found it wasn't true --
-# see the inline comment below.)
-with_retry() {
-  local max="$1" base="$2"; shift 2
-  local attempt=1 rc=0
-  while (( attempt <= max )); do
-    # Must be "$@" && return 0, NOT "if "$@"; then return 0; fi" -- when a
-    # plain if/fi (no else) takes neither branch, POSIX defines the if
-    # statement's own exit status as zero regardless of the condition's
-    # real exit code. That meant `rc=$?` on the next line always read 0,
-    # so with_retry could never detect a failure for ANY wrapped command --
-    # found live during #787's homeserver reinstall (2026-08-09): every
-    # `scp` in step_restore_env_files was genuinely failing (nested
-    # ${name}/.env path that never existed on the flat-structured backup
-    # host) yet with_retry reported success for all 17 stacks. `&&`
-    # short-circuits without touching $? when the command fails, so the
-    # following `rc=$?` captures the real code.
-    "$@" && return 0
-    rc=$?
-    if (( attempt == max )); then
-      return "$rc"
-    fi
-    local wait=$(( base * attempt ))
-    echo "attempt $attempt/$max failed (exit $rc), retrying in ${wait}s: $*" >&2
-    sleep "$wait"
-    attempt=$(( attempt + 1 ))
-  done
-  return "$rc"
-}
-
-run_step() {
-  local id="$1" desc="$2"
-  shift 2
-  STEP_ORDER+=("$id")
-
-  # --force-rerun-from <id> reruns that step and every step after it, even
-  # if markers exist -- must activate BEFORE the marker skip-check below, or
-  # the named step itself (and everything after it) still gets skipped on
-  # its own marker. Confirmed live (#518 test run 2): passing
-  # --force-rerun-from shared-resources still skipped shared-resources
-  # itself plus every step after it, because FORCE_ACTIVE was being set
-  # only *after* run_step had already returned early.
-  if [[ -n "$FORCE_FROM" && "$id" == "$FORCE_FROM" ]]; then
-    FORCE_ACTIVE=1
-  fi
-
-  local marker="$MARKER_DIR/$id.done"
-  if [[ $RESET_MARKERS -eq 0 && -f "$marker" && "$FORCE_ACTIVE" -eq 0 ]]; then
-    STEP_STATUS["$id"]="SKIPPED (already done — marker $marker)"
-    log "==> [$id] $desc — SKIPPED (marker present)"
-    return 0
-  fi
-
-  log "==> [$id] $desc"
-  if "$@" >>"$RUN_LOG" 2>&1; then
-    STEP_STATUS["$id"]="OK"
-    log "    [$id] OK"
-    mkdir -p "$MARKER_DIR"
-    date -Iseconds > "$marker"
-  else
-    local rc=$?
-    STEP_STATUS["$id"]="FAILED (exit $rc)"
-    log "    [$id] FAILED (exit $rc) — see $RUN_LOG"
-  fi
-}
-
-skip_step() {
-  local id="$1" desc="$2" reason="$3"
-  STEP_ORDER+=("$id")
-  STEP_STATUS["$id"]="SKIPPED ($reason)"
-  log "==> [$id] $desc — SKIPPED ($reason)"
-}
-
-print_summary() {
-  echo
-  echo "==================== install-homeserver.sh summary ===================="
-  local failed=0
-  for id in "${STEP_ORDER[@]}"; do
-    local status="${STEP_STATUS[$id]}"
-    printf '  %-36s %s\n' "$id" "$status"
-    [[ "$status" == FAILED* ]] && failed=1
-  done
-  echo "=========================================================================="
-  echo "Full log: $RUN_LOG"
-  if [[ $failed -eq 1 ]]; then
-    echo "One or more steps FAILED. Fix the underlying issue and re-run this"
-    echo "script — completed steps are skipped via markers under $MARKER_DIR,"
-    echo "so re-running only retries what actually failed. Use"
-    echo "--force-rerun-from <step-id> to redo a step whose marker exists but"
-    echo "whose result you don't trust."
-    return 1
-  fi
-  echo "All steps completed."
-  return 0
-}
+# Resolve the shared library: explicit override, then next to this script (a
+# checkout), then the installed location. This script does not only run from
+# the checkout — systemd under SELinux cannot exec it from /home or /root, so
+# the live homeserver runs a copy at /usr/local/sbin (see --install-self).
+# Hard-exit rather than sourcing nothing: `set -u` without `-e` lets a failed
+# `source` continue, after which every framework call is a "command not found"
+# and the run limps on half-executed. That risk is why this extraction was
+# deferred once; this is the guard that closes it.
+APIARY_INSTALL_LIB_RESOLVED=""
+for _cand in \
+  "${APIARY_INSTALL_LIB:-}" \
+  "$(dirname "$INSTALLER_SELF_PATH")/lib/install-common.sh" \
+  "/usr/local/lib/apiary/install-common.sh"; do
+  if [[ -n "$_cand" && -r "$_cand" ]]; then APIARY_INSTALL_LIB_RESOLVED="$_cand"; break; fi
+done
+if [[ -z "$APIARY_INSTALL_LIB_RESOLVED" ]]; then
+  echo "Cannot find install-common.sh (the shared installer framework)." >&2
+  echo "Looked at: \$APIARY_INSTALL_LIB, $(dirname "$INSTALLER_SELF_PATH")/lib/, /usr/local/lib/apiary/" >&2
+  echo "Run this script from a repo checkout, or re-run 'sudo $0 --install-self'" >&2
+  echo "from one so the script and its library are staged together." >&2
+  exit 2
+fi
+# shellcheck source=lib/install-common.sh
+source "$APIARY_INSTALL_LIB_RESOLVED"
+install_common_require
 
 # ---------------------------------------------------------------------------
 # Args / config
 # ---------------------------------------------------------------------------
-CONFIG_FILE=""
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --config) CONFIG_FILE="$2"; shift 2 ;;
-    --force-rerun-from) FORCE_FROM="$2"; shift 2 ;;
-    --reset-markers) RESET_MARKERS=1; shift ;;
-    -h|--help)
-      echo "Usage: sudo $0 --config /path/to/answers.conf [--force-rerun-from <step-id>] [--reset-markers]"
-      echo "See scripts/install-homeserver.conf.example for the template."
-      exit 0
-      ;;
-    *) echo "Unknown argument: $1" >&2; exit 2 ;;
-  esac
-done
+install_common_parse_args "$@"
 
 if [[ $EUID -ne 0 ]]; then
   echo "Run as root: sudo $0 --config <file>" >&2
@@ -267,9 +191,7 @@ if [[ "$ENABLE_SANDBOX_RESTORE" == "true" ]]; then
   fi
 fi
 
-mkdir -p "$LOG_DIR" "$MARKER_DIR"
-RUN_LOG="$LOG_DIR/install-$(date -u +%Y%m%dT%H%M%SZ).log"
-: >"$RUN_LOG"
+install_common_open_run_log
 
 # ---------------------------------------------------------------------------
 # Distro shim
@@ -281,26 +203,11 @@ RUN_LOG="$LOG_DIR/install-$(date -u +%Y%m%dT%H%M%SZ).log"
 # (Docker, WireGuard, libvirt, the whole APIARY provisioning flow) is
 # identical once the packages are on disk.
 #
-# Set once, at source time, so a step cannot disagree with preflight.
-if [[ -r /etc/os-release ]]; then
-  DISTRO_ID="$(. /etc/os-release && echo "${ID:-}")"
-  DISTRO_ID_LIKE="$(. /etc/os-release && echo "${ID_LIKE:-}")"
-else
-  DISTRO_ID=""; DISTRO_ID_LIKE=""
-fi
-
-case "$DISTRO_ID" in
-  ubuntu|debian)              DISTRO_FAMILY=debian ;;
-  rocky|rhel|centos|almalinux|fedora) DISTRO_FAMILY=rhel ;;
-  *)
-    case " $DISTRO_ID_LIKE " in
-      *debian*) DISTRO_FAMILY=debian ;;
-      *rhel*|*fedora*) DISTRO_FAMILY=rhel ;;
-      *) DISTRO_FAMILY=unknown ;;
-    esac
-    ;;
-esac
-export DISTRO_FAMILY
+# Set once, at source time, so a step cannot disagree with preflight. The
+# detection itself lives in the shared library (#1609 Phase 5) -- install-vps.sh
+# needs exactly the same answer and used to derive it inside a step, where a
+# marker-skipped preflight left it unset.
+install_common_detect_distro
 
 pkg_update() {
   case "$DISTRO_FAMILY" in
@@ -2608,8 +2515,16 @@ step_libvirt_install() {
       # Same stack, different names throughout: qemu-kvm, libvirt-daemon-kvm,
       # libvirt-client, virt-install, guestfs-tools, edk2-ovmf (the UEFI
       # firmware the Windows sandbox domains boot from).
+      #
+      # virt-win-reg and libguestfs-winsupport are separate packages here,
+      # where Debian's libguestfs-tools carries both. kvm_manage.sh's
+      # verify_golden_image_contents reads the guest's SMB share registry keys
+      # through virt-win-reg before every clone (#100/#2023), so without them
+      # EVERY create fails on a golden image that is perfectly fine:
+      #   [ERROR] Could not read the SMB share registry state ... via virt-win-reg
+      # winsupport is what makes the guest's NTFS filesystem readable at all.
       pkg_install qemu-kvm libvirt libvirt-daemon-kvm libvirt-client bridge-utils \
-        virt-install guestfs-tools edk2-ovmf
+        virt-install guestfs-tools virt-win-reg libguestfs-winsupport edk2-ovmf
       ;;
   esac
   # RHEL 9+ splits libvirtd into modular per-driver daemons and may ship no
@@ -2637,7 +2552,8 @@ step_libvirt_install() {
   # with "referenced filter '...' is missing" the first time a sandbox step
   # runs -- confirmed live, see #518. Restore them unconditionally here so
   # apt's install-vs-upgrade heuristic can't leave the sandbox chain broken.
-  cp -n /usr/share/libvirt/nwfilter/*.xml /etc/libvirt/nwfilter/
+  mkdir -p /etc/libvirt/nwfilter
+  cp -n /usr/share/libvirt/nwfilter/*.xml /etc/libvirt/nwfilter/ 2>/dev/null || true
   systemctl restart libvirtd
 }
 
@@ -2647,6 +2563,30 @@ step_sandbox_backup_restore() {
   # SANDBOX_ROOT default, provision-golden-image.sh's default arg) -- it
   # must land exactly there, not somewhere symlinked or renamed.
   mkdir -p /var/dockge/sandbox
+
+  # A "local:" prefix restores from a directory on this host instead of over
+  # SSH. The golden images are ~66G and the copy that matters is often already
+  # attached to the box being rebuilt: on 2026-09-05 all three images plus
+  # isos/, vms/ and libvirt-defs.xml were sitting on the homeserver's own
+  # backup drive at /mnt/usb-recovery, while #1609 recorded them as not being
+  # in the backup set at all and Phase 8 as blocked on a multi-hundred-GB
+  # transfer nobody had scheduled. Pulling 66G out of a local ext4 drive and
+  # back over the LAN to the same machine is the only thing that was actually
+  # missing.
+  if [[ "$BACKUP_HOST_SANDBOX_PATH" == local:* ]]; then
+    local src="${BACKUP_HOST_SANDBOX_PATH#local:}"
+    if [[ ! -d "$src" ]]; then
+      echo "BACKUP_HOST_SANDBOX_PATH names a local path that does not exist: $src" >&2
+      echo "  (mount the backup drive first -- an unmounted mountpoint reads as" >&2
+      echo "   an empty directory or a missing one, and rsync would happily" >&2
+      echo "   'restore' nothing at all)" >&2
+      return 1
+    fi
+    echo "restoring sandbox tree from local path: $src"
+    rsync -a --info=progress2 "${src%/}/" /var/dockge/sandbox/
+    return
+  fi
+
   with_retry 2 30 rsync -a -e "ssh -i $BACKUP_HOST_KEY -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10" \
     "${BACKUP_HOST_USER}@${BACKUP_HOST}:${BACKUP_HOST_SANDBOX_PATH}/" /var/dockge/sandbox/
 }
@@ -2689,8 +2629,21 @@ step_sandbox_checksum_verify() {
 ensure_nvram_vars() {
   local target="$1"
   [[ -f "$target" ]] && return 0
-  qemu-img convert -f raw -O qcow2 /usr/share/OVMF/OVMF_VARS_4M.ms.fd "$target"
-  chown libvirt-qemu:kvm "$target"
+  # The template path and the QEMU file owner are both distro-dependent, and
+  # both were hardcoded to Debian's until #1609's Rocky rebuild ran this for
+  # the first time on EL:
+  #   qemu-img: Could not open '/usr/share/OVMF/OVMF_VARS_4M.ms.fd'
+  #   chown: invalid user: 'libvirt-qemu:kvm'
+  # Resolved through the same helper kvm_manage.sh uses, so the installer and
+  # a hand-run kvm_manage.sh cannot disagree about which firmware a domain got.
+  # shellcheck source=/dev/null
+  . "$REPO_DIR/sandbox/windows/setup/host-paths.sh"
+  local template owner
+  template="$(sandbox_ovmf_vars_template)" || return 1
+  owner="$(sandbox_qemu_owner)" || return 1
+  mkdir -p "$(dirname "$target")"
+  qemu-img convert -f raw -O qcow2 "$template" "$target"
+  chown "$owner" "$target"
 }
 
 step_ghosts_network_setup() {
@@ -2973,6 +2926,7 @@ if [[ "$ENABLE_SANDBOX_RESTORE" == "true" ]]; then
   run_step linux-sandbox-verify   "Run Linux sandbox smoke test"          step_linux_sandbox_verify
 else
   skip_step libvirt-install "Install libvirt/KVM/QEMU" "ENABLE_SANDBOX_RESTORE=false"
+  skip_step vfio-gpu-passthrough "Bind the sandbox GPU to vfio-pci (#1609 Phase 7)" "ENABLE_SANDBOX_RESTORE=false"
   skip_step sandbox-restore "Pull sandbox backup from LAN host" "ENABLE_SANDBOX_RESTORE=false"
   skip_step sandbox-checksum "Verify golden-image checksums" "ENABLE_SANDBOX_RESTORE=false"
   skip_step ghosts-network "Set up GHOSTS isolated libvirt network" "ENABLE_SANDBOX_RESTORE=false"
@@ -2981,7 +2935,10 @@ else
   skip_step windows-sandbox-network "Set up Windows sandbox libvirt network" "ENABLE_SANDBOX_RESTORE=false"
   skip_step windows-sandbox-create "Create win11-sandbox thin-clone VM" "ENABLE_SANDBOX_RESTORE=false"
   skip_step windows-sandbox-start "Start win11-sandbox VM" "ENABLE_SANDBOX_RESTORE=false"
-  skip_step sandbox-verify "Verify both sandbox VMs running" "ENABLE_SANDBOX_RESTORE=false"
+  skip_step cape-network "Set up CAPE libvirt network" "ENABLE_SANDBOX_RESTORE=false"
+  skip_step cape-vm-create "Create win11-cape thin-clone VM (#1609 Phase 7)" "ENABLE_SANDBOX_RESTORE=false"
+  skip_step cape-vm-start "Start win11-cape VM" "ENABLE_SANDBOX_RESTORE=false"
+  skip_step sandbox-verify "Verify sandbox VMs running" "ENABLE_SANDBOX_RESTORE=false"
   skip_step sandbox-host-foundation "Set up Linux sandbox network + dirs" "ENABLE_SANDBOX_RESTORE=false"
   skip_step linux-sandbox-base "Download + verify Linux base image" "ENABLE_SANDBOX_RESTORE=false"
   skip_step linux-sandbox-verify "Run Linux sandbox smoke test" "ENABLE_SANDBOX_RESTORE=false"

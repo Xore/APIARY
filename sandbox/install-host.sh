@@ -6,13 +6,33 @@ if [[ ${EUID} -ne 0 ]]; then
   exit 1
 fi
 
-apt-get update
-# Keep the complete QEMU package set in Ubuntu's standard family. Mixing the
-# HWE qemu-system package with qemu-utils/OVMF selects mutually conflicting
-# ubuntu-virt and ubuntu-virt-hwe dependency families on Ubuntu 26.04.
-DEBIAN_FRONTEND=noninteractive apt-get install -y \
-  qemu-system-x86 libvirt-daemon-system libvirt-clients virtinst \
-  libguestfs-tools ovmf swtpm swtpm-tools qemu-utils nftables acl tcpdump
+# Distro-aware since the homeserver moved to Rocky (#1609's rebuild): this was
+# an unconditional apt-get, so on EL the script died at exit 127 on its very
+# first command and every later step -- the /var/lib/honeypot-sandbox tree, the
+# network filter, the honeypot-sandbox libvirt network -- never ran. The
+# failures that surfaced downstream ("no such file or directory" on the base
+# dir, "Network not found: no network with matching name 'honeypot-sandbox'")
+# all trace back here.
+if command -v apt-get >/dev/null 2>&1; then
+  apt-get update
+  # Keep the complete QEMU package set in Ubuntu's standard family. Mixing the
+  # HWE qemu-system package with qemu-utils/OVMF selects mutually conflicting
+  # ubuntu-virt and ubuntu-virt-hwe dependency families on Ubuntu 26.04.
+  DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    qemu-system-x86 libvirt-daemon-system libvirt-clients virtinst \
+    libguestfs-tools ovmf swtpm swtpm-tools qemu-utils nftables acl tcpdump
+elif command -v dnf >/dev/null 2>&1; then
+  # Same stack, EL names (see install-homeserver.sh's step_libvirt_install for
+  # the same mapping): virt-win-reg and libguestfs-winsupport are split out of
+  # guestfs-tools here, and qemu-img lives in qemu-img rather than qemu-utils.
+  dnf install -y \
+    qemu-kvm libvirt libvirt-daemon-kvm libvirt-client virt-install \
+    guestfs-tools virt-win-reg libguestfs-winsupport edk2-ovmf \
+    swtpm swtpm-tools qemu-img nftables acl tcpdump
+else
+  echo "no apt-get or dnf on this host -- install the KVM/libvirt stack by hand" >&2
+  exit 1
+fi
 
 install -d -m 0750 -o root -g libvirt /var/lib/honeypot-sandbox
 install -d -m 0750 -o root -g libvirt /var/lib/honeypot-sandbox/{base,overlays,inbox,results,pcap}

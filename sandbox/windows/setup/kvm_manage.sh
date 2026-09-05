@@ -29,6 +29,11 @@ set -euo pipefail
 # decode_smb_share_names() this script reuses rather than reimplementing.
 KVM_MANAGE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
+# Distro-dependent QEMU/OVMF paths and the QEMU file owner (#1609): the domain
+# XMLs are written with Debian's names, which EL does not have.
+# shellcheck source=sandbox/windows/setup/host-paths.sh
+. "$KVM_MANAGE_DIR/host-paths.sh"
+
 VM_NAME="${VM_NAME:-win11-sandbox}"
 # Defaults follow win11-analysis.pkr.hcl: the build deliberately puts both the
 # ISO and the 25-35 GB golden image on the large /var spindle rather than the
@@ -176,7 +181,20 @@ create_vm() {
         log "WARNING: $VM_XML does not reference $VM_DISK — the domain will boot the wrong disk."
     fi
     log "Defining VM in libvirt..."
-    virsh define "$VM_XML"
+    # The XMLs name Debian's QEMU/OVMF paths literally, which do not exist on
+    # EL -- `virsh define` failed there with "Cannot check QEMU binary
+    # /usr/bin/qemu-system-x86_64" (#1609). host-paths.sh rewrites those three
+    # paths to whatever this host actually has, and returns the file unchanged
+    # on a host that has the literal ones.
+    local rendered
+    rendered="$(mktemp "/tmp/${VM_NAME}-domain.XXXXXX.xml")"
+    if sandbox_render_domain_xml "$VM_XML" > "$rendered"; then
+        virsh define "$rendered"
+        rm -f "$rendered"
+    else
+        rm -f "$rendered"
+        die "could not resolve this host's QEMU/OVMF paths -- see the message above"
+    fi
     log "VM '$VM_NAME' defined. Run: $0 start"
 }
 

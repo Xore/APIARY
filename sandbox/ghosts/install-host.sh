@@ -44,6 +44,7 @@ GHOSTS_API_ADDR=10.20.30.1:5000
 
 SKIP_ENROLL_TEST=0
 STACK_DIR="$([ -d /opt/stacks ] && echo /opt/stacks/ghosts || true)"
+env_file_arg=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -77,10 +78,27 @@ if [ -n "$STACK_DIR" ]; then
   else
     echo "  kept the existing $STACK_DIR/.env"
   fi
-  compose_file="$STACK_DIR/compose.yml"
+  # Deliberately NOT reassigning compose_file to the copy: since #2444 this
+  # stack builds from a LOCAL context (`context: .` + Dockerfile.api-prep, and
+  # ./vendor/ghosts-src for the Windows client), and compose resolves a
+  # relative build context against the project directory. Building out of
+  # $STACK_DIR -- which holds compose.yml and .env and nothing else -- fails:
+  #
+  #   failed to solve: failed to read dockerfile:
+  #   open Dockerfile.api-prep: no such file or directory
+  #
+  # Confirmed live on 2026-09-05 (#1609 Phase 8), where it took the whole
+  # ghosts-host step down. The copy still goes to $STACK_DIR so Arcane/Dockge
+  # can see and manage the stack; the build and the run stay rooted in the
+  # checkout that actually holds the context, reading the secret from the
+  # deployed .env.
+  env_file_arg="$STACK_DIR/.env"
 fi
 
-dc() { docker compose -f "$compose_file" --project-directory "$(dirname "$compose_file")" --profile test "$@"; }
+dc() {
+  docker compose -f "$compose_file" --project-directory "$(dirname "$compose_file")" \
+    ${env_file_arg:+--env-file "$env_file_arg"} --profile test "$@"
+}
 
 # ── Containers ───────────────────────────────────────────────────────────────
 say "building ghosts-api from cmu-sei/GHOSTS@v9.0.0 (this takes a while: a full dotnet publish)"
