@@ -38,6 +38,28 @@ port=$((19000 + (RANDOM % 900)))
 cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
+# #2915: the `trap cleanup EXIT` above does not fire on SIGKILL (a runner
+# OOM-kill -- and this container is Elasticsearch, so the runner is under
+# memory pressure exactly when this leg runs -- a cancelled CI job escalating
+# past SIGTERM, or a hard timeout). The container then survives, *running*,
+# for the life of the runner. Unlike the Keycloak fixtures in scripts/, the
+# port above is a fixed random draw rather than an ephemeral bind, so a
+# survivor can also collide with a later run outright. Verified live on the
+# homeserver 2026-09-04: one `es-ilm-rollover-test-<pid>` container had been up
+# 13 hours with no owning run.
+#
+# Reap survivors of an earlier killed run, skipping anything younger than
+# ${reap_min_age_s} so a *concurrent* run is never destroyed mid-flight --
+# the fleet runs several self-hosted runners against one Docker daemon, which
+# is what the `$$` in the name above is for.
+reap_min_age_s="${APIARY_TEST_REAP_MIN_AGE_S:-3600}"
+for stale_id in $(docker ps -aq --filter "name=^/es-ilm-rollover-test-" 2>/dev/null); do
+  stale_created="$(docker inspect -f '{{.Created}}' "$stale_id" 2>/dev/null)" || continue
+  stale_epoch="$(date -u -d "$stale_created" +%s 2>/dev/null)" || continue
+  [ "$(( $(date -u +%s) - stale_epoch ))" -ge "$reap_min_age_s" ] || continue
+  docker rm -fv "$stale_id" >/dev/null 2>&1 || true
+done
+
 fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "ok - $*"; }
 
