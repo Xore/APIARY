@@ -118,6 +118,13 @@ sandbox_nvram_path_in_xml() {
   sed -n "s#.*<nvram[^>]*>\\(.*\\)</nvram>.*#\\1#p" "$1" | head -1
 }
 
+# Just the user half of sandbox_qemu_owner, for setfacl/getent callers.
+sandbox_qemu_user() {
+  local owner
+  owner="$(sandbox_qemu_owner)" || return 1
+  printf '%s\n' "${owner%%:*}"
+}
+
 # Print a domain XML with the Debian paths rewritten to this host's, on stdout.
 # A host that already has the literal paths (Debian) gets the file back byte
 # for byte, so nothing changes where this was already working.

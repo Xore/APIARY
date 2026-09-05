@@ -49,6 +49,17 @@ VM_DISK="${VM_DISK:-$SANDBOX_ROOT/vms/${VM_NAME}.qcow2}"
 # overridable there was no way to drive it from here at all -- which is why
 # nothing in the installer ever created that VM (#1609 Phase 7).
 VM_XML="${VM_XML:-$(dirname "$0")/../packer/win11-kvm.xml}"
+# Which golden-image content check applies to $GOLDEN_IMAGE. "analysis" is
+# #100/#2023's five-point check for the win11-analysis image (Regshot,
+# FakeNet, Procmon, the Inbox/Logs SMB shares); "none" for an image that is
+# not built from that provisioner at all.
+#
+# win11-cape is the concrete case: its golden image is CAPE's own agent build
+# -- C:\CAPE, no C:\Tools -- so running the analysis check against it fails on
+# four tools that were never supposed to be there. #2963 made this script
+# drive that second domain without giving it a way to say so, and every
+# cape-vm-create since has failed on the mismatch (#1609, verified live).
+GOLDEN_CONTENT_CHECK="${GOLDEN_CONTENT_CHECK:-analysis}"
 NET_NAME="${NET_NAME:-sandbox}"
 NET_XML="${NET_XML:-$(dirname "$0")/sandbox-network.xml}"
 
@@ -100,6 +111,10 @@ clone_disk() {
 }
 
 verify_golden_image_contents() {
+    if [[ "$GOLDEN_CONTENT_CHECK" == "none" ]]; then
+        log "Golden image content check skipped (GOLDEN_CONTENT_CHECK=none: $GOLDEN_IMAGE is not a win11-analysis build)."
+        return 0
+    fi
     # #100/#2023: the same five-point checklist
     # orchestrate/run_sample.py's verify_golden_image_contents() enforces on
     # every automated detonation (that is the canonical implementation, with
