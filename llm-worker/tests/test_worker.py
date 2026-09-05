@@ -389,6 +389,112 @@ class CycleStageIsolationTests(unittest.TestCase):
         self.assertEqual(result["reports"], 1, "the report still runs after payloads fail")
         self.assertEqual(result["stage_errors"], {"payloads": "RuntimeError"})
 
+    @staticmethod
+    def _es_api_error(status: int, error_type: str = "cluster_block_exception"):
+        from elastic_transport import ApiResponseMeta, HttpHeaders
+
+        meta = ApiResponseMeta(status=status, http_version="1.1", headers=HttpHeaders({}), duration=0.0, node=None)
+        return worker.ApiError(f"{status} from Elasticsearch", meta, {"error": {"type": error_type}})
+
+    def test_a_429_from_elasticsearch_is_deferred_not_a_stage_failure(self):
+        # #2917: a flood-stage-watermark 429 means the worker did its job and
+        # correctly refused to drop data -- it must not read as `ok: False`
+        # and trigger an auto-heal restart that can't free disk.
+        w = self._worker()
+        w.analyze_daily_report = lambda: (_ for _ in ()).throw(self._es_api_error(429))
+        result = w.run_once()
+        self.assertNotIn("stage_errors", result, "a sink-unavailable failure must not flip ok=False")
+        self.assertEqual(result["sink_errors"], {"daily_report": "ApiError"})
+        self.assertEqual(result["reports"], 0)
+
+    def test_a_503_from_elasticsearch_is_also_deferred(self):
+        w = self._worker()
+        w.analyze_daily_report = lambda: 1
+        w.analyze_ready_sessions = lambda: (_ for _ in ()).throw(self._es_api_error(503, "unavailable_shards_exception"))
+        result = w.run_once()
+        self.assertNotIn("stage_errors", result)
+        self.assertEqual(result["sink_errors"], {"sessions": "ApiError"})
+
+    def test_a_non_sink_elasticsearch_error_still_fails_the_stage(self):
+        # A 400/404/etc from Elasticsearch is a real worker-side fault (a bad
+        # query, a missing index it should have created) and must still count.
+        w = self._worker()
+        w.analyze_daily_report = lambda: 1
+        w.analyze_payloads = lambda: (_ for _ in ()).throw(self._es_api_error(400, "parsing_exception"))
+        result = w.run_once()
+        self.assertEqual(result["stage_errors"], {"payloads": "ApiError"})
+        self.assertNotIn("sink_errors", result)
+
+
+class HealthcheckSinkErrorTests(unittest.TestCase):
+    """#2917 end to end: a cycle whose only failure was Elasticsearch refusing
+    writes must leave the healthcheck green, so auto-heal does not restart a
+    worker that is behaving correctly.
+
+    These drive the real path -- run_once(), then main()'s own
+    `stage_ok = not result.get("stage_errors")` rule, then write_status(), then
+    healthcheck() reading the file it wrote -- rather than asserting against a
+    hand-built dict, because the defect being guarded lives in the seam between
+    those steps."""
+
+    def _status_path(self) -> Path:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        return Path(directory.name) / "llm-worker-status.json"
+
+    def _cycle_then_healthcheck(self, status_path: Path) -> tuple[int, str, dict]:
+        """One full cycle whose daily_report stage hits a 429, written to
+        `status_path` exactly as main() would, then healthchecked."""
+        w = CycleStageIsolationTests._worker(self)
+        api_error = CycleStageIsolationTests._es_api_error(429)
+        w.analyze_daily_report = lambda: (_ for _ in ()).throw(api_error)
+        with patch.object(worker, "STATUS_PATH", status_path):
+            result = w.run_once()
+            # main():1642 -- verbatim, so this test breaks if that rule changes.
+            write_status_ok = not result.get("stage_errors")
+            worker.write_status(result, write_status_ok)
+            output = StringIO()
+            with redirect_stdout(output):
+                code = worker.healthcheck(unittest.mock.Mock(poll_interval=30))
+        return code, output.getvalue(), json.loads(status_path.read_text(encoding="utf-8"))
+
+    def test_a_cycle_deferred_by_an_unavailable_sink_stays_healthy(self):
+        status_path = self._status_path()
+        code, output, document = self._cycle_then_healthcheck(status_path)
+        self.assertEqual(code, 0, f"healthcheck should stay green; it printed: {output.strip()}")
+        self.assertEqual(document["ok"], True)
+        self.assertEqual(document["sink_errors"], {"daily_report": "ApiError"})
+        self.assertNotIn("stage_errors", document)
+        self.assertLessEqual(
+            (dt.now(timezone.utc) - dt.fromisoformat(document["updated_at"].replace("Z", "+00:00"))).total_seconds(),
+            60,
+            "the status document must be fresh, or this test would pass for the wrong reason",
+        )
+
+    def test_the_same_cycle_is_unhealthy_without_the_sink_classification(self):
+        """The mutation check: with _sink_unavailable answering False, the very
+        same 429 lands in stage_errors and the healthcheck goes red -- which is
+        the pre-#2917 behaviour that drove the restart loop. Without this, the
+        test above would pass even if the fix were reverted."""
+        status_path = self._status_path()
+        with patch.object(worker.LLMWorker, "_sink_unavailable", staticmethod(lambda exc: False)):
+            code, output, document = self._cycle_then_healthcheck(status_path)
+        self.assertEqual(code, 1)
+        self.assertEqual(document["ok"], False)
+        self.assertEqual(document["stage_errors"], {"daily_report": "ApiError"})
+        self.assertIn("failing stages=daily_report", output)
+
+    def test_healthcheck_failure_surfaces_sink_errors_alongside_a_real_failure(self):
+        status = {
+            "ok": False,
+            "updated_at": dt.now(timezone.utc).isoformat(),
+            "stage_errors": {"sessions": "ValueError"},
+            "sink_errors": {"daily_report": "ApiError"},
+        }
+        message = worker.healthcheck_failure(status, maximum_age=90)
+        self.assertIn("failing stages=sessions", message)
+        self.assertIn("deferred (sink unavailable)=daily_report", message)
+
 
 class ElasticsearchPreflightTests(unittest.TestCase):
     """#2234: captured-data mode without an ES route fails named, once, at boot."""
