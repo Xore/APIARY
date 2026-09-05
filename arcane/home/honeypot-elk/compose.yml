@@ -471,6 +471,17 @@ services:
       start_period: 60s
     labels:
       - autoheal=true
+    # #3045 (#2825 class A repointed here on closure): measured, not
+    # assumed -- /src (suricata pcap, uid different from this container's
+    # own root) is read-only and needs no write access, but /dst
+    # (arkime-raw, owned uid/gid 998) rejected a plain touch/cp/rm with
+    # cap_drop: ALL and no cap_add. Adding back exactly DAC_OVERRIDE let
+    # the same write/copy/delete cycle this loop actually performs
+    # succeed end to end (staged dd copy, cp -p, touch -r, retention rm).
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
     deploy:
       resources:
         limits:
@@ -567,6 +578,22 @@ services:
       start_period: 10m
     labels:
       - autoheal=true
+    # #3045 (#2825 class A repointed here on closure): measured, not
+    # assumed. ARKIME__dropUser=nobody/ARKIME__dropGroup=daemon above are
+    # configured, but live testing (docker exec, checking /proc/1/status)
+    # shows the capture process stays uid 0 throughout in this offline
+    # -R/--monitor/--skip import mode -- it never actually calls setuid/
+    # setgid, so SETUID/SETGID are not needed for that (a separate,
+    # unrelated gap in Arkime's own privilege-drop path, not something
+    # cap_drop can affect either way -- flagged, not fixed, here). What
+    # the process actually does as uid 0 -- reading arkime-raw (owned
+    # uid/gid 998, but world-readable 644/755, so no DAC_OVERRIDE needed)
+    # and writing arkime-pcap (owned root:root, so normal owner
+    # permissions already suffice) -- ran a full real capture/index cycle
+    # against the live cluster cleanly with cap_drop: ALL and no cap_add
+    # at all.
+    cap_drop:
+      - ALL
     deploy:
       resources:
         limits:
@@ -632,6 +659,14 @@ services:
         # arkime-pcap volume arkime-capture writes to, so it's the correct
         # target for that alias.
         aliases: [honeypot-vps]
+    # #3045 (#2825 class A repointed here on closure): measured, not
+    # assumed. Same shape as arkime-capture above -- uid 0 over the same
+    # world-readable arkime-raw and root-owned arkime-pcap trees, no
+    # dropUser configured here at all. A full viewer boot against the
+    # live cluster (listening on 8005, real ES connection) ran cleanly
+    # with cap_drop: ALL and no cap_add.
+    cap_drop:
+      - ALL
     deploy:
       resources:
         limits:

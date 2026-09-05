@@ -77,6 +77,15 @@ services:
       - /opt/stacks/apiary:/stack:ro
       - dionaea-lib:/dionaea
       - /opt/stacks/apiary/state/personas:/state
+    # #3045 (#2825 repointed here on closure): measured, not assumed.
+    # /dionaea (dionaea-lib volume, owned uid/gid 1000) rejected a plain
+    # touch with cap_drop: ALL and no cap_add; adding back exactly
+    # DAC_OVERRIDE let the same write succeed, alongside /state (root-owned,
+    # already writable) and the read-only /stack mount.
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
     deploy:
       resources:
         limits:
@@ -168,6 +177,24 @@ services:
       - /opt/stacks/apiary/state/elasticsearch-snapshots:/snapshots
       - yara-results:/yara-results
       - /opt/stacks/apiary/state/init-markers:/markers
+    # #3045 (#2825 repointed here on closure): measured, not assumed.
+    # This job's entire purpose is chown -R to a different uid/gid per
+    # sensor directory, then chmod on some of what it just chowned away
+    # from itself -- CAP_CHOWN alone got every chown to succeed but
+    # failed the chmod ("Operation not permitted") on a path no longer
+    # owned by this process; adding back FOWNER as well let the full real
+    # script (every mkdir/chown/chmod line, run against the actual
+    # production log tree) complete end to end. DAC_OVERRIDE was tried
+    # too and made no difference -- CHOWN+FOWNER is the measured minimum.
+    # (The one line that does still fail, `chown .../suricata/pcap`, is
+    # `|| true`-guarded on purpose: /logs/suricata is a read-only sshfs
+    # mount at the host level, not a permission-bit problem any
+    # capability could fix.)
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - FOWNER
     deploy:
       resources:
         limits:
@@ -217,6 +244,15 @@ services:
       - /opt/stacks/apiary/state/init-markers:/markers
     networks:
       - honeynet
+    # #3045 (#2825 repointed here on closure): measured, not assumed. The
+    # only host-owned path this touches is /markers (world-writable
+    # 777); everything else is either a read-only mount or this
+    # container's own image filesystem. A full real run of
+    # elasticsearch-setup.sh against the live cluster (ILM policies,
+    # pipelines, templates -- every step it performs) completed cleanly
+    # with cap_drop: ALL and no cap_add.
+    cap_drop:
+      - ALL
     deploy:
       resources:
         limits:
@@ -237,6 +273,12 @@ services:
     depends_on:
       elasticsearch-setup:
         condition: service_completed_successfully
+    # #3045 (#2825 repointed here on closure): measured, not assumed.
+    # Mounts nothing but its own read-only script; every effect is over
+    # the network (curl against Kibana). A full real run against the
+    # live stack completed cleanly with cap_drop: ALL and no cap_add.
+    cap_drop:
+      - ALL
     deploy:
       resources:
         limits:
@@ -354,6 +396,14 @@ services:
       - ARKIME__passwordSecret=${ARKIME_PASSWORD_SECRET:-change-me-in-env}
     networks:
       - honeynet
+    # #3045 (#2825 repointed here on closure): measured, not assumed.
+    # Only bind mounts are a read-only config and /markers (world-writable
+    # 777); db.pl's init/upgradenoprompt paths (both real code paths this
+    # script can take) ran cleanly against the live cluster with
+    # cap_drop: ALL and no cap_add. arkime_add_user.sh only talks to ES
+    # over the network, same as db.pl.
+    cap_drop:
+      - ALL
     deploy:
       resources:
         limits:
@@ -385,6 +435,14 @@ services:
     volumes:
       - snare-pages:/opt/snare/pages
       - /opt/stacks/apiary/state/init-markers:/markers
+    # #3045 (#2825 repointed here on closure): measured, not assumed.
+    # snare-pages is owned uid/gid 65534 mode 757 (rwxr-xrwx) -- "other"
+    # already has full rwx, so this uid-0 process needs nothing extra to
+    # write there; a plain touch/rm against the real volume succeeded
+    # with cap_drop: ALL and no cap_add. /opt/persona-pages is baked into
+    # this service's own image, not a mount.
+    cap_drop:
+      - ALL
     deploy:
       resources:
         limits:
@@ -415,6 +473,14 @@ services:
       - GEOIPUPDATE_FREQUENCY=24
     volumes:
       - /opt/stacks/apiary/analysis/geoip:/usr/share/GeoIP
+    # #3045 (#2825 repointed here on closure): measured, not assumed.
+    # /usr/share/GeoIP is owned uid/gid 980:977 -- a plain touch against
+    # the real mount failed "Permission denied" with cap_drop: ALL and no
+    # cap_add; adding back exactly DAC_OVERRIDE let it succeed.
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
     deploy:
       resources: { limits: { cpus: "0.5", memory: 256M } }
 
@@ -462,6 +528,16 @@ services:
           sleep \"$$THREAT_INTEL_REFRESH_INTERVAL\";
         done
       "
+    # #3045 (#2825 repointed here on closure): measured, not assumed.
+    # apk installing its own runtime deps into the image's own writable
+    # layer works fine as root regardless of capabilities (it owns that
+    # layer by construction); /geoip is owned uid/gid 980:977 and a plain
+    # touch against the real mount failed "Permission denied" with
+    # cap_drop: ALL and no cap_add -- DAC_OVERRIDE fixed it.
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
     deploy:
       resources: { limits: { cpus: "0.5", memory: 256M } }
 
