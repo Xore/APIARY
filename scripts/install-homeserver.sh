@@ -2111,6 +2111,65 @@ step_technitium_verify() {
   [[ -n "$lan_answer" ]] || { echo "Technitium returned no LAN-side answer" >&2; return 1; }
 }
 
+# #2974: a fresh/rebuilt host picks up NetworkManager's default resolver
+# order (public resolvers first), which the glibc stub resolver treats as
+# authoritative -- an NXDOMAIN from 1.1.1.1/8.8.8.8 for a split-horizon
+# dmz.xore.lan name stops the lookup right there, it does not fall through
+# to Technitium even though Technitium would answer. Confirmed live
+# 2026-09-05: `getent hosts <host>.dmz.xore.lan` returned nothing with the
+# public-first order and resolved correctly once Technitium was made
+# primary.
+#
+# Order is TECHNITIUM_PRIMARY_IP first, then TECHNITIUM_LAN_IP. This fleet's
+# primary Technitium node is the workstation, not the host this installer
+# provisions -- zones are edited on the master and replicated to the node
+# here, so the node this script sets up is the secondary and belongs second.
+# TECHNITIUM_PRIMARY_IP is optional: a fleet with only the one node this
+# script provisions leaves it unset and gets a single-entry list.
+#
+# Public resolvers are opt-in (HOST_RESOLVER_PUBLIC_FALLBACK), not appended
+# unconditionally. On this fleet's LAN outbound port 53 to the internet is
+# blocked entirely -- confirmed live 2026-09-05, `dig @1.1.1.1` and
+# `dig @8.8.8.8` both time out -- so a public entry is not a fallback here,
+# it is a full resolver timeout charged to every lookup that has to reach
+# past Technitium. A network where they do work can still ask for them.
+step_host_resolver_order() {
+  local primary_ip="${TECHNITIUM_PRIMARY_IP:-}"
+  local conn
+  # The connection actually carrying TECHNITIUM_LAN_IP, not a fixed
+  # interface name -- NIC naming isn't stable across this fleet's hosts.
+  conn=$(nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null \
+    | while IFS=: read -r name dev; do
+        ip addr show "$dev" 2>/dev/null | grep -q "inet ${TECHNITIUM_LAN_IP}/" && echo "$name" && break
+      done)
+  if [[ -z "$conn" ]]; then
+    echo "no active NetworkManager connection carries $TECHNITIUM_LAN_IP -- set resolver order by hand" >&2
+    return 1
+  fi
+
+  local dns_list=""
+  [[ -n "$primary_ip" ]] && dns_list="$primary_ip,"
+  dns_list="${dns_list}${TECHNITIUM_LAN_IP}"
+  if [[ "${HOST_RESOLVER_PUBLIC_FALLBACK:-}" != "" ]]; then
+    dns_list="$dns_list,${HOST_RESOLVER_PUBLIC_FALLBACK}"
+  fi
+
+  nmcli connection modify "$conn" ipv4.dns "$dns_list"
+  nmcli connection up "$conn" >/dev/null
+
+  # Assert the property the step exists to establish: a Technitium node is
+  # the FIRST nameserver. `grep -q "^nameserver <ip>"` matches anywhere in
+  # the file and so passes even with public DNS ahead of it, which is
+  # exactly the state this step is here to prevent.
+  local first technitium_nodes
+  first=$(awk '/^nameserver /{print $2; exit}' /etc/resolv.conf)
+  technitium_nodes="${TECHNITIUM_LAN_IP}${primary_ip:+,$primary_ip}"
+  if [[ -z "$first" || ",$technitium_nodes," != *",$first,"* ]]; then
+    echo "first nameserver in /etc/resolv.conf is '${first:-none}', expected one of $technitium_nodes" >&2
+    return 1
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Phase 9 — LLM/ML worker (GPU-dependent, gated behind ENABLE_GPU_STACK)
 # ---------------------------------------------------------------------------
@@ -2889,6 +2948,7 @@ run_step auth-events-worker-start "Start auth-events-worker" step_auth_events_wo
 run_step technitium-provision  "Install Technitium DNS config"       step_technitium_provision
 run_step technitium-start      "Start Technitium DNS"                step_technitium_start
 run_step technitium-verify     "Resolve container and LAN"           step_technitium_verify
+run_step host-resolver-order   "Point host resolver at Technitium before public DNS" step_host_resolver_order
 
 if [[ "$ENABLE_GPU_STACK" == "true" ]]; then
   run_step ghidra-provision      "Link ghidra compose.yml"            step_ghidra_stack_provision
