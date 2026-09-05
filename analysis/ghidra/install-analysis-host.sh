@@ -263,7 +263,24 @@ fi # HOST_FILES_ONLY
 # raw .dot file ever written. graphviz is a small, common package; installing
 # it unconditionally here is cheaper than making it a flag.
 say "installing graphviz (call-graph rendering)"
-apt-get install -y graphviz
+# Distro-aware since the homeserver moved to Rocky (#1609's rebuild): this was
+# an unconditional apt-get, which is exit 127 on EL -- and under `set -e` that
+# aborted this script *before* it installed the worker at all. The Ghidra
+# containers then come up healthy while triage does nothing, which is #636's
+# failure mode exactly: nothing errors, no analysis ever completes. Confirmed
+# live on 2026-09-05, when install-homeserver.sh's ghidra-worker-install step
+# failed with 127 on this line.
+#
+# Non-fatal: graphviz only affects call-graph SVG rendering (#796), and losing
+# the whole worker install over a missing renderer is the trade that caused
+# this bug.
+if command -v apt-get >/dev/null 2>&1; then
+  apt-get install -y graphviz || say "WARNING: graphviz install failed -- call graphs will not render"
+elif command -v dnf >/dev/null 2>&1; then
+  dnf install -y graphviz || say "WARNING: graphviz install failed -- call graphs will not render"
+else
+  say "WARNING: no apt-get or dnf -- install graphviz by hand or call graphs will not render"
+fi
 
 say "installing the worker into $target"
 install -d -m 0755 -o root -g root "$target" "$target/worker" "$target/models" "$target/report"
