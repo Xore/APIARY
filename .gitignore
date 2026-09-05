@@ -30,3 +30,6 @@ install-vps.conf
 # Rev·Deck upstream build context, cloned by install-homeserver.sh
 # (step_revdeck_source). Upstream source, deliberately not vendored here.
 analysis/ghidra/revdeck/
+
+.grit
+.orchestrator/
