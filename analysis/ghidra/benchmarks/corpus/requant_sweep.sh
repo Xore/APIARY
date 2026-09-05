@@ -89,7 +89,12 @@ docker ps --format '{{.Names}}' | grep -qx "$OLLAMA" || die "$OLLAMA is not runn
 docker image inspect "$IMAGE" >/dev/null 2>&1 || { log "pulling $IMAGE"; docker pull "$IMAGE" >/dev/null || die "cannot pull $IMAGE"; }
 
 mkdir -p "$WORK" "$RESULTS"
-: > "$TAGLIST"
+# Deliberately NOT truncated here. A plan run is often partial -- one base at a
+# time, or a retry after a conversion failure -- and truncating meant a second
+# invocation silently dropped the first invocation's tags. That happened live:
+# a gemma-only retry wiped the four Ornith rows out of the list, and the chain
+# would have scored 3 of 7 with nothing announcing the loss. The list is rebuilt
+# by discovery at the end instead, from what Ollama actually holds.
 
 log "REQUANT_START plan=$PLAN pin=$head free=$(free_gb "$WORK")G"
 
@@ -236,8 +241,6 @@ while IFS='|' read -r REPO_ID LEVELS PREFIX; do
       sudo -n rm -f "$vol/requant-import.gguf" "$vol/requant-import.Modelfile"
     fi
 
-    docker exec "$OLLAMA" ollama list 2>/dev/null | awk '{print $1}' | grep -qixF "$tag" \
-      && echo "$tag" >> "$TAGLIST"
   done
 
   # --- 6. drop the f16 ------------------------------------------------------
@@ -247,7 +250,19 @@ while IFS='|' read -r REPO_ID LEVELS PREFIX; do
   fi
 done < "$PLAN"
 
-log "LADDER_BUILT tags=$(wc -l < "$TAGLIST")"
+# Rebuild by discovery rather than by accumulation: ask Ollama which tags for
+# this plan's prefixes actually exist. Idempotent, correct after a partial run or
+# a retry, and it cannot record a tag whose `ollama create` quietly failed.
+# `keep/` aliases are excluded -- they are keep_and_sample.sh's blob anchors, not
+# roster entries, and scoring them would duplicate every row.
+prefixes=$(grep -v '^[[:space:]]*#' "$PLAN" | awk -F'|' 'NF>=3 {gsub(/^[ \t]+|[ \t]+$/,"",$3); if ($3!="") print $3}')
+if [ -n "$prefixes" ]; then
+  docker exec "$OLLAMA" ollama list 2>/dev/null | awk '{print $1}' \
+    | grep -v '^keep/' \
+    | grep -F -f <(printf '%s\n' "$prefixes") \
+    | sort -u > "$TAGLIST"
+fi
+log "LADDER_BUILT tags=$(wc -l < "$TAGLIST") (discovered from ollama, not accumulated)"
 [ -s "$TAGLIST" ] || { log "REQUANT_SWEEP_COMPLETE (nothing built)"; exit 0; }
 
 if [ "$BUILD_ONLY" = "1" ]; then
