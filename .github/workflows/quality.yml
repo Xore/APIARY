@@ -1461,7 +1461,7 @@ jobs:
               # The image is read from the Dockerfile so a base bump moves CI too.
               image="$(awk '/^FROM /{print $2; exit}' arcane/home/honeypot-payload-analysis/analysis/yara/Dockerfile)"
               echo "validating against $image"
-              docker run --rm -v "$PWD:/w" -w /w "$image" sh -c '
+              docker run --rm -e PYTHONDONTWRITEBYTECODE=1 -v "$PWD:/w" -w /w "$image" sh -c '
                 apk add --no-cache bash git yara >/dev/null
                 yara --version
                 scripts/check-yara-corpus.sh
@@ -1479,7 +1479,13 @@ jobs:
               # committed manifest.json byte-for-byte, which only means
               # something if it is the same environment the corpus claims
               # provenance against.
-              docker run --rm -v "$PWD:/w" -w /w debian:trixie-slim bash -c '
+              # -e PYTHONDONTWRITEBYTECODE=1: the container runs as root against
+              # this bind-mounted workspace, and root-owned __pycache__ left
+              # behind here breaks actions/checkout's clean step for every later
+              # job on this runner (EACCES on unlink). ci_verify.sh exports it
+              # too -- belt and braces, since it is equally true of any other
+              # caller that runs it as root in a mount.
+              docker run --rm -e PYTHONDONTWRITEBYTECODE=1 -v "$PWD:/w" -w /w debian:trixie-slim bash -c '
                 analysis/ghidra/benchmarks/corpus/ci_verify.sh
               '
 
