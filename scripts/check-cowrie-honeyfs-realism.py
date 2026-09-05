@@ -12,7 +12,10 @@ Debian/Ubuntu account table) would notice on the live honeypot:
 2. every $6$ (sha512crypt) shadow hash body is exactly 86 characters --
    anything shorter is not a hash any real crypt(3) implementation emits;
 3. every passwd primary GID has a matching /etc/group entry;
-4. every passwd account has a matching /etc/shadow row.
+4. every passwd account has a matching /etc/shadow row;
+5. userdb.txt is pure ASCII -- cowrie's auth.py reads it with
+   encoding="ascii", so one non-ASCII byte anywhere (even in a comment)
+   raises UnicodeDecodeError and fails every login attempt (#2927).
 
 Usage: python scripts/check-cowrie-honeyfs-realism.py
 """
@@ -28,6 +31,7 @@ HONEYFS = COWRIE / "cowrie" / "honeyfs"
 PASSWD = HONEYFS / "etc" / "passwd"
 SHADOW = HONEYFS / "etc" / "shadow"
 GROUP = HONEYFS / "etc" / "group"
+USERDB = COWRIE / "cowrie" / "userdb.txt"
 
 
 def check_ssh_keys() -> list[str]:
@@ -110,12 +114,29 @@ def check_shadow_account_closure() -> list[str]:
     return []
 
 
+def check_userdb_ascii() -> list[str]:
+    raw = USERDB.read_bytes()
+    try:
+        raw.decode("ascii")
+    except UnicodeDecodeError as exc:
+        lineno = raw[:exc.start].count(b"\n") + 1
+        findings = [
+            f"{USERDB.relative_to(ROOT)}:{lineno} contains a non-ASCII "
+            f"byte ({raw[exc.start:exc.end]!r}) -- cowrie's auth.py reads "
+            "this file with encoding=\"ascii\" and would fail to load it "
+            "under auth_class=UserDB"
+        ]
+        return findings
+    return []
+
+
 def main() -> int:
     findings: list[str] = []
     findings += check_ssh_keys()
     findings += check_shadow_hash_lengths()
     findings += check_gid_closure()
     findings += check_shadow_account_closure()
+    findings += check_userdb_ascii()
 
     if findings:
         print("Cowrie honeyfs realism check failed:")
@@ -125,7 +146,8 @@ def main() -> int:
 
     print("Cowrie honeyfs realism check passed "
           "(SSH keys parse, $6$ bodies are 86 chars, "
-          "passwd/group and passwd/shadow closures hold).")
+          "passwd/group and passwd/shadow closures hold, "
+          "userdb.txt is pure ASCII).")
     return 0
 
 

@@ -83,9 +83,11 @@ PY312_CONPOT_ROOT = "/usr/lib/python3.12/site-packages/conpot"
 # to 3.13 that forgets a script is caught as loudly as a leftover 3.11.
 CONPOT_ROOT_RE = re.compile(r"/usr/lib/python(?P<pyver>3\.\d+)/site-packages/conpot")
 
-# The six scripts #2619 names. Spelled out rather than globbed: a seventh
-# script appearing is something the suite should have an opinion about,
-# not something it should silently absorb.
+# Every patch script the conpot build runs. Spelled out rather than
+# globbed: a new script appearing is something the suite should have an
+# opinion about, not something it should silently absorb -- it must name
+# the 3.12 root like its six siblings, and #2940's json_log_rotation_patch
+# is the seventh, added after #2619 retargeted the original six.
 PATCH_SCRIPTS = [
     "persona_patch.py",
     "proxy_patch.py",
@@ -93,6 +95,9 @@ PATCH_SCRIPTS = [
     "modbus_patch.py",
     "guardian_ast_patch.py",
     "iec104_patch.py",
+    # #2940: rotates conpot's own JSON sink, so /logs/conpot stops growing
+    # unbounded. Same install root, so the same contract applies.
+    "json_log_rotation_patch.py",
 ]
 
 # Phrases that only make sense while the pin is deliberately held back.
@@ -378,13 +383,13 @@ def test_conpot_dockerfile_no_longer_carries_the_2314_freeze_rationale():
     )
 
 
-# --- the six patch scripts ------------------------------------------------
+# --- the patch scripts ---------------------------------------------------
 
 @pytest.mark.parametrize("script", PATCH_SCRIPTS)
 def test_patch_script_exists(script):
     assert (REPO_ROOT / CONPOT_DIR / script).is_file(), (
-        f"{CONPOT_DIR}/{script} is missing -- #2619 retargets all six "
-        f"conpot patch scripts"
+        f"{CONPOT_DIR}/{script} is missing -- every conpot patch script "
+        f"the build runs targets the 3.12 root (#2619)"
     )
 
 
@@ -433,12 +438,13 @@ def test_patch_script_does_not_reference_the_python_3_11_root(script):
     )
 
 
-def test_dockerfile_copies_and_runs_exactly_the_six_patch_scripts():
-    """The six scripts this file checks must be the six the build uses.
+def test_dockerfile_copies_and_runs_exactly_the_listed_patch_scripts():
+    """The scripts this file checks must be the ones the build uses.
 
-    Without this, adding a seventh patch script with a stale 3.11 path
+    Without this, adding another patch script with a stale 3.11 path
     breaks the image while every parametrized test above still passes --
-    they only ever look at the six names hardcoded here.
+    they only ever look at the names hardcoded here. #2940 added a
+    seventh; this is the test that noticed.
     """
     instructions = _dockerfile_instructions()
     copied = {s for s in _copy_sources(instructions) if s.endswith("_patch.py")}
@@ -491,7 +497,7 @@ def test_no_effective_python_3_11_conpot_path_remains_anywhere():
     )
 
 
-def test_python_3_12_conpot_paths_are_confined_to_the_six_patch_scripts():
+def test_python_3_12_conpot_paths_are_confined_to_the_patch_scripts():
     """The new path must appear only where it belongs.
 
     Guards the other direction from the sweep above: a blanket

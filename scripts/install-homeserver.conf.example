@@ -5,6 +5,10 @@
 # Copy this file, fill in every <PLACEHOLDER>, then run:
 #   sudo ./scripts/install-homeserver.sh --config /path/to/your-filled-in.conf
 #
+# Put the filled-in copy at /etc/apiary/install-home.conf and
+# `sudo ./scripts/install.sh --profile home` finds it without --config. It holds
+# real keys and hostnames -- keep it out of version control wherever it lives.
+#
 # Never commit your filled-in copy. It will contain real IPs and a real
 # git remote. Keep it next to the script but outside version control
 # (.gitignore has a name-specific rule for this file — only the
@@ -142,6 +146,15 @@ ENABLE_SANDBOX_RESTORE="false"
 # Only needed if ENABLE_SANDBOX_RESTORE=true. Same backup host as
 # BACKUP_HOST above, different subdirectory -- the one holding golden-images/,
 # isos/, vms/, etc. (e.g. <path>/home-sandbox).
+#
+# Prefix with "local:" to restore from a directory on THIS host instead of
+# over SSH, e.g.
+#   BACKUP_HOST_SANDBOX_PATH="local:/mnt/usb-recovery/apiary-backups/sandbox-<stamp>"
+# which is the right answer whenever the backup drive holding the golden
+# images is attached to the machine being rebuilt -- 66G over the LAN and back
+# to the same box buys nothing. The step fails loudly if the local path does
+# not exist, because an unmounted mountpoint would otherwise "restore" an
+# empty tree without complaint.
 BACKUP_HOST_SANDBOX_PATH="<PATH_ON_BACKUP_HOST>"
 
 # --- Windows sandbox GPU passthrough (#1609 Phase 7) ----------------------

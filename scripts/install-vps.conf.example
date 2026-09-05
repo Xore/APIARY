@@ -4,6 +4,10 @@
 # Copy this file, fill in every <PLACEHOLDER>, then run:
 #   sudo ./scripts/install-vps.sh --config /path/to/your-filled-in.conf
 #
+# Put the filled-in copy at /etc/apiary/install-vps.conf and
+# `sudo ./scripts/install.sh --profile vps` finds it without --config. It holds
+# real keys and hostnames -- keep it out of version control wherever it lives.
+#
 # Never commit your filled-in copy. It will contain real IPs and a real
 # git remote. Keep it next to the script but outside version control
 # (.gitignore has a name-specific rule for this file -- only the
