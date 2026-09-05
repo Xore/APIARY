@@ -429,6 +429,27 @@ jobs:
       # no duplicate @tanstack copies today (every package appears exactly
       # once), so nothing is diverging inside one install in the literal
       # sense either.
+      #
+      # #2867: this is the check that retirement left uncovered. #2208
+      # pinned the three @tanstack/* deps in package.json spec-exact so
+      # upgrades are deliberate (#2180's actual goal); nothing asserted that
+      # stayed true. Needs no network and no lockfile resolution -- a jq
+      # test over package.json alone -- so it runs before install-dependent
+      # steps and fails (not warns) since a caret creeping back in is a real,
+      # fixable regression.
+      - name: TanStack deps stay spec-exact (#2180)
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+        run: |
+          loose="$(jq -r '((.dependencies // {}) + (.devDependencies // {}))
+              | to_entries[]
+              | select(.key | startswith("@tanstack/"))
+              | select(.value | test("^[0-9]+\\.[0-9]+\\.[0-9]+$") | not)
+              | "\(.key) \(.value)"' package.json)"
+          if [ -n "$loose" ]; then
+            echo "::error::@tanstack deps must be pinned spec-exact (#2180/#2208):"
+            echo "$loose"
+            exit 1
+          fi
       - run: npm run typecheck
         working-directory: arcane/home/honeypot-dashboard/frontend-next
       # #1831: the tier's first behavioural check. typecheck and build were
@@ -483,6 +504,21 @@ jobs:
       # #2180 / #2804: the twin of the retired "TanStack minors diverge
       # inside one install" step lived here. Retired for the same reason --
       # see the full rationale on the homeserver copy above.
+      #
+      # #2867: twin of the homeserver copy's spec-exact check above.
+      - name: TanStack deps stay spec-exact (#2180)
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+        run: |
+          loose="$(jq -r '((.dependencies // {}) + (.devDependencies // {}))
+              | to_entries[]
+              | select(.key | startswith("@tanstack/"))
+              | select(.value | test("^[0-9]+\\.[0-9]+\\.[0-9]+$") | not)
+              | "\(.key) \(.value)"' package.json)"
+          if [ -n "$loose" ]; then
+            echo "::error::@tanstack deps must be pinned spec-exact (#2180/#2208):"
+            echo "$loose"
+            exit 1
+          fi
       - run: npm run typecheck
         working-directory: arcane/home/honeypot-dashboard/frontend-next
       - run: npm test
