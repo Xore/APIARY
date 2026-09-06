@@ -639,9 +639,15 @@ services:
           memory: 1G
 
   # #1738 decision 5: ship extracted file bytes into Elasticsearch, so an
-  # artefact survives the VPS being wiped or rebuilt. Behind the same profile
-  # as the extraction itself -- running an importer for a directory nothing
-  # writes to would be misleading.
+  # artefact survives the VPS being wiped or rebuilt. zeek-proxy (the
+  # writer) is unconditional, not itself behind a profile, so this used to
+  # be misleadingly gated as if the two were paired -- #2975: the profile
+  # gate meant neither the installer's plain `docker compose up -d` nor
+  # Arcane's redeploy path (neither passes --profile) ever created this
+  # container, on a fresh install or a rebuild. Confirmed live 2026-09-05:
+  # it's the only one of this stack's declared services that was silently
+  # absent, and the gap was invisible to health checks because nothing
+  # that *was* running was unhealthy. Always-on now, matching zeek-proxy.
   #
   # Networkless except for Elasticsearch: it reads two local paths and posts.
   # It never fetches anything, and it never executes what it reads.
@@ -649,7 +655,6 @@ services:
     image: docker.io/library/python:3.12-alpine@sha256:b64631e04e4920160c50fbe8d8df828f7f35f06f425cb44aa09bca53e708a35a
     container_name: hp-extracted-file-importer
     restart: unless-stopped
-    profiles: ["file-extract"]
     read_only: true
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
