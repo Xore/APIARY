@@ -112,32 +112,44 @@ q4_K_M/q4_K_S/q8_0 only, no imatrix, not the quality path.
 
 The interactive half is a **separate Arcane stack**, `arcane/home/unsloth/compose.yml`
 (manifest entry `unsloth` in `arcane/manifests/home-production.json`). It runs
-JupyterLab out of the same image digest, mounted on the same work area, so the
-batch leg above keeps its `run --rm` / no-restart / no-daemon semantics
+**Unsloth Studio** — the project's own web UI — mounted on the same work area,
+so the batch leg above keeps its `run --rm` / no-restart / no-daemon semantics
 untouched.
 
 | | |
 |---|---|
-| URL | `http://<homeserver-lan-ip>:8899` |
-| password (Jupyter token) | `unsloth` |
-| container port | 8888 (`JUPYTER_PORT` default) |
+| URL | `http://<homeserver-lan-ip>:8899` (Studio UI) |
+| password | `unsloth` (`JUPYTER_PASSWORD` in the untracked stack `.env`) |
+| container ports | 8000 (Studio UI, published on 8899), 8888 (Studio API) |
 | mounts | `/var/training` → `/workspace`, `/mnt-1/hf-cache` → `/hf-cache` |
 
-**LAN only.** The publish is `${UNSLOTH_BIND}:8899:8888` — the homeserver's
-LAN address, reachable from the LAN and nowhere else. Never `0.0.0.0`, never
-the VPS, never a Traefik router. The address itself is deployment-specific and
-is not in git: `compose.yml` interpolates `${UNSLOTH_BIND:-10.8.0.2}`, and the
-stack's untracked `.env` on the box carries the real LAN address (see
-`arcane/home/unsloth/.env.example`). Without that `.env` the stack falls back
-to the WireGuard address, which is reachable over the tunnel but not the LAN. The `--ip=0.0.0.0` in the container's `command:`
-is the container's own namespace; the host side of the publish is what limits
-reachability. 8899 was verified free on that address (only `:53`, `:5380`,
-`:53443` were bound). There is no TLS and the token is a plain value in git —
-that is the operator's explicit call for a LAN-only lab box; do not expose it
-further.
+The stack pins the **`studio`** image variant, not the `core` digest the batch
+leg uses. Only `studio` ships `/usr/local/bin/unsloth-studio-launch` and
+exposes 8000; `core` has `Cmd ["python"]` and would start and exit. Both are
+Apache-2.0. Verify a candidate digest the same way as the batch pin:
+
+```
+skopeo inspect --override-os linux --override-arch amd64 docker://docker.io/unsloth/unsloth:studio
+```
+
+**LAN only.** The publishes are `${UNSLOTH_BIND}:8899:8000` and
+`${UNSLOTH_BIND}:8888:8888` — the homeserver's LAN address, reachable from the
+LAN and nowhere else. Never `0.0.0.0`, never the VPS, never a Traefik router,
+and never Studio's `--secure` flag (that is the Cloudflare-tunnel mode, which
+is not what this box wants). The address itself is deployment-specific and is
+not in git: `compose.yml` interpolates `${UNSLOTH_BIND:-10.8.0.2}`, and the
+stack's untracked `.env` on the box carries the real LAN address and the real
+password (see `arcane/home/unsloth/.env.example`). Without that `.env` the
+stack falls back to the WireGuard address, which is reachable over the tunnel
+but not the LAN. The container binds inside its own network namespace; the
+host side of the publish is what limits reachability, so no
+`unsloth studio -H <host>` override is needed. 8899 was verified free on that
+address (only `:53`, `:5380`, `:53443` were bound). There is no TLS and the
+password is a low-value literal — that is the operator's explicit call for a
+LAN-only lab box; do not expose it further.
 
 The stack has **no `restart:` policy** on purpose: the operator starts it in
-Arcane when the notebook is wanted and stops it again. It reserves the same
+Arcane when Studio is wanted and stops it again. It reserves the same
 RTX 4000 Ada by UUID as the batch leg (the image refuses to start without a
 GPU), so **stop this stack before running a cold benchmark leg** —
 `round7_coldrun.sh` assumes an empty card. Confirm with
@@ -148,8 +160,8 @@ GPU), so **stop this stack before running a cold benchmark leg** —
 Through the Arcane API, like every other homeserver stack — **never**
 `docker compose up` by hand on the box. The image is pulled by digest, so
 there is nothing to build. Create `.env` in the stack directory on the box
-first (`UNSLOTH_BIND=<the homeserver's LAN address>`) — a gitops sync does not
-carry it:
+first (`UNSLOTH_BIND=<the homeserver's LAN address>`, `JUPYTER_PASSWORD=<the
+password>`) — a gitops sync does not carry it:
 
 ```
 # 1. sync the stack directory from git (syncName "unsloth")
@@ -165,7 +177,13 @@ Look up `$SYNC_ID` / `$PROJECT_ID` with
 `GET /environments/0/gitops-syncs?limit=100` (it paginates at 20). Both calls
 stream and must run to completion — a truncated stream aborts the operation
 server-side; `{"done":true}` is the terminal frame. Then check
-`docker ps | grep hp-unsloth-jupyter` and `curl -sI http://<homeserver-lan-ip>:8899`.
+`docker ps | grep hp-unsloth-studio` and `curl -sI http://<homeserver-lan-ip>:8899`.
+
+**Gotcha (verified live 2026-09-06):** the sync returns **500** if the stack
+directory already exists on the box *and* contains a `.env`. Order matters —
+run the sync first so Arcane creates the directory, then write `.env` into it,
+then redeploy. If a sync is already failing 500, move the existing `.env`
+aside, re-run the sync, and put it back before the redeploy.
 
 ## No smoke test yet
 
