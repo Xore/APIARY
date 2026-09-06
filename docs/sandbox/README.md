@@ -189,6 +189,10 @@ the nftables chain accepts only DNS and the allowlisted proxy, nothing else.
    `forensic-egress-allowed-domains.txt`. DNS answers are real; both queries and
    responses are retained in the per-job capture. Direct guest connections,
    private destinations, arbitrary domains, and non-HTTP protocols stay blocked.
+   The allowlist bounds *where* a sample may connect, not what it may do there
+   (#3072): squid cannot see inside an established CONNECT tunnel, so every
+   allowlisted domain is reachable for upload as much as for download, and
+   tunneled volume shows up in the access log without being capped by it.
 
 For a new or existing foundation, the complete Wine-enabled installation can
 instead be run in the safe order with one command. It pauses an idle worker,
