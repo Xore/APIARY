@@ -51,6 +51,7 @@ type event struct {
 	SrcPort   int               `json:"src_port"`
 	Event     string            `json:"event"`
 	Path      string            `json:"path,omitempty"`
+	Query     string            `json:"query,omitempty"`
 	Data      string            `json:"data,omitempty"`
 	UserAgent string            `json:"user_agent,omitempty"`
 	Headers   map[string]string `json:"headers,omitempty"`
