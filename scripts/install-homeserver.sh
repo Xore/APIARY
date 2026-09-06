@@ -1477,6 +1477,16 @@ step_provision_buildx_cache() {
   # an interactive admin can also write it without making it world-writable
   # on a filesystem that also holds /mnt-1/benchmarks. setgid keeps
   # per-image subdirectories group-owned as builds create them.
+  #
+  # The group has to be granted to every runner instance, not just the
+  # first. Measured live 2026-09-06: the box runs seven runner users
+  # (github-ci-runner, github-ci-runner-2 .. -7, one per
+  # actions.runner.Xore-APIARY.supermicro-ci-* unit) and only
+  # github-ci-runner was in the github-ci-runner group, so a Containers row
+  # that landed on supermicro-ci-2 got EACCES from the workflow's own
+  # `mkdir -p /mnt-1/buildx-cache/<image>` and silently degraded to
+  # type=gha -- the exact quota-evicted cache #2822 moved off. Joining them
+  # here (rather than by hand) is what makes a #1609 rebuild reproduce it.
   local cache_dir=/mnt-1/buildx-cache
   local runner_user=github-ci-runner
 
@@ -1489,14 +1499,42 @@ step_provision_buildx_cache() {
 
   install -d -m 2775 -o "$runner_user" -g "$runner_user" "$cache_dir"
 
+  # Empty on a fresh install, where the extra instances do not exist yet --
+  # install-ci-runner.sh is a manual runbook step that runs later. The loops
+  # below then simply do nothing extra, which is the pre-existing behaviour.
+  local extra_users=()
+  mapfile -t extra_users < <(getent passwd | cut -d: -f1 | grep -E '^github-ci-runner-[0-9]+$' | sort)
+
+  local u
+  for u in "${extra_users[@]}"; do
+    if id -nG "$u" 2>/dev/null | tr ' ' '\n' | grep -qx "$runner_user"; then
+      continue
+    fi
+    usermod -aG "$runner_user" "$u"
+    echo "  added $u to the $runner_user group"
+  done
+
+  # Group membership alone is not enough for subdirectories that already
+  # exist: the workflow creates /mnt-1/buildx-cache/<image> with the runner's
+  # default umask 022, so a dir made by one runner before the grant existed
+  # is 2755 -- group-owned but not group-writable, and the next runner's
+  # mkdir/prune inside it still fails. Repair what is there; the workflow
+  # sets umask 002 for the ones it creates from now on.
+  chown -R "$runner_user:$runner_user" "$cache_dir"
+  chmod -R g+rwX "$cache_dir"
+
   # Prove it, rather than assuming install(1) implies the runner can write:
-  # the check that was missing is the whole reason this step exists.
-  if ! runuser -u "$runner_user" -- test -w "$cache_dir"; then
-    echo "  ERROR: $cache_dir is not writable by $runner_user" >&2
-    ls -ld "$cache_dir" >&2
-    return 1
-  fi
-  echo "  $cache_dir writable by $runner_user (verified)"
+  # the check that was missing is the whole reason this step exists. Every
+  # runner user is checked, because one unlisted user is exactly how the
+  # 2026-09-06 fallback went unnoticed.
+  for u in "$runner_user" "${extra_users[@]}"; do
+    if ! runuser -u "$u" -- test -w "$cache_dir"; then
+      echo "  ERROR: $cache_dir is not writable by $u" >&2
+      ls -ld "$cache_dir" >&2
+      return 1
+    fi
+  done
+  echo "  $cache_dir writable by $runner_user ${extra_users[*]} (verified)"
 }
 
 step_build_zeek_image() {
