@@ -50,14 +50,20 @@ def derive(*cli_args: str) -> dict[str, str]:
 class InstallCiRunnerInstancesTest(unittest.TestCase):
     def test_default_instance_keeps_the_original_singleton_layout(self) -> None:
         derived = derive("--repo", "Xore/APIARY")
-        self.assertEqual(derived["home"], "/opt/github-ci-runner")
+        # #3021's install-ci-runner.sh comments explain the split: /opt is
+        # var_t-labelled under SELinux and can't host a systemd unit's
+        # WorkingDirectory, so RUNNER_ROOT moved to /var/lib/github-runners
+        # while the runner's own executables stayed under /opt. Re-derived
+        # against the live host 2026-09-05 rather than assuming the pre-split
+        # value from #2572 still holds.
+        self.assertEqual(derived["home"], "/var/lib/github-runners/github-ci-runner")
         self.assertEqual(derived["user"], "github-ci-runner")
         self.assertTrue(derived["name"].endswith("-ci"))
         self.assertNotIn("-ci-", derived["name"])
 
     def test_second_instance_gets_isolated_home_and_user(self) -> None:
         derived = derive("--repo", "Xore/APIARY", "--instance", "2")
-        self.assertEqual(derived["home"], "/opt/github-ci-runner-2")
+        self.assertEqual(derived["home"], "/var/lib/github-runners/github-ci-runner-2")
         self.assertEqual(derived["user"], "github-ci-runner-2")
         self.assertTrue(derived["name"].endswith("-ci-2"))
 
@@ -71,7 +77,7 @@ class InstallCiRunnerInstancesTest(unittest.TestCase):
     def test_explicit_name_overrides_the_derived_default_but_not_home_or_user(self) -> None:
         derived = derive("--repo", "Xore/APIARY", "--instance", "2", "--name", "custom-ci")
         self.assertEqual(derived["name"], "custom-ci")
-        self.assertEqual(derived["home"], "/opt/github-ci-runner-2")
+        self.assertEqual(derived["home"], "/var/lib/github-runners/github-ci-runner-2")
         self.assertEqual(derived["user"], "github-ci-runner-2")
 
     def test_every_instance_shares_the_same_labels(self) -> None:
