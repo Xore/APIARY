@@ -145,3 +145,28 @@ const genericLogin = `<!DOCTYPE html>
 </body>
 </html>
 `
+
+// #2973: CVE-2026-9586 (Sangoma Switchvox unauthenticated SQLi/RCE through
+// the public /pa endpoint's PhoneIP XML field). #2919 shipped the classify()
+// half, so the campaign was already labelled -- but /pa still answered with
+// the generic nginx 404, which tells a scanner "nothing here" and ends the
+// exchange. A vulnerable Switchvox answers an unparseable provisioning
+// request with its own XML error envelope, so a scanner that gets one back
+// has reason to send the follow-on exploitation request this honeypot exists
+// to capture. Same reasoning as the two named WordPress CVE baits above.
+//
+// The envelope follows the shape Switchvox's own XML API documents for a
+// failed request (<response><result><errors><error code= message=>) -- it is
+// modelled on the published API's error format, not copied from a live
+// appliance, and it deliberately carries no server-, path- or stack-specific
+// detail. Nothing here names or hints at the honeypot: no Go error strings,
+// no internal paths, no build identifiers.
+const switchvoxPAFault = `<?xml version="1.0" encoding="UTF-8"?>
+<response>
+ <result>
+  <errors>
+   <error code="103" message="The request XML could not be parsed."/>
+  </errors>
+ </result>
+</response>
+`
