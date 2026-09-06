@@ -29,6 +29,17 @@ services:
       - "${LAN_IP:-127.0.0.1}:53:53/tcp"
       - "${LAN_IP:-127.0.0.1}:53:53/udp"
       - "${LAN_IP:-127.0.0.1}:5380:5380/tcp"
+      # Cluster replication. The primary (hermes) reaches this node on 53443 to
+      # push zones and settings; the image only EXPOSEs the port, so without an
+      # explicit publish nothing binds it on the host and the primary reports
+      #   Error! No route to host (supermicro.cluster.xore.lan:53443)
+      # -- "no route" rather than "refused" because firewalld REJECTs it, while
+      # 53 and 5380 are reachable only because Docker's own DNAT/FORWARD rules
+      # bypass the firewalld zone. Publishing it here bypasses firewalld the
+      # same way, so no zone change is needed. The primary runs with
+      # network_mode: host and already listens on 53443 for the reverse
+      # direction.
+      - "${LAN_IP:-127.0.0.1}:53443:53443/tcp"
     environment:
       # The built-in DNS_SERVER_ADMIN_PASSWORD var only applies on first
       # bootstrap; afterwards the password lives in ./config and this var is
