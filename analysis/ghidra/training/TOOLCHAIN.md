@@ -118,14 +118,18 @@ untouched.
 
 | | |
 |---|---|
-| URL | `http://192.168.42.250:8899` |
+| URL | `http://<homeserver-lan-ip>:8899` |
 | password (Jupyter token) | `unsloth` |
 | container port | 8888 (`JUPYTER_PORT` default) |
 | mounts | `/var/training` → `/workspace`, `/mnt-1/hf-cache` → `/hf-cache` |
 
-**LAN only.** The publish is `192.168.42.250:8899:8888` — the homeserver's LAN
-address, reachable from the LAN and nowhere else. Never `0.0.0.0`, never the
-VPS, never a Traefik router. The `--ip=0.0.0.0` in the container's `command:`
+**LAN only.** The publish is `${UNSLOTH_BIND}:8899:8888` — the homeserver's
+LAN address, reachable from the LAN and nowhere else. Never `0.0.0.0`, never
+the VPS, never a Traefik router. The address itself is deployment-specific and
+is not in git: `compose.yml` interpolates `${UNSLOTH_BIND:-10.8.0.2}`, and the
+stack's untracked `.env` on the box carries the real LAN address (see
+`arcane/home/unsloth/.env.example`). Without that `.env` the stack falls back
+to the WireGuard address, which is reachable over the tunnel but not the LAN. The `--ip=0.0.0.0` in the container's `command:`
 is the container's own namespace; the host side of the publish is what limits
 reachability. 8899 was verified free on that address (only `:53`, `:5380`,
 `:53443` were bound). There is no TLS and the token is a plain value in git —
@@ -143,7 +147,9 @@ GPU), so **stop this stack before running a cold benchmark leg** —
 
 Through the Arcane API, like every other homeserver stack — **never**
 `docker compose up` by hand on the box. The image is pulled by digest, so
-there is nothing to build:
+there is nothing to build. Create `.env` in the stack directory on the box
+first (`UNSLOTH_BIND=<the homeserver's LAN address>`) — a gitops sync does not
+carry it:
 
 ```
 # 1. sync the stack directory from git (syncName "unsloth")
@@ -159,7 +165,7 @@ Look up `$SYNC_ID` / `$PROJECT_ID` with
 `GET /environments/0/gitops-syncs?limit=100` (it paginates at 20). Both calls
 stream and must run to completion — a truncated stream aborts the operation
 server-side; `{"done":true}` is the terminal frame. Then check
-`docker ps | grep hp-unsloth-jupyter` and `curl -sI http://192.168.42.250:8899`.
+`docker ps | grep hp-unsloth-jupyter` and `curl -sI http://<homeserver-lan-ip>:8899`.
 
 ## No smoke test yet
 

@@ -32,13 +32,16 @@ services:
     ulimits:
       memlock: -1
     working_dir: /workspace
-    # LAN only. 192.168.42.250 is the homeserver's LAN address, reachable from
-    # the LAN; never 0.0.0.0, never the WireGuard-only 10.8.0.2, never the VPS.
-    # 8899 verified free on this address (only :53, :5380, :53443 were bound).
+    # LAN only. UNSLOTH_BIND is the homeserver's LAN address, set in this
+    # stack's untracked .env on the box (see .env.example) -- the real address
+    # is deployment-specific and never committed. Never 0.0.0.0, never the VPS.
+    # The fallback is the WireGuard address, same as every honeypot stack's
+    # HP_BIND: unreachable from the LAN, but safe if .env is missing.
+    # 8899 verified free on the LAN address (only :53, :5380, :53443 bound).
     # The 0.0.0.0 in `command:` below is the *container's* namespace, not the
     # host -- the host side of the publish is what limits reachability.
     ports:
-      - "192.168.42.250:8899:8888"
+      - "${UNSLOTH_BIND:-10.8.0.2}:8899:8888"
     environment:
       # Jupyter's own native knob (ServerApp.token). LAN-only lab box, plain
       # value accepted by the operator. JUPYTER_PASSWORD is a Studio-image
