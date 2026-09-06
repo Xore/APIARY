@@ -172,3 +172,95 @@ func TestSelfSignedCertIsGeneratedFresh(t *testing.T) {
 		t.Fatal("two calls produced the identical certificate -- not fresh per instance")
 	}
 }
+
+// #2977: probes of the NetScaler AAA / SAML / OAuth authentication surface
+// get their own event kind. The literals come from ET signatures loaded on
+// this fleet's Suricata (see authSurfaceEvent's comment), so this is a
+// confirmed-shape classifier, not a guessed one.
+func TestAuthSurfaceProbesAreClassified(t *testing.T) {
+	cases := []struct {
+		path string
+		want string
+	}{
+		{"/saml/login", "netscaler_saml_surface_probe"},
+		{"/cgi/samlauth", "netscaler_saml_surface_probe"},
+		{"/wsfed/passive", "netscaler_saml_surface_probe"},
+		{"/cgi/logout", "netscaler_saml_surface_probe"},
+		{"/SAML/Login/", "netscaler_saml_surface_probe"},
+		{"/oauth/idp/.well-known/openid-configuration", "netscaler_oauth_surface_probe"},
+		{"/oauth/rp/.well-known/openid-configuration", "netscaler_oauth_surface_probe"},
+		{"/p/u/doAuthentication.do", "netscaler_aaa_surface_probe"},
+		{"/", ""},
+		{"/vpn", ""},
+		{"/vpn/../vpns/", ""},
+		{"/some/random/path", ""},
+		{"/oauth", ""},
+	}
+	for _, c := range cases {
+		if got := authSurfaceEvent(c.path); got != c.want {
+			t.Errorf("authSurfaceEvent(%q) = %q, want %q", c.path, got, c.want)
+		}
+	}
+}
+
+// The classification must be additive only: the response a scanner sees is
+// byte-identical to before, so the decoy's fingerprint is unchanged.
+func TestAuthSurfaceProbeIsLoggedWithoutChangingTheResponse(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = orig }()
+
+	req := httptest.NewRequest("GET", "/saml/login", nil)
+	rec := httptest.NewRecorder()
+	newTestHandler().ServeHTTP(rec, req)
+
+	w.Close()
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+
+	if rec.Code != 200 || rec.Body.Len() != 0 {
+		t.Fatalf("got %d %q, want the unchanged empty 200", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Server"); got != "Apache" {
+		t.Fatalf("Server header = %q, want Apache", got)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `"event":"get"`) {
+		t.Fatalf("the unconditional get event must still be emitted, got %q", out)
+	}
+	if !strings.Contains(out, `"event":"netscaler_saml_surface_probe"`) {
+		t.Fatalf("expected the auth-surface event alongside it, got %q", out)
+	}
+}
+
+// POST classifies too, and carries the body -- the CVE-2026-3055 M1 shape is
+// a POST to /saml/login whose SAMLRequest= parameter is in the body.
+func TestAuthSurfacePOSTCarriesTheBody(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = orig }()
+
+	req := httptest.NewRequest("POST", "/saml/login", strings.NewReader("SAMLRequest=PHNhbWxw"))
+	rec := httptest.NewRecorder()
+	newTestHandler().ServeHTTP(rec, req)
+
+	w.Close()
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+
+	out := buf.String()
+	if !strings.Contains(out, `"event":"netscaler_saml_surface_probe"`) {
+		t.Fatalf("expected the auth-surface event on POST, got %q", out)
+	}
+	if !strings.Contains(out, "SAMLRequest=PHNhbWxw") {
+		t.Fatalf("expected the POST body captured on the classified event, got %q", out)
+	}
+}
