@@ -63,10 +63,17 @@ class TechnitiumInstallSmokeTest(unittest.TestCase):
         text = INSTALLER.read_text()
         for fn in (
             "step_technitium_provision()",
+            "step_technitium_lan_route()",
             "step_technitium_start()",
             "step_technitium_verify()",
         ):
             self.assertIn(fn, text)
+        # #3068: the LAN-route assertion has to run before Technitium comes
+        # up, not after -- a wrong-NIC bind is what gets AXFRs REFUSED.
+        self.assertLess(
+            text.index("run_step technitium-lan-route"),
+            text.index("run_step technitium-start"),
+        )
         # The old pihole step functions must be gone.
         self.assertNotIn("step_pihole_provision()", text)
 
