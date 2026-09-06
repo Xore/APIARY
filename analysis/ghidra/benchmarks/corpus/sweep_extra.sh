@@ -218,8 +218,33 @@ while read -r TAG; do
     echo "$(date -u +%H:%M:%S) already local: $TAG (will not delete)"
   fi
 
+  # Ollama's stored spelling of a tag is not always the spelling you asked for:
+  # it rewrites SOME quant-shaped tags and not others. Measured on tags this
+  # repo created itself, all written lowercase:
+  #     gemma4-26b-a4b-selfquant:q3_k_m   <- kept
+  #     gemma4-26b-a4b-selfquant:Q4_K_M   <- uppercased by Ollama
+  # The presence check above is `grep -qixF`, case-insensitive, so it passes --
+  # but record_baseline.py resolves a model by EXACT string match against
+  # /api/tags and exits "model tag is not installed". The result was three runs
+  # failing, MODEL_DONE written, and the weights deleted, for three models that
+  # had pulled perfectly (#1947 phase 2: Ornith Q3_K_M and gemma Q3_K_M/Q5_K_M --
+  # the published twins of the self-quant ladder, i.e. the most decision-relevant
+  # rows in the roster).
+  #
+  # Fixed here rather than in record_baseline.py on purpose: that file is on the
+  # pinned a99e765 harness, and moving the pin to fix a name lookup would split
+  # the scoring vintage for no benefit. Hand the scorer the name Ollama actually
+  # holds.
+  RESOLVED=$(docker exec ghidra-ollama-1 ollama list 2>/dev/null | awk '{print $1}' | grep -ixF "$TAG" | head -1)
+  if [ -n "$RESOLVED" ] && [ "$RESOLVED" != "$TAG" ]; then
+    echo "$(date -u +%H:%M:%S) tag case differs: roster '$TAG' -> ollama '$RESOLVED'"
+    TAG="$RESOLVED"
+  fi
+
+  TIER_OK=0
   for tier in A B; do
     do_run "$tier" "$slug" "$TAG" 1 || continue
+    TIER_OK=1
     do_run "$tier" "$slug" "$TAG" 2 || continue
     s1=$(score_of "$BASE/tier${tier}_${slug}_run1.json")
     s2=$(score_of "$BASE/tier${tier}_${slug}_run2.json")
@@ -255,6 +280,14 @@ while read -r TAG; do
     else
       echo "$(date -u +%H:%M:%S) kept $TAG (${free_now}G free, above the ${KEEP_WEIGHTS_ABOVE_GB}G floor)"
     fi
+  fi
+  # A model that pulled but produced no result on either tier used to leave only
+  # a GIVEUP line in failures.txt and a MODEL_DONE in the log -- indistinguishable
+  # from success to anything reading the results directory. That is the same
+  # silent-hole class as the false EXTRA_COMPLETE in #3031.
+  if [ "$TIER_OK" = "0" ] && [ ! -f "$BASE/tierA_${slug}_run1.json" ]; then
+    mark_unmeasured "$slug" "$TAG" "pulled but every run failed on both tiers"
+    echo "$(date -u +%H:%M:%S) UNMEASURED $TAG (pulled, no run produced a result)"
   fi
   echo "$(date -u +%H:%M:%S) MODEL_DONE $TAG"
 done < "$LIST"
