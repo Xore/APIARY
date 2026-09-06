@@ -2092,6 +2092,77 @@ step_technitium_provision() {
   fi
 }
 
+step_technitium_lan_route() {
+  # #3068: this host has two NICs on the same /24, and whichever one has
+  # the lower route metric wins outbound traffic regardless of which
+  # address Technitium is configured and listening on. Technitium's peer
+  # identity, zone-transfer ACLs and cluster membership are all pinned to
+  # TECHNITIUM_LAN_IP -- if the kernel actually sources LAN traffic from
+  # the *other* NIC's address, every AXFR from a real peer gets REFUSED,
+  # with a symptom (RCODE=Refused) that looks like a TSIG problem and
+  # burns time debugging the wrong layer (confirmed live, #3068). Catch
+  # the metric/interface mismatch here, before Technitium ever starts.
+  local lan_ip="$TECHNITIUM_LAN_IP"
+  local iface lan_cidr prefix probe actual_src
+  local ip_int mask base candidate route_out try try_ip a b c d default_gw
+
+  read -r iface lan_cidr < <(ip -o addr show | awk -v ip="$lan_ip" '$4 ~ "^"ip"/" {print $2, $4; exit}')
+  if [[ -z "${iface:-}" ]]; then
+    echo "no local interface holds TECHNITIUM_LAN_IP=$lan_ip" >&2
+    return 1
+  fi
+
+  # Probe an address inside the LAN's own subnet, not the default gateway.
+  # The property under test is which NIC wins the *connected* route for
+  # this /24 -- the route a peer's AXFR is answered over. A gateway probe
+  # only happens to test that while the default route stays inside the LAN;
+  # point the default route at wg0 or a WAN NIC and it reports a mismatch
+  # that has nothing to do with #3068. Broadcast is no good either: it
+  # resolves out of the local table and answers from the wrong NIC here
+  # (measured). So: first host address in the subnet, skipping any
+  # candidate the host holds itself (those route via lo and say nothing
+  # about which NIC wins).
+  prefix="${lan_cidr#*/}"
+  IFS=. read -r a b c d <<<"${lan_cidr%/*}"
+  ip_int=$(( (a << 24) | (b << 16) | (c << 8) | d ))
+  mask=$(( prefix == 0 ? 0 : ((0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF) ))
+  base=$(( ip_int & mask ))
+
+  probe=""
+  for candidate in 1 2 3 4; do
+    try=$(( base + candidate ))
+    try_ip="$(( (try >> 24) & 255 )).$(( (try >> 16) & 255 )).$(( (try >> 8) & 255 )).$(( try & 255 ))"
+    route_out="$(ip route get "$try_ip" 2>/dev/null)" || continue
+    [[ "$route_out" == local* ]] && continue
+    probe="$try_ip"
+    break
+  done
+  if [[ -z "$probe" ]]; then
+    echo "could not pick a probe address inside $lan_cidr to test the LAN route with" >&2
+    return 1
+  fi
+
+  # Non-fatal sanity note, deliberately not an assertion. The old shape of
+  # this check probed the default gateway, which also caught
+  # TECHNITIUM_LAN_IP pointing at a tunnel address (wg0) instead of the
+  # home LAN -- but it fails spuriously the moment a host's default route
+  # legitimately leaves the LAN subnet. Keep the observation, drop the
+  # false failure: the hard assertion below is about which NIC wins the
+  # LAN, which is what #3068 was.
+  default_gw="$(ip route show default | awk '{print $3; exit}')"
+  if [[ -n "$default_gw" ]]; then
+    IFS=. read -r a b c d <<<"$default_gw"
+    if (( ((((a << 24) | (b << 16) | (c << 8) | d)) & mask) != base )); then
+      echo "note: TECHNITIUM_LAN_IP=$lan_ip sits on $iface ($lan_cidr), which does not contain the default gateway $default_gw -- if this host's home LAN is really elsewhere, Technitium is bound to the wrong network (a WireGuard/tunnel address will pass the route check below and still be unreachable from LAN peers)" >&2
+    fi
+  fi
+
+  actual_src="$(ip route get "$probe" | grep -oP 'src \K\S+' | head -1)"
+  if [[ "$actual_src" != "$lan_ip" ]]; then
+    echo "LAN traffic to $probe sources from ${actual_src:-<none>}, not TECHNITIUM_LAN_IP=$lan_ip on $iface -- a second NIC on the same LAN with a lower route metric will source zone transfers from the wrong address and get every AXFR REFUSED (see #3068); fix the route metric (e.g. nmcli connection modify <conn> ipv4.route-metric <n>) so $lan_ip's interface wins" >&2
+    return 1
+  fi
+}
 step_technitium_start() {
   [[ -f /var/dockge/stacks/technitium/.env ]] || { echo "no technitium .env restored — skipping start"; return 1; }
   (cd /var/dockge/stacks/technitium && with_retry 3 15 docker compose -f compose.yml up -d --wait)
@@ -2984,6 +3055,7 @@ run_step auth-events-worker-start "Start auth-events-worker" step_auth_events_wo
 
 
 run_step technitium-provision  "Install Technitium DNS config"       step_technitium_provision
+run_step technitium-lan-route  "Assert LAN NIC owns lowest-metric route" step_technitium_lan_route
 run_step technitium-start      "Start Technitium DNS"                step_technitium_start
 run_step technitium-verify     "Resolve container and LAN"           step_technitium_verify
 run_step host-resolver-order   "Point host resolver at Technitium before public DNS" step_host_resolver_order
