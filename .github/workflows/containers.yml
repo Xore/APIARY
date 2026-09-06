@@ -197,6 +197,14 @@ jobs:
           # that step has not run on this box yet -- losing the local cache
           # is a slow build, failing here is a Containers outage.
           dir="/mnt-1/buildx-cache/${{ matrix.image }}"
+          # 2026-09-06: the box runs seven runner users, all in the
+          # github-ci-runner group, and any of them can take this row. With
+          # the default umask 022 the first one to build an image left
+          # <image> at 2755 -- group-owned but not group-writable -- so the
+          # next runner's mkdir inside it got EACCES and the row silently
+          # degraded to the type=gha cache #2822 moved off. 002 makes the
+          # dir 2775, writable by every runner.
+          umask 002
           if [ "${{ needs.ci-target.outputs.homeserver }}" = "true" ] \
              && mkdir -p "$dir" 2>/dev/null && [ -w "$dir" ]; then
             echo "from=type=local,src=$dir" >> "$GITHUB_OUTPUT"
