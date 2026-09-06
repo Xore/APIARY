@@ -522,7 +522,7 @@ grit done -a issue-<N>-coder                           # auto-commit, rebase, se
 - New files have no symbols yet: claim the neighbours you touch (the compose
   file, the README, the sibling script), and **re-run `grit init` after the
   merge** so the new symbols are indexed for the next agent.
-- Relative-path dependencies (`path = "../x"`, `-r ../requirements.txt`) break
+- Relative-path dependencies (`path = "../<crate>"`, `-r ../<file>`) break
   inside `.grit/worktrees/`; use absolute paths.
 - After any large merge to `main`, `grit init` again.
 

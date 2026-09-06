@@ -23,7 +23,7 @@ session.
 
 | what | where |
 |---|---|
-| plan | `docs/benchmarks/plans/2026-09-06-round7-unsloth-train-requant-ollama.md` — on PR #3089's branch `docs/round7-unsloth-plan` until merged (`git show origin/docs/round7-unsloth-plan:<path>`) |
+| plan | `docs/benchmarks/plans/2026-09-06-round7-unsloth-train-requant-ollama.md` — merged to `main` by PR #3089 |
 | working conventions | plan §15 (grit, rtk, gh, two-agent cap) and this file §5 |
 | live state of the benchmark host | `homeserver:/mnt-1/benchmarks/STATE-2026-09-06-round7-fold.md` |
 | coding tree | the workstation checkout `/home/xore/Github/APIARY` (grit-initialised, 101k symbols). **Never code in the homeserver's pinned clones** (`/mnt-1/benchmarks/APIARY` at a99e765, `/mnt-1/benchmarks/APIARY-round7` at 32dbdeb1): they are scoring vintages, detached on purpose, and must not move or be committed into. Operational copies of scripts are `scp`'d to `/mnt-1/benchmarks/` exactly as every `round7_*.sh` was |

@@ -82,3 +82,8 @@ tests/test_importer.py::ScanSourceSameMtimeRaceTest # era class reference; same 
 tests/test_es_consume.py # root-relative test path; the consuming doc predates the per-component split
 tests/test_claims.py # root-relative test path in docs/benchmarks/claim-pools; actual at analysis/ghidra/benchmarks/tests/test_claims.py
 tests/test_claims.py::ReviewQueueFreshnessTest # era class reference; same source as above
+
+# --- round-7 training tree, created by #3080 (epic #3079); the plan doc
+#     names where the toolchain record and the scripts will land ---
+analysis/ghidra/training # training tree the round-7 plan creates in #3080; not tracked yet
+analysis/ghidra/training/TOOLCHAIN.md # resolved-version record #3080 writes into that tree; not tracked yet
