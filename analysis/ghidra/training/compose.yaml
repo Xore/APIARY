@@ -1,0 +1,41 @@
+# The Unsloth training container (#3080, part of round 7 / #3079).
+#
+# Not a service: nothing here gets `up -d`. Every run is
+# `docker compose -f analysis/ghidra/training/compose.yaml run --rm train <cmd>`
+# so the container starts, does one job, and exits -- releasing VRAM the same
+# way the cold benchmark protocol assumes. Deliberately no `restart:` policy.
+#
+# Image pinned by digest -- see TOOLCHAIN.md for how it was resolved and how
+# to re-verify it. Never `unsloth/unsloth:latest` (floats).
+#
+# GPU: RTX 4000 Ada only, by UUID, exactly like
+# analysis/ghidra/docker-compose.ghidra.gpu.yml. The Quadro P2200 in the same
+# box belongs to the Windows sandbox VM (#1539) and must never be handed to
+# this container -- never `count: all`, never `--gpus all`.
+#
+# No docker socket, no /var/dockge, no sandbox mounts, loopback only. Model
+# files and conversion tools are untrusted supply-chain inputs (#160).
+#
+# HF_HOME points at the shared cache so repeated runs don't re-download base
+# weights. The HF token itself is NOT wired in here -- it is a 0600 file on
+# the host (never in compose, never in git); pass it at run time with
+# `--env-file /path/to/hf-token.env` on the `run` command.
+services:
+  train:
+    image: docker.io/unsloth/unsloth@sha256:84511bee77058158ea48c625b490ad0edae1ea10005c459a4a9a10d0569e5642
+    ipc: host
+    ulimits:
+      memlock: -1
+    working_dir: /workspace
+    environment:
+      HF_HOME: /hf-cache
+    volumes:
+      - /mnt-1/training:/workspace
+      - /mnt-1/hf-cache:/hf-cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["GPU-18a00c7e-670a-c305-a2aa-20e3a71917a3"]
+              capabilities: [gpu]

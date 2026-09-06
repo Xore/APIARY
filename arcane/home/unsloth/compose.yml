@@ -1,0 +1,76 @@
+# unsloth -- JupyterLab remote access to the round-7 training work area (#3080).
+#
+# This is the *interactive* leg. The batch leg lives in
+# analysis/ghidra/training/compose.yaml and stays `run --rm` only (no restart,
+# no daemon) so it releases VRAM between cold-benchmark legs. Nothing here
+# changes that file; this stack is a second, separate way into the same
+# /var/training directory and the same HF cache.
+#
+# Deployed through Arcane like every other homeserver stack (manifest entry
+# "unsloth" in arcane/manifests/home-production.json). Never `docker compose
+# up` by hand -- see analysis/ghidra/training/TOOLCHAIN.md.
+#
+# Deliberately NO `restart:` policy: the operator starts this stack in Arcane
+# when they want the notebook and stops it again. The cold benchmark protocol
+# (round7_coldrun.sh) needs an empty card, so this stack must be stopped while
+# a cold leg runs.
+#
+# Same image, same digest as the batch leg -- `core` (Apache-2.0, no Studio).
+# The `core` image has no service manager, so JupyterLab is started by the
+# explicit `command:` below; with no command the image just runs `python` and
+# exits.
+#
+# No docker socket, no /var/dockge, no sandbox mounts.
+
+name: unsloth
+
+services:
+  jupyter:
+    image: docker.io/unsloth/unsloth@sha256:84511bee77058158ea48c625b490ad0edae1ea10005c459a4a9a10d0569e5642
+    container_name: hp-unsloth-jupyter
+    ipc: host
+    ulimits:
+      memlock: -1
+    working_dir: /workspace
+    # LAN only. UNSLOTH_BIND is the homeserver's LAN address, set in this
+    # stack's untracked .env on the box (see .env.example) -- the real address
+    # is deployment-specific and never committed. Never 0.0.0.0, never the VPS.
+    # The fallback is the WireGuard address, same as every honeypot stack's
+    # HP_BIND: unreachable from the LAN, but safe if .env is missing.
+    # 8899 verified free on the LAN address (only :53, :5380, :53443 bound).
+    # The 0.0.0.0 in `command:` below is the *container's* namespace, not the
+    # host -- the host side of the publish is what limits reachability.
+    ports:
+      - "${UNSLOTH_BIND:-10.8.0.2}:8899:8888"
+    environment:
+      # Jupyter's own native knob (ServerApp.token). LAN-only lab box, plain
+      # value accepted by the operator. JUPYTER_PASSWORD is a Studio-image
+      # variable and is not read when `jupyter lab` is invoked directly.
+      JUPYTER_TOKEN: unsloth
+      # Shared cache, same as the batch leg -- don't re-download base weights.
+      # Overrides the image default of /workspace/.cache/huggingface.
+      HF_HOME: /hf-cache
+    command:
+      - jupyter
+      - lab
+      - --ip=0.0.0.0
+      - --port=8888
+      - --no-browser
+      - --allow-root
+      - --ServerApp.root_dir=/workspace
+    volumes:
+      # /mnt-1/training is a symlink to /var/training; mount the real path.
+      - /var/training:/workspace
+      - /mnt-1/hf-cache:/hf-cache
+    # RTX 4000 Ada only, by UUID, exactly like the batch leg and
+    # analysis/ghidra/docker-compose.ghidra.gpu.yml. The Quadro P2200 in the
+    # same box belongs to the Windows sandbox VM (#1539) -- never `count: all`.
+    # The card is needed here too: the image refuses to start without a GPU
+    # unless UNSLOTH_ALLOW_CPU=1, and a notebook that cannot train is useless.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["GPU-18a00c7e-670a-c305-a2aa-20e3a71917a3"]
+              capabilities: [gpu]
