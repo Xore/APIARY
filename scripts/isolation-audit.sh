@@ -377,17 +377,35 @@ fi
 
 sock_path=/var/run/libvirt/libvirt-sock
 if [ -S "$sock_path" ]; then
-  # The security-relevant property is "root:libvirt owned, no world access" --
-  # whether the group bit also carries execute (770 vs 660) varies by distro
-  # default and is meaningless for a socket anyway (the x bit isn't
-  # consulted for AF_UNIX connect()), so both are accepted.
+  # #2976: two different, both legitimate, access-control models exist for
+  # this socket, and the check used to only recognize one of them.
+  #
+  #   Debian/Ubuntu: unix_sock_group defaults to "libvirt" and the socket
+  #   ships root:libvirt with no world access -- Unix permissions ARE the
+  #   access boundary, so "world-accessible" would be a real hole there.
+  #
+  #   RHEL/Fedora/Rocky: libvirtd.socket ships SocketMode=0666, root:root,
+  #   by vendor default -- confirmed live on the rebuilt homeserver
+  #   (2026-09-05), not a local misconfiguration. Access control here is
+  #   polkit's job instead: /usr/share/polkit-1/rules.d/50-libvirt.rules
+  #   auto-allows only the "libvirt" group for org.libvirt.unix.manage,
+  #   and any other caller falls through to the packaged policy's default
+  #   (auth_admin_keep -- requires authentication, denied outright with no
+  #   agent). A wide-open socket mode is not a gap on this distro family;
+  #   treating it as one hard-FAILs every RHEL-family host regardless of
+  #   its actual posture, which is the exact false-positive #2951 already
+  #   fixed for a different socket.
   mode=$(stat -c '%a' "$sock_path" 2>/dev/null)
   owner=$(stat -c '%U:%G' "$sock_path" 2>/dev/null)
   other_bits=${mode: -1}
   if [ "$owner" = "root:libvirt" ] && [ "$other_bits" = "0" ]; then
     ok "libvirt socket is $mode $owner (root:libvirt, no world access)"
+  elif systemctl is-active --quiet polkit 2>/dev/null \
+    && [ -f /usr/share/polkit-1/rules.d/50-libvirt.rules ] \
+    && grep -q 'org.libvirt.unix.manage' /usr/share/polkit-1/rules.d/50-libvirt.rules 2>/dev/null; then
+    ok "libvirt socket is $mode $owner, access gated by the active polkit libvirt rule (RHEL-family default, not a Unix-permission boundary)"
   else
-    bad "libvirt socket is $mode $owner -- expected root:libvirt with no world access"
+    bad "libvirt socket is $mode $owner -- expected root:libvirt with no world access, or an active polkit rule gating org.libvirt.unix.manage"
   fi
 else
   bad "libvirt socket not found at $sock_path"
