@@ -272,8 +272,8 @@ CAP_NOT_YET_HARDENED=(
   # configured but, confirmed live via /proc/1/status, never actually
   # takes effect in this offline-import mode -- the process stays uid 0
   # throughout, so SETUID/SETGID were never the question; a separate,
-  # unrelated gap in Arkime's own privilege-drop path, flagged here and
-  # not otherwise acted on).
+  # unrelated gap in Arkime's own privilege-drop path, filed as #3074
+  # and not otherwise acted on here).
   #
   # Those eleven will FAIL here (deploy drift, same shape as #2877 and as
   # #2825 round 2) until the two projects that own them -- honeypot-elk

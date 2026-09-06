@@ -585,7 +585,8 @@ services:
     # -R/--monitor/--skip import mode -- it never actually calls setuid/
     # setgid, so SETUID/SETGID are not needed for that (a separate,
     # unrelated gap in Arkime's own privilege-drop path, not something
-    # cap_drop can affect either way -- flagged, not fixed, here). What
+    # cap_drop can affect either way -- filed as #3074, not fixed here).
+    # What
     # the process actually does as uid 0 -- reading arkime-raw (owned
     # uid/gid 998, but world-readable 644/755, so no DAC_OVERRIDE needed)
     # and writing arkime-pcap (owned root:root, so normal owner
