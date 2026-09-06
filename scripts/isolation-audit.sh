@@ -361,11 +361,29 @@ if [ -n "${containers:-}" ]; then
     # before naming its own owner would emit a false hygiene line -- in the
     # one check whose whole value is that its hygiene lines can be trusted.
     owner_issue=$(grep -oE '^#[0-9]+' <<<"$listed_reason" | head -1)
+    # ...which only works if that convention holds, so the convention is
+    # checked too: the tiering above makes an owner issue mandatory for a
+    # tracked gap, and an entry that does not open with one is now skipped
+    # silently rather than reported. CAP_EXCEPTIONS are exempt by
+    # definition -- they are permanent and owned by nobody.
+    if [ -z "$owner_issue" ] && cap_listed_reason "$listed_name" "${CAP_NOT_YET_HARDENED[@]}" >/dev/null; then
+      info "list hygiene: $listed_name is a tracked gap whose reason does not open with its owner issue -- start it with #NNNN, or its owner can never be checked for closure"
+    fi
     if [ -n "$owner_issue" ] && command -v gh >/dev/null 2>&1; then
       # timeout: the only network call in a script that otherwise talks to
       # nothing but the local docker socket. A hung gh must not stall the
       # audit (diagnostics.yml runs it and exits on its status).
-      owner_state=$(timeout 10 gh issue view "${owner_issue#\#}" --json state -q .state 2>/dev/null) || owner_state=""
+      # --repo is not optional, measured rather than assumed: the copy that
+      # matters is the deployed one, and it runs with no usable git context
+      # in either place it runs from. diagnostics.yml deliberately has no
+      # actions/checkout, and /opt/stacks/apiary resolves into root-owned
+      # /var/dockge/stacks/apiary, which git refuses as dubious ownership.
+      # Without --repo, gh cannot resolve a repository and this whole check
+      # silently never fires -- exactly the quiet nothing it exists to end.
+      # GITHUB_REPOSITORY is set for free under Actions; the default covers
+      # the root systemd timer.
+      owner_state=$(timeout 10 gh issue view "${owner_issue#\#}" \
+        --repo "${GITHUB_REPOSITORY:-Xore/APIARY}" --json state -q .state 2>/dev/null) || owner_state=""
       if [ "$owner_state" = "CLOSED" ]; then
         info "list hygiene: $listed_name names $owner_issue as its owner issue, and $owner_issue is closed -- repoint this entry at whatever now tracks the gap, or the list will silently rot the way #2825's closure did"
       fi
