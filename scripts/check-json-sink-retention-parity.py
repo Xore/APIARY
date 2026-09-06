@@ -309,6 +309,25 @@ ROWS = [
                         "(elasticpot.json.<YYYY-MM-DD> generations present "
                         "back to 2026-08-15 on the homeserver, #2826)",
     },
+    # #2892: event_log.json had neither half of the #120 contract --
+    # internal/logger/logger.go's New() os.OpenFile()s it once and hands
+    # the raw *os.File straight to cblog's EventLogger.SetOutput(), with no
+    # size check and no rotation flag anywhere on galah's CLI.
+    # galah/json_log_rotation_patch.py gives it the same close/rename/reopen
+    # self-rotation dionaea/mailoney/conpot's own source patches use for
+    # their sinks, inserted as a small io.Writer wrapper since Go has no
+    # string-replace-a-method-body shape as convenient as those three
+    # Python targets. Verified live: applying the patch against the actual
+    # pinned upstream commit, `go build`ing the real cmd/galah binary, and
+    # driving internal/logger.New()+LogEvent() through it directly all
+    # succeeded, producing rotated event_log.json.<timestamp> generations
+    # once GALAH_JSON_LOG_MAX_BYTES was exceeded.
+    {
+        "dir": "/logs/galah",
+        "globs": ["'event_log.json.[0-9]*'"],
+        "writer": ("arcane/home/honeypot-galah/galah",
+                   ["GALAH_JSON_LOG_MAX_BYTES", "func (w *rotatingWriter) rotate()"]),
+    },
 ]
 
 # Mounted log directories that are deliberately outside the two-sided
@@ -424,32 +443,37 @@ KNOWN_UNCOVERED = {
     # rows still here, so they were repointed at its successor rather than
     # left naming a closed issue -- the contract above is that every entry
     # names the issue that tracks it. The six conpot rows moved to ROWS
-    # above (conpot/json_log_rotation_patch.py, #2892) -- the remaining
-    # three are vendored binaries (C for sentrypeer, Go for beelzebub/galah)
-    # whose JSON writer has no in-tree source this checker's ROWS
-    # writer-proof mechanism can grep a token from, and none of them
-    # self-rotate on their own -- the sink genuinely appends forever today.
-    # The established fix shape already exists three times in this repo now
-    # (dionaea/log_rotation_patch.py, mailoney/json_log_patch.py,
-    # conpot/json_log_rotation_patch.py: an exact-match source patch applied
+    # above (conpot/json_log_rotation_patch.py, #2892), and so did galah
+    # (galah/json_log_rotation_patch.py, #2892: a Go io.Writer wrapper
+    # patched into internal/logger/logger.go's New() at build time, same
+    # close/rename/reopen shape as the Python patches, verified live by
+    # `go build`ing the real pinned upstream commit and driving
+    # logger.New()+LogEvent() through it). sentrypeer and beelzebub remain:
+    # sentrypeer is a vendored C binary whose JSON writer
+    # (SENTRYPEER_JSON_LOG_FILE's consumer) has no in-tree source this
+    # checker's ROWS writer-proof mechanism can grep a token from, and
+    # beelzebub is a vendored Go binary (core.yaml's logsPath) not built
+    # from source in this tree either -- neither self-rotates on its own,
+    # the sink genuinely appends forever today. The established fix shape
+    # already exists four times in this repo now (dionaea/log_rotation_patch.py,
+    # mailoney/json_log_patch.py, conpot/json_log_rotation_patch.py,
+    # galah/json_log_rotation_patch.py): an exact-match source patch applied
     # at build time that wraps the writer's file handle with the same
     # close/rename/reopen self-rotation multipot/http-honeypot's Go loggers
-    # use, plus a matching pruner find line here). sentrypeer/beelzebub/galah
-    # would each need the equivalent patch in their own language against
-    # their own git-cloned build stage. None of the three were attempted in
-    # this pass for lack of session budget to write, build and verify three
-    # separate patches across two languages -- left as debt rather than
-    # guessed at.
+    # use, plus a matching pruner find line here. sentrypeer/beelzebub would
+    # each need the equivalent patch in their own git-cloned build stage
+    # (C for sentrypeer, Go for beelzebub) -- neither was attempted in this
+    # pass for lack of session budget to write, build and verify two more
+    # separate patches -- left as debt rather than guessed at.
     # The sizes below were measured on the homeserver on 2026-09-02 and are
     # illustrative, not a bound: they had already drifted a day later
-    # (sentrypeer 160MB, beelzebub 82MB, galah 192KB), and #1609's rebuild
-    # resets every one of them to zero without changing anything this ledger
-    # cares about. What puts these three rows here is that nothing bounds
-    # them, not how large they happen to be on a given day -- so do not do
-    # arithmetic on these numbers or treat them as a backlog total.
+    # (sentrypeer 160MB, beelzebub 82MB), and #1609's rebuild resets both of
+    # them to zero without changing anything this ledger cares about. What
+    # puts these rows here is that nothing bounds them, not how large they
+    # happen to be on a given day -- so do not do arithmetic on these
+    # numbers or treat them as a backlog total.
     "/logs/sentrypeer": "sentrypeer.json, 94MB and growing, vendored C writer, no self-rotation knob found in SENTRYPEER_JSON_LOG_FILE's consumer (#2892)",
     "/logs/beelzebub": "beelzebub.json, 81MB and growing, vendored Go writer (core.yaml's logsPath), no rotation flag in beelzebub's CLI (#2892)",
-    "/logs/galah": "event_log.json (157KB -- small only because galah sees little traffic, not because anything bounds it), vendored Go writer (ENTRYPOINT's -o flag), no rotation flag exposed (#2892)",
 }
 
 # #2882: sinks that live in a named Docker volume rather than a

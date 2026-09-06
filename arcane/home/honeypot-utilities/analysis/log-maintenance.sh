@@ -176,6 +176,10 @@ while true; do
   find /logs/conpot-iec104 -maxdepth 1 -name 'conpot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
   find /logs/conpot-guardian -maxdepth 1 -name 'conpot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
   find /logs/conpot-kamstrup -maxdepth 1 -name 'conpot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  # #2892: galah/json_log_rotation_patch.py gives event_log.json the same
+  # close/rename/reopen self-rotation at GALAH_JSON_LOG_MAX_BYTES, digit-
+  # leading .<stamp>[.N] suffix -- same shape as the conpot rows above.
+  find /logs/galah -maxdepth 1 -name 'event_log.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
 
   sleep "$interval"
 done
