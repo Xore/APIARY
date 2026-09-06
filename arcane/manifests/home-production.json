@@ -334,5 +334,14 @@
     "autoSync": false,
     "syncDirectory": true,
     "syncInterval": 300
+  },
+  {
+    "syncName": "unsloth",
+    "gitRepo": "apiary",
+    "branch": "production",
+    "dockerComposePath": "arcane/home/unsloth/compose.yml",
+    "autoSync": false,
+    "syncDirectory": true,
+    "syncInterval": 300
   }
 ]

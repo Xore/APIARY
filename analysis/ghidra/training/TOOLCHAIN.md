@@ -108,6 +108,59 @@ GGUF sha256, Ollama digest), whether the template diff was accepted, the
 llama.cpp image used, and a timestamp. Never `ollama create --quantize` --
 q4_K_M/q4_K_S/q8_0 only, no imatrix, not the quality path.
 
+## Remote access (Arcane)
+
+The interactive half is a **separate Arcane stack**, `arcane/home/unsloth/compose.yml`
+(manifest entry `unsloth` in `arcane/manifests/home-production.json`). It runs
+JupyterLab out of the same image digest, mounted on the same work area, so the
+batch leg above keeps its `run --rm` / no-restart / no-daemon semantics
+untouched.
+
+| | |
+|---|---|
+| URL | `http://192.168.42.250:8899` |
+| password (Jupyter token) | `unsloth` |
+| container port | 8888 (`JUPYTER_PORT` default) |
+| mounts | `/var/training` → `/workspace`, `/mnt-1/hf-cache` → `/hf-cache` |
+
+**LAN only.** The publish is `192.168.42.250:8899:8888` — the homeserver's LAN
+address, reachable from the LAN and nowhere else. Never `0.0.0.0`, never the
+VPS, never a Traefik router. The `--ip=0.0.0.0` in the container's `command:`
+is the container's own namespace; the host side of the publish is what limits
+reachability. 8899 was verified free on that address (only `:53`, `:5380`,
+`:53443` were bound). There is no TLS and the token is a plain value in git —
+that is the operator's explicit call for a LAN-only lab box; do not expose it
+further.
+
+The stack has **no `restart:` policy** on purpose: the operator starts it in
+Arcane when the notebook is wanted and stops it again. It reserves the same
+RTX 4000 Ada by UUID as the batch leg (the image refuses to start without a
+GPU), so **stop this stack before running a cold benchmark leg** —
+`round7_coldrun.sh` assumes an empty card. Confirm with
+`nvidia-smi --query-compute-apps=pid,used_memory --format=csv`.
+
+### Deploying it
+
+Through the Arcane API, like every other homeserver stack — **never**
+`docker compose up` by hand on the box. The image is pulled by digest, so
+there is nothing to build:
+
+```
+# 1. sync the stack directory from git (syncName "unsloth")
+curl -N -m 3600 -X POST -H "X-API-Key: $ARCANE_KEY" \
+  http://10.8.0.2:3552/environments/0/gitops-syncs/$SYNC_ID/sync
+
+# 2. redeploy the project (no build step -- image comes from the registry)
+curl -N -m 3600 -X POST -H "X-API-Key: $ARCANE_KEY" \
+  http://10.8.0.2:3552/environments/0/projects/$PROJECT_ID/redeploy
+```
+
+Look up `$SYNC_ID` / `$PROJECT_ID` with
+`GET /environments/0/gitops-syncs?limit=100` (it paginates at 20). Both calls
+stream and must run to completion — a truncated stream aborts the operation
+server-side; `{"done":true}` is the terminal frame. Then check
+`docker ps | grep hp-unsloth-jupyter` and `curl -sI http://192.168.42.250:8899`.
+
 ## No smoke test yet
 
 The GPU is busy with the round-7 cold re-run (`round7_coldrun.sh`, #3079).
