@@ -14,7 +14,30 @@ calibration-set hashes, decontamination reports.
 
 ---
 
-## 1. Where we are — measured, not assumed (2026-09-06)
+## 0. What changed after this plan was first written (2026-09-06, afternoon)
+
+The operator folded the #1947 cold re-run into round 7 instead of letting it
+spend 2–4 GPU-days on the saturated 14-case pin. Done the same day, all of it
+committed as `analysis/ghidra/benchmarks/corpus/round7_*.sh` and recorded in
+`/mnt-1/benchmarks/STATE-2026-09-06-round7-fold.md`:
+
+| step | result |
+|---|---|
+| old-pin cold re-run stopped | after 13 models / 52 result files in `1947cold/` — valid cold cells on the OLD pin, kept, marked `ABORTED-2026-09-06.txt`, never extended |
+| phase 3 (#2245) | had completed at 10:26Z; `ornith-35b-selfquant:Q4_K_M` scored **0 on all four runs** = UNMEASURABLE on that pin, re-measured in round 7 |
+| round-7 pin | second clone `APIARY-round7`, detached at **`32dbdeb1`** — the a99e765 clone untouched, its transcripts mirrored first |
+| corpus | 17-case corpus rebuilt in the provenance container, byte-identical to the pinned manifest → `corpus-round7/` |
+| Tier B cache | `tierb-cache-round7/`, 17 entries, 0 errors, Ghidra 11.3.2 |
+| smoke | `qwen2.5:7b-instruct-q4_K_M`: **Tier A 70/83, Tier B 69/83**, 17 cases, 0 empty answers — **the max is 83, not 79** |
+| **launched 14:08Z** | `round7_coldrun.sh` → `sweep_extra.sh`, 96 tags, cold, N=2 → 3 → 5, results `round7/`, log `round7.log`, VRAM sampler beside it. Expect 2–4 days |
+
+So the "GPU frees" line in §9 now means **"when `round7_coldrun.sh` completes"**,
+and the round-7 ghidra-slot baseline is no longer future work for #3087 — it
+is running. What #3087 still owns: the sessions/Rev·Deck legs
+(`slots_sweep.sh`), pooled-claims rescoring from the transcripts,
+`chain_round7.sh` for the training legs, and the write-up.
+
+## 1. Where we are — measured, not assumed (2026-09-06, morning)
 
 ### 1.1 The #1947 sweep is finishing
 
@@ -85,7 +108,7 @@ Neither is fixed by pulling one more tag. Both are the subject of this round.
 | "bigger models" | requant the 27–35 B class to GPU-resident **and** the 100 B+ RAM-offload class (123 B / 218 B) | §7 R2; GLM-4.6 357 B stays a measured rejection |
 | training data | a separate, decontaminated corpus; real captured ES data allowed as input, never leaves the host; captured slices use a **local teacher**; synthetic slices may use **open-weight frontier teachers via OpenRouter** | §6 |
 | compute | **local card only**, queued behind the cold re-run; above 14 B only at the VRAM edge (#3088, gated) | §9 |
-| harness for round 7 | **main's 17-case / 79 rubric + pooled claims + all three slots, one new pin** | §8; `a99e765` numbers become historical context |
+| harness for round 7 | **main's 17-case / 83 rubric + pooled claims + all three slots, one new pin** | §8; `a99e765` numbers become historical context |
 
 ---
 
@@ -276,7 +299,9 @@ quant and against phase 3's plain level at matched size (isolates the recipe).
 
 - **Pin.** `main` at the commit the round starts on; recorded in every result
   and the write-up; never moved mid-round. `resume_phases.sh`-style guard.
-- **Ghidra slot.** `record_baseline.py --tier A` / `--tier B`, 17 cases / 79,
+- **Ghidra slot.** `record_baseline.py --tier A` / `--tier B`, 17 cases / **83**
+  (max per case is `required_groups + 1`; the resume plan's "79" was a guess —
+  the smoke run on this pin measured 70/83 A, 69/83 B for `qwen2.5:7b`),
   `tierb-cache` regenerated for 17 cases on the current `ghidra-ghidra-1`
   (`GHIDRA_VERSION` exported — #2983), injection gate v3 paired verdicts,
   **plus** pooled-claims scoring with `claims.py` against `tier-a-v1.json`
@@ -432,10 +457,20 @@ this round's control), #1804, #2279 / #2985, #356 / #1523, #2969, #3023.
 ```bash
 # is the card free, and who holds it
 ssh homeserver 'nvidia-smi --query-compute-apps=pid,used_memory --format=csv; \
-  pgrep -af "coldrun.sh|sweep_extra.sh|record_baseline.py|requant_sweep.sh|chain_"'
+  pgrep -af "round7_coldrun|coldrun.sh|sweep_extra.sh|record_baseline.py|requant_sweep.sh|chain_"'
 
-# state of the cold re-run (must be complete before any training leg)
-ssh homeserver 'tail -5 /mnt-1/benchmarks/coldchain.log; ls /mnt-1/benchmarks/1947cold/ | wc -l'
+# state of the round-7 cold baseline (must be complete before any training leg)
+ssh homeserver 'tail -20 /mnt-1/benchmarks/round7.log'      # must show BOTH "done A" and "done B" lines
+ssh homeserver 'ls /mnt-1/benchmarks/round7/tierA_*.json | wc -l; ls /mnt-1/benchmarks/round7/tierB_*.json | wc -l'
+# 96 tags x 2 tiers x N>=2; complete = every roster tag has both tier files or an UNMEASURED marker
+# stop, in order (sweep_extra.sh TRAPS TERM and keeps going -- it needs KILL):
+ssh homeserver 'pkill -TERM -f "bash /mnt-1/benchmarks/round7_coldrun[.]sh"; \
+  pkill -KILL -f "bash /mnt-1/benchmarks/sweep_extra[.]sh"; pkill -TERM -f "record_baseline[.]py"; \
+  docker start ghidra-revdeck-1'   # then quarantine any partial result in round7/ and ollama stop the tag
+
+# prepare the pin again from scratch (resume-safe; clone -> corpus -> Tier B cache), then smoke, then launch
+ssh homeserver 'bash /mnt-1/benchmarks/round7_prepare.sh && bash /mnt-1/benchmarks/round7_smoke.sh'
+ssh homeserver 'bash /mnt-1/benchmarks/round7_launch.sh'
 
 # training work area layout (created by #3080)
 #   /mnt-1/training/corpus-v1/   /mnt-1/training/calib/   /mnt-1/training/runs/<run>/
@@ -487,7 +522,7 @@ grit done -a issue-<N>-coder                           # auto-commit, rebase, se
 - New files have no symbols yet: claim the neighbours you touch (the compose
   file, the README, the sibling script), and **re-run `grit init` after the
   merge** so the new symbols are indexed for the next agent.
-- Relative-path dependencies (`path = "../x"`, `-r ../requirements.txt`) break
+- Relative-path dependencies (`path = "../<crate>"`, `-r ../<file>`) break
   inside `.grit/worktrees/`; use absolute paths.
 - After any large merge to `main`, `grit init` again.
 

@@ -60,6 +60,12 @@ LIVE_WORKERS=${LIVE_WORKERS:-"hp-llm-worker ghidra-revdeck-1"}
 # still protects the filesystem that holds the Docker volumes and the ES data.
 KEEP_WEIGHTS_ABOVE_GB=${KEEP_WEIGHTS_ABOVE_GB:-1000}
 
+# #3087: round 7 scores on its own pin with its own 17-case Tier B cache and
+# its own operator tag, so both are overridable; the defaults are the a99e765
+# sweep's, unchanged. round7_coldrun.sh sets them.
+GHIDRA_CACHE=${GHIDRA_CACHE:-/mnt-1/benchmarks/tierb-cache}
+OPERATOR=${OPERATOR:-bg-1947extra}
+
 # #2738: fail fast on any roster entry Ollama's client-side hf.co name
 # validation would reject before a sweep wastes time discovering it --
 # see /mnt-1/benchmarks/oversized-model-aliases.tsv for the bisection and
@@ -151,7 +157,7 @@ do_run() { # tier slug tag n
   local tier="$1" slug="$2" tag="$3" n="$4"
   local out="$BASE/tier${tier}_${slug}_run${n}.json"
   [ -f "$out" ] && { echo "$(date -u +%H:%M:%S) skip $tier $slug run$n"; return 0; }
-  local extra=""; [ "$tier" = "B" ] && extra="--ghidra-cache /mnt-1/benchmarks/tierb-cache"
+  local extra=""; [ "$tier" = "B" ] && extra="--ghidra-cache $GHIDRA_CACHE"
   local try=1
   while [ $try -le $MAXTRY ]; do
     docker exec ghidra-ollama-1 ollama stop "$tag" >/dev/null 2>&1
@@ -159,7 +165,7 @@ do_run() { # tier slug tag n
     echo "$(date -u +%H:%M:%S) start $tier $slug run$n try$try"
     timeout 10800 python3 analysis/ghidra/benchmarks/corpus/record_baseline.py \
       --tier "$tier" $extra --model "$tag" \
-      --operator bg-1947extra --provenance synthetic \
+      --operator "$OPERATOR" --provenance synthetic \
       --output "$out" > "$BASE/logs/x_tier${tier}_${slug}_run${n}_try${try}.log" 2>&1
     local rc=$?
     if [ $rc -eq 0 ] && [ -f "$out" ]; then
