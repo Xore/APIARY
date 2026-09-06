@@ -59,6 +59,32 @@ func TestGETLogonHTMLQueryStringIsCapturedInLoggedEvent(t *testing.T) {
 	}
 }
 
+func TestGETLogonHTMLWithoutQueryOmitsQueryField(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "out.json")
+	h := &webvpnHandler{log: newLogger(path), port: 8443}
+
+	req := httptest.NewRequest("GET", "/+CSCOE+/logon.html", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := strings.Split(strings.TrimSpace(string(data)), "\n")
+	last := line[len(line)-1]
+	if strings.Contains(last, `"query"`) {
+		t.Fatalf("omitempty should drop the query key when there is no query string: %s", last)
+	}
+	var e event
+	if err := json.Unmarshal([]byte(last), &e); err != nil {
+		t.Fatal(err)
+	}
+	if e.Query != "" {
+		t.Fatalf("Query = %q, want empty", e.Query)
+	}
+}
+
 func TestGETLogonFailureServesFailurePage(t *testing.T) {
 	req := httptest.NewRequest("GET", "/+CSCOE+/logon.html?reason=1", nil)
 	w := httptest.NewRecorder()
