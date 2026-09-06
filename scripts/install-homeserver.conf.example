@@ -138,6 +138,22 @@ BACKUP_HOST_PATH="<PATH_ON_BACKUP_HOST>" # e.g. /home/<user>/honeypot-backups/<d
 # happens to prefer.
 TECHNITIUM_LAN_IP="<HOME_LAN_IP>"         # e.g. 192.168.1.10
 
+# Optional. Set if this fleet has a second, externally-managed Technitium
+# node (e.g. a workstation running its own instance) that is the PRIMARY --
+# the master where zones are actually edited, with the node this script
+# provisions running as its secondary. The host resolver order (#2974) is
+# built primary-first, so this is listed ahead of TECHNITIUM_LAN_IP. Leave
+# unset if there is only the one node this script provisions.
+TECHNITIUM_PRIMARY_IP=""                  # e.g. 192.168.1.5
+
+# Optional, and off by default. Comma-separated public resolvers to append
+# AFTER the Technitium nodes in the host resolver order (#2974). Only set
+# this if outbound port 53 to the internet actually works on this network:
+# where it is blocked (this fleet's LAN, confirmed live 2026-09-05) a public
+# entry is not a fallback, it is a full resolver timeout charged to every
+# lookup that has to reach past Technitium.
+HOST_RESOLVER_PUBLIC_FALLBACK=""          # e.g. 1.1.1.1,8.8.8.8
+
 # --- Sandbox VM restore (GHOSTS + Windows detonation) ----------------------
 # Optional and gated separately from everything above: this is a 170G+
 # transfer (golden images, ISOs, VM disks) and a genuinely separate
