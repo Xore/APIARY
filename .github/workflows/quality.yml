@@ -811,6 +811,14 @@ jobs:
               # actually fires -- skips (not fails) if `go` isn't on PATH.
               python arcane/home/honeypot-galah/galah/tests/test_json_log_rotation_patch.py
 
+          - name: Beelzebub JSON log rotation patch (#2892)
+            home: true
+            run: |
+              # Same shape as the Galah row above (Go target, `go run`s the
+              # extracted rotatingWriter, skips without `go`) -- the other
+              # vendored Go sensor, patched in internal/builder/builder.go.
+              python arcane/home/honeypot-beelzebub/beelzebub/tests/test_json_log_rotation_patch.py
+
           - name: HellPot X-Forwarded-For trust patch (#1876)
             home: true
             run: |

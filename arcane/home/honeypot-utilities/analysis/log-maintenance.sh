@@ -180,6 +180,9 @@ while true; do
   # close/rename/reopen self-rotation at GALAH_JSON_LOG_MAX_BYTES, digit-
   # leading .<stamp>[.N] suffix -- same shape as the conpot rows above.
   find /logs/galah -maxdepth 1 -name 'event_log.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  # #2892: beelzebub/json_log_rotation_patch.py, same wrapper as galah's
+  # (BEELZEBUB_JSON_LOG_MAX_BYTES, digit-leading .<stamp>[.N] suffix).
+  find /logs/beelzebub -maxdepth 1 -name 'beelzebub.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
 
   sleep "$interval"
 done
