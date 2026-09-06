@@ -522,11 +522,12 @@ docker run -d --name "${proxy_outage}" --network "${network}" -p "127.0.0.1:${pr
   -e OAUTH2_PROXY_OIDC_EMAIL_CLAIM=preferred_username \
   -e OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL=true \
   -e OAUTH2_PROXY_COOKIE_REFRESH=5s \
-  -e OAUTH2_PROXY_COOKIE_EXPIRE=20s \
+  -e OAUTH2_PROXY_COOKIE_EXPIRE=45s \
   quay.io/oauth2-proxy/oauth2-proxy:v7.15.3@sha256:10a1165743a192e1940b4708fb9647027185ce11a681a1c5519b442ff7f1f561 >/dev/null
 wait_for_proxy_ready "${proxy_outage}"
 
 read -r outage_login_callback outage_login_protected <<< "$(drive_login_against "${proxy_outage}" authorized-user 'TestPass123!' jar-outage.txt)"
+outage_login_epoch=$(date +%s)
 if [ "${outage_login_callback}" != "302" ] || [ "${outage_login_protected}" != "200" ]; then
   bad "outage-scenario login did not even succeed: callback=${outage_login_callback} protected=${outage_login_protected}"
 else
@@ -543,11 +544,18 @@ else
   fi
 
   # 9a continued: past the 5s refresh interval (but still well inside the
-  # 20s COOKIE_EXPIRE this proxy instance uses), the next request must
+  # 45s COOKIE_EXPIRE this proxy instance uses), the next request must
   # attempt a refresh against the now-unreachable Keycloak, fail, and
   # STILL be granted -- the fail-open behavior #1178 accepted as a
   # tradeoff, confirmed still holding within the cookie's own lifetime.
-  sleep 8
+  # Sleep to an absolute deadline measured from login, not a flat
+  # duration stacked on top of whatever the login/disconnect/curl round
+  # trips above already cost -- on a loaded runner those alone can eat
+  # several seconds, and a flat "sleep 8" here previously let that drift
+  # push the check past a too-tight COOKIE_EXPIRE and fail spuriously.
+  past_refresh_target=$((outage_login_epoch + 15))
+  past_refresh_remaining=$((past_refresh_target - $(date +%s)))
+  [ "${past_refresh_remaining}" -gt 0 ] && sleep "${past_refresh_remaining}"
   past_refresh_status=$(docker run --rm --network "${network}" -v "${flow_dir}:/w" curlimages/curl:8.21.0@sha256:7c12af72ceb38b7432ab85e1a265cff6ae58e06f95539d539b654f2cfa64bb13 \
     curl -s -o /dev/null -w '%{http_code}' -b "/w/jar-outage.txt" "http://${proxy_outage}:4180/")
   if [ "${past_refresh_status}" = "200" ]; then
@@ -556,14 +564,16 @@ else
     bad "expected the gateway to fail open (200) during a network-level Keycloak outage while still within COOKIE_EXPIRE -- got ${past_refresh_status} instead; if this gateway's behavior genuinely changed, update #1178 and this comment together"
   fi
 
-  # 9b: #1178's actual fix -- past this instance's 20s COOKIE_EXPIRE (still
+  # 9b: #1178's actual fix -- past this instance's 45s COOKIE_EXPIRE (still
   # mid-outage, kc still disconnected), the cookie's own absolute lifetime
   # has now lapsed regardless of the refresh cadence. This is the bound
   # that replaced production's old 12h exposure with 30m: the session must
   # now be denied, proving the new OAUTH2_PROXY_COOKIE_EXPIRE setting
   # actually caps the fail-open window rather than just being configured
-  # and never verified.
-  sleep 14
+  # and never verified. Same absolute-deadline approach as 9a above.
+  past_expire_target=$((outage_login_epoch + 50))
+  past_expire_remaining=$((past_expire_target - $(date +%s)))
+  [ "${past_expire_remaining}" -gt 0 ] && sleep "${past_expire_remaining}"
   past_expire_status=$(docker run --rm --network "${network}" -v "${flow_dir}:/w" curlimages/curl:8.21.0@sha256:7c12af72ceb38b7432ab85e1a265cff6ae58e06f95539d539b654f2cfa64bb13 \
     curl -s -o /dev/null -w '%{http_code}' -b "/w/jar-outage.txt" "http://${proxy_outage}:4180/")
   docker network connect "${network}" "${kc}" >/dev/null

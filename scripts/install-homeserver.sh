@@ -2778,6 +2778,23 @@ step_cape_vm_start() {
   virsh domstate win11-cape | grep -q running || virsh start win11-cape
 }
 
+# Detonation guests are started per sample by the pipeline, never left up:
+# run_sample.py's revert_to_golden() destroys the domain, makes a fresh CoW
+# clone and boots that ("every detonation still starts from the identical
+# golden state, which is what makes runs comparable and the guest
+# disposable"), and CAPE's capekvm machinery does its own vm.create() per
+# task. Leaving one powered on after the install is not merely idle waste --
+# detonate_inguest() (#490) stages the sample with libguestfs BEFORE qemu
+# opens the disk, and libguestfs and a running qemu process cannot both hold
+# the same qcow2 open. An install that leaves them running hands the pipeline
+# a state it has to undo, and a 16 GiB guest sits on the host's RAM until it
+# does.
+#
+# So the install still boots each domain once -- that is the check that
+# catches firmware/nvram breakage at install time, which is exactly what
+# #1609 found on EL -- and then puts them back down.
+SANDBOX_DETONATION_DOMAINS=(win11-sandbox win11-cape)
+
 step_sandbox_verify_running() {
   local dom rc=0
   # win11-cape is included only when defined: its golden image is optional (see
@@ -2790,6 +2807,27 @@ step_sandbox_verify_running() {
     [[ "$state" == "running" ]] || rc=1
   done
   return $rc
+}
+
+step_sandbox_park_detonation_vms() {
+  # Runs after sandbox-verify has confirmed they boot. Graceful shutdown, then
+  # destroy for anything that ignores ACPI within the window -- these are
+  # disposable clones, so a hard stop costs nothing that the next
+  # revert_to_golden() would not throw away anyway.
+  local dom
+  for dom in "${SANDBOX_DETONATION_DOMAINS[@]}"; do
+    virsh list --all --name | grep -qx "$dom" || continue
+    [[ "$(virsh domstate "$dom" 2>/dev/null)" == "running" ]] || { echo "$dom: already off"; continue; }
+    echo "$dom: shutting down (started on demand by the detonation pipeline)"
+    virsh shutdown "$dom" >/dev/null 2>&1 || true
+    local waited=0
+    while (( waited < 90 )); do
+      [[ "$(virsh domstate "$dom" 2>/dev/null)" == "running" ]] || break
+      sleep 5; waited=$(( waited + 5 ))
+    done
+    [[ "$(virsh domstate "$dom" 2>/dev/null)" == "running" ]] && virsh destroy "$dom" >/dev/null 2>&1 || true
+    echo "$dom: $(virsh domstate "$dom" 2>/dev/null)"
+  done
 }
 
 step_sandbox_host_foundation() {
@@ -2927,6 +2965,7 @@ if [[ "$ENABLE_SANDBOX_RESTORE" == "true" ]]; then
   run_step cape-vm-create         "Create win11-cape thin-clone VM (#1609 Phase 7)" step_cape_vm_create
   run_step cape-vm-start          "Start win11-cape VM"                    step_cape_vm_start
   run_step sandbox-verify         "Verify sandbox VMs running"             step_sandbox_verify_running
+  run_step sandbox-park-vms       "Shut the detonation VMs back down"      step_sandbox_park_detonation_vms
   run_step sandbox-host-foundation "Set up Linux sandbox network + dirs"   step_sandbox_host_foundation
   run_step linux-sandbox-base     "Download + verify Linux base image"    step_linux_sandbox_base
   run_step linux-sandbox-verify   "Run Linux sandbox smoke test"          step_linux_sandbox_verify
@@ -2945,6 +2984,7 @@ else
   skip_step cape-vm-create "Create win11-cape thin-clone VM (#1609 Phase 7)" "ENABLE_SANDBOX_RESTORE=false"
   skip_step cape-vm-start "Start win11-cape VM" "ENABLE_SANDBOX_RESTORE=false"
   skip_step sandbox-verify "Verify sandbox VMs running" "ENABLE_SANDBOX_RESTORE=false"
+  skip_step sandbox-park-vms "Shut the detonation VMs back down" "ENABLE_SANDBOX_RESTORE=false"
   skip_step sandbox-host-foundation "Set up Linux sandbox network + dirs" "ENABLE_SANDBOX_RESTORE=false"
   skip_step linux-sandbox-base "Download + verify Linux base image" "ENABLE_SANDBOX_RESTORE=false"
   skip_step linux-sandbox-verify "Run Linux sandbox smoke test" "ENABLE_SANDBOX_RESTORE=false"
