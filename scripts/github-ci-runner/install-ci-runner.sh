@@ -481,11 +481,33 @@ cd "$RUNNER_HOME"
 service_file="/etc/systemd/system/actions.runner.$(tr '/' '-' <<<"$repo").$name.service"
 if [[ ! -f "$service_file" ]]; then
   ./svc.sh install "$RUNNER_USER"
-  ./svc.sh start
 else
   ./svc.sh stop || true
-  ./svc.sh start
 fi
+
+# #3021: reclaim ownership of anything a root process left behind in this
+# runner's _work checkout before the runner (re)starts and actions/checkout@v7
+# hits an EACCES it can never resolve as an unprivileged user. `+` runs the
+# ExecStartPre line as root regardless of the unit's own User=.
+#
+# $here (absolute, resolved before any cd) rather than a path relative to
+# BASH_SOURCE: this block runs after `cd "$RUNNER_HOME"` above, and the
+# documented invocation (docs/CI-CD.md) is relative, so a relative source
+# path resolves to nothing here -- under `set -e` that aborts the script
+# after ./svc.sh stop has already run, leaving the runner down.
+install -d -m 0755 -o root -g root /opt/github-ci-runner-helpers
+install -m 0755 -o root -g root \
+  "$here/github-ci-runner/fix-work-ownership.sh" \
+  /opt/github-ci-runner-helpers/fix-work-ownership.sh
+unit_dropin_dir="${service_file}.d"
+install -d -m 0755 -o root -g root "$unit_dropin_dir"
+cat > "$unit_dropin_dir/fix-work-ownership.conf" <<EOF
+[Service]
+ExecStartPre=+/opt/github-ci-runner-helpers/fix-work-ownership.sh $RUNNER_USER $RUNNER_HOME/_work
+EOF
+systemctl daemon-reload
+
+./svc.sh start
 
 echo "done. status:"
 ./svc.sh status

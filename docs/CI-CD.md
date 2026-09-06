@@ -773,6 +773,71 @@ and skips re-registration if `$RUNNER_HOME/.runner` already exists (remove
 that file first to re-register, e.g. after moving the runner to a new
 host).
 
+#### Root-owned leftovers in `_work` (#3021)
+
+The install also drops two things next to the unit:
+
+- `/opt/github-ci-runner-helpers/fix-work-ownership.sh` (installed from
+  `scripts/github-ci-runner/fix-work-ownership.sh`, root-owned, 0755), and
+- `/etc/systemd/system/actions.runner.<repo>.<name>.service.d/fix-work-ownership.conf`,
+  a drop-in carrying
+  `ExecStartPre=+/opt/github-ci-runner-helpers/fix-work-ownership.sh <runner-user> <runner-home>/_work`.
+
+The leading `+` runs that line as root even though the unit's own `User=`
+is the unprivileged runner account, so no new sudoers grant was needed
+(unlike `compose-project-state.py` above, this runs as part of the unit's
+own privileged startup rather than from inside a workflow step).
+
+**Why it exists.** A root process that writes into a runner's `_work`
+checkout leaves files the runner user can never delete, and
+`actions/checkout`'s clean step then fails permanently on that runner:
+
+```
+File was unable to be removed
+Error: EACCES: permission denied, unlink '.../__pycache__/polarity.cpython-313.pyc'
+```
+
+Every later job scheduled onto that runner dies at checkout in 6-10
+seconds, so the symptom -- dozens of unrelated suites red at once with no
+test output -- looks nothing like its cause. Two causes are confirmed, both
+on 2026-09-05:
+
+1. **The repo's own CI**, fixed at source by #3024: `quality.yml`'s #159
+   corpus job ran `docker run --rm -v "$PWD:/w" ... debian:trixie-slim` as
+   root, so its `python3` calls wrote root-owned bytecode into the
+   bind-mounted workspace. `PYTHONDONTWRITEBYTECODE=1` now goes into that
+   container and is exported by `analysis/ghidra/benchmarks/corpus/ci_verify.sh`
+   itself. A root container needs no `sudo`, which is why grepping the repo
+   for `sudo` finds nothing here.
+2. **A manual #1947 benchmark sweep run as root** directly against a runner
+   checkout, outside any repo-tracked workflow. Operator process, not
+   reachable from code.
+
+#3024 closes the first at source; this helper is the backstop for the second
+and for whatever the next one turns out to be. It reclaims ownership only
+under the one `_work` directory it is given, only back to that runner's own
+user, refuses any path outside `/var/lib/github-runners/*/_work`, and uses
+`chown -h` so a root-owned symlink dropped into `_work` cannot be used to
+hand ownership of its target away.
+
+If it finds a path it **cannot** reclaim -- an immutable file (`chattr +i`
+on `__pycache__` was seen doing exactly this) or a mount that refuses
+`chown` -- it lists the paths and exits non-zero, which stops the unit.
+That is deliberate: the runner goes offline in GitHub and its jobs queue,
+instead of accepting them and failing every one at checkout. Recover with:
+
+```bash
+ssh homeserver 'sudo lsattr -R /var/lib/github-runners/<user>/_work 2>/dev/null | grep -- "-i-"'
+# clear whatever it reports, then
+ssh homeserver 'sudo systemctl start actions.runner.Xore-APIARY.<name>.service'
+```
+
+The drop-in only runs on a unit (re)start, not before every job, so a root
+process that touches a checkout between restarts still blocks the *next*
+checkout until the service restarts. `ACTIONS_RUNNER_HOOK_JOB_STARTED`
+would close that window but runs as the unprivileged runner user, so it
+could not fix root-owned files at all.
+
 ### Scaling past one instance (#2572)
 
 `--instance N` registers an independent SECOND (or third, fourth, ...)
