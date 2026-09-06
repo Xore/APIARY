@@ -222,6 +222,15 @@ telemetry enqueues onto `gpu-job-queue` rather than assuming the card idle.
 Its `keep_alive` defaults to `5m` (`LLM_KEEP_ALIVE`), shorter than the 30m
 server default, so an operator's follow-up questions stay warm without one
 dark endpoint pinning ~10 GiB for half an hour.
+A queued `vault-rag` job is drained by `analysis/ghidra/worker/gpu-queue-drain.py`
+(#2928) alongside `ghidra-triage`: the drainer re-runs the same embed → kNN →
+generate sequence against the analysis host's Ollama and writes
+`{"answer", "citations"}` to the queue document's `result`, which
+`/api/v1/gpu-queue` returns — the operator who was told "queued" reads the
+answer there. The drainer needs `LLM_EMBEDDING_MODEL` in
+`/etc/default/honeypot-ghidra` to match the backend's, and its stale-running
+sweep bounds a `vault-rag` job by `GPU_QUEUE_VAULT_RAG_TIMEOUT` (120s) instead
+of the ghidra triage bound.
 
 Hard rules:
 

@@ -31,6 +31,11 @@ pub struct GpuJob {
     pub abort_requested: bool,
     pub error: String,
     pub attempts: i64,
+    /// #2928: what a completed job produced when it has nowhere else to
+    /// land -- a drained `vault-rag` job's `{"answer", "citations"}`.
+    /// Null for job types whose output lives elsewhere (ghidra-triage
+    /// patches its result file).
+    pub result: serde_json::Value,
 }
 
 pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<GpuJob>>, (StatusCode, String)> {
@@ -63,6 +68,7 @@ pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<GpuJob>>, (S
                 abort_requested: source["abort_requested"].as_bool().unwrap_or(false),
                 error: text(&source["error"]),
                 attempts: source["attempts"].as_i64().unwrap_or(0),
+                result: source["result"].clone(),
             }
         })
         .collect();

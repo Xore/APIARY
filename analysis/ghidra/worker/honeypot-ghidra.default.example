@@ -55,6 +55,18 @@ GHIDRA_TRIAGE_SEED=144
 #GHIDRA_TRIAGE_RUNTIME_BASE=http://127.0.0.1:11434
 GHIDRA_TRIAGE_RUNTIME_TIMEOUT=10
 
+# gpu-queue-drain.py also drains `vault-rag` jobs (#2928), which it answers
+# through the same Ollama the runtime base above points at. The embedding
+# model must match what vault-worker stamped on the notes and what the
+# backend's LLM_EMBEDDING_MODEL is set to, or retrieval silently finds
+# nothing (llm_search.rs's embedding_model filter). Chat completion bound
+# matches vault_rag.rs's own 120s.
+LLM_EMBEDDING_MODEL=nomic-embed-text:latest
+GPU_QUEUE_VAULT_RAG_TIMEOUT=120
+# Per-request keep_alive for a drained vault-rag answer, same key and default
+# as the backend (vault_rag.rs) -- shorter than OLLAMA_KEEP_ALIVE=30m on purpose.
+#LLM_KEEP_ALIVE=5m
+
 # How much of the binary the model is shown. Raising these needs a model with
 # the context window to match; whatever is set here is reported verbatim in the
 # result's evidence_shown field, so an analyst can see what the assessment was
