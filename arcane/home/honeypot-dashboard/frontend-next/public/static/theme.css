@@ -1586,6 +1586,18 @@ select.form-input { cursor: pointer; }
     font-weight: 500;
   }
   .data-table--responsive td:empty { display: none; }
+  /* The cell's own white-space:normal above never reaches a value wrapped in
+     an <a> (td.v a) or a bare numeric cell that also gets nowrap on desktop
+     (td.n) -- both are set back to nowrap by the desktop-only
+     "td.v a, td.n { white-space: nowrap; }" rule, which has no phone-width
+     exception. At 390px a long single-line value (a user-agent, an AS name)
+     then breaks out of the stacked card instead of wrapping into it, and
+     because an ancestor clips overflow-x, the rest of the value is
+     unreachable -- there is no gesture that reveals it. overflow-wrap:
+     anywhere rather than break-word: these are single unbroken tokens with
+     no natural wrap opportunity, so break-word alone would not break them. */
+  .data-table--responsive td.v a,
+  .data-table--responsive td.n { white-space: normal; overflow-wrap: anywhere; }
   /* Row quick-actions (copy IP / replay session / attacker profile,
      etc.) reveal on tr:hover / tr.selected in the desktop table -- hover
      has no touch equivalent, so at this width the cell was pure empty
