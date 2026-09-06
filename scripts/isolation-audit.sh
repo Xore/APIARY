@@ -275,6 +275,19 @@ CAP_NOT_YET_HARDENED=(
   # unrelated gap in Arkime's own privilege-drop path, flagged here and
   # not otherwise acted on).
   #
+  # Those eleven will FAIL here (deploy drift, same shape as #2877 and as
+  # #2825 round 2) until the two projects that own them -- honeypot-elk
+  # (hp-pcap-sync, hp-arkime-capture, hp-arkime-viewer) and honeypot-init
+  # (the rest) -- are actually re-synced and redeployed. That is expected,
+  # not a regression. Five of the eleven still exist as running containers
+  # and so are the five that go red; the six one-shot jobs have already
+  # exited and contribute nothing. Unlike previous rounds the redeploy is
+  # not a few minutes away: it is blocked on #3051 (the Arcane API key is
+  # dead), so the window is open-ended. This note exists so that stays a
+  # known, dated gap rather than a section everyone learns to ignore --
+  # if it is still red once #3051 is unblocked and both projects are
+  # redeployed, that IS a regression.
+  #
   # The remaining three are internal workers with their own `build:`
   # step (not a pulled image), so they could not be measured inside this
   # round's budget the same way -- still unmeasured, not to be guessed at.
@@ -342,9 +355,17 @@ if [ -n "${containers:-}" ]; then
     # on any failure (gh missing, unauthenticated, or no network): this is
     # a hygiene nicety, not something the audit should ever fail or block
     # on when it can't reach GitHub.
-    owner_issue=$(grep -oE '#[0-9]+' <<<"$listed_reason" | head -1)
+    # Anchored to the *start* of the reason: the owner issue is the one the
+    # entry leads with. An unanchored match would take any issue number in
+    # the string, so a future entry that cites a closed issue as precedent
+    # before naming its own owner would emit a false hygiene line -- in the
+    # one check whose whole value is that its hygiene lines can be trusted.
+    owner_issue=$(grep -oE '^#[0-9]+' <<<"$listed_reason" | head -1)
     if [ -n "$owner_issue" ] && command -v gh >/dev/null 2>&1; then
-      owner_state=$(gh issue view "${owner_issue#\#}" --json state -q .state 2>/dev/null) || owner_state=""
+      # timeout: the only network call in a script that otherwise talks to
+      # nothing but the local docker socket. A hung gh must not stall the
+      # audit (diagnostics.yml runs it and exits on its status).
+      owner_state=$(timeout 10 gh issue view "${owner_issue#\#}" --json state -q .state 2>/dev/null) || owner_state=""
       if [ "$owner_state" = "CLOSED" ]; then
         info "list hygiene: $listed_name names $owner_issue as its owner issue, and $owner_issue is closed -- repoint this entry at whatever now tracks the gap, or the list will silently rot the way #2825's closure did"
       fi
