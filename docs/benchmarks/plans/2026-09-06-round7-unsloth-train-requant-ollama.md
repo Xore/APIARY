@@ -452,6 +452,74 @@ ssh homeserver 'cd /mnt-1/benchmarks && LIST=/mnt-1/benchmarks/models_round7.txt
   STOP_WORKERS=1 bash round7_sweep.sh'
 ```
 
+---
+
+## 15. How agents work this round — grit, rtk, gh
+
+Three tools, not one. Every child issue is worked under all three.
+
+### grit — mandatory for any parallel work in this repository
+
+`grit` 0.4.0 is installed and initialised at the repository root (index in
+`.grit/registry.db`). It locks at the **function / symbol level**, so two agents
+editing different functions of `sweep_extra.sh` or `train.py` never collide,
+and it replaces bare `git worktree add` isolation. One grit agent name per
+subagent (`issue-3080-coder`, `issue-3082-corpus`, …), never shared.
+
+```bash
+grit gc                                                # session start: clear expired locks
+grit status                                            # who holds what
+grit symbols --file 'analysis/ghidra/benchmarks/corpus/*'   # or analysis/ghidra/training/*
+grit plan  -a issue-<N>-coder -i "<intent>"            # search + dependencies BEFORE claiming
+grit claim -a issue-<N>-coder -i "<intent>" <file>::<symbol> [<file>::<symbol> …]
+#   --with-deps  read-locks callees        --queue  wait on a contested symbol
+#   creates .grit/worktrees/issue-<N>-coder/ — edit ONLY the claimed symbols, ONLY there
+grit heartbeat -a issue-<N>-coder --ttl 900            # long-running legs
+grit done -a issue-<N>-coder                           # auto-commit, rebase, serialized merge, release
+```
+
+- The orchestrator claims **before** dispatching a coder, from the symbols the
+  fix will touch; `grit plan` first so dependency read-locks do not surprise
+  another agent.
+- `grit done` is never issued from two orchestrator threads at once. If it
+  reports uncommitted changes in the main checkout, commit or set them aside
+  there first; the agent branch is kept.
+- New files have no symbols yet: claim the neighbours you touch (the compose
+  file, the README, the sibling script), and **re-run `grit init` after the
+  merge** so the new symbols are indexed for the next agent.
+- Relative-path dependencies (`path = "../x"`, `-r ../requirements.txt`) break
+  inside `.grit/worktrees/`; use absolute paths.
+- After any large merge to `main`, `grit init` again.
+
+### rtk — every shell command goes through it
+
+The shell hook rewrites every command to its `rtk` form (`git status` →
+`rtk git status`) and cuts the output to what matters. Do not bypass it.
+`rtk proxy <cmd>` only when the raw, unfiltered output is genuinely needed
+(reading a whole run log); long outputs go to a file under the job's tmp
+directory and are read selectively. `rtk gain --history` goes into the
+end-of-issue report so the token cost of the work is visible.
+
+### gh — the repository conventions, unchanged
+
+Check `gh issue view <n>` **and** `gh pr list --search "<n>"` before claiming
+(the repo is worked through several tools at once); claim with the
+`in-progress` label, assignee, and a comment; post a status comment at every
+milestone; push → PR → wait for CI → `gh pr merge <n> --squash --delete-branch`
+on green; `Closes #N` in the commit; file a new issue for anything out of scope
+instead of widening the task; audit issue state at the end of a batch; never
+mention AI tooling in commits, PRs, comments or issues; never put credentials or
+real production domains in an issue.
+
+### Concurrency
+
+**At most two agents at once**, each with its own grit agent name and its own
+issue. Only one of them may hold the GPU, and only through the positive-condition
+chain of §9.
+
+---
+
 The one sentence to keep: **Unsloth makes the weights, llama.cpp makes the
 bits, Ollama serves them, and the benchmark decides — on a pin, cold, with the
-test set never seen.**
+test set never seen — and the agents doing it claim with grit, run through rtk,
+and ship through gh.**
