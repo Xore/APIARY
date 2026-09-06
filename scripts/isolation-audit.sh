@@ -255,54 +255,45 @@ CAP_EXCEPTIONS=(
   "hp-arcane|the deploy control plane itself -- a third-party manager image that runs as root against the real /var/run/docker.sock, which is root-equivalent by construction. Dropping capabilities inside a container that can create privileged containers on the host buys nothing; the exposure that matters for it is the socket mount, which the 'Stack containers' section above already reports separately, deliberately and by name"
 )
 CAP_NOT_YET_HARDENED=(
-  # #2825, class A: runs as uid 0 and reads/writes the sensor-owned log,
-  # state and payload trees (/opt/stacks/apiary/logs/<sensor> is owned by the
-  # sensor's own UID at drwxrwsr-x; Dionaea captures are mode 0600). Measured,
-  # not assumed: a uid-0 process under cap_drop: ALL has CapEff 0 and so no
-  # CAP_DAC_OVERRIDE, and can no longer create, read or unlink in those trees
-  # -- a bare cap_drop: ALL would silently break log rotation, pcap sync,
-  # disk reporting, payload dedup and the canarytokens log writers. Each needs
-  # cap_drop: ALL plus a measured minimal cap_add, the way yara-scanner
-  # already carries a justified DAC_READ_SEARCH.
+  # #2825's owner issue closed 2026-09-05 with these 14 rows still WARN
+  # (#3045). Eleven are now hardened and off this list: hp-pcap-sync,
+  # hp-geoipupdate, hp-threat-cidrs-refresh and hp-persona-apply each
+  # measured to need cap_drop: ALL + cap_add: [DAC_OVERRIDE] (a plain
+  # touch/write against their real bind mount/volume, each owned by a
+  # uid other than 0, failed without it and succeeded with only that
+  # added back); hp-log-init measured to CHOWN + FOWNER (its whole job is
+  # chown -R to per-sensor uids, then chmod on some of what it just
+  # chowned away from itself -- CHOWN alone got every chown to succeed
+  # but not the chmod); hp-arkime-capture, hp-arkime-viewer,
+  # hp-elasticsearch-setup, hp-honeypot-kibana-setup, hp-arkime-init and
+  # hp-snare-clone measured to need no cap_add at all, each run for real
+  # against the live cluster/host paths rather than assumed from owner
+  # bits alone (hp-arkime-capture's own ARKIME__dropUser=nobody is
+  # configured but, confirmed live via /proc/1/status, never actually
+  # takes effect in this offline-import mode -- the process stays uid 0
+  # throughout, so SETUID/SETGID were never the question; a separate,
+  # unrelated gap in Arkime's own privilege-drop path, filed as #3074
+  # and not otherwise acted on here).
   #
-  # #2825 round 2: hp-log-maintenance, hp-disk-space-monitor,
-  # hp-canarytokens-frontend, hp-canarytokens-switchboard and
-  # hp-payload-dedupe moved off this list -- each now carries
-  # cap_drop: ALL + cap_add: [DAC_OVERRIDE] in its compose file, measured
-  # live against the real bind mount (a plain touch/write/hard-link failed
-  # with no cap_add, and succeeded with DAC_OVERRIDE alone added back --
-  # for hp-payload-dedupe this also settles its own prior "possibly
-  # FOWNER" guess: not needed). hp-canarytokens-redis moved too, see below.
-  # They will FAIL here (deploy drift, same shape as #2877) until the
-  # affected projects (honeypot-utilities, honeypot-canarytokens,
-  # honeypot-payload-analysis) are actually re-synced and redeployed --
-  # that is expected, not a regression.
-  "hp-pcap-sync|#2825 class A -- uid 0 copying between the sshfs-backed raw dir and the arkime-pcap volume, needs a measured cap_add"
-  "hp-arkime-capture|#2825 class A -- uid 0 reading the sensor-owned arkime-raw tree (offline import, so no NET_RAW is involved), needs a measured cap_add. Round 2 attempted to measure this live (a parallel --skip capture instance against the real ES) and could not get a clean answer inside this round's budget -- the test instance stalled on Elasticsearch readiness before reaching the privilege-drop question. Still unmeasured; do not guess dropUser=nobody's actual capability need from this comment"
-  "hp-arkime-viewer|#2825 class A -- uid 0 over the same arkime-raw/arkime-pcap trees, needs a measured cap_add"
-  # #2825, class B: the process itself already runs capability-free (redis is
-  # uid 999 with CapEff 0 today), but the official entrypoint gets there by
-  # chown-ing /data and calling setpriv as root, which needs CHOWN/SETUID/
-  # SETGID. Round 2: re-measured live against the real data volume and this
-  # was incomplete -- CHOWN+SETUID+SETGID alone still failed ("find:
-  # ./appendonlydir: Permission denied") against the existing 700-mode
-  # appendonlydir; DAC_OVERRIDE was also required. hp-canarytokens-redis now
-  # carries cap_drop: ALL + cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE].
-  # #2366 scoped itself to the internet-facing sensor stacks. These are the
-  # internal workers and honeypot-init's one-shot jobs it deliberately did not
-  # touch, carried over unchanged and now tracked in #2825 rather than in a
-  # follow-up that was never filed.
-  "hp-attacker-identity-worker|#2825 -- internal worker, out of #2366's internet-facing scope"
-  "hp-correlator-worker|#2825 -- internal worker, out of #2366's internet-facing scope"
-  "hp-payload-inventory-worker|#2825 -- internal worker, out of #2366's internet-facing scope"
-  "hp-persona-apply|#2825 -- honeypot-init job, out of #2366's internet-facing scope"
-  "hp-log-init|#2825 -- honeypot-init job, out of #2366's internet-facing scope"
-  "hp-elasticsearch-setup|#2825 -- honeypot-init job, out of #2366's internet-facing scope"
-  "hp-honeypot-kibana-setup|#2825 -- honeypot-init job, out of #2366's internet-facing scope"
-  "hp-arkime-init|#2825 -- honeypot-init job, out of #2366's internet-facing scope"
-  "hp-snare-clone|#2825 -- honeypot-init job, out of #2366's internet-facing scope"
-  "hp-geoipupdate|#2825 -- honeypot-init refresh job, out of #2366's internet-facing scope"
-  "hp-threat-cidrs-refresh|#2825 -- honeypot-init refresh job, out of #2366's internet-facing scope"
+  # Those eleven will FAIL here (deploy drift, same shape as #2877 and as
+  # #2825 round 2) until the two projects that own them -- honeypot-elk
+  # (hp-pcap-sync, hp-arkime-capture, hp-arkime-viewer) and honeypot-init
+  # (the rest) -- are actually re-synced and redeployed. That is expected,
+  # not a regression. Five of the eleven still exist as running containers
+  # and so are the five that go red; the six one-shot jobs have already
+  # exited and contribute nothing. Unlike previous rounds the redeploy is
+  # not a few minutes away: it is blocked on #3051 (the Arcane API key is
+  # dead), so the window is open-ended. This note exists so that stays a
+  # known, dated gap rather than a section everyone learns to ignore --
+  # if it is still red once #3051 is unblocked and both projects are
+  # redeployed, that IS a regression.
+  #
+  # The remaining three are internal workers with their own `build:`
+  # step (not a pulled image), so they could not be measured inside this
+  # round's budget the same way -- still unmeasured, not to be guessed at.
+  "hp-attacker-identity-worker|#3045 -- internal worker, out of #2366's internet-facing scope, unmeasured (custom-built image)"
+  "hp-correlator-worker|#3045 -- internal worker, out of #2366's internet-facing scope, unmeasured (custom-built image)"
+  "hp-payload-inventory-worker|#3045 -- internal worker, out of #2366's internet-facing scope, unmeasured (custom-built image)"
 )
 
 # Returns the reason string for $1 if it appears in the remaining arguments.
@@ -351,10 +342,51 @@ if [ -n "${containers:-}" ]; then
   # fatal -- a stale entry is a tidiness problem, not an isolation failure.
   for entry in "${CAP_EXCEPTIONS[@]}" "${CAP_NOT_YET_HARDENED[@]}"; do
     listed_name="${entry%%|*}"
+    listed_reason="${entry#*|}"
     if grep -qw -- "$listed_name" <<<"$cap_hardened_names"; then
       info "list hygiene: $listed_name now reports cap_drop: ALL -- drop its entry from this script's lists"
     elif ! grep -qE "^${listed_name}\b" <<<"$containers"; then
       info "list hygiene: $listed_name is listed here but not deployed on this host -- keep it only if the stack is expected back"
+    fi
+    # #3045: #2825 closed with 14 entries still naming it as their owner
+    # issue, and nothing here noticed -- a closed owner issue is invisible
+    # to the two checks above (the container is neither hardened nor
+    # undeployed, so it never got a second look). Best-effort and silent
+    # on any failure (gh missing, unauthenticated, or no network): this is
+    # a hygiene nicety, not something the audit should ever fail or block
+    # on when it can't reach GitHub.
+    # Anchored to the *start* of the reason: the owner issue is the one the
+    # entry leads with. An unanchored match would take any issue number in
+    # the string, so a future entry that cites a closed issue as precedent
+    # before naming its own owner would emit a false hygiene line -- in the
+    # one check whose whole value is that its hygiene lines can be trusted.
+    owner_issue=$(grep -oE '^#[0-9]+' <<<"$listed_reason" | head -1)
+    # ...which only works if that convention holds, so the convention is
+    # checked too: the tiering above makes an owner issue mandatory for a
+    # tracked gap, and an entry that does not open with one is now skipped
+    # silently rather than reported. CAP_EXCEPTIONS are exempt by
+    # definition -- they are permanent and owned by nobody.
+    if [ -z "$owner_issue" ] && cap_listed_reason "$listed_name" "${CAP_NOT_YET_HARDENED[@]}" >/dev/null; then
+      info "list hygiene: $listed_name is a tracked gap whose reason does not open with its owner issue -- start it with #NNNN, or its owner can never be checked for closure"
+    fi
+    if [ -n "$owner_issue" ] && command -v gh >/dev/null 2>&1; then
+      # timeout: the only network call in a script that otherwise talks to
+      # nothing but the local docker socket. A hung gh must not stall the
+      # audit (diagnostics.yml runs it and exits on its status).
+      # --repo is not optional, measured rather than assumed: the copy that
+      # matters is the deployed one, and it runs with no usable git context
+      # in either place it runs from. diagnostics.yml deliberately has no
+      # actions/checkout, and /opt/stacks/apiary resolves into root-owned
+      # /var/dockge/stacks/apiary, which git refuses as dubious ownership.
+      # Without --repo, gh cannot resolve a repository and this whole check
+      # silently never fires -- exactly the quiet nothing it exists to end.
+      # GITHUB_REPOSITORY is set for free under Actions; the default covers
+      # the root systemd timer.
+      owner_state=$(timeout 10 gh issue view "${owner_issue#\#}" \
+        --repo "${GITHUB_REPOSITORY:-Xore/APIARY}" --json state -q .state 2>/dev/null) || owner_state=""
+      if [ "$owner_state" = "CLOSED" ]; then
+        info "list hygiene: $listed_name names $owner_issue as its owner issue, and $owner_issue is closed -- repoint this entry at whatever now tracks the gap, or the list will silently rot the way #2825's closure did"
+      fi
     fi
   done
   printf '  (capability posture: %d hardened, %d tracked gaps, see WARN lines)\n' \
