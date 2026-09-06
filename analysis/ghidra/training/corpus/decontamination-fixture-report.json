@@ -1,0 +1,29 @@
+{
+  "fixture": true,
+  "hits": [
+    {
+      "kind": "phrase",
+      "protected_source": "rubric-phrase:xor_decode_loop",
+      "sample_id": "fx-contaminated",
+      "sample_slice": "S3",
+      "score": null
+    }
+  ],
+  "pass": false,
+  "per_slice": {
+    "S3": {
+      "hits": 1,
+      "samples": 2
+    },
+    "S6": {
+      "hits": 0,
+      "samples": 1
+    }
+  },
+  "protected_documents": 499,
+  "samples_scanned": 3,
+  "schema_version": "corpus-v1-decontamination-1",
+  "shingle_size": 8,
+  "threshold": 0.5,
+  "total_hits": 1
+}
