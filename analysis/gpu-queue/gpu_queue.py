@@ -274,8 +274,14 @@ def get_job(es_host: str, job_id: str) -> dict | None:
     return {**result["_source"], "_id": result["_id"]}
 
 
-def update_status(es_host: str, job_id: str, status: str, error: str | None = None) -> None:
+def update_status(es_host: str, job_id: str, status: str, error: str | None = None,
+                  result: dict[str, Any] | None = None) -> None:
+    """`result` (#2928): what a completed job produced when it has no file
+    of its own to land in -- vault-rag's {"answer", "citations"} -- kept on
+    the queue document so /api/v1/gpu-queue can show it."""
     doc: dict[str, Any] = {"status": status}
+    if result is not None:
+        doc["result"] = result
     if status == "running":
         doc["started_at"] = _now()
     if status in ("completed", "failed", "aborted"):

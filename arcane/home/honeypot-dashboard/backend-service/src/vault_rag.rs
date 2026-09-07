@@ -17,9 +17,10 @@
 //! headroom (or unreadable telemetry) enqueues onto the shared
 //! `gpu-job-queue` index (visible/abortable from the existing
 //! /api/v1/gpu-queue endpoints) and answers honestly rather than blocking
-//! or assuming the card idle; nothing drains a queued `vault-rag` job
-//! automatically yet, matching the issue's own "ship it dark" scope — an
-//! operator retries once the queue view shows room.
+//! or assuming the card idle. analysis/ghidra/worker/gpu-queue-drain.py
+//! picks the job up once the card frees (#2928) and lands the answer on
+//! the queue document's `result`, which /api/v1/gpu-queue returns — so an
+//! operator told "queued" reads the answer from the queue view later.
 
 use axum::{extract::State, Json};
 use rand::RngCore;
