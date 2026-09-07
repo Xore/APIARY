@@ -41,7 +41,9 @@ request as an authenticated admin) — the mode `port-tests/` and most local
 iteration use, since standing up a real Keycloak realm locally is rarely
 worth it just to click around the UI. Without it, set `OIDC_ISSUER_URL`/
 `OIDC_CLIENT_ID`/`OIDC_CLIENT_SECRET_FILE`/`OIDC_EXTERNAL_URL` to point at
-a real Keycloak instance.
+a real Keycloak instance. The process refuses to boot with `OIDC_DISABLED=1`
+unless `NODE_ENV=development` or `APIARY_ALLOW_UNAUTH_DEV=1` is also set
+(#3112), so local harnesses need one of those two alongside it.
 
 Add route files under `src/routes/`; TanStack Router regenerates
 `src/routeTree.gen.ts` for you (`npm run generate-routes` to force it

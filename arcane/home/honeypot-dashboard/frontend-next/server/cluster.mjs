@@ -37,6 +37,25 @@ if (!tokenIsSet && process.env.APIARY_ALLOW_UNAUTH_DEV !== '1') {
   process.exit(1)
 }
 
+// #3112: same reasoning as the SERVICE_TOKEN check above -- the primary
+// never evaluates the server bundle (src/lib/backend.server.ts's
+// assertOidcDisabledPolicy), so a leaked OIDC_DISABLED=1 outside
+// development would crashloop-respawn every worker instead of refusing
+// once, loudly, before forking any of them.
+if (
+  process.env.OIDC_DISABLED === '1' &&
+  process.env.NODE_ENV !== 'development' &&
+  process.env.APIARY_ALLOW_UNAUTH_DEV !== '1'
+) {
+  console.error(
+    `[E-OIDC-DISABLED] refusing to start: OIDC_DISABLED=1 is set outside development ` +
+      `(NODE_ENV=${process.env.NODE_ENV ?? 'unset'}), which would let every request in as a ` +
+      `fixture admin operator with no real session. Unset OIDC_DISABLED, or set ` +
+      `NODE_ENV=development or APIARY_ALLOW_UNAUTH_DEV=1 to confirm this is a local/dev instance (#3112).`,
+  )
+  process.exit(1)
+}
+
 const workerCount = Math.max(1, Number(process.env.WEB_CONCURRENCY) || Math.min(4, os.cpus().length))
 
 if (workerCount === 1 || !cluster.isPrimary) {
