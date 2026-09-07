@@ -7,6 +7,7 @@ Run: python3 -m pytest ml-worker/tests/test_model_lifecycle.py -v
 """
 import json
 import os
+import random
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -290,6 +291,92 @@ class TestRetrainAttachesCalibration:
         for name, values in [("iso", iso_scores), ("hbos", hbos_scores)]:
             assert not all(v == 1.0 for v in values), f"{name} scores must not all saturate at the ceiling post-calibration"
             assert len(set(values)) > 1, f"{name} scores must show real spread across genuinely different inputs, not a single tied value"
+
+
+class TestCalibrationDirectionIsHonest:
+    """#3097: TestRetrainAttachesCalibration above only checks that a p50/p99
+    calibration dict gets attached and stops saturating -- it never checks
+    which anchor is the anomalous one. That's exactly the bug: computing
+    both models' tail anchor at percentile 99 is correct for HBOS
+    (pyod: higher raw score = more anomalous) but backwards for
+    IsolationForest (sklearn: lower raw score = more anomalous), so a
+    genuinely planted outlier cluster scored LOWER than the bulk under the
+    old code while every existing test kept passing. This drives retrain()
+    on synthetic data with a real planted-outlier/bulk split and asserts the
+    planted cluster scores high and the bulk scores low, not just that the
+    two differ."""
+
+    def _bulk_and_planted_sources(self, n_bulk=120, n_planted=10):
+        # Bulk: one login per distinct IP, all hitting the SAME port --
+        # a categorical split here (tried first, e.g. rotating ports) gives
+        # IsolationForest a clean minority branch to isolate as harshly as
+        # the planted cluster, and zero variance ties p50==p99 exactly
+        # (degenerate, collapses score() to a flat neutral 0.5 everywhere).
+        # honeypot.duration is a real continuous field extract_features
+        # reads (_get_duration) -- seeded jitter there gives a natural,
+        # single-peaked spread with no isolable subgroup.
+        rng = random.Random(42)
+        bulk = []
+        for i in range(n_bulk):
+            ip = f"203.0.113.{(i % 250) + 1}"
+            bulk.append({
+                **fixtures.COWRIE_LOGIN_FAILED["_source"],
+                "@timestamp": f"2026-09-01T00:{i % 60:02d}:00Z",
+                "source": {"ip": ip},
+                "destination": {"port": 22},
+                "honeypot": {"duration": rng.uniform(10.0, 60.0)},
+            })
+        # Planted: one IP hammering many distinct ports within the same
+        # rolling hour -- a real port-scan signature, genuinely rare
+        # relative to the bulk (#277's unique_ports_1h feature).
+        planted = []
+        scan_ip = "198.51.100.7"
+        for i in range(n_planted):
+            planted.append({
+                **fixtures.COWRIE_LOGIN_FAILED["_source"],
+                "@timestamp": f"2026-09-01T01:00:{i % 60:02d}Z",
+                "source": {"ip": scan_ip},
+                "destination": {"port": 1024 + i},
+            })
+        # Planted first: retrain()'s holdout is the LIST tail (sources[n -
+        # holdout_n:]), not a time sort. Putting the planted cluster in
+        # train and leaving holdout pure bulk keeps the acceptance gate's
+        # ~1% reference rate satisfied while still calibrating the model
+        # against a real isolated cluster it actually trained on.
+        return planted + bulk, bulk, planted
+
+    def test_planted_outlier_cluster_scores_high_bulk_scores_low(self, tmp_path):
+        sources, bulk, planted = self._bulk_and_planted_sources()
+        model = IsoForestModel(model_dir=str(tmp_path))
+        result = model.retrain(sources)
+        assert result.accepted is True, result.reason
+
+        # Sign assertion in retrain() (#3097): the accepted candidate's tail
+        # anchor must sit on the anomalous side of its typical anchor (or
+        # tie, for a near-homogeneous bulk holdout -- retrain()'s own
+        # rejection check is likewise non-strict, see isolation_forest.py).
+        assert model.iso.hp_calib["p99"] <= model.iso.hp_calib["p50"]
+        assert model.hbos.hp_calib["p99"] >= model.hbos.hp_calib["p50"]
+
+        # Same feature pipeline retrain() itself used (#277 rolling
+        # failed_logins_1h/unique_ports_1h) rather than hand-picked
+        # overrides, or scoring would drift from what the model was
+        # actually fit on.
+        from models.session_features import compute_batch_session_features
+        planted_scores = [model.score(model.extract_features(s, **f))
+                          for s, f in zip(planted, compute_batch_session_features(planted))]
+        bulk_scores = [model.score(model.extract_features(s, **f))
+                       for s, f in zip(bulk, compute_batch_session_features(bulk))]
+
+        # Median not max: a handful of tiny-sample IsolationForest artifacts
+        # scoring like outliers is a separate, real precision concern (not
+        # what #3097 is about) -- direction is what this test asserts, so
+        # bulk as a population must sit low even if IsolationForest's own
+        # noise floor puts a few individual bulk points high.
+        bulk_scores.sort()
+        median_bulk = bulk_scores[len(bulk_scores) // 2]
+        assert min(planted_scores) >= 0.95, f"planted outliers must score near the ceiling, got {planted_scores}"
+        assert median_bulk <= 0.5, f"bulk traffic must score well below the outliers, got {bulk_scores}"
 
 
 class TestLstmRetrainAttachesCalibration:

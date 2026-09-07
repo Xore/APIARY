@@ -333,7 +333,15 @@ class LSTMAEModel:
                 sequences.append(np.array(vecs[i:i + SEQ_LEN], dtype=np.float32))
 
         if len(sequences) > MAX_TRAIN_WINDOWS:
-            sequences = sequences[-MAX_TRAIN_WINDOWS:]
+            # #3097: a tail slice here biases toward whichever IPs land last
+            # in by_ip's insertion order (index-concatenated sources), same
+            # class of skew as IsoForestModel.retrain()'s old tail slice.
+            # Uniform sample instead, fixed seed for reproducibility; kept in
+            # relative order since it's still an (approximately) time-ordered
+            # list per the holdout split right below.
+            rng = np.random.RandomState(42)
+            keep = sorted(rng.choice(len(sequences), size=MAX_TRAIN_WINDOWS, replace=False))
+            sequences = [sequences[i] for i in keep]
 
         n = len(sequences)
         if n < BATCH_SIZE + HOLDOUT_MIN:

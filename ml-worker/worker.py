@@ -1146,18 +1146,32 @@ def run_worker() -> None:
         # least bounds how large a backlog blocking this causes.
         if drift_rate is not None or scheduled_due:
             logger.info("Starting model retraining...")
+            # #3097: fetching each index's most-recent MAX_TRAIN_SAMPLES
+            # ascending-from-24h-ago systematically starves whichever index
+            # sorts first / is smallest (Zeek in practice ends up as a ~2h
+            # sliver). Quota each index, then quota each index's quota
+            # uniformly across 24 hourly slices, so no single index or hour
+            # of day can dominate the training batch.
+            per_index_quota = max(1, MAX_TRAIN_SAMPLES // len(SOURCE_INDICES))
+            hourly_quota = max(1, per_index_quota // 24)
+            now = datetime.now(timezone.utc)
             all_events = []
+            index_counts = {}
             for idx in SOURCE_INDICES:
-                since_24h = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
-                idx_events, _ok = fetch_new_events(
-                    es, idx, since_24h, page_size=5000,
-                    max_total=MAX_TRAIN_SAMPLES,
-                )
+                idx_events = []
+                for hour_ago in range(24, 0, -1):
+                    since_hour = (now - timedelta(hours=hour_ago)).isoformat()
+                    hour_events, _ok = fetch_new_events(
+                        es, idx, since_hour, page_size=hourly_quota,
+                        max_total=hourly_quota,
+                    )
+                    idx_events.extend(hour_events)
+                index_counts[idx] = len(idx_events)
                 all_events.extend(idx_events)
 
             if len(all_events) > 100:
                 sources = [e["_source"] for e in all_events]
-                iso_result = iso_model.retrain(sources)
+                iso_result = iso_model.retrain(sources, source_index_counts=index_counts)
                 lstm_result = lstm_model.retrain(sources)
                 write_retrain_metric(es, "isolation_forest_hbos", iso_result)
                 write_retrain_metric(es, "lstm_ae", lstm_result)
