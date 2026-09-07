@@ -318,6 +318,43 @@ def check_abstains_on_inference_failure(candidate: Candidate, doc: dict,
     )
 
 
+def check_score_direction_is_sane(candidate: Candidate, normal_doc: dict,
+                                  anomalous_doc: dict) -> CheckResult:
+    """A trained detector must not score a failed-login attempt below a
+    routine single command (#3097).
+
+    A sign-inverted calibration -- sklearn's IsolationForest treats LOWER raw
+    scores as anomalous, pyod's HBOS treats HIGHER as anomalous, and #3097
+    anchored both the same way -- passed every one of the six checks above
+    (bounded, no raise, abstains correctly): none of them evaluate direction,
+    only shape. A candidate that is confidently, consistently backwards is
+    otherwise indistinguishable from a working one until it is live.
+    """
+    if not getattr(candidate, "trained", False):
+        return CheckResult("score_direction_is_sane", True,
+                           "candidate is untrained; scores are all abstention (None), "
+                           "direction cannot be exercised (skipped, not vacuously passed)",
+                           skipped=True)
+    try:
+        normal_score = candidate.score_event(normal_doc, 0)
+        anomalous_score = candidate.score_event(anomalous_doc, 0)
+    except Exception as exc:
+        return CheckResult("score_direction_is_sane", False,
+                           f"raised {type(exc).__name__} while scoring direction fixtures")
+    if normal_score is None or anomalous_score is None:
+        return CheckResult("score_direction_is_sane", True,
+                           "one side abstained (None); direction cannot be exercised",
+                           skipped=True)
+    passed = anomalous_score >= normal_score
+    return CheckResult(
+        "score_direction_is_sane", passed,
+        f"anomalous={anomalous_score!r} >= normal={normal_score!r}" if passed
+        else f"BACKWARDS: anomalous (failed login) scored {anomalous_score!r}, "
+             f"lower than normal (single command) {normal_score!r}",
+        observed={"normal": normal_score, "anomalous": anomalous_score},
+    )
+
+
 def check_composite_renormalises_over_present_detectors() -> CheckResult:
     """The ensemble itself must treat absence as absence (#1969).
 
@@ -371,6 +408,8 @@ def run_checks(candidate: Candidate, fixtures: dict[str, Any],
     report.checks.append(check_abstains_on_inference_failure(
         candidate, fixtures["single_event"], break_inference, candidate.prime_events))
     report.checks.append(check_composite_renormalises_over_present_detectors())
+    report.checks.append(check_score_direction_is_sane(
+        candidate, fixtures["direction_normal"], fixtures["direction_anomalous"]))
     report.caps.append(f"{len(documents)} contract fixtures; this tier does not measure accuracy")
     return report
 
@@ -425,6 +464,8 @@ def load_fixtures() -> dict[str, Any]:
         "malformed": src(f.MALFORMED_MISSING_TIMESTAMP),
         "single_event": src(f.COWRIE_COMMAND_INPUT),
         "sequence": [src(d) for d in f.COWRIE_SAME_IP_SEQUENCE],
+        "direction_normal": src(f.COWRIE_COMMAND_INPUT),
+        "direction_anomalous": src(f.COWRIE_LOGIN_FAILED),
     }
 
 

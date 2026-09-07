@@ -399,6 +399,12 @@ class RetrainResult:
     holdout_samples: int
     anomaly_rate_new: float
     anomaly_rate_previous: Optional[float]
+    # #3097 PR-1 step 4: forensic evidence for A4 (training slice covers the
+    # day) -- per-index sample counts and the distinct @timestamp hours seen,
+    # so "was this retrain trained on a skewed slice" is one `cat *.meta.json`
+    # instead of re-deriving it from HBOS bin edges (§1.3 of the research doc).
+    train_index_counts: Optional[dict] = None
+    train_hours: Optional[list] = None
 
 
 def _accept_decision(candidate_rate: float, previous_rate: Optional[float]) -> tuple:
@@ -640,7 +646,7 @@ class IsoForestModel:
 
         return ". ".join(parts) + "."
 
-    def retrain(self, sources: list) -> RetrainResult:
+    def retrain(self, sources: list, source_index_counts: Optional[dict] = None) -> RetrainResult:
         """Retrain candidate IsoForest/HBOS models and gate promotion on the
         acceptance bar (#65, docs/ml-worker-plan.md §11.1) -- fit on a train
         split, evaluate label-free on a holdout split never trained on, and
@@ -651,10 +657,18 @@ class IsoForestModel:
 
         Capped at MAX_TRAIN_SAMPLES regardless of how many sources the
         caller collected -- see the constant's comment for the cost
-        rationale. Keeps the most recent slice on the (reasonable, not
-        guaranteed) assumption that callers append in roughly chronological
-        order; a cap that's approximately-recent is still a real bound and
-        is far better than an unbounded one.
+        rationale. #3097: the caller (worker.py) now fetches an already
+        time-stratified, per-index-quota'd sample, so this is a defense-in-
+        depth truncation only -- it takes the head of the list, not the
+        tail, so it no longer systematically drops whichever index the
+        caller happened to concatenate last.
+
+        source_index_counts, if given, is the caller's per-index sample
+        count (e.g. {"zeek-v1-conn-*": 6000, ...}) -- recorded verbatim into
+        the accepted version's metadata (#3097 PR-1 step 4) alongside the
+        distinct @timestamp hours actually present in `sources`, so a
+        skewed training slice is visible in *.meta.json without re-deriving
+        it from HBOS bin edges.
 
         cmd_count/failed_logins_1h/unique_ports_1h (#277) are computed once
         here via compute_batch_session_features() -- a pure, batch-local
@@ -664,7 +678,9 @@ class IsoForestModel:
         state answer different questions).
         """
         if len(sources) > MAX_TRAIN_SAMPLES:
-            sources = sources[-MAX_TRAIN_SAMPLES:]
+            sources = sources[:MAX_TRAIN_SAMPLES]
+
+        train_hours = sorted({_ts_to_hour(s.get("@timestamp") or s.get("timestamp")) for s in sources})
 
         n = len(sources)
         if n < 2:
@@ -672,6 +688,7 @@ class IsoForestModel:
                 accepted=False, reason="not enough data to retrain",
                 train_samples=n, holdout_samples=0,
                 anomaly_rate_new=0.0, anomaly_rate_previous=None,
+                train_index_counts=source_index_counts, train_hours=train_hours,
             )
 
         # Local import: models.session_features imports _get_ip/_get_port
@@ -716,19 +733,43 @@ class IsoForestModel:
             if len(X_holdout) > 0:
                 iso_raw_holdout = candidate_iso.score_samples(X_holdout)
                 hbos_raw_holdout = candidate_hbos.decision_function(X_holdout)
-                candidate_iso.hp_calib = {
-                    "p50": float(np.percentile(iso_raw_holdout, 50)),
-                    "p99": float(np.percentile(iso_raw_holdout, 99)),
-                }
-                candidate_hbos.hp_calib = {
-                    "p50": float(np.percentile(hbos_raw_holdout, 50)),
-                    "p99": float(np.percentile(hbos_raw_holdout, 99)),
-                }
+                iso_p50 = float(np.percentile(iso_raw_holdout, 50))
+                # #3097: sklearn score_samples() is lower-is-more-anomalous, so
+                # the anomalous tail is the 1st percentile, not the 99th --
+                # np.percentile(..., 99) anchored on the most NORMAL 1% instead
+                # (live: p50=-0.4133, "p99"=-0.3840, i.e. p99 > p50), which
+                # made _percentile_normalize's frac denominator negative and
+                # inverted every score since #174. Key stays "p99" (it's still
+                # the tail anchor _percentile_normalize expects) -- only the
+                # percentile it's computed from changes.
+                iso_tail = float(np.percentile(iso_raw_holdout, 1))
+                hbos_p50 = float(np.percentile(hbos_raw_holdout, 50))
+                # pyod decision_function() is higher-is-more-anomalous, so its
+                # tail anchor is correctly the 99th percentile -- unaffected by
+                # the bug above, kept symmetric with the assertion below.
+                hbos_tail = float(np.percentile(hbos_raw_holdout, 99))
+                # Strict-only: equal anchors (e.g. a degenerate holdout where
+                # every raw score ties) are a real but separate case, already
+                # handled by _percentile_normalize's neutral-0.5 fallback --
+                # not a sign inversion, so not a reject here.
+                if iso_tail > iso_p50 or hbos_tail < hbos_p50:
+                    return RetrainResult(
+                        accepted=False,
+                        reason=(f"tail anchor on wrong side of p50 for this detector's sign "
+                                f"(iso tail={iso_tail:.4f} p50={iso_p50:.4f}, "
+                                f"hbos tail={hbos_tail:.4f} p50={hbos_p50:.4f})"),
+                        train_samples=len(train_sources), holdout_samples=len(holdout_sources),
+                        anomaly_rate_new=0.0, anomaly_rate_previous=None,
+                        train_index_counts=source_index_counts, train_hours=train_hours,
+                    )
+                candidate_iso.hp_calib = {"p50": iso_p50, "p99": iso_tail}
+                candidate_hbos.hp_calib = {"p50": hbos_p50, "p99": hbos_tail}
         except Exception as exc:
             return RetrainResult(
                 accepted=False, reason=f"candidate failed to fit or score holdout: {exc}",
                 train_samples=len(train_sources), holdout_samples=len(holdout_sources),
                 anomaly_rate_new=0.0, anomaly_rate_previous=None,
+                train_index_counts=source_index_counts, train_hours=train_hours,
             )
 
         previous_rate = None
@@ -740,6 +781,7 @@ class IsoForestModel:
             accepted=accept, reason=reason,
             train_samples=len(train_sources), holdout_samples=len(holdout_sources),
             anomaly_rate_new=candidate_rate, anomaly_rate_previous=previous_rate,
+            train_index_counts=source_index_counts, train_hours=train_hours,
         )
 
         if accept:
