@@ -106,13 +106,27 @@ passphrase that only exists on the dead host is not a passphrase.
 `BACKUP_ENCRYPT=0` writes plaintext archives. Only reasonable if all three
 destinations are trusted, which today they are not.
 
+If the passphrase file is missing but archives from a previous passphrase
+already exist on this host, the installer refuses to mint a new one — that
+would leave those archives permanently unreadable. Confirm the old passphrase
+is saved in the password manager, then either write it back to
+`/etc/apiary-backup.pass` yourself or re-run with `CONFIRM_NEW_PASSPHRASE=1`
+to accept minting a fresh one.
+
 ## Running it
 
 ```bash
 scripts/backup-essentials.sh              # collect and fan out
 scripts/backup-essentials.sh --dry-run    # collect, print the tree and size, discard
 scripts/backup-essentials.sh --list       # what each destination currently holds
+scripts/backup-essentials.sh --check      # exit non-zero if the newest archive
+                                           # anywhere is missing or stale (>48h,
+                                           # override with MAX_AGE_HOURS)
 ```
+
+Nothing runs `--check` on a schedule today; wire it into whatever host health
+sweep exists, or a separate timer, if the timer silently disappearing (as it
+did after the #1609 rebuild — see #3016) needs to be caught automatically.
 
 Requirements on the workstation: SSH aliases `homeserver` and `vps` working
 (see `~/.ssh/config`), passwordless `sudo` on the homeserver — the stack `.env`

@@ -36,6 +36,8 @@
 #   scripts/backup-essentials.sh            # collect and fan out to all destinations
 #   scripts/backup-essentials.sh --dry-run  # collect, report size, discard
 #   scripts/backup-essentials.sh --list     # list what each destination holds
+#   scripts/backup-essentials.sh --check    # exit non-zero if the newest archive
+#                                            # anywhere is missing or >MAX_AGE_HOURS old
 #
 # Env:
 #   HOMESERVER_SSH   ssh target for the homeserver      (default: homeserver)
@@ -47,6 +49,7 @@
 #   RETENTION        archives to keep per destination    (default: 30)
 #   BACKUP_ENCRYPT   1 = gpg-encrypt the archive        (default: 1)
 #   PASSPHRASE_FILE  gpg symmetric passphrase           (default: /etc/apiary-backup.pass)
+#   MAX_AGE_HOURS    --check staleness threshold        (default: 48)
 #
 # Restore: docs/BACKUP-ESSENTIALS.md, a copy of which rides inside every
 # archive under repo/docs/ along with the rest of the runbooks. The archive is
@@ -65,15 +68,18 @@ REPO_DIR=${REPO_DIR:-$HOME/Github/APIARY}
 RETENTION=${RETENTION:-30}
 BACKUP_ENCRYPT=${BACKUP_ENCRYPT:-1}
 PASSPHRASE_FILE=${PASSPHRASE_FILE:-/etc/apiary-backup.pass}
+MAX_AGE_HOURS=${MAX_AGE_HOURS:-48}
 
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15)
 
 dry_run=0
 list_only=0
+check_only=0
 for arg in "$@"; do
   case $arg in
     --dry-run) dry_run=1 ;;
     --list)    list_only=1 ;;
+    --check)   check_only=1 ;;
     -h|--help) sed -n '2,60p' "$0"; exit 0 ;;
     *) echo "unknown argument: $arg" >&2; exit 2 ;;
   esac
@@ -95,6 +101,35 @@ if [ "$list_only" -eq 1 ]; then
   printf '\n== %s:%s\n' "$HOMESERVER_SSH" "$DEST_SERVER_USB"
   ssh "${SSH_OPTS[@]}" "$HOMESERVER_SSH" \
     "ls -lh '$DEST_SERVER_USB'/apiary-essentials-*.tar.gz* 2>/dev/null" || echo "  (nothing)"
+  exit 0
+fi
+
+# --- freshness check ---------------------------------------------------------
+#
+# For a health sweep or manual audit: the timer can silently stop existing
+# (a rebuild that drops the unit, an installer never re-run) with nothing
+# noticing until someone needs a restore. This finds the newest archive
+# across all three destinations and fails loudly if it is missing or stale.
+
+if [ "$check_only" -eq 1 ]; then
+  newest=0
+  for dir in "$DEST_LOCAL_USB" "$DEST_LOCAL_DISK"; do
+    while IFS= read -r t; do
+      [ -n "$t" ] && [ "${t%.*}" -gt "$newest" ] && newest=${t%.*}
+    done < <(find "$dir" -maxdepth 1 -name 'apiary-essentials-*.tar.gz*' ! -name '*.sha256' \
+      -printf '%T@\n' 2>/dev/null)
+  done
+  remote_t=$(ssh "${SSH_OPTS[@]}" "$HOMESERVER_SSH" \
+    "find '$DEST_SERVER_USB' -maxdepth 1 -name 'apiary-essentials-*.tar.gz*' ! -name '*.sha256' -printf '%T@\n' 2>/dev/null | sort -rn | head -1" \
+    2>/dev/null || true)
+  remote_t=${remote_t%.*}
+  [ -n "$remote_t" ] && [ "$remote_t" -gt "$newest" ] && newest=$remote_t
+
+  [ "$newest" -gt 0 ] || fail "no essentials archive found on any of the three destinations"
+  age_h=$(( ($(date +%s) - newest) / 3600 ))
+  [ "$age_h" -le "$MAX_AGE_HOURS" ] \
+    || fail "newest essentials archive is ${age_h}h old (> ${MAX_AGE_HOURS}h) — check apiary-backup-essentials.timer"
+  log "newest essentials archive is ${age_h}h old — OK"
   exit 0
 fi
 

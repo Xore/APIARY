@@ -28,8 +28,11 @@
 #   sudo scripts/install-backup-essentials.sh
 #
 # Env:
-#   RUN_AS      user the timer runs as       (default: the invoking sudo user)
-#   REPO_DIR    checkout to run from         (default: this script's repo)
+#   RUN_AS                  user the timer runs as       (default: the invoking sudo user)
+#   REPO_DIR                checkout to run from         (default: this script's repo)
+#   CONFIRM_NEW_PASSPHRASE  1 = allow minting a new passphrase even though
+#                           archives encrypted with an old one already exist
+#                           on this host                 (default: refuse)
 
 set -euo pipefail
 
@@ -58,6 +61,27 @@ created_passphrase=0
 if [[ -s $passphrase_file ]]; then
   echo "keeping existing passphrase at $passphrase_file"
 else
+  # The passphrase file is the only thing that opens archives already on
+  # disk. A rebuild that wipes /etc (but not the backup destinations) must
+  # not silently mint a new one and orphan them -- require the operator to
+  # say so explicitly once they've confirmed the old passphrase is saved
+  # elsewhere (it is not recoverable from this host).
+  existing=$(find "/home/$run_as/apiary-backups" -maxdepth 1 \
+    -name 'apiary-essentials-*.tar.gz.gpg' -print -quit 2>/dev/null || true)
+  if [[ -n $existing && -z ${CONFIRM_NEW_PASSPHRASE:-} ]]; then
+    cat >&2 <<EOF
+refusing to mint a new passphrase: encrypted archives already exist
+(e.g. $existing) and only the OLD passphrase opens them -- it is not stored
+anywhere on this host to recover automatically.
+
+Before continuing:
+  1. confirm the old passphrase is saved in the password manager
+  2. either write it back to $passphrase_file yourself, or
+  3. re-run with CONFIRM_NEW_PASSPHRASE=1 to mint a fresh one (existing
+     archives stay readable only with the passphrase already saved off-host)
+EOF
+    exit 1
+  fi
   umask 077
   # 32 bytes of base64 from the kernel CSPRNG.
   openssl rand -base64 32 > "$passphrase_file"
