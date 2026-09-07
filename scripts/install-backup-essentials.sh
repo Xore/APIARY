@@ -88,7 +88,7 @@ else
   if [[ (-n $existing || $homeserver_unreachable -eq 1) && -z ${CONFIRM_NEW_PASSPHRASE:-} ]]; then
     cat >&2 <<EOF
 refusing to mint a new passphrase: encrypted archives already exist
-(e.g. ${existing:-on the homeserver's USB, which could not be checked --
+(e.g. ${existing:-on the homeserver USB, which could not be checked --
 treating unreachable as "unknown, refuse"}) and only the OLD passphrase opens
 them -- it is not stored anywhere on this host to recover automatically.
 
