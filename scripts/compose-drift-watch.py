@@ -190,7 +190,7 @@ def retired_projects(stacks_root: Path, known_names: set[str]) -> list[str]:
 # one field install-homeserver.sh's step_arcane_install and deploy.yml's
 # "Synchronize honeypot-arcane" step both copy from once and never re-diff.
 ARCANE_REPO_COMPOSE = Path(__file__).resolve().parent.parent / "docker-compose.arcane.yml"
-ARCANE_IMAGE_RE = re.compile(r"(?m)^\s*image:\s*(\S+)$")
+ARCANE_IMAGE_RE = re.compile(r"(?m)^\s*image:\s*(ghcr\.io/getarcaneapp/\S+)$")
 
 
 def arcane_image(text: str) -> str | None:
