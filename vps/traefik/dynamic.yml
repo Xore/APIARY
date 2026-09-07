@@ -114,6 +114,22 @@ http:
         options: modern
       middlewares: [security-headers, traefik-dashboard-redirect]
 
+    # #3120: traefik-dashboard above forwards every path to oidc-traefik,
+    # including oauth2-proxy's own built-in unauthenticated /ping liveness
+    # endpoint -- the only router on this host that isn't OIDC-gated. No
+    # monitor depends on the public path: Traefik's real healthcheck (see
+    # vps/docker-compose.yml) already targets the loopback traefik-local
+    # entrypoint, not this one. noop@internal is Traefik's own built-in
+    # deny primitive (answers 418, not a configurable status) -- higher
+    # priority than every named router on this host so it wins outright.
+    traefik-dashboard-ping-block:
+      rule: "Host(`traefik.honeypot.example`) && Path(`/ping`)"
+      priority: 200
+      entryPoints: [websecure]
+      service: noop@internal
+      tls:
+        options: modern
+
     keycloak:
       rule: "Host(`auth.honeypot.example`)"
       entryPoints: [websecure]
