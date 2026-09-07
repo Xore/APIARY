@@ -52,23 +52,47 @@ die() { log "ABORT: $*"; exit 1; }
 # ---------------------------------------------------------------------------
 coldrun_finished() {
   python3 - "$TAGLIST" "$RESULTS" <<'EOF' || return 1
-import os, re, sys
-tags = [l.strip() for l in open(sys.argv[1]) if l.strip()]
+import os, sys
+tags = [l.strip() for l in open(sys.argv[1]) if l.strip() and not l.startswith("#")]
 res = sys.argv[2]
-slug = lambda t: re.sub(r"[^A-Za-z0-9._-]", "_", t)
+# Same slug derivation sweep_extra.sh scores with (tr ':/' '__').
+def slug(t):
+    return t.replace(":", "_").replace("/", "_")
 for t in tags:
-    a = os.path.exists(f"{res}/tierA_{slug(t)}_run1.json")
-    b = os.path.exists(f"{res}/tierB_{slug(t)}_run1.json")
-    if not (a and b) and not os.path.exists(f"{res}/UNMEASURED_{slug(t)}.txt"):
-        sys.exit(1)
+    s = slug(t)
+    if os.path.exists(f"{res}/tierA_{s}_run1.json") and os.path.exists(f"{res}/tierB_{s}_run1.json"):
+        continue
+    # sweep_extra.sh writes UNMEASURED_<slug>.status; older copies wrote .txt,
+    # and some drivers drop a plain UNMEASURED marker. Any of them is settled.
+    if any(os.path.exists(f"{res}/{p}") for p in (
+            f"UNMEASURED_{s}.status", f"UNMEASURED_{s}.txt", "UNMEASURED",
+            f"UNRESOLVED_tierA_{s}.status", f"UNRESOLVED_tierB_{s}.status")):
+        continue
+    sys.exit(1)
 EOF
 }
-if [ -s "$ROSTER7" ]; then TAGLIST="$ROSTER7"; fi
+# Roster for the gate. Default is the round-7 roster the cold run itself
+# consumes ($BASE/round7_roster.txt is built by round7_coldrun.sh's
+# build_roster and may not exist yet); T0_ROWS mode narrows the gate to the
+# four T0 tags -- the merge leg runs AFTER the cold run and registers exactly
+# those tags, so the full-roster wait would deadlock with this very script.
+T0_ROWS="rex86-merged:q8_0
+rex86-merged:q4_k_m
+qwen2.5-coder-7b-base:q8_0
+qwen2.5-coder-7b-base:q4_k_m"
+if [ "${T0_GATE:-0}" = "1" ]; then
+  TAGLIST=$(mktemp)
+  printf '%s\n' "$T0_ROWS" > "$TAGLIST"
+elif [ ! -s "$ROSTER7" ]; then
+  [ -s "$TAGLIST" ] || TAGLIST=$BASE/models_round7.txt
+else
+  TAGLIST=$ROSTER7
+fi
 [ -s "$TAGLIST" ] || die "roster $TAGLIST is empty -- cannot evaluate the gate"
 coldrun_finished || die "round-7 roster not fully scored -- cold run still owns the GPU"
-pgrep -f "sweep_extra[.]sh"      >/dev/null 2>&1 && die "a sweep is still running"
-pgrep -f "record_baseline[.]py"  >/dev/null 2>&1 && die "a baseline run is still running"
-pgrep -f "round7_coldrun[.]sh"   >/dev/null 2>&1 && die "round7_coldrun.sh is still alive"
+pgrep -f "sweep_extra[.]sh"       >/dev/null 2>&1 && die "a sweep is still running"
+pgrep -f "record_baseline[.]py"   >/dev/null 2>&1 && die "a baseline run is still running"
+pgrep -f "round7_coldrun[.]sh"    >/dev/null 2>&1 && die "round7_coldrun.sh is still alive"
 
 # RAM guard: fp16 merge of a 7B model wants ~30 GB headroom.
 free_g=$(free -g | awk '/^Mem:/{print $7}')
@@ -87,7 +111,8 @@ ZENODO_SIZE=$(curl -fsS "https://zenodo.org/api/records/${ZENODO_REC}" \
   | python3 -c 'import json,sys;print(next(f["size"] for f in json.load(sys.stdin)["files"] if f["key"]=="REx86.zip"))')
 ZIP_SIZE=$(stat -c%s REx86.zip)
 [ "$ZIP_SIZE" = "$ZENODO_SIZE" ] || die "REx86.zip size $ZIP_SIZE != live Zenodo size $ZENODO_SIZE (corrupt/partial download)"
-log "zip size ok: $ZIP_SIZE bytes (matches live Zenodo record)"
+ZIP_SHA=$(sha256sum REx86.zip | awk '{print $1}')
+log "zip size ok: $ZIP_SIZE bytes (matches live Zenodo record); sha256 $ZIP_SHA"
 
 if [ ! -s REx86/adapter_model.safetensors ]; then
   unzip -o REx86.zip || die "unzip failed"
@@ -156,9 +181,10 @@ done
 # ---------------------------------------------------------------------------
 # 5. Manifest: input SHAs, base revision, quant params, file sizes
 # ---------------------------------------------------------------------------
-python3 - "$RUN" "$ZIP_SIZE" "$INNER_ACTUAL" "$INNER_ACTUAL_SIZE" <<'EOF'
+python3 - "$RUN" "$ZIP_SIZE" "$ZIP_SHA" "$INNER_ACTUAL" "$INNER_ACTUAL_SIZE" <<'EOF'
 import hashlib, json, os, sys
-run, zip_size, inner_sha, inner_size = sys.argv[1], int(sys.argv[2]), sys.argv[3], int(sys.argv[4])
+run, zip_size, zip_sha, inner_sha, inner_size = (
+    sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4], int(sys.argv[5]))
 def sha(p):
     h = hashlib.sha256()
     with open(p, "rb") as f:
@@ -174,7 +200,7 @@ manifest = {
     "base_model": "unsloth/Qwen2.5-Coder-7B",
     "base_revision": "5762507e8ed2132906da60f86a2b23b54673ee81",
     "adapter": {"source": "Zenodo 15420461 REx86.zip",
-                "zip_bytes": zip_size,
+                "zip_bytes": zip_size, "zip_sha256": zip_sha,
                 "inner_file": "REx86/adapter_model.safetensors",
                 "inner_bytes": inner_size, "inner_sha256": inner_sha,
                 "peft": {"type": "LORA", "r": 32, "lora_alpha": 64}},
