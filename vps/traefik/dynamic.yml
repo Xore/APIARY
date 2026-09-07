@@ -114,22 +114,6 @@ http:
         options: modern
       middlewares: [security-headers, traefik-dashboard-redirect]
 
-    # #3120: traefik-dashboard above forwards every path to oidc-traefik,
-    # including oauth2-proxy's own built-in unauthenticated /ping liveness
-    # endpoint -- the only router on this host that isn't OIDC-gated. No
-    # monitor depends on the public path: Traefik's real healthcheck (see
-    # vps/docker-compose.yml) already targets the loopback traefik-local
-    # entrypoint, not this one. noop@internal is Traefik's own built-in
-    # deny primitive (answers 418, not a configurable status) -- higher
-    # priority than every named router on this host so it wins outright.
-    traefik-dashboard-ping-block:
-      rule: "Host(`traefik.honeypot.example`) && Path(`/ping`)"
-      priority: 200
-      entryPoints: [websecure]
-      service: noop@internal
-      tls:
-        options: modern
-
     keycloak:
       rule: "Host(`auth.honeypot.example`)"
       entryPoints: [websecure]
@@ -206,33 +190,6 @@ http:
       tls:
         options: modern
       middlewares: [security-headers, rate-limit-keycloak-admin]
-
-    # #3118: Cloudflare's managed WAF evaluates the raw URI before
-    # normalization, so a leading /./ segment slips past it, while Traefik
-    # normalizes the path before routing -- confirmed reproducing only on
-    # this host, since the other 8 gated hosts' oauth2-proxy middleware
-    # applies post-normalization. That differential turned this host's own
-    # missing OIDC gate (Keycloak is the identity provider itself, so it
-    # can't sit behind its own oauth2-proxy) into an unauthenticated
-    # client-enumeration / PKCE-policy oracle. Deliberately scoped to this
-    # host only, not global: the same dot-segment traffic is exactly what
-    # the honeypot-* decoy routers below exist to capture, so a blanket
-    # deny would suppress attacker path-traversal probes the rest of this
-    # stack is built to record.
-    #
-    # noop@internal is Traefik's own built-in deny primitive (verified
-    # against upstream source: pkg/server/service/internalhandler.go
-    # answers http.StatusTeapot) -- 418, not the 400 the scan report
-    # suggested, but the same deterministic pre-backend rejection.
-    # Cloudflare-side normalization/WAF rule is a zone-config change,
-    # outside this repo's scope.
-    deny-dot-segment-on-auth:
-      rule: "Host(`auth.honeypot.example`) && PathRegexp(`(^|/)\\.\\.?(/|$)`)"
-      priority: 200
-      entryPoints: [websecure]
-      service: noop@internal
-      tls:
-        options: modern
 
     # #1509: was `static-site`, routing to a dead `socat-static` bridge --
     # see socat-hp-hellpot's own header comment in vps/docker-compose.yml
