@@ -61,6 +61,39 @@ export function oidcDisabled(): boolean {
   return process.env.OIDC_DISABLED === '1'
 }
 
+/** The refusal code this gate stamps on its boot-failure line, mirroring
+ * serviceToken.server.ts's SERVICE_TOKEN_GATE_CODE convention. */
+export const OIDC_DISABLED_GATE_CODE = 'E-OIDC-DISABLED'
+
+/** #3112: OIDC_DISABLED=1 short-circuits login with a fixture admin
+ * identity (sessionGate.server.ts's resolveFunctionUser) -- exactly the
+ * shape a leaked dev override must never reach in a real deployment. Same
+ * posture as serviceTokenPolicy(): a deployment may only run this way when
+ * it says so out loud, via NODE_ENV=development (the value `npm run dev`
+ * and this image's own Dockerfile use to mean the opposite of each other),
+ * not merely by OIDC_DISABLED itself. */
+export function oidcDisabledPolicy(
+  env: { OIDC_DISABLED?: string; NODE_ENV?: string } & Record<string, string | undefined> = process.env,
+): { kind: 'enforced' } | { kind: 'dev-override' } | { kind: 'refuse'; message: string } {
+  if (env.OIDC_DISABLED !== '1') return { kind: 'enforced' }
+  if (env.NODE_ENV === 'development') return { kind: 'dev-override' }
+  return {
+    kind: 'refuse',
+    message: `[${OIDC_DISABLED_GATE_CODE}] refusing to start: OIDC_DISABLED=1 is set outside development (NODE_ENV=${env.NODE_ENV ?? 'unset'}), which would let every request in as a fixture admin operator with no real session. Unset OIDC_DISABLED, or set NODE_ENV=development to confirm this is a local/dev instance (#3112).`,
+  }
+}
+
+/** Throws the E-OIDC-DISABLED refusal when env does not sanction the dev
+ * bypass; silent otherwise. Called once from backend.server.ts's module
+ * scope, same timing as assertServiceTokenPolicy: the process dies before
+ * listening rather than serving live traffic under a fixture identity. */
+export function assertOidcDisabledPolicy(
+  env: Parameters<typeof oidcDisabledPolicy>[0] = process.env,
+): void {
+  const policy = oidcDisabledPolicy(env)
+  if (policy.kind === 'refuse') throw new Error(policy.message)
+}
+
 // Keycloak's account console lives at <issuer>/account/ by convention (the
 // issuer is already .../realms/<realm>), so these links need no extra env
 // var beyond OIDC_ISSUER_URL. Restores settings_modal.html:58-84's "Account

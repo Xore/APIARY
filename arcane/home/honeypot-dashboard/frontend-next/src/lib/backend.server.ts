@@ -23,6 +23,7 @@
 import { Agent, setGlobalDispatcher } from 'undici'
 import { ConcurrencyLimiter, envInt, Overloaded, overloadedResponse, releaseOnFinish } from './backpressure.server'
 import { assertServiceTokenPolicy, SERVICE_TOKEN_GATE_CODE, serviceTokenPolicy } from './serviceToken.server'
+import { assertOidcDisabledPolicy } from './oidc.server'
 import type { RequestContextRuntime } from './requestContext.server'
 
 // #2183: the boot half of the shared token contract. An unset/empty
@@ -33,6 +34,10 @@ import type { RequestContextRuntime } from './requestContext.server'
 // Nitro boots — the process never listens misconfigured; see
 // serviceToken.server.ts for the one decision both tiers render.
 assertServiceTokenPolicy()
+// #3112: same boot timing, guarding the other dev-only bypass -- a leaked
+// OIDC_DISABLED=1 outside development would serve every request as a
+// fixture admin instead of merely being unauthenticated.
+assertOidcDisabledPolicy()
 
 setGlobalDispatcher(
   new Agent({
