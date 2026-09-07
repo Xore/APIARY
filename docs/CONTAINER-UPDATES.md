@@ -51,6 +51,14 @@ pinned to `:latest` deliberately (check the surrounding comment before
 assuming that's an oversight — some are intentional, e.g. debug/diagnostic
 tooling images meant to always be fresh).
 
+Known deliberate `:latest` exceptions (each justified inline at its own
+`image:` line — read the comment there before "fixing" it):
+- `arcane/home/honeypot-keycloak/compose.yml` — `quay.io/keycloak/keycloak:latest`
+  with `pull_policy: always`. Keycloak is the identity provider for the
+  whole stack; staying current on it matters more than a reproducible
+  image id (a prior digest pin kept a build with an unauthenticated
+  account-takeover CVE running until someone edited the file).
+
 ## 2. Check the latest available version per image
 
 No web search needed for this part — query the registry directly.

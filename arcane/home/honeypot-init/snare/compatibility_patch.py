@@ -43,3 +43,19 @@ replacement = """        # Cached metadata can predate the cloner filter. Never 
 if needle not in source:
     raise SystemExit("SNARE response header patch target was not found")
 server.write_text(source.replace(needle, replacement, 1))
+
+# #3119: upstream issues sess_uuid pre-auth and on every request with no
+# cookie attributes at all -- cookie-confidentiality-only today (no
+# fixation, no reachable state-changing endpoint on this decoy), but a
+# session-theft enabler the moment any XSS or authenticated flow lands here.
+source = server.read_text()
+needle = '                headers.add("Set-Cookie", "sess_uuid=" + cur_sess_id)'
+replacement = (
+    '                headers.add(\n'
+    '                    "Set-Cookie",\n'
+    '                    "sess_uuid=" + cur_sess_id + "; HttpOnly; Secure; SameSite=Lax",\n'
+    '                )'
+)
+if needle not in source:
+    raise SystemExit("SNARE session cookie patch target was not found")
+server.write_text(source.replace(needle, replacement, 1))

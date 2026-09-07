@@ -142,7 +142,10 @@ fn discover_sources(logs_dir: &Path, out_dir: &Path, state_dir: &Path) -> Vec<So
             .filter_map(|e| e.ok())
             .filter(|e| e.path().is_dir())
             .filter_map(|e| e.file_name().into_string().ok())
-            .filter(|name| name.starts_with("conpot") && logs_dir.join(name).join("conpot.json").is_file())
+            .filter(|name| {
+                (name == "conpot" || name.starts_with("conpot-"))
+                    && logs_dir.join(name).join("conpot.json").is_file()
+            })
             .collect();
         personas.sort(); // deterministic discovery order
         for persona in personas {
@@ -467,6 +470,22 @@ mod tests {
         ] {
             assert_eq!(by_name[name].input, logs.join(dir).join(file), "{name} input path");
         }
+    }
+
+    #[test]
+    fn a_lookalike_directory_name_is_not_mistaken_for_a_conpot_persona() {
+        let logs = temp_dir("lookalike-logs");
+        for dir in ["conpotato", "conpot_legacy"] {
+            std::fs::create_dir_all(logs.join(dir)).unwrap();
+            std::fs::write(logs.join(dir).join("conpot.json"), b"").unwrap();
+        }
+
+        let sources = discover_sources(&logs, &temp_dir("lookalike-out"), &temp_dir("lookalike-state"));
+
+        assert!(
+            !sources.iter().any(|s| s.name.starts_with("conpot")),
+            "directory-name prefix match must not pick up non-persona lookalikes"
+        );
     }
 
     #[test]
