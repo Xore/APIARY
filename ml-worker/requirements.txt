@@ -35,7 +35,7 @@ elasticsearch==8.19.3
 
 # ML core
 scikit-learn==1.9.0
-joblib==1.5.3
+joblib==1.6.0
 # 2.4.6. This rationale was re-derived 2026-08-27 against the interpreter
 # ml-worker/Dockerfile actually ships -- python:3.14-slim, digest-pinned.
 # Treat the Dockerfile's FROM, not any interpreter number in a comment, as
