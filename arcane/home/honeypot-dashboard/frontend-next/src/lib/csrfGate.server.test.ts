@@ -2,6 +2,8 @@
 // nonce and the session cookie both live on the analyst UI's own origin, so
 // a request whose Origin/Referer disagrees with it never legitimately
 // belongs to a same-site caller.
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { crossOriginResponse, isSameOriginRequest } from './csrfGate.server'
 
@@ -42,11 +44,32 @@ describe('isSameOriginRequest', () => {
       isSameOriginRequest(req('POST', { referer: 'https://evil.example/canarytokens' })),
     ).toBe(false)
   })
+
+  it('accepts a same-host Origin even when the scheme differs (Traefik TLS termination)', () => {
+    process.env.OIDC_EXTERNAL_URL = 'https://dashboard.example'
+    expect(isSameOriginRequest(req('POST', { origin: 'https://internal.example' }))).toBe(true)
+  })
+
+  it('rejects a foreign Origin whose host does not match the request host either', () => {
+    process.env.OIDC_EXTERNAL_URL = 'https://dashboard.example'
+    expect(isSameOriginRequest(req('POST', { origin: 'https://evil.example' }))).toBe(false)
+  })
 })
 
 describe('crossOriginResponse', () => {
   it('is a JSON 403 with the ok:false shape mutating callers check', () => {
     const response = crossOriginResponse()
     expect(response.status).toBe(403)
+  })
+})
+
+describe('the CSRF gate wiring', () => {
+  it('runs before the public-fn exemption in start.ts, so login/logout are covered too', () => {
+    const start = readFileSync(join(__dirname, '..', 'start.ts'), 'utf8')
+    const csrfCheck = start.indexOf('isSameOriginRequest(getRequest())')
+    const publicFnCheck = start.indexOf('isPublicFn(serverFnMeta)')
+    expect(csrfCheck).toBeGreaterThan(-1)
+    expect(publicFnCheck).toBeGreaterThan(-1)
+    expect(csrfCheck).toBeLessThan(publicFnCheck)
   })
 })

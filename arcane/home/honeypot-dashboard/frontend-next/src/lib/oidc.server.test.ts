@@ -29,8 +29,27 @@ describe('oidcDisabledPolicy', () => {
     expect(oidcDisabledPolicy({ OIDC_DISABLED: '1', NODE_ENV: 'production' }).kind).toBe('refuse')
   })
 
-  it('sanctions OIDC_DISABLED=1 only under NODE_ENV=development', () => {
+  it('sanctions OIDC_DISABLED=1 under NODE_ENV=development', () => {
     expect(oidcDisabledPolicy({ OIDC_DISABLED: '1', NODE_ENV: 'development' }).kind).toBe('dev-override')
+  })
+
+  it('also sanctions OIDC_DISABLED=1 via APIARY_ALLOW_UNAUTH_DEV=1, the escape hatch every harness that boots with OIDC_DISABLED=1 already sets', () => {
+    expect(
+      oidcDisabledPolicy({ OIDC_DISABLED: '1', APIARY_ALLOW_UNAUTH_DEV: '1' }).kind,
+    ).toBe('dev-override')
+  })
+
+  it('still refuses OIDC_DISABLED=1 when neither escape hatch is set', () => {
+    expect(
+      oidcDisabledPolicy({ OIDC_DISABLED: '1', APIARY_ALLOW_UNAUTH_DEV: '0' }).kind,
+    ).toBe('refuse')
+  })
+
+  it('names both escape hatches in the refusal message', () => {
+    const policy = oidcDisabledPolicy({ OIDC_DISABLED: '1' })
+    if (policy.kind !== 'refuse') throw new Error('expected refuse')
+    expect(policy.message).toContain('NODE_ENV=development')
+    expect(policy.message).toContain('APIARY_ALLOW_UNAUTH_DEV=1')
   })
 })
 
@@ -42,5 +61,6 @@ describe('assertOidcDisabledPolicy', () => {
   it('passes silently when OIDC is enforced or the dev override is sanctioned', () => {
     expect(() => assertOidcDisabledPolicy({})).not.toThrow()
     expect(() => assertOidcDisabledPolicy({ OIDC_DISABLED: '1', NODE_ENV: 'development' })).not.toThrow()
+    expect(() => assertOidcDisabledPolicy({ OIDC_DISABLED: '1', APIARY_ALLOW_UNAUTH_DEV: '1' })).not.toThrow()
   })
 })

@@ -70,16 +70,22 @@ export const OIDC_DISABLED_GATE_CODE = 'E-OIDC-DISABLED'
  * shape a leaked dev override must never reach in a real deployment. Same
  * posture as serviceTokenPolicy(): a deployment may only run this way when
  * it says so out loud, via NODE_ENV=development (the value `npm run dev`
- * and this image's own Dockerfile use to mean the opposite of each other),
- * not merely by OIDC_DISABLED itself. */
+ * and this image's own Dockerfile use to mean the opposite of each other)
+ * or via APIARY_ALLOW_UNAUTH_DEV=1 (the escape hatch #2183's SERVICE_TOKEN
+ * check already uses to mean "this is a deliberately unauthenticated dev
+ * instance", which every harness that boots with OIDC_DISABLED=1 already
+ * sets) -- not merely by OIDC_DISABLED itself. */
 export function oidcDisabledPolicy(
-  env: { OIDC_DISABLED?: string; NODE_ENV?: string } & Record<string, string | undefined> = process.env,
+  env: { OIDC_DISABLED?: string; NODE_ENV?: string; APIARY_ALLOW_UNAUTH_DEV?: string } & Record<
+    string,
+    string | undefined
+  > = process.env,
 ): { kind: 'enforced' } | { kind: 'dev-override' } | { kind: 'refuse'; message: string } {
   if (env.OIDC_DISABLED !== '1') return { kind: 'enforced' }
-  if (env.NODE_ENV === 'development') return { kind: 'dev-override' }
+  if (env.NODE_ENV === 'development' || env.APIARY_ALLOW_UNAUTH_DEV === '1') return { kind: 'dev-override' }
   return {
     kind: 'refuse',
-    message: `[${OIDC_DISABLED_GATE_CODE}] refusing to start: OIDC_DISABLED=1 is set outside development (NODE_ENV=${env.NODE_ENV ?? 'unset'}), which would let every request in as a fixture admin operator with no real session. Unset OIDC_DISABLED, or set NODE_ENV=development to confirm this is a local/dev instance (#3112).`,
+    message: `[${OIDC_DISABLED_GATE_CODE}] refusing to start: OIDC_DISABLED=1 is set outside development (NODE_ENV=${env.NODE_ENV ?? 'unset'}), which would let every request in as a fixture admin operator with no real session. Unset OIDC_DISABLED, or set NODE_ENV=development or APIARY_ALLOW_UNAUTH_DEV=1 to confirm this is a local/dev instance (#3112).`,
   }
 }
 

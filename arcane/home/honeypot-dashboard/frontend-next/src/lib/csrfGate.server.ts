@@ -9,6 +9,15 @@
 // same-site navigations omit Origin) against externalURL()'s origin for
 // every state-changing call; missing or mismatched fails closed, same
 // posture as sessionGate.server.ts's fail-closed session check.
+//
+// externalURL() alone only covers production (it falls back to
+// http://127.0.0.1:4173, which nothing outside compose.yml actually sets —
+// see #3109 review). So also accept a header whose *host* matches the
+// request's own Host: behind TLS-terminating Traefik the browser's Origin is
+// https:// while request.url is the internal http:// one, so comparing full
+// origins would false-reject in production; comparing Host loses no security
+// since a victim's browser cannot be made to send a foreign Host to this
+// server (X-Forwarded-* is deliberately not consulted).
 import { externalURL } from './oidc.server'
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
@@ -22,7 +31,9 @@ export function isSameOriginRequest(request: Request): boolean {
   const header = request.headers.get('origin') ?? request.headers.get('referer')
   if (!header) return false
   try {
-    return new URL(header).origin === new URL(externalURL()).origin
+    const headerUrl = new URL(header)
+    if (headerUrl.origin === new URL(externalURL()).origin) return true
+    return headerUrl.host === new URL(request.url).host
   } catch {
     return false
   }

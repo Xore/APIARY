@@ -23,7 +23,6 @@
 import { Agent, setGlobalDispatcher } from 'undici'
 import { ConcurrencyLimiter, envInt, Overloaded, overloadedResponse, releaseOnFinish } from './backpressure.server'
 import { assertServiceTokenPolicy, SERVICE_TOKEN_GATE_CODE, serviceTokenPolicy } from './serviceToken.server'
-import { assertOidcDisabledPolicy } from './oidc.server'
 import type { RequestContextRuntime } from './requestContext.server'
 
 // #2183: the boot half of the shared token contract. An unset/empty
@@ -33,11 +32,14 @@ import type { RequestContextRuntime } from './requestContext.server'
 // imports every route module into the server bundle, so this throws while
 // Nitro boots — the process never listens misconfigured; see
 // serviceToken.server.ts for the one decision both tiers render.
+//
+// #3112: the OIDC_DISABLED boot refusal used to also live here, but this
+// module's scope is only evaluated lazily on first import — started via
+// index.mjs directly, that meant a leaked OIDC_DISABLED=1 served one
+// request as a fixture admin before the 500. It now runs from
+// server/plugins/service-token-gate.ts alongside this same assertion,
+// which Nitro evaluates while the bundle boots regardless of entrypoint.
 assertServiceTokenPolicy()
-// #3112: same boot timing, guarding the other dev-only bypass -- a leaked
-// OIDC_DISABLED=1 outside development would serve every request as a
-// fixture admin instead of merely being unauthenticated.
-assertOidcDisabledPolicy()
 
 setGlobalDispatcher(
   new Agent({
