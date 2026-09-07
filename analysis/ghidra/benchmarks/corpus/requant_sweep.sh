@@ -57,6 +57,33 @@
 #   bash requant_sweep.sh                    # work the whole plan
 #   PLAN=/path/to/plan.txt bash requant_sweep.sh
 #   BUILD_ONLY=1 bash requant_sweep.sh       # build the ladder, don't score
+#
+# ---------------------------------------------------------------------------
+# Dynamic-quant extension (#3086, round-7 plan §7 R2): IMATRIX= and TENSOR_TYPES=
+#
+#   IMATRIX=/mnt-1/training/calib/calib.txt bash requant_sweep.sh
+#   TENSOR_TYPES="re=Q8_0" IMATRIX=... bash requant_sweep.sh
+#
+# IMATRIX turns the plain K-quant ladder into the Dynamic-3.0 methodology
+# (#3086 R1/R2): before the first level of a base is quantised,
+# `llama-imatrix -f "$IMATRIX" -o "$WORK/$name-imatrix.dat"` runs once per base
+# (the file is reused by every level and every re-run, like the f16), and
+# llama-quantize is invoked with `--imatrix`. The calibration text must be the
+# decontaminated round-7 calibration set built by round7_build_calib.sh --
+# never corpus text, which is the test set (plan §6.1).
+#
+# TENSOR_TYPES appends per-tensor overrides, one `--tensor-type <spec>` each
+# (llama-quantize accepts the flag repeatedly; the spec syntax is
+# `regex=TYPE`, e.g. `re=Q8_0` to keep the RoPE/output tensors at higher
+# precision). It only takes effect together with --imatrix -- llama-quantize
+# refuses tensor selection on a plain K-quant -- so setting it without
+# IMATRIX is a fatal configuration error rather than a silently ignored one.
+#
+# Resume safety is now per level AND content-checked: a level whose output
+# exists but is smaller than LEVEL_MIN_MB is treated as a truncated leftover
+# of an interrupted run, deleted, and rebuilt. (Every level in any plan this
+# script has ever carried is far above the floor; the floor exists to catch
+# partial writes, not small models.)
 set -u
 
 BASE=${BASE:-/mnt-1/benchmarks}
@@ -69,6 +96,17 @@ IMAGE=${IMAGE:-ghcr.io/ggml-org/llama.cpp:full}
 OLLAMA=${OLLAMA:-ghidra-ollama-1}
 KEEP_F16=${KEEP_F16:-0}
 BUILD_ONLY=${BUILD_ONLY:-0}
+# --- #3086: dynamic-quant inputs --------------------------------------------
+# IMATRIX: path to a calibration TEXT file for llama-imatrix. Empty = the
+# plain ladder, unchanged. Must be the decontaminated round-7 calibration set
+# (round7_build_calib.sh), never corpus text -- that is the test set.
+IMATRIX=${IMATRIX:-}
+# TENSOR_TYPES: space-separated per-tensor specs, each passed as its own
+# --tensor-type flag (e.g. TENSOR_TYPES="re=Q8_0"). Requires IMATRIX.
+TENSOR_TYPES=${TENSOR_TYPES:-}
+# A level output below this many MB is a truncated leftover of an interrupted
+# quantize, not a finished level; it is deleted and rebuilt.
+LEVEL_MIN_MB=${LEVEL_MIN_MB:-200}
 # An f16 master plus one quant level is the peak; leave room for the largest
 # base in the plan rather than discovering the ceiling mid-convert.
 MIN_FREE_GB=${MIN_FREE_GB:-400}
@@ -84,6 +122,25 @@ free_gb() { df --output=avail -BG "$1" | tail -1 | tr -dc '0-9'; }
 head=$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null) || die "$REPO is not a git checkout"
 [ "$head" = "a99e765" ] || die "repo head is $head, not a99e765 -- a different scoring vintage would split the matrix (#1947 rule 6)"
 command -v docker >/dev/null || die "no docker"
+# #3086: validate the dynamic-quant inputs before any hours-long download.
+if [ -n "$TENSOR_TYPES" ] && [ -z "$IMATRIX" ]; then
+  die "TENSOR_TYPES needs IMATRIX -- llama-quantize refuses per-tensor types without an importance matrix"
+fi
+if [ -n "$IMATRIX" ]; then
+  [ -f "$IMATRIX" ] || die "IMATRIX=$IMATRIX is not a file"
+  IMATRIX_IN_WORK="/work/$(basename "$IMATRIX")"
+  log "dynamic-quant ladder: imatrix=$IMATRIX tensor-types=${TENSOR_TYPES:-none}"
+fi
+# Each spec gets its own --tensor-type flag; llama-quantize accepts the flag
+# repeatedly. Unquoted expansion below is deliberate: word-splitting IS the
+# parsing here, and specs are operator-written regex=TYPE pairs without spaces.
+TENSOR_TYPE_FLAGS=""
+for spec in $TENSOR_TYPES; do TENSOR_TYPE_FLAGS="$TENSOR_TYPE_FLAGS --tensor-type $spec"; done
+# The llama() helper only bind-mounts $WORK, so the calibration text has to
+# live there. Copied once here, resume-safe: an identical copy is not replaced.
+if [ -n "$IMATRIX" ] && ! cmp -s "$IMATRIX" "$WORK/$(basename "$IMATRIX")" 2>/dev/null; then
+  cp "$IMATRIX" "$WORK/$(basename "$IMATRIX")" || die "cannot copy the calibration set into $WORK"
+fi
 docker ps --format '{{.Names}}' | grep -qx "$OLLAMA" || die "$OLLAMA is not running"
 [ -r "$HOME/.cache/huggingface/token" ] || die "no HF token at ~/.cache/huggingface/token -- snapshot downloads need it"
 docker image inspect "$IMAGE" >/dev/null 2>&1 || { log "pulling $IMAGE"; docker pull "$IMAGE" >/dev/null || die "cannot pull $IMAGE"; }
@@ -213,13 +270,40 @@ while IFS='|' read -r REPO_ID LEVELS PREFIX; do
   fi
 
   # --- 3+4. ladder ----------------------------------------------------------
+  # #3086: with IMATRIX set, build the importance matrix once per base from
+  # the calibration text, before the first level. Resume-safe like the f16:
+  # an existing non-empty imatrix.dat is reused. Requires the f16 on disk, so
+  # it lives directly under the ladder loop (never before step 1+2).
+  imatrix_dat=""
+  if [ -n "$IMATRIX" ]; then
+    imatrix_dat="$WORK/${name}-imatrix.dat"
+    if [ ! -s "$imatrix_dat" ]; then
+      log "building imatrix from $(basename "$IMATRIX")"
+      if ! llama /app/llama-imatrix -m "/work/${name}-f16.gguf" -f "$IMATRIX_IN_WORK" -o "/work/${name}-imatrix.dat"; then
+        log "IMATRIX_FAILED $REPO_ID"; rm -f "$imatrix_dat"; continue
+      fi
+    else
+      log "imatrix already present: $(du -h "$imatrix_dat" | cut -f1)"
+    fi
+  fi
+
   for lvl in $LEVELS; do
     out="$WORK/${name}-${lvl}.gguf"
     tag="${PREFIX}:$(echo "$lvl" | tr '[:upper:]' '[:lower:]')"
 
+    # Resume-safe per level, content-checked: an output below the floor is a
+    # partial write from an interrupted run -- delete it and rebuild.
+    if [ -f "$out" ]; then
+      mb=$(( $(stat -c%s "$out") / 1024 / 1024 ))
+      if [ "$mb" -lt "$LEVEL_MIN_MB" ]; then
+        log "$lvl output only ${mb}MB -- truncated leftover, rebuilding"
+        rm -f "$out"
+      fi
+    fi
     if [ ! -f "$out" ]; then
       log "quantizing -> $lvl"
-      if ! llama /app/llama-quantize "/work/${name}-f16.gguf" "/work/${name}-${lvl}.gguf" "$lvl"; then
+      if ! llama /app/llama-quantize ${imatrix_dat:+--imatrix "/work/${name}-imatrix.dat"} \
+           $TENSOR_TYPE_FLAGS "/work/${name}-f16.gguf" "/work/${name}-${lvl}.gguf" "$lvl"; then
         log "QUANT_FAILED $REPO_ID $lvl"; rm -f "$out"; continue
       fi
     fi
