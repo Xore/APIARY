@@ -1,0 +1,23 @@
+# models_round7.txt -- the round-7 benchmark roster (#3087, plan §7/§8).
+#
+# Rows from #3086's R2 dynamic ladder (requant_sweep.sh IMATRIX= builds these
+# tags; the prefixes below must match the R2 ladder plan's tag prefixes), the
+# controls, and the T0 pipeline-proof rows (#3081).
+#
+#   R2 ladder (7 bases -- one tag prefix per base; levels land as <prefix>:<level>):
+ornith-35b-dyn
+qwen3.8-27b-dyn
+qwen3.6-27b-dyn
+qwen3.6-35b-a3b-dyn
+gemma4-31b-dyn
+xortron-123b-dyn
+glm-4.6-reap-218b-dyn
+#   Controls (incumbent + #159 baseline, scored on every pin):
+qwen3:14b
+qwen2.5-coder:7b-instruct-q4_K_M
+#   T0: rex86-merged artefact and its untouched base, each at Q8_0 / Q4_K_M
+#   (isolates training; the pair at two quants brackets the residency line):
+rex86-merged:Q8_0
+rex86-merged:Q4_K_M
+qwen25-coder-7b-base:Q8_0
+qwen25-coder-7b-base:Q4_K_M
