@@ -24,6 +24,16 @@ x-oidc-gateway: &oidc-gateway
     OAUTH2_PROXY_PROVIDER: keycloak-oidc
     OAUTH2_PROXY_OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:?set OIDC_ISSUER_URL in the VPS environment}
     OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
+    # #3120: oauth2-proxy answers its default /ping path unauthenticated,
+    # ahead of its own auth handler -- a property of oauth2-proxy, not of
+    # any one Traefik host, so all six gateways sharing this anchor (kibana,
+    # tanner, evebox, arkime, revdeck, traefik) exposed it. Neither
+    # healthcheck in this file depends on the default path: Traefik's own
+    # liveness check hits the loopback traefik-local entrypoint directly
+    # (not through this gateway), and oauth2-proxy's container healthcheck
+    # runs `--version`, not an HTTP call. One line here closes all six at
+    # once instead of a per-host Traefik deny router.
+    OAUTH2_PROXY_PING_PATH: /__apiary_ping
     OAUTH2_PROXY_EMAIL_DOMAINS: "*"
     # The realm has no self-registration or email-verification flow at all --
     # "Administrators create every human account" (docs/KEYCLOAK-CUTOVER.md)
