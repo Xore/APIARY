@@ -1,106 +1,112 @@
 #!/usr/bin/env python3
-"""Exercise audit-sensor-event-coverage.py's extraction/matching logic
-against small synthetic Go source, not the real sensors -- the real-tree
-run (scripts/audit-sensor-event-coverage.py itself) is the audit; this is
-what proves the regexes are correct in the first place.
+"""Exercise audit-sensor-event-coverage.py's local computation: coverage()'s
+percent/sort math and main()'s reporting and --fail-under gate.
 
-Usage: scripts/tests/test_audit_sensor_event_coverage.py
+#1659/#1665 replaced the old Go-source regex audit with an Elasticsearch
+aggregation query (docstring in the script explains why -- there is no
+per-sensor classifier left to diff against). That means the only thing
+worth unit-testing here is the arithmetic and CLI behaviour around a
+canned aggregation response; the query itself is an operational audit
+against a live cluster, not something CI can exercise.
+
+search() is mocked out so no network or ES is needed, and coverage() is
+mocked out for the main() tests so their argument-parsing/threshold logic
+is isolated from the aggregation math already covered above.
+
+Usage: python3 -m unittest scripts.tests.test_audit_sensor_event_coverage
+   or: python3 scripts/tests/test_audit_sensor_event_coverage.py
 """
+from __future__ import annotations
+
 import importlib.util
+import io
 import sys
+import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parent.parent / "audit-sensor-event-coverage.py"
 spec = importlib.util.spec_from_file_location("audit_sensor_event_coverage", SCRIPT)
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 
-fails = []
 
-
-def check(cond, label):
-    print(("  PASS  " if cond else "  FAIL  ") + label)
-    if not cond:
-        fails.append(label)
-
-
-def test_event_literal_extraction(tmp_path):
-    src = tmp_path / "main.go"
-    src.write_text(
-        'log.emit(event{Event: "connect"})\n'
-        'e := event{Event: "frame"}\n'
-        'e.Event = "malformed_frame"\n'
-        'h.log2(r, "get", reqPath, "")\n'
-        'h.log2(r, "method_"+strings.ToLower(r.Method), reqPath, "")\n'
-    )
-    (tmp_path / "skip_test.go").write_text('event{Event: "should_not_appear"}')
-    literal, dynamic = _emitted_kinds_direct(tmp_path)
-    # "method_" itself is also captured as a literal prefix by LOG2_LITERAL_RE
-    # (it's a real, if incomplete, quoted string in that call) -- the dynamic
-    # set below is what actually flags it as unresolvable on its own.
-    check(literal == {"connect", "frame", "malformed_frame", "get", "method_"}, f"extracts literal kinds, got {literal}")
-    check(dynamic == {"method_*"}, f"flags the dynamic method_+ kind as unresolvable, got {dynamic}")
-    check("should_not_appear" not in literal, "_test.go files are excluded")
-
-
-def _emitted_kinds_direct(base_dir: Path):
-    """emitted_kinds() takes a path relative to REPO_ROOT; call its regex
-    logic directly against an absolute tmp dir instead of monkeypatching
-    REPO_ROOT."""
-    literal, dynamic_prefixes = set(), set()
-    for go_file in base_dir.glob("*.go"):
-        if go_file.name.endswith("_test.go"):
-            continue
-        text = go_file.read_text()
-        for m in mod.EVENT_LITERAL_RE.finditer(text):
-            literal.add(m.group(1) or m.group(2))
-        for m in mod.LOG2_LITERAL_RE.finditer(text):
-            literal.add(m.group(1))
-        for m in mod.DYNAMIC_KIND_RE.finditer(text):
-            import re
-            prefix = re.search(r'"([a-zA-Z0-9_]*)"\s*\+', m.group(0))
-            if prefix:
-                dynamic_prefixes.add(prefix.group(1) + "*")
-    return literal, dynamic_prefixes
-
-
-def test_matched_kinds_and_fallback():
-    section = '''
-    if s, ok := e["sensor"].(string); ok && s == "x" {
-        kind := str(e["event"])
-        if kind == "listening" {
-            ev.skip = true
-            return ev
-        }
-        switch kind {
-        case "connect":
-            ev.detail = "connect"
-        default:
-            ev.detail = kind
-        }
+def _bucket(sensor, events, labelled, pipeline_labelled=None, kinds=()):
+    return {
+        "key": sensor,
+        "doc_count": events,
+        "labelled": {"doc_count": labelled},
+        "pipeline_labelled": {"doc_count": labelled if pipeline_labelled is None else pipeline_labelled},
+        "kinds": {"buckets": [{"key": k} for k in kinds]},
     }
-    '''
-    matched = mod.matched_kinds(section)
-    check(matched == {"listening", "connect"}, f"matches both == comparisons and case labels, got {matched}")
-    check(mod.has_generic_fallback(section) is True, "a switch default: counts as a generic fallback")
-
-    no_fallback_section = 'if kind == "only_one" { ev.detail = "fixed text" }'
-    check(mod.has_generic_fallback(no_fallback_section) is False, "no default/kind-concatenation means no fallback")
 
 
-def test_section_extraction_stops_at_next_marker():
-    real_section = mod.classify_section("dnp3-honeypot")
-    check("dnp3-honeypot" in real_section, "finds the real dnp3-honeypot section in classify.go")
-    check("dns-honeypot" not in real_section, "section extraction stops before the next '---- marker'")
+def _agg_response(buckets):
+    return {"aggregations": {"sensors": {"buckets": buckets}}}
+
+
+class CoverageTest(unittest.TestCase):
+    def test_computes_percent_and_sorts_worst_first(self):
+        response = _agg_response([
+            _bucket("cowrie", 100, 100, kinds=["telnet"]),
+            _bucket("dionaea", 200, 0),
+            _bucket("conpot", 50, 25),
+        ])
+        with mock.patch.object(mod, "search", return_value=response):
+            rows = mod.coverage("24h")
+        self.assertEqual([r["sensor"] for r in rows], ["dionaea", "conpot", "cowrie"])
+        self.assertEqual(rows[0]["percent"], 0)
+        self.assertEqual(rows[1]["percent"], 50)
+        self.assertEqual(rows[2]["percent"], 100)
+
+    def test_zero_events_does_not_divide_by_zero(self):
+        response = _agg_response([_bucket("idle-sensor", 0, 0)])
+        with mock.patch.object(mod, "search", return_value=response):
+            rows = mod.coverage("24h")
+        self.assertEqual(rows[0]["percent"], 0)
+
+    def test_pipeline_category_tracked_separately_from_honeypot_category(self):
+        response = _agg_response([_bucket("suricata", 10, 4, pipeline_labelled=10)])
+        with mock.patch.object(mod, "search", return_value=response):
+            rows = mod.coverage("24h")
+        self.assertEqual(rows[0]["labelled"], 4)
+        self.assertEqual(rows[0]["pipeline"], 10)
+
+
+class MainTest(unittest.TestCase):
+    def _run_main(self, argv, rows):
+        with mock.patch.object(mod, "coverage", return_value=rows), \
+             mock.patch.object(sys, "argv", ["audit-sensor-event-coverage.py", *argv]), \
+             redirect_stdout(io.StringIO()) as out:
+            code = mod.main()
+        return code, out.getvalue()
+
+    def test_no_events_short_circuits_clean(self):
+        code, out = self._run_main(["--since", "1h"], [])
+        self.assertEqual(code, 0)
+        self.assertIn("no sensor events", out)
+
+    def test_uncovered_sensor_is_listed(self):
+        rows = [{"sensor": "dionaea", "events": 5, "labelled": 0, "percent": 0,
+                 "pipeline": 0, "kinds": []}]
+        code, out = self._run_main([], rows)
+        self.assertEqual(code, 0)
+        self.assertIn("label nothing at all", out)
+        self.assertIn("dionaea", out)
+
+    def test_fail_under_trips_on_low_coverage(self):
+        rows = [{"sensor": "dionaea", "events": 5, "labelled": 1, "percent": 20,
+                 "pipeline": 1, "kinds": ["x"]}]
+        code, _ = self._run_main(["--fail-under", "50"], rows)
+        self.assertEqual(code, 1)
+
+    def test_fail_under_passes_above_threshold(self):
+        rows = [{"sensor": "cowrie", "events": 5, "labelled": 5, "percent": 100,
+                 "pipeline": 5, "kinds": ["x"]}]
+        code, _ = self._run_main(["--fail-under", "50"], rows)
+        self.assertEqual(code, 0)
 
 
 if __name__ == "__main__":
-    import tempfile
-    with tempfile.TemporaryDirectory() as tmp:
-        test_event_literal_extraction(Path(tmp))
-    test_matched_kinds_and_fallback()
-    test_section_extraction_stops_at_next_marker()
-    if fails:
-        print(f"\n{len(fails)} check(s) failed: {fails}")
-        sys.exit(1)
-    print("\nall checks passed")
+    unittest.main()
