@@ -644,8 +644,24 @@ jobs:
         run: |
           set -euo pipefail
           if ! command -v rustup >/dev/null 2>&1; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-              | sh -s -- -y --profile minimal --no-modify-path
+            # Pinned target + checksum instead of piping sh.rustup.rs straight
+            # into sh (SAST-flagged, #3115): fetch rustup-init and its official
+            # sha256 sidecar from static.rust-lang.org and verify before exec.
+            target=x86_64-unknown-linux-gnu
+            tmp="$(mktemp -d)"
+            curl --proto '=https' --tlsv1.2 -sSf -o "$tmp/rustup-init" \
+              "https://static.rust-lang.org/rustup/dist/${target}/rustup-init"
+            curl --proto '=https' --tlsv1.2 -sSf -o "$tmp/rustup-init.sha256" \
+              "https://static.rust-lang.org/rustup/dist/${target}/rustup-init.sha256"
+            expected="$(awk '{print $1}' "$tmp/rustup-init.sha256")"
+            actual="$(sha256sum "$tmp/rustup-init" | awk '{print $1}')"
+            if [ "$expected" != "$actual" ]; then
+              echo "rustup-init checksum mismatch: expected $expected, got $actual" >&2
+              exit 1
+            fi
+            chmod +x "$tmp/rustup-init"
+            "$tmp/rustup-init" -y --profile minimal --no-modify-path
+            rm -rf "$tmp"
           fi
           echo "$HOME/.cargo/bin" >>"$GITHUB_PATH"
       # `rustup show` installs whatever rust-toolchain.toml pins (including

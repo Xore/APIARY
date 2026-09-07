@@ -81,13 +81,25 @@ jobs:
         run: python3 scripts/list-docker-base-images.py | tee images.txt
 
       - name: Install trivy
+        env:
+          TRIVY_VERSION: "0.74.0"
+          TRIVY_ASSET: "trivy_0.74.0_Linux-64bit.tar.gz"
+          TRIVY_SHA256: "2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a"
         run: |
           # Install into a runner-writable dir: the self-hosted honeypot-ci
           # runner has no write access to /usr/local/bin (install: Permission
           # denied), and $RUNNER_TEMP is writable on both runner types.
+          #
+          # Pinned version + checksum instead of the upstream contrib/install.sh
+          # curl-|-sh pattern (SAST-flagged, #3115): download the release
+          # tarball directly and verify it against a hardcoded sha256 before
+          # extracting anything.
+          set -euo pipefail
           mkdir -p "$RUNNER_TEMP/trivy-bin"
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sh -s -- -b "$RUNNER_TEMP/trivy-bin"
+          cd "$RUNNER_TEMP"
+          curl -sfLO "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${TRIVY_ASSET}"
+          echo "${TRIVY_SHA256}  ${TRIVY_ASSET}" | sha256sum -c -
+          tar -xzf "${TRIVY_ASSET}" -C "$RUNNER_TEMP/trivy-bin" trivy
           echo "$RUNNER_TEMP/trivy-bin" >> "$GITHUB_PATH"
 
       - name: Scan each image for known CRITICAL/HIGH vulnerabilities (report-only)
