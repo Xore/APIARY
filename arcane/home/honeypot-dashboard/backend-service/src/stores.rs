@@ -329,19 +329,13 @@ pub async fn acknowledge(
     Ok(Json(json!({"ok": true, "key": key, "ack": body.ack})))
 }
 
-/// Generic allowlisted store passthrough: /api/v1/store/{name}. Every
-/// remaining store-shaped page reads through here instead of growing its
-/// own handler; the allowlist keeps arbitrary index reads impossible.
-pub async fn generic(
-    State(state): State<AppState>,
-    axum::extract::Path(name): axum::extract::Path<String>,
-    Query(q): Query<StoreQuery>,
-) -> Result<Json<Value>, (StatusCode, String)> {
-    // (index, sort field, heavy fields excluded from list responses).
-    // (index, sort field, that field's type, heavy fields excluded from
-    // list responses). The type is not decoration -- see the sort spec in
-    // store_page_excluding for what a wrong one costs.
-    let (index, sort, sort_type, excludes): (&str, &str, &str, &[&str]) = match name.as_str() {
+/// (index, sort field, sort field type, sensitive/heavy fields excluded
+/// from list responses). The type is not decoration -- see the sort spec in
+/// store_page_excluding for what a wrong one costs.
+type StoreConfig = (&'static str, &'static str, &'static str, &'static [&'static str]);
+
+fn store_config(name: &str) -> Option<StoreConfig> {
+    Some(match name {
         // #1611 workstream E.9: `error`, `details.username`, and
         // `details.redirect_uri` are already present here (no excludes) —
         // the workstream's ask is first-class *columns* for them on the
@@ -350,7 +344,7 @@ pub async fn generic(
         // "last_seen" is not a field these documents have -- Keycloak's
         // event stream writes @timestamp -- so this list came back in no
         // order at all until #1566.
-        "auth-events" => ("auth-failure-events", "@timestamp", "date", &[]),
+        "auth-events" => ("auth-failure-events", "@timestamp", "date", &[] as &[&str]),
         // llm-worker output; index may not exist yet (ignore_unavailable).
         "llm-analysis" => ("llm-analysis", "@timestamp", "date", &[]),
         // Likewise "timestamp": the ml-worker writes @timestamp. Measured
@@ -362,7 +356,12 @@ pub async fn generic(
         // this index holds have no last_seen field at all (see the
         // agent-intrusion-worker port's build_campaign_verdict, #1610).
         "agent-campaigns" => ("agent-intrusion-campaigns", "@timestamp", "date", &[]),
-        "canarytokens" => ("dashboard-canarytokens-v1", "created_at", "date", &[]),
+        // #3111: auth_token is the platform's password-equivalent
+        // management credential (canarytokens.rs's dedicated list/create
+        // endpoints already strip it via redact_record()) -- this generic
+        // passthrough reads the same index and must match that invariant
+        // instead of serving the raw _source.
+        "canarytokens" => ("dashboard-canarytokens-v1", "created_at", "date", &["auth_token"]),
         "problem-reports" => ("dashboard-problem-reports-v1", "submitted_at", "date", &["dom_snapshot"]),
         "dead-letters" => ("dead-letter-honeypot", "@timestamp", "date", &[]),
         "yara" => ("yara-analysis-v1", "@timestamp", "date", &[]),
@@ -382,7 +381,20 @@ pub async fn generic(
         "generated-reports" => ("dashboard-generated-reports-v1", "created_at", "date", &["pdf_base64"]),
         "report-definitions" => ("dashboard-reports-definitions-v1", "updated", "date", &[]),
         "intelligence" => ("dashboard-intelligence-archive-v1", "generated", "date", &[]),
-        _ => return Err((StatusCode::NOT_FOUND, format!("unknown store {name}"))),
+        _ => return None,
+    })
+}
+
+/// Generic allowlisted store passthrough: /api/v1/store/{name}. Every
+/// remaining store-shaped page reads through here instead of growing its
+/// own handler; the allowlist keeps arbitrary index reads impossible.
+pub async fn generic(
+    State(state): State<AppState>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+    Query(q): Query<StoreQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let Some((index, sort, sort_type, excludes)) = store_config(&name) else {
+        return Err((StatusCode::NOT_FOUND, format!("unknown store {name}")));
     };
     store_page_excluding(&state, &[index], sort, sort_type, &q, None, excludes)
         .await
@@ -453,5 +465,25 @@ mod sort_tests {
             assert_eq!(spec.as_array().map(Vec::len), Some(2), "{field} lost its tiebreak");
             assert_eq!(spec[1]["_doc"]["order"], "asc", "{field}'s tiebreak is not a total order");
         }
+    }
+}
+
+#[cfg(test)]
+mod store_config_tests {
+    use super::store_config;
+
+    #[test]
+    fn canarytokens_passthrough_excludes_the_management_auth_token() {
+        // #3111: the dedicated canarytoken endpoints strip auth_token
+        // before it ever reaches a browser -- this generic passthrough
+        // reads the same index and must carry the same exclude, or the
+        // credential leaks to any authenticated non-admin operator.
+        let (_, _, _, excludes) = store_config("canarytokens").expect("canarytokens is a known store");
+        assert!(excludes.contains(&"auth_token"), "canarytokens store must exclude auth_token");
+    }
+
+    #[test]
+    fn unknown_store_name_has_no_config() {
+        assert!(store_config("not-a-real-store").is_none());
     }
 }
