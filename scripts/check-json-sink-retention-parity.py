@@ -345,6 +345,26 @@ ROWS = [
         "writer": ("arcane/home/honeypot-beelzebub/beelzebub",
                    ["BEELZEBUB_JSON_LOG_MAX_BYTES", "func (w *rotatingWriter) rotate()"]),
     },
+    # #2892: sentrypeer.json, 94MB and growing, had neither half -- the
+    # vendored C/Rust build's live writer (sentrypeer_rust::json_logger's
+    # json_log_bad_actor_rs(), selected over the plain C writer because this
+    # build's HAVE_RUST=1 leaves new_mode=true, and this image's CMD never
+    # passes the -N flag that cli.rs wires to clear it) opened the
+    # file fresh per call and never checked its size. Upstream itself ignores
+    # SIGHUP (src/signal_handler.c) and has no reopen/logrotate knob at the
+    # pinned SENTRYPEER_REF, so there was no config-only collapse available.
+    # json_log_rotation_patch.py patches json_log_bad_actor_rs() to
+    # close/rename/reopen once SENTRYPEER_JSON_LOG_MAX_BYTES is exceeded,
+    # same digit-leading .<stamp>[.N] suffix as the rows above. Verified: a
+    # standalone cargo crate built from the patch's own added functions
+    # (chrono, already a sentrypeer_rust dependency) actually produced
+    # rotated generations once the threshold was crossed.
+    {
+        "dir": "/logs/sentrypeer",
+        "globs": ["'sentrypeer.json.[0-9]*'"],
+        "writer": ("arcane/home/honeypot-sentrypeer/sentrypeer",
+                   ["SENTRYPEER_JSON_LOG_MAX_BYTES", "fn rotate_json_log_if_needed("]),
+    },
 ]
 
 # Mounted log directories that are deliberately outside the two-sided
@@ -455,40 +475,24 @@ EXEMPT = {
 # enumeration above can fail on a genuinely new stack today instead of
 # waiting for the whole fleet to be clean first. Every entry names the issue
 # that tracks it, and closing that issue means deleting the entry.
-KNOWN_UNCOVERED = {
-    # Tracked on #2892. #2826 made the first pass and closed with these nine
-    # rows still here, so they were repointed at its successor rather than
-    # left naming a closed issue -- the contract above is that every entry
-    # names the issue that tracks it. The six conpot rows moved to ROWS
-    # above (conpot/json_log_rotation_patch.py, #2892), and so did galah
-    # (galah/json_log_rotation_patch.py, #2892: a Go io.Writer wrapper
-    # patched into internal/logger/logger.go's New() at build time, same
-    # close/rename/reopen shape as the Python patches, verified live by
-    # `go build`ing the real pinned upstream commit and driving
-    # logger.New()+LogEvent() through it), and then beelzebub
-    # (beelzebub/json_log_rotation_patch.py, #2892: the same wrapper ported
-    # to internal/builder/builder.go's buildLogger()). sentrypeer remains:
-    # a vendored C binary whose JSON writer (SENTRYPEER_JSON_LOG_FILE's
-    # consumer) has no in-tree source this checker's ROWS writer-proof
-    # mechanism can grep a token from, and it does not self-rotate on its
-    # own -- the sink genuinely appends forever today. The established fix
-    # shape already exists five times in this repo now
-    # (dionaea/log_rotation_patch.py, mailoney/json_log_patch.py,
-    # conpot/json_log_rotation_patch.py, galah/json_log_rotation_patch.py,
-    # beelzebub/json_log_rotation_patch.py): an exact-match source patch
-    # applied at build time that wraps the writer's file handle with the
-    # same close/rename/reopen self-rotation multipot/http-honeypot's Go
-    # loggers use, plus a matching pruner find line here. sentrypeer needs
-    # the equivalent C patch in its own git-cloned build stage -- not
-    # attempted in this pass, left as debt rather than guessed at.
-    # The size below was measured on the homeserver on 2026-09-02 and is
-    # illustrative, not a bound: it had already drifted a day later
-    # (160MB), and #1609's rebuild resets it to zero without changing
-    # anything this ledger cares about. What puts this row here is that
-    # nothing bounds it, not how large it happens to be on a given day --
-    # so do not do arithmetic on this number or treat it as a backlog total.
-    "/logs/sentrypeer": "sentrypeer.json, 94MB and growing, vendored C writer, no self-rotation knob found in SENTRYPEER_JSON_LOG_FILE's consumer (#2892)",
-}
+#
+# #2892 closed this out: conpot (six rows), galah, beelzebub and finally
+# sentrypeer all moved to ROWS above. sentrypeer was the last -- its build
+# clones upstream SentryPeer C/Rust source at image-build time rather than
+# vendoring interpreted source, and HAVE_RUST=1/new_mode=true in this build
+# (confirmed against src/conf.c and tests/unit_tests/test_json_logger.c)
+# means sentrypeer_rust::json_logger's json_log_bad_actor_rs() is the writer
+# actually exercised, not src/json_logger.c. sentrypeer_rust/src/cli.rs's -N
+# flag can clear new_mode back to false, but this image's CMD never passes
+# -N -- and it would not matter if it did: under HAVE_RUST != 0,
+# src/bad_actor.c compiles the C writer's call site out entirely (#else), so
+# json_log_bad_actor_rs() is the only reachable JSON writer either way. That
+# is what json_log_rotation_patch.py patches.
+# Upstream itself (checked at the pinned SENTRYPEER_REF,
+# 008be5ebb451467ca9c76763717bc75916e3fcac) ignores SIGHUP outright
+# (src/signal_handler.c's signal(SIGHUP, SIG_IGN)) and has no reopen/logrotate
+# knob anywhere, so the collapse-to-SIGHUP shortcut does not apply here.
+KNOWN_UNCOVERED = {}
 
 # #2882: sinks that live in a named Docker volume rather than a
 # /opt/stacks/apiary/logs/<dir> bind mount are architecturally invisible to
