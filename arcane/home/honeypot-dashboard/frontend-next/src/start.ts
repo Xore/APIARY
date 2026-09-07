@@ -30,6 +30,12 @@ import { sessionAwareFetch } from './lib/reauth'
 
 const requireSession = createMiddleware({ type: 'function' }).server(
   async ({ serverFnMeta, next }) => {
+    const { isSameOriginRequest, crossOriginResponse } = await import('./lib/csrfGate.server')
+    // Origin check runs before auth and before the public-fn exemption:
+    // CSRF is a property of the request's origin, not of who it's
+    // authenticated as, and the pre-auth functions (login/logout) need it
+    // too (#3109).
+    if (!isSameOriginRequest(getRequest())) throw crossOriginResponse()
     const { isPublicFn, resolveFunctionUser, unauthenticatedResponse } = await import(
       './lib/sessionGate.server'
     )
