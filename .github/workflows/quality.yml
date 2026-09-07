@@ -644,21 +644,22 @@ jobs:
         run: |
           set -euo pipefail
           if ! command -v rustup >/dev/null 2>&1; then
-            # Pinned target + checksum instead of piping sh.rustup.rs straight
-            # into sh (SAST-flagged, #3115): fetch rustup-init and its official
-            # sha256 sidecar from static.rust-lang.org and verify before exec.
+            # Pinned version + hardcoded checksum instead of piping
+            # sh.rustup.rs straight into sh (SAST-flagged, #3115). The
+            # unversioned dist/ path is rolling-latest, and its .sha256
+            # sidecar is fetched from the same host over the same TLS
+            # session moments later -- that detects transport corruption,
+            # which TLS already covers, not a compromised upstream. Same
+            # discipline as the trivy block below: fetch the versioned
+            # archive and verify against a digest hardcoded here, taken
+            # from that archive's own .sha256 once at authoring time.
+            rustup_version=1.28.2
+            rustup_sha256=20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c
             target=x86_64-unknown-linux-gnu
             tmp="$(mktemp -d)"
             curl --proto '=https' --tlsv1.2 -sSf -o "$tmp/rustup-init" \
-              "https://static.rust-lang.org/rustup/dist/${target}/rustup-init"
-            curl --proto '=https' --tlsv1.2 -sSf -o "$tmp/rustup-init.sha256" \
-              "https://static.rust-lang.org/rustup/dist/${target}/rustup-init.sha256"
-            expected="$(awk '{print $1}' "$tmp/rustup-init.sha256")"
-            actual="$(sha256sum "$tmp/rustup-init" | awk '{print $1}')"
-            if [ "$expected" != "$actual" ]; then
-              echo "rustup-init checksum mismatch: expected $expected, got $actual" >&2
-              exit 1
-            fi
+              "https://static.rust-lang.org/rustup/archive/${rustup_version}/${target}/rustup-init"
+            echo "${rustup_sha256}  $tmp/rustup-init" | sha256sum -c -
             chmod +x "$tmp/rustup-init"
             "$tmp/rustup-init" -y --profile minimal --no-modify-path
             rm -rf "$tmp"
