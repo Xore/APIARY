@@ -82,6 +82,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -173,6 +174,45 @@ def retired_projects(stacks_root: Path, known_names: set[str]) -> list[str]:
         and (d / "compose.yml").is_file()
         and d.name not in known_names
         and d.name not in KNOWN_NON_PROJECT_DIRS
+    )
+
+
+# #3048: honeypot-arcane is excluded from the manifest-driven checks above
+# by design (KNOWN_NON_PROJECT_DIRS's own comment), which means nothing
+# checks its *content* against the repo at all. 2026-09-05: the running
+# hp-arcane container was still on v2.9.0 while docker-compose.arcane.yml on
+# main had already moved to v2.10.1 -- a silent version drift across a
+# rebuild, caught only by a human diffing both files by hand. This is a
+# narrow, single-field check for exactly that image line, not a generic
+# raw-file diff: env-var interpolation and the optional GPU overlay
+# (docker-compose.arcane.gpu.yml, merged in only on hosts with a working
+# NVIDIA runtime) make a byte-for-byte diff noisy, but the image tag is the
+# one field install-homeserver.sh's step_arcane_install and deploy.yml's
+# "Synchronize honeypot-arcane" step both copy from once and never re-diff.
+ARCANE_REPO_COMPOSE = Path(__file__).resolve().parent.parent / "docker-compose.arcane.yml"
+ARCANE_IMAGE_RE = re.compile(r"(?m)^\s*image:\s*(ghcr\.io/getarcaneapp/\S+)$")
+
+
+def arcane_image(text: str) -> str | None:
+    match = ARCANE_IMAGE_RE.search(text)
+    return match.group(1) if match else None
+
+
+def arcane_image_drift(stacks_root: Path) -> str | None:
+    """A finding string if the live honeypot-arcane compose.yml's image
+    differs from the repo's, None if it matches or either side can't be
+    read (unreadable is "not checked", never reported as clean)."""
+    live_path = stacks_root / "honeypot-arcane" / "compose.yml"
+    try:
+        repo_image = arcane_image(ARCANE_REPO_COMPOSE.read_text())
+        live_image = arcane_image(live_path.read_text())
+    except OSError:
+        return None
+    if repo_image is None or live_image is None or repo_image == live_image:
+        return None
+    return (
+        f"- `honeypot-arcane` — deployed image `{live_image}` does not match "
+        f"`docker-compose.arcane.yml` on `main` (`{repo_image}`)"
     )
 
 
@@ -345,6 +385,8 @@ def main() -> int:
     else:
         retired = retired_projects(stacks_root, known_names)
 
+    arcane_drift = arcane_image_drift(stacks_root)
+
     if unresolved:
         print(
             f"note: {len(unresolved)} project(s) could not be resolved and "
@@ -352,9 +394,10 @@ def main() -> int:
             file=sys.stderr,
         )
 
-    if not findings and not retired:
+    if not findings and not retired and not arcane_drift:
         print(f"healthy on {host}: no always-on service is missing all its containers "
-              "while a sibling runs, and no live stack directory is missing from the repo manifest")
+              "while a sibling runs, no live stack directory is missing from the repo "
+              "manifest, and honeypot-arcane's deployed image matches the repo")
         if args.dry_run:
             return 0
         if not REPO:
@@ -372,14 +415,15 @@ def main() -> int:
         return 0
 
     print(f"DRIFT: {len(findings)} service(s) missing all containers while a sibling runs, "
-          f"{len(retired)} live stack(s) retired from the repo")
+          f"{len(retired)} live stack(s) retired from the repo, "
+          f"{'1' if arcane_drift else '0'} honeypot-arcane image mismatch")
     lines = [
         f"- `{f['project']}` / **{f['service']}** — zero containers "
         f"(running siblings: {', '.join(f['siblings_running'])})"
         for f in findings
     ]
     retired_lines = [f"- `{name}` — still deployed, no matching entry in the manifest" for name in retired]
-    print("\n".join(lines + retired_lines))
+    print("\n".join(lines + retired_lines + ([arcane_drift] if arcane_drift else [])))
 
     now = datetime.now(timezone.utc).strftime("%FT%TZ")
     body_sections = [
@@ -425,6 +469,24 @@ def main() -> int:
             *retired_lines,
             "",
         ]
+    if arcane_drift:
+        body_sections += [
+            "## honeypot-arcane image mismatch",
+            "",
+            "Context: #3048 — honeypot-arcane is installer-/deploy.yml-managed "
+            "by a one-time file copy, not an Arcane gitops-sync (syncing the "
+            "thing that has to already be running before any sync can happen "
+            "is a bootstrap loop), so nothing re-copies "
+            "`docker-compose.arcane.yml` after the initial install unless "
+            "deploy.yml's \"Synchronize honeypot-arcane\" step is actually "
+            "run. Fix: run that step (`workflow_dispatch` on deploy.yml, "
+            "target home) or re-run `scripts/install-homeserver.sh`'s "
+            "`step_arcane_install`, then confirm `docker inspect hp-arcane "
+            "--format '{{.Config.Image}}'` matches.",
+            "",
+            arcane_drift,
+            "",
+        ]
     if unresolved:
         body_sections.append(
             f"Also unresolved this sweep (skipped, not counted as "
@@ -459,6 +521,8 @@ def main() -> int:
             if retired else
             f"ops: {len(findings)} compose service(s) drifted out of existence (#2747 watch)"
         )
+        if arcane_drift:
+            title += " + honeypot-arcane image mismatch (#3048 watch)"
         gh(
             "issue", "create", "-R", REPO, "--title", title,
             "--label", LABEL, "--body-file", str(body_path),
