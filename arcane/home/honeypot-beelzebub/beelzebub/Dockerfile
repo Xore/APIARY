@@ -14,12 +14,26 @@
 # No plugins (configurations/plugins.yaml ships empty in upstream and stays
 # that way here) -- every service this stack uses is upstream's own built-in
 # SSH/HTTP/TCP/MCP strategy, configured via YAML, not custom Go code.
+#
+# json_log_rotation_patch.py DOES patch source (#2892): beelzebub.json
+# (core.yaml's logsPath) had neither half of the #120 contract --
+# internal/builder/builder.go's buildLogger() os.OpenFile()s it once and
+# hands the raw *os.File to logrus through io.MultiWriter with no size
+# check and no rotation knob in core.yaml's Logging block. Same shape as
+# galah/json_log_rotation_patch.py (the other vendored Go sensor): a
+# close/rename/reopen io.Writer wrapper inserted at build time, keeping
+# Builder.logsFile (which Builder.Close() closes) pointed at the live
+# generation. See that patch's own docstring.
 FROM golang:1.26-alpine@sha256:28d89ee9cc0ff9fec75c82ca201e6bf7fdf9a679d4b7b24dfa04f2bb766bb468 AS build
-RUN apk add --no-cache git
+# python3 only runs json_log_rotation_patch.py (#2892) below; the runtime
+# stage never sees it.
+RUN apk add --no-cache git python3
 ARG BEELZEBUB_REF=39242822af79a59a6b8d0139adc4a8ccf2edec0c
 WORKDIR /build
 RUN git clone https://github.com/mariocandela/beelzebub /build \
  && git checkout "$BEELZEBUB_REF"
+COPY json_log_rotation_patch.py /tmp/json_log_rotation_patch.py
+RUN python3 /tmp/json_log_rotation_patch.py
 RUN go mod download
 # go run . plugin install --no-build is upstream's own Dockerfile step for
 # compiling declared plugins in -- skipped here, plugins.yaml is empty.
