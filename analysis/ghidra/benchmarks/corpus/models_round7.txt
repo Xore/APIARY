@@ -1,23 +1,29 @@
 # models_round7.txt -- the round-7 benchmark roster (#3087, plan §7/§8).
 #
-# Rows from #3086's R2 dynamic ladder (requant_sweep.sh IMATRIX= builds these
-# tags; the prefixes below must match the R2 ladder plan's tag prefixes), the
-# controls, and the T0 pipeline-proof rows (#3081).
+# Every row is a CONCRETE ollama tag: sweep_extra.sh / round7_sweep.sh pull,
+# score and slug each row verbatim (slug = tr ':/' '__'), and requant_sweep.sh
+# publishes its built ladder tags as <prefix>:<lowercase level>, so bare
+# prefixes here would never match anything a completion gate could check.
 #
-#   R2 ladder (7 bases -- one tag prefix per base; levels land as <prefix>:<level>):
-ornith-35b-dyn
-qwen3.8-27b-dyn
-qwen3.6-27b-dyn
-qwen3.6-35b-a3b-dyn
-gemma4-31b-dyn
-xortron-123b-dyn
-glm-4.6-reap-218b-dyn
+#   R2 dynamic ladder (7 bases -- one headline level per base; requant_sweep.sh
+#   with IMATRIX= builds the full level set, the roster pins the headline tag
+#   each row must land on; levels follow the R2 dynamic methodology, unsloth
+#   dynamic naming: Q4_K_XL / Q3_K_XL above and below the ~16-17 GB weights
+#   budget of the RTX 4000 Ada at CONTEXT 32768):
+ornith-35b-dyn:q4_k_xl
+qwen3.8-27b-dyn:q4_k_xl
+qwen3.6-27b-dyn:q4_k_xl
+qwen3.6-35b-a3b-dyn:q4_k_xl
+gemma4-31b-dyn:q4_k_xl
+xortron-123b-dyn:q3_k_xl
+glm-4.6-reap-218b-dyn:q3_k_xl
 #   Controls (incumbent + #159 baseline, scored on every pin):
 qwen3:14b
-qwen2.5-coder:7b-instruct-q4_K_M
+qwen2.5-coder:7b-instruct-q4_k_m
 #   T0: rex86-merged artefact and its untouched base, each at Q8_0 / Q4_K_M
-#   (isolates training; the pair at two quants brackets the residency line):
-rex86-merged:Q8_0
-rex86-merged:Q4_K_M
-qwen25-coder-7b-base:Q8_0
-qwen25-coder-7b-base:Q4_K_M
+#   (isolates training; the pair at two quants brackets the residency line).
+#   Tags exactly as round7_t0_merge_export.sh registers them (#3081):
+rex86-merged:q8_0
+rex86-merged:q4_k_m
+qwen2.5-coder-7b-base:q8_0
+qwen2.5-coder-7b-base:q4_k_m

@@ -33,18 +33,32 @@ KEEP_WEIGHTS_ABOVE_GB=${KEEP_WEIGHTS_ABOVE_GB:-1000}
 
 log() { echo "$(date -u +%FT%TZ) $*"; }
 
-# POSIX exit: 0 only when every roster tag is measured-or-marked.
+# Gate: 0 only when every roster tag is measured-or-marked.
+# Every tag needs both tier files OR a settled state: UNMEASURED_<slug>.status
+# (sweep_extra.sh's pull-fail / giveup marker), .txt (older marker spelling),
+# or a plain UNMEASURED marker file in the results dir. Also accept a
+# directory-form marker and UNRESOLVED markers -- a cell the harness ran
+# N=5 times with no majority has a recorded, reviewable state too.
+# Same slug derivation as sweep_extra.sh's scoring loop (tr ':/' '__',
+# case-preserving) -- a completion gate and the run that produces the files
+# must name a cell identically or the gate never fires for it.
 roster_done() {
   python3 - "$TAGLIST" "$RESULTS" <<'EOF'
-import os, re, sys
+import os, sys
 tags = [l.strip() for l in open(sys.argv[1]) if l.strip() and not l.startswith("#")]
 res = sys.argv[2]
-slug = lambda t: re.sub(r"[^A-Za-z0-9._-]", "_", t).lower()
+def slug(t):
+    return t.replace(":", "_").replace("/", "_")
 for t in tags:
     s = slug(t)
     if os.path.exists(f"{res}/tierA_{s}_run1.json") and os.path.exists(f"{res}/tierB_{s}_run1.json"):
         continue
-    if os.path.exists(f"{res}/UNMEASURED_{s}.status"):
+    settled = any(
+        os.path.exists(f"{res}/{p}")
+        for p in (f"UNMEASURED_{s}.status", f"UNMEASURED_{s}.txt", "UNMEASURED",
+                  f"UNRESOLVED_tierA_{s}.status", f"UNRESOLVED_tierB_{s}.status")
+    )
+    if settled:
         continue
     print(f"pending: {t}")
     sys.exit(1)

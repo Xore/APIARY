@@ -62,7 +62,7 @@ log "SLOTS_SWEEP_START list=$LIST slots=$SLOTS out=$OUT pin=$head"
 while read -r TAG; do
   [ -z "$TAG" ] && continue
   case "$TAG" in \#*) continue;; esac
-  slug=$(echo "$TAG" | tr ':/' '__' | tr '[:upper:]' '[:lower:]')
+  slug=$(echo "$TAG" | tr ':/' '__')
   out_json="$OUT/slots_${slug}.json"
   if [ -s "$out_json" ]; then
     log "SKIP $TAG (already measured)"
@@ -99,10 +99,28 @@ EOF
        > "$OUT/logs/slots_${slug}.log" 2>&1; then
     up=$(( $(awk '{print int($1)}' /proc/uptime) - up0 ))
     echo -e "$(date -u +%FT%TZ)\t$TAG\t${up}s" >> "$OUT/uptime.tsv"
+    # Per-model result JSON -- the same idempotency contract sweep_extra.sh's
+    # tier files carry: this file's existence is what makes re-runs skip and
+    # lets an aggregator read outcomes without scraping logs.
+    python3 - "$out_json" "$TAG" "$SLOTS" "$up" <<'EOF'
+import json, sys
+out, tag, slots, wall = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+json.dump({"tag": tag, "slots": slots.split(","), "wall_seconds": wall,
+           "status": "MEASURED",
+           "ts": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()},
+          open(out, "w"), indent=2)
+EOF
     log "done  slots $TAG wall=${up}s"
   else
     rc=$?
     log "FAIL  slots $TAG rc=$rc -- marker written, next model"
+    python3 - "$OUT" "UNMEASURED_slots_${slug}.status" "$TAG" "run_failed rc=$rc" <<'EOF'
+import json, sys, datetime, os
+path, name, tag, reason = sys.argv[1:5]
+json.dump({"tag": tag, "status": "UNMEASURED", "reason": reason,
+           "ts": datetime.datetime.now(datetime.timezone.utc).isoformat()},
+          open(os.path.join(path, name), "w"))
+EOF
     echo "$(date -u +%FT%TZ) GIVEUP slots $TAG rc=$rc" >> "$OUT/failures.txt"
   fi
   # keep the weights; drop nothing (KEEP_WEIGHTS lesson, sweep_extra.sh:153)

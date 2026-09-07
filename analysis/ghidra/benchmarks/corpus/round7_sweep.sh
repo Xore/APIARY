@@ -22,6 +22,9 @@ RESULTS=${RESULTS:-$BASE/round7}
 REPO=${REPO:-$BASE/APIARY-round7}
 STOP_WORKERS=${STOP_WORKERS:-1}
 KEEP_WEIGHTS_ABOVE_GB=${KEEP_WEIGHTS_ABOVE_GB:-1000}
+# Round-7 roster: concrete tags (see the file header). The sweep driver
+# consumes LIST verbatim, so it must be set before use.
+LIST=${LIST:-$BASE/models_round7.txt}
 
 log() { echo "$(date -u +%FT%TZ) $*"; }
 
