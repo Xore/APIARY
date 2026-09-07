@@ -107,11 +107,13 @@ passphrase that only exists on the dead host is not a passphrase.
 destinations are trusted, which today they are not.
 
 If the passphrase file is missing but archives from a previous passphrase
-already exist on this host, the installer refuses to mint a new one — that
-would leave those archives permanently unreadable. Confirm the old passphrase
-is saved in the password manager, then either write it back to
-`/etc/apiary-backup.pass` yourself or re-run with `CONFIRM_NEW_PASSPHRASE=1`
-to accept minting a fresh one.
+already exist on **any of the three destinations** (local disk, local USB, or
+the homeserver's USB), the installer refuses to mint a new one — that would
+leave those archives permanently unreadable. An unreachable homeserver counts
+as "unknown, refuse" rather than "none found", since failing closed is the
+point of the guard. Confirm the old passphrase is saved in the password
+manager, then either write it back to `/etc/apiary-backup.pass` yourself or
+re-run with `CONFIRM_NEW_PASSPHRASE=1` to accept minting a fresh one.
 
 ## Running it
 
