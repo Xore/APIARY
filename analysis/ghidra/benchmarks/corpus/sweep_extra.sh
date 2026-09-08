@@ -101,6 +101,17 @@ fi
 
 score_of() { python3 -c "import json;print(json.load(open('$1'))['total_score'])" 2>/dev/null; }
 
+# #3090: a model that 500s on every request used to burn MAXTRY full-timeout
+# do_run() attempts per tier (up to 6 runs total) before the "every run
+# failed" fallback below finally caught it. One short completion up front
+# catches the same failure for the cost of one request.
+preflight_probe() { # tag
+  curl -sf -m 30 http://127.0.0.1:11434/v1/chat/completions \
+    -H 'Content-Type: application/json' \
+    -d "$(python3 -c 'import json,sys;print(json.dumps({"model":sys.argv[1],"messages":[{"role":"user","content":"ping"}],"max_tokens":1}))' "$1")" \
+    >/dev/null 2>&1
+}
+
 # #2728: writes a machine-readable marker next to the tierA/tierB result
 # files for a model that never produced a score, so an aggregator (or a
 # human running `ls`) cannot mistake "never ran" for "ran and scored badly" --
@@ -248,7 +259,14 @@ while read -r TAG; do
   fi
 
   TIER_OK=0
+  PREFLIGHT_FAILED=0
+  if ! preflight_probe "$TAG"; then
+    echo "$(date -u +%H:%M:%S) PREFLIGHT_FAIL $TAG (no request served)"
+    mark_unmeasured "$slug" "$TAG" "http_500_every_request"
+    PREFLIGHT_FAILED=1
+  fi
   for tier in A B; do
+    [ "$PREFLIGHT_FAILED" = "1" ] && break
     do_run "$tier" "$slug" "$TAG" 1 || continue
     TIER_OK=1
     do_run "$tier" "$slug" "$TAG" 2 || continue
@@ -291,7 +309,7 @@ while read -r TAG; do
   # a GIVEUP line in failures.txt and a MODEL_DONE in the log -- indistinguishable
   # from success to anything reading the results directory. That is the same
   # silent-hole class as the false EXTRA_COMPLETE in #3031.
-  if [ "$TIER_OK" = "0" ] && [ ! -f "$BASE/tierA_${slug}_run1.json" ]; then
+  if [ "$PREFLIGHT_FAILED" = "0" ] && [ "$TIER_OK" = "0" ] && [ ! -f "$BASE/tierA_${slug}_run1.json" ]; then
     mark_unmeasured "$slug" "$TAG" "pulled but every run failed on both tiers"
     echo "$(date -u +%H:%M:%S) UNMEASURED $TAG (pulled, no run produced a result)"
   fi
