@@ -39,6 +39,7 @@ jobs:
       - name: Check server-USB essentials backup for staleness
         env:
           GH_TOKEN: ${{ github.token }}
+          MAX_AGE_HOURS: ${{ inputs.max_age_hours || '48' }}
         run: |
           python3 scripts/backup-staleness-watch.py \
-            --max-age-hours "${{ inputs.max_age_hours || '48' }}"
+            --max-age-hours "$MAX_AGE_HOURS"
