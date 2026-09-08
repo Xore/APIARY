@@ -237,6 +237,44 @@ Q8="$RUN/rex86-merged-Q8_0.gguf"
   "/var/training/runs/t0-rex86/rex86-merged-f16.gguf" "/var/training/runs/t0-rex86/rex86-merged-Q8_0.gguf" Q8_0 || die "Q8_0 quantise failed"
 
 # ---------------------------------------------------------------------------
+# 3b. Fetch and convert the UNTOUCHED base separately (#3137) -- the
+#     "qwen2.5-coder-7b-base" Ollama tags are meant to be the control arm.
+#     Deriving them from the merged model (as this script used to) makes the
+#     control equal the treatment; they must come from $BASE_MODEL @
+#     $BASE_REV with no adapter applied.
+# ---------------------------------------------------------------------------
+BASE16="$RUN/base_16bit"
+BASE16_C="$RUN_C/base_16bit"
+# convert_hf_to_gguf.py has no --revision flag (checked against its argparse),
+# so the pinned revision is materialised on disk first via snapshot_download,
+# inside the same unsloth container used for the merge (it already has
+# huggingface_hub and the /var/training bind).
+have_base_snapshot() { [ -s "$BASE16/model.safetensors.index.json" ] || [ -s "$BASE16/model.safetensors" ]; }
+if ! have_base_snapshot; then
+  log "downloading untouched base $BASE_MODEL @ $BASE_REV (no adapter)"
+  docker exec "$UNSLOTH_IMG" python3 - <<PY3 || die "base snapshot download failed"
+from huggingface_hub import snapshot_download
+p = snapshot_download("$BASE_MODEL", revision="$BASE_REV", local_dir="$BASE16_C")
+print("base snapshot ->", p)
+PY3
+  have_base_snapshot || die "base snapshot incomplete at $BASE16"
+fi
+
+BASE_GGUF_F16="$RUN/qwen2.5-coder-7b-base-f16.gguf"
+if [ ! -s "$BASE_GGUF_F16" ]; then
+  log "converting untouched base to GGUF f16"
+  docker run --rm --entrypoint python3 -v /var/training:/var/training "$LLAMA_IMG" \
+    /app/convert_hf_to_gguf.py "/var/training/runs/t0-rex86/base_16bit" --outfile "/var/training/runs/t0-rex86/qwen2.5-coder-7b-base-f16.gguf" --outtype f16 \
+    || die "base convert_hf_to_gguf failed"
+fi
+BASE_Q4="$RUN/base-Q4_K_M.gguf"
+BASE_Q8="$RUN/base-Q8_0.gguf"
+[ -s "$BASE_Q4" ] || docker run --rm --entrypoint /app/llama-quantize -v /var/training:/var/training "$LLAMA_IMG" \
+  "/var/training/runs/t0-rex86/qwen2.5-coder-7b-base-f16.gguf" "/var/training/runs/t0-rex86/base-Q4_K_M.gguf" Q4_K_M || die "base Q4_K_M quantise failed"
+[ -s "$BASE_Q8" ] || docker run --rm --entrypoint /app/llama-quantize -v /var/training:/var/training "$LLAMA_IMG" \
+  "/var/training/runs/t0-rex86/qwen2.5-coder-7b-base-f16.gguf" "/var/training/runs/t0-rex86/base-Q8_0.gguf" Q8_0 || die "base Q8_0 quantise failed"
+
+# ---------------------------------------------------------------------------
 # 4. Register in Ollama: merged artefact + untouched base twins
 #    (create/quantise is CPU; nothing is loaded for inference here)
 # ---------------------------------------------------------------------------
@@ -248,10 +286,11 @@ OLLAMA_VOL=$(docker volume inspect ghidra_ollama_models --format '{{.Mountpoint}
 [ -n "$OLLAMA_VOL" ] || die "cannot resolve ollama models volume"
 STAGE="$OLLAMA_VOL/import-t0"
 sudo -n mkdir -p "$STAGE" || die "cannot create $STAGE"
-for f in "$GGUF_F16" "$Q4" "$Q8"; do
+for f in "$GGUF_F16" "$Q4" "$Q8" "$BASE_GGUF_F16" "$BASE_Q4" "$BASE_Q8"; do
   dst="$STAGE/$(basename "$f")"
-  # ~27 GB in total; skip anything a previous run already staged intact. Size
-  # compare, not cmp -s, because cmp would read all 27 GB to learn nothing.
+  # ~54 GB in total (merged + base twins); skip anything a previous run
+  # already staged intact. Size compare, not cmp -s, because cmp would read
+  # tens of GB to learn nothing.
   if [ "$(stat -c%s "$f")" = "$(stat -c%s "$dst" 2>/dev/null || echo 0)" ]; then
     log "already staged: $(basename "$f")"
     continue
@@ -264,7 +303,7 @@ for q in q4_k_m q8_0; do
   printf 'FROM /root/.ollama/import-t0/%s\n' "$SRCNAME" | sudo -n tee "$STAGE/Modelfile.rex86-$q" > /dev/null
   docker exec "$OLLAMA_C" ollama create "rex86-merged:$q" -f "/root/.ollama/import-t0/Modelfile.rex86-$q" \
     || die "ollama create rex86-merged:$q failed"
-  printf 'FROM /root/.ollama/import-t0/rex86-merged-f16.gguf\n' | sudo -n tee "$STAGE/Modelfile.base-$q" > /dev/null
+  printf 'FROM /root/.ollama/import-t0/qwen2.5-coder-7b-base-f16.gguf\n' | sudo -n tee "$STAGE/Modelfile.base-$q" > /dev/null
   docker exec "$OLLAMA_C" ollama create --quantize "$q" "qwen2.5-coder-7b-base:$q" \
     -f "/root/.ollama/import-t0/Modelfile.base-$q" \
     || die "ollama create qwen2.5-coder-7b-base:$q failed"
@@ -277,7 +316,7 @@ sudo -n rm -f "$STAGE"/*.gguf || log "warning: could not clean staged GGUFs from
 # ---------------------------------------------------------------------------
 # 5. Manifest: input SHAs, base revision, quant params, file sizes
 # ---------------------------------------------------------------------------
-python3 - "$RUN" "$ZIP_SIZE" "$ZIP_SHA" "$INNER_ACTUAL" "$INNER_ACTUAL_SIZE" <<'EOF'
+python3 - "$RUN" "$ZIP_SIZE" "$ZIP_SHA" "$INNER_ACTUAL" "$INNER_ACTUAL_SIZE" <<'EOF' || die "manifest generation failed"
 import hashlib, json, os, sys
 run, zip_size, zip_sha, inner_sha, inner_size = (
     sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4], int(sys.argv[5]))
@@ -290,7 +329,17 @@ def sha(p):
 ggufs = {n: {"path": p, "bytes": os.path.getsize(p), "sha256": sha(p)}
          for n, p in [("rex86-merged-f16", f"{run}/rex86-merged-f16.gguf"),
                       ("rex86-merged-Q4_K_M", f"{run}/rex86-merged-Q4_K_M.gguf"),
-                      ("rex86-merged-Q8_0", f"{run}/rex86-merged-Q8_0.gguf")]}
+                      ("rex86-merged-Q8_0", f"{run}/rex86-merged-Q8_0.gguf"),
+                      ("base-f16", f"{run}/qwen2.5-coder-7b-base-f16.gguf"),
+                      ("base-Q4_K_M", f"{run}/base-Q4_K_M.gguf"),
+                      ("base-Q8_0", f"{run}/base-Q8_0.gguf")]}
+# #3137: the base twins must be provably distinct weights from the merged
+# model, not just distinct files -- a re-quantised copy of the same tensors
+# would still pass an [ -s ] guard.
+merged_f16_sha = ggufs["rex86-merged-f16"]["sha256"]
+base_f16_sha = ggufs["base-f16"]["sha256"]
+assert base_f16_sha != merged_f16_sha, \
+    "base f16 GGUF matches merged f16 GGUF -- base twin is not untouched (#3137)"
 manifest = {
     "experiment": "T0 pipeline proof (#3081)",
     "base_model": "unsloth/Qwen2.5-Coder-7B",
@@ -306,6 +355,7 @@ manifest = {
     "ollama_tags": ["rex86-merged:q4_k_m", "rex86-merged:q8_0",
                     "qwen2.5-coder-7b-base:q4_k_m", "qwen2.5-coder-7b-base:q8_0"],
     "gguf": ggufs,
+    "lineage": {"rex86-merged-f16": "base+REx86 adapter", "base-f16": "base only"},
 }
 out = f"{run}/manifest.json"
 json.dump(manifest, open(out, "w"), indent=2)
