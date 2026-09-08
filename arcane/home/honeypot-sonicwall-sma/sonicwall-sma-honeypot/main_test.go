@@ -13,11 +13,12 @@ import (
 
 func newTestHandler(relayURL string) *handler {
 	return &handler{
-		log:       newLogger(""),
-		port:      8443,
-		relayURL:  relayURL,
-		relayHTTP: &http.Client{Timeout: 2 * time.Second},
-		relayed:   make(map[string]struct{}),
+		log:             newLogger(""),
+		port:            8443,
+		relayURL:        relayURL,
+		relayHTTP:       &http.Client{Timeout: 2 * time.Second},
+		relayed:         make(map[string]time.Time),
+		relayMaxSources: 4096,
 	}
 }
 
@@ -165,6 +166,45 @@ func TestRelayIsRateLimitedToOneHopPerSourceIP(t *testing.T) {
 
 	if hits != 1 {
 		t.Fatalf("relay hit %d times, want exactly 1 (rate-limited to one hop per source IP)", hits)
+	}
+}
+
+// TestRelayedMapEvictsOldestEntryOnceAtCap is a regression test for the
+// unbounded relayed map (one entry per distinct source IP, forever, in an
+// internet-facing 256M container) -- mirrors cisco-asa-honeypot's
+// cap-and-evict for its IKE session map (#2324).
+func TestRelayedMapEvictsOldestEntryOnceAtCap(t *testing.T) {
+	relay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer relay.Close()
+
+	h := newTestHandler(relay.URL)
+	h.relayMaxSources = 2
+
+	for _, ip := range []string{"10.0.0.1", "10.0.0.2"} {
+		if _, _, err := h.relayToAMC(ip); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Millisecond) // force distinct seen timestamps
+	}
+	if len(h.relayed) != 2 {
+		t.Fatalf("relayed map size = %d, want 2 (at cap)", len(h.relayed))
+	}
+
+	// A third distinct source IP must evict the oldest entry rather than
+	// growing the map past the cap.
+	if _, _, err := h.relayToAMC("10.0.0.3"); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.relayed) != 2 {
+		t.Fatalf("relayed map size = %d, want 2 (still at cap after eviction)", len(h.relayed))
+	}
+	if _, ok := h.relayed["10.0.0.1"]; ok {
+		t.Fatal("expected oldest entry (10.0.0.1) to be evicted")
+	}
+	if _, ok := h.relayed["10.0.0.3"]; !ok {
+		t.Fatal("expected newest entry (10.0.0.3) to be present")
 	}
 }
 

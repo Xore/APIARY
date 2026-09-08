@@ -165,6 +165,15 @@ func getenv(k, def string) string {
 	return def
 }
 
+func getenvInt(k string, def int) int {
+	if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
+}
+
 func srcIP(r *http.Request) (string, int) {
 	host, portStr, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -182,8 +191,9 @@ type handler struct {
 	relayURL  string
 	relayHTTP *http.Client
 
-	relayedMu sync.Mutex
-	relayed   map[string]struct{}
+	relayedMu       sync.Mutex
+	relayed         map[string]time.Time
+	relayMaxSources int
 }
 
 // relayMarkerHeader is set on every outbound relayToAMC request so the
@@ -247,6 +257,24 @@ func amcActionPath(reqPath string) bool {
 	return strings.ToLower(path.Clean(reqPath)) == "/cgi-bin/amc/rollbackconfirm.action"
 }
 
+// evictOldestRelayLocked drops the least-recently-seen entry from relayed to
+// make room for a new one once the map is at relayMaxSources. Caller must
+// hold relayedMu. Mirrors cisco-asa-honeypot's
+// evictOldestIKESessionLocked (#2324).
+func evictOldestRelayLocked(relayed map[string]time.Time) {
+	var oldestKey string
+	var oldestSeen time.Time
+	found := false
+	for k, v := range relayed {
+		if !found || v.Before(oldestSeen) {
+			oldestKey, oldestSeen, found = k, v, true
+		}
+	}
+	if found {
+		delete(relayed, oldestKey)
+	}
+}
+
 // relayToAMC performs the one fixed, non-attacker-steerable outbound hop
 // toward api-honeypot's cloud-metadata surface (h.relayURL), making the
 // SSRF itself observable rather than only its intended destination shape.
@@ -258,13 +286,22 @@ func amcActionPath(reqPath string) bool {
 // looping the entry probe turns this decoy into a 1:1 request amplifier
 // against api-honeypot. The probe itself still classifies and responds on
 // every request -- only the actual outbound relay call is capped.
+//
+// h.relayed grows one entry per distinct source IP ever seen, forever, in
+// this internet-facing 256M container -- same unbounded-map shape as
+// cisco-asa-honeypot's IKE session map (#2324) and reporter's hits map
+// (#2342). Capped and evicted the same way as the former: oldest entry
+// dropped once relayMaxSources is reached, rather than a flat clear.
 func (h *handler) relayToAMC(ip string) (status int, alreadyRelayed bool, err error) {
 	h.relayedMu.Lock()
 	if _, done := h.relayed[ip]; done {
 		h.relayedMu.Unlock()
 		return 0, true, nil
 	}
-	h.relayed[ip] = struct{}{}
+	if len(h.relayed) >= h.relayMaxSources {
+		evictOldestRelayLocked(h.relayed)
+	}
+	h.relayed[ip] = time.Now()
 	h.relayedMu.Unlock()
 
 	req, err := http.NewRequest(http.MethodGet, h.relayURL, nil)
@@ -409,7 +446,10 @@ func main() {
 		relayHTTP: &http.Client{
 			Timeout: 3 * time.Second,
 		},
-		relayed: make(map[string]struct{}),
+		// #2324-style cap: bounds relayed against one distinct-source-IP
+		// entry accumulating forever.
+		relayed:         make(map[string]time.Time),
+		relayMaxSources: getenvInt("RELAY_MAX_SOURCES", 4096),
 	}
 
 	srv := &http.Server{
