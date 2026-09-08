@@ -544,12 +544,27 @@ services:
       # read-only -- worker.sh already caps what lands in export/ at 64MiB
       # per pcap before this container ever sees it.
       - /var/lib/honeypot-sandbox/export:/opt/arkime/sandbox-import:ro
+    # #3074: ARKIME__dropUser/dropGroup below looked like they dropped
+    # capture to nobody:daemon, but never did -- confirmed against upstream
+    # source (capture/main.c, arkime_drop_privileges()): the setuid/setgid
+    # call is only reached `if (!config.pcapReadOffline)`, and this
+    # container runs offline-import mode (-R --monitor --skip below), so
+    # the function is simply never called regardless of config. The env
+    # vars did reach Arkime's config (verified: ARKIME__ vars are merged
+    # into the keyfile before dropUser/dropGroup are read), so this isn't
+    # a config-plumbing gap -- it's a deliberate upstream no-op for this
+    # mode. Enforcing it at the Docker level instead: `user:` below is not
+    # advisory, unlike the env vars it replaces. Confirmed safe live --
+    # capture (pid 26, not pid 1/docker.sh) holds no writable file
+    # descriptors in this mode (only stdio pipes, ES sockets, inotify), and
+    # every path it reads (arkime-raw, config.ini, geo, init-markers,
+    # sandbox-import) is world-readable, so a non-root uid needs nothing
+    # extra here or in cap_add below.
+    user: "nobody:daemon"
     environment:
       - TZ=Europe/Berlin
       - ARKIME__elasticsearch=http://elasticsearch:9200
       - ARKIME__passwordSecret=${ARKIME_PASSWORD_SECRET:-change-me-in-env}
-      - ARKIME__dropUser=nobody
-      - ARKIME__dropGroup=daemon
     networks:
       - honeynet
     # #1497: stateful, not a naive "is the newest session recent" check --
@@ -579,20 +594,15 @@ services:
     labels:
       - autoheal=true
     # #3045 (#2825 class A repointed here on closure): measured, not
-    # assumed. ARKIME__dropUser=nobody/ARKIME__dropGroup=daemon above are
-    # configured, but live testing (docker exec, checking /proc/1/status)
-    # shows the capture process stays uid 0 throughout in this offline
-    # -R/--monitor/--skip import mode -- it never actually calls setuid/
-    # setgid, so SETUID/SETGID are not needed for that (a separate,
-    # unrelated gap in Arkime's own privilege-drop path, not something
-    # cap_drop can affect either way -- filed as #3074, not fixed here).
-    # What
-    # the process actually does as uid 0 -- reading arkime-raw (owned
-    # uid/gid 998, but world-readable 644/755, so no DAC_OVERRIDE needed)
-    # and writing arkime-pcap (owned root:root, so normal owner
-    # permissions already suffice) -- ran a full real capture/index cycle
-    # against the live cluster cleanly with cap_drop: ALL and no cap_add
-    # at all.
+    # assumed. What the process does -- reading arkime-raw (owned uid/gid
+    # 998, but world-readable 644/755, so no DAC_OVERRIDE needed) and
+    # talking to elasticsearch over the network, no local writes at all in
+    # this offline mode (confirmed live: capture's own fd table holds no
+    # writable regular files, only stdio pipes and ES sockets) -- ran a
+    # full real capture/index cycle against the live cluster cleanly with
+    # cap_drop: ALL and no cap_add at all. #3074 (uid drop) resolved
+    # separately via `user:` above, not cap_add -- the two gaps were
+    # independent of each other.
     cap_drop:
       - ALL
     deploy:
