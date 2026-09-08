@@ -148,6 +148,9 @@ MERGED_C="$RUN_C/merged_16bit"
 # reads as finished and never re-merges. .merge_done is written by this script
 # only once the save AND the tokenizer normalization below have both returned.
 MERGE_DONE="$MERGED/.merge_done"
+# save_pretrained shards only above max_shard_size (50GB default), so a 15GB
+# merge is one model.safetensors with no index.json. Accept either layout.
+have_weights() { [ -s "$MERGED/model.safetensors" ] || [ -s "$MERGED/model.safetensors.index.json" ]; }
 if [ ! -s "$MERGE_DONE" ]; then
   rm -f "$MERGE_DONE"
   log "merging adapter into $BASE_MODEL @ $BASE_REV (CPU, fp16, unsloth)"
@@ -163,7 +166,7 @@ model = model.merge_and_unload()
 model.save_pretrained_merged("$MERGED_C", tok, save_method="merged_16bit")
 print("merged (unsloth) ->", "$MERGED_C")
 PY
-  if [ ! -s "$MERGED/model.safetensors.index.json" ]; then
+  if ! have_weights; then
     # save_pretrained_merged hard-requires CUDA and OOMs when the Studio
     # server's own model residency already holds VRAM; fall back to a plain
     # HF+PEFT CPU merge, which produces identical weights.
@@ -183,7 +186,7 @@ tok.save_pretrained("$MERGED_C")
 print("merged (HF+PEFT CPU) ->", "$MERGED_C")
 PY2
   fi
-  [ -s "$MERGED/model.safetensors.index.json" ] || die "merge produced no weight shards at $MERGED"
+  have_weights || die "merge produced no weight shards at $MERGED"
 
   # newer transformers requires tokenizer_config.json's extra_special_tokens to
   # be a dict; unsloth and older PEFT merges write it as a list, which then
