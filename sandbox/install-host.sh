@@ -41,7 +41,12 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 bash "$script_dir/repair-permissions.sh"
 
 systemctl enable --now libvirtd.service 2>/dev/null || true
-systemctl enable --now virtqemud.socket virtnetworkd.socket 2>/dev/null || true
+# virtnwfilterd.socket ships enabled by the EL package preset but not started
+# -- "enabled" only means it will start at the next boot via sockets.target,
+# not that it is up now. apply-network-filter.sh's nwfilter-define talks to
+# this socket directly and failed with "No such file or directory" until it
+# was started explicitly here (#3027).
+systemctl enable --now virtqemud.socket virtnetworkd.socket virtnwfilterd.socket 2>/dev/null || true
 bash "$script_dir/apply-network-filter.sh"
 
 if ! virsh net-info honeypot-sandbox >/dev/null 2>&1; then
