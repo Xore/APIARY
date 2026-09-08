@@ -30,22 +30,23 @@ filebeat.inputs:
   # and join -- or, on hellpot/galah's Traefik-proxied door, adjudicate
   # the forwarded-header claim instead of joining at all.
   #
-  # #1217: multipot/tanner/http-honeypot/citrix-honeypot/rdp-honeypot
-  # already get the real attacker IP directly via PROXY protocol (no join
-  # needed) but are ALSO now watched, purely to
+  # #1217: multipot/tanner/http-honeypot/citrix-honeypot/rdp-honeypot, plus
+  # sonicwall-sma-honeypot (#3033), already get the real attacker IP
+  # directly via PROXY protocol (no join needed) but are ALSO now watched,
+  # purely to
   # promote canonical_* creds/command/fingerprint fields (see
   # backend-service/src/ip_enrichment/canonical.rs) -- their enriched copies land in
   # /logs/enriched/ too (multipot.json, tanner.json, http-honeypot.json,
-  # citrix-honeypot.json, rdp-honeypot.json).
+  # citrix-honeypot.json, rdp-honeypot.json, sonicwall-sma-honeypot.json).
   #
   # Every watched sensor's own raw path is deliberately absent
   # from this list -- only /logs/enriched/*.json is tailed for them, so no
   # event is ever shipped twice. That set is the #37/#38 five above plus
   # elasticpot, mailoney, the four bespoke joiners, dionaea-incident and
-  # the #1217 five -- 16 named sources plus every conpot persona found on
+  # the #1217 six -- 17 named sources plus every conpot persona found on
   # disk; backend-service/src/ip_enrichment/mod.rs's discover_sources is
   # the authoritative roster. api-honeypot/dnp3/dicompot/endlessh are
-  # NOT watched at all (#1217 is exactly the five named above, no more)
+  # NOT watched at all (#1217 is exactly the six named above, no more)
   # and keep tailing their raw path as before, as does canarytokens
   # (#1426, below).
   - type: filestream
