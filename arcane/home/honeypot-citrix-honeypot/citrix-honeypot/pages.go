@@ -44,6 +44,9 @@ const citrixLoginPage = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN
 
             <button type="submit" class="login_button rdx_blue_button"><span id="logintext">Log On</span><span id="loadingdots"></span></button>
         </div>
+        <div class="ns_grid_text saml_sso">
+            <a href="/saml/login" id="samlSSOLink">Log On using Single Sign-On</a>
+        </div>
 </div>
 </body>
 </html>
@@ -65,4 +68,61 @@ on this server.<br />
 const citrixSmbConf = `[global]
                 encrypt passwords = yes
                 name resolve order = lmhosts wins host bcast
+`
+
+// citrixAAALoginPage is served at the NetScaler AAA vserver's login
+// endpoint (/p/u/doAuthentication.do, #3032) once authSurfaceEvent
+// recognizes an AAA/SAML surface probe. Deliberately distinct from
+// citrixLoginPage: a real AAA/SAML-configured Gateway serves a different
+// login flow than a plain ADC Gateway, and answering both endpoints with
+// the same page would itself be a fingerprinting tell.
+const citrixAAALoginPage = `<!DOCTYPE html>
+<html><head><title>Citrix Gateway - Authentication</title></head>
+<body class="ns_login_body aaa_tm">
+<form name="vpnForm" id="vpnForm" method="post" action="/cgi/login">
+<div id="ns_user_pass_section">
+<span>User name</span><input type="text" name="login" id="Enter user name">
+<span>Password</span><input type="password" name="passwd" id="Enter password">
+<input type="hidden" name="samlSSO" value="1">
+<button type="submit">Log On</button>
+</div>
+</form>
+</body></html>
+`
+
+// citrixLogoutPage is served at /cgi/logout -- the AAA session-teardown
+// endpoint ET sid 2065742 (CVE-2025-12101) probes with a RelayState=
+// parameter.
+const citrixLogoutPage = `<!DOCTYPE html>
+<html><head><title>Citrix Gateway - Logged Off</title></head>
+<body><p>You have logged off, or your session has expired. To log on again, click <a href="/">here</a>.</p></body></html>
+`
+
+// citrixSAMLBounceTemplate is served at /saml/login and /cgi/samlauth: the
+// SP side of an SP-initiated SAML flow bounces the browser onward with an
+// auto-submitting form exactly like this one. There is no real IdP behind
+// this decoy, so "{acs}" points the auto-submit target back at this
+// decoy's own assertion consumer service rather than an external host.
+const citrixSAMLBounceTemplate = `<!DOCTYPE html>
+<html><body onload="document.forms[0].submit()">
+<form method="post" action="{acs}">
+<input type="hidden" name="SAMLResponse" value="">
+<noscript><button type="submit">Continue</button></noscript>
+</form>
+</body></html>
+`
+
+// citrixWSFedTemplate is served at /wsfed/passive -- the WS-Federation
+// passive requestor profile echoes the caller's own "wctx" back in its
+// sign-in response, so a scanner sees its own context value reflected.
+// "{wctx}" must be HTML-escaped by the caller before substitution.
+const citrixWSFedTemplate = `<!DOCTYPE html>
+<html><body onload="document.forms[0].submit()">
+<form method="post" action="/cgi/samlauth">
+<input type="hidden" name="wa" value="wsignin1.0">
+<input type="hidden" name="wctx" value="{wctx}">
+<input type="hidden" name="wresult" value="">
+<noscript><button type="submit">Continue</button></noscript>
+</form>
+</body></html>
 `
