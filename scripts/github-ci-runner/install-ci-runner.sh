@@ -318,6 +318,53 @@ fi
 install -m 0440 -o root -g root "$sudoers_tmp" "$sudoers_file"
 rm -f "$sudoers_tmp"
 
+# REVIEW-A/#3030: compose-drift-watch.py's failing-healthcheck-streak
+# duration tracker needs a state file every runner instance can both read
+# and write across scheduled sweeps -- shared /tmp does NOT give it that:
+# the file itself ends up owned by whichever single runner user created it,
+# at that user's umask (confirmed live: 0644 owned by one account, EACCES
+# for the other three github-ci-runner-{2,3,4} accounts). Reuses
+# compose-drift-ro rather than a new group -- every RUNNER_USER is already
+# a member from the grant just above, and this state file is no more
+# sensitive than the drift findings it feeds. setgid (g+s) makes new files
+# inherit the group; compose-drift-watch.py's own write path still chmods
+# each write to 0664 since setgid does not touch permission bits.
+install -d -m 2775 -o root -g "$compose_drift_group" /var/lib/compose-drift-watch
+
+# REVIEW-A/#3025: same narrow shape as the #2764 grant just above, for a
+# different unreadable-by-this-user directory. `/mnt/usb-recovery/apiary-
+# backups` is `drwx------ xore xore`; widening its mode or this user's
+# group membership was rejected for the same reason as the .env case --
+# it is the only on-disk copy of the essentials backup archives, and
+# should stay closed to every account except xore and root. The helper
+# (scripts/backup-freshness-check.py) returns only a bare mtime or
+# `EMPTY`, never a filename or listing.
+backup_staleness_group=backup-staleness-ro
+if ! getent group "$backup_staleness_group" >/dev/null 2>&1; then
+  groupadd --system "$backup_staleness_group"
+fi
+usermod -aG "$backup_staleness_group" "$RUNNER_USER"
+
+install -m 0755 -o root -g root \
+  "$here/backup-freshness-check.py" \
+  /opt/github-ci-runner-helpers/backup-freshness-check.py
+
+# Dir argument pinned to the one known backup dir so sudoers itself only
+# wildcards the glob argument; the helper's own validation (rejects a
+# glob containing '/' or '..') is still the real boundary for that part.
+backup_sudoers_file=/etc/sudoers.d/backup-staleness-ro
+backup_sudoers_tmp="$(mktemp)"
+cat > "$backup_sudoers_tmp" <<EOF
+%${backup_staleness_group} ALL=(root) NOPASSWD: /usr/bin/python3 /opt/github-ci-runner-helpers/backup-freshness-check.py /mnt/usb-recovery/apiary-backups *
+EOF
+if ! visudo -cf "$backup_sudoers_tmp"; then
+  echo "generated sudoers file failed validation, not installing it" >&2
+  rm -f "$backup_sudoers_tmp"
+  exit 1
+fi
+install -m 0440 -o root -g root "$backup_sudoers_tmp" "$backup_sudoers_file"
+rm -f "$backup_sudoers_tmp"
+
 # Host provision for the routed checks, kept idempotent so re-running this
 # script restores a drifted box. The runner user has no general sudo BY
 # DESIGN -- the one exception above (#2764) is a single, narrow, output-

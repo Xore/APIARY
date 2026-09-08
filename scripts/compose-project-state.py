@@ -21,13 +21,21 @@ process only), but the ONLY thing that ever leaves this process **on
 stdout** is
 
     {"services":   {service_name: restart_policy, ...},
-     "containers": [{"Service": ..., "State": ...}, ...]}
+     "containers": [{"Service": ..., "State": ..., "Name": ...}, ...],
+     "limits":     {service_name: {"cpus": ..., "memory": ...}, ...}}
 
 -- structural metadata, and nothing else. Not one environment value, image
 name, digest, label, command line or file path from inside the resolved
 config or the `ps` output crosses the boundary, even though both raw
 outputs are full of them (`ps --format json` alone carries Image, Command
-and the whole `Labels` string). Anything this helper writes to *stderr* is
+and the whole `Labels` string). The container's own compose-assigned Name
+(e.g. `technitium-dns-1`) is the one exception -- it is a resolved
+identifier, not a secret, and compose-drift-watch.py's resource-limit
+check (#3028) needs it to run `docker inspect` against the right
+container. `limits` (declared `deploy.resources.limits.cpus`/`.memory` per
+service, same #3028 check) is the other addition: values straight from
+the compose file's own resource declarations, nothing interpolated from
+`.env`. Anything this helper writes to *stderr* is
 a diagnostic from a failed docker invocation, deliberately excluded from
 that guarantee; compose-drift-watch.py captures and discards it.
 
@@ -56,12 +64,20 @@ rejected before docker ever runs.
 
 Usage (normally invoked by compose-drift-watch.py via `sudo -n`, not by
 hand):
-  sudo python3 scripts/compose-project-state.py <project-dir>
+  sudo python3 scripts/compose-project-state.py <project-dir> [compose-file]
+compose-file defaults to compose.yml. #3040: a handful of manifest-listed
+stacks (llm-worker, auth-events-worker, ml-worker, ghidra) resolve under a
+different filename (docker-compose.yml, docker-compose.ghidra.yml, ...) --
+the sudoers grant already wildcards trailing arguments (install-ci-runner.sh),
+so this script's own validation below, not sudoers, is what stops that
+argument from being turned into an arbitrary path: it must be a bare
+filename, no directory separators and no `..`.
 Exit 0 on success, 1 on a docker/compose failure, 2 on a rejected argument.
 """
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -73,10 +89,15 @@ from pathlib import Path
 # on the host even though sudoers itself allows any trailing argument.
 ALLOWED_ROOTS = (Path("/var/dockge/stacks"), Path("/opt/stacks"))
 
+# Bare filename only -- no "/", no "..", nothing that could walk this
+# argument outside of `project`. This is the entire boundary for the new
+# argument: sudoers itself already allows any trailing text.
+SAFE_COMPOSE_FILENAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$")
 
-def compose(project: Path, *args: str) -> subprocess.CompletedProcess:
+
+def compose(project: Path, compose_file: str, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["docker", "compose", "-f", "compose.yml", *args],
+        ["docker", "compose", "-f", compose_file, *args],
         cwd=project, capture_output=True, text=True,
     )
 
@@ -84,9 +105,9 @@ def compose(project: Path, *args: str) -> subprocess.CompletedProcess:
 def parse_ps(stdout: str) -> list[dict] | None:
     """`ps --format json` is newline-delimited objects on the fleet's compose
     (v5.5.0, verified live); some versions emit a single array instead.
-    Accept either, and keep ONLY Service/State -- the raw records also carry
-    Image, Command and a flattened Labels blob, none of which may cross the
-    privilege boundary."""
+    Accept either, and keep ONLY Service/State/Name -- the raw records also
+    carry Image, Command and a flattened Labels blob, none of which may
+    cross the privilege boundary."""
     stdout = stdout.strip()
     if not stdout:
         return []
@@ -107,14 +128,28 @@ def parse_ps(stdout: str) -> list[dict] | None:
             except json.JSONDecodeError:
                 return None
     return [
-        {"Service": r.get("Service", ""), "State": r.get("State", "")}
+        {"Service": r.get("Service", ""), "State": r.get("State", ""), "Name": r.get("Name", "")}
         for r in records
     ]
 
 
+def resource_limits(data: dict) -> dict[str, dict]:
+    """service_name -> {"cpus": ..., "memory": ...} for every service with a
+    declared deploy.resources.limits entry (#3028). Straight from the
+    resolved compose config, same fields resource_limit_findings() already
+    reads unprivileged for the readable stacks."""
+    limits = {}
+    for name, svc in data.get("services", {}).items():
+        declared = ((svc.get("deploy") or {}).get("resources") or {}).get("limits") or {}
+        cpus, memory = declared.get("cpus"), declared.get("memory")
+        if cpus is not None or memory is not None:
+            limits[name] = {"cpus": cpus, "memory": memory}
+    return limits
+
+
 def main() -> int:
-    if len(sys.argv) != 2:
-        print("usage: compose-project-state.py <project-dir>", file=sys.stderr)
+    if len(sys.argv) not in (2, 3):
+        print("usage: compose-project-state.py <project-dir> [compose-file]", file=sys.stderr)
         return 2
 
     try:
@@ -127,12 +162,17 @@ def main() -> int:
         print(f"refusing: {project} is outside the known stacks roots {ALLOWED_ROOTS}", file=sys.stderr)
         return 2
 
-    compose_file = project / "compose.yml"
-    if not compose_file.is_file():
-        print(f"refusing: no compose.yml under {project}", file=sys.stderr)
+    compose_filename = sys.argv[2] if len(sys.argv) == 3 else "compose.yml"
+    if not SAFE_COMPOSE_FILENAME.match(compose_filename):
+        print(f"refusing: {compose_filename!r} is not a bare compose filename", file=sys.stderr)
         return 2
 
-    cfg = compose(project, "config", "--format", "json")
+    compose_path = project / compose_filename
+    if not compose_path.is_file():
+        print(f"refusing: no {compose_filename} under {project}", file=sys.stderr)
+        return 2
+
+    cfg = compose(project, compose_filename, "config", "--format", "json")
     if cfg.returncode != 0:
         print(cfg.stderr, file=sys.stderr)
         return 1
@@ -142,7 +182,7 @@ def main() -> int:
         print(f"docker compose config produced non-JSON output: {e}", file=sys.stderr)
         return 1
 
-    ps = compose(project, "ps", "-a", "--format", "json")
+    ps = compose(project, compose_filename, "ps", "-a", "--format", "json")
     if ps.returncode != 0:
         print(ps.stderr, file=sys.stderr)
         return 1
@@ -152,15 +192,17 @@ def main() -> int:
         return 1
 
     # The only line that leaves this root process: service names + restart
-    # policies, and container service names + states. Nothing from
-    # `environment:`, `secrets:`, `build:`, `image:`, `Labels` or any other
-    # key either command resolved along the way.
+    # policies + declared resource limits, and container service
+    # names/states/names. Nothing from `environment:`, `secrets:`, `build:`,
+    # `image:`, `Labels` or any other key either command resolved along the
+    # way.
     print(json.dumps({
         "services": {
             name: (svc.get("restart") or "")
             for name, svc in data.get("services", {}).items()
         },
         "containers": containers,
+        "limits": resource_limits(data),
     }))
     return 0
 
