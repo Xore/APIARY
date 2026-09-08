@@ -18,6 +18,7 @@
 | **dns-honeypot** | DNS 53/udp | raw tunnel | from-scratch UDP reflection bait, response capped in code to at most 1.5x request size — never contacts a real resolver, so it cannot be abused as a DDoS amplification vector — ES-only from day one (#238, #415) |
 | **citrix-honeypot** | raw 4443 (→ container 443) | raw tunnel + PROXY | Citrix ADC/NetScaler Gateway decoy (CVE-2019-19781 path traversal), Go port of `t3chn0m4g3/CitrixHoneypot`, own self-signed TLS — ES-only from day one (#238, #414) |
 | **cisco-asa-honeypot** | WebVPN 8443, IKE 500/udp | raw tunnel + PROXY (8443) | Cisco ASA WebVPN + IKE decoy (CVE-2018-0101), Go port of `t3chn0m4g3/ciscoasa_honeypot` — the IKE side replies once per source with a real Diffie-Hellman/nonce exchange then goes silent, matching upstream's actual (not fully protocol-correct) behavior exactly — ES-only from day one (#238, #414) |
+| **sonicwall-sma-honeypot** | raw 8543 (→ container 8443) | raw tunnel + PROXY | SonicWall SMA1000 Work Place/AMC decoy for the CVE-2026-83548 Work Place SSRF / CVE-2026-83549 AMC OS command injection chain — Work Place login page, `/cgi-bin/...` classified as the stage-one SSRF probe with a fixed non-attacker-steerable relay hop to `api-honeypot`'s cloud-metadata surface, synthetic AMC hop page whose own action route classifies the stage-two payload — no Suricata rule yet, no public PoC/vendor IOC gives a literal shape (#3033) |
 | **rdp-honeypot** | RDP 3389 | raw tunnel + PROXY | RDP decoy, Go port of `CommunityHoneyNetwork/rdphoney` — reads the initial X.224 Connection Request, captures the `mstshash=` cookie username if present and the client's requested security protocols (plain RDP / TLS / CredSSP / RDSTLS / CredSSP-EarlyUserAuth) from the trailing `RDP_NEG_REQ` structure — ES-only from day one (#238, #412) |
 | **http-honeypot** | `decoy.<domain>` (+ catch-all, + raw :8081 with PROXY protocol — portbridge rule carries the `pp` flag, same as citrix/cisco/rdp/dicom) | Traefik | fake nginx / login pages — unrecognized scan/rce-probe paths get a HellPot-style Markov-garbage tarpit instead of a fast reply by default (`HTTP_TARPIT=0` to disable, #246) |
 | **api-honeypot** | raw 8888 | raw tunnel + PROXY | cloud metadata, Kubernetes, registry, DevOps and LLM API probes — same binary as http-honeypot, same tarpit behavior |
@@ -178,6 +179,7 @@ Web UI: `http://<HP_BIND>:19080` (`arkime.<domain>` via Traefik).
 >   header carrying the real client address. **multipot** and the
 >   **http/api-honeypots** (`PROXY_PROTOCOL=1`), **dnp3** (`PROXY_PROTOCOL=1`),
 >   **dicompot** (`PROXY_PROTOCOL=1`), **citrix-honeypot**,
+>   **sonicwall-sma-honeypot** (`PROXY_PROTOCOL=1`),
 >   **cisco-asa-honeypot**'s WebVPN side and **rdp-honeypot** (`PROXY_PROTOCOL=1`) and **all conpot sensors** (`CONPOT_PROXY_PROTOCOL=1`, gevent shim baked in
 >   by `conpot/proxy_patch.py`) parse it, so those events log the true IP and
 >   port. The http listener sniffs the header, so Traefik-routed requests (no

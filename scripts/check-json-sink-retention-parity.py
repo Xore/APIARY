@@ -209,6 +209,12 @@ ROWS = [
                    ["LOG_MAX_BYTES", "func (l *logger) rotate()"]),
     },
     {
+        "dir": "/logs/sonicwall-sma-honeypot",
+        "globs": ["'sonicwall-sma-honeypot.json.[0-9]*'"],
+        "writer": ("arcane/home/honeypot-sonicwall-sma/sonicwall-sma-honeypot",
+                   ["LOG_MAX_BYTES", "func (l *logger) rotate()"]),
+    },
+    {
         "dir": "/logs/dns-honeypot",
         "globs": ["'dns-honeypot.json.[0-9]*'"],
         "writer": ("arcane/home/honeypot-dns-honeypot/dns-honeypot",

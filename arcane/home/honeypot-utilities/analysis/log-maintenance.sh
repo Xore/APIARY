@@ -150,6 +150,7 @@ while true; do
   # digit-leading glob shape prunes the aged-out segments here.
   find /logs/rdp-honeypot -maxdepth 1 -name 'rdp-honeypot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
   find /logs/citrix-honeypot -maxdepth 1 -name 'citrix-honeypot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  find /logs/sonicwall-sma-honeypot -maxdepth 1 -name 'sonicwall-sma-honeypot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
   find /logs/dns-honeypot -maxdepth 1 -name 'dns-honeypot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
   find /logs/cisco-asa-honeypot -maxdepth 1 -name 'cisco-asa-honeypot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
   find /logs/dicompot -maxdepth 1 -name 'dicompot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
