@@ -1,0 +1,25 @@
+[Unit]
+Description=Pull the homeserver benchmark work area to this workstation (#3104)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Runs as the workstation's own user: the SSH alias and identity used to
+# reach homeserver are that user's, same reasoning as
+# apiary-backup-essentials.service.
+User=xore
+Group=xore
+ExecStart=/usr/local/libexec/mirror-benchmark-workarea.sh
+NoNewPrivileges=true
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target
+
+# Install (mirrors install-backup-essentials.sh's pattern -- no separate
+# installer script for two static units):
+#   sudo install -m 0755 scripts/mirror-benchmark-workarea.sh /usr/local/libexec/mirror-benchmark-workarea.sh
+#   sudo install -m 0644 scripts/apiary-benchmark-mirror.service scripts/apiary-benchmark-mirror.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now apiary-benchmark-mirror.timer

@@ -1,0 +1,13 @@
+[Unit]
+Description=Periodic pull of the homeserver benchmark work area (#3104)
+
+[Timer]
+# Tighter than apiary-backup-essentials.timer's daily cadence: this mirrors an
+# actively-running sweep, where losing hours of in-progress transcripts to a
+# homeserver disaster costs more than losing a day of already-static secrets.
+OnCalendar=*-*-* 0/2:00:00
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target
