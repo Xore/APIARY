@@ -247,6 +247,16 @@ while read -r TAG; do
     TAG="$RESOLVED"
   fi
 
+  # #3090 tried a preflight probe here (one request before the tier loop) to
+  # catch an always-500 model cheaply. Dropped in review: 31 of 167 stored
+  # tierA run1 results show cold-load time >30s (max 694s), so the probe's
+  # own timeout misread a healthy-but-cold model as dead and routed it to
+  # mark_unmeasured() before it ever got a real run; raising the timeout only
+  # turned the probe into a mandatory extra cold load per model (do_run()
+  # below issues its own `ollama stop` before try 1 regardless). The
+  # TIER_OK==0 fallback a few lines down already reaches mark_unmeasured()
+  # for an always-500 model, at the cost of MAXTRY attempts instead of one --
+  # correct beats cheap here.
   TIER_OK=0
   for tier in A B; do
     do_run "$tier" "$slug" "$TAG" 1 || continue

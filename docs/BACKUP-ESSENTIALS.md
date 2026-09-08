@@ -248,6 +248,39 @@ box dies; the two are complements, not alternatives.
 
 Validate one with `analysis/verify-backup.sh <directory>`.
 
+## The benchmark work-area mirror
+
+`/mnt-1/benchmarks` on the homeserver (sweep scripts, rosters, run-state
+JSON, status markers — the same class of "irreplaceable, double-digit MB"
+data #2985 lost once) is **not** in this backup's fan-out. It is out of
+scope on purpose: everything in it either belongs in git (drivers, rosters —
+enforced separately) or is small run-state that changes every few minutes
+while a sweep is live, which does not suit a daily three-destination archive
+cycle.
+
+**Mirror of record**: `~/apiary-bench-snapshots/homeserver-workarea/` on
+this workstation (`hermes`, `192.168.42.253`) — not `xps13` / `192.168.42.15`,
+which is retired and unroutable. Kept current by
+`scripts/mirror-benchmark-workarea.sh`, pulled (never pushed — homeserver has
+no SSH key back to hermes) every 2 hours by the
+`apiary-benchmark-mirror.timer`/`.service` pair on this workstation.
+
+```bash
+scripts/mirror-benchmark-workarea.sh              # pull now
+systemctl list-timers apiary-benchmark-mirror.timer
+```
+
+Restore is a plain reverse rsync — no GPG envelope, since this mirror holds
+scripts and JSON, not secrets:
+
+```bash
+rsync -a ~/apiary-bench-snapshots/homeserver-workarea/ <dest>
+```
+
+Dry-run restore verified 2026-09-08 against a scratch directory: 5,489 files,
+154 MB, transferred clean; a full non-dry-run copy into the same scratch
+directory came back byte-identical to the source (`diff -rq`).
+
 ## History
 
 The Elasticsearch snapshot that `analysis/backup-honeypot.sh` used to take is

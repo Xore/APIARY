@@ -537,6 +537,28 @@ def write_report(output_path, report: dict) -> None:
         json.dump(report, f, indent=2)
 
 
+def finalize(results: dict, output_path, *, model_tag: str, model_digest: str, request: dict,
+             tier: str, transcript_summary: dict | None = None, extra: dict | None = None) -> int:
+    """Writes the report and returns the process exit code.
+
+    #3090: a model that fails every request (e.g. Ollama 500s on every call)
+    used to score 0/0 across 0 cases and still exit 0 with a written report --
+    indistinguishable from a model that genuinely scored 0. sweep_extra.sh then
+    logged MODEL_DONE instead of calling mark_unmeasured(). No cases scored is
+    a failed run, not a score: write nothing and fail loudly instead.
+    """
+    if not results:
+        print(f"UNMEASURABLE {model_tag}: 0 cases scored, no result written", file=sys.stderr)
+        return 3
+    report = build_report(results, model_tag=model_tag, model_digest=model_digest,
+                          request=request, tier=tier, transcript_summary=transcript_summary,
+                          extra=extra)
+    write_report(output_path, report)
+    print(f"\n{model_tag}: {report['total_score']}/{report['total_max_score']} "
+          f"({report['percent']}%) across {len(results)} cases")
+    return 0
+
+
 def run_cases(slice_builds, rubric: dict, tier: str, *, api_base: str, model_tag: str,
               model_digest: str, request: dict, recorder=None, tier_b=None,
               output_path=None, system_prompt: str = REV_SYSTEM,
@@ -754,14 +776,9 @@ def main() -> int:
     transcript_summary = None
     if writer is not None:
         transcript_summary = writer.close()
-    report = build_report(results, model_tag=model_tag, model_digest=model_digest,
-                          request=request, tier=args.tier, transcript_summary=transcript_summary,
-                          extra=report_extra)
-    write_report(args.output, report)
-
-    print(f"\n{model_tag}: {report['total_score']}/{report['total_max_score']} "
-          f"({report['percent']}%) across {len(results)} cases")
-    return 0
+    return finalize(results, args.output, model_tag=model_tag, model_digest=model_digest,
+                    request=request, tier=args.tier, transcript_summary=transcript_summary,
+                    extra=report_extra)
 
 
 if __name__ == "__main__":
