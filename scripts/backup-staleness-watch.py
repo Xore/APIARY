@@ -103,7 +103,12 @@ def newest_archive_age_hours(path: Path) -> float | None:
     of a direct filesystem read, exactly like compose-drift-watch.py does
     for the root-owned stack dirs it can't read either."""
     out = subprocess.run(
-        ["sudo", "-n", "python3", FRESHNESS_HELPER, str(path), GLOB],
+        # REVIEW-A non-blocking: absolute path, matching the sudoers grant
+        # itself (/usr/bin/python3 ...) and compose-drift-watch.py's own
+        # privileged-helper call -- works today via secure_path, but a bare
+        # "python3" is one PATH change away from silently resolving to
+        # something the grant never intended.
+        ["sudo", "-n", "/usr/bin/python3", FRESHNESS_HELPER, str(path), GLOB],
         capture_output=True, text=True,
     )
     if out.returncode != 0:

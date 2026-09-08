@@ -255,8 +255,11 @@ def arcane_image_drift(stacks_root: Path) -> str | None:
 PRIVILEGED_HELPER = "/opt/github-ci-runner-helpers/compose-project-state.py"
 
 
-def resolved_services(project: Path, compose_file: str = "compose.yml") -> dict[str, str] | None:
-    """service name -> resolved restart policy. None on resolution failure."""
+def _resolved_config(project: Path, compose_file: str = "compose.yml") -> dict | None:
+    """Parsed `docker compose config --format json`, unprivileged. None on
+    resolution failure. Shared by resolved_services() and resolved_limits()
+    so both #3040's restart-policy check and #3028's resource-limit check
+    read the same one compose resolution instead of two divergent ones."""
     try:
         out = subprocess.run(
             ["docker", "compose", "-f", compose_file, "config", "--format", "json"],
@@ -272,13 +275,36 @@ def resolved_services(project: Path, compose_file: str = "compose.yml") -> dict[
     if out.returncode != 0:
         return None
     try:
-        data = json.loads(out.stdout)
+        return json.loads(out.stdout)
     except json.JSONDecodeError:
+        return None
+
+
+def resolved_services(project: Path, compose_file: str = "compose.yml") -> dict[str, str] | None:
+    """service name -> resolved restart policy. None on resolution failure."""
+    data = _resolved_config(project, compose_file)
+    if data is None:
         return None
     return {
         name: (svc.get("restart") or "")
         for name, svc in data.get("services", {}).items()
     }
+
+
+def resolved_limits(project: Path, compose_file: str = "compose.yml") -> dict[str, tuple] | None:
+    """service name -> (cpus, memory) declared deploy.resources.limits,
+    unprivileged. None on resolution failure -- distinct from an empty dict,
+    which means "resolved fine, nothing declared"."""
+    data = _resolved_config(project, compose_file)
+    if data is None:
+        return None
+    limits = {}
+    for name, svc in data.get("services", {}).items():
+        declared = ((svc.get("deploy") or {}).get("resources") or {}).get("limits") or {}
+        cpus, memory = declared.get("cpus"), declared.get("memory")
+        if cpus is not None or memory is not None:
+            limits[name] = (cpus, memory)
+    return limits
 
 
 def actual_containers(project: Path, compose_file: str = "compose.yml") -> list[dict] | None:
@@ -306,23 +332,29 @@ def actual_containers(project: Path, compose_file: str = "compose.yml") -> list[
     return containers
 
 
-def privileged_project_state(project: Path, compose_file: str = "compose.yml") -> tuple[dict[str, str], list[dict]] | None:
-    """Same two answers, obtained through the narrow root-run helper.
+def privileged_project_state(
+    project: Path, compose_file: str = "compose.yml"
+) -> tuple[dict[str, str], list[dict], dict[str, tuple]] | None:
+    """Same answers as the unprivileged path, obtained through the narrow
+    root-run helper -- now three of them: services, containers, and declared
+    resource limits (REVIEW-A/#3028: resource_limit_findings() had no
+    privileged fallback at all, so it could never fire on any .env-locked or
+    0700 root-owned stack; measured live as "projects with declared limits:
+    0"). One helper call, one place that can fail, for all three.
 
     #2764: a handful of stacks' .env files aren't readable by whichever
     unprivileged user runs this sweep (root/deploy-runner-owned, 600/640).
     `docker compose config` AND `docker compose ps` both fail on those with
     permission denied -- `ps` has to load the project too, so patching only
-    the config half leaves the stack just as unresolved as before. Hence one
-    helper call that returns both halves, and one place that can fail.
+    the config half leaves the stack just as unresolved as before.
 
     The helper resolves everything as root but only ever prints
-    {"services": {name: restart}, "containers": [{Service, State}]} -- never
-    a secret value, an image, a label or a command line. Silently absent
-    (not installed, or the sudoers grant isn't there) just means this
-    fallback fails too and the project stays "unresolved", same as before
-    #2764 -- this can never make a resolution failure look like a clean
-    pass.
+    {"services": {name: restart}, "containers": [{Service, State}],
+    "limits": {name: {cpus, memory}}} -- never a secret value, an image, a
+    label or a command line. Silently absent (not installed, or the
+    sudoers grant isn't there) just means this fallback fails too and the
+    project stays "unresolved", same as before #2764 -- this can never make
+    a resolution failure look like a clean pass.
     """
     out = subprocess.run(
         ["sudo", "-n", "/usr/bin/python3", PRIVILEGED_HELPER, str(project), compose_file],
@@ -338,31 +370,57 @@ def privileged_project_state(project: Path, compose_file: str = "compose.yml") -
     containers = data.get("containers")
     if not isinstance(services, dict) or not isinstance(containers, list):
         return None
-    return services, containers
+    limits_raw = data.get("limits")
+    limits = {
+        name: (v.get("cpus"), v.get("memory"))
+        for name, v in limits_raw.items() if isinstance(v, dict)
+    } if isinstance(limits_raw, dict) else {}
+    return services, containers, limits
 
 
 def project_state(project: Path, compose_file: str = "compose.yml") -> tuple[dict[str, str], list[dict]] | None:
     """(resolved services, existing containers), or None if this project
     can't be resolved at all. Tries unprivileged first and only reaches for
     the root helper when either half fails -- so an ordinary run stays
-    entirely unprivileged, and the four .env-locked stacks resolve through
+    entirely unprivileged, and the .env-locked stacks resolve through
     exactly one sudo call instead of two half-fixes."""
     services = resolved_services(project, compose_file)
     containers = actual_containers(project, compose_file) if services is not None else None
     if services is not None and containers is not None:
         return services, containers
-    return privileged_project_state(project, compose_file)
+    result = privileged_project_state(project, compose_file)
+    if result is None:
+        return None
+    services, containers, _limits = result
+    return services, containers
+
+
+def project_limits(project: Path, compose_file: str = "compose.yml") -> dict[str, tuple] | None:
+    """service name -> (cpus, memory) declared limits, or None if this
+    project can't be resolved at all. Same two-tier resolution as
+    project_state(), for resource_limit_findings() (REVIEW-A/#3028)."""
+    limits = resolved_limits(project, compose_file)
+    if limits is not None:
+        return limits
+    result = privileged_project_state(project, compose_file)
+    if result is None:
+        return None
+    _, _, limits = result
+    return limits
 
 
 def manifest_extra_targets(stacks_root: Path, entries: list[dict]) -> list[tuple[Path, str]]:
-    """Manifest-listed stacks whose live compose file is not named
-    compose.yml -- project_dirs()'s glob only ever looks for compose.yml, so
-    these (llm-worker, auth-events-worker, ml-worker, ghidra as of
-    2026-09-03) have never been enumerated for internal drift at all
-    (#3040). This is exactly the gap #2747's own detector was supposed to
-    close for hp-llm-worker and didn't: a single-service, non-compose.yml-
-    named project with zero containers is invisible to the old enumeration
-    twice over.
+    """Every manifest-listed stack, by its own dockerComposePath basename --
+    including compose.yml-named ones. project_dirs()'s glob only ever finds
+    compose.yml AND only succeeds on dirs this user can read, so relying on
+    it to cover every compose.yml-named entry silently dropped every
+    manifest stack that is both compose.yml-named and unreadable
+    unprivileged (REVIEW-A: 34 of 43 `/var/dockge/stacks` dirs are 0700
+    root:root -- 31 of 38 manifest entries, including honeypot-elk and
+    honeypot-keycloak, the exact stacks #2747 was filed about, were never
+    swept at all). project_state()'s privileged fallback is what actually
+    resolves an unreadable one; sweep()'s real-path dedup (below) folds this
+    back together with project_dirs()'s own list so nothing doubles up.
 
     Live project dir is always stacks_root/<syncName> -- confirmed against
     every one of this manifest's 38 entries, regardless of where
@@ -373,12 +431,10 @@ def manifest_extra_targets(stacks_root: Path, entries: list[dict]) -> list[tuple
     install-homeserver.sh and Arcane's own gitops-sync already treat as
     authoritative.
 
-    compose.yml-named entries are skipped here -- project_dirs() already
-    covers them, and double-listing would sweep them twice. A target whose
-    file isn't actually there yet is skipped too (not alarmed): the normal
-    per-project "unresolved" path already covers real resolution failures,
-    and this function should never manufacture a project that plainly
-    doesn't exist on this host yet.
+    A target whose file isn't actually there yet is skipped (not alarmed):
+    the normal per-project "unresolved" path already covers real resolution
+    failures, and this function should never manufacture a project that
+    plainly doesn't exist on this host yet.
     """
     targets = []
     for entry in entries:
@@ -387,8 +443,6 @@ def manifest_extra_targets(stacks_root: Path, entries: list[dict]) -> list[tuple
         if not name or not compose_path:
             continue
         compose_file = Path(compose_path).name
-        if compose_file == "compose.yml":
-            continue
         project = stacks_root / name
         try:
             exists = (project / compose_file).is_file()
@@ -406,6 +460,36 @@ def manifest_extra_targets(stacks_root: Path, entries: list[dict]) -> list[tuple
     return targets
 
 
+def stack_targets(stacks_root: Path, entries: list[dict]) -> list[tuple[Path, str]]:
+    """Every (project dir, compose filename) this host's sweep resolves,
+    deduped by real path. Shared by sweep() and resource_limit_findings()
+    (REVIEW-A/#3028) so both walk the same universe of stacks instead of the
+    latter being limited to project_dirs()'s unprivileged-readable minority.
+
+    ghidra's compose.yml is a symlink to docker-compose.ghidra.yml (same
+    file, confirmed live) -- project_dirs() finds it via the former,
+    manifest_extra_targets() via the latter (its manifest basename), so
+    without dedup it gets swept twice and can double-report findings
+    (REVIEW-A non-blocking). Dedup on the resolved real path, not the
+    (project, compose_file) pair.
+    """
+    targets = [(p, "compose.yml") for p in project_dirs(stacks_root)]
+    targets += manifest_extra_targets(stacks_root, entries)
+
+    seen: set[Path] = set()
+    deduped = []
+    for project, compose_file in targets:
+        try:
+            real = (project / compose_file).resolve()
+        except OSError:
+            real = project / compose_file
+        if real in seen:
+            continue
+        seen.add(real)
+        deduped.append((project, compose_file))
+    return deduped
+
+
 def sweep(stacks_root: Path, entries: list[dict], retired: set[str] | None) -> tuple[list[dict], list[str]]:
     """Returns (drift findings, project names that failed to resolve).
 
@@ -421,29 +505,7 @@ def sweep(stacks_root: Path, entries: list[dict], retired: set[str] | None) -> t
     findings: list[dict] = []
     unresolved: list[str] = []
 
-    targets = [(p, "compose.yml") for p in project_dirs(stacks_root)]
-    targets += manifest_extra_targets(stacks_root, entries)
-
-    # ghidra's compose.yml is a symlink to docker-compose.ghidra.yml (same
-    # file, confirmed live) -- project_dirs() finds it via the former,
-    # manifest_extra_targets() via the latter (its manifest basename), so
-    # without this it gets swept twice and can double-report findings
-    # (REVIEW-A non-blocking). Dedup on the resolved real path, not the
-    # (project, compose_file) pair.
-    seen: set[Path] = set()
-    deduped = []
-    for project, compose_file in targets:
-        try:
-            real = (project / compose_file).resolve()
-        except OSError:
-            real = project / compose_file
-        if real in seen:
-            continue
-        seen.add(real)
-        deduped.append((project, compose_file))
-    targets = deduped
-
-    for project, compose_file in targets:
+    for project, compose_file in stack_targets(stacks_root, entries):
         name = project.name
         state = project_state(project, compose_file)
         if state is None:
@@ -516,8 +578,18 @@ def sweep(stacks_root: Path, entries: list[dict], retired: set[str] | None) -> t
 FAILING_STREAK_DURATION_THRESHOLD_S = int(
     os.environ.get("FAILING_STREAK_DURATION_THRESHOLD_S", str(60 * 60))
 )
+# REVIEW-A/#3030: /tmp is sticky (mode-protected against other users
+# deleting your files) but a file inside it is still owned by whichever of
+# the four github-ci-runner{,-2,-3,-4} users happened to create it, at
+# whatever mode that user's umask left it -- confirmed live at 0644 owned by
+# a single user, EACCES for every other runner's write. install-ci-runner.sh
+# provisions this dir mode 2775 root:compose-drift-ro (same group every
+# runner user is already in for the privileged sudo helper) so any runner
+# can create or update the file; _save_streak_state() below still chmods
+# each write explicitly since the setgid bit only fixes new files' group
+# ownership, not their permission bits.
 FAILING_STREAK_STATE_FILE = Path(
-    os.environ.get("FAILING_STREAK_STATE_FILE", "/tmp/compose-drift-watch-failing-streak-state.json")
+    os.environ.get("FAILING_STREAK_STATE_FILE", "/var/lib/compose-drift-watch/failing-streak-state.json")
 )
 
 
@@ -537,6 +609,11 @@ def _load_streak_state(state_file: Path) -> dict[str, float]:
 def _save_streak_state(state_file: Path, state: dict[str, float]) -> None:
     try:
         state_file.write_text(json.dumps(state))
+        # Explicit group-write: a runner user's umask (typically 022) would
+        # otherwise leave the file 0644, unwritable by every *other* runner
+        # user sharing the group -- exactly the live #3030 bug. The setgid
+        # dir bit only controls which group owns a new file, not its mode.
+        state_file.chmod(0o664)
     except OSError:
         # Best-effort: a lost state file just means duration tracking
         # restarts from "now" on the next sweep, never a crash.
@@ -616,7 +693,7 @@ def _compose_memory_bytes(value) -> int | None:
         return None
 
 
-def resource_limit_findings(stacks_root: Path) -> list[dict]:
+def resource_limit_findings(stacks_root: Path, entries: list[dict] | None = None) -> list[dict]:
     """[{project, service, container, field, repo, live}, ...] for every
     running container whose live `cpus`/`memory` limit (`docker inspect`
     `.HostConfig.NanoCpus`/`.Memory`) diverges from its own project's
@@ -630,46 +707,26 @@ def resource_limit_findings(stacks_root: Path) -> list[dict]:
     check #3028 also floats. See CODE-A.md for why the fuller version is a
     separate, deliberately-not-attempted piece of work in this batch.
 
-    Additive and read-only, same shape as failing_streak_findings() above:
-    a project this can't resolve (0700 root-owned dir, no docker-compose.yml
-    match, a `docker inspect` miss) is silently skipped, never reported as
-    "no drift" -- this can undercount but never lies about a stack it never
-    actually checked.
+    Walks the same stack_targets() universe as sweep() and resolves each one
+    through project_limits()/project_state()'s privileged fallback
+    (REVIEW-A: previously unprivileged-only against project_dirs()'s 5
+    readable dirs, so it could never fire against any .env-locked or 0700
+    root-owned stack -- measured live as "projects with declared limits:
+    0"). Additive and read-only, same shape as failing_streak_findings()
+    above: a project this can't resolve at all is silently skipped, never
+    reported as "no drift" -- this can undercount but never lies about a
+    stack it never actually checked.
     """
     findings = []
-    for project in project_dirs(stacks_root):
-        compose_file = "compose.yml" if (project / "compose.yml").exists() else "docker-compose.yml"
-        if not (project / compose_file).exists():
-            continue
-        try:
-            cfg = subprocess.run(
-                ["docker", "compose", "-f", compose_file, "config", "--format", "json"],
-                cwd=project, capture_output=True, text=True,
-            )
-        except OSError:
-            # Same 0700-dir chdir gap as resolved_services() -- the
-            # privileged helper's output schema doesn't carry resource
-            # limits, so these stacks aren't covered by this check yet.
-            continue
-        if cfg.returncode != 0:
-            continue
-        try:
-            data = json.loads(cfg.stdout)
-        except json.JSONDecodeError:
-            continue
-
-        repo_limits = {}
-        for name, svc in data.get("services", {}).items():
-            limits = ((svc.get("deploy") or {}).get("resources") or {}).get("limits") or {}
-            cpus, memory = limits.get("cpus"), limits.get("memory")
-            if cpus is not None or memory is not None:
-                repo_limits[name] = (cpus, memory)
+    for project, compose_file in stack_targets(stacks_root, entries or []):
+        repo_limits = project_limits(project, compose_file)
         if not repo_limits:
             continue
 
-        containers = actual_containers(project, compose_file)
-        if not containers:
+        state = project_state(project, compose_file)
+        if state is None:
             continue
+        _, containers = state
         for c in containers:
             service = c.get("Service", "")
             if service not in repo_limits or c.get("State") != "running":
@@ -745,7 +802,7 @@ def main() -> int:
         print("note: could not run docker ps/inspect -- skipping the "
               "failing-healthcheck-streak check this sweep", file=sys.stderr)
         bad_streaks = []
-    resource_drift = resource_limit_findings(stacks_root)
+    resource_drift = resource_limit_findings(stacks_root, entries or [])
 
     if unresolved:
         print(

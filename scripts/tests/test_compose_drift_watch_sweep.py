@@ -167,6 +167,78 @@ class GhidraDedupTest(unittest.TestCase):
         self.assertEqual(len(findings), 1)
 
 
+class ManifestCoverageTest(unittest.TestCase):
+    """REVIEW-A blocking finding 1: manifest_extra_targets() used to skip
+    every compose.yml-named entry on the theory project_dirs() already
+    covered it -- true only for the unprivileged-readable minority. A dir
+    that is both compose.yml-named and unreadable (0700 root:root, matching
+    honeypot-elk/honeypot-keycloak live) fell through both functions and
+    was never swept at all -- 31 of 38 manifest stacks, measured live."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.stacks_root = Path(self.tmp.name)
+
+    def test_unreadable_compose_yml_manifest_entry_reaches_privileged_fallback(self) -> None:
+        # A readable sibling so project_dirs() has something to find --
+        # its own "no compose.yml anywhere" gate is a separate, deliberate
+        # loud-crash safety net, not part of what this test pins.
+        # No declared services -- stays quiet on its own, exists purely so
+        # project_dirs() has a readable match (its own deliberate "empty
+        # fleet" safety gate is a separate concern from what this test pins).
+        sibling = self.stacks_root / "technitium"
+        sibling.mkdir()
+        (sibling / "compose.yml").write_text("services: {}\n")
+
+        locked = self.stacks_root / "honeypot-elk"
+        locked.mkdir()
+        locked.chmod(0)
+        self.addCleanup(locked.chmod, 0o700)
+
+        entries = [{"syncName": "honeypot-elk", "dockerComposePath": "arcane/home/honeypot-elk/compose.yml"}]
+
+        def fake_run(args, cwd=None, capture_output=True, text=True):
+            if cwd == locked:
+                # 0700 root:root denies chdir before docker even runs --
+                # same shape resolved_services()/actual_containers() catch.
+                raise OSError("Permission denied")
+            if cwd == sibling:
+                if "config" in args:
+                    return _Result(0, json.dumps({"services": {}}))
+                if "ps" in args:
+                    return _Result(0, "")
+            if args[:2] == ["sudo", "-n"]:
+                return _Result(0, json.dumps({
+                    "services": {"elasticsearch": "unless-stopped"},
+                    "containers": [],
+                    "limits": {},
+                }))
+            raise AssertionError(args)
+
+        with mock.patch.object(cdw.subprocess, "run", side_effect=fake_run):
+            findings, unresolved = cdw.sweep(self.stacks_root, entries=entries, retired=set())
+        self.assertEqual(unresolved, [])
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["project"], "honeypot-elk")
+
+    def test_readable_compose_yml_manifest_entry_not_double_reported(self) -> None:
+        # Regression for the dedup this fix leans on: a project_dirs()-
+        # readable stack whose manifest entry is ALSO compose.yml-named
+        # must not be swept twice now that manifest_extra_targets() no
+        # longer skips that basename.
+        d = self.stacks_root / "honeypot-galah"
+        d.mkdir()
+        (d / "compose.yml").write_text("services: {}\n")
+
+        entries = [{"syncName": "honeypot-galah", "dockerComposePath": "arcane/home/honeypot-galah/compose.yml"}]
+        configs = {"honeypot-galah": ({"galah": "unless-stopped"}, [])}
+        with mock.patch.object(cdw.subprocess, "run", side_effect=_fake_compose_run(configs)):
+            findings, unresolved = cdw.sweep(self.stacks_root, entries=entries, retired=set())
+        self.assertEqual(unresolved, [])
+        self.assertEqual(len(findings), 1)
+
+
 class ResourceLimitTest(unittest.TestCase):
     """#2972/#3028: a project's live cpus/memory limit silently drifting
     away from its repo-declared deploy.resources.limits (confirmed live to
@@ -248,6 +320,92 @@ class ResourceLimitTest(unittest.TestCase):
         containers = [{"Service": "svc", "State": "running", "Name": "plain"}]
         with mock.patch.object(cdw.subprocess, "run", side_effect=self._fake_run(None, None, containers, {})):
             findings = cdw.resource_limit_findings(self.stacks_root)
+        self.assertEqual(findings, [])
+
+
+class ResourceLimitPrivilegedFallbackTest(unittest.TestCase):
+    """REVIEW-A blocking finding 2/#3028: resource_limit_findings() had no
+    privileged fallback at all, so it could never fire against any
+    .env-locked or 0700 root-owned stack -- measured live as "projects with
+    declared limits: 0". Now routes through project_limits()/
+    project_state(), same as sweep() does for restart-policy drift."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.stacks_root = Path(self.tmp.name)
+
+    def test_env_locked_project_resolves_limits_through_privileged_helper(self) -> None:
+        # project_dirs() refuses to treat a stacks root with zero readable
+        # matches as a healthy fleet (its own deliberate safety gate) -- give
+        # it one ordinary readable sibling, same as a real fleet would have.
+        sibling = self.stacks_root / "honeypot-galah"
+        sibling.mkdir()
+        (sibling / "compose.yml").write_text("services: {}\n")
+
+        locked = self.stacks_root / "technitium"
+        locked.mkdir()
+        locked.chmod(0)
+        self.addCleanup(locked.chmod, 0o700)
+
+        entries = [{"syncName": "technitium", "dockerComposePath": "sandbox/technitium/compose.yml"}]
+
+        def fake_run(args, cwd=None, capture_output=True, text=True):
+            if cwd == locked:
+                raise OSError("Permission denied")
+            if cwd == sibling:
+                if "config" in args:
+                    return _Result(0, json.dumps({"services": {}}))
+                if "ps" in args:
+                    return _Result(0, "")
+            if args[:2] == ["sudo", "-n"]:
+                return _Result(0, json.dumps({
+                    "services": {"technitium-dns": "unless-stopped"},
+                    "containers": [{"Service": "technitium-dns", "State": "running", "Name": "technitium-dns"}],
+                    "limits": {"technitium-dns": {"cpus": 3, "memory": "2147483648"}},
+                }))
+            if args[:2] == ["docker", "inspect"]:
+                return _Result(0, "1500000000 2147483648")
+            raise AssertionError(args)
+
+        with mock.patch.object(cdw.subprocess, "run", side_effect=fake_run):
+            findings = cdw.resource_limit_findings(self.stacks_root, entries=entries)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["field"], "cpus")
+        self.assertEqual(findings[0]["project"], "technitium")
+
+    def test_env_locked_project_with_no_drift_stays_quiet(self) -> None:
+        sibling = self.stacks_root / "honeypot-galah"
+        sibling.mkdir()
+        (sibling / "compose.yml").write_text("services: {}\n")
+
+        locked = self.stacks_root / "technitium"
+        locked.mkdir()
+        locked.chmod(0)
+        self.addCleanup(locked.chmod, 0o700)
+
+        entries = [{"syncName": "technitium", "dockerComposePath": "sandbox/technitium/compose.yml"}]
+
+        def fake_run(args, cwd=None, capture_output=True, text=True):
+            if cwd == locked:
+                raise OSError("Permission denied")
+            if cwd == sibling:
+                if "config" in args:
+                    return _Result(0, json.dumps({"services": {}}))
+                if "ps" in args:
+                    return _Result(0, "")
+            if args[:2] == ["sudo", "-n"]:
+                return _Result(0, json.dumps({
+                    "services": {"technitium-dns": "unless-stopped"},
+                    "containers": [{"Service": "technitium-dns", "State": "running", "Name": "technitium-dns"}],
+                    "limits": {"technitium-dns": {"cpus": 3, "memory": "2147483648"}},
+                }))
+            if args[:2] == ["docker", "inspect"]:
+                return _Result(0, "3000000000 2147483648")
+            raise AssertionError(args)
+
+        with mock.patch.object(cdw.subprocess, "run", side_effect=fake_run):
+            findings = cdw.resource_limit_findings(self.stacks_root, entries=entries)
         self.assertEqual(findings, [])
 
 
@@ -345,6 +503,23 @@ class FailingStreakTest(unittest.TestCase):
         with mock.patch.object(cdw.subprocess, "run", side_effect=self._fake_docker([])):
             findings = cdw.failing_streak_findings(3600, state_file=self.state_file)
         self.assertEqual(findings, [])
+
+    def test_state_file_is_written_group_writable(self) -> None:
+        # REVIEW-A blocking finding 3/#3030: a runner user's default umask
+        # (022) leaves write_text()'s file at 0644 -- unwritable by the
+        # other three github-ci-runner-{2,3,4} accounts sharing the group,
+        # confirmed live as the actual root cause of the state never
+        # updating. _save_streak_state() must chmod every write explicitly.
+        containers = [{
+            "Id": "abc123",
+            "Name": "/hp-llm-worker",
+            "State": {"Health": {"FailingStreak": 6, "Status": "unhealthy"}},
+        }]
+        with mock.patch.object(cdw.subprocess, "run", side_effect=self._fake_docker(containers)), \
+             mock.patch.object(cdw.time, "time", return_value=1_000_000.0):
+            cdw.failing_streak_findings(3600, state_file=self.state_file)
+        mode = self.state_file.stat().st_mode & 0o777
+        self.assertEqual(mode, 0o664)
 
 
 if __name__ == "__main__":

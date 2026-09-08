@@ -318,6 +318,19 @@ fi
 install -m 0440 -o root -g root "$sudoers_tmp" "$sudoers_file"
 rm -f "$sudoers_tmp"
 
+# REVIEW-A/#3030: compose-drift-watch.py's failing-healthcheck-streak
+# duration tracker needs a state file every runner instance can both read
+# and write across scheduled sweeps -- shared /tmp does NOT give it that:
+# the file itself ends up owned by whichever single runner user created it,
+# at that user's umask (confirmed live: 0644 owned by one account, EACCES
+# for the other three github-ci-runner-{2,3,4} accounts). Reuses
+# compose-drift-ro rather than a new group -- every RUNNER_USER is already
+# a member from the grant just above, and this state file is no more
+# sensitive than the drift findings it feeds. setgid (g+s) makes new files
+# inherit the group; compose-drift-watch.py's own write path still chmods
+# each write to 0664 since setgid does not touch permission bits.
+install -d -m 2775 -o root -g "$compose_drift_group" /var/lib/compose-drift-watch
+
 # REVIEW-A/#3025: same narrow shape as the #2764 grant just above, for a
 # different unreadable-by-this-user directory. `/mnt/usb-recovery/apiary-
 # backups` is `drwx------ xore xore`; widening its mode or this user's

@@ -21,13 +21,21 @@ process only), but the ONLY thing that ever leaves this process **on
 stdout** is
 
     {"services":   {service_name: restart_policy, ...},
-     "containers": [{"Service": ..., "State": ...}, ...]}
+     "containers": [{"Service": ..., "State": ..., "Name": ...}, ...],
+     "limits":     {service_name: {"cpus": ..., "memory": ...}, ...}}
 
 -- structural metadata, and nothing else. Not one environment value, image
 name, digest, label, command line or file path from inside the resolved
 config or the `ps` output crosses the boundary, even though both raw
 outputs are full of them (`ps --format json` alone carries Image, Command
-and the whole `Labels` string). Anything this helper writes to *stderr* is
+and the whole `Labels` string). The container's own compose-assigned Name
+(e.g. `technitium-dns-1`) is the one exception -- it is a resolved
+identifier, not a secret, and compose-drift-watch.py's resource-limit
+check (#3028) needs it to run `docker inspect` against the right
+container. `limits` (declared `deploy.resources.limits.cpus`/`.memory` per
+service, same #3028 check) is the other addition: values straight from
+the compose file's own resource declarations, nothing interpolated from
+`.env`. Anything this helper writes to *stderr* is
 a diagnostic from a failed docker invocation, deliberately excluded from
 that guarantee; compose-drift-watch.py captures and discards it.
 
@@ -97,9 +105,9 @@ def compose(project: Path, compose_file: str, *args: str) -> subprocess.Complete
 def parse_ps(stdout: str) -> list[dict] | None:
     """`ps --format json` is newline-delimited objects on the fleet's compose
     (v5.5.0, verified live); some versions emit a single array instead.
-    Accept either, and keep ONLY Service/State -- the raw records also carry
-    Image, Command and a flattened Labels blob, none of which may cross the
-    privilege boundary."""
+    Accept either, and keep ONLY Service/State/Name -- the raw records also
+    carry Image, Command and a flattened Labels blob, none of which may
+    cross the privilege boundary."""
     stdout = stdout.strip()
     if not stdout:
         return []
@@ -120,9 +128,23 @@ def parse_ps(stdout: str) -> list[dict] | None:
             except json.JSONDecodeError:
                 return None
     return [
-        {"Service": r.get("Service", ""), "State": r.get("State", "")}
+        {"Service": r.get("Service", ""), "State": r.get("State", ""), "Name": r.get("Name", "")}
         for r in records
     ]
+
+
+def resource_limits(data: dict) -> dict[str, dict]:
+    """service_name -> {"cpus": ..., "memory": ...} for every service with a
+    declared deploy.resources.limits entry (#3028). Straight from the
+    resolved compose config, same fields resource_limit_findings() already
+    reads unprivileged for the readable stacks."""
+    limits = {}
+    for name, svc in data.get("services", {}).items():
+        declared = ((svc.get("deploy") or {}).get("resources") or {}).get("limits") or {}
+        cpus, memory = declared.get("cpus"), declared.get("memory")
+        if cpus is not None or memory is not None:
+            limits[name] = {"cpus": cpus, "memory": memory}
+    return limits
 
 
 def main() -> int:
@@ -170,15 +192,17 @@ def main() -> int:
         return 1
 
     # The only line that leaves this root process: service names + restart
-    # policies, and container service names + states. Nothing from
-    # `environment:`, `secrets:`, `build:`, `image:`, `Labels` or any other
-    # key either command resolved along the way.
+    # policies + declared resource limits, and container service
+    # names/states/names. Nothing from `environment:`, `secrets:`, `build:`,
+    # `image:`, `Labels` or any other key either command resolved along the
+    # way.
     print(json.dumps({
         "services": {
             name: (svc.get("restart") or "")
             for name, svc in data.get("services", {}).items()
         },
         "containers": containers,
+        "limits": resource_limits(data),
     }))
     return 0
 
