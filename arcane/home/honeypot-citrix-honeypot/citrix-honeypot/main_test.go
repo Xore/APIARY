@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http/httptest"
 	"os"
@@ -247,9 +248,11 @@ func TestAuthSurfaceProbesAreClassified(t *testing.T) {
 	}
 }
 
-// The classification must be additive only: the response a scanner sees is
-// byte-identical to before, so the decoy's fingerprint is unchanged.
-func TestAuthSurfaceProbeIsLoggedWithoutChangingTheResponse(t *testing.T) {
+// #3032: classification alone is no longer the whole story -- these paths
+// now also get an AAA/SAML-shaped response instead of an empty 200, so a
+// scanner fingerprinting for the surface finds something. The event log
+// behavior from #2977 is unchanged.
+func TestAuthSurfaceProbeServesSAMLShapedResponseAndIsLogged(t *testing.T) {
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -266,8 +269,11 @@ func TestAuthSurfaceProbeIsLoggedWithoutChangingTheResponse(t *testing.T) {
 	var buf bytes.Buffer
 	io.Copy(&buf, r)
 
-	if rec.Code != 200 || rec.Body.Len() != 0 {
-		t.Fatalf("got %d %q, want the unchanged empty 200", rec.Code, rec.Body.String())
+	if rec.Code != 200 || rec.Body.Len() == 0 {
+		t.Fatalf("got %d %q, want a non-empty SAML-shaped 200", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "SAMLResponse") {
+		t.Fatalf("expected a SAML bounce form in the body, got %q", rec.Body.String())
 	}
 	if got := rec.Header().Get("Server"); got != "Apache" {
 		t.Fatalf("Server header = %q, want Apache", got)
@@ -278,6 +284,75 @@ func TestAuthSurfaceProbeIsLoggedWithoutChangingTheResponse(t *testing.T) {
 	}
 	if !strings.Contains(out, `"event":"netscaler_saml_surface_probe"`) {
 		t.Fatalf("expected the auth-surface event alongside it, got %q", out)
+	}
+}
+
+func TestOAuthDiscoveryPathsServeOIDCDocument(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+		role string
+	}{
+		{"/oauth/idp/.well-known/openid-configuration", "idp"},
+		{"/oauth/rp/.well-known/openid-configuration", "rp"},
+	} {
+		req := httptest.NewRequest("GET", tc.path, nil)
+		req.Host = "citrixgw01.example.test"
+		rec := httptest.NewRecorder()
+		newTestHandler().ServeHTTP(rec, req)
+
+		if rec.Code != 200 {
+			t.Fatalf("%s: code = %d, want 200", tc.path, rec.Code)
+		}
+		if got := rec.Header().Get("Content-Type"); got != "application/json" {
+			t.Fatalf("%s: Content-Type = %q, want application/json", tc.path, got)
+		}
+		var doc oidcDiscovery
+		if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+			t.Fatalf("%s: invalid JSON body %q: %v", tc.path, rec.Body.String(), err)
+		}
+		wantIssuer := "https://citrixgw01.example.test/oauth/" + tc.role
+		if doc.Issuer != wantIssuer {
+			t.Fatalf("%s: issuer = %q, want %q", tc.path, doc.Issuer, wantIssuer)
+		}
+	}
+}
+
+func TestAAALoginEndpointServesDistinctPage(t *testing.T) {
+	req := httptest.NewRequest("GET", "/p/u/doAuthentication.do", nil)
+	rec := httptest.NewRecorder()
+	newTestHandler().ServeHTTP(rec, req)
+
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "vpnForm") {
+		t.Fatalf("got %d %q, want the AAA login page", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "Citrix Login") {
+		t.Fatalf("AAA login page should be distinct from the Gateway login page, got %q", rec.Body.String())
+	}
+}
+
+func TestWSFedPassiveReflectsEscapedWctx(t *testing.T) {
+	req := httptest.NewRequest("GET", "/wsfed/passive?wctx=%3Cscript%3Ealert(1)%3C%2Fscript%3E", nil)
+	rec := httptest.NewRecorder()
+	newTestHandler().ServeHTTP(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("code = %d, want 200", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "<script>") {
+		t.Fatalf("wctx must be HTML-escaped, got %q", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "&lt;script&gt;") {
+		t.Fatalf("expected the escaped wctx reflected back, got %q", rec.Body.String())
+	}
+}
+
+func TestLoginPageAdvertisesSAMLSSO(t *testing.T) {
+	req := httptest.NewRequest("GET", "/", nil)
+	rec := httptest.NewRecorder()
+	newTestHandler().ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), `href="/saml/login"`) {
+		t.Fatalf("expected a SAML SSO link on the login page, got %q", rec.Body.String())
 	}
 }
 

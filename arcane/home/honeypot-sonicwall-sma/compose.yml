@@ -1,0 +1,60 @@
+# honeypot-sonicwall-sma — #3033: SonicWall SMA1000 Work Place/AMC decoy
+# for the CVE-2026-83548 SSRF / CVE-2026-83549 AMC OS command injection
+# chain -- see sonicwall-sma-honeypot/main.go's own doc comment. Same shape
+# and reasoning as arcane/home/honeypot-citrix-honeypot/compose.yml.
+# Deployed as /opt/stacks/honeypot-sonicwall-sma.
+
+name: honeypot-sonicwall-sma
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  sonicwall-sma-honeypot:
+    <<: *runtime-defaults
+    build: ./sonicwall-sma-honeypot
+    container_name: hp-sonicwall-sma-honeypot
+    restart: unless-stopped
+    environment:
+      - LISTEN_ADDR=:8443
+      - LOG_FILE=/var/log/honeypot/sonicwall-sma-honeypot.json
+      # Parse the PROXY header portbridge prepends (":pp" rule on 8543) so
+      # events carry the real attacker IP instead of tunnel peer 10.8.0.1.
+      - PROXY_PROTOCOL=1
+      # Fixed, non-attacker-steerable relay target for the CVE-2026-83548
+      # SSRF hop -- api-honeypot's own cloud-metadata surface, already
+      # classified there as "cloud-metadata". Never read from the request.
+      - AMC_RELAY_URL=http://10.8.0.2:18083/latest/meta-data/iam/security-credentials/worker-node
+      - TZ=Europe/Berlin
+    ports:
+      - ${HP_BIND:-10.8.0.2}:8543:8443
+    volumes:
+      - /opt/stacks/apiary/logs/sonicwall-sma-honeypot:/var/log/honeypot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    networks: [sonicwall_sma_honeypot_net]
+    healthcheck:
+      test: ["CMD", "/sonicwall-sma-honeypot", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    labels:
+      - autoheal=true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+
+networks:
+  sonicwall_sma_honeypot_net:
+    driver: bridge

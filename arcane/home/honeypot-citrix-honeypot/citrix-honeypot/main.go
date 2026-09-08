@@ -234,11 +234,13 @@ func headerMap(r *http.Request) map[string]string {
 //	/wsfed/passive                               sid 2068632  CVE-2026-3055
 //	/cgi/samlauth                                sid 2071537  CVE-2026-8452
 //
-// This classifies the probe; it does not make the decoy *present* as an
-// AAA/SAML-configured vserver (responses are unchanged -- the caller logs
-// and falls through). Presenting that surface is a deception-design change
-// tracked separately in #3032, as is a CVE-2026-19490-specific event type
-// once that CVE's own literal request shape is confirmed.
+// This classifies the probe. The caller additionally presents an
+// AAA/SAML-shaped response at each of these paths (#3032, authSurfaceResponse)
+// rather than falling through to an empty 200, so a scanner fingerprinting
+// for an AAA/SAML vserver has something to find before it ever gets to the
+// exploit stage. A CVE-2026-19490-specific event type is deliberately not
+// added yet: its own literal request shape is still unconfirmed against a
+// primary source, unlike the seven paths above.
 func authSurfaceEvent(reqPath string) string {
 	p := strings.ToLower(reqPath)
 	if len(p) > 1 {
@@ -254,6 +256,84 @@ func authSurfaceEvent(reqPath string) string {
 		return "netscaler_aaa_surface_probe"
 	}
 	return ""
+}
+
+// oidcDiscovery mirrors the RFC 8414 discovery document a NetScaler AAA
+// vserver serves under /oauth/idp and /oauth/rp (CVE-2023-4966, ET sid
+// 2048930/2048931).
+type oidcDiscovery struct {
+	Issuer                           string   `json:"issuer"`
+	AuthorizationEndpoint            string   `json:"authorization_endpoint"`
+	TokenEndpoint                    string   `json:"token_endpoint"`
+	JWKSURI                          string   `json:"jwks_uri"`
+	UserinfoEndpoint                 string   `json:"userinfo_endpoint"`
+	ResponseTypesSupported           []string `json:"response_types_supported"`
+	SubjectTypesSupported            []string `json:"subject_types_supported"`
+	IDTokenSigningAlgValuesSupported []string `json:"id_token_signing_alg_values_supported"`
+}
+
+// oidcDiscoveryJSON builds the discovery document for the "idp" or "rp"
+// OAuth role, self-referencing off the request's own Host header the way a
+// real appliance's discovery URLs do.
+func oidcDiscoveryJSON(base, role string) []byte {
+	root := base + "/oauth/" + role
+	doc := oidcDiscovery{
+		Issuer:                           root,
+		AuthorizationEndpoint:            root + "/authorize",
+		TokenEndpoint:                    root + "/token",
+		JWKSURI:                          root + "/certs",
+		UserinfoEndpoint:                 root + "/userinfo",
+		ResponseTypesSupported:           []string{"code", "token", "id_token"},
+		SubjectTypesSupported:            []string{"public"},
+		IDTokenSigningAlgValuesSupported: []string{"RS256"},
+	}
+	out, _ := json.Marshal(doc)
+	return out
+}
+
+func writeJSON(w http.ResponseWriter, body []byte) {
+	w.Header().Set("Server", "Apache")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(body)
+}
+
+// authSurfaceResponse renders the AAA/SAML-shaped body for a path
+// authSurfaceEvent classified, returning false for anything else so the
+// caller falls through to its existing handling. #3032: classification
+// alone (#2977) never advanced a scan to its exploit stage because there
+// was nothing here to fingerprint *as* an AAA/SAML vserver.
+//
+// No version banner: matches citrixLoginPage's own existing choice, rather
+// than inventing a NetScaler build number nothing here is actually tied to.
+func (h *handler) authSurfaceResponse(w http.ResponseWriter, r *http.Request, reqPath string) bool {
+	p := strings.ToLower(reqPath)
+	if len(p) > 1 {
+		p = strings.TrimRight(p, "/")
+	}
+	base := "https://" + r.Host
+	switch p {
+	case "/oauth/idp/.well-known/openid-configuration":
+		writeJSON(w, oidcDiscoveryJSON(base, "idp"))
+		return true
+	case "/oauth/rp/.well-known/openid-configuration":
+		writeJSON(w, oidcDiscoveryJSON(base, "rp"))
+		return true
+	case "/p/u/doauthentication.do":
+		writeApache(w, http.StatusOK, citrixAAALoginPage)
+		return true
+	case "/cgi/logout":
+		writeApache(w, http.StatusOK, citrixLogoutPage)
+		return true
+	case "/saml/login", "/cgi/samlauth":
+		writeApache(w, http.StatusOK, strings.ReplaceAll(citrixSAMLBounceTemplate, "{acs}", "/cgi/samlauth"))
+		return true
+	case "/wsfed/passive":
+		wctx := html.EscapeString(r.URL.Query().Get("wctx"))
+		writeApache(w, http.StatusOK, strings.ReplaceAll(citrixWSFedTemplate, "{wctx}", wctx))
+		return true
+	}
+	return false
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -277,6 +357,9 @@ func (h *handler) serveGET(w http.ResponseWriter, r *http.Request, reqPath strin
 	h.log2(r, "get", reqPath, "")
 	if kind := authSurfaceEvent(reqPath); kind != "" {
 		h.log2(r, kind, reqPath, "")
+		if h.authSurfaceResponse(w, r, reqPath) {
+			return
+		}
 	}
 
 	urlParts := splitNonEmpty(reqPath)
@@ -321,6 +404,9 @@ func (h *handler) servePOST(w http.ResponseWriter, r *http.Request, reqPath stri
 	h.log2(r, "post", reqPath, string(body))
 	if kind := authSurfaceEvent(reqPath); kind != "" {
 		h.log2(r, kind, reqPath, string(body))
+		if h.authSurfaceResponse(w, r, reqPath) {
+			return
+		}
 	}
 
 	if len(body) > 0 && path.Clean(reqPath) == "/vpns/portal/scripts/newbm.pl" {

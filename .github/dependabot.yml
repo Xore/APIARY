@@ -86,6 +86,7 @@ updates:
       - /arcane/home/honeypot-multipot/multipot
       - /portbridge
       - /arcane/home/honeypot-rdp-honeypot/rdp-honeypot
+      - /arcane/home/honeypot-sonicwall-sma/sonicwall-sma-honeypot
       - /arcane/home/honeypot-utilities/reporter
       - /sandbox/ghosts
       - /sandbox/windows/gateway/inetsim

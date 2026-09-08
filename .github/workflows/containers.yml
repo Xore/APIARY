@@ -88,6 +88,8 @@ jobs:
             context: portbridge
           - image: rdp-honeypot
             context: arcane/home/honeypot-rdp-honeypot/rdp-honeypot
+          - image: sonicwall-sma-honeypot
+            context: arcane/home/honeypot-sonicwall-sma/sonicwall-sma-honeypot
           - image: tftp-relay
             context: arcane/home/honeypot-dionaea/tftp-relay
           - image: vps-portbridge

@@ -294,6 +294,7 @@ jobs:
           - arcane/home/honeypot-multipot/multipot
           - arcane/home/honeypot-payload-inventory-worker/payload-inventory-worker
           - arcane/home/honeypot-rdp-honeypot/rdp-honeypot
+          - arcane/home/honeypot-sonicwall-sma/sonicwall-sma-honeypot
           - arcane/home/honeypot-utilities/reporter
           - portbridge
           - vps/portbridge

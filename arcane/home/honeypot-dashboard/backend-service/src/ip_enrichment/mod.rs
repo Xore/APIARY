@@ -136,6 +136,7 @@ fn discover_sources(logs_dir: &Path, out_dir: &Path, state_dir: &Path) -> Vec<So
     add("http-honeypot", logs_dir.join("http-honeypot").join("http.json"), enrich_line);
     add("citrix-honeypot", logs_dir.join("citrix-honeypot").join("citrix-honeypot.json"), enrich_line);
     add("rdp-honeypot", logs_dir.join("rdp-honeypot").join("rdp-honeypot.json"), enrich_line);
+    add("sonicwall-sma-honeypot", logs_dir.join("sonicwall-sma-honeypot").join("sonicwall-sma-honeypot.json"), enrich_line);
 
     if let Ok(entries) = std::fs::read_dir(logs_dir) {
         let mut personas: Vec<String> = entries
@@ -443,11 +444,12 @@ mod tests {
             "cowrie", "dionaea", "dionaea-incident", "dns-honeypot", "cisco-asa-honeypot",
             "conpot", "conpot-s7-1200", "conpot-kamstrup",
             "multipot", "tanner", "http-honeypot", "citrix-honeypot", "rdp-honeypot",
+            "sonicwall-sma-honeypot",
             "beelzebub", "hellpot", "elasticpot", "galah", "sentrypeer", "mailoney",
         ] {
             assert!(by_name.contains_key(want), "no source named {want:?}");
         }
-        assert_eq!(sources.len(), 19, "no duplicates across conpot personas");
+        assert_eq!(sources.len(), 20, "no duplicates across conpot personas");
 
         // Each conpot persona reads its own subdirectory, all under the
         // same literal filename.
@@ -465,6 +467,7 @@ mod tests {
             ("http-honeypot", "http-honeypot", "http.json"),
             ("citrix-honeypot", "citrix-honeypot", "citrix-honeypot.json"),
             ("rdp-honeypot", "rdp-honeypot", "rdp-honeypot.json"),
+            ("sonicwall-sma-honeypot", "sonicwall-sma-honeypot", "sonicwall-sma-honeypot.json"),
             ("hellpot", "hellpot", "HellPot.log"),
             ("galah", "galah", "event_log.json"),
         ] {
@@ -495,7 +498,7 @@ mod tests {
 
         // Discovery does not require the files to exist -- only conpot is
         // glob-driven -- so the fixed list is always present.
-        assert_eq!(sources.len(), 16);
+        assert_eq!(sources.len(), 17);
         assert!(!sources.iter().any(|s| s.name.starts_with("conpot")));
     }
 
