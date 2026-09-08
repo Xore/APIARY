@@ -60,6 +60,10 @@ def main() -> int:
         return 2
 
     glob = sys.argv[2]
+    if "/" in glob or ".." in glob:
+        print(f"refusing: glob {glob!r} must not contain '/' or '..'", file=sys.stderr)
+        return 2
+
     if not target.is_dir():
         print(f"refusing: {target} is not a directory", file=sys.stderr)
         return 1

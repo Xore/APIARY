@@ -409,6 +409,54 @@ class ResourceLimitPrivilegedFallbackTest(unittest.TestCase):
         self.assertEqual(findings, [])
 
 
+class LimitsSchemaSkewTest(unittest.TestCase):
+    """REVIEW-A blocking finding 3/#3028: the deployed privileged helper
+    predates the "limits" field, so `data.get("limits")` returned None and
+    was silently treated identically to a resolved-but-empty `{}` --
+    "no limits declared" and "helper doesn't know about limits" looked the
+    same. A missing key must warn loudly instead of reading as clean."""
+
+    def setUp(self) -> None:
+        cdw._warned_limits_schema_skew = False
+
+    def test_missing_limits_key_warns_once_and_treats_as_empty(self) -> None:
+        old_helper_output = json.dumps({
+            "services": {"svc": "unless-stopped"},
+            "containers": [{"Service": "svc", "State": "running", "Name": "svc"}],
+        })
+        with mock.patch.object(
+            cdw.subprocess, "run", return_value=_Result(0, old_helper_output)
+        ), mock.patch.object(cdw.sys, "stderr") as fake_stderr:
+            result = cdw.privileged_project_state(Path("/some/project"))
+            result2 = cdw.privileged_project_state(Path("/some/project"))
+        self.assertIsNotNone(result)
+        _, _, limits = result
+        self.assertEqual(limits, {})
+        _, _, limits2 = result2
+        self.assertEqual(limits2, {})
+        warnings = [c for c in fake_stderr.write.call_args_list if "limits" in c.args[0]]
+        # print() calls .write() once for the message and once for the
+        # newline -- assert the warning fired exactly once across both
+        # privileged_project_state() calls, not once per call.
+        self.assertEqual(sum(1 for c in warnings if "no 'limits' field" in c.args[0]), 1)
+
+    def test_present_empty_limits_dict_does_not_warn(self) -> None:
+        resolved_output = json.dumps({
+            "services": {"svc": "unless-stopped"},
+            "containers": [{"Service": "svc", "State": "running", "Name": "svc"}],
+            "limits": {},
+        })
+        with mock.patch.object(
+            cdw.subprocess, "run", return_value=_Result(0, resolved_output)
+        ), mock.patch.object(cdw.sys, "stderr") as fake_stderr:
+            result = cdw.privileged_project_state(Path("/some/project"))
+        self.assertIsNotNone(result)
+        _, _, limits = result
+        self.assertEqual(limits, {})
+        warnings = [c for c in fake_stderr.write.call_args_list if "no 'limits' field" in c.args[0]]
+        self.assertEqual(warnings, [])
+
+
 class FailingStreakTest(unittest.TestCase):
     """#3030/REVIEW-A: a raw FailingStreak count resets to 0 the moment
     hp-autoheal restarts the container (this fleet's healthchecks near-

@@ -349,13 +349,13 @@ install -m 0755 -o root -g root \
   "$here/backup-freshness-check.py" \
   /opt/github-ci-runner-helpers/backup-freshness-check.py
 
-# The trailing '*' only ever reaches this helper's own argument validation
-# (rejects anything but the one known backup dir -- see the script's own
-# header), not a general command.
+# Dir argument pinned to the one known backup dir so sudoers itself only
+# wildcards the glob argument; the helper's own validation (rejects a
+# glob containing '/' or '..') is still the real boundary for that part.
 backup_sudoers_file=/etc/sudoers.d/backup-staleness-ro
 backup_sudoers_tmp="$(mktemp)"
 cat > "$backup_sudoers_tmp" <<EOF
-%${backup_staleness_group} ALL=(root) NOPASSWD: /usr/bin/python3 /opt/github-ci-runner-helpers/backup-freshness-check.py *
+%${backup_staleness_group} ALL=(root) NOPASSWD: /usr/bin/python3 /opt/github-ci-runner-helpers/backup-freshness-check.py /mnt/usb-recovery/apiary-backups *
 EOF
 if ! visudo -cf "$backup_sudoers_tmp"; then
   echo "generated sudoers file failed validation, not installing it" >&2

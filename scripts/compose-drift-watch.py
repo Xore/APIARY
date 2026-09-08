@@ -332,6 +332,23 @@ def actual_containers(project: Path, compose_file: str = "compose.yml") -> list[
     return containers
 
 
+_warned_limits_schema_skew = False
+
+
+def _warn_limits_schema_skew() -> None:
+    global _warned_limits_schema_skew
+    if _warned_limits_schema_skew:
+        return
+    _warned_limits_schema_skew = True
+    print(
+        "warning: deployed compose-project-state.py has no 'limits' field -- "
+        "resource-limit drift checks against every privileged-fallback stack "
+        "are silently reporting \"nothing declared\" instead of running; "
+        "refresh /opt/github-ci-runner-helpers/compose-project-state.py from this branch",
+        file=sys.stderr,
+    )
+
+
 def privileged_project_state(
     project: Path, compose_file: str = "compose.yml"
 ) -> tuple[dict[str, str], list[dict], dict[str, tuple]] | None:
@@ -370,7 +387,18 @@ def privileged_project_state(
     containers = data.get("containers")
     if not isinstance(services, dict) or not isinstance(containers, list):
         return None
-    limits_raw = data.get("limits")
+    # REVIEW-A: a deployed helper that predates the "limits" field and one
+    # that resolved cleanly with nothing declared both used to end up as
+    # `{}` here, indistinguishable from each other -- "projects with
+    # declared limits: 0" against the *entire* live fleet was silently read
+    # as "nothing declared" instead of "helper is out of date". The key
+    # being absent is schema skew (warn loudly, once); the key present with
+    # an empty dict is a genuine, resolved "no limits declared".
+    if "limits" not in data:
+        _warn_limits_schema_skew()
+        limits_raw = {}
+    else:
+        limits_raw = data.get("limits")
     limits = {
         name: (v.get("cpus"), v.get("memory"))
         for name, v in limits_raw.items() if isinstance(v, dict)
@@ -614,10 +642,13 @@ def _save_streak_state(state_file: Path, state: dict[str, float]) -> None:
         # user sharing the group -- exactly the live #3030 bug. The setgid
         # dir bit only controls which group owns a new file, not its mode.
         state_file.chmod(0o664)
-    except OSError:
+    except OSError as e:
         # Best-effort: a lost state file just means duration tracking
-        # restarts from "now" on the next sweep, never a crash.
-        pass
+        # restarts from "now" on the next sweep, never a crash -- but say
+        # so, since a silently-unwritable state dir (REVIEW-A: not deployed
+        # on the live host) makes #3030's duration threshold silently dead
+        # rather than merely degraded.
+        print(f"warning: could not persist failing-streak state to {state_file}: {e}", file=sys.stderr)
 
 
 def failing_streak_findings(

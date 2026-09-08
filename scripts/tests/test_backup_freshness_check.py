@@ -68,6 +68,17 @@ class BackupFreshnessCheckTest(unittest.TestCase):
         code, _ = self._run(str(self.path / "does-not-exist"), "*.tar.gz.gpg")
         self.assertEqual(code, 2)
 
+    def test_glob_traversal_is_rejected(self) -> None:
+        # REVIEW-A live finding: sys.argv[1] is checked against ALLOWED_DIRS
+        # but sys.argv[2] reached target.glob() unvalidated -- confirmed
+        # live to return /etc/shadow's mtime via "../../../etc/shadow".
+        code, _ = self._run(str(self.path), "../../../etc/shadow")
+        self.assertEqual(code, 2)
+
+    def test_glob_with_path_separator_is_rejected(self) -> None:
+        code, _ = self._run(str(self.path), "subdir/*.gpg")
+        self.assertEqual(code, 2)
+
 
 if __name__ == "__main__":
     unittest.main()
