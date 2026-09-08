@@ -176,6 +176,10 @@ def main() -> int:
     if not args.dry_run and not args.answer and not args.answer_file:
         parser.error("--answer or --answer-file is required unless --dry-run")
 
+    if not args.dry_run and args.repeats < 2:
+        parser.error("--repeats must be >= 2 -- a stability claim from a single "
+                      "trial proves nothing about drift (see module docstring)")
+
     answer = args.answer or (args.answer_file.read_text() if args.answer_file else
                              "placeholder answer text for --dry-run planning")
 

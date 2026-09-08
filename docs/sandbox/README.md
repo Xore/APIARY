@@ -198,11 +198,12 @@ the nftables chain accepts only DNS and the allowlisted proxy, nothing else.
 
    **Decision recorded (#3072):** the two files split destinations into a
    read-class set (no write/mutate API reachable there without credentials
-   the sandbox doesn't hold -- `raw.githubusercontent.com`, `codeload.github.com`,
-   GitHub Pages, static asset/status CDNs) and a write-class set
-   (`github.com` itself, whose smart-HTTP protocol POSTs even for clone/fetch
-   so it can't be pinned to a read-only subset; `pastebin.com`, which has its
-   own anonymous paste-creation API). Squid logs each class to its own file
+   the sandbox doesn't hold -- `raw.githubusercontent.com`, GitHub Pages,
+   static asset/status CDNs) and a write-class set (`github.com` itself,
+   whose smart-HTTP protocol POSTs even for clone/fetch so it can't be
+   pinned to a read-only subset -- this also covers `codeload.github.com`,
+   a `github.com` subdomain, so it is not separately listed; `pastebin.com`,
+   which has its own anonymous paste-creation API). Squid logs each class to its own file
    (`access-read.log`/`access-write.log`) alongside the combined log, so "what
    did a write-capable destination see" is a grep away instead of a
    post-hoc cross-reference.

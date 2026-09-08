@@ -9,7 +9,10 @@
 # A leading dot matches the domain and every subdomain, so
 # .githubusercontent.com below already covers raw.githubusercontent.com and
 # objects.githubusercontent.com -- squid itself warns on startup if those are
-# also listed explicitly (redundant ACL entries), so they are not.
+# also listed explicitly (redundant ACL entries), so they are not. Same
+# reason codeload.github.com is not listed here: it is a subdomain of
+# github.com, already permitted (write-class) via
+# forensic-egress-allowed-domains-write.txt's .github.com entry.
 .githubusercontent.com
 .githubassets.com
 # GitHub Pages: static hosting, no write API of its own -- but shared
@@ -17,4 +20,3 @@
 # list by construction. Read-class does not mean trusted-content.
 .github.io
 .githubstatus.com
-.codeload.github.com

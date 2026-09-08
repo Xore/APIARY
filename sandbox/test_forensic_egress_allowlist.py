@@ -18,14 +18,35 @@ def _domains(path: Path) -> set[str]:
     }
 
 
+def _bare(domain: str) -> str:
+    return domain[1:] if domain.startswith(".") else domain
+
+
+def _covers(a: str, b: str) -> bool:
+    """True if squid's leading-dot ACL for `a` also matches `b` (or vice
+    versa): equal domains, or one is a subdomain of the other."""
+    bare_a, bare_b = _bare(a), _bare(b)
+    return (
+        bare_a == bare_b
+        or bare_a.endswith("." + bare_b)
+        or bare_b.endswith("." + bare_a)
+    )
+
+
 # #3072: the read/write split only means something if the two files are
 # actually disjoint and both non-empty -- a domain listed in both classes, or
 # an empty write-class file, would silently collapse the split back to the
-# single-file behaviour it replaced.
+# single-file behaviour it replaced. Disjointness is by squid ACL coverage,
+# not literal string equality: a leading-dot entry matches every subdomain,
+# so e.g. `.codeload.github.com` in one file and `.github.com` in the other
+# are non-disjoint even though the strings differ.
 class AllowlistSplitTest(unittest.TestCase):
     def test_read_and_write_classes_are_disjoint(self):
-        overlap = _domains(READ_FILE) & _domains(WRITE_FILE)
-        self.assertEqual(overlap, set(), f"domains listed in both classes: {overlap}")
+        read_domains, write_domains = _domains(READ_FILE), _domains(WRITE_FILE)
+        overlap = {
+            (r, w) for r in read_domains for w in write_domains if _covers(r, w)
+        }
+        self.assertEqual(overlap, set(), f"domains covered by both classes: {overlap}")
 
     def test_both_classes_non_empty(self):
         self.assertTrue(_domains(READ_FILE), "read-class allowlist is empty")
