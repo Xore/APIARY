@@ -212,11 +212,23 @@ cd "$RUNNER_HOME"
 service_file="/etc/systemd/system/actions.runner.$(tr '/' '-' <<<"$repo").$name.service"
 if [[ ! -f "$service_file" ]]; then
   ./svc.sh install "$RUNNER_USER"
-  ./svc.sh start
 else
   ./svc.sh stop || true
-  ./svc.sh start
 fi
+
+# #3105: same shared-cache group-write gap as install-ci-runner.sh -- this
+# runner also builds against /mnt-1/buildx-cache, and its UMask=0022 default
+# writes new cache files 0644, unreadable-for-write by the CI pool's users.
+unit_name="$(basename "$service_file")"
+unit_dropin_dir="/etc/systemd/system/${unit_name}.d"
+install -d -m 0755 -o root -g root "$unit_dropin_dir"
+cat > "$unit_dropin_dir/buildx-cache-umask.conf" <<EOF
+[Service]
+UMask=0002
+EOF
+systemctl daemon-reload
+
+./svc.sh start
 
 echo "done. status:"
 ./svc.sh status
