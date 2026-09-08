@@ -487,6 +487,34 @@ services:
         limits:
           cpus: "2.0"
           memory: 1G
+  # #3045 follow-up (round6R REVIEW-B blocker 1): arkime-pcap is created
+  # root:root 755 by Docker on first use, which arkime-capture's `user:
+  # nobody:daemon` below cannot write into -- proven live:
+  # `docker run --user nobody:daemon -v honeypot-elk_arkime-pcap:/opt/arkime/pcap
+  # ... touch` -> Permission denied. That only matters for
+  # sandbox/worker.sh's one-shot `docker exec hp-arkime-capture ...
+  # capture -r ... --copy` import (config.ini pcapDir=/opt/arkime/pcap);
+  # the long-running -R --monitor command: never writes. One-shot, same
+  # project as arkime-pcap so no external: volume reference is needed,
+  # and it exits immediately rather than living inside arkime-capture's
+  # own cap_drop: ALL container. CHOWN+FOWNER is the same measured-minimum
+  # pair honeypot-init's log-init uses for chown-then-chmod (FOWNER is
+  # needed for the chmod once root no longer owns the path post-chown).
+  arkime-pcap-init:
+    <<: *runtime-defaults
+    image: ghcr.io/arkime/arkime/arkime:v6.7.0@sha256:754ac8d50c8d4136462c3bb3701c400be66310020ab01d5ea94a4e73942b0127
+    container_name: hp-arkime-pcap-init
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - chown nobody:daemon /opt/arkime/pcap && chmod g+w /opt/arkime/pcap
+    volumes:
+      - arkime-pcap:/opt/arkime/pcap
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - FOWNER
   arkime-capture:
     <<: *runtime-defaults
     # #1497: was the floating v6-latest tag -- pinned per docs/CONTAINER-UPDATES.md's
@@ -544,6 +572,9 @@ services:
       # read-only -- worker.sh already caps what lands in export/ at 64MiB
       # per pcap before this container ever sees it.
       - /var/lib/honeypot-sandbox/export:/opt/arkime/sandbox-import:ro
+    depends_on:
+      arkime-pcap-init:
+        condition: service_completed_successfully
     # #3074: ARKIME__dropUser/dropGroup below looked like they dropped
     # capture to nobody:daemon, but never did -- confirmed against upstream
     # source (capture/main.c, arkime_drop_privileges()): the setuid/setgid
@@ -596,13 +627,16 @@ services:
     # #3045 (#2825 class A repointed here on closure): measured, not
     # assumed. What the process does -- reading arkime-raw (owned uid/gid
     # 998, but world-readable 644/755, so no DAC_OVERRIDE needed) and
-    # talking to elasticsearch over the network, no local writes at all in
-    # this offline mode (confirmed live: capture's own fd table holds no
-    # writable regular files, only stdio pipes and ES sockets) -- ran a
-    # full real capture/index cycle against the live cluster cleanly with
-    # cap_drop: ALL and no cap_add at all. #3074 (uid drop) resolved
-    # separately via `user:` above, not cap_add -- the two gaps were
-    # independent of each other.
+    # talking to elasticsearch over the network. The long-running -R
+    # --monitor command: above never writes locally (confirmed live:
+    # capture's own fd table holds no writable regular files, only stdio
+    # pipes and ES sockets) -- ran a full real capture/index cycle against
+    # the live cluster cleanly with cap_drop: ALL and no cap_add at all.
+    # It does write arkime-pcap (owned root:root, see arkime-pcap-init
+    # above), but only via the separate docker exec ... --copy one-shot
+    # import (#87 above), never through this container's own command:.
+    # #3074 (uid drop) resolved separately via `user:` above, not cap_add
+    # -- the two gaps were independent of each other.
     cap_drop:
       - ALL
     deploy:

@@ -268,12 +268,11 @@ CAP_NOT_YET_HARDENED=(
   # hp-elasticsearch-setup, hp-honeypot-kibana-setup, hp-arkime-init and
   # hp-snare-clone measured to need no cap_add at all, each run for real
   # against the live cluster/host paths rather than assumed from owner
-  # bits alone (hp-arkime-capture's own ARKIME__dropUser=nobody is
-  # configured but, confirmed live via /proc/1/status, never actually
-  # takes effect in this offline-import mode -- the process stays uid 0
-  # throughout, so SETUID/SETGID were never the question; a separate,
-  # unrelated gap in Arkime's own privilege-drop path, filed as #3074
-  # and not otherwise acted on here).
+  # bits alone (hp-arkime-capture's privilege drop is enforced by compose's
+  # `user: nobody:daemon` -- Docker-level, not advisory -- after #3074
+  # found the previous ARKIME__dropUser/dropGroup env vars never took
+  # effect in this offline-import mode (upstream's arkime_drop_privileges()
+  # is only reached when NOT reading pcap offline) and removed them).
   #
   # Those eleven will FAIL here (deploy drift, same shape as #2877 and as
   # #2825 round 2) until the two projects that own them -- honeypot-elk
