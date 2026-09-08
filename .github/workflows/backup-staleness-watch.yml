@@ -1,0 +1,44 @@
+name: Backup staleness watch
+
+# Scheduled sentinel for #3025: a 2026-09-01 homeserver rebuild wiped
+# apiary-backup-essentials.timer along with everything else under
+# /etc/systemd/system, and the essentials backup silently stopped for 4
+# days before an unrelated #1609 audit happened to notice. Nothing checked
+# staleness on a schedule.
+#
+# Runs ON the homeserver-backed fleet (not GitHub-hosted): it reads the
+# server-USB backup destination directly off this host's own filesystem, no
+# separate SSH credential or network path to the thing being measured, same
+# reasoning disk-usage-watch.yml and compose-drift-watch.yml give for their
+# own designs. See scripts/backup-staleness-watch.py's header for why this
+# covers the server-USB leg only, not the two workstation-local legs.
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      max_age_hours:
+        description: Override the staleness threshold (hours)
+        required: false
+        default: "48"
+
+permissions:
+  issues: write
+
+concurrency:
+  group: backup-staleness-watch
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: [self-hosted, linux, x64, honeypot-ci]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check server-USB essentials backup for staleness
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/backup-staleness-watch.py \
+            --max-age-hours "${{ inputs.max_age_hours || '48' }}"

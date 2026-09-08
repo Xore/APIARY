@@ -318,6 +318,40 @@ fi
 install -m 0440 -o root -g root "$sudoers_tmp" "$sudoers_file"
 rm -f "$sudoers_tmp"
 
+# REVIEW-A/#3025: same narrow shape as the #2764 grant just above, for a
+# different unreadable-by-this-user directory. `/mnt/usb-recovery/apiary-
+# backups` is `drwx------ xore xore`; widening its mode or this user's
+# group membership was rejected for the same reason as the .env case --
+# it is the only on-disk copy of the essentials backup archives, and
+# should stay closed to every account except xore and root. The helper
+# (scripts/backup-freshness-check.py) returns only a bare mtime or
+# `EMPTY`, never a filename or listing.
+backup_staleness_group=backup-staleness-ro
+if ! getent group "$backup_staleness_group" >/dev/null 2>&1; then
+  groupadd --system "$backup_staleness_group"
+fi
+usermod -aG "$backup_staleness_group" "$RUNNER_USER"
+
+install -m 0755 -o root -g root \
+  "$here/backup-freshness-check.py" \
+  /opt/github-ci-runner-helpers/backup-freshness-check.py
+
+# The trailing '*' only ever reaches this helper's own argument validation
+# (rejects anything but the one known backup dir -- see the script's own
+# header), not a general command.
+backup_sudoers_file=/etc/sudoers.d/backup-staleness-ro
+backup_sudoers_tmp="$(mktemp)"
+cat > "$backup_sudoers_tmp" <<EOF
+%${backup_staleness_group} ALL=(root) NOPASSWD: /usr/bin/python3 /opt/github-ci-runner-helpers/backup-freshness-check.py *
+EOF
+if ! visudo -cf "$backup_sudoers_tmp"; then
+  echo "generated sudoers file failed validation, not installing it" >&2
+  rm -f "$backup_sudoers_tmp"
+  exit 1
+fi
+install -m 0440 -o root -g root "$backup_sudoers_tmp" "$backup_sudoers_file"
+rm -f "$backup_sudoers_tmp"
+
 # Host provision for the routed checks, kept idempotent so re-running this
 # script restores a drifted box. The runner user has no general sudo BY
 # DESIGN -- the one exception above (#2764) is a single, narrow, output-
