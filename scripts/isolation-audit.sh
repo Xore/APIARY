@@ -268,12 +268,11 @@ CAP_NOT_YET_HARDENED=(
   # hp-elasticsearch-setup, hp-honeypot-kibana-setup, hp-arkime-init and
   # hp-snare-clone measured to need no cap_add at all, each run for real
   # against the live cluster/host paths rather than assumed from owner
-  # bits alone (hp-arkime-capture's own ARKIME__dropUser=nobody is
-  # configured but, confirmed live via /proc/1/status, never actually
-  # takes effect in this offline-import mode -- the process stays uid 0
-  # throughout, so SETUID/SETGID were never the question; a separate,
-  # unrelated gap in Arkime's own privilege-drop path, filed as #3074
-  # and not otherwise acted on here).
+  # bits alone (hp-arkime-capture's privilege drop is enforced by compose's
+  # `user: nobody:daemon` -- Docker-level, not advisory -- after #3074
+  # found the previous ARKIME__dropUser/dropGroup env vars never took
+  # effect in this offline-import mode (upstream's arkime_drop_privileges()
+  # is only reached when NOT reading pcap offline) and removed them).
   #
   # Those eleven will FAIL here (deploy drift, same shape as #2877 and as
   # #2825 round 2) until the two projects that own them -- honeypot-elk
@@ -435,12 +434,35 @@ if [ -S "$sock_path" ]; then
   elif systemctl is-active --quiet polkit 2>/dev/null \
     && [ -f /usr/share/polkit-1/rules.d/50-libvirt.rules ] \
     && grep -q 'org.libvirt.unix.manage' /usr/share/polkit-1/rules.d/50-libvirt.rules 2>/dev/null; then
-    ok "libvirt socket is $mode $owner, access gated by the active polkit libvirt rule (RHEL-family default, not a Unix-permission boundary)"
+    ok "libvirt socket is $mode $owner, write/manage access gated by the active polkit org.libvirt.unix.manage rule (RHEL-family default, not a Unix-permission boundary; the read-only socket below is a separate object this rule does not cover)"
   else
     bad "libvirt socket is $mode $owner -- expected root:libvirt with no world access, or an active polkit rule gating org.libvirt.unix.manage"
   fi
 else
   bad "libvirt socket not found at $sock_path"
+fi
+
+sock_ro_path=/var/run/libvirt/libvirt-sock-ro
+if [ -S "$sock_ro_path" ]; then
+  # #3039: this is a distinct socket from libvirt-sock above and the
+  # org.libvirt.unix.manage polkit rule that gates the RW socket on
+  # RHEL-family hosts does NOT cover it -- confirmed live (2026-09-08):
+  # `virsh -c qemu+unix:///system?socket=.../libvirt-sock-ro list --all`
+  # succeeded unauthenticated as an unprivileged user with no polkit prompt.
+  # World-readable VM enumeration (list/dumpxml, no state-changing actions)
+  # may be an acceptable posture for a honeypot host, but it must be a
+  # recorded decision rather than a silent gap or a day-one hard-FAIL on
+  # every RHEL-family host's shipped default.
+  mode=$(stat -c '%a' "$sock_ro_path" 2>/dev/null)
+  owner=$(stat -c '%U:%G' "$sock_ro_path" 2>/dev/null)
+  other_bits=${mode: -1}
+  if [ "$owner" = "root:libvirt" ] && [ "$other_bits" = "0" ]; then
+    ok "libvirt read-only socket is $mode $owner (root:libvirt, no world access)"
+  else
+    warn "libvirt read-only socket is $mode $owner -- unauthenticated read-only VM enumeration is possible (no polkit rule gates the RO monitor actions); accepted as read-only exposure on this honeypot host, tracked in #3039"
+  fi
+else
+  bad "libvirt read-only socket not found at $sock_ro_path"
 fi
 if grep -qE '^\s*listen_tcp\s*=\s*1' /etc/libvirt/libvirtd.conf 2>/dev/null; then
   bad "libvirtd.conf has listen_tcp = 1 -- the TCP socket is enabled"

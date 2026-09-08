@@ -505,6 +505,19 @@ cat > "$unit_dropin_dir/fix-work-ownership.conf" <<EOF
 [Service]
 ExecStartPre=+/opt/github-ci-runner-helpers/fix-work-ownership.sh $RUNNER_USER $RUNNER_HOME/_work
 EOF
+
+# #3105: /mnt-1/buildx-cache is shared across every runner instance's user so
+# a docker/build-push-action cache-to/cache-from can be reused between them,
+# but the default UMask=0022 this unit ships with writes new cache files
+# 0644 -- the next build that lands on a DIFFERENT instance's user can read
+# them but not open them for write, and fails with EACCES on oci-layout or a
+# blob. UMask=0002 keeps new writes group-writable (the cache root is
+# already setgid to a shared group), so the drop only needs to happen once
+# per file rather than being repaired after the fact by a recurring chmod.
+cat > "$unit_dropin_dir/buildx-cache-umask.conf" <<EOF
+[Service]
+UMask=0002
+EOF
 systemctl daemon-reload
 
 ./svc.sh start
