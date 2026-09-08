@@ -181,7 +181,20 @@ type handler struct {
 	port      int
 	relayURL  string
 	relayHTTP *http.Client
+
+	relayedMu sync.Mutex
+	relayed   map[string]struct{}
 }
+
+// relayMarkerHeader is set on every outbound relayToAMC request so the
+// resulting event in api-honeypot's own log carries evidence of its true
+// origin (api-honeypot logs headers unconditionally for every request),
+// making it excludable from attack-facing figures downstream without a
+// fleet-wide pipeline change -- the same role LOOPBACK_IPS-based
+// internal_probe marking plays for loopback health checks
+// (ip_enrichment/sensors.rs), applied here at the one place that has
+// certain knowledge this is a synthetic, decoy-generated hop.
+const relayMarkerHeader = "X-Apiary-Relay-Source"
 
 func (h *handler) log2(r *http.Request, kind, reqPath, data string) {
 	ip, port := srcIP(r)
@@ -204,6 +217,16 @@ func headerMap(r *http.Request) map[string]string {
 		m[k] = strings.Join(v, ", ")
 	}
 	return m
+}
+
+// welcomeCGIPath is the Work Place login page's own form target
+// (pages.go's workPlaceLoginPage). A GET here is still SSRF-shaped scanning
+// (ssrfRelayPath below applies as normal), but a POST here is just an
+// ordinary credential-stuffing bot submitting the decoy's own login form --
+// servePOST excludes exactly that case so it doesn't misclassify as
+// CVE-2026-83548 and fire the AMC relay on every login attempt.
+func welcomeCGIPath(reqPath string) bool {
+	return strings.ToLower(path.Clean(reqPath)) == "/cgi-bin/welcome/welcome.cgi"
 }
 
 // ssrfRelayPath recognizes the Work Place -> AMC relay's own path
@@ -230,13 +253,31 @@ func amcActionPath(reqPath string) bool {
 // Best-effort: a failed hop (e.g. api-honeypot not reachable in a given
 // deployment) still lets the entry probe classify and the synthetic AMC
 // page serve.
-func (h *handler) relayToAMC() (status int, err error) {
-	resp, err := h.relayHTTP.Get(h.relayURL)
+//
+// Limited to one hop per source IP (h.relayed): otherwise an attacker
+// looping the entry probe turns this decoy into a 1:1 request amplifier
+// against api-honeypot. The probe itself still classifies and responds on
+// every request -- only the actual outbound relay call is capped.
+func (h *handler) relayToAMC(ip string) (status int, alreadyRelayed bool, err error) {
+	h.relayedMu.Lock()
+	if _, done := h.relayed[ip]; done {
+		h.relayedMu.Unlock()
+		return 0, true, nil
+	}
+	h.relayed[ip] = struct{}{}
+	h.relayedMu.Unlock()
+
+	req, err := http.NewRequest(http.MethodGet, h.relayURL, nil)
 	if err != nil {
-		return 0, err
+		return 0, false, err
+	}
+	req.Header.Set(relayMarkerHeader, "sonicwall-sma-honeypot")
+	resp, err := h.relayHTTP.Do(req)
+	if err != nil {
+		return 0, false, err
 	}
 	defer resp.Body.Close()
-	return resp.StatusCode, nil
+	return resp.StatusCode, false, nil
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -265,10 +306,14 @@ func (h *handler) serveGET(w http.ResponseWriter, r *http.Request, reqPath strin
 
 	if ssrfRelayPath(reqPath) {
 		h.log2(r, "cve_2026_83548_ssrf_probe", reqPath, "")
-		status, err := h.relayToAMC()
-		if err != nil {
+		ip, _ := srcIP(r)
+		status, skipped, err := h.relayToAMC(ip)
+		switch {
+		case skipped:
+			h.log2(r, "cve_2026_83548_ssrf_relay_skipped", reqPath, "relay already performed for this source, rate-limited to one hop per source IP")
+		case err != nil:
 			h.log2(r, "cve_2026_83548_ssrf_relay", reqPath, "relay failed: "+err.Error())
-		} else {
+		default:
 			h.log2(r, "cve_2026_83548_ssrf_relay", reqPath, "relay reached "+h.relayURL+" status="+strconv.Itoa(status))
 		}
 		writeApache(w, http.StatusOK, amcHopPage)
@@ -288,12 +333,21 @@ func (h *handler) servePOST(w http.ResponseWriter, r *http.Request, reqPath stri
 		return
 	}
 
+	if welcomeCGIPath(reqPath) {
+		writeApache(w, http.StatusOK, "")
+		return
+	}
+
 	if ssrfRelayPath(reqPath) {
 		h.log2(r, "cve_2026_83548_ssrf_probe", reqPath, string(body))
-		status, err := h.relayToAMC()
-		if err != nil {
+		ip, _ := srcIP(r)
+		status, skipped, err := h.relayToAMC(ip)
+		switch {
+		case skipped:
+			h.log2(r, "cve_2026_83548_ssrf_relay_skipped", reqPath, "relay already performed for this source, rate-limited to one hop per source IP")
+		case err != nil:
 			h.log2(r, "cve_2026_83548_ssrf_relay", reqPath, "relay failed: "+err.Error())
-		} else {
+		default:
 			h.log2(r, "cve_2026_83548_ssrf_relay", reqPath, "relay reached "+h.relayURL+" status="+strconv.Itoa(status))
 		}
 		writeApache(w, http.StatusOK, amcHopPage)
@@ -355,6 +409,7 @@ func main() {
 		relayHTTP: &http.Client{
 			Timeout: 3 * time.Second,
 		},
+		relayed: make(map[string]struct{}),
 	}
 
 	srv := &http.Server{

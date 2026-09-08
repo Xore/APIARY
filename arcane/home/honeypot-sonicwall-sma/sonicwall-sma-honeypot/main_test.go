@@ -17,6 +17,7 @@ func newTestHandler(relayURL string) *handler {
 		port:      8443,
 		relayURL:  relayURL,
 		relayHTTP: &http.Client{Timeout: 2 * time.Second},
+		relayed:   make(map[string]struct{}),
 	}
 }
 
@@ -113,6 +114,57 @@ func TestAMCActionPathClassifiesStageTwoWithBody(t *testing.T) {
 	}
 	if !strings.Contains(out, "hotfix=../../etc/passwd") {
 		t.Fatalf("expected POST body logged, got %q", out)
+	}
+}
+
+func TestPOSTToLoginFormOwnTargetIsNotClassifiedAsSSRF(t *testing.T) {
+	req := httptest.NewRequest("POST", "/cgi-bin/welcome/welcome.cgi", strings.NewReader("username=admin&password=admin"))
+	w := httptest.NewRecorder()
+
+	out := captureStdout(t, func() {
+		newTestHandler("http://127.0.0.1:1").ServeHTTP(w, req)
+	})
+
+	if w.Code != 200 || w.Body.Len() != 0 {
+		t.Fatalf("got %d %q, want empty 200", w.Code, w.Body.String())
+	}
+	if strings.Contains(out, `"event":"cve_2026_83548_ssrf_probe"`) {
+		t.Fatalf("login form submission must not classify as SSRF probe, got %q", out)
+	}
+}
+
+func TestGETToLoginFormOwnTargetStillClassifiesAsSSRF(t *testing.T) {
+	req := httptest.NewRequest("GET", "/cgi-bin/welcome/welcome.cgi", nil)
+	w := httptest.NewRecorder()
+
+	out := captureStdout(t, func() {
+		newTestHandler("http://127.0.0.1:1").ServeHTTP(w, req)
+	})
+
+	if !strings.Contains(out, `"event":"cve_2026_83548_ssrf_probe"`) {
+		t.Fatalf("GET scanning the relay path must still classify as SSRF probe, got %q", out)
+	}
+}
+
+func TestRelayIsRateLimitedToOneHopPerSourceIP(t *testing.T) {
+	var hits int
+	relay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.WriteHeader(200)
+	}))
+	defer relay.Close()
+
+	h := newTestHandler(relay.URL)
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest("GET", "/cgi-bin/x", nil)
+		w := httptest.NewRecorder()
+		captureStdout(t, func() {
+			h.ServeHTTP(w, req)
+		})
+	}
+
+	if hits != 1 {
+		t.Fatalf("relay hit %d times, want exactly 1 (rate-limited to one hop per source IP)", hits)
 	}
 }
 
