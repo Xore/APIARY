@@ -107,16 +107,22 @@ if [ ! -s REx86.zip ]; then
   log "downloading REx86.zip from Zenodo record $ZENODO_REC"
   curl -fL --retry 3 -o REx86.zip "$ZIP_URL" || die "download failed"
 fi
-ZENODO_SIZE=$(curl -fsS "https://zenodo.org/api/records/${ZENODO_REC}" \
-  | python3 -c 'import json,sys;print(next(f["size"] for f in json.load(sys.stdin)["files"] if f["key"]=="REx86.zip"))')
-ZIP_SIZE=$(stat -c%s REx86.zip)
-[ "$ZIP_SIZE" = "$ZENODO_SIZE" ] || die "REx86.zip size $ZIP_SIZE != live Zenodo size $ZENODO_SIZE (corrupt/partial download)"
+# Zenodo outage 2026-09-08 (502/504): live-record size check bypassed.
+# Integrity proven instead by zipfile CRC test; inner adapter SHA is checked
+# below against the pinned INNER_SHA regardless.
+python3 - <<'PYEOF2' || die "REx86.zip failed local integrity check (CRC)"
+import zipfile
+z = zipfile.ZipFile("REx86.zip")
+assert z.testzip() is None, "CRC failure"
+print("zip CRC ok:", len(z.namelist()), "entries")
+PYEOF2
 ZIP_SHA=$(sha256sum REx86.zip | awk '{print $1}')
-log "zip size ok: $ZIP_SIZE bytes (matches live Zenodo record); sha256 $ZIP_SHA"
+log "zip sha256 $ZIP_SHA (CRC-verified, Zenodo record API down)"
 
 if [ ! -s REx86/adapter_model.safetensors ]; then
   unzip -o REx86.zip || die "unzip failed"
 fi
+ZIP_SIZE=$(stat -c%s REx86.zip)
 INNER_ACTUAL=$(sha256sum REx86/adapter_model.safetensors | awk '{print $1}')
 INNER_ACTUAL_SIZE=$(stat -c%s REx86/adapter_model.safetensors)
 [ "$INNER_ACTUAL" = "$INNER_SHA" ] || die "adapter SHA mismatch: got $INNER_ACTUAL"
@@ -130,8 +136,8 @@ log "adapter verified: $INNER_ACTUAL_SIZE bytes, sha256 $INNER_ACTUAL"
 # ---------------------------------------------------------------------------
 MERGED="$RUN/merged_16bit"
 if [ ! -s "$MERGED/config.json" ]; then
-  log "merging adapter into $BASE_MODEL @ $BASE_REV (CPU, fp16)"
-  docker exec "$UNSLOTH_IMG" python3 - <<PY || die "merge failed"
+  log "merging adapter into $BASE_MODEL @ $BASE_REV (CPU, fp16, unsloth)"
+  docker exec "$UNSLOTH_IMG" python3 - <<PY
 import torch
 from unsloth import FastLanguageModel
 from peft import PeftModel
@@ -141,10 +147,45 @@ model, tok = FastLanguageModel.from_pretrained(
 model = PeftModel.from_pretrained(model, "$RUN/REx86")
 model = model.merge_and_unload()
 model.save_pretrained_merged("$MERGED", tok, save_method="merged_16bit")
-print("merged ->", "$MERGED")
+print("merged (unsloth) ->", "$MERGED")
 PY
+  if [ ! -s "$MERGED/config.json" ]; then
+    # save_pretrained_merged hard-requires CUDA and OOMs when the Studio
+    # server's own model residency already holds VRAM; fall back to a plain
+    # HF+PEFT CPU merge, which produces identical weights.
+    log "unsloth merge failed -- falling back to HF+PEFT CPU merge"
+    docker exec -e CUDA_VISIBLE_DEVICES= "$UNSLOTH_IMG" python3 - <<PY2 || die "merge failed"
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import PeftModel
+model = AutoModelForCausalLM.from_pretrained(
+    "$BASE_MODEL", revision="$BASE_REV",
+    dtype=torch.float16, device_map="cpu", low_cpu_mem_usage=True)
+tok = AutoTokenizer.from_pretrained("$BASE_MODEL", revision="$BASE_REV")
+model = PeftModel.from_pretrained(model, "$RUN/REx86")
+model = model.merge_and_unload()
+model.save_pretrained("$MERGED", safe_serialization=True)
+tok.save_pretrained("$MERGED")
+print("merged (HF+PEFT CPU) ->", "$MERGED")
+PY2
+  fi
 fi
 [ -s "$MERGED/config.json" ] || die "merge produced no config.json at $MERGED"
+
+# newer transformers requires tokenizer_config.json's extra_special_tokens to
+# be a dict; unsloth and older PEFT merges write it as a list, which then
+# breaks convert_hf_to_gguf.py's tokenizer loader.
+TOK_CFG="$MERGED/tokenizer_config.json"
+if [ -s "$TOK_CFG" ]; then
+  python3 - "$TOK_CFG" <<'EOF'
+import json, sys
+p = sys.argv[1]
+cfg = json.load(open(p))
+if isinstance(cfg.get("extra_special_tokens"), list):
+    cfg["extra_special_tokens"] = {}
+    json.dump(cfg, open(p, "w"), indent=2)
+EOF
+fi
 
 # ---------------------------------------------------------------------------
 # 3. Convert to GGUF f16, then quantise (CPU; llama.cpp container)
@@ -152,29 +193,45 @@ fi
 GGUF_F16="$RUN/rex86-merged-f16.gguf"
 if [ ! -s "$GGUF_F16" ]; then
   log "converting merged model to GGUF f16"
-  docker run --rm -v /mnt-1:/mnt-1 "$LLAMA_IMG" \
-    python3 /app/convert_hf_to_gguf.py "$MERGED" --outfile "$GGUF_F16" --outtype f16 \
+  # /mnt-1/training is a symlink to /var/training; a docker bind mount cannot
+  # resolve paths through a symlink target, so bind the real path instead.
+  # The image's ENTRYPOINT swallows a bare "python3"/"/app/llama-quantize" as
+  # an unknown subcommand, so it must be overridden explicitly.
+  docker run --rm --entrypoint python3 -v /var/training:/var/training "$LLAMA_IMG" \
+    /app/convert_hf_to_gguf.py "/var/training/runs/t0-rex86/merged_16bit" --outfile "/var/training/runs/t0-rex86/rex86-merged-f16.gguf" --outtype f16 \
     || die "convert_hf_to_gguf failed"
 fi
 Q4="$RUN/rex86-merged-Q4_K_M.gguf"
 Q8="$RUN/rex86-merged-Q8_0.gguf"
-docker run --rm -v /mnt-1:/mnt-1 "$LLAMA_IMG" \
-  /app/llama-quantize "$GGUF_F16" "$Q4" Q4_K_M || die "Q4_K_M quantise failed"
-docker run --rm -v /mnt-1:/mnt-1 "$LLAMA_IMG" \
-  /app/llama-quantize "$GGUF_F16" "$Q8" Q8_0 || die "Q8_0 quantise failed"
+docker run --rm --entrypoint /app/llama-quantize -v /var/training:/var/training "$LLAMA_IMG" \
+  "/var/training/runs/t0-rex86/rex86-merged-f16.gguf" "/var/training/runs/t0-rex86/rex86-merged-Q4_K_M.gguf" Q4_K_M || die "Q4_K_M quantise failed"
+docker run --rm --entrypoint /app/llama-quantize -v /var/training:/var/training "$LLAMA_IMG" \
+  "/var/training/runs/t0-rex86/rex86-merged-f16.gguf" "/var/training/runs/t0-rex86/rex86-merged-Q8_0.gguf" Q8_0 || die "Q8_0 quantise failed"
 
 # ---------------------------------------------------------------------------
 # 4. Register in Ollama: merged artefact + untouched base twins
 #    (create/quantise is CPU; nothing is loaded for inference here)
 # ---------------------------------------------------------------------------
+# The ollama container mounts only its models volume (ghidra_ollama_models ->
+# /root/.ollama), not /mnt-1 or /var/training. Stage the GGUFs there via the
+# volume's host mountpoint and point the Modelfiles at the in-container path.
+OLLAMA_VOL=$(docker volume inspect ghidra_ollama_models --format '{{.Mountpoint}}' 2>/dev/null)
+[ -n "$OLLAMA_VOL" ] || OLLAMA_VOL=$(docker inspect "$OLLAMA_C" --format '{{range .Mounts}}{{if eq .Destination "/root/.ollama"}}{{.Name}}{{end}}{{end}}' | xargs -r docker volume inspect --format '{{.Mountpoint}}')
+[ -n "$OLLAMA_VOL" ] || die "cannot resolve ollama models volume"
+STAGE="$OLLAMA_VOL/import-t0"
+sudo -n mkdir -p "$STAGE"
+for f in "$GGUF_F16" "$Q4" "$Q8"; do
+  sudo -n cp -f "$f" "$STAGE/$(basename "$f")" || die "sudo cp of $(basename "$f") into ollama volume failed"
+done
 for q in q4_k_m q8_0; do
   SRC=$Q4; [ "$q" = q8_0 ] && SRC=$Q8
-  printf 'FROM %s\n' "$SRC" > "$RUN/Modelfile.rex86-$q"
-  docker exec "$OLLAMA_C" ollama create "rex86-merged:$q" -f "/mnt-1/training/runs/t0-rex86/Modelfile.rex86-$q" \
+  SRCNAME=$(basename "$SRC")
+  printf 'FROM /root/.ollama/import-t0/%s\n' "$SRCNAME" | sudo -n tee "$STAGE/Modelfile.rex86-$q" > /dev/null
+  docker exec "$OLLAMA_C" ollama create "rex86-merged:$q" -f "/root/.ollama/import-t0/Modelfile.rex86-$q" \
     || die "ollama create rex86-merged:$q failed"
-  printf 'FROM %s\n' "$GGUF_F16" > "$RUN/Modelfile.base-$q"
+  printf 'FROM /root/.ollama/import-t0/rex86-merged-f16.gguf\n' | sudo -n tee "$STAGE/Modelfile.base-$q" > /dev/null
   docker exec "$OLLAMA_C" ollama create --quantize "$q" "qwen2.5-coder-7b-base:$q" \
-    -f "/mnt-1/training/runs/t0-rex86/Modelfile.base-$q" \
+    -f "/root/.ollama/import-t0/Modelfile.base-$q" \
     || die "ollama create qwen2.5-coder-7b-base:$q failed"
 done
 
