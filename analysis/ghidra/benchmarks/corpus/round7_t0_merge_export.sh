@@ -49,6 +49,23 @@ INNER_SIZE=323014168
 log() { echo "$(date -u +%FT%TZ) $*"; }
 die() { log "ABORT: $*"; exit 1; }
 
+# docker exec WITHOUT -i does not attach STDIN, so `python3 -` reads EOF,
+# executes nothing and exits 0 -- a heredoc-fed step then no-ops silently and
+# `|| die` never fires. Feed with -i AND require the payload's own success
+# marker in the output: a zero exit alone does not prove the script ran.
+# Usage: exec_py <marker> [extra docker exec opts...]  # heredoc on stdin
+exec_py() {
+  marker=$1; shift
+  py_out=$(docker exec -i "$@" "$UNSLOTH_IMG" python3 - 2>&1)
+  py_rc=$?
+  printf '%s\n' "$py_out"
+  [ "$py_rc" -eq 0 ] || return "$py_rc"
+  printf '%s' "$py_out" | grep -qF "$marker" || {
+    log "no '$marker' marker in output -- the heredoc payload did not run"
+    return 1
+  }
+}
+
 # ---------------------------------------------------------------------------
 # Gate: positive condition only -- the cold run must be FINISHED, not merely
 # not-started. Every roster tag needs both tier files or an UNMEASURED marker,
@@ -154,7 +171,7 @@ have_weights() { [ -s "$MERGED/model.safetensors" ] || [ -s "$MERGED/model.safet
 if [ ! -s "$MERGE_DONE" ]; then
   rm -f "$MERGE_DONE"
   log "merging adapter into $BASE_MODEL @ $BASE_REV (CPU, fp16, unsloth)"
-  docker exec "$UNSLOTH_IMG" python3 - <<PY || log "unsloth merge failed (rc=$?) -- trying the HF+PEFT CPU fallback"
+  exec_py "merged (unsloth) ->" <<PY || log "unsloth merge failed (rc=$?) -- trying the HF+PEFT CPU fallback"
 import torch
 from unsloth import FastLanguageModel
 from peft import PeftModel
@@ -171,7 +188,7 @@ PY
     # server's own model residency already holds VRAM; fall back to a plain
     # HF+PEFT CPU merge, which produces identical weights.
     log "unsloth merge left no weight index -- falling back to HF+PEFT CPU merge"
-    docker exec -e CUDA_VISIBLE_DEVICES= "$UNSLOTH_IMG" python3 - <<PY2 || die "merge failed"
+    exec_py "merged (HF+PEFT CPU) ->" -e CUDA_VISIBLE_DEVICES= <<PY2 || die "merge failed"
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
@@ -252,7 +269,7 @@ BASE16_C="$RUN_C/base_16bit"
 have_base_snapshot() { [ -s "$BASE16/model.safetensors.index.json" ] || [ -s "$BASE16/model.safetensors" ]; }
 if ! have_base_snapshot; then
   log "downloading untouched base $BASE_MODEL @ $BASE_REV (no adapter)"
-  docker exec "$UNSLOTH_IMG" python3 - <<PY3 || die "base snapshot download failed"
+  exec_py "base snapshot ->" <<PY3 || die "base snapshot download failed"
 from huggingface_hub import snapshot_download
 p = snapshot_download("$BASE_MODEL", revision="$BASE_REV", local_dir="$BASE16_C")
 print("base snapshot ->", p)
@@ -286,9 +303,10 @@ OLLAMA_VOL=$(docker volume inspect ghidra_ollama_models --format '{{.Mountpoint}
 [ -n "$OLLAMA_VOL" ] || die "cannot resolve ollama models volume"
 STAGE="$OLLAMA_VOL/import-t0"
 sudo -n mkdir -p "$STAGE" || die "cannot create $STAGE"
-for f in "$GGUF_F16" "$Q4" "$Q8" "$BASE_GGUF_F16" "$BASE_Q4" "$BASE_Q8"; do
+for f in "$Q4" "$Q8" "$BASE_Q4" "$BASE_Q8"; do
   dst="$STAGE/$(basename "$f")"
-  # ~54 GB in total (merged + base twins); skip anything a previous run
+  # ~25.6 GB in total (merged + base twins, quantised only -- neither f16
+  # is imported any more); skip anything a previous run
   # already staged intact. Size compare, not cmp -s, because cmp would read
   # tens of GB to learn nothing.
   if [ "$(stat -c%s "$f")" = "$(stat -c%s "$dst" 2>/dev/null || echo 0)" ]; then
@@ -303,8 +321,13 @@ for q in q4_k_m q8_0; do
   printf 'FROM /root/.ollama/import-t0/%s\n' "$SRCNAME" | sudo -n tee "$STAGE/Modelfile.rex86-$q" > /dev/null
   docker exec "$OLLAMA_C" ollama create "rex86-merged:$q" -f "/root/.ollama/import-t0/Modelfile.rex86-$q" \
     || die "ollama create rex86-merged:$q failed"
-  printf 'FROM /root/.ollama/import-t0/qwen2.5-coder-7b-base-f16.gguf\n' | sudo -n tee "$STAGE/Modelfile.base-$q" > /dev/null
-  docker exec "$OLLAMA_C" ollama create --quantize "$q" "qwen2.5-coder-7b-base:$q" \
+  # Mirror the merged arm exactly: import the SAME llama-quantize output the
+  # treatment uses, rather than letting Ollama's vendored quantiser redo it
+  # from f16. Two quantisers across the two arms is a control-vs-treatment
+  # confound, which is the whole point of #3137.
+  BSRC=$BASE_Q4; [ "$q" = q8_0 ] && BSRC=$BASE_Q8
+  printf 'FROM /root/.ollama/import-t0/%s\n' "$(basename "$BSRC")" | sudo -n tee "$STAGE/Modelfile.base-$q" > /dev/null
+  docker exec "$OLLAMA_C" ollama create "qwen2.5-coder-7b-base:$q" \
     -f "/root/.ollama/import-t0/Modelfile.base-$q" \
     || die "ollama create qwen2.5-coder-7b-base:$q failed"
 done
