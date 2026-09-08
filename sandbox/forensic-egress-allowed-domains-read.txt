@@ -1,0 +1,22 @@
+# Read-class destinations (#3072): squid can gate CONNECT by destination
+# domain, nothing more -- once the TLS tunnel is up it parses no HTTP inside
+# it. "Read-class" here means "no write/mutate API is reachable at this
+# domain without credentials this sandbox does not hold", not "squid blocks
+# writes here" -- it does not, and cannot, for either file. See
+# forensic-egress-allowed-domains-write.txt and docs/sandbox/README.md for
+# what the split actually buys and what it deliberately leaves undone.
+#
+# A leading dot matches the domain and every subdomain, so
+# .githubusercontent.com below already covers raw.githubusercontent.com and
+# objects.githubusercontent.com -- squid itself warns on startup if those are
+# also listed explicitly (redundant ACL entries), so they are not. Same
+# reason codeload.github.com is not listed here: it is a subdomain of
+# github.com, already permitted (write-class) via
+# forensic-egress-allowed-domains-write.txt's .github.com entry.
+.githubusercontent.com
+.githubassets.com
+# GitHub Pages: static hosting, no write API of its own -- but shared
+# multi-tenant, so an attacker-controlled <name>.github.io is inside this
+# list by construction. Read-class does not mean trusted-content.
+.github.io
+.githubstatus.com

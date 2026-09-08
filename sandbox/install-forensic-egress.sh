@@ -21,7 +21,8 @@ install -m 0644 -o root -g root "$script_dir/forensic-egress-network.nft" "$targ
 install -d -m 0750 -o root -g root /etc/honeypot-sandbox
 install -m 0644 -o root -g root "$script_dir/forensic-egress-dnsmasq.conf" /etc/honeypot-sandbox/dnsmasq.conf
 install -m 0644 -o root -g root "$script_dir/forensic-egress-squid.conf" /etc/honeypot-sandbox/squid.conf
-install -m 0644 -o root -g root "$script_dir/forensic-egress-allowed-domains.txt" /etc/honeypot-sandbox/allowed-domains.txt
+install -m 0644 -o root -g root "$script_dir/forensic-egress-allowed-domains-read.txt" /etc/honeypot-sandbox/allowed-domains-read.txt
+install -m 0644 -o root -g root "$script_dir/forensic-egress-allowed-domains-write.txt" /etc/honeypot-sandbox/allowed-domains-write.txt
 
 install -d -m 0750 -o nobody -g nogroup /var/log/honeypot-sandbox/dns
 install -d -m 0750 -o proxy -g adm /var/log/honeypot-sandbox/proxy

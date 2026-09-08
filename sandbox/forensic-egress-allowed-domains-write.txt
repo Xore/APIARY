@@ -1,0 +1,13 @@
+# Write-class destinations (#3072): domains that structurally support a
+# write/mutate operation, not just a fetch -- either because the operation a
+# sample legitimately needs there is inherently bidirectional, or because
+# the domain itself accepts anonymous writes. Kept separate from
+# forensic-egress-allowed-domains-read.txt so an operator narrowing this
+# allowlist knows which entries to cut first.
+#
+# git's smart-HTTP protocol POSTs to this domain for clone/fetch, not just
+# push -- there is no GET-only subset of "talking git to github.com".
+.github.com
+# Accepts paste creation over its own write API at this same domain --
+# reachable the moment a sample can talk to pastebin.com at all.
+.pastebin.com

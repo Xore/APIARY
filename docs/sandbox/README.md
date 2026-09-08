@@ -186,13 +186,42 @@ the nftables chain accepts only DNS and the allowlisted proxy, nothing else.
 6. Optional: run `sudo bash ./install-forensic-egress.sh`. This installs
    host-side logged DNS and a Squid retrieval proxy outside Docker, switches
    `SANDBOX_NETWORK_MODE` to `controlled`, and permits only the domains in
-   `forensic-egress-allowed-domains.txt`. DNS answers are real; both queries and
-   responses are retained in the per-job capture. Direct guest connections,
-   private destinations, arbitrary domains, and non-HTTP protocols stay blocked.
-   The allowlist bounds *where* a sample may connect, not what it may do there
-   (#3072): squid cannot see inside an established CONNECT tunnel, so every
-   allowlisted domain is reachable for upload as much as for download, and
-   tunneled volume shows up in the access log without being capped by it.
+   `forensic-egress-allowed-domains-read.txt` and
+   `forensic-egress-allowed-domains-write.txt`. DNS answers are real; both
+   queries and responses are retained in the per-job capture. Direct guest
+   connections, private destinations, arbitrary domains, and non-HTTP
+   protocols stay blocked. The allowlist bounds *where* a sample may connect,
+   not what it may do there (#3072): squid cannot see inside an established
+   CONNECT tunnel, so every allowlisted domain is reachable for upload as
+   much as for download, and tunneled volume shows up in the access log
+   without being capped by it.
+
+   **Decision recorded (#3072):** the two files split destinations into a
+   read-class set (no write/mutate API reachable there without credentials
+   the sandbox doesn't hold -- `raw.githubusercontent.com`, GitHub Pages,
+   static asset/status CDNs) and a write-class set (`github.com` itself,
+   whose smart-HTTP protocol POSTs even for clone/fetch so it can't be
+   pinned to a read-only subset -- this also covers `codeload.github.com`,
+   a `github.com` subdomain, so it is not separately listed; `pastebin.com`,
+   which has its own anonymous paste-creation API). Squid logs each class to its own file
+   (`access-read.log`/`access-write.log`) alongside the combined log, so "what
+   did a write-capable destination see" is a grep away instead of a
+   post-hoc cross-reference.
+
+   This buys operators a config-legible risk boundary and a narrower, faster
+   thing to review after a run: the write-class file is short and is exactly
+   the set an operator would cut first if a future sample's job doesn't need
+   bidirectional GitHub/Pastebin access at all. It does **not** enforce
+   anything squid didn't already enforce -- both classes remain fully
+   bidirectional CONNECT tunnels, and a read-class domain still permits
+   exfiltration via URL-encoded GET requests (a request that is structurally
+   a "read" can still carry an attacker-chosen payload in the path or query
+   string; the domain doesn't need a write API for that). Full TLS
+   interception (MITM) at the proxy, which would let squid actually see
+   method and path inside the tunnel and close that gap, is **deliberately
+   deferred**: real engineering lift, breaks certificate pinning some
+   retrieval targets may use, and `SANDBOX_NETWORK_MODE=controlled` doesn't
+   yet see enough use to justify it. Revisit if that changes.
 
 For a new or existing foundation, the complete Wine-enabled installation can
 instead be run in the safe order with one command. It pauses an idle worker,
