@@ -113,6 +113,6 @@ gap — not a fix.
 See `analysis/ghidra/benchmarks/probe-judge-repeat-stability.py` and its
 module docstring for the repeat-stability probe and how to run it once the
 round-7 cold run (currently live, `OLLAMA_MAX_LOADED_MODELS=1`, must not be
-disturbed — see the sandbox/GPU-host constraints this stage operated under)
+disturbed — see the GPU-host sandbox constraints this stage operated under)
 reports 96/96 `MODEL_DONE`. The probe was written and committed but
 deliberately **not executed** in this session.
