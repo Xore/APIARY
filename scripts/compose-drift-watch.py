@@ -637,11 +637,6 @@ def _load_streak_state(state_file: Path) -> dict[str, float]:
 def _save_streak_state(state_file: Path, state: dict[str, float]) -> None:
     try:
         state_file.write_text(json.dumps(state))
-        # Explicit group-write: a runner user's umask (typically 022) would
-        # otherwise leave the file 0644, unwritable by every *other* runner
-        # user sharing the group -- exactly the live #3030 bug. The setgid
-        # dir bit only controls which group owns a new file, not its mode.
-        state_file.chmod(0o664)
     except OSError as e:
         # Best-effort: a lost state file just means duration tracking
         # restarts from "now" on the next sweep, never a crash -- but say
@@ -649,6 +644,15 @@ def _save_streak_state(state_file: Path, state: dict[str, float]) -> None:
         # on the live host) makes #3030's duration threshold silently dead
         # rather than merely degraded.
         print(f"warning: could not persist failing-streak state to {state_file}: {e}", file=sys.stderr)
+        return
+    try:
+        # Explicit group-write: a runner user's umask (typically 022) would
+        # otherwise leave the file 0644, unwritable by every *other* runner
+        # user sharing the group -- exactly the live #3030 bug. The setgid
+        # dir bit only controls which group owns a new file, not its mode.
+        state_file.chmod(0o664)
+    except OSError:
+        pass
 
 
 def failing_streak_findings(
