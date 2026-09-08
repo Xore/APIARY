@@ -38,6 +38,9 @@ WORKDIR /SentryPeer
 # #1424: crash-on-embedded-NUL-byte fix, see nul_byte_crash_patch.py for why
 COPY nul_byte_crash_patch.py .
 RUN python3 nul_byte_crash_patch.py && rm nul_byte_crash_patch.py
+# #2892: self-rotating JSON log writer, see json_log_rotation_patch.py for why
+COPY json_log_rotation_patch.py .
+RUN python3 json_log_rotation_patch.py && rm json_log_rotation_patch.py
 RUN sed -i '/AM_LDFLAGS=/d' Makefile.am
 RUN ./bootstrap.sh
 RUN ./configure
