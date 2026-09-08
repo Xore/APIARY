@@ -22,13 +22,17 @@
 # Size/SHA note, measured 2026-09-07: the mandated size 323,014,168 and SHA
 # a21a6918...590f belong to the INNER adapter_model.safetensors, not the
 # REx86.zip wrapper (303,182,424 bytes, zip SHA 02a6e4c8...2067 -- recorded in
-# the manifest, not gated on, because Zenodo may repackage zips). The script
-# verifies BOTH: zip size against the live Zenodo record, inner safetensors
-# against the hard values. A mismatch aborts.
+# the manifest, not gated on, because Zenodo may repackage zips). Zenodo's
+# record API was down on 2026-09-08, so the zip is gated on a local zipfile CRC
+# test instead of a live size comparison; the inner safetensors is gated on the
+# hard SHA and size above. A mismatch aborts.
 set -u
 
 BASE=${BASE:-/mnt-1/benchmarks}
 RUN=${RUN:-/mnt-1/training/runs/t0-rex86}
+# $RUN as hp-unsloth-studio sees it: that container binds /var/training and
+# RENAMES it to /workspace, so no host path is valid inside it.
+RUN_C=${RUN_C:-/workspace/runs/t0-rex86}
 RESULTS=${RESULTS:-$BASE/round7}
 TAGLIST=${TAGLIST:-$BASE/models_requant.txt}
 ROSTER7=${ROSTER7:-$BASE/round7_roster.txt}
@@ -111,9 +115,12 @@ fi
 # Integrity proven instead by zipfile CRC test; inner adapter SHA is checked
 # below against the pinned INNER_SHA regardless.
 python3 - <<'PYEOF2' || die "REx86.zip failed local integrity check (CRC)"
-import zipfile
+import sys, zipfile
 z = zipfile.ZipFile("REx86.zip")
-assert z.testzip() is None, "CRC failure"
+bad = z.testzip()
+if bad is not None:
+    print("CRC failure in", bad)
+    sys.exit(1)
 print("zip CRC ok:", len(z.namelist()), "entries")
 PYEOF2
 ZIP_SHA=$(sha256sum REx86.zip | awk '{print $1}')
@@ -135,25 +142,32 @@ log "adapter verified: $INNER_ACTUAL_SIZE bytes, sha256 $INNER_ACTUAL"
 #    HF cache / container here cannot contend with a live run.
 # ---------------------------------------------------------------------------
 MERGED="$RUN/merged_16bit"
-if [ ! -s "$MERGED/config.json" ]; then
+MERGED_C="$RUN_C/merged_16bit"
+# Completion sentinel. NOT config.json: save_pretrained writes that BEFORE the
+# weight shards, so a crash mid-save leaves a directory every config.json gate
+# reads as finished and never re-merges. .merge_done is written by this script
+# only once the save AND the tokenizer normalization below have both returned.
+MERGE_DONE="$MERGED/.merge_done"
+if [ ! -s "$MERGE_DONE" ]; then
+  rm -f "$MERGE_DONE"
   log "merging adapter into $BASE_MODEL @ $BASE_REV (CPU, fp16, unsloth)"
-  docker exec "$UNSLOTH_IMG" python3 - <<PY
+  docker exec "$UNSLOTH_IMG" python3 - <<PY || log "unsloth merge failed (rc=$?) -- trying the HF+PEFT CPU fallback"
 import torch
 from unsloth import FastLanguageModel
 from peft import PeftModel
 model, tok = FastLanguageModel.from_pretrained(
     model_name="$BASE_MODEL", revision="$BASE_REV",
     max_seq_length=4096, dtype=torch.float16, load_in_4bit=False)
-model = PeftModel.from_pretrained(model, "$RUN/REx86")
+model = PeftModel.from_pretrained(model, "$RUN_C/REx86")
 model = model.merge_and_unload()
-model.save_pretrained_merged("$MERGED", tok, save_method="merged_16bit")
-print("merged (unsloth) ->", "$MERGED")
+model.save_pretrained_merged("$MERGED_C", tok, save_method="merged_16bit")
+print("merged (unsloth) ->", "$MERGED_C")
 PY
-  if [ ! -s "$MERGED/config.json" ]; then
+  if [ ! -s "$MERGED/model.safetensors.index.json" ]; then
     # save_pretrained_merged hard-requires CUDA and OOMs when the Studio
     # server's own model residency already holds VRAM; fall back to a plain
     # HF+PEFT CPU merge, which produces identical weights.
-    log "unsloth merge failed -- falling back to HF+PEFT CPU merge"
+    log "unsloth merge left no weight index -- falling back to HF+PEFT CPU merge"
     docker exec -e CUDA_VISIBLE_DEVICES= "$UNSLOTH_IMG" python3 - <<PY2 || die "merge failed"
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -162,30 +176,37 @@ model = AutoModelForCausalLM.from_pretrained(
     "$BASE_MODEL", revision="$BASE_REV",
     dtype=torch.float16, device_map="cpu", low_cpu_mem_usage=True)
 tok = AutoTokenizer.from_pretrained("$BASE_MODEL", revision="$BASE_REV")
-model = PeftModel.from_pretrained(model, "$RUN/REx86")
+model = PeftModel.from_pretrained(model, "$RUN_C/REx86")
 model = model.merge_and_unload()
-model.save_pretrained("$MERGED", safe_serialization=True)
-tok.save_pretrained("$MERGED")
-print("merged (HF+PEFT CPU) ->", "$MERGED")
+model.save_pretrained("$MERGED_C", safe_serialization=True)
+tok.save_pretrained("$MERGED_C")
+print("merged (HF+PEFT CPU) ->", "$MERGED_C")
 PY2
   fi
-fi
-[ -s "$MERGED/config.json" ] || die "merge produced no config.json at $MERGED"
+  [ -s "$MERGED/model.safetensors.index.json" ] || die "merge produced no weight shards at $MERGED"
 
-# newer transformers requires tokenizer_config.json's extra_special_tokens to
-# be a dict; unsloth and older PEFT merges write it as a list, which then
-# breaks convert_hf_to_gguf.py's tokenizer loader.
-TOK_CFG="$MERGED/tokenizer_config.json"
-if [ -s "$TOK_CFG" ]; then
-  python3 - "$TOK_CFG" <<'EOF'
-import json, sys
+  # newer transformers requires tokenizer_config.json's extra_special_tokens to
+  # be a dict; unsloth and older PEFT merges write it as a list, which then
+  # breaks convert_hf_to_gguf.py's tokenizer loader.
+  TOK_CFG="$MERGED/tokenizer_config.json"
+  if [ -s "$TOK_CFG" ]; then
+    python3 - "$TOK_CFG" <<'EOF' || die "tokenizer_config.json normalization failed"
+import json, os, sys
 p = sys.argv[1]
 cfg = json.load(open(p))
 if isinstance(cfg.get("extra_special_tokens"), list):
     cfg["extra_special_tokens"] = {}
-    json.dump(cfg, open(p, "w"), indent=2)
+    # temp + os.replace: a truncating in-place dump that dies mid-write leaves a
+    # corrupt tokenizer_config.json that no re-run regenerates.
+    tmp = p + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(cfg, fh, indent=2)
+    os.replace(tmp, p)
 EOF
+  fi
+  date -u +%FT%TZ > "$MERGE_DONE" || die "cannot write $MERGE_DONE"
 fi
+[ -s "$MERGE_DONE" ] || die "merge incomplete at $MERGED"
 
 # ---------------------------------------------------------------------------
 # 3. Convert to GGUF f16, then quantise (CPU; llama.cpp container)
@@ -193,8 +214,12 @@ fi
 GGUF_F16="$RUN/rex86-merged-f16.gguf"
 if [ ! -s "$GGUF_F16" ]; then
   log "converting merged model to GGUF f16"
-  # /mnt-1/training is a symlink to /var/training; a docker bind mount cannot
-  # resolve paths through a symlink target, so bind the real path instead.
+  # /mnt-1/training is a symlink to /var/training. Binding /mnt-1 would carry
+  # that symlink into the container, where its target is not mounted and so
+  # dangles -- a bind cannot resolve a host symlink pointing OUTSIDE the mounted
+  # tree. /var/training is a real directory, so bind it directly, identically
+  # named on both sides. (Containers that RENAME the mount need their own path
+  # variable instead -- see $RUN_C for hp-unsloth-studio's /workspace.)
   # The image's ENTRYPOINT swallows a bare "python3"/"/app/llama-quantize" as
   # an unknown subcommand, so it must be overridden explicitly.
   docker run --rm --entrypoint python3 -v /var/training:/var/training "$LLAMA_IMG" \
@@ -203,9 +228,9 @@ if [ ! -s "$GGUF_F16" ]; then
 fi
 Q4="$RUN/rex86-merged-Q4_K_M.gguf"
 Q8="$RUN/rex86-merged-Q8_0.gguf"
-docker run --rm --entrypoint /app/llama-quantize -v /var/training:/var/training "$LLAMA_IMG" \
+[ -s "$Q4" ] || docker run --rm --entrypoint /app/llama-quantize -v /var/training:/var/training "$LLAMA_IMG" \
   "/var/training/runs/t0-rex86/rex86-merged-f16.gguf" "/var/training/runs/t0-rex86/rex86-merged-Q4_K_M.gguf" Q4_K_M || die "Q4_K_M quantise failed"
-docker run --rm --entrypoint /app/llama-quantize -v /var/training:/var/training "$LLAMA_IMG" \
+[ -s "$Q8" ] || docker run --rm --entrypoint /app/llama-quantize -v /var/training:/var/training "$LLAMA_IMG" \
   "/var/training/runs/t0-rex86/rex86-merged-f16.gguf" "/var/training/runs/t0-rex86/rex86-merged-Q8_0.gguf" Q8_0 || die "Q8_0 quantise failed"
 
 # ---------------------------------------------------------------------------
@@ -219,9 +244,16 @@ OLLAMA_VOL=$(docker volume inspect ghidra_ollama_models --format '{{.Mountpoint}
 [ -n "$OLLAMA_VOL" ] || OLLAMA_VOL=$(docker inspect "$OLLAMA_C" --format '{{range .Mounts}}{{if eq .Destination "/root/.ollama"}}{{.Name}}{{end}}{{end}}' | xargs -r docker volume inspect --format '{{.Mountpoint}}')
 [ -n "$OLLAMA_VOL" ] || die "cannot resolve ollama models volume"
 STAGE="$OLLAMA_VOL/import-t0"
-sudo -n mkdir -p "$STAGE"
+sudo -n mkdir -p "$STAGE" || die "cannot create $STAGE"
 for f in "$GGUF_F16" "$Q4" "$Q8"; do
-  sudo -n cp -f "$f" "$STAGE/$(basename "$f")" || die "sudo cp of $(basename "$f") into ollama volume failed"
+  dst="$STAGE/$(basename "$f")"
+  # ~27 GB in total; skip anything a previous run already staged intact. Size
+  # compare, not cmp -s, because cmp would read all 27 GB to learn nothing.
+  if [ "$(stat -c%s "$f")" = "$(stat -c%s "$dst" 2>/dev/null || echo 0)" ]; then
+    log "already staged: $(basename "$f")"
+    continue
+  fi
+  sudo -n cp -f "$f" "$dst" || die "sudo cp of $(basename "$f") into ollama volume failed"
 done
 for q in q4_k_m q8_0; do
   SRC=$Q4; [ "$q" = q8_0 ] && SRC=$Q8
@@ -234,6 +266,10 @@ for q in q4_k_m q8_0; do
     -f "/root/.ollama/import-t0/Modelfile.base-$q" \
     || die "ollama create qwen2.5-coder-7b-base:$q failed"
 done
+# All four tags imported; ollama holds its own copy in the blob store, so the
+# staged GGUFs are now a pure duplicate inside the docker data root. Modelfiles
+# stay -- they are tiny and document what was imported.
+sudo -n rm -f "$STAGE"/*.gguf || log "warning: could not clean staged GGUFs from $STAGE"
 
 # ---------------------------------------------------------------------------
 # 5. Manifest: input SHAs, base revision, quant params, file sizes
