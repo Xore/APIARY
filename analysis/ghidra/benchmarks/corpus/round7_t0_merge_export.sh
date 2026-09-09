@@ -271,10 +271,16 @@ have_base_snapshot() { [ -s "$BASE16/model.safetensors.index.json" ] || [ -s "$B
 # no atomic "done" marker of its own, so a partial download can leave
 # index.json (or a lone shard) on disk and a re-run's have_base_snapshot()
 # check reads that as finished, skips the download, and fails later at
-# convert instead.
-SNAPSHOT_DONE="$BASE16/.snapshot_done"
+# convert instead. Lives under $RUN, not $BASE16: the unsloth container
+# writes $BASE16 as root, so this unprivileged host process could never
+# create a marker file inside it.
+SNAPSHOT_DONE="$RUN/.base_snapshot_done"
 if [ ! -s "$SNAPSHOT_DONE" ]; then
-  rm -rf "$BASE16"
+  # No rm -rf "$BASE16" here: $BASE16 is root-owned (written by the unsloth
+  # container), so an unprivileged rm would silently no-op, and
+  # snapshot_download resumes partial downloads on its own -- deleting the
+  # tree would only discard $BASE16/.cache/huggingface resume metadata and
+  # force a full ~15G re-download.
   log "downloading untouched base $BASE_MODEL @ $BASE_REV (no adapter)"
   exec_py "base snapshot ->" <<PY3 || die "base snapshot download failed"
 from huggingface_hub import snapshot_download
@@ -293,6 +299,7 @@ if [ ! -s "$BASE_GGUF_F16" ]; then
     /app/convert_hf_to_gguf.py "/var/training/runs/t0-rex86/base_16bit" --outfile "/var/training/runs/t0-rex86/qwen2.5-coder-7b-base-f16.gguf" --outtype f16 \
     || die "base convert_hf_to_gguf failed"
 fi
+[ -s "$BASE_GGUF_F16" ] || die "base convert produced no output at $BASE_GGUF_F16"
 
 # ---------------------------------------------------------------------------
 # 3c. Lineage assert (#3137), run before stage 4 registers anything in Ollama
@@ -304,6 +311,8 @@ fi
 # ---------------------------------------------------------------------------
 MERGED_F16_SHA=$(sha256sum "$GGUF_F16" | awk '{print $1}')
 BASE_F16_SHA=$(sha256sum "$BASE_GGUF_F16" | awk '{print $1}')
+[ -n "$MERGED_F16_SHA" ] || die "cannot hash $GGUF_F16"
+[ -n "$BASE_F16_SHA" ] || die "cannot hash $BASE_GGUF_F16"
 [ "$BASE_F16_SHA" != "$MERGED_F16_SHA" ] || die "base f16 GGUF matches merged f16 GGUF -- base twin is not untouched (#3137)"
 
 BASE_Q4="$RUN/base-Q4_K_M.gguf"
