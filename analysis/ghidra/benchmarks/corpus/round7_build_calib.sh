@@ -91,7 +91,7 @@ fi
 REPO_CORPUS="$REPO/analysis/ghidra/training/corpus"
 CALIB_PY="$CALIB/.build_calib.py"
 cat > "$CALIB_PY" <<'PYEOF'
-import collections, hashlib, json, random, sys
+import collections, hashlib, json, random, re, sys
 from pathlib import Path
 
 corpus, calib, repo_corpus = map(Path, sys.argv[1:4])
@@ -106,14 +106,40 @@ sources = {}  # name -> list of text chunks
 # themselves as the pre-decompilation fallback. Both are read here and the
 # preference between them is applied AFTER the pre-filter below, so a
 # s3-decomp slice that pre-filters away entirely still falls back to s3-src.
+#
+# Ghidra stamps its own diagnostics into the pseudocode as single-line
+# comments -- `/* WARNING: Control flow encountered bad instruction data */`,
+# `/* WARNING: Unknown calling convention ... */` -- which is decompiler
+# boilerplate, not decompiled program behaviour. #3145's live run found this
+# is exactly what put the rubric's generic RE vocabulary ("control flow")
+# into 2835/2836 s3-decomp chunks: #3146 taught the phrase check to exempt
+# vocabulary that also appears in the s3-src .c sources, but Ghidra's own
+# comment was never going to appear in hand-written source, so the exemption
+# never fired and the phrase pre-filter kept dropping nearly the whole slice.
+# Stripped here, before that filter runs, so it screens what the decompiler
+# actually recovered. s3-src is hand-written .c with no Ghidra comments, so
+# it is left untouched rather than run through a blanket cleaning pass.
+GHIDRA_WARNING_RE = re.compile(r"/\*\s*WARNING:.*?\*/")
+DECOMPILER_LABELS = {"s3-decomp"}
+
 for d, label in ((corpus / "s3-decomp", "s3-decomp"), (corpus / "s3-src/src", "s3-src")):
     if d.is_dir():
         # index.json is ghidra_cache.py's own cache index -- sha256 hex, paths
         # and case names, no decompiler text. It is the single largest file in
         # s3-decomp and calibrating on it would weight the imatrix towards hex
         # digits, so it is not calibration material at any contamination level.
-        chunks = [p.read_text(errors="replace") for p in sorted(d.rglob("*"))
-                  if p.is_file() and p.stat().st_size > 0 and p.name != "index.json"]
+        raw_chunks = [p.read_text(errors="replace") for p in sorted(d.rglob("*"))
+                      if p.is_file() and p.stat().st_size > 0 and p.name != "index.json"]
+        if label in DECOMPILER_LABELS:
+            chunks, n_cleaned = [], 0
+            for c in raw_chunks:
+                cleaned, n_subs = GHIDRA_WARNING_RE.subn("", c)
+                n_cleaned += n_subs > 0
+                chunks.append(cleaned)
+            print(f"CALIB_CLEAN {label}: cleaned {n_cleaned} of {len(raw_chunks)} chunks",
+                  file=sys.stderr)
+        else:
+            chunks = raw_chunks
         if chunks:
             sources[label] = chunks
 
