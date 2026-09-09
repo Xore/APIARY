@@ -51,7 +51,7 @@ BIND_ADDR=172.16.0.1
 BIND_PORT=5555
 # /var is the docker data root and sits near full on this box; the cache
 # grows with every distinct base image, so it lives on the roomy spindle.
-DATA_DIR=/mnt-1/ci-registry-mirror
+DATA_DIR=/var/ci-registry-mirror
 ENV_FILE=/etc/apiary-registry-mirror.env
 UNIT=/etc/systemd/system/ci-registry-mirror.service
 # Upstream blobs expire out of the proxy after a week, so a base image

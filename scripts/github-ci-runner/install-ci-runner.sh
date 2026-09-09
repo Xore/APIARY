@@ -553,7 +553,7 @@ cat > "$unit_dropin_dir/fix-work-ownership.conf" <<EOF
 ExecStartPre=+/opt/github-ci-runner-helpers/fix-work-ownership.sh $RUNNER_USER $RUNNER_HOME/_work
 EOF
 
-# #3105: /mnt-1/buildx-cache is shared across every runner instance's user so
+# #3105: /var/buildx-cache is shared across every runner instance's user so
 # a docker/build-push-action cache-to/cache-from can be reused between them,
 # but the default UMask=0022 this unit ships with writes new cache files
 # 0644 -- the next build that lands on a DIFFERENT instance's user can read

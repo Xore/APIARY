@@ -1459,7 +1459,7 @@ step_create_shared_resources() {
 
 step_provision_buildx_cache() {
   # #2822: .github/workflows/containers.yml exports every image's layer
-  # cache to type=local under /mnt-1/buildx-cache/<image> when the build
+  # cache to type=local under /var/buildx-cache/<image> when the build
   # lands on this box's self-hosted runners, because the type=gha cache was
   # measured ~2x over GitHub's 10 GB per-repository ceiling and therefore
   # being LRU-evicted while in use.
@@ -1467,7 +1467,7 @@ step_provision_buildx_cache() {
   # The runners execute as github-ci-runner (systemd User= on the
   # actions.runner.*.supermicro-ci* units), and /mnt-1 is root:root 0755 --
   # so the workflow cannot create this directory itself. Measured live
-  # 2026-09-02: `sudo -u github-ci-runner mkdir -p /mnt-1/buildx-cache/x`
+  # 2026-09-02: `sudo -u github-ci-runner mkdir -p /var/buildx-cache/x`
   # -> "Permission denied", exit 1, which under a step's default `bash -e`
   # fails every one of the Containers matrix rows. Provisioning it here
   # rather than by hand on the live host is the point: #1609 replays this
@@ -1484,10 +1484,10 @@ step_provision_buildx_cache() {
   # actions.runner.Xore-APIARY.supermicro-ci-* unit) and only
   # github-ci-runner was in the github-ci-runner group, so a Containers row
   # that landed on supermicro-ci-2 got EACCES from the workflow's own
-  # `mkdir -p /mnt-1/buildx-cache/<image>` and silently degraded to
+  # `mkdir -p /var/buildx-cache/<image>` and silently degraded to
   # type=gha -- the exact quota-evicted cache #2822 moved off. Joining them
   # here (rather than by hand) is what makes a #1609 rebuild reproduce it.
-  local cache_dir=/mnt-1/buildx-cache
+  local cache_dir=/var/buildx-cache
   local runner_user=github-ci-runner
 
   if ! id -u "$runner_user" >/dev/null 2>&1; then
@@ -1515,7 +1515,7 @@ step_provision_buildx_cache() {
   done
 
   # Group membership alone is not enough for subdirectories that already
-  # exist: the workflow creates /mnt-1/buildx-cache/<image> with the runner's
+  # exist: the workflow creates /var/buildx-cache/<image> with the runner's
   # default umask 022, so a dir made by one runner before the grant existed
   # is 2755 -- group-owned but not group-writable, and the next runner's
   # mkdir/prune inside it still fails. Repair what is there; the workflow
@@ -3065,7 +3065,7 @@ run_step seed-canary-hostname "Seed honeypot-canarytokens' CANARY_PUBLIC_HOSTNAM
 run_step provision-keycloak-secrets "Generate Keycloak secrets, reset bootstrap admin to admin/admin123" step_provision_keycloak_secrets
 
 run_step shared-resources      "Create honeynet + placeholder volumes" step_create_shared_resources
-run_step provision-buildx-cache "Create /mnt-1/buildx-cache for the CI runners (#2822)" step_provision_buildx_cache
+run_step provision-buildx-cache "Create /var/buildx-cache for the CI runners (#2822)" step_provision_buildx_cache
 run_step build-zeek-image      "Build xore-zeek:local for zeek-proxy" step_build_zeek_image
 run_step start-elasticsearch   "Start honeypot-elk, wait healthy"   step_start_elasticsearch_first
 run_step start-init            "Start honeypot-init, wait for one-shots" step_start_init

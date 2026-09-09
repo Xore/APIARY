@@ -81,11 +81,16 @@ services:
     # /dionaea (dionaea-lib volume, owned uid/gid 1000) rejected a plain
     # touch with cap_drop: ALL and no cap_add; adding back exactly
     # DAC_OVERRIDE let the same write succeed, alongside /state (root-owned,
-    # already writable) and the read-only /stack mount.
+    # already writable) and the read-only /stack mount. utime on
+    # pre-existing volume files owned by uid 1000 additionally needs FOWNER
+    # (measured 2026-09-08: shutil.copy2 copystat EPERM on files left by an
+    # earlier persona apply; a plain write and a plain utime on a new file
+    # both pass with DAC_OVERRIDE alone).
     cap_drop:
       - ALL
     cap_add:
       - DAC_OVERRIDE
+      - FOWNER
     deploy:
       resources:
         limits:
@@ -439,10 +444,18 @@ services:
     # snare-pages is owned uid/gid 65534 mode 757 (rwxr-xrwx) -- "other"
     # already has full rwx, so this uid-0 process needs nothing extra to
     # write there; a plain touch/rm against the real volume succeeded
-    # with cap_drop: ALL and no cap_add. /opt/persona-pages is baked into
-    # this service's own image, not a mount.
+    # with cap_drop: ALL and no cap_add — for the volume root, which is
+    # mode 757. The per-run clone target portal.meridian.example/ inside
+    # is 65534:755 though, so cp -a into it needs capabilities: measured
+    # 2026-09-08 on the live volume, each alone insufficient —
+    # DAC_OVERRIDE (create in a dir not owned by us), FOWNER (cp -a utime
+    # on files owned by 65534), CHOWN (cp -a ownership preservation).
     cap_drop:
       - ALL
+    cap_add:
+      - DAC_OVERRIDE
+      - FOWNER
+      - CHOWN
     deploy:
       resources:
         limits:
