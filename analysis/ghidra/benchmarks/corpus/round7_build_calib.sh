@@ -97,16 +97,25 @@ from pathlib import Path
 corpus, calib, repo_corpus = map(Path, sys.argv[1:4])
 min_tok, max_tok, cpt = (int(x) for x in sys.argv[4:7])
 
+sys.path.insert(0, str(repo_corpus))
+import decontaminate  # noqa: E402 -- the exact matcher the decontamination gate below runs
+
 sources = {}  # name -> list of text chunks
 
-# S3/S2 decompiler output: the decompiled text files, falling back to the C
-# sources themselves before decompilation has happened (still corpus-v1, still
-# not the test set -- generate_s3.py enforces the name guard).
+# S3/S2 decompiler output: the decompiled text files, plus the C sources
+# themselves as the pre-decompilation fallback. Both are read here and the
+# preference between them is applied AFTER the pre-filter below, so a
+# s3-decomp slice that pre-filters away entirely still falls back to s3-src.
 for d, label in ((corpus / "s3-decomp", "s3-decomp"), (corpus / "s3-src/src", "s3-src")):
     if d.is_dir():
-        sources[label] = [p.read_text(errors="replace") for p in sorted(d.rglob("*")) if p.is_file() and p.stat().st_size > 0]
-        if sources[label]:
-            break
+        # index.json is ghidra_cache.py's own cache index -- sha256 hex, paths
+        # and case names, no decompiler text. It is the single largest file in
+        # s3-decomp and calibrating on it would weight the imatrix towards hex
+        # digits, so it is not calibration material at any contamination level.
+        chunks = [p.read_text(errors="replace") for p in sorted(d.rglob("*"))
+                  if p.is_file() and p.stat().st_size > 0 and p.name != "index.json"]
+        if chunks:
+            sources[label] = chunks
 
 # S1 sanitised sessions / S4 REx86 / S6 general text: corpus-v1 manifests,
 # prompt+completion text per Record.
@@ -131,6 +140,55 @@ for shard in sorted((corpus / "s6").glob("s6_shard_*.txt")) if (corpus / "s6").i
 
 if not sources:
     sys.exit("ABORT: no corpus-v1 slices found -- build them first")
+
+# --- pre-filter: drop every chunk the decontamination gate below would flag --
+# The gate (0 hits or nothing ships) is deliberately untouched, so the pool
+# handed to it has to be clean by construction. Screening here with
+# decontaminate.py's OWN scan_samples against its OWN protected corpus is the
+# only way to guarantee that: any other rule is a guess at what the gate will
+# do. #3144's live run showed why a provenance rule is not enough -- all 8532
+# hits were `phrase` hits on generic reverse-engineering vocabulary out of the
+# rubric's required_groups ("control flow", "buffer overflow", "does not"),
+# which a Ghidra decompilation JSON contains thousands of times by nature and
+# no case-name check can see.
+def _part(label, chunk):
+    """The exact text the pool will emit, so the pre-filter hashes, shingles
+    and phrase-matches byte-identically to what the gate later scans."""
+    return f"### source: {label}\n{chunk}"
+
+protected = decontaminate.load_protected_corpus()
+records = [decontaminate.Record(id=f"{label}#{i}", slice="S6", family="calib-prefilter",
+                                source_path="prefilter", prompt=None,
+                                completion=_part(label, chunk))
+           for label, chunks in sources.items() for i, chunk in enumerate(chunks)]
+flagged = {h.sample_id for h in decontaminate.scan_samples(records, protected)}
+for label in list(sources):
+    total = len(sources[label])
+    kept = [c for i, c in enumerate(sources[label]) if f"{label}#{i}" not in flagged]
+    print(f"CALIB_PREFILTER {label}: kept {len(kept)}/{total} chunks, dropped "
+          f"{total - len(kept)} that the decontamination gate would flag", file=sys.stderr)
+    if kept:
+        sources[label] = kept
+    else:
+        del sources[label]
+
+# s3-decomp is the preferred decompiler slice and s3-src only stands in for
+# it -- but only while s3-decomp still carries a slice's worth of text. Once
+# the pre-filter has taken it below the floor, dropping the .c sources as well
+# would throw away the one clean decompiler-adjacent slice that is left.
+decomp_tokens = sum(len(c) for c in sources.get("s3-decomp", [])) // cpt
+if decomp_tokens >= min_tok:
+    sources.pop("s3-src", None)
+elif "s3-decomp" in sources or "s3-src" in sources:
+    src_tokens = sum(len(c) for c in sources.get("s3-src", [])) // cpt
+    print(f"CALIB_SLIM decompiler slice: ~{decomp_tokens} s3-decomp tokens survive the "
+          f"pre-filter, below the {min_tok} floor -- keeping the ~{src_tokens} token s3-src "
+          "fallback in the pool; the other slices have to make up the difference",
+          file=sys.stderr)
+
+if not sources:
+    sys.exit("ABORT: every corpus-v1 chunk was flagged by the decontamination pre-filter -- "
+             "the slices are drawn from the protected material, rebuild them first")
 
 # Round-robin across sources so no slice dominates the sample, up to the token
 # ceiling. Deterministic order via seed: the same corpus yields the same file.
