@@ -27,3 +27,15 @@ rex86-merged:q8_0
 rex86-merged:q4_k_m
 qwen2.5-coder-7b-base:q8_0
 qwen2.5-coder-7b-base:q4_k_m
+#   New candidate (#3106): glyphsoftware/sentinel-r3, third-party GGUF pulled
+#   via Ollama's hf.co direct-pull -- it is not in Ollama's own library
+#   (ollama.com/glyphsoftware/sentinel-r3 404s). One headline tag, not a
+#   Q4_K_M/Q8_0 twin like T0: there is no training-isolation rationale here,
+#   so it follows the R2/Controls single-tag convention instead. Q4_K_M is
+#   both the repo's own stated default and the only one of its three
+#   published quants (Q4_K_M ~16GB, Q5_K_M ~19GB, Q8_0 ~29GB) that fits the
+#   20475 MiB RTX 4000 Ada -- Q8_0 alone exceeds the card. Repo is gated
+#   (Glyph Proprietary License v1.0, signed agreement), same wall the
+#   BaronLLM candidate hit in #661 -- pull needs an authorized HF token on
+#   the serving host or it fails the same way.
+hf.co/glyphsoftware/sentinel-r3-gguf:q4_k_m
