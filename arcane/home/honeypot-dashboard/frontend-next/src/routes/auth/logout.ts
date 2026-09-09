@@ -11,7 +11,10 @@
 // reason; this port had dropped that step. buildEndSessionUrl requires
 // live discovery metadata, so it's wrapped in a fallback to the previous
 // local-only behavior -- a Keycloak hiccup must never leave a user unable
-// to sign out of the BFF session at all.
+// to sign out of the BFF session at all. Typed-URL/direct navigation to
+// this route now 403s by design (#3153): it's cross-origin from the
+// browser's perspective (no Origin/Referer matching this app), same as a
+// forged cross-site logout call.
 import { createFileRoute } from '@tanstack/react-router'
 import * as oidc from 'openid-client'
 import { crossOriginResponse, hasSameOriginHeader } from '../../lib/csrfGate.server'

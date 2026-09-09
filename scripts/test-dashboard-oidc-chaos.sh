@@ -491,7 +491,18 @@ else
 fi
 
 # ═══ Scenario A': logout works even with the provider unreachable ══════════
-logout_headers=$(curl -s -D - -o /dev/null -c "${jar}" -b "${jar}" "${app_base}/auth/logout" || true)
+# #3153: cross-origin logout must still 403 (and leave the session alone)
+# even with the realm down -- the same-origin gate is a local check, not an
+# IdP round-trip, so provider outage is no excuse for it to fail open.
+forged_logout_status=$(curl -s -o /dev/null -w '%{http_code}' -b "${jar}" -H "Origin: http://evil.example" "${app_base}/auth/logout" || true)
+forged_still_in_redis=$(docker exec "${redis}" redis-cli EXISTS "bff:session:${sid}")
+if [ "${forged_logout_status}" = "403" ] && [ "${forged_still_in_redis}" = "1" ]; then
+  ok "scenario A': cross-origin /auth/logout (Origin: evil.example) is rejected with 403 and leaves the session in redis, realm still down (#3153)"
+else
+  bad "scenario A': cross-origin logout was not blocked as expected: status=${forged_logout_status} redis EXISTS=${forged_still_in_redis}"
+fi
+
+logout_headers=$(curl -s -D - -o /dev/null -c "${jar}" -b "${jar}" -H "Origin: ${app_base}" "${app_base}/auth/logout" || true)
 logout_status=$(echo "${logout_headers}" | head -1 | awk '{print $2}')
 logout_location=$(echo "${logout_headers}" | grep -i '^location:' | sed 's/^[Ll]ocation: //' | tr -d '\r')
 case "${logout_location}" in
