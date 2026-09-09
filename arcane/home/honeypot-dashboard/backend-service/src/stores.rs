@@ -101,16 +101,20 @@ async fn store_page(
     store_page_excluding(state, indices, sort_field, unmapped_type, q, extra_filter, &[]).await
 }
 
-async fn store_page_excluding(
-    state: &AppState,
-    indices: &[&str],
+/// The request body every store list search sends: paging, sort, query and
+/// -- when a store config lists any -- the `_source.excludes` that keep
+/// credential-shaped fields like canarytokens' `auth_token` out of the
+/// response entirely. Elasticsearch drops excluded fields before `_source`
+/// is built, so nothing downstream of this request can leak what never
+/// arrived. Split out from `store_page_excluding` so the wiring itself is
+/// unit-testable without a live cluster.
+fn store_search_body(
     sort_field: &str,
     unmapped_type: &str,
     q: &StoreQuery,
     extra_filter: Option<Value>,
     excludes: &[&str],
-) -> anyhow::Result<Value> {
-    let size = q.size.min(100);
+) -> Value {
     let query = match extra_filter {
         Some(filter) => filter,
         None => match q.q.as_deref().map(str::trim).filter(|text| !text.is_empty()) {
@@ -120,7 +124,7 @@ async fn store_page_excluding(
     };
     let mut body = json!({
         "from": q.offset,
-        "size": size,
+        "size": q.size.min(100),
         "track_total_hits": true,
         "sort": sort_spec(sort_field, unmapped_type),
         "query": query
@@ -128,6 +132,19 @@ async fn store_page_excluding(
     if !excludes.is_empty() {
         body["_source"] = json!({"excludes": excludes});
     }
+    body
+}
+
+async fn store_page_excluding(
+    state: &AppState,
+    indices: &[&str],
+    sort_field: &str,
+    unmapped_type: &str,
+    q: &StoreQuery,
+    extra_filter: Option<Value>,
+    excludes: &[&str],
+) -> anyhow::Result<Value> {
+    let body = store_search_body(sort_field, unmapped_type, q, extra_filter, excludes);
     let result = state.es.search_index(indices, body).await?;
     let total = result["hits"]["total"]["value"].as_u64().unwrap_or(0);
     let rows: Vec<Value> = result["hits"]["hits"]
@@ -470,7 +487,8 @@ mod sort_tests {
 
 #[cfg(test)]
 mod store_config_tests {
-    use super::store_config;
+    use super::{store_config, store_search_body, StoreQuery};
+    use serde_json::json;
 
     #[test]
     fn canarytokens_passthrough_excludes_the_management_auth_token() {
@@ -485,5 +503,53 @@ mod store_config_tests {
     #[test]
     fn unknown_store_name_has_no_config() {
         assert!(store_config("not-a-real-store").is_none());
+    }
+
+    #[test]
+    fn canarytokens_passthrough_query_strips_auth_token_from_a_full_document() {
+        // #3111: store_config listing "auth_token" is not enough on its own
+        // -- generic() has to actually thread it into the request this
+        // handler sends, or the config entry is decoration. This drives the
+        // real store_search_body() the passthrough calls (not a
+        // reimplementation of it), so a future refactor that drops the
+        // wiring fails here first.
+        let (_, sort_field, sort_type, excludes) =
+            store_config("canarytokens").expect("canarytokens is a known store");
+        let q = StoreQuery { offset: 0, size: 25, q: None, ip: None, aggs: None };
+        let body = store_search_body(sort_field, sort_type, &q, None, excludes);
+        assert_eq!(body["_source"]["excludes"], json!(["auth_token"]));
+
+        // A full ES document exactly as canarytokens.rs's create() persists
+        // it (see that module's es_record fixture): nine fields, credential
+        // included. `_source.excludes` is a flat top-level key removal --
+        // modeled here rather than requiring a live cluster -- so this
+        // proves the exclude this passthrough sends actually drops
+        // auth_token from a real document shape and nothing else.
+        let mut full_document = json!({
+            "id": "0fdec0yF",
+            "token_type": "ms_word",
+            "memo": "decoy 0fdec0yF",
+            "token_url": "https://decoys.example-shack.net/0fdec0yF",
+            "hostname": "quiet-river-4211.decoys.example-shack.net",
+            "filename_hint": "quarterly-report.docx",
+            "auth_token": "tok-secret-abcdef1234567890",
+            "created_by": "ops",
+            "created_at": "2026-08-27T00:00:00+00:00",
+        });
+        for field in excludes {
+            full_document.as_object_mut().unwrap().remove(*field);
+        }
+        let wire = full_document.to_string();
+        assert!(!wire.contains("auth_token"), "field name leaked past the passthrough's excludes: {wire}");
+        assert!(
+            !wire.contains("tok-secret-abcdef1234567890"),
+            "credential value leaked past its own key: {wire}"
+        );
+        for kept in [
+            "id", "token_type", "memo", "token_url", "hostname",
+            "filename_hint", "created_by", "created_at",
+        ] {
+            assert!(full_document.get(kept).is_some(), "excludes dropped {kept} along with the credential");
+        }
     }
 }
