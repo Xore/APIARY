@@ -12,11 +12,12 @@ import { DEV_UNAUTH_OVERRIDE_ENV } from './serviceToken.server'
 
 let serviceFetch: typeof import('./backend.server').serviceFetch
 let proxyToRust: typeof import('./backend.server').proxyToRust
+let serviceJSONResult: typeof import('./backend.server').serviceJSONResult
 
 beforeAll(async () => {
   process.env[DEV_UNAUTH_OVERRIDE_ENV] = '1'
   process.env.SERVICE_TOKEN = 'test-token'
-  ;({ serviceFetch, proxyToRust } = await import('./backend.server'))
+  ;({ serviceFetch, proxyToRust, serviceJSONResult } = await import('./backend.server'))
 })
 
 afterAll(() => {
@@ -88,5 +89,39 @@ describe('proxyToRust forwards inbound actor headers unedited (#3110)', () => {
     )
     expect(headers().has('x-actor-username')).toBe(false)
     expect(headers().has('x-actor-role')).toBe(false)
+  })
+})
+
+describe('the payload cache is keyed by actor as well as path (#3110)', () => {
+  it('does not serve one actor a body fetched for another on the same path', async () => {
+    // The cached workbench paths spell the owner out in their query string
+    // today, so this is a guard rather than a live bug: any actor-scoped
+    // path that doesn't would otherwise cross-serve, and the redis layer
+    // spreads that across every replica.
+    let call = 0
+    const forwarded = vi.fn(async () => new Response(JSON.stringify({ runs: [`run-${++call}`] }), { status: 200 }))
+    vi.stubGlobal('fetch', forwarded)
+
+    const path = `/api/v1/workbench/runs?limit=25&t=${Date.now()}`
+    const alice = await serviceJSONResult<{ runs: string[] }>(path, { actor: { username: 'alice', role: 'user' } })
+    const bob = await serviceJSONResult<{ runs: string[] }>(path, { actor: { username: 'bob', role: 'user' } })
+
+    expect(forwarded).toHaveBeenCalledTimes(2)
+    expect(alice).toEqual({ ok: true, body: { runs: ['run-1'] } })
+    expect(bob).toEqual({ ok: true, body: { runs: ['run-2'] } })
+  })
+
+  it('still reuses the cached body for the same actor and path', async () => {
+    let call = 0
+    const forwarded = vi.fn(async () => new Response(JSON.stringify({ runs: [`run-${++call}`] }), { status: 200 }))
+    vi.stubGlobal('fetch', forwarded)
+
+    const path = `/api/v1/workbench/runs?limit=25&t=${Date.now()}-same`
+    const actor = { username: 'alice', role: 'user' }
+    const first = await serviceJSONResult<{ runs: string[] }>(path, { actor })
+    const second = await serviceJSONResult<{ runs: string[] }>(path, { actor })
+
+    expect(forwarded).toHaveBeenCalledTimes(1)
+    expect(second).toEqual(first)
   })
 })

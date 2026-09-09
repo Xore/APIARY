@@ -227,12 +227,18 @@ export function parseRetryAfter(value: string | null): number | undefined {
  * the same path (confirmed live: without the prefix, whichever target
  * answered first poisons the cache for the other for PAYLOAD_TTL_MS).
  *
+ * The actor is part of the key for the same reason (#3110): an
+ * actor-scoped response is per-user by definition, and this cache is
+ * shared across replicas through redis, so a path that doesn't happen to
+ * spell the user out in its query string would otherwise serve one
+ * operator's data to the next one asking.
+ *
  * Only successes are cached, exactly as before — a failure must never turn
  * into fifteen seconds of cached certainty. */
 export async function serviceJSONResult<T>(path: string, opts?: ServiceOpts): Promise<ServiceResult<T>> {
   // One lookup, one layer outcome (#1972) — see obs.server's contract.
   const { recordCacheLookup } = await import('./obs.server')
-  const cacheKey = opts?.mounted ? `mounted:${path}` : path
+  const cacheKey = `${opts?.mounted ? 'mounted:' : ''}${opts?.actor ? `actor:${opts.actor.username}:` : ''}${path}`
   const cached = payloadCache.get(cacheKey)
   if (cached && Date.now() - cached.at < PAYLOAD_TTL_MS) {
     recordCacheLookup('in_process')

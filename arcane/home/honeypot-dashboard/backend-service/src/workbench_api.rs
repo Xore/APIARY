@@ -7,12 +7,17 @@
 //! *authorization* check, so anyone who could reach this service (the
 //! shared x-service-token, not a per-user secret) could act on any
 //! operator's runs by naming them. Identity is now taken from
-//! x-actor-username/x-actor-role, headers only the BFF's serviceFetch/
-//! proxyToRust seam sets (see backend.server.ts) from its own verified
-//! session — never from client-controlled JSON/query. The `owner` field
-//! stays on the wire so existing request bodies don't break, but it is now
-//! only a display hint, plus (for a verified admin only) an explicit
-//! override to view/act on another operator's runs.
+//! x-actor-username, a header only the BFF's serviceFetch/proxyToRust seam
+//! sets (see backend.server.ts) from its own verified session — never from
+//! client-controlled JSON/query. The `owner` field
+//! stays on the wire so existing request bodies don't break, but nothing
+//! here reads it: it isn't deserialized at all, so no handler can make an
+//! access decision out of request data. There is deliberately no
+//! "act as another operator" override either — every mutation is
+//! admin-gated at the BFF, so a wire-level override would hand the whole
+//! authorization decision back to anyone holding the shared service
+//! token. An admin UI for another operator's runs gets added when it
+//! exists, with its own authorization.
 
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -29,49 +34,18 @@ fn error(status: StatusCode, message: impl Into<String>) -> (StatusCode, Json<Va
     (status, Json(json!({"error": message.into()})))
 }
 
-/// Caller identity verified by the BFF and forwarded as headers — see the
-/// module doc comment. `is_admin` reflects the forwarded role claim as-is;
-/// there is no further verification possible at this tier, the same trust
-/// level the shared service token already carries.
-#[derive(Debug)]
-struct Actor {
-    username: String,
-    is_admin: bool,
-}
-
-fn require_actor(headers: &HeaderMap) -> Result<Actor, (StatusCode, Json<Value>)> {
-    let username = headers
+/// The caller identity the BFF verified and forwarded — see the module doc
+/// comment. This username is the only owner any handler below acts on; the
+/// forwarded role claim is not read here, so no request can widen its own
+/// reach past the operator it authenticated as.
+fn require_actor(headers: &HeaderMap) -> Result<String, (StatusCode, Json<Value>)> {
+    headers
         .get("x-actor-username")
         .and_then(|value| value.to_str().ok())
         .map(str::trim)
-        .filter(|value| !value.is_empty());
-    match username {
-        Some(username) => {
-            let is_admin = headers
-                .get("x-actor-role")
-                .and_then(|value| value.to_str().ok())
-                == Some("admin");
-            Ok(Actor {
-                username: username.to_string(),
-                is_admin,
-            })
-        }
-        None => Err(error(StatusCode::UNAUTHORIZED, "actor identity required")),
-    }
-}
-
-/// Every non-admin request is forced to its own identity regardless of what
-/// `requested` (the wire-level `owner` field) says. A verified admin may
-/// name a different operator to view or act on their runs — the one
-/// deliberate override, same posture admins already get elsewhere in this
-/// dashboard (services_control.rs).
-fn resolve_owner(actor: &Actor, requested: &str) -> String {
-    let requested = requested.trim();
-    if actor.is_admin && !requested.is_empty() {
-        requested.to_string()
-    } else {
-        actor.username.clone()
-    }
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| error(StatusCode::UNAUTHORIZED, "actor identity required"))
 }
 
 #[derive(Deserialize)]
@@ -100,9 +74,6 @@ pub async fn analyzers(
 #[derive(Deserialize)]
 pub struct CreateRunBody {
     payload_sha256: String,
-    // Display-hint only since #3110 — never authoritative, see module doc.
-    #[allow(dead_code)]
-    owner: String,
     #[serde(default)]
     recipe_id: String,
     #[serde(default)]
@@ -121,7 +92,7 @@ pub async fn create_run(
     let actor = require_actor(&headers)?;
     let request = CreateRunRequest {
         payload_sha256: body.payload_sha256,
-        owner: actor.username,
+        owner: actor,
         recipe_id: body.recipe_id,
         recipe_revision: body.recipe_revision,
         recipe_name: body.recipe_name,
@@ -137,21 +108,13 @@ pub async fn create_run(
     }
 }
 
-#[derive(Deserialize)]
-pub struct OwnerQuery {
-    #[serde(default)]
-    owner: String,
-}
-
 pub async fn get_run(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
-    Query(query): Query<OwnerQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let actor = require_actor(&headers)?;
-    let owner = resolve_owner(&actor, &query.owner);
-    match workbench_orchestrator::get_run(&state, &id, &owner).await {
+    match workbench_orchestrator::get_run(&state, &id, &actor).await {
         Ok(run) => Ok(Json(json!({"run": run}))),
         Err(UpdateRunError::NotFound) => {
             Err(error(StatusCode::NOT_FOUND, "workbench record not found"))
@@ -164,8 +127,6 @@ pub async fn get_run(
 #[derive(Deserialize)]
 pub struct ListRunsQuery {
     #[serde(default)]
-    owner: String,
-    #[serde(default)]
     hash: String,
     #[serde(default)]
     limit: usize,
@@ -177,28 +138,19 @@ pub async fn list_runs(
     Query(query): Query<ListRunsQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let actor = require_actor(&headers)?;
-    let owner = resolve_owner(&actor, &query.owner);
-    let runs = workbench_es::list_runs_for_owner_and_hash(&state.es, &owner, &query.hash, query.limit)
+    let runs = workbench_es::list_runs_for_owner_and_hash(&state.es, &actor, &query.hash, query.limit)
         .await
         .map_err(|err| error(StatusCode::BAD_GATEWAY, err.to_string()))?;
     Ok(Json(json!({"runs": runs})))
-}
-
-#[derive(Deserialize)]
-pub struct ChildActionBody {
-    #[serde(default)]
-    owner: String,
 }
 
 pub async fn child_action(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((run_id, analyzer_id, action)): Path<(String, String, String)>,
-    Json(body): Json<ChildActionBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let actor = require_actor(&headers)?;
-    let owner = resolve_owner(&actor, &body.owner);
-    match workbench_orchestrator::child_action(&state, &run_id, &analyzer_id, &action, &owner).await
+    match workbench_orchestrator::child_action(&state, &run_id, &analyzer_id, &action, &actor).await
     {
         Ok(run) => Ok(Json(json!({"run": run}))),
         Err(UpdateRunError::NotFound) => {
@@ -212,10 +164,9 @@ pub async fn child_action(
 pub async fn list_recipes(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(_query): Query<OwnerQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let actor = require_actor(&headers)?;
-    let recipes = workbench_es::list_recipes(&state.es, &actor.username)
+    let recipes = workbench_es::list_recipes(&state.es, &actor)
         .await
         .map_err(|err| error(StatusCode::BAD_GATEWAY, err.to_string()))?;
     Ok(Json(json!({"recipes": recipes})))
@@ -228,10 +179,6 @@ pub struct SaveRecipeBody {
     name: String,
     #[serde(default)]
     description: String,
-    // Display-hint only since #3110 — never authoritative, see module doc.
-    #[allow(dead_code)]
-    #[serde(default)]
-    owner: String,
     scope: String,
     analyzers: Vec<WorkbenchSelection>,
     #[serde(default)]
@@ -252,7 +199,7 @@ pub async fn save_recipe(
         analyzers: body.analyzers,
         ..Default::default()
     };
-    match workbench_es::save_recipe(&state.es, input, &actor.username, body.base_revision).await {
+    match workbench_es::save_recipe(&state.es, input, &actor, body.base_revision).await {
         Ok(recipe) => Ok(Json(json!({"recipe": recipe}))),
         Err(SaveRecipeError::Validation(message)) => Err(error(StatusCode::BAD_REQUEST, message)),
         Err(SaveRecipeError::Conflict) => {
@@ -267,7 +214,7 @@ pub async fn save_recipe(
 
 #[cfg(test)]
 mod tests {
-    use super::{require_actor, resolve_owner, Actor};
+    use super::{require_actor, CreateRunBody, SaveRecipeBody};
     use axum::http::{HeaderMap, StatusCode};
 
     fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
@@ -277,13 +224,6 @@ mod tests {
             headers.insert(name, value.parse().expect("valid header value"));
         }
         headers
-    }
-
-    fn actor(username: &str, is_admin: bool) -> Actor {
-        Actor {
-            username: username.to_string(),
-            is_admin,
-        }
     }
 
     #[test]
@@ -307,55 +247,44 @@ mod tests {
     fn require_actor_reads_and_trims_the_username() {
         let actor = require_actor(&headers(&[("x-actor-username", "  alice  ")]))
             .expect("must accept a present username");
-        assert_eq!(actor.username, "alice");
-        assert!(!actor.is_admin);
+        assert_eq!(actor, "alice");
     }
 
     #[test]
-    fn require_actor_only_recognizes_the_exact_admin_role() {
-        let admin = require_actor(&headers(&[
+    fn the_role_claim_never_widens_the_resolved_owner() {
+        // An admin is still only ever themselves at this tier. The role
+        // header is forwarded (the BFF gates mutations with it) but reading
+        // it here would make "whose run" a wire-level decision again.
+        let actor = require_actor(&headers(&[
             ("x-actor-username", "root"),
             ("x-actor-role", "admin"),
         ]))
         .expect("must accept");
-        assert!(admin.is_admin);
-
-        // A near-miss role claim is not the admin override -- exact match
-        // only, same as the header being absent.
-        let not_admin = require_actor(&headers(&[
-            ("x-actor-username", "root"),
-            ("x-actor-role", "Administrator"),
-        ]))
-        .expect("must accept");
-        assert!(!not_admin.is_admin);
+        assert_eq!(actor, "root");
     }
 
     #[test]
-    fn non_admin_owner_field_is_ignored_entirely() {
-        // The core of #3110: operator A naming operator B in the
-        // wire-level `owner` field must never change whose runs are read,
-        // listed, cancelled, or retried.
-        let a = actor("operator-a", false);
-        assert_eq!(resolve_owner(&a, "operator-b"), "operator-a");
-        assert_eq!(resolve_owner(&a, "  operator-b  "), "operator-a");
-        assert_eq!(resolve_owner(&a, ""), "operator-a");
-    }
+    fn a_spoofed_owner_field_is_not_deserialized_at_all() {
+        // The core of #3110: a create body naming another operator must not
+        // be able to attribute the run to them -- not for an analyst, not
+        // for an admin. It stays accepted on the wire (older BFF builds
+        // still send it) and is dropped before any handler sees it, so
+        // create_run has nothing but require_actor()'s username to use.
+        let body: CreateRunBody = serde_json::from_value(serde_json::json!({
+            "payload_sha256": "a".repeat(64),
+            "owner": "operator-b",
+            "analyzers": [],
+        }))
+        .expect("legacy bodies carrying `owner` must still parse");
+        assert_eq!(body.payload_sha256, "a".repeat(64));
 
-    #[test]
-    fn self_access_resolves_to_the_caller_regardless_of_role() {
-        // Legitimate self-access: an empty requested owner always means
-        // "my own runs", admin or not.
-        assert_eq!(resolve_owner(&actor("operator-a", false), ""), "operator-a");
-        assert_eq!(resolve_owner(&actor("root", true), ""), "root");
-        assert_eq!(resolve_owner(&actor("root", true), "   "), "root");
-    }
-
-    #[test]
-    fn admin_can_override_to_a_named_owner() {
-        // The one deliberate override: a verified admin naming another
-        // operator is honored, unlike the non-admin case above.
-        let admin = actor("root", true);
-        assert_eq!(resolve_owner(&admin, "operator-b"), "operator-b");
-        assert_eq!(resolve_owner(&admin, "  operator-b  "), "operator-b");
+        let recipe: SaveRecipeBody = serde_json::from_value(serde_json::json!({
+            "name": "r",
+            "owner": "operator-b",
+            "scope": "private",
+            "analyzers": [],
+        }))
+        .expect("legacy recipe bodies carrying `owner` must still parse");
+        assert_eq!(recipe.name, "r");
     }
 }
