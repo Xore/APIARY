@@ -61,6 +61,13 @@ text. `--transcripts` additionally loads `docs/benchmarks/runs/` (off by
 default -- large); `--tierb-cache <dir>` adds a host-side decompiled-variant
 cache that is never committed to this repo.
 
+`--background <dir>` (#3146) excludes a `required_groups`/`forbidden` phrase
+from protection if it also appears in that directory's text -- generic
+reverse-engineering vocabulary ("control flow", "buffer overflow") recurs
+naturally in any decompiler output and isn't a corpus leak. Without
+`--background`, every multi-word phrase is protected as before. `ground_truth`
+prose, source, and claim text are never affected by this flag.
+
 ## What is not in this repo
 
 - S1/S2 sample data, or any teacher output derived from it.

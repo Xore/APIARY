@@ -150,13 +150,17 @@ if not sources:
 # hits were `phrase` hits on generic reverse-engineering vocabulary out of the
 # rubric's required_groups ("control flow", "buffer overflow", "does not"),
 # which a Ghidra decompilation JSON contains thousands of times by nature and
-# no case-name check can see.
+# no case-name check can see. #3146 fixed the over-protection at the source:
+# a required_groups/forbidden phrase that also shows up in the s3-src .c
+# sources is generic scoring vocabulary, not a leak, and stops being
+# protected -- pass the same background corpus here and at the gate below so
+# a chunk that survives this filter can't still be flagged there.
 def _part(label, chunk):
     """The exact text the pool will emit, so the pre-filter hashes, shingles
     and phrase-matches byte-identically to what the gate later scans."""
     return f"### source: {label}\n{chunk}"
 
-protected = decontaminate.load_protected_corpus()
+protected = decontaminate.load_protected_corpus(background_corpus=corpus / "s3-src" / "src")
 records = [decontaminate.Record(id=f"{label}#{i}", slice="S6", family="calib-prefilter",
                                 source_path="prefilter", prompt=None,
                                 completion=_part(label, chunk))
@@ -286,7 +290,9 @@ python3 "$CALIB_PY" "$CORPUS" "$CALIB" "$REPO_CORPUS" "$MIN_TOKENS" "$MAX_TOKENS
 # --- decontamination: the round7-3 (#3082) tool, unchanged ------------------
 # The calibration set is training-adjacent text, so it goes through the same
 # protected-document scan as the corpus: the 17 benchmark programs, rubric
-# ground truth + phrases, the claim pool. 0 hits or nothing ships.
+# ground truth + phrases, the claim pool. 0 hits or nothing ships. Same
+# --background as the pre-filter above (#3146), so a chunk that already
+# passed that filter can't turn around and fail this one.
 REPORT="$CALIB/decontamination-report.json"
 # Guard against a checkout too shallow to load the protected documents: a
 # scan against 0 protected docs always passes and proves nothing. The tool
@@ -296,7 +302,8 @@ ndocs=$(python3 -c "
 import sys; sys.path.insert(0, '$REPO_CORPUS')
 import decontaminate; print(len(decontaminate.load_protected_corpus()))")
 [ "$ndocs" -gt 0 ] || die "decontaminate.py loaded 0 protected documents -- $REPO checkout is incomplete (missing benchmarks corpus src/rubric or claim pool)"
-(cd "$REPO_CORPUS" && python3 decontaminate.py "$CALIB/.calib_manifest.jsonl" --out "$REPORT") \
+(cd "$REPO_CORPUS" && python3 decontaminate.py "$CALIB/.calib_manifest.jsonl" --out "$REPORT" \
+  --background "$S3_SRC/src") \
   || die "DECONTAMINATION FAILED -- see $REPORT; do not use this calibration set"
 hits=$(python3 -c "import json;print(json.load(open('$REPORT'))['total_hits'])")
 [ "$hits" = "0" ] || die "decontamination found $hits hits -- regenerate the set from clean slices"
