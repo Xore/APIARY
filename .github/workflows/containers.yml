@@ -181,9 +181,9 @@ jobs:
       # occasionally missing, it was being actively deleted between runs.
       # On the homeserver executor (the common case -- see ci-target above)
       # there is a persistent local disk right there, so export to
-      # type=local under /mnt-1/buildx-cache/<image> instead: it never
+      # type=local under /var/buildx-cache/<image> instead: it never
       # touches the GHA quota, never crosses the network, and that box has
-      # 1.6 TB free on /mnt-1 (measured 2026-09-02). The GitHub-hosted
+      # 7.0 TB free on /var (measured 2026-09-02). The GitHub-hosted
       # fallback path has no persistent disk between runs, so it keeps
       # type=gha -- a cold cache there is the expected cost of falling
       # back, not a regression. type=local has no eviction of any kind, so
@@ -193,12 +193,12 @@ jobs:
         id: cache
         run: |
           # scripts/install-homeserver.sh's provision-buildx-cache step owns
-          # creating /mnt-1/buildx-cache as github-ci-runner (/mnt-1 itself
+          # creating /var/buildx-cache as github-ci-runner (/var itself
           # is root:root 0755, so this step cannot create it). Degrade to
           # type=gha rather than `bash -e`-failing all 18 matrix rows if
           # that step has not run on this box yet -- losing the local cache
           # is a slow build, failing here is a Containers outage.
-          dir="/mnt-1/buildx-cache/${{ matrix.image }}"
+          dir="/var/buildx-cache/${{ matrix.image }}"
           # 2026-09-06: the box runs seven runner users, all in the
           # github-ci-runner group, and any of them can take this row. With
           # the default umask 022 the first one to build an image left
@@ -250,4 +250,4 @@ jobs:
         # the chance to trim a cache dir it may have partially written.
         # No-ops instantly on the GitHub-hosted fallback (script check).
         if: always() && needs.ci-target.outputs.homeserver == 'true'
-        run: scripts/prune-buildx-cache.sh "/mnt-1/buildx-cache/${{ matrix.image }}"
+        run: scripts/prune-buildx-cache.sh "/var/buildx-cache/${{ matrix.image }}"
