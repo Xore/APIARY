@@ -91,7 +91,7 @@ fi
 REPO_CORPUS="$REPO/analysis/ghidra/training/corpus"
 CALIB_PY="$CALIB/.build_calib.py"
 cat > "$CALIB_PY" <<'PYEOF'
-import hashlib, json, random, sys
+import collections, hashlib, json, random, sys
 from pathlib import Path
 
 corpus, calib, repo_corpus = map(Path, sys.argv[1:4])
@@ -161,12 +161,38 @@ records = [decontaminate.Record(id=f"{label}#{i}", slice="S6", family="calib-pre
                                 source_path="prefilter", prompt=None,
                                 completion=_part(label, chunk))
            for label, chunks in sources.items() for i, chunk in enumerate(chunks)]
-flagged = {h.sample_id for h in decontaminate.scan_samples(records, protected)}
+hits_by_sample = {}
+for h in decontaminate.scan_samples(records, protected):
+    hits_by_sample.setdefault(h.sample_id, []).append(h)
+
+# Only `phrase` hits are droppable. A phrase hit means the chunk contains a
+# 2+-word string out of a rubric required_groups/forbidden list -- i.e. generic
+# scoring vocabulary, not test-set text (see #3144). An `exact` or
+# `near_duplicate` hit is the real thing: the chunk overlaps a protected
+# ground-truth answer or benchmark source file. Silently dropping those would
+# hide a genuine corpus leak inside a drop count, so the build dies instead.
+leaks = [(sid, h) for sid, hs in hits_by_sample.items() for h in hs if h.kind != "phrase"]
+if leaks:
+    for sid, h in sorted(leaks)[:20]:
+        print(f"CALIB_LEAK {sid}: kind={h.kind} protected_source={h.protected_source} "
+              f"score={h.score}", file=sys.stderr)
+    sys.exit(f"ABORT: {len(leaks)} non-phrase decontamination hit(s) across "
+             f"{len({sid for sid, _ in leaks})} chunk(s) -- the corpus slices overlap the "
+             "protected benchmark material itself. Rebuild the slices; do not filter this away.")
+
 for label in list(sources):
     total = len(sources[label])
-    kept = [c for i, c in enumerate(sources[label]) if f"{label}#{i}" not in flagged]
+    kept, dropped_kinds = [], collections.Counter()
+    for i, chunk in enumerate(sources[label]):
+        hs = hits_by_sample.get(f"{label}#{i}")
+        if hs:
+            dropped_kinds.update((h.kind, h.protected_source) for h in hs)
+        else:
+            kept.append(chunk)
     print(f"CALIB_PREFILTER {label}: kept {len(kept)}/{total} chunks, dropped "
           f"{total - len(kept)} that the decontamination gate would flag", file=sys.stderr)
+    for (kind, src), n in dropped_kinds.most_common():
+        print(f"CALIB_PREFILTER {label}: dropped {n} {kind} {src}", file=sys.stderr)
     if kept:
         sources[label] = kept
     else:
