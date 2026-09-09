@@ -863,7 +863,7 @@ that existing independence into actual wall-clock parallelism. The
 `conpot_persona_pipeline` rows each pick a random host port in `19000-19899`
 for their throwaway Elasticsearch container specifically so two instances
 running one concurrently don't collide on a fixed port; `containers.yml`'s
-buildx cache is `type=local` under `/mnt-1/buildx-cache/<image>` when the
+buildx cache is `type=local` under `/var/buildx-cache/<image>` when the
 build lands on this box (#2822, below), which is a path on shared local
 disk rather than per-instance state, so a second instance is not cold
 there either -- no extra work needed for that tier.
@@ -921,7 +921,7 @@ the images evicting *each other*, but did nothing about the quota itself.
 
 The `Pick cache backend` step therefore chooses per executor:
 
-- **Homeserver runner** -- `type=local,dest=/mnt-1/buildx-cache/<image>`.
+- **Homeserver runner** -- `type=local,dest=/var/buildx-cache/<image>`.
   Local disk on `/mnt-1` (see `docs/HOMESERVER-DISK-LAYOUT.md`), outside
   the GitHub quota entirely, and it survives between runs on this box.
 - **GitHub-hosted fallback** -- `type=gha,scope=<image>`, unchanged. An
@@ -929,7 +929,7 @@ The `Pick cache backend` step therefore chooses per executor:
 
 **The directory must be provisioned before the runner can use it.**
 `/mnt-1` is `root:root 0755`, so the workflow cannot create
-`/mnt-1/buildx-cache` itself: `mkdir` as `github-ci-runner` fails with
+`/var/buildx-cache` itself: `mkdir` as `github-ci-runner` fails with
 `Permission denied`. `scripts/install-homeserver.sh`'s
 `provision-buildx-cache` step creates it `2775 github-ci-runner:github-ci-runner`
 (setgid so per-image subdirectories stay group-owned) and then verifies
@@ -989,7 +989,7 @@ gh variable set CI_REGISTRY_MIRROR --repo Xore/APIARY --body '172.16.0.1:5555'
 ```
 
 A `registry:3` proxy in front of Docker Hub, run under
-`ci-registry-mirror.service`, storing to `/mnt-1/ci-registry-mirror` (not
+`ci-registry-mirror.service`, storing to `/var/ci-registry-mirror` (not
 `/var`, which is the docker data root and sits near full) with a 168h
 upstream TTL. Eighteen rows times N bases collapse to one upstream fetch,
 and it keeps them across runs.

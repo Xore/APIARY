@@ -32,7 +32,7 @@ set -euo pipefail
 
 DEST=${DEST:-"$HOME/apiary-bench-snapshots/homeserver-workarea/"}
 SRC_HOST=${SRC_HOST:-homeserver}
-SRC=${SRC:-/mnt-1/benchmarks/}
+SRC=${SRC:-/var/benchmarks/}
 
 EXCLUDES=(
   --exclude=APIARY/

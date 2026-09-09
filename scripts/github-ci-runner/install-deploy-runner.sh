@@ -217,7 +217,7 @@ else
 fi
 
 # #3105: same shared-cache group-write gap as install-ci-runner.sh -- this
-# runner also builds against /mnt-1/buildx-cache, and its UMask=0022 default
+# runner also builds against /var/buildx-cache, and its UMask=0022 default
 # writes new cache files 0644, unreadable-for-write by the CI pool's users.
 unit_name="$(basename "$service_file")"
 unit_dropin_dir="/etc/systemd/system/${unit_name}.d"
