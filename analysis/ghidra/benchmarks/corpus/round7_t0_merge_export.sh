@@ -267,7 +267,14 @@ BASE16_C="$RUN_C/base_16bit"
 # inside the same unsloth container used for the merge (it already has
 # huggingface_hub and the /var/training bind).
 have_base_snapshot() { [ -s "$BASE16/model.safetensors.index.json" ] || [ -s "$BASE16/model.safetensors" ]; }
-if ! have_base_snapshot; then
+# Completion sentinel, same shape as $MERGE_DONE above: snapshot_download has
+# no atomic "done" marker of its own, so a partial download can leave
+# index.json (or a lone shard) on disk and a re-run's have_base_snapshot()
+# check reads that as finished, skips the download, and fails later at
+# convert instead.
+SNAPSHOT_DONE="$BASE16/.snapshot_done"
+if [ ! -s "$SNAPSHOT_DONE" ]; then
+  rm -rf "$BASE16"
   log "downloading untouched base $BASE_MODEL @ $BASE_REV (no adapter)"
   exec_py "base snapshot ->" <<PY3 || die "base snapshot download failed"
 from huggingface_hub import snapshot_download
@@ -275,7 +282,9 @@ p = snapshot_download("$BASE_MODEL", revision="$BASE_REV", local_dir="$BASE16_C"
 print("base snapshot ->", p)
 PY3
   have_base_snapshot || die "base snapshot incomplete at $BASE16"
+  date -u +%FT%TZ > "$SNAPSHOT_DONE" || die "cannot write $SNAPSHOT_DONE"
 fi
+[ -s "$SNAPSHOT_DONE" ] || die "base snapshot incomplete at $BASE16"
 
 BASE_GGUF_F16="$RUN/qwen2.5-coder-7b-base-f16.gguf"
 if [ ! -s "$BASE_GGUF_F16" ]; then
@@ -284,6 +293,19 @@ if [ ! -s "$BASE_GGUF_F16" ]; then
     /app/convert_hf_to_gguf.py "/var/training/runs/t0-rex86/base_16bit" --outfile "/var/training/runs/t0-rex86/qwen2.5-coder-7b-base-f16.gguf" --outtype f16 \
     || die "base convert_hf_to_gguf failed"
 fi
+
+# ---------------------------------------------------------------------------
+# 3c. Lineage assert (#3137), run before stage 4 registers anything in Ollama
+#     so a lineage collision cannot register. The base twin must be provably
+#     distinct weights from the merged model, not just a distinct file -- a
+#     re-quantised copy of the same tensors would still pass an [ -s ] guard.
+#     Both f16 GGUFs exist now; the manifest stage below reuses these shas
+#     instead of re-hashing two ~15GB files.
+# ---------------------------------------------------------------------------
+MERGED_F16_SHA=$(sha256sum "$GGUF_F16" | awk '{print $1}')
+BASE_F16_SHA=$(sha256sum "$BASE_GGUF_F16" | awk '{print $1}')
+[ "$BASE_F16_SHA" != "$MERGED_F16_SHA" ] || die "base f16 GGUF matches merged f16 GGUF -- base twin is not untouched (#3137)"
+
 BASE_Q4="$RUN/base-Q4_K_M.gguf"
 BASE_Q8="$RUN/base-Q8_0.gguf"
 [ -s "$BASE_Q4" ] || docker run --rm --entrypoint /app/llama-quantize -v /var/training:/var/training "$LLAMA_IMG" \
@@ -339,30 +361,30 @@ sudo -n rm -f "$STAGE"/*.gguf || log "warning: could not clean staged GGUFs from
 # ---------------------------------------------------------------------------
 # 5. Manifest: input SHAs, base revision, quant params, file sizes
 # ---------------------------------------------------------------------------
-python3 - "$RUN" "$ZIP_SIZE" "$ZIP_SHA" "$INNER_ACTUAL" "$INNER_ACTUAL_SIZE" <<'EOF' || die "manifest generation failed"
+python3 - "$RUN" "$ZIP_SIZE" "$ZIP_SHA" "$INNER_ACTUAL" "$INNER_ACTUAL_SIZE" "$MERGED_F16_SHA" "$BASE_F16_SHA" <<'EOF' || die "manifest generation failed"
 import hashlib, json, os, sys
-run, zip_size, zip_sha, inner_sha, inner_size = (
-    sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4], int(sys.argv[5]))
+run, zip_size, zip_sha, inner_sha, inner_size, merged_f16_sha, base_f16_sha = (
+    sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4], int(sys.argv[5]),
+    sys.argv[6], sys.argv[7])
 def sha(p):
     h = hashlib.sha256()
     with open(p, "rb") as f:
         for c in iter(lambda: f.read(1 << 20), b""):
             h.update(c)
     return h.hexdigest()
-ggufs = {n: {"path": p, "bytes": os.path.getsize(p), "sha256": sha(p)}
-         for n, p in [("rex86-merged-f16", f"{run}/rex86-merged-f16.gguf"),
-                      ("rex86-merged-Q4_K_M", f"{run}/rex86-merged-Q4_K_M.gguf"),
-                      ("rex86-merged-Q8_0", f"{run}/rex86-merged-Q8_0.gguf"),
-                      ("base-f16", f"{run}/qwen2.5-coder-7b-base-f16.gguf"),
-                      ("base-Q4_K_M", f"{run}/base-Q4_K_M.gguf"),
-                      ("base-Q8_0", f"{run}/base-Q8_0.gguf")]}
-# #3137: the base twins must be provably distinct weights from the merged
-# model, not just distinct files -- a re-quantised copy of the same tensors
-# would still pass an [ -s ] guard.
-merged_f16_sha = ggufs["rex86-merged-f16"]["sha256"]
-base_f16_sha = ggufs["base-f16"]["sha256"]
-assert base_f16_sha != merged_f16_sha, \
-    "base f16 GGUF matches merged f16 GGUF -- base twin is not untouched (#3137)"
+# rex86-merged-f16 and base-f16 shas were computed earlier in the shell (the
+# #3137 lineage assert there runs before stage 4 registers anything in
+# Ollama) -- reuse them here instead of re-hashing two ~15GB files.
+precomputed_sha = {"rex86-merged-f16": merged_f16_sha, "base-f16": base_f16_sha}
+ggufs = {}
+for n, p in [("rex86-merged-f16", f"{run}/rex86-merged-f16.gguf"),
+             ("rex86-merged-Q4_K_M", f"{run}/rex86-merged-Q4_K_M.gguf"),
+             ("rex86-merged-Q8_0", f"{run}/rex86-merged-Q8_0.gguf"),
+             ("base-f16", f"{run}/qwen2.5-coder-7b-base-f16.gguf"),
+             ("base-Q4_K_M", f"{run}/base-Q4_K_M.gguf"),
+             ("base-Q8_0", f"{run}/base-Q8_0.gguf")]:
+    ggufs[n] = {"path": p, "bytes": os.path.getsize(p),
+                "sha256": precomputed_sha[n] if n in precomputed_sha else sha(p)}
 manifest = {
     "experiment": "T0 pipeline proof (#3081)",
     "base_model": "unsloth/Qwen2.5-Coder-7B",
