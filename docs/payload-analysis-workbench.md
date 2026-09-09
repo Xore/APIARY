@@ -10,6 +10,8 @@ The dashboard has no Docker, libvirt, systemd, Ghidra, statictools, Ollama, or h
 
 GitHub publication is deliberately absent from `Run all`. The workbench links to the existing administrator-only publisher, which retains its confirmation, dry-run, audit, and external-egress gates.
 
+Run ownership is likewise never taken from client input. The Rust tier derives it from the caller's verified identity, forwarded by the BFF as internal-only `x-actor-username`/`x-actor-role` headers the browser cannot set, and rejects any request missing them. A request body's `owner` field is kept only as a display hint; a non-admin caller can never use it to see or act on another operator's run, and only a verified admin identity can target one explicitly (#3110).
+
 ## Analyzer registry
 
 Seven analyzer IDs, one server-computed `workbenchAnalyzer` registry
@@ -107,7 +109,7 @@ degraded to a stale local copy (#405 follow-up).
 
 ## HTTP contracts
 
-All APIs require a live administrator identity. Every mutation additionally requires a same-origin request, `application/json`, one document no larger than 64 KiB, and the closed Go schema (unknown fields are rejected).
+All APIs require a live administrator identity. Every mutation additionally requires a same-origin request, `application/json`, one document no larger than 64 KiB, and the closed Go schema (unknown fields are rejected). Create, read/list, reconcile, cancel, and retry are further scoped server-side to the caller's verified owner identity (see Trust boundary) — a request's `owner` field is a display hint only, never an access decision (#3110).
 
 | Method and route | Purpose |
 |---|---|

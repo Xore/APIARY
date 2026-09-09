@@ -132,7 +132,11 @@ const fetchGhidra = createServerFn({ method: 'GET' })
 // GET (no ownership); recipes/runs/mutations are always scoped to the signed-
 // in operator's own username, derived server-side from getSessionUser() —
 // never accepted as client input, so one operator can't read or cancel
-// another's runs by editing the request.
+// another's runs by editing the request. #3110: that username now also rides
+// along as the x-actor-username/-role headers serviceFetch attaches (the
+// `actor` opt below), so the Rust tier enforces the same scoping itself
+// instead of trusting a client-suppliable `owner` field — see
+// workbench_api.rs's module doc.
 // #2178: a failed catalog request used to wear the same "not found"
 // message as a genuinely uncaptured hash — telling an operator their
 // sample doesn't exist when the mounted workbench instance was simply
@@ -160,6 +164,7 @@ const fetchRecipes = createServerFn({ method: 'GET' }).handler(async (): Promise
   const { serviceJSON } = await import('../lib/backend.server')
   return serviceJSON<{ recipes: WorkbenchRecipe[] }>(`/api/v1/workbench/recipes?owner=${encodeURIComponent(user?.username ?? '')}`, {
     mounted: true,
+    actor: { username: user?.username ?? '', role: user?.role ?? '' },
   })
 })
 
@@ -169,6 +174,7 @@ const fetchOwnRuns = createServerFn({ method: 'GET' }).handler(async (): Promise
   const { serviceJSON } = await import('../lib/backend.server')
   return serviceJSON<{ runs: WorkbenchRun[] }>(`/api/v1/workbench/runs?owner=${encodeURIComponent(user?.username ?? '')}&limit=25`, {
     mounted: true,
+    actor: { username: user?.username ?? '', role: user?.role ?? '' },
   })
 })
 
@@ -184,7 +190,7 @@ const refreshRunFn = createServerFn({ method: 'GET' })
     const response = await serviceFetch(
       `/api/v1/workbench/runs/${encodeURIComponent(data.id)}?owner=${encodeURIComponent(user?.username ?? '')}`,
       undefined,
-      { mounted: true },
+      { mounted: true, actor: { username: user?.username ?? '', role: user?.role ?? '' } },
     )
     if (!response.ok) return { ok: false, error: await response.text() }
     const body = (await response.json()) as { run: WorkbenchRun }
@@ -192,8 +198,10 @@ const refreshRunFn = createServerFn({ method: 'GET' })
   })
 
 // Every mutation below is admin-gated at the BFF, same posture as
-// reports.tsx's definition CRUD and settings.tsx's savePresentation —
-// workbench_api.rs itself has no role check, so this is the only gate.
+// reports.tsx's definition CRUD and settings.tsx's savePresentation. #3110:
+// that no longer is the only gate — workbench_api.rs independently derives
+// per-owner authorization from the actor headers below, so this BFF check
+// is only "who may mutate at all," not "whose run gets touched."
 const submitRun = createServerFn({ method: 'POST' })
   .validator((input: { payload_sha256: string; recipe_name: string; analyzers: WorkbenchSelection[] }) => input)
   .handler(async ({ data }): Promise<RunResult> => {
@@ -213,7 +221,7 @@ const submitRun = createServerFn({ method: 'POST' })
           analyzers: data.analyzers,
         }),
       },
-      { mounted: true },
+      { mounted: true, actor: { username: user?.username ?? '', role: user?.role ?? '' } },
     )
     if (!response.ok) return { ok: false, error: await response.text() }
     const body = (await response.json()) as { run: WorkbenchRun; reused: boolean }
@@ -233,7 +241,7 @@ const saveRecipeFn = createServerFn({ method: 'POST' })
     const response = await serviceFetch(
       '/api/v1/workbench/recipes',
       { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...data, owner: user?.username ?? '' }) },
-      { mounted: true },
+      { mounted: true, actor: { username: user?.username ?? '', role: user?.role ?? '' } },
     )
     if (!response.ok) return { ok: false, error: await response.text() }
     const body = (await response.json()) as { recipe: WorkbenchRecipe }
@@ -254,7 +262,7 @@ const childActionFn = createServerFn({ method: 'POST' })
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ owner: user?.username ?? '' }),
       },
-      { mounted: true },
+      { mounted: true, actor: { username: user?.username ?? '', role: user?.role ?? '' } },
     )
     if (!response.ok) return { ok: false, error: await response.text() }
     const body = (await response.json()) as { run: WorkbenchRun }

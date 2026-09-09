@@ -104,7 +104,16 @@ function currentRequestId(): string | undefined {
   return (globalThis as typeof globalThis & { __APIARY_REQ_ID__?: RequestContextRuntime }).__APIARY_REQ_ID__?.current?.()
 }
 
-export async function serviceFetch(path: string, init?: RequestInit, opts?: { mounted?: boolean }): Promise<Response> {
+/** Verified caller identity for the workbench's per-owner authorization
+ * (#3110) — only ever built from getSessionUser() at a server-function call
+ * site, never from client input. Forwarded as x-actor-username/x-actor-role,
+ * the only per-user signal the Rust tier trusts; see workbench_api.rs's
+ * module doc for why the wire-level `owner` field alone wasn't enough. */
+export type ServiceActor = { username: string; role: string }
+
+export type ServiceOpts = { mounted?: boolean; actor?: ServiceActor }
+
+export async function serviceFetch(path: string, init?: RequestInit, opts?: ServiceOpts): Promise<Response> {
   const base =
     serveMode() === 'frontend'
       ? `${bffInternalURL()}/${opts?.mounted ? 'bff-mounted' : 'bff'}`
@@ -123,6 +132,9 @@ export async function serviceFetch(path: string, init?: RequestInit, opts?: { mo
           // prefetchers, which have nothing to correlate with yet.
           'x-request-id': currentRequestId() ?? '',
           'x-service-token': process.env.SERVICE_TOKEN ?? '',
+          // #3110: per-user identity for the Rust tier's authorization —
+          // only present when the caller passed one, never guessed here.
+          ...(opts?.actor ? { 'x-actor-username': opts.actor.username, 'x-actor-role': opts.actor.role } : {}),
         },
         signal: init?.signal ?? AbortSignal.timeout(15_000),
       }),
@@ -217,7 +229,7 @@ export function parseRetryAfter(value: string | null): number | undefined {
  *
  * Only successes are cached, exactly as before — a failure must never turn
  * into fifteen seconds of cached certainty. */
-export async function serviceJSONResult<T>(path: string, opts?: { mounted?: boolean }): Promise<ServiceResult<T>> {
+export async function serviceJSONResult<T>(path: string, opts?: ServiceOpts): Promise<ServiceResult<T>> {
   // One lookup, one layer outcome (#1972) — see obs.server's contract.
   const { recordCacheLookup } = await import('./obs.server')
   const cacheKey = opts?.mounted ? `mounted:${path}` : path
@@ -270,7 +282,7 @@ export async function serviceJSONResult<T>(path: string, opts?: { mounted?: bool
  * is now a thin wrapper over serviceJSONResult (#1966): callers that need
  * to distinguish "empty" from "down" use that directly instead of trying
  * to un-collapse this one. */
-export async function serviceJSON<T>(path: string, opts?: { mounted?: boolean }): Promise<T | null> {
+export async function serviceJSON<T>(path: string, opts?: ServiceOpts): Promise<T | null> {
   const result = await serviceJSONResult<T>(path, opts)
   return result.ok ? result.body : null
 }
@@ -346,10 +358,17 @@ export async function proxyToRust(
       ? `${target.pathname.slice(prefixLength) || '/'}${target.search}`
       : `/${splat ?? ''}${target.search}`
   const contentType = request.headers.get('content-type')
+  // #3110: forwarded opaquely, same as content-type — this proxy doesn't
+  // interpret actor identity, it just carries whatever serviceFetch (the
+  // only sanctioned caller) set on the request it's relaying.
+  const actorUsername = request.headers.get('x-actor-username')
+  const actorRole = request.headers.get('x-actor-role')
   const upstream = await fetch(`${base}${upstreamPath}`, {
     method: request.method,
     headers: {
       ...(contentType ? { 'content-type': contentType } : {}),
+      ...(actorUsername ? { 'x-actor-username': actorUsername } : {}),
+      ...(actorRole ? { 'x-actor-role': actorRole } : {}),
       // #1972: same correlation-id forwarding as serviceFetch — a split
       // deployment must join hops identically.
       'x-request-id': currentRequestId() ?? '',
