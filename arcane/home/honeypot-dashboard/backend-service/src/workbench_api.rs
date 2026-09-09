@@ -1,11 +1,26 @@
-//! Payload Workbench HTTP surface — JSON adaptation of dashboard/
-//! settings_api-style identity (owner supplied as a plain BFF param, same
-//! precedent as preferences.rs/services_control.rs) over
-//! workbench_orchestrator.rs's run/child logic and workbench_es.rs's
-//! recipe storage.
+//! Payload Workbench HTTP surface over workbench_orchestrator.rs's run/child
+//! logic and workbench_es.rs's recipe storage.
+//!
+//! #3110: ownership used to be a plain BFF-supplied `owner` body/query
+//! field, same precedent as preferences.rs/services_control.rs — fine for
+//! those (audit logging, admin-only panes), but here it was also the
+//! *authorization* check, so anyone who could reach this service (the
+//! shared x-service-token, not a per-user secret) could act on any
+//! operator's runs by naming them. Identity is now taken from
+//! x-actor-username, a header only the BFF's serviceFetch/proxyToRust seam
+//! sets (see backend.server.ts) from its own verified session — never from
+//! client-controlled JSON/query. The `owner` field
+//! stays on the wire so existing request bodies don't break, but nothing
+//! here reads it: it isn't deserialized at all, so no handler can make an
+//! access decision out of request data. There is deliberately no
+//! "act as another operator" override either — every mutation is
+//! admin-gated at the BFF, so a wire-level override would hand the whole
+//! authorization decision back to anyone holding the shared service
+//! token. An admin UI for another operator's runs gets added when it
+//! exists, with its own authorization.
 
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -17,6 +32,20 @@ use crate::AppState;
 
 fn error(status: StatusCode, message: impl Into<String>) -> (StatusCode, Json<Value>) {
     (status, Json(json!({"error": message.into()})))
+}
+
+/// The caller identity the BFF verified and forwarded — see the module doc
+/// comment. This username is the only owner any handler below acts on; the
+/// forwarded role claim is not read here, so no request can widen its own
+/// reach past the operator it authenticated as.
+fn require_actor(headers: &HeaderMap) -> Result<String, (StatusCode, Json<Value>)> {
+    headers
+        .get("x-actor-username")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| error(StatusCode::UNAUTHORIZED, "actor identity required"))
 }
 
 #[derive(Deserialize)]
@@ -45,7 +74,6 @@ pub async fn analyzers(
 #[derive(Deserialize)]
 pub struct CreateRunBody {
     payload_sha256: String,
-    owner: String,
     #[serde(default)]
     recipe_id: String,
     #[serde(default)]
@@ -58,14 +86,13 @@ pub struct CreateRunBody {
 
 pub async fn create_run(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<CreateRunBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    if body.owner.trim().is_empty() {
-        return Err(error(StatusCode::BAD_REQUEST, "owner is required"));
-    }
+    let actor = require_actor(&headers)?;
     let request = CreateRunRequest {
         payload_sha256: body.payload_sha256,
-        owner: body.owner,
+        owner: actor,
         recipe_id: body.recipe_id,
         recipe_revision: body.recipe_revision,
         recipe_name: body.recipe_name,
@@ -81,18 +108,13 @@ pub async fn create_run(
     }
 }
 
-#[derive(Deserialize)]
-pub struct OwnerQuery {
-    #[serde(default)]
-    owner: String,
-}
-
 pub async fn get_run(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
-    Query(query): Query<OwnerQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    match workbench_orchestrator::get_run(&state, &id, &query.owner).await {
+    let actor = require_actor(&headers)?;
+    match workbench_orchestrator::get_run(&state, &id, &actor).await {
         Ok(run) => Ok(Json(json!({"run": run}))),
         Err(UpdateRunError::NotFound) => {
             Err(error(StatusCode::NOT_FOUND, "workbench record not found"))
@@ -105,8 +127,6 @@ pub async fn get_run(
 #[derive(Deserialize)]
 pub struct ListRunsQuery {
     #[serde(default)]
-    owner: String,
-    #[serde(default)]
     hash: String,
     #[serde(default)]
     limit: usize,
@@ -114,35 +134,23 @@ pub struct ListRunsQuery {
 
 pub async fn list_runs(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(query): Query<ListRunsQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    if query.owner.trim().is_empty() {
-        return Err(error(StatusCode::BAD_REQUEST, "owner is required"));
-    }
-    let runs = workbench_es::list_runs_for_owner_and_hash(
-        &state.es,
-        &query.owner,
-        &query.hash,
-        query.limit,
-    )
-    .await
-    .map_err(|err| error(StatusCode::BAD_GATEWAY, err.to_string()))?;
+    let actor = require_actor(&headers)?;
+    let runs = workbench_es::list_runs_for_owner_and_hash(&state.es, &actor, &query.hash, query.limit)
+        .await
+        .map_err(|err| error(StatusCode::BAD_GATEWAY, err.to_string()))?;
     Ok(Json(json!({"runs": runs})))
-}
-
-#[derive(Deserialize)]
-pub struct ChildActionBody {
-    #[serde(default)]
-    owner: String,
 }
 
 pub async fn child_action(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path((run_id, analyzer_id, action)): Path<(String, String, String)>,
-    Json(body): Json<ChildActionBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    match workbench_orchestrator::child_action(&state, &run_id, &analyzer_id, &action, &body.owner)
-        .await
+    let actor = require_actor(&headers)?;
+    match workbench_orchestrator::child_action(&state, &run_id, &analyzer_id, &action, &actor).await
     {
         Ok(run) => Ok(Json(json!({"run": run}))),
         Err(UpdateRunError::NotFound) => {
@@ -155,9 +163,10 @@ pub async fn child_action(
 
 pub async fn list_recipes(
     State(state): State<AppState>,
-    Query(query): Query<OwnerQuery>,
+    headers: HeaderMap,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let recipes = workbench_es::list_recipes(&state.es, &query.owner)
+    let actor = require_actor(&headers)?;
+    let recipes = workbench_es::list_recipes(&state.es, &actor)
         .await
         .map_err(|err| error(StatusCode::BAD_GATEWAY, err.to_string()))?;
     Ok(Json(json!({"recipes": recipes})))
@@ -170,7 +179,6 @@ pub struct SaveRecipeBody {
     name: String,
     #[serde(default)]
     description: String,
-    owner: String,
     scope: String,
     analyzers: Vec<WorkbenchSelection>,
     #[serde(default)]
@@ -179,11 +187,10 @@ pub struct SaveRecipeBody {
 
 pub async fn save_recipe(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<SaveRecipeBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    if body.owner.trim().is_empty() {
-        return Err(error(StatusCode::BAD_REQUEST, "owner is required"));
-    }
+    let actor = require_actor(&headers)?;
     let input = WorkbenchRecipe {
         id: body.id,
         name: body.name,
@@ -192,7 +199,7 @@ pub async fn save_recipe(
         analyzers: body.analyzers,
         ..Default::default()
     };
-    match workbench_es::save_recipe(&state.es, input, &body.owner, body.base_revision).await {
+    match workbench_es::save_recipe(&state.es, input, &actor, body.base_revision).await {
         Ok(recipe) => Ok(Json(json!({"recipe": recipe}))),
         Err(SaveRecipeError::Validation(message)) => Err(error(StatusCode::BAD_REQUEST, message)),
         Err(SaveRecipeError::Conflict) => {
@@ -202,5 +209,82 @@ pub async fn save_recipe(
             Err(error(StatusCode::NOT_FOUND, "workbench record not found"))
         }
         Err(SaveRecipeError::Storage(err)) => Err(error(StatusCode::BAD_GATEWAY, err.to_string())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{require_actor, CreateRunBody, SaveRecipeBody};
+    use axum::http::{HeaderMap, StatusCode};
+
+    fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        for (name, value) in pairs {
+            let name: axum::http::HeaderName = name.parse().expect("valid header name");
+            headers.insert(name, value.parse().expect("valid header value"));
+        }
+        headers
+    }
+
+    #[test]
+    fn require_actor_rejects_missing_identity() {
+        // No forwarded identity at all -- the BFF didn't attach one, or a
+        // request reached this tier some other way. Must refuse outright,
+        // never fall back to a default trusted state.
+        let (status, _) = require_actor(&HeaderMap::new()).expect_err("must reject");
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn require_actor_rejects_blank_username() {
+        // Whitespace-only counts as absent, same as no header at all.
+        let (status, _) =
+            require_actor(&headers(&[("x-actor-username", "   ")])).expect_err("must reject");
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn require_actor_reads_and_trims_the_username() {
+        let actor = require_actor(&headers(&[("x-actor-username", "  alice  ")]))
+            .expect("must accept a present username");
+        assert_eq!(actor, "alice");
+    }
+
+    #[test]
+    fn the_role_claim_never_widens_the_resolved_owner() {
+        // An admin is still only ever themselves at this tier. The role
+        // header is forwarded (the BFF gates mutations with it) but reading
+        // it here would make "whose run" a wire-level decision again.
+        let actor = require_actor(&headers(&[
+            ("x-actor-username", "root"),
+            ("x-actor-role", "admin"),
+        ]))
+        .expect("must accept");
+        assert_eq!(actor, "root");
+    }
+
+    #[test]
+    fn a_spoofed_owner_field_is_not_deserialized_at_all() {
+        // The core of #3110: a create body naming another operator must not
+        // be able to attribute the run to them -- not for an analyst, not
+        // for an admin. It stays accepted on the wire (older BFF builds
+        // still send it) and is dropped before any handler sees it, so
+        // create_run has nothing but require_actor()'s username to use.
+        let body: CreateRunBody = serde_json::from_value(serde_json::json!({
+            "payload_sha256": "a".repeat(64),
+            "owner": "operator-b",
+            "analyzers": [],
+        }))
+        .expect("legacy bodies carrying `owner` must still parse");
+        assert_eq!(body.payload_sha256, "a".repeat(64));
+
+        let recipe: SaveRecipeBody = serde_json::from_value(serde_json::json!({
+            "name": "r",
+            "owner": "operator-b",
+            "scope": "private",
+            "analyzers": [],
+        }))
+        .expect("legacy recipe bodies carrying `owner` must still parse");
+        assert_eq!(recipe.name, "r");
     }
 }
