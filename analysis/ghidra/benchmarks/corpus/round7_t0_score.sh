@@ -105,7 +105,7 @@ score_of() { python3 -c "import json;print(json.load(open('$1'))['total_score'])
 # UNRESOLVED marker -- identical JSON shape to sweep_extra.sh's
 # mark_unresolved_if_no_majority, so aggregators read both the same way.
 mark_unresolved_if_no_majority() { # tier slug tag
-  python3 - "$RESULTS7" "$1" "$2" "$3" <<'EOF'
+  python3 - "$OUT" "$1" "$2" "$3" <<'EOF'
 import json, sys, datetime, collections, pathlib
 base, tier, slug, tag = sys.argv[1:5]
 scores = []
