@@ -221,6 +221,17 @@ for TAG in $T0_TAGS; do
     log "SKIP $TAG (already measured)"
     continue
   fi
+  # Ollama sometimes rewrites quant-shaped tag case on write (#1947 bug class,
+  # fixed for sweep_extra.sh by 32dbdeb1): match case-insensitively and hand
+  # record_baseline.py / ollama stop the spelling Ollama actually holds. slug
+  # stays derived from the roster's own spelling above, so output filenames
+  # are unaffected. A tag not installed under any case is left as-is and
+  # falls through do_run's existing failure path.
+  RESOLVED=$(docker exec ghidra-ollama-1 ollama list 2>/dev/null | awk '{print $1}' | grep -ixF "$TAG" | head -1)
+  if [ -n "$RESOLVED" ] && [ "$RESOLVED" != "$TAG" ]; then
+    log "tag case differs: roster '$TAG' -> ollama '$RESOLVED'"
+    TAG="$RESOLVED"
+  fi
   for TIER in A B; do
     if do_run "$TIER" "$slug" "$TAG" 1; then
       extract_cases "$TIER" "$slug" 1
