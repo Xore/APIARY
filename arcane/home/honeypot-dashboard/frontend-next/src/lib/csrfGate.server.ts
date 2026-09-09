@@ -26,8 +26,12 @@ export function crossOriginResponse(): Response {
   return Response.json({ ok: false, error: 'Cross-origin request rejected.' }, { status: 403 })
 }
 
-export function isSameOriginRequest(request: Request): boolean {
-  if (SAFE_METHODS.has(request.method)) return true
+// Method-agnostic core of the check: SAFE_METHODS above assumes a GET/HEAD
+// never changes state, which is true for server functions but not for
+// /auth/logout (#3153) — that route clears the session on GET and needs the
+// Origin/Referer comparison to run unconditionally, so it calls this
+// directly instead of isSameOriginRequest.
+export function hasSameOriginHeader(request: Request): boolean {
   const header = request.headers.get('origin') ?? request.headers.get('referer')
   if (!header) return false
   try {
@@ -37,4 +41,9 @@ export function isSameOriginRequest(request: Request): boolean {
   } catch {
     return false
   }
+}
+
+export function isSameOriginRequest(request: Request): boolean {
+  if (SAFE_METHODS.has(request.method)) return true
+  return hasSameOriginHeader(request)
 }

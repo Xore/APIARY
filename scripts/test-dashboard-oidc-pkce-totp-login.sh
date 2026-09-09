@@ -661,7 +661,20 @@ fi
 # redis existence check -- a stolen-cookie scenario must fail after logout.
 if [ -n "${sid:-}" ]; then
   cp "${jar}" "${flow_dir}/jar-prelogout.txt"
-  logout_headers=$(curl -s -D - -o /dev/null -c "${jar}" -b "${jar}" "${app_base}/auth/logout")
+
+  # #3153: a cross-origin logout call must 403 and leave the session in
+  # redis untouched -- run this before the real logout below, while the
+  # session is still live, so a false "still in redis" pass can't hide
+  # behind the real logout having already torn it down.
+  forged_logout_status=$(curl -s -o /dev/null -w '%{http_code}' -b "${jar}" -H "Origin: http://evil.example" "${app_base}/auth/logout")
+  forged_still_in_redis=$(docker exec "${redis}" redis-cli EXISTS "bff:session:${sid}")
+  if [ "${forged_logout_status}" = "403" ] && [ "${forged_still_in_redis}" = "1" ]; then
+    ok "cross-origin /auth/logout (Origin: evil.example) is rejected with 403 and leaves the session in redis (#3153)"
+  else
+    bad "cross-origin logout was not blocked as expected: status=${forged_logout_status} redis EXISTS=${forged_still_in_redis}"
+  fi
+
+  logout_headers=$(curl -s -D - -o /dev/null -c "${jar}" -b "${jar}" -H "Origin: ${app_base}" "${app_base}/auth/logout")
   logout_status=$(echo "${logout_headers}" | head -1 | awk '{print $2}')
   logout_location=$(echo "${logout_headers}" | grep -i '^location:' | sed 's/^[Ll]ocation: //' | tr -d '\r')
   case "${logout_location}" in

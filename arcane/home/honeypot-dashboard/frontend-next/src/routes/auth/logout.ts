@@ -11,9 +11,13 @@
 // reason; this port had dropped that step. buildEndSessionUrl requires
 // live discovery metadata, so it's wrapped in a fallback to the previous
 // local-only behavior -- a Keycloak hiccup must never leave a user unable
-// to sign out of the BFF session at all.
+// to sign out of the BFF session at all. Typed-URL/direct navigation to
+// this route now 403s by design (#3153): it's cross-origin from the
+// browser's perspective (no Origin/Referer matching this app), same as a
+// forged cross-site logout call.
 import { createFileRoute } from '@tanstack/react-router'
 import * as oidc from 'openid-client'
+import { crossOriginResponse, hasSameOriginHeader } from '../../lib/csrfGate.server'
 import { clearSessionCookie, destroySession, getSession, sidFrom } from '../../lib/session.server'
 import { externalURL, oidcConfig } from '../../lib/oidc.server'
 
@@ -21,6 +25,12 @@ export const Route = createFileRoute('/auth/logout')({
   server: {
     handlers: {
       GET: async ({ request }) => {
+        // #3153: this GET is state-changing (clears the session), so unlike
+        // a real safe method it can't skip the Origin/Referer check the way
+        // isSameOriginRequest's SAFE_METHODS shortcut would — any cross-site
+        // page could otherwise force a sign-out just by loading this URL.
+        if (!hasSameOriginHeader(request)) return crossOriginResponse()
+
         const sid = sidFrom(request)
         const session = await getSession(sid)
         await destroySession(sid)

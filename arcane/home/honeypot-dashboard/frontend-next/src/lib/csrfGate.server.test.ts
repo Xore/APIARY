@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { crossOriginResponse, isSameOriginRequest } from './csrfGate.server'
+import { crossOriginResponse, hasSameOriginHeader, isSameOriginRequest } from './csrfGate.server'
 
 afterEach(() => {
   delete process.env.OIDC_EXTERNAL_URL
@@ -53,6 +53,23 @@ describe('isSameOriginRequest', () => {
   it('rejects a foreign Origin whose host does not match the request host either', () => {
     process.env.OIDC_EXTERNAL_URL = 'https://dashboard.example'
     expect(isSameOriginRequest(req('POST', { origin: 'https://evil.example' }))).toBe(false)
+  })
+})
+
+describe('hasSameOriginHeader', () => {
+  it('rejects a GET with no Origin or Referer, unlike isSameOriginRequest (#3153)', () => {
+    expect(hasSameOriginHeader(req('GET'))).toBe(false)
+    expect(isSameOriginRequest(req('GET'))).toBe(true)
+  })
+
+  it('accepts a GET with a matching Origin', () => {
+    process.env.OIDC_EXTERNAL_URL = 'https://dashboard.example'
+    expect(hasSameOriginHeader(req('GET', { origin: 'https://dashboard.example' }))).toBe(true)
+  })
+
+  it('rejects a GET with a cross-site Origin', () => {
+    process.env.OIDC_EXTERNAL_URL = 'https://dashboard.example'
+    expect(hasSameOriginHeader(req('GET', { origin: 'https://evil.example' }))).toBe(false)
   })
 })
 
