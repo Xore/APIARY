@@ -7,7 +7,9 @@ Protected material -- must not leak into a training sample above the
 near-duplicate threshold:
   - the 17 benchmark corpus programs' C source (analysis/ghidra/benchmarks/corpus/src/*.c)
   - their rubric ground_truth prose and required_groups/forbidden phrases
-    (analysis/ghidra/benchmarks/corpus/rev_cases_v2_rubric.json)
+    (analysis/ghidra/benchmarks/corpus/rev_cases_v2_rubric.json) -- a phrase also
+    found in --background's reference corpus is generic scoring vocabulary,
+    not a leak, and is not protected (#3146)
   - the adjudicated claim pool's claim text (docs/benchmarks/claim-pools/tier-a-v1.json)
   - transcripts under docs/benchmarks/runs/ (optional, --transcripts; can be large)
   - a live tierb-cache directory of decompiled variants (host-only, --tierb-cache; not committed here)
@@ -84,12 +86,32 @@ def _walk_strings(obj) -> Iterable[str]:
             yield from _walk_strings(v)
 
 
-def load_protected_corpus(*, tierb_cache: Optional[Path] = None, transcripts: bool = False) -> list[ProtectedDoc]:
+def _background_phrase_texts(background_corpus: Optional[Path]) -> Optional[list[str]]:
+    """Normalised text of every file under a reference corpus of unprotected,
+    definitely-not-test-set material. None means no reference corpus was
+    supplied (or it doesn't exist) -- the signal to fall back to protecting
+    every multi-word phrase, same as before #3146 existed."""
+    if not background_corpus or not background_corpus.is_dir():
+        return None
+    texts = [normalize(f.read_text(errors="replace"))
+             for f in sorted(background_corpus.rglob("*")) if f.is_file()]
+    return texts or None
+
+
+def load_protected_corpus(*, tierb_cache: Optional[Path] = None, transcripts: bool = False,
+                           background_corpus: Optional[Path] = None) -> list[ProtectedDoc]:
     docs: list[ProtectedDoc] = []
 
     src_dir = BENCH_CORPUS_DIR / "src"
     for c_file in sorted(src_dir.glob("*.c")):
         docs.append(ProtectedDoc(f"corpus-src:{c_file.name}", "source", c_file.read_text()))
+
+    background = _background_phrase_texts(background_corpus)
+
+    def is_generic(phrase: str) -> bool:
+        # No reference corpus -- can't tell generic from specific, so protect
+        # everything (#3146: never silently weaken the scan).
+        return background is not None and any(normalize(phrase) in t for t in background)
 
     rubric_path = BENCH_CORPUS_DIR / "rev_cases_v2_rubric.json"
     if rubric_path.exists():
@@ -100,10 +122,13 @@ def load_protected_corpus(*, tierb_cache: Optional[Path] = None, transcripts: bo
                 docs.append(ProtectedDoc(f"rubric-ground-truth:{case_name}", "ground_truth", gt))
             for group in case.get("required_groups", []):
                 for phrase in group:
-                    if len(phrase.split()) >= 2:  # lone common words are too noisy to protect
+                    # lone common words are too noisy to protect; a multi-word
+                    # phrase that also shows up in the background corpus is
+                    # generic scoring vocabulary, not an identifying leak (#3146)
+                    if len(phrase.split()) >= 2 and not is_generic(phrase):
                         docs.append(ProtectedDoc(f"rubric-phrase:{case_name}", "phrase", phrase))
             for term in case.get("forbidden", []):
-                if len(term.split()) >= 2:
+                if len(term.split()) >= 2 and not is_generic(term):
                     docs.append(ProtectedDoc(f"rubric-forbidden:{case_name}", "phrase", term))
 
     if CLAIM_POOL_PATH.exists():
@@ -205,11 +230,12 @@ def build_report(records: list[Record], hits: list[Hit], protected: list[Protect
 
 
 def run(manifests: list[Path], *, tierb_cache: Optional[Path], transcripts: bool,
-        threshold: float, out: Path) -> dict:
+        threshold: float, out: Path, background_corpus: Optional[Path] = None) -> dict:
     records: list[Record] = []
     for m in manifests:
         records.extend(iter_jsonl(m))
-    protected = load_protected_corpus(tierb_cache=tierb_cache, transcripts=transcripts)
+    protected = load_protected_corpus(tierb_cache=tierb_cache, transcripts=transcripts,
+                                       background_corpus=background_corpus)
     hits = scan_samples(records, protected, threshold=threshold)
     report = build_report(records, hits, protected, threshold=threshold)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -274,6 +300,41 @@ def demo() -> None:
     assert hits == [], hits
 
     print("decontaminate.py demo: ok (1/3 fixture samples correctly caught, clean subset passes)")
+    _demo_background_discrimination()
+
+
+def _demo_background_discrimination() -> None:
+    """#3146: a required_groups/forbidden phrase that also shows up in an
+    unprotected reference corpus must not block otherwise-clean decompiler
+    text, while ground truth and a phrase absent from that corpus still must."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        background_dir = Path(td) / "background"
+        background_dir.mkdir()
+        (background_dir / "notes.txt").write_text(
+            "This note only ever discusses control flow in the abstract."
+        )
+
+        protected = load_protected_corpus(background_corpus=background_dir)
+        assert not any(d.kind == "phrase" and d.text == "control flow" for d in protected)
+        assert any(d.kind == "phrase" and d.text == "not attacker-controlled" for d in protected)
+
+        rubric = json.loads((BENCH_CORPUS_DIR / "rev_cases_v2_rubric.json").read_text())["cases"]
+        records = [
+            Record(id="fx-generic", slice="S3", family="calib-prefilter", source_path="fixture",
+                   prompt=None, completion="The control flow here is a simple three-way branch."),
+            Record(id="fx-ground-truth", slice="S3", family="calib-prefilter", source_path="fixture",
+                   prompt=None, completion=rubric["xor_decode_loop"]["ground_truth"]),
+            Record(id="fx-specific", slice="S3", family="calib-prefilter", source_path="fixture",
+                   prompt=None, completion="Argument zero is not attacker-controlled in this path."),
+        ]
+        hits = {h.sample_id: h for h in scan_samples(records, protected)}
+        assert "fx-generic" not in hits, hits.get("fx-generic")
+        assert hits["fx-ground-truth"].kind == "exact", hits["fx-ground-truth"]
+        assert hits["fx-specific"].kind == "phrase", hits["fx-specific"]
+
+    print("decontaminate.py demo: background-corpus phrase discrimination ok (#3146)")
 
 
 def main() -> int:
@@ -281,6 +342,9 @@ def main() -> int:
     parser.add_argument("manifests", nargs="*", type=Path, help="corpus-v1 *_manifest.jsonl files to scan")
     parser.add_argument("--tierb-cache", type=Path, default=None, help="host-only decompiled-variant cache dir")
     parser.add_argument("--transcripts", action="store_true", help="also load docs/benchmarks/runs/ (slow)")
+    parser.add_argument("--background", type=Path, default=None,
+                         help="reference corpus dir of unprotected text; a required_groups/forbidden "
+                              "phrase found there is generic and is not protected (#3146)")
     parser.add_argument("--threshold", type=float, default=JACCARD_THRESHOLD)
     parser.add_argument("--out", type=Path, default=Path("decontamination-report.json"))
     parser.add_argument("--fixture", action="store_true", help="run the built-in tiny fixture instead of --manifests")
@@ -290,7 +354,7 @@ def main() -> int:
         report = run_fixture(args.out)
     elif args.manifests:
         report = run(args.manifests, tierb_cache=args.tierb_cache, transcripts=args.transcripts,
-                      threshold=args.threshold, out=args.out)
+                      threshold=args.threshold, out=args.out, background_corpus=args.background)
     else:
         parser.error("give at least one manifest, or pass --fixture")
         return 2
