@@ -30,8 +30,8 @@ services:
     environment:
       HF_HOME: /hf-cache
     volumes:
-      - /mnt-1/training:/workspace
-      - /mnt-1/hf-cache:/hf-cache
+      - /var/training:/workspace
+      - /var/hf-cache:/hf-cache
     deploy:
       resources:
         reservations:

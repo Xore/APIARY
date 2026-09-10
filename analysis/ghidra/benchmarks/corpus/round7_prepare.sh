@@ -7,9 +7,9 @@
 #   3. round7_cache.sh         17-case Tier B (Ghidra) cache in its own directory
 # Then run round7_smoke.sh, read its two lines, and only then round7_launch.sh.
 #
-# Operational copy lives at /mnt-1/benchmarks/round7_prepare.sh.
+# Operational copy lives at /var/benchmarks/round7_prepare.sh.
 set -euo pipefail
-BASE=${BASE:-/mnt-1/benchmarks}
+BASE=${BASE:-/var/benchmarks}
 log() { echo "$(date -u +%FT%TZ) $*"; }
 log "step 1/3 pin"
 bash "$BASE/round7_prep_pin.sh"

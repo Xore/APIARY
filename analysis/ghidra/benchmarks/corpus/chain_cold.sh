@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # chain_cold.sh -- start the full cold re-run once phase 3's scoring is done.
 #
-# Operational copy lives at /mnt-1/benchmarks/chain_cold.sh.
+# Operational copy lives at /var/benchmarks/chain_cold.sh.
 #
 # ---------------------------------------------------------------------------
 # Why the wait condition is positive, not "is the GPU idle"
@@ -20,7 +20,7 @@
 # is a wasted day of GPU rather than an error message.
 set -u
 
-BASE=${BASE:-/mnt-1/benchmarks}
+BASE=${BASE:-/var/benchmarks}
 RESULTS=${RESULTS:-$BASE/1947full}
 TAGLIST=${TAGLIST:-$BASE/models_requant.txt}
 MAX_WAIT_MIN=${MAX_WAIT_MIN:-4320}   # 72h

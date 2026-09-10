@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Extra-roster sweep: pull -> benchmark -> delete, one model at a time.
 #
-# Operational copy of this file runs from /mnt-1/benchmarks/sweep_extra.sh on
+# Operational copy of this file runs from /var/benchmarks/sweep_extra.sh on
 # the homeserver (its BASE/REPO/LIST/PRESEED/CHECK_NAMES paths below are that
 # host's layout) -- committed here so a script driving multi-hundred-GB pulls
 # and real benchmark runs is reviewable and isn't one `rm` away from being
@@ -36,10 +36,10 @@ set -u
 # self-quantized tags and then runs exactly this script over them, so the
 # self-quant rows are scored by the same code, at the same pin, as every
 # as-published row they are meant to be compared against.
-BASE=${BASE:-/mnt-1/benchmarks/1947full}
-REPO=${REPO:-/mnt-1/benchmarks/APIARY}
-LIST=${LIST:-/mnt-1/benchmarks/models_extra_all.txt}
-PRESEED=${PRESEED:-/mnt-1/benchmarks/preseed.sh}
+BASE=${BASE:-/var/benchmarks/1947full}
+REPO=${REPO:-/var/benchmarks/APIARY}
+LIST=${LIST:-/var/benchmarks/models_extra_all.txt}
+PRESEED=${PRESEED:-/var/benchmarks/preseed.sh}
 MAXTRY=${MAXTRY:-3}
 
 # #3023: the cold-slot protocol #2641 established requires that nothing else
@@ -63,14 +63,14 @@ KEEP_WEIGHTS_ABOVE_GB=${KEEP_WEIGHTS_ABOVE_GB:-1000}
 # #3087: round 7 scores on its own pin with its own 17-case Tier B cache and
 # its own operator tag, so both are overridable; the defaults are the a99e765
 # sweep's, unchanged. round7_coldrun.sh sets them.
-GHIDRA_CACHE=${GHIDRA_CACHE:-/mnt-1/benchmarks/tierb-cache}
+GHIDRA_CACHE=${GHIDRA_CACHE:-/var/benchmarks/tierb-cache}
 OPERATOR=${OPERATOR:-bg-1947extra}
 
 # #2738: fail fast on any roster entry Ollama's client-side hf.co name
 # validation would reject before a sweep wastes time discovering it --
-# see /mnt-1/benchmarks/oversized-model-aliases.tsv for the bisection and
+# see /var/benchmarks/oversized-model-aliases.tsv for the bisection and
 # the recovery path for an entry that does trip this.
-CHECK_NAMES=/mnt-1/benchmarks/check-roster-name-lengths.sh
+CHECK_NAMES=/var/benchmarks/check-roster-name-lengths.sh
 if [ -x "$CHECK_NAMES" ]; then
   "$CHECK_NAMES" "$LIST" || exit 1
 fi
@@ -199,7 +199,7 @@ while read -r TAG; do
   PULLED=0
   # -i: Ollama rewrites some quantisation-shaped tags to uppercase on write
   # (#2738's raven aliases: `ollama create x:q4_k_m` lands as `x:Q4_K_M` --
-  # see /mnt-1/benchmarks/oversized-model-aliases.tsv for the measured set),
+  # see /var/benchmarks/oversized-model-aliases.tsv for the measured set),
   # so an imported alias may not case-match the roster's own spelling of
   # $TAG. Match case-insensitively so those entries are recognised as
   # present. Ollama resolves names case-insensitively itself, so handing the

@@ -1,13 +1,15 @@
 #!/bin/bash
 # rex86_run_deepseek_v2_full.sh -- deepseek-ai/DeepSeek-Coder-V2-Instruct
-# (the FULL 235.74B model), stored on /mnt-1 (1.7TB free) instead of the
-# main rex86-eval container's /var-backed work dir (~1TB free, and shared
-# with everything else this session is doing concurrently -- the CAPE
-# build, the REx86 adapter queue, and the other #847 base-model
-# downloads). This one model alone needs ~470GB for its raw HF snapshot
-# plus another ~470GB temporarily while convert_hf_to_gguf.py writes the
-# f16 GGUF (source isn't deleted until conversion finishes) -- ~940GB
-# peak, more than /var's entire free space on its own.
+# (the FULL 235.74B model), stored under /var/rex86-large-models in a
+# separate throwaway container rather than the main rex86-eval container's
+# /var-backed work dir (shared with everything else this session is doing
+# concurrently -- the CAPE build, the REx86 adapter queue, and the other
+# #847 base-model downloads). This one model alone needs ~470GB for its raw
+# HF snapshot plus another ~470GB temporarily while convert_hf_to_gguf.py
+# writes the f16 GGUF (source isn't deleted until conversion finishes) --
+# ~940GB peak (the second volume this script was written for was
+# decommissioned in #3158/#3159; both dirs now live on /var's 4.7T free as
+# of 2026-09-10, so this job still contends with everything else on /var).
 #
 # Runs in a SEPARATE, throwaway container (rex86-eval-big) rather than
 # reconfiguring the long-lived rex86-eval container mid-flight (which is
@@ -15,7 +17,7 @@
 # recreating a running container to add a mount kills whatever docker exec
 # processes are using it). Reuses rex86-eval's already-built venv and
 # llama.cpp binary read-only (no reason to rebuild either), writes
-# everything else to /mnt-1.
+# everything else to /var/rex86-large-models.
 #
 # Only produces the sub-3-bit quantizations established as feasible on
 # #847 (IQ2_XS/IQ2_XXS/IQ1_S) -- f16/Q8_0/Q6_K/Q5_K_M/Q4_K_M/Q3_K_M/Q2_K
@@ -23,7 +25,7 @@
 # and posted on #847, not guessed here.
 set -euo pipefail
 
-BIG=/mnt-1/rex86-large-models
+BIG=/var/rex86-large-models
 MAIN_WORK=/var/dockge/stacks/rex86-eval/work
 source "$MAIN_WORK/rex86_common.sh"
 NAME=deepseek-coder-v2-full
@@ -31,9 +33,9 @@ HF_REPO="deepseek-ai/DeepSeek-Coder-V2-Instruct"
 LOG="$BIG/${NAME}.pipeline.log"
 mkdir -p "$BIG"
 exec > >(tee -a "$LOG") 2>&1
-echo "=== ${NAME}: START $(date -u +%FT%TZ) (on /mnt-1, separate container) ==="
+echo "=== ${NAME}: START $(date -u +%FT%TZ) (on /var/rex86-large-models, separate container) ==="
 
-df -h /mnt-1
+df -h /var
 
 docker rm -f rex86-eval-big >/dev/null 2>&1 || true
 docker run -d --name rex86-eval-big --gpus all \

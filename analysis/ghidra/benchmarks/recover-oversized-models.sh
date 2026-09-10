@@ -20,7 +20,7 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mapping="$script_dir/oversized-model-aliases.tsv"
 container="ghidra-ollama-1"
-cache_dir="/mnt-1/benchmarks/oversized-model-cache"
+cache_dir="/var/benchmarks/oversized-model-cache"
 only_aliases=()
 
 while [[ $# -gt 0 ]]; do

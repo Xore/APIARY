@@ -3,7 +3,7 @@
 # from an f16 master and measure every level with the same scorer, at the same
 # pin, as the as-published rows it is being compared against.
 #
-# Operational copy runs from /mnt-1/benchmarks/requant_sweep.sh on the
+# Operational copy runs from /var/benchmarks/requant_sweep.sh on the
 # homeserver. Committed here because the original was never committed, did not
 # survive the 2026-09-03/04 rebuild, and had to be rewritten from its issue
 # (#2985). Keep the two in sync by hand.
@@ -61,7 +61,7 @@
 # ---------------------------------------------------------------------------
 # Dynamic-quant extension (#3086, round-7 plan §7 R2): IMATRIX= and TENSOR_TYPES=
 #
-#   IMATRIX=/mnt-1/training/calib/calib.txt bash requant_sweep.sh
+#   IMATRIX=/var/training/calib/calib.txt bash requant_sweep.sh
 #   TENSOR_TYPES="re=Q8_0" IMATRIX=... bash requant_sweep.sh
 #
 # IMATRIX turns the plain K-quant ladder into the Dynamic-3.0 methodology
@@ -86,7 +86,7 @@
 # partial writes, not small models.)
 set -u
 
-BASE=${BASE:-/mnt-1/benchmarks}
+BASE=${BASE:-/var/benchmarks}
 WORK=${WORK:-$BASE/f16work}
 RESULTS=${RESULTS:-$BASE/1947full}
 REPO=${REPO:-$BASE/APIARY}

@@ -1,5 +1,9 @@
 # Round 7 — train and requantise with Unsloth, serve with Ollama, score on a fresh three-slot benchmark
 
+> `/mnt-1` paths below are dead as of #3158/#3159 (decommissioned 2026-09-09). Left
+> as-written since this is a dated record; see `docs/HOMESERVER-DISK-LAYOUT.md` for
+> current layout.
+
 **Written** 2026-09-06 from live inspection of `homeserver`, every open benchmark
 issue, and the current Unsloth / llama.cpp / Ollama documentation. Sits beside
 `2026-09-05-1947-resume-plan.md`, which remains the authority on the #1947 sweep

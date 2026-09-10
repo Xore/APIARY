@@ -250,7 +250,7 @@ Validate one with `analysis/verify-backup.sh <directory>`.
 
 ## The benchmark work-area mirror
 
-`/mnt-1/benchmarks` on the homeserver (sweep scripts, rosters, run-state
+`/var/benchmarks` on the homeserver (sweep scripts, rosters, run-state
 JSON, status markers — the same class of "irreplaceable, double-digit MB"
 data #2985 lost once) is **not** in this backup's fan-out. It is out of
 scope on purpose: everything in it either belongs in git (drivers, rosters —

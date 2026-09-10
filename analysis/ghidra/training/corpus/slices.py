@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-CORPUS_ROOT = Path("/mnt-1/training/corpus-v1")  # host-side; 0700, never this repo
+CORPUS_ROOT = Path("/var/training/corpus-v1")  # host-side; 0700, never this repo
 
 SliceId = Literal["S1", "S2", "S3", "S4", "S5", "S6"]
 

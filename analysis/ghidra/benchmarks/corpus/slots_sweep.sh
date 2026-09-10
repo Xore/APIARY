@@ -4,7 +4,7 @@
 # sessions,revdeck over a roster. The ghidra slot stays held back (#1795:
 # Tier B evidence first) -- record_baseline.py owns that axis.
 #
-# Operational copy: /mnt-1/benchmarks/slots_sweep.sh.
+# Operational copy: /var/benchmarks/slots_sweep.sh.
 #
 # Same regime as the corpus sweeps: cold slot, live workers stopped and
 # restored by trap, one model loaded at a time, uptime per run recorded.
@@ -13,7 +13,7 @@
 # is no shared scorer to reuse for these slots).
 set -u
 
-BASE=${BASE:-/mnt-1/benchmarks}
+BASE=${BASE:-/var/benchmarks}
 OUT=${OUT:-$BASE/round7/slots}
 LIST=${LIST:-$BASE/models_round7.txt}
 REPO=${REPO:-$BASE/APIARY-round7}

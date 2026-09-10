@@ -3,11 +3,11 @@
 # inside the exact provenance container ci_verify.sh documents
 # (debian:trixie-slim + the pinned cross toolchains), verified byte-for-byte
 # against the committed manifest, then copied out to a NEW directory. The
-# 14-case corpus at /mnt-1/benchmarks/corpus is left untouched.
-# Operational copy: /mnt-1/benchmarks/round7_build_corpus.sh
+# 14-case corpus at /var/benchmarks/corpus is left untouched.
+# Operational copy: /var/benchmarks/round7_build_corpus.sh
 set -euo pipefail
-REPO=${REPO:-/mnt-1/benchmarks/APIARY-round7}
-OUT=${OUT:-/mnt-1/benchmarks/corpus-round7}
+REPO=${REPO:-/var/benchmarks/APIARY-round7}
+OUT=${OUT:-/var/benchmarks/corpus-round7}
 NAME=corpus-round7-build
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 # no --rm: the built corpus is copied out of the stopped container afterwards,

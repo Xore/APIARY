@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # recreate-local-tags.sh -- #2985: lost in the same rebuild as
 # gptoss_rerun.sh/requant_sweep.sh/slots_sweep.sh, and never committed before
-# now. Operational copy lives at /mnt-1/benchmarks/recreate-local-tags.sh.
+# now. Operational copy lives at /var/benchmarks/recreate-local-tags.sh.
 #
 # #2695: rebuilds Ollama-local tags that models_extra_all.txt references but
 # that sweep_extra.sh cannot `ollama pull` (they're not registry tags).

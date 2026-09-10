@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mirror-benchmark-workarea.sh -- #3104: /mnt-1/benchmarks on homeserver has
+# mirror-benchmark-workarea.sh -- #3104: /var/benchmarks on homeserver has
 # no durable copy. The existing snapshot at ~/apiary-bench-snapshots/ was
 # built by hand and has gone stale (its own notes still called this host
 # "xps13" / 192.168.42.15 -- that machine is retired; this workstation is
@@ -20,7 +20,7 @@
 # Excludes exactly the directories confirmed >1 GB and reproducible without
 # this mirror: the two pinned git checkouts (clone + pin from the commit
 # their own STATE-*.md records) and the three model-weight caches (re-pullable
-# via ollama). Everything else under /mnt-1/benchmarks -- scripts, rosters,
+# via ollama). Everything else under /var/benchmarks -- scripts, rosters,
 # logs, result JSON, status markers, transcripts -- is the irreplaceable part
 # #2985 already lost once, and is small enough (double-digit MB) to keep in
 # full.

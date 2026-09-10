@@ -816,7 +816,7 @@ CPU-only: transformers 5.16.1 on torch 2.13.0+cpu, Python 3.14.
 
 All workload ran on the homeserver dev box against the *live captured*
 honeypot streams via the usual docker-exec ES pager; everything below is
-aggregates. Raw captures stay on the dev box (`/mnt-1/benchmarks/1804c/`,
+aggregates. Raw captures stay on the dev box (`/var/benchmarks/1804c/`,
 sha256-pin manifest in `out/run_meta.json`) per the standing
 nothing-captured-committed rule; the only verbatim lines in this section are
 the explicitly synthetic probes.
@@ -985,7 +985,7 @@ No production change in this slice. Follow-ups queued as intent:
 - Malware-family blindness means the tagger cannot replace family attribution
   anywhere it matters — that stays with the generative path.
 
-Artifacts pinned on the dev box (all hashes under `/mnt-1/benchmarks/1804c/out/run_meta.json`):
+Artifacts pinned on the dev box (all hashes under `/var/benchmarks/1804c/out/run_meta.json`):
 scripts `collect_ioc_corpus.py`, `sample_corpus.py`, `make_gold.py`,
 `ner_post.py`, `run_ner.py`, `evaluate_ner.py`, `rebuild_extractions.py`
 (+ collector/sample metadata, gold files, raw predictions, extractions,

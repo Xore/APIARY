@@ -10,7 +10,8 @@
 #     also now fixed.
 # Waits for both other GPU-bound pipelines running today (the base-model
 # queue, rex86_run_all_base.sh, and the DeepSeek-Coder-V2-full pipeline
-# on /mnt-1) to finish first -- this host has exactly one GPU.
+# under /var/rex86-large-models) to finish first -- this host has exactly
+# one GPU.
 set -uo pipefail
 WORK=/var/dockge/stacks/rex86-eval/work
 QUEUE_LOG="$WORK/other-models/queue-retry.log"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # resume_phases.sh -- #2985: lost in the same rebuild as gptoss_rerun.sh/
 # requant_sweep.sh/slots_sweep.sh, never committed before now. Operational
-# copy lives at /mnt-1/benchmarks/resume_phases.sh.
+# copy lives at /var/benchmarks/resume_phases.sh.
 #
 # Status: historical. Written to resume the a99e765 cold sweep after a RAM
 # install; that sweep was aborted by operator decision on 2026-09-06 (folded
@@ -18,14 +18,14 @@
 # quant-ladder step it does on the way through. chain2b and chain3 then pick up
 # on EXTRA_COMPLETE / REQUANT_SWEEP_COMPLETE as before.
 set -u
-cd /mnt-1/benchmarks || exit 1
+cd /var/benchmarks || exit 1
 
 echo "=== $(date -u +%FT%TZ) resume ==="
 
 # the pinned head is load-bearing: post-merge main defaults to 17 corpus cases
 # against the 14 this sweep measured, which would split the matrix down the middle
-HEAD=$(git -C /mnt-1/benchmarks/APIARY rev-parse --short HEAD)
-BRANCH=$(git -C /mnt-1/benchmarks/APIARY rev-parse --abbrev-ref HEAD)
+HEAD=$(git -C /var/benchmarks/APIARY rev-parse --short HEAD)
+BRANCH=$(git -C /var/benchmarks/APIARY rev-parse --abbrev-ref HEAD)
 echo "repo: $HEAD on $BRANCH"
 if [ "$HEAD" != "a99e765" ]; then
   echo "ABORT: repo head moved off a99e765. Phases 2-3 must run on the same case"
@@ -33,7 +33,7 @@ if [ "$HEAD" != "a99e765" ]; then
   exit 1
 fi
 
-if ! grep -q FULLRUN_COMPLETE /mnt-1/benchmarks/fullrun.log 2>/dev/null; then
+if ! grep -q FULLRUN_COMPLETE /var/benchmarks/fullrun.log 2>/dev/null; then
   echo "ABORT: fullrun.log has no FULLRUN_COMPLETE -- phase 1 is not finished."
   exit 1
 fi
@@ -47,29 +47,29 @@ done
 echo "ollama up; $(docker exec ghidra-ollama-1 ollama list 2>/dev/null | tail -n +2 | wc -l) models local"
 
 for s in chain chain2b chain3; do
-  if pgrep -f "/mnt-1/benchmarks/$s.sh" >/dev/null 2>&1; then
+  if pgrep -f "/var/benchmarks/$s.sh" >/dev/null 2>&1; then
     echo "ABORT: $s.sh already running -- refusing to double-start the GPU queue"
     exit 1
   fi
 done
 
-cd /mnt-1/benchmarks
-setsid nohup bash /mnt-1/benchmarks/chain.sh   >> /mnt-1/benchmarks/extra.log   2>&1 < /dev/null &
+cd /var/benchmarks
+setsid nohup bash /var/benchmarks/chain.sh   >> /var/benchmarks/extra.log   2>&1 < /dev/null &
 # 2026-09-05 (#1947 review): only launch a waiter whose downstream script
 # still exists. gptoss_rerun.sh / requant_sweep.sh / slots_sweep.sh were lost
 # in the rebuild and were never committed, so chain2b/chain3 would otherwise
 # sit for 14 days on markers nothing can write and report as "running".
-if [ -f /mnt-1/benchmarks/gptoss_rerun.sh ] && [ -f /mnt-1/benchmarks/requant_sweep.sh ]; then
-  setsid nohup bash /mnt-1/benchmarks/chain2b.sh >> /mnt-1/benchmarks/requant.log 2>&1 < /dev/null &
+if [ -f /var/benchmarks/gptoss_rerun.sh ] && [ -f /var/benchmarks/requant_sweep.sh ]; then
+  setsid nohup bash /var/benchmarks/chain2b.sh >> /var/benchmarks/requant.log 2>&1 < /dev/null &
 else
   echo "SKIP chain2b: gptoss_rerun.sh/requant_sweep.sh missing -- phases 2.5/3 not queued"
 fi
-if [ -f /mnt-1/benchmarks/slots_sweep.sh ]; then
-  setsid nohup bash /mnt-1/benchmarks/chain3.sh  >> /mnt-1/benchmarks/slots.log   2>&1 < /dev/null &
+if [ -f /var/benchmarks/slots_sweep.sh ]; then
+  setsid nohup bash /var/benchmarks/chain3.sh  >> /var/benchmarks/slots.log   2>&1 < /dev/null &
 else
   echo "SKIP chain3: slots_sweep.sh missing -- phase 5 not queued"
 fi
 sleep 3
 echo "relaunched:"
-pgrep -af '/mnt-1/benchmarks/chain' || echo "  (nothing came up -- check the logs)"
+pgrep -af '/var/benchmarks/chain' || echo "  (nothing came up -- check the logs)"
 echo "phase 2 (49-model extra roster) is now running; requant and slots chain behind it."

@@ -35,7 +35,7 @@
 #   DRY_RUN=1 bash xortron_next_finalize.sh  # report only
 set -u
 
-BASE=${BASE:-/mnt-1/benchmarks}
+BASE=${BASE:-/var/benchmarks}
 RESULTS=${RESULTS:-$BASE/1947full}
 DRY_RUN=${DRY_RUN:-0}
 

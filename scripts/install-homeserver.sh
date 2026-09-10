@@ -1465,7 +1465,7 @@ step_provision_buildx_cache() {
   # being LRU-evicted while in use.
   #
   # The runners execute as github-ci-runner (systemd User= on the
-  # actions.runner.*.supermicro-ci* units), and /mnt-1 is root:root 0755 --
+  # actions.runner.*.supermicro-ci* units), and /var is root:root 0755 --
   # so the workflow cannot create this directory itself. Measured live
   # 2026-09-02: `sudo -u github-ci-runner mkdir -p /var/buildx-cache/x`
   # -> "Permission denied", exit 1, which under a step's default `bash -e`
@@ -1475,7 +1475,7 @@ step_provision_buildx_cache() {
   #
   # 0775 with the runner as group owner (not 0777) so the deploy runner and
   # an interactive admin can also write it without making it world-writable
-  # on a filesystem that also holds /mnt-1/benchmarks. setgid keeps
+  # on a filesystem that also holds /var/benchmarks. setgid keeps
   # per-image subdirectories group-owned as builds create them.
   #
   # The group has to be granted to every runner instance, not just the

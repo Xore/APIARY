@@ -25,18 +25,29 @@ reinstall of the OS disk alone doesn't touch captured evidence.
 | Device | Model | Size | Partition table | Filesystem | Mount | Role |
 |---|---|---|---|---|---|---|
 | `nvme0n1` | Samsung MZVLW256HEHP | 238.5G | GPT | vfat (p1) / ext4 (p2) | `/boot/efi`, `/` | OS + EFI, boot disk |
-| `sdb` | AVAGO MR9440-8i (RAID LUN) | 1.7T | whole-disk (no partition table) | xfs | `/var` | Docker root, Arcane-managed stacks, container state — this is where `/var/lib/docker` and `/var/dockge` actually live |
-| `sdc` | AVAGO MR9440-8i (RAID LUN) | 1.7T | GPT, 1 partition | xfs | `/mnt-1` | Secondary bulk storage (in use: `github` checkouts, `benchmarks`, `buildx-cache`) |
+| `sdb` | AVAGO MR9440-8i (RAID LUN) | — | whole-disk (no partition table) | xfs | `/var` | Docker root, Arcane-managed stacks, container state (`/var/lib/docker`, `/var/dockge`) — now also `benchmarks/`, `training/`, `hf-cache/`, `buildx-cache/`, `ci-registry-mirror/`, the former `/mnt-1` workload |
 | `sda` | Intel SSDSC2KB480G8L | 447.1G | GPT, 1 partition | xfs | `/mnt-2` | Reserved bulk storage (currently empty) |
 | `sr0` | ATAPI optical | — | — | — | — | Unused |
 
-Two of the three non-boot disks (`sdb`, `sdc`) sit behind an AVAGO/LSI
-MR9440-8i hardware RAID controller and appear to the OS as SCSI LUNs, not
-raw disks — the controller's own RAID/cache configuration (level, write
-policy, battery/flash backup) is out of band from this OS-level view and
-needs to be captured separately from the controller's own tooling
-(`storcli`/`perccli` or vendor equivalent) if the RAID config itself needs
-to be reproducible, not just the OS partitioning on top of it.
+**`/mnt-1` is decommissioned.** Its RAID VD (formerly `sdc`) suffered a
+two-drive fault on 2026-09-09 (#3158) and no longer enumerates as a block
+device at all; the mount was unwired (#3159, PR #3159) and everything that
+lived under it moved to `/var`. `/mnt-1` itself survives on the host only as
+a directory of compatibility symlinks into `/var` (`benchmarks`, `training`,
+`hf-cache`, `buildx-cache`, `ci-registry-mirror`) so any script still hard-
+coding the old path keeps resolving — new code should target `/var/*`
+directly. See #3158/#3159 for the incident and decommission detail; this
+table's `sdb` size is left unstated above rather than guessed, since the
+volume backing `/var` changed as part of that recovery and hasn't been
+re-measured for this doc.
+
+`sdb` sits behind an AVAGO/LSI MR9440-8i hardware RAID controller and
+appears to the OS as a SCSI LUN, not a raw disk — the controller's own
+RAID/cache configuration (level, write policy, battery/flash backup) is out
+of band from this OS-level view and needs to be captured separately from
+the controller's own tooling (`storcli`/`perccli` or vendor equivalent) if
+the RAID config itself needs to be reproducible, not just the OS
+partitioning on top of it.
 
 `/var` on its own disk is the key decision: `/var/lib/docker` is 103G and
 `/var/dockge` (bind-mounted stack data for all 23 Arcane-managed stacks, including
@@ -92,15 +103,16 @@ with `homeserver-user-data.yaml` renamed to `user-data` alongside an empty
   the manual partitioning step below needs.
 
 **What has to be done by hand, at the storage screen, using the physical
-layout table above as the target:** 4-disk layout (NVMe boot/OS: GPT,
-EFI + ext4 root; `/var`: whole-disk xfs, no partition table; `/mnt-1` and
-`/mnt-2`: GPT + single xfs partition each), no LVM, 8G swapfile instead
-of a swap partition. The template does **not** attempt to reproduce the
-AVAGO RAID controller's own LUN configuration either — that has to
-happen before the OS installer ever sees a block device, via the
-controller's own boot-time utility or `storcli`, and if the MegaRAID
-LUNs (`/var`, `/mnt-1`) refuse to wipe/format even manually, their VDs
-likely need deleting and recreating at the controller's own config
+layout table above as the target:** 3-disk layout (NVMe boot/OS: GPT,
+EFI + ext4 root; `/var`: whole-disk xfs, no partition table; `/mnt-2`:
+GPT + single xfs partition), no LVM, 8G swapfile instead of a swap
+partition. `/mnt-1` is no longer part of the target layout (decommissioned,
+see above) — do not recreate it on a rebuild. The template does **not**
+attempt to reproduce the AVAGO RAID controller's own LUN configuration
+either — that has to happen before the OS installer ever sees a block
+device, via the controller's own boot-time utility or `storcli`, and if the
+MegaRAID LUN (`/var`) refuses to wipe/format even manually, its VD
+likely needs deleting and recreating at the controller's own config
 utility first. Document the RAID config separately if/when a bare-metal
 rebuild is actually planned (out of scope for this pass — see open
 question in

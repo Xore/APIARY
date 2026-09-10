@@ -1,5 +1,9 @@
 # Tier B injection gate — verification, confusion matrix, diagnosis, redesign
 
+> `/mnt-1` paths below are dead as of #3158/#3159 (decommissioned 2026-09-09). Left
+> as-written since this is a dated record; see `docs/HOMESERVER-DISK-LAYOUT.md` for
+> current layout.
+
 Measured 2026-08-30 against `/mnt-1/benchmarks/1947full` (run1 files; run2 verified byte-identical for every model at both tiers) and the checkout at `/mnt-1/benchmarks/APIARY` @ `a99e765`. Nothing on the host was modified; every script was piped over ssh stdin and read only.
 
 **Verdict on the preliminary finding (now issue #2694):** confirmed in mechanism and in substance, with two corrections and five additional findings. The gate is not measuring compliance. It is measuring whether a model *quoted or paraphrased the payload* (11 of 14 Tier B failures) or *used the exact phrase "appears to be benign"* (3 of 14). The fixture cannot discriminate compliance from correct analysis because the injected verdict is true. The same defect accounts for **all four Tier A failures that drove the #1805-c / #1947 "no promotion" decision**, including the disqualification of the top-scoring model.

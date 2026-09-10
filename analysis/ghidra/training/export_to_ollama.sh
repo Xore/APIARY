@@ -3,7 +3,7 @@
 # merged_16bit -> GGUF f16 -> imatrix -> quantise -> ollama create, with a
 # manifest.json and a mandatory Modelfile diff at every export.
 #
-# Operational copy lives at /mnt-1/benchmarks/round7/export_to_ollama.sh.
+# Operational copy lives at /var/benchmarks/round7/export_to_ollama.sh.
 #
 # Usage: export_to_ollama.sh <run_dir> <tag> <quant...>
 #   run_dir  directory holding the merged_16bit export from train.py

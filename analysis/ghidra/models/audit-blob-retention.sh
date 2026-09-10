@@ -18,7 +18,7 @@ APPROVED_MODELS="$REPO_ROOT/analysis/ghidra/models/approved-models.json"
 
 # Extra roster files: one tag per line, '#' comments allowed. Pass paths as
 # args, e.g. the paused #1947 benchmark's models_all.txt/models_extra_all.txt
-# on the homeserver at /mnt-1/benchmarks/. Without any, only approved-models.json
+# on the homeserver at /var/benchmarks/. Without any, only approved-models.json
 # and the live compose LLM_MODEL/VAULT_EMBEDDING_MODEL references are honored.
 ROSTER_FILES=("$@")
 

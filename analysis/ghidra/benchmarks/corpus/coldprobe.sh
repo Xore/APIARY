@@ -28,9 +28,9 @@
 # Preconditions this asserts rather than assumes: hp-llm-worker down,
 # sweep_extra.sh not running, no record_baseline in flight.
 set -u
-REPO=/mnt-1/benchmarks/APIARY
-OUT=/mnt-1/benchmarks/coldprobe
-CACHE=/mnt-1/benchmarks/tierb-cache
+REPO=/var/benchmarks/APIARY
+OUT=/var/benchmarks/coldprobe
+CACHE=/var/benchmarks/tierb-cache
 mkdir -p "$OUT/logs"
 
 die() { echo "ABORT: $*" >&2; exit 1; }

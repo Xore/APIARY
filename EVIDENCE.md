@@ -1,5 +1,9 @@
 # #2646 — warm-slot reproducibility on the production triage path
 
+> `/mnt-1` paths below are dead as of #3158/#3159 (decommissioned 2026-09-09). Left
+> as-written since this is a dated record; see `docs/HOMESERVER-DISK-LAYOUT.md` for
+> current layout.
+
 ## 0. What this session could and could not do
 
 State this first so nothing below is read as stronger than it is.

@@ -4,9 +4,9 @@
 # the pull). One Tier A and one Tier B run of a small local model into a
 # separate directory that no results glob reads.
 #
-# Operational copy lives at /mnt-1/benchmarks/round7_smoke.sh.
+# Operational copy lives at /var/benchmarks/round7_smoke.sh.
 set -u
-BASE=${BASE:-/mnt-1/benchmarks}
+BASE=${BASE:-/var/benchmarks}
 REPO=${REPO:-$BASE/APIARY-round7}
 OUT=${OUT:-$BASE/smoke-round7}
 CACHE=${CACHE:-$BASE/tierb-cache-round7}

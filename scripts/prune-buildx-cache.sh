@@ -4,8 +4,8 @@
 # `cache-to` export leaves old, no-longer-referenced blobs behind in
 # blobs/sha256/, and the directory grows without bound otherwise. This is
 # the local-disk equivalent of the GHA-quota incident this issue exists to
-# fix, just slower -- an unbounded cache on /mnt-1 eventually starves
-# whatever else is on that filesystem (including /mnt-1/benchmarks).
+# fix, just slower -- an unbounded cache on /var eventually starves
+# whatever else is on that filesystem (including /var/benchmarks).
 #
 # Strategy: OCI local-cache layout is content-addressed
 # (blobs/sha256/<digest>), so a blob's mtime only changes when it is
@@ -57,7 +57,7 @@ if [ "$total" -gt "$MAX_BYTES" ]; then
   echo "prune-buildx-cache: $dir is ${total} bytes, over the ${MAX_BYTES} ceiling -- resetting"
   # Remove the cache contents, not the directory itself: the runner owns
   # what is inside but may not be able to recreate the directory under a
-  # root-owned /mnt-1 (#2822's own blocker).
+  # root-owned /var (#2822's own blocker).
   find "$dir" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
 fi
 

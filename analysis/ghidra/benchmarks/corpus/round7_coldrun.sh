@@ -4,7 +4,7 @@
 # pin -- 17 cases / 79, injection gate v3, pooled-claims-ready transcripts --
 # cold slot, live workers stopped, N=2 with automatic 3/5 escalation.
 #
-# Operational copy lives at /mnt-1/benchmarks/round7_coldrun.sh.
+# Operational copy lives at /var/benchmarks/round7_coldrun.sh.
 #
 # ---------------------------------------------------------------------------
 # Why this replaced coldrun.sh's a99e765 re-run (operator decision 2026-09-06)
@@ -31,7 +31,7 @@
 #     fails without it, and sweep_extra would still write MODEL_DONE (#2971)
 #   - no other sweep holds the card
 set -u
-BASE=${BASE:-/mnt-1/benchmarks}
+BASE=${BASE:-/var/benchmarks}
 PIN=${PIN:-32dbdeb1}
 REPO=${REPO:-$BASE/APIARY-round7}
 OUT=${OUT:-$BASE/round7}

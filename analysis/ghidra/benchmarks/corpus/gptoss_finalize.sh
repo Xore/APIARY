@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # gptoss_finalize.sh -- #1947 phase 2.5 / #2279 step 3.
 #
-# Operational copy lives at /mnt-1/benchmarks/gptoss_finalize.sh. Committed here
+# Operational copy lives at /var/benchmarks/gptoss_finalize.sh. Committed here
 # because its predecessor (gptoss_rerun.sh) was never committed and did not
 # survive the 2026-09-03/04 rebuild (#2985).
 #
@@ -40,7 +40,7 @@
 #   DRY_RUN=1 bash gptoss_finalize.sh  # report only
 set -u
 
-BASE=${BASE:-/mnt-1/benchmarks}
+BASE=${BASE:-/var/benchmarks}
 RESULTS=${RESULTS:-$BASE/1947full}
 DRY_RUN=${DRY_RUN:-0}
 

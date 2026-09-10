@@ -51,7 +51,7 @@ not need.
 zramctl                                   # zram0 present, zstd
 swapon --show                             # zram0 at a better priority than any disk swap
 cat /sys/block/nvme0n1/queue/scheduler    # [none]
-findmnt -no OPTIONS /mnt-1                # contains noatime
+findmnt -no OPTIONS /var                # contains noatime
 tuned-adm active                          # throughput-performance
 cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
 ```

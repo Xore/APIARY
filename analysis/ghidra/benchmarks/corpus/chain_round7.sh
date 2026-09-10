@@ -2,7 +2,7 @@
 # chain_round7.sh -- #3087: fire the round-7 slot sweeps once every round-7
 # roster tag is measured on the ghidra slot AND the GPU work area is idle.
 #
-# Operational copy: /mnt-1/benchmarks/chain_round7.sh.
+# Operational copy: /var/benchmarks/chain_round7.sh.
 #
 # ---------------------------------------------------------------------------
 # Why the wait condition is POSITIVE, not "is the GPU idle" -- the same
@@ -16,7 +16,7 @@
 #   every tag in models_round7.txt has both tier files
 #   (tierA_<slug>_run1.json + tierB_<slug>_run1.json) OR an
 #   UNMEASURED_slots.../UNMEASURED_<slug>.status marker in
-#   /mnt-1/benchmarks/round7/
+#   /var/benchmarks/round7/
 #
 # ...AND no sweep_extra.sh / round7_coldrun.sh's own drivers
 # (coldrun.sh) / record_baseline.py process is alive. Both must hold at once:
@@ -25,7 +25,7 @@
 # as the second line of defence.
 set -u
 
-BASE=${BASE:-/mnt-1/benchmarks}
+BASE=${BASE:-/var/benchmarks}
 RESULTS=${RESULTS:-$BASE/round7}
 TAGLIST=${TAGLIST:-$BASE/models_round7.txt}
 MAX_WAIT_MIN=${MAX_WAIT_MIN:-10080}   # 7 days: the cold run alone is 2-4

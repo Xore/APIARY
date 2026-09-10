@@ -21,8 +21,8 @@ classifies every pulled model against two sources:
    (`qwen2.5:7b-instruct-q4_K_M`), and `vault-worker/.env.example`'s
    `VAULT_EMBEDDING_MODEL` (`nomic-embed-text:latest`).
 2. **Roster files** passed as arguments — the paused #1947 benchmark's own
-   model lists on the homeserver, `/mnt-1/benchmarks/models_all.txt` (38
-   models, phase 1's corpus, already run) and `/mnt-1/benchmarks/models_extra_all.txt`
+   model lists on the homeserver, `/var/benchmarks/models_all.txt` (38
+   models, phase 1's corpus, already run) and `/var/benchmarks/models_extra_all.txt`
    (95 models, the phase 2-4 roster #1947 has not yet pulled or run).
 
 Result, run against both roster files: **every one of the 47 currently
