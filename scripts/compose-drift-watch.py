@@ -112,6 +112,23 @@ MANIFEST_PATH = Path(__file__).resolve().parent.parent / "arcane" / "manifests" 
 #     happens to carry a top-level compose.yml (this repo's own), which is
 #     what made it look like a stack directory to a naive glob.
 KNOWN_NON_PROJECT_DIRS = {"honeypot-arcane", "apiary"}
+# #3129: llm-worker is still a manifest entry with a persistent restart
+# policy (not retired), but its single container has been deliberately kept
+# down since #3023 -- it was issuing a competing /api/chat against the same
+# Ollama instance the #1947 benchmark sweep needs cold, so the sweep owner
+# gated it off until the benchmark run releases it. That is an operator
+# decision, not the "torn down" shape retired_projects() (and #3040's Gate 1
+# below) exist to tell apart from real drift. #3040's own scope asked for
+# exactly this mechanism -- "Retired/intentionally-absent services need an
+# explicit allowlist with a reason, the same shape isolation-audit.sh
+# already uses for its known-gap WARN tier" -- so this is the allowlist that
+# issue specified, keyed by project name so it only ever silences this
+# specific, documented absence. Do not add a second entry here
+# without an equally-documented operator decision: that is exactly the
+# blanket "no sibling, don't alarm" rule #3040 removed.
+EXPECTED_ABSENT_WHILE = {
+    "llm-worker": "#3023 sweep-owner-gated for the #1947 benchmark run; stays down until the operator releases it",
+}
 
 
 def fail(msg: str) -> "None":
@@ -552,6 +569,15 @@ def sweep(stacks_root: Path, entries: list[dict], retired: set[str] | None) -> t
         }
         missing = expected_persistent - has_any_container
         if not missing:
+            continue
+
+        # #3129: an operator-gated deliberate absence, distinct from both
+        # "retired" (no manifest entry at all) and ordinary drift. Checked
+        # before the sibling logic below since llm-worker structurally never
+        # has a sibling either way -- this is not a re-run of #3040's removed
+        # blanket rule, it only matches the one named project in
+        # EXPECTED_ABSENT_WHILE.
+        if name in EXPECTED_ABSENT_WHILE:
             continue
 
         # #3040: the old rule suppressed *every* project with no sibling

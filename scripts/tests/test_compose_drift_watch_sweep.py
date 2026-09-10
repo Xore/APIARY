@@ -65,15 +65,46 @@ class SweepGateTest(unittest.TestCase):
         (d / "compose.yml").write_text("services: {}\n")
 
     def test_single_service_project_missing_container_alarms(self) -> None:
-        self._mkproject("llm-worker")
-        configs = {"llm-worker": ({"llm-worker": "unless-stopped"}, [])}
+        # #3129: llm-worker itself moved into EXPECTED_ABSENT_WHILE (see
+        # below), so this general "single-service project alarms" pin now
+        # uses a different real single-service manifest entry instead.
+        self._mkproject("auth-events-worker")
+        configs = {"auth-events-worker": ({"auth-events-worker": "unless-stopped"}, [])}
         with mock.patch.object(cdw.subprocess, "run", side_effect=_fake_compose_run(configs)):
             findings, unresolved = cdw.sweep(self.stacks_root, entries=[], retired=set())
         self.assertEqual(unresolved, [])
         self.assertEqual(len(findings), 1)
-        self.assertEqual(findings[0]["project"], "llm-worker")
-        self.assertEqual(findings[0]["service"], "llm-worker")
+        self.assertEqual(findings[0]["project"], "auth-events-worker")
+        self.assertEqual(findings[0]["service"], "auth-events-worker")
         self.assertEqual(findings[0]["siblings_running"], [])
+
+    def test_expected_absent_project_stays_quiet(self) -> None:
+        # #3129: llm-worker is still in the manifest (not retired) with a
+        # persistent restart policy, but its one container has been
+        # deliberately down since #3023. EXPECTED_ABSENT_WHILE must silence
+        # exactly this named project without reopening #3040's blanket
+        # "no sibling, don't alarm" rule for anything else.
+        self._mkproject("llm-worker")
+        configs = {"llm-worker": ({"llm-worker": "unless-stopped"}, [])}
+        with mock.patch.object(cdw.subprocess, "run", side_effect=_fake_compose_run(configs)):
+            findings, unresolved = cdw.sweep(self.stacks_root, entries=[], retired=set())
+        self.assertEqual(findings, [])
+        self.assertEqual(unresolved, [])
+
+    def test_unlisted_single_service_project_still_alarms_next_to_expected_absent(self) -> None:
+        # Control for the above: a different single-service project with the
+        # same zero-container, no-sibling shape as llm-worker must still
+        # alarm -- EXPECTED_ABSENT_WHILE only matches its one named key.
+        self._mkproject("llm-worker")
+        self._mkproject("ml-worker")
+        configs = {
+            "llm-worker": ({"llm-worker": "unless-stopped"}, []),
+            "ml-worker": ({"ml-worker": "unless-stopped"}, []),
+        }
+        with mock.patch.object(cdw.subprocess, "run", side_effect=_fake_compose_run(configs)):
+            findings, _ = cdw.sweep(self.stacks_root, entries=[], retired=set())
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["project"], "ml-worker")
 
     def test_fully_retired_project_down_stays_quiet(self) -> None:
         self._mkproject("wordpot")
