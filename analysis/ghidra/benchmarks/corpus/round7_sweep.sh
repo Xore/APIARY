@@ -6,9 +6,9 @@
 # whole point; this only chooses the roster, the output directory and the
 # regime flags, exactly as round7_coldrun.sh does.
 #
-# Operational copy: /mnt-1/benchmarks/round7_sweep.sh.
+# Operational copy: /var/benchmarks/round7_sweep.sh.
 #
-#   LIST=/mnt-1/benchmarks/models_round7.txt RESULTS=/mnt-1/benchmarks/round7 \
+#   LIST=/var/benchmarks/models_round7.txt RESULTS=/var/benchmarks/round7 \
 #     STOP_WORKERS=1 bash round7_sweep.sh
 #
 # Results land beside the running cold baseline's own output when RESULTS
@@ -17,7 +17,7 @@
 # rows scored as artefacts land fill in the same matrix the chain aggregates.
 set -u
 
-BASE=${BASE:-/mnt-1/benchmarks}
+BASE=${BASE:-/var/benchmarks}
 RESULTS=${RESULTS:-$BASE/round7}
 REPO=${REPO:-$BASE/APIARY-round7}
 STOP_WORKERS=${STOP_WORKERS:-1}

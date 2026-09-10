@@ -922,13 +922,13 @@ the images evicting *each other*, but did nothing about the quota itself.
 The `Pick cache backend` step therefore chooses per executor:
 
 - **Homeserver runner** -- `type=local,dest=/var/buildx-cache/<image>`.
-  Local disk on `/mnt-1` (see `docs/HOMESERVER-DISK-LAYOUT.md`), outside
+  Local disk on `/var` (see `docs/HOMESERVER-DISK-LAYOUT.md`), outside
   the GitHub quota entirely, and it survives between runs on this box.
 - **GitHub-hosted fallback** -- `type=gha,scope=<image>`, unchanged. An
   ephemeral runner has no local disk worth caching to.
 
 **The directory must be provisioned before the runner can use it.**
-`/mnt-1` is `root:root 0755`, so the workflow cannot create
+`/var` is `root:root 0755`, so the workflow cannot create
 `/var/buildx-cache` itself: `mkdir` as `github-ci-runner` fails with
 `Permission denied`. `scripts/install-homeserver.sh`'s
 `provision-buildx-cache` step creates it `2775 github-ci-runner:github-ci-runner`
@@ -945,7 +945,7 @@ blobs untouched for `PRUNE_DAYS` (14), then, if the directory is still
 over `MAX_BYTES` (2 GiB per image), clears it outright. The reset is
 deliberate: BuildKit skips the *entire* import when one referenced blob is
 missing (it warns and builds on, exit 0), so a partially trimmed directory
-is worth nothing while still occupying the disk that `/mnt-1/benchmarks`
+is worth nothing while still occupying the disk that `/var/benchmarks`
 shares.
 
 **Reclaiming the existing `type=gha` backlog.** `.github/workflows/cache-cleanup.yml`

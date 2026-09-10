@@ -1,5 +1,9 @@
 # init.md — round 7 handoff for the orchestrator (Hermes → Claude Code CLI)
 
+> `/mnt-1` paths below are dead as of #3158/#3159 (decommissioned 2026-09-09). Left
+> as-written since this is a dated record; see `docs/HOMESERVER-DISK-LAYOUT.md` for
+> current layout.
+
 **Read this first.** It names the plan of record, the state of the GPU, the
 kickoff order, the dispatch pattern and the hard rules. Written 2026-09-06,
 after the round-7 cold baseline was launched. Epic **#3079**, children

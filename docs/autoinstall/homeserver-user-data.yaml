@@ -77,12 +77,13 @@ autoinstall:
   #
   # See docs/HOMESERVER-DISK-LAYOUT.md for the target layout to reproduce
   # by hand: NVMe boot/OS (gpt, 1127M EFI + ext4 root), /var (whole-disk
-  # xfs, no partition table), /mnt-1 (gpt, single xfs partition), /mnt-2
-  # (gpt, single xfs partition), 8G swapfile on root. If the MegaRAID LUNs
-  # (/var, /mnt-1) still refuse to wipe/format even manually, their VDs
-  # likely need deleting and recreating at the controller's own config
-  # utility (UEFI Device Manager -> Avago MegaRAID Configuration Utility,
-  # or Ctrl+R at POST on legacy boot) BEFORE running the installer at all.
+  # xfs, no partition table), /mnt-2 (gpt, single xfs partition), 8G
+  # swapfile on root. /mnt-1 is decommissioned (#3158/#3159) and is no
+  # longer part of the target layout. If the MegaRAID LUN (/var) still
+  # refuses to wipe/format even manually, its VD likely needs deleting
+  # and recreating at the controller's own config utility (UEFI Device
+  # Manager -> Avago MegaRAID Configuration Utility, or Ctrl+R at POST on
+  # legacy boot) BEFORE running the installer at all.
   interactive-sections:
     - storage
 

@@ -13,7 +13,7 @@
 # every model that already has both tier run1 files, so the relaunch resumes
 # exactly where it stopped.
 set -u
-BASE=/mnt-1/benchmarks
+BASE=/var/benchmarks
 LOG=$BASE/probe_at_gap.log
 
 say() { echo "$(date -u +%FT%TZ) $*" | tee -a "$LOG"; }

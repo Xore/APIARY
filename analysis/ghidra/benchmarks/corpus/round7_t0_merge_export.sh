@@ -4,7 +4,7 @@
 # convert to GGUF, quantise, and register in Ollama beside its untouched base
 # twins -- so the training legs (#3083+) hit a proved path instead of a guess.
 #
-# Operational copy lives at /mnt-1/benchmarks/round7_t0_merge_export.sh.
+# Operational copy lives at /var/benchmarks/round7_t0_merge_export.sh.
 #
 # ---------------------------------------------------------------------------
 # Why this is CPU-only and why it gates on the cold run
@@ -28,8 +28,8 @@
 # hard SHA and size above. A mismatch aborts.
 set -u
 
-BASE=${BASE:-/mnt-1/benchmarks}
-RUN=${RUN:-/mnt-1/training/runs/t0-rex86}
+BASE=${BASE:-/var/benchmarks}
+RUN=${RUN:-/var/training/runs/t0-rex86}
 # $RUN as hp-unsloth-studio sees it: that container binds /var/training and
 # RENAMES it to /workspace, so no host path is valid inside it.
 RUN_C=${RUN_C:-/workspace/runs/t0-rex86}

@@ -2,13 +2,13 @@
 # round7_launch.sh -- start the round-7 cold baseline detached, with the VRAM
 # sampler beside it, after the smoke test has proved the leg scores.
 #
-# Operational copy lives at /mnt-1/benchmarks/round7_launch.sh.
+# Operational copy lives at /var/benchmarks/round7_launch.sh.
 #
 # Refuses to launch unless round7_smoke.sh has left a Tier B result on this
 # pin: a Tier-B-only failure is the exact 2026-09-04 defect (#2971), and the
 # sweep would still write MODEL_DONE over the hole.
 set -u
-BASE=${BASE:-/mnt-1/benchmarks}
+BASE=${BASE:-/var/benchmarks}
 SMOKE=${SMOKE:-$BASE/smoke-round7/tierB_smoke.json}
 [ -s "$SMOKE" ] || { echo "ABORT: no Tier B smoke result at $SMOKE -- run round7_smoke.sh first"; exit 1; }
 python3 - "$SMOKE" <<'PY' || exit 1

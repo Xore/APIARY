@@ -9,7 +9,7 @@ run (#3083/#3084/#3085/#3088) passes its own --base-model / --dataset.
 Writes a merged_16bit checkpoint (never merged_4bit -- lossy, Unsloth's own
 warning) plus the Modelfile export_to_ollama.sh diffs against the base tag.
 
-Operational copy lives at /mnt-1/benchmarks/round7/train.py.
+Operational copy lives at /var/benchmarks/round7/train.py.
 """
 import argparse
 import json

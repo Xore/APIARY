@@ -3,7 +3,7 @@
 #
 # Two jobs, both read-mostly:
 #
-# 1. RE-CREATE THE LOST SAMPLER (#2245). /mnt-1/benchmarks/vram_samples.tsv was
+# 1. RE-CREATE THE LOST SAMPLER (#2245). /var/benchmarks/vram_samples.tsv was
 #    the empirical record of served size and CPU/GPU split per model -- the input
 #    #2245's category-1 "which models actually spill" list was supposed to rest
 #    on. It was wiped with the rest of the work area (#2971) and is in no mirror,
@@ -26,8 +26,8 @@
 # Stop with: pkill -f keep_and_sample.sh   (leaves every alias in place)
 set -u
 OLLAMA=ghidra-ollama-1
-SAMPLES=/mnt-1/benchmarks/vram_samples.tsv
-KEPT=/mnt-1/benchmarks/kept-aliases.tsv
+SAMPLES=/var/benchmarks/vram_samples.tsv
+KEPT=/var/benchmarks/kept-aliases.tsv
 INTERVAL=60
 
 oll() { docker exec "$OLLAMA" ollama "$@" 2>/dev/null; }

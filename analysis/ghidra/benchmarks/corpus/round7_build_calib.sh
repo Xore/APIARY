@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # round7_build_calib.sh -- #3086 R1: build the round-7 imatrix calibration set
-# at /mnt-1/training/calib/ from corpus-v1 slices, ready to be handed to
+# at /var/training/calib/ from corpus-v1 slices, ready to be handed to
 # requant_sweep.sh as IMATRIX=... and to export_to_ollama.sh as CALIB_FILE=.
 #
-# Operational copy: /mnt-1/training/round7_build_calib.sh.
+# Operational copy: /var/training/round7_build_calib.sh.
 #
 # ---------------------------------------------------------------------------
 # Sources (plan §6.1/§6.4 -- the test set is off limits, all of it):
@@ -18,7 +18,7 @@
 #                             EXEC=1; the default only reports what it would do.
 #   sanitised sessions        S1 session text, already sanitised through the
 #                             production contracts.py path before it lands in
-#                             /mnt-1/training/corpus-v1/ (never leaves the host).
+#                             /var/training/corpus-v1/ (never leaves the host).
 #   REx86 text                S4 entries (Zenodo 15420461, CC-BY-4.0; #847's
 #                             internal-split check must pass first).
 #   general-text portion      S6 CPT shards already pooled by generate_s6.py.
@@ -38,13 +38,13 @@
 # provenance, token estimate, and the decontamination report.
 #
 # Usage:
-#   ssh homeserver 'bash /mnt-1/training/round7_build_calib.sh'          # plan
-#   ssh homeserver 'EXEC=1 bash /mnt-1/training/round7_build_calib.sh'   # build
+#   ssh homeserver 'bash /var/training/round7_build_calib.sh'          # plan
+#   ssh homeserver 'EXEC=1 bash /var/training/round7_build_calib.sh'   # build
 set -euo pipefail
 
-CALIB=${CALIB:-/mnt-1/training/calib}
-CORPUS=${CORPUS:-/mnt-1/training/corpus-v1}
-REPO=${REPO:-/mnt-1/benchmarks/APIARY-round7}
+CALIB=${CALIB:-/var/training/calib}
+CORPUS=${CORPUS:-/var/training/corpus-v1}
+REPO=${REPO:-/var/benchmarks/APIARY-round7}
 EXEC=${EXEC:-0}
 MIN_TOKENS=${MIN_TOKENS:-2000000}
 MAX_TOKENS=${MAX_TOKENS:-10000000}

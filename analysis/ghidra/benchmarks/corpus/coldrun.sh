@@ -2,7 +2,7 @@
 # coldrun.sh -- re-measure the WHOLE #1947 roster under one uniform regime:
 # cold slot, N=2 with automatic escalation, live workers stopped.
 #
-# Operational copy lives at /mnt-1/benchmarks/coldrun.sh.
+# Operational copy lives at /var/benchmarks/coldrun.sh.
 #
 # ---------------------------------------------------------------------------
 # Why this exists
@@ -37,7 +37,7 @@
 # it away to save disk would be the same mistake as deleting the weights.
 set -u
 
-BASE=${BASE:-/mnt-1/benchmarks}
+BASE=${BASE:-/var/benchmarks}
 COLD=${COLD:-$BASE/1947cold}
 ROSTER=${ROSTER:-$BASE/models_cold_all.txt}
 REPO=${REPO:-$BASE/APIARY}

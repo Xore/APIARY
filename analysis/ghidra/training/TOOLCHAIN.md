@@ -55,8 +55,8 @@ No docker socket mount, no `/var/dockge`, no sandbox mounts. Loopback only.
 
 | container path | host path (in `compose.yaml`) | actually |
 |---|---|---|
-| `/workspace` | `/mnt-1/training` | `/mnt-1/training` is a **symlink** to `/var/training` (0700, 6.1 T free) -- the real work area. Configs use `/mnt-1/training`; it resolves through the symlink transparently. |
-| `/hf-cache` (`HF_HOME`) | `/mnt-1/hf-cache` | real directory, create-on-mount |
+| `/workspace` | `/var/training` | the real work area (0700, 6.1 T free) |
+| `/hf-cache` (`HF_HOME`) | `/var/hf-cache` | real directory, create-on-mount |
 
 The HF token is a 0600 file on the host, **not** wired into `compose.yaml` and
 never committed. Pass it at run time:
@@ -121,7 +121,7 @@ untouched.
 | URL | `http://<homeserver-lan-ip>:8899` (Studio UI) |
 | password | `unsloth` (`JUPYTER_PASSWORD` in the untracked stack `.env`) |
 | container ports | 8000 (Studio UI, published on 8899), 8888 (Studio API) |
-| mounts | `/var/training` → `/workspace`, `/mnt-1/hf-cache` → `/hf-cache` |
+| mounts | `/var/training` → `/workspace`, `/var/hf-cache` → `/hf-cache` |
 
 The stack pins the **`studio`** image variant, not the `core` digest the batch
 leg uses. Only `studio` ships `/usr/local/bin/unsloth-studio-launch` and

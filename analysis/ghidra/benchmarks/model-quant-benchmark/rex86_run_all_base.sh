@@ -117,9 +117,9 @@ run llm4decompile-9b-v2     "LLM4Binary/llm4decompile-9b-v2"   Q6_K:99 Q5_K_M:99
 
 # DeepSeek-Coder-V2-Instruct FULL (235.74B, MoE) -- re-added per the
 # corrected feasibility check above, but NOT run from this queue: its
-# ~940GB peak disk need (raw HF snapshot + f16 GGUF coexisting) doesn't
-# fit /var alongside everything else this session is using it for.
-# rex86_run_deepseek_v2_full.sh runs it separately, on /mnt-1 (1.7TB
-# free), in its own throwaway container -- see that script's own header.
+# ~940GB peak disk need (raw HF snapshot + f16 GGUF coexisting) is kept
+# out of this queue's own work dir. rex86_run_deepseek_v2_full.sh runs
+# it separately, under /var/rex86-large-models, in its own throwaway
+# container -- see that script's own header.
 
 echo "=== BASE-MODEL QUEUE DONE $(date -u +%FT%TZ) ==="

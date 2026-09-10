@@ -2,7 +2,7 @@
 # chain_phase3.sh -- run phase 3's SCORING half once phase 2 has actually
 # finished with the GPU.
 #
-# Operational copy lives at /mnt-1/benchmarks/chain_phase3.sh. Committed here
+# Operational copy lives at /var/benchmarks/chain_phase3.sh. Committed here
 # because the previous generation of chain scripts (chain2b.sh, chain3.sh) were
 # never committed, did not survive the rebuild, and took phases 2.5/3/5 with
 # them (#2985).
@@ -26,7 +26,7 @@
 # green light to spend GPU hours on the next phase.
 set -u
 
-BASE=${BASE:-/mnt-1/benchmarks}
+BASE=${BASE:-/var/benchmarks}
 RESULTS=${RESULTS:-$BASE/1947full}
 ROSTER=${ROSTER:-$BASE/models_extra_all.txt}
 TAGLIST=${TAGLIST:-$BASE/models_requant.txt}

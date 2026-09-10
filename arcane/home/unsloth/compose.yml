@@ -54,9 +54,8 @@ services:
       # Overrides the image default of /workspace/.cache/huggingface.
       HF_HOME: /hf-cache
     volumes:
-      # /mnt-1/training is a symlink to /var/training; mount the real path.
       - /var/training:/workspace
-      - /mnt-1/hf-cache:/hf-cache
+      - /var/hf-cache:/hf-cache
     # RTX 4000 Ada only, by UUID, exactly like the batch leg and
     # analysis/ghidra/docker-compose.ghidra.gpu.yml. The Quadro P2200 in the
     # same box belongs to the Windows sandbox VM (#1539) -- never `count: all`.

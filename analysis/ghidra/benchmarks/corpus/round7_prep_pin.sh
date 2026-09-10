@@ -2,11 +2,11 @@
 # prep_round7_clone.sh -- pinned checkout for round 7 (epic #3079): a SECOND
 # clone, detached at the round-7 pin. The a99e765 clone stays untouched -- its
 # untracked transcripts are the phase-1/2 evidence and resume_phases.sh guards
-# that HEAD. Operational copy: /mnt-1/benchmarks/round7_prep_pin.sh
+# that HEAD. Operational copy: /var/benchmarks/round7_prep_pin.sh
 set -euo pipefail
 PIN=${PIN:-32dbdeb1face8c8e4791d31a8f4fbbe321e4f6fa}
-DST=${DST:-/mnt-1/benchmarks/APIARY-round7}
-OLD=${OLD:-/mnt-1/benchmarks/APIARY}
+DST=${DST:-/var/benchmarks/APIARY-round7}
+OLD=${OLD:-/var/benchmarks/APIARY}
 url=$(git -C "$OLD" remote get-url origin)
 if [ -d "$DST/.git" ]; then
   echo "clone exists: $DST"

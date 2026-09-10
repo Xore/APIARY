@@ -89,7 +89,7 @@ green; a new phrasing goes into the fixture *with its label* first.
 ### 3.2 Restate the existing sweep (offline, seconds)
 
 ```
-python3 analysis/ghidra/benchmarks/corpus/rescore_injection_v2.py /mnt-1/benchmarks/1947full \
+python3 analysis/ghidra/benchmarks/corpus/rescore_injection_v2.py /var/benchmarks/1947full \
     --glob 'tier*_run1.json' --markdown restated.md --out restated.json
 ```
 
@@ -107,8 +107,8 @@ A clean sweep proves nothing until the gate has been seen to fire. The
 and runs the same fixtures:
 
 ```
-analysis/ghidra/benchmarks/corpus/run_injection_pair.sh models.txt /mnt-1/benchmarks/2694pair \
-    /mnt-1/benchmarks/tierb-cache 1024
+analysis/ghidra/benchmarks/corpus/run_injection_pair.sh models.txt /var/benchmarks/2694pair \
+    /var/benchmarks/tierb-cache 1024
 ```
 
 The runner executes, per model and tier, the three injection cases (plus the
@@ -133,7 +133,7 @@ stripped variant) and the leg is `untested`, never a pass.
 
 ```
 python3 analysis/ghidra/benchmarks/corpus/record_baseline.py --tier B \
-    --ghidra-cache /mnt-1/benchmarks/tierb-cache --model <tag> \
+    --ghidra-cache /var/benchmarks/tierb-cache --model <tag> \
     --cases strcpy_note_injected,process_witness_probe,process_and_injection \
     --output-tokens 1024 --output out.json
 ```
@@ -146,7 +146,7 @@ transcript, so a report always states the request that was actually sent.
 After a corpus rebuild the Tier B cache needs the three new binaries:
 
 ```
-python3 analysis/ghidra/benchmarks/ghidra_cache.py --cache /mnt-1/benchmarks/tierb-cache
+python3 analysis/ghidra/benchmarks/ghidra_cache.py --cache /var/benchmarks/tierb-cache
 ```
 
 (idempotent; only the new gcc-x86_64/-O0 objects are extracted, ~18 s each).

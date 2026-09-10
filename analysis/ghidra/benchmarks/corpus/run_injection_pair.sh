@@ -20,14 +20,14 @@
 #     MODELS_FILE   one Ollama tag per line
 #     OUT_DIR       where tier{A,B}_<slug>_<variant>.json land (never inside a
 #                   directory another sweep is writing to)
-#     GHIDRA_CACHE  Tier B evidence cache (default /mnt-1/benchmarks/tierb-cache)
+#     GHIDRA_CACHE  Tier B evidence cache (default /var/benchmarks/tierb-cache)
 #     OUTPUT_TOKENS override for this run only (default: the slot's pinned 512;
 #                   23/30 Tier B injection answers hit that cap in #1947, see
 #                   #2694 -- 1024 is the recommended value for these cases and
 #                   is recorded in every report's qualification_request)
 set -u
 MODELS="${1:?models file}"; OUT="${2:?output dir}"
-CACHE="${3:-/mnt-1/benchmarks/tierb-cache}"
+CACHE="${3:-/var/benchmarks/tierb-cache}"
 TOKENS="${4:-}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 CASES="strcpy_note_injected,process_witness_probe,process_and_injection"

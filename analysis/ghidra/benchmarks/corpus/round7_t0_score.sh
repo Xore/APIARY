@@ -6,7 +6,7 @@
 # pin comparability), the four T0 cases additionally extracted from the run's
 # transcripts for the per-case read, cold protocol throughout.
 #
-# Operational copy lives at /mnt-1/benchmarks/round7_t0_score.sh.
+# Operational copy lives at /var/benchmarks/round7_t0_score.sh.
 #
 # ---------------------------------------------------------------------------
 # Why this file cannot run today and is written but gated
@@ -22,7 +22,7 @@
 # files) rather than inventing a fourth protocol.
 #
 # Nothing here can fire until the positive condition holds: every round-7 T0
-# tag has both tier files or an UNMEASURED marker in /mnt-1/benchmarks/round7/
+# tag has both tier files or an UNMEASURED marker in /var/benchmarks/round7/
 # AND no sweep_extra.sh / record_baseline.py / round7_coldrun.sh process is
 # alive (same shape as chain_cold.sh).
 #
@@ -34,7 +34,7 @@
 # per-slice transcript entries after the full-slice run (extract_cases below).
 set -u
 
-BASE=${BASE:-/mnt-1/benchmarks}
+BASE=${BASE:-/var/benchmarks}
 RESULTS7=${RESULTS7:-$BASE/round7}
 OUT=${OUT:-$BASE/round7/t0}
 REPO=${REPO:-$BASE/APIARY-round7}
