@@ -247,8 +247,26 @@ services:
     # SNARE drops privileges at startup (setgid/setuid), which is why the
     # otherwise-empty set the other tanner services use makes it exit with
     # PermissionError: [Errno 1] Operation not permitted before it binds.
-    # SETUID+SETGID is the measured minimum; CHOWN and DAC_OVERRIDE were
-    # tested on top and changed nothing, so they are not granted.
+    # SETUID+SETGID is the measured minimum.
+    #
+    # #3160: the earlier note here ("CHOWN and DAC_OVERRIDE were tested on
+    # top and changed nothing") was wrong -- that measurement predates
+    # snare.pid existing on disk. Root without CAP_DAC_OVERRIDE cannot
+    # truncate-open an *existing* file it does not own; the dir's own mode
+    # (0757) only gates create/unlink, not truncating a file someone else
+    # owns -- confirmed live by reproducing the EACCES with capsh under
+    # this exact cap set. The owning uid flips each stack start: snare's
+    # own prior run leaves these files root:root, then honeypot-init's
+    # `chown -R 65534:65534 .../logs/snare` (see honeypot-init compose)
+    # re-owns them to nobody before snare's next start -- either way the
+    # file is 0644 (other=read only) and snare starts as root, so it hits
+    # the same EACCES regardless of which non-root uid currently owns the
+    # file. Same trap hits snare.err and snare.log (opened next, same
+    # pre-drop root context) -- confirmed by clearing each in turn and
+    # watching the next one fail. Adding DAC_OVERRIDE would fix it too but
+    # widens what a network-exposed honeypot can do as root; instead the
+    # entrypoint below removes its own state files before each start, so
+    # SNARE always creates them fresh.
     cap_drop:
       - ALL
     cap_add:
@@ -269,6 +287,7 @@ services:
       - -c
       - >
         until [ -f /markers/snare-clone.done ] && [ -f /markers/log-init.done ]; do sleep 3; done;
+        rm -f /opt/snare/snare.pid /opt/snare/snare.err /opt/snare/snare.log;
         exec /usr/local/bin/snare-entry.sh
     ports:
       - ${HP_BIND:-10.8.0.2}:19082:8080
