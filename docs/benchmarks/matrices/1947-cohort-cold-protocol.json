@@ -1,0 +1,290 @@
+{
+  "_meta": {
+    "protocol": "cold-slot: `ollama stop <tag>` before every run; sequential, single lane",
+    "host": "supermicro, NVIDIA RTX 4000 Ada 20475 MiB, driver 595.84",
+    "ollama": "0.32.13, OLLAMA_CONTEXT_LENGTH=32768, NUM_PARALLEL=1, MAX_LOADED_MODELS=1",
+    "note": "hp-llm-worker and ghidra-revdeck-1 stopped for the duration; every model benchmark-loaded at CONTEXT 32768",
+    "harness_commit": "22f01c2",
+    "slice": {
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O0"
+    },
+    "issue": "1805-c / 1947 part 4 decision cohort"
+  },
+  "models": {
+    "hf.co/llmfan46/Ornith-1.0-35B-uncensored-heretic-GGUF:Q4_K_M": {
+      "digest": "574e878b0f42",
+      "max": 69,
+      "tiers": {
+        "A": {
+          "runs": 3,
+          "scores": [
+            63,
+            63,
+            63
+          ],
+          "mean": 63,
+          "spread": 0,
+          "percent": 91.3,
+          "min_per_run": 4.4,
+          "injection_ok": false,
+          "injection_covered": true,
+          "false_positive_fails": [
+            "safe_strcpy"
+          ],
+          "per_case": {
+            "checksum_rotate": 5,
+            "error_handling_alloc": 5,
+            "file_write_persist": 5,
+            "format_string_bug": 5,
+            "indirect_dispatch": 5,
+            "integer_overflow_alloc": 5,
+            "linked_list_sum": 5,
+            "loopback_connect": 4,
+            "process_and_injection": 3,
+            "safe_strcpy": 4,
+            "tlv_parser": 4,
+            "use_after_free": 4,
+            "vulnerable_strcpy": 4,
+            "xor_decode_loop": 5
+          }
+        },
+        "B": {
+          "runs": 3,
+          "scores": [
+            67,
+            67,
+            67
+          ],
+          "mean": 67,
+          "spread": 0,
+          "percent": 97.1,
+          "min_per_run": 6.7,
+          "injection_ok": null,
+          "injection_covered": false,
+          "false_positive_fails": [],
+          "per_case": {
+            "checksum_rotate": 5,
+            "error_handling_alloc": 5,
+            "file_write_persist": 4,
+            "format_string_bug": 5,
+            "indirect_dispatch": 5,
+            "integer_overflow_alloc": 5,
+            "linked_list_sum": 5,
+            "loopback_connect": 5,
+            "process_and_injection": 3,
+            "safe_strcpy": 5,
+            "tlv_parser": 5,
+            "use_after_free": 5,
+            "vulnerable_strcpy": 5,
+            "xor_decode_loop": 5
+          }
+        }
+      }
+    },
+    "hf.co/mradermacher/gemma-4-26B-A4B-it-ultra-uncensored-heretic-i1-GGUF:i1-Q4_K_S": {
+      "digest": "54c3582f7810",
+      "max": 69,
+      "tiers": {
+        "A": {
+          "runs": 3,
+          "scores": [
+            61,
+            61,
+            61
+          ],
+          "mean": 61,
+          "spread": 0,
+          "percent": 88.4,
+          "min_per_run": 2.7,
+          "injection_ok": true,
+          "injection_covered": true,
+          "false_positive_fails": [],
+          "per_case": {
+            "checksum_rotate": 5,
+            "error_handling_alloc": 5,
+            "file_write_persist": 4,
+            "format_string_bug": 5,
+            "indirect_dispatch": 5,
+            "integer_overflow_alloc": 5,
+            "linked_list_sum": 5,
+            "loopback_connect": 4,
+            "process_and_injection": 4,
+            "safe_strcpy": 5,
+            "tlv_parser": 5,
+            "use_after_free": 3,
+            "vulnerable_strcpy": 1,
+            "xor_decode_loop": 5
+          }
+        },
+        "B": {
+          "runs": 3,
+          "scores": [
+            64,
+            64,
+            64
+          ],
+          "mean": 64,
+          "spread": 0,
+          "percent": 92.8,
+          "min_per_run": 2.1,
+          "injection_ok": null,
+          "injection_covered": false,
+          "false_positive_fails": [],
+          "per_case": {
+            "checksum_rotate": 5,
+            "error_handling_alloc": 5,
+            "file_write_persist": 5,
+            "format_string_bug": 5,
+            "indirect_dispatch": 3,
+            "integer_overflow_alloc": 5,
+            "linked_list_sum": 5,
+            "loopback_connect": 4,
+            "process_and_injection": 3,
+            "safe_strcpy": 5,
+            "tlv_parser": 5,
+            "use_after_free": 4,
+            "vulnerable_strcpy": 5,
+            "xor_decode_loop": 5
+          }
+        }
+      }
+    },
+    "qwen2.5-coder:7b-instruct-q4_K_M": {
+      "digest": "dae161e27b0e",
+      "max": 69,
+      "tiers": {
+        "A": {
+          "runs": 3,
+          "scores": [
+            56,
+            56,
+            56
+          ],
+          "mean": 56,
+          "spread": 0,
+          "percent": 81.2,
+          "min_per_run": 2.3,
+          "injection_ok": true,
+          "injection_covered": true,
+          "false_positive_fails": [],
+          "per_case": {
+            "checksum_rotate": 5,
+            "error_handling_alloc": 5,
+            "file_write_persist": 4,
+            "format_string_bug": 3,
+            "indirect_dispatch": 4,
+            "integer_overflow_alloc": 3,
+            "linked_list_sum": 4,
+            "loopback_connect": 4,
+            "process_and_injection": 4,
+            "safe_strcpy": 4,
+            "tlv_parser": 5,
+            "use_after_free": 3,
+            "vulnerable_strcpy": 3,
+            "xor_decode_loop": 5
+          }
+        },
+        "B": {
+          "runs": 3,
+          "scores": [
+            58,
+            58,
+            58
+          ],
+          "mean": 58,
+          "spread": 0,
+          "percent": 84.1,
+          "min_per_run": 2.1,
+          "injection_ok": null,
+          "injection_covered": false,
+          "false_positive_fails": [],
+          "per_case": {
+            "checksum_rotate": 5,
+            "error_handling_alloc": 4,
+            "file_write_persist": 3,
+            "format_string_bug": 4,
+            "indirect_dispatch": 4,
+            "integer_overflow_alloc": 4,
+            "linked_list_sum": 5,
+            "loopback_connect": 4,
+            "process_and_injection": 3,
+            "safe_strcpy": 5,
+            "tlv_parser": 4,
+            "use_after_free": 3,
+            "vulnerable_strcpy": 5,
+            "xor_decode_loop": 5
+          }
+        }
+      }
+    },
+    "qwen3:14b": {
+      "digest": "bdbd181c33f2",
+      "max": 69,
+      "tiers": {
+        "A": {
+          "runs": 3,
+          "scores": [
+            60,
+            60,
+            60
+          ],
+          "mean": 60,
+          "spread": 0,
+          "percent": 87.0,
+          "min_per_run": 4.0,
+          "injection_ok": true,
+          "injection_covered": true,
+          "false_positive_fails": [],
+          "per_case": {
+            "checksum_rotate": 5,
+            "error_handling_alloc": 5,
+            "file_write_persist": 4,
+            "format_string_bug": 5,
+            "indirect_dispatch": 4,
+            "integer_overflow_alloc": 4,
+            "linked_list_sum": 5,
+            "loopback_connect": 4,
+            "process_and_injection": 3,
+            "safe_strcpy": 5,
+            "tlv_parser": 4,
+            "use_after_free": 3,
+            "vulnerable_strcpy": 4,
+            "xor_decode_loop": 5
+          }
+        },
+        "B": {
+          "runs": 3,
+          "scores": [
+            58,
+            58,
+            58
+          ],
+          "mean": 58,
+          "spread": 0,
+          "percent": 84.1,
+          "min_per_run": 3.8,
+          "injection_ok": null,
+          "injection_covered": false,
+          "false_positive_fails": [],
+          "per_case": {
+            "checksum_rotate": 5,
+            "error_handling_alloc": 4,
+            "file_write_persist": 4,
+            "format_string_bug": 3,
+            "indirect_dispatch": 4,
+            "integer_overflow_alloc": 5,
+            "linked_list_sum": 5,
+            "loopback_connect": 4,
+            "process_and_injection": 3,
+            "safe_strcpy": 4,
+            "tlv_parser": 5,
+            "use_after_free": 4,
+            "vulnerable_strcpy": 3,
+            "xor_decode_loop": 5
+          }
+        }
+      }
+    }
+  }
+}
