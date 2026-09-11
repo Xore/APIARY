@@ -369,9 +369,15 @@ services:
       - -c
       - |
         until [ -f /markers/log-init.done ]; do sleep 3; done
+        # #3170: seed before the loop so a cold start against a large
+        # backlog never reads as dead before the first pass can finish.
+        touch /tmp/.pcap-sync-heartbeat
         while true; do
           newest=$$(ls -t /src 2>/dev/null | head -1)
           for f in /src/*.pcap.*; do
+            # #3170: per-file, not per-pass -- a long in-flight pass must
+            # never read as a wedged loop.
+            touch /tmp/.pcap-sync-heartbeat
             [ -e "$$f" ] || continue
             n=$$(basename "$$f")
             [ "$$n" = "$$newest" ] && continue
@@ -395,6 +401,17 @@ services:
             # try to import.
             stage="/tmp/sync.$$n"
             size=$$(stat -c %s "$$f" 2>/dev/null) || continue
+            if [ "$$size" -eq 0 ]; then
+              # #3170: a zero-byte rotated pcap made "have -ge size" true
+              # below with $$stage never created (dd only runs when have
+              # <size, and 0<0 is never true) -- cp then failed to stat a
+              # file that was never staged, every pass forever, since a
+              # failed cp never creates /dst/$$n to mark the file done.
+              # Nothing to stage for an empty file; write it directly.
+              : > "/dst/$$n"
+              touch -r "$$f" "/dst/$$n" 2>/dev/null
+              continue
+            fi
             have=0
             [ -e "$$stage" ] && have=$$(stat -c %s "$$stage" 2>/dev/null || echo 0)
             if [ "$$have" -lt "$$size" ]; then
@@ -403,7 +420,11 @@ services:
                 conv=notrunc 2>/dev/null
               have=$$(stat -c %s "$$stage" 2>/dev/null || echo 0)
             fi
-            if [ "$$have" -ge "$$size" ]; then
+            # #3170: require $$stage to actually exist before trusting the
+            # size compare -- belt-and-suspenders for any other case where
+            # dd exits without producing it; falls through to retry next
+            # pass instead of cp failing against a path never created.
+            if [ -e "$$stage" ] && [ "$$have" -ge "$$size" ]; then
               cp -p "$$stage" "/dst/$$n" && touch -r "$$f" "/dst/$$n" 2>/dev/null
               rm -f "$$stage"
             fi
@@ -430,6 +451,11 @@ services:
             [ -n "$$oldest" ] || break
             rm -f "/dst/$$oldest" || break
           done
+          # #3170: proves this loop itself completed a pass, not just that
+          # /src is fresh -- /src freshness alone can't tell a live sync
+          # loop from one wedged mid-pass (e.g. on a stuck du/mount), so a
+          # hang here previously read healthy forever.
+          touch /tmp/.pcap-sync-heartbeat
           sleep 30
         done
     environment:
@@ -450,6 +476,11 @@ services:
     # that window, confirmed against this same session's own live
     # observations) while still catching a stale mount long before it
     # goes unnoticed for days.
+    # #3170: /src freshness only proves suricata is still producing --
+    # add a heartbeat check (touched once per completed loop pass, see
+    # command: above) so a loop wedged on something other than /src (a
+    # stuck du/mount, a hung retention delete) is caught too, instead of
+    # reading healthy forever because the source alone still looked fine.
     healthcheck:
       test:
         - CMD-SHELL
@@ -458,7 +489,9 @@ services:
           [ -n "$$newest" ] || exit 1;
           mtime=$$(stat -c %Y "/src/$$newest" 2>/dev/null) || exit 1;
           now=$$(date +%s);
-          [ $$((now - mtime)) -lt 900 ]
+          [ $$((now - mtime)) -lt 900 ] || exit 1;
+          hb=$$(stat -c %Y /tmp/.pcap-sync-heartbeat 2>/dev/null) || exit 1;
+          [ $$((now - hb)) -lt 180 ]
       interval: 120s
       # #2584: was 10s. This check's own /src reads share the sshfs channel
       # the sync loop's copy also reads from -- the loop now bounds each of
@@ -598,26 +631,45 @@ services:
       - ARKIME__passwordSecret=${ARKIME_PASSWORD_SECRET:-change-me-in-env}
     networks:
       - honeynet
-    # #1497: stateful, not a naive "is the newest session recent" check --
-    # this container is legitimately idle or mid-backlog-catchup for long
-    # stretches (confirmed live), which a recency-based check would
-    # false-positive on. Instead compares the real arkime_sessions3-* doc
-    # count against the value from the previous check (persisted to
-    # /tmp, reset on every restart -- exactly the fresh-baseline behavior
-    # wanted). A single unchanged reading isn't itself a failure --
-    # Docker's own retries below require 12 straight unhealthy readings,
-    # i.e. a full hour of zero indexing progress, before autoheal restarts
-    # it. Confirmed against this container's own real indexing rate before
-    # picking that window (thousands of sessions/hour under normal load).
+    # #3170: the #1497 stateful check above compared arkime_sessions3-*'s
+    # doc count, but that index is shared across every node/sensor writing
+    # to this ES cluster -- an hour with zero NEW sessions from ANYWHERE
+    # (a quiet overnight lull, the confirmed live trigger for this issue)
+    # read identical to this one node's own capture being wedged, and both
+    # drove the same hourly autoheal restart of a perfectly fine container.
+    # Rescoped to what this container alone controls: process alive
+    # (pgrep), ES reachable, and -- in place of the global session count
+    # -- whether the newest raw pcap this node's own producer (pcap-sync)
+    # has staged in /opt/arkime/raw is ahead of the newest file this node
+    # has actually indexed (arkime_files_v30, filtered to this --host). A
+    # quiet network stages no new raw files, so the lag stays ~0 and this
+    # reads healthy indefinitely, same for a dead producer (#3170's other
+    # defect) -- no new raw files land either, so this container is never
+    # restarted for a failure that isn't its own. A small lag (<60s) is
+    # normal live-tailing and always healthy; a larger one falls through
+    # to the same stateful progress compare #1497 used (persisted to /tmp,
+    # reset on restart), so a real, ongoing backlog catch-up still reads
+    # healthy as long as the indexed side keeps advancing, and only a
+    # backlog that stops advancing for 12 straight readings (1 hour, same
+    # window as before) trips autoheal -- now against the container that's
+    # actually stuck (the #1497 reader-slot deadlock), not a bystander.
     healthcheck:
       test:
         - CMD-SHELL
         - >
-          count=$$(curl -s --max-time 5 'http://elasticsearch:9200/arkime_sessions3-*/_count' | grep -o '"count":[0-9]*' | head -1 | cut -d: -f2);
-          [ -n "$$count" ] || exit 0;
-          prev=$$(cat /tmp/.arkime-session-count 2>/dev/null || echo "");
-          echo "$$count" > /tmp/.arkime-session-count;
-          [ -n "$$prev" ] && [ "$$count" = "$$prev" ] && exit 1 || exit 0
+          pgrep -x capture >/dev/null 2>&1 || exit 1;
+          newest_raw=$$(ls /opt/arkime/raw 2>/dev/null | sed -n 's/^log\.pcap\.\([0-9]*\)$$/\1/p' | sort -n | tail -1);
+          newest_raw=$${newest_raw:-0};
+          # #3170: ES trouble must not restart capture -- a bystander
+          # already covered by this healthcheck once. Any failure to reach
+          # or parse ES falls through to exit 0, not a false "stuck".
+          resp=$$(curl -s --max-time 5 -H 'Content-Type: application/json' -d '{"size":1,"sort":[{"num":"desc"}],"query":{"term":{"node":"honeypot-vps"}},"_source":["name"]}' 'http://elasticsearch:9200/arkime_files_v30/_search') || exit 0;
+          newest_idx=$$(printf '%s' "$$resp" | grep -o 'log\.pcap\.[0-9]*' | head -1 | grep -o '[0-9]*$$');
+          [ -n "$$newest_idx" ] || exit 0;
+          [ $$((newest_raw - newest_idx)) -lt 60 ] && exit 0;
+          prev=$$(cat /tmp/.arkime-idx-epoch 2>/dev/null || echo "");
+          echo "$$newest_idx" > /tmp/.arkime-idx-epoch;
+          [ -n "$$prev" ] && [ "$$newest_idx" = "$$prev" ] && exit 1 || exit 0
       interval: 5m
       timeout: 10s
       retries: 12
