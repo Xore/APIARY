@@ -24,7 +24,7 @@ from models.isolation_forest import (IsoForestModel, MAX_TRAIN_SAMPLES, _get_ip,
                                      _get_dst_ip, _get_src_port, _get_transport_proto,
                                      is_our_own_address)
 from models.lstm_autoencoder import LSTMAEModel
-from models.session_features import SessionFeatureTracker
+from models.session_features import SessionFeatureTracker, compute_batch_session_features
 
 # #1971: the poll/checkpoint mechanics below (#168 boundary semantics,
 # #188 failure-vs-empty shape, #190 batch caps) are the reference
@@ -403,11 +403,17 @@ def fetch_new_events(es: Elasticsearch, index_pattern: str,
     )
 
 
-def write_retrain_metric(es: Elasticsearch, model_name: str, result) -> None:
+def write_retrain_metric(es: Elasticsearch, model_name: str, result, dropped_count: int = 0) -> None:
     """Evidence for one retrain() call, accepted or not (#65,
     docs/ml-worker-plan.md §11.1/§11.4). Best-effort like write_anomaly()'s
     Redis publish: a metrics-write failure must never take down the retrain
-    cycle that already succeeded or failed on its own terms."""
+    cycle that already succeeded or failed on its own terms.
+
+    dropped_count (#2984): how many rows quarantine_retrain_events() dropped
+    from this cycle's fetched batch before either model ever saw it -- same
+    reviewable-metric contract as write_malformed_event_metric() (#171), just
+    surfaced as a count here since a retrain batch is scored as one unit, not
+    per-row."""
     doc = {
         "@timestamp": datetime.now(timezone.utc).isoformat(),
         "kind": "retrain",
@@ -418,6 +424,7 @@ def write_retrain_metric(es: Elasticsearch, model_name: str, result) -> None:
         "holdout_samples": result.holdout_samples,
         "anomaly_rate_new": round(result.anomaly_rate_new, 4),
         "anomaly_rate_previous": round(result.anomaly_rate_previous, 4) if result.anomaly_rate_previous is not None else None,
+        "dropped_count": dropped_count,
     }
     try:
         es.index(index=METRICS_INDEX, document=doc)
@@ -505,6 +512,37 @@ def write_malformed_event_metric(es: Elasticsearch, event: dict, exc: Exception)
     except Exception as write_exc:
         logger.warning(f"Failed to write malformed-event metric (non-fatal): {write_exc}")
     logger.warning(f"Skipping malformed event {doc['source_event_id']} in {doc['source_index']}: {exc}")
+
+
+def quarantine_retrain_events(es: Elasticsearch, iso_model, events: list) -> tuple:
+    """Per-event guard for the retrain batch (#2984), same quarantine
+    contract score_and_write_events() already has for live scoring (#171):
+    a source that can't survive extract_features() is dropped and recorded
+    as a reviewable metric instead of raising out of retrain().
+
+    Probes with both iso_model.extract_features() and
+    compute_batch_session_features() -- the two per-row entry points both
+    models' retrain() calls go through (isolation_forest.retrain() and
+    lstm_autoencoder.retrain() each call compute_batch_session_features()
+    themselves; extract_features() covers the rest of each model's own
+    field reads).
+
+    Returns (sources, dropped_count) -- sources is `events` filtered down to
+    just the ones that survived, in original order, ready to pass straight
+    to IsoForestModel.retrain()/LSTMAEModel.retrain()."""
+    sources = []
+    dropped = 0
+    for event in events:
+        src = event.get("_source", {})
+        try:
+            iso_model.extract_features(src)
+            compute_batch_session_features([src])
+        except Exception as exc:
+            write_malformed_event_metric(es, event, exc)
+            dropped += 1
+            continue
+        sources.append(src)
+    return sources, dropped
 
 
 def score_and_write_events(es: Elasticsearch, rdb, iso_model, lstm_model,
@@ -1005,6 +1043,7 @@ def run_worker() -> None:
                 "holdout_samples":       {"type": "integer"},
                 "anomaly_rate_new":      {"type": "float"},
                 "anomaly_rate_previous": {"type": "float"},
+                "dropped_count":         {"type": "integer"},  # kind="retrain" (#2984)
                 "drift_window":          {"type": "integer"},
                 "drift_rate":            {"type": "float"},
                 "source_event_id":       {"type": "keyword"},  # kind="malformed_event" (#171)
@@ -1170,12 +1209,12 @@ def run_worker() -> None:
                 all_events.extend(idx_events)
 
             if len(all_events) > 100:
-                sources = [e["_source"] for e in all_events]
+                sources, dropped_count = quarantine_retrain_events(es, iso_model, all_events)
                 iso_result = iso_model.retrain(sources, source_index_counts=index_counts)
                 lstm_result = lstm_model.retrain(sources)
-                write_retrain_metric(es, "isolation_forest_hbos", iso_result)
-                write_retrain_metric(es, "lstm_ae", lstm_result)
-                logger.info(f"Retrain cycle on {len(all_events)} events complete")
+                write_retrain_metric(es, "isolation_forest_hbos", iso_result, dropped_count=dropped_count)
+                write_retrain_metric(es, "lstm_ae", lstm_result, dropped_count=dropped_count)
+                logger.info(f"Retrain cycle on {len(all_events)} events complete ({dropped_count} dropped)")
 
             if scheduled_due:
                 # Mark this slot handled regardless of whether len(all_events)
