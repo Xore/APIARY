@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import worker  # noqa: E402
 from worker import contributing_detectors  # noqa: E402
-from models.isolation_forest import IsoForestModel  # noqa: E402
+from models.isolation_forest import IsoForestModel, RetrainResult  # noqa: E402
 from models.lstm_autoencoder import LSTMAEModel, SEQ_LEN  # noqa: E402
 
 
@@ -365,6 +365,147 @@ class TestUnhandledEventErrorsCrashTheBatch:
         es = MagicMock()
         es.index.side_effect = ConnectionError("ES unreachable")
         worker.write_malformed_event_metric(es, {"_id": "x", "_index": "y"}, ValueError("boom"))  # must not raise
+
+
+class TestRetrainBatchIsolation:
+    """#2984: run_worker()'s retrain call chain (compute_batch_session_features()
+    -> extract_features()/featurise_temporal()) had no per-event guard, unlike
+    score_and_write_events()'s live path (#171 above). One unreadable row in a
+    retrain batch (#2978's non-numeric port shape) raised out of retrain() and
+    killed the whole worker process. quarantine_retrain_events() gives the
+    retrain path the same drop-and-count contract, in the caller, without
+    touching extract_features()."""
+
+    def _valid_events(self, n: int) -> list:
+        return [
+            {"_id": f"valid-{i}", "_index": "honeypot-v2-2026.07.31", "_source": dict(REAL_SHAPED_DOCUMENT["_source"])}
+            for i in range(n)
+        ]
+
+    def test_quarantine_drops_malformed_row_and_keeps_the_rest(self):
+        iso_model = IsoForestModel(model_dir=_placeholder_model_dir("does-not-matter"))
+        es = MagicMock()
+
+        events = self._valid_events(120)
+        malformed_event = {
+            "_id": "malformed-1", "_index": "honeypot-v2-2026.07.31",
+            "_source": {"@timestamp": "2026-07-31T00:00:00Z", "destination": {"port": "not-a-port"}},
+        }
+        events.insert(60, malformed_event)
+
+        sources, dropped = worker.quarantine_retrain_events(es, iso_model, events)
+
+        assert dropped == 1
+        assert len(sources) == 120
+
+        malformed_calls = [
+            call for call in es.index.call_args_list
+            if call.kwargs.get("document", {}).get("kind") == "malformed_event"
+        ]
+        assert len(malformed_calls) == 1
+        assert malformed_calls[0].kwargs["document"]["source_event_id"] == "malformed-1"
+
+    def test_retrain_succeeds_on_the_quarantined_survivors(self):
+        iso_model = IsoForestModel(model_dir=_placeholder_model_dir("does-not-matter"))
+        es = MagicMock()
+
+        events = self._valid_events(120)
+        malformed_event = {
+            "_id": "malformed-2", "_index": "honeypot-v2-2026.07.31",
+            "_source": {"@timestamp": "2026-07-31T00:00:00Z", "destination": {"port": "not-a-port"}},
+        }
+        events.insert(30, malformed_event)
+
+        sources, dropped = worker.quarantine_retrain_events(es, iso_model, events)
+        assert dropped == 1
+
+        # Must not raise -- this is exactly the call run_worker() makes with
+        # quarantine_retrain_events()'s output, and exactly what raised
+        # unguarded before #2984 when a malformed row reached retrain()
+        # directly.
+        result = iso_model.retrain(sources)
+        assert result.train_samples + result.holdout_samples == 120
+
+    def test_retrain_without_quarantine_still_raises_on_the_malformed_row(self):
+        """Proves the pre-#2984 failure mode still exists at the retrain()
+        layer itself -- retrain() (like extract_features()) is intentionally
+        left strict/unguarded per #171's "readers stay strict" rule. The fix
+        is quarantine_retrain_events() in the caller, not a change here."""
+        iso_model = IsoForestModel(model_dir=_placeholder_model_dir("does-not-matter"))
+        sources = [e["_source"] for e in self._valid_events(120)]
+        sources.insert(60, {"@timestamp": "2026-07-31T00:00:00Z", "destination": {"port": "not-a-port"}})
+
+        with pytest.raises(ValueError):
+            iso_model.retrain(sources)
+
+    def test_quarantine_drops_row_that_only_compute_batch_session_features_rejects(self):
+        """extract_features() never reads honeypot.session -- only
+        compute_batch_session_features() does, as a dict key
+        (session_features.py's session_counts.get(session, 0)). A list
+        there survives extract_features()'s probe and then raises
+        TypeError: unhashable type: 'list' inside retrain(). The probe must
+        call compute_batch_session_features() too, not just
+        extract_features()."""
+        iso_model = IsoForestModel(model_dir=_placeholder_model_dir("does-not-matter"))
+        es = MagicMock()
+
+        events = self._valid_events(120)
+        unhashable_session_event = {
+            "_id": "unhashable-session-1", "_index": "honeypot-v2-2026.07.31",
+            "_source": dict(REAL_SHAPED_DOCUMENT["_source"], honeypot={
+                **REAL_SHAPED_DOCUMENT["_source"].get("honeypot", {}), "session": ["s1", "s2"],
+            }),
+        }
+        events.insert(60, unhashable_session_event)
+
+        sources, dropped = worker.quarantine_retrain_events(es, iso_model, events)
+
+        assert dropped == 1
+        assert len(sources) == 120
+
+        malformed_calls = [
+            call for call in es.index.call_args_list
+            if call.kwargs.get("document", {}).get("kind") == "malformed_event"
+        ]
+        assert len(malformed_calls) == 1
+        assert malformed_calls[0].kwargs["document"]["source_event_id"] == "unhashable-session-1"
+
+        # Must not raise -- same contract as the malformed-port test above.
+        result = iso_model.retrain(sources)
+        assert result.train_samples + result.holdout_samples == 120
+
+    def test_write_retrain_metric_reports_dropped_count(self):
+        es = MagicMock()
+        result = RetrainResult(
+            accepted=True, reason="accepted", train_samples=100, holdout_samples=20,
+            anomaly_rate_new=0.05, anomaly_rate_previous=0.05,
+        )
+
+        worker.write_retrain_metric(es, "isolation_forest_hbos", result, dropped_count=1)
+
+        retrain_calls = [
+            call for call in es.index.call_args_list
+            if call.kwargs.get("document", {}).get("kind") == "retrain"
+        ]
+        assert len(retrain_calls) == 1
+        assert retrain_calls[0].kwargs["document"]["dropped_count"] == 1
+
+    def test_write_retrain_metric_defaults_dropped_count_to_zero(self):
+        """Existing 3-positional-arg callers (test_model_lifecycle.py) must
+        keep working unchanged."""
+        es = MagicMock()
+        result = RetrainResult(
+            accepted=True, reason="accepted", train_samples=100, holdout_samples=20,
+            anomaly_rate_new=0.05, anomaly_rate_previous=0.05,
+        )
+
+        worker.write_retrain_metric(es, "isolation_forest_hbos", result)
+
+        retrain_calls = [
+            call for call in es.index.call_args_list
+            if call.kwargs.get("document", {}).get("kind") == "retrain"
+        ]
+        assert retrain_calls[0].kwargs["document"]["dropped_count"] == 0
 
 
 if __name__ == "__main__":
