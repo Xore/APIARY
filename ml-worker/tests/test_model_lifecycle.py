@@ -6,6 +6,7 @@ proves against.
 Run: python3 -m pytest ml-worker/tests/test_model_lifecycle.py -v
 """
 import json
+import math
 import os
 import random
 import sys
@@ -204,13 +205,49 @@ class TestPercentileCalibration:
     def test_p99_maps_to_the_tail_anchor(self):
         assert iso_mod._percentile_normalize(-0.68, p50=-0.48, p99=-0.68, lower_is_more_anomalous=True) == pytest.approx(0.95)
 
-    def test_beyond_p99_extrapolates_and_clips_at_one(self):
-        # More extreme than anything this model's own fit produced --
-        # still meaningfully "very anomalous", clipped at the ceiling.
-        assert iso_mod._percentile_normalize(-0.90, p50=-0.48, p99=-0.68, lower_is_more_anomalous=True) == 1.0
+    def test_beyond_p99_asymptotically_approaches_but_never_hard_clips_at_one(self):
+        # #3169: genuinely extreme raw scores should still read as
+        # "very anomalous" (near 1.0) -- but via an asymptote, not a
+        # hard clip, so they stay distinguishable from each other.
+        value = iso_mod._percentile_normalize(-0.90, p50=-0.48, p99=-0.68, lower_is_more_anomalous=True)
+        assert 0.95 < value < 1.0
+        # frac=2.9, still short of the ~3.25 float64 underflow point where
+        # exp() rounds to exactly 0.0 -- see _TAIL_DECAY's rationale comment.
+        far_value = iso_mod._percentile_normalize(-1.06, p50=-0.48, p99=-0.68, lower_is_more_anomalous=True)
+        assert far_value < 1.0
 
     def test_below_p50_extrapolates_and_clips_at_zero(self):
         assert iso_mod._percentile_normalize(-0.10, p50=-0.48, p99=-0.68, lower_is_more_anomalous=True) == 0.0
+
+    def test_moderately_beyond_p99_no_longer_hard_clips_to_the_ceiling(self):
+        # #3169: 52.4% of live alerts sat at an indistinguishable
+        # ceiling because the OLD linear formula (0.2 + frac * 0.75)
+        # hit its hard clip the moment frac >= 1.0667 -- barely past
+        # p99. frac=1.3 here used to clip to exactly 1.0.
+        value = iso_mod._percentile_normalize(-0.565, p50=-0.5, p99=-0.55, lower_is_more_anomalous=True)
+        assert value < 1.0
+        assert value == pytest.approx(1.0 - 0.05 * math.exp(-15 * 0.3))
+
+    def test_dense_tail_beyond_p99_spreads_instead_of_collapsing_to_one_value(self):
+        # #3169 regression: a dense cluster of raw scores past p99 (as
+        # live traffic produces once the holdout-derived p99 anchor
+        # under-estimates the true tail) must map to distinct,
+        # monotonically increasing values -- not pile onto one ceiling.
+        p50, p99 = -0.5, -0.55
+        # capped at frac=3.0: beyond that the asymptote's distance from
+        # 1.0 underflows float64 precision at 1.0, which is correct --
+        # truly extreme outliers should read as the ceiling itself.
+        fracs = [1.0, 1.1, 1.3, 1.6, 2.0, 3.0]
+        raws = [p50 - f * (p50 - p99) for f in fracs]
+        values = [iso_mod._percentile_normalize(r, p50=p50, p99=p99, lower_is_more_anomalous=True) for r in raws]
+        assert values == sorted(values)
+        assert len(set(values)) == len(values)
+        assert all(v < 1.0 for v in values)
+        # the OLD formula collapsed every frac past 1.0667 onto exactly
+        # 1.0 -- the same spread would have piled almost entirely onto
+        # one value.
+        old_values = [min(0.2 + f * 0.75, 1.0) for f in fracs]
+        assert len(set(old_values)) < len(set(values))
 
     def test_hbos_direction_is_reversed_higher_raw_is_more_anomalous(self):
         # pyod convention: higher decision_function = more anomalous,
@@ -222,6 +259,15 @@ class TestPercentileCalibration:
 
     def test_degenerate_equal_anchors_returns_neutral(self):
         assert iso_mod._percentile_normalize(5.0, p50=5.0, p99=5.0, lower_is_more_anomalous=False) == 0.5
+
+    def test_batch_normalize_matches_scalar_past_p99(self):
+        # #3169: the vectorized np.where path must apply the same
+        # asymptote as the scalar path, not just up to frac == 1.
+        p50, p99 = -0.5, -0.55
+        raws = np.array([-0.5, -0.55, -0.565, -0.6, -0.75])
+        batch = iso_mod._percentile_normalize_batch(raws, p50=p50, p99=p99, lower_is_more_anomalous=True)
+        scalar = [iso_mod._percentile_normalize(r, p50=p50, p99=p99, lower_is_more_anomalous=True) for r in raws]
+        assert list(batch) == pytest.approx(scalar)
 
 
 class TestRetrainAttachesCalibration:
