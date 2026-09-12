@@ -9,7 +9,7 @@ import json
 import os
 import random
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -927,6 +927,64 @@ class TestDriftDetection:
         es = MagicMock()
         es.index.side_effect = ConnectionError("ES unreachable")
         worker.write_drift_metric(es, window=500, rate=0.5)  # must not raise
+
+
+class TestDriftRetrainCooldown:
+    """#3168: 2026-09-08 03:00-04:00 CEST, 50+ retrain-accepted events in
+    under an hour at 15-26% drift against a 15% trigger -- genuine sustained
+    churn, not noise. drift_rate_if_triggered() has no time dimension, so a
+    DRIFT_WINDOW-sized recent_flags window that refills within a single
+    POLL_INTERVAL re-triggered on the very next cycle with zero spacing.
+    drift_retrain_allowed() adds that spacing as a separate, directly
+    testable gate."""
+    def test_first_ever_drift_is_allowed(self):
+        now = datetime(2026, 9, 8, 3, 0, tzinfo=timezone.utc)
+        assert worker.drift_retrain_allowed(None, now, cooldown_minutes=60) is True
+
+    def test_immediate_retrigger_within_cooldown_is_blocked(self):
+        last = datetime(2026, 9, 8, 3, 0, tzinfo=timezone.utc)
+        one_minute_later = datetime(2026, 9, 8, 3, 1, tzinfo=timezone.utc)
+        assert worker.drift_retrain_allowed(last, one_minute_later, cooldown_minutes=60) is False
+
+    def test_sustained_drift_still_retrains_once_cooldown_elapses(self):
+        """The throttle delays, it never mutes: elevated drift outlasting
+        the cooldown must retrain again, not go silent forever."""
+        last = datetime(2026, 9, 8, 3, 0, tzinfo=timezone.utc)
+        after_cooldown = datetime(2026, 9, 8, 4, 0, tzinfo=timezone.utc)
+        assert worker.drift_retrain_allowed(last, after_cooldown, cooldown_minutes=60) is True
+
+    def test_storm_shape_collapses_to_one_retrain_per_cooldown(self):
+        """Simulates the incident: a poll cycle every 30s, each one finding
+        the recent_flags window already over threshold (sustained churn).
+        Without the gate this fires every cycle (the reported storm); with
+        it, only the cycles at least cooldown_minutes apart accept."""
+        start = datetime(2026, 9, 8, 3, 0, tzinfo=timezone.utc)
+        cycles = [start + timedelta(seconds=30 * i) for i in range(120)]  # 1 hour, storm cadence
+        last_triggered_at = None
+        accepted = 0
+        for now in cycles:
+            if worker.drift_retrain_allowed(last_triggered_at, now, cooldown_minutes=60):
+                accepted += 1
+                last_triggered_at = now
+        assert accepted == 1  # not the 50+ the storm produced
+
+    def test_last_drift_retrain_persists_and_loads_back(self):
+        es = MagicMock()
+        when = datetime(2026, 9, 8, 3, 0, tzinfo=timezone.utc)
+        worker.save_last_drift_retrain(es, when)
+        doc = es.index.call_args.kwargs["document"]
+        assert doc["last_triggered_at"] == when.isoformat()
+
+    def test_no_persisted_drift_retrain_yet_loads_as_none(self):
+        es = MagicMock()
+        es.get.side_effect = Exception("not found")
+        assert worker.load_last_drift_retrain(es) is None
+
+    def test_persisted_drift_retrain_loads_back_correctly(self):
+        es = MagicMock()
+        when = datetime(2026, 9, 8, 3, 0, tzinfo=timezone.utc)
+        es.get.return_value = {"_source": {"last_triggered_at": when.isoformat()}}
+        assert worker.load_last_drift_retrain(es) == when
 
 
 class _StageWarnCapture:
