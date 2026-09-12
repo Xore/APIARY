@@ -422,6 +422,19 @@ def _accept_decision(candidate_rate: float, previous_rate: Optional[float]) -> t
     )
 
 
+# Tail past the p99 anchor (#3169): headroom is how much of [0, 1] is left
+# above the p99->0.95 anchor, decay is set to match the p50->p99 segment's
+# slope (0.75) at that anchor so the curve is continuous there.
+_TAIL_HEADROOM = 1.0 - 0.95
+# Slope-matched to the linear branch at frac=1 (d/dfrac of 0.2 + frac*0.75
+# is 0.75), not fitted to live traffic -- #3169 review flagged this as an
+# honest-measurement gap. Closing it needs a post-deploy field pass: count
+# the fraction of alerts landing at score >= 0.999 over a real window, then
+# re-derive this constant so that population lands <=20% at the observed
+# p99 tail (tracked as a follow-up issue, not done here).
+_TAIL_DECAY = 0.75 / _TAIL_HEADROOM
+
+
 def _percentile_normalize(raw: float, p50: float, p99: float, lower_is_more_anomalous: bool) -> float:
     """Map a raw model score to [0, 1] using THIS model's own observed p50
     (typical/unremarkable) and p99 (near the top of what its own fit
@@ -440,12 +453,25 @@ def _percentile_normalize(raw: float, p50: float, p99: float, lower_is_more_anom
     p50 maps to 0.2 (typical, unremarkable -- half of everything is
     literally this ordinary), p99 maps to 0.95 (only the top 1% of this
     model's OWN fit gets this high, consistent with CONTAMINATION=0.01).
-    Extrapolates and clips beyond either anchor.
+
+    p99 is one order statistic from a small, recent holdout slice, not a
+    census of the live stream it calibrates until the next retrain -- real
+    traffic routinely runs a bit past it. #3169: extrapolating past p99 at
+    the SAME slope as the p50->p99 segment meant only ~6.5% of that
+    segment's own length beyond the anchor was enough to clip to exactly
+    1.0, pinning 52.4% of live alerts to one indistinguishable ceiling
+    value. Past p99 this now decays toward 1.0 instead, with the decay
+    rate picked so the curve is continuous and slope-matched at the p99
+    anchor (frac=1): still asymptotes to 1.0 for genuinely extreme scores,
+    but takes meaningfully more than a noisy anchor's own margin of error
+    to get there.
     """
     if p99 == p50:
         return 0.5
     frac = (p50 - raw) / (p50 - p99) if lower_is_more_anomalous else (raw - p50) / (p99 - p50)
-    return float(np.clip(0.2 + frac * 0.75, 0.0, 1.0))
+    if frac <= 1.0:
+        return float(np.clip(0.2 + frac * 0.75, 0.0, 1.0))
+    return float(1.0 - _TAIL_HEADROOM * math.exp(-_TAIL_DECAY * (frac - 1.0)))
 
 
 def _percentile_normalize_batch(raw: np.ndarray, p50: float, p99: float, lower_is_more_anomalous: bool) -> np.ndarray:
@@ -455,7 +481,13 @@ def _percentile_normalize_batch(raw: np.ndarray, p50: float, p99: float, lower_i
     if p99 == p50:
         return np.full_like(raw, 0.5, dtype=float)
     frac = (p50 - raw) / (p50 - p99) if lower_is_more_anomalous else (raw - p50) / (p99 - p50)
-    return np.clip(0.2 + frac * 0.75, 0.0, 1.0)
+    linear = np.clip(0.2 + frac * 0.75, 0.0, 1.0)
+    # np.where evaluates both branches over the whole array first, so a
+    # very negative frac (deep below p50) would overflow exp() here even
+    # though np.where discards that element -- clamp the exponent's input
+    # to >=0 so the discarded branch never computes an overflowing value.
+    tail = 1.0 - _TAIL_HEADROOM * np.exp(-_TAIL_DECAY * np.maximum(frac - 1.0, 0.0))
+    return np.where(frac <= 1.0, linear, tail)
 
 
 def _anomaly_rate(iso: IsolationForest, hbos: HBOS, X: np.ndarray) -> float:
