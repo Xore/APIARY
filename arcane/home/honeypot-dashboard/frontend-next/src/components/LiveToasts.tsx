@@ -205,11 +205,38 @@ export function LiveToasts() {
     }
   }, [])
 
+  const timers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map())
+  useEffect(() => {
+    return () => {
+      for (const timer of timers.current.values()) clearTimeout(timer)
+    }
+  }, [])
+
+  const dismiss = useCallback((id: number) => {
+    const timer = timers.current.get(id)
+    if (timer) clearTimeout(timer)
+    timers.current.delete(id)
+    setToasts((current) => current.filter((toast) => toast.id !== id))
+  }, [])
+
+  const scheduleDismiss = useCallback((id: number) => {
+    const timer = setTimeout(() => dismiss(id), TOAST_MS)
+    timers.current.set(id, timer)
+  }, [dismiss])
+
+  // Hover/focus pauses the clock so a toast under the pointer or keyboard
+  // focus doesn't vanish mid-read; leaving/blurring restarts a fresh timer.
+  const pauseDismiss = useCallback((id: number) => {
+    const timer = timers.current.get(id)
+    if (timer) clearTimeout(timer)
+    timers.current.delete(id)
+  }, [])
+
   const show = useCallback((condition: Condition, message: string, severity: Severity) => {
     const id = nextId.current++
     setToasts((current) => [...current, { id, key: condition.key, message, severity, to: condition.to }])
-    setTimeout(() => setToasts((current) => current.filter((toast) => toast.id !== id)), TOAST_MS)
-  }, [])
+    scheduleDismiss(id)
+  }, [scheduleDismiss])
 
   const poll = useCallback(async () => {
     let health: SourceHealth | null
@@ -251,11 +278,26 @@ export function LiveToasts() {
 
   if (toasts.length === 0) return null
   return (
-    <div className="hp-toast-stack">
+    <div className="hp-toast-stack" role="status" aria-live="polite" aria-atomic="false">
       {toasts.map((toast) => (
-        <Link key={toast.id} className={`toast hp-toast toast--${toast.severity}`} to={toast.to}>
-          {toast.message}
-        </Link>
+        <div
+          key={toast.id}
+          className={`toast hp-toast toast--${toast.severity}`}
+          onMouseEnter={() => pauseDismiss(toast.id)}
+          onMouseLeave={() => scheduleDismiss(toast.id)}
+          onFocus={() => pauseDismiss(toast.id)}
+          onBlur={() => scheduleDismiss(toast.id)}
+        >
+          <Link to={toast.to}>{toast.message}</Link>
+          <button
+            type="button"
+            aria-label="Dismiss notification"
+            onClick={() => dismiss(toast.id)}
+            style={{ marginLeft: "auto", background: "transparent", border: 0, cursor: "pointer", font: "inherit", lineHeight: 1 }}
+          >
+            ×
+          </button>
+        </div>
       ))}
     </div>
   )

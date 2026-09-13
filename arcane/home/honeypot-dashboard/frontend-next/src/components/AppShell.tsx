@@ -107,6 +107,33 @@ export function AppShell({
 
   return (
     <div className={shellClass}>
+      <a
+        href="#main"
+        className="skip-link sr-only"
+        onFocus={(event) => {
+          Object.assign(event.currentTarget.style, {
+            position: 'fixed',
+            top: '8px',
+            left: '8px',
+            width: 'auto',
+            height: 'auto',
+            overflow: 'visible',
+            clip: 'auto',
+            whiteSpace: 'normal',
+            zIndex: 9999,
+            background: 'var(--surface, #fff)',
+            color: 'var(--text, #000)',
+            padding: '8px 16px',
+            borderRadius: '6px',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+          })
+        }}
+        onBlur={(event) => {
+          event.currentTarget.removeAttribute('style')
+        }}
+      >
+        Skip to main content
+      </a>
       <CommandPalette />
       <ProblemReportButton enabled={showProblemReportButton ?? false} />
       <ConfirmHost />
@@ -120,7 +147,7 @@ export function AppShell({
       {/* Click-to-dismiss backdrop behind the ≤520px drawer — visible only
           while .hp-nav-open is on the shell (theme.css:2143-2158). */}
       <div className="app-shell__nav-scrim" aria-hidden="true" onClick={() => setNavOpen(false)} />
-      <main className="app-main">
+      <main id="main" className="app-main">
         <div className="app-content app-content--wide" data-hp-page-content>
           {children}
         </div>
