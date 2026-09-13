@@ -134,8 +134,6 @@
   --accent-subtle: var(--accent-soft);
   --radius-sm: var(--radius-xs);
   --radius-md: 8px;
-  --radius-lg: var(--radius-panel);
-  --radius-xl: var(--radius-dialog);
   --shadow-card: none;
   --shadow-modal: var(--shadow-dialog);
 }
@@ -288,25 +286,25 @@
   --btn-inverted-bg-hover: light-dark(#121315, #ffffff);
   --btn-inverted-text: light-dark(#eff2f5, #131416);
   --overlay-bg: light-dark(rgba(28, 31, 34, 0.36), rgba(0, 0, 0, 0.5));
-  --success: light-dark(#3f876e, #79c9aa);
-  --success-soft: light-dark(rgba(63, 135, 110, 0.18), rgba(121, 201, 170, 0.2));
-  --success-text-on-soft: light-dark(#295e4d, #89ceb2);
-  --success-badge-fill: light-dark(#4f9f86, #79c9aa);
-  --info: light-dark(#487daa, #78a8d4);
-  --info-soft: light-dark(rgba(72, 125, 170, 0.18), rgba(120, 168, 212, 0.2));
-  --info-text-on-soft: light-dark(#33597a, #9cbedd);
-  --info-badge-fill: light-dark(#6795c0, #78a8d4);
-  --warning: light-dark(#9a9b25, #d9de6a);
-  --warning-soft: light-dark(rgba(154, 155, 37, 0.19), rgba(217, 222, 106, 0.21));
-  --warning-text-on-soft: light-dark(#5a5b15, #d9de6a);
-  --warning-badge-fill: light-dark(#9a9b25, #d9de6a);
-  --danger: light-dark(#b34c6d, #dc7495);
-  --danger-soft: light-dark(rgba(179, 76, 109, 0.2), rgba(220, 116, 149, 0.21));
-  --danger-text-on-soft: light-dark(#873857, #e8a4b9);
-  --danger-badge-fill: light-dark(#c87c91, #dc7495);
-  --critical: light-dark(#c53063, #ff5c94);
-  --critical-soft: light-dark(rgba(197, 48, 99, 0.13), rgba(255, 92, 148, 0.16));
-  --critical-text-on-soft: light-dark(#a12751, #ff89af);
+  --success: light-dark(#3f8764, #79c99e);
+  --success-soft: light-dark(rgba(63, 135, 100, 0.18), rgba(121, 201, 158, 0.2));
+  --success-text-on-soft: light-dark(#295e43, #89ceaa);
+  --success-badge-fill: light-dark(#4f9f7c, #79c99e);
+  --info: light-dark(#487eaa, #78a9d4);
+  --info-soft: light-dark(rgba(72, 126, 170, 0.18), rgba(120, 169, 212, 0.2));
+  --info-text-on-soft: light-dark(#335a7a, #9cbedd);
+  --info-badge-fill: light-dark(#6795c0, #78a9d4);
+  --warning: light-dark(#9b6b25, #deb36a);
+  --warning-soft: light-dark(rgba(155, 107, 37, 0.19), rgba(222, 179, 106, 0.21));
+  --warning-text-on-soft: light-dark(#734d1b, #e2bb7a);
+  --warning-badge-fill: light-dark(#bf862e, #deb36a);
+  --danger: light-dark(#b34f4c, #dc7774);
+  --danger-soft: light-dark(rgba(179, 79, 76, 0.2), rgba(220, 119, 116, 0.21));
+  --danger-text-on-soft: light-dark(#873938, #e7a3a0);
+  --danger-badge-fill: light-dark(#c87f7c, #dc7774);
+  --critical: light-dark(#c53030, #ff5c5c);
+  --critical-soft: light-dark(rgba(197, 48, 48, 0.13), rgba(255, 92, 92, 0.16));
+  --critical-text-on-soft: light-dark(#a52828, #ff8989);
   --terminal-bg: light-dark(#363d47, #13171c);
   --terminal-fg: light-dark(#e6e6e6, #dfe3e9);
   --framebuffer-bg: light-dark(#2f363e, #0d1013);
@@ -353,25 +351,25 @@
   --btn-inverted-bg-hover: light-dark(#121512, #ffffff);
   --btn-inverted-text: light-dark(#eff5ef, #131613);
   --overlay-bg: light-dark(rgba(28, 34, 28, 0.36), rgba(0, 0, 0, 0.5));
-  --success: light-dark(#3f875f, #79c99a);
-  --success-soft: light-dark(rgba(63, 135, 95, 0.18), rgba(121, 201, 154, 0.2));
-  --success-text-on-soft: light-dark(#2b6246, #91d1ac);
-  --success-badge-fill: light-dark(#51a271, #79c99a);
-  --info: light-dark(#4891aa, #78bbd4);
-  --info-soft: light-dark(rgba(72, 145, 170, 0.18), rgba(120, 187, 212, 0.2));
-  --info-text-on-soft: light-dark(#2c616a, #98cbdc);
-  --info-badge-fill: light-dark(#4f99b4, #78bbd4);
-  --warning: light-dark(#9b8325, #decb6a);
-  --warning-soft: light-dark(rgba(155, 131, 37, 0.19), rgba(222, 203, 106, 0.21));
-  --warning-text-on-soft: light-dark(#675718, #dfcc6e);
-  --warning-badge-fill: light-dark(#ab8f29, #decb6a);
-  --danger: light-dark(#b3644c, #dc8d74);
-  --danger-soft: light-dark(rgba(179, 100, 76, 0.2), rgba(220, 141, 116, 0.21));
-  --danger-text-on-soft: light-dark(#7b4833, #e8b1a4);
-  --danger-badge-fill: light-dark(#c37f70, #dc8d74);
-  --critical: light-dark(#c55030, #ff7f5c);
-  --critical-soft: light-dark(rgba(197, 80, 48, 0.13), rgba(255, 127, 92, 0.16));
-  --critical-text-on-soft: light-dark(#9d3c26, #ff9b7f);
+  --success: light-dark(#3f8764, #79c99e);
+  --success-soft: light-dark(rgba(63, 135, 100, 0.18), rgba(121, 201, 158, 0.2));
+  --success-text-on-soft: light-dark(#2b6246, #91d1b0);
+  --success-badge-fill: light-dark(#4f9f7c, #79c99e);
+  --info: light-dark(#487eaa, #78a9d4);
+  --info-soft: light-dark(rgba(72, 126, 170, 0.18), rgba(120, 169, 212, 0.2));
+  --info-text-on-soft: light-dark(#335a7a, #a4c3df);
+  --info-badge-fill: light-dark(#6795c0, #78a9d4);
+  --warning: light-dark(#9b6b25, #deb36a);
+  --warning-soft: light-dark(rgba(155, 107, 37, 0.19), rgba(222, 179, 106, 0.21));
+  --warning-text-on-soft: light-dark(#734d1b, #e5c186);
+  --warning-badge-fill: light-dark(#bf862e, #deb36a);
+  --danger: light-dark(#b34f4c, #dc7774);
+  --danger-soft: light-dark(rgba(179, 79, 76, 0.2), rgba(220, 119, 116, 0.21));
+  --danger-text-on-soft: light-dark(#8b3b3a, #e9aba8);
+  --danger-badge-fill: light-dark(#c87f7c, #dc7774);
+  --critical: light-dark(#c53030, #ff5c5c);
+  --critical-soft: light-dark(rgba(197, 48, 48, 0.13), rgba(255, 92, 92, 0.16));
+  --critical-text-on-soft: light-dark(#a52828, #ff9393);
   --terminal-bg: light-dark(#364738, #141b15);
   --terminal-fg: light-dark(#e6e6e6, #dfe9e0);
   --framebuffer-bg: light-dark(#2f3e31, #0d120e);
@@ -418,25 +416,25 @@
   --btn-inverted-bg-hover: light-dark(#131215, #ffffff);
   --btn-inverted-text: light-dark(#f1eff5, #141316);
   --overlay-bg: light-dark(rgba(30, 28, 34, 0.36), rgba(0, 0, 0, 0.5));
-  --success: light-dark(#3f8776, #79c9b3);
-  --success-soft: light-dark(rgba(63, 135, 118, 0.18), rgba(121, 201, 179, 0.2));
-  --success-text-on-soft: light-dark(#295e55, #81cbb7);
-  --success-badge-fill: light-dark(#4f9f8e, #79c9b3);
-  --info: light-dark(#4872aa, #789dd4);
-  --info-soft: light-dark(rgba(72, 114, 170, 0.18), rgba(120, 157, 212, 0.2));
-  --info-text-on-soft: light-dark(#35587e, #9cb8dd);
-  --info-badge-fill: light-dark(#7394c5, #789dd4);
-  --warning: light-dark(#9b4525, #de8e6a);
-  --warning-soft: light-dark(rgba(155, 69, 37, 0.19), rgba(222, 142, 106, 0.21));
-  --warning-text-on-soft: light-dark(#873b20, #e7a98e);
-  --warning-badge-fill: light-dark(#d67753, #de8e6a);
-  --danger: light-dark(#b34c62, #dc7489);
-  --danger-soft: light-dark(rgba(179, 76, 98, 0.2), rgba(220, 116, 137, 0.21));
-  --danger-text-on-soft: light-dark(#87384c, #e7a0ad);
-  --danger-badge-fill: light-dark(#c87c86, #dc7489);
-  --critical: light-dark(#c53053, #ff5c81);
-  --critical-soft: light-dark(rgba(197, 48, 83, 0.13), rgba(255, 92, 129, 0.16));
-  --critical-text-on-soft: light-dark(#a12741, #ff84a1);
+  --success: light-dark(#3f8764, #79c99e);
+  --success-soft: light-dark(rgba(63, 135, 100, 0.18), rgba(121, 201, 158, 0.2));
+  --success-text-on-soft: light-dark(#295e43, #81cba4);
+  --success-badge-fill: light-dark(#4f9f7c, #79c99e);
+  --info: light-dark(#487eaa, #78a9d4);
+  --info-soft: light-dark(rgba(72, 126, 170, 0.18), rgba(120, 169, 212, 0.2));
+  --info-text-on-soft: light-dark(#335a7a, #98bbdc);
+  --info-badge-fill: light-dark(#6795c0, #78a9d4);
+  --warning: light-dark(#9b6b25, #deb36a);
+  --warning-soft: light-dark(rgba(155, 107, 37, 0.19), rgba(222, 179, 106, 0.21));
+  --warning-text-on-soft: light-dark(#734d1b, #e1b976);
+  --warning-badge-fill: light-dark(#bf862e, #deb36a);
+  --danger: light-dark(#b34f4c, #dc7774);
+  --danger-soft: light-dark(rgba(179, 79, 76, 0.2), rgba(220, 119, 116, 0.21));
+  --danger-text-on-soft: light-dark(#873938, #e7a3a0);
+  --danger-badge-fill: light-dark(#c87f7c, #dc7774);
+  --critical: light-dark(#c53030, #ff5c5c);
+  --critical-soft: light-dark(rgba(197, 48, 48, 0.13), rgba(255, 92, 92, 0.16));
+  --critical-text-on-soft: light-dark(#a52828, #ff8989);
   --terminal-bg: light-dark(#3c3845, #17141b);
   --terminal-fg: light-dark(#e6e6e6, #e3dfe9);
   --framebuffer-bg: light-dark(#35313d, #100d12);
@@ -483,25 +481,25 @@
   --btn-inverted-bg-hover: light-dark(#141512, #ffffff);
   --btn-inverted-text: light-dark(#f4f5ef, #151613);
   --overlay-bg: light-dark(rgba(33, 34, 28, 0.36), rgba(0, 0, 0, 0.5));
-  --success: light-dark(#3f8757, #79c991);
-  --success-soft: light-dark(rgba(63, 135, 87, 0.18), rgba(121, 201, 145, 0.2));
-  --success-text-on-soft: light-dark(#2b6243, #95d3a6);
-  --success-badge-fill: light-dark(#51a269, #79c991);
-  --info: light-dark(#489daa, #78c5d4);
-  --info-soft: light-dark(rgba(72, 157, 170, 0.18), rgba(120, 197, 212, 0.2));
-  --info-text-on-soft: light-dark(#2b6466, #90d1da);
-  --info-badge-fill: light-dark(#489daa, #78c5d4);
-  --warning: light-dark(#9b7525, #debd6a);
-  --warning-soft: light-dark(rgba(155, 117, 37, 0.19), rgba(222, 189, 106, 0.21));
-  --warning-text-on-soft: light-dark(#6f541a, #e3c77e);
-  --warning-badge-fill: light-dark(#b78a2c, #debd6a);
-  --danger: light-dark(#b3604c, #dc8974);
-  --danger-soft: light-dark(rgba(179, 96, 76, 0.2), rgba(220, 137, 116, 0.21));
-  --danger-text-on-soft: light-dark(#7f4635, #e8b1a4);
-  --danger-badge-fill: light-dark(#c57e74, #dc8974);
-  --critical: light-dark(#c54930, #ff795c);
-  --critical-soft: light-dark(rgba(197, 73, 48, 0.13), rgba(255, 121, 92, 0.16));
-  --critical-text-on-soft: light-dark(#9d3926, #ff9d89);
+  --success: light-dark(#3f8764, #79c99e);
+  --success-soft: light-dark(rgba(63, 135, 100, 0.18), rgba(121, 201, 158, 0.2));
+  --success-text-on-soft: light-dark(#2b6246, #95d3b3);
+  --success-badge-fill: light-dark(#4f9f7c, #79c99e);
+  --info: light-dark(#487eaa, #78a9d4);
+  --info-soft: light-dark(rgba(72, 126, 170, 0.18), rgba(120, 169, 212, 0.2));
+  --info-text-on-soft: light-dark(#355d7e, #a4c3df);
+  --info-badge-fill: light-dark(#6795c0, #78a9d4);
+  --warning: light-dark(#9b6b25, #deb36a);
+  --warning-soft: light-dark(rgba(155, 107, 37, 0.19), rgba(222, 179, 106, 0.21));
+  --warning-text-on-soft: light-dark(#77501c, #e6c38a);
+  --warning-badge-fill: light-dark(#bf862e, #deb36a);
+  --danger: light-dark(#b34f4c, #dc7774);
+  --danger-soft: light-dark(rgba(179, 79, 76, 0.2), rgba(220, 119, 116, 0.21));
+  --danger-text-on-soft: light-dark(#8b3b3a, #e9aba8);
+  --danger-badge-fill: light-dark(#c87f7c, #dc7774);
+  --critical: light-dark(#c53030, #ff5c5c);
+  --critical-soft: light-dark(rgba(197, 48, 48, 0.13), rgba(255, 92, 92, 0.16));
+  --critical-text-on-soft: light-dark(#a92929, #ff9393);
   --terminal-bg: light-dark(#454a33, #191b14);
   --terminal-fg: light-dark(#e6e6e6, #e6e9df);
   --framebuffer-bg: light-dark(#3d412d, #11120d);
@@ -548,25 +546,25 @@
   --btn-inverted-bg-hover: light-dark(#151412, #ffffff);
   --btn-inverted-text: light-dark(#f5f3ef, #161513);
   --overlay-bg: light-dark(rgba(34, 32, 28, 0.36), rgba(0, 0, 0, 0.5));
-  --success: light-dark(#3f8751, #79c989);
-  --success-soft: light-dark(rgba(63, 135, 81, 0.18), rgba(121, 201, 137, 0.2));
-  --success-text-on-soft: light-dark(#2b623d, #91d19b);
-  --success-badge-fill: light-dark(#51a263, #79c989);
-  --info: light-dark(#48a5aa, #78cfd4);
-  --info-soft: light-dark(rgba(72, 165, 170, 0.18), rgba(120, 207, 212, 0.2));
-  --info-text-on-soft: light-dark(#2b6466, #84d2d7);
-  --info-badge-fill: light-dark(#48a5aa, #78cfd4);
-  --warning: light-dark(#9b6b25, #deb26a);
-  --warning-soft: light-dark(rgba(155, 107, 37, 0.19), rgba(222, 178, 106, 0.21));
-  --warning-text-on-soft: light-dark(#734d1b, #e5c086);
-  --warning-badge-fill: light-dark(#bf862e, #deb26a);
-  --danger: light-dark(#b3574c, #dc7f74);
-  --danger-soft: light-dark(rgba(179, 87, 76, 0.2), rgba(220, 127, 116, 0.21));
-  --danger-text-on-soft: light-dark(#874138, #e8afa4);
-  --danger-badge-fill: light-dark(#c87f7c, #dc7f74);
-  --critical: light-dark(#c53d30, #ff695c);
-  --critical-soft: light-dark(rgba(197, 61, 48, 0.13), rgba(255, 105, 92, 0.16));
-  --critical-text-on-soft: light-dark(#a13427, #ff9689);
+  --success: light-dark(#3f8764, #79c99e);
+  --success-soft: light-dark(rgba(63, 135, 100, 0.18), rgba(121, 201, 158, 0.2));
+  --success-text-on-soft: light-dark(#2b6246, #91d1b0);
+  --success-badge-fill: light-dark(#4f9f7c, #79c99e);
+  --info: light-dark(#487eaa, #78a9d4);
+  --info-soft: light-dark(rgba(72, 126, 170, 0.18), rgba(120, 169, 212, 0.2));
+  --info-text-on-soft: light-dark(#335a7a, #a0c0de);
+  --info-badge-fill: light-dark(#6795c0, #78a9d4);
+  --warning: light-dark(#9b6b25, #deb36a);
+  --warning-soft: light-dark(rgba(155, 107, 37, 0.19), rgba(222, 179, 106, 0.21));
+  --warning-text-on-soft: light-dark(#734d1b, #e5c186);
+  --warning-badge-fill: light-dark(#bf862e, #deb36a);
+  --danger: light-dark(#b34f4c, #dc7774);
+  --danger-soft: light-dark(rgba(179, 79, 76, 0.2), rgba(220, 119, 116, 0.21));
+  --danger-text-on-soft: light-dark(#8b3b3a, #e9aba8);
+  --danger-badge-fill: light-dark(#c87f7c, #dc7774);
+  --critical: light-dark(#c53030, #ff5c5c);
+  --critical-soft: light-dark(rgba(197, 48, 48, 0.13), rgba(255, 92, 92, 0.16));
+  --critical-text-on-soft: light-dark(#a92929, #ff9393);
   --terminal-bg: light-dark(#4e412f, #1c1814);
   --terminal-fg: light-dark(#e6e6e6, #e9e4df);
   --framebuffer-bg: light-dark(#443929, #13100e);
@@ -613,25 +611,25 @@
   --btn-inverted-bg-hover: light-dark(#121415, #ffffff);
   --btn-inverted-text: light-dark(#eff3f5, #131516);
   --overlay-bg: light-dark(rgba(28, 32, 34, 0.36), rgba(0, 0, 0, 0.5));
-  --success: light-dark(#3f876d, #79c9a8);
-  --success-soft: light-dark(rgba(63, 135, 109, 0.18), rgba(121, 201, 168, 0.2));
-  --success-text-on-soft: light-dark(#295e4c, #8dcfb2);
-  --success-badge-fill: light-dark(#4f9f85, #79c9a8);
-  --info: light-dark(#487faa, #78abd4);
-  --info-soft: light-dark(rgba(72, 127, 170, 0.18), rgba(120, 171, 212, 0.2));
-  --info-text-on-soft: light-dark(#335b7a, #a0c0de);
-  --info-badge-fill: light-dark(#6795c0, #78abd4);
-  --warning: light-dark(#9b9925, #ddde6a);
-  --warning-soft: light-dark(rgba(155, 153, 37, 0.19), rgba(221, 222, 106, 0.21));
-  --warning-text-on-soft: light-dark(#5f5d16, #ddde6a);
-  --warning-badge-fill: light-dark(#9b9925, #ddde6a);
-  --danger: light-dark(#b34c6f, #dc7498);
-  --danger-soft: light-dark(rgba(179, 76, 111, 0.2), rgba(220, 116, 152, 0.21));
-  --danger-text-on-soft: light-dark(#873859, #e8a4bc);
-  --danger-badge-fill: light-dark(#c87c93, #dc7498);
-  --critical: light-dark(#c53067, #ff5c99);
-  --critical-soft: light-dark(rgba(197, 48, 103, 0.13), rgba(255, 92, 153, 0.16));
-  --critical-text-on-soft: light-dark(#a12755, #ff89b4);
+  --success: light-dark(#3f8764, #79c99e);
+  --success-soft: light-dark(rgba(63, 135, 100, 0.18), rgba(121, 201, 158, 0.2));
+  --success-text-on-soft: light-dark(#2b6246, #8dcfad);
+  --success-badge-fill: light-dark(#4f9f7c, #79c99e);
+  --info: light-dark(#487eaa, #78a9d4);
+  --info-soft: light-dark(rgba(72, 126, 170, 0.18), rgba(120, 169, 212, 0.2));
+  --info-text-on-soft: light-dark(#335a7a, #a0c0de);
+  --info-badge-fill: light-dark(#6795c0, #78a9d4);
+  --warning: light-dark(#9b6b25, #deb36a);
+  --warning-soft: light-dark(rgba(155, 107, 37, 0.19), rgba(222, 179, 106, 0.21));
+  --warning-text-on-soft: light-dark(#734d1b, #e4bf82);
+  --warning-badge-fill: light-dark(#bf862e, #deb36a);
+  --danger: light-dark(#b34f4c, #dc7774);
+  --danger-soft: light-dark(rgba(179, 79, 76, 0.2), rgba(220, 119, 116, 0.21));
+  --danger-text-on-soft: light-dark(#8b3b3a, #e8a7a4);
+  --danger-badge-fill: light-dark(#c87f7c, #dc7774);
+  --critical: light-dark(#c53030, #ff5c5c);
+  --critical-soft: light-dark(rgba(197, 48, 48, 0.13), rgba(255, 92, 92, 0.16));
+  --critical-text-on-soft: light-dark(#a52828, #ff8e8e);
   --terminal-bg: light-dark(#364147, #13191c);
   --terminal-fg: light-dark(#e6e6e6, #dfe6e9);
   --framebuffer-bg: light-dark(#2f393e, #0d1113);
@@ -678,25 +676,25 @@
   --btn-inverted-bg-hover: light-dark(#151213, #ffffff);
   --btn-inverted-text: light-dark(#f5eff1, #161314);
   --overlay-bg: light-dark(rgba(34, 28, 29, 0.36), rgba(0, 0, 0, 0.5));
-  --success: light-dark(#3f8748, #79c980);
-  --success-soft: light-dark(rgba(63, 135, 72, 0.18), rgba(121, 201, 128, 0.2));
-  --success-text-on-soft: light-dark(#2b6234, #89ce8c);
-  --success-badge-fill: light-dark(#51a25a, #79c980);
-  --info: light-dark(#485eaa, #788cd4);
-  --info-soft: light-dark(rgba(72, 94, 170, 0.18), rgba(120, 140, 212, 0.2));
-  --info-text-on-soft: light-dark(#3b508e, #a8b0e0);
-  --info-badge-fill: light-dark(#838ccb, #7c8fd5);
-  --warning: light-dark(#9b5d25, #dea56a);
-  --warning-soft: light-dark(rgba(155, 93, 37, 0.19), rgba(222, 165, 106, 0.21));
-  --warning-text-on-soft: light-dark(#77481c, #e4b582);
-  --warning-badge-fill: light-dark(#cf7b37, #dea56a);
-  --danger: light-dark(#b34c4d, #dc7475);
-  --danger-soft: light-dark(rgba(179, 76, 77, 0.2), rgba(220, 116, 117, 0.21));
-  --danger-text-on-soft: light-dark(#873838, #e8a4a5);
-  --danger-badge-fill: light-dark(#c87c7d, #dc7475);
-  --critical: light-dark(#c53035, #ff5c62);
-  --critical-soft: light-dark(rgba(197, 48, 53, 0.13), rgba(255, 92, 98, 0.16));
-  --critical-text-on-soft: light-dark(#a5282d, #ff898f);
+  --success: light-dark(#3f8764, #79c99e);
+  --success-soft: light-dark(rgba(63, 135, 100, 0.18), rgba(121, 201, 158, 0.2));
+  --success-text-on-soft: light-dark(#295e43, #85cca7);
+  --success-badge-fill: light-dark(#4f9f7c, #79c99e);
+  --info: light-dark(#487eaa, #78a9d4);
+  --info-soft: light-dark(rgba(72, 126, 170, 0.18), rgba(120, 169, 212, 0.2));
+  --info-text-on-soft: light-dark(#335a7a, #98bbdc);
+  --info-badge-fill: light-dark(#6795c0, #78a9d4);
+  --warning: light-dark(#9b6b25, #deb36a);
+  --warning-soft: light-dark(rgba(155, 107, 37, 0.19), rgba(222, 179, 106, 0.21));
+  --warning-text-on-soft: light-dark(#734d1b, #e2bb7a);
+  --warning-badge-fill: light-dark(#bf862e, #deb36a);
+  --danger: light-dark(#b34f4c, #dc7774);
+  --danger-soft: light-dark(rgba(179, 79, 76, 0.2), rgba(220, 119, 116, 0.21));
+  --danger-text-on-soft: light-dark(#873938, #e7a3a0);
+  --danger-badge-fill: light-dark(#c87f7c, #dc7774);
+  --critical: light-dark(#c53030, #ff5c5c);
+  --critical-soft: light-dark(rgba(197, 48, 48, 0.13), rgba(255, 92, 92, 0.16));
+  --critical-text-on-soft: light-dark(#a52828, #ff8989);
   --terminal-bg: light-dark(#47363a, #1b1416);
   --terminal-fg: light-dark(#e6e6e6, #e9dfe2);
   --framebuffer-bg: light-dark(#3e2f33, #120d0f);
@@ -743,25 +741,25 @@
   --btn-inverted-bg-hover: light-dark(#121515, #f4f4f4);
   --btn-inverted-text: light-dark(#eff5f4, #080a0a);
   --overlay-bg: light-dark(rgba(28, 34, 33, 0.36), rgba(0, 0, 0, 0.5));
-  --success: light-dark(#3f8768, #79c9a3);
-  --success-soft: light-dark(rgba(63, 135, 104, 0.18), rgba(121, 201, 163, 0.2));
-  --success-text-on-soft: light-dark(#2b624a, #79c9a3);
-  --success-badge-fill: light-dark(#4f9f80, #79c9a3);
-  --info: light-dark(#4886aa, #78b1d4);
-  --info-soft: light-dark(rgba(72, 134, 170, 0.18), rgba(120, 177, 212, 0.2));
-  --info-text-on-soft: light-dark(#305c72, #88b9d8);
-  --info-badge-fill: light-dark(#5f96bc, #78b1d4);
-  --warning: light-dark(#9b9125, #ded76a);
-  --warning-soft: light-dark(rgba(155, 145, 37, 0.19), rgba(222, 215, 106, 0.21));
-  --warning-text-on-soft: light-dark(#635917, #ded76a);
-  --warning-badge-fill: light-dark(#9f9526, #ded76a);
-  --danger: light-dark(#b3644c, #dc8d74);
-  --danger-soft: light-dark(rgba(179, 100, 76, 0.2), rgba(220, 141, 116, 0.21));
-  --danger-text-on-soft: light-dark(#7b4833, #e3a290);
-  --danger-badge-fill: light-dark(#c37f70, #dc8d74);
-  --critical: light-dark(#c55030, #ff7f5c);
-  --critical-soft: light-dark(rgba(197, 80, 48, 0.13), rgba(255, 127, 92, 0.16));
-  --critical-text-on-soft: light-dark(#9d3c26, #ff8766);
+  --success: light-dark(#3f8764, #79c99e);
+  --success-soft: light-dark(rgba(63, 135, 100, 0.18), rgba(121, 201, 158, 0.2));
+  --success-text-on-soft: light-dark(#2b6246, #79c99e);
+  --success-badge-fill: light-dark(#4f9f7c, #79c99e);
+  --info: light-dark(#487eaa, #78a9d4);
+  --info-soft: light-dark(rgba(72, 126, 170, 0.18), rgba(120, 169, 212, 0.2));
+  --info-text-on-soft: light-dark(#335a7a, #8cb4d9);
+  --info-badge-fill: light-dark(#6795c0, #78a9d4);
+  --warning: light-dark(#9b6b25, #deb36a);
+  --warning-soft: light-dark(rgba(155, 107, 37, 0.19), rgba(222, 179, 106, 0.21));
+  --warning-text-on-soft: light-dark(#734d1b, #deb36a);
+  --warning-badge-fill: light-dark(#bf862e, #deb36a);
+  --danger: light-dark(#b34f4c, #dc7774);
+  --danger-soft: light-dark(rgba(179, 79, 76, 0.2), rgba(220, 119, 116, 0.21));
+  --danger-text-on-soft: light-dark(#8b3b3a, #e59b98);
+  --danger-badge-fill: light-dark(#c87f7c, #dc7774);
+  --critical: light-dark(#c53030, #ff5c5c);
+  --critical-soft: light-dark(rgba(197, 48, 48, 0.13), rgba(255, 92, 92, 0.16));
+  --critical-text-on-soft: light-dark(#a52828, #ff7a7a);
   --terminal-bg: light-dark(#384543, #0a0e0d);
   --terminal-fg: light-dark(#e6e6e6, #d1e0de);
   --framebuffer-bg: light-dark(#313d3b, #040505);
@@ -849,6 +847,20 @@ p { color: var(--text-100); }
 .sr-only {
   position: absolute; width: 1px; height: 1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+/* .skip-link ships combined with .sr-only (clipped offscreen by default);
+   this undoes the clip so keyboard focus reveals it as a real control. */
+.skip-link:focus-visible {
+  position: fixed; top: var(--space-sm); left: var(--space-sm);
+  width: auto; height: auto; overflow: visible; clip: auto; white-space: normal;
+  z-index: 2000;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border-200);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  color: var(--text-000);
+  box-shadow: var(--shadow-raised);
 }
 
 :focus-visible {
@@ -1068,7 +1080,6 @@ p { color: var(--text-100); }
   padding: var(--space-sm) var(--space-md);
   border: 1px solid var(--border-100);
   border-radius: var(--radius-control);
-  outline: none;
   background: var(--bg-200);
   color: var(--text-000);
   font-size: var(--font-size-footnote);
@@ -1166,14 +1177,16 @@ select.form-input { cursor: pointer; }
 .card {
   display: flex;
   flex-direction: column;
-  margin-bottom: var(--space-lg);
+  grid-column: span 4;
+  margin-bottom: 0;
   padding: var(--space-lg) var(--space-xl);
   /* Design refresh 2 (pick 1E, supersedes 1D): claude floating surface --
      borderless, big radius, soft layered shadow. */
   border: 0;
-  border-radius: 20px;
+  border-radius: var(--radius-panel);
   background: var(--bg-200);
   box-shadow: var(--shadow-raised);
+  overflow: hidden;
 }
 .card--raised { background: var(--bg-raised); border-color: var(--border-200); box-shadow: var(--shadow-raised); }
 .card__title { margin-bottom: var(--space-xs); color: var(--text-000); font-size: var(--font-size-body); font-weight: 600; }
@@ -1806,6 +1819,14 @@ select.form-input { cursor: pointer; }
   animation: toast-in 200ms var(--ease-out) backwards;
 }
 .toast--slide-in-right { animation: toast-slide-in-right 200ms var(--ease-out) backwards; }
+.toast__dismiss {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
 
 /* Severity, as a left rule.
 
@@ -2483,7 +2504,6 @@ pre {
   min-width: 0;
   border: 0;
   background: transparent;
-  outline: 0;
   color: var(--text-000);
   font-size: var(--font-size-lg);
 }
@@ -2842,7 +2862,6 @@ a.metric:hover { border-color: var(--border-200); background: var(--bg-300); }
 .metric__value--text { font-size: 14px; font-weight: 600; line-height: 1.4; }
 
 /* ── Card grid placement (theme.css owns .card visuals) ─────────────────── */
-.card { grid-column: span 4; margin-bottom: 0; overflow: hidden; }
 .card.half { grid-column: span 6; }
 .card.wide, .wide { grid-column: 1 / -1; }
 .card h2 {
@@ -3161,7 +3180,6 @@ td.v .eventdetail, td.v article, td.v .eventmeta { white-space: normal; }
   border-radius: var(--radius-control);
   padding: var(--space-sm) var(--space-md);
   font-size: 13px; color: var(--text-000); font-family: inherit;
-  outline: none;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 /* A control holding a small number -- an hour, a minute, a day of the month,
@@ -3354,7 +3372,7 @@ button.copy:hover { color: var(--text-000); background: var(--bg-300); }
 .hp-filterbar-field { display: block; margin-bottom: var(--space-sm); }
 .hp-filterbar-field span { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-200); margin-bottom: var(--space-xs); }
 .hp-filterbar-field input, .hp-filterbar-field select { width: 100%; background: var(--bg-100); border: 1px solid var(--border-100); border-radius: var(--radius-control); color: var(--text-000); padding: var(--space-sm) var(--space-md); font-size: 12.5px; }
-.hp-filterbar-field input:focus, .hp-filterbar-field select:focus { outline: none; border-color: var(--border-focus); }
+.hp-filterbar-field input:focus, .hp-filterbar-field select:focus { border-color: var(--border-focus); }
 /* #1531 (APIARY): a "since" field pairs its existing duration text input
    (the actual submitted value) with a native datetime-local picker.
    .hp-filterbar-field's own `input { width: 100% }` rule above is exactly
@@ -3693,7 +3711,7 @@ a.project-card { display: block; color: inherit; text-decoration: none; }
    fragment) is a real, existing feature, not a redesign choice. */
 .command-palette__field textarea {
   display: block; width: 100%; resize: none;
-  border: none; background: transparent; outline: none;
+  border: none; background: transparent;
   color: var(--text-000); font: inherit;
   max-height: 120px; padding: 0;
 }
@@ -4648,7 +4666,7 @@ tr.selected .hp-row-actions__more,
   color: var(--text-000);
   font-size: 12.5px;
 }
-.hp-ip-filter-add:focus { outline: none; border-color: var(--border-focus); }
+.hp-ip-filter-add:focus { border-color: var(--border-focus); }
 .hp-ip-filter-actions { display: flex; gap: var(--space-sm); padding: 0 4px; }
 .hp-rp-templates {
   display: grid;
@@ -4692,7 +4710,7 @@ tr.selected .hp-row-actions__more,
   color: var(--text-000);
   font-size: var(--font-size-footnote);
 }
-.hp-rp-field input:focus, .hp-rp-field select:focus { outline: none; border-color: var(--border-focus); }
+.hp-rp-field input:focus, .hp-rp-field select:focus { border-color: var(--border-focus); }
 .hp-rp-elements { display: grid; grid-template-columns: repeat(auto-fill,minmax(230px,1fr)); gap: 6px 16px; }
 .hp-rp-elements label {
   display: flex;
