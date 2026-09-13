@@ -2700,9 +2700,19 @@ step_libvirt_install() {
   # than assuming the monolithic one.
   if systemctl list-unit-files libvirtd.service >/dev/null 2>&1 \
      && systemctl cat libvirtd.service >/dev/null 2>&1; then
+    # The modular virtproxyd sockets Conflicts= the monolithic libvirtd units
+    # and bind the same /run/libvirt/libvirt-sock(-ro) paths. If a package
+    # preset leaves both stacks enabled, whichever activates second stops the
+    # other via Conflicts= -- permanently, since socket units have no
+    # Restart= (#3126). Keep this host on the monolithic stack only.
+    systemctl disable --now virtproxyd.socket virtproxyd-ro.socket >/dev/null 2>&1 || true
     systemctl enable --now libvirtd
   else
+    # Same Conflicts= hazard in reverse: the monolithic units must not stay
+    # enabled alongside the modular stack this branch is about to activate.
+    systemctl disable --now libvirtd.socket libvirtd-ro.socket libvirtd.service >/dev/null 2>&1 || true
     systemctl enable --now virtqemud.socket virtnetworkd.socket virtstoraged.socket \
+      virtproxyd.socket virtproxyd-ro.socket \
       || echo "WARNING: could not enable the modular libvirt sockets"
   fi
 
