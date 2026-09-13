@@ -5,7 +5,7 @@
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useRef, useState } from 'react'
 import { ErrorStateBlock } from './ErrorState'
-import { DEFAULT_MAP_PREFS, pullMapPrefs, type MapPrefs } from '../lib/prefs'
+import { DEFAULT_MAP_PREFS, pullMapPrefs, useThemeMode, type MapPrefs } from '../lib/prefs'
 
 export type Kv = { key: string; count: number; link: string }
 
@@ -244,17 +244,25 @@ const MARKER_RADIUS_PX = 6
 
 // #2528: basemap -> tile source. `osm` is the only value preferences.rs's
 // BASEMAPS (and config.rs's behavior.map_provider enum) accept today, so
-// this table has one entry -- but it is a lookup keyed on the preference
-// value rather than a hardcoded URL, so a second basemap becomes selectable
-// the moment it is added here, the same way a vendored theme becomes
-// selectable without a frontend redeploy (prefs.ts's isThemeName). An
-// unrecognised value (an old preference doc, a config rollback) falls back
-// to `osm` rather than rendering no tiles.
-const BASEMAP_TILES: Record<string, { url: string; attribution: string }> = {
+// this table has an `osm` entry -- but it is a lookup keyed on the
+// preference value rather than a hardcoded URL, so a second basemap becomes
+// selectable the moment it is added here, the same way a vendored theme
+// becomes selectable without a frontend redeploy (prefs.ts's isThemeName).
+// An unrecognised value (an old preference doc, a config rollback) falls
+// back to `osm` rather than rendering no tiles.
+//
+// `dark` is not a preferences.rs value -- it is swapped in automatically
+// when the resolved theme is dark (see `isDark` below), not via prefs.basemap.
+const BASEMAP_TILES: Record<string, { url: string; attribution: string; subdomains?: string }> = {
   osm: { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: '© OpenStreetMap contributors' },
+  dark: {
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    attribution: '© OpenStreetMap contributors © CARTO',
+    subdomains: 'abcd',
+  },
 }
 
-export function basemapTile(basemap: string | undefined): { url: string; attribution: string } {
+export function basemapTile(basemap: string | undefined): { url: string; attribution: string; subdomains?: string } {
   return BASEMAP_TILES[basemap ?? 'osm'] ?? BASEMAP_TILES.osm
 }
 
@@ -296,6 +304,10 @@ export function AttackMap({ points, failed }: { points: MapPoint[] | null; faile
   // best-effort client fetch LiveToasts uses for its own preferences: instant
   // paint with the compiled defaults, reconciled once the request lands.
   const [prefs, setPrefs] = useState<MapPrefs>(DEFAULT_MAP_PREFS)
+  const themeMode = useThemeMode()
+  const isDark =
+    themeMode === 'dark' ||
+    (themeMode === 'system' && typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches)
 
   useEffect(() => {
     let cancelled = false
@@ -318,6 +330,13 @@ export function AttackMap({ points, failed }: { points: MapPoint[] | null; faile
       const map = L.map(container, {
         worldCopyJump: true,
         minZoom: 1,
+        // Paired with noWrap on the tile layer below: locks panning to one
+        // world copy so the zoom-2 "world" view has no blank gutters past
+        // +/-180deg longitude.
+        maxBounds: [
+          [-85, -180],
+          [85, 180],
+        ],
         // `map_animation`: off means off everywhere Leaflet animates --
         // zoom transitions, the fade-in on tile/marker load, and markers
         // easing to their new screen position during a zoom.
@@ -350,8 +369,12 @@ export function AttackMap({ points, failed }: { points: MapPoint[] | null; faile
       const observer = new ResizeObserver(fitWorld)
       observer.observe(container)
       cleanupRef.current = () => observer.disconnect()
-      const tile = basemapTile(prefs.basemap)
-      L.tileLayer(tile.url, { attribution: tile.attribution }).addTo(map)
+      const tile = basemapTile(isDark && (prefs.basemap ?? 'osm') === 'osm' ? 'dark' : prefs.basemap)
+      L.tileLayer(tile.url, {
+        attribution: tile.attribution,
+        noWrap: true,
+        ...(tile.subdomains ? { subdomains: tile.subdomains } : {}),
+      }).addTo(map)
 
       // Tabbable, announced, Enter/Space-activated -- the same wiring the
       // single-point markers always had (hp-app.js:519-533), now shared with
@@ -426,7 +449,7 @@ export function AttackMap({ points, failed }: { points: MapPoint[] | null; faile
       mapRef.current?.remove()
       mapRef.current = null
     }
-  }, [points, prefs.basemap, prefs.clustering, prefs.animation])
+  }, [points, prefs.basemap, prefs.clustering, prefs.animation, isDark])
 
   if (points === null)
     return failed ? (
