@@ -159,7 +159,11 @@ func TestHandleConnContainsVendorParserPanic(t *testing.T) {
 		defer close(done)
 		handleConn(server, log, false, "RADIANT", 11112)
 	}()
-	client.Write(realAssociateRQ(t, "ANY-SCP", "STORESCU"))
+	// #3155: CalledAETitle must match the configured "RADIANT" now that
+	// handleConn rejects unrecognized Called AE Titles before ever reaching
+	// the vendored parser -- this test is about panic containment, not AE
+	// Title enforcement, so the fixture has to clear that gate first.
+	client.Write(realAssociateRQ(t, "RADIANT", "STORESCU"))
 
 	select {
 	case <-done:

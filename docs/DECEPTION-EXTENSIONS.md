@@ -75,7 +75,7 @@ Still under consideration:
 | Dionaea | Integrated | `arcane/home/honeypot-dionaea/` | pre-tracker malware-capture sensor; split by #258 |
 | SNARE/TANNER | Integrated | `arcane/home/honeypot-tanner/` | pre-tracker web-app group; split by #258 |
 | DNP3 protocol sensor | Integrated | `arcane/home/honeypot-dnp3/` | pre-tracker; split by #258 |
-| dicompot (DICOM) | Integrated | `arcane/home/honeypot-dicompot/` | #238 batch, per-decoy plan #413 |
+| dicompot (DICOM) | Integrated | `arcane/home/honeypot-dicompot/` | #238 batch, per-decoy plan #413; #3155 fingerprint-tell audit closed 3/5 tells in the wrapper, remaining 2 (vendored DIMSE handling) tracked as a fork-vs-accept decision in the issue linked from #3155 |
 
 ## Cloud, database and API deception
 
