@@ -42,7 +42,7 @@ export function Tbl({
           </>
         )
       ) : rows.length === 0 ? (
-        <p className="empty">{hint ?? 'No data in this window.'}</p>
+        <p className="empty">{hint ?? 'Nothing to show here'}</p>
       ) : (
         <div className="card__scroll">
           <table className="data-table">

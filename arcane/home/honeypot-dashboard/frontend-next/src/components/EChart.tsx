@@ -36,6 +36,7 @@ type BarPayload = { categories?: string[]; values?: number[] }
 type RadarPayload = { categories?: string[]; values?: number[] }
 type TimelinePayload = { cidr: string; start_ms: number; end_ms: number; score: number; events: number }[]
 
+const EMPTY_SUMMARY = 'Nothing to show here'
 const builders: Record<ChartKind, Builder> = {
   sankey: (chart, raw, themeColor) => {
     const data = (raw ?? {}) as SankeyPayload
@@ -111,7 +112,7 @@ const builders: Record<ChartKind, Builder> = {
               },
             ],
     })
-    if (nodes.length === 0) return 'No attacker sessions with a recognized ATT&CK technique yet.'
+    if (nodes.length === 0) return EMPTY_SUMMARY
     return `${nodes.length} tactic${nodes.length === 1 ? '' : 's'} observed, ${links.length} flow${links.length === 1 ? '' : 's'}.`
   },
 
@@ -154,7 +155,7 @@ const builders: Record<ChartKind, Builder> = {
         },
       ],
     })
-    if (techniques.length === 0) return 'No ATT&CK-mapped technique evidence yet.'
+    if (techniques.length === 0) return EMPTY_SUMMARY
     return `${techniques.length} technique${techniques.length === 1 ? '' : 's'} across ${new Set(cells.map((c) => c.tactic_idx)).size} tactics.`
   },
 
@@ -179,7 +180,7 @@ const builders: Record<ChartKind, Builder> = {
         },
       ],
     })
-    if (data.length === 0) return 'No data yet.'
+    if (data.length === 0) return EMPTY_SUMMARY
     return `${data.length} categor${data.length === 1 ? 'y' : 'ies'}, ${total} total.`
   },
 
@@ -205,8 +206,8 @@ const builders: Record<ChartKind, Builder> = {
       ],
     })
     const total = values.reduce((sum, v) => sum + v, 0)
-    if (categories.length === 0) return 'No data yet.'
-    if (total === 0) return "No shared signals across this entity's member IPs yet."
+    if (categories.length === 0) return EMPTY_SUMMARY
+    if (total === 0) return EMPTY_SUMMARY
     return `${total} shared signal value${total === 1 ? '' : 's'} across ${categories.length} categories.`
   },
 
@@ -239,7 +240,7 @@ const builders: Record<ChartKind, Builder> = {
         data: s.points.map((p) => [p.time, p.value]),
       })),
     })
-    if (totalPoints === 0) return 'No data yet.'
+    if (totalPoints === 0) return EMPTY_SUMMARY
     return `${data.length} series, ${totalPoints} points.`
   },
 
@@ -265,7 +266,7 @@ const builders: Record<ChartKind, Builder> = {
       series: [{ type: 'bar', barMaxWidth: 56, data: values, itemStyle: { color: themeColor('--accent', '#d97757') } }],
     })
     const total = values.reduce((sum, v) => sum + v, 0)
-    if (categories.length === 0) return 'No data yet.'
+    if (categories.length === 0) return EMPTY_SUMMARY
     return `${categories.length} bucket${categories.length === 1 ? '' : 's'}, ${total} total.`
   },
 
@@ -295,7 +296,7 @@ const builders: Record<ChartKind, Builder> = {
       if (label) copyWithFlash(label)
     })
     const total = values.reduce((sum, v) => sum + v, 0)
-    if (categories.length === 0) return 'No data yet.'
+    if (categories.length === 0) return EMPTY_SUMMARY
     return `${categories.length} fingerprint${categories.length === 1 ? '' : 's'}, ${total} total. Click a bar to copy its full value.`
   },
 
@@ -318,7 +319,7 @@ const builders: Record<ChartKind, Builder> = {
         data: s.points.map((p) => [p.time, p.value]),
       })),
     })
-    if (totalPoints === 0) return 'No anomalies scored yet.'
+    if (totalPoints === 0) return EMPTY_SUMMARY
     return `${data.length} series, ${totalPoints} points.`
   },
 
@@ -362,7 +363,7 @@ const builders: Record<ChartKind, Builder> = {
         },
       ],
     })
-    if (rows.length === 0) return 'No campaigns in the current window.'
+    if (rows.length === 0) return EMPTY_SUMMARY
     return `${rows.length} campaign${rows.length === 1 ? '' : 's'} plotted.`
   },
 }
@@ -429,7 +430,7 @@ export function EChart({ kind, url, height, zoomable }: { kind: ChartKind; url: 
     // echarts' container) intact.
     ;(container as HTMLElement & { __xoreChart?: unknown }).__xoreChart = chart
     const summary = builders[kind](chart, dataRef.current, chartColor, echarts)
-    if (summary.startsWith('No ')) {
+    if (summary === EMPTY_SUMMARY) {
       teardown()
       setState('empty')
       setStatus(summary)
@@ -520,7 +521,7 @@ export function EChart({ kind, url, height, zoomable }: { kind: ChartKind; url: 
           'removeChild' on 'Node': the node to be removed is not a child
           of this node", because chart.dispose() below removes echarts'
           own DOM synchronously, inside the same effect tick as the
-          setState that swaps in the "No data yet" React children --
+          setState that swaps in the EMPTY_SUMMARY React children --
           React's reconciler then tries to remove a sibling node echarts
           already tore down. Loading/empty/error status is rendered as an
           absolutely-positioned OVERLAY SIBLING inside this position:
