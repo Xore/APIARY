@@ -1,0 +1,145 @@
+/* ══════════════════════════════════════════════════════════════════════
+   VARIANT v5 — "Your Picks"
+   claude.ai schema on the Xore palette, with the chosen elements:
+   1D header-strip cards · 2D pulse skeletons (ghost shapes need templates)
+   4C card-row tables · 5D solid status badges · 6D ghost buttons w/
+   outline primary · 7D vertical-rail tabs · 9C "more" pill (JS) ·
+   10C accent-bar nav. Layout picks (OV-B/EV-B/AS-C/RP-C) are template
+   work, tracked separately. Includes v1 viewport-filling fixes.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── claude base ── */
+:root {
+  --radius-panel: 16px;
+  --radius-control: 12px;
+  --radius-dialog: 24px;
+  --border-subtle: rgba(255, 255, 255, 0.045);
+  --border-strong: rgba(255, 255, 255, 0.10);
+}
+.app-sidebar { background: transparent; border-right: 1px solid var(--border-subtle); }
+.app-toolbar { background: transparent; border-bottom: 1px solid var(--border-subtle); }
+.app-main { padding: 26px 34px; }
+.app-main > * { max-width: 1680px; margin-inline: auto; }
+h1 { letter-spacing: -0.015em; }
+
+/* ── 10C nav: accent bar + soft gradient ── */
+.sidebar__item { border-left: 2px solid transparent; border-radius: 0 8px 8px 0; transition: background .15s ease-out; }
+.sidebar__item:hover { background: var(--surface-1); }
+.sidebar__item.active,
+.sidebar__item[aria-current],
+.sidebar__item[aria-current="page"] {
+  border-left-color: var(--accent);
+  background: linear-gradient(90deg, var(--accent-soft), transparent 70%);
+}
+
+/* ── 1D card: title as header strip ── */
+.card > h2:first-child,
+.card > h3:first-child {
+  margin: calc(-1 * var(--space-lg)) calc(-1 * var(--space-xl)) 14px;
+  padding: 11px var(--space-xl);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: var(--radius-panel) var(--radius-panel) 0 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.card { border-color: var(--border-subtle); }
+.card:hover { border-color: var(--border-strong); }
+
+/* ── 4C table: card rows ── */
+.data-table { border-collapse: separate; border-spacing: 0 8px; }
+.data-table thead th {
+  border-bottom: 0;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+  padding: 4px 12px;
+}
+.data-table td { background: var(--surface-2); border-bottom: 0; padding: 10px 12px; }
+.data-table td:first-child { border-radius: 10px 0 0 10px; }
+.data-table td:last-child { border-radius: 0 10px 10px 0; }
+.data-table tbody tr:hover td { background: var(--surface-hover); }
+.data-table tbody tr:last-child td { border-bottom: 0; }
+
+/* ── 5D badges: solid status fills (sensor b-* chips keep theme colors) ── */
+.badge--info    { background: var(--info);    color: #0f1b26; }
+.badge--success { background: var(--success); color: #0d2417; }
+.badge--warning { background: var(--warning); color: #2a2008; }
+.badge--danger  { background: var(--danger);  color: #2b1312; }
+
+/* ── 6D buttons: ghost by default, outline primary ── */
+.btn, button.secondary {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 10px;
+}
+.btn:hover, button.secondary:hover { background: var(--surface-2); }
+.btn-primary, button.primary {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+.btn-primary:hover, button.primary:hover { background: var(--accent-soft); }
+.btn-danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+.btn-danger:hover { background: var(--danger-soft); }
+
+/* ── 7D tabs: vertical rail (float layout; real grid comes with templates) ── */
+.tabs {
+  flex-direction: column;
+  align-items: stretch;
+  width: 200px;
+  float: left;
+  position: sticky;
+  top: 16px;
+  margin: 0 22px 18px 0;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  gap: 2px;
+}
+.tabs .tab {
+  justify-content: flex-start;
+  text-align: left;
+  border-left: 2px solid transparent;
+  border-radius: 0 8px 8px 0;
+}
+.tabs .tab.active {
+  border-left-color: var(--accent);
+  background: linear-gradient(90deg, var(--accent-soft), transparent 75%);
+  color: var(--text-primary);
+}
+[role="tabpanel"] { overflow: hidden; }
+
+/* ── 2D skeletons: pulse now; content-shaped ghosts need templates ── */
+@keyframes hp5-pulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
+.skeleton-line { animation: hp5-pulse 1.6s ease-in-out infinite; }
+
+/* ── 9C scroll pill (paired JS in hp-app.js) ── */
+.hp5-more {
+  position: sticky;
+  bottom: 8px;
+  display: block;
+  width: fit-content;
+  margin: -26px auto 4px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-size: 11px;
+  padding: 2px 12px;
+  color: var(--text-secondary);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .2s ease-out;
+  z-index: 3;
+}
+
+/* ── v1 viewport-filling fixes ── */
+.card__scroll { max-height: max(340px, calc(100vh - 320px)); overscroll-behavior: contain; }
+.card__scroll .data-table thead th {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--surface-1);
+}
+td.v, .data-table td[data-label="time"], .data-table td[data-label="port"] { white-space: nowrap; }
+td.v .eventdetail, td.v article { white-space: normal; }
