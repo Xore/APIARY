@@ -269,7 +269,7 @@ function SourceHealthPage() {
             <CardRow label="uptime" value={formatDuration(runtime?.uptime_seconds ?? 0)} />
             <CardRow label="resident memory" value={formatBytes(runtime?.rss_bytes ?? 0)} />
             <CardRow label="virtual memory" value={formatBytes(runtime?.vm_bytes ?? 0)} />
-            <CardRow label="Elasticsearch cluster" value={health.cluster_status} />
+            <CardRow label="Elasticsearch cluster" value={clusterBadge(health.cluster_status)} />
             <p className="note">The Rust backend service's own process, from /proc/self — the legacy card's Go heap and goroutines have no equivalent here.</p>
           </div>
           <div className="card half" id="pipeline-status">
