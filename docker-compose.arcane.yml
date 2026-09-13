@@ -63,6 +63,10 @@ services:
       # can't hand to a container as a mounted file.
       ENCRYPTION_KEY: ${ARCANE_ENCRYPTION_KEY:?set ARCANE_ENCRYPTION_KEY in .env (32 raw/base64/hex bytes)}
       JWT_SECRET: ${ARCANE_JWT_SECRET:?set ARCANE_JWT_SECRET in .env (openssl rand -hex 32)}
+      # Explicitly activate vulnerability management in this environment
+      # (Arcane #3914 default is true, but pin it so the env doesn't silently
+      # lose the feature if upstream flips the default).
+      FEATURE_VULNERABILITY_MANAGEMENT_ENABLED: "true"
       PROJECTS_DIRECTORY: /var/dockge/stacks
       PROJECT_SCAN_MAX_DEPTH: "5"
       # OIDC -- native login, see this file's own header for why there is
