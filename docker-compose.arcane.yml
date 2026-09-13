@@ -48,7 +48,7 @@ services:
     # this file, then redeploy the stack. Get the digest with
     #   docker pull ghcr.io/getarcaneapp/manager:<tag>
     #   docker image inspect ghcr.io/getarcaneapp/manager:<tag> --format '{{index .RepoDigests 0}}'
-    image: ghcr.io/getarcaneapp/manager:v2.10.2@sha256:62d8001c3568e03acf66b53d4bdd97fcca59ae9e43f1561d8f720f38b738ffbc
+    image: ghcr.io/getarcaneapp/manager:v2.11.1@sha256:527af49cb544f4fea97848692761b8df5b328ea5b24e156318d570a3f2c0e884
     container_name: hp-arcane
     restart: unless-stopped
     environment:
@@ -63,6 +63,10 @@ services:
       # can't hand to a container as a mounted file.
       ENCRYPTION_KEY: ${ARCANE_ENCRYPTION_KEY:?set ARCANE_ENCRYPTION_KEY in .env (32 raw/base64/hex bytes)}
       JWT_SECRET: ${ARCANE_JWT_SECRET:?set ARCANE_JWT_SECRET in .env (openssl rand -hex 32)}
+      # Explicitly activate vulnerability management in this environment
+      # (Arcane #3914 default is true, but pin it so the env doesn't silently
+      # lose the feature if upstream flips the default).
+      FEATURE_VULNERABILITY_MANAGEMENT_ENABLED: "true"
       PROJECTS_DIRECTORY: /var/dockge/stacks
       PROJECT_SCAN_MAX_DEPTH: "5"
       # OIDC -- native login, see this file's own header for why there is
