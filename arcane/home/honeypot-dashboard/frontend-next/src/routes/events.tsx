@@ -124,6 +124,16 @@ const PIVOT_KEYS = [
 
 type FilterValues = { sensors: string[]; countries: string[]; cities?: string[]; protos: string[]; ports: string[]; kinds: string[] }
 
+// Suggestions only -- since_to_range (backend) accepts any short alphanumeric
+// duration, e.g. `24h` or `90d`, not just this list.
+const SINCE_SUGGESTIONS: [string, string][] = [
+  ['24h', 'Last 24 hours'],
+  ['7d', 'Last 7 days'],
+  ['30d', 'Last 30 days'],
+  ['90d', 'Last 90 days'],
+  ['365d', 'Last 365 days'],
+]
+
 const fetchEvents = createServerFn({ method: 'GET' })
   .validator((input: { offset: number; filters?: EventFilters }) => input)
   .handler(async ({ data }): Promise<EventsPage | null> => {
@@ -322,9 +332,16 @@ function Events() {
     })
   }, [rows])
   const [filtersOpen, setFiltersOpen] = useState(false)
-  const baseFilterCount = [search.ip, search.sensor, search.country, search.city, search.proto, search.port, search.kind].filter(
-    Boolean,
-  ).length
+  const baseFilterCount = [
+    search.ip,
+    search.sensor,
+    search.country,
+    search.city,
+    search.proto,
+    search.port,
+    search.kind,
+    search.since,
+  ].filter(Boolean).length
   const filtersActive = Boolean(
     search.ip ||
       search.sensor ||
@@ -566,7 +583,7 @@ function Events() {
           onApply={(event) => {
             const data = new FormData(event.currentTarget)
             const next: Record<string, string | undefined> = {}
-            for (const key of ['ip', 'sensor', 'country', 'city', 'proto', 'port', 'kind'] as const) {
+            for (const key of ['ip', 'sensor', 'country', 'city', 'proto', 'port', 'kind', 'since'] as const) {
               next[key] = (data.get(key) as string | null)?.trim() || undefined
             }
             setRows(null)
@@ -588,6 +605,7 @@ function Events() {
                 proto: undefined,
                 port: undefined,
                 kind: undefined,
+                since: undefined,
               }),
             })
           }}
@@ -623,6 +641,26 @@ function Events() {
               </select>
             </div>
           ))}
+          <div className="settings-field">
+            <label className="form-label" htmlFor="hp-ev-filter-since">
+              Since
+            </label>
+            <input
+              className="form-input"
+              id="hp-ev-filter-since"
+              name="since"
+              type="text"
+              defaultValue={search.since ?? ''}
+              list="hp-ev-since-suggestions"
+            />
+            <datalist id="hp-ev-since-suggestions">
+              {SINCE_SUGGESTIONS.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </datalist>
+          </div>
         </FiltersModal>
       ) : null}
       <div className={open ? 'hp-md hp-md--active hp-md--open wide' : 'hp-md hp-md--active wide'} id="events-grid">
