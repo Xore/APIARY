@@ -371,9 +371,31 @@ func handleConn(conn net.Conn, log *logger, proxy bool, aeTitle string, port int
 		return
 	}
 	log.emit(event{Port: port, SrcIP: ip, Event: "connect"})
-	conn, calledAE, callingAE := peekAETitles(conn)
+	conn, calledAE, callingAE, malformed := peekAETitles(conn)
 	if calledAE != "" || callingAE != "" {
 		log.emit(event{Port: port, SrcIP: ip, Event: "associate", CalledAE: calledAE, CallingAE: callingAE})
+	}
+	// #3155: a first PDU that isn't a well-formed A-ASSOCIATE-RQ used to
+	// fall straight through to RunProviderForConn or an implicit close --
+	// answer it with a real A-ABORT instead of silence.
+	if malformed {
+		log.emit(event{Port: port, SrcIP: ip, Event: "associate_aborted", CalledAE: calledAE, CallingAE: callingAE})
+		if err := abortAssociation(conn); err != nil {
+			log.emit(event{Port: port, SrcIP: ip, Event: "associate_abort_failed", Data: err.Error()})
+		}
+		return
+	}
+	// #3155: accept only the AE Title this persona actually claims -- an
+	// empty calledAE (malformed already false here) means the peek came up
+	// short or timed out, in which case there's nothing to enforce and
+	// RunProviderForConn's own (currently permissive) handling is left to
+	// run as before.
+	if calledAE != "" && calledAE != aeTitle {
+		log.emit(event{Port: port, SrcIP: ip, Event: "associate_rejected", CalledAE: calledAE, CallingAE: callingAE})
+		if err := rejectAssociation(conn); err != nil {
+			log.emit(event{Port: port, SrcIP: ip, Event: "associate_reject_failed", Data: err.Error()})
+		}
+		return
 	}
 	dicompot.RunProviderForConn(conn, paramsFor(log, aeTitle, port, ip))
 }
