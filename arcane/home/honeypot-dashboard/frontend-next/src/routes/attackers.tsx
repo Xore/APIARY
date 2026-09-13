@@ -13,6 +13,7 @@ import { ErrorStateBlock } from '../components/ErrorState'
 import { Tabs, TabPanel } from '../components/Tabs'
 import { usePaginatedList } from '../lib/hooks'
 import { formatTimestamp } from '../lib/time'
+import { copyWithFlash } from '../lib/flash'
 
 type AttackerRow = {
   id: string
@@ -54,7 +55,26 @@ export const Route = createFileRoute('/attackers')({
 })
 
 const COLUMNS: Column<AttackerRow>[] = [
-  { header: 'entity', className: 'v', render: (row) => row.id.slice(0, 8) },
+  {
+    header: 'entity',
+    className: 'v',
+    render: (row) => (
+      <span className="hp-token-url">
+        <code title={row.id}>{row.id.slice(0, 8)}</code>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          title="copy full entity id"
+          onClick={(event) => {
+            event.stopPropagation()
+            copyWithFlash(row.id, 'entity id')
+          }}
+        >
+          copy
+        </button>
+      </span>
+    ),
+  },
   { header: 'ips', className: 'n', render: (row) => row.ips.length.toLocaleString('en-US') },
   { header: 'events', className: 'n', render: (row) => row.events.toLocaleString('en-US') },
   {
