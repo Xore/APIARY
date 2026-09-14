@@ -34,3 +34,11 @@ paths-ignore:
   - analysis/ghidra/service/server.py
   - sandbox/ghosts/vendor/ghosts-src/Ghosts.Api/wwwroot/lib
   - arcane/home/honeypot-cowrie/honeyfs-implant/main.go
+  - docs/design-lab
+  # #1763: docs/design-lab/ is the preserved 2026-08-17 design-lab record
+  # (restored from preserve-design-lab-1763 branch, kept byte-identical).
+  # playground/compare.html is a local-only harness (loads 127.0.0.1:<port>
+  # frames into an iframe for side-by-side theme comparison); it is not
+  # shipped, not served by any route, and reachable only by opening the file
+  # directly in a browser. CodeQL js/html DOM-text findings here are
+  # documentation-artifact noise, same class as the ghost vendor exclusion.

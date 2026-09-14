@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>APIARY Design Lab</title>
+<style>
+  :root{--bg:#20201f;--card:#2c2c2a;--card2:#343432;--text:#e9e6df;--muted:#a8a49c;--accent:#d97757;--border:rgba(255,255,255,.09)}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 "Fira Sans",system-ui,sans-serif;padding:32px}
+  h1{font-size:26px;margin:0 0 4px}
+  h1 span{color:var(--accent)}
+  p.sub{color:var(--muted);margin:0 0 28px}
+  h2{font-size:15px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:34px 0 12px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px 20px}
+  .card h3{margin:0 0 4px;font-size:17px}
+  .card .tag{display:inline-block;font-size:11px;letter-spacing:.05em;border-radius:999px;padding:2px 10px;margin-left:8px;vertical-align:2px;background:rgba(217,119,87,.16);color:#e38f74}
+  .card p{color:var(--muted);font-size:13.5px;margin:6px 0 12px}
+  .links{display:flex;flex-wrap:wrap;gap:8px}
+  a.btn{color:var(--text);text-decoration:none;font-size:13px;background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:5px 12px}
+  a.btn:hover{border-color:var(--accent);color:#fff}
+  a.btn.primary{background:var(--accent);color:#211a17;font-weight:600;border-color:transparent}
+  .cmp{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+  small.note{color:var(--muted);display:block;margin-top:26px}
+  code{background:var(--card2);border-radius:5px;padding:1px 6px;font-family:"Fira Code",monospace;font-size:12.5px}
+</style>
+</head>
+<body>
+<h1>APIARY <span>Design Lab</span></h1>
+<p class="sub">Live dashboard variants running against the real homeserver Elasticsearch (read-only). Pick pages, compare split-screen, choose winners.</p>
+
+<h2>Variants</h2>
+<div class="grid" id="variants"></div>
+
+<p style="margin:14px 0 0"><a class="btn primary" href="elements.html">Design Picker — elements + page layouts, click your choices →</a></p>
+<h2>Split compare (drag the divider)</h2>
+<div class="cmp" id="compares"></div>
+
+<h2>Notes</h2>
+<div class="card">
+  <p style="margin:0">
+    Every variant is the <em>real</em> dashboard binary — full navigation works inside each. The only difference is
+    <code>theme.css</code> (Xore/theme). v1 keeps the stock look and only fixes layout (viewport-filling cards,
+    sticky table headers, no mid-value wraps). v2 and v3 are taste directions layered on top of the same fixes.
+    Winners get ported into <code>Xore/theme</code> properly (tokens + structured rules, light theme included) and PR'd.
+  </p>
+</div>
+<small class="note">Ports: base 19201 · v1 19202 · v2 19203 · v3 19204 · v4 19205 · v5 picks 19206 · v6 claude-pure 19207 — ES via SSH tunnel 19200 → supermicro.</small>
+
+<script>
+const VARIANTS = [
+  {port:19201, name:"Base (stock)",     tag:"as deployed", desc:"Current vendored theme.css, untouched. Reference point."},
+  {port:19202, name:"v1 · Full-bleed Ops", tag:"fixes only", desc:"Stock look; pages fill the viewport, sticky table headers, no mid-value wrapping, visible scroll affordances."},
+  {port:19203, name:"v2 · Soft Modern",  tag:"taste", desc:"Softer SaaS feel: shadow-elevated borderless cards, bigger radii, roomier tables, pill chips. Includes v1 fixes."},
+  {port:19204, name:"v3 · Terminal Dense", tag:"taste", desc:"SOC-floor density: darker ground, mono data cells, uppercase micro-labels, sharp corners, max rows per screen. Includes v1 fixes."},
+  {port:19205, name:"v4 · Claude", tag:"taste", desc:"claude.ai look & feel on the Xore palette: airy, nearly borderless, pill nav and controls, soft large radii, quiet chrome. Includes v1 fixes."},
+    {port:19207, name:"v6 · Claude Pure", tag:"chosen · round 2", desc:"Second-round E picks applied: floating borderless cards with serif titles, boxless serif KPI strip, open airy tables, neutral dot badges, pill buttons/tabs, raised-pill nav, floating pill topbar. Element theming only — page-layout work (feed breaks, source cards, doc reports) ships in the repo."},
+  {port:19206, name:"v5 · Your Picks", tag:"chosen", desc:"Xore's selections applied: header-strip cards, card-row tables, solid badges, ghost buttons, rail tabs, accent-bar nav, scroll pills — on the claude schema. Layout picks (OV-B/EV-B/AS-C/RP-C) follow as template work."},
+];
+const PAGES = [["Overview","/"],["Events","/events"],["Campaigns","/campaigns"],["Attack sources","/ips"],["Alerts","/alerts"],["Commands","/commands"],["Reports","/reports"],["Source health","/source-health"]];
+document.getElementById('variants').innerHTML = VARIANTS.map(v=>`
+  <div class="card">
+    <h3>${v.name}<span class="tag">${v.tag}</span></h3>
+    <p>${v.desc}</p>
+    <div class="links">
+      <a class="btn primary" href="http://127.0.0.1:${v.port}/" target="_blank">Open ↗</a>
+      ${PAGES.map(([n,p])=>`<a class="btn" href="http://127.0.0.1:${v.port}${p}" target="_blank">${n}</a>`).join('')}
+    </div>
+  </div>`).join('');
+const CMP = [];
+for (const [n,p] of PAGES) {
+  CMP.push({label:`base vs v1 — ${n}`, l:19201, r:19202, path:p});
+}
+CMP.push({label:"v1 vs v2 — Overview", l:19202, r:19203, path:"/"});
+CMP.push({label:"v1 vs v3 — Events", l:19202, r:19204, path:"/events"});
+CMP.push({label:"v2 vs v3 — Overview", l:19203, r:19204, path:"/"});
+CMP.push({label:"base vs v4 — Overview", l:19201, r:19205, path:"/"});
+CMP.push({label:"v1 vs v4 — Events", l:19202, r:19205, path:"/events"});
+CMP.push({label:"base vs v5 picks — Overview", l:19201, r:19206, path:"/"});
+CMP.push({label:"base vs v5 picks — Events", l:19201, r:19206, path:"/events"});
+document.getElementById('compares').innerHTML = CMP.map(c=>
+  `<a class="btn" href="compare.html?l=${c.l}&r=${c.r}&path=${encodeURIComponent(c.path)}">${c.label}</a>`).join('');
+</script>
+</body>
+</html>

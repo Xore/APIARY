@@ -628,7 +628,21 @@ function RecentRunsCard({ owner, refreshToken }: { owner: string; refreshToken: 
         <>
           <div className="project-grid" id="workbench-results-list">
             {runs.map((run) => (
-              <div key={run.id} className="project-card" onClick={() => setSelected(selected === run.id ? null : run.id)}>
+              <div
+                key={run.id}
+                className="project-card"
+                role="button"
+                tabIndex={0}
+                aria-label={`Toggle details for ${run.recipe_name || run.recipe_id || 'one-off'}`}
+                aria-expanded={selected === run.id}
+                onClick={() => setSelected(selected === run.id ? null : run.id)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    setSelected(selected === run.id ? null : run.id)
+                  }
+                }}
+              >
                 <div className="project-card__header">
                   <span className="project-card__title">{run.recipe_name || run.recipe_id || 'one-off'}</span>
                   <div className="project-card__badges">

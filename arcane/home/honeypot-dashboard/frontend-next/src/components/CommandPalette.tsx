@@ -197,6 +197,11 @@ export function CommandPalette() {
             rows={1}
             placeholder="Investigate an IP, ASN, payload hash, session, HTTP path or free text…"
             aria-label="Investigate an indicator"
+            role="combobox"
+            aria-expanded={rows.length > 0}
+            aria-controls="command-palette-listbox"
+            aria-activedescendant={activeRow >= 0 ? `command-palette-option-${activeRow}` : undefined}
+            aria-autocomplete="list"
             value={query}
             onChange={(event) => {
               setQuery(event.target.value)
@@ -209,13 +214,15 @@ export function CommandPalette() {
           </button>
         </form>
         {rows.length > 0 ? (
-          <div className="command-palette__results" role="listbox" aria-label="Search results">
+          <div id="command-palette-listbox" className="command-palette__results" role="listbox" aria-label="Search results">
             {rows.map((row, index) => {
               const active = index === activeRow
               return (
                 <button
                   key={`${row.group}:${row.title}:${index}`}
+                  id={`command-palette-option-${index}`}
                   type="button"
+                  tabIndex={-1}
                   className={active ? 'command-palette__row active' : 'command-palette__row'}
                   role="option"
                   aria-selected={active}
