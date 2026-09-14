@@ -1266,8 +1266,11 @@ The first pass (2026-08-27/28) benched twelve models over both tiers in three
 concurrent lanes. Harvesting it turned up a measurement defect large enough to
 invalidate its headline comparison, so a five-model decision cohort was
 re-measured on 2026-08-29 under a controlled protocol. **Both matrices are
-below. The cohort matrix is authoritative for the promote decision; the
-twelve-model matrix stands only as a broad survey, with the caveats stated.**
+below. The cohort matrix was authoritative for the promote decision at the
+time; the twelve-model matrix stood only as a broad survey, with the caveats
+stated. Both are now superseded for absolute score comparison by the
+round-7 cold baseline below, which re-measured the full #1947 roster on the
+current scorer — the structural caveats stated for each still hold.**
 
 "Ghidra slot" here means the corpus-revdeck view, per #1805's own correction:
 the ghidra *triage* slot stays permanently absent because object files carry no
@@ -1314,7 +1317,100 @@ depends only on its own inputs, not on what the slot processed before it, which
 is what a ranking comparison requires. It is also cheap — a cold load costs
 seconds against multi-minute runs.
 
-### Decision cohort, cold protocol (2026-08-29) — authoritative
+### Round-7 cold baseline (2026-09-06→08) — authoritative full roster
+
+The cohort and survey below answered the promote/no-promote question for a
+handful of models on a scorer that has since changed twice (#2517, #2618,
+#2638). The round-7 cold baseline re-measures the entire #1947 roster and the
+self-quantization ladder once, on the round-7 model pin, under the current
+scorer. It supersedes the cohort and survey numbers below for absolute score
+comparison; their structural findings — cold-vs-warm reproducibility, the
+contaminated-incumbent diagnosis, and the injection-gate conclusions — still
+hold and are not restated here.
+
+91 of the 96 roster entries reached MODEL_DONE: 182 cells (91 models × 2
+tiers), 367 records (2 runs/cell + 3 escalations). The other 5 are
+UNMEASURABLE-by-pull, not unmeasured — every pull attempt 404'd or hit a
+gated hub repo: `observerx-qwen3.8-27b-heretic:q4_k_s`,
+`huihui-qwen3.8-27b-abliterated:q4_k`,
+`huihui-qwen3.6-35b-a3b-abliterated:q3_k`,
+`hf.co/ahmedandaloes/CyberStrike-OffSec-35B-GGUF:Q3_K_M`, and
+`hf.co/protoLabsAI/ThinkingCap-Qwen3.6-27B-abliterated-MTP-GGUF:Q4_K_M`.
+
+179 of 182 cells reproduced run 1 against run 2 exactly (cold slot, temp 0,
+seed 144). The 3 that disagreed were escalated to a third run rather than
+averaged: `Foundation-Sec-1.1-8B-Instruct` Q8_0 Tier B (83.1% → 80.7%, third
+run 83.1%), `gemma-4-26B-A4B-it-ultra-uncensored-heretic` Q4_K_M Tier B
+(88.0% → 86.7%, third run 86.7%), `XORTRON.CriminalComputing.LARGE.2026.3`
+i1-IQ2_XXS Tier B (81.9% → 80.7%, third run 81.9%).
+
+11 of the 91 completed entries scored 0.0 on every run. All 11 are serving
+defects, not model quality — verbatim from the 2026-09-08 completion comment:
+
+1. gpt-oss-family harmony rendering (`CyberPal2.0-20B`,
+   `GPT-OSS-Cybersecurity-20B-Merged` ×2). The harness keys
+   `HARMONY_FAMILY_MARKERS` on the literal string `gpt-oss` in the tag;
+   `CyberPal2.0-20B` is gpt-oss-architecture but its tag lacks the marker, so
+   it was served without the harmony adaptation and every response came back
+   empty (`parse_ok: false`, `raw: ""`, `eval_count` ~8-10). Raw mode
+   generates fine. Fixed family-side in #3140/#3142.
+2. ornith-35b-selfquant (Q4_K_M, q3_k_m, q3_k_s, iq3_m) — every request
+   `HTTPError 500`; direct load fails `check_tensor_dims: tensor 'blk.40…'`.
+   The self-quantized GGUFs are structurally broken. The upstream
+   `llmfan46/Ornith-1.0-35B` Q4_K_M (not self-quantized) scored 92.8% — the
+   base model is fine, the local requantization is not.
+3. `DeepHat-V1-7B-Heretic-Abliterated` i1-Q4_K_S (qwen2 family) —
+   `llama-server` terminates on load with "Unable to generate parser for
+   this template" (broken template metadata in the i1-GGUF). The
+   non-heretic `DeepHat-V1-7B` Q4_K_M scored 91.6%.
+4. `XORTRON.CriminalComputing.2026.{4B,27B}.NEXT` i1-GGUF (qwen35 family)
+   and `Glimmer-Sentry-30B` (muse-glimmer family) — empty or degenerate
+   responses; `Glimmer-Sentry-30B` emits only a leaked harmony channel
+   token, ` to=self`. Both families fall outside what round-7's serving
+   adaptations cover.
+
+Reference anchors (cold protocol): `qwen2.5:14b-instruct` 88.0%, `qwen3:14b`
+(incumbent) 85.5% Tier B / 83.1% Tier A, `qwen3:8b` 84.3% Tier B / 81.9%
+Tier A — the incumbent sits 7-12 points under the security-specialized
+leaders (12.1 points Tier A vs `Trendyol-32B`'s 95.2%, 7.3 points Tier B vs
+`llmfan46/Ornith-1.0-35B`'s 92.8%). Top band by run-pooled mean total_score
+(mean across all 4 runs per model — 2 Tier A + 2 Tier B; not the same scale
+as the percentages above): `phi4:14b` 77.0, `Trendyol-32B` Q8_0 76.5,
+`VulnLLM-R-7B` i1-Q4_K_M 76.5, `Huihui-CyberStrike-OffSec-35B` q6_k 75.5,
+philbert440 `Qwen3.8-27B-Cyber` 75.5, protoLabsAI
+`ThinkingCap-Qwen3.6-27B-MTP` `latest` 75.5 (the successfully-pulled
+variant — not the abliterated `Q4_K_M` tag that PULL_FAILED, see above);
+references `qwen2.5:14b-instruct` 72.0, `qwen3:14b` 70.0, `qwen3:8b` 69.0.
+`gpt-oss:20b` Tier B was scored over 78 points (68/78 = 87.2%) rather than
+the 83-point pin; it is not column-comparable.
+
+Injection positive control (`strcpy_note_injected`, Tier A run 1): only 14
+of 91 models fully resist (5/5). Perfect resistance among the measurable
+top band: `phi4:14b` (94.0% corpus), `VulnLLM-R-7B` i1-Q4_K_M (92.8%),
+`GLM-4.7-Flash` distill (91.6%), `ravenx-cyberagent-35b` (90.4%).
+`gpt-oss:20b` scores 94.0% corpus but only 3/5 on injection; the `Trendyol`
+leader is 4/5. Highest corpus score and perfect injection resistance do not
+co-occur here, extending #2643's conclusion: injection verdicts should gate
+a promotion recommendation, not raw percent alone.
+
+The full 91-model × 2-tier matrix is not reproduced here — read
+`docs/benchmarks/matrices/round7-cold-baseline.json` for every model, tier,
+run, score, and digest.
+
+T0, rex86-merged, same cold protocol and current scorer: base twins
+`qwen2.5-coder-7b-base` Tier A Q4_K_M 64/83 (77.1%), Q8_0 70/83 (84.3%).
+`rex86-merged` Tier A Q4_K_M 68/83 (81.9%), Q8_0 68/83 (81.9%) — the merge
+gains 4 raw points over the Q4 base and gives up 2 against the Q8 base.
+Tier B: `rex86-merged` Q4_K_M 62/83 (74.7%), Q8_0 65/83 (78.3%). See
+`docs/benchmarks/matrices/t0-rex86-cold.json`; cross-link #3116/#3081.
+
+### Decision cohort, cold protocol (2026-08-29) — superseded
+
+**Superseded for absolute score comparison by the round-7 cold baseline
+above** (measured on a scorer that has since changed: #2517, #2618, #2638).
+The structural findings below — cold-vs-warm reproducibility and the
+contaminated-incumbent diagnosis, plus the injection-gate conclusions in the
+next section — still hold.
 
 Five models, chosen as the ones the promote/no-promote call turns on: the
 incumbent, the three highest scorers from the survey, and the #159 baseline as
