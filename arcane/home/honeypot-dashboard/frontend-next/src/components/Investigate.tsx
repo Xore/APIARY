@@ -338,6 +338,9 @@ export function MasterDetailTable<Row>({
                   const desc = cardDesc?.(row)
                   const CardTag = href ? 'a' : 'div'
                   const cardProps = href ? { href } : { onClick: onRowClick(index) }
+                  const titleClassName = primaryColumn?.className
+                    ? `project-card__title ${primaryColumn.className}`
+                    : 'project-card__title'
                   return (
                     <CardTag key={rowKey(row, index)} className="project-card" {...cardProps}>
                       <div className="project-card__header">
@@ -346,9 +349,26 @@ export function MasterDetailTable<Row>({
                             {icon}
                           </span>
                         ) : null}
-                        <span className={primaryColumn?.className ? `project-card__title ${primaryColumn.className}` : 'project-card__title'}>
-                          {primaryColumn?.render(row)}
-                        </span>
+                        <span className={titleClassName}>{primaryColumn?.render(row)}</span>
+                        {!href && (
+                          <button
+                            type="button"
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              padding: 0,
+                              cursor: 'pointer',
+                              font: 'inherit',
+                              color: 'inherit',
+                              flex: 'none',
+                            }}
+                            aria-expanded={selected === index}
+                            aria-label={`Toggle details for ${primaryColumn?.header ?? 'row'} ${index + 1}`}
+                            onClick={() => setSelected(selected === index ? null : index)}
+                          >
+                            {selected === index ? '▾' : '▸'}
+                          </button>
+                        )}
                         {badges ? <div className="project-card__badges">{badges}</div> : null}
                       </div>
                       {desc ? <p className="project-card__desc">{desc}</p> : null}
