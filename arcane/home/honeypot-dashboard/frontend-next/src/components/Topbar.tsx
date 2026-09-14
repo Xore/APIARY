@@ -130,7 +130,7 @@ export function Topbar({
           className="btn btn-icon btn-ghost"
           type="button"
           onClick={cycleTheme}
-          aria-label="Switch color theme"
+          aria-label={`Switch color theme (${mode})`}
           title={`Theme: ${mode}`}
         >
           {mode === 'system' ? (
