@@ -34,6 +34,7 @@ paths-ignore:
   - analysis/ghidra/service/server.py
   - sandbox/ghosts/vendor/ghosts-src/Ghosts.Api/wwwroot/lib
   - arcane/home/honeypot-cowrie/honeyfs-implant/main.go
+  - docs/design-lab
   # #1763: docs/design-lab/ is the preserved 2026-08-17 design-lab record
   # (restored from preserve-design-lab-1763 branch, kept byte-identical).
   # playground/compare.html is a local-only harness (loads 127.0.0.1:<port>
