@@ -23,6 +23,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useRouterState } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
+import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 
 export type ViewTabDef = { id: string; label: string }
 
@@ -34,6 +35,7 @@ export type ViewTabsConfig = {
   onSelect: (id: string) => void
   /** Prefix for tab/panel element ids — must match the page's TabPanel ids. */
   idPrefix: string
+  shadcn?: boolean
 }
 
 type Registration = { config: ViewTabsConfig; owner: object }
@@ -84,6 +86,16 @@ export function useNarrowViewport(): boolean {
 function ViewTabList({ config, sidebar }: { config: ViewTabsConfig; sidebar?: boolean }) {
   const listRef = useRef<HTMLDivElement>(null)
   const { tabs, active, onSelect, idPrefix } = config
+
+  if (config.shadcn) return (
+    <Tabs value={active} onValueChange={onSelect} orientation={sidebar ? 'vertical' : 'horizontal'}>
+      <TabsList className="tabs !h-auto !justify-start" aria-label={config.label} {...(sidebar ? { 'data-hp-sidebar-tabs': '1' } : null)}>
+        {tabs.map((tab, index) => <TabsTrigger key={tab.id} value={tab.id} id={`${idPrefix}-${tab.id}`} className={`${tab.id === active ? 'tab active' : 'tab'} !whitespace-normal`} aria-controls={`${idPrefix}-panel-${tab.id}`}>
+          <span>{String(index + 1).padStart(2, '0')}</span>{tab.label}
+        </TabsTrigger>)}
+      </TabsList>
+    </Tabs>
+  )
 
   const focusAndSelect = (index: number) => {
     const tab = tabs[(index + tabs.length) % tabs.length]
@@ -161,12 +173,14 @@ export function useSidebarViewTabs({
   active,
   onSelect,
   idPrefix = 'view',
+  shadcn = false,
 }: {
   label: string
   tabs: readonly ViewTabDef[]
   active: string
   onSelect: (id: string) => void
   idPrefix?: string
+  shadcn?: boolean
 }): ReactNode {
   const owner = useRef<object | null>(null)
   owner.current ??= {}
@@ -175,7 +189,7 @@ export function useSidebarViewTabs({
   useEffect(() => setMounted(true), [])
 
   const inline = narrow || !mounted
-  const config: ViewTabsConfig = { label, tabs, active, onSelect, idPrefix }
+  const config: ViewTabsConfig = { label, tabs, active, onSelect, idPrefix, shadcn }
 
   // Re-register on every commit so the rail always reflects the freshest
   // active/onSelect. Shrinking below 520px sweeps this page's rail out of

@@ -44,6 +44,7 @@ import { Route as BffMountedSplatRouteImport } from './routes/bff-mounted.$'
 import { Route as BffSplatRouteImport } from './routes/bff.$'
 import { Route as CapeIndexRouteImport } from './routes/cape.index'
 import { Route as CapeShaRouteImport } from './routes/cape.$sha'
+import { Route as DevGalleryRouteImport } from './routes/dev.gallery'
 import { Route as EventIdRouteImport } from './routes/event.$id'
 import { Route as ExportPortbridgeManualBlackholeDottxtRouteImport } from './routes/export.portbridge-manual-blackhole[.]txt'
 import { Route as GhidraShaRouteImport } from './routes/ghidra.$sha'
@@ -248,6 +249,11 @@ const CapeShaRoute = CapeShaRouteImport.update({
   path: '/cape/$sha',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DevGalleryRoute = DevGalleryRouteImport.update({
+  id: '/dev/gallery',
+  path: '/dev/gallery',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const EventIdRoute = EventIdRouteImport.update({
   id: '/event/$id',
   path: '/event/$id',
@@ -428,6 +434,7 @@ export interface FileRoutesByFullPath {
   '/bff-mounted/$': typeof BffMountedSplatRoute
   '/bff/$': typeof BffSplatRoute
   '/cape/$sha': typeof CapeShaRoute
+  '/dev/gallery': typeof DevGalleryRoute
   '/event/$id': typeof EventIdRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/ghidra/$sha': typeof GhidraShaRoute
@@ -493,6 +500,7 @@ export interface FileRoutesByTo {
   '/bff-mounted/$': typeof BffMountedSplatRoute
   '/bff/$': typeof BffSplatRoute
   '/cape/$sha': typeof CapeShaRoute
+  '/dev/gallery': typeof DevGalleryRoute
   '/event/$id': typeof EventIdRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/ghidra/$sha': typeof GhidraShaRoute
@@ -559,6 +567,7 @@ export interface FileRoutesById {
   '/bff-mounted/$': typeof BffMountedSplatRoute
   '/bff/$': typeof BffSplatRoute
   '/cape/$sha': typeof CapeShaRoute
+  '/dev/gallery': typeof DevGalleryRoute
   '/event/$id': typeof EventIdRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/ghidra/$sha': typeof GhidraShaRoute
@@ -626,6 +635,7 @@ export interface FileRouteTypes {
     | '/bff-mounted/$'
     | '/bff/$'
     | '/cape/$sha'
+    | '/dev/gallery'
     | '/event/$id'
     | '/export/portbridge-manual-blackhole.txt'
     | '/ghidra/$sha'
@@ -691,6 +701,7 @@ export interface FileRouteTypes {
     | '/bff-mounted/$'
     | '/bff/$'
     | '/cape/$sha'
+    | '/dev/gallery'
     | '/event/$id'
     | '/export/portbridge-manual-blackhole.txt'
     | '/ghidra/$sha'
@@ -756,6 +767,7 @@ export interface FileRouteTypes {
     | '/bff-mounted/$'
     | '/bff/$'
     | '/cape/$sha'
+    | '/dev/gallery'
     | '/event/$id'
     | '/export/portbridge-manual-blackhole.txt'
     | '/ghidra/$sha'
@@ -822,6 +834,7 @@ export interface RootRouteChildren {
   BffMountedSplatRoute: typeof BffMountedSplatRoute
   BffSplatRoute: typeof BffSplatRoute
   CapeShaRoute: typeof CapeShaRoute
+  DevGalleryRoute: typeof DevGalleryRoute
   EventIdRoute: typeof EventIdRoute
   ExportPortbridgeManualBlackholeDottxtRoute: typeof ExportPortbridgeManualBlackholeDottxtRoute
   GhidraShaRoute: typeof GhidraShaRoute
@@ -1100,6 +1113,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CapeShaRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/dev/gallery': {
+      id: '/dev/gallery'
+      path: '/dev/gallery'
+      fullPath: '/dev/gallery'
+      preLoaderRoute: typeof DevGalleryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/event/$id': {
       id: '/event/$id'
       path: '/event/$id'
@@ -1334,6 +1354,7 @@ const rootRouteChildren: RootRouteChildren = {
   BffMountedSplatRoute: BffMountedSplatRoute,
   BffSplatRoute: BffSplatRoute,
   CapeShaRoute: CapeShaRoute,
+  DevGalleryRoute: DevGalleryRoute,
   EventIdRoute: EventIdRoute,
   ExportPortbridgeManualBlackholeDottxtRoute:
     ExportPortbridgeManualBlackholeDottxtRoute,

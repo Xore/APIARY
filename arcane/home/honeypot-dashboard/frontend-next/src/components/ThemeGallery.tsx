@@ -16,6 +16,7 @@
 // they will get.
 import { THEMES } from '../lib/themes'
 import { useAppearanceKey, getThemeMode, getThemeName, applyPalette } from '../lib/prefs'
+import { Button } from './ui/button'
 
 function Tile({ id }: { id: string }) {
   // `system` means "no data-theme attribute", which lets color-scheme resolve
@@ -46,19 +47,20 @@ export function ThemeGallery() {
       {THEMES.map((theme) => {
         const selected = theme.id === current
         return (
-          <button
+          <Button
             key={theme.id}
             type="button"
             role="radio"
             aria-checked={selected}
-            className="hp-theme-tile"
+            className="hp-theme-tile !h-auto !w-[148px] !flex-col !items-stretch !justify-start !whitespace-normal"
+            variant={selected ? 'secondary' : 'ghost'}
             data-value={theme.id}
             onClick={() => applyPalette(theme.id)}
           >
             <Tile id={theme.id} />
             <span className="hp-theme-tile__label">{theme.label}</span>
             <span className="hp-theme-tile__desc">{theme.description}</span>
-          </button>
+          </Button>
         )
       })}
     </div>

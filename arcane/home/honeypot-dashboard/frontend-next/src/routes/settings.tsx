@@ -26,6 +26,7 @@ import { EsHistoryConsole, type EsStorage } from '../components/EsHistoryConsole
 import { str } from '../components/StoreList'
 import { applyPalette, applyTheme, useThemeMode, type ThemeMode } from '../lib/prefs'
 import { ThemeGallery } from '../components/ThemeGallery'
+import { Button } from '../components/ui/button'
 import { themeSearchTerms } from '../lib/themes'
 import type { JsonRecord } from '../lib/json'
 import { prefetchEnabled, setPrefetchEnabled } from '../lib/prefetch'
@@ -2840,15 +2841,17 @@ export function SettingsSurface({
       <p className="note">Theme mode</p>
       <div className="segmented" role="group" aria-label="Theme mode">
         {modes.map((mode) => (
-          <button
+          <Button
             key={mode.id}
             type="button"
             data-value={mode.id}
             aria-pressed={theme === mode.id}
+            className="!h-auto"
+            variant={theme === mode.id ? 'secondary' : 'ghost'}
             onClick={() => applyTheme(mode.id)}
           >
             {mode.label}
-          </button>
+          </Button>
         ))}
       </div>
       <p className="note">Theme</p>

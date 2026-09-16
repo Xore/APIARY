@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react'
 import { useRouterState } from '@tanstack/react-router'
 import { Sidebar } from './Sidebar'
+import { SidebarProvider } from './ui/sidebar'
 import { Topbar } from './Topbar'
 import { CommandPalette } from './CommandPalette'
 import { ConfirmHost } from './ConfirmDialog'
@@ -106,6 +107,10 @@ export function AppShell({
     .join(' ')
 
   return (
+    <SidebarProvider className="block min-h-0" open={!collapsed} onOpenChange={(open) => {
+      setCollapsed(!open)
+      try { localStorage.setItem(COLLAPSE_KEY, open ? '0' : '1') } catch { /* storage unavailable */ }
+    }}>
     <div className={shellClass}>
       <a
         href="#main"
@@ -153,5 +158,6 @@ export function AppShell({
         </div>
       </main>
     </div>
+    </SidebarProvider>
   )
 }
