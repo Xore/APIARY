@@ -196,6 +196,11 @@ export function cycleTheme() {
   applyTheme(next)
 }
 
+function syncShadcnDarkClass(mode: ThemeMode) {
+  const root = document.documentElement
+  root.classList.toggle('dark', mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches))
+}
+
 export function applyTheme(mode: ThemeMode, options?: { sync?: boolean }) {
   withoutTransitions(() => {
     try {
@@ -206,6 +211,7 @@ export function applyTheme(mode: ThemeMode, options?: { sync?: boolean }) {
         document.documentElement.dataset.theme = mode
         localStorage.setItem('hp-theme', mode)
       }
+      syncShadcnDarkClass(mode)
     } catch {
       /* storage unavailable */
     }
@@ -367,7 +373,10 @@ function watchOsTheme() {
   osThemeWatched = true
   const query = window.matchMedia('(prefers-color-scheme: dark)')
   const onChange = () => {
-    if (getThemeMode() === 'system') emit()
+    if (getThemeMode() === 'system') {
+      syncShadcnDarkClass('system')
+      emit()
+    }
   }
   if (typeof query.addEventListener === 'function') query.addEventListener('change', onChange)
   else if (typeof query.addListener === 'function') query.addListener(onChange)

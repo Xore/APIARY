@@ -3,6 +3,7 @@
 // same vendored stylesheet the Go dashboard serves), so the port inherits
 // the claude-pure element set 1:1 — no visual drift by construction.
 import { useEffect } from 'react'
+import '../index.css'
 import { HeadContent, Scripts, createRootRoute, redirect } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { AppShell } from '../components/AppShell'
@@ -188,7 +189,7 @@ export const Route = createRootRoute({
         // the first as canonical and the second as an alias; this repo still
         // reads dataset.hpPalette in settings.tsx.
         children:
-          '(function(){try{var d=document.documentElement;var t=localStorage.getItem("hp-theme");if(t==="light"||t==="dark"){d.dataset.theme=t;}var p=localStorage.getItem("hp-palette");if(p&&/^[a-z][a-z0-9-]{2,31}$/.test(p)){d.dataset.hpTheme=p;d.dataset.hpPalette=p;}}catch(e){}})();',
+          '(function(){try{var d=document.documentElement;var t=localStorage.getItem("hp-theme");if(t==="light"||t==="dark"){d.dataset.theme=t;}d.classList.toggle("dark",t==="dark"||(!t&&matchMedia("(prefers-color-scheme: dark)").matches));var p=localStorage.getItem("hp-palette");if(p&&/^[a-z][a-z0-9-]{2,31}$/.test(p)){d.dataset.hpTheme=p;d.dataset.hpPalette=p;}}catch(e){}})();',
       },
     ],
   }),
@@ -263,6 +264,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
     // with no cookie yet, and for a device where cookies are blocked.
     <html
       lang="en"
+      className={appearance?.mode === 'dark' ? 'dark' : undefined}
       {...(appearance?.mode ? { 'data-theme': appearance.mode } : {})}
       {...(appearance?.theme ? { 'data-hp-theme': appearance.theme, 'data-hp-palette': appearance.theme } : {})}
     >
