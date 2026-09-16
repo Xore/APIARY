@@ -277,6 +277,11 @@ const catchAllWarned = new Set();
 /** Minimal handler table; keys are matched by startsWith after the query
  *  string is split off, first match wins, then the catch-all. */
 function route(pathname) {
+  if (pathname === "/api/v1/config/history") return { entries: [] };
+  if (pathname === "/api/v1/audit") return { events: [] };
+  if (pathname === "/api/v1/settings/storage") {
+    return { cluster_status: "green", index_count: 0, doc_count: 0, store_bytes: 0 };
+  }
   if (pathname === "/api/v1/config") {
     return { payload: { presentation: { dashboard_title: "APIARY", dashboard_subtitle: "browser-e2e deployment", banner_text: "", footer_text: "" } } };
   }
