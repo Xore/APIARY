@@ -22,7 +22,8 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
-import { ErrorStateBlock } from '../components/ErrorState'
+import { Alert, AlertTitle, AlertDescription } from '../components/ui/alert'
+import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '../components/ui/empty'
 import { copyWithFlash } from '../lib/flash'
 import { type JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
@@ -224,11 +225,13 @@ function EventDetailPage() {
     return (
       <section className="flex min-w-0 flex-col gap-6">
         <InvestigateHeader label="Investigate" title="Event" subtitle="The record could not be loaded." />
-        <ErrorStateBlock
-          title="This event failed to load"
-          hint="The backend request failed — this says nothing about whether the event exists."
-          onRetry={() => setAttempt((n) => n + 1)}
-        />
+        <Alert variant="destructive">
+          <AlertTitle>This event failed to load</AlertTitle>
+          <AlertDescription className="flex flex-col items-start gap-4">
+            <p>The backend request failed — this says nothing about whether the event exists.</p>
+            <Button variant="outline" onClick={() => setAttempt((n) => n + 1)}>Retry</Button>
+          </AlertDescription>
+        </Alert>
       </section>
     )
   }
@@ -237,12 +240,15 @@ function EventDetailPage() {
     return (
       <section className="flex min-w-0 flex-col gap-6">
         <InvestigateHeader label="Investigate" title="Event" subtitle="This event could not be found." />
-        <Card className="min-w-0"><CardContent className="pt-6">
-          <p className="text-sm text-muted-foreground">
-            No event with id <code>{id}</code> is in the index. Events age out of the retention window, so an old link
-            can outlive the document it points at.
-          </p>
-        </CardContent></Card>
+        <Empty className="border">
+          <EmptyHeader>
+            <EmptyTitle>Event not found</EmptyTitle>
+            <EmptyDescription>
+              No event with id <code className="break-all">{id}</code> is in the index. Events age out of the retention window, so an old link
+              can outlive the document it points at.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       </section>
     )
   }
