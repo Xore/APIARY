@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test'
+import { join } from 'node:path'
 
 for (const width of [1280, 390]) for (const mode of ['light', 'dark']) {
-  test(`migrated overview ${width} ${mode} has no console errors`, async ({ page }) => {
+  test(`migrated overview ${width} ${mode} has no console errors`, async ({ page }, testInfo) => {
     const errors: string[] = []
     page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
     page.on('pageerror', error => errors.push(error.message))
@@ -15,7 +16,13 @@ for (const width of [1280, 390]) for (const mode of ['light', 'dark']) {
     await expect(page.locator('#overview-kpis')).toBeVisible()
     if (width === 1280) await expect(page.locator('aside [data-hp-sidebar-tabs]')).toBeVisible()
     else await expect(page.locator('main [role="tablist"]')).toBeVisible()
-    await page.screenshot({ path: `../../../../dash-shots/phase3-b1/overview-${width}-${mode}.png` })
+    // Captures go to the per-test results dir (or EVIDENCE_DIR) instead of
+    // hardcoding a repo path — running this suite must not rewrite
+    // dash-shots inputs (same defect class the review flagged as F2).
+    const shot = process.env.EVIDENCE_DIR
+      ? join(process.env.EVIDENCE_DIR, 'phase3-b1', `overview-${width}-${mode}.png`)
+      : testInfo.outputPath(`overview-${width}-${mode}.png`)
+    await page.screenshot({ path: shot })
     expect(errors).toEqual([])
   })
 }

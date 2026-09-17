@@ -381,6 +381,7 @@ const EXPECTED_ROUTE_SHAPE: RouteShape[] = [
   { id: '/commands', path: '/commands' },
   { id: '/credentials', path: '/credentials' },
   { id: '/dead-letters', path: '/dead-letters' },
+  { id: '/dev/gallery', path: '/dev/gallery' },
   { id: '/event/$id', path: '/event/$id' },
   { id: '/events', path: '/events' },
   { id: '/export/portbridge-manual-blackhole.txt', path: '/export/portbridge-manual-blackhole.txt' },

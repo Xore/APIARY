@@ -277,6 +277,23 @@ const catchAllWarned = new Set();
 /** Minimal handler table; keys are matched by startsWith after the query
  *  string is split off, first match wins, then the catch-all. */
 function route(pathname) {
+  if (pathname.startsWith("/api/v1/investigate/ip/")) {
+    const ip = decodeURIComponent(pathname.split("/").pop());
+    return {
+      ip, total: 342, first: NOW, last: NOW, country: "US", asn: "AS64500 Documentation",
+      sensors: [kv("cowrie", 210), kv("citrix", 132)], ports: [kv("22", 210), kv("443", 132)],
+      protos: [kv("ssh", 210), kv("https", 132)], credentials: [kv("fixture-user / fixture-password", 32)],
+      commands: [kv("fixture command with a long evidence value " + "detail ".repeat(14), 18)],
+      sessions: [kv("fixture-session-1", 42)], paths: [kv("/fixture/status", 132)],
+      payloads: [kv("a".repeat(64), 3)], alerts: [kv("Fixture reconnaissance", 4)], fingerprints: [kv("fixture-client", 12)],
+      techniques: [{ id: "T1110", name: "Brute Force", domain: "enterprise", evidence: "Repeated fixture logins", count: 32, url: "https://attack.mitre.org/techniques/T1110/" }],
+      confirmed_malicious: false, events: [eventRow(0), eventRow(1)],
+      correlation: { total: 400, truncated: true, sensors: [kv("cowrie", 210)], tunnel_connections: 14,
+        tunnel_os_guesses: ["Linux (fixture)"], records: [eventRow(0), eventRow(1)] },
+    };
+  }
+  if (pathname.startsWith("/api/v1/ip-block/")) return { IP: "203.0.113.7", Blocked: false, Active: false };
+
   if (pathname === "/api/v1/config/history") return { entries: [] };
   if (pathname === "/api/v1/audit") return { events: [] };
   if (pathname === "/api/v1/settings/storage") {

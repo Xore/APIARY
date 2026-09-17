@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { join } from 'node:path'
 import { THEME_IDS } from '../src/lib/themes'
 
 const mapping: Record<string, string> = {
@@ -11,7 +12,7 @@ const mapping: Record<string, string> = {
   'sidebar-accent': 'bg-300', 'sidebar-border': 'border-100', 'sidebar-ring': 'border-focus',
 }
 
-test('theme picker maps all nine palettes in both modes without console errors', async ({ page }) => {
+test('theme picker maps all nine palettes in both modes without console errors', async ({ page }, testInfo) => {
   test.setTimeout(120_000)
   await page.setViewportSize({ width: 1280, height: 800 })
   const errors: string[] = []
@@ -50,7 +51,10 @@ test('theme picker maps all nine palettes in both modes without console errors',
     for (const [route, name] of [['/', 'index'], ['/events', 'events'], ['/attackers', 'attackers']]) {
       await page.goto(route)
       await expect(page.locator('main.app-main')).toBeVisible()
-      await page.screenshot({ path: `../../../../dash-shots/theme-port/new-${name}-${mode}-1280.png` })
+      const filename = `new-${name}-${mode}-1280.png`
+      await page.screenshot({ path: process.env.EVIDENCE_DIR
+        ? join(process.env.EVIDENCE_DIR, 'theme-port', filename)
+        : testInfo.outputPath(filename) })
     }
     if (mode === 'light') {
       await page.goto('/settings')

@@ -27,6 +27,8 @@ import { str } from '../components/StoreList'
 import { applyPalette, applyTheme, useThemeMode, type ThemeMode } from '../lib/prefs'
 import { ThemeGallery } from '../components/ThemeGallery'
 import { Button } from '../components/ui/button'
+import { Input } from '../components/ui/input'
+import { Separator } from '../components/ui/separator'
 import { themeSearchTerms } from '../lib/themes'
 import type { JsonRecord } from '../lib/json'
 import { prefetchEnabled, setPrefetchEnabled } from '../lib/prefetch'
@@ -2885,28 +2887,27 @@ export function SettingsSurface({
   )
 
   const sidebarItem = (id: PaneId) => (
-    <button
+    <Button
       key={id}
-      className={`sidebar__item${active === id ? ' active' : ''}${paneDirty(id) ? ' is-dirty' : ''}`}
+      variant={active === id ? 'secondary' : 'ghost'}
+      className="h-auto min-h-9 w-full justify-start whitespace-normal text-left [&[hidden]]:hidden"
+      aria-current={active === id ? 'page' : undefined}
       type="button"
       hidden={query !== '' && !paneMatches(id, query)}
       onClick={() => showPane(id)}
     >
       {PANE_META[id].title}
-    </button>
+      {paneDirty(id) ? <span className="ml-auto text-primary" aria-label="Unsaved changes">●</span> : null}
+    </Button>
   )
 
   return (
     <SettingsUi.Provider value={{ query, active }}>
-      {/* The page-mode settings surface (theme.css "pick 13B",
-          #hp-settings.hp-dash-settings--page): the modal fragment's exact
-          rail/pane composition, permanently open, minus the overlay
-          chrome — matching what hp-settings.js:88-99 builds on /settings.
-          In modal mode the same fragment keeps its overlay chrome
-          (settings_modal.html:8-9): the centered .modal.hp-dash-settings
-          box with its absolute .modal__close. */}
+      {/* Official settings composition: section rail beside a bounded form
+          column. Keep every pane mounted so search and staged edits survive.
+          The modal keeps its existing lifecycle and focus ownership. */}
       <section
-        className={inModal ? 'modal hp-dash-settings open' : 'modal hp-dash-settings hp-dash-settings--page open'}
+        className={inModal ? 'modal hp-dash-settings open' : 'min-w-0 space-y-6 p-4 md:p-6'}
         id={inModal ? undefined : 'hp-settings'}
         role={inModal ? 'dialog' : undefined}
         aria-modal={inModal ? true : undefined}
@@ -2917,11 +2918,17 @@ export function SettingsSurface({
             {'✕'}
           </button>
         ) : null}
-        <div className="settings-layout">
-          <aside className="settings-layout__sidebar" aria-label="Settings sections">
-            <div className="sidebar__search">
-              <span aria-hidden="true">{'⌖'}</span>
-              <input
+        {!inModal ? (
+          <header className="space-y-2">
+            <h1>Settings</h1>
+            <p className="text-muted-foreground">Personal preferences and dashboard administration.</p>
+            <Separator />
+          </header>
+        ) : null}
+        <div className={inModal ? 'settings-layout' : 'flex min-w-0 flex-col gap-6 lg:flex-row lg:gap-10'}>
+          <aside className={inModal ? 'settings-layout__sidebar' : 'settings-layout__sidebar !border-0 !bg-transparent !p-0 !max-h-64 overflow-y-auto lg:!max-h-none lg:w-56 lg:shrink-0'} aria-label="Settings sections">
+            <div className="mb-4">
+              <Input
                 aria-label="Search settings"
                 placeholder="Search settings"
                 type="search"
@@ -2945,11 +2952,13 @@ export function SettingsSurface({
               </>
             ) : null}
           </aside>
-          <div className="settings-layout__content">
-            <div className="hp-settings-column">
+          <div className={inModal ? 'settings-layout__content' : 'min-w-0 flex-1'}>
+            <div className={inModal ? 'hp-settings-column' : 'w-full max-w-3xl space-y-6'}>
               <header className="hp-settings-head">
                 <div>
-                  <h1 id="hp-dash-settings-title">{PANE_META[active].title}</h1>
+                  {inModal
+                    ? <h1 id="hp-dash-settings-title">{PANE_META[active].title}</h1>
+                    : <h2 id="hp-dash-settings-title">{PANE_META[active].title}</h2>}
                   <p>{PANE_META[active].desc}</p>
                 </div>
               </header>

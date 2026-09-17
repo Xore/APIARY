@@ -512,7 +512,11 @@ function Overview() {
         ) : null}
         <div className="label-section">{presentation?.dashboard_title || 'Honeypot command center'}</div>
         <Suspense fallback={<h1>{greeting('')}</h1>}>
-          <Await promise={data.kpis}>{(kpis) => <h1>{greeting(kpis?.change24h ?? '')}</h1>}</Await>
+          {/* The salutation reads the wall clock at render time, so SSR and
+              a hydrated client (or a frozen test clock) can legally disagree
+              about the hour. suppressHydrationWarning keeps React from
+              flagging that known-safe text delta (#418 in matched-pairs). */}
+          <Await promise={data.kpis}>{(kpis) => <h1 suppressHydrationWarning>{greeting(kpis?.change24h ?? '')}</h1>}</Await>
         </Suspense>
         <p className="hp-hero__status">
           {presentation?.dashboard_subtitle ||
