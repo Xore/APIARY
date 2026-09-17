@@ -1,0 +1,190 @@
+{
+ "_meta": {
+  "protocol": "round7_coldrun.sh cold baseline, same script/pin as round7-cold-baseline.json: REx86-paper base-twin comparator (qwen2.5-coder-7b-base vs rex86-merged), not part of the 96-tag roster",
+  "pin": "17 cases / 79, injection gate v3, pooled-claims-ready transcripts",
+  "harness": "record_baseline.py @ round-7 commit; scoring path current main (#2517/#2618/#2638 all in) \u2014 same scorer as round7-cold-baseline.json",
+  "date": "2026-09-09"
+ },
+ "models": [
+  {
+   "model": "qwen2.5-coder-7b-base:Q4_K_M",
+   "tiers": {
+    "A": {
+     "runs": [
+      {
+       "run_id": "20260909T012529Z-9b745510",
+       "score": 64,
+       "max": 83,
+       "percent": 77.1,
+       "sha256": "809be1cb21d869667d0b6582591fdad2bafb1847e3d85579c1e68b6e9f1899b0",
+       "digest_short": "72d6ed392025"
+      },
+      {
+       "run_id": "20260909T012754Z-cb67caa3",
+       "score": 64,
+       "max": 83,
+       "percent": 77.1,
+       "sha256": "08fb3f4de6e1b8f275eb8aa13ec77a4becb32e7c4a8620049ed7a11288b552d3",
+       "digest_short": "72d6ed392025"
+      }
+     ]
+    },
+    "B": {
+     "runs": [
+      {
+       "run_id": "20260909T013017Z-4a90ae59",
+       "score": 61,
+       "max": 83,
+       "percent": 73.5,
+       "sha256": "7858d38424e01e8537c0b337dd7418ca23f2cb211fb7156cf7caf96faf123ea2",
+       "digest_short": "72d6ed392025"
+      },
+      {
+       "run_id": "20260909T013232Z-2405b859",
+       "score": 61,
+       "max": 83,
+       "percent": 73.5,
+       "sha256": "ed7d69eceb0ac4484f7ab89fa0aac513bbeca50cb96277f49b2a4b7b7182b9cc",
+       "digest_short": "72d6ed392025"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "model": "qwen2.5-coder-7b-base:Q8_0",
+   "tiers": {
+    "A": {
+     "runs": [
+      {
+       "run_id": "20260909T013449Z-4017b65b",
+       "score": 70,
+       "max": 83,
+       "percent": 84.3,
+       "sha256": "7b27022fb94d2643c949027c3c76d25ddb97817068a84fc2d8a2834f8ccfab28",
+       "digest_short": "b59e6c6cded7"
+      },
+      {
+       "run_id": "20260909T013830Z-535a5a9c",
+       "score": 70,
+       "max": 83,
+       "percent": 84.3,
+       "sha256": "8b381dfdb0d41876c1fe44947eda9fdea01ce85f496eea2b4c06f616feb4df18",
+       "digest_short": "b59e6c6cded7"
+      }
+     ]
+    },
+    "B": {
+     "runs": [
+      {
+       "run_id": "20260909T014209Z-b34bed30",
+       "score": 64,
+       "max": 83,
+       "percent": 77.1,
+       "sha256": "b511fddcf39fd37c08de0a03f61ada0dd1e48bc27af0857ac66d35abc40b30f7",
+       "digest_short": "b59e6c6cded7"
+      },
+      {
+       "run_id": "20260909T014531Z-1f8307ec",
+       "score": 64,
+       "max": 83,
+       "percent": 77.1,
+       "sha256": "68e6e439db1f4ae46c736270ec29a48fbbe8bb1b98fab745fd6a9d50c9d0631d",
+       "digest_short": "b59e6c6cded7"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "model": "rex86-merged:Q4_K_M",
+   "tiers": {
+    "A": {
+     "runs": [
+      {
+       "run_id": "20260909T010403Z-cd301c06",
+       "score": 68,
+       "max": 83,
+       "percent": 81.9,
+       "sha256": "0b4feab9ae0bd99a16791628a5a62160d519105e4af651f6058c7e849f18c223",
+       "digest_short": "400e9cfe043b"
+      },
+      {
+       "run_id": "20260909T010603Z-171296f1",
+       "score": 68,
+       "max": 83,
+       "percent": 81.9,
+       "sha256": "c236a6b20e66cb37b89bdd6c09c6ef73ba70f06992d1589299b48172b1b595a0",
+       "digest_short": "400e9cfe043b"
+      }
+     ]
+    },
+    "B": {
+     "runs": [
+      {
+       "run_id": "20260909T010802Z-4c7d55cb",
+       "score": 62,
+       "max": 83,
+       "percent": 74.7,
+       "sha256": "997dfe79aebf689c418a1487940321c812c6b1ff00b117d5f0abe6af31d9744a",
+       "digest_short": "400e9cfe043b"
+      },
+      {
+       "run_id": "20260909T011017Z-7e15148f",
+       "score": 62,
+       "max": 83,
+       "percent": 74.7,
+       "sha256": "0128a0aac1a23a22083b602301cbbdb4c75d282895173d196215611b04b98594",
+       "digest_short": "400e9cfe043b"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "model": "rex86-merged:Q8_0",
+   "tiers": {
+    "A": {
+     "runs": [
+      {
+       "run_id": "20260909T011233Z-8afd9ef4",
+       "score": 68,
+       "max": 83,
+       "percent": 81.9,
+       "sha256": "b27b1c57fbcea607268e1870effd6df623ffb5ca454d06d928787b3857db37b1",
+       "digest_short": "14877b6d7f37"
+      },
+      {
+       "run_id": "20260909T011540Z-d955c0d1",
+       "score": 68,
+       "max": 83,
+       "percent": 81.9,
+       "sha256": "bbf8ef889105832e73e222ab0361f2fcd089c8db8f092db58b5af776da5c32e7",
+       "digest_short": "14877b6d7f37"
+      }
+     ]
+    },
+    "B": {
+     "runs": [
+      {
+       "run_id": "20260909T011846Z-e3e37c82",
+       "score": 65,
+       "max": 83,
+       "percent": 78.3,
+       "sha256": "f13f97fdd71e16cf6b498f2483b2b237ee62ae182e88982b0136a5f88b79ca5f",
+       "digest_short": "14877b6d7f37"
+      },
+      {
+       "run_id": "20260909T012207Z-42708bd8",
+       "score": 65,
+       "max": 83,
+       "percent": 78.3,
+       "sha256": "415af0489c2f27ffa5d42265dfab2ec4f1c0aa1939889c4c022c4604923c1268",
+       "digest_short": "14877b6d7f37"
+      }
+     ]
+    }
+   }
+  }
+ ]
+}
