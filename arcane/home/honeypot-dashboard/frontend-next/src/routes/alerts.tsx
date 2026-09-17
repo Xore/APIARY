@@ -5,11 +5,16 @@
 // Acknowledged both take effect on the next reload without a page reload.
 import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useCallback, useEffect, useState } from 'react'
-import { confirmAction } from '../components/ConfirmDialog'
-import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
-import { ErrorStateBlock } from '../components/ErrorState'
-import { Tabs, TabPanel } from '../components/Tabs'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { ConfirmOptions } from '../components/ConfirmDialog'
+import * as Dialog from '@radix-ui/react-dialog'
+import { Bell, CheckCheck, RefreshCw } from 'lucide-react'
+import { Badge } from '../components/ui/badge'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '../components/ui/sheet'
+import { Skeleton } from '../components/ui/skeleton'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { formatTimestamp } from '../lib/time'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
@@ -173,85 +178,40 @@ export const Route = createFileRoute('/alerts')({
   component: Alerts,
 })
 
-function buildColumns(onToggleGroup: (group: AlertGroup) => void, onToggleMember: (row: AlertRow) => void): Column<AlertGroup>[] {
-  const linkCell = (row: AlertRow, text: string) =>
-    row.Link ? (
-      <a className="lnk" href={row.Link} title="show the events behind this alert" onClick={(event) => event.stopPropagation()}>
-        {text}
-      </a>
-    ) : (
-      text
-    )
-  return [
-    {
-      header: 'state',
-      render: (group) =>
-        group.acknowledged ? (
-          <span className="badge badge--muted">acknowledged</span>
-        ) : (
-          <span className="badge badge--warning">open</span>
-        ),
-    },
-    {
-      header: 'message',
-      className: 'v',
-      render: (group) => (
-        <>
-          {group.label}
-          {group.members.length > 1 ? <span className="badge badge--muted" title="alerts of this same rule/kind, grouped by hash"> ×{group.members.length}</span> : null}
-        </>
-      ),
-    },
-    { header: 'observed', className: 'n', render: (group) => group.count.toLocaleString('en-US') },
-    { header: 'last seen', render: (group) => formatTimestamp(group.lastSeen) },
-    { header: 'first seen', detail: true, render: (group) => formatTimestamp(group.firstSeen) },
-    {
-      header: 'members',
-      detail: true,
-      render: (group) => (
-        <ul>
-          {group.members.map((member) => (
-            <li key={member.Key}>
-              {linkCell(member, member.Key)} — {member.Count.toLocaleString('en-US')} observed, last {formatTimestamp(member.LastSeen)}{' '}
-              <button
-                className="copy"
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  onToggleMember(member)
-                }}
-              >
-                {member.Acknowledged ? 'reopen' : 'acknowledge'}
-              </button>
-            </li>
-          ))}
-        </ul>
-      ),
-    },
-    {
-      header: 'action',
-      render: (group) => (
-        <button
-          className="copy"
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation()
-            onToggleGroup(group)
-          }}
-        >
-          {group.acknowledged ? 'reopen' : `acknowledge${group.members.length > 1 ? ` (${group.members.length})` : ''}`}
-        </button>
-      ),
-    },
-  ]
-}
-
 function Alerts() {
   const { first } = Route.useLoaderData()
   const [alerts, setAlerts] = useState<AlertRow[] | null>(null)
   const [complete, setComplete] = useState(true)
   const [tab, setTab] = useState('new')
   const [query, setQuery] = useState('')
+  const [refreshing, setRefreshing] = useState(false)
+  const [notice, setNotice] = useState('')
+  const [confirmation, setConfirmation] = useState<ConfirmOptions | null>(null)
+  const [running, setRunning] = useState(false)
+  const [failure, setFailure] = useState('')
+  const triggerRef = useRef<HTMLElement | null>(null)
+  const refreshRef = useRef<HTMLButtonElement>(null)
+  const confirmAction = useCallback((options: ConfirmOptions) => {
+    triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setFailure('')
+    setNotice('')
+    setConfirmation(options)
+  }, [])
+
+  const runConfirm = async () => {
+    if (!confirmation || running) return
+    setRunning(true)
+    setFailure('')
+    try {
+      const message = await confirmation.onConfirm()
+      setNotice(typeof message === 'string' ? message : 'Alert updated.')
+      setConfirmation(null)
+    } catch (error) {
+      setFailure(error instanceof Error ? error.message : String(error))
+    } finally {
+      setRunning(false)
+    }
+  }
 
   const applyBoard = useCallback((result: BoardFetch) => {
     setAlerts(result.rows)
@@ -264,6 +224,8 @@ function Alerts() {
     setComplete(true)
     first.then((result) => {
       if (!cancelled) applyBoard(result)
+    }).catch(() => {
+      if (!cancelled) applyBoard({ rows: [], complete: false })
     })
     return () => {
       cancelled = true
@@ -271,7 +233,15 @@ function Alerts() {
   }, [first, applyBoard])
 
   const reload = useCallback(async () => {
-    applyBoard(await fetchAlerts())
+    setRefreshing(true)
+    try {
+      applyBoard(await fetchAlerts())
+    } catch (error) {
+      setComplete(false)
+      throw error
+    } finally {
+      setRefreshing(false)
+    }
   }, [applyBoard])
 
   // Per-member acknowledge/reopen (from a group's expanded member list) —
@@ -295,7 +265,7 @@ function Alerts() {
         },
       })
     },
-    [reload],
+    [reload, confirmAction],
   )
 
   // Group-level acknowledge/reopen — every member of a rule-group at once,
@@ -319,7 +289,7 @@ function Alerts() {
         },
       })
     },
-    [reload],
+    [reload, confirmAction],
   )
 
   const openCount = alerts ? alerts.filter((row) => !row.Acknowledged).length : 0
@@ -342,92 +312,101 @@ function Alerts() {
         return `${changed} alert${changed === 1 ? '' : 's'} acknowledged.`
       },
     })
-  }, [openCount, reload])
+  }, [openCount, reload, confirmAction])
 
-  const columns = buildColumns(toggleGroup, toggleMember)
   const q = query.trim().toLowerCase()
   const matches = (row: AlertRow) => !q || `${row.Key} ${row.Message}`.toLowerCase().includes(q)
   const partition = (acknowledged: boolean) =>
     alerts ? groupAlerts(alerts.filter((row) => row.Acknowledged === acknowledged && matches(row))) : null
-
-  const panel = (id: string, acknowledged: boolean) => {
-    const groups = partition(acknowledged)
-    return (
-      <TabPanel id={id} active={tab} idPrefix="alerts" className="dashboard-panel">
-        {boardFailed ? (
-          <ErrorStateBlock
-            title="The alert board failed to load"
-            hint="The backend request failed — an outage looks like silence here, so it names itself instead."
-            onRetry={reload}
-          />
-        ) : (
-          <>
-            {boardPartial ? (
-              <p className="note">
-                A read against the alert state store failed mid-walk; showing the {alerts?.length.toLocaleString('en-US')}{' '}
-                record{alerts?.length === 1 ? '' : 's'} that did load.
-              </p>
-            ) : null}
-            {groups && groups.length === 0 ? (
-              <p className="empty" role="status" aria-live="polite">
-                {alerts && alerts.length ? 'No alerts match this filter.' : 'No alerts recorded.'}
-              </p>
-            ) : (
-              <MasterDetailTable
-                rows={groups}
-                columns={columns}
-                rowKey={(group) => group.signature}
-                emptyState={{
-                  title: 'No alerts match this filter',
-                  hint: 'Nothing is open right now, or a filter above is excluding it.',
-                }}
-                inspectorTitle="Alert group details"
-              />
-            )}
-          </>
-        )}
-      </TabPanel>
-    )
-  }
+  const refresh = () => { void reload().catch(() => setNotice('Refresh failed. Retry to load the current alert state.')) }
+  const status = (acknowledged: boolean) => <Badge variant={acknowledged ? 'secondary' : 'outline'}>{acknowledged ? 'Acknowledged' : 'Open'}</Badge>
+  const actionLabel = (group: AlertGroup) => group.acknowledged ? 'Reopen' : `Acknowledge${group.members.length > 1 ? ` (${group.members.length})` : ''}`
 
   return (
-    <>
-      <InvestigateHeader
-        label="Security operations"
-        title="Alerts"
-        subtitle="Persistent alert state, cooldowns and acknowledgments — acknowledging an alert moves it out of New and into Acknowledged until it is reopened."
-        chips={
-          <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center">
-            <Button variant="outline" type="button" onClick={() => void reload()}>
-              refresh
-            </Button>
-            {openCount > 0 ? (
-              <Button variant="outline" type="button" onClick={ackAll}>
-                acknowledge all ({openCount})
-              </Button>
-            ) : null}
-            <Input
-              className="sm:max-w-sm"
-              placeholder="filter by message or key"
-              aria-label="Filter alerts"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </div>
-        }
-      />
-      <Tabs
-        tabs={[
-          { id: 'new', label: 'New' },
-          { id: 'acknowledged', label: 'Acknowledged' },
-        ]}
-        active={tab}
-        onSelect={setTab}
-        label="Alert views"
-        idPrefix="alerts"
-      />
-      {panel('new', false)}
-      {panel('acknowledged', true)}
-    </>
+    <section className="min-w-0 space-y-6" aria-labelledby="alerts-title">
+      <header className="space-y-2">
+        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Security operations</p>
+        <h1 id="alerts-title" className="text-3xl tracking-tight">Alerts</h1>
+        <p className="max-w-3xl text-sm text-muted-foreground">Persistent alert state, cooldowns and acknowledgments. Acknowledge alerts to move them out of New; reopen them to resume notifications.</p>
+      </header>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="w-full space-y-1.5 sm:max-w-sm">
+          <label htmlFor="alerts-filter" className="text-sm font-medium">Filter alerts</label>
+          <Input id="alerts-filter" type="search" placeholder="Filter by message or key" value={query} onChange={(event) => setQuery(event.target.value)} />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button ref={refreshRef} variant="outline" onClick={refresh} disabled={refreshing || alerts === null}>
+            <RefreshCw aria-hidden="true" className={refreshing ? 'animate-spin motion-reduce:animate-none' : ''} />{refreshing ? 'Refreshing…' : 'Refresh'}
+          </Button>
+          {openCount > 0 && <Button variant="outline" onClick={ackAll} disabled={refreshing}><CheckCheck aria-hidden="true" />Acknowledge all ({openCount})</Button>}
+        </div>
+      </div>
+      <p role="status" className={notice ? 'text-sm text-muted-foreground' : 'sr-only'}>{notice}</p>
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList aria-label="Alert views" className="max-w-full">
+          <TabsTrigger value="new" className="gap-2">New <span className="tabular-nums">{alerts ? openCount : '…'}</span></TabsTrigger>
+          <TabsTrigger value="acknowledged" className="gap-2">Acknowledged <span className="tabular-nums">{alerts ? alerts.length - openCount : '…'}</span></TabsTrigger>
+        </TabsList>
+        {(['new', 'acknowledged'] as const).map((id) => {
+          const groups = partition(id === 'acknowledged')
+          return <TabsContent key={id} value={id} className="mt-4 space-y-4">
+            {boardPartial && <Card role="alert"><CardHeader className="p-4"><CardTitle>Partial alert board</CardTitle><CardDescription>A read against the alert state store failed mid-walk; showing the {alerts?.length.toLocaleString('en-US')} records that did load. Counts and actions cover only loaded groups; acknowledge all also includes older alerts.</CardDescription></CardHeader><CardContent className="px-4 pb-4"><Button size="sm" variant="outline" disabled={refreshing} onClick={refresh}>Retry</Button></CardContent></Card>}
+            <Card className="min-w-0 overflow-hidden shadow-none">
+              <CardHeader className="p-4">
+                <CardTitle><h2>{id === 'new' ? 'New alerts' : 'Acknowledged alerts'}</h2></CardTitle>
+                <CardDescription>{groups ? `${groups.length} groups · ${groups.reduce((n, group) => n + group.members.length, 0)} matching alerts` : 'Loading alert state…'} · newest activity first</CardDescription>
+              </CardHeader>
+              {boardFailed ? <div role="alert" className="space-y-3 border-t p-6"><h3 className="font-semibold">The alert board failed to load</h3><p className="text-sm text-muted-foreground">The backend request failed. An unavailable board does not mean there are no alerts.</p><Button variant="outline" onClick={refresh} disabled={refreshing}>Retry</Button></div>
+              : groups?.length === 0 ? <div role="status" className="flex flex-col items-center gap-3 border-t px-6 py-12 text-center"><Bell className="size-8 text-muted-foreground" aria-hidden="true" /><h3 className="font-semibold">{q ? 'No alerts match this filter' : alerts?.length === 0 ? 'No alerts recorded' : id === 'new' ? 'No new alerts' : 'No acknowledged alerts'}</h3><p className="max-w-sm text-sm text-muted-foreground">{q ? 'Try another message or key, or clear the filter.' : id === 'new' ? 'New notifications will appear here. Acknowledged alerts remain in their own tab.' : 'Acknowledged alerts stay here until reopened.'}</p>{q && <Button variant="outline" onClick={() => setQuery('')}>Clear filter</Button>}</div>
+              : <Table aria-label={id === 'new' ? 'New alert groups' : 'Acknowledged alert groups'} className="border-t">
+                <TableHeader><TableRow><TableHead>State</TableHead><TableHead>Message</TableHead><TableHead className="text-right">Observed</TableHead><TableHead>Last seen</TableHead><TableHead className="text-right">Action</TableHead></TableRow></TableHeader>
+                <TableBody>
+                  {groups === null ? Array.from({ length: 8 }, (_, i) => <TableRow key={i}><TableCell colSpan={5}><Skeleton className="h-8 w-full" /></TableCell></TableRow>) : groups.map((group) => <TableRow key={group.signature}>
+                    <TableCell>{status(group.acknowledged)}</TableCell>
+                    <TableCell className="min-w-48 max-w-md">
+                      <Sheet>
+                        <SheetTrigger asChild><Button variant="ghost" className="h-auto w-full justify-start whitespace-normal px-0 text-left font-medium break-all">{group.label}</Button></SheetTrigger>
+                        {group.members.length > 1 && <Badge variant="secondary">{group.members.length} members</Badge>}
+                        <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
+                          <SheetHeader className="pr-6 text-left"><SheetTitle>Alert group details</SheetTitle><SheetDescription className="break-all">{group.label}</SheetDescription></SheetHeader>
+                          <div className="my-6 flex flex-wrap items-center gap-2">{status(group.acknowledged)}<Badge variant="outline">{group.members.length} members</Badge><Button size="sm" variant="outline" onClick={() => toggleGroup(group)}>{actionLabel(group)}</Button></div>
+                          <dl className="grid grid-cols-2 gap-4 border-y py-4 text-sm">
+                            <div><dt className="text-muted-foreground">Observed</dt><dd className="tabular-nums">{group.count.toLocaleString('en-US')}</dd></div>
+                            <div><dt className="text-muted-foreground">First seen</dt><dd>{formatTimestamp(group.firstSeen)}</dd></div>
+                            <div><dt className="text-muted-foreground">Last seen</dt><dd>{formatTimestamp(group.lastSeen)}</dd></div>
+                          </dl>
+                          <h3 className="my-4 font-semibold">Members</h3>
+                          <ul className="space-y-3">{group.members.map((member) => <li key={member.Key} className="space-y-3 rounded-lg border p-4">
+                            <p className="break-all text-sm font-medium">{member.Message}</p>
+                            {member.Link ? <Button asChild variant="link" className="h-auto max-w-full whitespace-normal p-0 text-left break-all"><a href={member.Link} title="Show the events behind this alert">{member.Key}</a></Button> : <p className="break-all font-mono text-xs">{member.Key}</p>}
+                            <dl className="grid grid-cols-2 gap-3 text-xs"><div><dt className="text-muted-foreground">Observed</dt><dd>{member.Count.toLocaleString('en-US')}</dd></div><div><dt className="text-muted-foreground">First seen</dt><dd>{formatTimestamp(member.FirstSeen)}</dd></div><div><dt className="text-muted-foreground">Last seen</dt><dd>{formatTimestamp(member.LastSeen)}</dd></div><div><dt className="text-muted-foreground">Last notified</dt><dd>{member.LastNotified ? formatTimestamp(member.LastNotified) : 'Never'}</dd></div></dl>
+                            <Button variant="outline" size="sm" onClick={() => toggleMember(member)}>{member.Acknowledged ? 'Reopen' : 'Acknowledge'}</Button>
+                          </li>)}</ul>
+                        </SheetContent>
+                      </Sheet>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{group.count.toLocaleString('en-US')}</TableCell>
+                    <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{formatTimestamp(group.lastSeen)}</TableCell>
+                    <TableCell className="text-right"><Button variant="outline" size="sm" onClick={() => toggleGroup(group)}>{actionLabel(group)}</Button></TableCell>
+                  </TableRow>)}
+                </TableBody>
+              </Table>}
+            </Card>
+            <p className="text-xs text-muted-foreground">Board shows up to {BOARD_CAP} records. Same-kind alerts are grouped; filtering applies to individual members before grouping.</p>
+          </TabsContent>
+        })}
+      </Tabs>
+      <Dialog.Root open={confirmation !== null} onOpenChange={(open) => { if (!open && !running) setConfirmation(null) }}>
+        <Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-black/80" /><Dialog.Content role="alertdialog" className="fixed left-1/2 top-1/2 z-50 grid max-h-[90dvh] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto rounded-lg border bg-background p-6 text-foreground shadow-lg"
+          onEscapeKeyDown={(event) => { if (running) event.preventDefault() }}
+          onInteractOutside={(event) => { if (running) event.preventDefault() }}
+          onCloseAutoFocus={(event) => { event.preventDefault(); (triggerRef.current?.isConnected ? triggerRef.current : refreshRef.current)?.focus() }}>
+          <div className="space-y-2"><Dialog.Title className="text-lg font-semibold">{confirmation?.title}</Dialog.Title><Dialog.Description className="text-sm text-muted-foreground">{confirmation?.description}</Dialog.Description></div>
+          {confirmation?.warning && <p className="rounded-md border bg-muted p-3 text-sm break-all">{confirmation.warning}</p>}
+          {failure && <p role="alert" className="text-sm text-destructive">{failure}</p>}
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><Button variant="outline" disabled={running} onClick={() => setConfirmation(null)}>Cancel</Button><Button autoFocus variant={confirmation?.danger ? 'destructive' : 'default'} disabled={running} onClick={() => void runConfirm()}>{running ? 'Working…' : failure ? 'Try again' : confirmation?.confirmLabel}</Button></div>
+        </Dialog.Content></Dialog.Portal>
+      </Dialog.Root>
+    </section>
   )
 }

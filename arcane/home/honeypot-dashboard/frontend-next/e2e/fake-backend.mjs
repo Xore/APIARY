@@ -520,7 +520,11 @@ function route(pathname) {
     return { preferences: { palette: "claude" }, revision: 1 };
   }
   if (pathname === "/api/v1/alerts") {
-    return { total: 1, offset: 0, rows: [{ id: "alert-1", time: NOW, sensor: "citrix", signature: "test alert", severity: "high", record: {} }], fingerprint_ips: null };
+    return { total: 3, rows: [
+      { Key: "yara:" + "a".repeat(64), Message: "YARA payload match: " + "a".repeat(64) + " rules=fixture source=dionaea", Link: "/payloads", FirstSeen: NOW, LastSeen: NOW, LastNotified: null, Count: 12, Acknowledged: false },
+      { Key: "yara:" + "b".repeat(64), Message: "YARA payload match: " + "b".repeat(64) + " rules=fixture source=dionaea", Link: "/payloads", FirstSeen: NOW, LastSeen: NOW, LastNotified: NOW, Count: 3, Acknowledged: false },
+      { Key: "campaign:fixture", Message: "Fixture reconnaissance", Link: "/campaigns", FirstSeen: NOW, LastSeen: NOW, LastNotified: NOW, Count: 4, Acknowledged: true },
+    ] };
   }
   if (pathname === "/api/v1/source-health") {
     // Full SourceHealth — the page renders cluster/yara/runtime/ingest/
