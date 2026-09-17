@@ -18,14 +18,12 @@ export function InvestigateHeader({
 }) {
   return (
     <>
-      <header className="overview-header">
-        <div>
-          <div className="label-section">{label}</div>
-          <h1>{title}</h1>
-          <p className="subtitle">{subtitle}</p>
-        </div>
+      <header className="col-span-full flex min-w-0 flex-col gap-2">
+        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
+        <h1 className="break-all text-3xl tracking-tight text-foreground">{title}</h1>
+        <p className="max-w-3xl text-sm text-muted-foreground">{subtitle}</p>
       </header>
-      {chips ? <div className="filters">{chips}</div> : null}
+      {chips ? <div className="col-span-full flex min-w-0 flex-wrap items-center gap-2">{chips}</div> : null}
     </>
   )
 }
