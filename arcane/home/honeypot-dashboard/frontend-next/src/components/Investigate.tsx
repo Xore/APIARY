@@ -20,7 +20,7 @@ export function InvestigateHeader({
     <>
       <header className="col-span-full flex min-w-0 flex-col gap-2">
         <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
-        <h1 className="break-all text-3xl tracking-tight text-foreground">{title}</h1>
+        <h1 className="heading-serif break-all text-[clamp(1.5rem,2.2vw,2rem)] leading-[1.1] text-foreground">{title}</h1>
         <p className="max-w-3xl text-sm text-muted-foreground">{subtitle}</p>
       </header>
       {chips ? <div className="col-span-full flex min-w-0 flex-wrap items-center gap-2">{chips}</div> : null}

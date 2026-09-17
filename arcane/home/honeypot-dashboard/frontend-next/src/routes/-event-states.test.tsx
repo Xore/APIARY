@@ -18,6 +18,7 @@ it('distinguishes outage from absence and retries through the real handler', asy
     await act(async () => host.querySelector<HTMLButtonElement>('button')!.click())
     expect(fixture.reads).toBe(1)
     expect(host.querySelector('[data-slot="empty"]')?.textContent).toContain('Event not found')
+    expect(host.querySelector('[data-slot="empty-title"]')?.classList.contains('font-serif')).toBe(true)
     expect(host.textContent).toContain('missing-fixture')
     expect(host.querySelector('[role="alert"]')).toBeNull()
   } finally {

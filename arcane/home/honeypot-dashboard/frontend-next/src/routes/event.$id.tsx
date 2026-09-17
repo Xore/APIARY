@@ -105,7 +105,7 @@ function RelationCard({
   if (!relation.key) return null
   return (
     <Card className="min-w-0">
-      <CardHeader><CardTitle><h2>{title}</h2></CardTitle></CardHeader><CardContent className="flex min-w-0 flex-col gap-4">
+      <CardHeader><CardTitle><h2 className="font-serif text-base font-medium">{title}</h2></CardTitle></CardHeader><CardContent className="flex min-w-0 flex-col gap-4">
       <p className="text-sm text-muted-foreground">
         {hint} <code>{relation.key}</code>
         {relation.total > relation.rows.length
@@ -129,7 +129,7 @@ function RelationCard({
               <TableRow key={`${row.time}-${index}`}>
                 <TableCell>{formatTimestamp(row.time)}</TableCell>
                 <TableCell>
-                  <Badge variant="secondary">{row.sensor}</Badge>
+                  <Badge variant="secondary" className={`badge b-${row.sensor}`}>{row.sensor}</Badge>
                 </TableCell>
                 <TableCell className="break-all">{row.src_ip || '—'}</TableCell>
                 <TableCell className="break-all">{row.detail || '—'}</TableCell>
@@ -156,19 +156,19 @@ function RelationCard({
 function FlowLinkCard({ link, currentId }: { link: FlowLink; currentId: string }) {
   return (
     <Card className="min-w-0">
-      <CardHeader><CardTitle><h2>Same connection, seen by {link.families.length} pipelines</h2></CardTitle></CardHeader><CardContent className="flex min-w-0 flex-col gap-4">
+      <CardHeader><CardTitle><h2 className="font-serif text-base font-medium">Same connection, seen by {link.families.length} pipelines</h2></CardTitle></CardHeader><CardContent className="flex min-w-0 flex-col gap-4">
       <p className="text-sm text-muted-foreground">
         <code>{link.community_id}</code> — {link.src_ip || '—'} → {link.dst_ip || '—'}
         {link.dst_port ? `:${link.dst_port}` : ''}, {link.events.toLocaleString('en-US')} events across{' '}
         {formatTimestamp(link.first)} – {formatTimestamp(link.last)}.
       </p>
-      <p className="text-sm text-muted-foreground">
+      <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
         {link.families.map((family) => (
           <Badge key={family} variant="secondary">
             {family}
           </Badge>
         ))}
-      </p>
+      </div>
       {link.event_ids.length > 0 ? (
         <ul>
           {link.event_ids.map((id) =>
@@ -242,7 +242,7 @@ function EventDetailPage() {
         <InvestigateHeader label="Investigate" title="Event" subtitle="This event could not be found." />
         <Empty className="border">
           <EmptyHeader>
-            <EmptyTitle>Event not found</EmptyTitle>
+            <EmptyTitle className="font-serif text-[17px]">Event not found</EmptyTitle>
             <EmptyDescription>
               No event with id <code className="break-all">{id}</code> is in the index. Events age out of the retention window, so an old link
               can outlive the document it points at.
@@ -284,7 +284,7 @@ function EventDetailPage() {
       />
 
       <Card className="min-w-0">
-        <CardHeader><CardTitle><h2>What this event is</h2></CardTitle></CardHeader><CardContent className="flex min-w-0 flex-col gap-4">
+        <CardHeader><CardTitle><h2 className="font-serif text-base font-medium">What this event is</h2></CardTitle></CardHeader><CardContent className="flex min-w-0 flex-col gap-4">
         <Table>
           <TableBody>
             <TableRow>
@@ -348,7 +348,7 @@ function EventDetailPage() {
 
       {spec && spec.artefacts.length > 0 ? (
         <Card className="min-w-0">
-          <CardHeader><CardTitle><h2>What the sensor captured</h2></CardTitle></CardHeader><CardContent className="flex min-w-0 flex-col gap-4">
+          <CardHeader><CardTitle><h2 className="font-serif text-base font-medium">What the sensor captured</h2></CardTitle></CardHeader><CardContent className="flex min-w-0 flex-col gap-4">
           <p className="text-sm text-muted-foreground">
             The artefact this protocol exists to capture, not a summary of it.
           </p>
@@ -368,7 +368,7 @@ function EventDetailPage() {
 
       {event.hashes.length > 0 ? (
         <Card className="min-w-0">
-          <CardHeader><CardTitle><h2>Hashes in this event</h2></CardTitle></CardHeader><CardContent className="flex min-w-0 flex-col gap-4">
+          <CardHeader><CardTitle><h2 className="font-serif text-base font-medium">Hashes in this event</h2></CardTitle></CardHeader><CardContent className="flex min-w-0 flex-col gap-4">
           <p className="text-sm text-muted-foreground">
             Found by shape rather than by field name, because every sensor names its hash differently. Each links to the
             payload record that owns the bytes and the analysis.
@@ -409,7 +409,7 @@ function EventDetailPage() {
       />
 
       <Card className="min-w-0">
-        <CardHeader><CardTitle><h2>The complete record</h2></CardTitle></CardHeader><CardContent className="flex min-w-0 flex-col gap-4">
+        <CardHeader><CardTitle><h2 className="font-serif text-base font-medium">The complete record</h2></CardTitle></CardHeader><CardContent className="flex min-w-0 flex-col gap-4">
         <p className="text-sm text-muted-foreground">
           Exactly as indexed. Everything above is a reading of this; nothing above is a substitute for it.
         </p>
