@@ -11,6 +11,8 @@ import { InvestigateHeader, MasterDetailTable, type Column } from '../components
 import { ErrorStateBlock } from '../components/ErrorState'
 import { Tabs, TabPanel } from '../components/Tabs'
 import { formatTimestamp } from '../lib/time'
+import { Button } from '../components/ui/button'
+import { Input } from '../components/ui/input'
 
 type AlertRow = {
   Key: string
@@ -395,23 +397,23 @@ function Alerts() {
         title="Alerts"
         subtitle="Persistent alert state, cooldowns and acknowledgments — acknowledging an alert moves it out of New and into Acknowledged until it is reopened."
         chips={
-          <>
-            <button className="copy" type="button" onClick={() => void reload()}>
+          <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center">
+            <Button variant="outline" type="button" onClick={() => void reload()}>
               refresh
-            </button>
+            </Button>
             {openCount > 0 ? (
-              <button className="copy" type="button" onClick={ackAll}>
+              <Button variant="outline" type="button" onClick={ackAll}>
                 acknowledge all ({openCount})
-              </button>
+              </Button>
             ) : null}
-            <input
-              className="search"
+            <Input
+              className="sm:max-w-sm"
               placeholder="filter by message or key"
               aria-label="Filter alerts"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
-          </>
+          </div>
         }
       />
       <Tabs
