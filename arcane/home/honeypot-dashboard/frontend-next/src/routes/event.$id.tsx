@@ -13,6 +13,11 @@
 // document, and the three questions the pane could never answer: what else
 // happened in this session, what else happened on this connection, and
 // what else this source did.
+import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../components/ui/table'
+import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import { Skeleton } from '../components/ui/skeleton'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
@@ -98,48 +103,48 @@ function RelationCard({
 }) {
   if (!relation.key) return null
   return (
-    <div className="card wide">
-      <h2>{title}</h2>
-      <p className="note">
+    <Card className="min-w-0">
+      <CardHeader><CardTitle><h2>{title}</h2></CardTitle></CardHeader><CardContent className="flex min-w-0 flex-col gap-4">
+      <p className="text-sm text-muted-foreground">
         {hint} <code>{relation.key}</code>
         {relation.total > relation.rows.length
           ? ` — ${relation.total.toLocaleString('en-US')} in total, newest ${relation.rows.length} shown.`
           : ''}
       </p>
       {relation.rows.length === 0 ? (
-        <p className="empty">Nothing else matched.</p>
+        <p className="text-sm text-muted-foreground">Nothing else matched.</p>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>time</th>
-              <th>sensor</th>
-              <th>source</th>
-              <th>what happened</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>time</TableHead>
+              <TableHead>sensor</TableHead>
+              <TableHead>source</TableHead>
+              <TableHead>what happened</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {relation.rows.map((row, index) => (
-              <tr key={`${row.time}-${index}`}>
-                <td>{formatTimestamp(row.time)}</td>
-                <td>
-                  <span className={`badge b-${row.sensor}`}>{row.sensor}</span>
-                </td>
-                <td className="v">{row.src_ip || '—'}</td>
-                <td className="v">{row.detail || '—'}</td>
-              </tr>
+              <TableRow key={`${row.time}-${index}`}>
+                <TableCell>{formatTimestamp(row.time)}</TableCell>
+                <TableCell>
+                  <Badge variant="secondary">{row.sensor}</Badge>
+                </TableCell>
+                <TableCell className="break-all">{row.src_ip || '—'}</TableCell>
+                <TableCell className="break-all">{row.detail || '—'}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
       {href ? (
-        <p className="note">
-          <a className="section-link" href={href}>
+        <p className="text-sm text-muted-foreground">
+          <a className="text-primary underline-offset-4 hover:underline" href={href}>
             {hrefLabel} →
           </a>
         </p>
       ) : null}
-    </div>
+    </CardContent></Card>
   )
 }
 
@@ -149,18 +154,18 @@ function RelationCard({
 // read as a complaint about a common case.
 function FlowLinkCard({ link, currentId }: { link: FlowLink; currentId: string }) {
   return (
-    <div className="card wide">
-      <h2>Same connection, seen by {link.families.length} pipelines</h2>
-      <p className="note">
+    <Card className="min-w-0">
+      <CardHeader><CardTitle><h2>Same connection, seen by {link.families.length} pipelines</h2></CardTitle></CardHeader><CardContent className="flex min-w-0 flex-col gap-4">
+      <p className="text-sm text-muted-foreground">
         <code>{link.community_id}</code> — {link.src_ip || '—'} → {link.dst_ip || '—'}
         {link.dst_port ? `:${link.dst_port}` : ''}, {link.events.toLocaleString('en-US')} events across{' '}
         {formatTimestamp(link.first)} – {formatTimestamp(link.last)}.
       </p>
-      <p className="note">
+      <p className="text-sm text-muted-foreground">
         {link.families.map((family) => (
-          <span key={family} className="badge badge--muted">
+          <Badge key={family} variant="secondary">
             {family}
-          </span>
+          </Badge>
         ))}
       </p>
       {link.event_ids.length > 0 ? (
@@ -184,12 +189,12 @@ function FlowLinkCard({ link, currentId }: { link: FlowLink; currentId: string }
           )}
         </ul>
       ) : null}
-      <p className="note">
-        <a className="section-link" href={`/events?community_id=${encodeURIComponent(link.community_id)}`}>
+      <p className="text-sm text-muted-foreground">
+        <a className="text-primary underline-offset-4 hover:underline" href={`/events?community_id=${encodeURIComponent(link.community_id)}`}>
           Open the full flow in the event explorer →
         </a>
       </p>
-    </div>
+    </CardContent></Card>
   )
 }
 
@@ -217,37 +222,37 @@ function EventDetailPage() {
 
   if (fetch?.state === 'failed') {
     return (
-      <>
+      <section className="flex min-w-0 flex-col gap-6">
         <InvestigateHeader label="Investigate" title="Event" subtitle="The record could not be loaded." />
         <ErrorStateBlock
           title="This event failed to load"
           hint="The backend request failed — this says nothing about whether the event exists."
           onRetry={() => setAttempt((n) => n + 1)}
         />
-      </>
+      </section>
     )
   }
 
   if (fetch?.state === 'missing') {
     return (
-      <>
+      <section className="flex min-w-0 flex-col gap-6">
         <InvestigateHeader label="Investigate" title="Event" subtitle="This event could not be found." />
-        <div className="card wide">
-          <p className="empty">
+        <Card className="min-w-0"><CardContent className="pt-6">
+          <p className="text-sm text-muted-foreground">
             No event with id <code>{id}</code> is in the index. Events age out of the retention window, so an old link
             can outlive the document it points at.
           </p>
-        </div>
-      </>
+        </CardContent></Card>
+      </section>
     )
   }
   const event = fetch?.state === 'event' ? fetch.event : null
   if (event === null) {
     return (
-      <>
+      <section className="flex min-w-0 flex-col gap-6">
         <InvestigateHeader label="Investigate" title="Event" subtitle="Loading the full record." />
-        <span className="skeleton-line" aria-hidden="true" />
-      </>
+        <Skeleton className="h-32 w-full" aria-hidden="true" />
+      </section>
     )
   }
 
@@ -255,7 +260,7 @@ function EventDetailPage() {
   const spec = protocolFor(event.sensor)
 
   return (
-    <>
+    <section className="flex min-w-0 flex-col gap-6">
       <InvestigateHeader
         label="Investigate"
         title={`${event.sensor} event`}
@@ -265,37 +270,37 @@ function EventDetailPage() {
             : 'Everything recorded for this event, as the sensor recorded it — no protocol reading is defined for this sensor yet.'
         }
         chips={
-          <>
-            <span className="chip">{formatTimestamp(event.time)}</span>
-            {event.src_ip ? <span className="chip">{event.src_ip}</span> : null}
-          </>
+          <section className="flex flex-wrap gap-2">
+            <Badge variant="outline">{formatTimestamp(event.time)}</Badge>
+            {event.src_ip ? <Badge variant="outline">{event.src_ip}</Badge> : null}
+          </section>
         }
       />
 
-      <div className="card wide">
-        <h2>What this event is</h2>
-        <table className="data-table">
-          <tbody>
-            <tr>
-              <td>Seen</td>
-              <td className="v">{formatTimestamp(event.time)}</td>
-            </tr>
-            <tr>
-              <td>Sensor</td>
-              <td className="v">
+      <Card className="min-w-0">
+        <CardHeader><CardTitle><h2>What this event is</h2></CardTitle></CardHeader><CardContent className="flex min-w-0 flex-col gap-4">
+        <Table>
+          <TableBody>
+            <TableRow>
+              <TableCell>Seen</TableCell>
+              <TableCell className="break-all">{formatTimestamp(event.time)}</TableCell>
+            </TableRow>
+            <TableRow>
+              <TableCell>Sensor</TableCell>
+              <TableCell className="break-all">
                 <a href={`/sensors?sensor=${encodeURIComponent(event.sensor)}`}>{event.sensor}</a>
-              </td>
-            </tr>
-            <tr>
-              <td>Source</td>
-              <td className="v">
+              </TableCell>
+            </TableRow>
+            <TableRow>
+              <TableCell>Source</TableCell>
+              <TableCell className="break-all">
                 {event.src_ip ? (
                   <a href={`/investigate/ip/${encodeURIComponent(event.src_ip)}`}>{event.src_ip}</a>
                 ) : (
                   '—'
                 )}
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
             {/* The protocol's own reading, where one is defined. This is
                 the same spec the sensor detail page renders from, so the
                 two never disagree about what a field means. */}
@@ -304,41 +309,41 @@ function EventDetailPage() {
                   const value = fieldText(readField(honeypot, column.field))
                   if (!value) return null
                   return (
-                    <tr key={column.header}>
-                      <td>{column.header}</td>
-                      <td className="v">{value}</td>
-                    </tr>
+                    <TableRow key={column.header}>
+                      <TableCell>{column.header}</TableCell>
+                      <TableCell className="break-all">{value}</TableCell>
+                    </TableRow>
                   )
                 })
               : meaningfulFields(honeypot).map(([key, value]) => (
-                  <tr key={key}>
-                    <td>{key}</td>
-                    <td className="v">{fieldText(value)}</td>
-                  </tr>
+                  <TableRow key={key}>
+                    <TableCell>{key}</TableCell>
+                    <TableCell className="break-all">{fieldText(value)}</TableCell>
+                  </TableRow>
                 ))}
-            <tr>
-              <td>Document id</td>
-              <td className="v">
+            <TableRow>
+              <TableCell>Document id</TableCell>
+              <TableCell className="break-all">
                 <code>{event.id}</code>{' '}
-                <button className="btn btn-ghost btn-sm" type="button" onClick={() => copyWithFlash(event.id)}>
+                <Button variant="ghost" size="sm" type="button" onClick={() => copyWithFlash(event.id)}>
                   copy
-                </button>
-              </td>
-            </tr>
-            <tr>
-              <td>Index</td>
-              <td className="v">
+                </Button>
+              </TableCell>
+            </TableRow>
+            <TableRow>
+              <TableCell>Index</TableCell>
+              <TableCell className="break-all">
                 <code>{event.index}</code>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </CardContent></Card>
 
       {spec && spec.artefacts.length > 0 ? (
-        <div className="card wide">
-          <h2>What the sensor captured</h2>
-          <p className="note">
+        <Card className="min-w-0">
+          <CardHeader><CardTitle><h2>What the sensor captured</h2></CardTitle></CardHeader><CardContent className="flex min-w-0 flex-col gap-4">
+          <p className="text-sm text-muted-foreground">
             The artefact this protocol exists to capture, not a summary of it.
           </p>
           {spec.artefacts.map((artefact) => {
@@ -347,18 +352,18 @@ function EventDetailPage() {
             if (!text) return null
             return (
               <div key={artefact.label}>
-                <p className="subtitle">{artefact.label}</p>
-                <pre className="code">{text}</pre>
+                <p className="text-sm font-medium">{artefact.label}</p>
+                <pre className="max-h-96 overflow-auto rounded-md bg-muted p-4 text-xs">{text}</pre>
               </div>
             )
           })}
-        </div>
+        </CardContent></Card>
       ) : null}
 
       {event.hashes.length > 0 ? (
-        <div className="card wide">
-          <h2>Hashes in this event</h2>
-          <p className="note">
+        <Card className="min-w-0">
+          <CardHeader><CardTitle><h2>Hashes in this event</h2></CardTitle></CardHeader><CardContent className="flex min-w-0 flex-col gap-4">
+          <p className="text-sm text-muted-foreground">
             Found by shape rather than by field name, because every sensor names its hash differently. Each links to the
             payload record that owns the bytes and the analysis.
           </p>
@@ -371,7 +376,7 @@ function EventDetailPage() {
               </li>
             ))}
           </ul>
-        </div>
+        </CardContent></Card>
       ) : null}
 
       <RelationCard
@@ -397,13 +402,13 @@ function EventDetailPage() {
         hrefLabel="Open the attacker profile"
       />
 
-      <div className="card wide">
-        <h2>The complete record</h2>
-        <p className="note">
+      <Card className="min-w-0">
+        <CardHeader><CardTitle><h2>The complete record</h2></CardTitle></CardHeader><CardContent className="flex min-w-0 flex-col gap-4">
+        <p className="text-sm text-muted-foreground">
           Exactly as indexed. Everything above is a reading of this; nothing above is a substitute for it.
         </p>
-        <pre className="code">{JSON.stringify(event.record, null, 2)}</pre>
-      </div>
-    </>
+        <pre className="max-h-96 overflow-auto rounded-md bg-muted p-4 text-xs">{JSON.stringify(event.record, null, 2)}</pre>
+      </CardContent></Card>
+    </section>
   )
 }
