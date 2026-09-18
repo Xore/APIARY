@@ -277,6 +277,11 @@ const catchAllWarned = new Set();
 /** Minimal handler table; keys are matched by startsWith after the query
  *  string is split off, first match wins, then the catch-all. */
 function route(pathname, searchParams = new URLSearchParams()) {
+  if (pathname.startsWith("/api/v1/investigate/cidr/")) return {
+    cidr: decodeURIComponent(pathname.slice("/api/v1/investigate/cidr/".length)),
+    correlation: { total: 12, truncated: true, sensors: [kv("cowrie", 9), kv("portbridge", 3)],
+      tunnel_connections: 3, tunnel_os_guesses: ["Linux (fixture)"], records: [eventRow(0), eventRow(1)] },
+  };
   if (pathname === "/api/v1/investigate/cluster") return {
     kind: "asn", value: "AS64500", ip_count: 3,
     correlation: { total: 2, truncated: false, sensors: [kv("cowrie", 2)], tunnel_connections: 0,

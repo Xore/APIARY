@@ -8,6 +8,10 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { Badge } from '../components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
+import { Skeleton } from '../components/ui/skeleton'
+import { Table, TableBody, TableCell, TableRow } from '../components/ui/table'
 import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
 
@@ -53,7 +57,7 @@ export const Route = createFileRoute('/investigate/cidr/$cidr')({
 
 const RECORD_COLUMNS: Column<EventRow>[] = [
   { header: 'time', render: (row) => formatTimestamp(row.time) },
-  { header: 'sensor', render: (row) => <span className="badge badge--muted">{row.sensor}</span> },
+  { header: 'sensor', render: (row) => <Badge variant="secondary">{row.sensor}</Badge> },
   { header: 'detail', className: 'v', render: (row) => row.detail || row.proto },
   {
     header: 'record',
@@ -65,21 +69,21 @@ const RECORD_COLUMNS: Column<EventRow>[] = [
 function MiniTable({ title, rows }: { title: string; rows: Kv[] }) {
   if (rows.length === 0) return null
   return (
-    <div className="card half">
-      <h2>{title}</h2>
-      <div className="card__scroll">
-        <table className="data-table">
-          <tbody>
+    <Card className="min-w-0">
+      <CardHeader><CardTitle className="text-lg"><h2>{title}</h2></CardTitle></CardHeader>
+      <CardContent>
+        <Table>
+          <TableBody>
             {rows.map((row) => (
-              <tr key={row.key}>
-                <td className="n">{row.count.toLocaleString('en-US')}</td>
-                <td className="v">{row.key}</td>
-              </tr>
+              <TableRow key={row.key}>
+                <TableCell className="w-24 text-right tabular-nums">{row.count.toLocaleString('en-US')}</TableCell>
+                <TableCell className="break-words">{row.key}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -110,7 +114,7 @@ function InvestigateCidr() {
         title={cidr}
         subtitle="This network could not be correlated — invalid range, or the correlation backend is unavailable."
         chips={
-          <Link className="chip" to="/campaigns">
+          <Link className="text-sm text-primary underline-offset-4 hover:underline" to="/campaigns">
             &larr; campaigns
           </Link>
         }
@@ -128,38 +132,34 @@ function InvestigateCidr() {
         subtitle="#354: everything Elasticsearch has correlated for this network across honeypot, Suricata, and portbridge tunnel records."
         chips={
           <>
-            <Link className="chip" to="/campaigns">
+            <Link className="text-sm text-primary underline-offset-4 hover:underline" to="/campaigns">
               &larr; campaigns
             </Link>
             {/* Go's /events?cidr= chip (intel.html:180) — the events API's
                 ip filter is a term query on the ip-mapped source.ip field
                 (events.rs), which accepts CIDR notation natively, so ?ip=
                 carries the old ?cidr= role. */}
-            <Link className="chip" to="/events" search={{ ip: cidr, since: '168h' }}>
+            <Link className="text-sm text-primary underline-offset-4 hover:underline" to="/events" search={{ ip: cidr, since: '168h' }}>
               in-memory events for this network
             </Link>
-            {generated ? <span className="chip">generated {formatTimestamp(generated)}</span> : null}
+            {generated ? <Badge variant="secondary">generated {formatTimestamp(generated)}</Badge> : null}
           </>
         }
       />
+      {!data ? <Card aria-label="Loading CIDR correlation"><CardContent className="flex flex-col gap-3 pt-6"><Skeleton className="h-7 w-1/3" /><Skeleton className="h-20 w-full" /></CardContent></Card> : null}
       {correlation ? (
-        <div className="metric-grid">
-          <div className="metric">
-            <div className="metric__value">{correlation.total.toLocaleString('en-US')}</div>
-            <div className="metric__label">Total matches</div>
-          </div>
-          <div className="metric">
-            <div className="metric__value">{correlation.tunnel_connections.toLocaleString('en-US')}</div>
-            <div className="metric__label">Tunnel connections</div>
-          </div>
-          <div className="metric">
-            <div className="metric__value">{correlation.sensors.length}</div>
-            <div className="metric__label">Distinct sensors</div>
-          </div>
+        <div className="grid gap-4 sm:grid-cols-3">
+          {([
+            ['Total matches', correlation.total],
+            ['Tunnel connections', correlation.tunnel_connections],
+            ['Distinct sensors', correlation.sensors.length],
+          ] as const).map(([label, count]) => (
+            <Card key={label}><CardHeader><CardTitle className="text-lg"><h2>{label}</h2></CardTitle></CardHeader><CardContent className="text-2xl font-semibold tabular-nums">{count.toLocaleString('en-US')}</CardContent></Card>
+          ))}
         </div>
       ) : null}
       {correlation ? (
-        <p className="note">
+        <p className="text-sm text-muted-foreground">
           {correlation.truncated
             ? `Showing the ${correlation.records.length} most recent of ${correlation.total.toLocaleString('en-US')} total matches.`
             : 'Newest first.'}
