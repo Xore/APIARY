@@ -377,6 +377,23 @@ function route(pathname, searchParams = new URLSearchParams()) {
     // CuratedSensorViews' SensorDetail; only the three per-protocol arrays.
     return { mailoney: [], http_requests: [], tanner: [] };
   }
+  if (pathname === "/api/v1/sessions/sess-0") {
+    // session.rs::SessionDetail, including the unmodified events.rs row envelope.
+    return { id: "sess-0", ip: "203.0.113.1", country: "CN", first: NOW, last: NOW, total: 1,
+      sensors: [{ key: "citrix", count: 1 }], commands: [{ key: "uname -a", count: 1 }],
+      credentials: [{ key: "root/admin", count: 1 }], payloads: [{ key: "sample", count: 1 }],
+      techniques: [{ id: "T1110", name: "Brute Force", domain: "Enterprise", evidence: "credential attempt", count: 1, url: "https://attack.mitre.org/techniques/T1110/" }],
+      sequences: [{ name: "Credential attempt", severity: "critical", summary: "One observed login attempt." }], events: [eventRow(0)] };
+  }
+  if (/^\/api\/v1\/payloads\/[0-9a-f]{64}$/.test(pathname)) {
+    // payload_detail.rs::PayloadDetail; Analysis is capitalized in the static-analysis document.
+    return { hash: pathname.split('/').at(-1), inventory: { Kind: "script", MIME: "text/plain", SizeH: "1 KB" },
+      analysis: { Analysis: { Classification: { Code: "script", Label: "Shell script", Platform: "linux", Category: "script", AnalysisPath: "static", Dynamic: false }, SHA256: pathname.split('/').at(-1), MIME: "text/plain", IOCs: ["example.test"], Rules: [{ name: "suspicious", severity: "medium", description: "test signature" }], ASCII: ["uname -a"] } },
+      yara: [{ yara: { matches: ["FixtureRule"], scanned_at: NOW } }], size_bytes: 1024, hex_preview: ["00000000  23 21  |#!|"] };
+  }
+  if (pathname === "/api/v1/workbench/recipes") return { recipes: [] };
+  if (pathname === "/api/v1/workbench/runs") return { runs: [{ schema_version: 1, id: "fixture-run", payload_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", payload_kind: "script", owner: "dev", recipe_id: "", recipe_revision: 0, recipe_name: "Local static checks", recipe_snapshot: [], idempotency_key: "fixture", state: "completed", created_at: NOW, updated_at: NOW, children: [] }] };
+  if (pathname === "/api/v1/sandbox/golden-image-status") return { configured: false };
   if (pathname === "/api/v1/payloads") {
     // Payload rows keep the Go-tier capitalized serde names.
     return {
@@ -564,6 +581,8 @@ function route(pathname, searchParams = new URLSearchParams()) {
   }
   if (pathname === "/api/v1/ml-health") return [];
   if (pathname === "/api/v1/ml-anomalies/acks") return {};
+  if (pathname.startsWith("/api/v1/store/static-analysis")) return { rows: [{ Fingerprint: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", Analysis: { Kind: "script", Summary: "Shell script" } }], total: 1 };
+  if (pathname.startsWith("/api/v1/store/yara")) return { rows: [{ file: { hash: { sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" } }, yara: { matches: ["FixtureRule"] }, "@timestamp": NOW }], total: 1 };
   if (pathname.startsWith("/api/v1/store/")) return { rows: [], total: 0 };
   if (pathname === "/api/v1/search") {
     const query = searchParams.get("q")?.trim() ?? "";

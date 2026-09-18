@@ -88,6 +88,9 @@ spawnChild("bff", process.execPath, [join(ROOT, ".output/server/index.mjs")], {
   OIDC_DISABLED: "1",
   OIDC_SESSION_REDIS_URL: redis.url,
   BACKEND_URL: backend.url,
+  // Both production instances run the same Rust routes; the hermetic
+  // fixture serves both reads and mounted workbench actions on one socket.
+  BACKEND_MOUNTED_URL: backend.url,
   // A real token is no alternative to the override, for the record:
   // proxyToRust would demand it from the browser caller too (#2247).
 });

@@ -14,6 +14,14 @@ import { getSessionUser } from '../lib/auth'
 import { pathString, type JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
 import { useSidebarViewTabs } from '../lib/viewTabs'
+import { Badge } from '../components/ui/badge'
+import { Input } from '../components/ui/input'
+import { Label } from '../components/ui/label'
+import { Button } from '../components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader } from '../components/ui/card'
+import { Skeleton } from '../components/ui/skeleton'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
 
 type StoreRow = JsonRecord
 type Page = { total: number; rows: StoreRow[] }
@@ -382,7 +390,7 @@ const WORKBENCH_COLUMNS: Column<StoreRow>[] = [
     primary: true,
     render: (row) => pathString(row, 'recipe_name') || <span className="text-muted">one-off</span>,
   },
-  { header: 'state', detail: true, render: (row) => <span className="badge badge--muted">{pathString(row, 'state')}</span> },
+  { header: 'state', detail: true, render: (row) => <Badge variant="secondary">{pathString(row, 'state')}</Badge> },
   { header: 'payload', className: 'v', render: (row) => <span className="mono">{pathString(row, 'payload_sha256').slice(0, 16)}</span> },
   { header: 'created', render: (row) => when(pathString(row, 'created_at')) },
   { header: 'owner', render: (row) => pathString(row, 'owner') },
@@ -427,13 +435,12 @@ const SANDBOX_COLUMNS: Column<StoreRow>[] = [
     },
   },
   { header: 'detonated', render: (row) => when(pathString(row, '@timestamp')) },
-  { header: 'platform', detail: true, render: (row) => <span className="badge badge--muted">{pathString(row, 'platform')}</span> },
+  { header: 'platform', detail: true, render: (row) => <Badge variant="secondary">{pathString(row, 'platform')}</Badge> },
   {
     header: 'risk',
     render: (row) => {
       const level = pathString(row, 'risk_level')
-      const cls = level === 'high' || level === 'critical' ? 'badge badge--danger' : level === 'medium' ? 'badge badge--warning' : 'badge badge--muted'
-      return <span className={cls}>{level} {pathString(row, 'risk_score')}</span>
+      return <Badge variant={level === 'high' || level === 'critical' ? 'destructive' : 'secondary'}>{level} {pathString(row, 'risk_score')}</Badge>
     },
   },
   {
@@ -467,26 +474,26 @@ const GHIDRA_COLUMNS: Column<StoreRow>[] = [
 
 const HASH_RE = /^[0-9a-fA-F]{32,64}$/
 
-function stateBadgeClass(state: string): string {
+function stateBadgeVariant(state: string): 'default' | 'destructive' | 'secondary' | 'outline' {
   switch (state) {
     case 'completed':
-      return 'badge badge--success'
+      return 'default'
     case 'failed':
     case 'timed_out':
-      return 'badge badge--danger'
+      return 'destructive'
     case 'partial':
     case 'running':
     case 'queued':
     case 'claimed':
-      return 'badge badge--warning'
+      return 'secondary'
     default:
-      return 'badge badge--muted'
+      return 'outline'
   }
 }
 
-function analyzerBadgeClass(analyzer: WorkbenchAnalyzer): string {
-  if (!analyzer.applicable) return 'badge badge--muted'
-  return analyzer.availability === 'configured' ? 'badge badge--success' : 'badge badge--warning'
+function analyzerBadgeVariant(analyzer: WorkbenchAnalyzer): 'default' | 'secondary' | 'outline' {
+  if (!analyzer.applicable) return 'outline'
+  return analyzer.availability === 'configured' ? 'default' : 'secondary'
 }
 
 // Per-run child status + cancel/retry — driven entirely by the server-
@@ -526,59 +533,50 @@ function RunDetail({ run, currentOwner, onChanged }: { run: WorkbenchRun; curren
   return (
     <div>
       <div className="filters hp-flow--tight">
-        <span className={stateBadgeClass(run.state)}>{run.state}</span>
-        <span className="chip">recipe: {run.recipe_name || run.recipe_id || 'one-off'}</span>
+        <Badge variant={stateBadgeVariant(run.state)}>{run.state}</Badge>
+        <Badge variant="outline">recipe: {run.recipe_name || run.recipe_id || 'one-off'}</Badge>
         <code>{run.payload_sha256}</code>
-        <button className="btn btn-secondary btn-sm" type="button" onClick={refresh} disabled={refreshing}>
+        <Button variant="secondary" size="sm" type="button" onClick={refresh} disabled={refreshing}>
           {refreshing ? 'Refreshing…' : 'Refresh status'}
-        </button>
+        </Button>
       </div>
       <div className="table-scroll">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Analyzer</th>
-              <th>State</th>
-              <th>Reason / summary</th>
-              <th>Attempts</th>
-              {canMutate ? <th>Actions</th> : null}
-            </tr>
-          </thead>
-          <tbody>
+        <Table>
+          <TableHeader><TableRow>
+              <TableHead>Analyzer</TableHead><TableHead>State</TableHead><TableHead>Reason / summary</TableHead><TableHead>Attempts</TableHead>
+              {canMutate ? <TableHead>Actions</TableHead> : null}
+          </TableRow></TableHeader>
+          <TableBody>
             {run.children.map((child) => (
-              <tr key={child.analyzer_id}>
-                <td className="v">{child.display_name || child.analyzer_id}</td>
-                <td>
-                  <span className={stateBadgeClass(child.state)}>{child.state}</span>
-                </td>
-                <td>{child.summary || child.reason || '—'}</td>
-                <td className="n">{child.attempts}</td>
+              <TableRow key={child.analyzer_id}>
+                <TableCell className="v">{child.display_name || child.analyzer_id}</TableCell>
+                <TableCell><Badge variant={stateBadgeVariant(child.state)}>{child.state}</Badge></TableCell>
+                <TableCell>{child.summary || child.reason || '—'}</TableCell>
+                <TableCell className="n">{child.attempts}</TableCell>
                 {canMutate ? (
-                  <td>
+                  <TableCell>
                     <div className="filters">
-                      <button
-                        className="btn btn-secondary btn-sm"
+                      <Button variant="secondary" size="sm"
                         type="button"
                         disabled={!child.cancelable || busyChild === child.analyzer_id}
                         onClick={() => act(child.analyzer_id, 'cancel')}
                       >
                         Cancel
-                      </button>
-                      <button
-                        className="btn btn-secondary btn-sm"
+                      </Button>
+                      <Button variant="secondary" size="sm"
                         type="button"
                         disabled={!child.retryable || busyChild === child.analyzer_id}
                         onClick={() => act(child.analyzer_id, 'retry')}
                       >
                         Retry
-                      </button>
+                      </Button>
                     </div>
-                  </td>
+                  </TableCell>
                 ) : null}
-              </tr>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
       {message ? <p className="note">{message}</p> : null}
     </div>
@@ -616,19 +614,19 @@ function RecentRunsCard({ owner, refreshToken }: { owner: string; refreshToken: 
   }
 
   return (
-    <div className="card wide">
-      <h2>My recent runs</h2>
+    <Card className="col-span-full">
+      <CardHeader><h2 className="font-semibold leading-none tracking-tight">My recent runs</h2></CardHeader><CardContent>
       {runs === null && failed ? (
         <ErrorStateBlock title="Run history failed to load" hint="The backend request failed — nothing here is cached." />
       ) : runs === null ? (
-        <span className="skeleton-line" aria-hidden="true" />
+        <Skeleton className="h-20 w-full" aria-label="Loading recent runs" />
       ) : runs.length === 0 ? (
         <p className="empty">No workbench runs submitted yet.</p>
       ) : (
         <>
           <div className="project-grid" id="workbench-results-list">
             {runs.map((run) => (
-              <div
+              <Card
                 key={run.id}
                 className="project-card"
                 role="button"
@@ -646,27 +644,28 @@ function RecentRunsCard({ owner, refreshToken }: { owner: string; refreshToken: 
                 <div className="project-card__header">
                   <span className="project-card__title">{run.recipe_name || run.recipe_id || 'one-off'}</span>
                   <div className="project-card__badges">
-                    <span className={stateBadgeClass(run.state)}>{run.state}</span>
+                    <Badge variant={stateBadgeVariant(run.state)}>{run.state}</Badge>
                   </div>
                 </div>
                 <div className="project-card__meta">
                   <span>{formatTimestamp(run.created_at)}</span>
                   <span className="mono">{run.payload_sha256.slice(0, 16)}</span>
                 </div>
-              </div>
+              </Card>
             ))}
           </div>
           {(() => {
             const run = runs.find((candidate) => candidate.id === selected)
             return run ? (
-              <div className="card wide hp-flow--tight">
+              <div className="hp-flow--tight">
                 <RunDetail run={run} currentOwner={owner} onChanged={updateRun} />
               </div>
             ) : null
           })()}
         </>
       )}
-    </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -684,13 +683,10 @@ function ModelHealthCard() {
   }, [])
 
   return (
-    <div className="card wide">
-      <div className="filters">
-        <h2 className="hp-push-end">Approved local-model health</h2>
-        <span className="badge badge--muted">advisory only</span>
-      </div>
+    <Card className="col-span-full">
+      <CardHeader><h2 className="font-semibold leading-none tracking-tight">Approved local-model health <Badge variant="outline">advisory only</Badge></h2></CardHeader><CardContent>
       {models === null ? (
-        <span className="skeleton-line" aria-hidden="true" />
+        <Skeleton className="h-20 w-full" aria-label="Loading model health" />
       ) : models === 'unavailable' || models.length === 0 ? (
         <p className="note">
           {models === 'unavailable' ? 'Model-status adapter is unavailable' : 'No retrain history recorded yet'}. Drift or unavailability
@@ -699,36 +695,30 @@ function ModelHealthCard() {
       ) : (
         <>
           <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Model</th>
-                  <th>Last retrain</th>
-                  <th>Outcome</th>
-                  <th>Anomaly rate</th>
-                  <th>Samples</th>
-                  <th>Reason</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table>
+              <TableHeader><TableRow>
+                  <TableHead>Model</TableHead><TableHead>Last retrain</TableHead><TableHead>Outcome</TableHead>
+                  <TableHead>Anomaly rate</TableHead><TableHead>Samples</TableHead><TableHead>Reason</TableHead>
+              </TableRow></TableHeader>
+              <TableBody>
                 {models.map((model) => (
-                  <tr key={model.model}>
-                    <td className="v">{model.model}</td>
-                    <td>{model.timestamp ? formatTimestamp(model.timestamp) : '—'}</td>
-                    <td>
-                      <span className={model.accepted ? 'badge badge--success' : 'badge badge--danger'}>
+                  <TableRow key={model.model}>
+                    <TableCell className="v">{model.model}</TableCell>
+                    <TableCell>{model.timestamp ? formatTimestamp(model.timestamp) : '—'}</TableCell>
+                    <TableCell>
+                      <Badge variant={model.accepted ? 'default' : 'destructive'}>
                         {model.accepted ? 'accepted' : 'rejected'}
-                      </span>
-                    </td>
-                    <td className="n">
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="n">
                       {(model.anomaly_rate_previous * 100).toFixed(2)}% → {(model.anomaly_rate_new * 100).toFixed(2)}%
-                    </td>
-                    <td className="n">{model.train_samples.toLocaleString('en-US')}</td>
-                    <td className="v">{model.reason || '—'}</td>
-                  </tr>
+                    </TableCell>
+                    <TableCell className="n">{model.train_samples.toLocaleString('en-US')}</TableCell>
+                    <TableCell className="v">{model.reason || '—'}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
           <p className="note">
             Latest retrain decision per approved local model, through the read-only ml-health surface. Drift or unavailability never
@@ -736,7 +726,8 @@ function ModelHealthCard() {
           </p>
         </>
       )}
-    </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -927,17 +918,15 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
   }
 
   return (
-    <div className="card wide" id="workbench-builder">
-      <h2>Start a new analysis</h2>
-      <p className="note">
+    <Card className="col-span-full" id="workbench-builder">
+      <CardHeader><h2 className="font-semibold leading-none tracking-tight">Start a new analysis</h2><CardDescription>
         Static checks and detonation are different trust decisions. Running every applicable analyzer does not make a payload
         safe — dynamic backends stay isolated and cannot reach the protected live VM or the internet from here.
-      </p>
+      </CardDescription></CardHeader><CardContent>
       <div className="filters">
-        <label className="note hp-field--wide">
-          Payload hash (sha256 or md5)
-          <input
-            className="form-input"
+        <div className="hp-field--wide">
+          <Label htmlFor="workbench-payload-hash">Payload hash (sha256 or md5)</Label>
+          <Input id="workbench-payload-hash"
            
             type="text"
             maxLength={64}
@@ -945,34 +934,36 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
             onChange={(event) => setHash(event.target.value)}
             placeholder="full payload hash"
           />
-        </label>
-        <button className="btn btn-secondary btn-sm" type="button" onClick={() => loadCatalog()} disabled={loadingCatalog}>
+        </div>
+        <Button variant="secondary" size="sm" type="button" onClick={() => loadCatalog()} disabled={loadingCatalog}>
           {loadingCatalog ? 'Loading…' : 'Load catalog'}
-        </button>
+        </Button>
       </div>
       {catalogError ? <p className="note">{catalogError}</p> : null}
 
       {catalog ? (
         <>
           <div className="filters">
-            <span className="chip">{catalog.classification.label || catalog.classification.code}</span>
-            <span className="chip">{catalog.classification.platform}</span>
-            <span className="chip">{catalog.classification.category}</span>
-            {catalog.classification.dynamic ? <span className="chip">dynamic-capable</span> : null}
+            <Badge variant="secondary">{catalog.classification.label || catalog.classification.code}</Badge>
+            <Badge variant="secondary">{catalog.classification.platform}</Badge>
+            <Badge variant="secondary">{catalog.classification.category}</Badge>
+            {catalog.classification.dynamic ? <Badge variant="secondary">dynamic-capable</Badge> : null}
           </div>
 
           {(recipes?.length ?? 0) > 0 ? (
-            <label className="note hp-field--wide">
-              Load from saved recipe
-              <select className="form-input" value={pickedRecipeId} onChange={(event) => pickRecipe(event.target.value)}>
-                <option value="">Custom selection…</option>
+            <div className="hp-field--wide">
+              <Label htmlFor="workbench-recipe">Load from saved recipe</Label>
+              <Select value={pickedRecipeId || 'custom'} onValueChange={(value) => pickRecipe(value === 'custom' ? '' : value)}>
+                <SelectTrigger id="workbench-recipe"><SelectValue placeholder="Custom selection…" /></SelectTrigger>
+                <SelectContent><SelectItem value="custom">Custom selection…</SelectItem>
                 {(recipes ?? []).map((recipe) => (
-                  <option key={`${recipe.id}:${recipe.revision}`} value={recipe.id}>
+                  <SelectItem key={`${recipe.id}:${recipe.revision}`} value={recipe.id}>
                     {recipe.name} ({recipe.scope}, rev {recipe.revision})
-                  </option>
+                  </SelectItem>
                 ))}
-              </select>
-            </label>
+                </SelectContent>
+              </Select>
+            </div>
           ) : recipesFailed ? (
             <p className="note text-danger" role="alert">
               Saved recipes couldn't be loaded — they exist but the request failed.{' '}
@@ -983,9 +974,9 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
           ) : null}
 
           <div className="filters">
-            <button className="btn btn-sm btn-secondary" type="button" onClick={runAllApplicable}>
+            <Button size="sm" variant="secondary" type="button" onClick={runAllApplicable}>
               Run all applicable
-            </button>
+            </Button>
           </div>
           {/* payload_workbench.html — says why an analyzer may be greyed
               out, which is otherwise guesswork. */}
@@ -994,31 +985,25 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
           </p>
 
           <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Select</th>
-                  <th>Analyzer</th>
-                  <th>Status</th>
-                  <th>Notes</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table>
+              <TableHeader><TableRow>
+                  <TableHead>Select</TableHead><TableHead>Analyzer</TableHead><TableHead>Status</TableHead><TableHead>Notes</TableHead>
+              </TableRow></TableHeader>
+              <TableBody>
                 {catalog.analyzers.map((analyzer) => (
-                  <tr key={analyzer.id}>
-                    <td>
-                      <button
-                        type="button"
-                        className={selected.includes(analyzer.id) ? 'chip is-active' : 'chip'}
+                  <TableRow key={analyzer.id}>
+                    <TableCell>
+                      <Button type="button" size="sm" variant={selected.includes(analyzer.id) ? 'default' : 'outline'}
                         aria-pressed={selected.includes(analyzer.id)}
+                        aria-label={`Select ${analyzer.display_name}`}
                         disabled={!analyzer.applicable || !analyzer.available}
                         title={analyzer.reason}
                         onClick={() => toggleAnalyzer(analyzer.id)}
                       >
                         {selected.includes(analyzer.id) ? 'selected' : 'select'}
-                      </button>
-                    </td>
-                    <td className="v">
+                      </Button>
+                    </TableCell>
+                    <TableCell className="v">
                       <strong>{analyzer.display_name}</strong>
                       <p className="note">{analyzer.description}</p>
                       {selected.includes(analyzer.id) ? (
@@ -1027,8 +1012,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
                           <div className="wb-option-grid">
                             <label>
                               Timeout (seconds)
-                              <input
-                                className="form-input"
+                              <Input aria-label={`${analyzer.display_name} timeout in seconds`}
                                 type="number"
                                 min={analyzer.option_schema?.timeout_min_seconds}
                                 max={analyzer.option_schema?.timeout_max_seconds}
@@ -1038,8 +1022,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
                             </label>
                             <label>
                               Maximum queue age (seconds)
-                              <input
-                                className="form-input"
+                              <Input aria-label={`${analyzer.display_name} maximum queue age in seconds`}
                                 type="number"
                                 min={analyzer.option_schema?.queue_age_min_seconds}
                                 max={analyzer.option_schema?.queue_age_max_seconds}
@@ -1049,8 +1032,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
                             </label>
                             <label>
                               Retry allowance
-                              <input
-                                className="form-input"
+                              <Input aria-label={`${analyzer.display_name} retry allowance`}
                                 type="number"
                                 min={0}
                                 max={analyzer.option_schema?.retry_limit_max}
@@ -1061,20 +1043,20 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
                           </div>
                         </details>
                       ) : null}
-                    </td>
-                    <td>
-                      <span className={analyzerBadgeClass(analyzer)}>{!analyzer.applicable ? 'not applicable' : analyzer.availability}</span>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={analyzerBadgeVariant(analyzer)}>{!analyzer.applicable ? 'not applicable' : analyzer.availability}</Badge>
                       {analyzer.reason ? <p className="note">{analyzer.reason}</p> : null}
-                    </td>
-                    <td>
-                      {analyzer.detonates ? <span className="badge badge--danger">detonates</span> : null}{' '}
-                      {analyzer.gpu_consuming ? <span className="badge badge--muted">gpu</span> : null}{' '}
-                      {analyzer.local_only ? <span className="badge badge--muted">local-only</span> : null}
-                    </td>
-                  </tr>
+                    </TableCell>
+                    <TableCell>
+                      {analyzer.detonates ? <Badge variant="destructive">detonates</Badge> : null}{' '}
+                      {analyzer.gpu_consuming ? <Badge variant="secondary">gpu</Badge> : null}{' '}
+                      {analyzer.local_only ? <Badge variant="secondary">local-only</Badge> : null}
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
 
           {needsConfirmation ? (
@@ -1083,22 +1065,19 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
                 One or more selected analyzers detonate this payload in an isolated sandbox. Detonation cannot reach the
                 protected live VM or the internet.
               </p>
-              <button
-                type="button"
-                className={confirmed ? 'chip is-active' : 'chip'}
+              <Button type="button" variant={confirmed ? 'default' : 'outline'}
                 aria-pressed={confirmed}
                 onClick={() => setConfirmed((current) => !current)}
               >
                 {confirmed ? 'Detonation confirmed' : 'Confirm detonation'}
-              </button>
+              </Button>
             </>
           ) : null}
 
           <div className="filters hp-flow--tight">
             <label className="note hp-field--wide">
               Run / recipe name
-              <input
-                className="form-input"
+              <Input
                
                 type="text"
                 maxLength={80}
@@ -1107,21 +1086,18 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
                 placeholder="One-off analysis"
               />
             </label>
-            <button
-              type="button"
-              className={saveAsRecipe ? 'chip is-active' : 'chip'}
+            <Button type="button" variant={saveAsRecipe ? 'default' : 'outline'}
               aria-pressed={saveAsRecipe}
               onClick={() => setSaveAsRecipe((current) => !current)}
             >
               {saveAsRecipe ? 'Will save as recipe' : 'Save as recipe'}
-            </button>
+            </Button>
           </div>
           {saveAsRecipe ? (
             <div className="filters">
               <label className="note hp-field--wide">
                 Recipe description
-                <input
-                  className="form-input"
+                <Input
                  
                   type="text"
                   maxLength={400}
@@ -1131,18 +1107,18 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
               </label>
               <label className="note hp-field">
                 Scope
-                <select className="form-input" value={recipeScope} onChange={(event) => setRecipeScope(event.target.value)}>
-                  <option value="private">Private</option>
-                  <option value="shared">Shared with analysts</option>
-                </select>
+                <Select value={recipeScope} onValueChange={setRecipeScope}>
+                  <SelectTrigger aria-label="Scope"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="private">Private</SelectItem><SelectItem value="shared">Shared with analysts</SelectItem></SelectContent>
+                </Select>
               </label>
             </div>
           ) : null}
 
           <div className="filters hp-flow--tight">
-            <button className="btn btn-primary btn-sm" type="button" onClick={submit} disabled={!canSubmit}>
+            <Button size="sm" type="button" onClick={submit} disabled={!canSubmit}>
               {busy ? 'Submitting…' : 'Start analysis run'}
-            </button>
+            </Button>
           </div>
         </>
       ) : null}
@@ -1154,7 +1130,8 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
           <RunDetail run={lastRun} currentOwner={owner} onChanged={setLastRun} />
         </div>
       ) : null}
-    </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -1183,10 +1160,12 @@ function FilterScopeNote({ page, query, matched }: { page: Page | null; query: s
 }
 
 function FilterInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  const id = `results-filter-${label.replaceAll(' ', '-')}`
   return (
     <div className="filters">
-      <input
-        className="form-input"
+      <Label htmlFor={id} className="sr-only">Filter {label}</Label>
+      <Input
+        id={id}
         type="search"
         placeholder={`Filter ${label}…`}
         aria-label={`Filter ${label}`}
@@ -1243,7 +1222,7 @@ function gpuStatusBadge(status: string) {
         : status === 'running'
           ? 'badge badge--warning'
           : 'badge badge--muted' // queued, aborted, unknown
-  return <span className={cls}>{status || 'unknown'}</span>
+  return <Badge variant={cls === 'badge badge--danger' ? 'destructive' : cls === 'badge badge--success' ? 'default' : 'secondary'}>{status || 'unknown'}</Badge>
 }
 
 const gpuQueueColumns = (onAbort: (job: GpuJob) => void): Column<GpuJob>[] => [
@@ -1254,7 +1233,7 @@ const gpuQueueColumns = (onAbort: (job: GpuJob) => void): Column<GpuJob>[] => [
   { header: 'attempts', className: 'n', render: (row) => String(row.attempts) },
   {
     header: 'abort requested',
-    render: (row) => (row.abort_requested ? <span className="badge badge--warning">yes</span> : '—'),
+    render: (row) => (row.abort_requested ? <Badge variant="secondary">yes</Badge> : '—'),
   },
   { header: 'ref', detail: true, className: 'v', render: (row) => <code>{row.ref}</code> },
   { header: 'estimated VRAM', detail: true, render: (row) => (row.estimated_vram_mib ? `${row.estimated_vram_mib} MiB` : '—') },
@@ -1272,9 +1251,9 @@ const gpuQueueColumns = (onAbort: (job: GpuJob) => void): Column<GpuJob>[] => [
     header: '',
     render: (row) =>
       (row.status === 'queued' || row.status === 'running') && !row.abort_requested ? (
-        <button type="button" className="btn btn-danger btn-sm" onClick={() => onAbort(row)}>
+        <Button type="button" variant="destructive" size="sm" onClick={() => onAbort(row)}>
           Abort
-        </button>
+        </Button>
       ) : null,
   },
 ]
@@ -1394,11 +1373,11 @@ function Results() {
         subtitle="Build and submit a workbench recipe against a captured payload, then follow every analyzer's verdict — static analysis, YARA, sandbox detonations, and Ghidra decompilation."
         chips={
           <>
-            <span className="chip">{workbenchQ.failed ? 'load failed' : `${(workbench?.total ?? 0).toLocaleString('en-US')} workbench runs`}</span>
-            <span className="chip">{staticsQ.failed ? 'load failed' : `${(statics?.total ?? 0).toLocaleString('en-US')} static analyses`}</span>
-            <span className="chip">{yaraQ.failed ? 'load failed' : `${(yara?.total ?? 0).toLocaleString('en-US')} YARA results`}</span>
-            <span className="chip">{sandboxQ.failed ? 'load failed' : `${(sandbox?.total ?? 0).toLocaleString('en-US')} detonations`}</span>
-            <span className="chip">{ghidraQ.failed ? 'load failed' : `${(ghidra?.total ?? 0).toLocaleString('en-US')} ghidra runs`}</span>
+            <Badge variant="secondary">{workbenchQ.failed ? 'load failed' : `${(workbench?.total ?? 0).toLocaleString('en-US')} workbench runs`}</Badge>
+            <Badge variant="secondary">{staticsQ.failed ? 'load failed' : `${(statics?.total ?? 0).toLocaleString('en-US')} static analyses`}</Badge>
+            <Badge variant="secondary">{yaraQ.failed ? 'load failed' : `${(yara?.total ?? 0).toLocaleString('en-US')} YARA results`}</Badge>
+            <Badge variant="secondary">{sandboxQ.failed ? 'load failed' : `${(sandbox?.total ?? 0).toLocaleString('en-US')} detonations`}</Badge>
+            <Badge variant="secondary">{ghidraQ.failed ? 'load failed' : `${(ghidra?.total ?? 0).toLocaleString('en-US')} ghidra runs`}</Badge>
           </>
         }
       />
@@ -1468,7 +1447,7 @@ function Results() {
           cardIcon={() => FileIcon}
           cardBadges={(row) => {
             const kind = pathString(row, 'Analysis', 'Kind')
-            return kind ? <span className="badge badge--muted">{kind}</span> : null
+            return kind ? <Badge variant="secondary">{kind}</Badge> : null
           }}
           cardDesc={(row) => pathString(row, 'Analysis', 'Summary') || null}
           emptyState={{
@@ -1540,8 +1519,8 @@ function Results() {
             const exit = pathString(row, 'exit_status')
             return (
               <>
-                {platform ? <span className="badge badge--muted">{platform}</span> : null}
-                {exit === 'error' ? <span className="badge badge--muted text-danger">error</span> : null}
+                {platform ? <Badge variant="secondary">{platform}</Badge> : null}
+                {exit === 'error' ? <Badge variant="destructive">error</Badge> : null}
               </>
             )
           }}

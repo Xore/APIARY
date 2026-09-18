@@ -21,6 +21,16 @@ import { flash } from '../lib/flash'
 import { useResolved } from '../lib/hooks'
 import type { Json, JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
+import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader } from '../components/ui/card'
+import { Skeleton } from '../components/ui/skeleton'
+import { Input } from '../components/ui/input'
+import { Label } from '../components/ui/label'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
+import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
+import { Dialog, DialogContent, DialogTitle } from '../components/ui/dialog'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../components/ui/dropdown-menu'
 
 type PayloadDetail = {
   hash: string
@@ -351,12 +361,12 @@ function buildStaticView(analysis: JsonRecord | null): StaticView | null {
   return {
     classification: c
       ? {
-          code: jstr(c.code),
-          label: jstr(c.label),
-          platform: jstr(c.platform),
-          category: jstr(c.category),
-          analysisPath: jstr(c.analysis_path),
-          dynamic: c.dynamic === true,
+          code: jstr(c.Code ?? c.code),
+          label: jstr(c.Label ?? c.label),
+          platform: jstr(c.Platform ?? c.platform),
+          category: jstr(c.Category ?? c.category),
+          analysisPath: jstr(c.AnalysisPath ?? c.analysis_path),
+          dynamic: (c.Dynamic ?? c.dynamic) === true,
         }
       : null,
     magic: jstr(pick('Magic', 'magic')),
@@ -416,28 +426,28 @@ function buildYaraView(rows: JsonRecord[]): { matches: string[]; scanned: string
 // Missing/unreadable/unconfigured is not an error (see golden_image_status
 // in sandbox_submit.rs) — no badge at all in that case, same "no news" as
 // the legacy sandbox.html detail page shows nothing when GoldenImage is nil.
-function goldenImageNote(golden: GoldenImageStatus | null): { cls: string; label: string; detail: string } | null {
+function goldenImageNote(golden: GoldenImageStatus | null): { variant: 'destructive' | 'secondary' | 'outline'; label: string; detail: string } | null {
   if (!golden || !golden.configured) return null
   if (golden.error) {
-    return { cls: 'badge badge--danger', label: 'Golden image missing', detail: golden.error }
+    return { variant: 'destructive', label: 'Golden image missing', detail: golden.error }
   }
   if (golden.stale_iso_eval) {
     return {
-      cls: 'badge badge--danger',
+      variant: 'destructive',
       label: `Golden image ${golden.age_days ?? '?'}d old`,
       detail: 'The evaluation ISO it was built from has likely expired (90-day limit) — a full rebuild is due.',
     }
   }
   if (golden.stale_monthly) {
     return {
-      cls: 'badge badge--warning',
+      variant: 'secondary',
       label: `Golden image ${golden.age_days ?? '?'}d old`,
       detail: 'Past the monthly rebuild cadence.',
     }
   }
   if (golden.checksum_written && !golden.checksum_verified) {
     return {
-      cls: 'badge badge--muted',
+      variant: 'outline',
       label: 'Checksum unverified',
       detail: 'Not yet verified against a live clone this build.',
     }
@@ -445,11 +455,7 @@ function goldenImageNote(golden: GoldenImageStatus | null): { cls: string; label
   return null
 }
 
-// Page-level numbered tab strip — theme.css's .tabs/.tab vocabulary
-// (payloads.html:247-251), which the shared Tabs component can't emit (it
-// speaks .segmented and can't put the .tab class on its buttons), so the
-// markup is inlined here with the same roving-tabindex/Arrow/Home/End
-// semantics hp-app.js's dashboard-tab handler had.
+// Page-level tabs keep their stable panel ids and keyboard navigation.
 function PageTabs({
   tabs,
   active,
@@ -461,37 +467,22 @@ function PageTabs({
   onSelect: (id: string) => void
   label: string
 }) {
-  const move = (event: React.KeyboardEvent, index: number) => {
-    let target: number | null = null
-    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') target = (index + 1) % tabs.length
-    else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') target = (index - 1 + tabs.length) % tabs.length
-    else if (event.key === 'Home') target = 0
-    else if (event.key === 'End') target = tabs.length - 1
-    if (target === null) return
-    event.preventDefault()
-    onSelect(tabs[target].id)
-    document.getElementById(`pl-tab-${tabs[target].id}`)?.focus()
-  }
   return (
-    <div className="tabs" role="tablist" aria-label={label}>
+    <Tabs value={active} onValueChange={onSelect}>
+      <TabsList aria-label={label}>
       {tabs.map((tab, index) => (
-        <button
+        <TabsTrigger
           key={tab.id}
           id={`pl-tab-${tab.id}`}
-          className={tab.id === active ? 'tab active' : 'tab'}
-          type="button"
-          role="tab"
-          aria-selected={tab.id === active}
+          value={tab.id}
           aria-controls={`pl-panel-${tab.id}`}
-          tabIndex={tab.id === active ? 0 : -1}
-          onClick={() => onSelect(tab.id)}
-          onKeyDown={(event) => move(event, index)}
         >
           <span>0{index + 1}</span>
           {tab.label}
-        </button>
+        </TabsTrigger>
       ))}
-    </div>
+      </TabsList>
+    </Tabs>
   )
 }
 
@@ -522,8 +513,9 @@ function SearchablePane({
         {shown.length} of {entries.length} {itemLabel}
         {entries.length === 1 ? '' : 's'} shown — {note}
       </p>
-      <input
-        className="search"
+      <Label htmlFor={`evidence-${placeholder.replaceAll(' ', '-')}`} className="sr-only">{placeholder}</Label>
+      <Input
+        id={`evidence-${placeholder.replaceAll(' ', '-')}`}
         type="search"
         placeholder={placeholder}
         aria-label={placeholder}
@@ -600,70 +592,62 @@ function OperatorActionsCard({
   const goldenNote = goldenImageNote(golden)
 
   return (
-    <div className="card wide">
-      <h2>Operator actions</h2>
-      <p className="note">
+    <Card className="col-span-full">
+      <CardHeader><h2 className="font-semibold leading-none tracking-tight">Operator actions</h2><CardDescription>
         Each action queues asynchronous work on the sensor host — nothing here executes inline. Results appear on the
         sandbox and Ghidra pages once the matching worker finishes.
-      </p>
-      <div className="table-scroll">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Action</th>
-              <th>Notes</th>
-              <th>Result</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td className="v">
-                <button
-                  className="btn btn-primary btn-sm"
+      </CardDescription></CardHeader>
+      <CardContent>
+        <Table>
+          <TableHeader><TableRow><TableHead>Action</TableHead><TableHead>Notes</TableHead><TableHead>Result</TableHead></TableRow></TableHeader>
+          <TableBody>
+            <TableRow>
+              <TableCell className="v">
+                <Button
+                  size="sm"
                   type="button"
                   disabled={!editable || sandboxBusy}
                   onClick={detonate}
                 >
                   {sandboxBusy ? 'Queuing…' : 'Detonate in sandbox'}
-                </button>
-              </td>
-              <td>
+                </Button>
+              </TableCell>
+              <TableCell>
                 {goldenNote ? (
                   <>
-                    <span className={goldenNote.cls}>{goldenNote.label}</span>{' '}
+                    <Badge variant={goldenNote.variant}>{goldenNote.label}</Badge>{' '}
                     <span className="note">{goldenNote.detail}</span>
                   </>
                 ) : goldenUnavailable ? (
-                  <span className="badge badge--muted" title="#2178: the staleness report could not be loaded right now — this says so rather than implying no news is good news.">
+                  <Badge variant="outline" title="#2178: the staleness report could not be loaded right now — this says so rather than implying no news is good news.">
                     Golden-image status unavailable
-                  </span>
+                  </Badge>
                 ) : (
                   <span className="note">Routes to the Windows or Linux sandbox automatically, based on classification.</span>
                 )}
-              </td>
-              <td className="v">{sandboxMessage ? <span className="note">{sandboxMessage}</span> : '—'}</td>
-            </tr>
-            <tr>
-              <td className="v">
-                <button
-                  className="btn btn-secondary btn-sm"
+              </TableCell>
+              <TableCell className="v">{sandboxMessage ? <span className="note">{sandboxMessage}</span> : '—'}</TableCell>
+            </TableRow>
+            <TableRow>
+              <TableCell className="v">
+                <Button variant="secondary" size="sm"
                   type="button"
                   disabled={!editable || ghidraBusy}
                   onClick={decompile}
                 >
                   {ghidraBusy ? 'Queuing…' : 'Decompile with Ghidra'}
-                </button>
-              </td>
-              <td>
+                </Button>
+              </TableCell>
+              <TableCell>
                 <span className="note">Headless decompilation — works on any sample with code in it, executes nothing.</span>
-              </td>
-              <td className="v">{ghidraMessage ? <span className="note">{ghidraMessage}</span> : '—'}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+              </TableCell>
+              <TableCell className="v">{ghidraMessage ? <span className="note">{ghidraMessage}</span> : '—'}</TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
       {!editable ? <p className="note">Admin role required to submit for analysis.</p> : null}
-    </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -700,89 +684,44 @@ function ExternalPublicationCard({ hash, editable }: { hash: string; editable: b
     })
 
   return (
-    <div className="card wide">
-      <div className="filters">
-        <h2 className="hp-push-end">External publication</h2>
-        <span className="badge badge--red">leaves local trust boundary</span>
-      </div>
-      <p className="note">
+    <Card className="col-span-full">
+      <CardHeader><h2 className="font-semibold leading-none tracking-tight">External publication <Badge variant="destructive">leaves local trust boundary</Badge></h2><CardDescription>
         GitHub analysis uploads captured material externally — to the public Xore/honeypot repository and third-party
         scanner APIs. It is a separate administrator-only workflow with its own confirmation and audit trail, unlike the
         local analyses above, which never leave this host.
-      </p>
-      <div className="filters">
-        <button className="btn btn-danger btn-sm" type="button" disabled={!editable || busy} onClick={publish}>
+      </CardDescription></CardHeader>
+      <CardContent className="flex items-center gap-3">
+        <Button variant="destructive" size="sm" type="button" disabled={!editable || busy} onClick={publish}>
           {busy ? 'Publishing…' : 'Publish to Xore/honeypot'}
-        </button>
+        </Button>
         {message ? <span className="note">{message}</span> : null}
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   )
 }
 
 // Payload PDF viewer (payloads.html:326-331 + hp-payload-report.js's
-// openViewer/closeViewer): the same application-managed
-// .modal.pdf-viewer-modal overlay as github-analysis.$sha.tsx's
-// ReportViewer — focus moves to the close button on open, Tab cycles
-// inside the dialog, Escape and backdrop clicks close, and focus returns
-// to the trigger on unmount. The iframe is same-origin (the BFF's
+// openViewer/closeViewer): Dialog traps focus, handles Escape/backdrop,
+// and the caller restores focus to the generating action on close.
+// The iframe is same-origin (the BFF's
 // /api/report/{id}/pdf streaming proxy in front of the Rust tier's
 // /api/v1/reports/{id}/pdf), so no sandbox attribute; the plain link is
 // the browsers-without-inline-PDF fallback.
 function PayloadReportViewer({ id, onClose }: { id: string; onClose: () => void }) {
-  const closeRef = useRef<HTMLButtonElement>(null)
-  const panelRef = useRef<HTMLElement>(null)
   const url = `/api/report/${encodeURIComponent(id)}/pdf`
-  useEffect(() => {
-    const previous = document.activeElement
-    closeRef.current?.focus()
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        onClose()
-        return
-      }
-      if (event.key !== 'Tab' || !panelRef.current) return
-      const focusables = panelRef.current.querySelectorAll<HTMLElement>('button, a[href], iframe')
-      if (!focusables.length) return
-      const first = focusables[0]
-      const last = focusables[focusables.length - 1]
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('keydown', onKeyDown)
-      if (previous instanceof HTMLElement && previous.isConnected) previous.focus()
-    }
-  }, [onClose])
   return (
-    <>
-      <div className="modal-backdrop open" aria-hidden="true" onClick={onClose} />
-      <section
-        className="modal pdf-viewer-modal open"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Payload report"
-        ref={panelRef}
-      >
-        <button className="modal__close" type="button" aria-label="Close report viewer" onClick={onClose} ref={closeRef}>
-          ✕
-        </button>
-        <h2 className="pdf-viewer-title">
+    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent aria-label="Payload report">
+        <Button variant="ghost" size="sm" type="button" aria-label="Close report viewer" onClick={onClose} autoFocus>✕</Button>
+        <DialogTitle className="pdf-viewer-title">
           Payload report{' '}
-          <a className="btn btn-ghost btn-sm" href={url} target="_blank" rel="noopener noreferrer">
+          <Button asChild variant="ghost" size="sm"><a href={url} target="_blank" rel="noopener noreferrer">
             open in new tab ↗
-          </a>
-        </h2>
+          </a></Button>
+        </DialogTitle>
         <iframe className="pdf-viewer-frame" title="Payload PDF report preview" src={url} />
-      </section>
-    </>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -823,12 +762,14 @@ function PayloadAnalysis() {
   const [relFailed, setRelFailed] = useState(false)
   const [reportBusy, setReportBusy] = useState(false)
   const [reportId, setReportId] = useState<string | null>(null)
+  const reportTrigger = useRef<HTMLElement | null>(null)
 
   // hp-payload-report.js's trigger flow: disable + relabel while the one
   // synchronous generate request runs, surface progress and failure in
   // the flash line, and open the viewer on the returned id.
   const generateReport = async () => {
     if (reportBusy) return
+    reportTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setReportBusy(true)
     flash('Generating PDF report…')
     try {
@@ -925,8 +866,8 @@ function PayloadAnalysis() {
 
   const skeleton = (
     <>
-      <span className="skeleton-line" aria-hidden="true" />
-      <span className="skeleton-line" aria-hidden="true" />
+      <Skeleton className="h-5 w-40" />
+      <Skeleton className="h-24 w-full" />
     </>
   )
 
@@ -939,32 +880,32 @@ function PayloadAnalysis() {
         chips={
           detail ? (
             <>
-              <Link className="chip" to="/payloads">← payloads</Link>
-              <span className="chip"><code>{detail.hash.slice(0, 32)}</code></span>
-              {kind ? <span className="badge badge--muted">{kind}</span> : null}
-              <span className="chip">{(detail.size_bytes / 1024).toFixed(1)} KB</span>
+              <Button asChild variant="outline" size="sm"><Link to="/payloads">← payloads</Link></Button>
+              <Badge variant="secondary"><code>{detail.hash.slice(0, 32)}</code></Badge>
+              {kind ? <Badge variant="secondary">{kind}</Badge> : null}
+              <Badge variant="secondary">{(detail.size_bytes / 1024).toFixed(1)} KB</Badge>
               {/* #673: origin as a labeled disclosure, matching the
                   action-menu pattern (payloads.html:200-206). */}
               {origin ? (
-                <details className="action-menu hp-pl-label-trigger">
-                  <summary aria-label="Origin" title="Where this payload was captured">Origin</summary>
-                  <div className="action-menu__popover hp-pl-info-popover" role="menu">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild><Button variant="outline" size="sm" title="Where this payload was captured">Origin</Button></DropdownMenuTrigger>
+                  <DropdownMenuContent>
                     <div className="hp-pl-info-row">
                       <span className="k">captured by</span>
                       <span className="v">{originLabel}</span>
                     </div>
                     {origin.session ? (
-                      <a className="action-menu__item" role="menuitem" href={`/sessions/${encodeURIComponent(origin.session)}`}>
+                      <DropdownMenuItem asChild><a href={`/sessions/${encodeURIComponent(origin.session)}`}>
                         Open capturing session →
-                      </a>
+                      </a></DropdownMenuItem>
                     ) : (
                       <div className="hp-pl-info-row">
                         <span className="k">session</span>
                         <span className="v">none recorded for this capture</span>
                       </div>
                     )}
-                  </div>
-                </details>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               ) : null}
               {/* #1140 folded every payload action into one ⋮ menu,
                   matching /payloads' card menu of the time. #1899 took that
@@ -1018,7 +959,7 @@ function PayloadAnalysis() {
         }
       />
       {detail === null ? (
-        <div className="card wide">{skeleton}</div>
+        <Card className="col-span-full" aria-label="Loading payload analysis"><CardContent className="space-y-4 pt-6">{skeleton}</CardContent></Card>
       ) : (
         <>
           {view?.classification && !view.classification.dynamic ? (
@@ -1071,7 +1012,7 @@ function PayloadAnalysis() {
                 <p>Type, hashes, and whether it has been detonated in the isolated sandbox.</p>
               </div>
             </div>
-            <div className="card wide">
+            <Card className="col-span-full p-6">
               <h2>Identity and selected analysis path</h2>
               {view ? (
                 <>
@@ -1081,7 +1022,7 @@ function PayloadAnalysis() {
                         <span className="card__label">identified type</span>
                         <span className="card__value">
                           <strong>{view.classification.label}</strong>{' '}
-                          <span className="badge badge--muted">{view.classification.code}</span>
+                          <Badge variant="secondary">{view.classification.code}</Badge>
                         </span>
                       </div>
                       <div className="card__row">
@@ -1163,9 +1104,9 @@ function PayloadAnalysis() {
               ) : (
                 <p className="empty">No static-analysis record for this hash yet.</p>
               )}
-            </div>
+            </Card>
             {view && (view.scriptType || view.indicators.length > 0) ? (
-              <div className="card half">
+              <Card className="min-w-0 p-6">
                 <h2>Script classification</h2>
                 {view.scriptType ? (
                   <div className="card__row">
@@ -1178,17 +1119,17 @@ function PayloadAnalysis() {
                     <span className="card__label">behavior indicators</span>
                     <span className="card__value">
                       {view.indicators.map((indicator) => (
-                        <span key={indicator} className="chip">
+                        <Badge key={indicator} variant="secondary">
                           {indicator}
-                        </span>
+                        </Badge>
                       ))}
                     </span>
                   </div>
                 ) : null}
                 <p className="note">Heuristic static findings only. Captured content is never interpreted or executed.</p>
-              </div>
+              </Card>
             ) : null}
-            <div className="card half">
+            <Card className="min-w-0 p-6">
               <h2>Isolated dynamic analysis</h2>
               {correlation === null ? (
                 skeleton
@@ -1202,34 +1143,27 @@ function PayloadAnalysis() {
                 </p>
               ) : (
                 <div className="card__scroll">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>completed</th>
-                        <th>exit</th>
-                        <th>changed paths</th>
-                        <th>details</th>
-                      </tr>
-                    </thead>
-                    <tbody>
+                  <Table>
+                    <TableHeader><TableRow><TableHead>completed</TableHead><TableHead>exit</TableHead><TableHead>changed paths</TableHead><TableHead>details</TableHead></TableRow></TableHeader>
+                    <TableBody>
                       {correlation.sandbox_runs.map((run) => (
-                        <tr key={run.job}>
-                          <td>{formatTimestamp(run.completed_at)}</td>
-                          <td className="n">{run.exit_status}</td>
-                          <td className="n">{run.changed}</td>
-                          <td>
-                            <a className="btn btn-ghost btn-sm" href={`/sandbox/${encodeURIComponent(run.job)}`}>
+                        <TableRow key={run.job}>
+                          <TableCell>{formatTimestamp(run.completed_at)}</TableCell>
+                          <TableCell className="n">{run.exit_status}</TableCell>
+                          <TableCell className="n">{run.changed}</TableCell>
+                          <TableCell>
+                            <Button asChild variant="ghost" size="sm"><a href={`/sandbox/${encodeURIComponent(run.job)}`}>
                               sandbox report →
-                            </a>
-                          </td>
-                        </tr>
+                            </a></Button>
+                          </TableCell>
+                        </TableRow>
                       ))}
-                    </tbody>
-                  </table>
+                    </TableBody>
+                  </Table>
                 </div>
               )}
-            </div>
-            <div className="card half">
+            </Card>
+            <Card className="min-w-0 p-6">
               <h2>GitHub analysis</h2>
               {correlation === null ? (
                 skeleton
@@ -1270,19 +1204,19 @@ function PayloadAnalysis() {
                   </a>
                 </>
               )}
-            </div>
-            <div className="card wide">
+            </Card>
+            <Card className="col-span-full p-6">
               <h2>
                 Known elsewhere{' '}
                 {lookupFailed ? (
                   // #2178: an outage must not wear the "not seen
                   // elsewhere" verdict it never checked for.
-                  <span className="badge badge--danger">lookup failed</span>
+                  <Badge variant="destructive">lookup failed</Badge>
                 ) : correlation !== null && related !== null ? (
                   known ? (
-                    <span className="badge badge--green">already analyzed</span>
+                    <Badge>already analyzed</Badge>
                   ) : (
-                    <span className="badge badge--muted">not seen elsewhere</span>
+                    <Badge variant="secondary">not seen elsewhere</Badge>
                   )
                 ) : null}
               </h2>
@@ -1294,9 +1228,9 @@ function PayloadAnalysis() {
                 <p className="note text-danger" role="alert">
                   The cross-store lookup failed this load — rows shown here say nothing about stores that were never
                   reached.{' '}
-                  <button type="button" className="lnk" onClick={() => setAttempt((n) => n + 1)}>
+                  <Button type="button" variant="link" size="sm" onClick={() => setAttempt((n) => n + 1)}>
                     Retry
-                  </button>
+                  </Button>
                 </p>
               ) : correlation === null || related === null ? (
                 skeleton
@@ -1307,7 +1241,7 @@ function PayloadAnalysis() {
                     <span className="card__value">
                       {correlation.ghidra ? (
                         <>
-                          <span className="badge badge--muted">{correlation.ghidra.exit_status}</span>
+                          <Badge variant="secondary">{correlation.ghidra.exit_status}</Badge>
                           {correlation.ghidra.completed_at ? ` completed ${formatTimestamp(correlation.ghidra.completed_at)} — ` : ' — '}
                           <a className="btn btn-ghost btn-sm" href={`/ghidra/${encodeURIComponent(sha256 || detail.hash)}`}>
                             full result →
@@ -1335,7 +1269,7 @@ function PayloadAnalysis() {
                   </div>
                 </>
               )}
-            </div>
+            </Card>
           </div>
 
           <div
@@ -1351,22 +1285,17 @@ function PayloadAnalysis() {
                 <p>YARA matches, built-in heuristics, and the indicators worth pivoting on.</p>
               </div>
             </div>
-            <div className="card wide">
+            <Card className="col-span-full p-6">
               <h2>YARA static scan</h2>
               {allMatches.length > 0 ? (
                 <div className="card__scroll">
-                  <table className="data-table">
-                    <tbody>
+                  <Table>
+                    <TableBody>
                       {allMatches.map((match) => (
-                        <tr key={match}>
-                          <td>
-                            <span className="badge badge--red">match</span>
-                          </td>
-                          <td className="v">{match}</td>
-                        </tr>
+                        <TableRow key={match}><TableCell><Badge variant="destructive">match</Badge></TableCell><TableCell className="v">{match}</TableCell></TableRow>
                       ))}
-                    </tbody>
-                  </table>
+                    </TableBody>
+                  </Table>
                 </div>
               ) : (
                 <p className="empty">{yara.scanned ? 'No YARA rules matched this sample.' : 'Waiting for the isolated YARA scanner.'}</p>
@@ -1378,59 +1307,45 @@ function PayloadAnalysis() {
                   attribution.
                 </p>
               ) : null}
-            </div>
-            <div className="card half">
+            </Card>
+            <Card className="min-w-0 p-6">
               <h2>Rule matches</h2>
               {view && view.rules.length > 0 ? (
                 <div className="card__scroll">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>severity</th>
-                        <th>rule</th>
-                        <th>reason</th>
-                      </tr>
-                    </thead>
-                    <tbody>
+                  <Table>
+                    <TableHeader><TableRow><TableHead>severity</TableHead><TableHead>rule</TableHead><TableHead>reason</TableHead></TableRow></TableHeader>
+                    <TableBody>
                       {view.rules.map((rule) => (
-                        <tr key={rule.name}>
-                          <td>
-                            <span className="badge badge--muted">{rule.severity}</span>
-                          </td>
-                          <td className="v">{rule.name}</td>
-                          <td className="v">{rule.description}</td>
-                        </tr>
+                        <TableRow key={rule.name}><TableCell><Badge variant="secondary">{rule.severity}</Badge></TableCell><TableCell className="v">{rule.name}</TableCell><TableCell className="v">{rule.description}</TableCell></TableRow>
                       ))}
-                    </tbody>
-                  </table>
+                    </TableBody>
+                  </Table>
                 </div>
               ) : (
                 <p className="empty">No built-in static rules matched.</p>
               )}
               <p className="note">Deterministic YARA-style heuristics; no sample execution or attribution.</p>
-            </div>
-            <div className="card half">
+            </Card>
+            <Card className="min-w-0 p-6">
               <h2>Extracted indicators</h2>
               {iocs.length > 0 ? (
                 <div className="card__scroll">
-                  <table className="data-table">
-                    <tbody>
+                  <Table><TableBody>
                       {iocs.map((ioc) => (
-                        <tr key={ioc}>
-                          <td className="v">
+                        <TableRow key={ioc}>
+                          <TableCell className="v">
                             <a href={`/search?q=${encodeURIComponent(ioc)}`} title="search telemetry for this indicator">
                               {ioc}
                             </a>
-                          </td>
-                        </tr>
+                          </TableCell>
+                        </TableRow>
                       ))}
-                    </tbody>
-                  </table>
+                    </TableBody></Table>
                 </div>
               ) : (
                 <p className="empty">No URL, domain, or IP indicators found.</p>
               )}
-            </div>
+            </Card>
           </div>
 
           <div
@@ -1446,7 +1361,7 @@ function PayloadAnalysis() {
                 <p>Raw bytes, metadata, and extracted text are visible below in bounded, searchable regions.</p>
               </div>
             </div>
-            <div className="card wide">
+            <Card className="col-span-full p-6">
               <h2>Bytes and metadata</h2>
               <p className="note">The sample is read, never interpreted or executed.</p>
               <h3>Hex / ASCII preview — first 512 bytes</h3>
@@ -1462,8 +1377,8 @@ function PayloadAnalysis() {
               {view?.truncated ? (
                 <p className="note">Deep inspection is capped at 16 MiB; hashes cover the complete file.</p>
               ) : null}
-            </div>
-            <div className="card half">
+            </Card>
+            <Card className="min-w-0 p-6">
               <h2>Extracted text</h2>
               <SearchablePane
                 entries={[
@@ -1475,8 +1390,8 @@ function PayloadAnalysis() {
                 itemLabel="sequence"
                 note="bounded static extraction; sample content is never executed"
               />
-            </div>
-            <div className="card half">
+            </Card>
+            <Card className="min-w-0 p-6">
               <h2>Decoded candidates</h2>
               <SearchablePane
                 entries={(view?.decoded ?? []).map((item) => ({
@@ -1488,14 +1403,14 @@ function PayloadAnalysis() {
                 itemLabel="candidate"
                 note="bounded decodes only; recovered content is never executed"
               />
-            </div>
+            </Card>
           </div>
 
           <OperatorActionsCard hash={detail.hash} golden={goldenStatus} goldenUnavailable={goldenUnavailable} editable={isAdmin} />
           <ExternalPublicationCard hash={detail.hash} editable={isAdmin} />
         </>
       )}
-      {reportId ? <PayloadReportViewer id={reportId} onClose={() => setReportId(null)} /> : null}
+      {reportId ? <PayloadReportViewer id={reportId} onClose={() => { setReportId(null); queueMicrotask(() => reportTrigger.current?.focus()) }} /> : null}
     </>
   )
 }
