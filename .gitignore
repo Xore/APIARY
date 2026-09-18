@@ -33,3 +33,5 @@ analysis/ghidra/revdeck/
 
 .grit
 .orchestrator/
+
+arcane/home/honeypot-dashboard/frontend-next/.claude/
