@@ -57,8 +57,12 @@ test('gallery and mobile navigation render without console errors', async ({ pag
 
 test('theme previews retain their full tile layout', async ({ page }) => {
   await page.goto('/settings')
-  await page.locator('.settings-layout__sidebar').getByText('Appearance').click()
-  const tile = page.locator('[role="radiogroup"][aria-label="Theme"] [data-value="claude"]')
+  await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Appearance' }).click()
+  const mode = page.getByRole('group', { name: 'Theme mode' }).getByRole('button', { name: 'Light' })
+  await expect(mode).toBeVisible()
+  await mode.click()
+  await expect(mode).toHaveAttribute('aria-pressed', 'true')
+  const tile = page.locator('.hp-theme-gallery [data-value="claude"]')
   await expect(tile).toBeVisible()
   expect((await tile.boundingBox())?.height).toBeGreaterThan(90)
 })

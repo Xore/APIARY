@@ -969,23 +969,23 @@ function PayloadAnalysis() {
             </p>
           ) : null}
 
-          <div className="metric-grid">
-            <div className="metric">
-              <div className="metric__value">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-4">
+            <Card className="min-w-0">
+              <CardHeader><h2 className="text-sm font-semibold">Static risk</h2></CardHeader>
+              <CardContent className="text-2xl font-semibold tabular-nums">
                 {view?.riskScore !== null && view?.riskScore !== undefined ? `${view.riskScore} / 100 • ${view.riskLevel}` : '—'}
-              </div>
-              <div className="metric__label">Static risk</div>
-            </div>
-            <div className="metric">
-              <div className="metric__value metric__value--text">
+              </CardContent>
+            </Card>
+            <Card className="min-w-0">
+              <CardHeader><h2 className="text-sm font-semibold">Packing likelihood</h2></CardHeader>
+              <CardContent className="font-semibold">
                 {view?.packedLikely === null || view === null ? '—' : view.packedLikely ? 'elevated' : 'not indicated'}
-              </div>
-              <div className="metric__label">Packing likelihood</div>
-            </div>
-            <div className="metric">
-              <div className="metric__value">{view ? iocs.length : '—'}</div>
-              <div className="metric__label">Extracted IOCs</div>
-            </div>
+              </CardContent>
+            </Card>
+            <Card className="min-w-0">
+              <CardHeader><h2 className="text-sm font-semibold">Extracted IOCs</h2></CardHeader>
+              <CardContent className="text-2xl font-semibold tabular-nums">{view ? iocs.length : '—'}</CardContent>
+            </Card>
           </div>
 
           <PageTabs

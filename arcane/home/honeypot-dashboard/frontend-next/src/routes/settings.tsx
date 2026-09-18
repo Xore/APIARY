@@ -2726,7 +2726,7 @@ export function SettingsSurface({
           column. Keep every pane mounted so search and staged edits survive.
           The modal keeps its existing lifecycle and focus ownership. */}
       <section
-        className={inModal ? 'relative min-w-0 space-y-6' : 'min-w-0 space-y-6 p-4 md:p-6'}
+        className={inModal ? 'relative min-w-0 space-y-6 pt-16' : 'min-w-0 space-y-6 p-4 md:p-6'}
         id={inModal ? undefined : 'hp-settings'}
         aria-labelledby={inModal ? undefined : 'hp-dash-settings-title'}
       >

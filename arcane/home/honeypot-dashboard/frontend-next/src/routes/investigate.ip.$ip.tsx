@@ -1,5 +1,8 @@
 import { Card, CardHeader, CardContent } from '../components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../components/ui/table'
+import { Button } from '../components/ui/button'
+import { Field, FieldLabel } from '../components/ui/field'
+import { Input } from '../components/ui/input'
 // Per-IP investigation — one source address's whole profile: summary
 // chips, tabbed Activity/Indicators/Correlation views (ips.html's
 // attacker-profile layout, #1682), and the newest events with the record
@@ -146,21 +149,22 @@ function BlockControl({ ip }: { ip: string }) {
           blocked{state.BlockedBy ? ` by ${state.BlockedBy}` : ''}
           {state.ExpiresAt ? `, expires ${formatTimestamp(state.ExpiresAt)}` : ''}
         </span>
-        <button
-          className="btn btn-sm btn-secondary"
+        <Button
+          variant="secondary"
+          size="sm"
           type="button"
           disabled={busy}
           title="Remove this IP from the manual blackhole list."
           onClick={() => void apply(false)}
         >
           {busy ? '…' : 'unblock'}
-        </button>
+        </Button>
       </span>
     )
   }
   return (
     <form
-      className="inline-form hp-row"
+      className="flex flex-wrap items-end gap-2"
       onSubmit={(event) => {
         event.preventDefault()
         const raw = new FormData(event.currentTarget).get('expires_days')
@@ -168,24 +172,26 @@ function BlockControl({ ip }: { ip: string }) {
         void apply(true, Number.isFinite(days) && days > 0 ? days : undefined)
       }}
     >
-      <label htmlFor="attacker-block-expires">expire after</label>
-      <input
+      <Field className="w-auto min-w-28 gap-1"><FieldLabel htmlFor="attacker-block-expires">expire after</FieldLabel>
+      <Input
         type="number"
         id="attacker-block-expires"
         name="expires_days"
         min="1"
         placeholder="never"
-        className="hp-input hp-num"
+        className="w-28"
       />
+      </Field>
       <span>day(s)</span>
-      <button
-        className="btn btn-sm btn-danger"
+      <Button
+        variant="destructive"
+        size="sm"
         type="submit"
         disabled={busy}
         title="Drop this IP's connections at portbridge going forward; does not retroactively affect anything already logged"
       >
         {busy ? '…' : 'block'}
-      </button>
+      </Button>
     </form>
   )
 }
@@ -307,24 +313,24 @@ function CorrelationPanel({ correlation }: { correlation: Correlation }) {
         ) : null}
         {correlation.records.length > 0 ? (
           <div className="card__scroll">
-            <table className="recent data-table">
-              <thead>
-                <tr>
-                  <th>time</th>
-                  <th>sensor</th>
-                  <th>summary</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table className="recent">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>time</TableHead>
+                  <TableHead>sensor</TableHead>
+                  <TableHead>summary</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {correlation.records.map((record, index) => (
-                  <tr key={`${record.time}-${index}`}>
-                    <td>{formatTimestamp(record.time)}</td>
-                    <td>{record.sensor}</td>
-                    <td className="v">{record.detail || record.proto}</td>
-                  </tr>
+                  <TableRow key={`${record.time}-${index}`}>
+                    <TableCell>{formatTimestamp(record.time)}</TableCell>
+                    <TableCell>{record.sensor}</TableCell>
+                    <TableCell className="v">{record.detail || record.proto}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         ) : (
           <p className="empty">No Elasticsearch correlation records were found for this IP.</p>

@@ -256,13 +256,13 @@ function KpiSpark({ hourly }: { hourly: number[] | undefined }) {
 function KpiStrip({ kpis, payloads, payloadsFailed }: { kpis: OverviewKpis | null; payloads: number | null; payloadsFailed?: boolean }) {
   return (
     <div className="metric-grid" id="overview-kpis">
-      <Card className="metric !rounded-none !border-t-0 !border-r-0 !border-b-0 !bg-transparent !shadow-none"><a className="block" href="/events" title="Open all normalized events in the current dashboard window">
+      <Card className="min-w-0 p-4"><a className="block" href="/events" title="Open all normalized events in the current dashboard window">
         <div className="metric__value font-serif text-[26px] font-medium tracking-tight">
           <KpiValue value={kpis && kpis.ready ? kpis.total : null} />
         </div>
         <div className="metric__label">All events</div>
       </a></Card>
-      <Card className="metric !rounded-none !border-t-0 !border-r-0 !border-b-0 !bg-transparent !shadow-none"><a className="block" href="/events?since=24h" title="Open events received during the last 24 hours">
+      <Card className="min-w-0 p-4"><a className="block" href="/events?since=24h" title="Open events received during the last 24 hours">
         <div className="metric__value font-serif text-[26px] font-medium tracking-tight">
           <KpiValue value={kpis && kpis.ready ? kpis.last24h : null} />
           {kpis?.change24h ? (
@@ -277,13 +277,13 @@ function KpiStrip({ kpis, payloads, payloadsFailed }: { kpis: OverviewKpis | nul
         <div className="metric__label">Events in 24 hours</div>
         <KpiSpark hourly={kpis?.hourly} />
       </a></Card>
-      <Card className="metric !rounded-none !border-t-0 !border-r-0 !border-b-0 !bg-transparent !shadow-none"><a className="block" href="/ips" title="Distinct attacker source addresses observed by the sensors">
+      <Card className="min-w-0 p-4"><a className="block" href="/ips" title="Distinct attacker source addresses observed by the sensors">
         <div className="metric__value font-serif text-[26px] font-medium tracking-tight">
           <KpiValue value={kpis && kpis.ready ? kpis.unique_ips : null} />
         </div>
         <div className="metric__label">Attack sources</div>
       </a></Card>
-      <Card className="metric !rounded-none !border-t-0 !border-r-0 !border-b-0 !bg-transparent !shadow-none"><a className="block" href="/events?kind=login" title="Authentication attempts captured by interactive honeypots">
+      <Card className="min-w-0 p-4"><a className="block" href="/events?kind=login" title="Authentication attempts captured by interactive honeypots">
         <div className="metric__value font-serif text-[26px] font-medium tracking-tight">
           {/* #1963: from the kpis endpoint, not /overview/dashboard -- this
               strip renders on every tab, and reading one integer from the
@@ -293,7 +293,7 @@ function KpiStrip({ kpis, payloads, payloadsFailed }: { kpis: OverviewKpis | nul
         </div>
         <div className="metric__label">Login attempts</div>
       </a></Card>
-      <Card className="metric !rounded-none !border-t-0 !border-r-0 !border-b-0 !bg-transparent !shadow-none"><a className="block" href="/payloads" title="Distinct payload binaries captured safely">
+      <Card className="min-w-0 p-4"><a className="block" href="/payloads" title="Distinct payload binaries captured safely">
         <div className="metric__value font-serif text-[26px] font-medium tracking-tight">
           {payloadsFailed && payloads === null ? (
             /* #2178: the tile says nothing rather than a skeleton that
@@ -574,7 +574,7 @@ function Overview() {
             </div>
             <a className="section-link" href="/events?since=24h">View last 24 hours →</a>
           </div>
-          <Card className="card wide chart-card">
+          <Card className="col-span-full min-w-0 p-6 chart-card">
             <h2>Activity — last 24h</h2>
             <Heatmap
               rows={dashboard ? dashboard.heatmap.filter((row) => !heatSensor || row.sensor === heatSensor) : null}
@@ -588,7 +588,7 @@ function Overview() {
               />
             ) : null}
           </Card>
-          <Card className="card wide map-card">
+          <Card className="col-span-full min-w-0 p-6 map-card">
             <h2>Attack origins — live geographic view</h2>
             <AttackMap points={dashboard ? dashboard.map_points : null} failed={dashboardFailed} />
             <p className="note">
@@ -603,7 +603,7 @@ function Overview() {
             </div>
             <a className="section-link" href="/events">Open full event explorer →</a>
           </div>
-          <Card className="card wide" id="recent-events-card">
+          <Card className="col-span-full min-w-0 p-6" id="recent-events-card">
             <h2>Recent events</h2>
             {recent === null ? (
               recentFailed ? (

@@ -7,6 +7,8 @@ import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { Button } from '../components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '../components/ui/card'
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from '../components/ui/empty'
+import { Table, TableBody, TableCell, TableRow } from '../components/ui/table'
 import { Field, FieldLabel } from '../components/ui/field'
 import { Input } from '../components/ui/input'
 import { Skeleton } from '../components/ui/skeleton'
@@ -103,13 +105,11 @@ function SearchPage() {
       {result && result !== 'failed' && result.total === 0 ? (
         /* The Go zero-state (search.html:57-66): explain what was searched
            and hand the operator pivots out, never a bare sentence. */
-        <Card><CardHeader><CardTitle>Nothing matched “{result.query}”</CardTitle></CardHeader><CardContent>
-            <p>
+        <Card><Empty><EmptyHeader><EmptyTitle>Nothing matched “{result.query}”</EmptyTitle><EmptyDescription>
               No sensor event, session, payload, command, credential, detection, fingerprint, decoy, or sandbox run
               mentions this value. Sensors only hold the retention window configured for this deployment — an older
               indicator may have aged out.
-            </p>
-            <div className="filters">
+            </EmptyDescription></EmptyHeader><EmptyContent><div className="filters">
               <Link className="chip" to="/events">
                 browse all events
               </Link>
@@ -122,25 +122,24 @@ function SearchPage() {
               <Link className="chip" to="/history" search={{ q: result.query }}>
                 search Elasticsearch history
               </Link>
-            </div>
-        </CardContent></Card>
+            </div></EmptyContent></Empty></Card>
       ) : null}
       {result && result !== 'failed'
         ? result.groups.map((group) => (
             <Card className="min-w-0" key={group.title}>
               <CardHeader><CardTitle>{group.title}</CardTitle></CardHeader><CardContent className="overflow-x-auto">
-              <table className="data-table">
-                <tbody>
+              <Table>
+                <TableBody>
                   {group.hits.map((hit) => (
-                    <tr key={hit.label}>
-                      <td className="n">{hit.count.toLocaleString('en-US')}</td>
-                      <td className="v">
+                    <TableRow key={hit.label}>
+                      <TableCell className="n">{hit.count.toLocaleString('en-US')}</TableCell>
+                      <TableCell className="v">
                         {hit.url.startsWith('/') ? <Link to={hit.url}>{hit.label}</Link> : hit.label}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
               </CardContent>{group.more > 0 ? (
                 /* Overflow past the 8-per-group cap (search.html:51). */
                 <CardFooter>

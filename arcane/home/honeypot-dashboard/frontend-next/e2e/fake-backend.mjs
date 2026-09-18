@@ -75,6 +75,33 @@ const eventRow = (n) => ({
   record: { "@timestamp": NOW, sensor: { name: "cowrie" }, source: { ip: `203.0.113.${n + 1}`, geo: { country_iso_code: "CN" } }, honeypot: { kind: "cowrie.log.opened", session_id: `sess-${n}` } },
 });
 
+// event_page.rs returns the full indexed document plus three count/sample
+// relations; keep the document's original field names (not pane pivots).
+const eventPage = {
+  id: "e2e-event-0",
+  index: "honeypot-v2-2026.08.26",
+  time: NOW,
+  sensor: "citrix-honeypot",
+  src_ip: "203.0.113.1",
+  session: "sess-0",
+  community_id: "",
+  hashes: [],
+  record: {
+    "@timestamp": NOW,
+    event: { sensor: "citrix-honeypot" },
+    source: { ip: "203.0.113.1" },
+    honeypot: {
+      sensor: "citrix-honeypot", src_ip: "203.0.113.1", session: "sess-0",
+      event: "cve_2019_19781_payload", method: "POST",
+      path: "/vpn/../vpns/portal/scripts/newbm.pl", data: "id",
+    },
+  },
+  session_events: { key: "sess-0", total: 0, rows: [] },
+  flow_events: { key: "", total: 0, rows: [] },
+  source_events: { key: "203.0.113.1", total: 0, rows: [] },
+  flow_link: null,
+};
+
 // Aggregate/investigate endpoints. These pages are typed against the Rust
 // backend's exact serde output, so every field a column renders must be
 // present or hydration throws on undefined.
@@ -319,6 +346,7 @@ function route(pathname, searchParams = new URLSearchParams()) {
   if (pathname === "/api/v1/events") {
     return { total: 1337, offset: 0, rows: [eventRow(0), eventRow(1), eventRow(2)], fingerprint_ips: null };
   }
+  if (pathname === "/api/v1/event/e2e-event-0") return eventPage;
   if (pathname === "/api/v1/filter-values") {
     return { sensors: ["citrix", "cowrie"], countries: ["CN", "NL"], protos: ["tcp"], ports: ["22", "8089"], kinds: [] };
   }
@@ -783,6 +811,13 @@ function topologyStacks() {
 export function startFakeBackend(port) {
   const server = createServer((req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
+    // event_page.rs returns 404 for an id absent from the index; the BFF
+    // distinguishes that from a backend failure when rendering the page.
+    if (url.pathname.startsWith("/api/v1/event/") && url.pathname !== "/api/v1/event/e2e-event-0" && !url.pathname.endsWith("/connections")) {
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "no such event" }));
+      return;
+    }
     const body = JSON.stringify(route(url.pathname, url.searchParams));
     res.writeHead(200, { "content-type": "application/json" });
     res.end(body);

@@ -126,9 +126,9 @@ function TopTable({ label, rows, href }: { label: string; rows: Row[]; href?: (k
   if (rows.length === 0) return null
   const most = rows[0].count
   return (
-    <div>
-      <p className="subtitle">{label}</p>
-      <Table>
+    <Card className="min-w-0">
+      <CardHeader><h2 className="text-sm font-semibold">{label}</h2></CardHeader>
+      <CardContent><Table>
         <TableBody>
           {rows.map((row) => (
             <TableRow key={row.key}>
@@ -142,8 +142,8 @@ function TopTable({ label, rows, href }: { label: string; rows: Row[]; href?: (k
             </TableRow>
           ))}
         </TableBody>
-      </Table>
-    </div>
+      </Table></CardContent>
+    </Card>
   )
 }
 
@@ -267,13 +267,13 @@ function SensorPage() {
                 The quantities this sensor exists to produce, over the last 7 days — not an event count, which says the
                 same thing about every sensor.
               </CardDescription></CardHeader>
-              <CardContent className="metric-grid">
+              <CardContent className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-4">
                 {view.measures.map((measure) => (
-                  <div className="metric" key={measure.label}>
-                    <div className="metric__value">{measureValue(measure)}</div>
-                    <div className="metric__label">{measure.label}</div>
-                    <div className="metric__trend">most in one event: {measurePeak(measure)}</div>
-                  </div>
+                  <Card className="min-w-0" key={measure.label}>
+                    <CardHeader><h2 className="text-sm font-semibold">{measure.label}</h2></CardHeader>
+                    <CardContent><div className="text-2xl font-semibold tabular-nums">{measureValue(measure)}</div>
+                    <p className="text-sm text-muted-foreground">most in one event: {measurePeak(measure)}</p></CardContent>
+                  </Card>
                 ))}
               </CardContent>
             </Card>
@@ -289,7 +289,7 @@ function SensorPage() {
 
           <Card className="col-span-full">
             <CardHeader><h2 className="font-semibold leading-none tracking-tight">Who reached it</h2></CardHeader>
-            <CardContent className="metric-grid">
+            <CardContent className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-4">
               <TopTable
                 label="source addresses"
                 rows={view.top_sources}
@@ -309,7 +309,7 @@ function SensorPage() {
                 This sensor&apos;s own leaderboards — the fields that mean something for this protocol, rather than the
                 same five for every sensor.
               </CardDescription></CardHeader>
-              <CardContent className="metric-grid">
+              <CardContent className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-4">
                 {view.top_lists.map((list) => (
                   <TopTable key={list.label} label={list.label} rows={list.rows} />
                 ))}
