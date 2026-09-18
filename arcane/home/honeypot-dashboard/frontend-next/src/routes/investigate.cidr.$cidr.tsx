@@ -70,7 +70,7 @@ function MiniTable({ title, rows }: { title: string; rows: Kv[] }) {
   if (rows.length === 0) return null
   return (
     <Card className="min-w-0">
-      <CardHeader><CardTitle className="text-lg"><h2>{title}</h2></CardTitle></CardHeader>
+      <CardHeader><h2 className="font-semibold leading-none tracking-tight">{title}</h2></CardHeader>
       <CardContent>
         <Table>
           <TableBody>
@@ -135,6 +135,7 @@ function InvestigateCidr() {
             <Link className="text-sm text-primary underline-offset-4 hover:underline" to="/campaigns">
               &larr; campaigns
             </Link>
+            {correlation ? <span className="text-sm text-muted-foreground">· {correlation.total.toLocaleString('en-US')} correlated events for this network ·</span> : null}
             {/* Go's /events?cidr= chip (intel.html:180) — the events API's
                 ip filter is a term query on the ip-mapped source.ip field
                 (events.rs), which accepts CIDR notation natively, so ?ip=
