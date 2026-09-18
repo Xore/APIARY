@@ -11,7 +11,14 @@ vi.mock('@tanstack/react-router', () => ({
   Link: 'a', useNavigate: () => fixture.navigate,
   createFileRoute: () => (config: Record<string, unknown>) => ({ ...config, useParams: () => fixture.params, useLoaderData: () => fixture.data }),
 }))
-vi.mock('@tanstack/react-start', () => ({ createServerFn: () => ({ validator() { return this }, handler: (fn: unknown) => fn }) }))
+vi.mock('@tanstack/react-start', () => ({ createServerFn: () => ({ validator() { return this }, handler: (fn: Function) => {
+  // Workbench mounts also load owner-scoped recipes/runs. Stub those GETs at
+  // the server-function seam: dynamic auth imports cannot use a Vitest request.
+  const source = fn.toString()
+  if (source.includes('/api/v1/workbench/recipes')) return async () => ({ recipes: [] })
+  if (source.includes('/api/v1/workbench/runs')) return async () => ({ runs: [] })
+  return fn
+} }) }))
 vi.mock('../lib/auth', () => ({ getSessionUser: async () => ({ username: 'operator', role: 'admin' }) }))
 vi.mock('../lib/backend.server', () => ({
   serviceJSON: async (path: string) => path.includes('/ml-health') || path.includes('/gpu-queue') ? [] : ({ rows: [], total: 0, recipes: [], runs: [], sensors: [] }),
