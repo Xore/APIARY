@@ -6,6 +6,10 @@ import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
+import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
+import { Input } from '../components/ui/input'
 import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
 
@@ -45,14 +49,14 @@ export const Route = createFileRoute('/history')({
 
 const COLUMNS: Column<EventRow>[] = [
   { header: 'time', render: (row) => formatTimestamp(row.time) },
-  { header: 'sensor', render: (row) => <span className="badge badge--muted">{row.sensor}</span> },
+  { header: 'sensor', render: (row) => <Badge variant="secondary">{row.sensor}</Badge> },
   { header: 'source ip', className: 'v', render: (row) => row.src_ip },
   { header: 'port', className: 'n', render: (row) => (row.port ? `:${row.port}` : '') },
   { header: 'detail', className: 'v', render: (row) => row.detail || row.proto },
   {
     header: 'record',
     detail: true,
-    render: (row) => <pre className="hp-md__preview">{JSON.stringify(row.record, null, 2)}</pre>,
+    render: (row) => <pre className="max-h-96 overflow-auto rounded-md border bg-muted p-3 text-xs whitespace-pre-wrap break-all">{JSON.stringify(row.record, null, 2)}</pre>,
   },
 ]
 
@@ -139,37 +143,37 @@ function History() {
         label="Operations"
         title="Event history"
         subtitle="Raw search across the full event archive — Lucene query syntax, 90-day window, exportable."
-        chips={<span className="chip">{failed ? 'load failed' : `${total.toLocaleString('en-US')} matches`}</span>}
+        chips={<Badge variant="secondary">{failed ? 'load failed' : `${total.toLocaleString('en-US')} matches`}</Badge>}
       />
-      <form
-        className="filters"
+      <Card><CardHeader><CardTitle><h2>Search archive</h2></CardTitle></CardHeader><CardContent><form
+        className="flex flex-wrap items-center gap-2"
         onSubmit={(event) => {
           event.preventDefault()
           void search(query)
         }}
       >
-        <input
-          className="form-input"
+        <Input
+          className="min-w-0 flex-1 basis-64"
           type="search"
           placeholder='Lucene query — e.g. source.ip:1.2.3.4 AND honeypot.event:login'
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           aria-label="History search query"
         />
-        <button className="btn btn-secondary btn-sm" type="submit">
+        <Button variant="secondary" size="sm" type="submit">
           Search
-        </button>
-        <button className="btn btn-secondary btn-sm" type="button" onClick={exportJSON} disabled={!rows || rows.length === 0}>
+        </Button>
+        <Button variant="secondary" size="sm" type="button" onClick={exportJSON} disabled={!rows || rows.length === 0}>
           Export loaded rows
-        </button>
+        </Button>
         <a
-          className="btn btn-secondary btn-sm"
+          className="inline-flex h-8 items-center rounded-md bg-secondary px-3 text-xs font-medium text-secondary-foreground hover:bg-secondary/80"
           title="Download up to 500 matches for the current query directly from the server, not just what's loaded here"
           href={`/api/export/history.json${activeQuery.current ? `?q=${encodeURIComponent(activeQuery.current)}` : ''}`}
         >
           Export JSON
         </a>
-      </form>
+      </form></CardContent></Card>
       {failed ? (
         <ErrorStateBlock
           title="Event history failed to load"

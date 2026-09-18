@@ -613,6 +613,7 @@ function route(pathname, searchParams = new URLSearchParams()) {
     return { generated_at: NOW, sensors: topologySensors(), stacks: topologyStacks(), flow: flowGraph() };
   }
   if (pathname === "/api/v1/ml-health") return [];
+  if (pathname === "/api/v1/store/dead-letters") return { rows: [{ "@timestamp": NOW, reason: "mapping rejected", logset: "cowrie" }], total: 1 };
   if (pathname === "/api/v1/ml-anomalies/acks") return {};
   if (pathname.startsWith("/api/v1/store/static-analysis")) return { rows: [{ Fingerprint: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", Analysis: { Kind: "script", Summary: "Shell script" } }], total: 1 };
   if (pathname.startsWith("/api/v1/store/yara")) return { rows: [{ file: { hash: { sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" } }, yara: { matches: ["FixtureRule"] }, "@timestamp": NOW }], total: 1 };

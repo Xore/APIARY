@@ -11,6 +11,14 @@ import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useMemo, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
+import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '../components/ui/empty'
+import { Field, FieldGroup, FieldLabel } from '../components/ui/field'
+import { Input } from '../components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
+import { Textarea } from '../components/ui/textarea'
 import { when } from '../components/StoreList'
 import { getSessionUser } from '../lib/auth'
 
@@ -120,15 +128,14 @@ function ProvisionForm({ onCreated }: { onCreated: () => void }) {
   const [message, setMessage] = useState('')
 
   return (
-    <div className="card wide">
-      <h2>Provision a new credential</h2>
-      <p className="note">
+    <Card>
+      <CardHeader><CardTitle><h2>Provision a new credential</h2></CardTitle><CardDescription>
         Writes the bait file live into the honeypot's filesystem via honeyfs-implant as soon as you submit — this isn't a
         draft. Cowrie's honeyfs is the only implant target wired up today. Rotating re-implants the same path with a new
         password — the file's location never changes.
-      </p>
+      </CardDescription></CardHeader><CardContent>
       <form
-        className="filters"
+        className="space-y-4"
         onSubmit={async (event) => {
           event.preventDefault()
           if (busy) return
@@ -151,64 +158,64 @@ function ProvisionForm({ onCreated }: { onCreated: () => void }) {
             setBusy(false)
           }
         }}
-      >
-        <input
-          className="form-input"
+      ><FieldGroup className="grid gap-3 sm:grid-cols-2">
+        <Field><FieldLabel htmlFor="credential-path">Honeyfs path</FieldLabel><Input
+          id="credential-path"
           type="text"
           required
           placeholder="path — e.g. home/mwagner/.aws/credentials"
           value={path}
           onChange={(event) => setPath(event.target.value)}
           aria-label="Honeyfs path"
-        />
-        <input
-          className="form-input"
+        /></Field>
+        <Field><FieldLabel htmlFor="credential-username">Username</FieldLabel><Input
+          id="credential-username"
           type="text"
           required
           placeholder="username"
           value={username}
           onChange={(event) => setUsername(event.target.value)}
           aria-label="Username"
-        />
-        <input
-          className="form-input"
+        /></Field>
+        <Field><FieldLabel htmlFor="credential-password">Password</FieldLabel><Input
+          id="credential-password"
           type="text"
           required
           placeholder="password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           aria-label="Password"
-        />
-        <button className="btn btn-ghost btn-sm" type="button" onClick={() => setPassword(randomPassword())}>
+        /></Field>
+        <Field className="justify-end"><Button variant="outline" size="sm" type="button" onClick={() => setPassword(randomPassword())}>
           Generate
-        </button>
-        <input
-          className="form-input"
+        </Button></Field>
+        <Field><FieldLabel htmlFor="credential-memo">Memo</FieldLabel><Input
+          id="credential-memo"
           type="text"
           required
           placeholder="memo — why this bait exists"
           value={memo}
           onChange={(event) => setMemo(event.target.value)}
           aria-label="Memo"
-        />
-        <textarea
-          className="form-input"
+        /></Field>
+        <Field><FieldLabel htmlFor="credential-template">Content template</FieldLabel><Textarea
+          id="credential-template"
           rows={2}
           placeholder="content template (optional) — defaults to a two-line username=/password= file using {{username}}/{{password}} placeholders"
           value={template}
           onChange={(event) => setTemplate(event.target.value)}
           aria-label="Content template"
-        />
-        <button
-          className="btn btn-secondary btn-sm"
+        /></Field></FieldGroup>
+        <Button
+          variant="secondary" size="sm"
           type="submit"
           disabled={busy || !path.trim() || !username.trim() || !password.trim() || !memo.trim()}
         >
           {busy ? 'Provisioning…' : 'Provision credential'}
-        </button>
-        {message ? <span className="note">{message}</span> : null}
-      </form>
-    </div>
+        </Button>
+        {message ? <span className="text-sm text-muted-foreground" role="status">{message}</span> : null}
+      </form></CardContent>
+    </Card>
   )
 }
 
@@ -266,9 +273,9 @@ function CredentialActions({
 
   return (
     <>
-      <div className="filters">
-        <input
-          className="form-input"
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          className="min-w-0 flex-1 basis-48"
           type="text"
           placeholder="new password (blank = auto-generate)"
           value={newPassword}
@@ -276,42 +283,43 @@ function CredentialActions({
           disabled={!isAdmin || rotateBusy}
           aria-label="New password"
         />
-        <button className="btn btn-secondary btn-sm" type="button" disabled={!isAdmin || rotateBusy} onClick={rotate}>
+        <Button variant="secondary" size="sm" type="button" disabled={!isAdmin || rotateBusy} onClick={rotate}>
           {rotateBusy ? 'Rotating…' : 'Rotate password'}
-        </button>
-        {rotateMessage ? <span className="note">{rotateMessage}</span> : null}
+        </Button>
+        {rotateMessage ? <span className="text-sm text-muted-foreground" role="status">{rotateMessage}</span> : null}
       </div>
-      <div className="filters">
-        <select
-          className="form-input"
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Select
           aria-label="Link canarytoken"
-          value={tokenChoice}
+          value={tokenChoice || 'none'}
           disabled={!isAdmin || linkBusy}
-          onChange={(event) => setTokenChoice(event.target.value)}
+          onValueChange={(value) => setTokenChoice(value === 'none' ? '' : value)}
         >
-          <option value="">— no linked token —</option>
+          <SelectTrigger className="min-w-0 flex-1 basis-48" aria-label="Link canarytoken"><SelectValue placeholder="— no linked token —" /></SelectTrigger>
+          <SelectContent>
+          <SelectItem value="none">— no linked token —</SelectItem>
           {tokens.map((token) => (
-            <option key={token.id} value={token.id}>
+            <SelectItem key={token.id} value={token.id}>
               {token.memo || token.token_type} ({token.token_type})
-            </option>
+            </SelectItem>
           ))}
-        </select>
-        <button
-          className="btn btn-secondary btn-sm"
+          </SelectContent>
+        </Select>
+        <Button variant="secondary" size="sm"
           type="button"
           disabled={!isAdmin || linkBusy || tokenChoice === (credential.linked_token_id ?? '')}
           onClick={() => applyLink(tokenChoice)}
         >
           {linkBusy ? 'Saving…' : 'Save link'}
-        </button>
+        </Button>
         {credential.linked_token_id ? (
-          <button className="btn btn-ghost btn-sm" type="button" disabled={!isAdmin || linkBusy} onClick={() => applyLink('')}>
+          <Button variant="ghost" size="sm" type="button" disabled={!isAdmin || linkBusy} onClick={() => applyLink('')}>
             Unlink
-          </button>
+          </Button>
         ) : null}
-        {linkMessage ? <span className="note">{linkMessage}</span> : null}
+        {linkMessage ? <span className="text-sm text-muted-foreground" role="status">{linkMessage}</span> : null}
       </div>
-      {!isAdmin ? <p className="note">Admin role required to rotate or link credentials.</p> : null}
+      {!isAdmin ? <p className="text-sm text-muted-foreground">Admin role required to rotate or link credentials.</p> : null}
     </>
   )
 }
@@ -322,12 +330,12 @@ function linkedBadge(row: CredentialRecord, tokensById: Map<string, TokenRecord>
   const token = tokensById.get(id)
   if (!token) {
     return (
-      <span className="badge badge--muted" title={`linked token ${id} not found — it may have been deleted`}>
+      <Badge variant="secondary" title={`linked token ${id} not found — it may have been deleted`}>
         unresolved
-      </span>
+      </Badge>
     )
   }
-  return <span className="badge badge--accent">{token.memo || token.token_type}</span>
+  return <Badge variant="outline">{token.memo || token.token_type}</Badge>
 }
 
 function buildColumns(tokensById: Map<string, TokenRecord>): Column<CredentialRecord>[] {
@@ -342,7 +350,7 @@ function buildColumns(tokensById: Map<string, TokenRecord>): Column<CredentialRe
     {
       header: 'content template',
       detail: true,
-      render: (row) => <code className="hp-pre-wrap">{row.content_template}</code>,
+      render: (row) => <code className="whitespace-pre-wrap break-all">{row.content_template}</code>,
     },
     { header: 'linked token id', detail: true, render: (row) => row.linked_token_id ?? '' },
     { header: 'created by', detail: true, render: (row) => row.created_by },
@@ -406,7 +414,7 @@ function Page() {
         label="Tools"
         title="Credentials"
         subtitle="Bait usernames and passwords planted live into honeypot filesystems via honeyfs-implant — provision, rotate, and optionally link to a canarytoken for the moment an attacker actually uses one."
-        chips={data?.available ? <span className="chip">{data.credentials.length.toLocaleString('en-US')} credentials</span> : undefined}
+        chips={data?.available ? <Badge variant="secondary">{data.credentials.length.toLocaleString('en-US')} credentials</Badge> : undefined}
       />
       <ProvisionForm onCreated={() => setGeneration((current) => current + 1)} />
       {data === null && failed ? (
@@ -418,16 +426,12 @@ function Page() {
       ) : data === null ? (
         <MasterDetailTable rows={null} columns={columns} rowKey={(row) => row.id} inspectorTitle="Credential details" />
       ) : !data.available ? (
-        <div className="card wide">
-          <p className="empty">{data.error || 'Credential storage is unavailable on this host.'}</p>
-        </div>
+        <Card><CardHeader><CardTitle><h2>Credential storage unavailable</h2></CardTitle></CardHeader><CardContent><Empty><EmptyHeader><EmptyTitle>Storage unavailable</EmptyTitle><EmptyDescription>{data.error || 'Credential storage is unavailable on this host.'}</EmptyDescription></EmptyHeader></Empty></CardContent></Card>
       ) : data.credentials.length === 0 ? (
-        <div className="card wide">
-          <p className="empty">No credentials provisioned yet — use the form above.</p>
-        </div>
+        <Card><CardHeader><CardTitle><h2>Credentials</h2></CardTitle></CardHeader><CardContent><Empty><EmptyHeader><EmptyTitle>No credentials provisioned yet</EmptyTitle><EmptyDescription>Use the form above.</EmptyDescription></EmptyHeader></Empty></CardContent></Card>
       ) : (
         <>
-        <p className="note">
+        <p className="text-sm text-muted-foreground">
           Newest first. Rotate plants a fresh password at the same path; linking a canarytoken is bookkeeping only —
           opening the file itself doesn&apos;t fire anything on its own unless the linked token IS that file.
         </p>
