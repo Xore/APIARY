@@ -11,6 +11,9 @@ import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
+import { Badge } from '../components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
+import { Skeleton } from '../components/ui/skeleton'
 
 type Kv = { key: string; count: number }
 
@@ -64,7 +67,7 @@ export const Route = createFileRoute('/investigate/cluster')({
 
 const RECORD_COLUMNS: Column<EventRow>[] = [
   { header: 'time', render: (row) => formatTimestamp(row.time) },
-  { header: 'sensor', render: (row) => <span className="badge badge--muted">{row.sensor}</span> },
+  { header: 'sensor', render: (row) => <Badge variant="secondary">{row.sensor}</Badge> },
   { header: 'detail', className: 'v', render: (row) => row.detail || row.proto },
   {
     header: 'record',
@@ -76,9 +79,8 @@ const RECORD_COLUMNS: Column<EventRow>[] = [
 function MiniTable({ title, rows }: { title: string; rows: Kv[] }) {
   if (rows.length === 0) return null
   return (
-    <div className="card half">
-      <h2>{title}</h2>
-      <div className="card__scroll">
+    <Card className="min-w-0"><CardHeader><CardTitle>{title}</CardTitle></CardHeader>
+      <CardContent className="overflow-x-auto">
         <table className="data-table">
           <tbody>
             {rows.map((row) => (
@@ -89,8 +91,8 @@ function MiniTable({ title, rows }: { title: string; rows: Kv[] }) {
             ))}
           </tbody>
         </table>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -116,10 +118,10 @@ function InvestigateCluster() {
 
   const backChip = (
     <>
-      <Link className="chip" to="/clusters">
+      <Link className="text-sm text-primary underline-offset-4 hover:underline" to="/clusters">
         &larr; clusters
       </Link>
-      {generated ? <span className="chip">generated {formatTimestamp(generated)}</span> : null}
+      {generated ? <Badge variant="secondary">generated {formatTimestamp(generated)}</Badge> : null}
     </>
   )
 
@@ -148,20 +150,16 @@ function InvestigateCluster() {
         }
         chips={backChip}
       />
+      {!data ? <Card aria-label="Loading cluster correlation"><CardContent className="flex flex-col gap-3 pt-6"><Skeleton className="h-7 w-1/3" /><Skeleton className="h-20 w-full" /></CardContent></Card> : null}
       {correlation && data ? (
-        <div className="metric-grid">
-          <div className="metric">
-            <div className="metric__value">{data.ip_count.toLocaleString('en-US')}</div>
-            <div className="metric__label">Member IPs</div>
-          </div>
-          <div className="metric">
-            <div className="metric__value">{correlation.total.toLocaleString('en-US')}</div>
-            <div className="metric__label">Total matches</div>
-          </div>
-          <div className="metric">
-            <div className="metric__value">{correlation.tunnel_connections.toLocaleString('en-US')}</div>
-            <div className="metric__label">Tunnel connections</div>
-          </div>
+        <div className="grid gap-4 sm:grid-cols-3">
+          {([
+            ['Member IPs', data.ip_count],
+            ['Total matches', correlation.total],
+            ['Tunnel connections', correlation.tunnel_connections],
+          ] as const).map(([label, count]) => (
+            <Card key={label}><CardHeader><CardTitle>{label}</CardTitle></CardHeader><CardContent>{count.toLocaleString('en-US')}</CardContent></Card>
+          ))}
         </div>
       ) : null}
       {correlation ? (

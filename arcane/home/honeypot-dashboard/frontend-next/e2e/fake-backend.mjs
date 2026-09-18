@@ -276,7 +276,12 @@ const catchAllWarned = new Set();
 
 /** Minimal handler table; keys are matched by startsWith after the query
  *  string is split off, first match wins, then the catch-all. */
-function route(pathname) {
+function route(pathname, searchParams = new URLSearchParams()) {
+  if (pathname === "/api/v1/investigate/cluster") return {
+    kind: "asn", value: "AS64500", ip_count: 3,
+    correlation: { total: 2, truncated: false, sensors: [kv("cowrie", 2)], tunnel_connections: 0,
+      tunnel_os_guesses: [], records: [eventRow(0), eventRow(1)] },
+  };
   if (pathname.startsWith("/api/v1/investigate/ip/")) {
     const ip = decodeURIComponent(pathname.split("/").pop());
     return {
@@ -560,7 +565,13 @@ function route(pathname) {
   if (pathname === "/api/v1/ml-health") return [];
   if (pathname === "/api/v1/ml-anomalies/acks") return {};
   if (pathname.startsWith("/api/v1/store/")) return { rows: [], total: 0 };
-  if (pathname === "/api/v1/search") return { results: [] };
+  if (pathname === "/api/v1/search") {
+    const query = searchParams.get("q")?.trim() ?? "";
+    const label = "fixture-command";
+    const hits = query && label.startsWith(query) ? [{ label, count: 1, url: `/events?cmd=${encodeURIComponent(label)}` }] : [];
+    return { query, redirect: null, total: hits.length,
+      groups: hits.length ? [{ title: "Commands", hits, more: 1, more_url: `/history?q=${encodeURIComponent(query)}` }] : [] };
+  }
   if (pathname === "/api/v1/live") {
     // STUB pending the live-shared-poller workstream (4b9cae88/bf8d4740:
     // "serve the live feed from one shared poller per process", "coalesce
@@ -748,7 +759,7 @@ function topologyStacks() {
 export function startFakeBackend(port) {
   const server = createServer((req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
-    const body = JSON.stringify(route(url.pathname));
+    const body = JSON.stringify(route(url.pathname, url.searchParams));
     res.writeHead(200, { "content-type": "application/json" });
     res.end(body);
   });

@@ -38,6 +38,7 @@ import { Route as SourceHealthRouteImport } from './routes/source-health'
 import { Route as TopologyRouteImport } from './routes/topology'
 import { Route as ApiLiveRouteImport } from './routes/api/live'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
+import { Route as AuthErrorRouteImport } from './routes/auth/error'
 import { Route as AuthLoginRouteImport } from './routes/auth/login'
 import { Route as AuthLogoutRouteImport } from './routes/auth/logout'
 import { Route as BffMountedSplatRouteImport } from './routes/bff-mounted.$'
@@ -217,6 +218,11 @@ const ApiLiveRoute = ApiLiveRouteImport.update({
 const AuthCallbackRoute = AuthCallbackRouteImport.update({
   id: '/auth/callback',
   path: '/auth/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthErrorRoute = AuthErrorRouteImport.update({
+  id: '/auth/error',
+  path: '/auth/error',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthLoginRoute = AuthLoginRouteImport.update({
@@ -429,6 +435,7 @@ export interface FileRoutesByFullPath {
   '/topology': typeof TopologyRoute
   '/api/live': typeof ApiLiveRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/auth/error': typeof AuthErrorRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
   '/bff-mounted/$': typeof BffMountedSplatRoute
@@ -495,6 +502,7 @@ export interface FileRoutesByTo {
   '/topology': typeof TopologyRoute
   '/api/live': typeof ApiLiveRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/auth/error': typeof AuthErrorRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
   '/bff-mounted/$': typeof BffMountedSplatRoute
@@ -562,6 +570,7 @@ export interface FileRoutesById {
   '/topology': typeof TopologyRoute
   '/api/live': typeof ApiLiveRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/auth/error': typeof AuthErrorRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
   '/bff-mounted/$': typeof BffMountedSplatRoute
@@ -630,6 +639,7 @@ export interface FileRouteTypes {
     | '/topology'
     | '/api/live'
     | '/auth/callback'
+    | '/auth/error'
     | '/auth/login'
     | '/auth/logout'
     | '/bff-mounted/$'
@@ -696,6 +706,7 @@ export interface FileRouteTypes {
     | '/topology'
     | '/api/live'
     | '/auth/callback'
+    | '/auth/error'
     | '/auth/login'
     | '/auth/logout'
     | '/bff-mounted/$'
@@ -762,6 +773,7 @@ export interface FileRouteTypes {
     | '/topology'
     | '/api/live'
     | '/auth/callback'
+    | '/auth/error'
     | '/auth/login'
     | '/auth/logout'
     | '/bff-mounted/$'
@@ -829,6 +841,7 @@ export interface RootRouteChildren {
   TopologyRoute: typeof TopologyRoute
   ApiLiveRoute: typeof ApiLiveRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
+  AuthErrorRoute: typeof AuthErrorRoute
   AuthLoginRoute: typeof AuthLoginRoute
   AuthLogoutRoute: typeof AuthLogoutRoute
   BffMountedSplatRoute: typeof BffMountedSplatRoute
@@ -1069,6 +1082,13 @@ declare module '@tanstack/react-router' {
       path: '/auth/callback'
       fullPath: '/auth/callback'
       preLoaderRoute: typeof AuthCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth/error': {
+      id: '/auth/error'
+      path: '/auth/error'
+      fullPath: '/auth/error'
+      preLoaderRoute: typeof AuthErrorRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth/login': {
@@ -1349,6 +1369,7 @@ const rootRouteChildren: RootRouteChildren = {
   TopologyRoute: TopologyRoute,
   ApiLiveRoute: ApiLiveRoute,
   AuthCallbackRoute: AuthCallbackRoute,
+  AuthErrorRoute: AuthErrorRoute,
   AuthLoginRoute: AuthLoginRoute,
   AuthLogoutRoute: AuthLogoutRoute,
   BffMountedSplatRoute: BffMountedSplatRoute,

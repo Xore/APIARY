@@ -18,6 +18,11 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
+import { Alert, AlertDescription } from '../components/ui/alert'
+import { Button } from '../components/ui/button'
+import { Card, CardContent } from '../components/ui/card'
+import { Field, FieldLabel } from '../components/ui/field'
+import { Input } from '../components/ui/input'
 
 const IPV4 = /^(\d{1,3}\.){3}\d{1,3}$/
 const IPV4_CIDR = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/
@@ -120,35 +125,34 @@ function Lookup() {
         title="Hash / IOC lookup"
         subtitle="Paste an IP, CIDR, ASN, provider name, payload hash, or connection fingerprint to jump straight into its cross-source correlation view — including values outside the clusters/campaigns leaderboards."
       />
-      <form className="card" onSubmit={submit}>
-        <div className="filters">
-          <input
-            className="search hp-grow"
+      <Card><CardContent className="pt-6"><form className="flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={submit}>
+          <Field className="min-w-0 flex-1">
+          <FieldLabel htmlFor="ioc-value">Value to look up</FieldLabel>
+          <Input
+            id="ioc-value"
             placeholder="203.0.113.7, 203.0.113.0/24, AS64500, a hex payload hash or fingerprint…"
-            aria-label="Value to look up"
             value={value}
             onChange={(event) => {
               setValue(event.target.value)
               setStatus('idle')
             }}
             autoFocus
-          />
-          <button className="copy" type="submit" disabled={!value.trim() || status === 'busy'}>
+          /></Field>
+          <Button type="submit" disabled={!value.trim() || status === 'busy'}>
             {status === 'busy' ? 'Looking up…' : 'Look up'}
-          </button>
-        </div>
-      </form>
+          </Button>
+      </form></CardContent></Card>
       {status === 'failed' ? (
         // #2178: the lookup itself failing is a different fact from the
         // hash genuinely not correlating. No retry button — resubmitting
         // the form IS the retry, same posture as search.tsx's failed query.
-        <p className="empty text-danger" role="alert">
+        <Alert variant="destructive" role="alert"><AlertDescription>
           The lookup request for <code>{lastHash}</code> failed — the backend may be down or shedding load, so this says
           nothing about whether the value correlates. Submit again to retry.
-        </p>
+        </AlertDescription></Alert>
       ) : null}
       {status === 'not-found' ? (
-        <p className="empty" role="status" aria-live="polite">
+        <Alert role="status" aria-live="polite"><AlertDescription>
           No cluster correlation for <code>{lastHash}</code> as either a payload hash or a fingerprint — it may be
           real but below the correlation floor (fewer than two source IPs). If it's a captured file, its own
           analysis is still reachable directly at{' '}
@@ -156,7 +160,7 @@ function Lookup() {
             /payload-analysis/{lastHash}
           </a>
           .
-        </p>
+        </AlertDescription></Alert>
       ) : null}
       <p className="note">
         A domain or URL pulled from a payload isn't correlated fleet-wide here — that's a per-sample

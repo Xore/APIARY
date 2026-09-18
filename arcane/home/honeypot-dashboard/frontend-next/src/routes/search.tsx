@@ -5,6 +5,11 @@ import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
+import { Button } from '../components/ui/button'
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '../components/ui/card'
+import { Field, FieldLabel } from '../components/ui/field'
+import { Input } from '../components/ui/input'
+import { Skeleton } from '../components/ui/skeleton'
 
 type Hit = { label: string; count: number; url: string }
 type Group = { title: string; hits: Hit[]; more: number; more_url: string }
@@ -65,46 +70,40 @@ function SearchPage() {
         Every source the dashboard holds, matched against your query.
       </p>
       <form
-        className="filters"
+        className="flex flex-col gap-3 sm:flex-row sm:items-end"
         onSubmit={(event) => {
           event.preventDefault()
           void navigate({ search: { q: query.trim() } })
         }}
       >
-        <input
-          className="form-input"
+        <Field className="min-w-0 flex-1"><FieldLabel htmlFor="search-query">Search query</FieldLabel><Input
+          id="search-query"
           type="search"
           placeholder="IP, session, hash, credential, command…"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          aria-label="Search query"
-        />
-        <button className="btn btn-secondary btn-sm" type="submit">
+        /></Field>
+        <Button variant="secondary" type="submit">
           Search
-        </button>
+        </Button>
       </form>
       {q && result === null ? (
-        <div className="card wide">
-          <span className="skeleton-line" aria-hidden="true" />
-          <span className="skeleton-line" aria-hidden="true" />
-        </div>
+        <Card aria-label="Loading search results"><CardContent className="flex flex-col gap-3 pt-6"><Skeleton className="h-5 w-1/3" /><Skeleton className="h-5 w-full" /></CardContent></Card>
       ) : null}
       {result === 'failed' ? (
         /* #2178: an outage used to hold these skeletons exactly like a slow
            request would. Name it; the form above is the retry. */
-        <div className="card wide">
+        <Card><CardContent className="pt-6">
           <ErrorStateBlock
             title="The search request failed"
             hint="The backend did not answer — results here are never cached. Re-submitting the query re-runs the search."
           />
-        </div>
+        </CardContent></Card>
       ) : null}
       {result && result !== 'failed' && result.total === 0 ? (
         /* The Go zero-state (search.html:57-66): explain what was searched
            and hand the operator pivots out, never a bare sentence. */
-        <div className="card wide">
-          <div className="empty-state">
-            <h3>Nothing matched “{result.query}”</h3>
+        <Card><CardHeader><CardTitle>Nothing matched “{result.query}”</CardTitle></CardHeader><CardContent>
             <p>
               No sensor event, session, payload, command, credential, detection, fingerprint, decoy, or sandbox run
               mentions this value. Sensors only hold the retention window configured for this deployment — an older
@@ -124,13 +123,12 @@ function SearchPage() {
                 search Elasticsearch history
               </Link>
             </div>
-          </div>
-        </div>
+        </CardContent></Card>
       ) : null}
       {result && result !== 'failed'
         ? result.groups.map((group) => (
-            <div className="card half" key={group.title}>
-              <h2>{group.title}</h2>
+            <Card className="min-w-0" key={group.title}>
+              <CardHeader><CardTitle>{group.title}</CardTitle></CardHeader><CardContent className="overflow-x-auto">
               <table className="data-table">
                 <tbody>
                   {group.hits.map((hit) => (
@@ -143,15 +141,15 @@ function SearchPage() {
                   ))}
                 </tbody>
               </table>
-              {group.more > 0 ? (
+              </CardContent>{group.more > 0 ? (
                 /* Overflow past the 8-per-group cap (search.html:51). */
-                <p className="note">
+                <CardFooter>
                   <a className="lnk" href={group.more_url}>
                     {group.more.toLocaleString('en-US')} more →
                   </a>
-                </p>
+                </CardFooter>
               ) : null}
-            </div>
+            </Card>
           ))
         : null}
     </>

@@ -5,8 +5,8 @@
 // framework's bare 53-byte 500 with nothing of ours in the log. The
 // offline-queue and non-poisoning-discovery fixes in oidc.server.ts
 // address the two known live causes; this catch is what keeps any future
-// cause visible (logged with its reason) and actionable (rendered page
-// with status 503) instead of an anonymous 500.
+// cause visible (logged with its reason) and actionable (bundled error route)
+// instead of an anonymous 500.
 import { createFileRoute } from '@tanstack/react-router'
 import { beginLogin, oidcDisabled, safeReturnTo } from '../../lib/oidc.server'
 import { authErrorPage } from '../../lib/oidcErrors.server'

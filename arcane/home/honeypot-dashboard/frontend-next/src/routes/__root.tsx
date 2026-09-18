@@ -4,7 +4,7 @@
 // the claude-pure element set 1:1 — no visual drift by construction.
 import { useEffect } from 'react'
 import '../index.css'
-import { HeadContent, Scripts, createRootRoute, redirect } from '@tanstack/react-router'
+import { HeadContent, Scripts, createRootRoute, redirect, useRouterState } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { AppShell } from '../components/AppShell'
 import { getSessionUser, type User } from '../lib/auth'
@@ -239,19 +239,20 @@ export const Route = createRootRoute({
 // the flash on a cold load -- that needs a cookie, because there is none in
 // this stack today and localStorage is per-device by definition. Tracked as
 // the remaining part of #1755 rather than smuggled in here.
-function useStoredAppearance() {
+function useStoredAppearance(enabled: boolean) {
   useEffect(() => {
-    void pullAppearance()
-  }, [])
+    if (enabled) void pullAppearance()
+  }, [enabled])
 }
 
 function RootDocument({ children }: { children: React.ReactNode }) {
+  const isAuthRoute = useRouterState({ select: (state) => state.location.pathname.startsWith('/auth/') })
   const { banner, showProblemReportButton, appName, appearance } = Route.useLoaderData()
   // beforeLoad already resolved the session user into router context for
   // every non-/auth navigation — thread it to the shell so the sidebar
   // profile widget and topbar avatar show a real identity (#1653).
   const { user } = Route.useRouteContext() as { user?: User | null }
-  useStoredAppearance()
+  useStoredAppearance(!isAuthRoute)
   // #1975: a tab that sat hidden long enough for its session to die finds
   // out the moment it comes back, not the next time the operator clicks
   // something and gets an unexplained failure. Root-mounted because it has
@@ -272,9 +273,9 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body>
-        <AppShell banner={banner} showProblemReportButton={showProblemReportButton} user={user ?? null} appName={appName}>
+        {isAuthRoute ? children : <AppShell banner={banner} showProblemReportButton={showProblemReportButton} user={user ?? null} appName={appName}>
           {children}
-        </AppShell>
+        </AppShell>}
         <Scripts />
       </body>
     </html>
