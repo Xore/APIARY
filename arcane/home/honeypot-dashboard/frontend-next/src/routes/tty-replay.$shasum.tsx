@@ -460,9 +460,9 @@ function AttackerTab({ shasum }: { shasum: string }) {
       <p className="empty">
         No indexed event still references this recording's source IP — either it aged out of the events window, or the
         recording predates this dashboard's own tracking. Attacker context isn't available for this one, but{' '}
-        <a className="lnk" href="/recordings">
+        <Link className="lnk" to="/recordings" search={() => ({ ip: undefined })}>
           other recordings
-        </a>{' '}
+        </Link>{' '}
         may still have it.
       </p>
     )

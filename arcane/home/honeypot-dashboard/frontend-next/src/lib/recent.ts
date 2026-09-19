@@ -32,6 +32,21 @@ export function hrefForRecent(entry: RecentEntry): string | null {
   }
 }
 
+export function linkForRecent(entry: RecentEntry): { to: string; params?: Record<string, unknown>; search?: Record<string, unknown> } | null {
+  switch (entry.kind) {
+    case 'ip':
+      return { to: '/investigate/ip/$ip', params: { ip: entry.value } }
+    case 'session':
+      return { to: '/sessions/$id', params: { id: entry.value } }
+    case 'payload':
+      return { to: '/payload-analysis/$shasum', params: { shasum: entry.value } }
+    case 'events-ip':
+      return { to: '/events', search: { ip: entry.value } }
+    default:
+      return null
+  }
+}
+
 export function labelForRecent(entry: RecentEntry): string {
   if (entry.kind === 'session') return 'session ' + entry.value.slice(0, 12)
   if (entry.kind === 'payload') return entry.value.slice(0, 16) + '…'

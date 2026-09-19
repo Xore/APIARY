@@ -3,7 +3,7 @@
 // Overview/Indicators dossier ui/attackers.html renders for a selected
 // entity (#1540's two-tab split), so every persisted field stays visible
 // even when empty and hydration can't make evidence appear to vanish.
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
@@ -291,15 +291,15 @@ function Attackers() {
         subtitle="Durable entities merged across IP churn by shared fingerprint, payload, and credential signals."
         chips={
           <>
-            <a className="text-sm text-primary hover:underline" href="/">
+            <Link className="text-sm text-primary hover:underline" to="/">
               ← dashboard
-            </a>
-            <a className="text-sm text-primary hover:underline" href="/campaigns">
+            </Link>
+            <Link className="text-sm text-primary hover:underline" to="/campaigns">
               network campaigns
-            </a>
-            <a className="text-sm text-primary hover:underline" href="/clusters">
+            </Link>
+            <Link className="text-sm text-primary hover:underline" to="/clusters">
               infrastructure clusters
-            </a>
+            </Link>
             <Badge variant="secondary">{failed ? 'load failed' : `${total.toLocaleString('en-US')} identities`}</Badge>
             {merged !== null ? <Badge variant="secondary">{merged.toLocaleString('en-US')} merged across &gt;1 IP</Badge> : null}
           </>

@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
 
@@ -20,7 +20,7 @@ function AuthError() {
   return <main className="flex min-h-screen items-center justify-center p-4">
     <Card className="w-full max-w-lg">
       <CardHeader><CardTitle><h1>{heading}</h1></CardTitle><CardDescription>{detail}</CardDescription></CardHeader>
-      <CardContent><Button asChild variant="secondary"><a href="/auth/login">Try signing in again</a></Button></CardContent>
+      <CardContent><Button asChild variant="secondary"><Link to="/auth/login">Try signing in again</Link></Button></CardContent>
     </Card>
   </main>
 }

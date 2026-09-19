@@ -4,7 +4,7 @@
 // the claude-pure element set 1:1 — no visual drift by construction.
 import { useEffect } from 'react'
 import '../index.css'
-import { HeadContent, Scripts, createRootRoute, redirect, useRouterState } from '@tanstack/react-router'
+import { HeadContent, Scripts, createRootRoute, Link, redirect, useRouterState } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { AppShell } from '../components/AppShell'
 import { getSessionUser, type User } from '../lib/auth'
@@ -210,12 +210,12 @@ export const Route = createRootRoute({
         <p className="empty-state__hint">
           Whatever you were looking for isn't at this address — check the link, or head back to a page that exists.
         </p>
-        <a className="empty-state__action" href="/">
+        <Link className="empty-state__action" to="/">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
           </svg>
           Go back home
-        </a>
+        </Link>
       </div>
     </div>
   ),

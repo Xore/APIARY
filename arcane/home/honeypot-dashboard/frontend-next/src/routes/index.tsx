@@ -257,13 +257,13 @@ function KpiSpark({ hourly }: { hourly: number[] | undefined }) {
 function KpiStrip({ kpis, payloads, payloadsFailed }: { kpis: OverviewKpis | null; payloads: number | null; payloadsFailed?: boolean }) {
   return (
     <div className="metric-grid" id="overview-kpis">
-      <Card className="min-w-0 p-4"><a className="block" href="/events" title="Open all normalized events in the current dashboard window">
+      <Card className="min-w-0 p-4"><Link className="block" to="/events" title="Open all normalized events in the current dashboard window">
         <div className="metric__value font-serif text-[26px] font-medium tracking-tight">
           <KpiValue value={kpis && kpis.ready ? kpis.total : null} />
         </div>
         <div className="metric__label">All events</div>
-      </a></Card>
-      <Card className="min-w-0 p-4"><a className="block" href="/events?since=24h" title="Open events received during the last 24 hours">
+      </Link></Card>
+      <Card className="min-w-0 p-4"><Link className="block" to="/events" search={{ since: '24h' }} title="Open events received during the last 24 hours">
         <div className="metric__value font-serif text-[26px] font-medium tracking-tight">
           <KpiValue value={kpis && kpis.ready ? kpis.last24h : null} />
           {kpis?.change24h ? (
@@ -277,14 +277,14 @@ function KpiStrip({ kpis, payloads, payloadsFailed }: { kpis: OverviewKpis | nul
         </div>
         <div className="metric__label">Events in 24 hours</div>
         <KpiSpark hourly={kpis?.hourly} />
-      </a></Card>
-      <Card className="min-w-0 p-4"><a className="block" href="/ips" title="Distinct attacker source addresses observed by the sensors">
+      </Link></Card>
+      <Card className="min-w-0 p-4"><Link className="block" to="/ips" title="Distinct attacker source addresses observed by the sensors">
         <div className="metric__value font-serif text-[26px] font-medium tracking-tight">
           <KpiValue value={kpis && kpis.ready ? kpis.unique_ips : null} />
         </div>
         <div className="metric__label">Attack sources</div>
-      </a></Card>
-      <Card className="min-w-0 p-4"><a className="block" href="/events?kind=login" title="Authentication attempts captured by interactive honeypots">
+      </Link></Card>
+      <Card className="min-w-0 p-4"><Link className="block" to="/events" search={{ kind: 'login' }} title="Authentication attempts captured by interactive honeypots">
         <div className="metric__value font-serif text-[26px] font-medium tracking-tight">
           {/* #1963: from the kpis endpoint, not /overview/dashboard -- this
               strip renders on every tab, and reading one integer from the
@@ -293,8 +293,8 @@ function KpiStrip({ kpis, payloads, payloadsFailed }: { kpis: OverviewKpis | nul
           <KpiValue value={kpis && kpis.ready ? kpis.logins : null} />
         </div>
         <div className="metric__label">Login attempts</div>
-      </a></Card>
-      <Card className="min-w-0 p-4"><a className="block" href="/payloads" title="Distinct payload binaries captured safely">
+      </Link></Card>
+      <Card className="min-w-0 p-4"><Link className="block" to="/payloads" title="Distinct payload binaries captured safely">
         <div className="metric__value font-serif text-[26px] font-medium tracking-tight">
           {payloadsFailed && payloads === null ? (
             /* #2178: the tile says nothing rather than a skeleton that
@@ -305,7 +305,7 @@ function KpiStrip({ kpis, payloads, payloadsFailed }: { kpis: OverviewKpis | nul
           )}
         </div>
         <div className="metric__label">Captured payloads</div>
-      </a></Card>
+      </Link></Card>
     </div>
   )
 }
@@ -347,15 +347,15 @@ function RecentEventRow({ row, open, onToggle }: { row: EventRow; open: boolean;
       <TableRow className={open ? 'selected' : undefined} onClick={onToggle}>
         <TableCell data-hp-time>{formatTimestamp(row.time)}</TableCell>
         <TableCell>
-          <Badge variant="secondary" className={`badge b-${row.sensor}`}><a href={`/events?sensor=${encodeURIComponent(row.sensor)}`} onClick={stop}>
+          <Badge variant="secondary" className={`badge b-${row.sensor}`}><Link to="/events" search={{ sensor: row.sensor }} onClick={stop}>
             {row.sensor}
-          </a></Badge>
+          </Link></Badge>
         </TableCell>
         <TableCell className="v">
           {row.src_ip ? (
-            <a href={`/events?ip=${encodeURIComponent(row.src_ip)}`} title={`attack chain for ${row.src_ip}`} onClick={stop}>
+            <Link to="/events" search={{ ip: row.src_ip }} title={`attack chain for ${row.src_ip}`} onClick={stop}>
               {row.src_ip}
-            </a>
+            </Link>
           ) : (
             <Badge variant="secondary"
               className="badge badge--muted"
@@ -367,17 +367,17 @@ function RecentEventRow({ row, open, onToggle }: { row: EventRow; open: boolean;
           {row.country ? (
             <>
               {' '}
-              <Badge variant="secondary" className="badge badge--info"><a title={countryName(row.country)} href={`/events?country=${encodeURIComponent(row.country)}`} onClick={stop}>
+              <Badge variant="secondary" className="badge badge--info"><Link title={countryName(row.country)} to="/events" search={{ country: row.country }} onClick={stop}>
                 {row.country}
-              </a></Badge>
+              </Link></Badge>
             </>
           ) : null}
         </TableCell>
         <TableCell className="n">
           {row.port ? (
-            <a href={`/events?port=${encodeURIComponent(row.port)}`} onClick={stop}>
+            <Link to="/events" search={{ port: row.port }} onClick={stop}>
               :{row.port}
-            </a>
+            </Link>
           ) : (
             ''
           )}
@@ -406,15 +406,15 @@ function RecentEventRow({ row, open, onToggle }: { row: EventRow; open: boolean;
               {row.src_ip || row.session ? (
                 <p className="note">
                   {row.src_ip ? (
-                    <a className="lnk" href={`/investigate/ip/${encodeURIComponent(row.src_ip)}`}>
+                    <Link className="lnk" to="/investigate/ip/$ip" params={{ ip: row.src_ip }}>
                       attacker profile for {row.src_ip}
-                    </a>
+                    </Link>
                   ) : null}
                   {row.src_ip && row.session ? ' • ' : null}
                   {row.session ? (
-                    <a className="lnk sess" href={`/sessions/${encodeURIComponent(row.session)}`}>
+                    <Link className="lnk sess" to="/sessions/$id" params={{ id: row.session }}>
                       replay session {row.session}
-                    </a>
+                    </Link>
                   ) : null}
                 </p>
               ) : null}
@@ -573,7 +573,7 @@ function Overview() {
               <h2>Current activity</h2>
               <p>What is happening now, when traffic arrived, and where it originated.</p>
             </div>
-            <a className="section-link" href="/events?since=24h">View last 24 hours →</a>
+            <Link className="section-link" to="/events" search={{ since: '24h' }}>View last 24 hours →</Link>
           </div>
           <Card className="col-span-full min-w-0 p-6 chart-card">
             <h2>Activity — last 24h</h2>
@@ -602,7 +602,7 @@ function Overview() {
               <h2>Live event stream</h2>
               <p>A balanced sample of the newest normalized events across all sensors.</p>
             </div>
-            <a className="section-link" href="/events">Open full event explorer →</a>
+            <Link className="section-link" to="/events">Open full event explorer →</Link>
           </div>
           <Card className="col-span-full min-w-0 p-6" id="recent-events-card">
             <h2>Recent events</h2>
@@ -651,7 +651,7 @@ function Overview() {
               <h2>Collection status</h2>
               <p>Sensor activity and the protocols currently attracting traffic.</p>
             </div>
-            <a className="section-link" href="/source-health">Open pipeline health →</a>
+            <Link className="section-link" to="/source-health">Open pipeline health →</Link>
           </div>
           <Card className="card half sensor-card">
             <h2>Sensor feeds</h2>
@@ -691,7 +691,7 @@ function Overview() {
               </>
             )}
           </Card>
-          <Tbl title="Protocols probed" rows={dashboard ? dashboard.protocols : null} half failed={dashboardFailed} />
+          <Tbl title="Protocols probed" rows={dashboard ? dashboard.protocols : null} failed={dashboardFailed} />
           <Card className="card wide" id="ml-backlog-card">
             <h2>ML classification backlog — last 7 days</h2>
             <EChart kind="line" url="/api/chart/ml-backlog" height={280} />
@@ -714,7 +714,7 @@ function Overview() {
               <h2>Threat landscape</h2>
               <p>Highest-volume sources, targets, locations, and network ownership.</p>
             </div>
-            <a className="section-link" href="/ips">Investigate all sources →</a>
+            <Link className="section-link" to="/ips">Investigate all sources →</Link>
           </div>
           <Tbl title="Top source IPs" rows={dashboard ? dashboard.top_ips : null} failed={dashboardFailed} />
           <Tbl title="Top targeted ports" rows={dashboard ? dashboard.top_ports : null} failed={dashboardFailed} />
@@ -722,8 +722,8 @@ function Overview() {
           {/* #1565 (overview.html:258-259): ASNs and provider classes are a
               deliberate half/half pair; the ids let theme.css widen the
               busier ASN card. */}
-          <Tbl title="Top autonomous systems" rows={dashboard ? dashboard.asns : null} half id="overview-asns-card" failed={dashboardFailed} />
-          <Tbl title="Network/provider classes" rows={dashboard ? dashboard.providers : null} half id="overview-providers-card" failed={dashboardFailed} />
+          <Tbl title="Top autonomous systems" rows={dashboard ? dashboard.asns : null} id="overview-asns-card" failed={dashboardFailed} />
+          <Tbl title="Network/provider classes" rows={dashboard ? dashboard.providers : null} id="overview-providers-card" failed={dashboardFailed} />
           <Card className="card wide" id="netflow-bytes-card">
             <h2>Traffic volume — bytes/hour, last 7 days</h2>
             <p className="note">
@@ -766,13 +766,13 @@ function Overview() {
               <h2>Attacker behavior</h2>
               <p>Authentication attempts, executed commands, client identity, and reusable fingerprints.</p>
             </div>
-            <a className="section-link" href="/commands">Review all commands →</a>
+            <Link className="section-link" to="/commands">Review all commands →</Link>
           </div>
           <Tbl title="Top credentials (user / pass)" rows={dashboard ? dashboard.top_creds : null} hint="authentication events only" failed={dashboardFailed} />
           <Tbl title="Top commands" rows={dashboard ? dashboard.top_commands : null} hint="No shell commands captured yet — fed by cowrie and multipot sessions." failed={dashboardFailed} />
           <Tbl title="SSH/telnet clients" rows={dashboard ? dashboard.clients : null} hint="No client banners yet — fed by cowrie." failed={dashboardFailed} />
-          <Tbl title="Top fingerprints (HASSH / JA3 / JA4 / User-Agent)" rows={dashboard ? dashboard.fingerprints : null} half hint="No protocol or client fingerprints captured yet." failed={dashboardFailed} />
-          <Tbl title="Top HTTP paths" rows={dashboard ? dashboard.top_paths : null} half hint="No web probes yet — fed by http-honeypot and tanner." failed={dashboardFailed} />
+          <Tbl title="Top fingerprints (HASSH / JA3 / JA4 / User-Agent)" rows={dashboard ? dashboard.fingerprints : null} hint="No protocol or client fingerprints captured yet." failed={dashboardFailed} />
+          <Tbl title="Top HTTP paths" rows={dashboard ? dashboard.top_paths : null} hint="No web probes yet — fed by http-honeypot and tanner." failed={dashboardFailed} />
           <Card className="card wide" id="os-distribution-card">
             <h2>Attacker OS distribution</h2>
             <p className="note">
@@ -868,10 +868,10 @@ function Overview() {
               <h2>Detection and evidence</h2>
               <p>IDS findings, captured artifacts, and cross-sensor campaign correlation.</p>
             </div>
-            <a className="section-link" href="/payloads">Open payload analysis →</a>
+            <Link className="section-link" to="/payloads">Open payload analysis →</Link>
           </div>
-          <Tbl title="Suricata alerts" rows={dashboard ? dashboard.alerts : null} half hint="No Suricata alerts in this window — pipeline status lives under Source & pipeline health." failed={dashboardFailed} />
-          <Tbl title="Alert categories" rows={dashboard ? dashboard.alert_cats : null} half hint="No Suricata alerts in this window." failed={dashboardFailed} />
+          <Tbl title="Suricata alerts" rows={dashboard ? dashboard.alerts : null} hint="No Suricata alerts in this window — pipeline status lives under Source & pipeline health." failed={dashboardFailed} />
+          <Tbl title="Alert categories" rows={dashboard ? dashboard.alert_cats : null} hint="No Suricata alerts in this window." failed={dashboardFailed} />
           <Card className="card wide">
             <h2>Captured payloads</h2>
             <p className="note">Inert copies of malware and high-confidence scripts. Static analysis never executes the payload.</p>

@@ -4,7 +4,7 @@
 // and the per-card actions -- now the same RowActions strip every table
 // row uses rather than the Go page's "…" menu (#1899) -- with View-more
 // + skeleton-first.
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useState } from 'react'
 import { confirmAction } from '../components/ConfirmDialog'
@@ -399,7 +399,7 @@ function Payloads() {
         subtitle="Unified inventory of Dionaea captures, Cowrie uploads/downloads, and retained script artifacts."
         chips={
           <>
-            <Button asChild variant="outline" size="sm"><a href="/">← dashboard</a></Button>
+            <Button asChild variant="outline" size="sm"><Link to="/">← dashboard</Link></Button>
             {source ? (
               <Button variant="outline" size="sm" type="button" onClick={() => void applySource('')}>all sources</Button>
             ) : (

@@ -7,7 +7,7 @@
 import { Fragment } from 'react'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { NAV_SECTIONS, navHrefFor } from '../lib/nav'
-import { hrefForRecent, labelForRecent, useRecentInvestigations } from '../lib/recent'
+import { labelForRecent, linkForRecent, useRecentInvestigations } from '../lib/recent'
 import { SidebarViewTabs } from '../lib/viewTabs'
 import { openCommandPalette } from './CommandPalette'
 import type { User } from '../lib/auth'
@@ -162,13 +162,13 @@ export function Sidebar({ user, onOpenSettings }: { user?: User | null; onOpenSe
             <div className="sidebar__section-label hp-views-label">Recent</div>
             <div className="sidebar__recent">
               {recent.map((entry) => {
-                const href = hrefForRecent(entry)
-                if (!href) return null
+                const link = linkForRecent(entry)
+                if (!link) return null
                 const label = labelForRecent(entry)
                 return (
-                  <a key={`${entry.kind}:${entry.value}`} href={href} title={label}>
+                  <Link key={`${entry.kind}:${entry.value}`} to={link.to} params={link.params} search={link.search} title={label}>
                     {label}
-                  </a>
+                  </Link>
                 )
               })}
             </div>
