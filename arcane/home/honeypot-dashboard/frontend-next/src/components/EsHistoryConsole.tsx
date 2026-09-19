@@ -62,10 +62,10 @@ export function EsHistoryConsole({ storage, hidden }: { storage: EsStorage | nul
 
   const statusTrendClass =
     storage?.cluster_status === 'green'
-      ? 'metric__trend text-secondary'
+      ? 'text-muted-foreground'
       : storage?.cluster_status === 'yellow'
-        ? 'metric__trend text-warning'
-        : 'metric__trend text-danger'
+        ? 'text-yellow-600'
+        : 'text-destructive'
 
   return (
     <>
@@ -74,67 +74,75 @@ export function EsHistoryConsole({ storage, hidden }: { storage: EsStorage | nul
       {storage === null ? (
         <p className="text-sm text-muted-foreground">Storage stats unavailable.</p>
       ) : (
-        <div className="metric-grid">
-          <div className="metric">
-            <div className="metric__label">Cluster</div>
-            <div className="metric__value">{storage.cluster_status || '—'}</div>
-            <div className={statusTrendClass}>Cluster health</div>
-          </div>
-          <div className="metric">
-            <div className="metric__label">Indices</div>
-            <div className="metric__value">{storage.index_count.toLocaleString('en-US')}</div>
-            <div className="metric__trend text-secondary">Tracked indices</div>
-          </div>
-          <div className="metric">
-            <div className="metric__label">Documents</div>
-            <div className="metric__value">{storage.doc_count.toLocaleString('en-US')}</div>
-            <div className="metric__trend text-secondary">Across every index</div>
-          </div>
-          <div className="metric">
-            <div className="metric__label">Storage</div>
-            <div className="metric__value">{bytesHuman(storage.store_bytes)}</div>
-            <div className="metric__trend text-secondary">Primary + replica shards</div>
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Card>
+            <CardContent className="p-4">
+              <div className="text-sm text-muted-foreground">Cluster</div>
+              <div className="text-2xl font-semibold">{storage.cluster_status || '—'}</div>
+              <div className={statusTrendClass}>Cluster health</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <div className="text-sm text-muted-foreground">Indices</div>
+              <div className="text-2xl font-semibold">{storage.index_count.toLocaleString('en-US')}</div>
+              <div className="text-sm text-muted-foreground">Tracked indices</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <div className="text-sm text-muted-foreground">Documents</div>
+              <div className="text-2xl font-semibold">{storage.doc_count.toLocaleString('en-US')}</div>
+              <div className="text-sm text-muted-foreground">Across every index</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <div className="text-sm text-muted-foreground">Storage</div>
+              <div className="text-2xl font-semibold">{bytesHuman(storage.store_bytes)}</div>
+              <div className="text-sm text-muted-foreground">Primary + replica shards</div>
+            </CardContent>
+          </Card>
         </div>
       )}
-            <Card hidden={hidden}>
-              <CardHeader>
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <CardTitle>Elasticsearch history</CardTitle>
-                    <CardDescription>Run a query_string search across every indexed honeypot and Suricata document.</CardDescription>
-                  </div>
-                  <div className="hp-head-actions">
-                    <a
-                      className="btn btn-ghost btn-sm"
-                      href={`/api/export/history.json${activeQuery ? `?q=${encodeURIComponent(activeQuery)}` : ''}`}
-                      title="Download the current result set as JSON"
-                    >
-                      Export JSON
-                    </a>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="filters">
-          <Input
-            className="search"
-            placeholder="query_string, e.g. honeypot.sensor:cowrie AND honeypot.username:root"
-            aria-label="Elasticsearch query"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') void run()
-            }}
-          />
-          <Button variant="ghost" size="sm" className="copy" type="button" onClick={() => void run()}>
-            search
-          </Button>
-        </div>
-        <CardDescription>{meta}</CardDescription>
-        <pre className="code">{results}</pre>
-          </CardContent>
-        </Card>
+      <Card hidden={hidden}>
+        <CardHeader>
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <CardTitle>Elasticsearch history</CardTitle>
+              <CardDescription>Run a query_string search across every indexed honeypot and Suricata document.</CardDescription>
+            </div>
+            <div className="hp-head-actions">
+              <a
+                className="btn btn-ghost btn-sm"
+                href={`/api/export/history.json${activeQuery ? `?q=${encodeURIComponent(activeQuery)}` : ''}`}
+                title="Download the current result set as JSON"
+              >
+                Export JSON
+              </a>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="filters">
+            <Input
+              className="search"
+              placeholder="query_string, e.g. honeypot.sensor:cowrie AND honeypot.username:root"
+              aria-label="Elasticsearch query"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') void run()
+              }}
+            />
+            <Button variant="ghost" size="sm" className="copy" type="button" onClick={() => void run()}>
+              search
+            </Button>
+          </div>
+          <CardDescription>{meta}</CardDescription>
+          <pre className="code">{results}</pre>
+        </CardContent>
+      </Card>
     </>
   )
 }

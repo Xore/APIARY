@@ -284,19 +284,25 @@ const CORRELATION_COLUMNS: Column<EventRow>[] = [
 function CorrelationPanel({ correlation }: { correlation: Correlation }) {
   return (
     <>
-      <div className="metric-grid">
-        <div className="metric">
-          <div className="metric__value">{correlation.total.toLocaleString('en-US')}</div>
-          <div className="metric__label">Total ES matches</div>
-        </div>
-        <div className="metric">
-          <div className="metric__value">{correlation.tunnel_connections.toLocaleString('en-US')}</div>
-          <div className="metric__label">Tunnel connections</div>
-        </div>
-        <div className="metric">
-          <div className="metric__value">{correlation.sensors.length}</div>
-          <div className="metric__label">Distinct sensors</div>
-        </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-sm text-muted-foreground">Total ES matches</div>
+            <div className="text-2xl font-semibold">{correlation.total.toLocaleString('en-US')}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-sm text-muted-foreground">Tunnel connections</div>
+            <div className="text-2xl font-semibold">{correlation.tunnel_connections.toLocaleString('en-US')}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-sm text-muted-foreground">Distinct sensors</div>
+            <div className="text-2xl font-semibold">{correlation.sensors.length}</div>
+          </CardContent>
+        </Card>
       </div>
       <div className="card wide">
         <h2>Elasticsearch correlation</h2>
@@ -446,27 +452,39 @@ function InvestigateIp() {
               <TabsTrigger value="indicators">Indicators</TabsTrigger>
               <TabsTrigger value="correlation">Correlation & timeline</TabsTrigger>
             </TabsList>
-            <TabsContent value="activity" className="dashboard-panel">
-              <div className="grid min-w-0 gap-4 md:grid-cols-2">
-                <MiniTable title="Sensors contacted" rows={profile.sensors} />
-                <MiniTable title="Credentials attempted" rows={profile.credentials} />
-                <MiniTable title="Commands" rows={profile.commands} />
-                <MiniTable title="HTTP paths" rows={profile.paths} />
-                <MiniTable title="Targeted ports" rows={profile.ports} />
-                <MiniTable title="Protocols" rows={profile.protos} />
-                <MiniTable title="Sessions" rows={profile.sessions} linkTo={(key) => `/sessions/${encodeURIComponent(key)}`} />
-              </div>
+            <TabsContent value="activity">
+              <Card>
+                <CardContent className="p-6">
+                  <div className="grid min-w-0 gap-4 md:grid-cols-2">
+                    <MiniTable title="Sensors contacted" rows={profile.sensors} />
+                    <MiniTable title="Credentials attempted" rows={profile.credentials} />
+                    <MiniTable title="Commands" rows={profile.commands} />
+                    <MiniTable title="HTTP paths" rows={profile.paths} />
+                    <MiniTable title="Targeted ports" rows={profile.ports} />
+                    <MiniTable title="Protocols" rows={profile.protos} />
+                    <MiniTable title="Sessions" rows={profile.sessions} linkTo={(key) => `/sessions/${encodeURIComponent(key)}`} />
+                  </div>
+                </CardContent>
+              </Card>
             </TabsContent>
-            <TabsContent value="indicators" className="dashboard-panel">
-              <div className="grid min-w-0 gap-4 md:grid-cols-2">
-                <MiniTable title="Payload hashes" rows={profile.payloads} linkTo={(key) => `/payload-analysis/${encodeURIComponent(key)}`} />
-                <MiniTable title="Alerts" rows={profile.alerts} />
-                <MiniTable title="Fingerprints" rows={profile.fingerprints} />
-              </div>
-              <TechniquesTable techniques={profile.techniques} />
+            <TabsContent value="indicators">
+              <Card>
+                <CardContent className="p-6">
+                  <div className="grid min-w-0 gap-4 md:grid-cols-2">
+                    <MiniTable title="Payload hashes" rows={profile.payloads} linkTo={(key) => `/payload-analysis/${encodeURIComponent(key)}`} />
+                    <MiniTable title="Alerts" rows={profile.alerts} />
+                    <MiniTable title="Fingerprints" rows={profile.fingerprints} />
+                  </div>
+                  <TechniquesTable techniques={profile.techniques} />
+                </CardContent>
+              </Card>
             </TabsContent>
-            <TabsContent value="correlation" className="dashboard-panel">
-              <CorrelationPanel correlation={profile.correlation} />
+            <TabsContent value="correlation">
+              <Card>
+                <CardContent className="p-6">
+                  <CorrelationPanel correlation={profile.correlation} />
+                </CardContent>
+              </Card>
             </TabsContent>
           </Tabs>
         </>

@@ -25,6 +25,7 @@ import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
+import { Card, CardContent } from '../components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
 import { Table, TableBody, TableCell, TableRow } from '../components/ui/table'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs'
@@ -501,19 +502,25 @@ function AttackerTab({ shasum }: { shasum: string }) {
         </div>
       </div>
 
-      <div className="metric-grid">
-        <div className="metric">
-          <div className="metric__value">{profile.total.toLocaleString('en-US')}</div>
-          <div className="metric__label">Events</div>
-        </div>
-        <div className="metric">
-          <div className="metric__value">{profile.sessions.length.toLocaleString('en-US')}</div>
-          <div className="metric__label">Sessions</div>
-        </div>
-        <div className="metric">
-          <div className="metric__value">{profile.commands.length.toLocaleString('en-US')}</div>
-          <div className="metric__label">Distinct commands</div>
-        </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-sm text-muted-foreground">Events</div>
+            <div className="text-2xl font-semibold">{profile.total.toLocaleString('en-US')}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-sm text-muted-foreground">Sessions</div>
+            <div className="text-2xl font-semibold">{profile.sessions.length.toLocaleString('en-US')}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-sm text-muted-foreground">Distinct commands</div>
+            <div className="text-2xl font-semibold">{profile.commands.length.toLocaleString('en-US')}</div>
+          </CardContent>
+        </Card>
       </div>
 
       {profile.techniques.length > 0 ? (
@@ -619,21 +626,27 @@ function TtyReplay() {
           <TabsTrigger value="playback">Playback</TabsTrigger>
           <TabsTrigger value="attacker">Attacker replay</TabsTrigger>
         </TabsList>
-        <TabsContent value="playback" className="dashboard-panel">
+        <TabsContent value="playback">
           {replay === null ? (
-            <div className="card wide">
-              <span className="skeleton-line" aria-hidden="true" />
-              <span className="skeleton-line" aria-hidden="true" />
-            </div>
+            <Card>
+              <CardContent className="p-6">
+                <span className="skeleton-line" aria-hidden="true" />
+                <span className="skeleton-line" aria-hidden="true" />
+              </CardContent>
+            </Card>
           ) : (
             <TerminalPlayback replay={replay} />
           )}
         </TabsContent>
-        <TabsContent value="attacker" className="dashboard-panel">
-          {/* Lazily mounted — the profile lookup doesn't run until the tab
-              is first opened (hp-tty-replay.js initialized its map the same
-              way, on first reveal). */}
-          {tab === 'attacker' ? <AttackerTab shasum={shasum} /> : null}
+        <TabsContent value="attacker">
+          <Card>
+            <CardContent className="p-6">
+              {/* Lazily mounted — the profile lookup doesn't run until the tab
+                  is first opened (hp-tty-replay.js initialized its map the same
+                  way, on first reveal). */}
+              {tab === 'attacker' ? <AttackerTab shasum={shasum} /> : null}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </>

@@ -14,6 +14,7 @@ import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 
@@ -302,25 +303,33 @@ function GithubAnalysisDetail() {
             </div>
           ) : null}
 
-          <div className="metric-grid">
-            <div className="metric">
-              <div className={`metric__value${run.verdict?.malicious ? ' text-danger' : ''}`}>
-                {run.verdict ? `${run.verdict.malicious} / ${run.verdict.total}` : '—'}
-              </div>
-              <div className="metric__label">Detections</div>
-            </div>
-            <div className="metric">
-              <div className="metric__value metric__value--text">{run.verdict?.level || 'unscored'}</div>
-              <div className="metric__label">Risk level</div>
-            </div>
-            <div className="metric">
-              <div className="metric__value metric__value--text">{run.family || 'unknown'}</div>
-              <div className="metric__label">Family</div>
-            </div>
-            <div className="metric">
-              <div className="metric__value">{run.yara_auto_rules?.length ?? 0}</div>
-              <div className="metric__label">Auto YARA rules</div>
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-sm text-muted-foreground">Detections</div>
+                <div className={`text-2xl font-semibold${run.verdict?.malicious ? ' text-destructive' : ''}`}>
+                  {run.verdict ? `${run.verdict.malicious} / ${run.verdict.total}` : '—'}
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-sm text-muted-foreground">Risk level</div>
+                <div className="text-2xl font-semibold">{run.verdict?.level || 'unscored'}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-sm text-muted-foreground">Family</div>
+                <div className="text-2xl font-semibold">{run.family || 'unknown'}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-sm text-muted-foreground">Auto YARA rules</div>
+                <div className="text-2xl font-semibold">{run.yara_auto_rules?.length ?? 0}</div>
+              </CardContent>
+            </Card>
           </div>
 
           <Tabs value={tab} onValueChange={(value) => setTab(value as 'verdict' | 'provenance' | 'artifacts')}>
@@ -330,13 +339,12 @@ function GithubAnalysisDetail() {
               <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
             </TabsList>
             <TabsContent value="verdict">
-              <div className="dashboard-panel">
-              <div className="section-heading">
-                <div>
-                  <h2>What the scanners found</h2>
-                  <p>Per-scanner results from the third-party pipeline the published sample was scored against.</p>
-                </div>
-              </div>
+              <Card>
+                <CardHeader>
+                  <CardTitle>What the scanners found</CardTitle>
+                  <CardDescription>Per-scanner results from the third-party pipeline the published sample was scored against.</CardDescription>
+                </CardHeader>
+                <CardContent>
               <div className="card wide">
                 <h2>Scanner results</h2>
                 {run.scanners?.length ? (
@@ -377,16 +385,16 @@ function GithubAnalysisDetail() {
                   <p className="empty">No scanner results are recorded for this analysis.</p>
                 )}
               </div>
-            </div>
+                </CardContent>
+              </Card>
             </TabsContent>
             <TabsContent value="provenance">
-              <div className="dashboard-panel">
-              <div className="section-heading">
-                <div>
-                  <h2>Where this came from</h2>
-                  <p>The publication that produced this result: who requested it, what was pushed, and when.</p>
-                </div>
-              </div>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Where this came from</CardTitle>
+                  <CardDescription>The publication that produced this result: who requested it, what was pushed, and when.</CardDescription>
+                </CardHeader>
+                <CardContent>
               <div className="card wide">
                 <h2>Publication record</h2>
                 <div className="card__scroll">
@@ -440,16 +448,16 @@ function GithubAnalysisDetail() {
                   </Table>
                 </div>
               </div>
-            </div>
+                </CardContent>
+              </Card>
             </TabsContent>
             <TabsContent value="artifacts">
-              <div className="dashboard-panel">
-              <div className="section-heading">
-                <div>
-                  <h2>What the pipeline produced</h2>
-                  <p>Auto-generated detection content and the downloadable report.</p>
-                </div>
-              </div>
+              <Card>
+                <CardHeader>
+                  <CardTitle>What the pipeline produced</CardTitle>
+                  <CardDescription>Auto-generated detection content and the downloadable report.</CardDescription>
+                </CardHeader>
+                <CardContent>
               <div className="card wide">
                 <h2>Auto-generated YARA rules</h2>
                 {run.yara_auto_rules?.length ? (
@@ -506,7 +514,8 @@ function GithubAnalysisDetail() {
                   </>
                 )}
               </div>
-            </div>
+                </CardContent>
+              </Card>
             </TabsContent>
           </Tabs>
 

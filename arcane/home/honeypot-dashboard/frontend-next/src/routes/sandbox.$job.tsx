@@ -16,6 +16,7 @@ import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
+import { Card, CardContent } from '../components/ui/card'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 import type { Json, JsonRecord } from '../lib/json'
@@ -298,23 +299,31 @@ function SandboxDetail() {
             </div>
           ) : null}
 
-          <div className="metric-grid">
-            <div className="metric">
-              <div className="metric__value text-danger">{incomplete ? 'not rated' : `${riskScore} / 100 • ${riskLevel}`}</div>
-              <div className="metric__label">Dynamic risk</div>
-            </div>
-            <div className="metric">
-              <div className="metric__value">{num(detail.duration_seconds)} seconds</div>
-              <div className="metric__label">Duration</div>
-            </div>
-            <div className="metric">
-              <div className="metric__value">{num(network.packets)}</div>
-              <div className="metric__label">Captured packets</div>
-            </div>
-            <div className="metric">
-              <div className="metric__value">{changedFiles.length}</div>
-              <div className="metric__label">Changed paths</div>
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-sm text-muted-foreground">Dynamic risk</div>
+                <div className="text-2xl font-semibold text-destructive">{incomplete ? 'not rated' : `${riskScore} / 100 • ${riskLevel}`}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-sm text-muted-foreground">Duration</div>
+                <div className="text-2xl font-semibold">{num(detail.duration_seconds)} seconds</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-sm text-muted-foreground">Captured packets</div>
+                <div className="text-2xl font-semibold">{num(network.packets)}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-sm text-muted-foreground">Changed paths</div>
+                <div className="text-2xl font-semibold">{changedFiles.length}</div>
+              </CardContent>
+            </Card>
           </div>
 
           <Tabs value={tab} onValueChange={setTab}>

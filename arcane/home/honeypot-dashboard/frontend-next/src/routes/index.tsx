@@ -16,7 +16,7 @@ import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
 import { useSidebarViewTabs } from '../lib/viewTabs'
 import { countryName } from '../lib/country'
-import { Card } from '../components/ui/card'
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../components/ui/table'
@@ -256,7 +256,7 @@ function KpiSpark({ hourly }: { hourly: number[] | undefined }) {
 
 function KpiStrip({ kpis, payloads, payloadsFailed }: { kpis: OverviewKpis | null; payloads: number | null; payloadsFailed?: boolean }) {
   return (
-    <div className="metric-grid" id="overview-kpis">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="overview-kpis">
       <Card className="min-w-0 p-4"><Link className="block" to="/events" title="Open all normalized events in the current dashboard window">
         <div className="metric__value font-serif text-[26px] font-medium tracking-tight">
           <KpiValue value={kpis && kpis.ready ? kpis.total : null} />
@@ -566,14 +566,17 @@ function Overview() {
       {viewTabs}
 
       {tab === 'live' ? (
-        <div className="dashboard-panel" role="tabpanel" id="ov-panel-live" aria-labelledby="ov-live">
-          <div className="section-heading">
-            <div>
-              <h2>Current activity</h2>
-              <p>What is happening now, when traffic arrived, and where it originated.</p>
+        <Card role="tabpanel" id="ov-panel-live" aria-labelledby="ov-live">
+          <CardHeader>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <CardTitle>Current activity</CardTitle>
+                <CardDescription>What is happening now, when traffic arrived, and where it originated.</CardDescription>
+              </div>
+              <Link className="section-link" to="/events" search={{ since: '24h' }}>View last 24 hours →</Link>
             </div>
-            <Link className="section-link" to="/events" search={{ since: '24h' }}>View last 24 hours →</Link>
-          </div>
+          </CardHeader>
+          <CardContent>
           <Card className="col-span-full min-w-0 p-6 chart-card">
             <h2>Activity — last 24h</h2>
             <Heatmap
@@ -640,18 +643,22 @@ function Overview() {
               </div>
             )}
           </Card>
-        </div>
+          </CardContent>
+        </Card>
       ) : null}
 
       {tab === 'health' ? (
-        <div className="dashboard-panel" role="tabpanel" id="ov-panel-health" aria-labelledby="ov-health">
-          <div className="section-heading">
-            <div>
-              <h2>Collection status</h2>
-              <p>Sensor activity and the protocols currently attracting traffic.</p>
+        <Card role="tabpanel" id="ov-panel-health" aria-labelledby="ov-health">
+          <CardHeader>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <CardTitle>Collection status</CardTitle>
+                <CardDescription>Sensor activity and the protocols currently attracting traffic.</CardDescription>
+              </div>
+              <Link className="section-link" to="/source-health">Open pipeline health →</Link>
             </div>
-            <Link className="section-link" to="/source-health">Open pipeline health →</Link>
-          </div>
+          </CardHeader>
+          <CardContent>
           <Card className="card half sensor-card">
             <h2>Sensor feeds</h2>
             {dashboard === null ? (
@@ -703,18 +710,22 @@ function Overview() {
               .
             </p>
           </Card>
-        </div>
+          </CardContent>
+        </Card>
       ) : null}
 
       {tab === 'threats' ? (
-        <div className="dashboard-panel" role="tabpanel" id="ov-panel-threats" aria-labelledby="ov-threats">
-          <div className="section-heading">
-            <div>
-              <h2>Threat landscape</h2>
-              <p>Highest-volume sources, targets, locations, and network ownership.</p>
+        <Card role="tabpanel" id="ov-panel-threats" aria-labelledby="ov-threats">
+          <CardHeader>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <CardTitle>Threat landscape</CardTitle>
+                <CardDescription>Highest-volume sources, targets, locations, and network ownership.</CardDescription>
+              </div>
+              <Link className="section-link" to="/ips">Investigate all sources →</Link>
             </div>
-            <Link className="section-link" to="/ips">Investigate all sources →</Link>
-          </div>
+          </CardHeader>
+          <CardContent>
           <Tbl title="Top source IPs" rows={dashboard ? dashboard.top_ips : null} failed={dashboardFailed} />
           <Tbl title="Top targeted ports" rows={dashboard ? dashboard.top_ports : null} failed={dashboardFailed} />
           <Tbl title="Top countries" rows={dashboard ? dashboard.countries : null} failed={dashboardFailed} />
@@ -755,18 +766,22 @@ function Overview() {
             </p>
             <EChart kind="bar" url="/api/chart/dionaea-cves" height={320} />
           </Card>
-        </div>
+          </CardContent>
+        </Card>
       ) : null}
 
       {tab === 'behavior' ? (
-        <div className="dashboard-panel" role="tabpanel" id="ov-panel-behavior" aria-labelledby="ov-behavior">
-          <div className="section-heading">
-            <div>
-              <h2>Attacker behavior</h2>
-              <p>Authentication attempts, executed commands, client identity, and reusable fingerprints.</p>
+        <Card role="tabpanel" id="ov-panel-behavior" aria-labelledby="ov-behavior">
+          <CardHeader>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <CardTitle>Attacker behavior</CardTitle>
+                <CardDescription>Authentication attempts, executed commands, client identity, and reusable fingerprints.</CardDescription>
+              </div>
+              <Link className="section-link" to="/commands">Review all commands →</Link>
             </div>
-            <Link className="section-link" to="/commands">Review all commands →</Link>
-          </div>
+          </CardHeader>
+          <CardContent>
           <Tbl title="Top credentials (user / pass)" rows={dashboard ? dashboard.top_creds : null} hint="authentication events only" failed={dashboardFailed} />
           <Tbl title="Top commands" rows={dashboard ? dashboard.top_commands : null} hint="No shell commands captured yet — fed by cowrie and multipot sessions." failed={dashboardFailed} />
           <Tbl title="SSH/telnet clients" rows={dashboard ? dashboard.clients : null} hint="No client banners yet — fed by cowrie." failed={dashboardFailed} />
@@ -857,18 +872,22 @@ function Overview() {
             <p className="note">Time attackers/bots spent stuck talking to nothing before giving up.</p>
             <EChart kind="bar" url="/api/chart/endlessh-held-histogram" height={320} />
           </Card>
-        </div>
+          </CardContent>
+        </Card>
       ) : null}
 
       {tab === 'evidence' ? (
-        <div className="dashboard-panel" role="tabpanel" id="ov-panel-evidence" aria-labelledby="ov-evidence">
-          <div className="section-heading">
-            <div>
-              <h2>Detection and evidence</h2>
-              <p>IDS findings, captured artifacts, and cross-sensor campaign correlation.</p>
+        <Card role="tabpanel" id="ov-panel-evidence" aria-labelledby="ov-evidence">
+          <CardHeader>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <CardTitle>Detection and evidence</CardTitle>
+                <CardDescription>IDS findings, captured artifacts, and cross-sensor campaign correlation.</CardDescription>
+              </div>
+              <Link className="section-link" to="/payloads">Open payload analysis →</Link>
             </div>
-            <Link className="section-link" to="/payloads">Open payload analysis →</Link>
-          </div>
+          </CardHeader>
+          <CardContent>
           <Tbl title="Suricata alerts" rows={dashboard ? dashboard.alerts : null} hint="No Suricata alerts in this window — pipeline status lives under Source & pipeline health." failed={dashboardFailed} />
           <Tbl title="Alert categories" rows={dashboard ? dashboard.alert_cats : null} hint="No Suricata alerts in this window." failed={dashboardFailed} />
           <Card className="card wide">
@@ -979,7 +998,8 @@ function Overview() {
               </div>
             )}
           </Card>
-        </div>
+          </CardContent>
+        </Card>
       ) : null}
 
       <footer id="overview-footer">

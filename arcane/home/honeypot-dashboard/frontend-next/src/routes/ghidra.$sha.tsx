@@ -15,6 +15,7 @@ import { GhidraCallGraph } from '../components/GhidraCallGraph'
 import { confirmAction } from '../components/ConfirmDialog'
 import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
+import { Card, CardContent } from '../components/ui/card'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 import { formatTimestamp } from '../lib/time'
@@ -1121,23 +1122,31 @@ function GhidraDetail() {
             </div>
           ) : null}
 
-          <div className="metric-grid" id="ghidra-detail-stats">
-            <div className="metric">
-              <div className="metric__value">{g.functions?.length ?? 0}</div>
-              <div className="metric__label">Functions</div>
-            </div>
-            <div className="metric">
-              <div className="metric__value">{g.imports?.length ?? 0}</div>
-              <div className="metric__label">Imports</div>
-            </div>
-            <div className="metric">
-              <div className="metric__value">{g.strings?.length ?? 0}</div>
-              <div className="metric__label">Strings</div>
-            </div>
-            <div className="metric">
-              <div className={`metric__value${g.findcrypt?.length ? ' text-secondary' : ''}`}>{g.findcrypt?.length ?? 0}</div>
-              <div className="metric__label">Crypto constants</div>
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="ghidra-detail-stats">
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-sm text-muted-foreground">Functions</div>
+                <div className="text-2xl font-semibold">{g.functions?.length ?? 0}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-sm text-muted-foreground">Imports</div>
+                <div className="text-2xl font-semibold">{g.imports?.length ?? 0}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-sm text-muted-foreground">Strings</div>
+                <div className="text-2xl font-semibold">{g.strings?.length ?? 0}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-sm text-muted-foreground">Crypto constants</div>
+                <div className={`text-2xl font-semibold${g.findcrypt?.length ? ' text-muted-foreground' : ''}`}>{g.findcrypt?.length ?? 0}</div>
+              </CardContent>
+            </Card>
           </div>
 
           <Tabs value={tab} onValueChange={setTab}>

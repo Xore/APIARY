@@ -2193,27 +2193,37 @@ function ReporterStatsCard({ data }: { data: ReporterStats | null }) {
           <p className="empty">{data.reason || 'No reporter metrics available.'}</p>
         ) : (
           <>
-            <div className="metric-grid">
-              <div className="metric">
-                <div className="metric__label">Attempted</div>
-                <div className="metric__value">{metric(data.stats?.attempted)}</div>
-              </div>
-              <div className="metric">
-                <div className="metric__label">Sent</div>
-                <div className="metric__value">{metric(data.stats?.sent)}</div>
-              </div>
-              <div className="metric">
-                <div className="metric__label">Suppressed</div>
-                <div className="metric__value">{metric(data.stats?.suppressed_cooldown)}</div>
-              </div>
-              <div className="metric">
-                <div className="metric__label">Dry run</div>
-                <div className="metric__value">{metric(data.stats?.dry_run)}</div>
-              </div>
-              <div className="metric">
-                <div className="metric__label">Failed</div>
-                <div className="metric__value">{metric(data.stats?.failed)}</div>
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+              <Card>
+                <CardContent className="p-4">
+                  <div className="text-sm text-muted-foreground">Attempted</div>
+                  <div className="text-2xl font-semibold">{metric(data.stats?.attempted)}</div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4">
+                  <div className="text-sm text-muted-foreground">Sent</div>
+                  <div className="text-2xl font-semibold">{metric(data.stats?.sent)}</div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4">
+                  <div className="text-sm text-muted-foreground">Suppressed</div>
+                  <div className="text-2xl font-semibold">{metric(data.stats?.suppressed_cooldown)}</div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4">
+                  <div className="text-sm text-muted-foreground">Dry run</div>
+                  <div className="text-2xl font-semibold">{metric(data.stats?.dry_run)}</div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4">
+                  <div className="text-sm text-muted-foreground">Failed</div>
+                  <div className="text-2xl font-semibold">{metric(data.stats?.failed)}</div>
+                </CardContent>
+              </Card>
             </div>
             {data.stats?.updated_at ? (
               <p className="note">Updated {formatTimestamp(String(data.stats.updated_at))}</p>

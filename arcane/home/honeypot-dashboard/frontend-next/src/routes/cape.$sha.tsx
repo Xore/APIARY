@@ -12,6 +12,7 @@ import { useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { Badge } from '../components/ui/badge'
+import { Card, CardContent } from '../components/ui/card'
 import type { Json, JsonRecord } from '../lib/json'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 
@@ -205,23 +206,31 @@ function CapeDetail() {
             </div>
           ) : (
             <>
-              <div className="metric-grid">
-                <div className="metric">
-                  <div className={`metric__value${(run.score ?? 0) > 0 ? ' text-danger' : ''}`}>{scoreDisplay(run.score)}</div>
-                  <div className="metric__label">Malscore</div>
-                </div>
-                <div className="metric">
-                  <div className="metric__value">{run.cape_status}</div>
-                  <div className="metric__label">Task status</div>
-                </div>
-                <div className="metric">
-                  <div className="metric__value">{run.signatures.length}</div>
-                  <div className="metric__label">Signatures</div>
-                </div>
-                <div className="metric">
-                  <div className="metric__value">{summary ? summary.processes.length : 0}</div>
-                  <div className="metric__label">Processes traced</div>
-                </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="text-sm text-muted-foreground">Malscore</div>
+                    <div className={`text-2xl font-semibold${(run.score ?? 0) > 0 ? ' text-destructive' : ''}`}>{scoreDisplay(run.score)}</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="text-sm text-muted-foreground">Task status</div>
+                    <div className="text-2xl font-semibold">{run.cape_status}</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="text-sm text-muted-foreground">Signatures</div>
+                    <div className="text-2xl font-semibold">{run.signatures.length}</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="text-sm text-muted-foreground">Processes traced</div>
+                    <div className="text-2xl font-semibold">{summary ? summary.processes.length : 0}</div>
+                  </CardContent>
+                </Card>
               </div>
 
               <div className="section-heading">
