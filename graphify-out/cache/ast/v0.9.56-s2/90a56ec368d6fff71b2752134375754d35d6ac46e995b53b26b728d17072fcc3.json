@@ -1,1 +1,0 @@
-{"nodes": [{"id": "pkg_endlessh_honeypot", "label": "endlessh-honeypot", "file_type": "code", "type": "package", "ecosystem": "go", "source_file": "arcane/home/honeypot-endlessh/endlessh-honeypot/go.mod", "source_location": "L1"}], "edges": []}

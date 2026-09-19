@@ -1,1 +1,0 @@
-{"nodes": [{"id": "pkg_tftp_relay", "label": "tftp-relay", "file_type": "code", "type": "package", "ecosystem": "go", "source_file": "arcane/home/honeypot-dionaea/tftp-relay/go.mod", "source_location": "L1"}], "edges": []}

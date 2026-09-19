@@ -1,1 +1,0 @@
-{"nodes": [{"id": "pkg_http_honeypot", "label": "http-honeypot", "file_type": "code", "type": "package", "ecosystem": "go", "source_file": "arcane/home/honeypot-http/http-honeypot/go.mod", "source_location": "L1"}], "edges": []}

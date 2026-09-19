@@ -1,1 +1,0 @@
-{"nodes": [{"id": "pkg_citrix_honeypot", "label": "citrix-honeypot", "file_type": "code", "type": "package", "ecosystem": "go", "source_file": "arcane/home/honeypot-citrix-honeypot/citrix-honeypot/go.mod", "source_location": "L1"}], "edges": []}

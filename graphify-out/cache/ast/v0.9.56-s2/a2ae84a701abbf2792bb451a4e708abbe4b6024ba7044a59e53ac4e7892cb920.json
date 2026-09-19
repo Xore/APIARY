@@ -1,1 +1,0 @@
-{"nodes": [{"id": "pkg_sonicwall_sma_honeypot", "label": "sonicwall-sma-honeypot", "file_type": "code", "type": "package", "ecosystem": "go", "source_file": "arcane/home/honeypot-sonicwall-sma/sonicwall-sma-honeypot/go.mod", "source_location": "L1"}], "edges": []}

@@ -3,6 +3,7 @@ node_modules/
 .nitro/
 .tanstack/
 dist/
+graphify-out/
 .env
 target/
 

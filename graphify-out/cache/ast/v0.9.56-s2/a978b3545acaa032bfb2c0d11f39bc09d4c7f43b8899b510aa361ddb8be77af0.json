@@ -1,1 +1,0 @@
-{"nodes": [{"id": "pkg_dnp3_honeypot", "label": "dnp3-honeypot", "file_type": "code", "type": "package", "ecosystem": "go", "source_file": "arcane/home/honeypot-dnp3/dnp3-honeypot/go.mod", "source_location": "L1"}], "edges": []}

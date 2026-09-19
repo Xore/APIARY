@@ -1,1 +1,0 @@
-{"nodes": [{"id": "pkg_canarytokens_http_router", "label": "canarytokens-http-router", "file_type": "code", "type": "package", "ecosystem": "go", "source_file": "arcane/home/honeypot-canarytokens/canarytokens-http-router/go.mod", "source_location": "L1"}], "edges": []}
