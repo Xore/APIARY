@@ -7,6 +7,7 @@
 // Live read-only VNC viewing of a currently-running Windows-sandbox
 // detonation (SANDBOX_VNC_BRIDGE_WS) is a separate page, not this one —
 // see sandbox.vnc.tsx.
+import { Skeleton } from '../components/ui/skeleton'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
@@ -271,8 +272,8 @@ function SandboxDetail() {
       {detail === null ? (
         <Card>
           <CardContent>
-            <span className="skeleton-line" aria-hidden="true" />
-            <span className="skeleton-line" aria-hidden="true" />
+            <Skeleton className="h-4 w-full" aria-hidden="true" />
+            <Skeleton className="h-4 w-full" aria-hidden="true" />
           </CardContent>
         </Card>
       ) : (

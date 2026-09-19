@@ -8,6 +8,7 @@
 // recordings, so "the source IP of this recording" had no single answer and
 // the column showed an arbitrary one. Everything rendered below is native to
 // the close event, so there is no join and no per-row lookup.
+import { Skeleton } from '../components/ui/skeleton'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useState } from 'react'
@@ -85,7 +86,7 @@ function ReplayPane({ row }: { row: RecordingRow }) {
       cancelled = true
     }
   }, [row.shasum])
-  if (replay === 'loading') return <span className="skeleton-line" aria-hidden="true" />
+  if (replay === 'loading') return <Skeleton className="h-4 w-full" aria-hidden="true" />
   if (!replay) return <p className="subtitle">Replay unavailable for this recording.</p>
   return (
     <>

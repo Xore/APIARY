@@ -6,6 +6,7 @@
 // layout fitted while the shell is resized (hp-attackers.js:135-146) —
 // the shell itself carries attackers.html:150's resize:vertical style so
 // the operator can drag it taller.
+import { Skeleton } from './ui/skeleton'
 import { createServerFn } from '@tanstack/react-start'
 import { useNavigate } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
@@ -100,7 +101,7 @@ export function AttackerGraph({ id }: { id: string }) {
       />
     )
   }
-  if (graph === null) return <span className="skeleton-line" aria-hidden="true" />
+  if (graph === null) return <Skeleton className="h-4 w-full" aria-hidden="true" />
   if (graph.nodes.length <= 1) return null
   return (
     <>

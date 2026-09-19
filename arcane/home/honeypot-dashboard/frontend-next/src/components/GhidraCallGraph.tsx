@@ -13,6 +13,7 @@
 // all, so a function literally named "<img onerror=...>" still just paints
 // as that literal text. Same property the static SVG's own image-embedding
 // relies on, a different rendering backend achieving it.
+import { Skeleton } from './ui/skeleton'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useRef, useState } from 'react'
 import type { Core, NodeSingular } from 'cytoscape'
@@ -159,7 +160,7 @@ export function GhidraCallGraph({ sha }: { sha: string }) {
       />
     )
   }
-  if (graph === null) return <span className="skeleton-line" aria-hidden="true" />
+  if (graph === null) return <Skeleton className="h-4 w-full" aria-hidden="true" />
   if (graph.nodes.length === 0) {
     return <p className="empty">No caller/callee cross-references were recovered for this binary's deep-dived functions.</p>
   }

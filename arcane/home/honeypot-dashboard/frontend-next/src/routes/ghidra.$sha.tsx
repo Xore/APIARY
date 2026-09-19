@@ -5,6 +5,7 @@
 // table), Deep dive (types, globals, annotations, memory map, chat threads,
 // symbol recovery), plus a Raw tab keeping the full analysis record and the
 // report artifacts the port already exposed.
+import { Skeleton } from '../components/ui/skeleton'
 import { useEffect, useState } from 'react'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
@@ -1186,9 +1187,9 @@ function GhidraDetail() {
       {doc === null ? (
         <Card>
           <CardContent>
-            <span className="skeleton-line" aria-hidden="true" />
-            <span className="skeleton-line" aria-hidden="true" />
-            <span className="skeleton-line" aria-hidden="true" />
+            <Skeleton className="h-4 w-full" aria-hidden="true" />
+            <Skeleton className="h-4 w-full" aria-hidden="true" />
+            <Skeleton className="h-4 w-full" aria-hidden="true" />
           </CardContent>
         </Card>
       ) : (

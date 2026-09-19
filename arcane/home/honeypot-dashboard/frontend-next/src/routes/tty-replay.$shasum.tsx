@@ -18,6 +18,7 @@
 // byte content as `transcript`), just kept as a frame list instead of one
 // concatenated string so each frame can be `term.write()`'d with real
 // timing instead of revealed character-by-character.
+import { Skeleton } from '../components/ui/skeleton'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -447,7 +448,7 @@ function AttackerTab({ shasum }: { shasum: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-runs on attempt bump only
   }, [shasum, attempt])
 
-  if (state === 'loading') return <span className="skeleton-line" aria-hidden="true" />
+  if (state === 'loading') return <Skeleton className="h-4 w-full" aria-hidden="true" />
   if (state === 'failed') {
     return (
       <ErrorStateBlock
@@ -631,8 +632,8 @@ function TtyReplay() {
           {replay === null ? (
             <Card>
               <CardContent className="p-6">
-                <span className="skeleton-line" aria-hidden="true" />
-                <span className="skeleton-line" aria-hidden="true" />
+                <Skeleton className="h-4 w-full" aria-hidden="true" />
+                <Skeleton className="h-4 w-full" aria-hidden="true" />
               </CardContent>
             </Card>
           ) : (

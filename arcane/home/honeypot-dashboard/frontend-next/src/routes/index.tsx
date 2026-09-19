@@ -3,6 +3,7 @@
 // landscape / Attacker behavior / Evidence & campaigns. Skeleton-first:
 // the shell renders instantly, every panel hydrates from its deferred
 // promise.
+import { Skeleton } from '../components/ui/skeleton'
 import { Await, Link, createFileRoute, useRouter } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { Suspense, useCallback, useEffect, useState } from 'react'
@@ -232,7 +233,7 @@ function greeting(change: string): string {
 }
 
 function KpiValue({ value }: { value: number | null }) {
-  if (value === null) return <span className="skeleton-line" aria-hidden="true" />
+  if (value === null) return <Skeleton className="h-4 w-full" aria-hidden="true" />
   return <>{value.toLocaleString('en-US')}</>
 }
 
@@ -616,9 +617,9 @@ function Overview() {
                 <ErrorStateBlock title="The event stream failed to load" hint="The backend request failed — this panel is never cached." onRetry={refresh} />
               ) : (
                 <>
-                  <span className="skeleton-line" aria-hidden="true" />
-                  <span className="skeleton-line" aria-hidden="true" />
-                  <span className="skeleton-line" aria-hidden="true" />
+                  <Skeleton className="h-4 w-full" aria-hidden="true" />
+                  <Skeleton className="h-4 w-full" aria-hidden="true" />
+                  <Skeleton className="h-4 w-full" aria-hidden="true" />
                 </>
               )
             ) : (
@@ -671,8 +672,8 @@ function Overview() {
                 </p>
               ) : (
                 <>
-                  <span className="skeleton-line" aria-hidden="true" />
-                  <span className="skeleton-line" aria-hidden="true" />
+                  <Skeleton className="h-4 w-full" aria-hidden="true" />
+                  <Skeleton className="h-4 w-full" aria-hidden="true" />
                 </>
               )
             ) : (
@@ -906,8 +907,8 @@ function Overview() {
                 </p>
               ) : (
                 <>
-                  <span className="skeleton-line" aria-hidden="true" />
-                  <span className="skeleton-line" aria-hidden="true" />
+                  <Skeleton className="h-4 w-full" aria-hidden="true" />
+                  <Skeleton className="h-4 w-full" aria-hidden="true" />
                 </>
               )
             ) : dashboard.payloads.length === 0 ? (
@@ -958,8 +959,8 @@ function Overview() {
                 <ErrorStateBlock title="Campaign correlation failed to load" hint="The backend request failed — this panel is never cached." onRetry={refresh} />
               ) : (
                 <>
-                  <span className="skeleton-line" aria-hidden="true" />
-                  <span className="skeleton-line" aria-hidden="true" />
+                  <Skeleton className="h-4 w-full" aria-hidden="true" />
+                  <Skeleton className="h-4 w-full" aria-hidden="true" />
                 </>
               )
             ) : (

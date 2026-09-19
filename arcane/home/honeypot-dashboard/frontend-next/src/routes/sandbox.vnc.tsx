@@ -13,6 +13,7 @@
 // Admin-gated at the BFF, same posture as every other admin action in
 // this port — watching a live malware detonation is at least as sensitive
 // as downloading its capture.
+import { Skeleton } from '../components/ui/skeleton'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useRef, useState } from 'react'
@@ -95,7 +96,7 @@ function VncViewer({ bridgeWs }: { bridgeWs: string }) {
       </div>
       <div className="hp-vnc-canvas-wrap">
         <div ref={targetRef} aria-busy={state === 'connecting'}>
-          {state === 'connecting' ? <span className="skeleton-line" aria-hidden="true" /> : null}
+          {state === 'connecting' ? <Skeleton className="h-4 w-full" aria-hidden="true" /> : null}
         </div>
       </div>
     </Card>
@@ -154,7 +155,7 @@ function SandboxVnc() {
       />
       {status === 'loading' ? (
         <Card>
-          <span className="skeleton-line" aria-hidden="true" />
+          <Skeleton className="h-4 w-full" aria-hidden="true" />
         </Card>
       ) : status === 'error' ? (
         <Card>

@@ -138,7 +138,7 @@ describe('route shape', () => {
 // ---------------------------------------------------------------------------
 // #2178's settled-error discipline. Every site in that census shipped as the
 // same shape: a module renders loading ghosts (`SkeletonRows`,
-// `SkeletonCards`, `.skeleton-line`) while carrying no vocabulary anywhere
+// `SkeletonCards`, `<Skeleton>`) while carrying no vocabulary anywhere
 // for what happens when the load fails -- because serviceJSON collapses
 // settled-null into "still loading", those ghosts render forever, or hand
 // off to an empty state that asserts absence during an outage. Phases 1-3
@@ -153,7 +153,7 @@ describe('route shape', () => {
 
 const COMPONENTS = join(dirname(ROUTES), 'components')
 
-const RENDERS_GHOST = /<SkeletonRows\b|<SkeletonCards\b|skeleton-line/
+const RENDERS_GHOST = /<SkeletonRows\b|<SkeletonCards\b|<Skeleton\b[^>]*className=["']h-4 w-full/
 const FAILURE_VOCABULARY = /ErrorStateBlock|\bfailed\b|[Ll]oad [Ff]ailed/
 const DEFINES_PRIMITIVE = /export function Skeleton(Rows|Cards)/
 

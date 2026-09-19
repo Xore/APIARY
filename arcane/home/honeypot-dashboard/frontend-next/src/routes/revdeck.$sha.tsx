@@ -8,6 +8,7 @@
 // (detail.rs's revdeck_run) can also surface an unconfigured-worker error
 // state — exit_status: "error" with revdeck: null/absent — rendered as a
 // visible error card, matching dashboard/ui/revdeck.html's own alert.
+import { Skeleton } from '../components/ui/skeleton'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
@@ -225,8 +226,8 @@ function RevdeckDetail() {
       ) : null}
       {run === null ? (
         <Card>
-          <span className="skeleton-line" aria-hidden="true" />
-          <span className="skeleton-line" aria-hidden="true" />
+          <Skeleton className="h-4 w-full" aria-hidden="true" />
+          <Skeleton className="h-4 w-full" aria-hidden="true" />
         </Card>
       ) : (
         <>

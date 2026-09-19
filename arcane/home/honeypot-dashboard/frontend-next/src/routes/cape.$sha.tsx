@@ -6,6 +6,7 @@
 // signatures, process activity (call counts, not the debugger trace
 // itself — see the note on GET /api/v1/cape/{sha}), behavior summary,
 // dumped payloads/configs, and the analyzer log.
+import { Skeleton } from '../components/ui/skeleton'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
@@ -194,8 +195,8 @@ function CapeDetail() {
       />
       {run === null ? (
         <Card>
-          <span className="skeleton-line" aria-hidden="true" />
-          <span className="skeleton-line" aria-hidden="true" />
+          <Skeleton className="h-4 w-full" aria-hidden="true" />
+          <Skeleton className="h-4 w-full" aria-hidden="true" />
         </Card>
       ) : (
         <>

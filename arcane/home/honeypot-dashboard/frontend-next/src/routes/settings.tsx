@@ -17,6 +17,7 @@
 // cards (settings_modal.html:103-381 / hp-settings.js:294-651) keep their
 // per-pane dirty-gated saves through the shared confirm dialog and their
 // timezone/clock localStorage mirrors (hp-tz / hp-clock).
+import { Skeleton } from '../components/ui/skeleton'
 import { createFileRoute, Link, useBlocker, useNavigate } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
@@ -1039,8 +1040,8 @@ function PersonalPanes({
   const placeholder =
     prefsState === 'loading' ? (
       <>
-        <span className="skeleton-line" aria-hidden="true" />
-        <span className="skeleton-line" aria-hidden="true" />
+        <Skeleton className="h-4 w-full" aria-hidden="true" />
+        <Skeleton className="h-4 w-full" aria-hidden="true" />
       </>
     ) : (
       <p className="empty">Preferences could not be loaded — reload to retry.</p>
@@ -2090,7 +2091,7 @@ function ServicesCard({ initial, editable }: { initial: ServicesResponse | null;
           never holds Docker access directly.
         </p>
         {data === null ? (
-          <span className="skeleton-line" aria-hidden="true" />
+          <Skeleton className="h-4 w-full" aria-hidden="true" />
         ) : !data.available ? (
           <p className="empty">{data.reason || 'Services adapter is not configured on this host.'}</p>
         ) : data.services.length === 0 ? (
@@ -2161,7 +2162,7 @@ function ServicesCard({ initial, editable }: { initial: ServicesResponse | null;
             <p className="text-sm text-muted-foreground">
               {logsFor} — most recent lines, newest at the bottom.
             </p>
-            {logsBusy ? <span className="skeleton-line" aria-hidden="true" /> : <pre className="code">{logsText || 'No log output.'}</pre>}
+            {logsBusy ? <Skeleton className="h-4 w-full" aria-hidden="true" /> : <pre className="code">{logsText || 'No log output.'}</pre>}
           </>
         ) : null}
       </CardContent>
@@ -2186,8 +2187,8 @@ function ReporterStatsCard({ data }: { data: ReporterStats | null }) {
         <p className="text-sm text-muted-foreground">The report-sender worker's own metrics — a quick glance at what it has attempted and sent.</p>
         {data === null ? (
           <>
-            <span className="skeleton-line" aria-hidden="true" />
-            <span className="skeleton-line" aria-hidden="true" />
+            <Skeleton className="h-4 w-full" aria-hidden="true" />
+            <Skeleton className="h-4 w-full" aria-hidden="true" />
           </>
         ) : !data.available ? (
           <p className="empty">{data.reason || 'No reporter metrics available.'}</p>
@@ -2277,7 +2278,7 @@ function ConfigHistoryCard({ initial, editable }: { initial: HistoryResponse | n
       <CardContent>
         <p className="text-sm text-muted-foreground">Newest first. Rollback restores a retained revision as a new revision.</p>
         {data === null ? (
-          <span className="skeleton-line" aria-hidden="true" />
+          <Skeleton className="h-4 w-full" aria-hidden="true" />
         ) : data.entries.length === 0 ? (
           <p className="empty">No configuration changes recorded yet.</p>
         ) : (
@@ -2392,7 +2393,7 @@ function AuditLogCard({ initial }: { initial: AuditResponse | null }) {
           onRetry={() => void applyFilter(filter)}
         />
       ) : data === null ? (
-        <span className="skeleton-line" aria-hidden="true" />
+        <Skeleton className="h-4 w-full" aria-hidden="true" />
       ) : data.events.length === 0 ? (
         <p className="empty">No audit events recorded yet.</p>
       ) : (
@@ -2643,8 +2644,8 @@ export function SettingsSurface({
 
   const loadingCard = (
     <Card className="space-y-4 p-6">
-      <span className="skeleton-line" aria-hidden="true" />
-      <span className="skeleton-line" aria-hidden="true" />
+      <Skeleton className="h-4 w-full" aria-hidden="true" />
+      <Skeleton className="h-4 w-full" aria-hidden="true" />
     </Card>
   )
 
@@ -2966,7 +2967,7 @@ export function SettingsSurface({
                           // reading as "no one has ever used the dashboard".
                           adminLoadFailure
                         ) : (
-                          <span className="skeleton-line" aria-hidden="true" />
+                          <Skeleton className="h-4 w-full" aria-hidden="true" />
                         )}
                       </CardContent>
                     </Card>

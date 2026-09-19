@@ -4,6 +4,7 @@
 // and therefore the same rendered pixels — as the legacy dashboard.
 // Client-only: echarts is imported dynamically inside useEffect so SSR
 // ships the skeleton and the canvas hydrates in.
+import { Skeleton } from './ui/skeleton'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { copyWithFlash } from '../lib/flash'
 import { useAppearanceKey } from '../lib/prefs'
@@ -584,8 +585,8 @@ export function EChart({ kind, url, height, zoomable }: { kind: ChartKind; url: 
           role={state === 'error' ? 'alert' : undefined}
         />
         {state === 'loading' ? (
-          <span
-            className="skeleton-line"
+          <Skeleton
+            className="h-4 w-full"
             aria-hidden="true"
             style={{ position: 'absolute', inset: 0, height: '100%', margin: 0 }}
           />

@@ -2,6 +2,7 @@
 // top-N card, the per-sensor hourly heatmap (Xore/theme's .heatmap
 // component, CSS-var intensity), the per-sensor attack-vectors
 // drill-down (#471), and the leaflet attack map.
+import { Skeleton } from './ui/skeleton'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useRef, useState } from 'react'
 import { ErrorStateBlock } from './ErrorState'
@@ -43,9 +44,9 @@ export function Tbl({
           </p>
         ) : (
           <>
-            <span className="skeleton-line" aria-hidden="true" />
-            <span className="skeleton-line" aria-hidden="true" />
-            <span className="skeleton-line" aria-hidden="true" />
+            <Skeleton className="h-4 w-full" aria-hidden="true" />
+            <Skeleton className="h-4 w-full" aria-hidden="true" />
+            <Skeleton className="h-4 w-full" aria-hidden="true" />
           </>
         )
       ) : rows.length === 0 ? (
@@ -182,7 +183,7 @@ export function AttackVectors({
           </Button>
         ) : null}
       </div>
-      {sensor && vectors === null && !failed ? <span className="skeleton-line" aria-hidden="true" /> : null}
+      {sensor && vectors === null && !failed ? <Skeleton className="h-4 w-full" aria-hidden="true" /> : null}
       {failed ? (
         <ErrorStateBlock
           title="Attack-vector drill-down failed to load"

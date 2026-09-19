@@ -1,5 +1,6 @@
 // Artifact list for one analysis run — fetched lazily when the inspector
 // opens, each row a download link through the BFF proxy.
+import { Skeleton } from './ui/skeleton'
 import { createServerFn } from '@tanstack/react-start'
 import { useServerQuery } from '../lib/useServerQuery'
 import { ErrorStateBlock } from './ErrorState'
@@ -29,7 +30,7 @@ export function ArtifactList({ kind, artifactKey }: { kind: 'ghidra' | 'sandbox'
   // no section header, no explanation, no way back. Tri-state now keeps a
   // genuine zero invisible but names a failure and offers a retry.
   const query = useServerQuery(fetchArtifacts, { kind, key: artifactKey }, [kind, artifactKey])
-  if (query.status === 'loading') return <span className="skeleton-line" aria-hidden="true" />
+  if (query.status === 'loading') return <Skeleton className="h-4 w-full" aria-hidden="true" />
   if (query.status === 'error') {
     return (
       <ErrorStateBlock title="Artifacts failed to load" hint="The backend request failed." onRetry={query.retry} />

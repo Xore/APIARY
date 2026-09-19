@@ -12,6 +12,7 @@
 // (name, type, size, sha256) without their bytes — the posture mail.rs's
 // own doc comment insists on, so this can be neither an attacker-
 // controlled script sink nor a malware distribution point.
+import { Skeleton } from './ui/skeleton'
 import { createServerFn } from '@tanstack/react-start'
 import { useState } from 'react'
 import { ErrorStateBlock } from './ErrorState'
@@ -161,7 +162,7 @@ export function CapturedMailInline({ sessionId }: { sessionId: string }) {
       </Button>
     )
   }
-  if (busy) return <span className="skeleton-line" aria-hidden="true" />
+  if (busy) return <Skeleton className="h-4 w-full" aria-hidden="true" />
   if (mail === 'failed') {
     return (
       <ErrorStateBlock
@@ -216,7 +217,7 @@ export function MailCard({ sessionId }: { sessionId: string }) {
       </Button>
       {open ? (
         busy ? (
-          <span className="skeleton-line" aria-hidden="true" />
+          <Skeleton className="h-4 w-full" aria-hidden="true" />
         ) : mail === 'failed' ? (
           <ErrorStateBlock
             title="The captured message failed to load"

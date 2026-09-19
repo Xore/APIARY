@@ -1,5 +1,6 @@
 // Attack sources — AS-D profile card grid with View-more + skeleton-first,
 // every column of the old table on each card.
+import { Skeleton } from '../components/ui/skeleton'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useMemo } from 'react'
@@ -63,19 +64,19 @@ function SkeletonCards({ count }: { count: number }) {
       {Array.from({ length: count }, (_, i) => (
         <div key={`skel-${i}`} className="hp-src-card" aria-hidden="true">
           <div className="hp-src-card__head">
-            <span className="skeleton-line" style={{ display: 'block', width: '42%' }} />
-            <span className="skeleton-line" style={{ display: 'block', width: 34, height: 16, borderRadius: 999 }} />
+            <Skeleton className="h-4 w-full" style={{ display: 'block', width: '42%' }} />
+            <Skeleton className="h-4 w-full" style={{ display: 'block', width: 34, height: 16, borderRadius: 999 }} />
           </div>
           <div className="hp-src-card__stats">
             {[0, 1, 2].map((j) => (
               <span key={j} style={{ flex: 1, minWidth: 0, padding: j === 0 ? '0 var(--space-md) 0 0' : '0 var(--space-md)', borderLeft: j === 0 ? 'none' : '1px solid var(--border-100)' }}>
-                <span className="skeleton-line" style={{ display: 'block', width: 36, height: 17 }} />
-                <span className="skeleton-line" style={{ display: 'block', width: 48, height: 10 }} />
+                <Skeleton className="h-4 w-full" style={{ display: 'block', width: 36, height: 17 }} />
+                <Skeleton className="h-4 w-full" style={{ display: 'block', width: 48, height: 10 }} />
               </span>
             ))}
           </div>
-          <span className="skeleton-line" style={{ display: 'block', width: '68%' }} />
-          <span className="skeleton-line" style={{ display: 'block', width: '46%' }} />
+          <Skeleton className="h-4 w-full" style={{ display: 'block', width: '68%' }} />
+          <Skeleton className="h-4 w-full" style={{ display: 'block', width: '46%' }} />
         </div>
       ))}
     </>

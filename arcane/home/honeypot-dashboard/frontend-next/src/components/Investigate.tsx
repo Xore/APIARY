@@ -2,6 +2,7 @@
 // master-detail table — full-width list, click-open "Row details"
 // inspector (outside-click + × close), skeleton-first first paint.
 // Mirrors the legacy generic inspector's semantics 1:1.
+import { Skeleton } from './ui/skeleton'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { RowActions, RowIcons } from './RowActions'
@@ -117,7 +118,7 @@ export function SkeletonRows({
             const width = stub.includes(col) ? 24 : wide.includes(col) ? '72%' : '42%'
             return (
               <TableCell key={col}>
-                <span className="skeleton-line" style={{ display: 'block', width }} />
+                <Skeleton className="h-4 w-full" style={{ display: 'block', width }} />
               </TableCell>
             )
           })}
@@ -156,15 +157,15 @@ export function SkeletonCards({
               // The real slot paints the accent chip; the ghost fills only
               // where the svg will land.
               <span className="grid size-8 shrink-0 place-items-center rounded-md bg-accent text-accent-foreground">
-                <span className="skeleton-line" style={{ display: 'block', width: 16, height: 16 }} />
+                <Skeleton className="h-4 w-full" style={{ display: 'block', width: 16, height: 16 }} />
               </span>
             ) : null}
             <span className="min-w-0 flex-1">
-              <span className="skeleton-line" style={{ display: 'block', width: '68%' }} />
+              <Skeleton className="h-4 w-full" style={{ display: 'block', width: '68%' }} />
             </span>
             {badges ? (
               <div className="flex flex-wrap gap-1">
-                <span className="skeleton-line" style={{ display: 'block', width: 56, height: 18, borderRadius: 999 }} />
+                <Skeleton className="h-4 w-full" style={{ display: 'block', width: 56, height: 18, borderRadius: 999 }} />
               </div>
             ) : null}
           </div>
@@ -172,15 +173,15 @@ export function SkeletonCards({
             <p className="mt-2 space-y-1 text-sm text-muted-foreground">
               {/* Two lines: __desc clamps at two, so the ghost claims the
                   same vertical budget the loaded text will. */}
-              <span className="skeleton-line" style={{ display: 'block', width: '88%' }} />
-              <span className="skeleton-line" style={{ display: 'block', width: '55%' }} />
+              <Skeleton className="h-4 w-full" style={{ display: 'block', width: '88%' }} />
+              <Skeleton className="h-4 w-full" style={{ display: 'block', width: '55%' }} />
             </p>
           ) : null}
           {metaCols > 0 ? (
             <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               {Array.from({ length: metaCols }, (_, j) => (
                 <span key={j}>
-                  <span className="skeleton-line" style={{ display: 'block', width: 64 }} />
+                  <Skeleton className="h-4 w-full" style={{ display: 'block', width: 64 }} />
                 </span>
               ))}
             </div>

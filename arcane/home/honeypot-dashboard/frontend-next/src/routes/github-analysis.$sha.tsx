@@ -6,6 +6,7 @@
 // auto-YARA metrics, and three tabs — Verdict (per-scanner results),
 // Provenance (the publication record), Artifacts (auto-generated YARA
 // rules + the PDF report or a JSON fallback).
+import { Skeleton } from '../components/ui/skeleton'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useRef, useState } from 'react'
@@ -293,8 +294,8 @@ function GithubAnalysisDetail() {
       ) : null}
       {run === null ? (
         <Card>
-          <span className="skeleton-line" aria-hidden="true" />
-          <span className="skeleton-line" aria-hidden="true" />
+          <Skeleton className="h-4 w-full" aria-hidden="true" />
+          <Skeleton className="h-4 w-full" aria-hidden="true" />
         </Card>
       ) : (
         <>
