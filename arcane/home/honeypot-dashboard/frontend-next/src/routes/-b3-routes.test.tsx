@@ -1,6 +1,7 @@
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
+import { Button } from '../components/ui/button'
 
 const fixture = vi.hoisted(() => ({
   navigate: vi.fn(),
@@ -50,7 +51,7 @@ vi.mock('../lib/live', async () => {
   }
 })
 vi.mock('../components/FiltersModal', () => ({
-  FiltersButton: ({ onClick, activeCount = 0 }: { onClick: () => void; activeCount?: number }) => <button onClick={onClick}>Filters{activeCount ? ` (${activeCount})` : ''}</button>,
+  FiltersButton: ({ onClick, activeCount = 0 }: { onClick: () => void; activeCount?: number }) => <Button variant="outline" size="sm" onClick={onClick}>Filters{activeCount ? ` (${activeCount})` : ''}</Button>,
   FiltersModal: ({ children }: { children: React.ReactNode }) => <form>{children}</form>,
 }))
 vi.mock('../components/ConfirmDialog', () => ({ confirmAction: vi.fn() }))

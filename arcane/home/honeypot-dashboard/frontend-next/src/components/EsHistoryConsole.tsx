@@ -9,6 +9,7 @@
 import { createServerFn } from '@tanstack/react-start'
 import { useState } from 'react'
 import type { JsonRecord } from '../lib/json'
+import { Button } from './ui/button'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from './ui/card'
 
 export type EsStorage = { cluster_status: string; index_count: number; doc_count: number; store_bytes: number }
@@ -125,9 +126,9 @@ export function EsHistoryConsole({ storage, hidden }: { storage: EsStorage | nul
               if (event.key === 'Enter') void run()
             }}
           />
-          <button className="copy" type="button" onClick={() => void run()}>
+          <Button variant="ghost" size="sm" className="copy" type="button" onClick={() => void run()}>
             search
-          </button>
+          </Button>
         </div>
         <p className="card__meta">{meta}</p>
         <pre className="code">{results}</pre>

@@ -1,6 +1,7 @@
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
+import { Button } from '../components/ui/button'
 
 const fixture = vi.hoisted(() => ({
   responses: {} as Record<string, unknown>,
@@ -37,7 +38,7 @@ vi.mock('../components/Investigate', () => ({
 vi.mock('../components/EChart', () => ({ EChart: () => <div aria-label="Chart placeholder" /> }))
 vi.mock('../components/AttackerGraph', () => ({ AttackerGraph: () => <div aria-label="Graph placeholder" /> }))
 vi.mock('../components/FiltersModal', () => ({
-  FiltersButton: ({ onClick }: { onClick: () => void }) => <button onClick={onClick}>Filters</button>,
+  FiltersButton: ({ onClick }: { onClick: () => void }) => <Button variant="outline" size="sm" onClick={onClick}>Filters</Button>,
   FiltersModal: ({ children }: { children: React.ReactNode }) => <form>{children}</form>,
 }))
 

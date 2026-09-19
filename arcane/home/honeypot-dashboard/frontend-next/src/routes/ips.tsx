@@ -9,6 +9,7 @@ import { ErrorStateBlock } from '../components/ErrorState'
 import { usePaginatedList, useResolved } from '../lib/hooks'
 import { formatTimestamp } from '../lib/time'
 import { countryName } from '../lib/country'
+import { Button } from '../components/ui/button'
 
 type SourceRow = {
   ip: string
@@ -183,9 +184,9 @@ function Sources() {
             <span>
               {rows.length.toLocaleString('en-US')} of {total.toLocaleString('en-US')} entries
             </span>
-            <button className="btn btn-secondary btn-sm" type="button" onClick={viewMore} disabled={loadingMore}>
+            <Button variant="secondary" size="sm" type="button" onClick={viewMore} disabled={loadingMore}>
               View more
-            </button>
+            </Button>
           </div>
         ) : null}
       </div>

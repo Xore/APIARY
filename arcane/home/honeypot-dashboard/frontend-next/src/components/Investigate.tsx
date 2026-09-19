@@ -4,6 +4,7 @@
 // Mirrors the legacy generic inspector's semantics 1:1.
 import { useEffect, useRef, useState } from 'react'
 import { RowActions, RowIcons } from './RowActions'
+import { Button } from './ui/button'
 import { Card, CardContent, CardHeader } from './ui/card'
 
 export function InvestigateHeader({
@@ -340,9 +341,9 @@ export function MasterDetailTable<Row>({
                         {icon ? <span className="grid size-8 shrink-0 place-items-center rounded-md bg-accent text-accent-foreground [&_svg]:size-4" aria-hidden="true">{icon}</span> : null}
                         <h2 className={titleClassName}>{primaryColumn?.render(row)}</h2>
                         {!href && (
-                          <button type="button" className="shrink-0 rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-expanded={selected === index} aria-label={`Toggle details for ${primaryColumn?.header ?? 'row'} ${index + 1}`} onClick={() => setSelected(selected === index ? null : index)}>
+                          <Button variant="ghost" size="icon" type="button" className="shrink-0 rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-expanded={selected === index} aria-label={`Toggle details for ${primaryColumn?.header ?? 'row'} ${index + 1}`} onClick={() => setSelected(selected === index ? null : index)}>
                             {selected === index ? '▾' : '▸'}
-                          </button>
+                          </Button>
                         )}
                         {badges ? <div className="flex shrink-0 flex-wrap gap-1">{badges}</div> : null}
                       </div>
@@ -429,9 +430,9 @@ export function MasterDetailTable<Row>({
               <span>
                 {rows.length.toLocaleString('en-US')} of {total.toLocaleString('en-US')} entries
               </span>
-              <button className="btn btn-secondary btn-sm" type="button" onClick={onViewMore} disabled={loadingMore}>
+              <Button variant="secondary" size="sm" type="button" onClick={onViewMore} disabled={loadingMore}>
                 View more
-              </button>
+              </Button>
             </div>
           ) : null}
         </Card>
@@ -439,9 +440,9 @@ export function MasterDetailTable<Row>({
       <div className="hp-md__pane" ref={paneRef}>
         {open ? (
           <Card className="hp-md__rowcard min-w-0">
-            <button className="hp-md__close" type="button" aria-label="Close details" title="Close details" onClick={() => setSelected(null)}>
+            <Button variant="ghost" size="icon" className="hp-md__close" type="button" aria-label="Close details" title="Close details" onClick={() => setSelected(null)}>
               ×
-            </button>
+            </Button>
             <CardHeader><h2 className="font-semibold leading-none tracking-tight">{inspectorTitle}</h2></CardHeader>
             <CardContent>
               {detailPage ? (

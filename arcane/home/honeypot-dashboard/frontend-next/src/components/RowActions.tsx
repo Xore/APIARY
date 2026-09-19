@@ -15,6 +15,7 @@
 // `.hp-row-actions` in the stylesheet already provides the 24x24 button
 // surface and the hover reveal; this is what goes inside it.
 import type React from 'react'
+import { Button } from './ui/button'
 
 const ICON_PROPS = {
   width: 14,
@@ -182,7 +183,9 @@ function Control({ action }: { action: RowAction }) {
       {action.icon}
     </a>
   ) : (
-    <button
+    <Button
+      variant="ghost"
+      size="icon"
       type="button"
       {...shared}
       onClick={(event) => {
@@ -191,7 +194,7 @@ function Control({ action }: { action: RowAction }) {
       }}
     >
       {action.icon}
-    </button>
+    </Button>
   )
 }
 

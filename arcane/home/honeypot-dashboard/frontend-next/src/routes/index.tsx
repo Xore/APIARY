@@ -18,6 +18,7 @@ import { useSidebarViewTabs } from '../lib/viewTabs'
 import { countryName } from '../lib/country'
 import { Card } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../components/ui/table'
 
 type OverviewKpis = {
@@ -540,7 +541,7 @@ function Overview() {
             </Await>
           </Suspense>
         </p>
-        <button className="hp-hero__search" type="button" onClick={() => import('../components/CommandPalette').then((m) => m.openCommandPalette())}>
+        <Button variant="outline" size="default" className="hp-hero__search" type="button" onClick={() => import('../components/CommandPalette').then((m) => m.openCommandPalette())}>
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <circle cx="11" cy="11" r="8" />
             <line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -549,7 +550,7 @@ function Overview() {
           {/* CommandPalette.tsx:54 really does bind "/" — the hint was
               dropped in the port even though the shortcut still works. */}
           <kbd>/</kbd>
-        </button>
+        </Button>
         <div className="hp-hero__links">
           <Suspense fallback={null}>
             <Await promise={data.kpis}>{(kpis) => <HeroFreshness ready={Boolean(kpis?.ready)} kpis={kpis} />}</Await>

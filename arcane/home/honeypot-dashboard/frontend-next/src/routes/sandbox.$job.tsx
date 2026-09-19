@@ -14,6 +14,7 @@ import { ArtifactList } from '../components/ArtifactList'
 import { confirmAction } from '../components/ConfirmDialog'
 import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
+import { Button } from '../components/ui/button'
 import type { Json, JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
 
@@ -174,7 +175,9 @@ function PageTabs({
   return (
     <div className="tabs" role="tablist" aria-label={label}>
       {tabs.map((tab, index) => (
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           key={tab.id}
           id={`sb-tab-${tab.id}`}
           className={tab.id === active ? 'tab active' : 'tab'}
@@ -188,7 +191,7 @@ function PageTabs({
         >
           <span>0{index + 1}</span>
           {tab.label}
-        </button>
+        </Button>
       ))}
     </div>
   )
@@ -351,9 +354,9 @@ function SandboxDetail() {
                 <a className="chip" href={`https://www.virustotal.com/gui/file/${sha256}`} target="_blank" rel="noopener noreferrer">
                   VirusTotal ↗
                 </a>
-                <button className="btn btn-sm btn-danger" type="button" title="Queue a fresh sandbox run of this capture" onClick={reanalyze}>
+                <Button variant="destructive" size="sm" type="button" title="Queue a fresh sandbox run of this capture" onClick={reanalyze}>
                   Re-analyze
-                </button>
+                </Button>
               </>
             ) : null}
           </div>

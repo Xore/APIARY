@@ -15,6 +15,7 @@ import { Sidebar as ShadcnSidebar, SidebarContent, SidebarFooter, SidebarGroup, 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { Avatar, AvatarFallback } from './ui/avatar'
 import { Badge } from './ui/badge'
+import { Button } from './ui/button'
 
 function NavIcon({ path }: { path: string }) {
   return (
@@ -72,7 +73,9 @@ function AccountMenu({ user, onOpenSettings }: { user?: User | null; onOpenSetti
           <DropdownMenuItem disabled>Account service unavailable</DropdownMenuItem>
         ) : null}
       </DropdownMenuContent>
-      <DropdownMenuTrigger asChild><button
+      <DropdownMenuTrigger asChild><Button
+        variant="ghost"
+        size="default"
         className="sidebar__profile hp-account-trigger"
         type="button"
         aria-label="Account actions"
@@ -85,7 +88,7 @@ function AccountMenu({ user, onOpenSettings }: { user?: User | null; onOpenSetti
             <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>{user.role}</Badge>
           ) : null}
         </div>
-      </button></DropdownMenuTrigger>
+      </Button></DropdownMenuTrigger>
     </DropdownMenu>
   )
 }
@@ -100,7 +103,9 @@ export function Sidebar({ user, onOpenSettings }: { user?: User | null; onOpenSe
   const hasActiveItem = NAV_SECTIONS.some((section) => section.items.some((item) => item.to === activeHref))
   return (
     <ShadcnSidebar collapsible="icon" className="!bg-transparent"><aside className="app-sidebar h-full w-full" aria-label="Primary navigation">
-      <button
+      <Button
+        variant="ghost"
+        size="icon"
         className="hp-sidebar-search"
         type="button"
         aria-label="Search and investigate"
@@ -111,7 +116,7 @@ export function Sidebar({ user, onOpenSettings }: { user?: User | null; onOpenSe
           <circle cx="11" cy="11" r="8" />
           <line x1="21" y1="21" x2="16.65" y2="16.65" />
         </svg>
-      </button>
+      </Button>
       <Link to="/" className="hp-brand">
         <span className="hp-brand-mark" aria-hidden="true">
           <img className="theme-art--dark" src="/static/apiary-compact-mark-for-dark.png" width="28" height="28" alt="" />

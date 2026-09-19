@@ -13,6 +13,7 @@
 //    confirms, focus is trapped inside and restored to the trigger.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { flash } from '../lib/flash'
+import { Button } from './ui/button'
 
 export type ConfirmOptions = {
   title: string
@@ -153,18 +154,19 @@ export function ConfirmHost() {
         </p>
         {options.warning ? <div className="danger-dialog__warning">{options.warning}</div> : null}
         <div className="edit-dialog__actions">
-          <button className="btn btn-secondary" data-hp-modal-cancel="" type="button" onClick={() => close()} disabled={running}>
+          <Button variant="secondary" size="default" data-hp-modal-cancel="" type="button" onClick={() => close()} disabled={running}>
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
+            variant={options.danger === false ? 'default' : 'destructive'}
+            size="default"
             ref={confirmRef}
-            className={options.danger === false ? 'btn btn-primary' : 'btn btn-danger'}
             type="button"
             onClick={() => void runConfirm()}
             disabled={running}
           >
             {running ? 'Working…' : failed ? 'Try again' : options.confirmLabel ?? 'Confirm'}
-          </button>
+          </Button>
         </div>
       </section>
     </div>

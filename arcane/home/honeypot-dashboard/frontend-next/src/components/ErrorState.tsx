@@ -9,6 +9,7 @@
 // role="alert" because the failure usually arrives long after mount: a
 // skeleton was announced, and without live-region semantics the operator
 // using a screen reader is never told it became an error.
+import { Button } from './ui/button'
 export function ErrorStateBlock({
   title,
   hint,
@@ -31,9 +32,9 @@ export function ErrorStateBlock({
         <div className="empty-state__title">{title}</div>
         {hint ? <p className="empty-state__hint">{hint}</p> : null}
         {onRetry ? (
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onRetry}>
+          <Button variant="ghost" size="sm" type="button" onClick={onRetry}>
             Retry
-          </button>
+          </Button>
         ) : null}
       </div>
     </div>

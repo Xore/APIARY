@@ -10,6 +10,7 @@
 import { useNavigate } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Button } from './ui/button'
 
 type Hit = { label: string; count: number; url: string }
 type Group = { title: string; hits: Hit[] }
@@ -209,16 +210,18 @@ export function CommandPalette() {
             }}
             onKeyDown={onFieldKeyDown}
           />
-          <button className="modal__close" type="button" aria-label="Close" onClick={close}>
+          <Button variant="ghost" size="icon" className="modal__close" type="button" aria-label="Close" onClick={close}>
             ✕
-          </button>
+          </Button>
         </form>
         {rows.length > 0 ? (
           <div id="command-palette-listbox" className="command-palette__results" role="listbox" aria-label="Search results">
             {rows.map((row, index) => {
               const active = index === activeRow
               return (
-                <button
+                <Button
+                  variant="ghost"
+                  size="default"
                   key={`${row.group}:${row.title}:${index}`}
                   id={`command-palette-option-${index}`}
                   type="button"
@@ -235,7 +238,7 @@ export function CommandPalette() {
                   </svg>
                   <span className="command-palette__row-title">{row.title}</span>
                   <span className="command-palette__row-meta">{active ? 'Enter' : row.group}</span>
-                </button>
+                </Button>
               )
             })}
           </div>

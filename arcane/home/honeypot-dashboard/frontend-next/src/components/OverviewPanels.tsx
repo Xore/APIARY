@@ -8,6 +8,7 @@ import { ErrorStateBlock } from './ErrorState'
 import { applyLeafletTheme } from '../lib/leafletTheme'
 import { DEFAULT_MAP_PREFS, pullMapPrefs, useAppearanceKey, useThemeMode, type MapPrefs } from '../lib/prefs'
 import { Card } from './ui/card'
+import { Button } from './ui/button'
 import { Table, TableBody, TableCell, TableRow } from './ui/table'
 
 export type Kv = { key: string; count: number; link: string }
@@ -177,9 +178,9 @@ export function AttackVectors({
           ))}
         </select>
         {sensor ? (
-          <button className="chip" type="button" onClick={() => onSensorChange('')}>
+          <Button variant="outline" size="sm" className="chip" type="button" onClick={() => onSensorChange('')}>
             × all sensors
-          </button>
+          </Button>
         ) : null}
       </div>
       {sensor && vectors === null && !failed ? <span className="skeleton-line" aria-hidden="true" /> : null}

@@ -6,6 +6,7 @@
 // speaks theme.css's .segmented vocabulary by default; pass className to
 // use a page's own tab-strip class instead.
 import { useRef } from 'react'
+import { Button } from './ui/button'
 
 export type TabDef = { id: string; label: React.ReactNode }
 
@@ -64,7 +65,9 @@ export function Tabs({
       {tabs.map((tab, index) => {
         const selected = tab.id === active
         return (
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             key={tab.id}
             id={`${idPrefix}-${tab.id}`}
             // theme.css's segmented active state is `button.active`
@@ -79,7 +82,7 @@ export function Tabs({
             onKeyDown={(event) => onKeyDown(event, index)}
           >
             {tab.label}
-          </button>
+          </Button>
         )
       })}
     </div>

@@ -32,6 +32,7 @@ import { Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useLiveInterval } from '../lib/live'
 import { pullLiveToastPrefs, type LiveToastPrefs } from '../lib/prefs'
+import { Button } from './ui/button'
 
 type Severity = 'warning' | 'danger' | 'success'
 
@@ -289,14 +290,16 @@ export function LiveToasts() {
           onBlur={() => scheduleDismiss(toast.id)}
         >
           <Link to={toast.to}>{toast.message}</Link>
-          <button
+          <Button
+            variant="ghost"
+            size="icon"
             type="button"
             aria-label="Dismiss notification"
             onClick={() => dismiss(toast.id)}
             style={{ marginLeft: "auto", background: "transparent", border: 0, cursor: "pointer", font: "inherit", lineHeight: 1 }}
           >
             ×
-          </button>
+          </Button>
         </div>
       ))}
     </div>

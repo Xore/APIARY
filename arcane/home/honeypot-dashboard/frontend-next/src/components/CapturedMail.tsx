@@ -15,6 +15,7 @@
 import { createServerFn } from '@tanstack/react-start'
 import { useState } from 'react'
 import { ErrorStateBlock } from './ErrorState'
+import { Button } from './ui/button'
 import { Card, CardContent } from './ui/card'
 
 export type MailAddress = { name: string; address: string }
@@ -154,9 +155,9 @@ export function CapturedMailInline({ sessionId }: { sessionId: string }) {
 
   if (!opened) {
     return (
-      <button className="btn btn-secondary btn-sm" type="button" onClick={load}>
+      <Button variant="secondary" size="sm" type="button" onClick={load}>
         Show captured message
-      </button>
+      </Button>
     )
   }
   if (busy) return <span className="skeleton-line" aria-hidden="true" />
@@ -209,9 +210,9 @@ export function MailCard({ sessionId }: { sessionId: string }) {
         The SMTP DATA body mailoney captured for this session, parsed to headers and plain text. An HTML body is decoded to
         text but never rendered, and attachments are listed as metadata only — no bytes are stored or downloadable here.
       </p>
-      <button className="btn btn-secondary btn-sm" type="button" onClick={toggle} disabled={busy}>
+      <Button variant="secondary" size="sm" type="button" onClick={toggle} disabled={busy}>
         {busy ? 'Loading…' : open ? 'Hide mail' : 'View mail'}
-      </button>
+      </Button>
       {open ? (
         busy ? (
           <span className="skeleton-line" aria-hidden="true" />

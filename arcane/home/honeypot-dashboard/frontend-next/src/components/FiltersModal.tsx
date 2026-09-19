@@ -10,6 +10,7 @@
 // ReportViewer, reports.tsx's ReportViewerModal), factored out here since
 // this is now the fourth call site for the identical modal chrome.
 import { useEffect, useRef } from 'react'
+import { Button } from './ui/button'
 
 export function FiltersButton({
   activeCount,
@@ -22,9 +23,9 @@ export function FiltersButton({
   onClick: () => void
 }) {
   return (
-    <button className={activeCount > 0 ? 'chip is-active' : 'chip'} type="button" onClick={onClick}>
+    <Button variant={activeCount > 0 ? 'default' : 'outline'} size="sm" className={activeCount > 0 ? 'chip is-active' : 'chip'} type="button" onClick={onClick}>
       Filters{activeCount > 0 ? ` (${activeCount})` : ''}
-    </button>
+    </Button>
   )
 }
 
@@ -94,9 +95,9 @@ export function FiltersModal({
       >
         <div className="modal__header">
           <h2>{title}</h2>
-          <button className="modal__close" type="button" aria-label="Close filters" onClick={onClose} ref={closeRef}>
+          <Button variant="ghost" size="icon" className="modal__close" type="button" aria-label="Close filters" onClick={onClose} ref={closeRef}>
             ✕
-          </button>
+          </Button>
         </div>
         <form
           className="settings-grid"
@@ -107,12 +108,12 @@ export function FiltersModal({
         >
           {children}
           <div className="hp-row hp-flow--tight">
-            <button className="btn btn-primary" type="submit">
+            <Button variant="default" size="default" type="submit">
               Apply filters
-            </button>
-            <button className="btn btn-secondary" type="button" disabled={clearDisabled} onClick={onClear}>
+            </Button>
+            <Button variant="secondary" size="default" type="button" disabled={clearDisabled} onClick={onClear}>
               Clear all
-            </button>
+            </Button>
           </div>
         </form>
       </section>

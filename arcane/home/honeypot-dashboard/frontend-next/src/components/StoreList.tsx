@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column, type EmptyState } from './Investigate'
 import { ErrorStateBlock } from './ErrorState'
+import { Button } from './ui/button'
 import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
 
@@ -181,7 +182,7 @@ export function StoreListPage<Row = StoreRow>({
             /* #2178: the click succeeded from the UI's point of view while
                the read behind it failed -- say so instead of a no-op. */
             <p className="note" role="alert">
-              Loading more {chipNoun} failed — <button className="copy" type="button" onClick={() => void viewMore()}>retry</button>
+              Loading more {chipNoun} failed — <Button variant="ghost" size="sm" className="copy" type="button" onClick={() => void viewMore()}>retry</Button>
             </p>
           ) : null}
         </>

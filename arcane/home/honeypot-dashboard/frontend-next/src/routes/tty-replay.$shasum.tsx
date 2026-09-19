@@ -23,6 +23,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
+import { Button } from '../components/ui/button'
 import { Tabs, TabPanel } from '../components/Tabs'
 import { formatTimestamp } from '../lib/time'
 import { xtermTheme } from '../lib/xtermTheme'
@@ -307,8 +308,9 @@ function TerminalPlayback({ replay }: { replay: Replay }) {
   return (
     <div className="card wide">
       <div className="hp-tty-controls">
-        <button
-          className="btn btn-sm btn-primary"
+        <Button
+          variant="default"
+          size="sm"
           type="button"
           onClick={() => {
             if (playing) {
@@ -320,9 +322,10 @@ function TerminalPlayback({ replay }: { replay: Replay }) {
           }}
         >
           {label}
-        </button>
-        <button
-          className="btn btn-sm btn-secondary"
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
           type="button"
           onClick={() => {
             setPlaying(false)
@@ -330,7 +333,7 @@ function TerminalPlayback({ replay }: { replay: Replay }) {
           }}
         >
           Restart
-        </button>
+        </Button>
         <input
           type="range"
           min={0}

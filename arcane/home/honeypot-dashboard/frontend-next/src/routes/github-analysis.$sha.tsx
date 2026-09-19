@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from 'react'
 import { confirmAction } from '../components/ConfirmDialog'
 import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
+import { Button } from '../components/ui/button'
 
 type Scanner = { source: string; ok: boolean; positives?: number; total?: number; suspicious?: boolean; permalink?: string; error?: string }
 type Verdict = { malicious: number; suspicious: number; total: number; level: string }
@@ -158,9 +159,9 @@ function ReportViewer({ url, onClose }: { url: string; onClose: () => void }) {
     <>
       <div className="modal-backdrop open" aria-hidden="true" onClick={onClose} />
       <section className="modal pdf-viewer-modal open" role="dialog" aria-modal="true" aria-label="Report" ref={panelRef}>
-        <button className="modal__close" type="button" aria-label="Close report viewer" onClick={onClose} ref={closeRef}>
+        <Button variant="ghost" size="icon" className="modal__close" type="button" aria-label="Close report viewer" onClick={onClose} ref={closeRef}>
           ✕
-        </button>
+        </Button>
         <h2 className="pdf-viewer-title">Report</h2>
         <iframe
           className="pdf-viewer-frame"
@@ -254,8 +255,9 @@ function GithubAnalysisDetail() {
               {/* github_analysis.html:94's Re-analyze form, with its exact
                   data-hp-confirm-* publication wording — publication to the
                   public repo is irreversible, hence the danger dialog. */}
-              <button
-                className="btn btn-sm btn-danger"
+              <Button
+                variant="destructive"
+                size="sm"
                 type="button"
                 title="Resubmit this sample for GitHub publication and scanning"
                 onClick={() =>
@@ -274,7 +276,7 @@ function GithubAnalysisDetail() {
                 }
               >
                 Re-analyze
-              </button>
+              </Button>
             </>
           ) : undefined
         }
@@ -320,7 +322,9 @@ function GithubAnalysisDetail() {
 
           <div className="tabs" role="tablist" aria-label="GitHub analysis sections">
             {(['verdict', 'provenance', 'artifacts'] as const).map((key, index) => (
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 key={key}
                 className={tab === key ? 'tab active' : 'tab'}
                 type="button"
@@ -331,7 +335,7 @@ function GithubAnalysisDetail() {
                 <span>0{index + 1}</span>
                 {key[0].toUpperCase()}
                 {key.slice(1)}
-              </button>
+              </Button>
             ))}
           </div>
 
@@ -484,10 +488,10 @@ function GithubAnalysisDetail() {
                 <h2>Report</h2>
                 {run.view_url ? (
                   // github_analysis.html's Report project-card (#309): a real
-                  // <button> here, so the template's hand-rolled Enter/Space
+                  // A button here, so the template's hand-rolled Enter/Space
                   // handling comes for free; opens the in-page viewer modal.
                   <div className="project-grid">
-                    <button type="button" className="project-card" aria-label="View PDF report" onClick={() => setViewerOpen(true)}>
+                    <Button variant="outline" size="default" type="button" className="project-card" aria-label="View PDF report" onClick={() => setViewerOpen(true)}>
                       <div className="project-card__header">
                         <span className="project-card__icon">
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -503,7 +507,7 @@ function GithubAnalysisDetail() {
                       <div className="project-card__meta">
                         <span>completed {run.completed_at}</span>
                       </div>
-                    </button>
+                    </Button>
                   </div>
                 ) : (
                   <>

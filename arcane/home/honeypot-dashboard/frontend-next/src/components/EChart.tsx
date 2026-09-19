@@ -9,6 +9,7 @@ import { copyWithFlash } from '../lib/flash'
 import { useAppearanceKey } from '../lib/prefs'
 import { stepZoom, zoomFromWheel } from '../lib/chartZoom'
 import { sessionAwareFetch } from '../lib/reauth'
+import { Button } from './ui/button'
 
 export type ChartKind = 'sankey' | 'timeline' | 'heatmap' | 'pie' | 'line' | 'bar' | 'barh' | 'scatter' | 'radar'
 
@@ -537,7 +538,9 @@ export function EChart({ kind, url, height, zoomable }: { kind: ChartKind; url: 
       {zoomable && state === 'ready' ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.4rem', marginBottom: '0.35rem' }}>
           <span className="note" style={{ margin: 0 }}>scroll to zoom · drag to pan · drag nodes</span>
-          <button
+          <Button
+            variant="outline"
+            size="icon"
             className="chip"
             type="button"
             aria-label="Zoom out"
@@ -545,9 +548,11 @@ export function EChart({ kind, url, height, zoomable }: { kind: ChartKind; url: 
             onClick={() => applyZoom(stepZoom(zoomRef.current, -1))}
           >
             −
-          </button>
+          </Button>
           <span className="chip" aria-live="polite">{Math.round(zoomDisplay * 100)}%</span>
-          <button
+          <Button
+            variant="outline"
+            size="icon"
             className="chip"
             type="button"
             aria-label="Zoom in"
@@ -555,8 +560,10 @@ export function EChart({ kind, url, height, zoomable }: { kind: ChartKind; url: 
             onClick={() => applyZoom(stepZoom(zoomRef.current, 1))}
           >
             +
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             className="chip"
             type="button"
             onClick={() => {
@@ -565,7 +572,7 @@ export function EChart({ kind, url, height, zoomable }: { kind: ChartKind; url: 
             }}
           >
             reset
-          </button>
+          </Button>
         </div>
       ) : null}
       <div style={{ position: 'relative', width: '100%', height }}>

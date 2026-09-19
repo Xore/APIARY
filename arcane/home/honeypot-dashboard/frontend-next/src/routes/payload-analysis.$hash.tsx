@@ -916,7 +916,7 @@ function PayloadAnalysis() {
                   competing for width with anything -- there is no reason to
                   make them cost a click to discover.
 
-                  Generate PDF stays a <button> rather than a link to
+                  Generate PDF stays a button rather than a link to
                   /reports because it POSTs in place (#474); RowActions
                   draws an onClick action exactly like an href one. */}
               <RowActions

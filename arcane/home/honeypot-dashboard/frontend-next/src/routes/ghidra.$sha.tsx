@@ -13,6 +13,7 @@ import { ErrorStateBlock } from '../components/ErrorState'
 import { ArtifactList } from '../components/ArtifactList'
 import { GhidraCallGraph } from '../components/GhidraCallGraph'
 import { confirmAction } from '../components/ConfirmDialog'
+import { Button } from '../components/ui/button'
 import { formatTimestamp } from '../lib/time'
 import { type JsonRecord } from '../lib/json'
 
@@ -225,7 +226,9 @@ function PageTabs({
   return (
     <div className="tabs" role="tablist" aria-label={label}>
       {tabs.map((tab, index) => (
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           key={tab.id}
           id={`gh-tab-${tab.id}`}
           className={tab.id === active ? 'tab active' : 'tab'}
@@ -239,7 +242,7 @@ function PageTabs({
         >
           <span>0{index + 1}</span>
           {tab.label}
-        </button>
+        </Button>
       ))}
     </div>
   )
@@ -1148,13 +1151,13 @@ function GhidraDetail() {
               <Link className="chip" to="/payload-workbench/results" hash="ghidra">
                 ← all Ghidra results
               </Link>
-              <button className="btn btn-sm btn-secondary" type="button" onClick={reanalyze} title="Queue a fresh Ghidra analysis of this capture">
+              <Button variant="secondary" size="sm" type="button" onClick={reanalyze} title="Queue a fresh Ghidra analysis of this capture">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <polyline points="23 4 23 10 17 10" />
                   <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
                 </svg>{' '}
                 Re-analyze
-              </button>
+              </Button>
             </>
           ) : undefined
         }

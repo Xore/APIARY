@@ -1,6 +1,7 @@
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
+import { Button } from '../components/ui/button'
 
 // A route callback can dynamically import the real backend module despite the module mock.
 // Keep its boot policy in the sanctioned dev mode for this isolated fixture suite.
@@ -24,7 +25,7 @@ vi.mock('../lib/backend.server', () => ({
   serviceJSON: async (path: string) => path.includes('/ml-health') || path.includes('/gpu-queue') ? [] : ({ rows: [], total: 0, recipes: [], runs: [], sensors: [] }),
   serviceJSONResult: async () => ({ ok: false, status: 404 }),
 }))
-vi.mock('../lib/viewTabs', () => ({ useSidebarViewTabs: ({ tabs, onSelect }: { tabs: { id: string; label: string }[]; onSelect: (id: string) => void }) => <nav aria-label="View tabs">{tabs.map(tab => <button key={tab.id} type="button" onClick={() => onSelect(tab.id)}>{tab.label}</button>)}</nav> }))
+vi.mock('../lib/viewTabs', () => ({ useSidebarViewTabs: ({ tabs, onSelect }: { tabs: { id: string; label: string }[]; onSelect: (id: string) => void }) => <nav aria-label="View tabs">{tabs.map(tab => <Button variant="ghost" size="sm" key={tab.id} type="button" onClick={() => onSelect(tab.id)}>{tab.label}</Button>)}</nav> }))
 vi.mock('../components/Investigate', () => ({
   InvestigateHeader: ({ title, chips }: { title: string; chips?: React.ReactNode }) => <header><h1>{title}</h1>{chips}</header>,
   MasterDetailTable: ({ rows }: { rows: unknown[] | null }) => <div data-testid="events">{rows?.length ?? 'loading'}</div>,

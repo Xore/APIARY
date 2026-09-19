@@ -15,6 +15,7 @@
 import { useRouterState } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useRef, useState } from 'react'
+import { Button } from './ui/button'
 
 const MAX_TRAIL = 100
 const MAX_CONSOLE_ERRORS = 30
@@ -219,8 +220,10 @@ export function ProblemReportButton({ enabled }: { enabled: boolean }) {
 
   return (
     <>
-      <button
-        className="btn btn-secondary hp-fab"
+      <Button
+        variant="secondary"
+        size="default"
+        className="hp-fab"
         type="button"
         onClick={() => {
           setStatus('')
@@ -228,16 +231,16 @@ export function ProblemReportButton({ enabled }: { enabled: boolean }) {
         }}
       >
         Report a problem
-      </button>
+      </Button>
       {open ? (
         <>
           <div className="modal-backdrop open" aria-hidden="true" onClick={() => setOpen(false)} />
           <div className="modal hp-pr-modal open" role="dialog" aria-modal="true" aria-label="Report a problem">
             <div className="modal__header">
               <h2>Report a problem</h2>
-              <button className="modal__close" type="button" aria-label="Close" onClick={() => setOpen(false)}>
+              <Button variant="ghost" size="icon" className="modal__close" type="button" aria-label="Close" onClick={() => setOpen(false)}>
                 ✕
-              </button>
+              </Button>
             </div>
             <form
               onSubmit={(event) => {
@@ -266,12 +269,12 @@ export function ProblemReportButton({ enabled }: { enabled: boolean }) {
                 snapshot of the current page — reviewed by an admin, never shared outside this dashboard.
               </p>
               <div className="hp-row hp-row--end hp-flow--tight">
-                <button className="btn btn-secondary" type="button" onClick={() => setOpen(false)}>
+                <Button variant="secondary" size="default" type="button" onClick={() => setOpen(false)}>
                   Cancel
-                </button>
-                <button className="btn btn-primary" type="submit" disabled={busy}>
+                </Button>
+                <Button variant="default" size="default" type="submit" disabled={busy}>
                   Submit report
-                </button>
+                </Button>
               </div>
               {status ? (
                 <p className="hp-modal-status" role="status" aria-live="polite">
