@@ -10,6 +10,9 @@ import { createServerFn } from '@tanstack/react-start'
 import { StoreListPage, str, when, type StorePage } from '../components/StoreList'
 import type { Column } from '../components/Investigate'
 import type { StoreRow } from '../components/StoreList'
+import { Badge } from '../components/ui/badge'
+import { Card, CardContent, CardHeader } from '../components/ui/card'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 
 const fetchPage = createServerFn({ method: 'GET' })
   .validator((input: { offset: number }) => input)
@@ -36,7 +39,7 @@ function detail(row: StoreRow, key: string): string {
 
 const COLUMNS: Column<StoreRow>[] = [
   { header: 'time', render: (row) => when(str(row, '@timestamp')) },
-  { header: 'type', render: (row) => <span className="badge badge--warning">{str(row, 'type')}</span> },
+  { header: 'type', render: (row) => <Badge>{str(row, 'type')}</Badge> },
   {
     header: 'ip',
     className: 'v',
@@ -47,7 +50,7 @@ const COLUMNS: Column<StoreRow>[] = [
           {str(row, 'ip_address')}
         </Link>
       ) : (
-        <span className="badge badge--muted">unattributed</span>
+        <Badge variant="secondary">unattributed</Badge>
       ),
   },
   { header: 'error', className: 'v', render: (row) => str(row, 'error') },
@@ -61,27 +64,27 @@ const COLUMNS: Column<StoreRow>[] = [
 function TopTable({ title, header, rows }: { title: string; header: string; rows: Array<[string, number]> }) {
   if (rows.length === 0) return null
   return (
-    <div className="card half">
-      <h2>{title}</h2>
-      <div className="card__scroll">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{header}</th>
-              <th>failures</th>
-            </tr>
-          </thead>
-          <tbody>
+    <Card className="min-w-0">
+      <CardHeader><h2 className="font-semibold leading-none tracking-tight">{title}</h2></CardHeader>
+      <CardContent>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{header}</TableHead>
+              <TableHead>failures</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {rows.map(([key, count]) => (
-              <tr key={key}>
-                <td className="v">{key}</td>
-                <td className="n">{count}</td>
-              </tr>
+              <TableRow key={key}>
+                <TableCell>{key}</TableCell>
+                <TableCell className="tabular-nums">{count}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -122,13 +125,13 @@ function AuthStats() {
   if (!stats) return null
   return (
     <>
-      <div className="metric-grid">
-        <div className="metric">
-          <div className="metric__value">{stats.total.toLocaleString('en-US')}</div>
-          <div className="metric__label">Failed logins, 24h</div>
-        </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Card>
+          <CardHeader><h2 className="text-sm font-semibold">Failed logins, 24h</h2></CardHeader>
+          <CardContent><div className="text-2xl font-semibold tabular-nums">{stats.total.toLocaleString('en-US')}</div></CardContent>
+        </Card>
       </div>
-      <div className="hp-flow">
+      <div className="grid gap-4 lg:grid-cols-2">
         <TopTable title="Failures by client, 24h" header="client" rows={stats.byClient} />
         <TopTable title="Top source IPs, 24h" header="source ip" rows={stats.byIP} />
       </div>

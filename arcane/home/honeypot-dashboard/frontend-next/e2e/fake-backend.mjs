@@ -631,6 +631,21 @@ function route(pathname, searchParams = new URLSearchParams()) {
     explanation: "fixture score anomaly", source_event_id: "e2e-event-0",
     source_index: "honeypot-v2-2026.08.26", model_scores: { isolation_forest: 0.9, lstm_ae: 0.8, hbos: 0.7 },
   }] };
+  if (pathname.startsWith("/api/v1/store/llm-analysis")) return { total: 1, rows: [{
+    analysis_id: "analysis-e2e-01", "@timestamp": NOW, doc_type: "session", severity: "high", confidence: "0.93",
+    intent: "credential access", summary: "Fixture model summary", session_id: "session-e2e-01", model: "qwen3:14b",
+  }] };
+  if (pathname.startsWith("/api/v1/store/auth-events")) return { total: 1, rows: [{
+    event_id: "auth-e2e-01", "@timestamp": NOW, type: "LOGIN_ERROR", ip_address: "203.0.113.8",
+    error: "invalid_user_credentials", client_id: "apiary-dashboard", realm: "apiary",
+    details: { username: "fixture-user", redirect_uri: "https://dashboard.example/callback" },
+  }] };
+  if (pathname.startsWith("/api/v1/store/problem-reports")) return { total: 1, rows: [{
+    id: "problem-e2e-01", submitted_at: NOW, submitted_by: "operator-e2e", submitted_by_name: "Fixture Operator",
+    page: "/events", expected: "filters remain open", actual: "filters closed", status: "open",
+    action_trail: [{ at: NOW, kind: "interaction", detail: "opened filters" }], console_errors: ["fixture console error"], network_failures: ["GET /api/events failed"],
+    api_calls: [{ at: NOW, method: "GET", url: "/api/events", status: 502, response_body: "bad gateway" }], user_agent: "fixture-browser",
+  }] };
   if (pathname.startsWith("/api/v1/store/static-analysis")) return { rows: [{ Fingerprint: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", Analysis: { Kind: "script", Summary: "Shell script" } }], total: 1 };
   if (pathname.startsWith("/api/v1/store/yara")) return { rows: [{ file: { hash: { sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" } }, yara: { matches: ["FixtureRule"] }, "@timestamp": NOW }], total: 1 };
   if (pathname.startsWith("/api/v1/store/")) return { rows: [], total: 0 };

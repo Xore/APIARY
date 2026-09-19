@@ -10,6 +10,9 @@ import { useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
 import { StoreListPage, str, when, type StorePage, type StoreRow } from '../components/StoreList'
 import type { Column } from '../components/Investigate'
+import { Badge } from '../components/ui/badge'
+import { Button, buttonVariants } from '../components/ui/button'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 
 const fetchPage = createServerFn({ method: 'GET' })
   .validator((input: { offset: number }) => input)
@@ -62,68 +65,66 @@ function CaptureContext({ row }: { row: StoreRow }) {
     <>
       {consoleErrors.length ? (
         <>
-          <p className="note">Console errors ({consoleErrors.length})</p>
-          <pre className="hp-md__preview">{consoleErrors.join('\n')}</pre>
+          <p className="text-sm font-medium">Console errors ({consoleErrors.length})</p>
+          <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 font-mono text-xs whitespace-pre-wrap break-all">{consoleErrors.join('\n')}</pre>
         </>
       ) : null}
       {networkFailures.length ? (
         <>
-          <p className="note">Network failures ({networkFailures.length})</p>
-          <pre className="hp-md__preview">{networkFailures.join('\n')}</pre>
+          <p className="text-sm font-medium">Network failures ({networkFailures.length})</p>
+          <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 font-mono text-xs whitespace-pre-wrap break-all">{networkFailures.join('\n')}</pre>
         </>
       ) : null}
       {calls.length ? (
         <>
-          <p className="note">API calls ({calls.length})</p>
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>at</th>
-                  <th>method</th>
-                  <th>url</th>
-                  <th>status</th>
-                  <th>request / response</th>
-                </tr>
-              </thead>
-              <tbody>
+          <p className="text-sm font-medium">API calls ({calls.length})</p>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>at</TableHead>
+                  <TableHead>method</TableHead>
+                  <TableHead>url</TableHead>
+                  <TableHead>status</TableHead>
+                  <TableHead>request / response</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {calls.map((call, index) => (
-                  <tr key={`${call.at}-${index}`}>
-                    <td>{call.at ? when(call.at) : ''}</td>
-                    <td>{call.method || ''}</td>
-                    <td className="v">{call.url || ''}</td>
-                    <td className="n">{typeof call.status === 'number' && call.status !== 0 ? call.status : '—'}</td>
-                    <td className="v">
+                  <TableRow key={`${call.at}-${index}`}>
+                    <TableCell>{call.at ? when(call.at) : ''}</TableCell>
+                    <TableCell>{call.method || ''}</TableCell>
+                    <TableCell className="max-w-xs break-all">{call.url || ''}</TableCell>
+                    <TableCell className="tabular-nums">{typeof call.status === 'number' && call.status !== 0 ? call.status : '—'}</TableCell>
+                    <TableCell>
                       {call.request_body || call.response_body ? (
                         <details>
                           {/* #1898: was .lnk, which promises navigation --
                               this expands in place. A summary is a control
                               that acts, so it takes the quietest button
                               tone rather than link styling. */}
-                          <summary className="btn btn-sm btn-ghost">bodies</summary>
-                          {call.request_body ? <pre className="hp-md__preview">{call.request_body}</pre> : null}
-                          {call.response_body ? <pre className="hp-md__preview">{call.response_body}</pre> : null}
+                          <summary className={buttonVariants({ variant: 'ghost', size: 'sm' })}>bodies</summary>
+                          {call.request_body ? <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 font-mono text-xs whitespace-pre-wrap break-all">{call.request_body}</pre> : null}
+                          {call.response_body ? <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 font-mono text-xs whitespace-pre-wrap break-all">{call.response_body}</pre> : null}
                         </details>
                       ) : (
                         '—'
                       )}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </TableBody>
+            </Table>
         </>
       ) : null}
       {snapshot ? (
         <details>
-          <summary className="btn btn-sm btn-ghost">
+          <summary className={buttonVariants({ variant: 'ghost', size: 'sm' })}>
             DOM snapshot ({(snapshot.length / 1024).toFixed(0)} KB, redacted)
           </summary>
-          <pre className="hp-md__preview">{snapshot}</pre>
+          <pre className="max-h-96 overflow-auto rounded-md bg-muted p-3 font-mono text-xs whitespace-pre-wrap break-all">{snapshot}</pre>
         </details>
       ) : (
-        <p className="note">No DOM snapshot was captured with this report.</p>
+        <p className="text-sm text-muted-foreground">No DOM snapshot was captured with this report.</p>
       )}
     </>
   )
@@ -136,8 +137,9 @@ function StatusControl({ row, onChanged }: { row: StoreRow; onChanged: () => voi
   if (!id) return null
   const next = STATUS_CYCLE[current] ?? 'triaged'
   return (
-    <button
-      className="btn btn-secondary btn-sm"
+    <Button
+      variant="secondary"
+      size="sm"
       type="button"
       disabled={busy}
       onClick={async () => {
@@ -151,7 +153,7 @@ function StatusControl({ row, onChanged }: { row: StoreRow; onChanged: () => voi
       }}
     >
       {busy ? '…' : `Mark ${next}`}
-    </button>
+    </Button>
   )
 }
 
@@ -160,23 +162,23 @@ const COLUMNS: Column<StoreRow>[] = [
   {
     header: 'status',
     render: (row) => (
-      <span className={str(row, 'status') === 'open' ? 'badge badge--warning' : 'badge badge--muted'}>{str(row, 'status')}</span>
+      <Badge variant={str(row, 'status') === 'open' ? 'default' : 'secondary'}>{str(row, 'status')}</Badge>
     ),
   },
-  { header: 'page', className: 'v', primary: true, render: (row) => str(row, 'page') || <span className="text-muted">(unknown page)</span> },
+  { header: 'page', className: 'v', primary: true, render: (row) => str(row, 'page') || <span className="text-muted-foreground">(unknown page)</span> },
   { header: 'expected', className: 'v', render: (row) => str(row, 'expected') },
   { header: 'actual', className: 'v', render: (row) => str(row, 'actual') },
   { header: 'console', className: 'n', render: (row) => (strings(row, 'console_errors').length || '—') },
   { header: 'network', className: 'n', render: (row) => (strings(row, 'network_failures').length || '—') },
   { header: 'api calls', className: 'n', render: (row) => (apiCalls(row).length || '—') },
-  { header: 'snapshot', render: (row) => (domSnapshot(row) ? <span className="badge badge--muted">DOM</span> : '—') },
+  { header: 'snapshot', render: (row) => (domSnapshot(row) ? <Badge variant="secondary">DOM</Badge> : '—') },
   { header: 'by', detail: true, render: (row) => str(row, 'submitted_by_name') || str(row, 'submitted_by') },
   { header: 'user agent', detail: true, render: (row) => str(row, 'user_agent') },
   {
     header: 'action trail',
     detail: true,
     render: (row) =>
-      Array.isArray(row.action_trail) ? <pre className="hp-md__preview">{(row.action_trail as string[]).join('\n')}</pre> : '',
+      Array.isArray(row.action_trail) ? <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 font-mono text-xs whitespace-pre-wrap">{JSON.stringify(row.action_trail, null, 2)}</pre> : '',
   },
 ]
 
@@ -219,7 +221,7 @@ function Page() {
       inspectorTitle="Report details"
       chipNoun="reports"
       beforeTable={
-        <p className="note">
+        <p className="text-sm text-muted-foreground">
           Reports submitted via the &quot;Report a problem&quot; button, newest first.
         </p>
       }
