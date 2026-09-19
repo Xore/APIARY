@@ -366,6 +366,17 @@ function route(pathname, searchParams = new URLSearchParams()) {
   if (pathname === "/api/v1/sources") {
     return { total_unique: 87, rows: [sourceRow] };
   }
+  if (pathname === "/api/v1/recordings/e2e-xterm-theme") {
+    return {
+      shasum: "e2e-xterm-theme",
+      size_bytes: 81,
+      imported_at: NOW,
+      frames: 2,
+      duration_seconds: 1,
+      transcript: "$ echo xterm-theme\r\nxterm-theme\r\n",
+      ttylog_base64: "AwAAAAAAAAAUAAAAAgAAAAEAAAAAAAAAJCBlY2hvIHh0ZXJtLXRoZW1lDQoDAAAAAAAAAA0AAAACAAAAAgAAAAAAAAB4dGVybS10aGVtZQ0K",
+    };
+  }
   if (pathname === "/api/v1/recordings") {
     // RecordingRow keyed on session; the replay pane fetches /recordings/<sha>
     // separately and is not part of the shell sweep.

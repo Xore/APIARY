@@ -25,18 +25,9 @@ import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { Tabs, TabPanel } from '../components/Tabs'
 import { formatTimestamp } from '../lib/time'
-import { cssVar } from '../lib/cssVar'
+import { xtermTheme } from '../lib/xtermTheme'
 import { useAppearanceKey } from '../lib/prefs'
 
-// The terminal's two tokens, resolved. Background falls back to fully
-// transparent -- what this passed before -- because .hp-tty-term already
-// paints the box behind it.
-function terminalTheme(): { background: string; foreground: string } {
-  return {
-    background: cssVar('--terminal-bg', '#00000000'),
-    foreground: cssVar('--terminal-fg', '#e6e6e6'),
-  }
-}
 
 type Replay = {
   shasum: string
@@ -189,7 +180,7 @@ function TerminalPlayback({ replay }: { replay: Replay }) {
   const text = useMemo(() => plainTranscript(replay.transcript), [replay.transcript])
   const total = frames.length
 
-  const containerRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement & { __xoreTerminal?: import('@xterm/xterm').Terminal }>(null)
   const termRef = useRef<import('@xterm/xterm').Terminal | null>(null)
   const appearance = useAppearanceKey()
 
@@ -197,7 +188,7 @@ function TerminalPlayback({ replay }: { replay: Replay }) {
   // neither a remount nor a re-parse of the recording.
   useEffect(() => {
     const term = termRef.current
-    if (term) term.options.theme = terminalTheme()
+    if (term) term.options.theme = xtermTheme()
   }, [appearance])
   const fitRef = useRef<import('@xterm/addon-fit').FitAddon | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -234,18 +225,13 @@ function TerminalPlayback({ replay }: { replay: Replay }) {
         disableStdin: true,
         fontSize: 13,
         scrollback: 5000,
-        // #1757: xterm paints its own text, so a transparent background
-        // alone left the foreground at xterm's built-in white -- fine on the
-        // dark ground this was written against, and white-on-paper in a light
-        // theme. theme.css styles .hp-tty-term from --terminal-bg and
-        // --terminal-fg; use the same two tokens so the canvas agrees with
-        // the box drawn around it.
-        theme: terminalTheme(),
+        theme: xtermTheme(),
       })
       const fit = new FitAddon()
       term.loadAddon(fit)
       term.open(container)
       fit.fit()
+      container.__xoreTerminal = term
       termRef.current = term
       fitRef.current = fit
     })()
@@ -256,6 +242,7 @@ function TerminalPlayback({ replay }: { replay: Replay }) {
       window.removeEventListener('resize', onResize)
       if (timerRef.current) clearTimeout(timerRef.current)
       termRef.current?.dispose()
+      delete container.__xoreTerminal
       termRef.current = null
       fitRef.current = null
     }
