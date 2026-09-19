@@ -13,6 +13,7 @@ import { confirmAction } from '../components/ConfirmDialog'
 import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { Button } from '../components/ui/button'
+import { DialogOverlay } from '../components/ui/dialog'
 import { Badge } from '../components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs'
@@ -161,7 +162,7 @@ function ReportViewer({ url, onClose }: { url: string; onClose: () => void }) {
   }, [onClose])
   return (
     <>
-      <div className="modal-backdrop open" aria-hidden="true" onClick={onClose} />
+      <DialogOverlay aria-hidden="true" onClick={onClose} />
       <section className="modal pdf-viewer-modal open" role="dialog" aria-modal="true" aria-label="Report" ref={panelRef}>
         <Button variant="ghost" size="icon" className="modal__close" type="button" aria-label="Close report viewer" onClick={onClose} ref={closeRef}>
           ✕
