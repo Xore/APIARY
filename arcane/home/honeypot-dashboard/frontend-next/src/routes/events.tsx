@@ -16,6 +16,7 @@ import { Checkbox } from '../components/ui/checkbox'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '../components/ui/empty'
 import { Field, FieldLabel } from '../components/ui/field'
 import { Input } from '../components/ui/input'
+import { Label } from '../components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 import { copyWithFlash } from '../lib/flash'
 import { subscribeLiveEvents, useLiveState } from '../lib/live'
@@ -776,7 +777,7 @@ function IsolateIpMenu({ ips, onApply }: { ips: CorrelatedIp[]; onApply: (value:
         </div>
         <div className="max-h-64 space-y-1 overflow-auto">
           {ips.map((entry) => (
-            <label key={entry.ip} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted">
+            <Label key={entry.ip} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted">
               <Checkbox
                 checked={pending.has(entry.ip)}
                 onCheckedChange={(checked) => {
@@ -790,7 +791,7 @@ function IsolateIpMenu({ ips, onApply }: { ips: CorrelatedIp[]; onApply: (value:
               />
               <span className="min-w-0 flex-1 font-mono">{entry.ip}</span>
               <Badge variant="secondary">{entry.count.toLocaleString('en-US')}</Badge>
-            </label>
+            </Label>
           ))}
         </div>
         <div className="flex gap-2">

@@ -1195,9 +1195,9 @@ function PersonalPanes({
               <>
                 <div className="settings-grid">
                   <div className="settings-field">
-                    <label className="form-label" htmlFor="hp-pref-timezone">
+                    <Label className="form-label" htmlFor="hp-pref-timezone">
                       Timezone
-                    </label>
+                    </Label>
                     <Input
                       id="hp-pref-timezone"
                       list="hp-tz-suggestions"

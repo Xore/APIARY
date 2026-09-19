@@ -25,6 +25,7 @@ import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
+import { Label } from '../components/ui/label'
 import { Card, CardContent } from '../components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
 import { Table, TableBody, TableCell, TableRow } from '../components/ui/table'
@@ -349,7 +350,7 @@ function TerminalPlayback({ replay }: { replay: Replay }) {
             writeUpTo(Number(event.target.value))
           }}
         />
-        <label>
+        <Label>
           speed{' '}
           <Select value={String(speed)} onValueChange={(value) => setSpeed(Number(value))}>
             <SelectTrigger><SelectValue /></SelectTrigger>
@@ -360,7 +361,7 @@ function TerminalPlayback({ replay }: { replay: Replay }) {
               <SelectItem value="0.5">0.5×</SelectItem>
             </SelectContent>
           </Select>
-        </label>
+        </Label>
       </div>
       <div className="hp-tty-status" role="status">
         {replay.frames.toLocaleString('en-US')} frame(s), {replay.size_bytes.toLocaleString('en-US')} bytes recorded ·{' '}

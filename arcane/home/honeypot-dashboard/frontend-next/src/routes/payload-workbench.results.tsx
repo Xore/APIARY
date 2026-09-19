@@ -1010,7 +1010,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
                         <details className="wb-options">
                           <summary>Orchestration options</summary>
                           <div className="wb-option-grid">
-                            <label>
+                            <Label>
                               Timeout (seconds)
                               <Input aria-label={`${analyzer.display_name} timeout in seconds`}
                                 type="number"
@@ -1019,8 +1019,8 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
                                 value={selectionOptions(analyzer.id).timeout_seconds}
                                 onChange={(event) => setOption(analyzer.id, 'timeout_seconds', event.target.valueAsNumber)}
                               />
-                            </label>
-                            <label>
+                            </Label>
+                            <Label>
                               Maximum queue age (seconds)
                               <Input aria-label={`${analyzer.display_name} maximum queue age in seconds`}
                                 type="number"
@@ -1029,8 +1029,8 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
                                 value={selectionOptions(analyzer.id).max_queue_age_seconds}
                                 onChange={(event) => setOption(analyzer.id, 'max_queue_age_seconds', event.target.valueAsNumber)}
                               />
-                            </label>
-                            <label>
+                            </Label>
+                            <Label>
                               Retry allowance
                               <Input aria-label={`${analyzer.display_name} retry allowance`}
                                 type="number"
@@ -1039,7 +1039,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
                                 value={selectionOptions(analyzer.id).retry_limit}
                                 onChange={(event) => setOption(analyzer.id, 'retry_limit', event.target.valueAsNumber)}
                               />
-                            </label>
+                            </Label>
                           </div>
                         </details>
                       ) : null}
@@ -1075,7 +1075,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
           ) : null}
 
           <div className="filters hp-flow--tight">
-            <label className="note hp-field--wide">
+            <Label className="note hp-field--wide">
               Run / recipe name
               <Input
                
@@ -1085,7 +1085,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
                 onChange={(event) => setRecipeName(event.target.value)}
                 placeholder="One-off analysis"
               />
-            </label>
+            </Label>
             <Button type="button" variant={saveAsRecipe ? 'default' : 'outline'}
               aria-pressed={saveAsRecipe}
               onClick={() => setSaveAsRecipe((current) => !current)}
@@ -1095,7 +1095,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
           </div>
           {saveAsRecipe ? (
             <div className="filters">
-              <label className="note hp-field--wide">
+              <Label className="note hp-field--wide">
                 Recipe description
                 <Input
                  
@@ -1104,14 +1104,14 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
                   value={recipeDescription}
                   onChange={(event) => setRecipeDescription(event.target.value)}
                 />
-              </label>
-              <label className="note hp-field">
+              </Label>
+              <Label className="note hp-field">
                 Scope
                 <Select value={recipeScope} onValueChange={setRecipeScope}>
                   <SelectTrigger aria-label="Scope"><SelectValue /></SelectTrigger>
                   <SelectContent><SelectItem value="private">Private</SelectItem><SelectItem value="shared">Shared with analysts</SelectItem></SelectContent>
                 </Select>
-              </label>
+              </Label>
             </div>
           ) : null}
 

@@ -18,6 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { formatTimestamp } from '../lib/time'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
+import { Label } from '../components/ui/label'
 
 type AlertRow = {
   Key: string
@@ -351,7 +352,7 @@ function Alerts() {
       </header>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="w-full space-y-1.5 sm:max-w-sm">
-          <label htmlFor="alerts-filter" className="text-sm font-medium">Filter alerts</label>
+          <Label htmlFor="alerts-filter" className="text-sm font-medium">Filter alerts</Label>
           <Input id="alerts-filter" type="search" placeholder="Filter by message or key" value={query} onChange={(event) => setQuery(event.target.value)} />
         </div>
         <div className="flex flex-wrap gap-2">

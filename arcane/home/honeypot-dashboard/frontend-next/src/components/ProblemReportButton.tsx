@@ -17,6 +17,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
+import { Label } from './ui/label'
 import { Textarea } from './ui/textarea'
 
 const MAX_TRAIL = 100
@@ -234,7 +235,7 @@ export function ProblemReportButton({ enabled }: { enabled: boolean }) {
               void submit()
             }}
           >
-            <label className="note hp-field">
+            <Label className="note hp-field">
               What did you expect to happen? *
               <Textarea
                 ref={expectedRef}
@@ -243,11 +244,11 @@ export function ProblemReportButton({ enabled }: { enabled: boolean }) {
                 value={expected}
                 onChange={(event) => setExpected(event.target.value)}
               />
-            </label>
-            <label className="note hp-field hp-flow--tight">
+            </Label>
+            <Label className="note hp-field hp-flow--tight">
               What actually happened?
               <Textarea rows={3} value={actual} onChange={(event) => setActual(event.target.value)} />
-            </label>
+            </Label>
             <p className="note">
               This report automatically includes your recent click/navigation trail, console errors, failed requests, and a
               snapshot of the current page — reviewed by an admin, never shared outside this dashboard.
