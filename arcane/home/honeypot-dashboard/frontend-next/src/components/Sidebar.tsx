@@ -11,7 +11,7 @@ import { hrefForRecent, labelForRecent, useRecentInvestigations } from '../lib/r
 import { SidebarViewTabs } from '../lib/viewTabs'
 import { openCommandPalette } from './CommandPalette'
 import type { User } from '../lib/auth'
-import { Sidebar as ShadcnSidebar, SidebarContent, SidebarGroup, SidebarGroupLabel, SidebarMenu, SidebarMenuItem } from './ui/sidebar'
+import { Sidebar as ShadcnSidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel, SidebarMenu, SidebarMenuItem } from './ui/sidebar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { Avatar, AvatarFallback } from './ui/avatar'
 import { Badge } from './ui/badge'
@@ -170,7 +170,9 @@ export function Sidebar({ user, onOpenSettings }: { user?: User | null; onOpenSe
           </>
         ) : null}
       </nav></SidebarContent>
-      <AccountMenu user={user} onOpenSettings={onOpenSettings} />
+      <SidebarFooter>
+        <AccountMenu user={user} onOpenSettings={onOpenSettings} />
+      </SidebarFooter>
     </ShadcnSidebar></aside>
   )
 }
