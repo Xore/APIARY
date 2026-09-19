@@ -92,7 +92,7 @@ function SemanticSearchCard() {
                   <TableCell className="max-w-md whitespace-normal">{str(hit, 'summary')}</TableCell>
                   <TableCell className="font-mono">
                     {str(hit, 'session_id') ? (
-                      <a href={`/sessions/${encodeURIComponent(str(hit, 'session_id'))}`}>{str(hit, 'session_id').slice(0, 12)}</a>
+                      <Link to="/sessions/$id" params={{ id: str(hit, 'session_id') }}>{str(hit, 'session_id').slice(0, 12)}</Link>
                     ) : null}
                   </TableCell>
                 </TableRow>

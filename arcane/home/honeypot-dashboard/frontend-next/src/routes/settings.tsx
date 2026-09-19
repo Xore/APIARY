@@ -2673,7 +2673,7 @@ export function SettingsSurface({
               Signed in as <strong>{user.displayName || user.username}</strong>
               {user.role ? <> · <Badge variant="secondary">{user.role}</Badge></> : null}
             </p>
-            <Button asChild variant="secondary" size="sm"><a href="/auth/logout">Sign out</a></Button>
+            <Button asChild variant="secondary" size="sm"><Link to="/auth/logout">Sign out</Link></Button>
           </>
         ) : (
           <p className="text-sm text-muted-foreground">No session (development mode).</p>

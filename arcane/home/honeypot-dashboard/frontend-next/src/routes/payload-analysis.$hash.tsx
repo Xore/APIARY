@@ -895,9 +895,9 @@ function PayloadAnalysis() {
                       <span className="v">{originLabel}</span>
                     </div>
                     {origin.session ? (
-                      <DropdownMenuItem asChild><a href={`/sessions/${encodeURIComponent(origin.session)}`}>
+                      <DropdownMenuItem asChild><Link to="/sessions/$id" params={{ id: origin.session }}>
                         Open capturing session →
-                      </a></DropdownMenuItem>
+                      </Link></DropdownMenuItem>
                     ) : (
                       <div className="hp-pl-info-row">
                         <span className="k">session</span>
@@ -1137,9 +1137,9 @@ function PayloadAnalysis() {
                 <p className="empty">
                   No completed KVM sandbox run for this payload. Queue one from the{' '}
                   <Button variant="ghost" size="sm" asChild>
-                    <a href={`/payload-workbench/results?hash=${encodeURIComponent(detail.hash)}#workbench-builder`}>
+                    <Link to="/payload-workbench/results" search={{ hash: detail.hash }} hash="workbench-builder">
                       analysis workbench
-                    </a>
+                    </Link>
                   </Button>
                   .
                 </p>
@@ -1154,9 +1154,9 @@ function PayloadAnalysis() {
                           <TableCell className="n">{run.exit_status}</TableCell>
                           <TableCell className="n">{run.changed}</TableCell>
                           <TableCell>
-                            <Button asChild variant="ghost" size="sm"><a href={`/sandbox/${encodeURIComponent(run.job)}`}>
+                            <Button asChild variant="ghost" size="sm"><Link to="/sandbox/$job" params={{ job: run.job }}>
                               sandbox report →
-                            </a></Button>
+                            </Link></Button>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -1191,20 +1191,20 @@ function PayloadAnalysis() {
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium text-muted-foreground">family</span>
                       <span className="text-lg font-semibold">
-                        <a
+                        <Link
                           className="lnk"
-                          href={`/events?q=${encodeURIComponent(correlation.github.family)}`}
+                          to={`/events?q=${encodeURIComponent(correlation.github.family)}` as string}
                           title="Other sessions that delivered this family"
                         >
                           {correlation.github.family}
-                        </a>
+                        </Link>
                       </span>
                     </div>
                   ) : null}
                   <Button variant="ghost" size="sm" asChild>
-                    <a href={`/github-analysis/${encodeURIComponent(correlation.github.sha256)}`}>
+                    <Link to="/github-analysis/$sha" params={{ sha: correlation.github.sha256 }}>
                       full result →
-                    </a>
+                    </Link>
                   </Button>
                 </>
               )}
@@ -1248,18 +1248,18 @@ function PayloadAnalysis() {
                           <Badge variant="secondary">{correlation.ghidra.exit_status}</Badge>
                           {correlation.ghidra.completed_at ? ` completed ${formatTimestamp(correlation.ghidra.completed_at)} — ` : ' — '}
                           <Button variant="ghost" size="sm" asChild>
-                            <a href={`/ghidra/${encodeURIComponent(sha256 || detail.hash)}`}>
+                            <Link to="/ghidra/$sha" params={{ sha: sha256 || detail.hash }}>
                               full result →
-                            </a>
+                            </Link>
                           </Button>
                         </>
                       ) : (
                         <>
                           <span className="empty">not yet analyzed</span> —{' '}
                           <Button variant="secondary" size="sm" asChild>
-                            <a href={`/payload-workbench/results?hash=${encodeURIComponent(detail.hash)}#workbench-builder`}>
+                            <Link to="/payload-workbench/results" search={{ hash: detail.hash }} hash="workbench-builder">
                               queue Ghidra →
-                            </a>
+                            </Link>
                           </Button>
                         </>
                       )}
@@ -1271,9 +1271,9 @@ function PayloadAnalysis() {
                       {related.total} event(s)
                       {related.earliest ? `, first seen ${formatTimestamp(related.earliest.time)}` : ''} —{' '}
                       <Button variant="ghost" size="sm" asChild>
-                        <a href={`/events?shasum=${encodeURIComponent(detail.hash)}`}>
+                        <Link to="/events" search={{ shasum: detail.hash }}>
                           related events →
-                        </a>
+                        </Link>
                       </Button>
                     </span>
                   </div>

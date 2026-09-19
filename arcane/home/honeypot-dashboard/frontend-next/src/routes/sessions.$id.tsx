@@ -180,7 +180,7 @@ function SessionPage() {
             {detail && detail.ip ? (
               <Button asChild variant="outline" size="sm"><Link to="/investigate/ip/$ip" params={{ ip: detail.ip }}>attacker profile</Link></Button>
             ) : null}
-            <Button asChild variant="outline" size="sm"><a href={`/events?session=${encodeURIComponent(id)}`}>filtered events</a></Button>
+            <Button asChild variant="outline" size="sm"><Link to="/events" search={{ session: id }}>filtered events</Link></Button>
             <Button asChild variant="outline" size="sm"><a href={`/api/export/events.csv?session=${encodeURIComponent(id)}`}>export CSV ↓</a></Button>
             {detail ? (
               <>

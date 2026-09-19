@@ -8,7 +8,7 @@
 // recordings, so "the source IP of this recording" had no single answer and
 // the column showed an arbitrary one. Everything rendered below is native to
 // the close event, so there is no join and no per-row lookup.
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
@@ -95,13 +95,14 @@ function ReplayPane({ row }: { row: RecordingRow }) {
           one ES happened to answer with. */}
       <p className="subtitle">
         {row.src_ip ? (
-          <a
+          <Link
             className="lnk"
-            href={`/investigate/ip/${encodeURIComponent(row.src_ip)}`}
+            to="/investigate/ip/$ip"
+            params={{ ip: row.src_ip }}
             title={`attacker profile for ${row.src_ip}`}
           >
             {row.src_ip}
-          </a>
+          </Link>
         ) : (
           'unattributed'
         )}
@@ -116,22 +117,23 @@ function ReplayPane({ row }: { row: RecordingRow }) {
         {row.session ? (
           <>
             {' · '}
-            <a
+            <Link
               className="lnk sess"
-              href={`/sessions/${encodeURIComponent(row.session)}`}
+              to="/sessions/$id"
+              params={{ id: row.session }}
               title="full chronological session replay"
             >
               session {row.session}
-            </a>
+            </Link>
           </>
         ) : null}
       </p>
       <p className="subtitle">
         {replay.frames.toLocaleString('en-US')} frames · {replay.duration_seconds.toFixed(1)}s of terminal time ·{' '}
         <Button variant="secondary" size="sm" asChild>
-          <a href={`/tty-replay/${encodeURIComponent(row.shasum)}`}>
+          <Link to="/tty-replay/$shasum" params={{ shasum: row.shasum }}>
             open replay page →
-          </a>
+          </Link>
         </Button>
       </p>
       <pre className="hp-md__preview">{plainTranscript(replay.transcript)}</pre>

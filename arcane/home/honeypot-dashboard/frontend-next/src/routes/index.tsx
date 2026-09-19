@@ -925,7 +925,7 @@ function Overview() {
                           <a href={row.link} title="show events for this payload">{row.count.toLocaleString('en-US')}</a>
                         </TableCell>
                         <TableCell className="v">
-                          <a href={`/payload-analysis/${row.shasum}`} title="static analysis of this payload">{row.shasum}</a>
+                          <Link to="/payload-analysis/$hash" params={{ hash: row.shasum }} title="static analysis of this payload">{row.shasum}</Link>
                         </TableCell>
                         <TableCell className="v">
                           <a href={row.link} title="show events for this captured artifact">{row.download}</a>

@@ -1,7 +1,7 @@
 // Canarytokens — deployed decoy tokens (dashboard-canarytokens-v1), plus
 // minting new ones against the self-hosted Canarytokens platform and
 // downloading their artifacts.
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { StoreListPage, str, when, type StorePage, type StoreRow } from '../components/StoreList'
@@ -321,7 +321,7 @@ function FiredTokens() {
                     <TableCell>{formatTimestamp(row.time)}</TableCell>
                     <TableCell className="font-mono">
                       {row.src_ip ? (
-                        <a href={`/investigate/ip/${encodeURIComponent(row.src_ip)}`}>{row.src_ip}</a>
+                        <Link to="/investigate/ip/$ip" params={{ ip: row.src_ip }}>{row.src_ip}</Link>
                       ) : (
                         '—'
                       )}

@@ -1,6 +1,6 @@
 // Attack sources — AS-D profile card grid with View-more + skeleton-first,
 // every column of the old table on each card.
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useMemo } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
@@ -127,29 +127,29 @@ function Sources() {
             rows.map((row) => (
               <div key={row.ip} className="hp-src-card">
                 <div className="hp-src-card__head">
-                  <a className="hp-src-card__ip" href={`/investigate/ip/${encodeURIComponent(row.ip)}`} title="Open full investigation">
+                  <Link className="hp-src-card__ip" to="/investigate/ip/$ip" params={{ ip: row.ip }} title="Open full investigation">
                     {row.ip}
-                  </a>
+                  </Link>
                   {row.country ? (
-                    <a href={`/events?country=${encodeURIComponent(row.country)}`} title={countryName(row.country)}>
+                    <Link to="/events" search={{ country: row.country }} title={countryName(row.country)}>
                       <Badge variant="secondary">{row.country}</Badge>
-                    </a>
+                    </Link>
                   ) : null}
                 </div>
                 {/* Distinct stat destinations per ips.html:10-14. */}
                 <div className="hp-src-card__stats">
-                  <a href={`/events?ip=${encodeURIComponent(row.ip)}`}>
+                  <Link to="/events" search={{ ip: row.ip }}>
                     <b>{row.events.toLocaleString('en-US')}</b>
                     <span>events</span>
-                  </a>
-                  <a href={`/events?ip=${encodeURIComponent(row.ip)}&kind=login`} title={`login attempts from ${row.ip}`}>
+                  </Link>
+                  <Link to="/events" search={{ ip: row.ip, kind: 'login' }} title={`login attempts from ${row.ip}`}>
                     <b>{row.logins.toLocaleString('en-US')}</b>
                     <span>logins</span>
-                  </a>
-                  <a href={`/investigate/ip/${encodeURIComponent(row.ip)}`} title={`attack chain and sessions for ${row.ip}`}>
+                  </Link>
+                  <Link to="/investigate/ip/$ip" params={{ ip: row.ip }} title={`attack chain and sessions for ${row.ip}`}>
                     <b>{row.sessions.toLocaleString('en-US')}</b>
                     <span>sessions</span>
-                  </a>
+                  </Link>
                 </div>
                 <span className="hp-src-card__sensors">
                   {/* The class on each anchor keeps the muted sensors-line look
@@ -157,13 +157,14 @@ function Sources() {
                   {row.sensors.map((sensor, i) => (
                     <span key={sensor}>
                       {i > 0 ? ' ' : null}
-                      <a
+                      <Link
                         className="hp-src-card__sensors"
-                        href={`/events?ip=${encodeURIComponent(row.ip)}&sensor=${encodeURIComponent(sensor)}`}
+                        to="/events"
+                        search={{ ip: row.ip, sensor }}
                         title={`${sensor} activity for ${row.ip}`}
                       >
                         {sensor}
-                      </a>
+                      </Link>
                     </span>
                   ))}
                 </span>

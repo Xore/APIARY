@@ -294,14 +294,14 @@ function EventDetailPage() {
             <TableRow>
               <TableCell>Sensor</TableCell>
               <TableCell className="break-all">
-                <a href={`/sensors?sensor=${encodeURIComponent(event.sensor)}`}>{event.sensor}</a>
+                <Link to="/sensors" search={{ sensor: event.sensor }}>{event.sensor}</Link>
               </TableCell>
             </TableRow>
             <TableRow>
               <TableCell>Source</TableCell>
               <TableCell className="break-all">
                 {event.src_ip ? (
-                  <a href={`/investigate/ip/${encodeURIComponent(event.src_ip)}`}>{event.src_ip}</a>
+                  <Link to="/investigate/ip/$ip" params={{ ip: event.src_ip }}>{event.src_ip}</Link>
                 ) : (
                   '—'
                 )}
