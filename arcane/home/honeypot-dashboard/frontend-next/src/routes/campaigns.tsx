@@ -8,6 +8,7 @@ import { InvestigateHeader, MasterDetailTable, type Column } from '../components
 import { ErrorStateBlock } from '../components/ErrorState'
 import { formatTimestamp } from '../lib/time'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
+import { Badge } from '../components/ui/badge'
 
 type CampaignRow = {
   cidr: string
@@ -140,7 +141,7 @@ const COLUMNS: Column<CampaignRow>[] = [
   {
     header: 'scan',
     className: 'v',
-    render: (row) => (row.scan ? <span className="badge badge--warning">{row.scan}</span> : null),
+    render: (row) => (row.scan ? <Badge variant="secondary">{row.scan}</Badge> : null),
   },
   {
     header: 'sensors',

@@ -27,7 +27,7 @@ import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
 import { Table, TableBody, TableCell, TableRow } from '../components/ui/table'
-import { Tabs, TabPanel } from '../components/Tabs'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs'
 import { formatTimestamp } from '../lib/time'
 import { xtermTheme } from '../lib/xtermTheme'
 import { useAppearanceKey } from '../lib/prefs'
@@ -614,32 +614,28 @@ function TtyReplay() {
           ) : undefined
         }
       />
-      <Tabs
-        tabs={[
-          { id: 'playback', label: 'Playback' },
-          { id: 'attacker', label: 'Attacker replay' },
-        ]}
-        active={tab}
-        onSelect={setTab}
-        label="TTY session views"
-        idPrefix="tty"
-      />
-      <TabPanel id="playback" active={tab} idPrefix="tty" className="dashboard-panel">
-        {replay === null ? (
-          <div className="card wide">
-            <span className="skeleton-line" aria-hidden="true" />
-            <span className="skeleton-line" aria-hidden="true" />
-          </div>
-        ) : (
-          <TerminalPlayback replay={replay} />
-        )}
-      </TabPanel>
-      <TabPanel id="attacker" active={tab} idPrefix="tty" className="dashboard-panel">
-        {/* Lazily mounted — the profile lookup doesn't run until the tab
-            is first opened (hp-tty-replay.js initialized its map the same
-            way, on first reveal). */}
-        {tab === 'attacker' ? <AttackerTab shasum={shasum} /> : null}
-      </TabPanel>
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList>
+          <TabsTrigger value="playback">Playback</TabsTrigger>
+          <TabsTrigger value="attacker">Attacker replay</TabsTrigger>
+        </TabsList>
+        <TabsContent value="playback" className="dashboard-panel">
+          {replay === null ? (
+            <div className="card wide">
+              <span className="skeleton-line" aria-hidden="true" />
+              <span className="skeleton-line" aria-hidden="true" />
+            </div>
+          ) : (
+            <TerminalPlayback replay={replay} />
+          )}
+        </TabsContent>
+        <TabsContent value="attacker" className="dashboard-panel">
+          {/* Lazily mounted — the profile lookup doesn't run until the tab
+              is first opened (hp-tty-replay.js initialized its map the same
+              way, on first reveal). */}
+          {tab === 'attacker' ? <AttackerTab shasum={shasum} /> : null}
+        </TabsContent>
+      </Tabs>
     </>
   )
 }

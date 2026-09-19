@@ -13,6 +13,8 @@ import { confirmAction } from '../components/ConfirmDialog'
 import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { Button } from '../components/ui/button'
+import { Badge } from '../components/ui/badge'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 
 type Scanner = { source: string; ok: boolean; positives?: number; total?: number; suspicious?: boolean; permalink?: string; error?: string }
@@ -176,10 +178,10 @@ function ReportViewer({ url, onClose }: { url: string; onClose: () => void }) {
 }
 
 function scannerBadge(scanner: Scanner) {
-  if (!scanner.ok) return <span className="badge badge--muted text-danger">failed{scanner.error ? `: ${scanner.error}` : ''}</span>
-  if ((scanner.positives ?? 0) > 0) return <span className="badge badge--red">detected</span>
-  if (scanner.suspicious) return <span className="badge badge--muted">suspicious</span>
-  return <span className="badge badge--muted">clean</span>
+  if (!scanner.ok) return <Badge variant="destructive">failed{scanner.error ? `: ${scanner.error}` : ''}</Badge>
+  if ((scanner.positives ?? 0) > 0) return <Badge variant="destructive">detected</Badge>
+  if (scanner.suspicious) return <Badge variant="secondary">suspicious</Badge>
+  return <Badge variant="secondary">clean</Badge>
 }
 
 function GithubAnalysisDetail() {
@@ -321,27 +323,14 @@ function GithubAnalysisDetail() {
             </div>
           </div>
 
-          <div className="tabs" role="tablist" aria-label="GitHub analysis sections">
-            {(['verdict', 'provenance', 'artifacts'] as const).map((key, index) => (
-              <Button
-                variant="ghost"
-                size="sm"
-                key={key}
-                className={tab === key ? 'tab active' : 'tab'}
-                type="button"
-                role="tab"
-                aria-selected={tab === key}
-                onClick={() => setTab(key)}
-              >
-                <span>0{index + 1}</span>
-                {key[0].toUpperCase()}
-                {key.slice(1)}
-              </Button>
-            ))}
-          </div>
-
-          {tab === 'verdict' ? (
-            <div className="dashboard-panel">
+          <Tabs value={tab} onValueChange={(value) => setTab(value as 'verdict' | 'provenance' | 'artifacts')}>
+            <TabsList>
+              <TabsTrigger value="verdict">Verdict</TabsTrigger>
+              <TabsTrigger value="provenance">Provenance</TabsTrigger>
+              <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
+            </TabsList>
+            <TabsContent value="verdict">
+              <div className="dashboard-panel">
               <div className="section-heading">
                 <div>
                   <h2>What the scanners found</h2>
@@ -389,10 +378,9 @@ function GithubAnalysisDetail() {
                 )}
               </div>
             </div>
-          ) : null}
-
-          {tab === 'provenance' ? (
-            <div className="dashboard-panel">
+            </TabsContent>
+            <TabsContent value="provenance">
+              <div className="dashboard-panel">
               <div className="section-heading">
                 <div>
                   <h2>Where this came from</h2>
@@ -453,10 +441,9 @@ function GithubAnalysisDetail() {
                 </div>
               </div>
             </div>
-          ) : null}
-
-          {tab === 'artifacts' ? (
-            <div className="dashboard-panel">
+            </TabsContent>
+            <TabsContent value="artifacts">
+              <div className="dashboard-panel">
               <div className="section-heading">
                 <div>
                   <h2>What the pipeline produced</h2>
@@ -520,7 +507,8 @@ function GithubAnalysisDetail() {
                 )}
               </div>
             </div>
-          ) : null}
+            </TabsContent>
+          </Tabs>
 
           {viewerOpen && run.view_url ? <ReportViewer url={run.view_url} onClose={() => setViewerOpen(false)} /> : null}
         </>

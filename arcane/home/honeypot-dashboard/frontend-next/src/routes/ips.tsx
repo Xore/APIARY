@@ -10,6 +10,7 @@ import { usePaginatedList, useResolved } from '../lib/hooks'
 import { formatTimestamp } from '../lib/time'
 import { countryName } from '../lib/country'
 import { Button } from '../components/ui/button'
+import { Badge } from '../components/ui/badge'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card'
 
 type SourceRow = {
@@ -130,8 +131,8 @@ function Sources() {
                     {row.ip}
                   </a>
                   {row.country ? (
-                    <a className="badge badge--info" title={countryName(row.country)} href={`/events?country=${encodeURIComponent(row.country)}`}>
-                      {row.country}
+                    <a href={`/events?country=${encodeURIComponent(row.country)}`} title={countryName(row.country)}>
+                      <Badge variant="secondary">{row.country}</Badge>
                     </a>
                   ) : null}
                 </div>

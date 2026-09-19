@@ -9,6 +9,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { StoreListPage, sha256Of, str, when, type StorePage, type StoreRow } from '../components/StoreList'
 import type { Column } from '../components/Investigate'
 import { SandboxIcon } from '../components/CardIcons'
+import { Badge } from '../components/ui/badge'
 
 const fetchPage = createServerFn({ method: 'GET' })
   .validator((input: { offset: number }) => input)
@@ -21,7 +22,7 @@ const COLUMNS: Column<StoreRow>[] = [
   { header: 'analyzed', render: (row) => when(str(row, '@timestamp')) },
   // Promoted into the card's badge row; detail-only so it is not
   // repeated in `.project-card__meta` underneath.
-  { header: 'status', detail: true, render: (row) => <span className="badge badge--muted">{str(row, 'status') || str(row, 'exit_status')}</span> },
+  { header: 'status', detail: true, render: (row) => <Badge variant="secondary">{str(row, 'status') || str(row, 'exit_status')}</Badge> },
   {
     header: 'file',
     className: 'v',
@@ -60,7 +61,7 @@ function Page() {
       cardIcon={() => SandboxIcon}
       cardBadges={(row) => {
         const status = str(row, 'status') || str(row, 'exit_status')
-        return status ? <span className={status === 'error' ? 'badge badge--muted text-danger' : 'badge badge--muted'}>{status}</span> : null
+        return status ? <Badge variant={status === 'error' ? 'destructive' : 'secondary'}>{status}</Badge> : null
       }}
       cardHref={(row) => {
         const sha = sha256Of(row)

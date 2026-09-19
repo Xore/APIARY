@@ -11,6 +11,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
+import { Badge } from '../components/ui/badge'
 import type { Json, JsonRecord } from '../lib/json'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 
@@ -172,7 +173,7 @@ function CapeDetail() {
         chips={
           run ? (
             <>
-              <span className={failed ? 'badge badge--danger' : 'badge badge--muted'}>exit {run.exit_status || 'n/a'}</span>
+              <Badge variant={failed ? 'destructive' : 'secondary'}>exit {run.exit_status || 'n/a'}</Badge>
               <Link className="chip" to="/payload-workbench/results" search={{ hash: sha }} hash="workbench-builder">
                 unified analysis workbench →
               </Link>
@@ -307,7 +308,7 @@ function CapeDetail() {
                         {run.signatures.map((signature, index) => (
                           <TableRow key={`${signature.name}-${index}`}>
                             <TableCell>
-                              <span className="badge badge--muted">{String(signature.severity)}</span>
+                              <Badge variant="secondary">{String(signature.severity)}</Badge>
                             </TableCell>
                             <TableCell className="v">{signature.name}</TableCell>
                             <TableCell className="v">{signature.description}</TableCell>

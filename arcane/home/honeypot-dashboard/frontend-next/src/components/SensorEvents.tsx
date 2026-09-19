@@ -13,6 +13,7 @@ import { Link } from '@tanstack/react-router'
 import { MasterDetailTable, type Column } from './Investigate'
 import { formatTimestamp } from '../lib/time'
 import { type Json } from '../lib/json'
+import { Badge } from './ui/badge'
 import {
   fieldBlock,
   fieldText,
@@ -48,7 +49,11 @@ function buildColumns(sensor: string): Column<SensorEventRow>[] {
         render: (row) => {
           const text = fieldText(readField(row.fields, column.field))
           if (!text) return ''
-          if (column.badge) return <span className={`badge badge--${column.badge}`}>{text}</span>
+          if (column.badge) {
+            const variant = column.badge === 'danger' ? 'destructive' : 
+                           column.badge === 'success' ? 'default' : 'secondary'
+            return <Badge variant={variant}>{text}</Badge>
+          }
           return column.mono ? <code>{text}</code> : text
         },
       })

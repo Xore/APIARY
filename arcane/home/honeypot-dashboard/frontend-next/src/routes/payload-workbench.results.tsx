@@ -1214,15 +1214,15 @@ function usePage(
 }
 
 function gpuStatusBadge(status: string) {
-  const cls =
+  const variant =
     status === 'completed' || status === 'done'
-      ? 'badge badge--success'
+      ? 'default'
       : status === 'failed' || status === 'error'
-        ? 'badge badge--danger'
+        ? 'destructive'
         : status === 'running'
-          ? 'badge badge--warning'
-          : 'badge badge--muted' // queued, aborted, unknown
-  return <Badge variant={cls === 'badge badge--danger' ? 'destructive' : cls === 'badge badge--success' ? 'default' : 'secondary'}>{status || 'unknown'}</Badge>
+          ? 'secondary'
+          : 'secondary' // queued, aborted, unknown
+  return <Badge variant={variant}>{status || 'unknown'}</Badge>
 }
 
 const gpuQueueColumns = (onAbort: (job: GpuJob) => void): Column<GpuJob>[] => [
@@ -1483,7 +1483,7 @@ function Results() {
             const matches = Array.isArray((row.yara as StoreRow | undefined)?.matches)
               ? ((row.yara as StoreRow).matches as unknown[]).length
               : Number(pathString(row, 'yara', 'match_count')) || 0
-            return <span className={matches > 0 ? 'badge badge--warning' : 'badge badge--muted'}>{matches} match{matches === 1 ? '' : 'es'}</span>
+            return <Badge variant={matches > 0 ? 'default' : 'secondary'}>{matches} match{matches === 1 ? '' : 'es'}</Badge>
           }}
           emptyState={{
             title: 'No YARA results match this view',
@@ -1592,7 +1592,7 @@ function Results() {
           cardIcon={() => CodeIcon}
           cardBadges={(row) => {
             const exit = pathString(row, 'exit_status')
-            return exit ? <span className={exit === 'error' ? 'badge badge--muted text-danger' : 'badge badge--muted'}>{exit}</span> : null
+            return exit ? <Badge variant={exit === 'error' ? 'destructive' : 'secondary'}>{exit}</Badge> : null
           }}
           emptyState={{
             title: 'No Ghidra analyses match this view',

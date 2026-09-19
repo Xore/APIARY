@@ -27,6 +27,7 @@ import { str } from '../components/StoreList'
 import { applyPalette, applyTheme, useThemeMode, type ThemeMode } from '../lib/prefs'
 import { ThemeGallery } from '../components/ThemeGallery'
 import { Button } from '../components/ui/button'
+import { Badge } from '../components/ui/badge'
 import { Input } from '../components/ui/input'
 import { Field, FieldLabel, FieldDescription } from '../components/ui/field'
 import { Label } from '../components/ui/label'
@@ -2008,15 +2009,14 @@ function ReportPresetsCard({
 }
 
 function stateBadge(state: string) {
-  const cls =
-    state === 'running'
-      ? 'badge badge--success'
+  const variant = state === 'running'
+      ? 'default'
       : state === 'exited' || state === 'dead'
-        ? 'badge badge--danger'
+        ? 'destructive'
         : state === 'restarting' || state === 'paused' || state === 'created' || state === 'removing'
-          ? 'badge badge--warning'
-          : 'badge badge--muted' // not_found | unknown
-  return <span className={cls}>{state}</span>
+          ? 'secondary'
+          : 'secondary' // not_found | unknown
+  return <Badge variant={variant}>{state}</Badge>
 }
 
 function ServicesCard({ initial, editable }: { initial: ServicesResponse | null; editable: boolean }) {
@@ -2290,7 +2290,7 @@ function ConfigHistoryCard({ initial, editable }: { initial: HistoryResponse | n
                     <TableCell>{formatTimestamp(entry.time)}</TableCell>
                     <TableCell>{entry.actor_username || entry.actor_subject || '—'}</TableCell>
                     <TableCell>
-                      <span className="badge badge--muted">{entry.action}</span>
+                      <Badge variant="secondary">{entry.action}</Badge>
                     </TableCell>
                     <TableCell className="v">{(entry.fields ?? []).join(', ')}</TableCell>
                     {editable ? (
@@ -2334,13 +2334,12 @@ const AUDIT_ACTIONS = [
 ]
 
 function resultBadge(result: string) {
-  const cls =
-    result === 'success'
-      ? 'badge badge--success'
+  const variant = result === 'success'
+      ? 'default'
       : result === 'conflict' || result === 'invalid'
-        ? 'badge badge--warning'
-        : 'badge badge--danger'
-  return <span className={cls}>{result}</span>
+        ? 'secondary'
+        : 'destructive'
+  return <Badge variant={variant}>{result}</Badge>
 }
 
 function AuditLogCard({ initial }: { initial: AuditResponse | null }) {
@@ -2405,7 +2404,7 @@ function AuditLogCard({ initial }: { initial: AuditResponse | null }) {
                   <TableCell>{formatTimestamp(event.time)}</TableCell>
                   <TableCell>{event.actor_username || event.actor_subject || '—'}</TableCell>
                   <TableCell>
-                    <span className="badge badge--muted">{event.action}</span>
+                    <Badge variant="secondary">{event.action}</Badge>
                   </TableCell>
                   <TableCell className="v">{(event.fields ?? []).join(', ')}</TableCell>
                   <TableCell className="n">{event.revision || ''}</TableCell>
@@ -2662,7 +2661,7 @@ export function SettingsSurface({
           <>
             <p className="note">
               Signed in as <strong>{user.displayName || user.username}</strong>
-              {user.role ? <> · <span className="badge badge--muted">{user.role}</span></> : null}
+              {user.role ? <> · <Badge variant="secondary">{user.role}</Badge></> : null}
             </p>
             <Button asChild variant="secondary" size="sm"><a href="/auth/logout">Sign out</a></Button>
           </>
@@ -2943,9 +2942,9 @@ export function SettingsSurface({
                                 <TableRow key={operator.subject}>
                                   <TableCell className="v">{operator.username}</TableCell>
                                   <TableCell>
-                                    <span className={operator.role === 'admin' ? 'badge badge--warning' : 'badge badge--muted'}>
+                                    <Badge variant={operator.role === 'admin' ? 'secondary' : 'secondary'}>
                                       {operator.role}
-                                    </span>
+                                    </Badge>
                                   </TableCell>
                                   <TableCell className="ago">{formatTimestamp(operator.last_seen_at)}</TableCell>
                                 </TableRow>

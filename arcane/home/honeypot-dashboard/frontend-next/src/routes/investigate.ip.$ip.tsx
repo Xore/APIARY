@@ -1,6 +1,7 @@
 import { Card, CardHeader, CardContent } from '../components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../components/ui/table'
 import { Button } from '../components/ui/button'
+import { Badge } from '../components/ui/badge'
 import { Field, FieldLabel } from '../components/ui/field'
 import { Input } from '../components/ui/input'
 // Per-IP investigation — one source address's whole profile: summary
@@ -12,7 +13,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
-import { Tabs, TabPanel } from '../components/Tabs'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs'
 import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
 import { countryName } from '../lib/country'
@@ -145,10 +146,10 @@ function BlockControl({ ip }: { ip: string }) {
   if (state.Active) {
     return (
       <span className="hp-row">
-        <span className="chip badge badge--danger">
+        <Badge variant="destructive">
           blocked{state.BlockedBy ? ` by ${state.BlockedBy}` : ''}
           {state.ExpiresAt ? `, expires ${formatTimestamp(state.ExpiresAt)}` : ''}
-        </span>
+        </Badge>
         <Button
           variant="secondary"
           size="sm"
@@ -203,7 +204,7 @@ export const Route = createFileRoute('/investigate/ip/$ip')({
 
 const EVENT_COLUMNS: Column<EventRow>[] = [
   { header: 'time', render: (row) => formatTimestamp(row.time) },
-  { header: 'sensor', render: (row) => <span className="badge badge--muted">{row.sensor}</span> },
+  { header: 'sensor', render: (row) => <Badge variant="secondary">{row.sensor}</Badge> },
   { header: 'port', className: 'n', render: (row) => (row.port ? `:${row.port}` : '') },
   { header: 'detail', className: 'v', render: (row) => row.detail || row.proto },
   {
@@ -256,7 +257,7 @@ function TechniquesTable({ techniques }: { techniques: Technique[] }) {
             {techniques.map((technique) => (
               <TableRow key={technique.id}>
                 <TableCell>
-                  <span className="badge badge--muted">{technique.domain}</span>
+                  <Badge variant="secondary">{technique.domain}</Badge>
                 </TableCell>
                 <TableCell className="v">
                   <a href={technique.url} target="_blank" rel="noopener noreferrer">
@@ -276,7 +277,7 @@ function TechniquesTable({ techniques }: { techniques: Technique[] }) {
 
 const CORRELATION_COLUMNS: Column<EventRow>[] = [
   { header: 'time', render: (row) => formatTimestamp(row.time) },
-  { header: 'sensor', render: (row) => <span className="badge badge--muted">{row.sensor}</span> },
+  { header: 'sensor', render: (row) => <Badge variant="secondary">{row.sensor}</Badge> },
   { header: 'summary', className: 'v', render: (row) => row.detail || row.proto },
 ]
 
@@ -411,14 +412,14 @@ function InvestigateIp() {
                   such corroboration", not "benign" — most addresses here are
                   hostile and simply never appeared in an analysed sample. */}
               {profile.confirmed_malicious ? (
-                <span
-                  className="badge badge--danger"
+                <Badge
+                  variant="destructive"
                   title="A sandbox detonation of a sample that references this address actually connected to it — two independent pipelines agree. Informational: the block action is not gated on this."
                 >
                   confirmed malicious (sandbox)
-                </span>
+                </Badge>
               ) : null}
-              {profile.country ? <span className="badge badge--info" title={countryName(profile.country)}>{profile.country}</span> : null}
+              {profile.country ? <Badge variant="secondary" title={countryName(profile.country)}>{profile.country}</Badge> : null}
               {profile.asn ? <span className="chip">{profile.asn}</span> : null}
               <span className="chip">
                 {formatTimestamp(profile.first)} → {formatTimestamp(profile.last)}
@@ -439,39 +440,35 @@ function InvestigateIp() {
       />
       {profile ? (
         <>
-          <Tabs
-            tabs={[
-              { id: 'activity', label: 'Activity' },
-              { id: 'indicators', label: 'Indicators' },
-              { id: 'correlation', label: 'Correlation & timeline' },
-            ]}
-            active={tab}
-            onSelect={setTab}
-            label="Attacker profile views"
-            idPrefix="attacker-profile"
-          />
-          <TabPanel id="activity" active={tab} idPrefix="attacker-profile" className="dashboard-panel">
-            <div className="grid min-w-0 gap-4 md:grid-cols-2">
-              <MiniTable title="Sensors contacted" rows={profile.sensors} />
-              <MiniTable title="Credentials attempted" rows={profile.credentials} />
-              <MiniTable title="Commands" rows={profile.commands} />
-              <MiniTable title="HTTP paths" rows={profile.paths} />
-              <MiniTable title="Targeted ports" rows={profile.ports} />
-              <MiniTable title="Protocols" rows={profile.protos} />
-              <MiniTable title="Sessions" rows={profile.sessions} linkTo={(key) => `/sessions/${encodeURIComponent(key)}`} />
-            </div>
-          </TabPanel>
-          <TabPanel id="indicators" active={tab} idPrefix="attacker-profile" className="dashboard-panel">
-            <div className="grid min-w-0 gap-4 md:grid-cols-2">
-              <MiniTable title="Payload hashes" rows={profile.payloads} linkTo={(key) => `/payload-analysis/${encodeURIComponent(key)}`} />
-              <MiniTable title="Alerts" rows={profile.alerts} />
-              <MiniTable title="Fingerprints" rows={profile.fingerprints} />
-            </div>
-            <TechniquesTable techniques={profile.techniques} />
-          </TabPanel>
-          <TabPanel id="correlation" active={tab} idPrefix="attacker-profile" className="dashboard-panel">
-            <CorrelationPanel correlation={profile.correlation} />
-          </TabPanel>
+          <Tabs value={tab} onValueChange={setTab}>
+            <TabsList>
+              <TabsTrigger value="activity">Activity</TabsTrigger>
+              <TabsTrigger value="indicators">Indicators</TabsTrigger>
+              <TabsTrigger value="correlation">Correlation & timeline</TabsTrigger>
+            </TabsList>
+            <TabsContent value="activity" className="dashboard-panel">
+              <div className="grid min-w-0 gap-4 md:grid-cols-2">
+                <MiniTable title="Sensors contacted" rows={profile.sensors} />
+                <MiniTable title="Credentials attempted" rows={profile.credentials} />
+                <MiniTable title="Commands" rows={profile.commands} />
+                <MiniTable title="HTTP paths" rows={profile.paths} />
+                <MiniTable title="Targeted ports" rows={profile.ports} />
+                <MiniTable title="Protocols" rows={profile.protos} />
+                <MiniTable title="Sessions" rows={profile.sessions} linkTo={(key) => `/sessions/${encodeURIComponent(key)}`} />
+              </div>
+            </TabsContent>
+            <TabsContent value="indicators" className="dashboard-panel">
+              <div className="grid min-w-0 gap-4 md:grid-cols-2">
+                <MiniTable title="Payload hashes" rows={profile.payloads} linkTo={(key) => `/payload-analysis/${encodeURIComponent(key)}`} />
+                <MiniTable title="Alerts" rows={profile.alerts} />
+                <MiniTable title="Fingerprints" rows={profile.fingerprints} />
+              </div>
+              <TechniquesTable techniques={profile.techniques} />
+            </TabsContent>
+            <TabsContent value="correlation" className="dashboard-panel">
+              <CorrelationPanel correlation={profile.correlation} />
+            </TabsContent>
+          </Tabs>
         </>
       ) : (
         <MasterDetailTable rows={null} columns={EVENT_COLUMNS} rowKey={(row, index) => `${row.time}-${index}`} inspectorTitle="Event record" />

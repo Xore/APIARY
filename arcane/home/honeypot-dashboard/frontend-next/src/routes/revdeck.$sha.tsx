@@ -13,6 +13,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
+import { Badge } from '../components/ui/badge'
 import { Table, TableBody, TableCell, TableRow } from '../components/ui/table'
 
 type Citation = { kind: string; raw: string; value: string; valid: boolean }
@@ -192,9 +193,9 @@ function RevdeckDetail() {
         chips={
           run ? (
             <>
-              <span className={failed ? 'badge badge--danger' : 'badge badge--muted'}>exit {run.exit_status || 'n/a'}</span>
-              {!failed && run.revdeck?.workflow ? <span className="badge badge--muted">{run.revdeck.workflow}</span> : null}
-              {!failed && run.revdeck?.status ? <span className="chip">{run.revdeck.status}</span> : null}
+              <Badge variant={failed ? 'destructive' : 'secondary'}>exit {run.exit_status || 'n/a'}</Badge>
+              {!failed && run.revdeck?.workflow ? <Badge variant="secondary">{run.revdeck.workflow}</Badge> : null}
+              {!failed && run.revdeck?.status ? <Badge variant="secondary">{run.revdeck.status}</Badge> : null}
               <Link className="chip" to="/payload-workbench/results" search={{ hash: sha }} hash="workbench-builder">
                 unified analysis workbench →
               </Link>

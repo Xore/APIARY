@@ -14,6 +14,8 @@ import { ArtifactList } from '../components/ArtifactList'
 import { GhidraCallGraph } from '../components/GhidraCallGraph'
 import { confirmAction } from '../components/ConfirmDialog'
 import { Button } from '../components/ui/button'
+import { Badge } from '../components/ui/badge'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 import { formatTimestamp } from '../lib/time'
 import { type JsonRecord } from '../lib/json'
@@ -197,71 +199,6 @@ export const Route = createFileRoute('/ghidra/$sha')({
   loader: async ({ params }) => ({ first: fetchRun({ data: { sha: params.sha } }) }),
   component: GhidraDetail,
 })
-
-// Page-level numbered tab strip — theme.css's .tabs/.tab vocabulary
-// (ghidra.html:106-111), same inlined roving-tabindex pattern as
-// sandbox.$job.tsx's PageTabs (the shared Tabs component speaks
-// .segmented and can't emit the numbered .tab markup).
-function PageTabs({
-  tabs,
-  active,
-  onSelect,
-  label,
-}: {
-  tabs: { id: string; label: string }[]
-  active: string
-  onSelect: (id: string) => void
-  label: string
-}) {
-  const move = (event: React.KeyboardEvent, index: number) => {
-    let target: number | null = null
-    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') target = (index + 1) % tabs.length
-    else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') target = (index - 1 + tabs.length) % tabs.length
-    else if (event.key === 'Home') target = 0
-    else if (event.key === 'End') target = tabs.length - 1
-    if (target === null) return
-    event.preventDefault()
-    onSelect(tabs[target].id)
-    document.getElementById(`gh-tab-${tabs[target].id}`)?.focus()
-  }
-  return (
-    <div className="tabs" role="tablist" aria-label={label}>
-      {tabs.map((tab, index) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          key={tab.id}
-          id={`gh-tab-${tab.id}`}
-          className={tab.id === active ? 'tab active' : 'tab'}
-          type="button"
-          role="tab"
-          aria-selected={tab.id === active}
-          aria-controls={`gh-panel-${tab.id}`}
-          tabIndex={tab.id === active ? 0 : -1}
-          onClick={() => onSelect(tab.id)}
-          onKeyDown={(event) => move(event, index)}
-        >
-          <span>0{index + 1}</span>
-          {tab.label}
-        </Button>
-      ))}
-    </div>
-  )
-}
-
-function Panel({ id, active, children }: { id: string; active: string; children: React.ReactNode }) {
-  return (
-    <div
-      className="dashboard-panel"
-      id={`gh-panel-${id}`}
-      role="tabpanel"
-      aria-labelledby={`gh-tab-${id}`}
-      hidden={id !== active}
-    >
-      {children}
-    </div>
-  )
-}
 
 function KV({ label, value, mono = true }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
@@ -1131,7 +1068,7 @@ function GhidraDetail() {
         chips={
           doc ? (
             <>
-              <span className={failed ? 'badge badge--danger' : 'badge badge--muted'}>exit {g.exit_status || 'n/a'}</span>
+              <Badge variant={failed ? 'destructive' : 'secondary'}>exit {g.exit_status || 'n/a'}</Badge>
               <Link className="chip" to="/payload-workbench/results" search={{ hash: sha }} hash="workbench-builder">
                 unified analysis workbench →
               </Link>
@@ -1203,43 +1140,39 @@ function GhidraDetail() {
             </div>
           </div>
 
-          <PageTabs
-            tabs={[
-              { id: 'overview', label: 'Overview' },
-              { id: 'code', label: 'Code' },
-              { id: 'data', label: 'Data' },
-              { id: 'deepdive', label: 'Deep dive' },
-              { id: 'raw', label: 'Raw' },
-            ]}
-            active={tab}
-            onSelect={setTab}
-            label="Ghidra analysis sections"
-          />
-
-          <Panel id="overview" active={tab}>
-            <OverviewPanel sha={sha} g={g} />
-          </Panel>
-          <Panel id="code" active={tab}>
-            <CodePanel sha={sha} g={g} />
-          </Panel>
-          <Panel id="data" active={tab}>
-            <DataPanel g={g} />
-          </Panel>
-          <Panel id="deepdive" active={tab}>
-            <DeepDivePanel g={g} correlation={correlation} />
-          </Panel>
-          <Panel id="raw" active={tab}>
-            <div className="card wide">
-              <h2>Report artifacts</h2>
-              <ArtifactList kind="ghidra" artifactKey={sha} />
-            </div>
-            <div className="card wide">
-              <h2>Analysis record</h2>
-              <div className="card__scroll">
-                <pre className="code">{JSON.stringify(doc, null, 2)}</pre>
+          <Tabs value={tab} onValueChange={setTab}>
+            <TabsList>
+              <TabsTrigger value="overview">Overview</TabsTrigger>
+              <TabsTrigger value="code">Code</TabsTrigger>
+              <TabsTrigger value="data">Data</TabsTrigger>
+              <TabsTrigger value="deepdive">Deep dive</TabsTrigger>
+              <TabsTrigger value="raw">Raw</TabsTrigger>
+            </TabsList>
+            <TabsContent value="overview">
+              <OverviewPanel sha={sha} g={g} />
+            </TabsContent>
+            <TabsContent value="code">
+              <CodePanel sha={sha} g={g} />
+            </TabsContent>
+            <TabsContent value="data">
+              <DataPanel g={g} />
+            </TabsContent>
+            <TabsContent value="deepdive">
+              <DeepDivePanel g={g} correlation={correlation} />
+            </TabsContent>
+            <TabsContent value="raw">
+              <div className="card wide">
+                <h2>Report artifacts</h2>
+                <ArtifactList kind="ghidra" artifactKey={sha} />
               </div>
-            </div>
-          </Panel>
+              <div className="card wide">
+                <h2>Analysis record</h2>
+                <div className="card__scroll">
+                  <pre className="code">{JSON.stringify(doc, null, 2)}</pre>
+                </div>
+              </div>
+            </TabsContent>
+          </Tabs>
         </>
       )}
     </>

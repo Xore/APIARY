@@ -14,6 +14,7 @@ import { ErrorStateBlock } from './ErrorState'
 import { MasterDetailTable, type Column } from './Investigate'
 import { CapturedMailInline } from './CapturedMail'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from './ui/card'
+import { Badge } from './ui/badge'
 import { formatTimestamp } from '../lib/time'
 
 type MailoneySession = {
@@ -106,7 +107,7 @@ const MAILONEY_COLUMNS: Column<MailoneySession>[] = [
   {
     header: 'auth',
     render: (row) =>
-      row.logged_in ? <span className="badge badge--warning">{row.user} / {row.pass}</span> : <span className="badge badge--muted">none</span>,
+      row.logged_in ? <Badge variant="secondary">{row.user} / {row.pass}</Badge> : <Badge variant="secondary">none</Badge>,
   },
   { header: 'mail from', className: 'v', render: (row) => row.mail_from.join(' · ') },
   { header: 'rcpt to', className: 'v', render: (row) => row.rcpt_to.join(' · ') },
@@ -141,7 +142,7 @@ const HTTP_COLUMNS: Column<HttpRequest>[] = [
   { header: 'status', className: 'n', render: (row) => String(row.status || '') },
   {
     header: 'tarpit',
-    render: (row) => (row.tarpitted ? <span className="badge badge--success">{row.tarpit_ms} ms</span> : ''),
+    render: (row) => (row.tarpitted ? <Badge variant="default">{row.tarpit_ms} ms</Badge> : ''),
   },
   { header: 'host', detail: true, render: (row) => row.host },
   { header: 'user agent', detail: true, render: (row) => row.user_agent },
@@ -161,11 +162,11 @@ const TANNER_COLUMNS: Column<TannerRequest>[] = [
   { header: 'request', className: 'v', render: (row) => <code>{row.method} {row.path}</code> },
   {
     header: 'detection',
-    render: (row) => (row.detection_name ? <span className="badge badge--danger">{row.detection_name}</span> : ''),
+    render: (row) => (row.detection_name ? <Badge variant="destructive">{row.detection_name}</Badge> : ''),
   },
   {
     header: 'tarpit',
-    render: (row) => (row.tarpitted ? <span className="badge badge--success">{row.tarpit_ms} ms</span> : ''),
+    render: (row) => (row.tarpitted ? <Badge variant="default">{row.tarpit_ms} ms</Badge> : ''),
   },
   { header: 'user agent', detail: true, render: (row) => row.user_agent },
   { header: 'credentials', detail: true, render: (row) => (row.username ? `${row.username} / ${row.password}` : '') },

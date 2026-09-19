@@ -7,6 +7,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
+import { Badge } from '../components/ui/badge'
 import { formatTimestamp } from '../lib/time'
 
 type ClusterRow = {
@@ -39,7 +40,7 @@ function drill(row: ClusterRow, children: React.ReactNode) {
 }
 
 const COLUMNS: Column<ClusterRow>[] = [
-  { header: 'cluster type', render: (row) => <span className="badge badge--muted">{row.kind}</span> },
+  { header: 'cluster type', render: (row) => <Badge variant="secondary">{row.kind}</Badge> },
   { header: 'shared value', className: 'v', render: (row) => drill(row, row.value) },
   { header: 'source IPs', className: 'n', render: (row) => drill(row, row.sources.toLocaleString('en-US')) },
   { header: 'events', className: 'n', render: (row) => drill(row, row.events.toLocaleString('en-US')) },

@@ -15,6 +15,8 @@ import { confirmAction } from '../components/ConfirmDialog'
 import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { Button } from '../components/ui/button'
+import { Badge } from '../components/ui/badge'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 import type { Json, JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
@@ -147,71 +149,6 @@ function DiffDetails({ diff, emptyAdded, emptyRemoved }: { diff: Diff; emptyAdde
   )
 }
 
-// Page-level numbered tab strip — theme.css's .tabs/.tab vocabulary
-// (sandbox.html:26-32), same inlined roving-tabindex pattern as
-// payload-analysis.$hash.tsx's PageTabs (the shared Tabs component speaks
-// .segmented and can't emit the numbered .tab markup).
-function PageTabs({
-  tabs,
-  active,
-  onSelect,
-  label,
-}: {
-  tabs: { id: string; label: string }[]
-  active: string
-  onSelect: (id: string) => void
-  label: string
-}) {
-  const move = (event: React.KeyboardEvent, index: number) => {
-    let target: number | null = null
-    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') target = (index + 1) % tabs.length
-    else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') target = (index - 1 + tabs.length) % tabs.length
-    else if (event.key === 'Home') target = 0
-    else if (event.key === 'End') target = tabs.length - 1
-    if (target === null) return
-    event.preventDefault()
-    onSelect(tabs[target].id)
-    document.getElementById(`sb-tab-${tabs[target].id}`)?.focus()
-  }
-  return (
-    <div className="tabs" role="tablist" aria-label={label}>
-      {tabs.map((tab, index) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          key={tab.id}
-          id={`sb-tab-${tab.id}`}
-          className={tab.id === active ? 'tab active' : 'tab'}
-          type="button"
-          role="tab"
-          aria-selected={tab.id === active}
-          aria-controls={`sb-panel-${tab.id}`}
-          tabIndex={tab.id === active ? 0 : -1}
-          onClick={() => onSelect(tab.id)}
-          onKeyDown={(event) => move(event, index)}
-        >
-          <span>0{index + 1}</span>
-          {tab.label}
-        </Button>
-      ))}
-    </div>
-  )
-}
-
-function Panel({ id, active, children }: { id: string; active: string; children: React.ReactNode }) {
-  return (
-    <div
-      className="dashboard-panel"
-      id={`sb-panel-${id}`}
-      role="tabpanel"
-      aria-labelledby={`sb-tab-${id}`}
-      hidden={id !== active}
-    >
-      {children}
-    </div>
-  )
-}
-
 function SandboxDetail() {
   const { first } = Route.useLoaderData()
   const { job } = Route.useParams()
@@ -291,15 +228,6 @@ function SandboxDetail() {
   const processDiff = lineDifference(lines(artifacts.processes_before), lines(artifacts.processes_after), normalizeProcess)
   const socketDiff = lineDifference(lines(detail?.sockets_before), lines(detail?.sockets_after), normalizeLine)
 
-  const tabs = [
-    { id: 'verdict', label: 'Verdict' },
-    { id: 'behavior', label: 'Behavior' },
-    { id: 'network', label: 'Network' },
-    ...(windowsDetected ? [{ id: 'file', label: 'File forensics' }] : []),
-    { id: 'diagnostics', label: 'Diagnostics' },
-    { id: 'raw', label: 'Raw' },
-  ]
-
   const reanalyze = () =>
     confirmAction({
       title: 'Detonate this payload again?',
@@ -322,19 +250,19 @@ function SandboxDetail() {
         chips={
           detail ? (
             <>
-              <span
-                className={
+              <Badge
+                variant={
                   riskLevel === 'high' || riskLevel === 'critical'
-                    ? 'badge badge--danger'
+                    ? 'destructive'
                     : riskLevel === 'medium'
-                      ? 'badge badge--warning'
-                      : 'badge badge--muted'
+                      ? 'secondary'
+                      : 'secondary'
                 }
               >
                 {riskLevel || 'n/a'} {incomplete ? '' : riskScore}
-              </span>
-              <span className="badge badge--muted">{str(detail.platform)}</span>
-              <span className="chip">exit {exitStatus}</span>
+              </Badge>
+              <Badge variant="secondary">{str(detail.platform)}</Badge>
+              <Badge variant="secondary">exit {exitStatus}</Badge>
             </>
           ) : undefined
         }
@@ -389,15 +317,22 @@ function SandboxDetail() {
             </div>
           </div>
 
-          <PageTabs tabs={tabs} active={tab} onSelect={setTab} label="Sandbox run views" />
-
-          <Panel id="verdict" active={tab}>
-            <div className="section-heading">
-              <div>
-                <h2>What this run concluded</h2>
-                <p>The identified payload, how static indicators compare with observed behavior, and the techniques the run demonstrated.</p>
+          <Tabs value={tab} onValueChange={setTab}>
+            <TabsList>
+              <TabsTrigger value="verdict">Verdict</TabsTrigger>
+              <TabsTrigger value="behavior">Behavior</TabsTrigger>
+              <TabsTrigger value="network">Network</TabsTrigger>
+              {windowsDetected && <TabsTrigger value="file">File forensics</TabsTrigger>}
+              <TabsTrigger value="diagnostics">Diagnostics</TabsTrigger>
+              <TabsTrigger value="raw">Raw</TabsTrigger>
+            </TabsList>
+            <TabsContent value="verdict">
+              <div className="section-heading">
+                <div>
+                  <h2>What this run concluded</h2>
+                  <p>The identified payload, how static indicators compare with observed behavior, and the techniques the run demonstrated.</p>
+                </div>
               </div>
-            </div>
             <div className="card wide">
               <h2>Run identity and analysis route</h2>
               <Row label="job" value={str(detail.job)} />
@@ -407,7 +342,7 @@ function SandboxDetail() {
                 value={
                   <>
                     <strong>{str(classification.label)}</strong>{' '}
-                    {str(classification.code) ? <span className="badge badge--muted">{str(classification.code)}</span> : null}
+                    {str(classification.code) ? <Badge variant="secondary">{str(classification.code)}</Badge> : null}
                   </>
                 }
               />
@@ -430,7 +365,7 @@ function SandboxDetail() {
                 value={
                   route === 'windows-ghosts' ? (
                     <>
-                      <span className="badge badge--warning">WAN-permitted</span> fresh transient KVM guest, disposable overlay — real
+                      <Badge variant="secondary">WAN-permitted</Badge> fresh transient KVM guest, disposable overlay — real
                       internet egress, LAN/RFC1918 blocked by host firewall policy, not air-gapped
                     </>
                   ) : (
@@ -477,15 +412,14 @@ function SandboxDetail() {
               )}
               <p className="note">Behavior context only; never actor attribution.</p>
             </div>
-          </Panel>
-
-          <Panel id="behavior" active={tab}>
-            <div className="section-heading">
-              <div>
-                <h2>What the payload did</h2>
-                <p>System calls, filesystem changes, and the process and socket state before and after detonation.</p>
+            </TabsContent>
+            <TabsContent value="behavior">
+              <div className="section-heading">
+                <div>
+                  <h2>What the payload did</h2>
+                  <p>System calls, filesystem changes, and the process and socket state before and after detonation.</p>
+                </div>
               </div>
-            </div>
             <div className="card half">
               <h2>Top system calls</h2>
               {topSyscalls.length ? (
@@ -552,15 +486,14 @@ function SandboxDetail() {
               <Evidence title="Standard error" body={str(detail.stderr)} />
               {!str(detail.stdout).trim() && !str(detail.stderr).trim() ? <p className="empty">No stream output was captured.</p> : null}
             </div>
-          </Panel>
-
-          <Panel id="network" active={tab}>
-            <div className="section-heading">
-              <div>
-                <h2>What it reached for</h2>
-                <p>Captured traffic on the host bridge and inside the guest, including loopback DNS.</p>
+            </TabsContent>
+            <TabsContent value="network">
+              <div className="section-heading">
+                <div>
+                  <h2>What it reached for</h2>
+                  <p>Captured traffic on the host bridge and inside the guest, including loopback DNS.</p>
+                </div>
               </div>
-            </div>
             <div className="card wide">
               <h2>Network and DNS capture</h2>
               <div className="card__scroll">
@@ -643,10 +576,10 @@ function SandboxDetail() {
                 trigger conditions never reached.
               </p>
             </div>
-          </Panel>
+            </TabsContent>
 
           {windowsDetected ? (
-            <Panel id="file" active={tab}>
+            <TabsContent value="file">
               <div className="section-heading">
                 <div>
                   <h2>What the file is</h2>
@@ -787,10 +720,10 @@ function SandboxDetail() {
                   body={lines(windows.utf16_strings).join('\n')}
                 />
               </div>
-            </Panel>
+            </TabsContent>
           ) : null}
 
-          <Panel id="diagnostics" active={tab}>
+          <TabsContent value="diagnostics">
             <div className="section-heading">
               <div>
                 <h2>How the run itself went</h2>
@@ -827,16 +760,17 @@ function SandboxDetail() {
                 <Evidence title="Domain state" body={`${str(artifacts.domain_state)}\n${str(artifacts.qemu_status)}`.trim()} />
               </div>
             ) : null}
-          </Panel>
+            </TabsContent>
 
-          <Panel id="raw" active={tab}>
+          <TabsContent value="raw">
             <div className="card wide">
               <h2>Behavior record</h2>
               <div className="card__scroll">
                 <pre className="code">{JSON.stringify(doc, null, 2)}</pre>
               </div>
             </div>
-          </Panel>
+          </TabsContent>
+          </Tabs>
 
           <p className="note hp-flow">
             Guest-produced text is untrusted and size-bounded. Complete raw result directories and syscall traces remain root-only on the

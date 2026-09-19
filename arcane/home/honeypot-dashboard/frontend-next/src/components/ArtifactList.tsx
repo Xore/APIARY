@@ -4,6 +4,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useServerQuery } from '../lib/useServerQuery'
 import { ErrorStateBlock } from './ErrorState'
 import { Table, TableBody, TableCell, TableRow } from './ui/table'
+import { Badge } from './ui/badge'
 
 type ArtifactRow = {
   filename: string
@@ -52,7 +53,7 @@ export function ArtifactList({ kind, artifactKey }: { kind: 'ghidra' | 'sandbox'
                 </a>
               </TableCell>
               <TableCell>
-                <span className="badge badge--muted">{row.kind}</span>
+                <Badge variant="secondary">{row.kind}</Badge>
               </TableCell>
               <TableCell className="n">{(row.size_bytes / 1024).toFixed(1)} KB</TableCell>
             </TableRow>

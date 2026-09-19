@@ -10,6 +10,7 @@ import { useAppearanceKey } from '../lib/prefs'
 import { stepZoom, zoomFromWheel } from '../lib/chartZoom'
 import { sessionAwareFetch } from '../lib/reauth'
 import { Button } from './ui/button'
+import { Badge } from './ui/badge'
 
 export type ChartKind = 'sankey' | 'timeline' | 'heatmap' | 'pie' | 'line' | 'bar' | 'barh' | 'scatter' | 'radar'
 
@@ -549,7 +550,7 @@ export function EChart({ kind, url, height, zoomable }: { kind: ChartKind; url: 
           >
             −
           </Button>
-          <span className="chip" aria-live="polite">{Math.round(zoomDisplay * 100)}%</span>
+          <Badge variant="secondary" aria-live="polite">{Math.round(zoomDisplay * 100)}%</Badge>
           <Button
             variant="outline"
             size="icon"

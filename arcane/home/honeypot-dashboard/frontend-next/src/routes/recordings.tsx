@@ -13,6 +13,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
+import { Badge } from '../components/ui/badge'
 import { formatTimestamp } from '../lib/time'
 import { countryName } from '../lib/country'
 
@@ -106,9 +107,9 @@ function ReplayPane({ row }: { row: RecordingRow }) {
         {row.country ? (
           <>
             {' '}
-            <span className="badge badge--info" title={countryName(row.country)}>
+            <Badge variant="secondary" title={countryName(row.country)}>
               {row.country}
-            </span>
+            </Badge>
           </>
         ) : null}
         {row.session ? (
@@ -215,7 +216,7 @@ function Recordings() {
         chips={
           <>
             <span className="chip">{failed ? 'load failed' : `${total.toLocaleString('en-US')} recorded sessions`}</span>
-            {ip ? <span className="badge badge--info">source {ip}</span> : null}
+            {ip ? <Badge variant="secondary">source {ip}</Badge> : null}
           </>
         }
       />

@@ -8,6 +8,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { StoreListPage, sha256Of, str, when, type StorePage, type StoreRow } from '../components/StoreList'
 import type { Column } from '../components/Investigate'
 import { ShieldIcon } from '../components/CardIcons'
+import { Badge } from '../components/ui/badge'
 import { pathString } from '../lib/json'
 
 const fetchPage = createServerFn({ method: 'GET' })
@@ -21,7 +22,7 @@ const COLUMNS: Column<StoreRow>[] = [
   { header: 'analyzed', render: (row) => when(str(row, '@timestamp')) },
   // Card layout promotes this into `.project-card__badges`; keeping it
   // detail-only stops it rendering twice on the same card.
-  { header: 'status', detail: true, render: (row) => <span className="badge badge--muted">{str(row, 'status') || str(row, 'exit_status')}</span> },
+  { header: 'status', detail: true, render: (row) => <Badge variant="secondary">{str(row, 'status') || str(row, 'exit_status')}</Badge> },
   {
     header: 'file',
     className: 'v',
@@ -64,8 +65,8 @@ function Page() {
         const family = pathString(row, 'family')
         return (
           <>
-            {status ? <span className={status === 'error' ? 'badge badge--muted text-danger' : 'badge badge--muted'}>{status}</span> : null}
-            {family ? <span className="badge badge--accent">{family}</span> : null}
+            {status ? <Badge variant={status === 'error' ? 'destructive' : 'secondary'}>{status}</Badge> : null}
+            {family ? <Badge variant="secondary">{family}</Badge> : null}
           </>
         )
       }}

@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { EChart } from '../components/EChart'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { InvestigateHeader } from '../components/Investigate'
+import { Badge } from '../components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 import { useLiveInterval } from '../lib/live'
 
@@ -87,19 +88,18 @@ export const Route = createFileRoute('/topology')({
 })
 
 function ingressBadge(kind: string) {
-  const cls =
-    kind === 'traefik' ? 'badge badge--info' : kind === 'portbridge' ? 'badge' : 'badge badge--warning'
+  const variant = kind === 'traefik' ? 'secondary' : kind === 'portbridge' ? 'default' : 'secondary'
   const label = kind === 'traefik' ? 'Traefik :443' : kind === 'portbridge' ? 'raw portbridge' : 'tunnel only'
-  return <span className={cls}>{label}</span>
+  return <Badge variant={variant}>{label}</Badge>
 }
 
 function freshnessBadge(row: SensorFreshness | undefined) {
   if (!row) return <span className="text-muted">—</span>
-  const cls = row.state === 'ACTIVE' ? 'badge badge--success' : row.state === 'QUIET' ? 'badge badge--warning' : 'badge badge--danger'
+  const variant = row.state === 'ACTIVE' ? 'default' : row.state === 'QUIET' ? 'secondary' : 'destructive'
   return (
-    <span className={cls} title={row.last_seen}>
+    <Badge variant={variant} title={row.last_seen}>
       {row.state}
-    </span>
+    </Badge>
   )
 }
 
@@ -124,11 +124,11 @@ function containerBadge(state: ContainerState | undefined, adapterVisible: boole
     )
   }
   const label = state?.state ?? 'unknown'
-  const cls = label === 'running' ? 'badge badge--success' : label === 'exited' || label === 'not_found' ? 'badge badge--danger' : 'badge badge--warning'
+  const variant = label === 'running' ? 'default' : label === 'exited' || label === 'not_found' ? 'destructive' : 'secondary'
   return (
-    <span className={cls} title={state?.health ? `docker health: ${state.health}` : undefined}>
+    <Badge variant={variant} title={state?.health ? `docker health: ${state.health}` : undefined}>
       {label}
-    </span>
+    </Badge>
   )
 }
 

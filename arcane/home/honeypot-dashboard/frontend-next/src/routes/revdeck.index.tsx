@@ -8,6 +8,7 @@ import { StoreListPage, str, when, type StorePage, type StoreRow } from '../comp
 import type { Column } from '../components/Investigate'
 import { pathString } from '../lib/json'
 import { CodeIcon } from '../components/CardIcons'
+import { Badge } from '../components/ui/badge'
 
 const fetchPage = createServerFn({ method: 'GET' })
   .validator((input: { offset: number }) => input)
@@ -38,7 +39,7 @@ const COLUMNS: Column<StoreRow>[] = [
   },
   // Promoted into the card's badge row (detail-only, so the card does
   // not show the same badge twice).
-  { header: 'exit', detail: true, render: (row) => <span className="badge badge--muted">{str(row, 'exit_status')}</span> },
+  { header: 'exit', detail: true, render: (row) => <Badge variant="secondary">{str(row, 'exit_status')}</Badge> },
   {
     header: 'record',
     detail: true,
@@ -68,7 +69,7 @@ function Page() {
       cardIcon={() => CodeIcon}
       cardBadges={(row) => {
         const exit = str(row, 'exit_status')
-        return exit ? <span className={exit === 'error' ? 'badge badge--muted text-danger' : 'badge badge--muted'}>{exit}</span> : null
+        return exit ? <Badge variant={exit === 'error' ? 'destructive' : 'secondary'}>{exit}</Badge> : null
       }}
       cardHref={(row) => {
         const sha = revdeckSha(row)

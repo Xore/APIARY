@@ -358,7 +358,6 @@ function RecentEventRow({ row, open, onToggle }: { row: EventRow; open: boolean;
             </Link>
           ) : (
             <Badge variant="secondary"
-              className="badge badge--muted"
               title="This event reached the sensor over the WireGuard tunnel and could not be joined back to a real client address."
             >
               unattributed
@@ -367,7 +366,7 @@ function RecentEventRow({ row, open, onToggle }: { row: EventRow; open: boolean;
           {row.country ? (
             <>
               {' '}
-              <Badge variant="secondary" className="badge badge--info"><Link title={countryName(row.country)} to="/events" search={{ country: row.country }} onClick={stop}>
+              <Badge variant="secondary"><Link title={countryName(row.country)} to="/events" search={{ country: row.country }} onClick={stop}>
                 {row.country}
               </Link></Badge>
             </>
@@ -507,7 +506,7 @@ function Overview() {
     <>
       <header className="hp-hero" id="overview-header">
         {presentation?.banner_text ? (
-          <Badge variant={presentation.banner_severity === 'critical' ? 'destructive' : 'secondary'} className={presentation.banner_severity === 'critical' ? 'badge badge--danger' : 'badge badge--warning'}>
+          <Badge variant={presentation.banner_severity === 'critical' ? 'destructive' : 'secondary'}>
             {presentation.banner_text}
           </Badge>
         ) : null}
