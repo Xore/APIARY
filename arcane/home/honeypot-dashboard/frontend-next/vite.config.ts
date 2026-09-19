@@ -3,11 +3,15 @@ import { defineConfig } from 'vite'
 
 import { tanstackStart } from '@tanstack/react-start/plugin/vite'
 
+import tailwindcss from '@tailwindcss/vite'
 import viteReact from '@vitejs/plugin-react'
 import { nitro } from 'nitro/vite'
 
 const config = defineConfig({
-  resolve: { tsconfigPaths: true },
+  resolve: {
+    alias: { '@': resolve(import.meta.dirname ?? '.', 'src') },
+    tsconfigPaths: true,
+  },
   plugins: [
     // #2183: the service-token boot gate, explicit rather than scan-dir
     // discovered so nothing about this deployment rides on nitro's
@@ -20,6 +24,7 @@ const config = defineConfig({
 
     tanstackStart(),
     viteReact(),
+    tailwindcss(),
   ],
 })
 

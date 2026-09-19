@@ -3,7 +3,8 @@
 // same vendored stylesheet the Go dashboard serves), so the port inherits
 // the claude-pure element set 1:1 — no visual drift by construction.
 import { useEffect } from 'react'
-import { HeadContent, Scripts, createRootRoute, redirect } from '@tanstack/react-router'
+import '../index.css'
+import { HeadContent, Scripts, createRootRoute, redirect, useRouterState } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { AppShell } from '../components/AppShell'
 import { getSessionUser, type User } from '../lib/auth'
@@ -188,7 +189,7 @@ export const Route = createRootRoute({
         // the first as canonical and the second as an alias; this repo still
         // reads dataset.hpPalette in settings.tsx.
         children:
-          '(function(){try{var d=document.documentElement;var t=localStorage.getItem("hp-theme");if(t==="light"||t==="dark"){d.dataset.theme=t;}var p=localStorage.getItem("hp-palette");if(p&&/^[a-z][a-z0-9-]{2,31}$/.test(p)){d.dataset.hpTheme=p;d.dataset.hpPalette=p;}}catch(e){}})();',
+          '(function(){try{var d=document.documentElement;var t=localStorage.getItem("hp-theme");if(t==="light"||t==="dark"){d.dataset.theme=t;}d.classList.toggle("dark",t==="dark"||(!t&&matchMedia("(prefers-color-scheme: dark)").matches));var p=localStorage.getItem("hp-palette");if(p&&/^[a-z][a-z0-9-]{2,31}$/.test(p)){d.dataset.hpTheme=p;d.dataset.hpPalette=p;}}catch(e){}})();',
       },
     ],
   }),
@@ -238,19 +239,20 @@ export const Route = createRootRoute({
 // the flash on a cold load -- that needs a cookie, because there is none in
 // this stack today and localStorage is per-device by definition. Tracked as
 // the remaining part of #1755 rather than smuggled in here.
-function useStoredAppearance() {
+function useStoredAppearance(enabled: boolean) {
   useEffect(() => {
-    void pullAppearance()
-  }, [])
+    if (enabled) void pullAppearance()
+  }, [enabled])
 }
 
 function RootDocument({ children }: { children: React.ReactNode }) {
+  const isAuthRoute = useRouterState({ select: (state) => state.location.pathname.startsWith('/auth/') })
   const { banner, showProblemReportButton, appName, appearance } = Route.useLoaderData()
   // beforeLoad already resolved the session user into router context for
   // every non-/auth navigation — thread it to the shell so the sidebar
   // profile widget and topbar avatar show a real identity (#1653).
   const { user } = Route.useRouteContext() as { user?: User | null }
-  useStoredAppearance()
+  useStoredAppearance(!isAuthRoute)
   // #1975: a tab that sat hidden long enough for its session to die finds
   // out the moment it comes back, not the next time the operator clicks
   // something and gets an unexplained failure. Root-mounted because it has
@@ -263,6 +265,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
     // with no cookie yet, and for a device where cookies are blocked.
     <html
       lang="en"
+      className={appearance?.mode === 'dark' ? 'dark' : undefined}
       {...(appearance?.mode ? { 'data-theme': appearance.mode } : {})}
       {...(appearance?.theme ? { 'data-hp-theme': appearance.theme, 'data-hp-palette': appearance.theme } : {})}
     >
@@ -270,9 +273,9 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body>
-        <AppShell banner={banner} showProblemReportButton={showProblemReportButton} user={user ?? null} appName={appName}>
+        {isAuthRoute ? children : <AppShell banner={banner} showProblemReportButton={showProblemReportButton} user={user ?? null} appName={appName}>
           {children}
-        </AppShell>
+        </AppShell>}
         <Scripts />
       </body>
     </html>

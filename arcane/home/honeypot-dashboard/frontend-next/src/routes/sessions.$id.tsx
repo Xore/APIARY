@@ -10,6 +10,11 @@ import { ErrorStateBlock } from '../components/ErrorState'
 import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
 import { countryName } from '../lib/country'
+import { Card, CardContent, CardDescription, CardHeader } from '../components/ui/card'
+import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import { Skeleton } from '../components/ui/skeleton'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 
 type Kv = { key: string; count: number }
 type Technique = { id: string; name: string; domain: string; evidence: string; count: number; url: string }
@@ -69,7 +74,7 @@ export const Route = createFileRoute('/sessions/$id')({
 
 const EVENT_COLUMNS: Column<EventRow>[] = [
   { header: 'time', render: (row) => formatTimestamp(row.time) },
-  { header: 'sensor', render: (row) => <span className="badge badge--muted">{row.sensor}</span> },
+  { header: 'sensor', render: (row) => <Badge variant="secondary">{row.sensor}</Badge> },
   { header: 'detail', className: 'v', render: (row) => row.detail || row.proto },
   {
     header: 'record',
@@ -93,21 +98,21 @@ function hasCapturedMail(events: EventRow[]): boolean {
 function MiniTable({ title, rows }: { title: string; rows: Kv[] }) {
   if (rows.length === 0) return null
   return (
-    <div className="card half">
-      <h2>{title}</h2>
-      <div className="card__scroll">
-        <table className="data-table">
-          <tbody>
+    <Card className="min-w-0">
+      <CardHeader><h2 className="font-semibold leading-none tracking-tight">{title}</h2></CardHeader>
+      <CardContent>
+        <Table>
+          <TableBody>
             {rows.map((row) => (
-              <tr key={row.key}>
-                <td className="n">{row.count.toLocaleString('en-US')}</td>
-                <td className="v">{row.key}</td>
-              </tr>
+              <TableRow key={row.key}>
+                <TableCell className="n">{row.count.toLocaleString('en-US')}</TableCell>
+                <TableCell className="v">{row.key}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -171,76 +176,68 @@ function SessionPage() {
                 attacker's profile, this session's filtered event view, and
                 the session-scoped CSV export (exports.rs events_csv accepts
                 the same session= pivot filter as /api/v1/events). */}
-            <Link className="chip" to="/events">
-              ← event explorer
-            </Link>
+            <Button asChild variant="outline" size="sm"><Link to="/events">← event explorer</Link></Button>
             {detail && detail.ip ? (
-              <Link className="chip" to="/investigate/ip/$ip" params={{ ip: detail.ip }}>
-                attacker profile
-              </Link>
+              <Button asChild variant="outline" size="sm"><Link to="/investigate/ip/$ip" params={{ ip: detail.ip }}>attacker profile</Link></Button>
             ) : null}
-            <a className="chip" href={`/events?session=${encodeURIComponent(id)}`}>
-              filtered events
-            </a>
-            <a className="chip" href={`/api/export/events.csv?session=${encodeURIComponent(id)}`}>
-              export CSV ↓
-            </a>
+            <Button asChild variant="outline" size="sm"><a href={`/events?session=${encodeURIComponent(id)}`}>filtered events</a></Button>
+            <Button asChild variant="outline" size="sm"><a href={`/api/export/events.csv?session=${encodeURIComponent(id)}`}>export CSV ↓</a></Button>
             {detail ? (
               <>
-                <span className="chip">{detail.total.toLocaleString('en-US')} events</span>
-                <span className="chip" title={countryName(detail.country)}>{detail.ip}{detail.country ? ` · ${detail.country}` : ''}</span>
-                <span className="chip">
+                <Badge variant="secondary">{detail.total.toLocaleString('en-US')} events</Badge>
+                <Badge variant="secondary" title={countryName(detail.country)}>{detail.ip}{detail.country ? ` · ${detail.country}` : ''}</Badge>
+                <Badge variant="secondary">
                   {formatTimestamp(detail.first)} → {formatTimestamp(detail.last)}
-                </span>
+                </Badge>
               </>
             ) : null}
           </>
         }
       />
+      {!fetch ? <Card className="col-span-full" aria-label="Loading session detail"><CardContent className="space-y-4 pt-6"><Skeleton className="h-6 w-40" /><Skeleton className="h-24 w-full" /></CardContent></Card> : null}
       {detail?.sequences.map((sequence) => (
-        <div className="card wide" key={sequence.name}>
-          <h2>
-            <span className={sequence.severity === 'critical' ? 'badge badge--danger' : 'badge badge--warning'}>
+        <Card className="col-span-full" key={sequence.name}>
+          <CardHeader><h2 className="font-semibold leading-none tracking-tight">
+            <Badge variant={sequence.severity === 'critical' ? 'destructive' : 'secondary'}>
               {sequence.severity}
-            </span>{' '}
+            </Badge>{' '}
             {sequence.name}
-          </h2>
-          <p className="note">{sequence.summary}</p>
-        </div>
+          </h2><CardDescription>{sequence.summary}</CardDescription></CardHeader>
+        </Card>
       ))}
       {detail && detail.techniques.length > 0 ? (
-        <div className="card wide">
-          <h2>MITRE ATT&amp;CK behavior mapping</h2>
-          <p className="note">Evidence-based behavioral context only; this does not identify or attribute an actor.</p>
-          <div className="card__scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>domain</th>
-                  <th>technique</th>
-                  <th>observations</th>
-                  <th>evidence</th>
-                </tr>
-              </thead>
-              <tbody>
+        <Card className="col-span-full min-w-0">
+          <CardHeader><h2 className="font-semibold leading-none tracking-tight">MITRE ATT&amp;CK behavior mapping</h2>
+          <CardDescription>Evidence-based behavioral context only; this does not identify or attribute an actor.</CardDescription></CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>domain</TableHead>
+                  <TableHead>technique</TableHead>
+                  <TableHead>observations</TableHead>
+                  <TableHead>evidence</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {detail.techniques.map((technique) => (
-                  <tr key={technique.id}>
-                    <td>
-                      <span className="badge badge--muted">{technique.domain}</span>
-                    </td>
-                    <td className="v">
+                  <TableRow key={technique.id}>
+                    <TableCell>
+                      <Badge variant="secondary">{technique.domain}</Badge>
+                    </TableCell>
+                    <TableCell className="v">
                       <a href={technique.url} target="_blank" rel="noopener noreferrer">
                         {technique.id} — {technique.name}
                       </a>
-                    </td>
-                    <td className="n">{technique.count.toLocaleString('en-US')}</td>
-                    <td className="v">{technique.evidence}</td>
-                  </tr>
+                    </TableCell>
+                    <TableCell className="n">{technique.count.toLocaleString('en-US')}</TableCell>
+                    <TableCell className="v">{technique.evidence}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
       ) : null}
       {detail ? (
         <>

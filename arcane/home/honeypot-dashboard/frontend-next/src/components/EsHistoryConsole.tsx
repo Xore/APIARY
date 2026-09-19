@@ -9,6 +9,7 @@
 import { createServerFn } from '@tanstack/react-start'
 import { useState } from 'react'
 import type { JsonRecord } from '../lib/json'
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from './ui/card'
 
 export type EsStorage = { cluster_status: string; index_count: number; doc_count: number; store_bytes: number }
 
@@ -94,23 +95,26 @@ export function EsHistoryConsole({ storage, hidden }: { storage: EsStorage | nul
           </div>
         </div>
       )}
-      <section className="card hp-field" hidden={hidden}>
-        <div className="card__header">
-          <div>
-            <h3>Elasticsearch history</h3>
-            <p className="card__meta">Run a query_string search across every indexed honeypot and Suricata document.</p>
-          </div>
-          <div className="hp-head-actions">
-            <a
-              className="btn btn-ghost btn-sm"
-              href={`/api/export/history.json${activeQuery ? `?q=${encodeURIComponent(activeQuery)}` : ''}`}
-              title="Download the current result set as JSON"
-            >
-              Export JSON
-            </a>
-          </div>
-        </div>
-        <div className="filters">
+            <Card hidden={hidden} className="hp-field">
+              <CardHeader>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <CardTitle>Elasticsearch history</CardTitle>
+                    <CardDescription>Run a query_string search across every indexed honeypot and Suricata document.</CardDescription>
+                  </div>
+                  <div className="hp-head-actions">
+                    <a
+                      className="btn btn-ghost btn-sm"
+                      href={`/api/export/history.json${activeQuery ? `?q=${encodeURIComponent(activeQuery)}` : ''}`}
+                      title="Download the current result set as JSON"
+                    >
+                      Export JSON
+                    </a>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="filters">
           <input
             className="search"
             placeholder="query_string, e.g. honeypot.sensor:cowrie AND honeypot.username:root"
@@ -127,7 +131,8 @@ export function EsHistoryConsole({ storage, hidden }: { storage: EsStorage | nul
         </div>
         <p className="card__meta">{meta}</p>
         <pre className="code">{results}</pre>
-      </section>
+          </CardContent>
+        </Card>
     </>
   )
 }

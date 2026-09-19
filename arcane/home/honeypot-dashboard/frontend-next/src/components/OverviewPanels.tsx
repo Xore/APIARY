@@ -5,7 +5,10 @@
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useRef, useState } from 'react'
 import { ErrorStateBlock } from './ErrorState'
-import { DEFAULT_MAP_PREFS, pullMapPrefs, useThemeMode, type MapPrefs } from '../lib/prefs'
+import { applyLeafletTheme } from '../lib/leafletTheme'
+import { DEFAULT_MAP_PREFS, pullMapPrefs, useAppearanceKey, useThemeMode, type MapPrefs } from '../lib/prefs'
+import { Card } from './ui/card'
+import { Table, TableBody, TableCell, TableRow } from './ui/table'
 
 export type Kv = { key: string; count: number; link: string }
 
@@ -25,7 +28,7 @@ export function Tbl({
   failed?: boolean
 }) {
   return (
-    <div className={half ? 'card half' : 'card'} id={id}>
+    <Card className={half ? 'card half' : 'card'} id={id}>
       <h2>{title}</h2>
       {rows === null ? (
         failed ? (
@@ -45,25 +48,25 @@ export function Tbl({
         <p className="empty">{hint ?? 'Nothing to show here'}</p>
       ) : (
         <div className="card__scroll">
-          <table className="data-table">
-            <tbody>
+          <Table className="data-table">
+            <TableBody>
               {rows.map((row) => (
-                <tr key={row.key}>
-                  <td className="n">
+                <TableRow key={row.key}>
+                  <TableCell className="n">
                     <a href={row.link} title="show matching events">
                       {row.count.toLocaleString('en-US')}
                     </a>
-                  </td>
-                  <td className="v">
+                  </TableCell>
+                  <TableCell className="v">
                     <a href={row.link}>{row.key}</a>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
-    </div>
+    </Card>
   )
 }
 
@@ -305,9 +308,14 @@ export function AttackMap({ points, failed }: { points: MapPoint[] | null; faile
   // paint with the compiled defaults, reconciled once the request lands.
   const [prefs, setPrefs] = useState<MapPrefs>(DEFAULT_MAP_PREFS)
   const themeMode = useThemeMode()
+  const appearanceKey = useAppearanceKey()
   const isDark =
     themeMode === 'dark' ||
     (themeMode === 'system' && typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+
+  useEffect(() => {
+    if (mapRef.current) applyLeafletTheme(mapRef.current)
+  }, [appearanceKey])
 
   useEffect(() => {
     let cancelled = false
@@ -345,6 +353,8 @@ export function AttackMap({ points, failed }: { points: MapPoint[] | null; faile
         markerZoomAnimation: prefs.animation,
       })
       mapRef.current = map
+      applyLeafletTheme(map)
+      ;(container as HTMLDivElement & { __xoreLeaflet?: import('leaflet').Map }).__xoreLeaflet = map
 
       // #1565: the map is built before the card has settled at its final
       // width, so leaflet sizes its tile grid against whatever the container
@@ -448,6 +458,7 @@ export function AttackMap({ points, failed }: { points: MapPoint[] | null; faile
       cleanupRef.current = null
       mapRef.current?.remove()
       mapRef.current = null
+      delete (container as HTMLDivElement & { __xoreLeaflet?: import('leaflet').Map }).__xoreLeaflet
     }
   }, [points, prefs.basemap, prefs.clustering, prefs.animation, isDark])
 

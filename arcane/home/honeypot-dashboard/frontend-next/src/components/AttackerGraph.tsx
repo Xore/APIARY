@@ -9,7 +9,7 @@
 import { createServerFn } from '@tanstack/react-start'
 import { useNavigate } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
-import { cssVar as cssColor } from '../lib/cssVar'
+import { cytoscapeTheme } from '../lib/cytoscapeTheme'
 import { ErrorStateBlock } from './ErrorState'
 import { useServerQuery } from '../lib/useServerQuery'
 import { useAppearanceKey } from '../lib/prefs'
@@ -26,17 +26,18 @@ const fetchGraph = createServerFn({ method: 'GET' })
   })
 
 export function AttackerGraph({ id }: { id: string }) {
-  const containerRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement & { __xoreCytoscape?: import('cytoscape').Core }>(null)
+  const cyRef = useRef<import('cytoscape').Core | null>(null)
   // #1966: tri-state -- an error is no longer a forever-skeleton.
   const query = useServerQuery(fetchGraph, { id }, [id])
   const graph = query.status === 'ready' ? query.data : null
   const navigate = useNavigate()
   const [memberCount, setMemberCount] = useState<number | null>(null)
-  // #1757: cytoscape resolves these tokens to pixel values once and cannot
-  // re-resolve them, so the graph has to be rebuilt when the appearance
-  // changes. `graph` is already in memory (useServerQuery above), so this
-  // costs a re-layout and no refetch.
   const appearance = useAppearanceKey()
+
+  useEffect(() => {
+    cyRef.current?.style(cytoscapeTheme())
+  }, [appearance])
 
   useEffect(() => {
     const container = containerRef.current
@@ -47,9 +48,6 @@ export function AttackerGraph({ id }: { id: string }) {
     ;(async () => {
       const cytoscape = (await import('cytoscape')).default
       if (disposed) return
-      const accent = cssColor('--accent', '#d97757')
-      const muted = cssColor('--text-200', '#a5a9a6')
-      const border = cssColor('--border-200', 'rgba(255,255,255,0.14)')
       instance = cytoscape({
         container,
         elements: [
@@ -65,44 +63,12 @@ export function AttackerGraph({ id }: { id: string }) {
         },
         minZoom: 0.25,
         maxZoom: 4,
-        style: [
-          {
-            selector: 'node',
-            style: {
-              label: 'data(label)',
-              'font-size': 10,
-              color: muted,
-              'text-valign': 'bottom',
-              'text-margin-y': 6,
-              'background-color': cssColor('--bg-300', '#343432'),
-              'border-color': accent,
-              'border-width': 1.2,
-              width: 26,
-              height: 26,
-            },
-          },
-          {
-            selector: 'node[kind = "hub"]',
-            style: {
-              'text-valign': 'center',
-              'text-halign': 'center',
-              'font-size': 12,
-              'font-weight': 600,
-              color: cssColor('--text-on-accent', '#211a17'),
-              'background-color': accent,
-              'border-color': cssColor('--bg-200', '#2c2c2a'),
-              'border-width': 2,
-              width: 56,
-              height: 56,
-            },
-          },
-          {
-            selector: 'node[kind = "overflow"]',
-            style: { 'background-color': cssColor('--bg-300', '#343432'), 'border-color': border, color: muted },
-          },
-          { selector: 'edge', style: { width: 1.2, 'line-color': border, 'curve-style': 'straight' } },
-        ],
+        style: cytoscapeTheme(),
       })
+      cyRef.current = instance
+      container.__xoreCytoscape = instance
+      instance.on('mouseover', 'node, edge', (event) => event.target.addClass('hover'))
+      instance.on('mouseout', 'node, edge', (event) => event.target.removeClass('hover'))
       instance.on('tap', 'node[kind = "spoke"]', (event) => {
         void navigate({ to: '/events', search: { ip: event.target.data('label') as string } })
       })
@@ -119,9 +85,11 @@ export function AttackerGraph({ id }: { id: string }) {
     return () => {
       disposed = true
       observer?.disconnect()
+      delete container.__xoreCytoscape
+      if (cyRef.current === instance) cyRef.current = null
       instance?.destroy()
     }
-  }, [graph, navigate, appearance])
+  }, [graph, navigate])
 
   if (query.status === 'error') {
     return (

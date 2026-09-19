@@ -12,6 +12,10 @@ import { cycleTheme, useThemeMode } from '../lib/prefs'
 import { isLivePaused, toggleLive, useLiveInterval, useLiveState } from '../lib/live'
 import type { BannerView } from '../lib/banner'
 import type { User } from '../lib/auth'
+import { Button } from './ui/button'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip'
+import { Avatar, AvatarFallback } from './ui/avatar'
+import { Separator } from './ui/separator'
 
 const fetchOpenAlertCount = createServerFn({ method: 'GET' }).handler(async (): Promise<number> => {
   const { serviceJSON } = await import('../lib/backend.server')
@@ -49,7 +53,7 @@ function LiveToggle() {
     .filter(Boolean)
     .join(' ')
   return (
-    <button
+    <Button variant="ghost"
       className={className}
       type="button"
       aria-pressed={paused}
@@ -64,7 +68,7 @@ function LiveToggle() {
     >
       <span className="status-dot" />
       <span>{paused ? 'Paused' : stalled ? 'Reconnecting…' : 'Live'}</span>
-    </button>
+    </Button>
   )
 }
 
@@ -89,9 +93,9 @@ export function Topbar({
   const alertCount = useOpenAlertCount()
   const initial = (user?.displayName || user?.username || '·').trim().charAt(0).toUpperCase()
   return (
-    <header className="app-toolbar">
-      <button
-        className="btn btn-icon btn-ghost"
+    <TooltipProvider><header className="app-toolbar">
+      <Tooltip><TooltipTrigger asChild><Button
+        variant="ghost" size="icon" className="btn-icon"
         type="button"
         aria-label="Toggle navigation"
         title="Toggle navigation"
@@ -101,7 +105,7 @@ export function Topbar({
           <rect x="3" y="3" width="18" height="18" rx="2" />
           <line x1="9" y1="3" x2="9" y2="21" />
         </svg>
-      </button>
+      </Button></TooltipTrigger><TooltipContent>Toggle navigation</TooltipContent></Tooltip>
       <Link className="app-toolbar__brand" to="/" aria-label="APIARY home">
         <img className="theme-art--dark" src="/static/apiary-compact-mark-for-dark.png" width="22" height="22" alt="" />
         <img className="theme-art--light" src="/static/apiary-compact-mark-for-light.png" width="22" height="22" alt="" />
@@ -110,14 +114,14 @@ export function Topbar({
         {section ? (
           <>
             <span>{section}</span>
-            <span className="sep">/</span>
+            <Separator orientation="vertical" className="sep !h-3 !w-px -rotate-[25deg]" />
           </>
         ) : null}
         <b>{page}</b>
       </div>
       <div className="app-toolbar__search" aria-hidden="true" />
       <div className="hp-toolbar-actions">
-        <Link className="btn btn-icon btn-ghost" to="/alerts" title="Open alerts" aria-label="Open alerts">
+        <Tooltip><TooltipTrigger asChild><Link className="btn btn-icon btn-ghost" to="/alerts" title="Open alerts" aria-label="Open alerts">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
             <path d="M13.73 21a2 2 0 0 1-3.46 0" />
@@ -125,9 +129,9 @@ export function Topbar({
           <span className="hp-alert-badge" hidden={alertCount === 0}>
             {alertCount > 99 ? '99+' : alertCount}
           </span>
-        </Link>
-        <button
-          className="btn btn-icon btn-ghost"
+        </Link></TooltipTrigger><TooltipContent>Open alerts</TooltipContent></Tooltip>
+        <Tooltip><TooltipTrigger asChild><Button
+          variant="ghost" size="icon" className="btn-icon"
           type="button"
           onClick={cycleTheme}
           aria-label={`Switch color theme (${mode})`}
@@ -156,7 +160,7 @@ export function Topbar({
               <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
             </svg>
           )}
-        </button>
+        </Button></TooltipTrigger><TooltipContent>Theme: {mode}</TooltipContent></Tooltip>
         <LiveToggle />
         <Link
           className="avatar hp-toolbar-avatar"
@@ -171,7 +175,7 @@ export function Topbar({
             onOpenSettings()
           }}
         >
-          {initial}
+          <Avatar className="!size-full !bg-transparent"><AvatarFallback className="!bg-transparent">{initial}</AvatarFallback></Avatar>
         </Link>
       </div>
       {banner ? (
@@ -179,6 +183,6 @@ export function Topbar({
           {banner.text}
         </div>
       ) : null}
-    </header>
+    </header></TooltipProvider>
   )
 }

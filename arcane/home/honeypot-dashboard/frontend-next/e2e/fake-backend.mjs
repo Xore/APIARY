@@ -75,6 +75,33 @@ const eventRow = (n) => ({
   record: { "@timestamp": NOW, sensor: { name: "cowrie" }, source: { ip: `203.0.113.${n + 1}`, geo: { country_iso_code: "CN" } }, honeypot: { kind: "cowrie.log.opened", session_id: `sess-${n}` } },
 });
 
+// event_page.rs returns the full indexed document plus three count/sample
+// relations; keep the document's original field names (not pane pivots).
+const eventPage = {
+  id: "e2e-event-0",
+  index: "honeypot-v2-2026.08.26",
+  time: NOW,
+  sensor: "citrix-honeypot",
+  src_ip: "203.0.113.1",
+  session: "sess-0",
+  community_id: "",
+  hashes: [],
+  record: {
+    "@timestamp": NOW,
+    event: { sensor: "citrix-honeypot" },
+    source: { ip: "203.0.113.1" },
+    honeypot: {
+      sensor: "citrix-honeypot", src_ip: "203.0.113.1", session: "sess-0",
+      event: "cve_2019_19781_payload", method: "POST",
+      path: "/vpn/../vpns/portal/scripts/newbm.pl", data: "id",
+    },
+  },
+  session_events: { key: "sess-0", total: 0, rows: [] },
+  flow_events: { key: "", total: 0, rows: [] },
+  source_events: { key: "203.0.113.1", total: 0, rows: [] },
+  flow_link: null,
+};
+
 // Aggregate/investigate endpoints. These pages are typed against the Rust
 // backend's exact serde output, so every field a column renders must be
 // present or hydration throws on undefined.
@@ -276,7 +303,39 @@ const catchAllWarned = new Set();
 
 /** Minimal handler table; keys are matched by startsWith after the query
  *  string is split off, first match wins, then the catch-all. */
-function route(pathname) {
+function route(pathname, searchParams = new URLSearchParams()) {
+  if (pathname.startsWith("/api/v1/investigate/cidr/")) return {
+    cidr: decodeURIComponent(pathname.slice("/api/v1/investigate/cidr/".length)),
+    correlation: { total: 12, truncated: true, sensors: [kv("cowrie", 9), kv("portbridge", 3)],
+      tunnel_connections: 3, tunnel_os_guesses: ["Linux (fixture)"], records: [eventRow(0), eventRow(1)] },
+  };
+  if (pathname === "/api/v1/investigate/cluster") return {
+    kind: "asn", value: "AS64500", ip_count: 3,
+    correlation: { total: 2, truncated: false, sensors: [kv("cowrie", 2)], tunnel_connections: 0,
+      tunnel_os_guesses: [], records: [eventRow(0), eventRow(1)] },
+  };
+  if (pathname.startsWith("/api/v1/investigate/ip/")) {
+    const ip = decodeURIComponent(pathname.split("/").pop());
+    return {
+      ip, total: 342, first: NOW, last: NOW, country: "US", asn: "AS64500 Documentation",
+      sensors: [kv("cowrie", 210), kv("citrix", 132)], ports: [kv("22", 210), kv("443", 132)],
+      protos: [kv("ssh", 210), kv("https", 132)], credentials: [kv("fixture-user / fixture-password", 32)],
+      commands: [kv("fixture command with a long evidence value " + "detail ".repeat(14), 18)],
+      sessions: [kv("fixture-session-1", 42)], paths: [kv("/fixture/status", 132)],
+      payloads: [kv("a".repeat(64), 3)], alerts: [kv("Fixture reconnaissance", 4)], fingerprints: [kv("fixture-client", 12)],
+      techniques: [{ id: "T1110", name: "Brute Force", domain: "enterprise", evidence: "Repeated fixture logins", count: 32, url: "https://attack.mitre.org/techniques/T1110/" }],
+      confirmed_malicious: false, events: [eventRow(0), eventRow(1)],
+      correlation: { total: 400, truncated: true, sensors: [kv("cowrie", 210)], tunnel_connections: 14,
+        tunnel_os_guesses: ["Linux (fixture)"], records: [eventRow(0), eventRow(1)] },
+    };
+  }
+  if (pathname.startsWith("/api/v1/ip-block/")) return { IP: "203.0.113.7", Blocked: false, Active: false };
+
+  if (pathname === "/api/v1/config/history") return { entries: [] };
+  if (pathname === "/api/v1/audit") return { events: [] };
+  if (pathname === "/api/v1/settings/storage") {
+    return { cluster_status: "green", index_count: 0, doc_count: 0, store_bytes: 0 };
+  }
   if (pathname === "/api/v1/config") {
     return { payload: { presentation: { dashboard_title: "APIARY", dashboard_subtitle: "browser-e2e deployment", banner_text: "", footer_text: "" } } };
   }
@@ -287,11 +346,15 @@ function route(pathname) {
   if (pathname === "/api/v1/events") {
     return { total: 1337, offset: 0, rows: [eventRow(0), eventRow(1), eventRow(2)], fingerprint_ips: null };
   }
+  if (pathname === "/api/v1/event/e2e-event-0") return eventPage;
   if (pathname === "/api/v1/filter-values") {
     return { sensors: ["citrix", "cowrie"], countries: ["CN", "NL"], protos: ["tcp"], ports: ["22", "8089"], kinds: [] };
   }
   if (pathname === "/api/v1/attackers") {
     return { total: attackPage.total, rows: attackPage.rows.slice(0) };
+  }
+  if (pathname === "/api/v1/attackers-graph") {
+    return { nodes: [{ id: "att-1", label: "att-1", kind: "hub" }, { id: "203.0.113.7", label: "203.0.113.7", kind: "spoke" }], edges: [{ source: "att-1", target: "203.0.113.7" }] };
   }
   if (pathname === "/api/v1/campaigns") {
     return { total: 1, rows: [campaignRow] };
@@ -302,6 +365,17 @@ function route(pathname) {
   }
   if (pathname === "/api/v1/sources") {
     return { total_unique: 87, rows: [sourceRow] };
+  }
+  if (pathname === "/api/v1/recordings/e2e-xterm-theme") {
+    return {
+      shasum: "e2e-xterm-theme",
+      size_bytes: 81,
+      imported_at: NOW,
+      frames: 2,
+      duration_seconds: 1,
+      transcript: "$ echo xterm-theme\r\nxterm-theme\r\n",
+      ttylog_base64: "AwAAAAAAAAAUAAAAAgAAAAEAAAAAAAAAJCBlY2hvIHh0ZXJtLXRoZW1lDQoDAAAAAAAAAA0AAAACAAAAAgAAAAAAAAB4dGVybS10aGVtZQ0K",
+    };
   }
   if (pathname === "/api/v1/recordings") {
     // RecordingRow keyed on session; the replay pane fetches /recordings/<sha>
@@ -350,6 +424,27 @@ function route(pathname) {
     // CuratedSensorViews' SensorDetail; only the three per-protocol arrays.
     return { mailoney: [], http_requests: [], tanner: [] };
   }
+  if (pathname === "/api/v1/sessions/sess-0") {
+    // session.rs::SessionDetail, including the unmodified events.rs row envelope.
+    return { id: "sess-0", ip: "203.0.113.1", country: "CN", first: NOW, last: NOW, total: 1,
+      sensors: [{ key: "citrix", count: 1 }], commands: [{ key: "uname -a", count: 1 }],
+      credentials: [{ key: "root/admin", count: 1 }], payloads: [{ key: "sample", count: 1 }],
+      techniques: [{ id: "T1110", name: "Brute Force", domain: "Enterprise", evidence: "credential attempt", count: 1, url: "https://attack.mitre.org/techniques/T1110/" }],
+      sequences: [{ name: "Credential attempt", severity: "critical", summary: "One observed login attempt." }], events: [eventRow(0)] };
+  }
+  if (/^\/api\/v1\/payloads\/[0-9a-f]{64}$/.test(pathname)) {
+    // payload_detail.rs::PayloadDetail; Analysis is capitalized in the static-analysis document.
+    return { hash: pathname.split('/').at(-1), inventory: { Kind: "script", MIME: "text/plain", SizeH: "1 KB" },
+      analysis: { Analysis: { Classification: { Code: "script", Label: "Shell script", Platform: "linux", Category: "script", AnalysisPath: "static", Dynamic: false }, SHA256: pathname.split('/').at(-1), MIME: "text/plain", IOCs: ["example.test"], Rules: [{ name: "suspicious", severity: "medium", description: "test signature" }], ASCII: ["uname -a"] } },
+      yara: [{ yara: { matches: ["FixtureRule"], scanned_at: NOW } }], size_bytes: 1024, hex_preview: ["00000000  23 21  |#!|"] };
+  }
+  if (pathname === "/api/v1/workbench/recipes") return { recipes: [] };
+  if (pathname === "/api/v1/workbench/runs") return { runs: [{ schema_version: 1, id: "fixture-run", payload_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", payload_kind: "script", owner: "dev", recipe_id: "", recipe_revision: 0, recipe_name: "Local static checks", recipe_snapshot: [], idempotency_key: "fixture", state: "completed", created_at: NOW, updated_at: NOW, children: [] }] };
+  if (pathname === "/api/v1/sandbox/golden-image-status") return { configured: false };
+  if (pathname === "/api/v1/sandbox/vnc") return {
+    sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    bridge_ws: "ws://127.0.0.1:9/e2e-novnc-theme",
+  };
   if (pathname === "/api/v1/payloads") {
     // Payload rows keep the Go-tier capitalized serde names.
     return {
@@ -498,7 +593,11 @@ function route(pathname) {
     return { preferences: { palette: "claude" }, revision: 1 };
   }
   if (pathname === "/api/v1/alerts") {
-    return { total: 1, offset: 0, rows: [{ id: "alert-1", time: NOW, sensor: "citrix", signature: "test alert", severity: "high", record: {} }], fingerprint_ips: null };
+    return { total: 3, rows: [
+      { Key: "yara:" + "a".repeat(64), Message: "YARA payload match: " + "a".repeat(64) + " rules=fixture source=dionaea", Link: "/payloads", FirstSeen: NOW, LastSeen: NOW, LastNotified: null, Count: 12, Acknowledged: false },
+      { Key: "yara:" + "b".repeat(64), Message: "YARA payload match: " + "b".repeat(64) + " rules=fixture source=dionaea", Link: "/payloads", FirstSeen: NOW, LastSeen: NOW, LastNotified: NOW, Count: 3, Acknowledged: false },
+      { Key: "campaign:fixture", Message: "Fixture reconnaissance", Link: "/campaigns", FirstSeen: NOW, LastSeen: NOW, LastNotified: NOW, Count: 4, Acknowledged: true },
+    ] };
   }
   if (pathname === "/api/v1/source-health") {
     // Full SourceHealth — the page renders cluster/yara/runtime/ingest/
@@ -532,9 +631,46 @@ function route(pathname) {
     return { generated_at: NOW, sensors: topologySensors(), stacks: topologyStacks(), flow: flowGraph() };
   }
   if (pathname === "/api/v1/ml-health") return [];
+  if (pathname === "/api/v1/store/dead-letters") return { rows: [{ "@timestamp": NOW, reason: "mapping rejected", logset: "cowrie" }], total: 1 };
   if (pathname === "/api/v1/ml-anomalies/acks") return {};
+  if (pathname.startsWith("/api/v1/store/agent-campaigns")) return { total: 1, rows: [{
+    "@timestamp": NOW, campaign_id: "agent-fixture-01", start: NOW, end: NOW,
+    severity: "critical", matched_categories: ["encoded-egress-external"],
+    correlation_identifiers: ["203.0.113.7"], event_count: 1,
+    events: [{ event_id: "e2e-event-0", source_index: "honeypot-v2-2026.08.26", timestamp: NOW,
+      matched_rules: [{ rule: "encoded-egress", reason: "encoded request", trust_boundary: "external egress", decode_chain: [] }] }],
+  }] };
+  if (pathname.startsWith("/api/v1/store/ml-anomalies")) return { total: 1, rows: [{
+    "@timestamp": NOW, _doc_id: "ml-fixture-01", severity: "high", composite_score: 0.92,
+    src_ip: "203.0.113.7", src_country: "CN", event_type: "ssh", status: "open",
+    explanation: "fixture score anomaly", source_event_id: "e2e-event-0",
+    source_index: "honeypot-v2-2026.08.26", model_scores: { isolation_forest: 0.9, lstm_ae: 0.8, hbos: 0.7 },
+  }] };
+  if (pathname.startsWith("/api/v1/store/llm-analysis")) return { total: 1, rows: [{
+    analysis_id: "analysis-e2e-01", "@timestamp": NOW, doc_type: "session", severity: "high", confidence: "0.93",
+    intent: "credential access", summary: "Fixture model summary", session_id: "session-e2e-01", model: "qwen3:14b",
+  }] };
+  if (pathname.startsWith("/api/v1/store/auth-events")) return { total: 1, rows: [{
+    event_id: "auth-e2e-01", "@timestamp": NOW, type: "LOGIN_ERROR", ip_address: "203.0.113.8",
+    error: "invalid_user_credentials", client_id: "apiary-dashboard", realm: "apiary",
+    details: { username: "fixture-user", redirect_uri: "https://dashboard.example/callback" },
+  }] };
+  if (pathname.startsWith("/api/v1/store/problem-reports")) return { total: 1, rows: [{
+    id: "problem-e2e-01", submitted_at: NOW, submitted_by: "operator-e2e", submitted_by_name: "Fixture Operator",
+    page: "/events", expected: "filters remain open", actual: "filters closed", status: "open",
+    action_trail: [{ at: NOW, kind: "interaction", detail: "opened filters" }], console_errors: ["fixture console error"], network_failures: ["GET /api/events failed"],
+    api_calls: [{ at: NOW, method: "GET", url: "/api/events", status: 502, response_body: "bad gateway" }], user_agent: "fixture-browser",
+  }] };
+  if (pathname.startsWith("/api/v1/store/static-analysis")) return { rows: [{ Fingerprint: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", Analysis: { Kind: "script", Summary: "Shell script" } }], total: 1 };
+  if (pathname.startsWith("/api/v1/store/yara")) return { rows: [{ file: { hash: { sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" } }, yara: { matches: ["FixtureRule"] }, "@timestamp": NOW }], total: 1 };
   if (pathname.startsWith("/api/v1/store/")) return { rows: [], total: 0 };
-  if (pathname === "/api/v1/search") return { results: [] };
+  if (pathname === "/api/v1/search") {
+    const query = searchParams.get("q")?.trim() ?? "";
+    const label = "fixture-command";
+    const hits = query && label.startsWith(query) ? [{ label, count: 1, url: `/events?cmd=${encodeURIComponent(label)}` }] : [];
+    return { query, redirect: null, total: hits.length,
+      groups: hits.length ? [{ title: "Commands", hits, more: 1, more_url: `/history?q=${encodeURIComponent(query)}` }] : [] };
+  }
   if (pathname === "/api/v1/live") {
     // STUB pending the live-shared-poller workstream (4b9cae88/bf8d4740:
     // "serve the live feed from one shared poller per process", "coalesce
@@ -722,7 +858,14 @@ function topologyStacks() {
 export function startFakeBackend(port) {
   const server = createServer((req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
-    const body = JSON.stringify(route(url.pathname));
+    // event_page.rs returns 404 for an id absent from the index; the BFF
+    // distinguishes that from a backend failure when rendering the page.
+    if (url.pathname.startsWith("/api/v1/event/") && url.pathname !== "/api/v1/event/e2e-event-0" && !url.pathname.endsWith("/connections")) {
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "no such event" }));
+      return;
+    }
+    const body = JSON.stringify(route(url.pathname, url.searchParams));
     res.writeHead(200, { "content-type": "application/json" });
     res.end(body);
   });

@@ -38,12 +38,14 @@ import { Route as SourceHealthRouteImport } from './routes/source-health'
 import { Route as TopologyRouteImport } from './routes/topology'
 import { Route as ApiLiveRouteImport } from './routes/api/live'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
+import { Route as AuthErrorRouteImport } from './routes/auth/error'
 import { Route as AuthLoginRouteImport } from './routes/auth/login'
 import { Route as AuthLogoutRouteImport } from './routes/auth/logout'
 import { Route as BffMountedSplatRouteImport } from './routes/bff-mounted.$'
 import { Route as BffSplatRouteImport } from './routes/bff.$'
 import { Route as CapeIndexRouteImport } from './routes/cape.index'
 import { Route as CapeShaRouteImport } from './routes/cape.$sha'
+import { Route as DevGalleryRouteImport } from './routes/dev.gallery'
 import { Route as EventIdRouteImport } from './routes/event.$id'
 import { Route as ExportPortbridgeManualBlackholeDottxtRouteImport } from './routes/export.portbridge-manual-blackhole[.]txt'
 import { Route as GhidraShaRouteImport } from './routes/ghidra.$sha'
@@ -218,6 +220,11 @@ const AuthCallbackRoute = AuthCallbackRouteImport.update({
   path: '/auth/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthErrorRoute = AuthErrorRouteImport.update({
+  id: '/auth/error',
+  path: '/auth/error',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthLoginRoute = AuthLoginRouteImport.update({
   id: '/auth/login',
   path: '/auth/login',
@@ -246,6 +253,11 @@ const CapeIndexRoute = CapeIndexRouteImport.update({
 const CapeShaRoute = CapeShaRouteImport.update({
   id: '/cape/$sha',
   path: '/cape/$sha',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DevGalleryRoute = DevGalleryRouteImport.update({
+  id: '/dev/gallery',
+  path: '/dev/gallery',
   getParentRoute: () => rootRouteImport,
 } as any)
 const EventIdRoute = EventIdRouteImport.update({
@@ -423,11 +435,13 @@ export interface FileRoutesByFullPath {
   '/topology': typeof TopologyRoute
   '/api/live': typeof ApiLiveRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/auth/error': typeof AuthErrorRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
   '/bff-mounted/$': typeof BffMountedSplatRoute
   '/bff/$': typeof BffSplatRoute
   '/cape/$sha': typeof CapeShaRoute
+  '/dev/gallery': typeof DevGalleryRoute
   '/event/$id': typeof EventIdRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/ghidra/$sha': typeof GhidraShaRoute
@@ -488,11 +502,13 @@ export interface FileRoutesByTo {
   '/topology': typeof TopologyRoute
   '/api/live': typeof ApiLiveRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/auth/error': typeof AuthErrorRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
   '/bff-mounted/$': typeof BffMountedSplatRoute
   '/bff/$': typeof BffSplatRoute
   '/cape/$sha': typeof CapeShaRoute
+  '/dev/gallery': typeof DevGalleryRoute
   '/event/$id': typeof EventIdRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/ghidra/$sha': typeof GhidraShaRoute
@@ -554,11 +570,13 @@ export interface FileRoutesById {
   '/topology': typeof TopologyRoute
   '/api/live': typeof ApiLiveRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/auth/error': typeof AuthErrorRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
   '/bff-mounted/$': typeof BffMountedSplatRoute
   '/bff/$': typeof BffSplatRoute
   '/cape/$sha': typeof CapeShaRoute
+  '/dev/gallery': typeof DevGalleryRoute
   '/event/$id': typeof EventIdRoute
   '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/ghidra/$sha': typeof GhidraShaRoute
@@ -621,11 +639,13 @@ export interface FileRouteTypes {
     | '/topology'
     | '/api/live'
     | '/auth/callback'
+    | '/auth/error'
     | '/auth/login'
     | '/auth/logout'
     | '/bff-mounted/$'
     | '/bff/$'
     | '/cape/$sha'
+    | '/dev/gallery'
     | '/event/$id'
     | '/export/portbridge-manual-blackhole.txt'
     | '/ghidra/$sha'
@@ -686,11 +706,13 @@ export interface FileRouteTypes {
     | '/topology'
     | '/api/live'
     | '/auth/callback'
+    | '/auth/error'
     | '/auth/login'
     | '/auth/logout'
     | '/bff-mounted/$'
     | '/bff/$'
     | '/cape/$sha'
+    | '/dev/gallery'
     | '/event/$id'
     | '/export/portbridge-manual-blackhole.txt'
     | '/ghidra/$sha'
@@ -751,11 +773,13 @@ export interface FileRouteTypes {
     | '/topology'
     | '/api/live'
     | '/auth/callback'
+    | '/auth/error'
     | '/auth/login'
     | '/auth/logout'
     | '/bff-mounted/$'
     | '/bff/$'
     | '/cape/$sha'
+    | '/dev/gallery'
     | '/event/$id'
     | '/export/portbridge-manual-blackhole.txt'
     | '/ghidra/$sha'
@@ -817,11 +841,13 @@ export interface RootRouteChildren {
   TopologyRoute: typeof TopologyRoute
   ApiLiveRoute: typeof ApiLiveRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
+  AuthErrorRoute: typeof AuthErrorRoute
   AuthLoginRoute: typeof AuthLoginRoute
   AuthLogoutRoute: typeof AuthLogoutRoute
   BffMountedSplatRoute: typeof BffMountedSplatRoute
   BffSplatRoute: typeof BffSplatRoute
   CapeShaRoute: typeof CapeShaRoute
+  DevGalleryRoute: typeof DevGalleryRoute
   EventIdRoute: typeof EventIdRoute
   ExportPortbridgeManualBlackholeDottxtRoute: typeof ExportPortbridgeManualBlackholeDottxtRoute
   GhidraShaRoute: typeof GhidraShaRoute
@@ -1058,6 +1084,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/auth/error': {
+      id: '/auth/error'
+      path: '/auth/error'
+      fullPath: '/auth/error'
+      preLoaderRoute: typeof AuthErrorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/auth/login': {
       id: '/auth/login'
       path: '/auth/login'
@@ -1098,6 +1131,13 @@ declare module '@tanstack/react-router' {
       path: '/cape/$sha'
       fullPath: '/cape/$sha'
       preLoaderRoute: typeof CapeShaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dev/gallery': {
+      id: '/dev/gallery'
+      path: '/dev/gallery'
+      fullPath: '/dev/gallery'
+      preLoaderRoute: typeof DevGalleryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/event/$id': {
@@ -1329,11 +1369,13 @@ const rootRouteChildren: RootRouteChildren = {
   TopologyRoute: TopologyRoute,
   ApiLiveRoute: ApiLiveRoute,
   AuthCallbackRoute: AuthCallbackRoute,
+  AuthErrorRoute: AuthErrorRoute,
   AuthLoginRoute: AuthLoginRoute,
   AuthLogoutRoute: AuthLogoutRoute,
   BffMountedSplatRoute: BffMountedSplatRoute,
   BffSplatRoute: BffSplatRoute,
   CapeShaRoute: CapeShaRoute,
+  DevGalleryRoute: DevGalleryRoute,
   EventIdRoute: EventIdRoute,
   ExportPortbridgeManualBlackholeDottxtRoute:
     ExportPortbridgeManualBlackholeDottxtRoute,

@@ -4,7 +4,7 @@
 // server-side (backend-service/src/reports_api.rs, reports_store.rs).
 import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { ReportIcon } from '../components/CardIcons'
@@ -12,6 +12,16 @@ import { getSessionUser } from '../lib/auth'
 import { pathString, type JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
 import { useSidebarViewTabs } from '../lib/viewTabs'
+import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader } from '../components/ui/card'
+import { Dialog, DialogContent, DialogTitle } from '../components/ui/dialog'
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '../components/ui/empty'
+import { Field, FieldLabel } from '../components/ui/field'
+import { Input } from '../components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
+import { Skeleton } from '../components/ui/skeleton'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 
 type StoreRow = JsonRecord
 type Page = { total: number; rows: StoreRow[] }
@@ -252,9 +262,9 @@ function buildGeneratedColumns(
       header: 'title',
       className: 'v',
       primary: true,
-      render: (row) => str(row, 'title') || str(row, 'name') || <span className="text-muted">(untitled report)</span>,
+      render: (row) => str(row, 'title') || str(row, 'name') || <span className="text-muted-foreground">(untitled report)</span>,
     },
-    { header: 'template', render: (row) => <span className="badge badge--muted">{str(row, 'template')}</span> },
+    { header: 'template', render: (row) => <Badge variant="secondary">{str(row, 'template')}</Badge> },
     { header: 'origin', render: (row) => str(row, 'origin') },
     { header: 'size', className: 'n', render: (row) => `${(num(row, 'size_bytes') / 1024).toFixed(0)} KB` },
     {
@@ -270,26 +280,26 @@ function buildGeneratedColumns(
       // already carries a rule for .btn-danger inside it -- the design
       // expected buttons here all along and the port used .lnk.
       render: (row) => (
-        <div className="hp-rp-row-actions" onClick={(event) => event.stopPropagation()}>
-          <button className="btn btn-secondary btn-sm" type="button" onClick={() => onView(row)}>
+        <div className="flex flex-wrap gap-2" onClick={(event) => event.stopPropagation()}>
+          <Button variant="secondary" size="sm" type="button" onClick={() => onView(row)}>
             view
-          </button>
-          <a
-            className="btn btn-ghost btn-sm"
+          </Button>
+          <Button asChild variant="ghost" size="sm"><a
             href={`/api/report/${encodeURIComponent(str(row, 'id'))}/pdf`}
             target="_blank"
             rel="noopener noreferrer"
           >
             download
-          </a>
-          <button
-            className="btn btn-danger btn-sm"
+          </a></Button>
+          <Button
+            variant="destructive"
+            size="sm"
             type="button"
             disabled={busyId === str(row, 'id')}
             onClick={() => onDelete(row)}
           >
             delete
-          </button>
+          </Button>
         </div>
       ),
     },
@@ -302,53 +312,15 @@ function buildGeneratedColumns(
 // inside the dialog, Escape and backdrop clicks close, focus returns to
 // the trigger on unmount.
 function ReportViewerModal({ id, title, onClose }: { id: string; title: string; onClose: () => void }) {
-  const closeRef = useRef<HTMLButtonElement>(null)
-  const panelRef = useRef<HTMLElement>(null)
   const url = `/api/report/${encodeURIComponent(id)}/pdf`
-  useEffect(() => {
-    const previous = document.activeElement
-    closeRef.current?.focus()
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        onClose()
-        return
-      }
-      if (event.key !== 'Tab' || !panelRef.current) return
-      const focusables = panelRef.current.querySelectorAll<HTMLElement>('button, a[href], iframe')
-      if (!focusables.length) return
-      const first = focusables[0]
-      const last = focusables[focusables.length - 1]
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('keydown', onKeyDown)
-      if (previous instanceof HTMLElement && previous.isConnected) previous.focus()
-    }
-  }, [onClose])
   return (
-    <>
-      <div className="modal-backdrop open" aria-hidden="true" onClick={onClose} />
-      <section className="modal pdf-viewer-modal open" role="dialog" aria-modal="true" aria-label="Report" ref={panelRef}>
-        <button className="modal__close" type="button" aria-label="Close report viewer" onClick={onClose} ref={closeRef}>
-          ✕
-        </button>
-        <h2 className="pdf-viewer-title">
-          {title || 'Report'}{' '}
-          <a className="btn btn-ghost btn-sm" href={url} target="_blank" rel="noopener noreferrer">
-            open in new tab ↗
-          </a>
-        </h2>
-        <iframe className="pdf-viewer-frame" title={title || 'Report'} src={url} />
-      </section>
-    </>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent className="flex h-[90vh] flex-col">
+        <DialogTitle asChild><h2>{title || 'Report'}</h2></DialogTitle>
+        <Button asChild variant="ghost" size="sm"><a href={url} target="_blank" rel="noopener noreferrer">open in new tab ↗</a></Button>
+        <iframe className="min-h-0 flex-1 rounded-md border" title={title || 'Report'} src={url} />
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -745,31 +717,29 @@ function DefinitionForm({
   }
 
   const scopeField = (key: 'ip' | 'sensor' | 'port' | 'signature' | 'job' | 'hash', label: string, maxLength: number) => (
-    <label className="note hp-field">
-      {label}
-      <input
-        className="form-input"
-       
+    <Field>
+      <FieldLabel htmlFor={`report-scope-${key}`}>{label}</FieldLabel>
+      <Input
+        id={`report-scope-${key}`}
         type="text"
         maxLength={maxLength}
         value={scope[key]}
         onChange={(event) => setScope((current) => ({ ...current, [key]: event.target.value }))}
       />
-    </label>
+    </Field>
   )
 
   const brandingField = (key: keyof ReportBranding, label: string, maxLength: number) => (
-    <label className="note hp-field">
-      {label}
-      <input
-        className="form-input"
-       
+    <Field>
+      <FieldLabel htmlFor={`report-branding-${key}`}>{label}</FieldLabel>
+      <Input
+        id={`report-branding-${key}`}
         type="text"
         maxLength={maxLength}
         value={branding[key]}
         onChange={(event) => setBranding((current) => ({ ...current, [key]: event.target.value }))}
       />
-    </label>
+    </Field>
   )
 
   return (
@@ -838,8 +808,8 @@ function DefinitionForm({
 
       {/* 01 Design — template, basics, theme, elements (reports.html:47-85). */}
       <div className="dashboard-panel" role="tabpanel" id="rp-panel-design" aria-labelledby="rp-design" hidden={step !== 'design'}>
-        <div className="card wide">
-        <h2>{isCreate ? 'New report definition' : `Edit — ${initial.name}`}</h2>
+        <Card className="col-span-full">
+        <CardHeader><h2 className="font-semibold leading-none tracking-tight">{isCreate ? 'New report definition' : `Edit — ${initial.name}`}</h2>
         {/* reports.html:47 / hp-reports.js:renderTemplates — a gallery of
             pressable cards, each showing what the template actually
             produces. The port reduced it to a <select> of bare names, so
@@ -847,123 +817,109 @@ function DefinitionForm({
             choosing, which is backwards for a picker. theme.css still
             carries .hp-rp-templates/.hp-rp-template including the
             aria-pressed selected state. */}
-        <p className="note">
+        <CardDescription>
           {stepLede('design')} Pick the closest starting point — the steps that follow adjust it, and nothing is
           generated until the Review step.
-        </p>
+        </CardDescription></CardHeader>
+        <CardContent className="space-y-6">
         <div className="hp-rp-templates" role="group" aria-label="Report template">
           {templates.length > 0 ? (
             templates.map((entry) => (
-              <button
+              <Button
                 key={entry.id}
                 type="button"
-                className="hp-rp-template"
+                variant={template === entry.id ? 'default' : 'outline'}
+                className="h-auto min-h-24 flex-col items-start whitespace-normal p-4 text-left"
                 aria-pressed={template === entry.id}
                 onClick={() => pickTemplate(entry.id)}
               >
                 <strong>{entry.name}</strong>
                 <span>{entry.description}</span>
-              </button>
+              </Button>
             ))
           ) : (
-            <p className="empty">No report templates are available.</p>
+            <Empty><EmptyHeader><EmptyTitle>No report templates are available</EmptyTitle></EmptyHeader></Empty>
           )}
         </div>
-        <div className="filters">
-          <label className="note hp-field--wide">
-            Name
-            <input
-              className="form-input"
-             
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field className="sm:col-span-2">
+            <FieldLabel htmlFor="report-definition-name">Name</FieldLabel>
+            <Input
+              id="report-definition-name"
               type="text"
               required
               maxLength={60}
               value={name}
               onChange={(event) => setName(event.target.value)}
             />
-          </label>
+          </Field>
           {/* reports.html:64-66 — the swatch shows what each PDF theme
               actually looks like; a two-option <select> of the words
               "Dark"/"Light" showed nothing. */}
-          <div className="note hp-field">
-            Theme
+          <Field>
+            <FieldLabel htmlFor="report-theme-dark">Theme</FieldLabel>
             <div className="hp-rp-theme" role="group" aria-label="PDF theme">
-              <button type="button" aria-pressed={theme === 'dark'} onClick={() => setTheme('dark')}>
+              <Button id="report-theme-dark" variant={theme === 'dark' ? 'default' : 'outline'} type="button" aria-pressed={theme === 'dark'} onClick={() => setTheme('dark')}>
                 <span className="hp-rp-swatch hp-rp-swatch--dark" aria-hidden="true" />
                 Dark
-              </button>
-              <button type="button" aria-pressed={theme === 'light'} onClick={() => setTheme('light')}>
+              </Button>
+              <Button variant={theme === 'light' ? 'default' : 'outline'} type="button" aria-pressed={theme === 'light'} onClick={() => setTheme('light')}>
                 <span className="hp-rp-swatch hp-rp-swatch--light" aria-hidden="true" />
                 Light
-              </button>
+              </Button>
             </div>
-          </div>
+          </Field>
         </div>
-        <div className="filters">
+        <div className="grid gap-4 sm:grid-cols-2">
           {!isSpecial ? (
             // reports.html:61 — the observation window is a Design-step
             // basic, not a scope filter.
-            <label className="note hp-field">
-              Window
-              <select
-                className="form-input"
-               
-                value={scope.window}
-                onChange={(event) => setScope((current) => ({ ...current, window: event.target.value }))}
-              >
-                <option value="">Template default</option>
-                <option value="1h">1 hour</option>
-                <option value="6h">6 hours</option>
-                <option value="24h">24 hours</option>
-                <option value="7d">7 days</option>
-                <option value="30d">30 days</option>
-              </select>
-            </label>
+            <Field><FieldLabel htmlFor="report-window">Window</FieldLabel><Select value={scope.window || 'default'} onValueChange={(value) => setScope((current) => ({ ...current, window: value === 'default' ? '' : value }))}>
+              <SelectTrigger id="report-window" aria-label="Window"><SelectValue /></SelectTrigger><SelectContent>
+                <SelectItem value="default">Template default</SelectItem><SelectItem value="1h">1 hour</SelectItem><SelectItem value="6h">6 hours</SelectItem><SelectItem value="24h">24 hours</SelectItem><SelectItem value="7d">7 days</SelectItem><SelectItem value="30d">30 days</SelectItem>
+              </SelectContent></Select></Field>
           ) : null}
-          <label className="note hp-field">
-            Event appendix limit
-            <input
-              className="form-input"
-             
+          <Field><FieldLabel htmlFor="report-appendix-limit">Event appendix limit</FieldLabel>
+            <Input id="report-appendix-limit"
               type="number"
               min={0}
               max={500}
               value={appendixLimit}
               onChange={(event) => setAppendixLimit(Number(event.target.value))}
             />
-          </label>
+          </Field>
         </div>
         {!isSpecial ? (
           <>
-            <p className="note">Elements</p>
-            <p className="card__meta">Each element becomes a section of the PDF, in this order.</p>
-            <div className="filters" role="group" aria-label="Report elements">
+            <p className="text-sm font-medium">Elements</p>
+            <p className="text-sm text-muted-foreground">Each element becomes a section of the PDF, in this order.</p>
+            <div className="flex flex-wrap gap-2" role="group" aria-label="Report elements">
               {elements.map((element) => (
-                <button
+                <Button
                   key={element.id}
                   type="button"
-                  className={selectedElements.includes(element.id) ? 'chip is-active' : 'chip'}
+                  variant={selectedElements.includes(element.id) ? 'default' : 'outline'}
                   aria-pressed={selectedElements.includes(element.id)}
                   title={element.description}
                   onClick={() => toggleElement(element.id)}
                 >
                   {element.label}
-                </button>
+                </Button>
               ))}
             </div>
           </>
         ) : null}
-        </div>
+        </CardContent></Card>
       </div>
 
       {/* 02 Scope — search criteria, or the sandbox/payload reference
           pickers for the fixed-structure templates (reports.html:87-126). */}
       <div className="dashboard-panel" role="tabpanel" id="rp-panel-scope" aria-labelledby="rp-scope" hidden={step !== 'scope'}>
-        <div className="card wide">
-        <h2>Scope &amp; search criteria</h2>
-        <p className="note">
+        <Card className="col-span-full">
+        <CardHeader><h2 className="font-semibold leading-none tracking-tight">Scope &amp; search criteria</h2>
+        <CardDescription>
           Leave a field empty to place no restriction on it. The report covers exactly what these criteria match.
-        </p>
+        </CardDescription></CardHeader><CardContent className="space-y-6">
         {isSpecial ? (
           // reports.html:109-125's sandbox/payload scope pickers. The old
           // blanket "not yet implemented" note is gone on purpose: the
@@ -974,59 +930,38 @@ function DefinitionForm({
           // built around an unresolvable reference.
           <>
             {activeTemplate?.sandbox ? (
-              <label className="note hp-field hp-field--wide">
-                Analysis job
-                <select
-                  className="form-input"
-                 
-                  value={scope.job}
-                  onChange={(event) => setScope((current) => ({ ...current, job: event.target.value }))}
-                >
-                  {jobsFailed ? (
-                    <option value="">sandbox results unavailable</option>
-                  ) : sandboxJobs === null ? (
-                    <option value="">loading analysis runs…</option>
-                  ) : (
-                    <option value="">select an analysis run…</option>
-                  )}
-                  {scope.job && !(sandboxJobs ?? []).some((row) => row.job === scope.job) ? (
-                    <option value={scope.job}>{scope.job} (saved)</option>
-                  ) : null}
-                  {(sandboxJobs ?? []).map((row) => (
-                    <option key={row.job} value={row.job}>
-                      {row.job} — {row.sha256.slice(0, 12)}… ({row.risk || 'unrated'})
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <Field><FieldLabel htmlFor="report-analysis-job">Analysis job</FieldLabel><Select value={scope.job || 'none'} onValueChange={(value) => setScope((current) => ({ ...current, job: value === 'none' ? '' : value }))}>
+                <SelectTrigger id="report-analysis-job" aria-label="Analysis job"><SelectValue /></SelectTrigger><SelectContent>
+                  <SelectItem value="none">{jobsFailed ? 'sandbox results unavailable' : sandboxJobs === null ? 'loading analysis runs…' : 'select an analysis run…'}</SelectItem>
+                  {scope.job && !(sandboxJobs ?? []).some((row) => row.job === scope.job) ? <SelectItem value={scope.job}>{scope.job} (saved)</SelectItem> : null}
+                  {(sandboxJobs ?? []).map((row) => <SelectItem key={row.job} value={row.job}>{row.job} — {row.sha256.slice(0, 12)}… ({row.risk || 'unrated'})</SelectItem>)}
+                </SelectContent></Select></Field>
             ) : null}
             {wantsHash ? (
               <>
-                <label className="note hp-field hp-field--wide">
-                  Search captured payloads
-                  <input
-                    className="form-input"
-                   
+                <Field><FieldLabel htmlFor="report-payload-search">Search captured payloads</FieldLabel>
+                  <Input id="report-payload-search"
                     type="search"
                     placeholder="hash or file kind…"
                     autoComplete="off"
                     value={payloadQuery}
                     onChange={(event) => setPayloadQuery(event.target.value)}
                   />
-                </label>
+                </Field>
                 <div className="hp-rp-payload-results" role="listbox" aria-label="Captured payloads">
                   {payloadError ? (
-                    <p className="note">payload search unavailable</p>
+                    <p className="text-sm text-destructive">payload search unavailable</p>
                   ) : payloadResults === null ? (
-                    <p className="note">loading captured payloads…</p>
+                    <p className="text-sm text-muted-foreground">loading captured payloads…</p>
                   ) : payloadResults.length === 0 ? (
-                    <p className="note">no captured payloads match that search</p>
+                    <p className="text-sm text-muted-foreground">no captured payloads match that search</p>
                   ) : (
                     payloadResults.map((row) => (
-                      <button
+                      <Button
                         key={row.hash}
                         type="button"
-                        className="hp-rp-payload-row"
+                        variant={selectedPayload?.hash === row.hash ? 'default' : 'outline'}
+                        className="h-auto w-full justify-between whitespace-normal p-3"
                         aria-pressed={selectedPayload?.hash === row.hash}
                         onClick={() => pickPayload(row)}
                       >
@@ -1037,15 +972,13 @@ function DefinitionForm({
                         <span className="hp-rp-payload-badges">
                           {row.sources.length ? (
                             row.sources.map((source) => (
-                              <span key={source} className="hp-rp-tag hp-rp-tag--light">
-                                {source}
-                              </span>
+                              <Badge key={source} variant="secondary">{source}</Badge>
                             ))
                           ) : (
-                            <span className="hp-rp-tag">inventory</span>
+                            <Badge variant="outline">inventory</Badge>
                           )}
                         </span>
-                      </button>
+                      </Button>
                     ))
                   )}
                 </div>
@@ -1057,53 +990,45 @@ function DefinitionForm({
                 ) : null}
               </>
             ) : null}
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               {activeTemplate?.sandbox ? 'Sandbox' : 'Payload'} reports have a fixed evidence structure; theme and branding
               still apply.
             </p>
           </>
         ) : (
           <>
-            <div className="filters">
+            <div className="grid gap-4 sm:grid-cols-2">
               {scopeField('ip', 'IP', 64)}
               {scopeField('sensor', 'Sensor', 64)}
               {scopeField('port', 'Port', 16)}
               {scopeField('signature', 'Signature', 120)}
             </div>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               Scope narrows what the report covers; leave fields blank for an unscoped report. Network, country, ASN, text,
               type, and session scope aren't exposed here and stay unscoped.
             </p>
           </>
         )}
-        </div>
+        </CardContent></Card>
       </div>
 
       {/* 03 Schedule — cadence + the starter presets (reports.html:128-174). */}
       <div className="dashboard-panel" role="tabpanel" id="rp-panel-schedule" aria-labelledby="rp-schedule" hidden={step !== 'schedule'}>
-        <div className="card wide">
-        <h2>Schedule</h2>
+        <Card className="col-span-full">
+        <CardHeader><h2 className="font-semibold leading-none tracking-tight">Schedule</h2></CardHeader><CardContent className="space-y-6">
         {!anyScheduled ? (
           // #1575 (reports.html:136-163): schedule starter cards, shown
           // while no saved definition has an active schedule. A click fills
           // the name (only if still untouched) and the cadence fields below.
-          <div className="empty-state" role="status" aria-live="polite">
-            <div>
-              <div className="empty-state__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <circle cx="12" cy="12" r="9" />
-                  <polyline points="12 7 12 12 15.5 14" />
-                </svg>
-              </div>
-              <div className="empty-state__title">Nothing scheduled yet</div>
-              <p className="empty-state__hint">Pick a cadence below, or start from one of these and adjust it.</p>
-              <hr className="empty-state__divider" />
+          <Empty role="status" aria-live="polite">
+            <EmptyHeader><EmptyTitle>Nothing scheduled yet</EmptyTitle><EmptyDescription>Pick a cadence below, or start from one of these and adjust it.</EmptyDescription></EmptyHeader>
               <div className="template-gallery" role="group" aria-label="Schedule starters">
                 {SCHEDULE_PRESETS.map((preset) => (
-                  <button
+                  <Button
                     key={preset.id}
                     type="button"
-                    className="template-card"
+                    variant="outline"
+                    className="h-auto flex-col whitespace-normal p-4"
                     onClick={() => {
                       if (!name.trim()) setName(preset.name)
                       setSchedule((current) => ({
@@ -1118,40 +1043,30 @@ function DefinitionForm({
                       setMessage(`“${preset.name}” schedule loaded — adjust anything, then save.`)
                     }}
                   >
-                    <span className="template-card__icon" aria-hidden="true">
+                    <span aria-hidden="true">
                       {preset.icon}
                     </span>
-                    <span className="template-card__title">{preset.name}</span>
-                    <span className="template-card__desc">{preset.desc}</span>
-                    <span className="chip">{preset.chip}</span>
-                  </button>
+                    <strong>{preset.name}</strong>
+                    <span className="text-xs text-muted-foreground">{preset.desc}</span>
+                    <Badge variant="secondary">{preset.chip}</Badge>
+                  </Button>
                 ))}
               </div>
-            </div>
-          </div>
+          </Empty>
         ) : null}
-        <div className="filters">
-          <button
+        <div className="flex flex-wrap items-end gap-3">
+          <Button
             type="button"
-            className={schedule.enabled ? 'chip is-active' : 'chip'}
+            variant={schedule.enabled ? 'default' : 'outline'}
             aria-pressed={schedule.enabled}
             onClick={() => setSchedule((current) => ({ ...current, enabled: !current.enabled }))}
           >
             {schedule.enabled ? 'Schedule: on' : 'Schedule: off'}
-          </button>
+          </Button>
           {schedule.enabled ? (
             <>
-              <select
-                className="form-input"
-                value={schedule.frequency}
-                onChange={(event) => setSchedule((current) => ({ ...current, frequency: event.target.value }))}
-              >
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
-              </select>
-              <input
-                className="form-input hp-num"
+              <Select value={schedule.frequency} onValueChange={(value) => setSchedule((current) => ({ ...current, frequency: value }))}><SelectTrigger className="w-36" aria-label="Frequency"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="daily">Daily</SelectItem><SelectItem value="weekly">Weekly</SelectItem><SelectItem value="monthly">Monthly</SelectItem></SelectContent></Select>
+              <Input className="w-24"
                 type="number"
                 min={0}
                 max={23}
@@ -1159,8 +1074,7 @@ function DefinitionForm({
                 value={schedule.hour}
                 onChange={(event) => setSchedule((current) => ({ ...current, hour: Number(event.target.value) }))}
               />
-              <input
-                className="form-input hp-num"
+              <Input className="w-24"
                 type="number"
                 min={0}
                 max={59}
@@ -1169,22 +1083,14 @@ function DefinitionForm({
                 onChange={(event) => setSchedule((current) => ({ ...current, minute: Number(event.target.value) }))}
               />
               {schedule.frequency === 'weekly' ? (
-                <select
-                  className="form-input"
-                  aria-label="Weekday"
-                  value={schedule.weekday}
-                  onChange={(event) => setSchedule((current) => ({ ...current, weekday: Number(event.target.value) }))}
-                >
+                <Select value={String(schedule.weekday)} onValueChange={(value) => setSchedule((current) => ({ ...current, weekday: Number(value) }))}><SelectTrigger className="w-36" aria-label="Weekday"><SelectValue /></SelectTrigger><SelectContent>
                   {WEEKDAYS.map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
+                    <SelectItem key={value} value={String(value)}>{label}</SelectItem>
                   ))}
-                </select>
+                </SelectContent></Select>
               ) : null}
               {schedule.frequency === 'monthly' ? (
-                <input
-                  className="form-input hp-num"
+                <Input className="w-24"
                   type="number"
                   min={1}
                   max={28}
@@ -1197,20 +1103,19 @@ function DefinitionForm({
           ) : null}
         </div>
         {schedule.enabled ? (
-          <p className="note">
+          <p className="text-sm text-muted-foreground">
             Times are UTC. Scheduled reports render through the same pipeline as manual ones and appear in the history with
             origin <em>schedule</em>; the retention cap prunes the oldest artifacts automatically.
           </p>
         ) : null}
-        </div>
+        </CardContent></Card>
       </div>
 
       {/* 04 Branding — headers, footer, classification (reports.html:176-190). */}
       <div className="dashboard-panel" role="tabpanel" id="rp-panel-branding" aria-labelledby="rp-branding" hidden={step !== 'branding'}>
-        <div className="card wide">
-        <h2>Branding</h2>
-        <p className="note">Applied to every page of the PDF. Empty fields fall back to the template defaults.</p>
-        <div className="filters">
+        <Card className="col-span-full">
+        <CardHeader><h2 className="font-semibold leading-none tracking-tight">Branding</h2><CardDescription>Applied to every page of the PDF. Empty fields fall back to the template defaults.</CardDescription></CardHeader><CardContent>
+        <div className="grid gap-4 sm:grid-cols-2">
           {brandingField('title', 'Title (defaults to template title)', 80)}
           {brandingField('author', 'Author', 60)}
           {brandingField('header_left', 'Header left', 60)}
@@ -1218,7 +1123,7 @@ function DefinitionForm({
           {brandingField('footer_left', 'Footer left', 80)}
           {brandingField('classification', 'Classification', 120)}
         </div>
-        </div>
+        </CardContent></Card>
       </div>
 
       {/* 05 Review — every choice read back before anything is generated
@@ -1228,9 +1133,8 @@ function DefinitionForm({
           row links to the step that owns the value, so a wrong-looking
           entry is one click from where it was set rather than a hunt. */}
       <div className="dashboard-panel" role="tabpanel" id="rp-panel-review" aria-labelledby="rp-review" hidden={!onReview}>
-        <div className="card wide">
-          <h2>Review</h2>
-          <p className="note">{stepLede('review')}</p>
+        <Card className="col-span-full">
+          <CardHeader><h2 className="font-semibold leading-none tracking-tight">Review</h2><CardDescription>{stepLede('review')}</CardDescription></CardHeader><CardContent>
           <div className="hp-rp-review">
             {summaryRows.map((row) => (
               <div className="hp-rp-review__row" key={`${row.step}:${row.key}`}>
@@ -1238,18 +1142,17 @@ function DefinitionForm({
                 <span className="hp-rp-review__value" data-unset={row.unset ? '' : undefined}>
                   {row.value}
                 </span>
-                <button
-                  className="btn btn-ghost btn-sm"
+                <Button variant="ghost" size="sm"
                   type="button"
                   onClick={() => onStep(row.step)}
                   title={`Change this on the ${STEPS.find((entry) => entry.id === row.step)?.label} step`}
                 >
                   change
-                </button>
+                </Button>
               </div>
             ))}
           </div>
-        </div>
+          </CardContent></Card>
       </div>
 
       {/* The sequence's controls. Back and Next move through the steps;
@@ -1259,26 +1162,25 @@ function DefinitionForm({
           available throughout, because abandoning a draft should never
           require walking to the end of it first. */}
       <div className="hp-rp-actions" hidden={step === 'library'}>
-        <button
-          className="btn btn-ghost btn-sm"
+        <Button variant="ghost" size="sm"
           type="button"
           disabled={!previousStep}
           onClick={() => previousStep && onStep(previousStep.id)}
         >
           Back{previousStep ? ` — ${previousStep.label}` : ''}
-        </button>
+        </Button>
         {nextStep ? (
-          <button className="btn btn-primary btn-sm" type="button" onClick={() => onStep(nextStep.id)}>
+          <Button size="sm" type="button" onClick={() => onStep(nextStep.id)}>
             Next — {nextStep.label}
-          </button>
+          </Button>
         ) : (
-          <button className="btn btn-primary btn-sm" type="submit" disabled={busy || !name.trim() || !template}>
+          <Button size="sm" type="submit" disabled={busy || !name.trim() || !template}>
             {busy ? 'Saving…' : isCreate ? 'Create definition' : 'Save changes'}
-          </button>
+          </Button>
         )}
-        <button className="btn btn-ghost btn-sm" type="button" onClick={onCancel}>
+        <Button variant="ghost" size="sm" type="button" onClick={onCancel}>
           {isCreate ? 'Reset' : 'Cancel edit'}
-        </button>
+        </Button>
         {message ? <span className="hp-rp-status" data-state="error">{message}</span> : null}
       </div>
     </form>
@@ -1338,94 +1240,87 @@ function DefinitionsCard({
 
   return (
     <>
-      <div className="card wide">
-        <h2>Saved definitions</h2>
-        <p className="note">
+      <Card className="col-span-full">
+        <CardHeader><h2 className="font-semibold leading-none tracking-tight">Saved definitions</h2>
+        <CardDescription>
           Definitions drive the scheduler and on-demand generation — saved designs you can re-generate, refine, or
           schedule.
-        </p>
+        </CardDescription></CardHeader>
+        <CardContent className="space-y-4">
         {editable ? (
-          <button className="btn btn-secondary btn-sm hp-flow" type="button" onClick={onNew}>
+          <Button variant="secondary" size="sm" type="button" onClick={onNew}>
             New definition
-          </button>
+          </Button>
         ) : null}
         {definitions === null ? (
           failed ? (
             /* #2178: the studio's own library must not answer an outage
                with "No report definitions yet". */
-            <p className="empty" role="alert">
-              Load failed — the backend request didn’t answer.
-            </p>
+            <Empty role="alert"><EmptyHeader><EmptyTitle>Definitions failed to load</EmptyTitle><EmptyDescription>The backend request didn’t answer.</EmptyDescription></EmptyHeader></Empty>
           ) : (
-            <span className="skeleton-line" aria-hidden="true" />
+            <Skeleton className="h-24 w-full" aria-hidden="true" />
           )
         ) : definitions.length === 0 ? (
-          <p className="empty">No report definitions yet.</p>
+          <Empty><EmptyHeader><EmptyTitle>No report definitions yet</EmptyTitle></EmptyHeader></Empty>
         ) : (
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Template</th>
-                  <th>Theme</th>
-                  <th>Schedule</th>
-                  <th>Created</th>
-                  {editable ? <th>Actions</th> : null}
-                </tr>
-              </thead>
-              <tbody>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Template</TableHead>
+                  <TableHead>Theme</TableHead>
+                  <TableHead>Schedule</TableHead>
+                  <TableHead>Created</TableHead>
+                  {editable ? <TableHead>Actions</TableHead> : null}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {definitions.map((definition) => (
-                  <tr key={definition.id}>
-                    <td className="v">{definition.name}</td>
-                    <td>
-                      <span className="badge badge--muted">{definition.template}</span>
-                    </td>
-                    <td>{definition.theme}</td>
-                    <td>
+                  <TableRow key={definition.id}>
+                    <TableCell>{definition.name}</TableCell>
+                    <TableCell><Badge variant="secondary">{definition.template}</Badge></TableCell>
+                    <TableCell>{definition.theme}</TableCell>
+                    <TableCell>
                       {definition.schedule?.enabled
                         ? `${definition.schedule.frequency} @ ${pad2(definition.schedule.hour)}:${pad2(definition.schedule.minute)} UTC`
                         : '—'}
-                    </td>
-                    <td>{formatTimestamp((definition.created || ''))}</td>
+                    </TableCell>
+                    <TableCell>{formatTimestamp((definition.created || ''))}</TableCell>
                     {editable ? (
-                      <td>
-                        <div className="filters">
-                          <button
-                            className="btn btn-secondary btn-sm"
+                      <TableCell>
+                        <div className="flex flex-wrap gap-2">
+                          <Button variant="secondary" size="sm"
                             type="button"
                             disabled={busyId === definition.id}
                             onClick={() => onEdit(definition)}
                           >
                             Edit
-                          </button>
-                          <button
-                            className="btn btn-secondary btn-sm"
+                          </Button>
+                          <Button variant="secondary" size="sm"
                             type="button"
                             disabled={busyId === definition.id}
                             onClick={() => generate(definition.id)}
                           >
                             {busyId === definition.id ? 'Working…' : 'Generate'}
-                          </button>
-                          <button
-                            className="btn btn-danger btn-sm"
+                          </Button>
+                          <Button variant="destructive" size="sm"
                             type="button"
                             disabled={busyId === definition.id}
                             onClick={() => remove(definition.id)}
                           >
                             Delete
-                          </button>
+                          </Button>
                         </div>
-                        {rowMessage[definition.id] ? <p className="note">{rowMessage[definition.id]}</p> : null}
-                      </td>
+                        {rowMessage[definition.id] ? <p className="text-sm text-destructive">{rowMessage[definition.id]}</p> : null}
+                      </TableCell>
                     ) : null}
-                  </tr>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </TableBody>
+            </Table>
         )}
-      </div>
+        </CardContent>
+      </Card>
     </>
   )
 }
@@ -1580,7 +1475,7 @@ function Reports() {
         label="Reports"
         title="Reports studio"
         subtitle="Finished PDF reports and the definitions that produce them — scheduled and on-demand runs land here."
-        chips={<span className="chip">{generatedFailed && !generated ? 'load failed' : `${(generated?.total ?? 0).toLocaleString('en-US')} generated reports`}</span>}
+        chips={<Badge variant="outline">{generatedFailed && !generated ? 'load failed' : `${(generated?.total ?? 0).toLocaleString('en-US')} generated reports`}</Badge>}
       />
       {viewTabs}
       {/* Steps 01-04 are the wizard form — always mounted (hidden panels)
@@ -1609,10 +1504,10 @@ function Reports() {
                template-catalog outage, with no signal and no way forward. */
             <ErrorStateBlock title="Report templates failed to load" hint="The designer needs its template catalog — the request failed." onRetry={retryTemplates} />
           ) : (
-            <span className="skeleton-line" aria-hidden="true" />
+            <Skeleton className="h-24 w-full" aria-hidden="true" />
           )
         ) : (
-          <p className="empty">Admin role required to design report definitions — the Library step is read-only browsing.</p>
+          <Empty><EmptyHeader><EmptyTitle>Admin role required</EmptyTitle><EmptyDescription>The Library step remains available for read-only browsing.</EmptyDescription></EmptyHeader></Empty>
         )
       ) : null}
 
@@ -1628,7 +1523,7 @@ function Reports() {
           onGenerated={refreshGenerated}
         />
         <h2 className="label-section">Generated reports</h2>
-        <p className="note">Newest first. Select a card to view inline, download the PDF, or delete stale artifacts.</p>
+        <p className="text-sm text-muted-foreground">Newest first. Select a card to view inline, download the PDF, or delete stale artifacts.</p>
         {generatedFailed && !generated ? (
           /* #2178: the library's finished-PDF list also stood as ghost
              cards forever under an outage. */
@@ -1652,7 +1547,7 @@ function Reports() {
           cardIcon={() => ReportIcon}
           cardBadges={(row) => {
             const format = str(row, 'format') || str(row, 'kind')
-            return format ? <span className="badge badge--muted">{format}</span> : null
+            return format ? <Badge variant="secondary">{format}</Badge> : null
           }}
         />
         )}

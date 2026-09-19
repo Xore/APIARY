@@ -11,7 +11,13 @@ import { confirmAction } from '../components/ConfirmDialog'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { InvestigateHeader } from '../components/Investigate'
 import { RowActions, RowIcons } from '../components/RowActions'
+import { Badge, badgeVariants } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '../components/ui/card'
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '../components/ui/empty'
+import { Skeleton } from '../components/ui/skeleton'
 import { formatTimestamp } from '../lib/time'
+import { FileWarning, PackageOpen } from 'lucide-react'
 
 type PayloadRow = {
   Hash: string
@@ -170,36 +176,11 @@ function SkeletonCards({ count }: { count: number }) {
   return (
     <>
       {Array.from({ length: count }, (_, i) => (
-        <div key={`skel-${i}`} className="project-card" aria-hidden="true">
-          <div className="project-card__header">
-            <span className="project-card__icon">
-              <span className="skeleton-line" style={{ display: 'block', width: 16, height: 16 }} />
-            </span>
-            <span className="project-card__title">
-              <span className="skeleton-line" style={{ display: 'block', width: '82%' }} />
-            </span>
-            <div className="project-card__badges">
-              <span className="skeleton-line" style={{ display: 'block', width: 56, height: 18, borderRadius: 999 }} />
-              <span className="skeleton-line" style={{ display: 'block', width: 44, height: 18, borderRadius: 999 }} />
-            </div>
-          </div>
-          <p className="project-card__desc">
-            <span className="skeleton-line" style={{ display: 'block', width: '88%' }} />
-          </p>
-          <pre className="code hp-code-results">
-            <span className="skeleton-line" style={{ display: 'block', width: '92%' }} />
-            <span className="skeleton-line" style={{ display: 'block', width: '74%' }} />
-            <span className="skeleton-line" style={{ display: 'block', width: '81%' }} />
-          </pre>
-          <div className="project-card__meta">
-            <span>
-              <span className="skeleton-line" style={{ display: 'block', width: 64 }} />
-            </span>
-            <span>
-              <span className="skeleton-line" style={{ display: 'block', width: 120 }} />
-            </span>
-          </div>
-        </div>
+        <Card key={`skel-${i}`} aria-hidden="true">
+          <CardHeader className="space-y-3"><Skeleton className="h-5 w-4/5" /><div className="flex gap-2"><Skeleton className="h-5 w-14 rounded-full" /><Skeleton className="h-5 w-11 rounded-full" /></div><Skeleton className="h-4 w-11/12" /></CardHeader>
+          <CardContent className="space-y-2"><Skeleton className="h-44 w-full" /><Skeleton className="h-4 w-16" /></CardContent>
+          <CardFooter><Skeleton className="h-8 w-32" /></CardFooter>
+        </Card>
       ))}
     </>
   )
@@ -234,39 +215,30 @@ function PayloadCard({ row, badge }: { row: PayloadRow; badge: GithubBadge | und
       },
     })
   return (
-    <div className="project-card">
+    <Card className="relative min-w-0 overflow-hidden">
       {/* Empty by design — it takes its accessible name from the label,
           because an unlabelled link is worse than the small target it
           replaces. */}
       <a
-        className="hp-card-link"
+        className="absolute inset-0 z-0"
         href={`/payload-analysis/${encodeURIComponent(row.Hash)}`}
         aria-label={`Open the analysis for payload ${row.Hash}`}
       />
-      <div className="project-card__header">
-        <span className="project-card__icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-            <polyline points="14 2 14 8 20 8" />
-          </svg>
-        </span>
-        <a className="project-card__title mono" href={`/payload-analysis/${encodeURIComponent(row.Hash)}`}>
-          {row.Hash}
-        </a>
-        <div className="project-card__badges">
+      <CardHeader className="relative z-10 pointer-events-none">
+        <div className="flex min-w-0 items-start gap-3"><PackageOpen className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <CardTitle className="min-w-0"><h2><a className="pointer-events-auto break-all font-mono text-sm text-primary hover:underline" href={`/payload-analysis/${encodeURIComponent(row.Hash)}`}>{row.Hash}</a></h2></CardTitle></div>
+        <div className="flex flex-wrap gap-2">
           {row.Sources.map((source) => (
-            <span key={source} className="badge badge--muted">
-              {source}
-            </span>
+            <Badge key={source} variant="secondary">{source}</Badge>
           ))}
           {badge ? (
-            <a className="badge badge--muted" href={`/github-analysis/${encodeURIComponent(row.Hash)}`} title="GitHub analysis verdict">
+            <a className={`${badgeVariants({ variant: 'secondary' })} pointer-events-auto`} href={`/github-analysis/${encodeURIComponent(row.Hash)}`} title="GitHub analysis verdict">
               {badge.label}
             </a>
           ) : null}
           {badge?.family ? (
             <a
-              className="badge badge--muted"
+              className={`${badgeVariants({ variant: 'secondary' })} pointer-events-auto`}
               href={`/events?q=${encodeURIComponent(badge.family)}`}
               title="Scanner-attributed family (GitHub analysis) — other sessions delivering this family"
             >
@@ -274,22 +246,24 @@ function PayloadCard({ row, badge }: { row: PayloadRow; badge: GithubBadge | und
             </a>
           ) : null}
         </div>
-      </div>
-      <p className="project-card__desc">
+        <CardDescription>
         <strong>{row.Kind}</strong> • {row.Platform} • {row.MIME} • {row.SizeH}
         {row.Copies > 1 ? ` • ${row.Copies} copies` : ''} •{' '}
         <span title={row.AnalysisPath}>{row.Dynamic ? 'dynamic route ready' : 'static-only route'}</span>
-      </p>
-      <section aria-label="Byte preview" className="hp-flow--tight">
-        <p className="note">
+      </CardDescription>
+      </CardHeader>
+      <CardContent className="relative z-10 pointer-events-none">
+      <section aria-label="Byte preview" className="space-y-2">
+        <p className="text-sm text-muted-foreground">
           {row.Preview
             ? `First ${row.PreviewTruncated ? `512 of ${row.SizeH}` : row.SizeH} bytes, hex/ASCII. Read only; never interpreted or executed.`
             : 'No byte preview is available for this capture.'}
         </p>
-        {row.Preview ? <pre className="code hp-code-results">{row.Preview}</pre> : null}
+        {row.Preview ? <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 font-mono text-xs whitespace-pre-wrap break-all">{row.Preview}</pre> : null}
       </section>
-      <div className="project-card__meta">
-        <span>{formatTimestamp(row.MtimeUTC)}</span>
+      </CardContent>
+      <CardFooter className="relative z-10 flex-col items-stretch gap-3">
+        <span className="text-sm text-muted-foreground">{formatTimestamp(row.MtimeUTC)}</span>
         {/* #1899: the same strip every table row uses, with every action
             resting on screen rather than behind a ⋮.
 
@@ -304,7 +278,7 @@ function PayloadCard({ row, badge }: { row: PayloadRow; badge: GithubBadge | und
             next thing an operator does after reading a capture. Publish
             is the one action with consequences outside this machine, so
             it is marked rather than left looking like Download. */}
-        <RowActions
+        <div className="pointer-events-auto"><RowActions
           expanded
           actions={[
             {
@@ -335,9 +309,9 @@ function PayloadCard({ row, badge }: { row: PayloadRow; badge: GithubBadge | und
             },
             { label: 'Publish to Xore/honeypot', icon: RowIcons.publish, onClick: publish, danger: true },
           ]}
-        />
-      </div>
-    </div>
+        /></div>
+      </CardFooter>
+    </Card>
   )
 }
 
@@ -425,55 +399,50 @@ function Payloads() {
         subtitle="Unified inventory of Dionaea captures, Cowrie uploads/downloads, and retained script artifacts."
         chips={
           <>
-            <a className="chip" href="/">← dashboard</a>
+            <Button asChild variant="outline" size="sm"><a href="/">← dashboard</a></Button>
             {source ? (
-              <button className="chip" type="button" onClick={() => void applySource('')}>
-                all sources
-              </button>
+              <Button variant="outline" size="sm" type="button" onClick={() => void applySource('')}>all sources</Button>
             ) : (
-              <span className="chip">all sources</span>
+              <Badge>all sources</Badge>
             )}
             {sourceNames.map((name) =>
               name === source ? (
-                <span key={name} className="chip">
-                  {name} {counts?.[name]}
-                </span>
+                <Badge key={name}>{name} {counts?.[name]}</Badge>
               ) : (
-                <button key={name} className="chip" type="button" onClick={() => void applySource(name)}>
+                <Button key={name} variant="outline" size="sm" type="button" onClick={() => void applySource(name)}>
                   {name} {counts?.[name]}
-                </button>
+                </Button>
               ),
             )}
             {sourceOther > 0 ? (
-              <span className="chip">…{sourceOther.toLocaleString('en-US')} docs in rarer sources</span>
+              <Badge variant="secondary">…{sourceOther.toLocaleString('en-US')} docs in rarer sources</Badge>
             ) : null}
-            <span className="chip">
+            <Badge variant="outline">
               {(rows?.length ?? 0).toLocaleString('en-US')} loaded of {total.toLocaleString('en-US')} matching •{' '}
               {uniqueTotal.toLocaleString('en-US')} unique total
-            </span>
+            </Badge>
           </>
         }
       />
-      <p className="note">
+      <p className="text-sm text-muted-foreground">
         Correlated workbench runs, isolated sandbox detonations, and published GitHub scans, without losing successful
         child results when another backend fails.
       </p>
-      <div className="card wide">
-        <p className="note">
-          ⚠ Unified inventory of Dionaea captures, Cowrie uploads/downloads, and retained shell, PowerShell, VBS,
+      <Card>
+        <CardHeader><CardTitle><h2>Payload inventory</h2></CardTitle><CardDescription className="flex gap-2"><FileWarning className="size-5 shrink-0 text-destructive" aria-hidden="true" /><span>Unified inventory of Dionaea captures, Cowrie uploads/downloads, and retained shell, PowerShell, VBS,
           Python, JavaScript and other script artifacts. Files are inert on disk but <strong>hostile</strong> — handle
-          only in an isolated analysis VM.
-        </p>
+          only in an isolated analysis VM.</span></CardDescription></CardHeader>
+        <CardContent>
         {/* #2179: badge coverage is whole-store after pagination; only when
             the scan ceiling binds is the shortfall disclosed here instead of
             silently rendering older captures without their badges. */}
         {verdictScan && verdictScan.scanned < verdictScan.total ? (
-          <p className="note">
+          <p className="mb-4 text-sm text-muted-foreground">
             Verdict badges cover the {verdictScan.scanned.toLocaleString('en-US')} most recent analyzed samples of{' '}
             {verdictScan.total.toLocaleString('en-US')} on record.
           </p>
         ) : null}
-        <div className="project-grid" id="payloads-results">
+        <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2" id="payloads-results">
           {rows === null && failed ? (
             // #2178: an outage here used to read as the opening ghosts, forever.
             <ErrorStateBlock
@@ -484,23 +453,24 @@ function Payloads() {
           ) : rows === null ? (
             <SkeletonCards count={12} />
           ) : rows.length === 0 ? (
-            <p className="empty">No payloads captured yet.</p>
+            <Empty className="col-span-full border" role="status"><EmptyHeader><EmptyMedia variant="icon"><PackageOpen /></EmptyMedia><EmptyTitle>No payloads captured yet.</EmptyTitle><EmptyDescription>Captured files will appear here when the inventory worker records them.</EmptyDescription></EmptyHeader></Empty>
           ) : (
             rows.map((row) => <PayloadCard key={row.Hash} row={row} badge={badgeFor(row.Hash)} />)
           )}
           {loadingMore ? <SkeletonCards count={4} /> : null}
         </div>
         {rows !== null && rows.length < total ? (
-          <div className="hp-lazy-controls" aria-live="polite">
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-sm text-muted-foreground" aria-live="polite">
             <span>
               {rows.length.toLocaleString('en-US')} of {total.toLocaleString('en-US')} entries
             </span>
-            <button className="btn btn-secondary btn-sm" type="button" onClick={viewMore} disabled={loadingMore}>
+            <Button variant="secondary" size="sm" type="button" onClick={viewMore} disabled={loadingMore}>
               View more
-            </button>
+            </Button>
           </div>
         ) : null}
-      </div>
+        </CardContent>
+      </Card>
     </>
   )
 }

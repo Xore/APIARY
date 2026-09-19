@@ -44,6 +44,7 @@ export const THEMES: Theme[] = [
   { id: 'amber', label: 'Amber', description: 'Warm sand and a golden accent.' },
   { id: 'rose', label: 'Rose', description: 'Warm pink-grey, softer than Claude.' },
   { id: 'neon', label: 'Neon', description: 'Near-black ground, high-chroma accent.' },
+  { id: 'default', label: 'Default', description: 'Stock shadcn zinc surfaces with a blue accent.' },
 ]
 
 export const DEFAULT_THEME = 'claude'

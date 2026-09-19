@@ -16,6 +16,9 @@ import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
 import { useSidebarViewTabs } from '../lib/viewTabs'
 import { countryName } from '../lib/country'
+import { Card } from '../components/ui/card'
+import { Badge } from '../components/ui/badge'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../components/ui/table'
 
 type OverviewKpis = {
   total: number
@@ -253,14 +256,14 @@ function KpiSpark({ hourly }: { hourly: number[] | undefined }) {
 function KpiStrip({ kpis, payloads, payloadsFailed }: { kpis: OverviewKpis | null; payloads: number | null; payloadsFailed?: boolean }) {
   return (
     <div className="metric-grid" id="overview-kpis">
-      <a className="metric" href="/events" title="Open all normalized events in the current dashboard window">
-        <div className="metric__value">
+      <Card className="min-w-0 p-4"><a className="block" href="/events" title="Open all normalized events in the current dashboard window">
+        <div className="metric__value font-serif text-[26px] font-medium tracking-tight">
           <KpiValue value={kpis && kpis.ready ? kpis.total : null} />
         </div>
         <div className="metric__label">All events</div>
-      </a>
-      <a className="metric" href="/events?since=24h" title="Open events received during the last 24 hours">
-        <div className="metric__value">
+      </a></Card>
+      <Card className="min-w-0 p-4"><a className="block" href="/events?since=24h" title="Open events received during the last 24 hours">
+        <div className="metric__value font-serif text-[26px] font-medium tracking-tight">
           <KpiValue value={kpis && kpis.ready ? kpis.last24h : null} />
           {kpis?.change24h ? (
             <span
@@ -273,15 +276,15 @@ function KpiStrip({ kpis, payloads, payloadsFailed }: { kpis: OverviewKpis | nul
         </div>
         <div className="metric__label">Events in 24 hours</div>
         <KpiSpark hourly={kpis?.hourly} />
-      </a>
-      <a className="metric" href="/ips" title="Distinct attacker source addresses observed by the sensors">
-        <div className="metric__value">
+      </a></Card>
+      <Card className="min-w-0 p-4"><a className="block" href="/ips" title="Distinct attacker source addresses observed by the sensors">
+        <div className="metric__value font-serif text-[26px] font-medium tracking-tight">
           <KpiValue value={kpis && kpis.ready ? kpis.unique_ips : null} />
         </div>
         <div className="metric__label">Attack sources</div>
-      </a>
-      <a className="metric" href="/events?kind=login" title="Authentication attempts captured by interactive honeypots">
-        <div className="metric__value">
+      </a></Card>
+      <Card className="min-w-0 p-4"><a className="block" href="/events?kind=login" title="Authentication attempts captured by interactive honeypots">
+        <div className="metric__value font-serif text-[26px] font-medium tracking-tight">
           {/* #1963: from the kpis endpoint, not /overview/dashboard -- this
               strip renders on every tab, and reading one integer from the
               dashboard aggregation used to drag all eighteen slices onto
@@ -289,9 +292,9 @@ function KpiStrip({ kpis, payloads, payloadsFailed }: { kpis: OverviewKpis | nul
           <KpiValue value={kpis && kpis.ready ? kpis.logins : null} />
         </div>
         <div className="metric__label">Login attempts</div>
-      </a>
-      <a className="metric" href="/payloads" title="Distinct payload binaries captured safely">
-        <div className="metric__value">
+      </a></Card>
+      <Card className="min-w-0 p-4"><a className="block" href="/payloads" title="Distinct payload binaries captured safely">
+        <div className="metric__value font-serif text-[26px] font-medium tracking-tight">
           {payloadsFailed && payloads === null ? (
             /* #2178: the tile says nothing rather than a skeleton that
                outlives the request it was waiting for. */
@@ -301,7 +304,7 @@ function KpiStrip({ kpis, payloads, payloadsFailed }: { kpis: OverviewKpis | nul
           )}
         </div>
         <div className="metric__label">Captured payloads</div>
-      </a>
+      </a></Card>
     </div>
   )
 }
@@ -340,36 +343,36 @@ function RecentEventRow({ row, open, onToggle }: { row: EventRow; open: boolean;
   const stop = (event: React.MouseEvent) => event.stopPropagation()
   return (
     <>
-      <tr className={open ? 'selected' : undefined} onClick={onToggle}>
-        <td data-hp-time>{formatTimestamp(row.time)}</td>
-        <td>
-          <a className={`badge b-${row.sensor}`} href={`/events?sensor=${encodeURIComponent(row.sensor)}`} onClick={stop}>
+      <TableRow className={open ? 'selected' : undefined} onClick={onToggle}>
+        <TableCell data-hp-time>{formatTimestamp(row.time)}</TableCell>
+        <TableCell>
+          <Badge variant="secondary" className={`badge b-${row.sensor}`}><a href={`/events?sensor=${encodeURIComponent(row.sensor)}`} onClick={stop}>
             {row.sensor}
-          </a>
-        </td>
-        <td className="v">
+          </a></Badge>
+        </TableCell>
+        <TableCell className="v">
           {row.src_ip ? (
             <a href={`/events?ip=${encodeURIComponent(row.src_ip)}`} title={`attack chain for ${row.src_ip}`} onClick={stop}>
               {row.src_ip}
             </a>
           ) : (
-            <span
+            <Badge variant="secondary"
               className="badge badge--muted"
               title="This event reached the sensor over the WireGuard tunnel and could not be joined back to a real client address."
             >
               unattributed
-            </span>
+            </Badge>
           )}
           {row.country ? (
             <>
               {' '}
-              <a className="badge badge--info" title={countryName(row.country)} href={`/events?country=${encodeURIComponent(row.country)}`} onClick={stop}>
+              <Badge variant="secondary" className="badge badge--info"><a title={countryName(row.country)} href={`/events?country=${encodeURIComponent(row.country)}`} onClick={stop}>
                 {row.country}
-              </a>
+              </a></Badge>
             </>
           ) : null}
-        </td>
-        <td className="n">
+        </TableCell>
+        <TableCell className="n">
           {row.port ? (
             <a href={`/events?port=${encodeURIComponent(row.port)}`} onClick={stop}>
               :{row.port}
@@ -377,12 +380,12 @@ function RecentEventRow({ row, open, onToggle }: { row: EventRow; open: boolean;
           ) : (
             ''
           )}
-        </td>
-        <td className="v">{row.detail || row.proto}</td>
+        </TableCell>
+        <TableCell className="v">{row.detail || row.proto}</TableCell>
         {/* #1868: one strip, drawn by one component. This was a
             hand-rolled copy of the event explorer's, down to the same
             `⧁`/`▶`/emoji glyphs, so the two could -- and did -- drift. */}
-        <td className="hp-row-actions-cell">
+        <TableCell className="hp-row-actions-cell">
           <RowActions
             actions={[
               row.id ? { label: 'Open full details', icon: RowIcons.detail, href: `/event/${encodeURIComponent(row.id)}` } : null,
@@ -391,12 +394,12 @@ function RecentEventRow({ row, open, onToggle }: { row: EventRow; open: boolean;
               row.src_ip ? { label: 'Attacker profile', icon: RowIcons.profile, href: `/investigate/ip/${encodeURIComponent(row.src_ip)}` } : null,
             ]}
           />
-        </td>
-      </tr>
+        </TableCell>
+      </TableRow>
       {open ? (
-        <tr>
-          <td colSpan={6}>
-            <article className="card wide hp-flow" aria-label="Full normalized event">
+        <TableRow>
+          <TableCell colSpan={6}>
+            <Card className="card wide hp-flow" role="article" aria-label="Full normalized event">
               <h3>Normalized event</h3>
               <p className="note">Complete read-only record as stored by the pipeline.</p>
               {row.src_ip || row.session ? (
@@ -417,9 +420,9 @@ function RecentEventRow({ row, open, onToggle }: { row: EventRow; open: boolean;
               <div className="card__scroll">
                 <pre className="code">{JSON.stringify(row.record, null, 2)}</pre>
               </div>
-            </article>
-          </td>
-        </tr>
+            </Card>
+          </TableCell>
+        </TableRow>
       ) : null}
     </>
   )
@@ -453,6 +456,7 @@ function Overview() {
     active: tab,
     onSelect: (id) => setTab(id as TabId),
     idPrefix: 'ov',
+    shadcn: true,
   })
   // Heatmap sensor picker (overview.html:94-120): one selection narrows
   // both the heatmap and its attack-vectors companion panel. The rows
@@ -502,13 +506,17 @@ function Overview() {
     <>
       <header className="hp-hero" id="overview-header">
         {presentation?.banner_text ? (
-          <div className={presentation.banner_severity === 'critical' ? 'badge badge--danger' : 'badge badge--warning'}>
+          <Badge variant={presentation.banner_severity === 'critical' ? 'destructive' : 'secondary'} className={presentation.banner_severity === 'critical' ? 'badge badge--danger' : 'badge badge--warning'}>
             {presentation.banner_text}
-          </div>
+          </Badge>
         ) : null}
         <div className="label-section">{presentation?.dashboard_title || 'Honeypot command center'}</div>
         <Suspense fallback={<h1>{greeting('')}</h1>}>
-          <Await promise={data.kpis}>{(kpis) => <h1>{greeting(kpis?.change24h ?? '')}</h1>}</Await>
+          {/* The salutation reads the wall clock at render time, so SSR and
+              a hydrated client (or a frozen test clock) can legally disagree
+              about the hour. suppressHydrationWarning keeps React from
+              flagging that known-safe text delta (#418 in matched-pairs). */}
+          <Await promise={data.kpis}>{(kpis) => <h1 suppressHydrationWarning>{greeting(kpis?.change24h ?? '')}</h1>}</Await>
         </Suspense>
         <p className="hp-hero__status">
           {presentation?.dashboard_subtitle ||
@@ -566,7 +574,7 @@ function Overview() {
             </div>
             <a className="section-link" href="/events?since=24h">View last 24 hours →</a>
           </div>
-          <div className="card wide chart-card">
+          <Card className="col-span-full min-w-0 p-6 chart-card">
             <h2>Activity — last 24h</h2>
             <Heatmap
               rows={dashboard ? dashboard.heatmap.filter((row) => !heatSensor || row.sensor === heatSensor) : null}
@@ -579,15 +587,15 @@ function Overview() {
                 onSensorChange={setHeatSensor}
               />
             ) : null}
-          </div>
-          <div className="card wide map-card">
+          </Card>
+          <Card className="col-span-full min-w-0 p-6 map-card">
             <h2>Attack origins — live geographic view</h2>
             <AttackMap points={dashboard ? dashboard.map_points : null} failed={dashboardFailed} />
             <p className="note">
               Approximate geolocation only. One marker per city, accumulating every IP that geolocated there. Map data ©
               OpenStreetMap contributors.
             </p>
-          </div>
+          </Card>
           <div className="section-heading">
             <div>
               <h2>Live event stream</h2>
@@ -595,7 +603,7 @@ function Overview() {
             </div>
             <a className="section-link" href="/events">Open full event explorer →</a>
           </div>
-          <div className="card wide" id="recent-events-card">
+          <Card className="col-span-full min-w-0 p-6" id="recent-events-card">
             <h2>Recent events</h2>
             {recent === null ? (
               recentFailed ? (
@@ -611,11 +619,11 @@ function Overview() {
               )
             ) : (
               <div className="card__scroll">
-                <table className="recent data-table">
-                  <thead>
-                    <tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th><th></th></tr>
-                  </thead>
-                  <tbody>
+                <Table className="recent data-table">
+                  <TableHeader>
+                    <TableRow><TableHead>time</TableHead><TableHead>sensor</TableHead><TableHead>source ip</TableHead><TableHead>port</TableHead><TableHead>detail</TableHead><TableHead></TableHead></TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {recent.rows.map((row, index) => {
                       const key = eventKey(row, index)
                       return (
@@ -627,11 +635,11 @@ function Overview() {
                         />
                       )
                     })}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
             )}
-          </div>
+          </Card>
         </div>
       ) : null}
 
@@ -644,7 +652,7 @@ function Overview() {
             </div>
             <a className="section-link" href="/source-health">Open pipeline health →</a>
           </div>
-          <div className="card half sensor-card">
+          <Card className="card half sensor-card">
             <h2>Sensor feeds</h2>
             {dashboard === null ? (
               dashboardFailed ? (
@@ -666,24 +674,24 @@ function Overview() {
                   stale = its feed has stopped updating. A quiet honeypot is not necessarily offline.
                 </p>
                 <div className="card__scroll">
-                  <table className="data-table">
-                    <tbody>
+                  <Table className="data-table">
+                    <TableBody>
                       {dashboard.sensors.map((sensor) => (
-                        <tr key={sensor.name}>
-                          <td className="n">{sensor.count.toLocaleString('en-US')}</td>
-                          <td><span className={`badge b-${sensor.name}`}>{sensor.name}</span></td>
-                          <td className={`state s-${sensor.state}`}>{sensor.state}</td>
-                          <td className="ago">{formatTimestamp(sensor.last_seen)}</td>
-                        </tr>
+                        <TableRow key={sensor.name}>
+                          <TableCell className="n">{sensor.count.toLocaleString('en-US')}</TableCell>
+                          <TableCell><Badge variant="secondary" className={`badge b-${sensor.name}`}>{sensor.name}</Badge></TableCell>
+                          <TableCell className={`state s-${sensor.state}`}>{sensor.state}</TableCell>
+                          <TableCell className="ago">{formatTimestamp(sensor.last_seen)}</TableCell>
+                        </TableRow>
                       ))}
-                    </tbody>
-                  </table>
+                    </TableBody>
+                  </Table>
                 </div>
               </>
             )}
-          </div>
+          </Card>
           <Tbl title="Protocols probed" rows={dashboard ? dashboard.protocols : null} half failed={dashboardFailed} />
-          <div className="card wide" id="ml-backlog-card">
+          <Card className="card wide" id="ml-backlog-card">
             <h2>ML classification backlog — last 7 days</h2>
             <EChart kind="line" url="/api/chart/ml-backlog" height={280} />
             <p className="note">
@@ -694,7 +702,7 @@ function Overview() {
               </a>
               .
             </p>
-          </div>
+          </Card>
         </div>
       ) : null}
 
@@ -715,7 +723,7 @@ function Overview() {
               busier ASN card. */}
           <Tbl title="Top autonomous systems" rows={dashboard ? dashboard.asns : null} half id="overview-asns-card" failed={dashboardFailed} />
           <Tbl title="Network/provider classes" rows={dashboard ? dashboard.providers : null} half id="overview-providers-card" failed={dashboardFailed} />
-          <div className="card wide" id="netflow-bytes-card">
+          <Card className="card wide" id="netflow-bytes-card">
             <h2>Traffic volume — bytes/hour, last 7 days</h2>
             <p className="note">
               Summed from every captured flow&apos;s byte count, all sensors and ports combined. A spike stands out here even
@@ -726,27 +734,27 @@ function Overview() {
               Summed from every captured flow's byte count. A spike stands out here even when it doesn't in the event-count
               heatmap.
             </p>
-          </div>
-          <div className="card wide" id="netflow-packets-card">
+          </Card>
+          <Card className="card wide" id="netflow-packets-card">
             <h2>Traffic volume — packets/hour, last 7 days</h2>
             <EChart kind="line" url="/api/chart/netflow-packets" height={280} />
-          </div>
-          <div className="card wide" id="anomaly-trend-card">
+          </Card>
+          <Card className="card wide" id="anomaly-trend-card">
             <h2>Protocol-conformance violations by protocol, over time</h2>
             <p className="note">
               Traffic that doesn't conform to the protocol it claims to be — often scanning tools or deliberate IDS-evasion
               attempts.
             </p>
             <EChart kind="line" url="/api/chart/anomaly-trend" height={280} />
-          </div>
-          <div className="card wide" id="dionaea-cves-card">
+          </Card>
+          <Card className="card wide" id="dionaea-cves-card">
             <h2>Top exploited CVEs / named incidents — last 7 days</h2>
             <p className="note">
               Real, human-readable exploit identities dionaea itself recognized in the traffic it captured (e.g.
               DoublePulsar/EternalBlue), not a generic incident-kind label.
             </p>
             <EChart kind="bar" url="/api/chart/dionaea-cves" height={320} />
-          </div>
+          </Card>
         </div>
       ) : null}
 
@@ -764,15 +772,15 @@ function Overview() {
           <Tbl title="SSH/telnet clients" rows={dashboard ? dashboard.clients : null} hint="No client banners yet — fed by cowrie." failed={dashboardFailed} />
           <Tbl title="Top fingerprints (HASSH / JA3 / JA4 / User-Agent)" rows={dashboard ? dashboard.fingerprints : null} half hint="No protocol or client fingerprints captured yet." failed={dashboardFailed} />
           <Tbl title="Top HTTP paths" rows={dashboard ? dashboard.top_paths : null} half hint="No web probes yet — fed by http-honeypot and tanner." failed={dashboardFailed} />
-          <div className="card wide" id="os-distribution-card">
+          <Card className="card wide" id="os-distribution-card">
             <h2>Attacker OS distribution</h2>
             <p className="note">
               p0f&apos;s own passive OS fingerprint, resolved from the portbridge tunnel join (#241) — a best-effort guess
               from TCP/IP stack behavior, not a claim of certainty.
             </p>
             <EChart kind="pie" url="/api/chart/os-distribution" height={360} />
-          </div>
-          <div className="card wide" id="tcp-stack-clusters-card">
+          </Card>
+          <Card className="card wide" id="tcp-stack-clusters-card">
             <h2>Attacker TCP-stack clusters (JA4T)</h2>
             <p className="note">
               Unique attackers per TCP handshake fingerprint, from Zeek. Deliberately not an OS name — it groups hosts
@@ -781,8 +789,8 @@ function Overview() {
               retired in 2017.
             </p>
             <EChart kind="pie" url="/api/chart/tcp-stack-clusters" height={360} />
-          </div>
-          <div className="card wide" id="ics-functions-card">
+          </Card>
+          <Card className="card wide" id="ics-functions-card">
             <h2>ICS function codes — what they asked the PLCs to do</h2>
             <p className="note">
               Per-transaction detail from the ICS parsers, across Modbus, S7comm, DNP3 and IEC-104. These events are rare and
@@ -790,16 +798,16 @@ function Overview() {
               requests, both filesystem reconnaissance. An alert-only view loses exactly those two.
             </p>
             <EChart kind="barh" url="/api/chart/ics-functions" height={360} />
-          </div>
-          <div className="card wide" id="decoy-requests-card">
+          </Card>
+          <Card className="card wide" id="decoy-requests-card">
             <h2>Decoy requests (TLS-terminated) — last 7 days</h2>
             <p className="note">
               What was requested from the Host-routed decoys behind Traefik. These exist in no other index: Traefik
               terminates TLS for them, so a wire sensor sees the handshake and then ciphertext.
             </p>
             <EChart kind="barh" url="/api/chart/decoy-requests" height={360} />
-          </div>
-          <div className="card wide" id="decoy-client-fingerprints-card">
+          </Card>
+          <Card className="card wide" id="decoy-client-fingerprints-card">
             <h2>Who reached the decoys (JA4)</h2>
             <p className="note">
               The TLS client behind each decoy request. Neither sensor can answer this alone — Traefik knows the
@@ -808,16 +816,16 @@ function Overview() {
               this work even when the request arrived through a proxy.
             </p>
             <EChart kind="barh" url="/api/chart/decoy-client-fingerprints" height={360} />
-          </div>
-          <div className="card wide" id="ja4h-fingerprints-card">
+          </Card>
+          <Card className="card wide" id="ja4h-fingerprints-card">
             <h2>HTTP client fingerprints (JA4H) — last 7 days</h2>
             <p className="note">
               The request&apos;s own header set and ordering. Clusters HTTP tooling that never negotiates TLS at all,
               which on this perimeter is most of it.
             </p>
             <EChart kind="barh" url="/api/chart/ja4h-fingerprints" height={360} />
-          </div>
-          <div className="card wide" id="ja4l-fingerprints-card">
+          </Card>
+          <Card className="card wide" id="ja4l-fingerprints-card">
             <h2>Connection-latency fingerprints (JA4L) — last 7 days</h2>
             <p className="note">
               Derived from handshake round-trip timing rather than anything the client sends, so unlike every other
@@ -825,30 +833,30 @@ function Overview() {
               signal for spotting one host behind several addresses; it says nothing about what that host is.
             </p>
             <EChart kind="barh" url="/api/chart/ja4l-fingerprints" height={360} />
-          </div>
-          <div className="card wide" id="ja4x-fingerprints-card">
+          </Card>
+          <Card className="card wide" id="ja4x-fingerprints-card">
             <h2>Certificate construction fingerprints (JA4X) — last 7 days</h2>
             <p className="note">
               Fingerprints how a certificate was built rather than what it claims — a scanner or C2 using a templated
               generator looks the same everywhere, however the subject fields are dressed up.
             </p>
             <EChart kind="barh" url="/api/chart/ja4x-fingerprints" height={360} />
-          </div>
-          <div className="card wide" id="tls-fingerprints-card">
+          </Card>
+          <Card className="card wide" id="tls-fingerprints-card">
             <h2>TLS scanner fingerprints (JA4) — wire-level, last 7 days</h2>
             <p className="note">Every TLS handshake against a non-dashboard port, alert or not. Click a bar to copy the full hash.</p>
             <EChart kind="barh" url="/api/chart/tls-fingerprints" height={360} />
-          </div>
-          <div className="card wide" id="ssh-fingerprints-card">
+          </Card>
+          <Card className="card wide" id="ssh-fingerprints-card">
             <h2>SSH client software — wire-level, last 7 days</h2>
             <p className="note">Every SSH handshake's client software banner, not just ones that triggered an alert.</p>
             <EChart kind="barh" url="/api/chart/ssh-fingerprints" height={360} />
-          </div>
-          <div className="card wide" id="endlessh-held-card">
+          </Card>
+          <Card className="card wide" id="endlessh-held-card">
             <h2>Attacker time wasted (endlessh tarpit)</h2>
             <p className="note">Time attackers/bots spent stuck talking to nothing before giving up.</p>
             <EChart kind="bar" url="/api/chart/endlessh-held-histogram" height={320} />
-          </div>
+          </Card>
         </div>
       ) : null}
 
@@ -863,7 +871,7 @@ function Overview() {
           </div>
           <Tbl title="Suricata alerts" rows={dashboard ? dashboard.alerts : null} half hint="No Suricata alerts in this window — pipeline status lives under Source & pipeline health." failed={dashboardFailed} />
           <Tbl title="Alert categories" rows={dashboard ? dashboard.alert_cats : null} half hint="No Suricata alerts in this window." failed={dashboardFailed} />
-          <div className="card wide">
+          <Card className="card wide">
             <h2>Captured payloads</h2>
             <p className="note">Inert copies of malware and high-confidence scripts. Static analysis never executes the payload.</p>
             {/* overview.html:400-412's columns: seen count → the payload's
@@ -886,34 +894,34 @@ function Overview() {
               <p className="empty">No payloads captured yet — cowrie logs downloads/uploads during a shell session.</p>
             ) : (
               <div className="card__scroll">
-                <table className="data-table">
-                  <thead>
-                    <tr><th>seen</th><th>sha-256</th><th>attacker target path</th><th>lookup</th></tr>
-                  </thead>
-                  <tbody>
+                <Table className="data-table">
+                  <TableHeader>
+                    <TableRow><TableHead>seen</TableHead><TableHead>sha-256</TableHead><TableHead>attacker target path</TableHead><TableHead>lookup</TableHead></TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {dashboard.payloads.map((row) => (
-                      <tr key={row.shasum}>
-                        <td className="n">
+                      <TableRow key={row.shasum}>
+                        <TableCell className="n">
                           <a href={row.link} title="show events for this payload">{row.count.toLocaleString('en-US')}</a>
-                        </td>
-                        <td className="v">
+                        </TableCell>
+                        <TableCell className="v">
                           <a href={`/payload-analysis/${row.shasum}`} title="static analysis of this payload">{row.shasum}</a>
-                        </td>
-                        <td className="v">
+                        </TableCell>
+                        <TableCell className="v">
                           <a href={row.link} title="show events for this captured artifact">{row.download}</a>
-                        </td>
-                        <td className="v">
+                        </TableCell>
+                        <TableCell className="v">
                           <a className="btn btn-ghost btn-sm" href={`/payload-analysis/${row.shasum}`}>static analysis →</a>{' '}
                           <a className="btn btn-ghost btn-sm" href={row.vt} target="_blank" rel="noopener noreferrer">VirusTotal →</a>
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     ))}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
             )}
-          </div>
-          <div className="card wide">
+          </Card>
+          <Card className="card wide">
             <h2>Correlated campaigns — rolling 7 days</h2>
             <p className="note">
               Groups related source networks across sensors. Score rises with volume, sensor/port spread, reused credentials,
@@ -932,45 +940,45 @@ function Overview() {
               )
             ) : (
               <div className="card__scroll">
-                <table className="recent data-table">
-                  <thead>
-                    <tr><th>network</th><th>events</th><th>ips</th><th>sensors</th><th>last seen</th></tr>
-                  </thead>
-                  <tbody>
+                <Table className="recent data-table">
+                  <TableHeader>
+                    <TableRow><TableHead>network</TableHead><TableHead>events</TableHead><TableHead>ips</TableHead><TableHead>sensors</TableHead><TableHead>last seen</TableHead></TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {/* intel.html:136-149 (campaignrows-summary): every
                         cell deep-links to the campaign's own CIDR
                         investigation. */}
                     {campaigns.rows.map((row, index) => {
                       const cidr = str(row, 'cidr')
                       return (
-                        <tr key={`${cidr}-${index}`}>
-                          <td className="v">
+                        <TableRow key={`${cidr}-${index}`}>
+                          <TableCell className="v">
                             <Link to="/investigate/cidr/$cidr" params={{ cidr }}>{cidr}</Link>
-                          </td>
-                          <td className="n">
+                          </TableCell>
+                          <TableCell className="n">
                             <Link to="/investigate/cidr/$cidr" params={{ cidr }} title="show campaign events">
                               {num(row, 'events').toLocaleString('en-US')}
                             </Link>
-                          </td>
-                          <td className="n">
+                          </TableCell>
+                          <TableCell className="n">
                             <Link to="/investigate/cidr/$cidr" params={{ cidr }} title="show campaign source addresses">
                               {num(row, 'unique_ips').toLocaleString('en-US')}
                             </Link>
-                          </td>
-                          <td className="v">
+                          </TableCell>
+                          <TableCell className="v">
                             <Link to="/investigate/cidr/$cidr" params={{ cidr }} title="show campaign sensor activity">
                               {Array.isArray(row.sensors) ? (row.sensors as string[]).join(' ') : ''}
                             </Link>
-                          </td>
-                          <td>{formatTimestamp(str(row, 'last'))}</td>
-                        </tr>
+                          </TableCell>
+                          <TableCell>{formatTimestamp(str(row, 'last'))}</TableCell>
+                        </TableRow>
                       )
                     })}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
             )}
-          </div>
+          </Card>
         </div>
       ) : null}
 

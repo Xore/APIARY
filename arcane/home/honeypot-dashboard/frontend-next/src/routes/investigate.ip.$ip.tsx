@@ -1,3 +1,8 @@
+import { Card, CardHeader, CardContent } from '../components/ui/card'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../components/ui/table'
+import { Button } from '../components/ui/button'
+import { Field, FieldLabel } from '../components/ui/field'
+import { Input } from '../components/ui/input'
 // Per-IP investigation — one source address's whole profile: summary
 // chips, tabbed Activity/Indicators/Correlation views (ips.html's
 // attacker-profile layout, #1682), and the newest events with the record
@@ -144,21 +149,22 @@ function BlockControl({ ip }: { ip: string }) {
           blocked{state.BlockedBy ? ` by ${state.BlockedBy}` : ''}
           {state.ExpiresAt ? `, expires ${formatTimestamp(state.ExpiresAt)}` : ''}
         </span>
-        <button
-          className="btn btn-sm btn-secondary"
+        <Button
+          variant="secondary"
+          size="sm"
           type="button"
           disabled={busy}
           title="Remove this IP from the manual blackhole list."
           onClick={() => void apply(false)}
         >
           {busy ? '…' : 'unblock'}
-        </button>
+        </Button>
       </span>
     )
   }
   return (
     <form
-      className="inline-form hp-row"
+      className="flex flex-wrap items-end gap-2"
       onSubmit={(event) => {
         event.preventDefault()
         const raw = new FormData(event.currentTarget).get('expires_days')
@@ -166,24 +172,26 @@ function BlockControl({ ip }: { ip: string }) {
         void apply(true, Number.isFinite(days) && days > 0 ? days : undefined)
       }}
     >
-      <label htmlFor="attacker-block-expires">expire after</label>
-      <input
+      <Field className="w-auto min-w-28 gap-1"><FieldLabel htmlFor="attacker-block-expires">expire after</FieldLabel>
+      <Input
         type="number"
         id="attacker-block-expires"
         name="expires_days"
         min="1"
         placeholder="never"
-        className="hp-input hp-num"
+        className="w-28"
       />
+      </Field>
       <span>day(s)</span>
-      <button
-        className="btn btn-sm btn-danger"
+      <Button
+        variant="destructive"
+        size="sm"
         type="submit"
         disabled={busy}
         title="Drop this IP's connections at portbridge going forward; does not retroactively affect anything already logged"
       >
         {busy ? '…' : 'block'}
-      </button>
+      </Button>
     </form>
   )
 }
@@ -208,59 +216,61 @@ const EVENT_COLUMNS: Column<EventRow>[] = [
 function MiniTable({ title, rows, linkTo }: { title: string; rows: Kv[]; linkTo?: (key: string) => string }) {
   if (rows.length === 0) return null
   return (
-    <div className="card half">
-      <h2>{title}</h2>
-      <div className="card__scroll">
-        <table className="data-table">
-          <tbody>
+    <Card className="min-w-0 shadow-none">
+      <CardHeader className="p-4 pb-2"><h2>{title}</h2></CardHeader>
+      <CardContent className="min-w-0 p-4 pt-0">
+        <Table>
+          <TableBody>
             {rows.map((row) => (
-              <tr key={row.key}>
-                <td className="n">{row.count.toLocaleString('en-US')}</td>
-                <td className="v">{linkTo ? <a href={linkTo(row.key)}>{row.key}</a> : row.key}</td>
-              </tr>
+              <TableRow key={row.key}>
+                <TableCell className="n">{row.count.toLocaleString('en-US')}</TableCell>
+                <TableCell className="v">{linkTo ? <a href={linkTo(row.key)}>{row.key}</a> : row.key}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
   )
 }
 
 function TechniquesTable({ techniques }: { techniques: Technique[] }) {
   if (techniques.length === 0) return null
   return (
-    <div className="card wide">
-      <h2>MITRE ATT&amp;CK behavior mapping</h2>
-      <p className="note">Evidence-based behavioral context only; this does not identify or attribute an actor.</p>
-      <div className="card__scroll">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>domain</th>
-              <th>technique</th>
-              <th>observations</th>
-              <th>evidence</th>
-            </tr>
-          </thead>
-          <tbody>
+    <Card className="min-w-0 shadow-none">
+      <CardHeader className="p-4 pb-2">
+        <h2>MITRE ATT&amp;CK behavior mapping</h2>
+        <p className="note">Evidence-based behavioral context only; this does not identify or attribute an actor.</p>
+      </CardHeader>
+      <CardContent className="min-w-0 p-4 pt-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>domain</TableHead>
+              <TableHead>technique</TableHead>
+              <TableHead>observations</TableHead>
+              <TableHead>evidence</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {techniques.map((technique) => (
-              <tr key={technique.id}>
-                <td>
+              <TableRow key={technique.id}>
+                <TableCell>
                   <span className="badge badge--muted">{technique.domain}</span>
-                </td>
-                <td className="v">
+                </TableCell>
+                <TableCell className="v">
                   <a href={technique.url} target="_blank" rel="noopener noreferrer">
                     {technique.id} — {technique.name}
                   </a>
-                </td>
-                <td className="n">{technique.count.toLocaleString('en-US')}</td>
-                <td className="v">{technique.evidence}</td>
-              </tr>
+                </TableCell>
+                <TableCell className="n">{technique.count.toLocaleString('en-US')}</TableCell>
+                <TableCell className="v">{technique.evidence}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -303,24 +313,24 @@ function CorrelationPanel({ correlation }: { correlation: Correlation }) {
         ) : null}
         {correlation.records.length > 0 ? (
           <div className="card__scroll">
-            <table className="recent data-table">
-              <thead>
-                <tr>
-                  <th>time</th>
-                  <th>sensor</th>
-                  <th>summary</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table className="recent">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>time</TableHead>
+                  <TableHead>sensor</TableHead>
+                  <TableHead>summary</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {correlation.records.map((record, index) => (
-                  <tr key={`${record.time}-${index}`}>
-                    <td>{formatTimestamp(record.time)}</td>
-                    <td>{record.sensor}</td>
-                    <td className="v">{record.detail || record.proto}</td>
-                  </tr>
+                  <TableRow key={`${record.time}-${index}`}>
+                    <TableCell>{formatTimestamp(record.time)}</TableCell>
+                    <TableCell>{record.sensor}</TableCell>
+                    <TableCell className="v">{record.detail || record.proto}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         ) : (
           <p className="empty">No Elasticsearch correlation records were found for this IP.</p>
@@ -441,7 +451,7 @@ function InvestigateIp() {
             idPrefix="attacker-profile"
           />
           <TabPanel id="activity" active={tab} idPrefix="attacker-profile" className="dashboard-panel">
-            <div className="">
+            <div className="grid min-w-0 gap-4 md:grid-cols-2">
               <MiniTable title="Sensors contacted" rows={profile.sensors} />
               <MiniTable title="Credentials attempted" rows={profile.credentials} />
               <MiniTable title="Commands" rows={profile.commands} />
@@ -452,7 +462,7 @@ function InvestigateIp() {
             </div>
           </TabPanel>
           <TabPanel id="indicators" active={tab} idPrefix="attacker-profile" className="dashboard-panel">
-            <div className="">
+            <div className="grid min-w-0 gap-4 md:grid-cols-2">
               <MiniTable title="Payload hashes" rows={profile.payloads} linkTo={(key) => `/payload-analysis/${encodeURIComponent(key)}`} />
               <MiniTable title="Alerts" rows={profile.alerts} />
               <MiniTable title="Fingerprints" rows={profile.fingerprints} />

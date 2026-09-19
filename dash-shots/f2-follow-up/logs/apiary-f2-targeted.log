@@ -1,0 +1,13 @@
+
+> test
+> vitest run src/lib/bootScript.test.ts src/routes/-routeShape.test.ts
+
+
+ RUN  v4.1.11 /home/xore/colibri-engines/apiary-dashboard/arcane/home/honeypot-dashboard/frontend-next
+
+
+ Test Files  2 passed (2)
+      Tests  32 passed (32)
+   Start at  04:13:43
+   Duration  3.40s (transform 1.38s, setup 0ms, import 199ms, tests 2.03s, environment 2.03s)
+

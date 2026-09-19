@@ -14,7 +14,6 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
-import type React from 'react'
 import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { SensorEventsTable } from '../components/SensorEvents'
@@ -23,6 +22,11 @@ import { protocolFor, type SensorEventRow } from '../lib/sensorProtocols'
 import { countryName } from '../lib/country'
 import { useSidebarViewTabs } from '../lib/viewTabs'
 import { CuratedSensorView, hasCuratedView } from '../components/CuratedSensorViews'
+import { Card, CardContent, CardDescription, CardHeader } from '../components/ui/card'
+import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import { Skeleton } from '../components/ui/skeleton'
+import { Table, TableBody, TableCell, TableRow } from '../components/ui/table'
 
 type Row = { key: string; count: number }
 type TopList = { label: string; rows: Row[] }
@@ -110,13 +114,11 @@ function Activity({ hourly }: { hourly: number[] }) {
   const peak = Math.max(...hourly)
   if (peak === 0) return <p className="empty">No activity in this window.</p>
   return (
-    <div className="metric__spark" aria-hidden="true">
+    <svg viewBox={`0 0 ${hourly.length * 5} 100`} preserveAspectRatio="none" className="h-16 w-full text-primary" aria-hidden="true">
       {hourly.map((count, index) => (
-        // The height is the datum -- this hour against the busiest one.
-        // Everything about how the bar looks belongs to .metric__spark.
-        <i key={index} style={{ ['--v' as string]: Math.max(3, Math.round((count * 100) / peak)) } as React.CSSProperties} />
+        <rect key={index} x={index * 5} y={100 - Math.max(3, Math.round((count * 100) / peak))} width="3" height={Math.max(3, Math.round((count * 100) / peak))} fill="currentColor" />
       ))}
-    </div>
+    </svg>
   )
 }
 
@@ -124,31 +126,24 @@ function TopTable({ label, rows, href }: { label: string; rows: Row[]; href?: (k
   if (rows.length === 0) return null
   const most = rows[0].count
   return (
-    <div>
-      <p className="subtitle">{label}</p>
-      <table className="data-table">
-        <tbody>
+    <Card className="min-w-0">
+      <CardHeader><h2 className="text-sm font-semibold">{label}</h2></CardHeader>
+      <CardContent><Table>
+        <TableBody>
           {rows.map((row) => (
-            <tr key={row.key}>
-              <td className="v">
+            <TableRow key={row.key}>
+              <TableCell className="v">
                 {href ? <a href={href(row.key)}>{row.key}</a> : row.key}
-              </td>
-              <td className="n">{row.count.toLocaleString('en-US')}</td>
-              {/* A leaderboard's shape matters as much as its order: one
-                  value at 90% is a different story from ten at 10% each.
-                  .progress is the theme's own bar and reads its fill from
-                  --v, so the percentage is data and the appearance is not
-                  ours to decide. */}
-              <td>
-                <span className="progress" aria-hidden="true">
-                  <span style={{ ['--v' as string]: Math.max(4, Math.round((row.count * 100) / most)) } as React.CSSProperties} />
-                </span>
-              </td>
-            </tr>
+              </TableCell>
+              <TableCell className="n">{row.count.toLocaleString('en-US')}</TableCell>
+              <TableCell>
+                <progress value={row.count} max={most} aria-label={`${row.key}: ${row.count} of ${most}`} />
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
-    </div>
+        </TableBody>
+      </Table></CardContent>
+    </Card>
   )
 }
 
@@ -233,9 +228,9 @@ function SensorPage() {
         chips={
           view ? (
             <>
-              <span className="chip">{view.events.toLocaleString('en-US')} events / 7d</span>
-              <span className="chip">{view.unique_sources.toLocaleString('en-US')} unique sources</span>
-              {view.last_seen ? <span className="chip">last {formatTimestamp(view.last_seen)}</span> : null}
+              <Badge variant="secondary">{view.events.toLocaleString('en-US')} events / 7d</Badge>
+              <Badge variant="secondary">{view.unique_sources.toLocaleString('en-US')} unique sources</Badge>
+              {view.last_seen ? <Badge variant="secondary">last {formatTimestamp(view.last_seen)}</Badge> : null}
             </>
           ) : undefined
         }
@@ -246,9 +241,9 @@ function SensorPage() {
         // between-sensor navigation silently vanished.
         <p className="note text-danger" role="alert">
           The sensor roster failed to load, so the per-sensor navigation above is missing this load.{' '}
-          <button type="button" className="lnk" onClick={retry}>
+          <Button type="button" variant="link" size="sm" onClick={retry}>
             Retry
-          </button>
+          </Button>
         </p>
       ) : null}
       {viewTabs}
@@ -260,39 +255,41 @@ function SensorPage() {
           onRetry={retry}
         />
       ) : view === null ? (
-        <span className="skeleton-line" aria-hidden="true" />
+        <Card className="col-span-full" aria-label="Loading sensor overview">
+          <CardContent className="space-y-4 pt-6"><Skeleton className="h-6 w-40" /><Skeleton className="h-24 w-full" /></CardContent>
+        </Card>
       ) : (
         <>
           {view.measures.length > 0 ? (
-            <div className="card wide">
-              <h2>What this sensor did</h2>
-              <p className="note">
+            <Card className="col-span-full">
+              <CardHeader><h2 className="font-semibold leading-none tracking-tight">What this sensor did</h2>
+              <CardDescription>
                 The quantities this sensor exists to produce, over the last 7 days — not an event count, which says the
                 same thing about every sensor.
-              </p>
-              <div className="metric-grid">
+              </CardDescription></CardHeader>
+              <CardContent className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-4">
                 {view.measures.map((measure) => (
-                  <div className="metric" key={measure.label}>
-                    <div className="metric__value">{measureValue(measure)}</div>
-                    <div className="metric__label">{measure.label}</div>
-                    <div className="metric__trend">most in one event: {measurePeak(measure)}</div>
-                  </div>
+                  <Card className="min-w-0" key={measure.label}>
+                    <CardHeader><h2 className="text-sm font-semibold">{measure.label}</h2></CardHeader>
+                    <CardContent><div className="text-2xl font-semibold tabular-nums">{measureValue(measure)}</div>
+                    <p className="text-sm text-muted-foreground">most in one event: {measurePeak(measure)}</p></CardContent>
+                  </Card>
                 ))}
-              </div>
-            </div>
+              </CardContent>
+            </Card>
           ) : null}
 
-          <div className="card wide">
-            <h2>Activity</h2>
-            <p className="note">
+          <Card className="col-span-full">
+            <CardHeader><h2 className="font-semibold leading-none tracking-tight">Activity</h2>
+            <CardDescription>
               Events per hour over the last 7 days. First seen {view.first_seen ? formatTimestamp(view.first_seen) : '—'}.
-            </p>
-            <Activity hourly={view.hourly} />
-          </div>
+            </CardDescription></CardHeader>
+            <CardContent><Activity hourly={view.hourly} /></CardContent>
+          </Card>
 
-          <div className="card wide">
-            <h2>Who reached it</h2>
-            <div className="metric-grid">
+          <Card className="col-span-full">
+            <CardHeader><h2 className="font-semibold leading-none tracking-tight">Who reached it</h2></CardHeader>
+            <CardContent className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-4">
               <TopTable
                 label="source addresses"
                 rows={view.top_sources}
@@ -302,22 +299,22 @@ function SensorPage() {
                 label="countries"
                 rows={view.top_countries.map((row) => ({ ...row, key: countryName(row.key) || row.key }))}
               />
-            </div>
-          </div>
+            </CardContent>
+          </Card>
 
           {view.top_lists.length > 0 ? (
-            <div className="card wide">
-              <h2>What they asked it for</h2>
-              <p className="note">
+            <Card className="col-span-full">
+              <CardHeader><h2 className="font-semibold leading-none tracking-tight">What they asked it for</h2>
+              <CardDescription>
                 This sensor&apos;s own leaderboards — the fields that mean something for this protocol, rather than the
                 same five for every sensor.
-              </p>
-              <div className="metric-grid">
+              </CardDescription></CardHeader>
+              <CardContent className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-4">
                 {view.top_lists.map((list) => (
                   <TopTable key={list.label} label={list.label} rows={list.rows} />
                 ))}
-              </div>
-            </div>
+              </CardContent>
+            </Card>
           ) : null}
         </>
       )}
@@ -325,20 +322,20 @@ function SensorPage() {
       {/* A sensor with a hand-written reading gets it; the rest get the
           generic one, which is strictly more than the nothing they had. */}
       {eventsFailed ? (
-        <div className="card wide">
+        <Card className="col-span-full p-6">
           <ErrorStateBlock
             title="This sensor's events failed to load"
             hint="The backend request failed — the event list below this page normally rides here."
             onRetry={retry}
           />
-        </div>
+        </Card>
       ) : null}
       {hasCuratedView(sensor) ? (
         <CuratedSensorView sensor={sensor} />
       ) : eventsFailed ? null : (
-        <div className="card wide">
+        <Card className="col-span-full p-6">
           <SensorEventsTable sensor={sensor} rows={rows?.rows ?? null} total={rows?.total} />
-        </div>
+        </Card>
       )}
     </>
   )

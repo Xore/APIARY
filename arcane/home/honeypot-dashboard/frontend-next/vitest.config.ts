@@ -11,9 +11,16 @@
 // before hydration, colour resolution that requires a real computed
 // style. `tsc --noEmit` and `vite build` were the only checks this tier
 // had, and neither can see behaviour.
+import { resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
+  resolve: {
+    // Same '@' alias as vite.config.ts: generated shadcn components under
+    // src/components/ui import '@/lib/utils', so the unit harness must
+    // resolve it too. Alias only — no app build plugins here (#1831).
+    alias: { '@': resolve(import.meta.dirname ?? '.', 'src') },
+  },
   test: {
     environment: 'jsdom',
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],

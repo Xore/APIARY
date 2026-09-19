@@ -10,6 +10,10 @@ import { useCallback, useEffect, useState } from 'react'
 import { confirmAction } from '../components/ConfirmDialog'
 import { InvestigateHeader, MasterDetailTable } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
+import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
+import { Input } from '../components/ui/input'
 import { str, when, type StorePage, type StoreRow } from '../components/StoreList'
 import type { Column } from '../components/Investigate'
 
@@ -143,30 +147,19 @@ function Page() {
         subtitle="Documents Elasticsearch rejected, with their original error and field shape for remediation. An empty list is the healthy state."
         chips={
           <>
-            <span className="chip">{failed ? 'load failed' : `${total.toLocaleString('en-US')} documents`}</span>
-            <input
-              className="search"
-              placeholder="optional Elasticsearch query"
-              aria-label="Dead-letter query"
-              value={queryInput}
-              onChange={(event) => setQueryInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') runSearch()
-              }}
-            />
-            <button className="copy" type="button" onClick={runSearch}>
-              search
-            </button>
-            {isAdmin ? (
-              <button className="btn btn-sm btn-danger" type="button" onClick={purge} disabled={purging}>
-                {purging ? 'purging…' : 'purge shown'}
-              </button>
-            ) : null}
+            <Badge variant="secondary">{failed ? 'load failed' : `${total.toLocaleString('en-US')} documents`}</Badge>
           </>
         }
       />
+      <Card><CardHeader><CardTitle><h2>Filter dead letters</h2></CardTitle></CardHeader><CardContent>
+        <form className="flex flex-wrap items-center gap-2" onSubmit={(event) => { event.preventDefault(); runSearch() }}>
+          <Input className="min-w-0 flex-1 basis-52" placeholder="optional Elasticsearch query" aria-label="Dead-letter query" value={queryInput} onChange={(event) => setQueryInput(event.target.value)} />
+          <Button size="sm" variant="secondary" type="submit">Search</Button>
+          {isAdmin ? <Button size="sm" variant="destructive" type="button" onClick={purge} disabled={purging}>{purging ? 'purging…' : 'purge shown'}</Button> : null}
+        </form>
+      </CardContent></Card>
       {message ? (
-        <p className="note" role="status" aria-live="polite">
+        <p className="text-sm text-muted-foreground" role="status" aria-live="polite">
           {message}
         </p>
       ) : null}

@@ -1,0 +1,71 @@
+
+> test
+> vitest run
+
+
+ RUN  v4.1.11 /home/xore/colibri-engines/apiary-dashboard/arcane/home/honeypot-dashboard/frontend-next
+
+ ❯ src/lib/bootScript.test.ts (7 tests | 1 failed) 48ms
+     × stamps a stored palette onto both attributes upstream reads 11ms
+ ❯ src/routes/-routeShape.test.ts (20 tests | 1 failed) 3434ms
+     × resolves every route to the pinned id/path shape 21ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/lib/bootScript.test.ts > the pre-hydration boot script > stamps a stored palette onto both attributes upstream reads
+AssertionError: expected undefined to be 'slate' // Object.is equality
+
+- Expected:
+"slate"
+
++ Received:
+undefined
+
+ ❯ src/lib/bootScript.test.ts:55:54
+     53|     localStorage.setItem('hp-palette', 'slate')
+     54|     runBoot()
+     55|     expect(document.documentElement.dataset.hpTheme).toBe('slate')
+       |                                                      ^
+     56|     expect(document.documentElement.dataset.hpPalette).toBe('slate')
+     57|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/routes/-routeShape.test.ts > generated route tree contract (#2215) > resolves every route to the pinned id/path shape
+AssertionError: expected [ …(65) ] to deeply equal [ …(64) ]
+
+- Expected
++ Received
+
+@@ -114,10 +114,14 @@
+    {
+      "id": "/dead-letters",
+      "path": "/dead-letters",
+    },
+    {
++     "id": "/dev/gallery",
++     "path": "/dev/gallery",
++   },
++   {
+      "id": "/event/$id",
+      "path": "/event/$id",
+    },
+    {
+      "id": "/events",
+
+ ❯ src/routes/-routeShape.test.ts:443:42
+    441|
+    442|   it('resolves every route to the pinned id/path shape', () => {
+    443|     expect(collectRouteShape(routeTree)).toEqual(EXPECTED_ROUTE_SHAPE)
+       |                                          ^
+    444|   })
+    445|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 19 passed (21)
+      Tests  2 failed | 177 passed (179)
+   Start at  04:06:10
+   Duration  5.99s (transform 4.00s, setup 0ms, import 3.72s, tests 4.74s, environment 39.35s)
+

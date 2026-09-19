@@ -6,6 +6,9 @@ import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
+import { Badge } from '../components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
+import { Table, TableBody, TableCell, TableRow } from '../components/ui/table'
 import { useLiveInterval } from '../lib/live'
 import { formatTimestamp } from '../lib/time'
 
@@ -63,8 +66,7 @@ export const Route = createFileRoute('/source-health')({
 })
 
 function stateBadge(state: SensorHealth['state']) {
-  const cls = state === 'ACTIVE' ? 'badge badge--success' : state === 'QUIET' ? 'badge badge--warning' : 'badge badge--danger'
-  return <span className={cls}>{state}</span>
+  return <Badge variant={state === 'ACTIVE' ? 'default' : state === 'QUIET' ? 'secondary' : 'destructive'}>{state}</Badge>
 }
 
 const COLUMNS: Column<SensorHealth>[] = [
@@ -75,8 +77,7 @@ const COLUMNS: Column<SensorHealth>[] = [
 ]
 
 function clusterBadge(status: string) {
-  const cls = status === 'green' ? 'badge badge--success' : status === 'yellow' ? 'badge badge--warning' : 'badge badge--danger'
-  return <span className={cls}>cluster {status}</span>
+  return <Badge variant={status === 'green' ? 'default' : status === 'yellow' ? 'secondary' : 'destructive'}>cluster {status}</Badge>
 }
 
 function formatDuration(totalSeconds: number): string {
@@ -100,9 +101,9 @@ function formatBytes(bytes: number): string {
 
 function CardRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="card__row">
-      <span className="card__label">{label}</span>
-      <span className="card__value card__value--mono">{value}</span>
+    <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b py-2 text-sm last:border-0">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="min-w-0 break-all font-mono text-right">{value}</span>
     </div>
   )
 }
@@ -153,9 +154,9 @@ function SourceHealthPage() {
           health ? (
             <>
               {clusterBadge(health.cluster_status)}
-              <span className="chip">{health.total_documents.toLocaleString('en-US')} documents</span>
-              <span className="chip">{health.sensors.length} sensors</span>
-              <Link className="chip" to="/dead-letters" title="Inspect documents Elasticsearch rejected">
+              <Badge variant="secondary">{health.total_documents.toLocaleString('en-US')} documents</Badge>
+              <Badge variant="secondary">{health.sensors.length} sensors</Badge>
+              <Link className="text-sm text-primary underline-offset-4 hover:underline" to="/dead-letters" title="Inspect documents Elasticsearch rejected">
                 {health.dead_letters.toLocaleString('en-US')} dead letters
               </Link>
             </>
@@ -170,7 +171,7 @@ function SourceHealthPage() {
         />
       ) : null}
       {failed && health ? (
-        <p className="note" role="alert">
+        <p className="text-sm text-muted-foreground" role="alert">
           The latest health refresh failed — the figures below are the last ones fetched.
         </p>
       ) : null}
@@ -179,23 +180,15 @@ function SourceHealthPage() {
           opened with no at-a-glance verdict at all. The two in-page
           anchors match the ids further down, same as the Go tier. */}
       {health ? (
-        <div className="metric-grid">
-          <a className="metric" href="#sensor-feeds" title="Jump to the per-sensor feed table">
-            <div className="metric__value">{health.sensors.length.toLocaleString('en-US')}</div>
-            <div className="metric__label">Configured feeds</div>
-          </a>
-          <Link className="metric" to="/history" title="Browse all indexed documents in Elasticsearch history">
-            <div className="metric__value">{health.total_documents.toLocaleString('en-US')}</div>
-            <div className="metric__label">Indexed documents</div>
-          </Link>
-          <a className="metric" href="#pipeline-status" title="Jump to the Filebeat pipeline status card">
-            <div className="metric__value">{health.pipeline?.state ?? 'unknown'}</div>
-            <div className="metric__label">Filebeat</div>
-          </a>
-          <Link className="metric" to="/dead-letters" title="Inspect rejected documents">
-            <div className="metric__value">{health.dead_letters.toLocaleString('en-US')}</div>
-            <div className="metric__label">Dead letters</div>
-          </Link>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {([
+            ['Configured feeds', health.sensors.length.toLocaleString('en-US'), <a href="#sensor-feeds" title="Jump to the per-sensor feed table">View feeds →</a>],
+            ['Indexed documents', health.total_documents.toLocaleString('en-US'), <Link to="/history" title="Browse all indexed documents in Elasticsearch history">View history →</Link>],
+            ['Filebeat', health.pipeline?.state ?? 'unknown', <a href="#pipeline-status" title="Jump to the Filebeat pipeline status card">View pipeline →</a>],
+            ['Dead letters', health.dead_letters.toLocaleString('en-US'), <Link to="/dead-letters" title="Inspect rejected documents">Inspect →</Link>],
+          ] as const).map(([label, value, link]) => (
+            <Card key={label} className="min-w-0"><CardHeader><CardTitle><h2>{label}</h2></CardTitle></CardHeader><CardContent><p className="text-2xl font-semibold tabular-nums">{value}</p><div className="mt-2 text-sm text-primary underline-offset-4 hover:underline">{link}</div></CardContent></Card>
+          ))}
         </div>
       ) : null}
       {/* source_health.html:35 — the page's two organising headings were
@@ -213,33 +206,31 @@ function SourceHealthPage() {
         </Link>
       </div>
       {health ? (
-        <div className="hp-flow--loose">
-          <div className="card wide">
-            <h2>Ingestion freshness</h2>
-            <table className="data-table">
-              <tbody>
-                <tr>
-                  <td>state</td>
-                  <td className={`state s-${ingest?.state ?? 'unknown'}`}>{ingest?.state ?? 'unknown'}</td>
-                </tr>
-                <tr>
-                  <td>latest indexed event</td>
-                  <td className="v">{ingest?.last_ingest ? formatTimestamp(ingest.last_ingest) : '—'}</td>
-                </tr>
-                <tr>
-                  <td>ingestion age</td>
-                  <td className="v">{ingest && ingest.age_seconds >= 0 ? (ingest.age_seconds === 0 ? '0s' : formatDuration(ingest.age_seconds)) : '—'}</td>
-                </tr>
-                <tr>
-                  <td>dead letters in 24h</td>
-                  <td className="v">
+        <div className="grid gap-4">
+          <Card>
+            <CardHeader><CardTitle><h2>Ingestion freshness</h2></CardTitle></CardHeader><CardContent>
+            <Table><TableBody>
+                <TableRow>
+                  <TableCell>state</TableCell>
+                  <TableCell><Badge variant={ingest?.state === 'fresh' ? 'default' : 'secondary'}>{ingest?.state ?? 'unknown'}</Badge></TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>latest indexed event</TableCell>
+                  <TableCell>{ingest?.last_ingest ? formatTimestamp(ingest.last_ingest) : '—'}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>ingestion age</TableCell>
+                  <TableCell>{ingest && ingest.age_seconds >= 0 ? (ingest.age_seconds === 0 ? '0s' : formatDuration(ingest.age_seconds)) : '—'}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>dead letters in 24h</TableCell>
+                  <TableCell>
                     <Link to="/dead-letters">{(ingest?.recent_dead_letters ?? 0).toLocaleString('en-US')}</Link>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <p className="note">Delayed means the newest indexed event is over two minutes old; stale means over fifteen minutes.</p>
-          </div>
+                  </TableCell>
+                </TableRow>
+              </TableBody></Table>
+            <p className="mt-3 text-sm text-muted-foreground">Delayed means the newest indexed event is over two minutes old; stale means over fifteen minutes.</p>
+            </CardContent></Card>
         </div>
       ) : null}
       {/* source_health.html:44. The Go tier's "Prometheus metrics →"
@@ -253,27 +244,27 @@ function SourceHealthPage() {
         </div>
       </div>
       {health ? (
-        <div className="hp-flow--loose">
-          <div className="card half">
-            <h2>YARA scanner</h2>
+        <div className="grid gap-4 lg:grid-cols-3">
+          <Card className="min-w-0">
+            <CardHeader><CardTitle><h2>YARA scanner</h2></CardTitle></CardHeader><CardContent>
             <CardRow label="enabled" value={String(yara?.enabled ?? false)} />
             <CardRow label="last scan" value={yara?.last_scan ? formatTimestamp(yara.last_scan) : '—'} />
             <CardRow label="rules sha256" value={yara?.rules_sha256 || '—'} />
             <CardRow label="samples scanned" value={(yara?.samples ?? 0).toLocaleString('en-US')} />
             <CardRow label="samples matched" value={(yara?.matched ?? 0).toLocaleString('en-US')} />
             <CardRow label="errors" value={(yara?.errors ?? 0).toLocaleString('en-US')} />
-            <p className="note">The scanner has no network and receives payload stores read-only.</p>
-          </div>
-          <div className="card half">
-            <h2>Backend runtime</h2>
+            <p className="mt-3 text-sm text-muted-foreground">The scanner has no network and receives payload stores read-only.</p>
+            </CardContent></Card>
+          <Card className="min-w-0">
+            <CardHeader><CardTitle><h2>Backend runtime</h2></CardTitle></CardHeader><CardContent>
             <CardRow label="uptime" value={formatDuration(runtime?.uptime_seconds ?? 0)} />
             <CardRow label="resident memory" value={formatBytes(runtime?.rss_bytes ?? 0)} />
             <CardRow label="virtual memory" value={formatBytes(runtime?.vm_bytes ?? 0)} />
             <CardRow label="Elasticsearch cluster" value={clusterBadge(health.cluster_status)} />
-            <p className="note">The Rust backend service's own process, from /proc/self — the legacy card's Go heap and goroutines have no equivalent here.</p>
-          </div>
-          <div className="card half" id="pipeline-status">
-            <h2>Pipeline status</h2>
+            <p className="mt-3 text-sm text-muted-foreground">The Rust backend service's own process, from /proc/self — the legacy card's Go heap and goroutines have no equivalent here.</p>
+            </CardContent></Card>
+          <Card className="min-w-0" id="pipeline-status">
+            <CardHeader><CardTitle><h2>Pipeline status</h2></CardTitle></CardHeader><CardContent>
             <CardRow label="Filebeat" value={pipeline?.state ?? 'unknown'} />
             <CardRow label="acknowledged" value={(pipeline?.acked ?? 0).toLocaleString('en-US')} />
             <CardRow
@@ -281,13 +272,13 @@ function SourceHealthPage() {
               value={`${(pipeline?.failed ?? 0).toLocaleString('en-US')} / ${(pipeline?.dropped ?? 0).toLocaleString('en-US')} / ${(pipeline?.active ?? 0).toLocaleString('en-US')}`}
             />
             <CardRow label="decode failures" value={(pipeline?.decode_failures ?? 0).toLocaleString('en-US')} />
-            <p className="note">
+            <p className="mt-3 text-sm text-muted-foreground">
               Filebeat's own fallback index for log lines its json.decode processor couldn't parse at all — a distinct,
               earlier failure layer from dead letters above, which only holds documents Elasticsearch itself rejected after
               Filebeat successfully shipped them. Failed/dropped counters or decode-failure growth indicate a pipeline
               error.
             </p>
-          </div>
+            </CardContent></Card>
         </div>
       ) : null}
       <div className="section-heading" id="sensor-feeds">
@@ -303,7 +294,7 @@ function SourceHealthPage() {
           non-zero — a note explaining a discrepancy that isn't there would
           be noise. */}
       {health && health.unattributed_24h > 0 ? (
-        <p className="note">
+        <p className="text-sm text-muted-foreground">
           {health.unattributed_24h.toLocaleString('en-US')} event
           {health.unattributed_24h === 1 ? '' : 's'} in the last 24 hours arrived over the WireGuard tunnel with no
           recoverable client address. They are counted in every total above but attributed to no source IP, because the

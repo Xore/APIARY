@@ -4,13 +4,17 @@
 // Recent-investigations list (pick 12B), and the account/session menu
 // (hp-account.js's dropdown: settings, log out, role badge). Identity is
 // resolved server-side into router context — no /api/whoami fetch here.
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment } from 'react'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { NAV_SECTIONS, navHrefFor } from '../lib/nav'
 import { hrefForRecent, labelForRecent, useRecentInvestigations } from '../lib/recent'
 import { SidebarViewTabs } from '../lib/viewTabs'
 import { openCommandPalette } from './CommandPalette'
 import type { User } from '../lib/auth'
+import { Sidebar as ShadcnSidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel, SidebarMenu, SidebarMenuItem } from './ui/sidebar'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './ui/dropdown-menu'
+import { Avatar, AvatarFallback } from './ui/avatar'
+import { Badge } from './ui/badge'
 
 function NavIcon({ path }: { path: string }) {
   return (
@@ -28,49 +32,20 @@ function NavIcon({ path }: { path: string }) {
 }
 
 function AccountMenu({ user, onOpenSettings }: { user?: User | null; onOpenSettings?: () => void }) {
-  const [open, setOpen] = useState(false)
-  const rootRef = useRef<HTMLDivElement>(null)
-  const triggerRef = useRef<HTMLButtonElement>(null)
-
-  // Click-away and Escape close, matching hp-account.js — Escape also
-  // returns focus to the trigger.
-  useEffect(() => {
-    if (!open) return
-    const onClick = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        setOpen(false)
-        triggerRef.current?.focus()
-      }
-    }
-    document.addEventListener('click', onClick)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('click', onClick)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
-
   const display = user?.displayName || user?.username || 'Account'
   const initial = display.trim().charAt(0).toUpperCase() || '?'
 
   return (
-    <div className="hp-account" ref={rootRef}>
-      <div className="dropdown hp-account-menu" role="menu" aria-label="Account actions" hidden={!open}>
+    <DropdownMenu>
+      <DropdownMenuContent align="start" aria-label="Account actions">
         {/* Opens the centered settings modal when JS-driven opening is
             available (hp-settings.js:23-27's
             data-hp-account-dashboard-settings, per Xore); the /settings
             href stays as the no-JS / modified-click fallback, and on the
             /settings route itself this is a plain link. */}
-        <Link
-          className="dropdown__item"
-          role="menuitem"
+        <DropdownMenuItem asChild><Link
           to="/settings"
           onClick={(event) => {
-            setOpen(false)
             if (!onOpenSettings || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
             event.preventDefault()
             onOpenSettings()
@@ -81,43 +56,37 @@ function AccountMenu({ user, onOpenSettings }: { user?: User | null; onOpenSetti
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
           </svg>
           <span>Dashboard settings</span>
-        </Link>
-        <div className="dropdown__divider" />
+        </Link></DropdownMenuItem>
+        <DropdownMenuSeparator />
         {/* Log out is a real navigation — the /auth/logout server route
             clears the session cookie and bounces through Keycloak. */}
-        <a className="dropdown__item" role="menuitem" href="/auth/logout">
+        <DropdownMenuItem asChild><a href="/auth/logout">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
             <polyline points="16 17 21 12 16 7" />
             <line x1="21" y1="12" x2="9" y2="12" />
           </svg>
           <span>Log out</span>
-        </a>
+        </a></DropdownMenuItem>
         {!user ? (
-          <span className="dropdown__item hp-account-note">Account service unavailable</span>
+          <DropdownMenuItem disabled>Account service unavailable</DropdownMenuItem>
         ) : null}
-      </div>
-      <button
-        ref={triggerRef}
+      </DropdownMenuContent>
+      <DropdownMenuTrigger asChild><button
         className="sidebar__profile hp-account-trigger"
         type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
         aria-label="Account actions"
-        onClick={() => setOpen((value) => !value)}
       >
-        <span className="avatar" aria-hidden="true">
-          {initial}
-        </span>
+        <Avatar aria-hidden="true"><AvatarFallback>{initial}</AvatarFallback></Avatar>
         <div>
           <div className="hp-profile-name">{display}</div>
           {/* Accent badge for admins, muted for users — hp-app.js:1845-1850. */}
           {user ? (
-            <span className={user.role === 'admin' ? 'badge badge--accent' : 'badge badge--muted'}>{user.role}</span>
+            <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>{user.role}</Badge>
           ) : null}
         </div>
-      </button>
-    </div>
+      </button></DropdownMenuTrigger>
+    </DropdownMenu>
   )
 }
 
@@ -130,7 +99,7 @@ export function Sidebar({ user, onOpenSettings }: { user?: User | null; onOpenSe
   // (hp-app.js:2049-2052's side.append fallback).
   const hasActiveItem = NAV_SECTIONS.some((section) => section.items.some((item) => item.to === activeHref))
   return (
-    <aside className="app-sidebar" aria-label="Primary navigation">
+    <aside className="app-sidebar" aria-label="Primary navigation"><ShadcnSidebar collapsible="none" className="!w-full !bg-transparent">
       <button
         className="hp-sidebar-search"
         type="button"
@@ -153,16 +122,17 @@ export function Sidebar({ user, onOpenSettings }: { user?: User | null; onOpenSe
           <small>Defensive operations</small>
         </span>
       </Link>
-      <nav className="app-sidebar__body" aria-label="Dashboard sections">
+      <SidebarContent className="app-sidebar__body !block"><nav aria-label="Dashboard sections">
         {NAV_SECTIONS.map((section) => (
-          <div key={section.label}>
-            <div className="sidebar__section-label">{section.label}</div>
+          <SidebarGroup key={section.label} className="!p-0">
+            <SidebarGroupLabel className="sidebar__section-label !h-auto">{section.label}</SidebarGroupLabel>
+            <SidebarMenu>
             {section.items.map((item) => {
               // Detail pages highlight their parent entry (hp-app.js's
               // activeHref) so drill-downs never orphan the rail.
               const active = activeHref === item.to
               return (
-                <Fragment key={item.to}>
+                <SidebarMenuItem key={item.to}><Fragment>
                   <Link
                     to={item.to}
                     className={active ? 'sidebar__item active' : 'sidebar__item'}
@@ -175,10 +145,11 @@ export function Sidebar({ user, onOpenSettings }: { user?: User | null; onOpenSe
                       directly under the active nav item, indented like a
                       tree branch (hp-app.js:2044-2051). */}
                   {active ? <SidebarViewTabs /> : null}
-                </Fragment>
+                </Fragment></SidebarMenuItem>
               )
             })}
-          </div>
+            </SidebarMenu>
+          </SidebarGroup>
         ))}
         {!hasActiveItem ? <SidebarViewTabs /> : null}
         {recent.length > 0 ? (
@@ -198,8 +169,10 @@ export function Sidebar({ user, onOpenSettings }: { user?: User | null; onOpenSe
             </div>
           </>
         ) : null}
-      </nav>
-      <AccountMenu user={user} onOpenSettings={onOpenSettings} />
-    </aside>
+      </nav></SidebarContent>
+      <SidebarFooter>
+        <AccountMenu user={user} onOpenSettings={onOpenSettings} />
+      </SidebarFooter>
+    </ShadcnSidebar></aside>
   )
 }

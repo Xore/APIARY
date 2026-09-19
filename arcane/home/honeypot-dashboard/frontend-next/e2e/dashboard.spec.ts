@@ -105,7 +105,7 @@ test.describe("reports studio content (#2507)", () => {
     await page.goto("/reports");
     // Design step: the wizard's template gallery lists the fixture catalog
     // instead of "No report templates are available.".
-    await expect(page.locator(".hp-rp-template", { hasText: "Executive report" })).toBeVisible();
+    await expect(page.locator(".hp-rp-templates", { hasText: "Executive report" })).toBeVisible();
     await expect(page.getByText("No report templates are available.")).toHaveCount(0);
 
     // Library step: saved definition with its schedule, plus the generated

@@ -12,7 +12,7 @@
 // the projection test in zeek_proxy_attribution.rs.
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 function shippedBootScript(): string {
   const source = readFileSync(join(__dirname, '..', 'routes', '__root.tsx'), 'utf8')
@@ -37,7 +37,12 @@ describe('the pre-hydration boot script', () => {
     document.documentElement.removeAttribute('data-hp-theme')
     document.documentElement.removeAttribute('data-hp-palette')
     localStorage.clear()
+    document.documentElement.classList.remove('dark')
+    // jsdom does not implement the browser API used before palette restore.
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false })))
   })
+
+  afterEach(() => vi.unstubAllGlobals())
 
   it('is present in the shipped route file', () => {
     expect(shippedBootScript()).toContain('localStorage.getItem("hp-theme")')
@@ -54,6 +59,34 @@ describe('the pre-hydration boot script', () => {
     runBoot()
     expect(document.documentElement.dataset.hpTheme).toBe('slate')
     expect(document.documentElement.dataset.hpPalette).toBe('slate')
+  })
+
+  it.each([false, true])('restores a palette with system dark=%s before hydration', (dark) => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: dark })))
+    localStorage.setItem('hp-palette', 'slate')
+    runBoot()
+    expect(matchMedia).toHaveBeenCalledWith('(prefers-color-scheme: dark)')
+    expect(document.documentElement.classList.contains('dark')).toBe(dark)
+    expect(document.documentElement.dataset.hpTheme).toBe('slate')
+    expect(document.documentElement.dataset.hpPalette).toBe('slate')
+    expect(localStorage.getItem('hp-palette')).toBe('slate')
+    expect(localStorage.getItem('hp-theme')).toBeNull()
+  })
+
+  it.each(['light', 'dark'])('stored %s mode overrides the system preference', (mode) => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: mode !== 'dark' })))
+    localStorage.setItem('hp-theme', mode)
+    runBoot()
+    expect(document.documentElement.dataset.theme).toBe(mode)
+    expect(document.documentElement.classList.contains('dark')).toBe(mode === 'dark')
+    expect(matchMedia).not.toHaveBeenCalled()
+  })
+
+  it('leaves the default palette unset on a cold load', () => {
+    runBoot()
+    expect(document.documentElement.dataset.hpTheme).toBeUndefined()
+    expect(document.documentElement.dataset.hpPalette).toBeUndefined()
+    expect(localStorage.getItem('hp-palette')).toBeNull()
   })
 
   it('ignores a mode it does not recognise instead of stamping it', () => {

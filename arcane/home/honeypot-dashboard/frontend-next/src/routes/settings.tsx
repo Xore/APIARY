@@ -26,6 +26,16 @@ import { EsHistoryConsole, type EsStorage } from '../components/EsHistoryConsole
 import { str } from '../components/StoreList'
 import { applyPalette, applyTheme, useThemeMode, type ThemeMode } from '../lib/prefs'
 import { ThemeGallery } from '../components/ThemeGallery'
+import { Button } from '../components/ui/button'
+import { Input } from '../components/ui/input'
+import { Field, FieldLabel, FieldDescription } from '../components/ui/field'
+import { Label } from '../components/ui/label'
+import { Switch } from '../components/ui/switch'
+import { Textarea } from '../components/ui/textarea'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
+import { ScrollArea } from '../components/ui/scroll-area'
+import { Separator } from '../components/ui/separator'
+import { Card } from '../components/ui/card'
 import { themeSearchTerms } from '../lib/themes'
 import type { JsonRecord } from '../lib/json'
 import { prefetchEnabled, setPrefetchEnabled } from '../lib/prefetch'
@@ -709,23 +719,28 @@ function SwitchRow({
   onChange: (value: boolean) => void
 }) {
   return (
-    <div className="card__row">
-      <div>
-        <div className="card__label">{label}</div>
-        <div className="card__value">{desc}</div>
-      </div>
-      <label className="switch">
-        <input
-          type="checkbox"
-          aria-label={label}
-          checked={checked}
-          disabled={disabled}
-          onChange={(event) => onChange(event.target.checked)}
-        />
-        <span></span>
-      </label>
-    </div>
+    <Field orientation="horizontal" data-disabled={disabled}>
+      <div className="flex flex-1 flex-col gap-1"><Label htmlFor={`pref-${label}`}>{label}</Label><FieldDescription>{desc}</FieldDescription></div>
+      <Switch id={`pref-${label}`} checked={checked} disabled={disabled} onCheckedChange={onChange} />
+    </Field>
   )
+}
+
+function SettingsSelect({ id, label, value, options, onChange, disabled }: {
+  id: string
+  label: string
+  value: string
+  options: readonly (readonly [string, string])[]
+  onChange: (value: string) => void
+  disabled?: boolean
+}) {
+  return <Field data-disabled={disabled}>
+    <FieldLabel htmlFor={id}>{label}</FieldLabel>
+    <Select value={value} onValueChange={onChange} disabled={disabled}>
+      <SelectTrigger id={id}><SelectValue /></SelectTrigger>
+      <SelectContent><SelectGroup>{options.map(([option, text]) => <SelectItem key={option} value={option}>{text}</SelectItem>)}</SelectGroup></SelectContent>
+    </Select>
+  </Field>
 }
 
 // Segmented picker matching the Go markup exactly: role="group" of
@@ -749,18 +764,19 @@ function Segmented({
   return (
     <div className="settings-field">
       <span className="form-label">{label}</span>
-      <div className="segmented" role="group" aria-label={label}>
+      <div className="inline-flex flex-wrap gap-1 rounded-md border bg-muted p-1" role="group" aria-label={label}>
         {options.map((option) => (
-          <button
+          <Button
             key={option.value}
             type="button"
             data-value={option.value}
             aria-pressed={value === option.value}
+            variant={value === option.value ? 'secondary' : 'ghost'}
             disabled={disabled}
             onClick={() => onChange(option.value)}
           >
             {option.label}
-          </button>
+          </Button>
         ))}
       </div>
       {desc ? <div className="settings-field__desc">{desc}</div> : null}
@@ -1008,14 +1024,13 @@ function PersonalPanes({
 
   const saveButton = (pane: PaneName, setStatus: (text: string, kind?: 'ok' | 'error') => void) => (
     <div className="settings-actions">
-      <button
-        className="btn btn-primary"
+      <Button
         type="button"
         disabled={!loaded || changedFields(pane).length === 0}
         onClick={() => requestSave(pane, setStatus)}
       >
         Save changes
-      </button>
+      </Button>
     </div>
   )
 
@@ -1033,20 +1048,20 @@ function PersonalPanes({
     <>
       <Pane id="account">
         {profileCard}
-        <div className="card hp-field" hidden={hideReset}>
+        <Card className="hp-field space-y-4 p-6" hidden={hideReset}>
           <h2>Reset preferences</h2>
           <p className="note">Returns every personal preference — appearance included — to its default.</p>
           {resetStatus}
           <div className="settings-actions">
-            <button className="btn btn-danger btn-sm" type="button" disabled={!loaded} onClick={requestReset}>
+            <Button variant="destructive" size="sm" type="button" disabled={!loaded} onClick={requestReset}>
               Reset all preferences
-            </button>
+            </Button>
           </div>
-        </div>
+        </Card>
       </Pane>
       <Pane id="appearance">
         {appearanceLead}
-        <div className="card hp-field" hidden={hideReadability}>
+        <Card className="hp-field space-y-4 p-6" hidden={hideReadability}>
           <h2>Readability &amp; density</h2>
           {appearanceStatus}
           {loaded ? (
@@ -1106,49 +1121,21 @@ function PersonalPanes({
           ) : (
             placeholder
           )}
-        </div>
+        </Card>
       </Pane>
       <Pane id="navigation">
-        <div className="card hp-field" hidden={hideNav}>
+        <Card className="hp-field space-y-4 p-6" hidden={hideNav}>
           <h2>Navigation &amp; tables</h2>
           {navStatus}
           {loaded ? (
             <>
               <div className="settings-grid">
                 <div className="settings-field">
-                  <label className="form-label" htmlFor="hp-pref-landing">
-                    Landing page
-                  </label>
-                  <select
-                    className="form-input"
-                    id="hp-pref-landing"
-                    value={form.landing_page ?? '/'}
-                    onChange={(event) => patch('landing_page', event.target.value)}
-                  >
-                    {PREF_LANDING_PAGES.map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
+                  <SettingsSelect id="hp-pref-landing" label="Landing page" value={form.landing_page ?? '/'} options={PREF_LANDING_PAGES} onChange={(value) => patch('landing_page', value)} />
                   <div className="settings-field__desc">First page after sign-in.</div>
                 </div>
                 <div className="settings-field">
-                  <label className="form-label" htmlFor="hp-pref-rows">
-                    Rows per page
-                  </label>
-                  <select
-                    className="form-input"
-                    id="hp-pref-rows"
-                    value={String(form.rows_per_page ?? 50)}
-                    onChange={(event) => patch('rows_per_page', Number(event.target.value))}
-                  >
-                    {[10, 25, 50, 100].map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
-                  </select>
+                  <SettingsSelect id="hp-pref-rows" label="Rows per page" value={String(form.rows_per_page ?? 50)} options={[10, 25, 50, 100].map((n) => [String(n), String(n)])} onChange={(value) => patch('rows_per_page', Number(value))} />
                 </div>
               </div>
               <SwitchRow
@@ -1180,11 +1167,11 @@ function PersonalPanes({
           ) : (
             placeholder
           )}
-        </div>
+        </Card>
         {navigationExtra}
       </Pane>
       <Pane id="time">
-        <div className="card hp-field" hidden={hideTime}>
+        <Card className="hp-field space-y-4 p-6" hidden={hideTime}>
           <h2>Time &amp; live data</h2>
           {timeStatus}
           {loaded ? (
@@ -1194,8 +1181,7 @@ function PersonalPanes({
                   <label className="form-label" htmlFor="hp-pref-timezone">
                     Timezone
                   </label>
-                  <input
-                    className="form-input"
+                  <Input
                     id="hp-pref-timezone"
                     list="hp-tz-suggestions"
                     autoComplete="off"
@@ -1216,21 +1202,7 @@ function PersonalPanes({
                   </div>
                 </div>
                 <div className="settings-field">
-                  <label className="form-label" htmlFor="hp-pref-refresh">
-                    Refresh interval
-                  </label>
-                  <select
-                    className="form-input"
-                    id="hp-pref-refresh"
-                    value={String(form.refresh_interval_seconds ?? 30)}
-                    onChange={(event) => patch('refresh_interval_seconds', Number(event.target.value))}
-                  >
-                    {REFRESH_INTERVALS.map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
+                  <SettingsSelect id="hp-pref-refresh" label="Refresh interval" value={String(form.refresh_interval_seconds ?? 30)} options={REFRESH_INTERVALS.map(([value, label]) => [String(value), label])} onChange={(value) => patch('refresh_interval_seconds', Number(value))} />
                 </div>
               </div>
               <Segmented
@@ -1265,21 +1237,7 @@ function PersonalPanes({
               />
               {form.live_toasts ?? true ? (
                 <div className="settings-field">
-                  <label className="form-label" htmlFor="hp-pref-toast-interval">
-                    Check frequency
-                  </label>
-                  <select
-                    className="form-input"
-                    id="hp-pref-toast-interval"
-                    value={String(form.live_toast_interval_seconds ?? 3)}
-                    onChange={(event) => patch('live_toast_interval_seconds', Number(event.target.value))}
-                  >
-                    {TOAST_INTERVALS.map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
+                  <SettingsSelect id="hp-pref-toast-interval" label="Check frequency" value={String(form.live_toast_interval_seconds ?? 3)} options={TOAST_INTERVALS.map(([value, label]) => [String(value), label])} onChange={(value) => patch('live_toast_interval_seconds', Number(value))} />
                   <div className="settings-field__desc">
                     How often the fleet is checked for problems. Each condition is announced once when it
                     starts and once when it clears, so an outage that lasts all afternoon is two toasts, not
@@ -1292,28 +1250,15 @@ function PersonalPanes({
           ) : (
             placeholder
           )}
-        </div>
-        <div className="card hp-field" hidden={hideNotify}>
+        </Card>
+        <Card className="hp-field space-y-4 p-6" hidden={hideNotify}>
           <h2>Notifications</h2>
           {notifyStatus}
           {loaded ? (
             <>
               <div className="settings-grid">
                 <div className="settings-field">
-                  <label className="form-label" htmlFor="hp-pref-severity">
-                    Minimum severity
-                  </label>
-                  <select
-                    className="form-input"
-                    id="hp-pref-severity"
-                    value={form.notify_severity ?? 'high'}
-                    onChange={(event) => patch('notify_severity', event.target.value)}
-                  >
-                    <option value="low">Low and above</option>
-                    <option value="medium">Medium and above</option>
-                    <option value="high">High and above</option>
-                    <option value="critical">Critical only</option>
-                  </select>
+                  <SettingsSelect id="hp-pref-severity" label="Minimum severity" value={form.notify_severity ?? 'high'} options={[["low", "Low and above"], ["medium", "Medium and above"], ["high", "High and above"], ["critical", "Critical only"]]} onChange={(value) => patch('notify_severity', value)} />
                 </div>
               </div>
               <SwitchRow
@@ -1333,44 +1278,20 @@ function PersonalPanes({
           ) : (
             placeholder
           )}
-        </div>
+        </Card>
       </Pane>
       <Pane id="map">
-        <div className="card hp-field" hidden={hideMap}>
+        <Card className="hp-field space-y-4 p-6" hidden={hideMap}>
           <h2>Map &amp; investigation</h2>
           {mapStatus}
           {loaded ? (
             <>
               <div className="settings-grid">
                 <div className="settings-field">
-                  <label className="form-label" htmlFor="hp-pref-basemap">
-                    Basemap
-                  </label>
-                  <select
-                    className="form-input"
-                    id="hp-pref-basemap"
-                    value={form.map_basemap ?? 'osm'}
-                    onChange={(event) => patch('map_basemap', event.target.value)}
-                  >
-                    <option value="osm">OpenStreetMap</option>
-                  </select>
+                  <SettingsSelect id="hp-pref-basemap" label="Basemap" value={form.map_basemap ?? 'osm'} options={[["osm", "OpenStreetMap"]]} onChange={(value) => patch('map_basemap', value)} />
                 </div>
                 <div className="settings-field">
-                  <label className="form-label" htmlFor="hp-pref-window">
-                    Default event window
-                  </label>
-                  <select
-                    className="form-input"
-                    id="hp-pref-window"
-                    value={form.default_event_window ?? '24h'}
-                    onChange={(event) => patch('default_event_window', event.target.value)}
-                  >
-                    {WINDOW_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  <SettingsSelect id="hp-pref-window" label="Default event window" value={form.default_event_window ?? '24h'} options={WINDOW_OPTIONS.map((option) => [option.value, option.label])} onChange={(value) => patch('default_event_window', value)} />
                 </div>
               </div>
               <SwitchRow
@@ -1396,7 +1317,7 @@ function PersonalPanes({
           ) : (
             placeholder
           )}
-        </div>
+        </Card>
       </Pane>
     </>
   )
@@ -1456,34 +1377,32 @@ function PresentationCard({ initial, editable, revision, onSaved, onConflict, on
   }, [changed.length, onDirty])
   const set = (key: keyof Presentation, value: string) => setForm((current) => ({ ...current, [key]: value }))
   const field = (key: keyof Presentation, label: string, extra?: { type?: string; placeholder?: string }) => (
-    <label className="note hp-field">
-      {label}
-      <input
-        className="form-input"
-       
+    <Field className="hp-field">
+      <FieldLabel htmlFor={`presentation-${key}`}>{label}</FieldLabel>
+      <Input
+        id={`presentation-${key}`}
         type="text"
         value={(form[key] as string) ?? ''}
         disabled={!editable}
         onChange={(event) => set(key, event.target.value)}
         {...extra}
       />
-    </label>
+    </Field>
   )
   const textarea = (key: keyof Presentation, label: string) => (
-    <label className="note hp-field">
-      {label}
-      <textarea
-        className="form-input"
-       
+    <Field className="hp-field">
+      <FieldLabel htmlFor={`presentation-${key}`}>{label}</FieldLabel>
+      <Textarea
+        id={`presentation-${key}`}
         rows={2}
         value={(form[key] as string) ?? ''}
         disabled={!editable}
         onChange={(event) => set(key, event.target.value)}
       />
-    </label>
+    </Field>
   )
   return (
-    <div className="card hp-field" hidden={hidden}>
+    <Card className="hp-field space-y-4 p-6" hidden={hidden}>
       <h2>Presentation</h2>
       <p className="note">Branding text across the dashboard, and the help/notice copy shown alongside it.</p>
       <form
@@ -1527,37 +1446,22 @@ function PresentationCard({ initial, editable, revision, onSaved, onConflict, on
           {field('help_link_url', 'Help link URL (https only)', { type: 'url', placeholder: 'https://' })}
           {field('footer_text', 'Footer text')}
           {field('banner_text', 'Banner text')}
-          <label className="note hp-field">
-            Banner severity
-            <select
-              className="form-input"
-             
-              value={form.banner_severity ?? ''}
-              disabled={!editable}
-              onChange={(event) => set('banner_severity', event.target.value)}
-            >
-              {BANNER_SEVERITIES.map((severity) => (
-                <option key={severity} value={severity}>
-                  {severity || 'None'}
-                </option>
-              ))}
-            </select>
-          </label>
+          <SettingsSelect id="banner-severity" label="Banner severity" value={form.banner_severity || 'none'} disabled={!editable} options={BANNER_SEVERITIES.map((severity): [string, string] => [severity || 'none', severity || 'None'])} onChange={(value) => set('banner_severity', value === 'none' ? '' : value)} />
           {field('banner_expires', 'Banner expiry (RFC 3339, empty = no expiry)', { placeholder: '2026-08-01T00:00:00Z' })}
         </div>
         {textarea('overview_intro', 'Overview introduction')}
         {textarea('ai_disclaimer', 'AI analysis disclaimer')}
         {textarea('privacy_notice', 'Evidence-handling / privacy notice')}
         {editable ? (
-          <button className="btn btn-secondary btn-sm hp-flow--tight" type="submit" disabled={changed.length === 0}>
+          <Button variant="secondary" size="sm" type="submit" disabled={changed.length === 0}>
             Save presentation
-          </button>
+          </Button>
         ) : (
           <p className="note">Admin role required to edit.</p>
         )}
         {status}
       </form>
-    </div>
+    </Card>
   )
 }
 
@@ -1606,11 +1510,10 @@ function HoneypotOperationsCard({ initial, editable, revision, onSaved, onConfli
     onDirty(changed.length > 0)
   }, [changed.length, onDirty])
   const field = (key: keyof typeof form, label: string, placeholder?: string) => (
-    <label className="note hp-field">
-      {label}
-      <input
-        className="form-input"
-       
+    <Field className="hp-field">
+      <FieldLabel htmlFor={`honeypot-${key}`}>{label}</FieldLabel>
+      <Input
+        id={`honeypot-${key}`}
         type="text"
         inputMode="numeric"
         placeholder={placeholder}
@@ -1618,10 +1521,10 @@ function HoneypotOperationsCard({ initial, editable, revision, onSaved, onConfli
         disabled={!editable}
         onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))}
       />
-    </label>
+    </Field>
   )
   return (
-    <div className="card hp-field" hidden={hidden}>
+    <Card className="hp-field space-y-4 p-6" hidden={hidden}>
       <h2>Honeypot operations</h2>
       <p className="note">
         Staged thresholds: saving updates the configuration store, and the consuming services pick them up on their next
@@ -1683,15 +1586,15 @@ function HoneypotOperationsCard({ initial, editable, revision, onSaved, onConfli
           {field('payload_dedupe_interval_seconds', 'Payload dedupe interval in seconds (300–86400)')}
         </div>
         {editable ? (
-          <button className="btn btn-secondary btn-sm hp-flow--tight" type="submit" disabled={changed.length === 0}>
+          <Button variant="secondary" size="sm" type="submit" disabled={changed.length === 0}>
             Stage changes
-          </button>
+          </Button>
         ) : (
           <p className="note">Admin role required to edit.</p>
         )}
         {status}
       </form>
-    </div>
+    </Card>
   )
 }
 
@@ -1780,24 +1683,13 @@ function BehaviorCard({ initial, editable, revision, onSaved, onConflict, onDirt
     onDirty(changed.length > 0)
   }, [changed.length, onDirty])
   const toggle = (key: 'show_ml_panels' | 'maintenance_mode' | 'read_only' | 'show_problem_report_button', label: string, desc: string) => (
-    <div className="card__row">
-      <div>
-        <div className="card__label">{label}</div>
-        <div className="card__value">{desc}</div>
-      </div>
-      <label className="switch">
-        <input
-          type="checkbox"
-          checked={form[key]}
-          disabled={!editable}
-          onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.checked }))}
-        />
-        <span></span>
-      </label>
-    </div>
+    <Field orientation="horizontal" data-disabled={!editable}>
+      <div className="flex flex-1 flex-col gap-1"><Label htmlFor={`behavior-${key}`}>{label}</Label><FieldDescription>{desc}</FieldDescription></div>
+      <Switch id={`behavior-${key}`} checked={form[key]} disabled={!editable} onCheckedChange={(checked) => setForm((current) => ({ ...current, [key]: checked }))} />
+    </Field>
   )
   return (
-    <div className="card hp-field" hidden={hidden}>
+    <Card className="hp-field space-y-4 p-6" hidden={hidden}>
       <h2>Dashboard behavior</h2>
       <p className="note">Global defaults users can still override per session, plus feature visibility applied live for every user.</p>
       <form
@@ -1855,125 +1747,79 @@ function BehaviorCard({ initial, editable, revision, onSaved, onConflict, onDirt
         }}
       >
         <div className="settings-grid">
-          <label className="note hp-field">
-            Default landing page
-            <select
-              className="form-input"
-             
-              value={form.default_landing}
-              disabled={!editable}
-              onChange={(event) => setForm((current) => ({ ...current, default_landing: event.target.value }))}
-            >
-              {LANDING_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="note hp-field">
-            Default time window
-            <select
-              className="form-input"
-             
-              value={form.default_time_window}
-              disabled={!editable}
-              onChange={(event) => setForm((current) => ({ ...current, default_time_window: event.target.value }))}
-            >
-              {WINDOW_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="note hp-field">
-            Rows-per-page choices (comma-separated, from 10/25/50/100)
-            <input
-              className="form-input"
-             
+          <SettingsSelect id="behavior-landing" label="Default landing page" value={form.default_landing} disabled={!editable} options={LANDING_OPTIONS.map((option) => [option.value, option.label])} onChange={(value) => setForm((current) => ({ ...current, default_landing: value }))} />
+          <SettingsSelect id="behavior-window" label="Default time window" value={form.default_time_window} disabled={!editable} options={WINDOW_OPTIONS.map((option) => [option.value, option.label])} onChange={(value) => setForm((current) => ({ ...current, default_time_window: value }))} />
+          <Field className="hp-field">
+            <FieldLabel htmlFor="behavior-rows-per-page-options">Rows-per-page choices (comma-separated, from 10/25/50/100)</FieldLabel>
+            <Input
+              id="behavior-rows-per-page-options"
               type="text"
               placeholder="25, 50, 100"
               value={form.rows_per_page_options}
               disabled={!editable}
               onChange={(event) => setForm((current) => ({ ...current, rows_per_page_options: event.target.value }))}
             />
-          </label>
-          <label className="note hp-field">
-            Maximum export rows (100–100000)
-            <input
-              className="form-input"
-             
+          </Field>
+          <Field className="hp-field">
+            <FieldLabel htmlFor="behavior-max-export-rows">Maximum export rows (100–100000)</FieldLabel>
+            <Input
+              id="behavior-max-export-rows"
               type="text"
               inputMode="numeric"
               value={form.max_export_rows}
               disabled={!editable}
               onChange={(event) => setForm((current) => ({ ...current, max_export_rows: event.target.value }))}
             />
-          </label>
-          <label className="note hp-field">
-            Refresh interval choices in seconds (from 10/15/30/60/120/300)
-            <input
-              className="form-input"
-             
+          </Field>
+          <Field className="hp-field">
+            <FieldLabel htmlFor="behavior-refresh-interval-options">Refresh interval choices in seconds (from 10/15/30/60/120/300)</FieldLabel>
+            <Input
+              id="behavior-refresh-interval-options"
               type="text"
               placeholder="15, 30, 60, 300"
               value={form.refresh_interval_seconds_options}
               disabled={!editable}
               onChange={(event) => setForm((current) => ({ ...current, refresh_interval_seconds_options: event.target.value }))}
             />
-          </label>
-          <label className="note hp-field">
-            Source stale threshold in minutes (2–120)
-            <input
-              className="form-input"
-             
+          </Field>
+          <Field className="hp-field">
+            <FieldLabel htmlFor="behavior-source-stale-minutes">Source stale threshold in minutes (2–120)</FieldLabel>
+            <Input
+              id="behavior-source-stale-minutes"
               type="text"
               inputMode="numeric"
               value={form.source_stale_minutes}
               disabled={!editable}
               onChange={(event) => setForm((current) => ({ ...current, source_stale_minutes: event.target.value }))}
             />
-          </label>
-          <label className="note hp-field">
-            Default map provider
-            <select
-              className="form-input"
-             
-              value={form.map_provider}
-              disabled={!editable}
-              onChange={(event) => setForm((current) => ({ ...current, map_provider: event.target.value }))}
-            >
-              <option value="osm">OpenStreetMap</option>
-            </select>
-          </label>
-          <label className="note hp-field">
-            Default timezone for new users
-            <input
-              className="form-input"
-             
+          </Field>
+          <SettingsSelect id="behavior-map" label="Default map provider" value={form.map_provider} disabled={!editable} options={[["osm", "OpenStreetMap"]]} onChange={(value) => setForm((current) => ({ ...current, map_provider: value }))} />
+          <Field className="hp-field">
+            <FieldLabel htmlFor="behavior-default-timezone">Default timezone for new users</FieldLabel>
+            <Input
+              id="behavior-default-timezone"
               type="text"
               placeholder="utc"
               value={form.default_timezone}
               disabled={!editable}
               onChange={(event) => setForm((current) => ({ ...current, default_timezone: event.target.value }))}
             />
-          </label>
+          </Field>
         </div>
         {toggle('show_ml_panels', 'Experimental ML/LLM panels', 'Show machine-learning analysis panels in investigations.')}
         {toggle('maintenance_mode', 'Maintenance mode', 'Announce maintenance across the dashboard.')}
         {toggle('read_only', 'Read-only mode', 'Freeze evidence-changing dashboard actions.')}
         {toggle('show_problem_report_button', '"Report a problem" button', 'Show a button on every page for reporting bugs.')}
         {editable ? (
-          <button className="btn btn-secondary btn-sm hp-flow--tight" type="submit" disabled={changed.length === 0}>
+          <Button variant="secondary" size="sm" type="submit" disabled={changed.length === 0}>
             Save changes
-          </button>
+          </Button>
         ) : (
           <p className="note">Admin role required to edit.</p>
         )}
         {status}
       </form>
-    </div>
+    </Card>
   )
 }
 
@@ -2033,7 +1879,7 @@ function ReportPresetsCard({
   if (templates.length === 0) return null
 
   return (
-    <div className="card hp-field" hidden={hidden}>
+    <Card className="hp-field space-y-4 p-6" hidden={hidden}>
       <h2>Report Studio presets</h2>
       <p className="note">Renamed/re-described copy for the compiled report-template catalog. Leave a field empty to use the compiled default.</p>
       <form
@@ -2069,17 +1915,16 @@ function ReportPresetsCard({
         {templates.map((template) => {
           const override = form[template.id] ?? {}
           return (
-            <div key={template.id} className="card hp-flow">
-              <div className="card__header">
+            <Card key={template.id} className="space-y-4 p-6">
+              <div>
                 <div>
                   <h3>{template.name}</h3>
                 </div>
               </div>
-              <label className="note hp-field">
-                Name
-                <input
-                  className="form-input"
-                 
+              <Field className="hp-field">
+                <FieldLabel htmlFor={`preset-${template.id}-name`}>Name</FieldLabel>
+                <Input
+                  id={`preset-${template.id}-name`}
                   type="text"
                   placeholder={template.name}
                   value={override.name ?? ''}
@@ -2088,12 +1933,11 @@ function ReportPresetsCard({
                     setForm((current) => ({ ...current, [template.id]: { ...current[template.id], name: event.target.value } }))
                   }
                 />
-              </label>
-              <label className="note hp-field">
-                Description
-                <textarea
-                  className="form-input"
-                 
+              </Field>
+              <Field className="hp-field">
+                <FieldLabel htmlFor={`preset-${template.id}-description`}>Description</FieldLabel>
+                <Textarea
+                  id={`preset-${template.id}-description`}
                   rows={2}
                   placeholder={template.description}
                   value={override.description ?? ''}
@@ -2105,20 +1949,20 @@ function ReportPresetsCard({
                     }))
                   }
                 />
-              </label>
-            </div>
+              </Field>
+            </Card>
           )
         })}
         {editable ? (
-          <button className="btn btn-secondary btn-sm hp-flow--tight" type="submit" disabled={changed.length === 0}>
+          <Button variant="secondary" size="sm" type="submit" disabled={changed.length === 0}>
             Save changes
-          </button>
+          </Button>
         ) : (
           <p className="note">Admin role required to edit.</p>
         )}
         {status}
       </form>
-    </div>
+    </Card>
   )
 }
 
@@ -2195,7 +2039,7 @@ function ServicesCard({ initial, editable }: { initial: ServicesResponse | null;
   }
 
   return (
-    <div className="card hp-field" hidden={hidden}>
+    <Card className="hp-field space-y-4 p-6" hidden={hidden}>
       <h2>Services</h2>
       <p className="note">
         Live container status for sensors, probes and workers. Actions cross a narrow allowlisted adapter — the dashboard
@@ -2230,33 +2074,33 @@ function ServicesCard({ initial, editable }: { initial: ServicesResponse | null;
                     <td className="n">{typeof service.restarts === 'number' ? service.restarts : '—'}</td>
                     <td>
                       <div className="filters">
-                        <button
-                          className="btn btn-secondary btn-sm"
+                        <Button
+                          variant="secondary" size="sm"
                           type="button"
                           disabled={!editable || busyName !== null}
                           onClick={() => act(name, 'start')}
                         >
                           Start
-                        </button>
-                        <button
-                          className="btn btn-secondary btn-sm"
+                        </Button>
+                        <Button
+                          variant="secondary" size="sm"
                           type="button"
                           disabled={!editable || busyName !== null}
                           onClick={() => act(name, 'stop')}
                         >
                           Stop
-                        </button>
-                        <button
-                          className="btn btn-secondary btn-sm"
+                        </Button>
+                        <Button
+                          variant="secondary" size="sm"
                           type="button"
                           disabled={!editable || busyName !== null}
                           onClick={() => act(name, 'restart')}
                         >
                           Restart
-                        </button>
-                        <button className="btn btn-ghost btn-sm" type="button" onClick={() => viewLogs(name)}>
+                        </Button>
+                        <Button variant="ghost" size="sm" type="button" onClick={() => viewLogs(name)}>
                           {logsFor === name ? 'Hide logs' : 'Logs'}
-                        </button>
+                        </Button>
                       </div>
                     </td>
                   </tr>
@@ -2276,7 +2120,7 @@ function ServicesCard({ initial, editable }: { initial: ServicesResponse | null;
           {logsBusy ? <span className="skeleton-line" aria-hidden="true" /> : <pre className="code">{logsText || 'No log output.'}</pre>}
         </>
       ) : null}
-    </div>
+    </Card>
   )
 }
 
@@ -2289,7 +2133,7 @@ function ReporterStatsCard({ data }: { data: ReporterStats | null }) {
     return '—'
   }
   return (
-    <div className="card hp-field" hidden={hidden}>
+    <Card className="hp-field space-y-4 p-6" hidden={hidden}>
       <h2>Reporter stats</h2>
       <p className="note">The report-sender worker's own metrics — a quick glance at what it has attempted and sent.</p>
       {data === null ? (
@@ -2328,7 +2172,7 @@ function ReporterStatsCard({ data }: { data: ReporterStats | null }) {
           ) : null}
         </>
       )}
-    </div>
+    </Card>
   )
 }
 
@@ -2367,7 +2211,7 @@ function ConfigHistoryCard({ initial, editable }: { initial: HistoryResponse | n
   }
 
   return (
-    <div className="card hp-field" hidden={hidden}>
+    <Card className="hp-field space-y-4 p-6" hidden={hidden}>
       <h2>Configuration history</h2>
       <p className="note">Newest first. Rollback restores a retained revision as a new revision.</p>
       {data === null ? (
@@ -2399,14 +2243,14 @@ function ConfigHistoryCard({ initial, editable }: { initial: HistoryResponse | n
                   <td className="v">{(entry.fields ?? []).join(', ')}</td>
                   {editable ? (
                     <td>
-                      <button
-                        className="btn btn-secondary btn-sm"
+                      <Button
+                        variant="secondary" size="sm"
                         type="button"
                         disabled={busy !== null}
                         onClick={() => rollback(entry.revision)}
                       >
                         {busy === entry.revision ? 'Rolling back…' : 'Rollback'}
-                      </button>
+                      </Button>
                     </td>
                   ) : null}
                 </tr>
@@ -2416,7 +2260,7 @@ function ConfigHistoryCard({ initial, editable }: { initial: HistoryResponse | n
         </div>
       )}
       {status}
-    </div>
+    </Card>
   )
 }
 
@@ -2473,17 +2317,10 @@ function AuditLogCard({ initial }: { initial: AuditResponse | null }) {
   }
 
   return (
-    <div className="card hp-field" hidden={hidden}>
+    <Card className="hp-field space-y-4 p-6" hidden={hidden}>
       <h2>Audit log</h2>
       <p className="note">Settings mutations, newest first. Sensitive values are never logged.</p>
-      <select className="form-input" aria-label="Filter by action" value={filter} onChange={(event) => applyFilter(event.target.value)}>
-        <option value="">All actions</option>
-        {AUDIT_ACTIONS.map((action) => (
-          <option key={action} value={action}>
-            {action}
-          </option>
-        ))}
-      </select>
+      <SettingsSelect id="audit-action" label="Filter by action" value={filter || 'all'} options={[["all", "All actions"], ...AUDIT_ACTIONS.map((action): [string, string] => [action, action])]} onChange={(value) => void applyFilter(value === 'all' ? '' : value)} />
       {data === null && failed ? (
         // Retrying re-issues whatever scope is selected; resubmitting via
         // the select is an equivalent retry.
@@ -2526,7 +2363,7 @@ function AuditLogCard({ initial }: { initial: AuditResponse | null }) {
           </table>
         </div>
       )}
-    </div>
+    </Card>
   )
 }
 
@@ -2743,10 +2580,10 @@ export function SettingsSurface({
     query !== '' && !matchesQuery(SEARCH_INDEX[pane][field] ?? '', query)
 
   const loadingCard = (
-    <div className="card">
+    <Card className="space-y-4 p-6">
       <span className="skeleton-line" aria-hidden="true" />
       <span className="skeleton-line" aria-hidden="true" />
-    </div>
+    </Card>
   )
 
   // #2311: shared across every admin pane — the parked state an outage
@@ -2763,7 +2600,7 @@ export function SettingsSurface({
   )
 
   const profileCard = (
-    <div className="card hp-field" hidden={fieldHidden('account', 'profile')}>
+    <Card className="hp-field space-y-4 p-6" hidden={fieldHidden('account', 'profile')}>
       <h2>Account</h2>
       {user ? (
         <>
@@ -2771,9 +2608,7 @@ export function SettingsSurface({
             Signed in as <strong>{user.displayName || user.username}</strong>
             {user.role ? <> · <span className="badge badge--muted">{user.role}</span></> : null}
           </p>
-          <a className="btn btn-secondary btn-sm" href="/auth/logout">
-            Sign out
-          </a>
+          <Button asChild variant="secondary" size="sm"><a href="/auth/logout">Sign out</a></Button>
         </>
       ) : (
         <p className="note">No session (development mode).</p>
@@ -2790,65 +2625,54 @@ export function SettingsSurface({
               <div className="card__label">Profile &amp; password</div>
               <div className="card__value">Account details, password change, and recovery email.</div>
             </div>
-            <a className="btn btn-secondary btn-sm" href={accountActions.profile} target="_blank" rel="noopener noreferrer">
-              Open
-            </a>
+            <Button asChild variant="secondary" size="sm"><a href={accountActions.profile} target="_blank" rel="noopener noreferrer">Open</a></Button>
           </div>
           <div className="card__row">
             <div>
               <div className="card__label">Passkeys &amp; two-factor authentication</div>
               <div className="card__value">Register hardware keys, authenticator apps, and WebAuthn credentials.</div>
             </div>
-            <a className="btn btn-secondary btn-sm" href={accountActions.security} target="_blank" rel="noopener noreferrer">
-              Open
-            </a>
+            <Button asChild variant="secondary" size="sm"><a href={accountActions.security} target="_blank" rel="noopener noreferrer">Open</a></Button>
           </div>
           <div className="card__row">
             <div>
               <div className="card__label">Sessions &amp; devices</div>
               <div className="card__value">Active sessions and trusted devices; revoke any of them.</div>
             </div>
-            <a className="btn btn-secondary btn-sm" href={accountActions.sessions} target="_blank" rel="noopener noreferrer">
-              Open
-            </a>
+            <Button asChild variant="secondary" size="sm"><a href={accountActions.sessions} target="_blank" rel="noopener noreferrer">Open</a></Button>
           </div>
           <div className="card__row">
             <div>
               <div className="card__label">Security settings</div>
               <div className="card__value">Open the Keycloak Account Console in a new tab.</div>
             </div>
-            <a
-              className="btn btn-secondary btn-sm"
-              href={accountActions.manageAccount}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Manage account
-            </a>
+            <Button asChild variant="secondary" size="sm"><a href={accountActions.manageAccount} target="_blank" rel="noopener noreferrer">Manage account</a></Button>
           </div>
         </>
       ) : null}
-    </div>
+    </Card>
   )
 
   const themeCard = (
-    <div className="card hp-field" hidden={fieldHidden('appearance', 'theme')}>
+    <Card className="hp-field space-y-4 p-6" hidden={fieldHidden('appearance', 'theme')}>
       <h2>Appearance</h2>
       {/* Go's segmented markup (settings_modal.html:103-125): a
           role="group" of aria-pressed buttons — never radiogroup, which
           aria-pressed is invalid inside. */}
       <p className="note">Theme mode</p>
-      <div className="segmented" role="group" aria-label="Theme mode">
+      <div className="inline-flex flex-wrap gap-1 rounded-md border bg-muted p-1" role="group" aria-label="Theme mode">
         {modes.map((mode) => (
-          <button
+          <Button
             key={mode.id}
             type="button"
             data-value={mode.id}
             aria-pressed={theme === mode.id}
+            className="!h-auto"
+            variant={theme === mode.id ? 'secondary' : 'ghost'}
             onClick={() => applyTheme(mode.id)}
           >
             {mode.label}
-          </button>
+          </Button>
         ))}
       </div>
       <p className="note">Theme</p>
@@ -2857,19 +2681,19 @@ export function SettingsSurface({
           nowhere on screen. Each tile now renders that theme's real tokens
           in the mode you are actually in. */}
       <ThemeGallery />
-    </div>
+    </Card>
   )
 
   const prefetchCard = (
-    <div className="card hp-field" hidden={fieldHidden('navigation', 'prefetch')}>
+    <Card className="hp-field space-y-4 p-6" hidden={fieldHidden('navigation', 'prefetch')}>
       <h2>Navigation</h2>
       <p className="note">
         Predictive prefetching warms the data for the pages you're most likely to open next, so navigation feels instant. Turn
         it off to only load pages on click.
       </p>
-      <button
+      <Button
         type="button"
-        className={prefetch ? 'chip is-active' : 'chip'}
+        variant={prefetch ? 'secondary' : 'ghost'}
         aria-pressed={prefetch}
         onClick={() => {
           setPrefetchEnabled(!prefetch)
@@ -2877,48 +2701,51 @@ export function SettingsSurface({
         }}
       >
         {prefetch ? 'Predictive prefetch: on' : 'Predictive prefetch: off'}
-      </button>
-    </div>
+      </Button>
+    </Card>
   )
 
   const sidebarItem = (id: PaneId) => (
-    <button
+    <Button
       key={id}
-      className={`sidebar__item${active === id ? ' active' : ''}${paneDirty(id) ? ' is-dirty' : ''}`}
+      variant={active === id ? 'secondary' : 'ghost'}
+      className="h-auto min-h-9 w-full justify-start whitespace-normal text-left [&[hidden]]:hidden"
+      aria-current={active === id ? 'page' : undefined}
       type="button"
       hidden={query !== '' && !paneMatches(id, query)}
       onClick={() => showPane(id)}
     >
       {PANE_META[id].title}
-    </button>
+      {paneDirty(id) ? <span className="ml-auto text-primary" aria-label="Unsaved changes">●</span> : null}
+    </Button>
   )
 
   return (
     <SettingsUi.Provider value={{ query, active }}>
-      {/* The page-mode settings surface (theme.css "pick 13B",
-          #hp-settings.hp-dash-settings--page): the modal fragment's exact
-          rail/pane composition, permanently open, minus the overlay
-          chrome — matching what hp-settings.js:88-99 builds on /settings.
-          In modal mode the same fragment keeps its overlay chrome
-          (settings_modal.html:8-9): the centered .modal.hp-dash-settings
-          box with its absolute .modal__close. */}
+      {/* Official settings composition: section rail beside a bounded form
+          column. Keep every pane mounted so search and staged edits survive.
+          The modal keeps its existing lifecycle and focus ownership. */}
       <section
-        className={inModal ? 'modal hp-dash-settings open' : 'modal hp-dash-settings hp-dash-settings--page open'}
+        className={inModal ? 'relative min-w-0 space-y-6 pt-16' : 'min-w-0 space-y-6 p-4 md:p-6'}
         id={inModal ? undefined : 'hp-settings'}
-        role={inModal ? 'dialog' : undefined}
-        aria-modal={inModal ? true : undefined}
-        aria-labelledby="hp-dash-settings-title"
+        aria-labelledby={inModal ? undefined : 'hp-dash-settings-title'}
       >
         {inModal ? (
-          <button className="modal__close" type="button" aria-label="Close settings" onClick={onClose}>
+          <Button className="absolute right-4 top-4" variant="ghost" size="icon" type="button" aria-label="Close settings" onClick={onClose}>
             {'✕'}
-          </button>
+          </Button>
         ) : null}
-        <div className="settings-layout">
-          <aside className="settings-layout__sidebar" aria-label="Settings sections">
-            <div className="sidebar__search">
-              <span aria-hidden="true">{'⌖'}</span>
-              <input
+        {!inModal ? (
+          <header className="space-y-2">
+            <h1>Settings</h1>
+            <p className="text-muted-foreground">Personal preferences and dashboard administration.</p>
+            <Separator />
+          </header>
+        ) : null}
+        <div className="flex min-w-0 flex-col gap-6 lg:flex-row lg:gap-10">
+          <ScrollArea className="max-h-64 lg:max-h-none lg:w-56 lg:shrink-0" role="navigation" aria-label="Settings sections">
+            <div className="mb-4">
+              <Input
                 aria-label="Search settings"
                 placeholder="Search settings"
                 type="search"
@@ -2941,12 +2768,14 @@ export function SettingsSurface({
                 {ADMIN_PANES.map(sidebarItem)}
               </>
             ) : null}
-          </aside>
-          <div className="settings-layout__content">
-            <div className="hp-settings-column">
+          </ScrollArea>
+          <div className="min-w-0 flex-1">
+            <div className="w-full max-w-3xl space-y-6">
               <header className="hp-settings-head">
                 <div>
-                  <h1 id="hp-dash-settings-title">{PANE_META[active].title}</h1>
+                  {inModal
+                    ? <h1 id="hp-dash-settings-title">{PANE_META[active].title}</h1>
+                    : <h2 id="hp-dash-settings-title">{PANE_META[active].title}</h2>}
                   <p>{PANE_META[active].desc}</p>
                 </div>
               </header>
@@ -3036,7 +2865,7 @@ export function SettingsSurface({
                     )}
                   </Pane>
                   <Pane id="users">
-                    <div className="card hp-field" hidden={fieldHidden('users', 'users')}>
+                    <Card className="hp-field space-y-4 p-6" hidden={fieldHidden('users', 'users')}>
                       <h2>Projected dashboard users</h2>
                       <p className="note">Diagnostic projection of who used the dashboard. Account management lives in the auth service.</p>
                       {adminData ? (
@@ -3062,7 +2891,7 @@ export function SettingsSurface({
                       ) : (
                         <span className="skeleton-line" aria-hidden="true" />
                       )}
-                    </div>
+                    </Card>
                   </Pane>
                   <Pane id="services">
                     <ServicesCard initial={servicesData} editable={isAdmin} />
@@ -3074,7 +2903,7 @@ export function SettingsSurface({
                       panes' copy and hand off to the full pages, never a
                       duplicate of the tools themselves. */}
                   <Pane id="canarytokens">
-                    <div className="card hp-field" hidden={fieldHidden('canarytokens', 'canarytokens')}>
+                    <Card className="hp-field space-y-4 p-6" hidden={fieldHidden('canarytokens', 'canarytokens')}>
                       <h2>Create a Canarytoken</h2>
                       <p className="note">
                         The resulting artifact is yours to plant anywhere — an email, a fileshare, a USB drive. It phones home
@@ -3085,9 +2914,7 @@ export function SettingsSurface({
                           <div className="card__label">Canarytokens</div>
                           <div className="card__value">Create tokens and re-download previously created artifacts.</div>
                         </div>
-                        <Link className="btn btn-secondary btn-sm" to="/canarytokens">
-                          Open full page {'→'}
-                        </Link>
+                        <Button asChild variant="secondary" size="sm"><Link to="/canarytokens">Open full page {'→'}</Link></Button>
                       </div>
                       <div className="card__row">
                         <div>
@@ -3097,17 +2924,15 @@ export function SettingsSurface({
                             canarytoken.
                           </div>
                         </div>
-                        <Link className="btn btn-secondary btn-sm" to="/credentials">
-                          Open full page {'→'}
-                        </Link>
+                        <Button asChild variant="secondary" size="sm"><Link to="/credentials">Open full page {'→'}</Link></Button>
                       </div>
-                    </div>
+                    </Card>
                   </Pane>
                   <Pane id="elasticsearch">
                     <EsHistoryConsole storage={storageData} hidden={fieldHidden('elasticsearch', 'console')} />
                   </Pane>
                   <Pane id="dead-letters">
-                    <div className="card hp-field" hidden={fieldHidden('dead-letters', 'dead-letters')}>
+                    <Card className="hp-field space-y-4 p-6" hidden={fieldHidden('dead-letters', 'dead-letters')}>
                       <h2>Ingest dead letters</h2>
                       <p className="note">
                         Documents Elasticsearch rejected, with their original error and field shape for remediation.
@@ -3117,11 +2942,9 @@ export function SettingsSurface({
                           <div className="card__label">Dead letters</div>
                           <div className="card__value">List, search, and purge rejected documents.</div>
                         </div>
-                        <Link className="btn btn-secondary btn-sm" to="/dead-letters">
-                          Open full page {'→'}
-                        </Link>
+                        <Button asChild variant="secondary" size="sm"><Link to="/dead-letters">Open full page {'→'}</Link></Button>
                       </div>
-                    </div>
+                    </Card>
                   </Pane>
                   <Pane id="history">
                     <ConfigHistoryCard initial={historyData} editable={isAdmin} />

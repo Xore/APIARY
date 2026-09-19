@@ -13,6 +13,7 @@ import { useEffect, useState } from 'react'
 import { ErrorStateBlock } from './ErrorState'
 import { MasterDetailTable, type Column } from './Investigate'
 import { CapturedMailInline } from './CapturedMail'
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from './ui/card'
 import { formatTimestamp } from '../lib/time'
 
 type MailoneySession = {
@@ -211,13 +212,16 @@ export function CuratedSensorView({ sensor }: { sensor: string }) {
 
   if (sensor === 'mailoney') {
     return (
-      <div className="card wide">
-        <h2 className="label-section">mailoney — SMTP conversations</h2>
-        <p className="card__meta">
-          Grouped by mailoney session — AUTH PLAIN credentials, the MAIL FROM / RCPT TO envelope, and the captured
-          message itself. Newest first, last 48h.
-        </p>
-        {failed ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>mailoney — SMTP conversations</CardTitle>
+              <CardDescription>
+                Grouped by mailoney session — AUTH PLAIN credentials, the MAIL FROM / RCPT TO envelope, and the captured
+                message itself. Newest first, last 48h.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {failed ? (
           <ErrorStateBlock
             title="SMTP conversations failed to load"
             hint="The backend request failed — this says nothing about activity on the sensor."
@@ -236,19 +240,23 @@ export function CuratedSensorView({ sensor }: { sensor: string }) {
           }}
           />
         )}
-      </div>
+          </CardContent>
+        </Card>
     )
   }
 
   if (sensor === 'http-honeypot') {
-    return (
-      <div className="card wide">
-        <h2 className="label-section">http-honeypot — requests</h2>
-        <p className="card__meta">
-          Every request&apos;s own method, path, headers, and body — not just the generic &quot;METHOD path&quot;
-          summary line. Newest first, last 48h.
-        </p>
-        {failed ? (
+      return (
+        <Card>
+          <CardHeader>
+            <CardTitle>http-honeypot — requests</CardTitle>
+            <CardDescription>
+              Every request&apos;s own method, path, headers, and body — not just the generic &quot;METHOD path&quot;
+              summary line. Newest first, last 48h.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {failed ? (
           <ErrorStateBlock
             title="http-honeypot requests failed to load"
             hint="The backend request failed — this says nothing about activity on the sensor."
@@ -267,19 +275,23 @@ export function CuratedSensorView({ sensor }: { sensor: string }) {
           }}
           />
         )}
-      </div>
+          </CardContent>
+        </Card>
     )
   }
 
   if (sensor === 'tanner') {
-    return (
-      <div className="card wide">
-        <h2 className="label-section">tanner — requests &amp; detections</h2>
-        <p className="card__meta">
-          Every request tanner&apos;s web emulator handled — submitted POST fields, cookies, and (when one of its 10
-          emulators matched) the attack detection and captured execution result. Newest first, last 48h.
-        </p>
-        {failed ? (
+      return (
+        <Card>
+          <CardHeader>
+            <CardTitle>tanner — requests &amp; detections</CardTitle>
+            <CardDescription>
+              Every request tanner&apos;s web emulator handled — submitted POST fields, cookies, and (when one of its 10
+              emulators matched) the attack detection and captured execution result. Newest first, last 48h.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {failed ? (
           <ErrorStateBlock
             title="tanner requests failed to load"
             hint="The backend request failed — this says nothing about activity on the sensor."
@@ -298,7 +310,8 @@ export function CuratedSensorView({ sensor }: { sensor: string }) {
           }}
           />
         )}
-      </div>
+          </CardContent>
+        </Card>
     )
   }
 

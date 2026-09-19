@@ -1,0 +1,50 @@
+[
+  {
+    "path": "dash-shots/f2-follow-up/before/overview-1280x800-light.png",
+    "width": 1280,
+    "height": 800,
+    "sha256": "93288266b85fd870fa9e477087ebe7d4080672aa2763a617ccfffcf8f17bdecb"
+  },
+  {
+    "path": "dash-shots/f2-follow-up/before/overview-1280x800-dark.png",
+    "width": 1280,
+    "height": 800,
+    "sha256": "83b995b7727df1ec6db7d81a6ac0d81ad52d80753af6a08753a6a0e3a6e7feed"
+  },
+  {
+    "path": "dash-shots/f2-follow-up/before/overview-390x844-light.png",
+    "width": 390,
+    "height": 844,
+    "sha256": "78887cc96ebc6975df0e077c59c421a98e12fe6c07e7007c6d7969c5b6682aec"
+  },
+  {
+    "path": "dash-shots/f2-follow-up/before/overview-390x844-dark.png",
+    "width": 390,
+    "height": 844,
+    "sha256": "c8904070678e36cd940f61f447fbd2bcd4db21d66a0284a813542cc8c0d8e24b"
+  },
+  {
+    "path": "dash-shots/f2-follow-up/after/overview-1280x800-light.png",
+    "width": 1280,
+    "height": 800,
+    "sha256": "56f64c3fb1e84a9cc5ecf36cef1a77e87cbd42b5beefd990046263b82a88f384"
+  },
+  {
+    "path": "dash-shots/f2-follow-up/after/overview-1280x800-dark.png",
+    "width": 1280,
+    "height": 800,
+    "sha256": "4823d67bd9273dc669281d2f52aacd27f96eb311f6ed97283ccd75b6b6286fb3"
+  },
+  {
+    "path": "dash-shots/f2-follow-up/after/overview-390x844-light.png",
+    "width": 390,
+    "height": 844,
+    "sha256": "33ec60c3fd1b0ade04e86364f306049bf333b260da07bd732abf1663762defb9"
+  },
+  {
+    "path": "dash-shots/f2-follow-up/after/overview-390x844-dark.png",
+    "width": 390,
+    "height": 844,
+    "sha256": "7a9e25097a21a652dabc42de5fc55049510e201243081600ed89ab30aaa1655e"
+  }
+]

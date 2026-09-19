@@ -4,6 +4,7 @@
 // Mirrors the legacy generic inspector's semantics 1:1.
 import { useEffect, useRef, useState } from 'react'
 import { RowActions, RowIcons } from './RowActions'
+import { Card, CardContent, CardHeader } from './ui/card'
 
 export function InvestigateHeader({
   label,
@@ -18,14 +19,12 @@ export function InvestigateHeader({
 }) {
   return (
     <>
-      <header className="overview-header">
-        <div>
-          <div className="label-section">{label}</div>
-          <h1>{title}</h1>
-          <p className="subtitle">{subtitle}</p>
-        </div>
+      <header className="col-span-full flex min-w-0 flex-col gap-2">
+        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
+        <h1 className="heading-serif break-all text-[clamp(1.5rem,2.2vw,2rem)] leading-[1.1] text-foreground">{title}</h1>
+        <p className="max-w-3xl text-sm text-muted-foreground">{subtitle}</p>
       </header>
-      {chips ? <div className="filters">{chips}</div> : null}
+      {chips ? <div className="col-span-full flex min-w-0 flex-wrap items-center gap-2">{chips}</div> : null}
     </>
   )
 }
@@ -37,7 +36,7 @@ export type Column<Row> = {
   detail?: boolean
   className?: string
   /** Card layout only (`layout="cards"`): this column's render() becomes
-   * the card title (`.project-card__title`) instead of a meta field.
+   * the card title instead of a meta field.
    * Defaults to the first non-detail column when none is marked. */
   primary?: boolean
 }
@@ -125,13 +124,12 @@ export function SkeletonRows({
   )
 }
 
-// Shape-true card ghosts (#1967): the five parts a hydrated .project-card
+// Shape-true card ghosts (#1967): the five parts a hydrated result card
 // carries (icon slot, title, badge pill, two-line desc, meta row), each as
 // its real shell with a skeleton fill inside -- so mid-load the grid reads
 // as the result cards it becomes, and swap-in shifts text instead of box
 // positions. Every part after `count` is opt-in so a surface mirrors only
-// what its loaded cards actually render; theme.css still styles all five
-// shells whether populated or ghosted.
+// what its loaded cards actually render.
 export function SkeletonCards({
   count,
   icon = false,
@@ -149,26 +147,26 @@ export function SkeletonCards({
   return (
     <>
       {Array.from({ length: count }, (_, i) => (
-        <div key={`skel-${i}`} className="project-card" aria-hidden="true">
-          <div className="project-card__header">
+        <Card key={`skel-${i}`} className="min-w-0 p-4" aria-hidden="true">
+          <div className="flex items-center gap-3">
             {icon ? (
               // The real slot paints the accent chip; the ghost fills only
               // where the svg will land.
-              <span className="project-card__icon">
+              <span className="grid size-8 shrink-0 place-items-center rounded-md bg-accent text-accent-foreground">
                 <span className="skeleton-line" style={{ display: 'block', width: 16, height: 16 }} />
               </span>
             ) : null}
-            <span className="project-card__title">
+            <span className="min-w-0 flex-1">
               <span className="skeleton-line" style={{ display: 'block', width: '68%' }} />
             </span>
             {badges ? (
-              <div className="project-card__badges">
+              <div className="flex flex-wrap gap-1">
                 <span className="skeleton-line" style={{ display: 'block', width: 56, height: 18, borderRadius: 999 }} />
               </div>
             ) : null}
           </div>
           {desc ? (
-            <p className="project-card__desc">
+            <p className="mt-2 space-y-1 text-sm text-muted-foreground">
               {/* Two lines: __desc clamps at two, so the ghost claims the
                   same vertical budget the loaded text will. */}
               <span className="skeleton-line" style={{ display: 'block', width: '88%' }} />
@@ -176,7 +174,7 @@ export function SkeletonCards({
             </p>
           ) : null}
           {metaCols > 0 ? (
-            <div className="project-card__meta">
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               {Array.from({ length: metaCols }, (_, j) => (
                 <span key={j}>
                   <span className="skeleton-line" style={{ display: 'block', width: 64 }} />
@@ -184,7 +182,7 @@ export function SkeletonCards({
               ))}
             </div>
           ) : null}
-        </div>
+        </Card>
       ))}
     </>
   )
@@ -217,20 +215,17 @@ export function MasterDetailTable<Row>({
   loadingMore?: boolean
   inspectorTitle?: string
   inspectorExtra?: (row: Row) => React.ReactNode
-  /** 'cards' renders a `.project-card` grid (theme.css's result-surface
+  /** 'cards' renders a result-card grid (theme.css's result-surface
    * pattern — payloads-results/github-analysis-results/etc.) instead of a
    * `.data-table`. Selection, the inspector pane, skeleton-first, and
    * View-more pagination are unchanged either way. */
   layout?: 'table' | 'cards'
-  /** `layout="cards"` only: id on the `.project-grid` container — theme.css
-   * scopes a few of its `.project-card` refinements (ellipsis, flex-wrap,
-   * action-menu alignment) to specific result-surface ids. Omit for a card
-   * grid theme.css doesn't name. */
+  /** `layout="cards"` only: id on the `.project-grid` container. */
   gridId?: string
   /** `layout="cards"` only: when a row has exactly one detail page to go
    * to (sandbox/ghidra/github-analysis/cape/revdeck/a payload's own
    * analysis page — the legacy Go templates rendered these result grids
-   * as `<a class="project-card" href="...">`, not click-to-inspect), the
+   * as linked cards, not click-to-inspect), the
    * whole card becomes that link and the inspector pane is skipped for
    * it. Return undefined for a row with nothing to link to (falls back
    * to opening the inspector, same as when this prop is omitted). */
@@ -244,11 +239,10 @@ export function MasterDetailTable<Row>({
    * templates kept those two claims apart and so should this. */
   emptyState?: EmptyState
   /** `layout="cards"` only — the three parts of the legacy result card the
-   * port dropped. Every `.project-card` in the Go templates
+   * port dropped. Every result card in the Go templates
    * (payload_workbench/sandbox/ghidra/github_analysis/payloads) was five
    * parts: an icon and a badge row flanking the title, a one-line
-   * description under it, then the meta row. theme.css still styles all
-   * five; only `__title` and `__meta` were being emitted, which is what
+   * description under it, then the meta row. Only title and meta were being emitted, which is what
    * made the ported cards read flat. Omit any of these for a surface that
    * genuinely has nothing to put there. */
   /** Where a row's own, fuller detail page lives. When this resolves, the
@@ -321,9 +315,10 @@ export function MasterDetailTable<Row>({
   return (
     <div className={open ? 'hp-md hp-md--active hp-md--open wide' : 'hp-md hp-md--active wide'}>
       <div className="hp-md__list" ref={listRef}>
-        <div className="card wide">
+        <Card className="min-w-0 overflow-x-auto">
           {layout === 'cards' ? (
-            <div className="project-grid" id={gridId}>
+            <CardContent className="p-4">
+              <div className="project-grid" id={gridId}>
               {rows === null ? (
                 ghosts(pageSize ?? 12)
               ) : rows.length === 0 ? (
@@ -336,55 +331,38 @@ export function MasterDetailTable<Row>({
                   const icon = cardIcon?.(row)
                   const badges = cardBadges?.(row)
                   const desc = cardDesc?.(row)
-                  const CardTag = href ? 'a' : 'div'
-                  const cardProps = href ? { href } : { onClick: onRowClick(index) }
                   const titleClassName = primaryColumn?.className
-                    ? `project-card__title ${primaryColumn.className}`
-                    : 'project-card__title'
-                  return (
-                    <CardTag key={rowKey(row, index)} className="project-card" {...cardProps}>
-                      <div className="project-card__header">
-                        {icon ? (
-                          <span className="project-card__icon" aria-hidden="true">
-                            {icon}
-                          </span>
-                        ) : null}
-                        <span className={titleClassName}>{primaryColumn?.render(row)}</span>
+                    ? `min-w-0 flex-1 font-semibold text-card-foreground ${primaryColumn.className}`
+                    : 'min-w-0 flex-1 font-semibold text-card-foreground'
+                  const content = (
+                    <>
+                      <div className="flex min-w-0 items-center gap-3">
+                        {icon ? <span className="grid size-8 shrink-0 place-items-center rounded-md bg-accent text-accent-foreground [&_svg]:size-4" aria-hidden="true">{icon}</span> : null}
+                        <h2 className={titleClassName}>{primaryColumn?.render(row)}</h2>
                         {!href && (
-                          <button
-                            type="button"
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              padding: 0,
-                              cursor: 'pointer',
-                              font: 'inherit',
-                              color: 'inherit',
-                              flex: 'none',
-                            }}
-                            aria-expanded={selected === index}
-                            aria-label={`Toggle details for ${primaryColumn?.header ?? 'row'} ${index + 1}`}
-                            onClick={() => setSelected(selected === index ? null : index)}
-                          >
+                          <button type="button" className="shrink-0 rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-expanded={selected === index} aria-label={`Toggle details for ${primaryColumn?.header ?? 'row'} ${index + 1}`} onClick={() => setSelected(selected === index ? null : index)}>
                             {selected === index ? '▾' : '▸'}
                           </button>
                         )}
-                        {badges ? <div className="project-card__badges">{badges}</div> : null}
+                        {badges ? <div className="flex shrink-0 flex-wrap gap-1">{badges}</div> : null}
                       </div>
-                      {desc ? <p className="project-card__desc">{desc}</p> : null}
+                      {desc ? <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">{desc}</p> : null}
                       {metaColumns.length > 0 ? (
-                        <div className="project-card__meta">
-                          {metaColumns.map((column) => (
-                            <span key={column.header}>{column.render(row)}</span>
-                          ))}
+                        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                          {metaColumns.map((column) => <span key={column.header}>{column.render(row)}</span>)}
                         </div>
                       ) : null}
-                    </CardTag>
+                    </>
+                  )
+                  return (
+                    href ? <a key={rowKey(row, index)} className="block min-w-0 text-inherit no-underline" href={href}><Card className="min-w-0 p-4 hover:bg-accent/10">{content}</Card></a>
+                      : <Card key={rowKey(row, index)} className="min-w-0 cursor-pointer p-4 hover:bg-accent/10" onClick={onRowClick(index)}>{content}</Card>
                   )
                 })
               )}
               {loadingMore ? ghosts(4) : null}
-            </div>
+              </div>
+            </CardContent>
           ) : (
             <table className="recent data-table data-table--responsive">
               {/* `data-table--responsive` plus a `data-label` on every cell
@@ -456,27 +434,29 @@ export function MasterDetailTable<Row>({
               </button>
             </div>
           ) : null}
-        </div>
+        </Card>
       </div>
       <div className="hp-md__pane" ref={paneRef}>
         {open ? (
-          <div className="card hp-md__rowcard">
+          <Card className="hp-md__rowcard min-w-0">
             <button className="hp-md__close" type="button" aria-label="Close details" title="Close details" onClick={() => setSelected(null)}>
               ×
             </button>
-            <h2>{inspectorTitle}</h2>
-            {detailPage ? (
-              <a className="btn btn-sm btn-secondary hp-flow" href={detailPage}>
-                Open full details →
-              </a>
-            ) : null}
-            {inspectorExtra ? <div className="hp-md__extra">{inspectorExtra(rows[selected])}</div> : null}
-            <dl>
-              {columns.map((column) => (
-                <FieldPair key={column.header} label={column.header} value={column.render(rows[selected])} />
-              ))}
-            </dl>
-          </div>
+            <CardHeader><h2 className="font-semibold leading-none tracking-tight">{inspectorTitle}</h2></CardHeader>
+            <CardContent>
+              {detailPage ? (
+                <a className="btn btn-sm btn-secondary hp-flow" href={detailPage}>
+                  Open full details →
+                </a>
+              ) : null}
+              {inspectorExtra ? <div className="hp-md__extra">{inspectorExtra(rows[selected])}</div> : null}
+              <dl>
+                {columns.map((column) => (
+                  <FieldPair key={column.header} label={column.header} value={column.render(rows[selected])} />
+                ))}
+              </dl>
+            </CardContent>
+          </Card>
         ) : null}
       </div>
     </div>
