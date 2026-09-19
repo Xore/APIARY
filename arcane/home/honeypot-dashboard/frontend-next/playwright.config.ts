@@ -1,6 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const externalBaseURL = process.env.DASHBOARD_E2E_BASE_URL;
+const baseURL = externalBaseURL || "http://127.0.0.1:18080";
+const palette = process.env.E2E_PALETTE === "ocean" ? "ocean" : "claude";
 
 // #2034: the slimmed port of the Go tier's 90-case browser matrix (#60, PR
 // #146 -- deleted with the Go dashboard at #1628/#1659). Sized to survive:
@@ -24,7 +26,11 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
   use: {
-    baseURL: externalBaseURL || "http://127.0.0.1:18080",
+    baseURL,
+    storageState: {
+      cookies: [],
+      origins: [{ origin: baseURL, localStorage: [{ name: "hp-palette", value: palette }] }],
+    },
     ...devices["Desktop Chrome"],
     trace: "retain-on-failure",
     screenshot: "only-on-failure",

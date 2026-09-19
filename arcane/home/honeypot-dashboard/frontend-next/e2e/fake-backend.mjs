@@ -587,10 +587,10 @@ function route(pathname, searchParams = new URLSearchParams()) {
     // at mobile/light). fetchAppearance maps an absent theme to mode: null,
     // which is the real "operator has never pinned a mode" state and the one
     // where the device's own choice stays authoritative -- so both halves of
-    // the matrix keep the theme they seeded. `palette` stays: it matches the
-    // palette the spec seeds, so the reconcile is a no-op on that axis too,
-    // and the envelope keeps its production shape.
-    return { preferences: { palette: "claude" }, revision: 1 };
+    // the matrix keep the theme they seeded. The palette mirrors the sweep's
+    // seeded palette so the reconcile is a no-op on that axis too, while the
+    // envelope keeps its production shape.
+    return { preferences: { palette: process.env.E2E_PALETTE === "ocean" ? "ocean" : "claude" }, revision: 1 };
   }
   if (pathname === "/api/v1/alerts") {
     return { total: 3, rows: [

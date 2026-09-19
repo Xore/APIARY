@@ -6,6 +6,7 @@ import { SESSION_COOKIE_NAME, fixtureSid } from "./fixture-session";
 // The route set is the sidebar's own registry: a new nav entry joins this
 // sweep without touching the spec, and a removed one drops out of it.
 const NAV_ROUTES = NAV_SECTIONS.flatMap((section) => section.items.map((item) => item.to));
+const PALETTE = process.env.E2E_PALETTE === "ocean" ? "ocean" : "claude";
 
 // Failure mode the matrix exists to catch (issue #60's words): a page
 // renders something broken and nothing fails. These are the two cheap
@@ -62,13 +63,13 @@ test.describe("route smoke across theme x viewport", () => {
         test(`${route} renders its shell`, async ({ browser }) => {
           const context = await browser.newContext({ viewport });
           await context.addInitScript(
-            (t) => {
+            ({ theme, palette }) => {
               try {
-                localStorage.setItem("hp-theme", t);
-                localStorage.setItem("hp-palette", "claude");
+                localStorage.setItem("hp-theme", theme);
+                localStorage.setItem("hp-palette", palette);
               } catch {}
             },
-            theme,
+            { theme, palette: PALETTE },
           );
           const page = await context.newPage();
 
