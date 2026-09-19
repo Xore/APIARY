@@ -12,6 +12,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
+import { Textarea } from './ui/textarea'
 
 type Hit = { label: string; count: number; url: string }
 type Group = { title: string; hits: Hit[] }
@@ -181,7 +182,7 @@ export function CommandPalette() {
             <circle cx="11" cy="11" r="8" />
             <line x1="21" y1="21" x2="16.65" y2="16.65" />
           </svg>
-          <textarea
+          <Textarea
             ref={inputRef}
             rows={1}
             placeholder="Investigate an IP, ASN, payload hash, session, HTTP path or free text…"

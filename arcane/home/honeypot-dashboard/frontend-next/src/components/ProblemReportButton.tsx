@@ -17,6 +17,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
+import { Textarea } from './ui/textarea'
 
 const MAX_TRAIL = 100
 const MAX_CONSOLE_ERRORS = 30
@@ -235,10 +236,8 @@ export function ProblemReportButton({ enabled }: { enabled: boolean }) {
           >
             <label className="note hp-field">
               What did you expect to happen? *
-              <textarea
+              <Textarea
                 ref={expectedRef}
-                className="form-input"
-
                 rows={3}
                 required
                 value={expected}
@@ -247,7 +246,7 @@ export function ProblemReportButton({ enabled }: { enabled: boolean }) {
             </label>
             <label className="note hp-field hp-flow--tight">
               What actually happened?
-              <textarea className="form-input" rows={3} value={actual} onChange={(event) => setActual(event.target.value)} />
+              <Textarea rows={3} value={actual} onChange={(event) => setActual(event.target.value)} />
             </label>
             <p className="note">
               This report automatically includes your recent click/navigation trail, console errors, failed requests, and a
