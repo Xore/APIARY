@@ -7,7 +7,7 @@
 import { useCallback, useState } from 'react'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { pageFor, sectionFor } from '../lib/nav'
+import { NAV_SECTIONS, pageFor, sectionFor } from '../lib/nav'
 import { cycleTheme, useThemeMode } from '../lib/prefs'
 import { isLivePaused, toggleLive, useLiveInterval, useLiveState } from '../lib/live'
 import type { BannerView } from '../lib/banner'
@@ -15,7 +15,14 @@ import type { User } from '../lib/auth'
 import { Button } from './ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip'
 import { Avatar, AvatarFallback } from './ui/avatar'
-import { Separator } from './ui/separator'
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from './ui/breadcrumb'
 
 const fetchOpenAlertCount = createServerFn({ method: 'GET' }).handler(async (): Promise<number> => {
   const { serviceJSON } = await import('../lib/backend.server')
@@ -90,6 +97,7 @@ export function Topbar({
   const mode = useThemeMode()
   const section = sectionFor(pathname)
   const page = pageFor(pathname)
+  const sectionHref = NAV_SECTIONS.find(({ label }) => label === section)?.items[0]?.to ?? '/'
   const alertCount = useOpenAlertCount()
   const initial = (user?.displayName || user?.username || '·').trim().charAt(0).toUpperCase()
   return (
@@ -110,15 +118,23 @@ export function Topbar({
         <img className="theme-art--dark" src="/static/apiary-compact-mark-for-dark.png" width="22" height="22" alt="" />
         <img className="theme-art--light" src="/static/apiary-compact-mark-for-light.png" width="22" height="22" alt="" />
       </Link>
-      <div className="hp-crumb">
-        {section ? (
-          <>
-            <span>{section}</span>
-            <Separator orientation="vertical" className="sep !h-3 !w-px -rotate-[25deg]" />
-          </>
-        ) : null}
-        <b>{page}</b>
-      </div>
+      <Breadcrumb className="hp-crumb">
+        <BreadcrumbList className="flex-nowrap">
+          {section ? (
+            <>
+              <BreadcrumbItem>
+                <BreadcrumbLink asChild>
+                  <Link to={sectionHref}>{section}</Link>
+                </BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+            </>
+          ) : null}
+          <BreadcrumbItem>
+            <BreadcrumbPage>{page}</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
       <div className="app-toolbar__search" aria-hidden="true" />
       <div className="hp-toolbar-actions">
         <Tooltip><TooltipTrigger asChild><Link className="btn btn-icon btn-ghost" to="/alerts" title="Open alerts" aria-label="Open alerts">

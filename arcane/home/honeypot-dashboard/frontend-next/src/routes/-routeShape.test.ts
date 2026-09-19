@@ -369,6 +369,7 @@ const EXPECTED_ROUTE_SHAPE: RouteShape[] = [
   { id: '/attackers', path: '/attackers' },
   { id: '/auth-events', path: '/auth-events' },
   { id: '/auth/callback', path: '/auth/callback' },
+  { id: '/auth/error', path: '/auth/error' },
   { id: '/auth/login', path: '/auth/login' },
   { id: '/auth/logout', path: '/auth/logout' },
   { id: '/bff-mounted/$', path: '/bff-mounted/$' },
