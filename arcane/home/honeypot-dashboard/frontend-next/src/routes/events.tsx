@@ -579,9 +579,9 @@ function Events() {
           <Download />JSON
         </Button>
       </div>
-      {filtersOpen ? (
-        <FiltersModal
-          onClose={() => setFiltersOpen(false)}
+      <FiltersModal
+        open={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
           onApply={(event) => {
             const data = new FormData(event.currentTarget)
             const next: Record<string, string | undefined> = {}
@@ -644,7 +644,6 @@ function Events() {
             </datalist>
           </Field>
         </FiltersModal>
-      ) : null}
       <div className={open ? 'hp-md hp-md--active hp-md--open wide' : 'hp-md hp-md--active wide'} id="events-grid">
         <div className="hp-md__list" ref={listRef}>
           <Card className="min-w-0 overflow-hidden">

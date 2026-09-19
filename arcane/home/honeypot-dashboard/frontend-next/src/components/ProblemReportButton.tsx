@@ -16,6 +16,7 @@ import { useRouterState } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from './ui/button'
+import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 
 const MAX_TRAIL = 100
 const MAX_CONSOLE_ERRORS = 30
@@ -176,15 +177,6 @@ export function ProblemReportButton({ enabled }: { enabled: boolean }) {
     if (open) expectedRef.current?.focus()
   }, [open])
 
-  useEffect(() => {
-    if (!open) return
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [open])
-
   if (!enabled) return null
 
   const submit = async () => {
@@ -232,59 +224,51 @@ export function ProblemReportButton({ enabled }: { enabled: boolean }) {
       >
         Report a problem
       </Button>
-      {open ? (
-        <>
-          <div className="modal-backdrop open" aria-hidden="true" onClick={() => setOpen(false)} />
-          <div className="modal hp-pr-modal open" role="dialog" aria-modal="true" aria-label="Report a problem">
-            <div className="modal__header">
-              <h2>Report a problem</h2>
-              <Button variant="ghost" size="icon" className="modal__close" type="button" aria-label="Close" onClick={() => setOpen(false)}>
-                ✕
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogTitle>Report a problem</DialogTitle>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault()
+              void submit()
+            }}
+          >
+            <label className="note hp-field">
+              What did you expect to happen? *
+              <textarea
+                ref={expectedRef}
+                className="form-input"
+
+                rows={3}
+                required
+                value={expected}
+                onChange={(event) => setExpected(event.target.value)}
+              />
+            </label>
+            <label className="note hp-field hp-flow--tight">
+              What actually happened?
+              <textarea className="form-input" rows={3} value={actual} onChange={(event) => setActual(event.target.value)} />
+            </label>
+            <p className="note">
+              This report automatically includes your recent click/navigation trail, console errors, failed requests, and a
+              snapshot of the current page — reviewed by an admin, never shared outside this dashboard.
+            </p>
+            <div className="hp-row hp-row--end hp-flow--tight">
+              <Button variant="secondary" size="default" type="button" onClick={() => setOpen(false)}>
+                Cancel
+              </Button>
+              <Button variant="default" size="default" type="submit" disabled={busy}>
+                Submit report
               </Button>
             </div>
-            <form
-              onSubmit={(event) => {
-                event.preventDefault()
-                void submit()
-              }}
-            >
-              <label className="note hp-field">
-                What did you expect to happen? *
-                <textarea
-                  ref={expectedRef}
-                  className="form-input"
-                 
-                  rows={3}
-                  required
-                  value={expected}
-                  onChange={(event) => setExpected(event.target.value)}
-                />
-              </label>
-              <label className="note hp-field hp-flow--tight">
-                What actually happened?
-                <textarea className="form-input" rows={3} value={actual} onChange={(event) => setActual(event.target.value)} />
-              </label>
-              <p className="note">
-                This report automatically includes your recent click/navigation trail, console errors, failed requests, and a
-                snapshot of the current page — reviewed by an admin, never shared outside this dashboard.
+            {status ? (
+              <p className="hp-modal-status" role="status" aria-live="polite">
+                {status}
               </p>
-              <div className="hp-row hp-row--end hp-flow--tight">
-                <Button variant="secondary" size="default" type="button" onClick={() => setOpen(false)}>
-                  Cancel
-                </Button>
-                <Button variant="default" size="default" type="submit" disabled={busy}>
-                  Submit report
-                </Button>
-              </div>
-              {status ? (
-                <p className="hp-modal-status" role="status" aria-live="polite">
-                  {status}
-                </p>
-              ) : null}
-            </form>
-          </div>
-        </>
-      ) : null}
+            ) : null}
+          </form>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }

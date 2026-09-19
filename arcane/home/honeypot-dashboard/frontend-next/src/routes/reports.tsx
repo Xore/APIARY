@@ -16,6 +16,7 @@ import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader } from '../components/ui/card'
 import { Dialog, DialogContent, DialogTitle } from '../components/ui/dialog'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../components/ui/alert-dialog'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '../components/ui/empty'
 import { Field, FieldLabel } from '../components/ui/field'
 import { Input } from '../components/ui/input'
@@ -1208,6 +1209,7 @@ function DefinitionsCard({
 }) {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [rowMessage, setRowMessage] = useState<Record<string, string>>({})
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const generate = async (id: string) => {
     setBusyId(id)
@@ -1224,7 +1226,6 @@ function DefinitionsCard({
   }
 
   const remove = async (id: string) => {
-    if (typeof window !== 'undefined' && !window.confirm('Delete this report definition? This cannot be undone.')) return
     setBusyId(id)
     try {
       const result = await deleteDefinition({ data: { id } })
@@ -1235,6 +1236,7 @@ function DefinitionsCard({
       }
     } finally {
       setBusyId(null)
+      setDeleteConfirmId(null)
     }
   }
 
@@ -1306,7 +1308,7 @@ function DefinitionsCard({
                           <Button variant="destructive" size="sm"
                             type="button"
                             disabled={busyId === definition.id}
-                            onClick={() => remove(definition.id)}
+                            onClick={() => setDeleteConfirmId(definition.id)}
                           >
                             Delete
                           </Button>
@@ -1321,6 +1323,18 @@ function DefinitionsCard({
         )}
         </CardContent>
       </Card>
+      <AlertDialog open={deleteConfirmId !== null} onOpenChange={(open) => !open && setDeleteConfirmId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete report definition?</AlertDialogTitle>
+            <AlertDialogDescription>This cannot be undone.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => deleteConfirmId && remove(deleteConfirmId)}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }
@@ -1346,6 +1360,7 @@ function Reports() {
   const [formSeed, setFormSeed] = useState(0)
   const [viewingReport, setViewingReport] = useState<StoreRow | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteGeneratedConfirmId, setDeleteGeneratedConfirmId] = useState<string | null>(null)
   // Design pick 7D: the studio's five step-tabs relocate into the sidebar
   // rail (inline below 520px, where the sidebar is off-canvas).
   const viewTabs = useSidebarViewTabs({
@@ -1447,13 +1462,13 @@ function Reports() {
 
   const removeGenerated = async (row: StoreRow) => {
     const id = str(row, 'id')
-    if (typeof window !== 'undefined' && !window.confirm('Delete this generated report? This cannot be undone.')) return
     setDeletingId(id)
     try {
       const result = await deleteGenerated({ data: { id } })
       if (result.ok) await refreshGenerated()
     } finally {
       setDeletingId(null)
+      setDeleteGeneratedConfirmId(null)
     }
   }
 
@@ -1535,7 +1550,7 @@ function Reports() {
         ) : (
         <MasterDetailTable
           rows={generated ? generated.rows : null}
-          columns={buildGeneratedColumns(setViewingReport, (row) => void removeGenerated(row), deletingId)}
+          columns={buildGeneratedColumns(setViewingReport, (row) => setDeleteGeneratedConfirmId(str(row, 'id')), deletingId)}
           rowKey={(row, index) => `${str(row, 'id')}-${index}`}
           emptyState={{
             title: 'No reports generated yet',
@@ -1559,6 +1574,21 @@ function Reports() {
           onClose={() => setViewingReport(null)}
         />
       ) : null}
+      <AlertDialog open={deleteGeneratedConfirmId !== null} onOpenChange={(open) => !open && setDeleteGeneratedConfirmId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete generated report?</AlertDialogTitle>
+            <AlertDialogDescription>This cannot be undone.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              const row = generated?.rows.find(r => str(r, 'id') === deleteGeneratedConfirmId)
+              if (row) void removeGenerated(row)
+            }}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }

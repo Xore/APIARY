@@ -11,6 +11,7 @@
 // this is now the fourth call site for the identical modal chrome.
 import { useEffect, useRef } from 'react'
 import { Button } from './ui/button'
+import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 
 export function FiltersButton({
   activeCount,
@@ -31,6 +32,7 @@ export function FiltersButton({
 
 export function FiltersModal({
   title = 'Filters',
+  open,
   onClose,
   onApply,
   onClear,
@@ -38,6 +40,7 @@ export function FiltersModal({
   children,
 }: {
   title?: string
+  open: boolean
   onClose: () => void
   /** Commits every field's draft value in one navigation. Fields are
    * uncontrolled (defaultValue from current search state) — read them
@@ -50,55 +53,15 @@ export function FiltersModal({
   children: React.ReactNode
 }) {
   const closeRef = useRef<HTMLButtonElement>(null)
-  const panelRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
-    const previous = document.activeElement
-    closeRef.current?.focus()
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        onClose()
-        return
-      }
-      if (event.key !== 'Tab' || !panelRef.current) return
-      const focusables = panelRef.current.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled])',
-      )
-      if (!focusables.length) return
-      const first = focusables[0]
-      const last = focusables[focusables.length - 1]
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('keydown', onKeyDown)
-      if (previous instanceof HTMLElement && previous.isConnected) previous.focus()
-    }
-  }, [onClose])
+    if (open) closeRef.current?.focus()
+  }, [open])
 
   return (
-    <>
-      <div className="modal-backdrop open" aria-hidden="true" onClick={onClose} />
-      <section
-        className="modal modal--compact open"
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        ref={panelRef}
-      >
-        <div className="modal__header">
-          <h2>{title}</h2>
-          <Button variant="ghost" size="icon" className="modal__close" type="button" aria-label="Close filters" onClick={onClose} ref={closeRef}>
-            ✕
-          </Button>
-        </div>
+    <Dialog open={open} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogTitle>{title}</DialogTitle>
         <form
           className="settings-grid"
           onSubmit={(event) => {
@@ -116,7 +79,7 @@ export function FiltersModal({
             </Button>
           </div>
         </form>
-      </section>
-    </>
+      </DialogContent>
+    </Dialog>
   )
 }

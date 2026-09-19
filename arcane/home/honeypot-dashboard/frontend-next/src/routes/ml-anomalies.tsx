@@ -719,9 +719,9 @@ function Page() {
       <div className="my-4 flex gap-2" id="ml-filters">
         <FiltersButton activeCount={activeFilterCount} onClick={() => setFiltersOpen(true)} />
       </div>
-      {filtersOpen ? (
-        <FiltersModal
-          onClose={() => setFiltersOpen(false)}
+      <FiltersModal
+        open={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
           onApply={(event) => {
             const data = new FormData(event.currentTarget)
             setSeverity(data.get('severity') === 'all' ? '' : String(data.get('severity') ?? ''))
@@ -776,7 +776,6 @@ function Page() {
               </SelectContent></Select>
           </div>
         </FiltersModal>
-      ) : null}
       <Card id="ml-anomaly-scores-card"><CardHeader><CardTitle><h2>Model scores over time</h2></CardTitle>
         <p className="text-sm text-muted-foreground">
           One point per anomaly per detector model, plus the composite — agreement across models is stronger evidence than any

@@ -11,6 +11,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from './ui/button'
+import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 
 type Hit = { label: string; count: number; url: string }
 type Group = { title: string; hits: Hit[] }
@@ -47,7 +48,7 @@ export function CommandPalette() {
     if (restoreFocusRef.current instanceof HTMLElement && restoreFocusRef.current.isConnected) {
       restoreFocusRef.current.focus()
     }
-  }, [])
+  }, [setOpen])
 
   useEffect(() => {
     const onOpen = () => {
@@ -68,21 +69,9 @@ export function CommandPalette() {
       window.removeEventListener('hp:palette', onOpen)
       document.removeEventListener('keydown', onKey)
     }
-  }, [])
+  }, [setOpen])
 
-  // Escape closes — bound only while open so the page underneath keeps
-  // its own Escape semantics otherwise.
-  useEffect(() => {
-    if (!open) return
-    const onEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        close()
-      }
-    }
-    document.addEventListener('keydown', onEscape)
-    return () => document.removeEventListener('keydown', onEscape)
-  }, [open, close])
+
 
   useEffect(() => {
     if (open) inputRef.current?.focus()
@@ -176,11 +165,10 @@ export function CommandPalette() {
     field.style.height = `${Math.min(120, field.scrollHeight)}px`
   }
 
-  if (!open) return null
   return (
-    <>
-      <div className="modal-backdrop open" aria-hidden="true" onClick={close} />
-      <section className="modal modal--palette open" role="dialog" aria-modal="true" aria-label="Investigate an indicator">
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent className="max-w-2xl">
+        <DialogTitle className="sr-only">Investigate an indicator</DialogTitle>
         <form
           className="command-palette__field"
           role="search"
@@ -251,7 +239,7 @@ export function CommandPalette() {
                 : 'Press Enter to open an investigation for this query.'}
           </p>
         )}
-      </section>
-    </>
+      </DialogContent>
+    </Dialog>
   )
 }
