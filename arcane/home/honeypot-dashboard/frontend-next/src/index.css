@@ -79,6 +79,38 @@
   --sidebar-ring: var(--border-focus);
 }
 
+.novnc-shadcn.card {
+  color: var(--novnc-toolbar-foreground);
+  background: var(--novnc-toolbar-background);
+}
+
+.novnc-shadcn .hp-vnc-status {
+  padding: var(--space-sm) var(--space-md);
+  color: var(--novnc-toolbar-foreground);
+  background: var(--novnc-toolbar-background);
+  border: 1px solid var(--novnc-border);
+  border-radius: var(--radius-control);
+}
+
+.novnc-shadcn .hp-vnc-canvas-wrap {
+  border-color: var(--novnc-border);
+}
+
+.novnc-shadcn button {
+  color: var(--novnc-button-foreground);
+  background: var(--novnc-button-background);
+  border-color: var(--novnc-border);
+}
+
+.novnc-shadcn button:hover {
+  color: var(--novnc-button-hover-foreground);
+  background: var(--novnc-button-hover-background);
+}
+
+.novnc-shadcn button:focus-visible {
+  outline-color: var(--novnc-focus);
+}
+
 .leaflet-shadcn .leaflet-tile-pane {
   background: var(--leaflet-tile-background);
 }

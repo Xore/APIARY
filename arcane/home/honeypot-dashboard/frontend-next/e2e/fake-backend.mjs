@@ -441,6 +441,10 @@ function route(pathname, searchParams = new URLSearchParams()) {
   if (pathname === "/api/v1/workbench/recipes") return { recipes: [] };
   if (pathname === "/api/v1/workbench/runs") return { runs: [{ schema_version: 1, id: "fixture-run", payload_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", payload_kind: "script", owner: "dev", recipe_id: "", recipe_revision: 0, recipe_name: "Local static checks", recipe_snapshot: [], idempotency_key: "fixture", state: "completed", created_at: NOW, updated_at: NOW, children: [] }] };
   if (pathname === "/api/v1/sandbox/golden-image-status") return { configured: false };
+  if (pathname === "/api/v1/sandbox/vnc") return {
+    sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    bridge_ws: "ws://127.0.0.1:9/e2e-novnc-theme",
+  };
   if (pathname === "/api/v1/payloads") {
     // Payload rows keep the Go-tier capitalized serde names.
     return {

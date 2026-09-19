@@ -17,6 +17,8 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useRef, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
+import { applyNoVncTheme } from '../lib/novncTheme'
+import { useAppearanceKey } from '../lib/prefs'
 
 type VncStatus = { sha256: string; bridge_ws: string }
 
@@ -39,9 +41,15 @@ export const Route = createFileRoute('/sandbox/vnc')({
 type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error'
 
 function VncViewer({ bridgeWs }: { bridgeWs: string }) {
+  const hostRef = useRef<HTMLDivElement>(null)
   const targetRef = useRef<HTMLDivElement>(null)
   const [state, setState] = useState<ConnectionState>('connecting')
   const [message, setMessage] = useState('Connecting to the read-only bridge…')
+  const appearance = useAppearanceKey()
+
+  useEffect(() => {
+    if (hostRef.current) applyNoVncTheme(hostRef.current)
+  }, [appearance])
 
   useEffect(() => {
     const target = targetRef.current
@@ -80,7 +88,7 @@ function VncViewer({ bridgeWs }: { bridgeWs: string }) {
   }, [bridgeWs])
 
   return (
-    <div className="card wide" data-vnc-state={state}>
+    <div ref={hostRef} className="card wide" data-vnc-state={state}>
       <div className="hp-vnc-status" role="status">
         {message}
       </div>
