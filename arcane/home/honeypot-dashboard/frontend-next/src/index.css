@@ -78,3 +78,47 @@
   --sidebar-border: var(--border-100);
   --sidebar-ring: var(--border-focus);
 }
+
+.leaflet-shadcn .leaflet-tile-pane {
+  background: var(--leaflet-tile-background);
+}
+
+.leaflet-shadcn .leaflet-control {
+  color: var(--leaflet-control-foreground);
+  border-color: var(--leaflet-control-border);
+}
+
+.leaflet-shadcn .leaflet-control-attribution,
+.leaflet-shadcn .leaflet-control-layers,
+.leaflet-shadcn .leaflet-bar a {
+  color: var(--leaflet-control-foreground) !important;
+  background: var(--leaflet-control-background) !important;
+  border-color: var(--leaflet-control-border) !important;
+}
+
+.leaflet-shadcn .leaflet-control a,
+.leaflet-shadcn .leaflet-control-attribution a {
+  color: var(--leaflet-control-foreground) !important;
+}
+
+.leaflet-shadcn .leaflet-control a:hover,
+.leaflet-shadcn .leaflet-control a:focus-visible {
+  color: var(--leaflet-control-hover-foreground) !important;
+  background: var(--leaflet-control-hover-background) !important;
+}
+
+.leaflet-shadcn .leaflet-control a:focus-visible {
+  outline: 2px solid var(--leaflet-control-focus);
+  outline-offset: 1px;
+}
+
+.leaflet-shadcn .leaflet-popup-content-wrapper,
+.leaflet-shadcn .leaflet-tooltip {
+  color: var(--leaflet-popup-foreground) !important;
+  background: var(--leaflet-popup-background) !important;
+  border-color: var(--leaflet-popup-border) !important;
+}
+
+.leaflet-shadcn .leaflet-popup-tip {
+  background: var(--leaflet-popup-background) !important;
+}
