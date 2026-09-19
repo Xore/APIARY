@@ -10,7 +10,10 @@ import { InvestigateHeader, MasterDetailTable, type Column } from '../components
 import { EChart } from '../components/EChart'
 import { AttackerGraph } from '../components/AttackerGraph'
 import { ErrorStateBlock } from '../components/ErrorState'
-import { Tabs, TabPanel } from '../components/Tabs'
+import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { usePaginatedList } from '../lib/hooks'
 import { formatTimestamp } from '../lib/time'
 import { copyWithFlash } from '../lib/flash'
@@ -61,9 +64,9 @@ const COLUMNS: Column<AttackerRow>[] = [
     render: (row) => (
       <span className="hp-token-url">
         <code title={row.id}>{row.id.slice(0, 8)}</code>
-        <button
+        <Button
           type="button"
-          className="btn btn-ghost btn-sm"
+          variant="ghost" size="sm"
           title="copy full entity id"
           onClick={(event) => {
             event.stopPropagation()
@@ -71,7 +74,7 @@ const COLUMNS: Column<AttackerRow>[] = [
           }}
         >
           copy
-        </button>
+        </Button>
       </span>
     ),
   },
@@ -83,9 +86,9 @@ const COLUMNS: Column<AttackerRow>[] = [
     render: (row) => (
       <>
         {row.sensors.map((sensor) => (
-          <span key={sensor} className="badge badge--muted">
+          <Badge key={sensor} variant="secondary">
             {sensor}
-          </span>
+          </Badge>
         ))}
       </>
     ),
@@ -96,14 +99,14 @@ const COLUMNS: Column<AttackerRow>[] = [
   // sandbox-analyzed entities stand out in the list.
   {
     header: 'verdict',
-    render: (row) => (row.verdicts?.length ? <span className="badge badge--accent">verdict</span> : null),
+    render: (row) => (row.verdicts?.length ? <Badge>verdict</Badge> : null),
   },
   // #2047 scan-shape badge, same row as the verdict chip above — absent
   // (not a badge reading "none") when the entity's window never crossed
   // either threshold.
   {
     header: 'scan',
-    render: (row) => (row.scan ? <span className="badge badge--warning">{row.scan}</span> : null),
+    render: (row) => (row.scan ? <Badge variant="secondary">{row.scan}</Badge> : null),
   },
 ]
 
@@ -122,22 +125,19 @@ function EvidenceList<T>({
   render: (item: T) => React.ReactNode
 }) {
   return (
-    <>
-      <h2>
-        {title} ({items.length})
-      </h2>
+    <Card className="min-w-0"><CardHeader><CardTitle><h2>{title} ({items.length})</h2></CardTitle></CardHeader><CardContent>
       {items.length ? (
-        <div className="card__scroll">
+        <div className="max-h-64 overflow-auto divide-y">
           {items.map((item, index) => (
-            <div className="card__row" key={index}>
+            <div className="min-w-0 break-all py-2 text-sm" key={index}>
               {render(item)}
             </div>
           ))}
         </div>
       ) : (
-        <p className="empty">{empty}</p>
+        <p className="text-sm text-muted-foreground">{empty}</p>
       )}
-    </>
+    </CardContent></Card>
   )
 }
 
@@ -157,44 +157,38 @@ function Dossier({ row }: { row: AttackerRow }) {
   const verdicts = row.verdicts ?? []
   const techniques = row.techniques ?? []
   return (
-    <>
-      <Tabs
-        tabs={[
-          { id: 'overview', label: 'Overview' },
-          { id: 'indicators', label: 'Indicators' },
-        ]}
-        active={tab}
-        onSelect={setTab}
-        label="Attacker entity views"
-        idPrefix="attacker-dossier"
-      />
-      <TabPanel id="overview" active={tab} idPrefix="attacker-dossier" className="dashboard-panel">
-        <h2>Identity</h2>
-        <div className="card__row">
-          <span className="card__label">entity</span>
-          <span className="card__value card__value--mono">{row.id}</span>
+    <Tabs value={tab} onValueChange={setTab} className="min-w-0 space-y-4">
+      <TabsList aria-label="Attacker entity views">
+        <TabsTrigger value="overview" id="attacker-dossier-tab-overview" aria-controls="attacker-dossier-panel-overview">Overview</TabsTrigger>
+        <TabsTrigger value="indicators" id="attacker-dossier-tab-indicators" aria-controls="attacker-dossier-panel-indicators">Indicators</TabsTrigger>
+      </TabsList>
+      <TabsContent value="overview" id="attacker-dossier-panel-overview" aria-labelledby="attacker-dossier-tab-overview" className="space-y-4">
+        <Card><CardHeader><CardTitle><h2>Identity</h2></CardTitle></CardHeader><CardContent>
+        <div className="flex flex-wrap justify-between gap-2 border-b py-2 text-sm">
+          <span className="text-muted-foreground">entity</span>
+          <span className="break-all font-mono">{row.id}</span>
         </div>
-        <div className="card__row">
-          <span className="card__label">events</span>
-          <span className="card__value card__value--mono">{row.events.toLocaleString('en-US')}</span>
+        <div className="flex flex-wrap justify-between gap-2 border-b py-2 text-sm">
+          <span className="text-muted-foreground">events</span>
+          <span className="font-mono">{row.events.toLocaleString('en-US')}</span>
         </div>
-        <div className="card__row">
-          <span className="card__label">updated</span>
-          <span className="card__value">{row.updated ? formatTimestamp(row.updated) : 'not recorded'}</span>
+        <div className="flex flex-wrap justify-between gap-2 border-b py-2 text-sm">
+          <span className="text-muted-foreground">updated</span>
+          <span>{row.updated ? formatTimestamp(row.updated) : 'not recorded'}</span>
         </div>
-        <div className="card__row">
-          <span className="card__label">first seen</span>
-          <span className="card__value">{row.first ? formatTimestamp(row.first) : 'not recorded'}</span>
+        <div className="flex flex-wrap justify-between gap-2 border-b py-2 text-sm">
+          <span className="text-muted-foreground">first seen</span>
+          <span>{row.first ? formatTimestamp(row.first) : 'not recorded'}</span>
         </div>
-        <div className="card__row">
-          <span className="card__label">last seen</span>
-          <span className="card__value">{row.last ? formatTimestamp(row.last) : 'not recorded'}</span>
+        <div className="flex flex-wrap justify-between gap-2 border-b py-2 text-sm">
+          <span className="text-muted-foreground">last seen</span>
+          <span>{row.last ? formatTimestamp(row.last) : 'not recorded'}</span>
         </div>
         {row.scan ? (
-          <div className="card__row">
-            <span className="card__label">scan shape</span>
-            <span className="card__value">
-              <span className="badge badge--warning">{row.scan}</span>{' '}
+          <div className="flex flex-wrap justify-between gap-2 border-b py-2 text-sm">
+            <span className="text-muted-foreground">scan shape</span>
+            <span>
+              <Badge variant="secondary">{row.scan}</Badge>{' '}
               {row.scan === 'horizontal'
                 ? `${row.dest_ips ?? 0} distinct destinations`
                 : `${row.ports_touched ?? 0} distinct ports across ${row.dest_ips ?? 0} hosts`}
@@ -202,58 +196,57 @@ function Dossier({ row }: { row: AttackerRow }) {
           </div>
         ) : null}
         {recordingsURL ? (
-          <div className="card__footer">
-            <a className="lnk" href={recordingsURL} title="TTY session recordings from this entity's member IPs, if any">
+          <div className="pt-4">
+            <a className="text-sm text-primary hover:underline" href={recordingsURL} title="TTY session recordings from this entity's member IPs, if any">
               session recordings →
             </a>
           </div>
         ) : null}
+        </CardContent></Card>
         <EvidenceList
           title="Sensors"
           items={row.sensors}
           empty="No sensors recorded for this identity."
-          render={(sensor) => <span className="badge badge--muted">{sensor}</span>}
+          render={(sensor) => <Badge variant="secondary">{sensor}</Badge>}
         />
         <EvidenceList
           title="Member IPs"
           items={row.ips}
           empty="No member IPs recorded for this identity."
           render={(ip) => (
-            <a className="card__value card__value--mono" href={`/investigate/ip/${encodeURIComponent(ip)}`}>
+            <a className="font-mono text-primary hover:underline" href={`/investigate/ip/${encodeURIComponent(ip)}`}>
               {ip}
             </a>
           )}
         />
-        <h2>Entity {row.id.slice(0, 8)} — member IPs</h2>
-        <AttackerGraph id={row.id} />
-        <h2>Fingerprint fusion — why this entity merged</h2>
+        <Card><CardHeader><CardTitle><h2>Entity {row.id.slice(0, 8)} — member IPs</h2></CardTitle></CardHeader><CardContent><AttackerGraph id={row.id} /></CardContent></Card>
+        <Card><CardHeader><CardTitle><h2>Fingerprint fusion — why this entity merged</h2></CardTitle>
         {/* Fusion radar (#1280): which signal categories 2+ member IPs
             actually share — the visual evidence for the merge decision. */}
         <p className="note">
           Signal values shared by 2 or more of this entity's member IPs, by category. A value only one member IP exhibits is real
           telemetry but not evidence for this specific merge.
-        </p>
-        <EChart kind="radar" url={`/api/chart/attacker-fusion?id=${encodeURIComponent(row.id)}`} height={280} />
-      </TabPanel>
-      <TabPanel id="indicators" active={tab} idPrefix="attacker-dossier" className="dashboard-panel">
+        </p></CardHeader><CardContent><EChart kind="radar" url={`/api/chart/attacker-fusion?id=${encodeURIComponent(row.id)}`} height={280} /></CardContent></Card>
+      </TabsContent>
+      <TabsContent value="indicators" id="attacker-dossier-panel-indicators" aria-labelledby="attacker-dossier-tab-indicators" className="space-y-4">
         <EvidenceList
           title="Credential pairs"
           items={row.credentials}
           empty="No credential pairs recorded for this identity."
-          render={(pair) => <code className="card__value card__value--mono">{pair}</code>}
+          render={(pair) => <code className="font-mono">{pair}</code>}
         />
         <EvidenceList
           title="Fingerprints"
           items={row.fingerprints}
           empty="No fingerprints recorded for this identity."
-          render={(fingerprint) => <code className="card__value card__value--mono">{fingerprint}</code>}
+          render={(fingerprint) => <code className="font-mono">{fingerprint}</code>}
         />
         <EvidenceList
           title="Payload hashes"
           items={row.payloads}
           empty="No payload hashes recorded for this identity."
           render={(hash) => (
-            <a className="card__value card__value--mono" href={`/payload-analysis/${encodeURIComponent(hash)}`}>
+            <a className="font-mono text-primary hover:underline" href={`/payload-analysis/${encodeURIComponent(hash)}`}>
               {hash}
             </a>
           )}
@@ -262,7 +255,7 @@ function Dossier({ row }: { row: AttackerRow }) {
           title="Ghidra verdicts"
           items={verdicts}
           empty="No Ghidra verdicts recorded for this identity."
-          render={(verdict) => <span className="badge badge--accent">{verdict}</span>}
+          render={(verdict) => <Badge>{verdict}</Badge>}
         />
         {/* #1260: the worker's own durable technique-coverage field (bare
             IDs) — not the richer per-event attackTechnique the ATT&CK
@@ -272,13 +265,13 @@ function Dossier({ row }: { row: AttackerRow }) {
           items={techniques}
           empty="No ATT&CK techniques recorded for this identity."
           render={(technique) => (
-            <a className="badge badge--info" href={attckTechniqueURL(technique)} target="_blank" rel="noopener noreferrer">
+            <a className="text-primary hover:underline" href={attckTechniqueURL(technique)} target="_blank" rel="noopener noreferrer">
               {technique}
             </a>
           )}
         />
-      </TabPanel>
-    </>
+      </TabsContent>
+    </Tabs>
   )
 }
 
@@ -298,17 +291,17 @@ function Attackers() {
         subtitle="Durable entities merged across IP churn by shared fingerprint, payload, and credential signals."
         chips={
           <>
-            <a className="chip" href="/">
+            <a className="text-sm text-primary hover:underline" href="/">
               ← dashboard
             </a>
-            <a className="chip" href="/campaigns">
+            <a className="text-sm text-primary hover:underline" href="/campaigns">
               network campaigns
             </a>
-            <a className="chip" href="/clusters">
+            <a className="text-sm text-primary hover:underline" href="/clusters">
               infrastructure clusters
             </a>
-            <span className="chip">{failed ? 'load failed' : `${total.toLocaleString('en-US')} identities`}</span>
-            {merged !== null ? <span className="chip">{merged.toLocaleString('en-US')} merged across &gt;1 IP</span> : null}
+            <Badge variant="secondary">{failed ? 'load failed' : `${total.toLocaleString('en-US')} identities`}</Badge>
+            {merged !== null ? <Badge variant="secondary">{merged.toLocaleString('en-US')} merged across &gt;1 IP</Badge> : null}
           </>
         }
       />

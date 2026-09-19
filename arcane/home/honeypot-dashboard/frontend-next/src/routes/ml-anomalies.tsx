@@ -15,6 +15,14 @@ import { FiltersButton, FiltersModal } from '../components/FiltersModal'
 import { formatTimestamp } from '../lib/time'
 import { collapseRuns, foldedCount, idsFor } from '../lib/mlGrouping'
 import { countryName } from '../lib/country'
+import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
+import { Input } from '../components/ui/input'
+import { Label } from '../components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
+import { Skeleton } from '../components/ui/skeleton'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 
 type AckRecord = { Acknowledged: boolean; AckedBy?: string; AckedAt?: string }
 
@@ -28,13 +36,13 @@ type Disposition = (typeof DISPOSITIONS)[number]
 function dispositionBadge(status: string) {
   switch (status) {
     case 'true_positive':
-      return <span className="badge badge--danger">true positive</span>
+      return <Badge variant="destructive">true positive</Badge>
     case 'false_positive':
-      return <span className="badge badge--success">false positive</span>
+      return <Badge variant="secondary">false positive</Badge>
     case 'benign_known':
-      return <span className="badge badge--info">benign known</span>
+      return <Badge variant="secondary">benign known</Badge>
   }
-  return <span className="badge badge--muted">{status}</span>
+  return <Badge variant="outline">{status}</Badge>
 }
 
 const fetchAcks = createServerFn({ method: 'GET' }).handler(async (): Promise<Record<string, AckRecord> | null> => {
@@ -61,7 +69,7 @@ const fetchModelHealth = createServerFn({ method: 'GET' }).handler(async (): Pro
 })
 
 function outcomeBadge(accepted: boolean) {
-  return <span className={accepted ? 'badge badge--success' : 'badge badge--danger'}>{accepted ? 'accepted' : 'rejected'}</span>
+  return <Badge variant={accepted ? 'secondary' : 'destructive'}>{accepted ? 'accepted' : 'rejected'}</Badge>
 }
 
 function ModelHealthCard() {
@@ -88,9 +96,10 @@ function ModelHealthCard() {
     }
   }, [attempt])
   return (
-    <div className="card wide" id="ml-model-health-card">
-      <h2>Model health</h2>
-      <p className="note">Each detector model's most recent retrain decision — accepted or rejected, and why.</p>
+    <Card className="min-w-0" id="ml-model-health-card">
+      <CardHeader><CardTitle><h2>Model health</h2></CardTitle>
+      <p className="text-sm text-muted-foreground">Each detector model's most recent retrain decision — accepted or rejected, and why.</p></CardHeader>
+      <CardContent>
       {models === null && failed ? (
         <ErrorStateBlock
           title="Model health failed to load"
@@ -98,40 +107,33 @@ function ModelHealthCard() {
           onRetry={() => setAttempt((n) => n + 1)}
         />
       ) : models === null ? (
-        <span className="skeleton-line" aria-hidden="true" />
+        <Skeleton className="h-5 w-32" aria-hidden="true" />
       ) : models.length === 0 ? (
-        <p className="empty">No retrain history recorded yet.</p>
+        <p className="text-sm text-muted-foreground">No retrain history recorded yet.</p>
       ) : (
-        <div className="card__scroll">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>model</th>
-                <th>outcome</th>
-                <th>reason</th>
-                <th>anomaly rate (prev → new)</th>
-                <th>train samples</th>
-                <th>last retrain</th>
-              </tr>
-            </thead>
-            <tbody>
+        <Table>
+            <TableHeader><TableRow>
+                <TableHead>model</TableHead><TableHead>outcome</TableHead><TableHead>reason</TableHead>
+                <TableHead>anomaly rate (prev → new)</TableHead><TableHead>train samples</TableHead><TableHead>last retrain</TableHead>
+              </TableRow></TableHeader>
+            <TableBody>
               {models.map((model) => (
-                <tr key={model.model}>
-                  <td className="v">{model.model}</td>
-                  <td>{outcomeBadge(model.accepted)}</td>
-                  <td className="v">{model.reason || '—'}</td>
-                  <td className="n">
+                <TableRow key={model.model}>
+                  <TableCell className="font-mono">{model.model}</TableCell>
+                  <TableCell>{outcomeBadge(model.accepted)}</TableCell>
+                  <TableCell className="font-mono">{model.reason || '—'}</TableCell>
+                  <TableCell className="text-right tabular-nums">
                     {model.anomaly_rate_previous.toFixed(4)} → {model.anomaly_rate_new.toFixed(4)}
-                  </td>
-                  <td className="n">{model.train_samples.toLocaleString('en-US')}</td>
-                  <td>{model.timestamp ? formatTimestamp(model.timestamp) : '—'}</td>
-                </tr>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{model.train_samples.toLocaleString('en-US')}</TableCell>
+                  <TableCell>{model.timestamp ? formatTimestamp(model.timestamp) : '—'}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </TableBody>
+        </Table>
       )}
-    </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -199,8 +201,8 @@ function AckControl({ docIds, acks, onChanged }: { docIds: string[]; acks: Recor
   const acked = docIds.every((id) => acks[id]?.Acknowledged ?? false)
   const many = docIds.length > 1
   return (
-    <button
-      className="btn btn-secondary btn-sm"
+    <Button
+      variant="secondary" size="sm"
       type="button"
       disabled={busy}
       onClick={async () => {
@@ -214,7 +216,7 @@ function AckControl({ docIds, acks, onChanged }: { docIds: string[]; acks: Recor
       }}
     >
       {busy ? '…' : acked ? `Reopen ${many ? `all ${docIds.length}` : 'anomaly'}` : `Acknowledge ${many ? `all ${docIds.length}` : 'anomaly'}`}
-    </button>
+    </Button>
   )
 }
 
@@ -241,35 +243,31 @@ function DispositionControl({ docIds, row, onChanged }: { docIds: string[]; row:
   }
   return (
     <>
-      <label className="form-label" htmlFor="hp-ml-disposition-select">
+      <Label htmlFor="hp-ml-disposition-select">
         Disposition{many ? ` — applies to all ${docIds.length}` : ''}
-      </label>
-      <select
-        id="hp-ml-disposition-select"
-        className="form-input"
+      </Label>
+      <Select
         value={selection}
-        onChange={(event) => setSelection(event.target.value as Disposition)}
+        onValueChange={(value) => setSelection(value as Disposition)}
       >
-        {DISPOSITIONS.map((value) => (
-          <option key={value} value={value}>
-            {value.replace('_', ' ')}
-          </option>
-        ))}
-      </select>
-      <input
-        className="form-input"
+        <SelectTrigger id="hp-ml-disposition-select"><SelectValue /></SelectTrigger>
+        <SelectContent>{DISPOSITIONS.map((value) => (
+          <SelectItem key={value} value={value}>{value.replace('_', ' ')}</SelectItem>
+        ))}</SelectContent>
+      </Select>
+      <Input
         type="text"
         placeholder="why (kept beside the score for the labelled corpus)"
         value={reason}
         onChange={(event) => setReason(event.target.value)}
       />
-      <button className="btn btn-sm btn-secondary" type="button" disabled={busy} onClick={() => void apply(selection)}>
+      <Button variant="secondary" size="sm" type="button" disabled={busy} onClick={() => void apply(selection)}>
         {busy ? '…' : disposed ? `Change to ${selection.replace('_', ' ')}` : 'Record disposition'}
-      </button>
+      </Button>
       {disposed ? (
-        <button className="btn btn-sm btn-secondary" type="button" disabled={busy} onClick={() => void apply('open')}>
+        <Button variant="secondary" size="sm" type="button" disabled={busy} onClick={() => void apply('open')}>
           Retract
-        </button>
+        </Button>
       ) : null}
     </>
   )
@@ -346,15 +344,7 @@ const fetchBacklog = createServerFn({ method: 'GET' }).handler(async (): Promise
 
 function severityBadge(severity: string) {
   // critical→danger, high→warning, medium→info (ml_anomalies.html:65).
-  const cls =
-    severity === 'critical'
-      ? 'badge badge--danger'
-      : severity === 'high'
-        ? 'badge badge--warning'
-        : severity === 'medium'
-          ? 'badge badge--info'
-          : 'badge badge--muted'
-  return <span className={cls}>{severity}</span>
+  return <Badge variant={severity === 'critical' ? 'destructive' : severity === 'high' ? 'default' : 'secondary'}>{severity}</Badge>
 }
 
 function modelScore(row: StoreRow, key: string): string {
@@ -401,12 +391,12 @@ function buildColumns(acks: Record<string, AckRecord>): Column<StoreRow>[] {
             {folded > 1 ? (
               <>
                 {' '}
-                <span
-                  className="badge badge--muted"
+                <Badge
+                  variant="secondary"
                   title={`${folded} anomalies from this address within the same second, scoring within 0.01 of each other, folded into this row. Acknowledging it covers all ${folded}.`}
                 >
                   ×{folded}
-                </span>
+                </Badge>
               </>
             ) : null}
           </>
@@ -424,7 +414,7 @@ function buildColumns(acks: Record<string, AckRecord>): Column<StoreRow>[] {
             <Link to="/events" search={{ ip: str(row, 'src_ip') }}>
               {str(row, 'src_ip')}
             </Link>
-            {str(row, 'src_country') ? <> <span className="badge badge--info" title={countryName(str(row, 'src_country'))}>{str(row, 'src_country')}</span></> : null}
+            {str(row, 'src_country') ? <> <Badge variant="secondary" title={countryName(str(row, 'src_country'))}>{str(row, 'src_country')}</Badge></> : null}
           </>
         ) : (
           <span className="text-muted">unattributed</span>
@@ -458,12 +448,12 @@ function buildColumns(acks: Record<string, AckRecord>): Column<StoreRow>[] {
         const open = ids.filter((id) => !(acks[id]?.Acknowledged ?? false))
         if (!open.length) {
           const by = acks[ids[0]]?.AckedBy
-          return <span className="badge badge--muted">acknowledged{by ? ` by ${by}` : ''}</span>
+          return <Badge variant="secondary">acknowledged{by ? ` by ${by}` : ''}</Badge>
         }
         return (
-          <span className="badge badge--warning">
+          <Badge variant="default">
             {open.length === ids.length ? 'open' : `${open.length} of ${ids.length} open`}
-          </span>
+          </Badge>
         )
       },
     },
@@ -522,9 +512,9 @@ function buildColumns(acks: Record<string, AckRecord>): Column<StoreRow>[] {
             {str(row, 'model_state_id')}
           </code>
         ) : (
-          <span className="badge badge--muted" title="No full detector trio was promoted when this score was computed">
+          <Badge variant="outline" title="No full detector trio was promoted when this score was computed">
             untrained detectors
-          </span>
+          </Badge>
         ),
     },
   ]
@@ -662,10 +652,10 @@ function Page() {
         subtitle="Statistical outliers across sensor traffic — isolation forest, HBOS and LSTM autoencoder scores composited per event."
         chips={
           <>
-            <span className="chip">{total.toLocaleString('en-US')} anomalies</span>
+            <Badge variant="secondary">{total.toLocaleString('en-US')} anomalies</Badge>
             {openCount > 0 ? (
-              <button
-                className="btn btn-sm btn-secondary"
+              <Button
+                variant="secondary" size="sm"
                 type="button"
                 onClick={() =>
                   // Its own copy, verbatim from ml_anomalies.html:38's
@@ -686,7 +676,7 @@ function Page() {
                 }
               >
                 acknowledge all ({openCount})
-              </button>
+              </Button>
             ) : null}
           </>
         }
@@ -695,32 +685,25 @@ function Page() {
         Composite scores from ml-worker's three unsupervised models (Isolation Forest, LSTM-AE, HBOS) — statistical
         outliers, not confirmed attacks. Operator dispositions are stored on the anomaly itself and survive re-scoring.
       </p>
-      <div className="metric-grid" id="ml-kpis">
-        <div className="metric">
-          <div className="metric__value">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" id="ml-kpis">
+        <Card><CardHeader><CardTitle className="text-lg"><h2>Anomalies, 24h</h2></CardTitle></CardHeader><CardContent className="text-2xl font-semibold tabular-nums">
             {stats ? (
               stats.total24h
             ) : statsFailed ? (
               /* #2178: the skeleton was only honest while the request lived. */
               <span className="note">load failed</span>
             ) : (
-              <span className="skeleton-line" aria-hidden="true" />
+              <Skeleton className="h-6 w-16" aria-hidden="true" />
             )}
-          </div>
-          <div className="metric__label">Anomalies, 24h</div>
-        </div>
+        </CardContent></Card>
         {/* #1566: a "0 in 24h" tile directly above a table full of week-old
             open items read as "nothing to do here" — surface the open
             backlog alongside the 24h count. */}
-        <div className="metric">
-          <div className="metric__value">{failed ? <span className="note">load failed</span> : openCount}</div>
-          <div className="metric__label">Open (all time)</div>
-        </div>
+        <Card><CardHeader><CardTitle className="text-lg"><h2>Open (all time)</h2></CardTitle></CardHeader>
+          <CardContent className="text-2xl font-semibold tabular-nums">{failed ? <span className="text-sm text-muted-foreground">load failed</span> : openCount}</CardContent></Card>
         {(stats?.bySeverity ?? []).map((bucket) => (
-          <div className="metric" key={bucket.key}>
-            <div className="metric__value">{bucket.count}</div>
-            <div className="metric__label">{bucket.key}</div>
-          </div>
+          <Card key={bucket.key}><CardHeader><CardTitle className="text-lg"><h2>{bucket.key}</h2></CardTitle></CardHeader>
+            <CardContent className="text-2xl font-semibold tabular-nums">{bucket.count}</CardContent></Card>
         ))}
       </div>
       {/* #2179: severity buckets are computed over the newest rows of the
@@ -733,7 +716,7 @@ function Page() {
           {stats.total24h.toLocaleString('en-US')} in the 24h window.
         </p>
       ) : null}
-      <div className="filters" id="ml-filters">
+      <div className="my-4 flex gap-2" id="ml-filters">
         <FiltersButton activeCount={activeFilterCount} onClick={() => setFiltersOpen(true)} />
       </div>
       {filtersOpen ? (
@@ -741,9 +724,9 @@ function Page() {
           onClose={() => setFiltersOpen(false)}
           onApply={(event) => {
             const data = new FormData(event.currentTarget)
-            setSeverity((data.get('severity') as string | null) ?? '')
-            setEventType((data.get('event_type') as string | null) ?? '')
-            setStatus((data.get('status') as string | null) ?? '')
+            setSeverity(data.get('severity') === 'all' ? '' : String(data.get('severity') ?? ''))
+            setEventType(data.get('event_type') === 'all' ? '' : String(data.get('event_type') ?? ''))
+            setStatus(data.get('status') === 'all' ? '' : String(data.get('status') ?? ''))
             setFiltersOpen(false)
           }}
           onClear={() => {
@@ -754,57 +737,53 @@ function Page() {
           }}
           clearDisabled={activeFilterCount === 0}
         >
-          <div className="settings-field">
-            <label className="form-label" htmlFor="hp-ml-filter-severity">
+          <div className="grid gap-2">
+            <Label htmlFor="hp-ml-filter-severity">
               Severity
-            </label>
-            <select className="form-input" id="hp-ml-filter-severity" name="severity" defaultValue={severity}>
-              <option value="">all severities</option>
+            </Label>
+            <Select name="severity" defaultValue={severity || 'all'}>
+              <SelectTrigger id="hp-ml-filter-severity"><SelectValue /></SelectTrigger><SelectContent className="z-[110]">
+              <SelectItem value="all">all severities</SelectItem>
               {['critical', 'high', 'medium', 'low'].map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
+                <SelectItem key={value} value={value}>{value}</SelectItem>
               ))}
-            </select>
+              </SelectContent></Select>
           </div>
-          <div className="settings-field">
-            <label className="form-label" htmlFor="hp-ml-filter-event-type">
+          <div className="grid gap-2">
+            <Label htmlFor="hp-ml-filter-event-type">
               Event type
-            </label>
-            <select className="form-input" id="hp-ml-filter-event-type" name="event_type" defaultValue={eventType}>
-              <option value="">all event types</option>
+            </Label>
+            <Select name="event_type" defaultValue={eventType || 'all'}>
+              <SelectTrigger id="hp-ml-filter-event-type"><SelectValue /></SelectTrigger><SelectContent className="z-[110]">
+              <SelectItem value="all">all event types</SelectItem>
               {eventTypes.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
+                <SelectItem key={value} value={value}>{value}</SelectItem>
               ))}
-            </select>
+              </SelectContent></Select>
           </div>
-          <div className="settings-field">
-            <label className="form-label" htmlFor="hp-ml-filter-status">
+          <div className="grid gap-2">
+            <Label htmlFor="hp-ml-filter-status">
               Status
-            </label>
-            <select className="form-input" id="hp-ml-filter-status" name="status" defaultValue={status}>
-              <option value="">all statuses</option>
-              <option value="open">open</option>
-              <option value="acknowledged">acknowledged</option>
+            </Label>
+            <Select name="status" defaultValue={status || 'all'}>
+              <SelectTrigger id="hp-ml-filter-status"><SelectValue /></SelectTrigger><SelectContent className="z-[110]">
+              <SelectItem value="all">all statuses</SelectItem>
+              <SelectItem value="open">open</SelectItem>
+              <SelectItem value="acknowledged">acknowledged</SelectItem>
               {DISPOSITIONS.map((value) => (
-                <option key={value} value={value}>
-                  {value.replace('_', ' ')}
-                </option>
+                  <SelectItem key={value} value={value}>{value.replace('_', ' ')}</SelectItem>
               ))}
-            </select>
+              </SelectContent></Select>
           </div>
         </FiltersModal>
       ) : null}
-      <div className="card wide" id="ml-anomaly-scores-card">
-        <h2>Model scores over time</h2>
-        <p className="note">
+      <Card id="ml-anomaly-scores-card"><CardHeader><CardTitle><h2>Model scores over time</h2></CardTitle>
+        <p className="text-sm text-muted-foreground">
           One point per anomaly per detector model, plus the composite — agreement across models is stronger evidence than any
           single high score.
-        </p>
+        </p></CardHeader><CardContent>
         <EChart kind="scatter" url="/api/chart/ml-anomaly-scores" height={300} />
-      </div>
+      </CardContent></Card>
       <ModelHealthCard />
       {rows === null && failed ? (
         /* #2178: the same null that meant "still loading" also meant "the
@@ -857,31 +836,23 @@ function Page() {
       />
       )}
       {stats && stats.topSrcIPs.length > 0 ? (
-        <div className="card wide">
-          <h2>Top source IPs, 24h</h2>
-          <div className="card__scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>source ip</th>
-                  <th>anomalies</th>
-                </tr>
-              </thead>
-              <tbody>
+        <Card><CardHeader><CardTitle><h2>Top source IPs, 24h</h2></CardTitle></CardHeader><CardContent>
+            <Table>
+              <TableHeader><TableRow><TableHead>source ip</TableHead><TableHead>anomalies</TableHead></TableRow></TableHeader>
+              <TableBody>
                 {stats.topSrcIPs.map((entry) => (
-                  <tr key={entry.key}>
-                    <td className="v">
+                  <TableRow key={entry.key}>
+                    <TableCell className="font-mono">
                       <Link to="/events" search={{ ip: entry.key }}>
                         {entry.key}
                       </Link>
-                    </td>
-                    <td className="n">{entry.count}</td>
-                  </tr>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{entry.count}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+              </TableBody>
+            </Table>
+          </CardContent></Card>
       ) : null}
     </>
   )

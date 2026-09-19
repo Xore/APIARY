@@ -9,6 +9,9 @@ import { ErrorStateBlock } from '../components/ErrorState'
 import type { StorePage } from '../components/StoreList'
 import { useServerQuery } from '../lib/useServerQuery'
 import { formatTimestamp } from '../lib/time'
+import { Badge } from '../components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 
 // Matches build_campaign_verdict's document shape
 // (honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/worker.py)
@@ -58,9 +61,7 @@ const fetchPage = createServerFn({ method: 'GET' })
 // Severity → badge mapping from agent_campaigns.html: critical is the
 // danger tier, high the warning tier, everything else informational.
 function severityBadge(severity: string) {
-  const cls =
-    severity === 'critical' ? 'badge badge--danger' : severity === 'high' ? 'badge badge--warning' : 'badge badge--info'
-  return <span className={cls}>{severity}</span>
+  return <Badge variant={severity === 'critical' ? 'destructive' : severity === 'high' ? 'default' : 'secondary'}>{severity}</Badge>
 }
 
 const COLUMNS: Column<AgentCampaignRow>[] = [
@@ -98,48 +99,47 @@ function EvidenceTimeline({ row }: { row: AgentCampaignRow }) {
   if (events.length === 0) return null
   return (
     <section aria-label="Evidence timeline">
-      <h3>
-        Evidence timeline <span className="text-muted">({events.length} event{events.length === 1 ? '' : 's'})</span>
-      </h3>
-      <div className="card__scroll">
-        <table className="recent data-table hp-flow--tight">
-          <thead>
-            <tr>
-              <th>time</th>
-              <th>rule</th>
-              <th>trust boundary crossed</th>
-              <th>reason</th>
-              <th>decoded artifact</th>
-              <th>source event</th>
-            </tr>
-          </thead>
-          <tbody>
+      <Card>
+        <CardHeader><CardTitle><h2>Evidence timeline <span className="text-muted-foreground">({events.length} event{events.length === 1 ? '' : 's'})</span></h2></CardTitle></CardHeader>
+        <CardContent>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>time</TableHead>
+              <TableHead>rule</TableHead>
+              <TableHead>trust boundary crossed</TableHead>
+              <TableHead>reason</TableHead>
+              <TableHead>decoded artifact</TableHead>
+              <TableHead>source event</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {events.flatMap((event, eventIndex) => {
               const link = sourceLink(event)
               const sourceCell = (
-                <td className="v">
+                <TableCell className="font-mono">
                   {link ? <a href={link}>view source</a> : <span className="text-muted">&mdash;</span>}
-                </td>
+                </TableCell>
               )
               const rules = event.matched_rules ?? []
               if (rules.length === 0) {
                 return [
-                  <tr key={`e${eventIndex}`}>
-                    <td>{formatTimestamp(event.timestamp)}</td>
-                    <td className="v" colSpan={4}>
+                  <TableRow key={`e${eventIndex}`}>
+                    <TableCell>{formatTimestamp(event.timestamp)}</TableCell>
+                    <TableCell className="font-mono" colSpan={4}>
                       <span className="text-muted">correlated into this campaign, no rule matched on its own</span>
-                    </td>
+                    </TableCell>
                     {sourceCell}
-                  </tr>,
+                  </TableRow>,
                 ]
               }
               return rules.map((rule, ruleIndex) => (
-                <tr key={`e${eventIndex}r${ruleIndex}`}>
-                  <td>{formatTimestamp(event.timestamp)}</td>
-                  <td className="v">{rule.rule}</td>
-                  <td className="v">{rule.trust_boundary}</td>
-                  <td className="v">{rule.reason}</td>
-                  <td className="v">
+                <TableRow key={`e${eventIndex}r${ruleIndex}`}>
+                  <TableCell>{formatTimestamp(event.timestamp)}</TableCell>
+                  <TableCell className="font-mono">{rule.rule}</TableCell>
+                  <TableCell className="font-mono">{rule.trust_boundary}</TableCell>
+                  <TableCell className="font-mono">{rule.reason}</TableCell>
+                  <TableCell className="font-mono">
                     {(rule.decode_chain ?? []).length > 0 ? (
                       <small>
                         {transformPath(rule)} <span className="text-muted">sha256:{finalArtifactHash(rule)}</span>
@@ -147,14 +147,15 @@ function EvidenceTimeline({ row }: { row: AgentCampaignRow }) {
                     ) : (
                       <span className="text-muted">&mdash;</span>
                     )}
-                  </td>
+                  </TableCell>
                   {sourceCell}
-                </tr>
+                </TableRow>
               ))
             })}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+        </CardContent>
+      </Card>
     </section>
   )
 }
@@ -225,15 +226,15 @@ function Page() {
         subtitle="Correlated AI-agent intrusion activity — encoded egress, tool-use fingerprints, and cross-sensor automation patterns."
         chips={
           <>
-            <span className="chip">
+            <Badge variant="secondary">
               {category && visible ? `${visible.length} of ${total.toLocaleString('en-US')} campaigns` : `${total.toLocaleString('en-US')} campaigns`}
-            </span>
+            </Badge>
             {category ? (
-              <Link className="chip" to="/agent-campaigns" search={{}} title="clear the category filter">
+              <Link className="text-sm text-primary underline-offset-4 hover:underline" to="/agent-campaigns" search={{}} title="clear the category filter">
                 category: {category} ✕
               </Link>
             ) : null}
-            {rows && rows.length > 0 ? <span className="chip">generated {formatTimestamp(rows[0]['@timestamp'])}</span> : null}
+            {rows && rows.length > 0 ? <Badge variant="secondary">generated {formatTimestamp(rows[0]['@timestamp'])}</Badge> : null}
           </>
         }
       />
@@ -252,11 +253,11 @@ function Page() {
         </p>
       ) : null}
       {kpis.length > 0 ? (
-        <div className="metric-grid">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {kpis.map(([cat, count]) => {
             const selected = cat === category
             return (
-              <div className="metric" key={cat} aria-current={selected ? 'true' : undefined}>
+              <Card key={cat} aria-current={selected ? 'true' : undefined} className={selected ? 'border-primary' : undefined}>
                 {/* #1855: this read as a bare count stacked over a raw slug,
                     and clicking it looked inert -- it did navigate, but the
                     tile itself never showed that it was now the active
@@ -264,17 +265,15 @@ function Page() {
                     than an identifier, and marks itself when selected.
                     Clicking the selected one clears the filter, so the tile
                     is a toggle rather than a one-way trip. */}
-                <Link
+                <Link className="block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   to="/agent-campaigns"
                   search={selected ? {} : { category: cat }}
                   title={selected ? 'clear this filter' : `show only ${categoryLabel(cat)} campaigns`}
                 >
-                  <div className="metric__value">{count.toLocaleString('en-US')}</div>
-                  <div className="metric__label">
-                    {categoryLabel(cat)} {count === 1 ? 'campaign' : 'campaigns'}
-                  </div>
+                  <CardHeader><CardTitle className="text-lg"><h2>{categoryLabel(cat)} {count === 1 ? 'campaign' : 'campaigns'}</h2></CardTitle></CardHeader>
+                  <CardContent className="text-2xl font-semibold tabular-nums">{count.toLocaleString('en-US')}</CardContent>
                 </Link>
-              </div>
+              </Card>
             )
           })}
         </div>

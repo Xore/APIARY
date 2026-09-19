@@ -353,6 +353,9 @@ function route(pathname, searchParams = new URLSearchParams()) {
   if (pathname === "/api/v1/attackers") {
     return { total: attackPage.total, rows: attackPage.rows.slice(0) };
   }
+  if (pathname === "/api/v1/attackers-graph") {
+    return { nodes: [{ id: "att-1", label: "att-1", kind: "hub" }, { id: "203.0.113.7", label: "203.0.113.7", kind: "spoke" }], edges: [{ source: "att-1", target: "203.0.113.7" }] };
+  }
   if (pathname === "/api/v1/campaigns") {
     return { total: 1, rows: [campaignRow] };
   }
@@ -615,6 +618,19 @@ function route(pathname, searchParams = new URLSearchParams()) {
   if (pathname === "/api/v1/ml-health") return [];
   if (pathname === "/api/v1/store/dead-letters") return { rows: [{ "@timestamp": NOW, reason: "mapping rejected", logset: "cowrie" }], total: 1 };
   if (pathname === "/api/v1/ml-anomalies/acks") return {};
+  if (pathname.startsWith("/api/v1/store/agent-campaigns")) return { total: 1, rows: [{
+    "@timestamp": NOW, campaign_id: "agent-fixture-01", start: NOW, end: NOW,
+    severity: "critical", matched_categories: ["encoded-egress-external"],
+    correlation_identifiers: ["203.0.113.7"], event_count: 1,
+    events: [{ event_id: "e2e-event-0", source_index: "honeypot-v2-2026.08.26", timestamp: NOW,
+      matched_rules: [{ rule: "encoded-egress", reason: "encoded request", trust_boundary: "external egress", decode_chain: [] }] }],
+  }] };
+  if (pathname.startsWith("/api/v1/store/ml-anomalies")) return { total: 1, rows: [{
+    "@timestamp": NOW, _doc_id: "ml-fixture-01", severity: "high", composite_score: 0.92,
+    src_ip: "203.0.113.7", src_country: "CN", event_type: "ssh", status: "open",
+    explanation: "fixture score anomaly", source_event_id: "e2e-event-0",
+    source_index: "honeypot-v2-2026.08.26", model_scores: { isolation_forest: 0.9, lstm_ae: 0.8, hbos: 0.7 },
+  }] };
   if (pathname.startsWith("/api/v1/store/static-analysis")) return { rows: [{ Fingerprint: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", Analysis: { Kind: "script", Summary: "Shell script" } }], total: 1 };
   if (pathname.startsWith("/api/v1/store/yara")) return { rows: [{ file: { hash: { sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" } }, yara: { matches: ["FixtureRule"] }, "@timestamp": NOW }], total: 1 };
   if (pathname.startsWith("/api/v1/store/")) return { rows: [], total: 0 };
