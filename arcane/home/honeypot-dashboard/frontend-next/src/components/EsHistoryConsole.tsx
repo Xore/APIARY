@@ -11,6 +11,7 @@ import { useState } from 'react'
 import type { JsonRecord } from '../lib/json'
 import { Button } from './ui/button'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from './ui/card'
+import { Input } from './ui/input'
 
 export type EsStorage = { cluster_status: string; index_count: number; doc_count: number; store_bytes: number }
 
@@ -71,7 +72,7 @@ export function EsHistoryConsole({ storage, hidden }: { storage: EsStorage | nul
       {/* #647: the storage glance — same metric-grid shape as the Services
           pane summary (settings_modal.html:745-750). */}
       {storage === null ? (
-        <p className="card__meta">Storage stats unavailable.</p>
+        <p className="text-sm text-muted-foreground">Storage stats unavailable.</p>
       ) : (
         <div className="metric-grid">
           <div className="metric">
@@ -96,7 +97,7 @@ export function EsHistoryConsole({ storage, hidden }: { storage: EsStorage | nul
           </div>
         </div>
       )}
-            <Card hidden={hidden} className="hp-field">
+            <Card hidden={hidden}>
               <CardHeader>
                 <div className="flex items-start justify-between gap-2">
                   <div>
@@ -116,7 +117,7 @@ export function EsHistoryConsole({ storage, hidden }: { storage: EsStorage | nul
               </CardHeader>
               <CardContent>
                 <div className="filters">
-          <input
+          <Input
             className="search"
             placeholder="query_string, e.g. honeypot.sensor:cowrie AND honeypot.username:root"
             aria-label="Elasticsearch query"
@@ -130,7 +131,7 @@ export function EsHistoryConsole({ storage, hidden }: { storage: EsStorage | nul
             search
           </Button>
         </div>
-        <p className="card__meta">{meta}</p>
+        <CardDescription>{meta}</CardDescription>
         <pre className="code">{results}</pre>
           </CardContent>
         </Card>

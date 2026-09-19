@@ -35,7 +35,7 @@ import { Textarea } from '../components/ui/textarea'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
 import { ScrollArea } from '../components/ui/scroll-area'
 import { Separator } from '../components/ui/separator'
-import { Card } from '../components/ui/card'
+import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 import { themeSearchTerms } from '../lib/themes'
 import type { JsonRecord } from '../lib/json'
@@ -1049,275 +1049,299 @@ function PersonalPanes({
     <>
       <Pane id="account">
         {profileCard}
-        <Card className="hp-field space-y-4 p-6" hidden={hideReset}>
-          <h2>Reset preferences</h2>
-          <p className="note">Returns every personal preference — appearance included — to its default.</p>
-          {resetStatus}
-          <div className="settings-actions">
-            <Button variant="destructive" size="sm" type="button" disabled={!loaded} onClick={requestReset}>
-              Reset all preferences
-            </Button>
-          </div>
+        <Card hidden={hideReset}>
+          <CardHeader>
+            <CardTitle>Reset preferences</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="note">Returns every personal preference — appearance included — to its default.</p>
+            {resetStatus}
+            <div className="settings-actions">
+              <Button variant="destructive" size="sm" type="button" disabled={!loaded} onClick={requestReset}>
+                Reset all preferences
+              </Button>
+            </div>
+          </CardContent>
         </Card>
       </Pane>
       <Pane id="appearance">
         {appearanceLead}
-        <Card className="hp-field space-y-4 p-6" hidden={hideReadability}>
-          <h2>Readability &amp; density</h2>
-          {appearanceStatus}
-          {loaded ? (
-            <>
-              {/* #1759: these four saved cleanly, round-tripped, showed a
-                  success toast and changed nothing -- no CSS implements any
-                  of them. Two of them described a specific effect that never
-                  occurred, which is the worse half: a control that reports
-                  success and does nothing is worse than one that is not
-                  there. They stay visible and disabled rather than removed,
-                  because they are wanted; what is removed is the claim that
-                  they work. */}
-              <p className="note hp-appearance-note">
-                Density, high contrast and evidence text are not wired up yet. They are shown here because they are
-                planned, not because they work — see #1759. Motion already follows your operating system's
-                reduced-motion setting; the explicit choices below do not override it.
-              </p>
-              <Segmented
-                label="Density"
-                value={form.density ?? 'comfortable'}
-                options={[
-                  { value: 'comfortable', label: 'Comfortable' },
-                  { value: 'compact', label: 'Compact' },
-                ]}
-                onChange={(value) => patch('density', value)}
-                disabled
-                desc="Not implemented — the stylesheet's spacing scale is defined but barely used, so this needs the spacing refactor in Xore/theme#105 before it can do anything."
-              />
-              <Segmented
-                label="Motion"
-                value={form.reduced_motion ?? 'system'}
-                options={[
-                  { value: 'system', label: 'System' },
-                  { value: 'on', label: 'Reduced' },
-                  { value: 'off', label: 'Full' },
-                ]}
-                onChange={(value) => patch('reduced_motion', value)}
-                disabled
-                desc="Follows your operating system. The explicit Reduced and Full choices are not wired up."
-              />
-              <SwitchRow
-                label="High contrast"
-                desc="Not implemented here on purpose — contrast is a whole token set, so it ships as a theme rather than a switch (#1753)."
-                checked={form.high_contrast ?? false}
-                disabled
-                onChange={(value) => patch('high_contrast', value)}
-              />
-              <SwitchRow
-                label="Larger evidence text"
-                desc="Not implemented yet — needs a type-scale override scoped to tables, the terminal and payload views."
-                checked={form.large_evidence_text ?? false}
-                disabled
-                onChange={(value) => patch('large_evidence_text', value)}
-              />
-              {saveButton('appearance', setAppearanceStatus)}
-            </>
-          ) : (
-            placeholder
-          )}
+        <Card hidden={hideReadability}>
+          <CardHeader>
+            <CardTitle>Readability &amp; density</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {appearanceStatus}
+            {loaded ? (
+              <>
+                {/* #1759: these four saved cleanly, round-tripped, showed a
+                    success toast and changed nothing -- no CSS implements any
+                    of them. Two of them described a specific effect that never
+                    occurred, which is the worse half: a control that reports
+                    success and does nothing is worse than one that is not
+                    there. They stay visible and disabled rather than removed,
+                    because they are wanted; what is removed is the claim that
+                    they work. */}
+                <p className="note hp-appearance-note">
+                  Density, high contrast and evidence text are not wired up yet. They are shown here because they are
+                  planned, not because they work — see #1759. Motion already follows your operating system's
+                  reduced-motion setting; the explicit choices below do not override it.
+                </p>
+                <Segmented
+                  label="Density"
+                  value={form.density ?? 'comfortable'}
+                  options={[
+                    { value: 'comfortable', label: 'Comfortable' },
+                    { value: 'compact', label: 'Compact' },
+                  ]}
+                  onChange={(value) => patch('density', value)}
+                  disabled
+                  desc="Not implemented — the stylesheet's spacing scale is defined but barely used, so this needs the spacing refactor in Xore/theme#105 before it can do anything."
+                />
+                <Segmented
+                  label="Motion"
+                  value={form.reduced_motion ?? 'system'}
+                  options={[
+                    { value: 'system', label: 'System' },
+                    { value: 'on', label: 'Reduced' },
+                    { value: 'off', label: 'Full' },
+                  ]}
+                  onChange={(value) => patch('reduced_motion', value)}
+                  disabled
+                  desc="Follows your operating system. The explicit Reduced and Full choices are not wired up."
+                />
+                <SwitchRow
+                  label="High contrast"
+                  desc="Not implemented here on purpose — contrast is a whole token set, so it ships as a theme rather than a switch (#1753)."
+                  checked={form.high_contrast ?? false}
+                  disabled
+                  onChange={(value) => patch('high_contrast', value)}
+                />
+                <SwitchRow
+                  label="Larger evidence text"
+                  desc="Not implemented yet — needs a type-scale override scoped to tables, the terminal and payload views."
+                  checked={form.large_evidence_text ?? false}
+                  disabled
+                  onChange={(value) => patch('large_evidence_text', value)}
+                />
+                {saveButton('appearance', setAppearanceStatus)}
+              </>
+            ) : (
+              placeholder
+            )}
+          </CardContent>
         </Card>
       </Pane>
       <Pane id="navigation">
-        <Card className="hp-field space-y-4 p-6" hidden={hideNav}>
-          <h2>Navigation &amp; tables</h2>
-          {navStatus}
-          {loaded ? (
-            <>
-              <div className="settings-grid">
-                <div className="settings-field">
-                  <SettingsSelect id="hp-pref-landing" label="Landing page" value={form.landing_page ?? '/'} options={PREF_LANDING_PAGES} onChange={(value) => patch('landing_page', value)} />
-                  <div className="settings-field__desc">First page after sign-in.</div>
+        <Card hidden={hideNav}>
+          <CardHeader>
+            <CardTitle>Navigation &amp; tables</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {navStatus}
+            {loaded ? (
+              <>
+                <div className="settings-grid">
+                  <div className="settings-field">
+                    <SettingsSelect id="hp-pref-landing" label="Landing page" value={form.landing_page ?? '/'} options={PREF_LANDING_PAGES} onChange={(value) => patch('landing_page', value)} />
+                    <div className="settings-field__desc">First page after sign-in.</div>
+                  </div>
+                  <div className="settings-field">
+                    <SettingsSelect id="hp-pref-rows" label="Rows per page" value={String(form.rows_per_page ?? 50)} options={[10, 25, 50, 100].map((n) => [String(n), String(n)])} onChange={(value) => patch('rows_per_page', Number(value))} />
+                  </div>
                 </div>
-                <div className="settings-field">
-                  <SettingsSelect id="hp-pref-rows" label="Rows per page" value={String(form.rows_per_page ?? 50)} options={[10, 25, 50, 100].map((n) => [String(n), String(n)])} onChange={(value) => patch('rows_per_page', Number(value))} />
-                </div>
-              </div>
-              <SwitchRow
-                label="Collapsed sidebar"
-                desc="Start with the navigation rail minimized on wide screens."
-                checked={form.collapsed_sidebar ?? false}
-                onChange={(value) => patch('collapsed_sidebar', value)}
-              />
-              <SwitchRow
-                label="Remember filters"
-                desc="Keep table filters when navigating between pages."
-                checked={form.remember_filters ?? false}
-                onChange={(value) => patch('remember_filters', value)}
-              />
-              <SwitchRow
-                label="Open details in a new tab"
-                desc="Sessions and payload analysis open alongside the current view."
-                checked={form.open_details_new_tab ?? false}
-                onChange={(value) => patch('open_details_new_tab', value)}
-              />
-              <SwitchRow
-                label="Wrap long values"
-                desc="Wrap commands and payloads instead of truncating them."
-                checked={form.wrap_long_values ?? false}
-                onChange={(value) => patch('wrap_long_values', value)}
-              />
-              {saveButton('navigation', setNavStatus)}
-            </>
-          ) : (
-            placeholder
-          )}
+                <SwitchRow
+                  label="Collapsed sidebar"
+                  desc="Start with the navigation rail minimized on wide screens."
+                  checked={form.collapsed_sidebar ?? false}
+                  onChange={(value) => patch('collapsed_sidebar', value)}
+                />
+                <SwitchRow
+                  label="Remember filters"
+                  desc="Keep table filters when navigating between pages."
+                  checked={form.remember_filters ?? false}
+                  onChange={(value) => patch('remember_filters', value)}
+                />
+                <SwitchRow
+                  label="Open details in a new tab"
+                  desc="Sessions and payload analysis open alongside the current view."
+                  checked={form.open_details_new_tab ?? false}
+                  onChange={(value) => patch('open_details_new_tab', value)}
+                />
+                <SwitchRow
+                  label="Wrap long values"
+                  desc="Wrap commands and payloads instead of truncating them."
+                  checked={form.wrap_long_values ?? false}
+                  onChange={(value) => patch('wrap_long_values', value)}
+                />
+                {saveButton('navigation', setNavStatus)}
+              </>
+            ) : (
+              placeholder
+            )}
+          </CardContent>
         </Card>
         {navigationExtra}
       </Pane>
       <Pane id="time">
-        <Card className="hp-field space-y-4 p-6" hidden={hideTime}>
-          <h2>Time &amp; live data</h2>
-          {timeStatus}
-          {loaded ? (
-            <>
-              <div className="settings-grid">
-                <div className="settings-field">
-                  <label className="form-label" htmlFor="hp-pref-timezone">
-                    Timezone
-                  </label>
-                  <Input
-                    id="hp-pref-timezone"
-                    list="hp-tz-suggestions"
-                    autoComplete="off"
-                    spellCheck={false}
-                    placeholder="browser"
-                    value={form.timezone ?? ''}
-                    onChange={(event) => patch('timezone', event.target.value)}
-                  />
-                  <datalist id="hp-tz-suggestions">
-                    {TZ_SUGGESTIONS.map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </datalist>
-                  <div className="settings-field__desc">
-                    "browser", "utc", or an IANA zone such as Europe/Berlin — start typing to see suggestions.
+        <Card hidden={hideTime}>
+          <CardHeader>
+            <CardTitle>Time &amp; live data</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {timeStatus}
+            {loaded ? (
+              <>
+                <div className="settings-grid">
+                  <div className="settings-field">
+                    <label className="form-label" htmlFor="hp-pref-timezone">
+                      Timezone
+                    </label>
+                    <Input
+                      id="hp-pref-timezone"
+                      list="hp-tz-suggestions"
+                      autoComplete="off"
+                      spellCheck={false}
+                      placeholder="browser"
+                      value={form.timezone ?? ''}
+                      onChange={(event) => patch('timezone', event.target.value)}
+                    />
+                    <datalist id="hp-tz-suggestions">
+                      {TZ_SUGGESTIONS.map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </datalist>
+                    <div className="settings-field__desc">
+                      "browser", "utc", or an IANA zone such as Europe/Berlin — start typing to see suggestions.
+                    </div>
+                  </div>
+                  <div className="settings-field">
+                    <SettingsSelect id="hp-pref-refresh" label="Refresh interval" value={String(form.refresh_interval_seconds ?? 30)} options={REFRESH_INTERVALS.map(([value, label]) => [String(value), label])} onChange={(value) => patch('refresh_interval_seconds', Number(value))} />
                   </div>
                 </div>
-                <div className="settings-field">
-                  <SettingsSelect id="hp-pref-refresh" label="Refresh interval" value={String(form.refresh_interval_seconds ?? 30)} options={REFRESH_INTERVALS.map(([value, label]) => [String(value), label])} onChange={(value) => patch('refresh_interval_seconds', Number(value))} />
-                </div>
-              </div>
-              <Segmented
-                label="Clock format"
-                value={form.clock ?? 'h24'}
-                options={[
-                  { value: 'h24', label: '24-hour' },
-                  { value: 'h12', label: '12-hour' },
-                ]}
-                onChange={(value) => patch('clock', value)}
-              />
-              <Segmented
-                label="Timestamps"
-                value={form.timestamps ?? 'relative'}
-                options={[
-                  { value: 'relative', label: 'Relative' },
-                  { value: 'absolute', label: 'Absolute' },
-                ]}
-                onChange={(value) => patch('timestamps', value)}
-              />
-              <SwitchRow
-                label="Auto-refresh"
-                desc="Keep dashboard pages updating in the background."
-                checked={form.auto_refresh ?? true}
-                onChange={(value) => patch('auto_refresh', value)}
-              />
-              <SwitchRow
-                label="Operational alerts"
-                desc="Show a toast when a sensor stops reporting, ingestion stalls, or the cluster degrades — and again when it recovers."
-                checked={form.live_toasts ?? true}
-                onChange={(value) => patch('live_toasts', value)}
-              />
-              {form.live_toasts ?? true ? (
-                <div className="settings-field">
-                  <SettingsSelect id="hp-pref-toast-interval" label="Check frequency" value={String(form.live_toast_interval_seconds ?? 3)} options={TOAST_INTERVALS.map(([value, label]) => [String(value), label])} onChange={(value) => patch('live_toast_interval_seconds', Number(value))} />
-                  <div className="settings-field__desc">
-                    How often the fleet is checked for problems. Each condition is announced once when it
-                    starts and once when it clears, so an outage that lasts all afternoon is two toasts, not
-                    one every check.
+                <Segmented
+                  label="Clock format"
+                  value={form.clock ?? 'h24'}
+                  options={[
+                    { value: 'h24', label: '24-hour' },
+                    { value: 'h12', label: '12-hour' },
+                  ]}
+                  onChange={(value) => patch('clock', value)}
+                />
+                <Segmented
+                  label="Timestamps"
+                  value={form.timestamps ?? 'relative'}
+                  options={[
+                    { value: 'relative', label: 'Relative' },
+                    { value: 'absolute', label: 'Absolute' },
+                  ]}
+                  onChange={(value) => patch('timestamps', value)}
+                />
+                <SwitchRow
+                  label="Auto-refresh"
+                  desc="Keep dashboard pages updating in the background."
+                  checked={form.auto_refresh ?? true}
+                  onChange={(value) => patch('auto_refresh', value)}
+                />
+                <SwitchRow
+                  label="Operational alerts"
+                  desc="Show a toast when a sensor stops reporting, ingestion stalls, or the cluster degrades — and again when it recovers."
+                  checked={form.live_toasts ?? true}
+                  onChange={(value) => patch('live_toasts', value)}
+                />
+                {form.live_toasts ?? true ? (
+                  <div className="settings-field">
+                    <SettingsSelect id="hp-pref-toast-interval" label="Check frequency" value={String(form.live_toast_interval_seconds ?? 3)} options={TOAST_INTERVALS.map(([value, label]) => [String(value), label])} onChange={(value) => patch('live_toast_interval_seconds', Number(value))} />
+                    <div className="settings-field__desc">
+                      How often the fleet is checked for problems. Each condition is announced once when it
+                      starts and once when it clears, so an outage that lasts all afternoon is two toasts, not
+                      one every check.
+                    </div>
                   </div>
-                </div>
-              ) : null}
-              {saveButton('time', setTimeStatus)}
-            </>
-          ) : (
-            placeholder
-          )}
+                ) : null}
+                {saveButton('time', setTimeStatus)}
+              </>
+            ) : (
+              placeholder
+            )}
+          </CardContent>
         </Card>
-        <Card className="hp-field space-y-4 p-6" hidden={hideNotify}>
-          <h2>Notifications</h2>
-          {notifyStatus}
-          {loaded ? (
-            <>
-              <div className="settings-grid">
-                <div className="settings-field">
-                  <SettingsSelect id="hp-pref-severity" label="Minimum severity" value={form.notify_severity ?? 'high'} options={[["low", "Low and above"], ["medium", "Medium and above"], ["high", "High and above"], ["critical", "Critical only"]]} onChange={(value) => patch('notify_severity', value)} />
+        <Card hidden={hideNotify}>
+          <CardHeader>
+            <CardTitle>Notifications</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {notifyStatus}
+            {loaded ? (
+              <>
+                <div className="settings-grid">
+                  <div className="settings-field">
+                    <SettingsSelect id="hp-pref-severity" label="Minimum severity" value={form.notify_severity ?? 'high'} options={[["low", "Low and above"], ["medium", "Medium and above"], ["high", "High and above"], ["critical", "Critical only"]]} onChange={(value) => patch('notify_severity', value)} />
+                  </div>
                 </div>
-              </div>
-              <SwitchRow
-                label="Notification sound"
-                desc="Play a short tone for qualifying alerts."
-                checked={form.notify_sound ?? false}
-                onChange={(value) => patch('notify_sound', value)}
-              />
-              <SwitchRow
-                label="Desktop notifications"
-                desc="Uses the browser notification permission."
-                checked={form.notify_desktop ?? false}
-                onChange={(value) => patch('notify_desktop', value)}
-              />
-              {saveButton('notifications', setNotifyStatus)}
-            </>
-          ) : (
-            placeholder
-          )}
+                <SwitchRow
+                  label="Notification sound"
+                  desc="Play a short tone for qualifying alerts."
+                  checked={form.notify_sound ?? false}
+                  onChange={(value) => patch('notify_sound', value)}
+                />
+                <SwitchRow
+                  label="Desktop notifications"
+                  desc="Uses the browser notification permission."
+                  checked={form.notify_desktop ?? false}
+                  onChange={(value) => patch('notify_desktop', value)}
+                />
+                {saveButton('notifications', setNotifyStatus)}
+              </>
+            ) : (
+              placeholder
+            )}
+          </CardContent>
         </Card>
       </Pane>
       <Pane id="map">
-        <Card className="hp-field space-y-4 p-6" hidden={hideMap}>
-          <h2>Map &amp; investigation</h2>
-          {mapStatus}
-          {loaded ? (
-            <>
-              <div className="settings-grid">
-                <div className="settings-field">
-                  <SettingsSelect id="hp-pref-basemap" label="Basemap" value={form.map_basemap ?? 'osm'} options={[["osm", "OpenStreetMap"]]} onChange={(value) => patch('map_basemap', value)} />
+        <Card hidden={hideMap}>
+          <CardHeader>
+            <CardTitle>Map &amp; investigation</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {mapStatus}
+            {loaded ? (
+              <>
+                <div className="settings-grid">
+                  <div className="settings-field">
+                    <SettingsSelect id="hp-pref-basemap" label="Basemap" value={form.map_basemap ?? 'osm'} options={[["osm", "OpenStreetMap"]]} onChange={(value) => patch('map_basemap', value)} />
+                  </div>
+                  <div className="settings-field">
+                    <SettingsSelect id="hp-pref-window" label="Default event window" value={form.default_event_window ?? '24h'} options={WINDOW_OPTIONS.map((option) => [option.value, option.label])} onChange={(value) => patch('default_event_window', value)} />
+                  </div>
                 </div>
-                <div className="settings-field">
-                  <SettingsSelect id="hp-pref-window" label="Default event window" value={form.default_event_window ?? '24h'} options={WINDOW_OPTIONS.map((option) => [option.value, option.label])} onChange={(value) => patch('default_event_window', value)} />
-                </div>
-              </div>
-              <SwitchRow
-                label="Cluster markers"
-                desc="Group nearby attack origins at low zoom levels."
-                checked={form.map_clustering ?? true}
-                onChange={(value) => patch('map_clustering', value)}
-              />
-              <SwitchRow
-                label="Map animation"
-                desc="Animate zoom and pan transitions."
-                checked={form.map_animation ?? true}
-                onChange={(value) => patch('map_animation', value)}
-              />
-              <SwitchRow
-                label="Preserve filters while drilling down"
-                desc="Carry the current filter set into linked investigations."
-                checked={form.preserve_filters ?? false}
-                onChange={(value) => patch('preserve_filters', value)}
-              />
-              {saveButton('map', setMapStatus)}
-            </>
-          ) : (
-            placeholder
-          )}
+                <SwitchRow
+                  label="Cluster markers"
+                  desc="Group nearby attack origins at low zoom levels."
+                  checked={form.map_clustering ?? true}
+                  onChange={(value) => patch('map_clustering', value)}
+                />
+                <SwitchRow
+                  label="Map animation"
+                  desc="Animate zoom and pan transitions."
+                  checked={form.map_animation ?? true}
+                  onChange={(value) => patch('map_animation', value)}
+                />
+                <SwitchRow
+                  label="Preserve filters while drilling down"
+                  desc="Carry the current filter set into linked investigations."
+                  checked={form.preserve_filters ?? false}
+                  onChange={(value) => patch('preserve_filters', value)}
+                />
+                {saveButton('map', setMapStatus)}
+              </>
+            ) : (
+              placeholder
+            )}
+          </CardContent>
         </Card>
       </Pane>
     </>
@@ -1378,7 +1402,7 @@ function PresentationCard({ initial, editable, revision, onSaved, onConflict, on
   }, [changed.length, onDirty])
   const set = (key: keyof Presentation, value: string) => setForm((current) => ({ ...current, [key]: value }))
   const field = (key: keyof Presentation, label: string, extra?: { type?: string; placeholder?: string }) => (
-    <Field className="hp-field">
+    <Field>
       <FieldLabel htmlFor={`presentation-${key}`}>{label}</FieldLabel>
       <Input
         id={`presentation-${key}`}
@@ -1391,7 +1415,7 @@ function PresentationCard({ initial, editable, revision, onSaved, onConflict, on
     </Field>
   )
   const textarea = (key: keyof Presentation, label: string) => (
-    <Field className="hp-field">
+    <Field>
       <FieldLabel htmlFor={`presentation-${key}`}>{label}</FieldLabel>
       <Textarea
         id={`presentation-${key}`}
@@ -1403,9 +1427,12 @@ function PresentationCard({ initial, editable, revision, onSaved, onConflict, on
     </Field>
   )
   return (
-    <Card className="hp-field space-y-4 p-6" hidden={hidden}>
-      <h2>Presentation</h2>
-      <p className="note">Branding text across the dashboard, and the help/notice copy shown alongside it.</p>
+    <Card hidden={hidden}>
+      <CardHeader>
+        <CardTitle>Presentation</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="note">Branding text across the dashboard, and the help/notice copy shown alongside it.</p>
       <form
         onSubmit={(event) => {
           event.preventDefault()
@@ -1462,6 +1489,7 @@ function PresentationCard({ initial, editable, revision, onSaved, onConflict, on
         )}
         {status}
       </form>
+      </CardContent>
     </Card>
   )
 }
@@ -1511,7 +1539,7 @@ function HoneypotOperationsCard({ initial, editable, revision, onSaved, onConfli
     onDirty(changed.length > 0)
   }, [changed.length, onDirty])
   const field = (key: keyof typeof form, label: string, placeholder?: string) => (
-    <Field className="hp-field">
+    <Field>
       <FieldLabel htmlFor={`honeypot-${key}`}>{label}</FieldLabel>
       <Input
         id={`honeypot-${key}`}
@@ -1525,76 +1553,80 @@ function HoneypotOperationsCard({ initial, editable, revision, onSaved, onConfli
     </Field>
   )
   return (
-    <Card className="hp-field space-y-4 p-6" hidden={hidden}>
-      <h2>Honeypot operations</h2>
-      <p className="note">
-        Staged thresholds: saving updates the configuration store, and the consuming services pick them up on their next
-        restart — nothing here applies live.
-      </p>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (changed.length === 0) return
-          // The "staged" variant of hp-settings.js:831-835's confirm copy:
-          // these fields are all restart-required.
-          confirmAction({
-            title: 'Stage configuration?',
-            description: `Apply these changes: ${changed.join(', ')}.`,
-            warning:
-              'Restart-required values are staged only. Saving never restarts a service — apply them with an operator-run restart.',
-            confirmLabel: 'Stage changes',
-            danger: false,
-            onConfirm: async () => {
-              try {
-                const value: HoneypotConfig = {
-                  alert_cooldown: form.alert_cooldown || undefined,
-                  alert_campaign_score: form.alert_campaign_score ? Number(form.alert_campaign_score) : undefined,
-                  sandbox_alert_risk_score: form.sandbox_alert_risk_score ? Number(form.sandbox_alert_risk_score) : undefined,
-                  ml_alert_threshold: form.ml_alert_threshold ? Number(form.ml_alert_threshold) : undefined,
-                  yara_scan_interval_seconds: form.yara_scan_interval_seconds
-                    ? Number(form.yara_scan_interval_seconds)
-                    : undefined,
-                  yara_max_bytes: form.yara_max_bytes ? Number(form.yara_max_bytes) : undefined,
-                  payload_dedupe_interval_seconds: form.payload_dedupe_interval_seconds
-                    ? Number(form.payload_dedupe_interval_seconds)
-                    : undefined,
+    <Card hidden={hidden}>
+      <CardHeader>
+        <CardTitle>Honeypot operations</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="note">
+          Staged thresholds: saving updates the configuration store, and the consuming services pick them up on their next
+          restart — nothing here applies live.
+        </p>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (changed.length === 0) return
+            // The "staged" variant of hp-settings.js:831-835's confirm copy:
+            // these fields are all restart-required.
+            confirmAction({
+              title: 'Stage configuration?',
+              description: `Apply these changes: ${changed.join(', ')}.`,
+              warning:
+                'Restart-required values are staged only. Saving never restarts a service — apply them with an operator-run restart.',
+              confirmLabel: 'Stage changes',
+              danger: false,
+              onConfirm: async () => {
+                try {
+                  const value: HoneypotConfig = {
+                    alert_cooldown: form.alert_cooldown || undefined,
+                    alert_campaign_score: form.alert_campaign_score ? Number(form.alert_campaign_score) : undefined,
+                    sandbox_alert_risk_score: form.sandbox_alert_risk_score ? Number(form.sandbox_alert_risk_score) : undefined,
+                    ml_alert_threshold: form.ml_alert_threshold ? Number(form.ml_alert_threshold) : undefined,
+                    yara_scan_interval_seconds: form.yara_scan_interval_seconds
+                      ? Number(form.yara_scan_interval_seconds)
+                      : undefined,
+                    yara_max_bytes: form.yara_max_bytes ? Number(form.yara_max_bytes) : undefined,
+                    payload_dedupe_interval_seconds: form.payload_dedupe_interval_seconds
+                      ? Number(form.payload_dedupe_interval_seconds)
+                      : undefined,
+                  }
+                  const outcome = await runConfigSave({
+                    section: 'honeypot',
+                    value,
+                    revision,
+                    setStatus,
+                    onSaved,
+                    onConflict,
+                    successText: 'Staged — apply with a restart of the affected services.',
+                  })
+                  if (outcome === 'saved') setSnapshot(form)
+                } catch (error) {
+                  setStatus(`Configuration could not be staged — ${errorText(error)}`, 'error')
+                  throw error
                 }
-                const outcome = await runConfigSave({
-                  section: 'honeypot',
-                  value,
-                  revision,
-                  setStatus,
-                  onSaved,
-                  onConflict,
-                  successText: 'Staged — apply with a restart of the affected services.',
-                })
-                if (outcome === 'saved') setSnapshot(form)
-              } catch (error) {
-                setStatus(`Configuration could not be staged — ${errorText(error)}`, 'error')
-                throw error
-              }
-            },
-          })
-        }}
-      >
-        <div className="settings-grid">
-          {field('alert_cooldown', 'Alert cooldown (5m–168h)', '6h')}
-          {field('alert_campaign_score', 'Alert campaign score (0–100)')}
-          {field('sandbox_alert_risk_score', 'Sandbox alert risk score (0–100)')}
-          {field('ml_alert_threshold', 'ML anomaly alert threshold (0.5–0.99)')}
-          {field('yara_scan_interval_seconds', 'YARA scan interval in seconds (300–86400)')}
-          {field('yara_max_bytes', 'YARA max bytes (1048576–1073741824)')}
-          {field('payload_dedupe_interval_seconds', 'Payload dedupe interval in seconds (300–86400)')}
-        </div>
-        {editable ? (
-          <Button variant="secondary" size="sm" type="submit" disabled={changed.length === 0}>
-            Stage changes
-          </Button>
-        ) : (
-          <p className="note">Admin role required to edit.</p>
-        )}
-        {status}
-      </form>
+              },
+            })
+          }}
+        >
+          <div className="settings-grid">
+            {field('alert_cooldown', 'Alert cooldown (5m–168h)', '6h')}
+            {field('alert_campaign_score', 'Alert campaign score (0–100)')}
+            {field('sandbox_alert_risk_score', 'Sandbox alert risk score (0–100)')}
+            {field('ml_alert_threshold', 'ML anomaly alert threshold (0.5–0.99)')}
+            {field('yara_scan_interval_seconds', 'YARA scan interval in seconds (300–86400)')}
+            {field('yara_max_bytes', 'YARA max bytes (1048576–1073741824)')}
+            {field('payload_dedupe_interval_seconds', 'Payload dedupe interval in seconds (300–86400)')}
+          </div>
+          {editable ? (
+            <Button variant="secondary" size="sm" type="submit" disabled={changed.length === 0}>
+              Stage changes
+            </Button>
+          ) : (
+            <p className="note">Admin role required to edit.</p>
+          )}
+          {status}
+        </form>
+      </CardContent>
     </Card>
   )
 }
@@ -1690,9 +1722,12 @@ function BehaviorCard({ initial, editable, revision, onSaved, onConflict, onDirt
     </Field>
   )
   return (
-    <Card className="hp-field space-y-4 p-6" hidden={hidden}>
-      <h2>Dashboard behavior</h2>
-      <p className="note">Global defaults users can still override per session, plus feature visibility applied live for every user.</p>
+    <Card hidden={hidden}>
+      <CardHeader>
+        <CardTitle>Dashboard behavior</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="note">Global defaults users can still override per session, plus feature visibility applied live for every user.</p>
       <form
         onSubmit={(event) => {
           event.preventDefault()
@@ -1750,7 +1785,7 @@ function BehaviorCard({ initial, editable, revision, onSaved, onConflict, onDirt
         <div className="settings-grid">
           <SettingsSelect id="behavior-landing" label="Default landing page" value={form.default_landing} disabled={!editable} options={LANDING_OPTIONS.map((option) => [option.value, option.label])} onChange={(value) => setForm((current) => ({ ...current, default_landing: value }))} />
           <SettingsSelect id="behavior-window" label="Default time window" value={form.default_time_window} disabled={!editable} options={WINDOW_OPTIONS.map((option) => [option.value, option.label])} onChange={(value) => setForm((current) => ({ ...current, default_time_window: value }))} />
-          <Field className="hp-field">
+          <Field>
             <FieldLabel htmlFor="behavior-rows-per-page-options">Rows-per-page choices (comma-separated, from 10/25/50/100)</FieldLabel>
             <Input
               id="behavior-rows-per-page-options"
@@ -1761,7 +1796,7 @@ function BehaviorCard({ initial, editable, revision, onSaved, onConflict, onDirt
               onChange={(event) => setForm((current) => ({ ...current, rows_per_page_options: event.target.value }))}
             />
           </Field>
-          <Field className="hp-field">
+          <Field>
             <FieldLabel htmlFor="behavior-max-export-rows">Maximum export rows (100–100000)</FieldLabel>
             <Input
               id="behavior-max-export-rows"
@@ -1772,7 +1807,7 @@ function BehaviorCard({ initial, editable, revision, onSaved, onConflict, onDirt
               onChange={(event) => setForm((current) => ({ ...current, max_export_rows: event.target.value }))}
             />
           </Field>
-          <Field className="hp-field">
+          <Field>
             <FieldLabel htmlFor="behavior-refresh-interval-options">Refresh interval choices in seconds (from 10/15/30/60/120/300)</FieldLabel>
             <Input
               id="behavior-refresh-interval-options"
@@ -1783,7 +1818,7 @@ function BehaviorCard({ initial, editable, revision, onSaved, onConflict, onDirt
               onChange={(event) => setForm((current) => ({ ...current, refresh_interval_seconds_options: event.target.value }))}
             />
           </Field>
-          <Field className="hp-field">
+          <Field>
             <FieldLabel htmlFor="behavior-source-stale-minutes">Source stale threshold in minutes (2–120)</FieldLabel>
             <Input
               id="behavior-source-stale-minutes"
@@ -1795,7 +1830,7 @@ function BehaviorCard({ initial, editable, revision, onSaved, onConflict, onDirt
             />
           </Field>
           <SettingsSelect id="behavior-map" label="Default map provider" value={form.map_provider} disabled={!editable} options={[["osm", "OpenStreetMap"]]} onChange={(value) => setForm((current) => ({ ...current, map_provider: value }))} />
-          <Field className="hp-field">
+          <Field>
             <FieldLabel htmlFor="behavior-default-timezone">Default timezone for new users</FieldLabel>
             <Input
               id="behavior-default-timezone"
@@ -1820,6 +1855,7 @@ function BehaviorCard({ initial, editable, revision, onSaved, onConflict, onDirt
         )}
         {status}
       </form>
+      </CardContent>
     </Card>
   )
 }
@@ -1880,9 +1916,12 @@ function ReportPresetsCard({
   if (templates.length === 0) return null
 
   return (
-    <Card className="hp-field space-y-4 p-6" hidden={hidden}>
-      <h2>Report Studio presets</h2>
-      <p className="note">Renamed/re-described copy for the compiled report-template catalog. Leave a field empty to use the compiled default.</p>
+    <Card hidden={hidden}>
+      <CardHeader>
+        <CardTitle>Report Studio presets</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="note">Renamed/re-described copy for the compiled report-template catalog. Leave a field empty to use the compiled default.</p>
       <form
         onSubmit={(event) => {
           event.preventDefault()
@@ -1922,7 +1961,7 @@ function ReportPresetsCard({
                   <h3>{template.name}</h3>
                 </div>
               </div>
-              <Field className="hp-field">
+              <Field>
                 <FieldLabel htmlFor={`preset-${template.id}-name`}>Name</FieldLabel>
                 <Input
                   id={`preset-${template.id}-name`}
@@ -1935,7 +1974,7 @@ function ReportPresetsCard({
                   }
                 />
               </Field>
-              <Field className="hp-field">
+              <Field>
                 <FieldLabel htmlFor={`preset-${template.id}-description`}>Description</FieldLabel>
                 <Textarea
                   id={`preset-${template.id}-description`}
@@ -1963,6 +2002,7 @@ function ReportPresetsCard({
         )}
         {status}
       </form>
+      </CardContent>
     </Card>
   )
 }
@@ -2040,87 +2080,91 @@ function ServicesCard({ initial, editable }: { initial: ServicesResponse | null;
   }
 
   return (
-    <Card className="hp-field space-y-4 p-6" hidden={hidden}>
-      <h2>Services</h2>
-      <p className="note">
-        Live container status for sensors, probes and workers. Actions cross a narrow allowlisted adapter — the dashboard
-        never holds Docker access directly.
-      </p>
-      {data === null ? (
-        <span className="skeleton-line" aria-hidden="true" />
-      ) : !data.available ? (
-        <p className="empty">{data.reason || 'Services adapter is not configured on this host.'}</p>
-      ) : data.services.length === 0 ? (
-        <p className="empty">No services reported.</p>
-      ) : (
-        <div className="table-scroll">
-          <Table className="data-table">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Service</TableHead>
-                <TableHead>State</TableHead>
-                <TableHead>Health</TableHead>
-                <TableHead>Restarts</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.services.map((service) => {
-                const name = str(service, 'name')
-                return (
-                  <TableRow key={name}>
-                    <TableCell className="v">{name}</TableCell>
-                    <TableCell>{stateBadge(str(service, 'state'))}</TableCell>
-                    <TableCell>{str(service, 'health') || '—'}</TableCell>
-                    <TableCell className="n">{typeof service.restarts === 'number' ? service.restarts : '—'}</TableCell>
-                    <TableCell>
-                      <div className="filters">
-                        <Button
-                          variant="secondary" size="sm"
-                          type="button"
-                          disabled={!editable || busyName !== null}
-                          onClick={() => act(name, 'start')}
-                        >
-                          Start
-                        </Button>
-                        <Button
-                          variant="secondary" size="sm"
-                          type="button"
-                          disabled={!editable || busyName !== null}
-                          onClick={() => act(name, 'stop')}
-                        >
-                          Stop
-                        </Button>
-                        <Button
-                          variant="secondary" size="sm"
-                          type="button"
-                          disabled={!editable || busyName !== null}
-                          onClick={() => act(name, 'restart')}
-                        >
-                          Restart
-                        </Button>
-                        <Button variant="ghost" size="sm" type="button" onClick={() => viewLogs(name)}>
-                          {logsFor === name ? 'Hide logs' : 'Logs'}
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      )}
-      {!editable ? <p className="note">Admin role required to control services.</p> : null}
-      {status}
-      {logsFor ? (
-        <>
-          <p className="note">
-            {logsFor} — most recent lines, newest at the bottom.
-          </p>
-          {logsBusy ? <span className="skeleton-line" aria-hidden="true" /> : <pre className="code">{logsText || 'No log output.'}</pre>}
-        </>
-      ) : null}
+    <Card hidden={hidden}>
+      <CardHeader>
+        <CardTitle>Services</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="note">
+          Live container status for sensors, probes and workers. Actions cross a narrow allowlisted adapter — the dashboard
+          never holds Docker access directly.
+        </p>
+        {data === null ? (
+          <span className="skeleton-line" aria-hidden="true" />
+        ) : !data.available ? (
+          <p className="empty">{data.reason || 'Services adapter is not configured on this host.'}</p>
+        ) : data.services.length === 0 ? (
+          <p className="empty">No services reported.</p>
+        ) : (
+          <div className="table-scroll">
+            <Table className="data-table">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Service</TableHead>
+                  <TableHead>State</TableHead>
+                  <TableHead>Health</TableHead>
+                  <TableHead>Restarts</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.services.map((service) => {
+                  const name = str(service, 'name')
+                  return (
+                    <TableRow key={name}>
+                      <TableCell className="v">{name}</TableCell>
+                      <TableCell>{stateBadge(str(service, 'state'))}</TableCell>
+                      <TableCell>{str(service, 'health') || '—'}</TableCell>
+                      <TableCell className="n">{typeof service.restarts === 'number' ? service.restarts : '—'}</TableCell>
+                      <TableCell>
+                        <div className="filters">
+                          <Button
+                            variant="secondary" size="sm"
+                            type="button"
+                            disabled={!editable || busyName !== null}
+                            onClick={() => act(name, 'start')}
+                          >
+                            Start
+                          </Button>
+                          <Button
+                            variant="secondary" size="sm"
+                            type="button"
+                            disabled={!editable || busyName !== null}
+                            onClick={() => act(name, 'stop')}
+                          >
+                            Stop
+                          </Button>
+                          <Button
+                            variant="secondary" size="sm"
+                            type="button"
+                            disabled={!editable || busyName !== null}
+                            onClick={() => act(name, 'restart')}
+                          >
+                            Restart
+                          </Button>
+                          <Button variant="ghost" size="sm" type="button" onClick={() => viewLogs(name)}>
+                            {logsFor === name ? 'Hide logs' : 'Logs'}
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+        {!editable ? <p className="note">Admin role required to control services.</p> : null}
+        {status}
+        {logsFor ? (
+          <>
+            <p className="note">
+              {logsFor} — most recent lines, newest at the bottom.
+            </p>
+            {logsBusy ? <span className="skeleton-line" aria-hidden="true" /> : <pre className="code">{logsText || 'No log output.'}</pre>}
+          </>
+        ) : null}
+      </CardContent>
     </Card>
   )
 }
@@ -2134,45 +2178,49 @@ function ReporterStatsCard({ data }: { data: ReporterStats | null }) {
     return '—'
   }
   return (
-    <Card className="hp-field space-y-4 p-6" hidden={hidden}>
-      <h2>Reporter stats</h2>
-      <p className="note">The report-sender worker's own metrics — a quick glance at what it has attempted and sent.</p>
-      {data === null ? (
-        <>
-          <span className="skeleton-line" aria-hidden="true" />
-          <span className="skeleton-line" aria-hidden="true" />
-        </>
-      ) : !data.available ? (
-        <p className="empty">{data.reason || 'No reporter metrics available.'}</p>
-      ) : (
-        <>
-          <div className="metric-grid">
-            <div className="metric">
-              <div className="metric__label">Attempted</div>
-              <div className="metric__value">{metric(data.stats?.attempted)}</div>
+    <Card hidden={hidden}>
+      <CardHeader>
+        <CardTitle>Reporter stats</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="note">The report-sender worker's own metrics — a quick glance at what it has attempted and sent.</p>
+        {data === null ? (
+          <>
+            <span className="skeleton-line" aria-hidden="true" />
+            <span className="skeleton-line" aria-hidden="true" />
+          </>
+        ) : !data.available ? (
+          <p className="empty">{data.reason || 'No reporter metrics available.'}</p>
+        ) : (
+          <>
+            <div className="metric-grid">
+              <div className="metric">
+                <div className="metric__label">Attempted</div>
+                <div className="metric__value">{metric(data.stats?.attempted)}</div>
+              </div>
+              <div className="metric">
+                <div className="metric__label">Sent</div>
+                <div className="metric__value">{metric(data.stats?.sent)}</div>
+              </div>
+              <div className="metric">
+                <div className="metric__label">Suppressed</div>
+                <div className="metric__value">{metric(data.stats?.suppressed_cooldown)}</div>
+              </div>
+              <div className="metric">
+                <div className="metric__label">Dry run</div>
+                <div className="metric__value">{metric(data.stats?.dry_run)}</div>
+              </div>
+              <div className="metric">
+                <div className="metric__label">Failed</div>
+                <div className="metric__value">{metric(data.stats?.failed)}</div>
+              </div>
             </div>
-            <div className="metric">
-              <div className="metric__label">Sent</div>
-              <div className="metric__value">{metric(data.stats?.sent)}</div>
-            </div>
-            <div className="metric">
-              <div className="metric__label">Suppressed</div>
-              <div className="metric__value">{metric(data.stats?.suppressed_cooldown)}</div>
-            </div>
-            <div className="metric">
-              <div className="metric__label">Dry run</div>
-              <div className="metric__value">{metric(data.stats?.dry_run)}</div>
-            </div>
-            <div className="metric">
-              <div className="metric__label">Failed</div>
-              <div className="metric__value">{metric(data.stats?.failed)}</div>
-            </div>
-          </div>
-          {data.stats?.updated_at ? (
-            <p className="note">Updated {formatTimestamp(String(data.stats.updated_at))}</p>
-          ) : null}
-        </>
-      )}
+            {data.stats?.updated_at ? (
+              <p className="note">Updated {formatTimestamp(String(data.stats.updated_at))}</p>
+            ) : null}
+          </>
+        )}
+      </CardContent>
     </Card>
   )
 }
@@ -2212,55 +2260,59 @@ function ConfigHistoryCard({ initial, editable }: { initial: HistoryResponse | n
   }
 
   return (
-    <Card className="hp-field space-y-4 p-6" hidden={hidden}>
-      <h2>Configuration history</h2>
-      <p className="note">Newest first. Rollback restores a retained revision as a new revision.</p>
-      {data === null ? (
-        <span className="skeleton-line" aria-hidden="true" />
-      ) : data.entries.length === 0 ? (
-        <p className="empty">No configuration changes recorded yet.</p>
-      ) : (
-        <div className="table-scroll">
-          <Table className="data-table">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Revision</TableHead>
-                <TableHead>Time</TableHead>
-                <TableHead>Actor</TableHead>
-                <TableHead>Action</TableHead>
-                <TableHead>Fields</TableHead>
-                {editable ? <TableHead>Rollback</TableHead> : null}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.entries.map((entry) => (
-                <TableRow key={entry.revision}>
-                  <TableCell className="n">{entry.revision}</TableCell>
-                  <TableCell>{formatTimestamp(entry.time)}</TableCell>
-                  <TableCell>{entry.actor_username || entry.actor_subject || '—'}</TableCell>
-                  <TableCell>
-                    <span className="badge badge--muted">{entry.action}</span>
-                  </TableCell>
-                  <TableCell className="v">{(entry.fields ?? []).join(', ')}</TableCell>
-                  {editable ? (
-                    <TableCell>
-                      <Button
-                        variant="secondary" size="sm"
-                        type="button"
-                        disabled={busy !== null}
-                        onClick={() => rollback(entry.revision)}
-                      >
-                        {busy === entry.revision ? 'Rolling back…' : 'Rollback'}
-                      </Button>
-                    </TableCell>
-                  ) : null}
+    <Card hidden={hidden}>
+      <CardHeader>
+        <CardTitle>Configuration history</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="note">Newest first. Rollback restores a retained revision as a new revision.</p>
+        {data === null ? (
+          <span className="skeleton-line" aria-hidden="true" />
+        ) : data.entries.length === 0 ? (
+          <p className="empty">No configuration changes recorded yet.</p>
+        ) : (
+          <div className="table-scroll">
+            <Table className="data-table">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Revision</TableHead>
+                  <TableHead>Time</TableHead>
+                  <TableHead>Actor</TableHead>
+                  <TableHead>Action</TableHead>
+                  <TableHead>Fields</TableHead>
+                  {editable ? <TableHead>Rollback</TableHead> : null}
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
-      {status}
+              </TableHeader>
+              <TableBody>
+                {data.entries.map((entry) => (
+                  <TableRow key={entry.revision}>
+                    <TableCell className="n">{entry.revision}</TableCell>
+                    <TableCell>{formatTimestamp(entry.time)}</TableCell>
+                    <TableCell>{entry.actor_username || entry.actor_subject || '—'}</TableCell>
+                    <TableCell>
+                      <span className="badge badge--muted">{entry.action}</span>
+                    </TableCell>
+                    <TableCell className="v">{(entry.fields ?? []).join(', ')}</TableCell>
+                    {editable ? (
+                      <TableCell>
+                        <Button
+                          variant="secondary" size="sm"
+                          type="button"
+                          disabled={busy !== null}
+                          onClick={() => rollback(entry.revision)}
+                        >
+                          {busy === entry.revision ? 'Rolling back…' : 'Rollback'}
+                        </Button>
+                      </TableCell>
+                    ) : null}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+        {status}
+      </CardContent>
     </Card>
   )
 }
@@ -2601,108 +2653,120 @@ export function SettingsSurface({
   )
 
   const profileCard = (
-    <Card className="hp-field space-y-4 p-6" hidden={fieldHidden('account', 'profile')}>
-      <h2>Account</h2>
-      {user ? (
-        <>
-          <p className="note">
-            Signed in as <strong>{user.displayName || user.username}</strong>
-            {user.role ? <> · <span className="badge badge--muted">{user.role}</span></> : null}
-          </p>
-          <Button asChild variant="secondary" size="sm"><a href="/auth/logout">Sign out</a></Button>
-        </>
-      ) : (
-        <p className="note">No session (development mode).</p>
-      )}
-      {accountActions ? (
-        <>
-          <hr className="empty-state__divider" />
-          <p className="note">
-            Password, passkeys, two-factor authentication, and sessions are managed by Keycloak. These protected pages open
-            in a new tab and are never embedded.
-          </p>
-          <div className="card__row">
-            <div>
-              <div className="card__label">Profile &amp; password</div>
-              <div className="card__value">Account details, password change, and recovery email.</div>
+    <Card hidden={fieldHidden('account', 'profile')}>
+      <CardHeader>
+        <CardTitle>Account</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {user ? (
+          <>
+            <p className="note">
+              Signed in as <strong>{user.displayName || user.username}</strong>
+              {user.role ? <> · <span className="badge badge--muted">{user.role}</span></> : null}
+            </p>
+            <Button asChild variant="secondary" size="sm"><a href="/auth/logout">Sign out</a></Button>
+          </>
+        ) : (
+          <p className="note">No session (development mode).</p>
+        )}
+        {accountActions ? (
+          <>
+            <hr className="empty-state__divider" />
+            <p className="note">
+              Password, passkeys, two-factor authentication, and sessions are managed by Keycloak. These protected pages open
+              in a new tab and are never embedded.
+            </p>
+            <div className="card__row">
+              <div>
+                <div className="card__label">Profile &amp; password</div>
+                <div className="card__value">Account details, password change, and recovery email.</div>
+              </div>
+              <Button asChild variant="secondary" size="sm"><a href={accountActions.profile} target="_blank" rel="noopener noreferrer">Open</a></Button>
             </div>
-            <Button asChild variant="secondary" size="sm"><a href={accountActions.profile} target="_blank" rel="noopener noreferrer">Open</a></Button>
-          </div>
-          <div className="card__row">
-            <div>
-              <div className="card__label">Passkeys &amp; two-factor authentication</div>
-              <div className="card__value">Register hardware keys, authenticator apps, and WebAuthn credentials.</div>
+            <div className="card__row">
+              <div>
+                <div className="card__label">Passkeys &amp; two-factor authentication</div>
+                <div className="card__value">Register hardware keys, authenticator apps, and WebAuthn credentials.</div>
+              </div>
+              <Button asChild variant="secondary" size="sm"><a href={accountActions.security} target="_blank" rel="noopener noreferrer">Open</a></Button>
             </div>
-            <Button asChild variant="secondary" size="sm"><a href={accountActions.security} target="_blank" rel="noopener noreferrer">Open</a></Button>
-          </div>
-          <div className="card__row">
-            <div>
-              <div className="card__label">Sessions &amp; devices</div>
-              <div className="card__value">Active sessions and trusted devices; revoke any of them.</div>
+            <div className="card__row">
+              <div>
+                <div className="card__label">Sessions &amp; devices</div>
+                <div className="card__value">Active sessions and trusted devices; revoke any of them.</div>
+              </div>
+              <Button asChild variant="secondary" size="sm"><a href={accountActions.sessions} target="_blank" rel="noopener noreferrer">Open</a></Button>
             </div>
-            <Button asChild variant="secondary" size="sm"><a href={accountActions.sessions} target="_blank" rel="noopener noreferrer">Open</a></Button>
-          </div>
-          <div className="card__row">
-            <div>
-              <div className="card__label">Security settings</div>
-              <div className="card__value">Open the Keycloak Account Console in a new tab.</div>
+            <div className="card__row">
+              <div>
+                <div className="card__label">Security settings</div>
+                <div className="card__value">Open the Keycloak Account Console in a new tab.</div>
+              </div>
+              <Button asChild variant="secondary" size="sm"><a href={accountActions.manageAccount} target="_blank" rel="noopener noreferrer">Manage account</a></Button>
             </div>
-            <Button asChild variant="secondary" size="sm"><a href={accountActions.manageAccount} target="_blank" rel="noopener noreferrer">Manage account</a></Button>
-          </div>
-        </>
-      ) : null}
+          </>
+        ) : null}
+      </CardContent>
     </Card>
   )
 
   const themeCard = (
-    <Card className="hp-field space-y-4 p-6" hidden={fieldHidden('appearance', 'theme')}>
-      <h2>Appearance</h2>
-      {/* Go's segmented markup (settings_modal.html:103-125): a
-          role="group" of aria-pressed buttons — never radiogroup, which
-          aria-pressed is invalid inside. */}
-      <p className="note">Theme mode</p>
-      <div className="inline-flex flex-wrap gap-1 rounded-md border bg-muted p-1" role="group" aria-label="Theme mode">
-        {modes.map((mode) => (
-          <Button
-            key={mode.id}
-            type="button"
-            data-value={mode.id}
-            aria-pressed={theme === mode.id}
-            className="!h-auto"
-            variant={theme === mode.id ? 'secondary' : 'ghost'}
-            onClick={() => applyTheme(mode.id)}
-          >
-            {mode.label}
-          </Button>
-        ))}
-      </div>
-      <p className="note">Theme</p>
-      {/* #1758: was nine 11px dots whose colours were hardcoded dark-mode
-          accents, so in light mode they previewed colours that appeared
-          nowhere on screen. Each tile now renders that theme's real tokens
-          in the mode you are actually in. */}
-      <ThemeGallery />
+    <Card hidden={fieldHidden('appearance', 'theme')}>
+      <CardHeader>
+        <CardTitle>Appearance</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {/* Go's segmented markup (settings_modal.html:103-125): a
+            role="group" of aria-pressed buttons — never radiogroup, which
+            aria-pressed is invalid inside. */}
+        <p className="note">Theme mode</p>
+        <div className="inline-flex flex-wrap gap-1 rounded-md border bg-muted p-1" role="group" aria-label="Theme mode">
+          {modes.map((mode) => (
+            <Button
+              key={mode.id}
+              type="button"
+              data-value={mode.id}
+              aria-pressed={theme === mode.id}
+              className="!h-auto"
+              variant={theme === mode.id ? 'secondary' : 'ghost'}
+              onClick={() => applyTheme(mode.id)}
+            >
+              {mode.label}
+            </Button>
+          ))}
+        </div>
+        <p className="note">Theme</p>
+        {/* #1758: was nine 11px dots whose colours were hardcoded dark-mode
+            accents, so in light mode they previewed colours that appeared
+            nowhere on screen. Each tile now renders that theme's real tokens
+            in the mode you are actually in. */}
+        <ThemeGallery />
+      </CardContent>
     </Card>
   )
 
   const prefetchCard = (
-    <Card className="hp-field space-y-4 p-6" hidden={fieldHidden('navigation', 'prefetch')}>
-      <h2>Navigation</h2>
-      <p className="note">
-        Predictive prefetching warms the data for the pages you're most likely to open next, so navigation feels instant. Turn
-        it off to only load pages on click.
-      </p>
-      <Button
-        type="button"
-        variant={prefetch ? 'secondary' : 'ghost'}
-        aria-pressed={prefetch}
-        onClick={() => {
-          setPrefetchEnabled(!prefetch)
-          setPrefetch(!prefetch)
-        }}
-      >
-        {prefetch ? 'Predictive prefetch: on' : 'Predictive prefetch: off'}
-      </Button>
+    <Card hidden={fieldHidden('navigation', 'prefetch')}>
+      <CardHeader>
+        <CardTitle>Navigation</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="note">
+          Predictive prefetching warms the data for the pages you're most likely to open next, so navigation feels instant. Turn
+          it off to only load pages on click.
+        </p>
+        <Button
+          type="button"
+          variant={prefetch ? 'secondary' : 'ghost'}
+          aria-pressed={prefetch}
+          onClick={() => {
+            setPrefetchEnabled(!prefetch)
+            setPrefetch(!prefetch)
+          }}
+        >
+          {prefetch ? 'Predictive prefetch: on' : 'Predictive prefetch: off'}
+        </Button>
+      </CardContent>
     </Card>
   )
 
@@ -2866,32 +2930,36 @@ export function SettingsSurface({
                     )}
                   </Pane>
                   <Pane id="users">
-                    <Card className="hp-field space-y-4 p-6" hidden={fieldHidden('users', 'users')}>
-                      <h2>Projected dashboard users</h2>
-                      <p className="note">Diagnostic projection of who used the dashboard. Account management lives in the auth service.</p>
-                      {adminData ? (
-                        <Table className="data-table">
-                          <TableBody>
-                            {adminData.users.map((operator) => (
-                              <TableRow key={operator.subject}>
-                                <TableCell className="v">{operator.username}</TableCell>
-                                <TableCell>
-                                  <span className={operator.role === 'admin' ? 'badge badge--warning' : 'badge badge--muted'}>
-                                    {operator.role}
-                                  </span>
-                                </TableCell>
-                                <TableCell className="ago">{formatTimestamp(operator.last_seen_at)}</TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      ) : adminFailed ? (
-                        // #2311: an outage used to render an empty roster —
-                        // reading as "no one has ever used the dashboard".
-                        adminLoadFailure
-                      ) : (
-                        <span className="skeleton-line" aria-hidden="true" />
-                      )}
+                    <Card hidden={fieldHidden('users', 'users')}>
+                      <CardHeader>
+                        <CardTitle>Projected dashboard users</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <p className="note">Diagnostic projection of who used the dashboard. Account management lives in the auth service.</p>
+                        {adminData ? (
+                          <Table className="data-table">
+                            <TableBody>
+                              {adminData.users.map((operator) => (
+                                <TableRow key={operator.subject}>
+                                  <TableCell className="v">{operator.username}</TableCell>
+                                  <TableCell>
+                                    <span className={operator.role === 'admin' ? 'badge badge--warning' : 'badge badge--muted'}>
+                                      {operator.role}
+                                    </span>
+                                  </TableCell>
+                                  <TableCell className="ago">{formatTimestamp(operator.last_seen_at)}</TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        ) : adminFailed ? (
+                          // #2311: an outage used to render an empty roster —
+                          // reading as "no one has ever used the dashboard".
+                          adminLoadFailure
+                        ) : (
+                          <span className="skeleton-line" aria-hidden="true" />
+                        )}
+                      </CardContent>
                     </Card>
                   </Pane>
                   <Pane id="services">
@@ -2904,47 +2972,55 @@ export function SettingsSurface({
                       panes' copy and hand off to the full pages, never a
                       duplicate of the tools themselves. */}
                   <Pane id="canarytokens">
-                    <Card className="hp-field space-y-4 p-6" hidden={fieldHidden('canarytokens', 'canarytokens')}>
-                      <h2>Create a Canarytoken</h2>
-                      <p className="note">
-                        The resulting artifact is yours to plant anywhere — an email, a fileshare, a USB drive. It phones home
-                        the instant it's opened, wherever that is.
-                      </p>
-                      <div className="card__row">
-                        <div>
-                          <div className="card__label">Canarytokens</div>
-                          <div className="card__value">Create tokens and re-download previously created artifacts.</div>
-                        </div>
-                        <Button asChild variant="secondary" size="sm"><Link to="/canarytokens">Open full page {'→'}</Link></Button>
-                      </div>
-                      <div className="card__row">
-                        <div>
-                          <div className="card__label">Planted credentials</div>
-                          <div className="card__value">
-                            Bait usernames and passwords implanted into honeypot filesystems, optionally linked to a
-                            canarytoken.
+                    <Card hidden={fieldHidden('canarytokens', 'canarytokens')}>
+                      <CardHeader>
+                        <CardTitle>Create a Canarytoken</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <p className="note">
+                          The resulting artifact is yours to plant anywhere — an email, a fileshare, a USB drive. It phones home
+                          the instant it's opened, wherever that is.
+                        </p>
+                        <div className="card__row">
+                          <div>
+                            <div className="card__label">Canarytokens</div>
+                            <div className="card__value">Create tokens and re-download previously created artifacts.</div>
                           </div>
+                          <Button asChild variant="secondary" size="sm"><Link to="/canarytokens">Open full page {'→'}</Link></Button>
                         </div>
-                        <Button asChild variant="secondary" size="sm"><Link to="/credentials">Open full page {'→'}</Link></Button>
-                      </div>
+                        <div className="card__row">
+                          <div>
+                            <div className="card__label">Planted credentials</div>
+                            <div className="card__value">
+                              Bait usernames and passwords implanted into honeypot filesystems, optionally linked to a
+                              canarytoken.
+                            </div>
+                          </div>
+                          <Button asChild variant="secondary" size="sm"><Link to="/credentials">Open full page {'→'}</Link></Button>
+                        </div>
+                      </CardContent>
                     </Card>
                   </Pane>
                   <Pane id="elasticsearch">
                     <EsHistoryConsole storage={storageData} hidden={fieldHidden('elasticsearch', 'console')} />
                   </Pane>
                   <Pane id="dead-letters">
-                    <Card className="hp-field space-y-4 p-6" hidden={fieldHidden('dead-letters', 'dead-letters')}>
-                      <h2>Ingest dead letters</h2>
-                      <p className="note">
-                        Documents Elasticsearch rejected, with their original error and field shape for remediation.
-                      </p>
-                      <div className="card__row">
-                        <div>
-                          <div className="card__label">Dead letters</div>
-                          <div className="card__value">List, search, and purge rejected documents.</div>
+                    <Card hidden={fieldHidden('dead-letters', 'dead-letters')}>
+                      <CardHeader>
+                        <CardTitle>Ingest dead letters</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <p className="note">
+                          Documents Elasticsearch rejected, with their original error and field shape for remediation.
+                        </p>
+                        <div className="card__row">
+                          <div>
+                            <div className="card__label">Dead letters</div>
+                            <div className="card__value">List, search, and purge rejected documents.</div>
+                          </div>
+                          <Button asChild variant="secondary" size="sm"><Link to="/dead-letters">Open full page {'→'}</Link></Button>
                         </div>
-                        <Button asChild variant="secondary" size="sm"><Link to="/dead-letters">Open full page {'→'}</Link></Button>
-                      </div>
+                      </CardContent>
                     </Card>
                   </Pane>
                   <Pane id="history">

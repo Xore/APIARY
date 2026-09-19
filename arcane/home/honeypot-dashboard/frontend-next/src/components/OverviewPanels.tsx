@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ErrorStateBlock } from './ErrorState'
 import { applyLeafletTheme } from '../lib/leafletTheme'
 import { DEFAULT_MAP_PREFS, pullMapPrefs, useAppearanceKey, useThemeMode, type MapPrefs } from '../lib/prefs'
-import { Card } from './ui/card'
+import { Card, CardHeader, CardTitle, CardContent } from './ui/card'
 import { Button } from './ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import { Table, TableBody, TableCell, TableRow } from './ui/table'
@@ -17,21 +17,22 @@ export type Kv = { key: string; count: number; link: string }
 export function Tbl({
   title,
   rows,
-  half,
   hint,
   id,
   failed,
 }: {
   title: string
   rows: Kv[] | null
-  half?: boolean
   hint?: string
   id?: string
   failed?: boolean
 }) {
   return (
-    <Card className={half ? 'card half' : 'card'} id={id}>
-      <h2>{title}</h2>
+    <Card id={id}>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+      </CardHeader>
+      <CardContent>
       {rows === null ? (
         failed ? (
           /* #2178: null both starts and ends the skeleton here; a failed
@@ -49,7 +50,6 @@ export function Tbl({
       ) : rows.length === 0 ? (
         <p className="empty">{hint ?? 'Nothing to show here'}</p>
       ) : (
-        <div className="card__scroll">
           <Table className="data-table">
             <TableBody>
               {rows.map((row) => (
@@ -66,8 +66,8 @@ export function Tbl({
               ))}
             </TableBody>
           </Table>
-        </div>
-      )}
+        )}
+      </CardContent>
     </Card>
   )
 }
@@ -87,8 +87,7 @@ export function Heatmap({ rows, failed }: { rows: HeatRow[] | null; failed?: boo
   if (rows.length === 0) return <p className="empty">No events in the last 24 hours.</p>
   return (
     <>
-      <div className="card__scroll">
-        <div className="heatmap" aria-label="Hourly event activity per sensor, last 24 hours">
+      <div className="heatmap" aria-label="Hourly event activity per sensor, last 24 hours">
           {rows.map((row) => (
             <div className="heatmap__row" key={row.sensor}>
               <span className="heatmap__label">{row.sensor}</span>
@@ -106,7 +105,6 @@ export function Heatmap({ rows, failed }: { rows: HeatRow[] | null; failed?: boo
             </div>
           ))}
         </div>
-      </div>
       <div className="heatmap__legend">
         <span>Less</span>
         {[0, 25, 50, 75, 100].map((v) => (

@@ -10,6 +10,7 @@ import { usePaginatedList, useResolved } from '../lib/hooks'
 import { formatTimestamp } from '../lib/time'
 import { countryName } from '../lib/country'
 import { Button } from '../components/ui/button'
+import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card'
 
 type SourceRow = {
   ip: string
@@ -109,11 +110,15 @@ function Sources() {
       />
       {/* Map-first (ips.html:56-64, AS-C): where-then-who — the attack-origins
           map leads the page, marker clicks open the related events. */}
-      <div className="card wide" id="ips-map">
-        <h2>Attack origins</h2>
-        <AttackMap points={points ?? null} />
-      </div>
-      <div className="card wide" id="ips-table">
+      <Card id="ips-map">
+        <CardHeader>
+          <CardTitle>Attack origins</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <AttackMap points={points ?? null} />
+        </CardContent>
+      </Card>
+      <Card id="ips-table">
         <div className="hp-src-grid">
           {failed ? null : rows === null ? (
             <SkeletonCards count={10} />
@@ -189,7 +194,7 @@ function Sources() {
             </Button>
           </div>
         ) : null}
-      </div>
+      </Card>
     </>
   )
 }
