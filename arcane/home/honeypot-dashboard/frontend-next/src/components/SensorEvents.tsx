@@ -145,7 +145,7 @@ export function SensorEventsTable({
   const spec = protocolFor(sensor)
   return (
     <>
-      <h2 className="label-section">{sensor}</h2>
+      <h2 className="text-base font-semibold">{sensor}</h2>
       <CardDescription>
         {spec
           ? `${spec.what}. Newest first, last 48h.`

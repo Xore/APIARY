@@ -241,7 +241,7 @@ function TechniquesTable({ techniques }: { techniques: Technique[] }) {
     <Card className="min-w-0 shadow-none">
       <CardHeader className="p-4 pb-2">
         <h2>MITRE ATT&amp;CK behavior mapping</h2>
-        <p className="note">Evidence-based behavioral context only; this does not identify or attribute an actor.</p>
+        <p className="text-sm text-muted-foreground">Evidence-based behavioral context only; this does not identify or attribute an actor.</p>
       </CardHeader>
       <CardContent className="min-w-0 p-4 pt-0">
         <Table>
@@ -306,7 +306,7 @@ function CorrelationPanel({ correlation }: { correlation: Correlation }) {
       </div>
       <Card>
         <h2>Elasticsearch correlation</h2>
-        <p className="note">
+        <p className="text-sm text-muted-foreground">
           Everything the backend has seen for this IP across honeypot, Suricata, and portbridge tunnel records — not
           limited to the in-memory window above.
           {correlation.truncated
@@ -345,7 +345,7 @@ function CorrelationPanel({ correlation }: { correlation: Correlation }) {
       </Card>
       <Card>
         <h2>Attack progression</h2>
-        <p className="note">Chronological, oldest to newest; capped to the latest 250 matching records.</p>
+        <p className="text-sm text-muted-foreground">Chronological, oldest to newest; capped to the latest 250 matching records.</p>
         <MasterDetailTable
           rows={[...correlation.records].reverse()}
           columns={CORRELATION_COLUMNS}

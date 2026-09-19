@@ -538,7 +538,7 @@ export function EChart({ kind, url, height, zoomable }: { kind: ChartKind; url: 
           pan UI. Roam and the wheel listener now do that work in-chart. */}
       {zoomable && state === 'ready' ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.4rem', marginBottom: '0.35rem' }}>
-          <span className="note" style={{ margin: 0 }}>scroll to zoom · drag to pan · drag nodes</span>
+          <span className="text-sm text-muted-foreground" style={{ margin: 0 }}>scroll to zoom · drag to pan · drag nodes</span>
           <Button
             variant="outline"
             size="icon"
@@ -599,7 +599,7 @@ export function EChart({ kind, url, height, zoomable }: { kind: ChartKind; url: 
           </p>
         ) : null}
       </div>
-      {state === 'ready' ? <p className="note">{status}</p> : null}
+      {state === 'ready' ? <p className="text-sm text-muted-foreground">{status}</p> : null}
     </>
   )
 }

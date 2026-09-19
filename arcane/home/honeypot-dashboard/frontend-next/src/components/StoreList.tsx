@@ -181,7 +181,7 @@ export function StoreListPage<Row = StoreRow>({
           {moreFailed ? (
             /* #2178: the click succeeded from the UI's point of view while
                the read behind it failed -- say so instead of a no-op. */
-            <p className="note" role="alert">
+            <p className="text-sm text-muted-foreground" role="alert">
               Loading more {chipNoun} failed — <Button variant="ghost" size="sm" className="copy" type="button" onClick={() => void viewMore()}>retry</Button>
             </p>
           ) : null}

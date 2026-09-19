@@ -177,7 +177,7 @@ export function GhidraCallGraph({ sha }: { sha: string }) {
           aria-label="Filter call graph nodes"
         />
       </div>
-      <p className="note" role="status">
+      <p className="text-sm text-muted-foreground" role="status">
         {functionCount} function{functionCount === 1 ? '' : 's'}, {graph.nodes.length} node{graph.nodes.length === 1 ? '' : 's'}{' '}
         total — click a node to focus its neighbors, click the background to clear
         {graph.truncated ? ' (truncated to the largest functions)' : ''}

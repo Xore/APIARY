@@ -238,7 +238,7 @@ function Page() {
           </>
         }
       />
-      <p className="note">
+      <p className="text-sm text-muted-foreground">
         Correlated, deterministically-scored campaigns from agent-intrusion-worker — every entry here crossed a named
         trust boundary via a rule in criticality_rules.py, not a model's own judgment call.
       </p>
@@ -247,7 +247,7 @@ function Page() {
           the numbers they count rather than presenting a prefix as the
           fleet-wide breakdown. */}
       {rows !== null && rows.length < total ? (
-        <p className="note">
+        <p className="text-sm text-muted-foreground">
           Category counts cover the {rows.length.toLocaleString('en-US')} loaded campaigns of{' '}
           {total.toLocaleString('en-US')} on record — view more to widen them.
         </p>

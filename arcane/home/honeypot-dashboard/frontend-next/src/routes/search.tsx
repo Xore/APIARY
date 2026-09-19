@@ -68,7 +68,7 @@ function SearchPage() {
         subtitle="Grouped matches across sources, sessions, payloads, commands, credentials, fingerprints and signatures."
         chips={result && result !== 'failed' ? <span className="chip">{result.total.toLocaleString('en-US')} matches</span> : undefined}
       />
-      <p className="note">
+      <p className="text-sm text-muted-foreground">
         Every source the dashboard holds, matched against your query.
       </p>
       <form

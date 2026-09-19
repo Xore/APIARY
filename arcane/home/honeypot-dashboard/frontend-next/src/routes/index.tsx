@@ -300,7 +300,7 @@ function KpiStrip({ kpis, payloads, payloadsFailed }: { kpis: OverviewKpis | nul
           {payloadsFailed && payloads === null ? (
             /* #2178: the tile says nothing rather than a skeleton that
                outlives the request it was waiting for. */
-            <span className="note">load failed</span>
+            <span className="text-sm text-muted-foreground">load failed</span>
           ) : (
             <KpiValue value={payloads} />
           )}
@@ -402,9 +402,9 @@ function RecentEventRow({ row, open, onToggle }: { row: EventRow; open: boolean;
           <TableCell colSpan={6}>
             <Card className="hp-flow" role="article" aria-label="Full normalized event">
               <h3>Normalized event</h3>
-              <p className="note">Complete read-only record as stored by the pipeline.</p>
+              <p className="text-sm text-muted-foreground">Complete read-only record as stored by the pipeline.</p>
               {row.src_ip || row.session ? (
-                <p className="note">
+                <p className="text-sm text-muted-foreground">
                   {row.src_ip ? (
                     <Link className="lnk" to="/investigate/ip/$ip" params={{ ip: row.src_ip }}>
                       attacker profile for {row.src_ip}
@@ -511,7 +511,7 @@ function Overview() {
             {presentation.banner_text}
           </Badge>
         ) : null}
-        <div className="label-section">{presentation?.dashboard_title || 'Honeypot command center'}</div>
+        <Label className="text-base font-semibold">{presentation?.dashboard_title || 'Honeypot command center'}</Label>
         <Suspense fallback={<h1>{greeting('')}</h1>}>
           {/* The salutation reads the wall clock at render time, so SSR and
               a hydrated client (or a frozen test clock) can legally disagree
@@ -595,7 +595,7 @@ function Overview() {
           <Card className="col-span-full min-w-0 p-6 map-card">
             <h2>Attack origins — live geographic view</h2>
             <AttackMap points={dashboard ? dashboard.map_points : null} failed={dashboardFailed} />
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               Approximate geolocation only. One marker per city, accumulating every IP that geolocated there. Map data ©
               OpenStreetMap contributors.
             </p>
@@ -677,7 +677,7 @@ function Overview() {
               )
             ) : (
               <>
-                <p className="note">
+                <p className="text-sm text-muted-foreground">
                   Showing all {dashboard.sensors.length} sensors. Active = recent traffic, quiet = online with no recent event,
                   stale = its feed has stopped updating. A quiet honeypot is not necessarily offline.
                 </p>
@@ -702,7 +702,7 @@ function Overview() {
           <Card id="ml-backlog-card">
             <h2>ML classification backlog — last 7 days</h2>
             <EChart kind="line" url="/api/chart/ml-backlog" height={280} />
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               Average queue depth per hour for honeypot-v2-* and suricata-v2-* events awaiting ml-worker classification. A
               rising line means the backlog is growing, not draining — see{' '}
               <a href="https://github.com/Xore/APIARY/issues/1227" target="_blank" rel="noopener noreferrer">
@@ -737,12 +737,12 @@ function Overview() {
           <Tbl title="Network/provider classes" rows={dashboard ? dashboard.providers : null} id="overview-providers-card" failed={dashboardFailed} />
           <Card id="netflow-bytes-card">
             <h2>Traffic volume — bytes/hour, last 7 days</h2>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               Summed from every captured flow&apos;s byte count, all sensors and ports combined. A spike stands out here even
               when it doesn&apos;t in the event-count activity heatmap above.
             </p>
             <EChart kind="line" url="/api/chart/netflow-bytes" height={280} />
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               Summed from every captured flow's byte count. A spike stands out here even when it doesn't in the event-count
               heatmap.
             </p>
@@ -753,7 +753,7 @@ function Overview() {
           </Card>
           <Card id="anomaly-trend-card">
             <h2>Protocol-conformance violations by protocol, over time</h2>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               Traffic that doesn't conform to the protocol it claims to be — often scanning tools or deliberate IDS-evasion
               attempts.
             </p>
@@ -761,7 +761,7 @@ function Overview() {
           </Card>
           <Card id="dionaea-cves-card">
             <h2>Top exploited CVEs / named incidents — last 7 days</h2>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               Real, human-readable exploit identities dionaea itself recognized in the traffic it captured (e.g.
               DoublePulsar/EternalBlue), not a generic incident-kind label.
             </p>
@@ -790,7 +790,7 @@ function Overview() {
           <Tbl title="Top HTTP paths" rows={dashboard ? dashboard.top_paths : null} hint="No web probes yet — fed by http-honeypot and tanner." failed={dashboardFailed} />
           <Card id="os-distribution-card">
             <h2>Attacker OS distribution</h2>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               p0f&apos;s own passive OS fingerprint, resolved from the portbridge tunnel join (#241) — a best-effort guess
               from TCP/IP stack behavior, not a claim of certainty.
             </p>
@@ -798,7 +798,7 @@ function Overview() {
           </Card>
           <Card id="tcp-stack-clusters-card">
             <h2>Attacker TCP-stack clusters (JA4T)</h2>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               Unique attackers per TCP handshake fingerprint, from Zeek. Deliberately not an OS name — it groups hosts
               that share a network stack without guessing which one, so it does not go stale as operating systems move on.
               Read it alongside the OS chart above: p0f resolves three quarters of connections here to a Linux kernel
@@ -808,7 +808,7 @@ function Overview() {
           </Card>
           <Card id="ics-functions-card">
             <h2>ICS function codes — what they asked the PLCs to do</h2>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               Per-transaction detail from the ICS parsers, across Modbus, S7comm, DNP3 and IEC-104. These events are rare and
               the scanning around them is not — one sample held 3,600 connections to the DNP3 port and two actual DNP3
               requests, both filesystem reconnaissance. An alert-only view loses exactly those two.
@@ -817,7 +817,7 @@ function Overview() {
           </Card>
           <Card id="decoy-requests-card">
             <h2>Decoy requests (TLS-terminated) — last 7 days</h2>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               What was requested from the Host-routed decoys behind Traefik. These exist in no other index: Traefik
               terminates TLS for them, so a wire sensor sees the handshake and then ciphertext.
             </p>
@@ -825,7 +825,7 @@ function Overview() {
           </Card>
           <Card id="decoy-client-fingerprints-card">
             <h2>Who reached the decoys (JA4)</h2>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               The TLS client behind each decoy request. Neither sensor can answer this alone — Traefik knows the
               request but has already discarded the handshake, and the passive sniffer sees the handshake but never
               learns which request it became. They meet on the connection, not the client address, which is what makes
@@ -835,7 +835,7 @@ function Overview() {
           </Card>
           <Card id="ja4h-fingerprints-card">
             <h2>HTTP client fingerprints (JA4H) — last 7 days</h2>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               The request&apos;s own header set and ordering. Clusters HTTP tooling that never negotiates TLS at all,
               which on this perimeter is most of it.
             </p>
@@ -843,7 +843,7 @@ function Overview() {
           </Card>
           <Card id="ja4l-fingerprints-card">
             <h2>Connection-latency fingerprints (JA4L) — last 7 days</h2>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               Derived from handshake round-trip timing rather than anything the client sends, so unlike every other
               family here it cannot be forged by changing what you transmit — only by changing where you are. Strongest
               signal for spotting one host behind several addresses; it says nothing about what that host is.
@@ -852,7 +852,7 @@ function Overview() {
           </Card>
           <Card id="ja4x-fingerprints-card">
             <h2>Certificate construction fingerprints (JA4X) — last 7 days</h2>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               Fingerprints how a certificate was built rather than what it claims — a scanner or C2 using a templated
               generator looks the same everywhere, however the subject fields are dressed up.
             </p>
@@ -860,17 +860,17 @@ function Overview() {
           </Card>
           <Card id="tls-fingerprints-card">
             <h2>TLS scanner fingerprints (JA4) — wire-level, last 7 days</h2>
-            <p className="note">Every TLS handshake against a non-dashboard port, alert or not. Click a bar to copy the full hash.</p>
+            <p className="text-sm text-muted-foreground">Every TLS handshake against a non-dashboard port, alert or not. Click a bar to copy the full hash.</p>
             <EChart kind="barh" url="/api/chart/tls-fingerprints" height={360} />
           </Card>
           <Card id="ssh-fingerprints-card">
             <h2>SSH client software — wire-level, last 7 days</h2>
-            <p className="note">Every SSH handshake's client software banner, not just ones that triggered an alert.</p>
+            <p className="text-sm text-muted-foreground">Every SSH handshake's client software banner, not just ones that triggered an alert.</p>
             <EChart kind="barh" url="/api/chart/ssh-fingerprints" height={360} />
           </Card>
           <Card id="endlessh-held-card">
             <h2>Attacker time wasted (endlessh tarpit)</h2>
-            <p className="note">Time attackers/bots spent stuck talking to nothing before giving up.</p>
+            <p className="text-sm text-muted-foreground">Time attackers/bots spent stuck talking to nothing before giving up.</p>
             <EChart kind="bar" url="/api/chart/endlessh-held-histogram" height={320} />
           </Card>
           </CardContent>
@@ -893,7 +893,7 @@ function Overview() {
           <Tbl title="Alert categories" rows={dashboard ? dashboard.alert_cats : null} hint="No Suricata alerts in this window." failed={dashboardFailed} />
           <Card>
             <h2>Captured payloads</h2>
-            <p className="note">Inert copies of malware and high-confidence scripts. Static analysis never executes the payload.</p>
+            <p className="text-sm text-muted-foreground">Inert copies of malware and high-confidence scripts. Static analysis never executes the payload.</p>
             {/* overview.html:400-412's columns: seen count → the payload's
                 events, hash → static analysis, target path → events,
                 lookup → static analysis + VirusTotal. */}
@@ -947,7 +947,7 @@ function Overview() {
           </Card>
           <Card>
             <h2>Correlated campaigns — rolling 7 days</h2>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               Groups related source networks across sensors. Score rises with volume, sensor/port spread, reused credentials,
               payloads, IDS alerts, and matching fingerprints.
             </p>

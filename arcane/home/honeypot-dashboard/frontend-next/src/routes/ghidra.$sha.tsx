@@ -257,7 +257,7 @@ function TriageCard({ triage }: { triage: Triage | null | undefined }) {
           {triage.evidence_shown ? <KV label="evidence shown" value={triage.evidence_shown} mono={false} /> : null}
           {triage.behaviors?.length ? (
             <>
-              <p className="note">Suggested behaviors:</p>
+              <p className="text-sm text-muted-foreground">Suggested behaviors:</p>
               <ul className="">
                 {triage.behaviors.map((behavior, index) => (
                   <li key={index}>{behavior}</li>
@@ -266,7 +266,7 @@ function TriageCard({ triage }: { triage: Triage | null | undefined }) {
             </>
           ) : null}
           {triage.evidence_shown ? (
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               The model saw only the subset listed above, not the whole binary. A claim it did not make may simply be something it
               was never shown.
             </p>
@@ -314,7 +314,7 @@ function RevDeckCard({ revdeck }: { revdeck: RevDeck | null | undefined }) {
           <KV label="tool calls" value={revdeck.tool_calls ?? 0} />
           {revdeck.answer ? (
             <div className="hp-ai-report">
-              <p className="note">Answer:</p>
+              <p className="text-sm text-muted-foreground">Answer:</p>
               {/* ghidra.html rendered this markdown via marked.js+DOMPurify
                   (hp-ghidra-markdown.js, #1285); its own documented no-JS
                   fallback is literal markdown text, which is what this port
@@ -356,7 +356,7 @@ function RevDeckCard({ revdeck }: { revdeck: RevDeck | null | undefined }) {
           ) : null}
           {revdeck.warnings?.length ? (
             <>
-              <p className="note">Warnings from the run:</p>
+              <p className="text-sm text-muted-foreground">Warnings from the run:</p>
               <ul className="">
                 {revdeck.warnings.map((warning, index) => (
                   <li key={index}>{warning}</li>
@@ -405,7 +405,7 @@ function OverviewPanel({ sha, g }: { sha: string; g: GhidraDoc }) {
         <CardContent>
         {g.findcrypt?.length ? (
           <>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               Constant tables matching known cipher implementations. Their presence indicates the algorithm is compiled in; it does
               not by itself show the binary uses it maliciously. Addresses are file offsets, not virtual addresses.
             </p>
@@ -443,7 +443,7 @@ function OverviewPanel({ sha, g }: { sha: string; g: GhidraDoc }) {
         <CardContent>
         {g.fuzzy_hashes ? (
           <>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               Similarity hashes for family clustering — two samples with close hashes share large runs of bytes, which exact
               SHA-256 dedup cannot show. Paste into a search that supports the matching algorithm to find related captures.
             </p>
@@ -474,7 +474,7 @@ function OverviewPanel({ sha, g }: { sha: string; g: GhidraDoc }) {
         <CardContent>
         {g.lief ? (
           <>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               Parsed by lief independently of Ghidra's own loader — a second read of the same header/section data, useful as a
               cross-check.
             </p>
@@ -516,7 +516,7 @@ function OverviewPanel({ sha, g }: { sha: string; g: GhidraDoc }) {
             </p>
           ) : (
             <>
-              <p className="note">
+              <p className="text-sm text-muted-foreground">
                 MITRE ATT&CK/MBC-tagged capabilities matched by rule — a capability being tagged here means code implementing it
                 was found, not that it necessarily ran. capa's default backend covers x86/amd64/arm64 only.
               </p>
@@ -525,7 +525,7 @@ function OverviewPanel({ sha, g }: { sha: string; g: GhidraDoc }) {
               <KV label="format" value={g.capa.format} />
               {g.capa.capabilities?.length ? (
                 <>
-                  <p className="note">
+                  <p className="text-sm text-muted-foreground">
                     {g.capa.capabilities.length} capabilit{g.capa.capabilities.length === 1 ? 'y' : 'ies'} matched
                     {g.capa.capabilities_truncated ? ' (truncated in this view)' : ''}.
                   </p>
@@ -538,7 +538,7 @@ function OverviewPanel({ sha, g }: { sha: string; g: GhidraDoc }) {
               ) : null}
               {g.capa.attack?.length ? (
                 <>
-                  <p className="note">MITRE ATT&CK techniques:</p>
+                  <p className="text-sm text-muted-foreground">MITRE ATT&CK techniques:</p>
                   <ul className="">
                     {g.capa.attack.map((a, index) => (
                       <li key={index}>
@@ -552,7 +552,7 @@ function OverviewPanel({ sha, g }: { sha: string; g: GhidraDoc }) {
               ) : null}
               {g.capa.mbc?.length ? (
                 <>
-                  <p className="note">Malware Behavior Catalog:</p>
+                  <p className="text-sm text-muted-foreground">Malware Behavior Catalog:</p>
                   <ul className="">
                     {g.capa.mbc.map((m, index) => (
                       <li key={index}>
@@ -589,7 +589,7 @@ function OverviewPanel({ sha, g }: { sha: string; g: GhidraDoc }) {
             </p>
           ) : (
             <>
-              <p className="note">
+              <p className="text-sm text-muted-foreground">
                 Decoded/stack/tight strings are recovered by emulating the sample, not by scanning raw bytes — they surface strings
                 a plain strings dump on the binary itself would miss entirely.
               </p>
@@ -597,7 +597,7 @@ function OverviewPanel({ sha, g }: { sha: string; g: GhidraDoc }) {
               <KV label="stack strings" value={floss.stack_strings_total ?? 0} />
               <KV label="tight strings" value={floss.tight_strings_total ?? 0} />
               <KV label="static strings" value={floss.static_strings_total ?? 0} />
-              {floss.truncated ? <p className="note">One or more of the lists above were truncated in this view.</p> : null}
+              {floss.truncated ? <p className="text-sm text-muted-foreground">One or more of the lists above were truncated in this view.</p> : null}
               <CardContent className="overflow-auto max-h-96" aria-label="Recovered FLOSS strings">
                 <h3>Decoded strings</h3>
                 <pre className="code">{(floss.decoded_strings ?? []).join('\n')}</pre>
@@ -634,7 +634,7 @@ function CodePanel({ sha, g }: { sha: string; g: GhidraDoc }) {
         <CardContent>
         {g.imports?.length ? (
           <>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               {g.imports.length} imported symbol{g.imports.length === 1 ? '' : 's'}. What a binary imports bounds what it can do
               without further tricks.
             </p>
@@ -657,7 +657,7 @@ function CodePanel({ sha, g }: { sha: string; g: GhidraDoc }) {
             {/* GhidraCallGraph carries its own filter box and click-to-focus
                 note; only the labels-safety caveat from ghidra.html:204 is
                 added here. */}
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               Node labels are names recovered from the sample and are untrusted — they are drawn to canvas, not the DOM, so they
               cannot execute script.
             </p>
@@ -678,7 +678,7 @@ function CodePanel({ sha, g }: { sha: string; g: GhidraDoc }) {
         <CardContent>
         {g.call_graph_svg ? (
           <>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               Assembled from the largest functions outward. A plain, script-free fallback for the interactive graph above — always
               available even with JavaScript disabled, and downloadable on its own.
             </p>
@@ -709,7 +709,7 @@ function CodePanel({ sha, g }: { sha: string; g: GhidraDoc }) {
         <CardContent>
         {g.functions?.length ? (
           <>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               {g.functions.length} recovered function{g.functions.length === 1 ? '' : 's'}
               {deepened > 0
                 ? `, ${deepened} with decompiled pseudocode and callers/callees${
@@ -756,7 +756,7 @@ function DataPanel({ g }: { g: GhidraDoc }) {
         <CardContent>
         {g.strings?.length ? (
           <>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               {g.strings.length} extracted string{g.strings.length === 1 ? '' : 's'}. Strings come from the sample and are
               untrusted input: they are rendered as text and never as markup.
             </p>
@@ -781,7 +781,7 @@ function DataPanel({ g }: { g: GhidraDoc }) {
 function IocEvidence({ kind }: { kind: IocKind | undefined }) {
   const block = (label: string, values: string[] | undefined) => (
     <>
-      <p className="note">{label}:</p>
+      <p className="text-sm text-muted-foreground">{label}:</p>
       <pre className="code">{(values ?? []).join('\n')}</pre>
     </>
   )
@@ -824,7 +824,7 @@ function IocCorrelationCard({ correlation }: { correlation: IocCorrelation | nul
         </p>
       ) : (
         <>
-          <p className="note">
+          <p className="text-sm text-muted-foreground">
             Cross-references floss&apos;s decoded/static/stack/tight strings against this sample&apos;s Windows-sandbox
             run(s), by the same IP/URL/domain/UNC patterns <code>extract_iocs.py</code> uses. &ldquo;Confirmed at
             runtime&rdquo; is the strongest signal here: a value floss decoded from the binary that a sandbox run also
@@ -854,7 +854,7 @@ function IocCorrelationCard({ correlation }: { correlation: IocCorrelation | nul
               </TableBody>
             </Table>
           </CardContent>
-          <p className="note">
+          <p className="text-sm text-muted-foreground">
             UNC/SMB paths have no dynamic counterpart — the sandbox&apos;s own parsers have no SMB/UNC observation path,
             only the static binary scan does.
           </p>
@@ -890,7 +890,7 @@ function DeepDivePanel({ g, correlation }: { g: GhidraDoc; correlation: IocCorre
         <CardContent>
         {g.types?.length ? (
           <>
-            <p className="note">{g.types.length} struct/union/enum/typedef recovered from the program's own type database.</p>
+            <p className="text-sm text-muted-foreground">{g.types.length} struct/union/enum/typedef recovered from the program's own type database.</p>
             <CardContent className="overflow-auto max-h-96" aria-label="Full type list">
               <pre className="code">
                 {g.types
@@ -920,7 +920,7 @@ function DeepDivePanel({ g, correlation }: { g: GhidraDoc; correlation: IocCorre
         <CardContent>
         {g.globals?.length ? (
           <>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               {g.globals.length} non-string global data symbol{g.globals.length === 1 ? '' : 's'}. Distinct from the string table —
               these are named/typed data locations, not text.
             </p>
@@ -941,7 +941,7 @@ function DeepDivePanel({ g, correlation }: { g: GhidraDoc; correlation: IocCorre
         {g.annotations ? (
           Object.keys(g.annotations.entries ?? {}).length ? (
             <>
-              <p className="note">
+              <p className="text-sm text-muted-foreground">
                 {Object.keys(g.annotations.entries ?? {}).length} analyst-authored annotation
                 {Object.keys(g.annotations.entries ?? {}).length === 1 ? '' : 's'} (revision {g.annotations.revision}), written
                 through the analysis workbench and mirrored here read-only.
@@ -978,7 +978,7 @@ function DeepDivePanel({ g, correlation }: { g: GhidraDoc; correlation: IocCorre
         <CardContent>
         {g.memory_map?.length ? (
           <>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               {g.memory_map.length} initialized memory block{g.memory_map.length === 1 ? '' : 's'}, each with a bounded preview of
               its opening bytes.
             </p>
@@ -1010,7 +1010,7 @@ function DeepDivePanel({ g, correlation }: { g: GhidraDoc; correlation: IocCorre
         <CardContent>
         {chat ? (
           <>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               {chat.threads?.length ?? 0} thread{(chat.threads?.length ?? 0) === 1 ? '' : 's'},{' '}
               {chat.active_thread_messages?.length ?? 0} message{(chat.active_thread_messages?.length ?? 0) === 1 ? '' : 's'}{' '}
               mirrored from the currently-active thread — the analyst's actual back-and-forth with the RevDeck assistant, distinct
@@ -1037,7 +1037,7 @@ function DeepDivePanel({ g, correlation }: { g: GhidraDoc; correlation: IocCorre
                     ) : null}
                     {message.tool_calls != null ? (
                       <>
-                        <p className="note">Tool calls</p>
+                        <p className="text-sm text-muted-foreground">Tool calls</p>
                         <pre className="code">{rawText(message.tool_calls)}</pre>
                       </>
                     ) : null}
@@ -1061,7 +1061,7 @@ function DeepDivePanel({ g, correlation }: { g: GhidraDoc; correlation: IocCorre
         <CardContent>
         {recovery ? (
           <>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               RevDeck's own symbol/type-recovery model for this job — recovered function names, renamed symbols, and
               class/type-layout candidates, distinct from the Ghidra-native types/globals above.
             </p>

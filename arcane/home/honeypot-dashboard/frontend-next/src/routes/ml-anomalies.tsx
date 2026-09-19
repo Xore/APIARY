@@ -681,7 +681,7 @@ function Page() {
           </>
         }
       />
-      <p className="note">
+      <p className="text-sm text-muted-foreground">
         Composite scores from ml-worker's three unsupervised models (Isolation Forest, LSTM-AE, HBOS) — statistical
         outliers, not confirmed attacks. Operator dispositions are stored on the anomaly itself and survive re-scoring.
       </p>
@@ -691,7 +691,7 @@ function Page() {
               stats.total24h
             ) : statsFailed ? (
               /* #2178: the skeleton was only honest while the request lived. */
-              <span className="note">load failed</span>
+              <span className="text-sm text-muted-foreground">load failed</span>
             ) : (
               <Skeleton className="h-6 w-16" aria-hidden="true" />
             )}
@@ -711,7 +711,7 @@ function Page() {
           tile above is exact — disclose when the two can disagree instead of
           letting a quiet prefix stand in for the window. */}
       {stats && stats.scanned < stats.total24h ? (
-        <p className="note">
+        <p className="text-sm text-muted-foreground">
           Severity buckets cover the {stats.scanned.toLocaleString('en-US')} newest anomalies of{' '}
           {stats.total24h.toLocaleString('en-US')} in the 24h window.
         </p>
@@ -811,7 +811,7 @@ function Page() {
               const doc = str(row, 'status')
               if (!(DISPOSITIONS as readonly string[]).includes(doc)) return null
               return (
-                <p className="note">
+                <p className="text-sm text-muted-foreground">
                   Disposition: <strong>{doc.replace('_', ' ')}</strong>
                   {str(row, 'disposition_by') ? ` by ${str(row, 'disposition_by')}` : ''}
                   {str(row, 'disposed_at') ? ` at ${formatTimestamp(str(row, 'disposed_at'))}` : ''}
@@ -820,7 +820,7 @@ function Page() {
               )
             })()}
             {acks[str(row, '_doc_id')]?.Acknowledged ? (
-              <p className="note">
+              <p className="text-sm text-muted-foreground">
                 Acknowledged by {acks[str(row, '_doc_id')]?.AckedBy || 'unknown'}
                 {acks[str(row, '_doc_id')]?.AckedAt ? ` at ${formatTimestamp((acks[str(row, '_doc_id')]!.AckedAt as string))}` : ''}
               </p>

@@ -30,7 +30,7 @@ function KillChain() {
       />
       <Card>
         <h2>Kill-chain flow</h2>
-        <p className="note">
+        <p className="text-sm text-muted-foreground">
           Each attacker session (or, for sensors with no session concept, each source IP) contributes one flow unit between every
           pair of MITRE ATT&CK tactics its own traffic touched, in canonical kill-chain order — reads top to bottom.
         </p>
@@ -38,12 +38,12 @@ function KillChain() {
       </Card>
       <Card>
         <h2>Campaign timeline</h2>
-        <p className="note">Every current network campaign (#1199/#1219), plotted from first to last observed activity.</p>
+        <p className="text-sm text-muted-foreground">Every current network campaign (#1199/#1219), plotted from first to last observed activity.</p>
         <EChart kind="timeline" url="/api/chart/campaign-timeline" height={420} />
       </Card>
       <Card>
         <h2>ATT&CK coverage grid</h2>
-        <p className="note">
+        <p className="text-sm text-muted-foreground">
           Every ATT&CK technique this deployment has evidence for, grouped by tactic. Darker cells mean more observed events, not
           more severe activity.
         </p>

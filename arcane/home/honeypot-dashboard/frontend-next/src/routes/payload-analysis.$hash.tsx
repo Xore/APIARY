@@ -509,7 +509,7 @@ function SearchablePane({
     : entries
   return (
     <>
-      <p className="note">
+      <p className="text-sm text-muted-foreground">
         {shown.length} of {entries.length} {itemLabel}
         {entries.length === 1 ? '' : 's'} shown — {note}
       </p>
@@ -616,17 +616,17 @@ function OperatorActionsCard({
                 {goldenNote ? (
                   <>
                     <Badge variant={goldenNote.variant}>{goldenNote.label}</Badge>{' '}
-                    <span className="note">{goldenNote.detail}</span>
+                    <span className="text-sm text-muted-foreground">{goldenNote.detail}</span>
                   </>
                 ) : goldenUnavailable ? (
                   <Badge variant="outline" title="#2178: the staleness report could not be loaded right now — this says so rather than implying no news is good news.">
                     Golden-image status unavailable
                   </Badge>
                 ) : (
-                  <span className="note">Routes to the Windows or Linux sandbox automatically, based on classification.</span>
+                  <span className="text-sm text-muted-foreground">Routes to the Windows or Linux sandbox automatically, based on classification.</span>
                 )}
               </TableCell>
-              <TableCell className="v">{sandboxMessage ? <span className="note">{sandboxMessage}</span> : '—'}</TableCell>
+              <TableCell className="v">{sandboxMessage ? <span className="text-sm text-muted-foreground">{sandboxMessage}</span> : '—'}</TableCell>
             </TableRow>
             <TableRow>
               <TableCell className="v">
@@ -639,13 +639,13 @@ function OperatorActionsCard({
                 </Button>
               </TableCell>
               <TableCell>
-                <span className="note">Headless decompilation — works on any sample with code in it, executes nothing.</span>
+                <span className="text-sm text-muted-foreground">Headless decompilation — works on any sample with code in it, executes nothing.</span>
               </TableCell>
-              <TableCell className="v">{ghidraMessage ? <span className="note">{ghidraMessage}</span> : '—'}</TableCell>
+              <TableCell className="v">{ghidraMessage ? <span className="text-sm text-muted-foreground">{ghidraMessage}</span> : '—'}</TableCell>
             </TableRow>
           </TableBody>
         </Table>
-      {!editable ? <p className="note">Admin role required to submit for analysis.</p> : null}
+      {!editable ? <p className="text-sm text-muted-foreground">Admin role required to submit for analysis.</p> : null}
       </CardContent>
     </Card>
   )
@@ -694,7 +694,7 @@ function ExternalPublicationCard({ hash, editable }: { hash: string; editable: b
         <Button variant="destructive" size="sm" type="button" disabled={!editable || busy} onClick={publish}>
           {busy ? 'Publishing…' : 'Publish to Xore/honeypot'}
         </Button>
-        {message ? <span className="note">{message}</span> : null}
+        {message ? <span className="text-sm text-muted-foreground">{message}</span> : null}
       </CardContent>
     </Card>
   )
@@ -963,7 +963,7 @@ function PayloadAnalysis() {
       ) : (
         <>
           {view?.classification && !view.classification.dynamic ? (
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               {view.classification.label} has no dynamic detonation path — {view.classification.analysisPath}. The
               evidence below is the whole analysis for this artifact.
             </p>
@@ -1072,7 +1072,7 @@ function PayloadAnalysis() {
                     <span className="font-mono text-lg font-semibold">{view.md5 || '—'}</span>
                   </div>
                   {view.truncated ? (
-                    <p className="note">deep inspection capped at 16 MiB; hashes cover the complete file</p>
+                    <p className="text-sm text-muted-foreground">deep inspection capped at 16 MiB; hashes cover the complete file</p>
                   ) : null}
                 </>
               ) : inventory ? (
@@ -1099,7 +1099,7 @@ function PayloadAnalysis() {
                     <span className="text-sm font-medium text-muted-foreground">size</span>
                     <span className="font-mono text-lg font-semibold">{jstr(inventory.SizeH) || '—'}</span>
                   </div>
-                  <p className="note">No static-analysis record for this hash yet — inventory metadata only.</p>
+                  <p className="text-sm text-muted-foreground">No static-analysis record for this hash yet — inventory metadata only.</p>
                 </>
               ) : (
                 <p className="empty">No static-analysis record for this hash yet.</p>
@@ -1126,7 +1126,7 @@ function PayloadAnalysis() {
                     </span>
                   </div>
                 ) : null}
-                <p className="note">Heuristic static findings only. Captured content is never interpreted or executed.</p>
+                <p className="text-sm text-muted-foreground">Heuristic static findings only. Captured content is never interpreted or executed.</p>
               </Card>
             ) : null}
             <Card className="min-w-0 p-6">
@@ -1224,7 +1224,7 @@ function PayloadAnalysis() {
                   )
                 ) : null}
               </h2>
-              <p className="note">
+              <p className="text-sm text-muted-foreground">
                 Advisory only — checked before queueing a new run so you know if this hash was already analyzed. Never
                 blocks a fresh submission.
               </p>
@@ -1312,7 +1312,7 @@ function PayloadAnalysis() {
               )}
               {yara.error ? <p className="note text-danger">{yara.error}</p> : null}
               {yara.scanned ? (
-                <p className="note">
+                <p className="text-sm text-muted-foreground">
                   Scanned {formatTimestamp(yara.scanned)} by the networkless YARA sidecar. A match is a triage signal, not
                   attribution.
                 </p>
@@ -1334,7 +1334,7 @@ function PayloadAnalysis() {
               ) : (
                 <p className="empty">No built-in static rules matched.</p>
               )}
-              <p className="note">Deterministic YARA-style heuristics; no sample execution or attribution.</p>
+              <p className="text-sm text-muted-foreground">Deterministic YARA-style heuristics; no sample execution or attribution.</p>
             </Card>
             <Card className="min-w-0 p-6">
               <h2>Extracted indicators</h2>
@@ -1373,7 +1373,7 @@ function PayloadAnalysis() {
             </div>
             <Card className="col-span-full p-6">
               <h2>Bytes and metadata</h2>
-              <p className="note">The sample is read, never interpreted or executed.</p>
+              <p className="text-sm text-muted-foreground">The sample is read, never interpreted or executed.</p>
               <h3>Hex / ASCII preview — first 512 bytes</h3>
               <pre className="code hp-code-results">
                 {view?.hexdump || detail.hex_preview.join('\n') || 'No byte preview is available.'}
@@ -1385,7 +1385,7 @@ function PayloadAnalysis() {
                 <p className="empty">Not a recognized PE or ELF file.</p>
               )}
               {view?.truncated ? (
-                <p className="note">Deep inspection is capped at 16 MiB; hashes cover the complete file.</p>
+                <p className="text-sm text-muted-foreground">Deep inspection is capped at 16 MiB; hashes cover the complete file.</p>
               ) : null}
             </Card>
             <Card className="min-w-0 p-6">

@@ -60,7 +60,7 @@ function CitationList({ title, citations }: { title: string; citations: Citation
   if (!citations.length) return null
   return (
     <>
-      <p className="note">{title}</p>
+      <p className="text-sm text-muted-foreground">{title}</p>
       <ul className="">
         {citations.map((citation, index) => (
           <li key={`${citation.raw}-${index}`}>{citation.raw}</li>
@@ -82,7 +82,7 @@ function RevDeckCard({ analysis }: { analysis: RevDeckAnalysis | null }) {
   return (
     <Card>
       <h2>Rev·Deck</h2>
-      <p className="note">
+      <p className="text-sm text-muted-foreground">
         Rev·Deck's own bounded, autonomous tool-calling loop against the Ghidra REST service — a second and independent AI aid
         alongside the worker's own AI triage, not a replacement for it. Every claim below is a language model's reading of
         decompiled code.
@@ -117,7 +117,7 @@ function RevDeckCard({ analysis }: { analysis: RevDeckAnalysis | null }) {
         </Table>
         {analysis.answer ? (
           <>
-            <p className="note">Answer:</p>
+            <p className="text-sm text-muted-foreground">Answer:</p>
             <p>{analysis.answer}</p>
           </>
         ) : null}
@@ -132,7 +132,7 @@ function RevDeckCard({ analysis }: { analysis: RevDeckAnalysis | null }) {
         ) : null}
         {analysis.warnings.length ? (
           <>
-            <p className="note">Warnings from the run:</p>
+            <p className="text-sm text-muted-foreground">Warnings from the run:</p>
             <ul className="">
               {analysis.warnings.map((warning, index) => (
                 <li key={index}>{warning}</li>

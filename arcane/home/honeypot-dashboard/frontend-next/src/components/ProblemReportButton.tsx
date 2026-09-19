@@ -249,7 +249,7 @@ export function ProblemReportButton({ enabled }: { enabled: boolean }) {
               What actually happened?
               <Textarea rows={3} value={actual} onChange={(event) => setActual(event.target.value)} />
             </Label>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               This report automatically includes your recent click/navigation trail, console errors, failed requests, and a
               snapshot of the current page — reviewed by an admin, never shared outside this dashboard.
             </p>

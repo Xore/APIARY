@@ -490,7 +490,7 @@ function AttackerTab({ shasum }: { shasum: string }) {
     <>
       <div className="overview-header">
         <div>
-          <div className="label-section">Attacker profile</div>
+          <div className="text-base font-semibold">Attacker profile</div>
           <h2>
             <a className="lnk" href={`/investigate/ip/${encodeURIComponent(ip)}`}>
               {ip}
@@ -548,7 +548,7 @@ function AttackerTab({ shasum }: { shasum: string }) {
       {profile.events.length > 0 ? (
         <Card>
           <h2>Session timeline</h2>
-          <p className="note">Chronological, oldest to newest.</p>
+          <p className="text-sm text-muted-foreground">Chronological, oldest to newest.</p>
           <CardContent className="timeline-track">
             {[...profile.events].reverse().map((event, index) => (
               <div className="timeline-block" key={`${event.time}-${index}`}>

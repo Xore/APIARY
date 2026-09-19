@@ -164,7 +164,7 @@ function InvestigateCluster() {
         </div>
       ) : null}
       {correlation ? (
-        <p className="note">
+        <p className="text-sm text-muted-foreground">
           {correlation.truncated
             ? `Showing the ${correlation.records.length} most recent of ${correlation.total.toLocaleString('en-US')} total matches.`
             : 'Newest first.'}

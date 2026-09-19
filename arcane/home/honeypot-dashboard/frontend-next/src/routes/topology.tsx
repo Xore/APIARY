@@ -209,7 +209,7 @@ function TopologyPage() {
             zoomable gives it wheel/buttons for magnification, drag-to-pan
             on the canvas itself, and draggable nodes. */}
         <EChart kind="sankey" url="/api/topology/flow" height={820} zoomable />
-        <p className="note">
+        <p className="text-sm text-muted-foreground">
           Every path crosses the VPS: if it restarts, new attack traffic stops reaching every decoy at once, while
           already-captured logs keep indexing from disk. Canarytokens is drawn deliberately off the Filebeat artery — its
           triggers come back through the HTTP switchboard into the adapter's own index.
@@ -244,7 +244,7 @@ function TopologyPage() {
                     </span>
                   ))}
                   {row.hostnames.length > 0 ? (
-                    <div className="note" style={{ margin: 0 }}>
+                    <div className="text-sm text-muted-foreground" style={{ margin: 0 }}>
                       {row.hostnames.join(' · ')}
                     </div>
                   ) : null}
@@ -266,7 +266,7 @@ function TopologyPage() {
             ))}
           </TableBody>
         </Table>
-        <p className="note">+PROXY means the upstream appends PROXY protocol v1 — those are the sensors that can see a real client address.</p>
+        <p className="text-sm text-muted-foreground">+PROXY means the upstream appends PROXY protocol v1 — those are the sensors that can see a real client address.</p>
       </Card>
 
       <div className="section-heading">
@@ -288,7 +288,7 @@ function TopologyPage() {
         ))}
       </div>
       {topology && containers.size === 0 ? (
-        <p className="note">No container states right now — services-adapter is unreachable or answered unavailable; the grouping above is config-only.</p>
+        <p className="text-sm text-muted-foreground">No container states right now — services-adapter is unreachable or answered unavailable; the grouping above is config-only.</p>
       ) : null}
     </>
   )

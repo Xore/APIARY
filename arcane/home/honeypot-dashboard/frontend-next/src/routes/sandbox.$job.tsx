@@ -398,7 +398,7 @@ function SandboxDetail() {
               <Row label="system calls recorded" value={topSyscalls.length} />
               <Row label="filesystem changes" value={changedFiles.length} />
               <Row label="network packets" value={num(network.packets)} />
-              <p className="note">Static indicators show what the file contains; dynamic evidence shows what this bounded run actually attempted.</p>
+              <p className="text-sm text-muted-foreground">Static indicators show what the file contains; dynamic evidence shows what this bounded run actually attempted.</p>
               </CardContent>
             </Card>
             <Card className="sm:w-1/2 w-full">
@@ -432,7 +432,7 @@ function SandboxDetail() {
               ) : (
                 <p className="empty">No mapped behavior in this run.</p>
               )}
-              <p className="note">Behavior context only; never actor attribution.</p>
+              <p className="text-sm text-muted-foreground">Behavior context only; never actor attribution.</p>
               </CardContent>
             </Card>
             </TabsContent>
@@ -479,7 +479,7 @@ function SandboxDetail() {
               <CardContent>
               {changedFiles.length ? (
                 <>
-                  <p className="note">
+                  <p className="text-sm text-muted-foreground">
                     {changedFiles.length} tracked path{changedFiles.length === 1 ? '' : 's'} changed.
                   </p>
                   <Evidence
@@ -498,7 +498,7 @@ function SandboxDetail() {
                 <CardTitle>Process difference</CardTitle>
               </CardHeader>
               <CardContent>
-              <p className="note">
+              <p className="text-sm text-muted-foreground">
                 Userspace commands added or removed between the pre- and post-execution snapshots. Volatile PID/resource columns and
                 kernel-worker churn are ignored.
               </p>
@@ -510,7 +510,7 @@ function SandboxDetail() {
                 <CardTitle>Sockets difference</CardTitle>
               </CardHeader>
               <CardContent>
-              <p className="note">Socket rows added or removed between the pre- and post-execution snapshots.</p>
+              <p className="text-sm text-muted-foreground">Socket rows added or removed between the pre- and post-execution snapshots.</p>
               <DiffDetails diff={socketDiff} emptyAdded="No added sockets." emptyRemoved="No removed sockets." />
               <Evidence title="Sockets before detonation" body={lines(detail.sockets_before).join('\n')} />
               <Evidence title="Sockets after detonation" body={lines(detail.sockets_after).join('\n')} />
@@ -521,7 +521,7 @@ function SandboxDetail() {
                 <CardTitle>Process output</CardTitle>
               </CardHeader>
               <CardContent>
-              <p className="note">
+              <p className="text-sm text-muted-foreground">
                 Everything the payload wrote to its standard streams inside the guest. Guest-produced text is untrusted and size-bounded.
               </p>
               <Evidence title="Standard output" body={str(detail.stdout)} />
@@ -557,7 +557,7 @@ function SandboxDetail() {
               </CardContent>
               <Evidence title={`Captured DNS names (${lines(network.dns_queries).length})`} body={lines(network.dns_queries).join('\n')} />
               <Evidence title={`DNS queries and responses (${lines(network.dns_events).length})`} body={lines(network.dns_events).join('\n')} />
-              <p className="note">
+              <p className="text-sm text-muted-foreground">
                 Raw captures are administrator-only and can be opened directly in Wireshark or tshark. PCAPs begin at guest boot and may
                 include Ubuntu service traffic; captured presence alone does not prove payload attribution. Dynamic risk and ATT&CK
                 network behavior require a matching syscall from the traced payload process tree. In controlled mode, DNS answers are real
@@ -572,7 +572,7 @@ function SandboxDetail() {
               <CardContent>
               {lines(network.events).length ? (
                 <>
-                  <p className="note">
+                  <p className="text-sm text-muted-foreground">
                     {lines(network.events).length} decoded packet event{lines(network.events).length === 1 ? '' : 's'}.
                   </p>
                   <Evidence title="Open the packet log" body={lines(network.events).join('\n')} />
@@ -598,7 +598,7 @@ function SandboxDetail() {
               <CardContent>
               {lines(network.guest_events).length ? (
                 <>
-                  <p className="note">
+                  <p className="text-sm text-muted-foreground">
                     {lines(network.guest_events).length} decoded guest-side event{lines(network.guest_events).length === 1 ? '' : 's'}.
                   </p>
                   <Evidence title="Open the guest packet log" body={lines(network.guest_events).join('\n')} />
@@ -628,7 +628,7 @@ function SandboxDetail() {
                 title={`Dormant domains (${lines(iocs.static_only_dns_domains).length})`}
                 body={lines(iocs.static_only_dns_domains).join('\n')}
               />
-              <p className="note">
+              <p className="text-sm text-muted-foreground">
                 Static IOCs come from a printable-string scan of the sample binary itself. "Dormant" entries are present in the sample but
                 were never observed during this run's bounded observation window — a backup C2/exfil address, or a code path this run's
                 trigger conditions never reached.
@@ -658,7 +658,7 @@ function SandboxDetail() {
                 <Row label="subsystem" value={num(windows.subsystem)} />
                 <Row label="import hash" value={str(windows.imphash)} />
                 <Row label="embedded signature" value={String(flag(windows.signature_present))} />
-                <p className="note">
+                <p className="text-sm text-muted-foreground">
                   Parsed with pefile inside the powered-off-after-use analysis guest. Wine execution is behavioral emulation, not a perfect
                   replacement for native Windows.
                 </p>
@@ -767,7 +767,7 @@ function SandboxDetail() {
               </Card>
               <Card className="sm:w-1/2 w-full">
                 <h2>Exports, warnings, and metadata</h2>
-                <p className="note">Parser output and the metadata tools run against the sample.</p>
+                <p className="text-sm text-muted-foreground">Parser output and the metadata tools run against the sample.</p>
                 <Evidence title={`Exports (${lines(windows.exports).length})`} body={lines(windows.exports).join('\n')} />
                 <Evidence title={`Warnings (${lines(windows.warnings).length})`} body={lines(windows.warnings).join('\n')} />
                 <Evidence title="ExifTool" body={str(artifacts.exiftool)} />
@@ -778,7 +778,7 @@ function SandboxDetail() {
               </Card>
               <Card className="sm:w-1/2 w-full">
                 <h2>Signing and strings</h2>
-                <p className="note">Authenticode result and the printable sequences extracted from the sample.</p>
+                <p className="text-sm text-muted-foreground">Authenticode result and the printable sequences extracted from the sample.</p>
                 <Evidence title="Authenticode inspection" body={str(windows.authenticode)} />
                 <Evidence
                   title={`ASCII strings (${lines(windows.ascii_strings).length})`}

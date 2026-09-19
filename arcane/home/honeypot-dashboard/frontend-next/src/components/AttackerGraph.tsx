@@ -119,7 +119,7 @@ export function AttackerGraph({ id }: { id: string }) {
       >
         <div ref={containerRef} style={{ width: '100%', height: '100%' }} role="img" aria-label="Attacker entity graph around one entity node" />
       </div>
-      <p className="note">
+      <p className="text-sm text-muted-foreground">
         {memberCount === null
           ? 'Loading graph…'
           : `${memberCount} member IP${memberCount === 1 ? '' : 's'} — drag to pan, scroll to zoom, drag the corner to resize`}

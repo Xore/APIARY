@@ -349,7 +349,7 @@ function GithubAnalysisDetail() {
                 <h2>Scanner results</h2>
                 {run.scanners?.length ? (
                   <>
-                    <p className="note">A scanner that failed to run is shown as failed, not omitted — a missing row would silently understate coverage.</p>
+                    <p className="text-sm text-muted-foreground">A scanner that failed to run is shown as failed, not omitted — a missing row would silently understate coverage.</p>
                     <CardContent>
                       <Table className="data-table">
                         <TableHeader>
@@ -464,7 +464,7 @@ function GithubAnalysisDetail() {
                 <h2>Auto-generated YARA rules</h2>
                 {run.yara_auto_rules?.length ? (
                   <>
-                    <p className="note">
+                    <p className="text-sm text-muted-foreground">
                       {run.yara_auto_rules.length} rule file{run.yara_auto_rules.length !== 1 ? 's' : ''} in the upstream repository
                       reference this sample's hash.
                     </p>
@@ -501,7 +501,7 @@ function GithubAnalysisDetail() {
                         </span>
                         <span className="project-card__title">PDF report</span>
                       </div>
-                      <p className="project-card__desc">The rendered PDF report from the upstream repository.</p>
+                      <CardDescription>The rendered PDF report from the upstream repository.</CardDescription>
                       <div className="project-card__meta">
                         <span>completed {run.completed_at}</span>
                       </div>
@@ -509,7 +509,7 @@ function GithubAnalysisDetail() {
                   </div>
                 ) : (
                   <>
-                    <p className="note">No PDF has been generated for this analysis yet — this downloads the JSON record instead.</p>
+                    <p className="text-sm text-muted-foreground">No PDF has been generated for this analysis yet — this downloads the JSON record instead.</p>
                     <Button variant="ghost" size="sm" asChild>
                       <a href={`/api/raw-report/github-analysis/${encodeURIComponent(sha)}`} target="_blank" rel="noopener noreferrer">
                         download JSON ↓

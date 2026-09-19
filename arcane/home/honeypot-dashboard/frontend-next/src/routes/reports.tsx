@@ -1537,7 +1537,7 @@ function Reports() {
           onChanged={refreshDefinitions}
           onGenerated={refreshGenerated}
         />
-        <h2 className="label-section">Generated reports</h2>
+        <h2 className="text-base font-semibold">Generated reports</h2>
         <p className="text-sm text-muted-foreground">Newest first. Select a card to view inline, download the PDF, or delete stale artifacts.</p>
         {generatedFailed && !generated ? (
           /* #2178: the library's finished-PDF list also stood as ghost

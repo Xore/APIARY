@@ -130,7 +130,7 @@ const MAILONEY_COLUMNS: Column<MailoneySession>[] = [
       row.body_path ? (
         <CapturedMailInline sessionId={row.session_id} />
       ) : (
-        <span className="note">This session never sent a DATA body.</span>
+        <span className="text-sm text-muted-foreground">This session never sent a DATA body.</span>
       ),
   },
 ]

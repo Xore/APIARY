@@ -17,6 +17,7 @@
 import { THEMES } from '../lib/themes'
 import { useAppearanceKey, getThemeMode, getThemeName, applyPalette } from '../lib/prefs'
 import { Button } from './ui/button'
+import { CardDescription } from './ui/card'
 import { Label } from './ui/label'
 
 function Tile({ id }: { id: string }) {
@@ -60,7 +61,7 @@ export function ThemeGallery() {
           >
             <Tile id={theme.id} />
             <Label className="hp-theme-tile__label">{theme.label}</Label>
-            <span className="hp-theme-tile__desc">{theme.description}</span>
+            <CardDescription>{theme.description}</CardDescription>
           </Button>
         )
       })}

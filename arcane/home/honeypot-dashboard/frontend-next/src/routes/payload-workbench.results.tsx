@@ -578,7 +578,7 @@ function RunDetail({ run, currentOwner, onChanged }: { run: WorkbenchRun; curren
           </TableBody>
         </Table>
       </div>
-      {message ? <p className="note">{message}</p> : null}
+      {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
     </div>
   )
 }
@@ -688,7 +688,7 @@ function ModelHealthCard() {
       {models === null ? (
         <Skeleton className="h-20 w-full" aria-label="Loading model health" />
       ) : models === 'unavailable' || models.length === 0 ? (
-        <p className="note">
+        <p className="text-sm text-muted-foreground">
           {models === 'unavailable' ? 'Model-status adapter is unavailable' : 'No retrain history recorded yet'}. Drift or unavailability
           never disables deterministic analysis.
         </p>
@@ -720,7 +720,7 @@ function ModelHealthCard() {
               </TableBody>
             </Table>
           </div>
-          <p className="note">
+          <p className="text-sm text-muted-foreground">
             Latest retrain decision per approved local model, through the read-only ml-health surface. Drift or unavailability never
             disables deterministic analysis.
           </p>
@@ -939,7 +939,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
           {loadingCatalog ? 'Loading…' : 'Load catalog'}
         </Button>
       </div>
-      {catalogError ? <p className="note">{catalogError}</p> : null}
+      {catalogError ? <p className="text-sm text-muted-foreground">{catalogError}</p> : null}
 
       {catalog ? (
         <>
@@ -980,7 +980,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
           </div>
           {/* payload_workbench.html — says why an analyzer may be greyed
               out, which is otherwise guesswork. */}
-          <p className="note">
+          <p className="text-sm text-muted-foreground">
             Availability and applicability are derived on the server from this captured sample and operator configuration.
           </p>
 
@@ -1005,7 +1005,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
                     </TableCell>
                     <TableCell className="v">
                       <strong>{analyzer.display_name}</strong>
-                      <p className="note">{analyzer.description}</p>
+                      <p className="text-sm text-muted-foreground">{analyzer.description}</p>
                       {selected.includes(analyzer.id) ? (
                         <details className="wb-options">
                           <summary>Orchestration options</summary>
@@ -1046,7 +1046,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
                     </TableCell>
                     <TableCell>
                       <Badge variant={analyzerBadgeVariant(analyzer)}>{!analyzer.applicable ? 'not applicable' : analyzer.availability}</Badge>
-                      {analyzer.reason ? <p className="note">{analyzer.reason}</p> : null}
+                      {analyzer.reason ? <p className="text-sm text-muted-foreground">{analyzer.reason}</p> : null}
                     </TableCell>
                     <TableCell>
                       {analyzer.detonates ? <Badge variant="destructive">detonates</Badge> : null}{' '}
@@ -1061,7 +1061,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
 
           {needsConfirmation ? (
             <>
-              <p className="note">
+              <p className="text-sm text-muted-foreground">
                 One or more selected analyzers detonate this payload in an isolated sandbox. Detonation cannot reach the
                 protected live VM or the internet.
               </p>
@@ -1122,11 +1122,11 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
           </div>
         </>
       ) : null}
-      {message ? <p className="note">{message}</p> : null}
+      {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
 
       {lastRun ? (
         <div className="hp-flow">
-          <h3 className="label-section">Run {lastRun.id}</h3>
+          <h3 className="text-base font-semibold">Run {lastRun.id}</h3>
           <RunDetail run={lastRun} currentOwner={owner} onChanged={setLastRun} />
         </div>
       ) : null}
@@ -1152,7 +1152,7 @@ function filterRows(rows: StoreRow[] | null, query: string): StoreRow[] | null {
 function FilterScopeNote({ page, query, matched }: { page: Page | null; query: string; matched: number }) {
   if (query.trim() === '' || !page || page.total <= page.rows.length) return null
   return (
-    <p className="note">
+    <p className="text-sm text-muted-foreground">
       Filter matches {matched.toLocaleString('en-US')} of {page.rows.length.toLocaleString('en-US')} loaded rows —{' '}
       {page.total.toLocaleString('en-US')} in the store.
     </p>
@@ -1386,7 +1386,7 @@ function Results() {
         <WorkbenchBuilder owner={owner} onRunCreated={() => setRunsToken((token) => token + 1)} />
         <ModelHealthCard />
         <RecentRunsCard owner={owner} refreshToken={runsToken} />
-        <h2 className="label-section">Workbench runs</h2>
+        <h2 className="text-base font-semibold">Workbench runs</h2>
         <FilterInput label="workbench runs" value={workbenchQuery} onChange={setWorkbenchQuery} />
         <FilterScopeNote page={workbench} query={workbenchQuery} matched={workbenchFiltered?.length ?? 0} />
         {workbenchQ.failed && !workbench ? (
@@ -1429,7 +1429,7 @@ function Results() {
         />
       </div>
       <div className="dashboard-panel" role="tabpanel" id="wb-panel-static" aria-labelledby="wb-static" hidden={tab !== 'static'}>
-        <h2 className="label-section">Static analysis</h2>
+        <h2 className="text-base font-semibold">Static analysis</h2>
         <FilterInput label="static analyses" value={staticQuery} onChange={setStaticQuery} />
         <FilterScopeNote page={statics} query={staticQuery} matched={staticFiltered?.length ?? 0} />
         {staticsQ.failed && !statics ? (
@@ -1463,7 +1463,7 @@ function Results() {
         />
       </div>
       <div className="dashboard-panel" role="tabpanel" id="wb-panel-yara" aria-labelledby="wb-yara" hidden={tab !== 'yara'}>
-        <h2 className="label-section">YARA</h2>
+        <h2 className="text-base font-semibold">YARA</h2>
         <FilterInput label="YARA results" value={yaraQuery} onChange={setYaraQuery} />
         <FilterScopeNote page={yara} query={yaraQuery} matched={yaraFiltered?.length ?? 0} />
         {yaraQ.failed && !yara ? (
@@ -1498,7 +1498,7 @@ function Results() {
         />
       </div>
       <div className="dashboard-panel" role="tabpanel" id="wb-panel-sandbox" aria-labelledby="wb-sandbox" hidden={tab !== 'sandbox'}>
-        <h2 className="label-section">Sandbox detonations</h2>
+        <h2 className="text-base font-semibold">Sandbox detonations</h2>
         <FilterInput label="sandbox detonations" value={sandboxQuery} onChange={setSandboxQuery} />
         <FilterScopeNote page={sandbox} query={sandboxQuery} matched={sandboxFiltered?.length ?? 0} />
         {sandboxQ.failed && !sandbox ? (
@@ -1561,8 +1561,8 @@ function Results() {
         ) : null}
         {gpuQueue === null || gpuQueue.length > 0 ? (
           <>
-            <h2 className="label-section">GPU queue</h2>
-            <p className="note">
+            <h2 className="text-base font-semibold">GPU queue</h2>
+            <p className="text-sm text-muted-foreground">
               Jobs deferred because there wasn't enough free GPU headroom when they were submitted — a queued job's AI triage
               runs automatically once the card frees up; the rest of that analysis is unaffected and already completed.
             </p>
@@ -1574,7 +1574,7 @@ function Results() {
             />
           </>
         ) : null}
-        <h2 className="label-section">Ghidra decompilation</h2>
+        <h2 className="text-base font-semibold">Ghidra decompilation</h2>
         <FilterInput label="Ghidra runs" value={ghidraQuery} onChange={setGhidraQuery} />
         <FilterScopeNote page={ghidra} query={ghidraQuery} matched={ghidraFiltered?.length ?? 0} />
         {ghidraQ.failed && !ghidra ? (

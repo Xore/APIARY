@@ -88,7 +88,7 @@ function CredReuseCard({ edges }: { edges: CredEdge[] | null }) {
   return (
     <Card>
       <h2>Reused credentials</h2>
-      <p className="note">
+      <p className="text-sm text-muted-foreground">
         Username/password pairs tried by 2 or more distinct source IPs — the shared-wordlist signal that survives
         across campaigns, not just within one.
       </p>
@@ -255,7 +255,7 @@ function Campaigns() {
           </>
         }
       />
-      <p className="note">
+      <p className="text-sm text-muted-foreground">
         Score combines volume, unique sources, sensor and port spread, reused credentials, captured payloads, and IDS
         alerts. Select a network for its complete event chain.
       </p>

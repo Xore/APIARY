@@ -223,7 +223,7 @@ function Dossier({ row }: { row: AttackerRow }) {
         <Card><CardHeader><CardTitle><h2>Fingerprint fusion — why this entity merged</h2></CardTitle>
         {/* Fusion radar (#1280): which signal categories 2+ member IPs
             actually share — the visual evidence for the merge decision. */}
-        <p className="note">
+        <p className="text-sm text-muted-foreground">
           Signal values shared by 2 or more of this entity's member IPs, by category. A value only one member IP exhibits is real
           telemetry but not evidence for this specific merge.
         </p></CardHeader><CardContent><EChart kind="radar" url={`/api/chart/attacker-fusion?id=${encodeURIComponent(row.id)}`} height={280} /></CardContent></Card>

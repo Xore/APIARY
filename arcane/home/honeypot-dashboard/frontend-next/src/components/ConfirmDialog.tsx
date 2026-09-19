@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { flash } from '../lib/flash'
 import { Button } from './ui/button'
+import { CardDescription } from './ui/card'
 
 export type ConfirmOptions = {
   title: string
@@ -149,9 +150,9 @@ export function ConfirmHost() {
         <h2 className="edit-dialog__title" id="hp-confirm-title">
           {options.title}
         </h2>
-        <p className="edit-dialog__desc" id="hp-confirm-description">
+        <CardDescription id="hp-confirm-description">
           {options.description ?? ''}
-        </p>
+        </CardDescription>
         {options.warning ? <div className="danger-dialog__warning">{options.warning}</div> : null}
         <div className="edit-dialog__actions">
           <Button variant="secondary" size="default" data-hp-modal-cancel="" type="button" onClick={() => close()} disabled={running}>

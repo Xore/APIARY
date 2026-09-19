@@ -88,7 +88,7 @@ function ProcessActivityCard({ summary }: { summary: ReportSummary }) {
   return (
     <Card>
       <h2>Process activity</h2>
-      <p className="note">
+      <p className="text-sm text-muted-foreground">
         API call counts, not the calls themselves — CAPE recorded {summary.total_calls.toLocaleString('en-US')} calls across
         these processes combined, far too many to render on one page. The full trace is in the raw report (link above).
       </p>
@@ -300,7 +300,7 @@ function CapeDetail() {
               {run.signatures.length ? (
                 <Card>
                   <h2>Signatures</h2>
-                  <p className="note">
+                  <p className="text-sm text-muted-foreground">
                     CAPE's own behavioral signature matches — a signature firing means code matching a known pattern ran, not
                     necessarily that the sample is malicious.
                   </p>
@@ -342,7 +342,7 @@ function CapeDetail() {
                   {summary.summary_keys.length ? (
                     <Card>
                       <h2>Behavior summary</h2>
-                      <p className="note">
+                      <p className="text-sm text-muted-foreground">
                         Deduplicated files, registry keys, mutexes and similar CAPE observed across every traced process. Large
                         categories (registry keys especially) are common and not by themselves a finding.
                       </p>
@@ -361,13 +361,13 @@ function CapeDetail() {
                     <h2>Dumped payloads &amp; extracted configuration</h2>
                     {summary.payloads.length || summary.configs.length ? (
                       <>
-                        <p className="note">
+                        <p className="text-sm text-muted-foreground">
                           Files CAPE's own debugger-driven unpacking dumped mid-execution, and any malware configuration it
                           extracted from them — CAPE's own YARA-triggered dynamic bypass mechanism at work, not static
                           analysis.
                         </p>
-                        {summary.payloads.length ? <p className="note">{summary.payloads.length} payload(s) dumped.</p> : null}
-                        {summary.configs.length ? <p className="note">{summary.configs.length} configuration(s) extracted.</p> : null}
+                        {summary.payloads.length ? <p className="text-sm text-muted-foreground">{summary.payloads.length} payload(s) dumped.</p> : null}
+                        {summary.configs.length ? <p className="text-sm text-muted-foreground">{summary.configs.length} configuration(s) extracted.</p> : null}
                       </>
                     ) : (
                       <p className="empty">CAPE's debugger did not dump any payloads or extract any malware configuration during this run.</p>
@@ -376,7 +376,7 @@ function CapeDetail() {
 
                   <Card>
                     <h2>Analyzer log</h2>
-                    <p className="note">
+                    <p className="text-sm text-muted-foreground">
                       The in-guest analyzer's own operational log, not a per-instruction trace. See Process activity above for
                       the execution summary.
                     </p>

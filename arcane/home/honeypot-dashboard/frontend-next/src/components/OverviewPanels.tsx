@@ -113,7 +113,7 @@ export function Heatmap({ rows, failed }: { rows: HeatRow[] | null; failed?: boo
         ))}
         <span>More</span>
       </div>
-      <p className="note">Every sensor's activity in the last 24 hours, hour by hour. Hover or focus a cell for the exact count.</p>
+      <p className="text-sm text-muted-foreground">Every sensor's activity in the last 24 hours, hour by hour. Hover or focus a cell for the exact count.</p>
     </>
   )
 }
@@ -199,7 +199,7 @@ export function AttackVectors({
             ] as const
           ).map(([title, rows]) => (
             <div key={title}>
-              <p className="note">{title} — {vectors.sensor}, last 24h</p>
+              <p className="text-sm text-muted-foreground">{title} — {vectors.sensor}, last 24h</p>
               {rows.length === 0 ? (
                 <p className="empty">No traffic in the window.</p>
               ) : (

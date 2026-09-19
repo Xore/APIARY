@@ -162,7 +162,7 @@ function Lookup() {
           .
         </AlertDescription></Alert>
       ) : null}
-      <p className="note">
+      <p className="text-sm text-muted-foreground">
         A domain or URL pulled from a payload isn't correlated fleet-wide here — that's a per-sample
         floss-vs-sandbox cross-reference on the payload's own Ghidra/workbench page, not a searchable index across
         every capture.

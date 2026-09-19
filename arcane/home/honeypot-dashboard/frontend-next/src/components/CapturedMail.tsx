@@ -207,7 +207,7 @@ export function MailCard({ sessionId }: { sessionId: string }) {
       <Card id="captured-mail">
         <CardContent>
           <h2>Captured mail</h2>
-          <p className="note">
+          <p className="text-sm text-muted-foreground">
         The SMTP DATA body mailoney captured for this session, parsed to headers and plain text. An HTML body is decoded to
         text but never rendered, and attachments are listed as metadata only — no bytes are stored or downloadable here.
       </p>

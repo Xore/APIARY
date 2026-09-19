@@ -36,7 +36,7 @@ import { Textarea } from '../components/ui/textarea'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
 import { ScrollArea } from '../components/ui/scroll-area'
 import { Separator } from '../components/ui/separator'
-import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card'
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 import { themeSearchTerms } from '../lib/themes'
 import type { JsonRecord } from '../lib/json'
@@ -607,7 +607,7 @@ function Pane({ id, children }: { id: PaneId; children: ReactNode }) {
   const hidden = searching ? !paneMatches(id, query) : active !== id
   return (
     <section className="hp-settings-pane" data-hp-pane={id} aria-label={PANE_META[id].title} hidden={hidden}>
-      {searching && !hidden ? <div className="label-section">{PANE_META[id].title}</div> : null}
+      {searching && !hidden ? <Label className="text-base font-semibold">{PANE_META[id].title}</Label> : null}
       {children}
     </section>
   )
@@ -781,7 +781,7 @@ function Segmented({
           </Button>
         ))}
       </div>
-      {desc ? <div className="settings-field__desc">{desc}</div> : null}
+      {desc ? <CardDescription>{desc}</CardDescription> : null}
     </div>
   )
 }
@@ -1055,7 +1055,7 @@ function PersonalPanes({
             <CardTitle>Reset preferences</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="note">Returns every personal preference — appearance included — to its default.</p>
+            <p className="text-sm text-muted-foreground">Returns every personal preference — appearance included — to its default.</p>
             {resetStatus}
             <div className="settings-actions">
               <Button variant="destructive" size="sm" type="button" disabled={!loaded} onClick={requestReset}>
@@ -1145,7 +1145,7 @@ function PersonalPanes({
                 <div className="settings-grid">
                   <div className="settings-field">
                     <SettingsSelect id="hp-pref-landing" label="Landing page" value={form.landing_page ?? '/'} options={PREF_LANDING_PAGES} onChange={(value) => patch('landing_page', value)} />
-                    <div className="settings-field__desc">First page after sign-in.</div>
+                    <CardDescription>First page after sign-in.</CardDescription>
                   </div>
                   <div className="settings-field">
                     <SettingsSelect id="hp-pref-rows" label="Rows per page" value={String(form.rows_per_page ?? 50)} options={[10, 25, 50, 100].map((n) => [String(n), String(n)])} onChange={(value) => patch('rows_per_page', Number(value))} />
@@ -1214,9 +1214,9 @@ function PersonalPanes({
                         </option>
                       ))}
                     </datalist>
-                    <div className="settings-field__desc">
+                    <CardDescription>
                       "browser", "utc", or an IANA zone such as Europe/Berlin — start typing to see suggestions.
-                    </div>
+                    </CardDescription>
                   </div>
                   <div className="settings-field">
                     <SettingsSelect id="hp-pref-refresh" label="Refresh interval" value={String(form.refresh_interval_seconds ?? 30)} options={REFRESH_INTERVALS.map(([value, label]) => [String(value), label])} onChange={(value) => patch('refresh_interval_seconds', Number(value))} />
@@ -1255,11 +1255,11 @@ function PersonalPanes({
                 {form.live_toasts ?? true ? (
                   <div className="settings-field">
                     <SettingsSelect id="hp-pref-toast-interval" label="Check frequency" value={String(form.live_toast_interval_seconds ?? 3)} options={TOAST_INTERVALS.map(([value, label]) => [String(value), label])} onChange={(value) => patch('live_toast_interval_seconds', Number(value))} />
-                    <div className="settings-field__desc">
+                    <CardDescription>
                       How often the fleet is checked for problems. Each condition is announced once when it
                       starts and once when it clears, so an outage that lasts all afternoon is two toasts, not
                       one every check.
-                    </div>
+                    </CardDescription>
                   </div>
                 ) : null}
                 {saveButton('time', setTimeStatus)}
@@ -1433,7 +1433,7 @@ function PresentationCard({ initial, editable, revision, onSaved, onConflict, on
         <CardTitle>Presentation</CardTitle>
       </CardHeader>
       <CardContent>
-        <p className="note">Branding text across the dashboard, and the help/notice copy shown alongside it.</p>
+        <p className="text-sm text-muted-foreground">Branding text across the dashboard, and the help/notice copy shown alongside it.</p>
       <form
         onSubmit={(event) => {
           event.preventDefault()
@@ -1486,7 +1486,7 @@ function PresentationCard({ initial, editable, revision, onSaved, onConflict, on
             Save presentation
           </Button>
         ) : (
-          <p className="note">Admin role required to edit.</p>
+          <p className="text-sm text-muted-foreground">Admin role required to edit.</p>
         )}
         {status}
       </form>
@@ -1559,7 +1559,7 @@ function HoneypotOperationsCard({ initial, editable, revision, onSaved, onConfli
         <CardTitle>Honeypot operations</CardTitle>
       </CardHeader>
       <CardContent>
-        <p className="note">
+        <p className="text-sm text-muted-foreground">
           Staged thresholds: saving updates the configuration store, and the consuming services pick them up on their next
           restart — nothing here applies live.
         </p>
@@ -1623,7 +1623,7 @@ function HoneypotOperationsCard({ initial, editable, revision, onSaved, onConfli
               Stage changes
             </Button>
           ) : (
-            <p className="note">Admin role required to edit.</p>
+            <p className="text-sm text-muted-foreground">Admin role required to edit.</p>
           )}
           {status}
         </form>
@@ -1728,7 +1728,7 @@ function BehaviorCard({ initial, editable, revision, onSaved, onConflict, onDirt
         <CardTitle>Dashboard behavior</CardTitle>
       </CardHeader>
       <CardContent>
-        <p className="note">Global defaults users can still override per session, plus feature visibility applied live for every user.</p>
+        <p className="text-sm text-muted-foreground">Global defaults users can still override per session, plus feature visibility applied live for every user.</p>
       <form
         onSubmit={(event) => {
           event.preventDefault()
@@ -1852,7 +1852,7 @@ function BehaviorCard({ initial, editable, revision, onSaved, onConflict, onDirt
             Save changes
           </Button>
         ) : (
-          <p className="note">Admin role required to edit.</p>
+          <p className="text-sm text-muted-foreground">Admin role required to edit.</p>
         )}
         {status}
       </form>
@@ -1922,7 +1922,7 @@ function ReportPresetsCard({
         <CardTitle>Report Studio presets</CardTitle>
       </CardHeader>
       <CardContent>
-        <p className="note">Renamed/re-described copy for the compiled report-template catalog. Leave a field empty to use the compiled default.</p>
+        <p className="text-sm text-muted-foreground">Renamed/re-described copy for the compiled report-template catalog. Leave a field empty to use the compiled default.</p>
       <form
         onSubmit={(event) => {
           event.preventDefault()
@@ -1999,7 +1999,7 @@ function ReportPresetsCard({
             Save changes
           </Button>
         ) : (
-          <p className="note">Admin role required to edit.</p>
+          <p className="text-sm text-muted-foreground">Admin role required to edit.</p>
         )}
         {status}
       </form>
@@ -2085,7 +2085,7 @@ function ServicesCard({ initial, editable }: { initial: ServicesResponse | null;
         <CardTitle>Services</CardTitle>
       </CardHeader>
       <CardContent>
-        <p className="note">
+        <p className="text-sm text-muted-foreground">
           Live container status for sensors, probes and workers. Actions cross a narrow allowlisted adapter — the dashboard
           never holds Docker access directly.
         </p>
@@ -2154,11 +2154,11 @@ function ServicesCard({ initial, editable }: { initial: ServicesResponse | null;
             </Table>
           </div>
         )}
-        {!editable ? <p className="note">Admin role required to control services.</p> : null}
+        {!editable ? <p className="text-sm text-muted-foreground">Admin role required to control services.</p> : null}
         {status}
         {logsFor ? (
           <>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               {logsFor} — most recent lines, newest at the bottom.
             </p>
             {logsBusy ? <span className="skeleton-line" aria-hidden="true" /> : <pre className="code">{logsText || 'No log output.'}</pre>}
@@ -2183,7 +2183,7 @@ function ReporterStatsCard({ data }: { data: ReporterStats | null }) {
         <CardTitle>Reporter stats</CardTitle>
       </CardHeader>
       <CardContent>
-        <p className="note">The report-sender worker's own metrics — a quick glance at what it has attempted and sent.</p>
+        <p className="text-sm text-muted-foreground">The report-sender worker's own metrics — a quick glance at what it has attempted and sent.</p>
         {data === null ? (
           <>
             <span className="skeleton-line" aria-hidden="true" />
@@ -2226,7 +2226,7 @@ function ReporterStatsCard({ data }: { data: ReporterStats | null }) {
               </Card>
             </div>
             {data.stats?.updated_at ? (
-              <p className="note">Updated {formatTimestamp(String(data.stats.updated_at))}</p>
+              <p className="text-sm text-muted-foreground">Updated {formatTimestamp(String(data.stats.updated_at))}</p>
             ) : null}
           </>
         )}
@@ -2275,7 +2275,7 @@ function ConfigHistoryCard({ initial, editable }: { initial: HistoryResponse | n
         <CardTitle>Configuration history</CardTitle>
       </CardHeader>
       <CardContent>
-        <p className="note">Newest first. Rollback restores a retained revision as a new revision.</p>
+        <p className="text-sm text-muted-foreground">Newest first. Rollback restores a retained revision as a new revision.</p>
         {data === null ? (
           <span className="skeleton-line" aria-hidden="true" />
         ) : data.entries.length === 0 ? (
@@ -2381,7 +2381,7 @@ function AuditLogCard({ initial }: { initial: AuditResponse | null }) {
   return (
     <Card className="hp-field space-y-4 p-6" hidden={hidden}>
       <h2>Audit log</h2>
-      <p className="note">Settings mutations, newest first. Sensitive values are never logged.</p>
+      <p className="text-sm text-muted-foreground">Settings mutations, newest first. Sensitive values are never logged.</p>
       <SettingsSelect id="audit-action" label="Filter by action" value={filter || 'all'} options={[["all", "All actions"], ...AUDIT_ACTIONS.map((action): [string, string] => [action, action])]} onChange={(value) => void applyFilter(value === 'all' ? '' : value)} />
       {data === null && failed ? (
         // Retrying re-issues whatever scope is selected; resubmitting via
@@ -2669,19 +2669,19 @@ export function SettingsSurface({
       <CardContent>
         {user ? (
           <>
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               Signed in as <strong>{user.displayName || user.username}</strong>
               {user.role ? <> · <Badge variant="secondary">{user.role}</Badge></> : null}
             </p>
             <Button asChild variant="secondary" size="sm"><a href="/auth/logout">Sign out</a></Button>
           </>
         ) : (
-          <p className="note">No session (development mode).</p>
+          <p className="text-sm text-muted-foreground">No session (development mode).</p>
         )}
         {accountActions ? (
           <>
             <hr className="empty-state__divider" />
-            <p className="note">
+            <p className="text-sm text-muted-foreground">
               Password, passkeys, two-factor authentication, and sessions are managed by Keycloak. These protected pages open
               in a new tab and are never embedded.
             </p>
@@ -2728,7 +2728,7 @@ export function SettingsSurface({
         {/* Go's segmented markup (settings_modal.html:103-125): a
             role="group" of aria-pressed buttons — never radiogroup, which
             aria-pressed is invalid inside. */}
-        <p className="note">Theme mode</p>
+        <p className="text-sm text-muted-foreground">Theme mode</p>
         <div className="inline-flex flex-wrap gap-1 rounded-md border bg-muted p-1" role="group" aria-label="Theme mode">
           {modes.map((mode) => (
             <Button
@@ -2744,7 +2744,7 @@ export function SettingsSurface({
             </Button>
           ))}
         </div>
-        <p className="note">Theme</p>
+        <p className="text-sm text-muted-foreground">Theme</p>
         {/* #1758: was nine 11px dots whose colours were hardcoded dark-mode
             accents, so in light mode they previewed colours that appeared
             nowhere on screen. Each tile now renders that theme's real tokens
@@ -2760,7 +2760,7 @@ export function SettingsSurface({
         <CardTitle>Navigation</CardTitle>
       </CardHeader>
       <CardContent>
-        <p className="note">
+        <p className="text-sm text-muted-foreground">
           Predictive prefetching warms the data for the pages you're most likely to open next, so navigation feels instant. Turn
           it off to only load pages on click.
         </p>
@@ -2944,7 +2944,7 @@ export function SettingsSurface({
                         <CardTitle>Projected dashboard users</CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <p className="note">Diagnostic projection of who used the dashboard. Account management lives in the auth service.</p>
+                        <p className="text-sm text-muted-foreground">Diagnostic projection of who used the dashboard. Account management lives in the auth service.</p>
                         {adminData ? (
                           <Table className="data-table">
                             <TableBody>
@@ -2986,7 +2986,7 @@ export function SettingsSurface({
                         <CardTitle>Create a Canarytoken</CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <p className="note">
+                        <p className="text-sm text-muted-foreground">
                           The resulting artifact is yours to plant anywhere — an email, a fileshare, a USB drive. It phones home
                           the instant it's opened, wherever that is.
                         </p>
@@ -3019,7 +3019,7 @@ export function SettingsSurface({
                         <CardTitle>Ingest dead letters</CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <p className="note">
+                        <p className="text-sm text-muted-foreground">
                           Documents Elasticsearch rejected, with their original error and field shape for remediation.
                         </p>
                         <div className="flex items-center justify-between">
