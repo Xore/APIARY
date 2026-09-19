@@ -321,6 +321,26 @@ function Alerts() {
   const refresh = () => { void reload().catch(() => setNotice('Refresh failed. Retry to load the current alert state.')) }
   const status = (acknowledged: boolean) => <Badge variant={acknowledged ? 'secondary' : 'outline'}>{acknowledged ? 'Acknowledged' : 'Open'}</Badge>
   const actionLabel = (group: AlertGroup) => group.acknowledged ? 'Reopen' : `Acknowledge${group.members.length > 1 ? ` (${group.members.length})` : ''}`
+  const groupDetails = (group: AlertGroup) => <Sheet>
+    <SheetTrigger asChild><Button variant="ghost" className="h-auto w-full justify-start whitespace-normal px-0 text-left font-medium break-all">{group.label}</Button></SheetTrigger>
+    {group.members.length > 1 && <Badge variant="secondary">{group.members.length} members</Badge>}
+    <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
+      <SheetHeader className="pr-6 text-left"><SheetTitle>Alert group details</SheetTitle><SheetDescription className="break-all">{group.label}</SheetDescription></SheetHeader>
+      <div className="my-6 flex flex-wrap items-center gap-2">{status(group.acknowledged)}<Badge variant="outline">{group.members.length} members</Badge><Button size="sm" variant="outline" onClick={() => toggleGroup(group)}>{actionLabel(group)}</Button></div>
+      <dl className="grid grid-cols-2 gap-4 border-y py-4 text-sm">
+        <div><dt className="text-muted-foreground">Observed</dt><dd className="tabular-nums">{group.count.toLocaleString('en-US')}</dd></div>
+        <div><dt className="text-muted-foreground">First seen</dt><dd>{formatTimestamp(group.firstSeen)}</dd></div>
+        <div><dt className="text-muted-foreground">Last seen</dt><dd>{formatTimestamp(group.lastSeen)}</dd></div>
+      </dl>
+      <h3 className="my-4 font-semibold">Members</h3>
+      <ul className="space-y-3">{group.members.map((member) => <li key={member.Key} className="space-y-3 rounded-lg border p-4">
+        <p className="break-all text-sm font-medium">{member.Message}</p>
+        {member.Link ? <Button asChild variant="link" className="h-auto max-w-full whitespace-normal p-0 text-left break-all"><a href={member.Link} title="Show the events behind this alert">{member.Key}</a></Button> : <p className="break-all font-mono text-xs">{member.Key}</p>}
+        <dl className="grid grid-cols-2 gap-3 text-xs"><div><dt className="text-muted-foreground">Observed</dt><dd>{member.Count.toLocaleString('en-US')}</dd></div><div><dt className="text-muted-foreground">First seen</dt><dd>{formatTimestamp(member.FirstSeen)}</dd></div><div><dt className="text-muted-foreground">Last seen</dt><dd>{formatTimestamp(member.LastSeen)}</dd></div><div><dt className="text-muted-foreground">Last notified</dt><dd>{member.LastNotified ? formatTimestamp(member.LastNotified) : 'Never'}</dd></div></dl>
+        <Button variant="outline" size="sm" onClick={() => toggleMember(member)}>{member.Acknowledged ? 'Reopen' : 'Acknowledge'}</Button>
+      </li>)}</ul>
+    </SheetContent>
+  </Sheet>
 
   return (
     <section className="min-w-0 space-y-6" aria-labelledby="alerts-title">
@@ -358,39 +378,30 @@ function Alerts() {
               </CardHeader>
               {boardFailed ? <div role="alert" className="space-y-3 border-t p-6"><h3 className="font-semibold">The alert board failed to load</h3><p className="text-sm text-muted-foreground">The backend request failed. An unavailable board does not mean there are no alerts.</p><Button variant="outline" onClick={refresh} disabled={refreshing}>Retry</Button></div>
               : groups?.length === 0 ? <div role="status" className="flex flex-col items-center gap-3 border-t px-6 py-12 text-center"><Bell className="size-8 text-muted-foreground" aria-hidden="true" /><h3 className="font-semibold">{q ? 'No alerts match this filter' : alerts?.length === 0 ? 'No alerts recorded' : id === 'new' ? 'No new alerts' : 'No acknowledged alerts'}</h3><p className="max-w-sm text-sm text-muted-foreground">{q ? 'Try another message or key, or clear the filter.' : id === 'new' ? 'New notifications will appear here. Acknowledged alerts remain in their own tab.' : 'Acknowledged alerts stay here until reopened.'}</p>{q && <Button variant="outline" onClick={() => setQuery('')}>Clear filter</Button>}</div>
-              : <Table aria-label={id === 'new' ? 'New alert groups' : 'Acknowledged alert groups'} className="border-t">
+              : <><Table aria-label={id === 'new' ? 'New alert groups' : 'Acknowledged alert groups'} className="border-t max-[391px]:hidden">
                 <TableHeader><TableRow><TableHead>State</TableHead><TableHead>Message</TableHead><TableHead className="text-right">Observed</TableHead><TableHead>Last seen</TableHead><TableHead className="text-right">Action</TableHead></TableRow></TableHeader>
                 <TableBody>
                   {groups === null ? Array.from({ length: 8 }, (_, i) => <TableRow key={i}><TableCell colSpan={5}><Skeleton className="h-8 w-full" /></TableCell></TableRow>) : groups.map((group) => <TableRow key={group.signature}>
                     <TableCell>{status(group.acknowledged)}</TableCell>
-                    <TableCell className="min-w-48 max-w-md">
-                      <Sheet>
-                        <SheetTrigger asChild><Button variant="ghost" className="h-auto w-full justify-start whitespace-normal px-0 text-left font-medium break-all">{group.label}</Button></SheetTrigger>
-                        {group.members.length > 1 && <Badge variant="secondary">{group.members.length} members</Badge>}
-                        <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
-                          <SheetHeader className="pr-6 text-left"><SheetTitle>Alert group details</SheetTitle><SheetDescription className="break-all">{group.label}</SheetDescription></SheetHeader>
-                          <div className="my-6 flex flex-wrap items-center gap-2">{status(group.acknowledged)}<Badge variant="outline">{group.members.length} members</Badge><Button size="sm" variant="outline" onClick={() => toggleGroup(group)}>{actionLabel(group)}</Button></div>
-                          <dl className="grid grid-cols-2 gap-4 border-y py-4 text-sm">
-                            <div><dt className="text-muted-foreground">Observed</dt><dd className="tabular-nums">{group.count.toLocaleString('en-US')}</dd></div>
-                            <div><dt className="text-muted-foreground">First seen</dt><dd>{formatTimestamp(group.firstSeen)}</dd></div>
-                            <div><dt className="text-muted-foreground">Last seen</dt><dd>{formatTimestamp(group.lastSeen)}</dd></div>
-                          </dl>
-                          <h3 className="my-4 font-semibold">Members</h3>
-                          <ul className="space-y-3">{group.members.map((member) => <li key={member.Key} className="space-y-3 rounded-lg border p-4">
-                            <p className="break-all text-sm font-medium">{member.Message}</p>
-                            {member.Link ? <Button asChild variant="link" className="h-auto max-w-full whitespace-normal p-0 text-left break-all"><a href={member.Link} title="Show the events behind this alert">{member.Key}</a></Button> : <p className="break-all font-mono text-xs">{member.Key}</p>}
-                            <dl className="grid grid-cols-2 gap-3 text-xs"><div><dt className="text-muted-foreground">Observed</dt><dd>{member.Count.toLocaleString('en-US')}</dd></div><div><dt className="text-muted-foreground">First seen</dt><dd>{formatTimestamp(member.FirstSeen)}</dd></div><div><dt className="text-muted-foreground">Last seen</dt><dd>{formatTimestamp(member.LastSeen)}</dd></div><div><dt className="text-muted-foreground">Last notified</dt><dd>{member.LastNotified ? formatTimestamp(member.LastNotified) : 'Never'}</dd></div></dl>
-                            <Button variant="outline" size="sm" onClick={() => toggleMember(member)}>{member.Acknowledged ? 'Reopen' : 'Acknowledge'}</Button>
-                          </li>)}</ul>
-                        </SheetContent>
-                      </Sheet>
-                    </TableCell>
+                    <TableCell className="min-w-48 max-w-md">{groupDetails(group)}</TableCell>
                     <TableCell className="text-right tabular-nums">{group.count.toLocaleString('en-US')}</TableCell>
                     <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{formatTimestamp(group.lastSeen)}</TableCell>
                     <TableCell className="text-right"><Button variant="outline" size="sm" onClick={() => toggleGroup(group)}>{actionLabel(group)}</Button></TableCell>
                   </TableRow>)}
                 </TableBody>
-              </Table>}
+              </Table><div role="list" className="hidden border-t max-[391px]:block" aria-label={id === 'new' ? 'New alert groups' : 'Acknowledged alert groups'}>
+                {groups === null ? Array.from({ length: 4 }, (_, i) => <Card role="listitem" key={i} className="rounded-none border-x-0 border-t-0 shadow-none"><CardContent className="p-4"><Skeleton className="h-32 w-full" /></CardContent></Card>) : groups.map((group) => <Card role="listitem" key={group.signature} className="rounded-none border-x-0 border-t-0 shadow-none">
+                  <CardContent className="p-4">
+                    <dl className="space-y-3 text-sm">
+                      <div><dt className="text-xs font-medium text-muted-foreground">State</dt><dd className="mt-1">{status(group.acknowledged)}</dd></div>
+                      <div><dt className="text-xs font-medium text-muted-foreground">Message</dt><dd>{groupDetails(group)}</dd></div>
+                      <div><dt className="text-xs font-medium text-muted-foreground">Observed</dt><dd className="tabular-nums">{group.count.toLocaleString('en-US')}</dd></div>
+                      <div><dt className="text-xs font-medium text-muted-foreground">Last seen</dt><dd>{formatTimestamp(group.lastSeen)}</dd></div>
+                      <div><dt className="text-xs font-medium text-muted-foreground">Action</dt><dd className="mt-1"><Button variant="outline" size="sm" onClick={() => toggleGroup(group)}>{actionLabel(group)}</Button></dd></div>
+                    </dl>
+                  </CardContent>
+                </Card>)}
+              </div></>}
             </Card>
             <p className="text-xs text-muted-foreground">Board shows up to {BOARD_CAP} records. Same-kind alerts are grouped; filtering applies to individual members before grouping.</p>
           </TabsContent>
