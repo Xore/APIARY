@@ -13,6 +13,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
+import { Table, TableBody, TableCell, TableRow } from '../components/ui/table'
 
 type Citation = { kind: string; raw: string; value: string; valid: boolean }
 
@@ -85,33 +86,33 @@ function RevDeckCard({ analysis }: { analysis: RevDeckAnalysis | null }) {
         decompiled code.
       </p>
       <div className="card__scroll">
-        <table className="data-table">
-          <tbody>
-            <tr>
-              <td>workflow</td>
-              <td className="v">{analysis.workflow}</td>
-            </tr>
-            <tr>
-              <td>status</td>
-              <td className="v">
+        <Table className="data-table">
+          <TableBody>
+            <TableRow>
+              <TableCell>workflow</TableCell>
+              <TableCell className="v">{analysis.workflow}</TableCell>
+            </TableRow>
+            <TableRow>
+              <TableCell>status</TableCell>
+              <TableCell className="v">
                 {analysis.status}
                 {analysis.status === 'max_turns'
                   ? ' — the step budget ran out before the model finished; this is its best-effort synthesis, not a completed analysis'
                   : ''}
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
             {analysis.steps ? (
-              <tr>
-                <td>steps</td>
-                <td className="v">{analysis.steps}</td>
-              </tr>
+              <TableRow>
+                <TableCell>steps</TableCell>
+                <TableCell className="v">{analysis.steps}</TableCell>
+              </TableRow>
             ) : null}
-            <tr>
-              <td>tool calls</td>
-              <td className="v">{analysis.tool_calls}</td>
-            </tr>
-          </tbody>
-        </table>
+            <TableRow>
+              <TableCell>tool calls</TableCell>
+              <TableCell className="v">{analysis.tool_calls}</TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
         {analysis.answer ? (
           <>
             <p className="note">Answer:</p>

@@ -13,6 +13,7 @@ import { confirmAction } from '../components/ConfirmDialog'
 import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { Button } from '../components/ui/button'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 
 type Scanner = { source: string; ok: boolean; positives?: number; total?: number; suspicious?: boolean; permalink?: string; error?: string }
 type Verdict = { malicious: number; suspicious: number; total: number; level: string }
@@ -353,22 +354,22 @@ function GithubAnalysisDetail() {
                   <>
                     <p className="note">A scanner that failed to run is shown as failed, not omitted — a missing row would silently understate coverage.</p>
                     <div className="card__scroll">
-                      <table className="data-table">
-                        <thead>
-                          <tr>
-                            <th>scanner</th>
-                            <th>result</th>
-                            <th>detections</th>
-                            <th>link</th>
-                          </tr>
-                        </thead>
-                        <tbody>
+                      <Table className="data-table">
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>scanner</TableHead>
+                            <TableHead>result</TableHead>
+                            <TableHead>detections</TableHead>
+                            <TableHead>link</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
                           {run.scanners.map((scanner, index) => (
-                            <tr key={`${scanner.source}-${index}`}>
-                              <td className="v">{scanner.source}</td>
-                              <td>{scannerBadge(scanner)}</td>
-                              <td className="n">{scanner.ok ? `${scanner.positives ?? 0} / ${scanner.total ?? 0}` : '—'}</td>
-                              <td className="v">
+                            <TableRow key={`${scanner.source}-${index}`}>
+                              <TableCell className="v">{scanner.source}</TableCell>
+                              <TableCell>{scannerBadge(scanner)}</TableCell>
+                              <TableCell className="n">{scanner.ok ? `${scanner.positives ?? 0} / ${scanner.total ?? 0}` : '—'}</TableCell>
+                              <TableCell className="v">
                                 {scanner.permalink ? (
                                   <a className="btn btn-secondary btn-sm" href={scanner.permalink} target="_blank" rel="noopener noreferrer">
                                     report ↗
@@ -376,11 +377,11 @@ function GithubAnalysisDetail() {
                                 ) : (
                                   '—'
                                 )}
-                              </td>
-                            </tr>
+                              </TableCell>
+                            </TableRow>
                           ))}
-                        </tbody>
-                      </table>
+                        </TableBody>
+                      </Table>
                     </div>
                   </>
                 ) : (
@@ -401,43 +402,43 @@ function GithubAnalysisDetail() {
               <div className="card wide">
                 <h2>Publication record</h2>
                 <div className="card__scroll">
-                  <table className="data-table">
-                    <tbody>
-                      <tr>
-                        <td>SHA-256</td>
-                        <td className="v">{run.sha256}</td>
-                      </tr>
-                      <tr>
-                        <td>requested</td>
-                        <td className="v">{run.requested_at}</td>
-                      </tr>
-                      <tr>
-                        <td>started</td>
-                        <td className="v">{run.started_at || '—'}</td>
-                      </tr>
-                      <tr>
-                        <td>completed</td>
-                        <td className="v">{run.completed_at}</td>
-                      </tr>
-                      <tr>
-                        <td>exit status</td>
-                        <td className="v">{run.exit_status}</td>
-                      </tr>
-                      <tr>
-                        <td>requesting admin</td>
-                        <td className="v">{run.requested_by || 'not recorded'}</td>
-                      </tr>
-                      <tr>
-                        <td>pushed commit</td>
-                        <td className="v">{run.commit ? <code>{run.commit}</code> : '—'}</td>
-                      </tr>
-                      <tr>
-                        <td>sample path upstream</td>
-                        <td className="v">{run.sample_path ? <code>{run.sample_path}</code> : '—'}</td>
-                      </tr>
-                      <tr>
-                        <td>Actions run</td>
-                        <td className="v">
+                  <Table className="data-table">
+                    <TableBody>
+                      <TableRow>
+                        <TableCell>SHA-256</TableCell>
+                        <TableCell className="v">{run.sha256}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell>requested</TableCell>
+                        <TableCell className="v">{run.requested_at}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell>started</TableCell>
+                        <TableCell className="v">{run.started_at || '—'}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell>completed</TableCell>
+                        <TableCell className="v">{run.completed_at}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell>exit status</TableCell>
+                        <TableCell className="v">{run.exit_status}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell>requesting admin</TableCell>
+                        <TableCell className="v">{run.requested_by || 'not recorded'}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell>pushed commit</TableCell>
+                        <TableCell className="v">{run.commit ? <code>{run.commit}</code> : '—'}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell>sample path upstream</TableCell>
+                        <TableCell className="v">{run.sample_path ? <code>{run.sample_path}</code> : '—'}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell>Actions run</TableCell>
+                        <TableCell className="v">
                           {run.run_url ? (
                             <a className="lnk" href={run.run_url} target="_blank" rel="noopener noreferrer">
                               {run.run_url}
@@ -445,10 +446,10 @@ function GithubAnalysisDetail() {
                           ) : (
                             '—'
                           )}
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
                 </div>
               </div>
             </div>

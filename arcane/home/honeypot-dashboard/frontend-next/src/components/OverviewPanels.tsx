@@ -9,6 +9,7 @@ import { applyLeafletTheme } from '../lib/leafletTheme'
 import { DEFAULT_MAP_PREFS, pullMapPrefs, useAppearanceKey, useThemeMode, type MapPrefs } from '../lib/prefs'
 import { Card } from './ui/card'
 import { Button } from './ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import { Table, TableBody, TableCell, TableRow } from './ui/table'
 
 export type Kv = { key: string; count: number; link: string }
@@ -169,14 +170,13 @@ export function AttackVectors({
   return (
     <>
       <div className="filters">
-        <select className="form-input" aria-label="Sensor drill-down" value={sensor} onChange={(event) => onSensorChange(event.target.value)}>
-          <option value="">All sensors</option>
-          {options.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
+        <Select value={sensor || 'all'} onValueChange={(value) => onSensorChange(value === 'all' ? '' : value)}>
+          <SelectTrigger className="form-input" aria-label="Sensor drill-down"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All sensors</SelectItem>
+            {options.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+          </SelectContent>
+        </Select>
         {sensor ? (
           <Button variant="outline" size="sm" className="chip" type="button" onClick={() => onSensorChange('')}>
             × all sensors
@@ -204,20 +204,20 @@ export function AttackVectors({
               {rows.length === 0 ? (
                 <p className="empty">No traffic in the window.</p>
               ) : (
-                <table className="data-table">
-                  <tbody>
+                <Table className="data-table">
+                  <TableBody>
                     {rows.map((row) => (
-                      <tr key={row.key}>
-                        <td className="n">
+                      <TableRow key={row.key}>
+                        <TableCell className="n">
                           <a href={row.link}>{row.count.toLocaleString('en-US')}</a>
-                        </td>
-                        <td className="v">
+                        </TableCell>
+                        <TableCell className="v">
                           <a href={row.link}>{row.key}</a>
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     ))}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               )}
             </div>
           ))}

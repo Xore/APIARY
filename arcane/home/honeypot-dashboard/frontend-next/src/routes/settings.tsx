@@ -36,6 +36,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { ScrollArea } from '../components/ui/scroll-area'
 import { Separator } from '../components/ui/separator'
 import { Card } from '../components/ui/card'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 import { themeSearchTerms } from '../lib/themes'
 import type { JsonRecord } from '../lib/json'
 import { prefetchEnabled, setPrefetchEnabled } from '../lib/prefetch'
@@ -2053,26 +2054,26 @@ function ServicesCard({ initial, editable }: { initial: ServicesResponse | null;
         <p className="empty">No services reported.</p>
       ) : (
         <div className="table-scroll">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Service</th>
-                <th>State</th>
-                <th>Health</th>
-                <th>Restarts</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table className="data-table">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Service</TableHead>
+                <TableHead>State</TableHead>
+                <TableHead>Health</TableHead>
+                <TableHead>Restarts</TableHead>
+                <TableHead>Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {data.services.map((service) => {
                 const name = str(service, 'name')
                 return (
-                  <tr key={name}>
-                    <td className="v">{name}</td>
-                    <td>{stateBadge(str(service, 'state'))}</td>
-                    <td>{str(service, 'health') || '—'}</td>
-                    <td className="n">{typeof service.restarts === 'number' ? service.restarts : '—'}</td>
-                    <td>
+                  <TableRow key={name}>
+                    <TableCell className="v">{name}</TableCell>
+                    <TableCell>{stateBadge(str(service, 'state'))}</TableCell>
+                    <TableCell>{str(service, 'health') || '—'}</TableCell>
+                    <TableCell className="n">{typeof service.restarts === 'number' ? service.restarts : '—'}</TableCell>
+                    <TableCell>
                       <div className="filters">
                         <Button
                           variant="secondary" size="sm"
@@ -2102,12 +2103,12 @@ function ServicesCard({ initial, editable }: { initial: ServicesResponse | null;
                           {logsFor === name ? 'Hide logs' : 'Logs'}
                         </Button>
                       </div>
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 )
               })}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
       {!editable ? <p className="note">Admin role required to control services.</p> : null}
@@ -2220,29 +2221,29 @@ function ConfigHistoryCard({ initial, editable }: { initial: HistoryResponse | n
         <p className="empty">No configuration changes recorded yet.</p>
       ) : (
         <div className="table-scroll">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Revision</th>
-                <th>Time</th>
-                <th>Actor</th>
-                <th>Action</th>
-                <th>Fields</th>
-                {editable ? <th>Rollback</th> : null}
-              </tr>
-            </thead>
-            <tbody>
+          <Table className="data-table">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Revision</TableHead>
+                <TableHead>Time</TableHead>
+                <TableHead>Actor</TableHead>
+                <TableHead>Action</TableHead>
+                <TableHead>Fields</TableHead>
+                {editable ? <TableHead>Rollback</TableHead> : null}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {data.entries.map((entry) => (
-                <tr key={entry.revision}>
-                  <td className="n">{entry.revision}</td>
-                  <td>{formatTimestamp(entry.time)}</td>
-                  <td>{entry.actor_username || entry.actor_subject || '—'}</td>
-                  <td>
+                <TableRow key={entry.revision}>
+                  <TableCell className="n">{entry.revision}</TableCell>
+                  <TableCell>{formatTimestamp(entry.time)}</TableCell>
+                  <TableCell>{entry.actor_username || entry.actor_subject || '—'}</TableCell>
+                  <TableCell>
                     <span className="badge badge--muted">{entry.action}</span>
-                  </td>
-                  <td className="v">{(entry.fields ?? []).join(', ')}</td>
+                  </TableCell>
+                  <TableCell className="v">{(entry.fields ?? []).join(', ')}</TableCell>
                   {editable ? (
-                    <td>
+                    <TableCell>
                       <Button
                         variant="secondary" size="sm"
                         type="button"
@@ -2251,12 +2252,12 @@ function ConfigHistoryCard({ initial, editable }: { initial: HistoryResponse | n
                       >
                         {busy === entry.revision ? 'Rolling back…' : 'Rollback'}
                       </Button>
-                    </td>
+                    </TableCell>
                   ) : null}
-                </tr>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
       {status}
@@ -2335,32 +2336,32 @@ function AuditLogCard({ initial }: { initial: AuditResponse | null }) {
         <p className="empty">No audit events recorded yet.</p>
       ) : (
         <div className="table-scroll">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Actor</th>
-                <th>Action</th>
-                <th>Fields</th>
-                <th>Revision</th>
-                <th>Result</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table className="data-table">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Time</TableHead>
+                <TableHead>Actor</TableHead>
+                <TableHead>Action</TableHead>
+                <TableHead>Fields</TableHead>
+                <TableHead>Revision</TableHead>
+                <TableHead>Result</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {data.events.map((event, index) => (
-                <tr key={`${event.time}-${index}`}>
-                  <td>{formatTimestamp(event.time)}</td>
-                  <td>{event.actor_username || event.actor_subject || '—'}</td>
-                  <td>
+                <TableRow key={`${event.time}-${index}`}>
+                  <TableCell>{formatTimestamp(event.time)}</TableCell>
+                  <TableCell>{event.actor_username || event.actor_subject || '—'}</TableCell>
+                  <TableCell>
                     <span className="badge badge--muted">{event.action}</span>
-                  </td>
-                  <td className="v">{(event.fields ?? []).join(', ')}</td>
-                  <td className="n">{event.revision || ''}</td>
-                  <td>{resultBadge(event.result)}</td>
-                </tr>
+                  </TableCell>
+                  <TableCell className="v">{(event.fields ?? []).join(', ')}</TableCell>
+                  <TableCell className="n">{event.revision || ''}</TableCell>
+                  <TableCell>{resultBadge(event.result)}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
     </Card>
@@ -2869,21 +2870,21 @@ export function SettingsSurface({
                       <h2>Projected dashboard users</h2>
                       <p className="note">Diagnostic projection of who used the dashboard. Account management lives in the auth service.</p>
                       {adminData ? (
-                        <table className="data-table">
-                          <tbody>
+                        <Table className="data-table">
+                          <TableBody>
                             {adminData.users.map((operator) => (
-                              <tr key={operator.subject}>
-                                <td className="v">{operator.username}</td>
-                                <td>
+                              <TableRow key={operator.subject}>
+                                <TableCell className="v">{operator.username}</TableCell>
+                                <TableCell>
                                   <span className={operator.role === 'admin' ? 'badge badge--warning' : 'badge badge--muted'}>
                                     {operator.role}
                                   </span>
-                                </td>
-                                <td className="ago">{formatTimestamp(operator.last_seen_at)}</td>
-                              </tr>
+                                </TableCell>
+                                <TableCell className="ago">{formatTimestamp(operator.last_seen_at)}</TableCell>
+                              </TableRow>
                             ))}
-                          </tbody>
-                        </table>
+                          </TableBody>
+                        </Table>
                       ) : adminFailed ? (
                         // #2311: an outage used to render an empty roster —
                         // reading as "no one has ever used the dashboard".

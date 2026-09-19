@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react'
 import { RowActions, RowIcons } from './RowActions'
 import { Button } from './ui/button'
 import { Card, CardContent, CardHeader } from './ui/card'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table'
 
 export function InvestigateHeader({
   label,
@@ -110,16 +111,16 @@ export function SkeletonRows({
   return (
     <>
       {Array.from({ length: count }, (_, i) => (
-        <tr key={`skel-${i}`} aria-hidden="true">
+        <TableRow key={`skel-${i}`} aria-hidden="true">
           {Array.from({ length: cols }, (_, col) => {
             const width = stub.includes(col) ? 24 : wide.includes(col) ? '72%' : '42%'
             return (
-              <td key={col}>
+              <TableCell key={col}>
                 <span className="skeleton-line" style={{ display: 'block', width }} />
-              </td>
+              </TableCell>
             )
           })}
-        </tr>
+        </TableRow>
       ))}
     </>
   )
@@ -365,7 +366,7 @@ export function MasterDetailTable<Row>({
               </div>
             </CardContent>
           ) : (
-            <table className="recent data-table data-table--responsive">
+            <Table className="recent data-table data-table--responsive">
               {/* `data-table--responsive` plus a `data-label` on every cell
                   is what drives theme.css's <=720px stacked-card layout.
                   The stylesheet cannot read the <th> text itself, so the
@@ -373,23 +374,23 @@ export function MasterDetailTable<Row>({
                   leaving those rules dead and wide tables overflowing on
                   mobile. Deriving the label from the column header here
                   keeps the two in sync by construction. */}
-              <thead>
-                <tr>
+              <TableHeader>
+                <TableRow>
                   {listColumns.map((column) => (
-                    <th key={column.header}>{column.header}</th>
+                    <TableHead key={column.header}>{column.header}</TableHead>
                   ))}
-                  {anyDetailHref ? <th aria-label="Row actions" /> : null}
-                </tr>
-              </thead>
-              <tbody>
+                  {anyDetailHref ? <TableHead aria-label="Row actions" /> : null}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {rows === null ? (
                   ghosts(pageSize ?? 12)
                 ) : rows.length === 0 ? (
-                  <tr className="hp-table-state">
-                    <td colSpan={bodyColumnCount}>
+                  <TableRow className="hp-table-state">
+                    <TableCell colSpan={bodyColumnCount}>
                       <EmptyStateBlock state={emptyState ?? DEFAULT_EMPTY} />
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ) : (
                   rows.map((row, index) => {
                     // #1868: the full-detail link used to live only inside
@@ -400,14 +401,14 @@ export function MasterDetailTable<Row>({
                     // for.
                     const rowDetail = detailHref?.(row)
                     return (
-                      <tr key={rowKey(row, index)} className={selected === index ? 'selected' : undefined} onClick={onRowClick(index)}>
+                      <TableRow key={rowKey(row, index)} className={selected === index ? 'selected' : undefined} onClick={onRowClick(index)}>
                         {listColumns.map((column) => (
-                          <td key={column.header} className={column.className} data-label={column.header}>
+                          <TableCell key={column.header} className={column.className} data-label={column.header}>
                             {column.render(row)}
-                          </td>
+                          </TableCell>
                         ))}
                         {anyDetailHref ? (
-                          <td className="hp-row-actions-cell" data-label="">
+                          <TableCell className="hp-row-actions-cell" data-label="">
                             <RowActions
                               actions={[
                                 rowDetail
@@ -415,15 +416,15 @@ export function MasterDetailTable<Row>({
                                   : null,
                               ]}
                             />
-                          </td>
+                          </TableCell>
                         ) : null}
-                      </tr>
+                      </TableRow>
                     )
                   })
                 )}
                 {loadingMore ? ghosts(5) : null}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           )}
           {rows !== null && onViewMore && total !== undefined && rows.length < total ? (
             <div className="hp-lazy-controls" aria-live="polite">

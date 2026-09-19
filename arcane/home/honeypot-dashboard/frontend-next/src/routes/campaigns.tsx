@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { formatTimestamp } from '../lib/time'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 
 type CampaignRow = {
   cidr: string
@@ -89,32 +90,32 @@ function CredReuseCard({ edges }: { edges: CredEdge[] | null }) {
         Username/password pairs tried by 2 or more distinct source IPs — the shared-wordlist signal that survives
         across campaigns, not just within one.
       </p>
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th>credential</th>
-            <th>ips</th>
-            <th>sensors</th>
-            <th>events</th>
-            <th>last</th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table className="data-table">
+        <TableHeader>
+          <TableRow>
+            <TableHead>credential</TableHead>
+            <TableHead>ips</TableHead>
+            <TableHead>sensors</TableHead>
+            <TableHead>events</TableHead>
+            <TableHead>last</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {edges.slice(0, 25).map((edge) => (
-            <tr key={`${edge.user}:${edge.pass}`}>
-              <td className="v">
+            <TableRow key={`${edge.user}:${edge.pass}`}>
+              <TableCell className="v">
                 <code>
                   {edge.user}:{edge.pass}
                 </code>
-              </td>
-              <td className="n">{edge.unique_ips.toLocaleString('en-US')}</td>
-              <td className="v">{edge.sensors.join(' ')}</td>
-              <td className="n">{edge.events.toLocaleString('en-US')}</td>
-              <td>{formatTimestamp(edge.last)}</td>
-            </tr>
+              </TableCell>
+              <TableCell className="n">{edge.unique_ips.toLocaleString('en-US')}</TableCell>
+              <TableCell className="v">{edge.sensors.join(' ')}</TableCell>
+              <TableCell className="n">{edge.events.toLocaleString('en-US')}</TableCell>
+              <TableCell>{formatTimestamp(edge.last)}</TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   )
 }

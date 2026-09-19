@@ -3,6 +3,7 @@
 import { createServerFn } from '@tanstack/react-start'
 import { useServerQuery } from '../lib/useServerQuery'
 import { ErrorStateBlock } from './ErrorState'
+import { Table, TableBody, TableCell, TableRow } from './ui/table'
 
 type ArtifactRow = {
   filename: string
@@ -38,26 +39,26 @@ export function ArtifactList({ kind, artifactKey }: { kind: 'ghidra' | 'sandbox'
   return (
     <>
       <p className="subtitle">Artifacts</p>
-      <table className="data-table">
-        <tbody>
+      <Table className="data-table">
+        <TableBody>
           {rows.map((row) => (
-            <tr key={row.filename}>
-              <td className="v">
+            <TableRow key={row.filename}>
+              <TableCell className="v">
                 <a
                   className="lnk"
                   href={`/api/artifact/${kind}/${encodeURIComponent(artifactKey)}/${encodeURIComponent(row.filename)}`}
                 >
                   {row.filename} ↓
                 </a>
-              </td>
-              <td>
+              </TableCell>
+              <TableCell>
                 <span className="badge badge--muted">{row.kind}</span>
-              </td>
-              <td className="n">{(row.size_bytes / 1024).toFixed(1)} KB</td>
-            </tr>
+              </TableCell>
+              <TableCell className="n">{(row.size_bytes / 1024).toFixed(1)} KB</TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </>
   )
 }

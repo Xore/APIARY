@@ -14,6 +14,7 @@ import { ArtifactList } from '../components/ArtifactList'
 import { GhidraCallGraph } from '../components/GhidraCallGraph'
 import { confirmAction } from '../components/ConfirmDialog'
 import { Button } from '../components/ui/button'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 import { formatTimestamp } from '../lib/time'
 import { type JsonRecord } from '../lib/json'
 
@@ -455,24 +456,24 @@ function OverviewPanel({ sha, g }: { sha: string; g: GhidraDoc }) {
               not by itself show the binary uses it maliciously. Addresses are file offsets, not virtual addresses.
             </p>
             <div className="card__scroll">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>address</th>
-                    <th>constant</th>
-                    <th>algorithm</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table className="data-table">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>address</TableHead>
+                    <TableHead>constant</TableHead>
+                    <TableHead>algorithm</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {g.findcrypt.map((hit, index) => (
-                    <tr key={index}>
-                      <td className="v">{hit.address}</td>
-                      <td className="v">{hit.constant}</td>
-                      <td>{hit.algorithm}</td>
-                    </tr>
+                    <TableRow key={index}>
+                      <TableCell className="v">{hit.address}</TableCell>
+                      <TableCell className="v">{hit.constant}</TableCell>
+                      <TableCell>{hit.algorithm}</TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           </>
         ) : (
@@ -836,28 +837,28 @@ function IocCorrelationCard({ correlation }: { correlation: IocCorrelation | nul
             actually observed happening.
           </p>
           <div className="card__scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>kind</th>
-                  <th>floss-only</th>
-                  <th>sandbox-static-only</th>
-                  <th>confirmed at runtime</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table className="data-table">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>kind</TableHead>
+                  <TableHead>floss-only</TableHead>
+                  <TableHead>sandbox-static-only</TableHead>
+                  <TableHead>confirmed at runtime</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {rows.map((row) => (
-                  <tr key={row.label}>
-                    <td>{row.label}</td>
-                    <td className="v">{count(row.kind?.floss_only)}</td>
-                    <td className="v">{count(row.kind?.sandbox_static_only)}</td>
-                    <td className={count(row.kind?.confirmed_at_runtime) > 0 ? 'v text-secondary' : 'v'}>
+                  <TableRow key={row.label}>
+                    <TableCell>{row.label}</TableCell>
+                    <TableCell className="v">{count(row.kind?.floss_only)}</TableCell>
+                    <TableCell className="v">{count(row.kind?.sandbox_static_only)}</TableCell>
+                    <TableCell className={count(row.kind?.confirmed_at_runtime) > 0 ? 'v text-secondary' : 'v'}>
                       {row.dynamic ? count(row.kind?.confirmed_at_runtime) : '—'}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
           <p className="note">
             UNC/SMB paths have no dynamic counterpart — the sandbox&apos;s own parsers have no SMB/UNC observation path,

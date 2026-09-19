@@ -12,6 +12,7 @@ import { useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
 import type { Json, JsonRecord } from '../lib/json'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 
 type Signature = { name: string; description: string; severity: Json }
 
@@ -90,28 +91,28 @@ function ProcessActivityCard({ summary }: { summary: ReportSummary }) {
         these processes combined, far too many to render on one page. The full trace is in the raw report (link above).
       </p>
       <div className="card__scroll">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>PID</th>
-              <th>process</th>
-              <th>parent PID</th>
-              <th>first seen</th>
-              <th>API calls</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table className="data-table">
+          <TableHeader>
+            <TableRow>
+              <TableHead>PID</TableHead>
+              <TableHead>process</TableHead>
+              <TableHead>parent PID</TableHead>
+              <TableHead>first seen</TableHead>
+              <TableHead>API calls</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {summary.processes.map((process, index) => (
-              <tr key={`${process.process_id}-${index}`}>
-                <td className="n">{process.process_id}</td>
-                <td className="v">{process.process_name}</td>
-                <td className="n">{process.parent_id}</td>
-                <td className="ago">{process.first_seen}</td>
-                <td className="n">{process.call_count.toLocaleString('en-US')}</td>
-              </tr>
+              <TableRow key={`${process.process_id}-${index}`}>
+                <TableCell className="n">{process.process_id}</TableCell>
+                <TableCell className="v">{process.process_name}</TableCell>
+                <TableCell className="n">{process.parent_id}</TableCell>
+                <TableCell className="ago">{process.first_seen}</TableCell>
+                <TableCell className="n">{process.call_count.toLocaleString('en-US')}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
     </div>
   )
@@ -230,60 +231,60 @@ function CapeDetail() {
               </div>
               <div className="card wide">
                 <h2>Task identity</h2>
-                <table className="data-table">
-                  <tbody>
-                    <tr>
-                      <td>SHA-256</td>
-                      <td className="v">{run.sha256}</td>
-                    </tr>
-                    <tr>
-                      <td>task ID</td>
-                      <td className="v">{run.task_id ?? '—'}</td>
-                    </tr>
-                    <tr>
-                      <td>requested</td>
-                      <td className="v">{run.requested_at}</td>
-                    </tr>
-                    <tr>
-                      <td>started</td>
-                      <td className="v">{run.started_at}</td>
-                    </tr>
-                    <tr>
-                      <td>completed</td>
-                      <td className="v">{run.completed_at}</td>
-                    </tr>
-                    <tr>
-                      <td>exit status</td>
-                      <td className="v">{run.exit_status}</td>
-                    </tr>
-                    <tr>
-                      <td>CAPE task status</td>
-                      <td className="v">{run.cape_status}</td>
-                    </tr>
-                    <tr>
-                      <td>route</td>
-                      <td className="v">{run.route}</td>
-                    </tr>
+                <Table className="data-table">
+                  <TableBody>
+                    <TableRow>
+                      <TableCell>SHA-256</TableCell>
+                      <TableCell className="v">{run.sha256}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>task ID</TableCell>
+                      <TableCell className="v">{run.task_id ?? '—'}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>requested</TableCell>
+                      <TableCell className="v">{run.requested_at}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>started</TableCell>
+                      <TableCell className="v">{run.started_at}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>completed</TableCell>
+                      <TableCell className="v">{run.completed_at}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>exit status</TableCell>
+                      <TableCell className="v">{run.exit_status}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>CAPE task status</TableCell>
+                      <TableCell className="v">{run.cape_status}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>route</TableCell>
+                      <TableCell className="v">{run.route}</TableCell>
+                    </TableRow>
                     {summary ? (
                       <>
-                        <tr>
-                          <td>machine</td>
-                          <td className="v">{summary.machine}</td>
-                        </tr>
-                        <tr>
-                          <td>package</td>
-                          <td className="v">{summary.package}</td>
-                        </tr>
-                        <tr>
-                          <td>duration</td>
-                          <td className="v">
+                        <TableRow>
+                          <TableCell>machine</TableCell>
+                          <TableCell className="v">{summary.machine}</TableCell>
+                        </TableRow>
+                        <TableRow>
+                          <TableCell>package</TableCell>
+                          <TableCell className="v">{summary.package}</TableCell>
+                        </TableRow>
+                        <TableRow>
+                          <TableCell>duration</TableCell>
+                          <TableCell className="v">
                             {summary.duration} seconds{summary.timeout ? ' (hit its own analysis timeout)' : ''}
-                          </td>
-                        </tr>
+                          </TableCell>
+                        </TableRow>
                       </>
                     ) : null}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
 
               {run.signatures.length ? (
@@ -294,26 +295,26 @@ function CapeDetail() {
                     necessarily that the sample is malicious.
                   </p>
                   <div className="card__scroll">
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>severity</th>
-                          <th>name</th>
-                          <th>description</th>
-                        </tr>
-                      </thead>
-                      <tbody>
+                    <Table className="data-table">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>severity</TableHead>
+                          <TableHead>name</TableHead>
+                          <TableHead>description</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
                         {run.signatures.map((signature, index) => (
-                          <tr key={`${signature.name}-${index}`}>
-                            <td>
+                          <TableRow key={`${signature.name}-${index}`}>
+                            <TableCell>
                               <span className="badge badge--muted">{String(signature.severity)}</span>
-                            </td>
-                            <td className="v">{signature.name}</td>
-                            <td className="v">{signature.description}</td>
-                          </tr>
+                            </TableCell>
+                            <TableCell className="v">{signature.name}</TableCell>
+                            <TableCell className="v">{signature.description}</TableCell>
+                          </TableRow>
                         ))}
-                      </tbody>
-                    </table>
+                      </TableBody>
+                    </Table>
                   </div>
                 </div>
               ) : null}

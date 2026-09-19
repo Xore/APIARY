@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { EChart } from '../components/EChart'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { InvestigateHeader } from '../components/Investigate'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 import { useLiveInterval } from '../lib/live'
 
 type ExposedPort = {
@@ -221,21 +222,21 @@ function TopologyPage() {
         </div>
       </div>
       <div className="card wide">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>sensor</th>
-              <th>ingress</th>
-              <th>ports (public → home)</th>
-              <th>raw index</th>
-              <th>feed state</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table className="data-table">
+          <TableHeader>
+            <TableRow>
+              <TableHead>sensor</TableHead>
+              <TableHead>ingress</TableHead>
+              <TableHead>ports (public → home)</TableHead>
+              <TableHead>raw index</TableHead>
+              <TableHead>feed state</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {(topology?.sensors ?? []).map((row) => (
-              <tr key={row.sensor}>
-                <td className="v">{row.sensor}</td>
-                <td>
+              <TableRow key={row.sensor}>
+                <TableCell className="v">{row.sensor}</TableCell>
+                <TableCell>
                   {row.ingress.map((kind) => (
                     <span key={kind} style={{ marginRight: 'var(--space-xs)' }}>
                       {ingressBadge(kind)}
@@ -246,8 +247,8 @@ function TopologyPage() {
                       {row.hostnames.join(' · ')}
                     </div>
                   ) : null}
-                </td>
-                <td>
+                </TableCell>
+                <TableCell>
                   {row.ports.length === 0 ? (
                     <span className="text-muted">hostname only</span>
                   ) : (
@@ -257,13 +258,13 @@ function TopologyPage() {
                       </span>
                     ))
                   )}
-                </td>
-                <td className="v text-muted">{row.raw_index}</td>
-                <td>{freshnessBadge(freshness.get(row.sensor))}</td>
-              </tr>
+                </TableCell>
+                <TableCell className="v text-muted">{row.raw_index}</TableCell>
+                <TableCell>{freshnessBadge(freshness.get(row.sensor))}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
         <p className="note">+PROXY means the upstream appends PROXY protocol v1 — those are the sensors that can see a real client address.</p>
       </div>
 

@@ -14,6 +14,7 @@ import { formatTimestamp } from '../lib/time'
 import { Badge } from '../components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Skeleton } from '../components/ui/skeleton'
+import { Table, TableBody, TableCell, TableRow } from '../components/ui/table'
 
 type Kv = { key: string; count: number }
 
@@ -81,16 +82,16 @@ function MiniTable({ title, rows }: { title: string; rows: Kv[] }) {
   return (
     <Card className="min-w-0"><CardHeader><CardTitle>{title}</CardTitle></CardHeader>
       <CardContent className="overflow-x-auto">
-        <table className="data-table">
-          <tbody>
+        <Table className="data-table">
+          <TableBody>
             {rows.map((row) => (
-              <tr key={row.key}>
-                <td className="n">{row.count.toLocaleString('en-US')}</td>
-                <td className="v">{row.key}</td>
-              </tr>
+              <TableRow key={row.key}>
+                <TableCell className="n">{row.count.toLocaleString('en-US')}</TableCell>
+                <TableCell className="v">{row.key}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </CardContent>
     </Card>
   )

@@ -15,6 +15,7 @@ import { confirmAction } from '../components/ConfirmDialog'
 import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { Button } from '../components/ui/button'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 import type { Json, JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
 
@@ -450,26 +451,26 @@ function SandboxDetail() {
               <h2>ATT&CK behavior mapping</h2>
               {techniques.length ? (
                 <div className="card__scroll">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>technique</th>
-                        <th>evidence</th>
-                      </tr>
-                    </thead>
-                    <tbody>
+                  <Table className="data-table">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>technique</TableHead>
+                        <TableHead>evidence</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
                       {techniques.map((technique, index) => (
-                        <tr key={`${str(technique.id)}-${index}`}>
-                          <td>
+                        <TableRow key={`${str(technique.id)}-${index}`}>
+                          <TableCell>
                             <a href={`https://attack.mitre.org/techniques/${encodeURIComponent(str(technique.id))}/`} target="_blank" rel="noopener noreferrer">
                               {str(technique.id)} {str(technique.name)}
                             </a>
-                          </td>
-                          <td className="v">{str(technique.evidence)}</td>
-                        </tr>
+                          </TableCell>
+                          <TableCell className="v">{str(technique.evidence)}</TableCell>
+                        </TableRow>
                       ))}
-                    </tbody>
-                  </table>
+                    </TableBody>
+                  </Table>
                 </div>
               ) : (
                 <p className="empty">No mapped behavior in this run.</p>
@@ -489,22 +490,22 @@ function SandboxDetail() {
               <h2>Top system calls</h2>
               {topSyscalls.length ? (
                 <div className="card__scroll">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>call</th>
-                        <th>count</th>
-                      </tr>
-                    </thead>
-                    <tbody>
+                  <Table className="data-table">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>call</TableHead>
+                        <TableHead>count</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
                       {topSyscalls.map((syscall, index) => (
-                        <tr key={`${str(syscall.name)}-${index}`}>
-                          <td className="v">{str(syscall.name)}</td>
-                          <td className="n">{num(syscall.count)}</td>
-                        </tr>
+                        <TableRow key={`${str(syscall.name)}-${index}`}>
+                          <TableCell className="v">{str(syscall.name)}</TableCell>
+                          <TableCell className="n">{num(syscall.count)}</TableCell>
+                        </TableRow>
                       ))}
-                    </tbody>
-                  </table>
+                    </TableBody>
+                  </Table>
                 </div>
               ) : (
                 <p className="empty">No syscall trace was exported.</p>
@@ -671,28 +672,28 @@ function SandboxDetail() {
                 <h2>Suspicious Windows API imports</h2>
                 {Object.keys(rec(windows.suspicious_imports)).length ? (
                   <div className="card__scroll">
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>behavior</th>
-                          <th>imports</th>
-                        </tr>
-                      </thead>
-                      <tbody>
+                    <Table className="data-table">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>behavior</TableHead>
+                          <TableHead>imports</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
                         {Object.entries(rec(windows.suspicious_imports)).map(([group, names]) => (
-                          <tr key={group}>
-                            <td>{group}</td>
-                            <td className="v">
+                          <TableRow key={group}>
+                            <TableCell>{group}</TableCell>
+                            <TableCell className="v">
                               {lines(names).map((name) => (
                                 <span key={name} className="chip">
                                   {name}
                                 </span>
                               ))}
-                            </td>
-                          </tr>
+                            </TableCell>
+                          </TableRow>
                         ))}
-                      </tbody>
-                    </table>
+                      </TableBody>
+                    </Table>
                   </div>
                 ) : (
                   <p className="empty">No categorized high-signal imports found.</p>
@@ -702,28 +703,28 @@ function SandboxDetail() {
                 <h2>PE sections</h2>
                 {recList(windows.sections).length ? (
                   <div className="card__scroll">
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>name</th>
-                          <th>virtual</th>
-                          <th>raw</th>
-                          <th>entropy</th>
-                          <th>flags</th>
-                        </tr>
-                      </thead>
-                      <tbody>
+                    <Table className="data-table">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>name</TableHead>
+                          <TableHead>virtual</TableHead>
+                          <TableHead>raw</TableHead>
+                          <TableHead>entropy</TableHead>
+                          <TableHead>flags</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
                         {recList(windows.sections).map((section, index) => (
-                          <tr key={`${str(section.name)}-${index}`}>
-                            <td className="v">{str(section.name)}</td>
-                            <td className="n">{num(section.virtual_size)}</td>
-                            <td className="n">{num(section.raw_size)}</td>
-                            <td className="n">{num(section.entropy)}</td>
-                            <td className="v">{str(section.characteristics)}</td>
-                          </tr>
+                          <TableRow key={`${str(section.name)}-${index}`}>
+                            <TableCell className="v">{str(section.name)}</TableCell>
+                            <TableCell className="n">{num(section.virtual_size)}</TableCell>
+                            <TableCell className="n">{num(section.raw_size)}</TableCell>
+                            <TableCell className="n">{num(section.entropy)}</TableCell>
+                            <TableCell className="v">{str(section.characteristics)}</TableCell>
+                          </TableRow>
                         ))}
-                      </tbody>
-                    </table>
+                      </TableBody>
+                    </Table>
                   </div>
                 ) : (
                   <p className="empty">No PE sections parsed.</p>
@@ -733,28 +734,28 @@ function SandboxDetail() {
                 <h2>Imported libraries and symbols</h2>
                 {recList(windows.imports).length ? (
                   <div className="card__scroll">
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>library</th>
-                          <th>symbols</th>
-                        </tr>
-                      </thead>
-                      <tbody>
+                    <Table className="data-table">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>library</TableHead>
+                          <TableHead>symbols</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
                         {recList(windows.imports).map((entry, index) => (
-                          <tr key={`${str(entry.dll)}-${index}`}>
-                            <td className="v">{str(entry.dll)}</td>
-                            <td className="v">
+                          <TableRow key={`${str(entry.dll)}-${index}`}>
+                            <TableCell className="v">{str(entry.dll)}</TableCell>
+                            <TableCell className="v">
                               {lines(entry.symbols).map((symbol) => (
                                 <span key={symbol} className="chip">
                                   {symbol}
                                 </span>
                               ))}
-                            </td>
-                          </tr>
+                            </TableCell>
+                          </TableRow>
                         ))}
-                      </tbody>
-                    </table>
+                      </TableBody>
+                    </Table>
                   </div>
                 ) : (
                   <p className="empty">No imports parsed.</p>

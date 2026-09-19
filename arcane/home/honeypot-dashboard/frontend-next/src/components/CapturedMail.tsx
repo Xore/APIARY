@@ -17,6 +17,7 @@ import { useState } from 'react'
 import { ErrorStateBlock } from './ErrorState'
 import { Button } from './ui/button'
 import { Card, CardContent } from './ui/card'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table'
 
 export type MailAddress = { name: string; address: string }
 export type MailAttachment = { filename: string; content_type: string; size_bytes: number; sha256: string }
@@ -50,61 +51,61 @@ export function formatAddress(address: MailAddress): string {
 export function MailMessage({ mail }: { mail: Mail }) {
   return (
     <>
-      <table className="data-table hp-flow">
-        <tbody>
-          <tr>
-            <td>From</td>
-            <td className="v">{mail.from ? formatAddress(mail.from) : '—'}</td>
-          </tr>
-          <tr>
-            <td>To</td>
-            <td className="v">{mail.to.length ? mail.to.map(formatAddress).join(', ') : '—'}</td>
-          </tr>
-          <tr>
-            <td>Subject</td>
-            <td className="v">{mail.subject || '—'}</td>
-          </tr>
-          <tr>
-            <td>Date</td>
-            <td>{mail.date || '—'}</td>
-          </tr>
-          <tr>
-            <td>Message-ID</td>
-            <td className="v">{mail.message_id || '—'}</td>
-          </tr>
-          <tr>
-            <td>Size</td>
-            <td className="n">{mail.size_bytes.toLocaleString('en-US')} bytes</td>
-          </tr>
-        </tbody>
-      </table>
+      <Table className="data-table hp-flow">
+        <TableBody>
+          <TableRow>
+            <TableCell>From</TableCell>
+            <TableCell className="v">{mail.from ? formatAddress(mail.from) : '—'}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableCell>To</TableCell>
+            <TableCell className="v">{mail.to.length ? mail.to.map(formatAddress).join(', ') : '—'}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableCell>Subject</TableCell>
+            <TableCell className="v">{mail.subject || '—'}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableCell>Date</TableCell>
+            <TableCell>{mail.date || '—'}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableCell>Message-ID</TableCell>
+            <TableCell className="v">{mail.message_id || '—'}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableCell>Size</TableCell>
+            <TableCell className="n">{mail.size_bytes.toLocaleString('en-US')} bytes</TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
       <p className="subtitle">Body</p>
       <pre className="code">{mail.body_text || '(empty body)'}</pre>
       {mail.attachments.length > 0 ? (
         <>
           <p className="subtitle">Attachments</p>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>filename</th>
-                <th>content-type</th>
-                <th>size</th>
-                <th>sha256</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table className="data-table">
+            <TableHeader>
+              <TableRow>
+                <TableHead>filename</TableHead>
+                <TableHead>content-type</TableHead>
+                <TableHead>size</TableHead>
+                <TableHead>sha256</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {mail.attachments.map((attachment, index) => (
-                <tr key={`${attachment.sha256}-${index}`}>
-                  <td className="v">{attachment.filename || '(unnamed)'}</td>
-                  <td>{attachment.content_type || '—'}</td>
-                  <td className="n">{attachment.size_bytes.toLocaleString('en-US')} bytes</td>
-                  <td className="v">
+                <TableRow key={`${attachment.sha256}-${index}`}>
+                  <TableCell className="v">{attachment.filename || '(unnamed)'}</TableCell>
+                  <TableCell>{attachment.content_type || '—'}</TableCell>
+                  <TableCell className="n">{attachment.size_bytes.toLocaleString('en-US')} bytes</TableCell>
+                  <TableCell className="v">
                     <code>{attachment.sha256}</code>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </>
       ) : null}
     </>

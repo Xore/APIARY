@@ -24,6 +24,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { Button } from '../components/ui/button'
+import { Input } from '../components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
+import { Table, TableBody, TableCell, TableRow } from '../components/ui/table'
 import { Tabs, TabPanel } from '../components/Tabs'
 import { formatTimestamp } from '../lib/time'
 import { xtermTheme } from '../lib/xtermTheme'
@@ -334,7 +337,7 @@ function TerminalPlayback({ replay }: { replay: Replay }) {
         >
           Restart
         </Button>
-        <input
+        <Input
           type="range"
           min={0}
           max={total}
@@ -347,12 +350,15 @@ function TerminalPlayback({ replay }: { replay: Replay }) {
         />
         <label>
           speed{' '}
-          <select value={speed} onChange={(event) => setSpeed(Number(event.target.value))}>
-            <option value={1}>1×</option>
-            <option value={2}>2×</option>
-            <option value={4}>4×</option>
-            <option value={0.5}>0.5×</option>
-          </select>
+          <Select value={String(speed)} onValueChange={(value) => setSpeed(Number(value))}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="1">1×</SelectItem>
+              <SelectItem value="2">2×</SelectItem>
+              <SelectItem value="4">4×</SelectItem>
+              <SelectItem value="0.5">0.5×</SelectItem>
+            </SelectContent>
+          </Select>
         </label>
       </div>
       <div className="hp-tty-status" role="status">
@@ -376,16 +382,16 @@ function MiniTable({ title, rows, linkTo }: { title: string; rows: Kv[]; linkTo?
     <div className="card half">
       <h2>{title}</h2>
       <div className="card__scroll">
-        <table className="data-table">
-          <tbody>
+        <Table className="data-table">
+          <TableBody>
             {rows.map((row) => (
-              <tr key={row.key}>
-                <td className="n">{row.count.toLocaleString('en-US')}</td>
-                <td className="v">{linkTo ? <a href={linkTo(row.key)}>{row.key}</a> : row.key}</td>
-              </tr>
+              <TableRow key={row.key}>
+                <TableCell className="n">{row.count.toLocaleString('en-US')}</TableCell>
+                <TableCell className="v">{linkTo ? <a href={linkTo(row.key)}>{row.key}</a> : row.key}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
     </div>
   )
