@@ -99,7 +99,7 @@ const builders: Record<ChartKind, Builder> = {
                 // combination that actually declutters.
                 label: {
                   position: 'top',
-                  color: themeColor('--text-000', '#e9e6df'),
+                  color: themeColor('--foreground', '#e9e6df'),
                   fontSize: 11,
                 },
                 // At fleet density (27 sensors share one layer band) neighbour
@@ -128,14 +128,14 @@ const builders: Record<ChartKind, Builder> = {
       xAxis: {
         type: 'category',
         data: tactics,
-        splitArea: { show: true, areaStyle: { color: [themeColor('--bg-200', '#2c2c2a'), themeColor('--bg-300', '#232321')] } },
-        axisLabel: { rotate: 30, color: themeColor('--text-000', '#e9e6df') },
+        splitArea: { show: true, areaStyle: { color: [themeColor('--secondary', '#2c2c2a'), themeColor('--shadcn-muted', '#232321')] } },
+        axisLabel: { rotate: 30, color: themeColor('--foreground', '#e9e6df') },
       },
       yAxis: {
         type: 'category',
         data: techniques,
-        splitArea: { show: true, areaStyle: { color: [themeColor('--bg-200', '#2c2c2a'), themeColor('--bg-300', '#232321')] } },
-        axisLabel: { color: themeColor('--text-000', '#e9e6df') },
+        splitArea: { show: true, areaStyle: { color: [themeColor('--secondary', '#2c2c2a'), themeColor('--shadcn-muted', '#232321')] } },
+        axisLabel: { color: themeColor('--foreground', '#e9e6df') },
       },
       visualMap: {
         min: 0,
@@ -144,7 +144,7 @@ const builders: Record<ChartKind, Builder> = {
         orient: 'horizontal',
         left: 'center',
         bottom: '0%',
-        inRange: { color: [themeColor('--bg-400', '#3d3d3b'), themeColor('--accent', '#d97757')] },
+        inRange: { color: [themeColor('--shadcn-muted', '#3d3d3b'), themeColor('--chart-1', '#d97757')] },
       },
       series: [
         {
@@ -168,14 +168,14 @@ const builders: Record<ChartKind, Builder> = {
     })
     chart.setOption({
       tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      legend: { orient: 'vertical', left: 'left', textStyle: { color: themeColor('--text-000', '#e9e6df') } },
+      legend: { orient: 'vertical', left: 'left', textStyle: { color: themeColor('--foreground', '#e9e6df') } },
       series: [
         {
           type: 'pie',
           radius: ['35%', '65%'],
           avoidLabelOverlap: true,
-          itemStyle: { borderColor: themeColor('--bg-200', '#2c2c2a'), borderWidth: 2 },
-          label: { color: themeColor('--text-000', '#e9e6df') },
+          itemStyle: { borderColor: themeColor('--card', '#2c2c2a'), borderWidth: 2 },
+          label: { color: themeColor('--foreground', '#e9e6df') },
           data: trimmed,
         },
       ],
@@ -193,15 +193,15 @@ const builders: Record<ChartKind, Builder> = {
       tooltip: { trigger: 'item' },
       radar: {
         indicator: categories.map((c) => ({ name: c, max })),
-        axisName: { color: themeColor('--text-000', '#e9e6df') },
-        axisLine: { lineStyle: { color: themeColor('--border-200', 'rgba(255,255,255,0.14)') } },
-        splitLine: { lineStyle: { color: themeColor('--border-100', 'rgba(255,255,255,0.075)') } },
+        axisName: { color: themeColor('--foreground', '#e9e6df') },
+        axisLine: { lineStyle: { color: themeColor('--border', 'rgba(255,255,255,0.14)') } },
+        splitLine: { lineStyle: { color: themeColor('--shadcn-muted', 'rgba(255,255,255,0.075)') } },
         splitArea: { areaStyle: { color: ['transparent'] } },
       },
       series: [
         {
           type: 'radar',
-          data: [{ value: values, areaStyle: { opacity: 0.25 }, itemStyle: { color: themeColor('--accent', '#d97757') } }],
+          data: [{ value: values, areaStyle: { opacity: 0.25 }, itemStyle: { color: themeColor('--chart-1', '#d97757') } }],
         },
       ],
     })
@@ -256,14 +256,14 @@ const builders: Record<ChartKind, Builder> = {
         type: 'category',
         data: categories,
         axisLabel: {
-          color: themeColor('--text-000', '#e9e6df'),
+          color: themeColor('--foreground', '#e9e6df'),
           rotate: longLabels ? 30 : 0,
           overflow: longLabels ? 'break' : undefined,
           width: longLabels ? 200 : undefined,
         },
       },
       yAxis: { type: 'value', axisLabel: { formatter: humanizeNumber } },
-      series: [{ type: 'bar', barMaxWidth: 56, data: values, itemStyle: { color: themeColor('--accent', '#d97757') } }],
+      series: [{ type: 'bar', barMaxWidth: 56, data: values, itemStyle: { color: themeColor('--chart-1', '#d97757') } }],
     })
     const total = values.reduce((sum, v) => sum + v, 0)
     if (categories.length === 0) return EMPTY_SUMMARY
@@ -282,9 +282,9 @@ const builders: Record<ChartKind, Builder> = {
         type: 'category',
         data: categories,
         inverse: true,
-        axisLabel: { color: themeColor('--text-000', '#e9e6df'), overflow: 'truncate', width: 220 },
+        axisLabel: { color: themeColor('--foreground', '#e9e6df'), overflow: 'truncate', width: 220 },
       },
-      series: [{ type: 'bar', barMaxWidth: 18, data: values, itemStyle: { color: themeColor('--accent', '#d97757') } }],
+      series: [{ type: 'bar', barMaxWidth: 18, data: values, itemStyle: { color: themeColor('--chart-1', '#d97757') } }],
     })
     chart.off('click')
     chart.on('click', (params) => {
@@ -342,7 +342,7 @@ const builders: Record<ChartKind, Builder> = {
         max: maxScore,
         dimension: 3,
         show: false,
-        inRange: { color: [themeColor('--info', '#78a9d4'), themeColor('--accent', '#d97757'), themeColor('--danger', '#dc7774')] },
+        inRange: { color: [themeColor('--chart-3', '#78a9d4'), themeColor('--chart-1', '#d97757'), themeColor('--chart-5', '#dc7774')] },
       },
       series: [
         {
@@ -417,11 +417,11 @@ export function EChart({ kind, url, height, zoomable }: { kind: ChartKind; url: 
   const paint = useCallback(async () => {
     const container = containerRef.current
     if (!container || dataRef.current == null) return
-    const { echarts, chartColor, registerXoreTheme } = await import('../lib/echarts')
+    const { echarts, chartColor, registerShadcnTheme } = await import('../lib/echartsTheme')
     if (!containerRef.current) return
     teardown()
-    registerXoreTheme()
-    const chart = echarts.init(container, 'xore')
+    registerShadcnTheme()
+    const chart = echarts.init(container, 'shadcn')
     chartRef.current = chart
     // Diagnostic/e2e seam (#2130): the dashboard spec asserts label hiding
     // through zrender's display list, which is reachable only off the
