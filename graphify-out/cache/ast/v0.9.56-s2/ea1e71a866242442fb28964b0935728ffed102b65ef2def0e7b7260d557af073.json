@@ -1,0 +1,1 @@
+{"nodes": [{"id": "pkg_rdp_honeypot", "label": "rdp-honeypot", "file_type": "code", "type": "package", "ecosystem": "go", "source_file": "arcane/home/honeypot-rdp-honeypot/rdp-honeypot/go.mod", "source_location": "L1"}], "edges": []}

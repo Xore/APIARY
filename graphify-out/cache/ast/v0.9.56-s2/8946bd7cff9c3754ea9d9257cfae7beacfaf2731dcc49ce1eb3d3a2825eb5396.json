@@ -1,0 +1,1 @@
+{"nodes": [{"id": "pkg_dns_honeypot", "label": "dns-honeypot", "file_type": "code", "type": "package", "ecosystem": "go", "source_file": "arcane/home/honeypot-dns-honeypot/dns-honeypot/go.mod", "source_location": "L1"}], "edges": []}

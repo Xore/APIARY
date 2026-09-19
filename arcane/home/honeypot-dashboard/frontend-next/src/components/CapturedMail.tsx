@@ -15,6 +15,7 @@
 import { createServerFn } from '@tanstack/react-start'
 import { useState } from 'react'
 import { ErrorStateBlock } from './ErrorState'
+import { Card, CardContent } from './ui/card'
 
 export type MailAddress = { name: string; address: string }
 export type MailAttachment = { filename: string; content_type: string; size_bytes: number; sha256: string }
@@ -201,9 +202,10 @@ export function MailCard({ sessionId }: { sessionId: string }) {
   }
 
   return (
-    <div className="card wide" id="captured-mail">
-      <h2>Captured mail</h2>
-      <p className="note">
+      <Card id="captured-mail">
+        <CardContent>
+          <h2>Captured mail</h2>
+          <p className="note">
         The SMTP DATA body mailoney captured for this session, parsed to headers and plain text. An HTML body is decoded to
         text but never rendered, and attachments are listed as metadata only — no bytes are stored or downloadable here.
       </p>
@@ -225,6 +227,7 @@ export function MailCard({ sessionId }: { sessionId: string }) {
           <MailMessage mail={mail} />
         )
       ) : null}
-    </div>
+        </CardContent>
+      </Card>
   )
 }

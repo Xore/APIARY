@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>APIARY — brutalist lane</title>
+<!--
+  LANE C — BRUTALIST
+  Spec:
+  Color     paper #f2f0eb / ink #111. Two signals only: signal-green #0a7d33 (ok/live)
+            and alarm-red #c81e1e (bad/rising). Warning folds into red-orange #b45309.
+            No soft tints — status blocks are solid ink-outlined chips or solid fills.
+            Dark scheme: #101010 / #f2f0eb, same signals brightened.
+  Type      monospace-forward: IBM Plex Mono for data, Archivo/Archivo Black for display.
+            Scale: 12/13/15/20/36. h1 36px/800 uppercase -0.01em. Numerals always mono,
+            tabular by nature. Micro-labels 11px/700 uppercase +0.08em.
+  Spacing   hard 8px grid, tighter feel: gutter 20, card padding 16, section gap 28.
+  Radius    0 everywhere. Borders 2px solid ink. Shadows: 4px 4px 0 ink on hover-able
+            cards and primary button only; everything else flat.
+  Chrome    220px sidebar with 2px right rule; active item = inverted block (ink bg,
+            paper text). Topbar has 2px bottom rule. LIVE = solid green block, white text.
+  Charts    heat cells = outlined squares, density via solid ink fills at stepped
+            opacity 0.15/0.4/0.7/1. Sparkline 2px ink, square joins.
+  A11y      all text passes AA at its size (mono small text uses 600+ weight),
+            focus = 3px offset outline, 44px tap targets, status never color-alone
+            (word label inside every chip).
+-->
+<style>
+:root{
+  --paper:#f2f0eb; --ink:#111110; --line:#111110;
+  --text:#111110; --text-dim:#55534d;
+  --ok:#0a7d33; --bad:#c81e1e; --warn:#b45309; --info:#1d4ed8;
+  --accent:#111110;
+}
+[data-theme="dark"]{
+  --paper:#101010; --ink:#f2f0eb; --line:#f2f0eb;
+  --text:#f2f0eb; --text-dim:#a3a09a;
+  --ok:#3ec46e; --bad:#ff6b6b; --warn:#f5a623; --info:#7aa2ff;
+}
+*{box-sizing:border-box;margin:0}
+body{font:15px/1.5 "IBM Plex Mono",ui-monospace,Menlo,monospace;background:var(--paper);color:var(--text);font-variant-numeric:tabular-nums;touch-action:manipulation}
+a{color:var(--text);text-decoration:underline;text-underline-offset:3px}
+a:hover{background:var(--ink);color:var(--paper);text-decoration:none}
+:focus-visible{outline:3px solid var(--ok);outline-offset:3px}
+.shell{display:grid;grid-template-columns:220px 1fr;min-height:100vh}
+@media(max-width:900px){.shell{grid-template-columns:1fr}.sidebar{display:none}}
+.sidebar{border-right:2px solid var(--line);padding:18px 0;position:sticky;top:0;height:100vh;overflow:auto}
+.brand{display:flex;align-items:center;gap:10px;padding:0 16px 18px;font-family:Archivo,"Arial Black",sans-serif;font-weight:800;font-size:17px;letter-spacing:-.01em}
+.brand-mark{width:24px;height:24px;background:var(--ink);color:var(--paper);display:grid;place-items:center;font-size:13px;font-weight:900}
+.nav-group{padding:16px 16px 6px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim)}
+.nav a{display:block;padding:8px 16px;color:var(--text);text-decoration:none;border-top:1px solid color-mix(in srgb,var(--line) 20%,transparent);font-size:13.5px;font-weight:600}
+.nav a:hover{background:var(--ink);color:var(--paper)}
+.nav a[aria-current="page"]{background:var(--ink);color:var(--paper);font-weight:700}
+.main{min-width:0}
+.topbar{display:flex;align-items:center;gap:12px;padding:10px 20px;border-bottom:2px solid var(--line);position:sticky;top:0;background:var(--paper);z-index:5}
+.crumbs{font-size:12.5px;color:var(--text-dim);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.crumbs b{color:var(--text)}
+.spacer{flex:1}
+.live{display:inline-block;background:var(--ok);color:#fff;font-size:12px;font-weight:700;letter-spacing:.08em;padding:6px 12px;border:2px solid var(--ink)}
+.icon-btn{width:44px;height:44px;display:grid;place-items:center;border:2px solid var(--line);background:var(--paper);color:var(--text);cursor:pointer;font-size:14px;font-weight:700}
+.icon-btn:hover{background:var(--ink);color:var(--paper)}
+.avatar{width:34px;height:34px;background:var(--ink);color:var(--paper);display:grid;place-items:center;font-size:12px;font-weight:700;border:0;cursor:pointer}
+.hero{padding:32px 20px 6px;max-width:1200px;margin:0 auto;width:100%;border-bottom:2px solid var(--line);padding-bottom:24px}
+.hero .kicker{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim)}
+.hero h1{font-family:Archivo,"Arial Black",sans-serif;font-size:36px;font-weight:800;text-transform:uppercase;letter-spacing:-.01em;margin:8px 0 10px;line-height:1.05}
+.hero .sub{font-size:14px}
+.hero .sub .sep{color:var(--text-dim);margin:0 8px}
+.hero .fresh{color:var(--text-dim);font-size:12.5px;margin-top:8px;text-transform:uppercase;letter-spacing:.04em}
+.wrap{max-width:1200px;margin:0 auto;padding:20px 20px 64px}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);border:2px solid var(--line);margin:24px 0 8px}
+@media(max-width:1100px){.kpis{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:640px){.kpis{grid-template-columns:repeat(2,1fr)}}
+.kpi{padding:16px;border-right:2px solid var(--line)}
+.kpi:last-child{border-right:0}
+.kpi .lbl{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim)}
+.kpi .val{font-size:36px;font-weight:700;line-height:1.1;margin-top:4px;letter-spacing:-.02em}
+.kpi .meta{font-size:12px;color:var(--text-dim);margin-top:4px;font-weight:600}
+.chip{display:inline-block;font-size:12px;font-weight:700;padding:1px 8px;border:2px solid currentColor}
+.chip.up{color:var(--bad)}
+.chip.down{color:var(--ok)}
+.spark{display:block;margin-top:10px}
+.tabs{display:flex;margin:26px 0 20px;border:2px solid var(--line);flex-wrap:wrap}
+.tabs a{padding:10px 16px;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text);text-decoration:none;border-right:2px solid var(--line)}
+.tabs a:last-child{border-right:0}
+.tabs a:hover{background:var(--ink);color:var(--paper)}
+.tabs a[aria-selected="true"]{background:var(--ink);color:var(--paper)}
+.section{display:flex;align-items:baseline;justify-content:space-between;margin:30px 0 12px;gap:16px;flex-wrap:wrap}
+.section h2{font-family:Archivo,"Arial Black",sans-serif;font-size:20px;font-weight:800;text-transform:uppercase}
+.section p{font-size:12.5px;color:var(--text-dim);margin-top:2px}
+.section .more{font-size:12.5px;font-weight:700}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:1000px){.grid{grid-template-columns:1fr}}
+@media(max-width:700px){.card{overflow-x:auto}}
+.card{border:2px solid var(--line);padding:16px;background:var(--paper)}
+.card h3{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:14px;border-bottom:2px solid var(--line);padding-bottom:8px}
+.heat{display:grid;grid-template-columns:72px repeat(24,1fr);gap:2px;align-items:center}
+.heat .rl{font-size:11px;font-weight:600;color:var(--text-dim);white-space:nowrap;padding-right:6px}
+.heat i{display:block;height:14px;border:1px solid var(--ink);background:var(--ink)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);text-align:left;padding:8px 10px;border-bottom:2px solid var(--line)}
+td{padding:9px 10px;border-bottom:1px solid color-mix(in srgb,var(--line) 25%,transparent)}
+tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-weight:700}
+.state{display:inline-block;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:2px 8px;border:2px solid currentColor}
+.state.ok{color:var(--ok)}
+.state.warn{color:var(--warn)}
+.state.bad{color:var(--bad)}
+.state.ok.inv{background:var(--ok);color:#fff;border-color:var(--ok)}
+.state.bad.inv{background:var(--bad);color:#fff;border-color:var(--bad)}
+.legend{display:flex;gap:8px;font-size:11px;color:var(--text-dim);margin-top:12px;align-items:center;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark">A</span>APIARY</div>
+    <div class="nav-group">Monitor</div>
+    <nav class="nav" aria-label="Primary">
+      <a href="#" aria-current="page">Overview</a><a href="#">Events</a><a href="#">Attackers</a><a href="#">Alerts</a><a href="#">Kill chain</a>
+    </nav>
+    <div class="nav-group">Investigate</div>
+    <nav class="nav"><a href="#">IP lookup</a><a href="#">Clusters</a><a href="#">Payloads</a></nav>
+    <div class="nav-group">Operations</div>
+    <nav class="nav"><a href="#">Sensors</a><a href="#">Source health</a></nav>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <nav class="crumbs" aria-label="Breadcrumb">Monitor / <b>Overview</b></nav>
+      <div class="spacer"></div>
+      <span class="live">● LIVE</span>
+      <button class="icon-btn" aria-label="Toggle theme">◐</button>
+      <button class="icon-btn" aria-label="Command palette">⌘K</button>
+      <button class="avatar" aria-label="Account settings">XO</button>
+    </header>
+
+    <section class="hero">
+      <div class="kicker">Honeypot command center</div>
+      <h1>Activity up 12% — 2,847 events in 24h</h1>
+      <p class="sub">312 attack sources<span class="sep">|</span>9 sensors reporting<span class="sep">|</span>57 payloads captured</p>
+      <p class="fresh">Fresh 14s ago · auto-refresh on</p>
+    </section>
+
+    <main class="wrap">
+      <div class="kpis" role="list" aria-label="Key metrics">
+        <div class="kpi" role="listitem"><div class="lbl">Total events</div><div class="val">184,203</div><div class="meta">all time</div></div>
+        <div class="kpi" role="listitem"><div class="lbl">Last 24h</div><div class="val">2,847</div><div class="meta"><span class="chip up">▲12%</span> prev 24h</div>
+          <svg class="spark" width="120" height="26" viewBox="0 0 120 26" aria-hidden="true"><polyline points="0,20 10,18 20,21 30,13 40,15 50,10 60,12 70,8 80,11 90,7 100,9 110,5 120,7" fill="none" stroke="var(--ink)" stroke-width="2"/></svg></div>
+        <div class="kpi" role="listitem"><div class="lbl">Unique sources</div><div class="val">312</div><div class="meta">last 24h</div></div>
+        <div class="kpi" role="listitem"><div class="lbl">Login attempts</div><div class="val">9,410</div><div class="meta">cowrie + ssh</div></div>
+        <div class="kpi" role="listitem"><div class="lbl">Payloads</div><div class="val">57</div><div class="meta">2 queued</div></div>
+      </div>
+
+      <nav class="tabs" role="tablist" aria-label="Overview views">
+        <a href="#" role="tab" aria-selected="true">Live ops</a>
+        <a href="#" role="tab">Collection</a>
+        <a href="#" role="tab">Threats</a>
+        <a href="#" role="tab">Behavior</a>
+        <a href="#" role="tab">Evidence</a>
+      </nav>
+
+      <div class="section"><div><h2>Current activity</h2><p>What is happening now, when traffic arrived, and where it originated.</p></div><a class="more" href="#">VIEW 24H →</a></div>
+      <div class="grid">
+        <div class="card">
+          <h3>Activity — last 24h, by sensor</h3>
+          <div class="heat" aria-label="Event heatmap">
+            <span class="rl">cowrie</span><i style="opacity:.7"></i><i style="opacity:.4"></i><i style="opacity:.15"></i><i style="opacity:.4"></i><i style="opacity:1"></i><i style="opacity:.15"></i><i style="opacity:.4"></i><i style="opacity:.7"></i><i style="opacity:.15"></i><i style="opacity:.4"></i><i style="opacity:.7"></i><i style="opacity:.4"></i><i style="opacity:.15"></i><i style="opacity:.4"></i><i style="opacity:.15"></i><i style="opacity:.7"></i><i style="opacity:1"></i><i style="opacity:.4"></i><i style="opacity:.15"></i><i style="opacity:.7"></i><i style="opacity:.7"></i><i style="opacity:.4"></i><i style="opacity:.15"></i><i style="opacity:.4"></i>
+            <span class="rl">dionaea</span><i style="opacity:.4"></i><i style="opacity:.15"></i><i style="opacity:.7"></i><i style="opacity:.15"></i><i style="opacity:.4"></i><i style="opacity:.7"></i><i style="opacity:.15"></i><i style="opacity:.15"></i><i style="opacity:.4"></i><i style="opacity:.7"></i><i style="opacity:.15"></i><i style="opacity:.4"></i><i style="opacity:1"></i><i style="opacity:.15"></i><i style="opacity:.7"></i><i style="opacity:.15"></i><i style="opacity:.4"></i><i style="opacity:.4"></i><i style="opacity:.7"></i><i style="opacity:.15"></i><i style="opacity:.4"></i><i style="opacity:.15"></i><i style="opacity:.4"></i><i style="opacity:.7"></i>
+            <span class="rl">suricata</span><i style="opacity:.15"></i><i style="opacity:.4"></i><i style="opacity:.15"></i><i style="opacity:.4"></i><i style="opacity:.15"></i><i style="opacity:.15"></i><i style="opacity:.7"></i><i style="opacity:.4"></i><i style="opacity:.15"></i><i style="opacity:.7"></i><i style="opacity:.4"></i><i style="opacity:.15"></i><i style="opacity:.4"></i><i style="opacity:.7"></i><i style="opacity:.15"></i><i style="opacity:.4"></i><i style="opacity:.15"></i><i style="opacity:.4"></i><i style="opacity:.7"></i><i style="opacity:.15"></i><i style="opacity:.4"></i><i style="opacity:.7"></i><i style="opacity:.15"></i><i style="opacity:.4"></i>
+          </div>
+          <div class="legend"><span>fewer</span><i style="width:14px;height:14px;border:1px solid var(--ink);background:var(--ink);opacity:.15"></i><i style="width:14px;height:14px;border:1px solid var(--ink);background:var(--ink);opacity:.4"></i><i style="width:14px;height:14px;border:1px solid var(--ink);background:var(--ink);opacity:.7"></i><i style="width:14px;height:14px;border:1px solid var(--ink);background:var(--ink)"></i><span>more</span></div>
+        </div>
+        <div class="card">
+          <h3>Attack origins — top networks</h3>
+          <table>
+            <thead><tr><th scope="col">Network</th><th scope="col">ASN</th><th scope="col" style="text-align:right">Sources</th></tr></thead>
+            <tbody>
+              <tr><td>Amsterdam, NL</td><td>AS60781</td><td class="num">64</td></tr>
+              <tr><td>Shanghai, CN</td><td>AS4134</td><td class="num">51</td></tr>
+              <tr><td>Frankfurt, DE</td><td>AS24940</td><td class="num">38</td></tr>
+              <tr><td>São Paulo, BR</td><td>AS28573</td><td class="num">27</td></tr>
+              <tr><td>Ashburn, US</td><td>AS14061</td><td class="num">22</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="section"><div><h2>Live event stream</h2><p>A balanced sample of the newest normalized events across all sensors.</p></div><a class="more" href="#">FULL EXPLORER →</a></div>
+      <div class="card" style="padding:0 16px 4px">
+        <table>
+          <thead><tr><th scope="col">Time</th><th scope="col">Sensor</th><th scope="col">Source IP</th><th scope="col" style="text-align:right">Port</th><th scope="col">Detail</th></tr></thead>
+          <tbody>
+            <tr><td>21:44:07</td><td>cowrie</td><td>203.0.113.42</td><td class="num">22</td><td>SSH banner: SSH-2.0-libssh_0.9.6</td></tr>
+            <tr><td>21:43:58</td><td>suricata</td><td>198.51.100.7</td><td class="num">445</td><td>SMB doublepulsar ping detected</td></tr>
+            <tr><td>21:43:41</td><td>dionaea</td><td>192.0.2.135</td><td class="num">21</td><td>FTP USER anonymous</td></tr>
+            <tr><td>21:43:12</td><td>conpot</td><td>203.0.113.88</td><td class="num">102</td><td>S7 connect request, rack 0</td></tr>
+            <tr><td>21:42:59</td><td>beelzebub</td><td>198.51.100.201</td><td class="num">2222</td><td>Password auth: root / 3 tries</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="section"><div><h2>Collection status</h2><p>Sensor activity and the protocols currently attracting traffic.</p></div><a class="more" href="#">PIPELINE HEALTH →</a></div>
+      <div class="grid">
+        <div class="card" style="padding:0 16px 4px">
+          <h3 style="margin:12px -16px 0;padding:0 16px 8px">Sensor feeds</h3>
+          <table>
+            <tbody>
+              <tr><td class="num">41,204</td><td>cowrie</td><td><span class="state ok inv">active</span></td><td>21:44</td></tr>
+              <tr><td class="num">33,981</td><td>dionaea</td><td><span class="state ok inv">active</span></td><td>21:43</td></tr>
+              <tr><td class="num">18,760</td><td>suricata</td><td><span class="state ok inv">active</span></td><td>21:44</td></tr>
+              <tr><td class="num">2,431</td><td>conpot</td><td><span class="state warn">quiet</span></td><td>18:02</td></tr>
+              <tr><td class="num">604</td><td>dicompot</td><td><span class="state bad inv">stale</span></td><td>Tue</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card">
+          <h3>Protocols probed — last 24h</h3>
+          <table>
+            <tbody>
+              <tr><td>ssh</td><td class="num">1,905</td></tr>
+              <tr><td>http</td><td class="num">487</td></tr>
+              <tr><td>telnet</td><td class="num">214</td></tr>
+              <tr><td>smb</td><td class="num">132</td></tr>
+              <tr><td>modbus</td><td class="num">44</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+</body>
+</html>

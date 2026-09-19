@@ -1,0 +1,1 @@
+{"nodes": [{"id": "pkg_cisco_asa_honeypot", "label": "cisco-asa-honeypot", "file_type": "code", "type": "package", "ecosystem": "go", "source_file": "arcane/home/honeypot-cisco-asa-honeypot/cisco-asa-honeypot/go.mod", "source_location": "L1"}], "edges": []}
