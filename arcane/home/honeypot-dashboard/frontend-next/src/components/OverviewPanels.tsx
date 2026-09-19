@@ -384,6 +384,7 @@ export function AttackMap({ points, failed }: { points: MapPoint[] | null; faile
       L.tileLayer(tile.url, {
         attribution: tile.attribution,
         noWrap: true,
+        bounds: [[-85, -180], [85, 180]],
         ...(tile.subdomains ? { subdomains: tile.subdomains } : {}),
       }).addTo(map)
 
