@@ -14,6 +14,7 @@ import { useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { Badge } from '../components/ui/badge'
+import { Card, CardContent } from '../components/ui/card'
 import { Table, TableBody, TableCell, TableRow } from '../components/ui/table'
 
 type Citation = { kind: string; raw: string; value: string; valid: boolean }
@@ -72,21 +73,21 @@ function CitationList({ title, citations }: { title: string; citations: Citation
 function RevDeckCard({ analysis }: { analysis: RevDeckAnalysis | null }) {
   if (!analysis) {
     return (
-      <div className="card wide">
+      <Card>
         <h2>Rev·Deck</h2>
         <p className="empty">No Rev·Deck data — see the error above.</p>
-      </div>
+      </Card>
     )
   }
   return (
-    <div className="card wide">
+    <Card>
       <h2>Rev·Deck</h2>
       <p className="note">
         Rev·Deck's own bounded, autonomous tool-calling loop against the Ghidra REST service — a second and independent AI aid
         alongside the worker's own AI triage, not a replacement for it. Every claim below is a language model's reading of
         decompiled code.
       </p>
-      <div className="card__scroll">
+      <CardContent>
         <Table className="data-table">
           <TableBody>
             <TableRow>
@@ -139,8 +140,8 @@ function RevDeckCard({ analysis }: { analysis: RevDeckAnalysis | null }) {
             </ul>
           </>
         ) : null}
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -214,28 +215,28 @@ function RevdeckDetail() {
         }
       />
       {run && failed ? (
-        <div className="card wide">
+        <Card>
           <h2>This run did not complete</h2>
           <p>
             {run.error || 'The worker reported a failure with no detail.'} Rev·Deck's answer is the entire point of a standalone
             request, so a failure here means there is nothing else on this page.
           </p>
-        </div>
+        </Card>
       ) : null}
       {run === null ? (
-        <div className="card wide">
+        <Card>
           <span className="skeleton-line" aria-hidden="true" />
           <span className="skeleton-line" aria-hidden="true" />
-        </div>
+        </Card>
       ) : (
         <>
           {!failed ? <RevDeckCard analysis={run.revdeck} /> : null}
-          <div className="card wide">
+          <Card>
             <h2>Raw record</h2>
-            <div className="card__scroll">
+            <CardContent>
               <pre className="code">{JSON.stringify(run, null, 2)}</pre>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         </>
       )}
     </>

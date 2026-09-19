@@ -304,7 +304,7 @@ function CorrelationPanel({ correlation }: { correlation: Correlation }) {
           </CardContent>
         </Card>
       </div>
-      <div className="card wide">
+      <Card>
         <h2>Elasticsearch correlation</h2>
         <p className="note">
           Everything the backend has seen for this IP across honeypot, Suricata, and portbridge tunnel records — not
@@ -319,7 +319,7 @@ function CorrelationPanel({ correlation }: { correlation: Correlation }) {
           </p>
         ) : null}
         {correlation.records.length > 0 ? (
-          <div className="card__scroll">
+          <CardContent>
             <Table className="recent">
               <TableHeader>
                 <TableRow>
@@ -338,12 +338,12 @@ function CorrelationPanel({ correlation }: { correlation: Correlation }) {
                 ))}
               </TableBody>
             </Table>
-          </div>
+          </CardContent>
         ) : (
           <p className="empty">No Elasticsearch correlation records were found for this IP.</p>
         )}
-      </div>
-      <div className="card wide">
+      </Card>
+      <Card>
         <h2>Attack progression</h2>
         <p className="note">Chronological, oldest to newest; capped to the latest 250 matching records.</p>
         <MasterDetailTable
@@ -356,7 +356,7 @@ function CorrelationPanel({ correlation }: { correlation: Correlation }) {
           }}
           inspectorTitle="Event record"
         />
-      </div>
+      </Card>
     </>
   )
 }

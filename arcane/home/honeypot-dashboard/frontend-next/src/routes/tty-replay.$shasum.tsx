@@ -300,18 +300,18 @@ function TerminalPlayback({ replay }: { replay: Replay }) {
 
   if (total === 0) {
     return (
-      <div className="card wide">
+      <Card>
         <div className="hp-tty-status" role="status">
           This recording has no replayable output. The terminal is empty.
         </div>
-      </div>
+      </Card>
     )
   }
 
   const label = playing ? 'Pause' : index >= total ? 'Replay' : index > 0 ? 'Resume' : 'Play'
 
   return (
-    <div className="card wide">
+    <Card>
       <div className="hp-tty-controls">
         <Button
           variant="default"
@@ -374,16 +374,16 @@ function TerminalPlayback({ replay }: { replay: Replay }) {
         <summary>Full transcript</summary>
         <pre className="code">{text}</pre>
       </details>
-    </div>
+    </Card>
   )
 }
 
 function MiniTable({ title, rows, linkTo }: { title: string; rows: Kv[]; linkTo?: (key: string) => string }) {
   if (rows.length === 0) return null
   return (
-    <div className="card half">
+    <Card className="sm:w-1/2 w-full">
       <h2>{title}</h2>
-      <div className="card__scroll">
+      <CardContent>
         <Table className="data-table">
           <TableBody>
             {rows.map((row) => (
@@ -394,8 +394,8 @@ function MiniTable({ title, rows, linkTo }: { title: string; rows: Kv[]; linkTo?
             ))}
           </TableBody>
         </Table>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -546,10 +546,10 @@ function AttackerTab({ shasum }: { shasum: string }) {
       <MiniTable title="Sessions" rows={profile.sessions} linkTo={(key) => `/sessions/${encodeURIComponent(key)}`} />
 
       {profile.events.length > 0 ? (
-        <div className="card wide">
+        <Card>
           <h2>Session timeline</h2>
           <p className="note">Chronological, oldest to newest.</p>
-          <div className="card__scroll timeline-track">
+          <CardContent className="timeline-track">
             {[...profile.events].reverse().map((event, index) => (
               <div className="timeline-block" key={`${event.time}-${index}`}>
                 <div className="timeline-block__meta">
@@ -558,8 +558,8 @@ function AttackerTab({ shasum }: { shasum: string }) {
                 <div>{event.detail || event.proto}</div>
               </div>
             ))}
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       ) : null}
     </>
   )

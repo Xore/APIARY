@@ -17,6 +17,7 @@
 import { THEMES } from '../lib/themes'
 import { useAppearanceKey, getThemeMode, getThemeName, applyPalette } from '../lib/prefs'
 import { Button } from './ui/button'
+import { Label } from './ui/label'
 
 function Tile({ id }: { id: string }) {
   // `system` means "no data-theme attribute", which lets color-scheme resolve
@@ -58,7 +59,7 @@ export function ThemeGallery() {
             onClick={() => applyPalette(theme.id)}
           >
             <Tile id={theme.id} />
-            <span className="hp-theme-tile__label">{theme.label}</span>
+            <Label className="hp-theme-tile__label">{theme.label}</Label>
             <span className="hp-theme-tile__desc">{theme.description}</span>
           </Button>
         )

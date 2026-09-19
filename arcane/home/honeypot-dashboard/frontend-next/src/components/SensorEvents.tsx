@@ -14,6 +14,7 @@ import { MasterDetailTable, type Column } from './Investigate'
 import { formatTimestamp } from '../lib/time'
 import { type Json } from '../lib/json'
 import { Badge } from './ui/badge'
+import { CardDescription } from './ui/card'
 import {
   fieldBlock,
   fieldText,
@@ -145,14 +146,14 @@ export function SensorEventsTable({
   return (
     <>
       <h2 className="label-section">{sensor}</h2>
-      <p className="card__meta">
+      <CardDescription>
         {spec
           ? `${spec.what}. Newest first, last 48h.`
           : `Everything this sensor recorded, as it recorded it — no protocol reading is defined for it yet. Newest first, last 48h.`}
         {typeof total === 'number' && rows && total > rows.length
           ? ` Showing ${rows.length.toLocaleString('en-US')} of ${total.toLocaleString('en-US')}.`
           : ''}
-      </p>
+      </CardDescription>
       <MasterDetailTable
         rows={rows}
         columns={buildColumns(sensor)}

@@ -522,13 +522,13 @@ function SearchablePane({
         value={query}
         onChange={(event) => setQuery(event.target.value)}
       />
-      <div className="card__scroll">
+      <CardContent>
         <pre className="code">
           {shown.length
             ? shown.map((entry) => (entry.label ? `[${entry.label}]\n${entry.value}` : entry.value)).join('\n\n')
             : 'No entries match this filter.'}
         </pre>
-      </div>
+      </CardContent>
     </>
   )
 }
@@ -1018,58 +1018,58 @@ function PayloadAnalysis() {
                 <>
                   {view.classification ? (
                     <>
-                      <div className="card__row">
-                        <span className="card__label">identified type</span>
-                        <span className="card__value">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-muted-foreground">identified type</span>
+                        <span className="text-lg font-semibold">
                           <strong>{view.classification.label}</strong>{' '}
                           <Badge variant="secondary">{view.classification.code}</Badge>
                         </span>
                       </div>
-                      <div className="card__row">
-                        <span className="card__label">platform / category</span>
-                        <span className="card__value card__value--mono">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-muted-foreground">platform / category</span>
+                        <span className="font-mono text-lg font-semibold">
                           {view.classification.platform} / {view.classification.category}
                         </span>
                       </div>
-                      <div className="card__row">
-                        <span className="card__label">sandbox route</span>
-                        <span className="card__value card__value--mono">{view.classification.analysisPath}</span>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-muted-foreground">sandbox route</span>
+                        <span className="font-mono text-lg font-semibold">{view.classification.analysisPath}</span>
                       </div>
-                      <div className="card__row">
-                        <span className="card__label">dynamic execution</span>
-                        <span className="card__value">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-muted-foreground">dynamic execution</span>
+                        <span className="text-lg font-semibold">
                           {view.classification.dynamic ? 'supported for this type' : 'not automatic; static analysis only'}
                         </span>
                       </div>
                     </>
                   ) : null}
-                  <div className="card__row">
-                    <span className="card__label">magic</span>
-                    <span className="card__value">{view.magic || '—'}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-muted-foreground">magic</span>
+                    <span className="text-lg font-semibold">{view.magic || '—'}</span>
                   </div>
-                  <div className="card__row">
-                    <span className="card__label">MIME</span>
-                    <span className="card__value card__value--mono">{view.mime || jstr(inventory?.MIME) || '—'}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-muted-foreground">MIME</span>
+                    <span className="font-mono text-lg font-semibold">{view.mime || jstr(inventory?.MIME) || '—'}</span>
                   </div>
-                  <div className="card__row">
-                    <span className="card__label">size</span>
-                    <span className="card__value card__value--mono">{view.size || jstr(inventory?.SizeH) || '—'}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-muted-foreground">size</span>
+                    <span className="font-mono text-lg font-semibold">{view.size || jstr(inventory?.SizeH) || '—'}</span>
                   </div>
-                  <div className="card__row">
-                    <span className="card__label">entropy</span>
-                    <span className="card__value card__value--mono">{view.entropy || '—'}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-muted-foreground">entropy</span>
+                    <span className="font-mono text-lg font-semibold">{view.entropy || '—'}</span>
                   </div>
-                  <div className="card__row">
-                    <span className="card__label">SHA-256</span>
-                    <span className="card__value card__value--mono">{view.sha256 || '—'}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-muted-foreground">SHA-256</span>
+                    <span className="font-mono text-lg font-semibold">{view.sha256 || '—'}</span>
                   </div>
-                  <div className="card__row">
-                    <span className="card__label">SHA-1</span>
-                    <span className="card__value card__value--mono">{view.sha1 || '—'}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-muted-foreground">SHA-1</span>
+                    <span className="font-mono text-lg font-semibold">{view.sha1 || '—'}</span>
                   </div>
-                  <div className="card__row">
-                    <span className="card__label">MD5</span>
-                    <span className="card__value card__value--mono">{view.md5 || '—'}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-muted-foreground">MD5</span>
+                    <span className="font-mono text-lg font-semibold">{view.md5 || '—'}</span>
                   </div>
                   {view.truncated ? (
                     <p className="note">deep inspection capped at 16 MiB; hashes cover the complete file</p>
@@ -1077,27 +1077,27 @@ function PayloadAnalysis() {
                 </>
               ) : inventory ? (
                 <>
-                  <div className="card__row">
-                    <span className="card__label">identified type</span>
-                    <span className="card__value">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-muted-foreground">identified type</span>
+                    <span className="text-lg font-semibold">
                       <strong>{jstr(inventory.Kind) || 'unknown'}</strong>
                     </span>
                   </div>
-                  <div className="card__row">
-                    <span className="card__label">platform</span>
-                    <span className="card__value card__value--mono">{jstr(inventory.Platform) || '—'}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-muted-foreground">platform</span>
+                    <span className="font-mono text-lg font-semibold">{jstr(inventory.Platform) || '—'}</span>
                   </div>
-                  <div className="card__row">
-                    <span className="card__label">sandbox route</span>
-                    <span className="card__value card__value--mono">{jstr(inventory.AnalysisPath) || '—'}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-muted-foreground">sandbox route</span>
+                    <span className="font-mono text-lg font-semibold">{jstr(inventory.AnalysisPath) || '—'}</span>
                   </div>
-                  <div className="card__row">
-                    <span className="card__label">MIME</span>
-                    <span className="card__value card__value--mono">{jstr(inventory.MIME) || '—'}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-muted-foreground">MIME</span>
+                    <span className="font-mono text-lg font-semibold">{jstr(inventory.MIME) || '—'}</span>
                   </div>
-                  <div className="card__row">
-                    <span className="card__label">size</span>
-                    <span className="card__value card__value--mono">{jstr(inventory.SizeH) || '—'}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-muted-foreground">size</span>
+                    <span className="font-mono text-lg font-semibold">{jstr(inventory.SizeH) || '—'}</span>
                   </div>
                   <p className="note">No static-analysis record for this hash yet — inventory metadata only.</p>
                 </>
@@ -1109,15 +1109,15 @@ function PayloadAnalysis() {
               <Card className="min-w-0 p-6">
                 <h2>Script classification</h2>
                 {view.scriptType ? (
-                  <div className="card__row">
-                    <span className="card__label">language/type</span>
-                    <span className="card__value card__value--mono">{view.scriptType}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-muted-foreground">language/type</span>
+                    <span className="font-mono text-lg font-semibold">{view.scriptType}</span>
                   </div>
                 ) : null}
                 {view.indicators.length > 0 ? (
-                  <div className="card__row">
-                    <span className="card__label">behavior indicators</span>
-                    <span className="card__value">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-muted-foreground">behavior indicators</span>
+                    <span className="text-lg font-semibold">
                       {view.indicators.map((indicator) => (
                         <Badge key={indicator} variant="secondary">
                           {indicator}
@@ -1144,7 +1144,7 @@ function PayloadAnalysis() {
                   .
                 </p>
               ) : (
-                <div className="card__scroll">
+                <CardContent>
                   <Table>
                     <TableHeader><TableRow><TableHead>completed</TableHead><TableHead>exit</TableHead><TableHead>changed paths</TableHead><TableHead>details</TableHead></TableRow></TableHeader>
                     <TableBody>
@@ -1162,7 +1162,7 @@ function PayloadAnalysis() {
                       ))}
                     </TableBody>
                   </Table>
-                </div>
+                </CardContent>
               )}
             </Card>
             <Card className="min-w-0 p-6">
@@ -1175,22 +1175,22 @@ function PayloadAnalysis() {
                 </p>
               ) : (
                 <>
-                  <div className="card__row">
-                    <span className="card__label">exit status</span>
-                    <span className="card__value card__value--mono">{correlation.github.exit_status || '—'}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-muted-foreground">exit status</span>
+                    <span className="font-mono text-lg font-semibold">{correlation.github.exit_status || '—'}</span>
                   </div>
                   {correlation.github.total !== null ? (
-                    <div className="card__row">
-                      <span className="card__label">detections</span>
-                      <span className="card__value card__value--mono">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-muted-foreground">detections</span>
+                      <span className="font-mono text-lg font-semibold">
                         {correlation.github.malicious ?? 0} / {correlation.github.total} • {correlation.github.level}
                       </span>
                     </div>
                   ) : null}
                   {correlation.github.family ? (
-                    <div className="card__row">
-                      <span className="card__label">family</span>
-                      <span className="card__value">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-muted-foreground">family</span>
+                      <span className="text-lg font-semibold">
                         <a
                           className="lnk"
                           href={`/events?q=${encodeURIComponent(correlation.github.family)}`}
@@ -1240,9 +1240,9 @@ function PayloadAnalysis() {
                 skeleton
               ) : (
                 <>
-                  <div className="card__row">
-                    <span className="card__label">Ghidra</span>
-                    <span className="card__value">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-muted-foreground">Ghidra</span>
+                    <span className="text-lg font-semibold">
                       {correlation.ghidra ? (
                         <>
                           <Badge variant="secondary">{correlation.ghidra.exit_status}</Badge>
@@ -1265,9 +1265,9 @@ function PayloadAnalysis() {
                       )}
                     </span>
                   </div>
-                  <div className="card__row">
-                    <span className="card__label">Elasticsearch sightings</span>
-                    <span className="card__value">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-muted-foreground">Elasticsearch sightings</span>
+                    <span className="text-lg font-semibold">
                       {related.total} event(s)
                       {related.earliest ? `, first seen ${formatTimestamp(related.earliest.time)}` : ''} —{' '}
                       <Button variant="ghost" size="sm" asChild>
@@ -1298,7 +1298,7 @@ function PayloadAnalysis() {
             <Card className="col-span-full p-6">
               <h2>YARA static scan</h2>
               {allMatches.length > 0 ? (
-                <div className="card__scroll">
+                <CardContent>
                   <Table>
                     <TableBody>
                       {allMatches.map((match) => (
@@ -1306,7 +1306,7 @@ function PayloadAnalysis() {
                       ))}
                     </TableBody>
                   </Table>
-                </div>
+                </CardContent>
               ) : (
                 <p className="empty">{yara.scanned ? 'No YARA rules matched this sample.' : 'Waiting for the isolated YARA scanner.'}</p>
               )}
@@ -1321,7 +1321,7 @@ function PayloadAnalysis() {
             <Card className="min-w-0 p-6">
               <h2>Rule matches</h2>
               {view && view.rules.length > 0 ? (
-                <div className="card__scroll">
+                <CardContent>
                   <Table>
                     <TableHeader><TableRow><TableHead>severity</TableHead><TableHead>rule</TableHead><TableHead>reason</TableHead></TableRow></TableHeader>
                     <TableBody>
@@ -1330,7 +1330,7 @@ function PayloadAnalysis() {
                       ))}
                     </TableBody>
                   </Table>
-                </div>
+                </CardContent>
               ) : (
                 <p className="empty">No built-in static rules matched.</p>
               )}
@@ -1339,7 +1339,7 @@ function PayloadAnalysis() {
             <Card className="min-w-0 p-6">
               <h2>Extracted indicators</h2>
               {iocs.length > 0 ? (
-                <div className="card__scroll">
+                <CardContent>
                   <Table><TableBody>
                       {iocs.map((ioc) => (
                         <TableRow key={ioc}>
@@ -1351,7 +1351,7 @@ function PayloadAnalysis() {
                         </TableRow>
                       ))}
                     </TableBody></Table>
-                </div>
+                </CardContent>
               ) : (
                 <p className="empty">No URL, domain, or IP indicators found.</p>
               )}

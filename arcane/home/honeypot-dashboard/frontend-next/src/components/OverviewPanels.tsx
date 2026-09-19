@@ -8,6 +8,7 @@ import { ErrorStateBlock } from './ErrorState'
 import { applyLeafletTheme } from '../lib/leafletTheme'
 import { DEFAULT_MAP_PREFS, pullMapPrefs, useAppearanceKey, useThemeMode, type MapPrefs } from '../lib/prefs'
 import { Card, CardHeader, CardTitle, CardContent } from './ui/card'
+import { Label } from './ui/label'
 import { Button } from './ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import { Table, TableBody, TableCell, TableRow } from './ui/table'
@@ -90,7 +91,7 @@ export function Heatmap({ rows, failed }: { rows: HeatRow[] | null; failed?: boo
       <div className="heatmap" aria-label="Hourly event activity per sensor, last 24 hours">
           {rows.map((row) => (
             <div className="heatmap__row" key={row.sensor}>
-              <span className="heatmap__label">{row.sensor}</span>
+              <Label className="heatmap__label">{row.sensor}</Label>
               <div className="heatmap__cells">
                 {row.cells.map((cell) => (
                   <span

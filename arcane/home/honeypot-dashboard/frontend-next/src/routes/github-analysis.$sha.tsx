@@ -291,10 +291,10 @@ function GithubAnalysisDetail() {
         </div>
       ) : null}
       {run === null ? (
-        <div className="card wide">
+        <Card>
           <span className="skeleton-line" aria-hidden="true" />
           <span className="skeleton-line" aria-hidden="true" />
-        </div>
+        </Card>
       ) : (
         <>
           {note ? (
@@ -345,12 +345,12 @@ function GithubAnalysisDetail() {
                   <CardDescription>Per-scanner results from the third-party pipeline the published sample was scored against.</CardDescription>
                 </CardHeader>
                 <CardContent>
-              <div className="card wide">
+              <Card>
                 <h2>Scanner results</h2>
                 {run.scanners?.length ? (
                   <>
                     <p className="note">A scanner that failed to run is shown as failed, not omitted — a missing row would silently understate coverage.</p>
-                    <div className="card__scroll">
+                    <CardContent>
                       <Table className="data-table">
                         <TableHeader>
                           <TableRow>
@@ -381,12 +381,12 @@ function GithubAnalysisDetail() {
                           ))}
                         </TableBody>
                       </Table>
-                    </div>
+                    </CardContent>
                   </>
                 ) : (
                   <p className="empty">No scanner results are recorded for this analysis.</p>
                 )}
-              </div>
+              </Card>
                 </CardContent>
               </Card>
             </TabsContent>
@@ -397,9 +397,9 @@ function GithubAnalysisDetail() {
                   <CardDescription>The publication that produced this result: who requested it, what was pushed, and when.</CardDescription>
                 </CardHeader>
                 <CardContent>
-              <div className="card wide">
+              <Card>
                 <h2>Publication record</h2>
-                <div className="card__scroll">
+                <CardContent>
                   <Table className="data-table">
                     <TableBody>
                       <TableRow>
@@ -448,8 +448,8 @@ function GithubAnalysisDetail() {
                       </TableRow>
                     </TableBody>
                   </Table>
-                </div>
-              </div>
+                </CardContent>
+              </Card>
                 </CardContent>
               </Card>
             </TabsContent>
@@ -460,7 +460,7 @@ function GithubAnalysisDetail() {
                   <CardDescription>Auto-generated detection content and the downloadable report.</CardDescription>
                 </CardHeader>
                 <CardContent>
-              <div className="card wide">
+              <Card>
                 <h2>Auto-generated YARA rules</h2>
                 {run.yara_auto_rules?.length ? (
                   <>
@@ -468,7 +468,7 @@ function GithubAnalysisDetail() {
                       {run.yara_auto_rules.length} rule file{run.yara_auto_rules.length !== 1 ? 's' : ''} in the upstream repository
                       reference this sample's hash.
                     </p>
-                    <div className="card__scroll">
+                    <CardContent>
                       <ul className="">
                         {run.yara_auto_rules.map((rule) => (
                           <li key={rule}>
@@ -476,13 +476,13 @@ function GithubAnalysisDetail() {
                           </li>
                         ))}
                       </ul>
-                    </div>
+                    </CardContent>
                   </>
                 ) : (
                   <p className="empty">No auto-generated YARA rules reference this sample.</p>
                 )}
-              </div>
-              <div className="card wide">
+              </Card>
+              <Card>
                 <h2>Report</h2>
                 {run.view_url ? (
                   // github_analysis.html's Report project-card (#309): a real
@@ -517,7 +517,7 @@ function GithubAnalysisDetail() {
                     </Button>
                   </>
                 )}
-              </div>
+              </Card>
                 </CardContent>
               </Card>
             </TabsContent>

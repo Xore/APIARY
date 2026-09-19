@@ -79,20 +79,20 @@ function scoreDisplay(score: number | null): string {
 function ProcessActivityCard({ summary }: { summary: ReportSummary }) {
   if (!summary.processes.length) {
     return (
-      <div className="card wide">
+      <Card>
         <h2>Process activity</h2>
         <p className="empty">No process trace was recorded for this run.</p>
-      </div>
+      </Card>
     )
   }
   return (
-    <div className="card wide">
+    <Card>
       <h2>Process activity</h2>
       <p className="note">
         API call counts, not the calls themselves — CAPE recorded {summary.total_calls.toLocaleString('en-US')} calls across
         these processes combined, far too many to render on one page. The full trace is in the raw report (link above).
       </p>
-      <div className="card__scroll">
+      <CardContent>
         <Table className="data-table">
           <TableHeader>
             <TableRow>
@@ -115,8 +115,8 @@ function ProcessActivityCard({ summary }: { summary: ReportSummary }) {
             ))}
           </TableBody>
         </Table>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -193,17 +193,17 @@ function CapeDetail() {
         }
       />
       {run === null ? (
-        <div className="card wide">
+        <Card>
           <span className="skeleton-line" aria-hidden="true" />
           <span className="skeleton-line" aria-hidden="true" />
-        </div>
+        </Card>
       ) : (
         <>
           {failed ? (
-            <div className="card wide">
+            <Card>
               <h2>This run did not complete</h2>
               <p>{run.error || 'The worker reported a failure with no detail.'}</p>
-            </div>
+            </Card>
           ) : (
             <>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -239,7 +239,7 @@ function CapeDetail() {
                   <p>What was submitted, to which guest, and how the task itself went.</p>
                 </div>
               </div>
-              <div className="card wide">
+              <Card>
                 <h2>Task identity</h2>
                 <Table className="data-table">
                   <TableBody>
@@ -295,16 +295,16 @@ function CapeDetail() {
                     ) : null}
                   </TableBody>
                 </Table>
-              </div>
+              </Card>
 
               {run.signatures.length ? (
-                <div className="card wide">
+                <Card>
                   <h2>Signatures</h2>
                   <p className="note">
                     CAPE's own behavioral signature matches — a signature firing means code matching a known pattern ran, not
                     necessarily that the sample is malicious.
                   </p>
-                  <div className="card__scroll">
+                  <CardContent>
                     <Table className="data-table">
                       <TableHeader>
                         <TableRow>
@@ -325,8 +325,8 @@ function CapeDetail() {
                         ))}
                       </TableBody>
                     </Table>
-                  </div>
-                </div>
+                  </CardContent>
+                </Card>
               ) : null}
 
               {summary ? (
@@ -340,7 +340,7 @@ function CapeDetail() {
                   <ProcessActivityCard summary={summary} />
 
                   {summary.summary_keys.length ? (
-                    <div className="card wide">
+                    <Card>
                       <h2>Behavior summary</h2>
                       <p className="note">
                         Deduplicated files, registry keys, mutexes and similar CAPE observed across every traced process. Large
@@ -348,16 +348,16 @@ function CapeDetail() {
                       </p>
                       {summary.summary_keys.map((key) =>
                         summary.summary[key]?.length ? (
-                          <div className="card__row" key={key}>
-                            <span className="card__label">{key}</span>
-                            <span className="card__value card__value--mono">{summary.summary[key].length}</span>
+                          <div className="flex items-center justify-between" key={key}>
+                            <span className="text-sm font-medium text-muted-foreground">{key}</span>
+                            <span className="font-mono text-lg font-semibold">{summary.summary[key].length}</span>
                           </div>
                         ) : null,
                       )}
-                    </div>
+                    </Card>
                   ) : null}
 
-                  <div className="card wide">
+                  <Card>
                     <h2>Dumped payloads &amp; extracted configuration</h2>
                     {summary.payloads.length || summary.configs.length ? (
                       <>
@@ -372,9 +372,9 @@ function CapeDetail() {
                     ) : (
                       <p className="empty">CAPE's debugger did not dump any payloads or extract any malware configuration during this run.</p>
                     )}
-                  </div>
+                  </Card>
 
-                  <div className="card wide">
+                  <Card>
                     <h2>Analyzer log</h2>
                     <p className="note">
                       The in-guest analyzer's own operational log, not a per-instruction trace. See Process activity above for
@@ -384,13 +384,13 @@ function CapeDetail() {
                       <p className="note text-danger">{summary.debug_errors.length} analyzer error(s) were logged.</p>
                     ) : null}
                     {summary.debug_log ? (
-                      <div className="card__scroll" aria-label="Analyzer log output">
+                      <CardContent aria-label="Analyzer log output">
                         <pre className="code">{summary.debug_log}</pre>
-                      </div>
+                      </CardContent>
                     ) : (
                       <p className="empty">No analyzer log was recorded.</p>
                     )}
-                  </div>
+                  </Card>
                 </>
               ) : null}
             </>

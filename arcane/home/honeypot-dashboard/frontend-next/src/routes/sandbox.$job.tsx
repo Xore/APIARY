@@ -16,7 +16,7 @@ import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
-import { Card, CardContent } from '../components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 import type { Json, JsonRecord } from '../lib/json'
@@ -104,9 +104,9 @@ function lineDifference(before: string[], after: string[], normalize: (line: str
 // ── Small presentational helpers ──────────────────────────────────────
 function Row({ label, value, mono = true, danger = false }: { label: string; value: React.ReactNode; mono?: boolean; danger?: boolean }) {
   return (
-    <div className="card__row">
-      <span className="card__label">{label}</span>
-      <span className={`card__value${mono ? ' card__value--mono' : ''}${danger ? ' text-danger' : ''}`}>{value}</span>
+    <div className="flex items-center justify-between">
+      <span className="text-sm font-medium text-muted-foreground">{label}</span>
+      <span className={`${mono ? 'font-mono ' : ''}text-lg font-semibold${danger ? ' text-destructive' : ''}`}>{value}</span>
     </div>
   )
 }
@@ -120,9 +120,9 @@ function Evidence({ title, note, body }: { title: string; note?: string; body: s
     <details className="hp-flow">
       <summary>{title}</summary>
       {note ? <p className="note hp-flow">{note}</p> : null}
-      <div className="card__scroll">
+      <CardContent className="overflow-auto max-h-96">
         <pre className="code">{body}</pre>
-      </div>
+      </CardContent>
     </details>
   )
 }
@@ -269,10 +269,12 @@ function SandboxDetail() {
         }
       />
       {detail === null ? (
-        <div className="card wide">
-          <span className="skeleton-line" aria-hidden="true" />
-          <span className="skeleton-line" aria-hidden="true" />
-        </div>
+        <Card>
+          <CardContent>
+            <span className="skeleton-line" aria-hidden="true" />
+            <span className="skeleton-line" aria-hidden="true" />
+          </CardContent>
+        </Card>
       ) : (
         <>
           <div className="filters">
@@ -342,8 +344,11 @@ function SandboxDetail() {
                   <p>The identified payload, how static indicators compare with observed behavior, and the techniques the run demonstrated.</p>
                 </div>
               </div>
-            <div className="card wide">
-              <h2>Run identity and analysis route</h2>
+            <Card>
+              <CardHeader>
+                <CardTitle>Run identity and analysis route</CardTitle>
+              </CardHeader>
+              <CardContent>
               <Row label="job" value={str(detail.job)} />
               <Row
                 label="identified payload"
@@ -382,19 +387,27 @@ function SandboxDetail() {
                   )
                 }
               />
-            </div>
-            <div className="card half">
-              <h2>Static versus dynamic</h2>
+              </CardContent>
+            </Card>
+            <Card className="sm:w-1/2 w-full">
+              <CardHeader>
+                <CardTitle>Static versus dynamic</CardTitle>
+              </CardHeader>
+              <CardContent>
               <Row label="dynamic ATT&CK behaviors" value={techniques.length} />
               <Row label="system calls recorded" value={topSyscalls.length} />
               <Row label="filesystem changes" value={changedFiles.length} />
               <Row label="network packets" value={num(network.packets)} />
               <p className="note">Static indicators show what the file contains; dynamic evidence shows what this bounded run actually attempted.</p>
-            </div>
-            <div className="card half">
-              <h2>ATT&CK behavior mapping</h2>
+              </CardContent>
+            </Card>
+            <Card className="sm:w-1/2 w-full">
+              <CardHeader>
+                <CardTitle>ATT&CK behavior mapping</CardTitle>
+              </CardHeader>
+              <CardContent>
               {techniques.length ? (
-                <div className="card__scroll">
+                <CardContent className="overflow-auto max-h-96">
                   <Table className="data-table">
                     <TableHeader>
                       <TableRow>
@@ -415,12 +428,13 @@ function SandboxDetail() {
                       ))}
                     </TableBody>
                   </Table>
-                </div>
+                </CardContent>
               ) : (
                 <p className="empty">No mapped behavior in this run.</p>
               )}
               <p className="note">Behavior context only; never actor attribution.</p>
-            </div>
+              </CardContent>
+            </Card>
             </TabsContent>
             <TabsContent value="behavior">
               <div className="section-heading">
@@ -429,10 +443,13 @@ function SandboxDetail() {
                   <p>System calls, filesystem changes, and the process and socket state before and after detonation.</p>
                 </div>
               </div>
-            <div className="card half">
-              <h2>Top system calls</h2>
+            <Card className="sm:w-1/2 w-full">
+              <CardHeader>
+                <CardTitle>Top system calls</CardTitle>
+              </CardHeader>
+              <CardContent>
               {topSyscalls.length ? (
-                <div className="card__scroll">
+                <CardContent className="overflow-auto max-h-96">
                   <Table className="data-table">
                     <TableHeader>
                       <TableRow>
@@ -449,13 +466,17 @@ function SandboxDetail() {
                       ))}
                     </TableBody>
                   </Table>
-                </div>
+                </CardContent>
               ) : (
                 <p className="empty">No syscall trace was exported.</p>
               )}
-            </div>
-            <div className="card half">
-              <h2>Created or changed paths</h2>
+              </CardContent>
+            </Card>
+            <Card className="sm:w-1/2 w-full">
+              <CardHeader>
+                <CardTitle>Created or changed paths</CardTitle>
+              </CardHeader>
+              <CardContent>
               {changedFiles.length ? (
                 <>
                   <p className="note">
@@ -470,31 +491,44 @@ function SandboxDetail() {
               ) : (
                 <p className="empty">No tracked path changes.</p>
               )}
-            </div>
-            <div className="card half">
-              <h2>Process difference</h2>
+              </CardContent>
+            </Card>
+            <Card className="sm:w-1/2 w-full">
+              <CardHeader>
+                <CardTitle>Process difference</CardTitle>
+              </CardHeader>
+              <CardContent>
               <p className="note">
                 Userspace commands added or removed between the pre- and post-execution snapshots. Volatile PID/resource columns and
                 kernel-worker churn are ignored.
               </p>
               <DiffDetails diff={processDiff} emptyAdded="No added processes." emptyRemoved="No removed processes." />
-            </div>
-            <div className="card half">
-              <h2>Sockets difference</h2>
+              </CardContent>
+            </Card>
+            <Card className="sm:w-1/2 w-full">
+              <CardHeader>
+                <CardTitle>Sockets difference</CardTitle>
+              </CardHeader>
+              <CardContent>
               <p className="note">Socket rows added or removed between the pre- and post-execution snapshots.</p>
               <DiffDetails diff={socketDiff} emptyAdded="No added sockets." emptyRemoved="No removed sockets." />
               <Evidence title="Sockets before detonation" body={lines(detail.sockets_before).join('\n')} />
               <Evidence title="Sockets after detonation" body={lines(detail.sockets_after).join('\n')} />
-            </div>
-            <div className="card wide">
-              <h2>Process output</h2>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Process output</CardTitle>
+              </CardHeader>
+              <CardContent>
               <p className="note">
                 Everything the payload wrote to its standard streams inside the guest. Guest-produced text is untrusted and size-bounded.
               </p>
               <Evidence title="Standard output" body={str(detail.stdout)} />
               <Evidence title="Standard error" body={str(detail.stderr)} />
               {!str(detail.stdout).trim() && !str(detail.stderr).trim() ? <p className="empty">No stream output was captured.</p> : null}
-            </div>
+              </CardContent>
+            </Card>
             </TabsContent>
             <TabsContent value="network">
               <div className="section-heading">
@@ -503,9 +537,12 @@ function SandboxDetail() {
                   <p>Captured traffic on the host bridge and inside the guest, including loopback DNS.</p>
                 </div>
               </div>
-            <div className="card wide">
-              <h2>Network and DNS capture</h2>
-              <div className="card__scroll">
+            <Card>
+              <CardHeader>
+                <CardTitle>Network and DNS capture</CardTitle>
+              </CardHeader>
+              <CardContent>
+              <CardContent className="overflow-auto max-h-96">
                 <Row label="host bridge packets" value={num(network.packets)} />
                 <Row label="host PCAP bytes" value={num(network.bytes)} />
                 <Row label="guest packets, including loopback DNS" value={num(network.guest_packets)} />
@@ -517,7 +554,7 @@ function SandboxDetail() {
                 {countMap(network.guest_protocols).map(([name, count]) => (
                   <Row key={`guest-${name}`} label={`guest ${name}`} value={count} />
                 ))}
-              </div>
+              </CardContent>
               <Evidence title={`Captured DNS names (${lines(network.dns_queries).length})`} body={lines(network.dns_queries).join('\n')} />
               <Evidence title={`DNS queries and responses (${lines(network.dns_events).length})`} body={lines(network.dns_events).join('\n')} />
               <p className="note">
@@ -526,9 +563,13 @@ function SandboxDetail() {
                 network behavior require a matching syscall from the traced payload process tree. In controlled mode, DNS answers are real
                 and logged while downloads must pass the allowlisted proxy; direct guest routing remains blocked.
               </p>
-            </div>
-            <div className="card half">
-              <h2>Host bridge events</h2>
+              </CardContent>
+            </Card>
+            <Card className="sm:w-1/2 w-full">
+              <CardHeader>
+                <CardTitle>Host bridge events</CardTitle>
+              </CardHeader>
+              <CardContent>
               {lines(network.events).length ? (
                 <>
                   <p className="note">
@@ -548,9 +589,13 @@ function SandboxDetail() {
                   <Evidence title="Open connect attempts" body={lines(network.attempts).join('\n')} />
                 </>
               ) : null}
-            </div>
-            <div className="card half">
-              <h2>Guest and loopback packet events</h2>
+              </CardContent>
+            </Card>
+            <Card className="sm:w-1/2 w-full">
+              <CardHeader>
+                <CardTitle>Guest and loopback packet events</CardTitle>
+              </CardHeader>
+              <CardContent>
               {lines(network.guest_events).length ? (
                 <>
                   <p className="note">
@@ -561,9 +606,13 @@ function SandboxDetail() {
               ) : (
                 <p className="empty">No guest-side packets were decoded.</p>
               )}
-            </div>
-            <div className="card wide">
-              <h2>IOCs: static versus dynamic</h2>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>IOCs: static versus dynamic</CardTitle>
+              </CardHeader>
+              <CardContent>
               <Row label="remote IPs observed at runtime" value={lines(network.remote_ips).length} />
               <Row label="download URLs observed at runtime" value={lines(iocs.download_urls).length} />
               <Row label="PowerShell download cradles" value={num(iocs.download_cradle_count)} />
@@ -584,7 +633,8 @@ function SandboxDetail() {
                 were never observed during this run's bounded observation window — a backup C2/exfil address, or a code path this run's
                 trigger conditions never reached.
               </p>
-            </div>
+              </CardContent>
+            </Card>
             </TabsContent>
 
           {windowsDetected ? (
@@ -595,8 +645,11 @@ function SandboxDetail() {
                   <p>Windows PE structure, imports, and signing, parsed inside the analysis guest.</p>
                 </div>
               </div>
-              <div className="card wide">
-                <h2>Windows PE forensics</h2>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Windows PE forensics</CardTitle>
+                </CardHeader>
+                <CardContent>
                 <Row label="format / machine" value={`${str(windows.pe_type)} / ${str(windows.machine)}`} />
                 <Row label="DLL" value={String(flag(windows.dll))} />
                 <Row label="compile timestamp" value={str(windows.compile_timestamp)} />
@@ -609,11 +662,15 @@ function SandboxDetail() {
                   Parsed with pefile inside the powered-off-after-use analysis guest. Wine execution is behavioral emulation, not a perfect
                   replacement for native Windows.
                 </p>
-              </div>
-              <div className="card half">
-                <h2>Suspicious Windows API imports</h2>
+                </CardContent>
+              </Card>
+              <Card className="sm:w-1/2 w-full">
+                <CardHeader>
+                  <CardTitle>Suspicious Windows API imports</CardTitle>
+                </CardHeader>
+                <CardContent>
                 {Object.keys(rec(windows.suspicious_imports)).length ? (
-                  <div className="card__scroll">
+                  <CardContent className="overflow-auto max-h-96">
                     <Table className="data-table">
                       <TableHeader>
                         <TableRow>
@@ -636,15 +693,19 @@ function SandboxDetail() {
                         ))}
                       </TableBody>
                     </Table>
-                  </div>
+                  </CardContent>
                 ) : (
                   <p className="empty">No categorized high-signal imports found.</p>
                 )}
-              </div>
-              <div className="card half">
-                <h2>PE sections</h2>
+                </CardContent>
+              </Card>
+              <Card className="sm:w-1/2 w-full">
+                <CardHeader>
+                  <CardTitle>PE sections</CardTitle>
+                </CardHeader>
+                <CardContent>
                 {recList(windows.sections).length ? (
-                  <div className="card__scroll">
+                  <CardContent>
                     <Table className="data-table">
                       <TableHeader>
                         <TableRow>
@@ -667,15 +728,16 @@ function SandboxDetail() {
                         ))}
                       </TableBody>
                     </Table>
-                  </div>
+                  </CardContent>
                 ) : (
                   <p className="empty">No PE sections parsed.</p>
                 )}
-              </div>
-              <div className="card wide">
+                </CardContent>
+              </Card>
+              <Card>
                 <h2>Imported libraries and symbols</h2>
                 {recList(windows.imports).length ? (
-                  <div className="card__scroll">
+                  <CardContent>
                     <Table className="data-table">
                       <TableHeader>
                         <TableRow>
@@ -698,12 +760,12 @@ function SandboxDetail() {
                         ))}
                       </TableBody>
                     </Table>
-                  </div>
+                  </CardContent>
                 ) : (
                   <p className="empty">No imports parsed.</p>
                 )}
-              </div>
-              <div className="card half">
+              </Card>
+              <Card className="sm:w-1/2 w-full">
                 <h2>Exports, warnings, and metadata</h2>
                 <p className="note">Parser output and the metadata tools run against the sample.</p>
                 <Evidence title={`Exports (${lines(windows.exports).length})`} body={lines(windows.exports).join('\n')} />
@@ -713,8 +775,8 @@ function SandboxDetail() {
                 {!lines(windows.exports).length && !lines(windows.warnings).length ? (
                   <p className="note hp-flow">No exported symbols or parser warnings.</p>
                 ) : null}
-              </div>
-              <div className="card half">
+              </Card>
+              <Card className="sm:w-1/2 w-full">
                 <h2>Signing and strings</h2>
                 <p className="note">Authenticode result and the printable sequences extracted from the sample.</p>
                 <Evidence title="Authenticode inspection" body={str(windows.authenticode)} />
@@ -728,7 +790,7 @@ function SandboxDetail() {
                   note="Wide-character sequences extracted from the sample."
                   body={lines(windows.utf16_strings).join('\n')}
                 />
-              </div>
+              </Card>
             </TabsContent>
           ) : null}
 
@@ -739,7 +801,7 @@ function SandboxDetail() {
                 <p>Guest and collection state — read this when the evidence above looks thin, to tell an empty result from a broken one.</p>
               </div>
             </div>
-            <div className="card wide">
+            <Card>
               <h2>Runtime and collection diagnostics</h2>
               <Row label="run status" danger={incomplete} value={runStatus} />
               <Row label="guest service started" value={String(flag(detail.guest_started))} />
@@ -756,9 +818,9 @@ function SandboxDetail() {
               <Evidence title="Guest tcpdump log" body={str(artifacts.guest_tcpdump_log)} />
               <Evidence title="Classifier error" body={str(artifacts.classification_error)} />
               <Evidence title="PE parser error" body={str(artifacts.pe_forensics_error)} />
-            </div>
+            </Card>
             {incomplete ? (
-              <div className="card wide">
+              <Card>
                 <h2>Sandbox infrastructure diagnostics</h2>
                 <Row label="run status" danger value={runStatus} />
                 <Row label="exit status" value={exitStatus} />
@@ -767,17 +829,17 @@ function SandboxDetail() {
                 <Evidence title="Guest serial console" body={str(artifacts.console_log)} />
                 <Evidence title="QEMU log" body={str(artifacts.qemu_log)} />
                 <Evidence title="Domain state" body={`${str(artifacts.domain_state)}\n${str(artifacts.qemu_status)}`.trim()} />
-              </div>
+              </Card>
             ) : null}
             </TabsContent>
 
           <TabsContent value="raw">
-            <div className="card wide">
+            <Card>
               <h2>Behavior record</h2>
-              <div className="card__scroll">
+              <CardContent>
                 <pre className="code">{JSON.stringify(doc, null, 2)}</pre>
-              </div>
-            </div>
+              </CardContent>
+            </Card>
           </TabsContent>
           </Tabs>
 
@@ -787,10 +849,10 @@ function SandboxDetail() {
           </p>
         </>
       )}
-      <div className="card wide">
+      <Card>
         <h2>Exported artifacts</h2>
         <ArtifactList kind="sandbox" artifactKey={job} />
-      </div>
+      </Card>
     </>
   )
 }

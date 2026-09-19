@@ -17,6 +17,7 @@ import { formatTimestamp } from '../lib/time'
 import { useSidebarViewTabs } from '../lib/viewTabs'
 import { countryName } from '../lib/country'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../components/ui/card'
+import { Label } from '../components/ui/label'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../components/ui/table'
@@ -261,7 +262,7 @@ function KpiStrip({ kpis, payloads, payloadsFailed }: { kpis: OverviewKpis | nul
         <div className="metric__value font-serif text-[26px] font-medium tracking-tight">
           <KpiValue value={kpis && kpis.ready ? kpis.total : null} />
         </div>
-        <div className="metric__label">All events</div>
+        <Label className="metric__label">All events</Label>
       </Link></Card>
       <Card className="min-w-0 p-4"><Link className="block" to="/events" search={{ since: '24h' }} title="Open events received during the last 24 hours">
         <div className="metric__value font-serif text-[26px] font-medium tracking-tight">
@@ -275,14 +276,14 @@ function KpiStrip({ kpis, payloads, payloadsFailed }: { kpis: OverviewKpis | nul
             </span>
           ) : null}
         </div>
-        <div className="metric__label">Events in 24 hours</div>
+        <Label className="metric__label">Events in 24 hours</Label>
         <KpiSpark hourly={kpis?.hourly} />
       </Link></Card>
       <Card className="min-w-0 p-4"><Link className="block" to="/ips" title="Distinct attacker source addresses observed by the sensors">
         <div className="metric__value font-serif text-[26px] font-medium tracking-tight">
           <KpiValue value={kpis && kpis.ready ? kpis.unique_ips : null} />
         </div>
-        <div className="metric__label">Attack sources</div>
+        <Label className="metric__label">Attack sources</Label>
       </Link></Card>
       <Card className="min-w-0 p-4"><Link className="block" to="/events" search={{ kind: 'login' }} title="Authentication attempts captured by interactive honeypots">
         <div className="metric__value font-serif text-[26px] font-medium tracking-tight">
@@ -292,7 +293,7 @@ function KpiStrip({ kpis, payloads, payloadsFailed }: { kpis: OverviewKpis | nul
               every tick. */}
           <KpiValue value={kpis && kpis.ready ? kpis.logins : null} />
         </div>
-        <div className="metric__label">Login attempts</div>
+        <Label className="metric__label">Login attempts</Label>
       </Link></Card>
       <Card className="min-w-0 p-4"><Link className="block" to="/payloads" title="Distinct payload binaries captured safely">
         <div className="metric__value font-serif text-[26px] font-medium tracking-tight">
@@ -304,7 +305,7 @@ function KpiStrip({ kpis, payloads, payloadsFailed }: { kpis: OverviewKpis | nul
             <KpiValue value={payloads} />
           )}
         </div>
-        <div className="metric__label">Captured payloads</div>
+        <Label className="metric__label">Captured payloads</Label>
       </Link></Card>
     </div>
   )
@@ -399,7 +400,7 @@ function RecentEventRow({ row, open, onToggle }: { row: EventRow; open: boolean;
       {open ? (
         <TableRow>
           <TableCell colSpan={6}>
-            <Card className="card wide hp-flow" role="article" aria-label="Full normalized event">
+            <Card className="hp-flow" role="article" aria-label="Full normalized event">
               <h3>Normalized event</h3>
               <p className="note">Complete read-only record as stored by the pipeline.</p>
               {row.src_ip || row.session ? (
@@ -417,9 +418,9 @@ function RecentEventRow({ row, open, onToggle }: { row: EventRow; open: boolean;
                   ) : null}
                 </p>
               ) : null}
-              <div className="card__scroll">
+              <CardContent>
                 <pre className="code">{JSON.stringify(row.record, null, 2)}</pre>
-              </div>
+              </CardContent>
             </Card>
           </TableCell>
         </TableRow>
@@ -621,7 +622,7 @@ function Overview() {
                 </>
               )
             ) : (
-              <div className="card__scroll">
+              <CardContent>
                 <Table className="recent data-table">
                   <TableHeader>
                     <TableRow><TableHead>time</TableHead><TableHead>sensor</TableHead><TableHead>source ip</TableHead><TableHead>port</TableHead><TableHead>detail</TableHead><TableHead></TableHead></TableRow>
@@ -640,7 +641,7 @@ function Overview() {
                     })}
                   </TableBody>
                 </Table>
-              </div>
+              </CardContent>
             )}
           </Card>
           </CardContent>
@@ -659,7 +660,7 @@ function Overview() {
             </div>
           </CardHeader>
           <CardContent>
-          <Card className="card half sensor-card">
+          <Card className="sensor-card sm:w-1/2 w-full">
             <h2>Sensor feeds</h2>
             {dashboard === null ? (
               dashboardFailed ? (
@@ -680,7 +681,7 @@ function Overview() {
                   Showing all {dashboard.sensors.length} sensors. Active = recent traffic, quiet = online with no recent event,
                   stale = its feed has stopped updating. A quiet honeypot is not necessarily offline.
                 </p>
-                <div className="card__scroll">
+                <CardContent>
                   <Table className="data-table">
                     <TableBody>
                       {dashboard.sensors.map((sensor) => (
@@ -693,12 +694,12 @@ function Overview() {
                       ))}
                     </TableBody>
                   </Table>
-                </div>
+                </CardContent>
               </>
             )}
           </Card>
           <Tbl title="Protocols probed" rows={dashboard ? dashboard.protocols : null} failed={dashboardFailed} />
-          <Card className="card wide" id="ml-backlog-card">
+          <Card id="ml-backlog-card">
             <h2>ML classification backlog — last 7 days</h2>
             <EChart kind="line" url="/api/chart/ml-backlog" height={280} />
             <p className="note">
@@ -734,7 +735,7 @@ function Overview() {
               busier ASN card. */}
           <Tbl title="Top autonomous systems" rows={dashboard ? dashboard.asns : null} id="overview-asns-card" failed={dashboardFailed} />
           <Tbl title="Network/provider classes" rows={dashboard ? dashboard.providers : null} id="overview-providers-card" failed={dashboardFailed} />
-          <Card className="card wide" id="netflow-bytes-card">
+          <Card id="netflow-bytes-card">
             <h2>Traffic volume — bytes/hour, last 7 days</h2>
             <p className="note">
               Summed from every captured flow&apos;s byte count, all sensors and ports combined. A spike stands out here even
@@ -746,11 +747,11 @@ function Overview() {
               heatmap.
             </p>
           </Card>
-          <Card className="card wide" id="netflow-packets-card">
+          <Card id="netflow-packets-card">
             <h2>Traffic volume — packets/hour, last 7 days</h2>
             <EChart kind="line" url="/api/chart/netflow-packets" height={280} />
           </Card>
-          <Card className="card wide" id="anomaly-trend-card">
+          <Card id="anomaly-trend-card">
             <h2>Protocol-conformance violations by protocol, over time</h2>
             <p className="note">
               Traffic that doesn't conform to the protocol it claims to be — often scanning tools or deliberate IDS-evasion
@@ -758,7 +759,7 @@ function Overview() {
             </p>
             <EChart kind="line" url="/api/chart/anomaly-trend" height={280} />
           </Card>
-          <Card className="card wide" id="dionaea-cves-card">
+          <Card id="dionaea-cves-card">
             <h2>Top exploited CVEs / named incidents — last 7 days</h2>
             <p className="note">
               Real, human-readable exploit identities dionaea itself recognized in the traffic it captured (e.g.
@@ -787,7 +788,7 @@ function Overview() {
           <Tbl title="SSH/telnet clients" rows={dashboard ? dashboard.clients : null} hint="No client banners yet — fed by cowrie." failed={dashboardFailed} />
           <Tbl title="Top fingerprints (HASSH / JA3 / JA4 / User-Agent)" rows={dashboard ? dashboard.fingerprints : null} hint="No protocol or client fingerprints captured yet." failed={dashboardFailed} />
           <Tbl title="Top HTTP paths" rows={dashboard ? dashboard.top_paths : null} hint="No web probes yet — fed by http-honeypot and tanner." failed={dashboardFailed} />
-          <Card className="card wide" id="os-distribution-card">
+          <Card id="os-distribution-card">
             <h2>Attacker OS distribution</h2>
             <p className="note">
               p0f&apos;s own passive OS fingerprint, resolved from the portbridge tunnel join (#241) — a best-effort guess
@@ -795,7 +796,7 @@ function Overview() {
             </p>
             <EChart kind="pie" url="/api/chart/os-distribution" height={360} />
           </Card>
-          <Card className="card wide" id="tcp-stack-clusters-card">
+          <Card id="tcp-stack-clusters-card">
             <h2>Attacker TCP-stack clusters (JA4T)</h2>
             <p className="note">
               Unique attackers per TCP handshake fingerprint, from Zeek. Deliberately not an OS name — it groups hosts
@@ -805,7 +806,7 @@ function Overview() {
             </p>
             <EChart kind="pie" url="/api/chart/tcp-stack-clusters" height={360} />
           </Card>
-          <Card className="card wide" id="ics-functions-card">
+          <Card id="ics-functions-card">
             <h2>ICS function codes — what they asked the PLCs to do</h2>
             <p className="note">
               Per-transaction detail from the ICS parsers, across Modbus, S7comm, DNP3 and IEC-104. These events are rare and
@@ -814,7 +815,7 @@ function Overview() {
             </p>
             <EChart kind="barh" url="/api/chart/ics-functions" height={360} />
           </Card>
-          <Card className="card wide" id="decoy-requests-card">
+          <Card id="decoy-requests-card">
             <h2>Decoy requests (TLS-terminated) — last 7 days</h2>
             <p className="note">
               What was requested from the Host-routed decoys behind Traefik. These exist in no other index: Traefik
@@ -822,7 +823,7 @@ function Overview() {
             </p>
             <EChart kind="barh" url="/api/chart/decoy-requests" height={360} />
           </Card>
-          <Card className="card wide" id="decoy-client-fingerprints-card">
+          <Card id="decoy-client-fingerprints-card">
             <h2>Who reached the decoys (JA4)</h2>
             <p className="note">
               The TLS client behind each decoy request. Neither sensor can answer this alone — Traefik knows the
@@ -832,7 +833,7 @@ function Overview() {
             </p>
             <EChart kind="barh" url="/api/chart/decoy-client-fingerprints" height={360} />
           </Card>
-          <Card className="card wide" id="ja4h-fingerprints-card">
+          <Card id="ja4h-fingerprints-card">
             <h2>HTTP client fingerprints (JA4H) — last 7 days</h2>
             <p className="note">
               The request&apos;s own header set and ordering. Clusters HTTP tooling that never negotiates TLS at all,
@@ -840,7 +841,7 @@ function Overview() {
             </p>
             <EChart kind="barh" url="/api/chart/ja4h-fingerprints" height={360} />
           </Card>
-          <Card className="card wide" id="ja4l-fingerprints-card">
+          <Card id="ja4l-fingerprints-card">
             <h2>Connection-latency fingerprints (JA4L) — last 7 days</h2>
             <p className="note">
               Derived from handshake round-trip timing rather than anything the client sends, so unlike every other
@@ -849,7 +850,7 @@ function Overview() {
             </p>
             <EChart kind="barh" url="/api/chart/ja4l-fingerprints" height={360} />
           </Card>
-          <Card className="card wide" id="ja4x-fingerprints-card">
+          <Card id="ja4x-fingerprints-card">
             <h2>Certificate construction fingerprints (JA4X) — last 7 days</h2>
             <p className="note">
               Fingerprints how a certificate was built rather than what it claims — a scanner or C2 using a templated
@@ -857,17 +858,17 @@ function Overview() {
             </p>
             <EChart kind="barh" url="/api/chart/ja4x-fingerprints" height={360} />
           </Card>
-          <Card className="card wide" id="tls-fingerprints-card">
+          <Card id="tls-fingerprints-card">
             <h2>TLS scanner fingerprints (JA4) — wire-level, last 7 days</h2>
             <p className="note">Every TLS handshake against a non-dashboard port, alert or not. Click a bar to copy the full hash.</p>
             <EChart kind="barh" url="/api/chart/tls-fingerprints" height={360} />
           </Card>
-          <Card className="card wide" id="ssh-fingerprints-card">
+          <Card id="ssh-fingerprints-card">
             <h2>SSH client software — wire-level, last 7 days</h2>
             <p className="note">Every SSH handshake's client software banner, not just ones that triggered an alert.</p>
             <EChart kind="barh" url="/api/chart/ssh-fingerprints" height={360} />
           </Card>
-          <Card className="card wide" id="endlessh-held-card">
+          <Card id="endlessh-held-card">
             <h2>Attacker time wasted (endlessh tarpit)</h2>
             <p className="note">Time attackers/bots spent stuck talking to nothing before giving up.</p>
             <EChart kind="bar" url="/api/chart/endlessh-held-histogram" height={320} />
@@ -890,7 +891,7 @@ function Overview() {
           <CardContent>
           <Tbl title="Suricata alerts" rows={dashboard ? dashboard.alerts : null} hint="No Suricata alerts in this window — pipeline status lives under Source & pipeline health." failed={dashboardFailed} />
           <Tbl title="Alert categories" rows={dashboard ? dashboard.alert_cats : null} hint="No Suricata alerts in this window." failed={dashboardFailed} />
-          <Card className="card wide">
+          <Card>
             <h2>Captured payloads</h2>
             <p className="note">Inert copies of malware and high-confidence scripts. Static analysis never executes the payload.</p>
             {/* overview.html:400-412's columns: seen count → the payload's
@@ -912,7 +913,7 @@ function Overview() {
             ) : dashboard.payloads.length === 0 ? (
               <p className="empty">No payloads captured yet — cowrie logs downloads/uploads during a shell session.</p>
             ) : (
-              <div className="card__scroll">
+              <CardContent>
                 <Table className="data-table">
                   <TableHeader>
                     <TableRow><TableHead>seen</TableHead><TableHead>sha-256</TableHead><TableHead>attacker target path</TableHead><TableHead>lookup</TableHead></TableRow>
@@ -941,10 +942,10 @@ function Overview() {
                     ))}
                   </TableBody>
                 </Table>
-              </div>
+              </CardContent>
             )}
           </Card>
-          <Card className="card wide">
+          <Card>
             <h2>Correlated campaigns — rolling 7 days</h2>
             <p className="note">
               Groups related source networks across sensors. Score rises with volume, sensor/port spread, reused credentials,
@@ -962,7 +963,7 @@ function Overview() {
                 </>
               )
             ) : (
-              <div className="card__scroll">
+              <CardContent>
                 <Table className="recent data-table">
                   <TableHeader>
                     <TableRow><TableHead>network</TableHead><TableHead>events</TableHead><TableHead>ips</TableHead><TableHead>sensors</TableHead><TableHead>last seen</TableHead></TableRow>
@@ -999,7 +1000,7 @@ function Overview() {
                     })}
                   </TableBody>
                 </Table>
-              </div>
+              </CardContent>
             )}
           </Card>
           </CardContent>

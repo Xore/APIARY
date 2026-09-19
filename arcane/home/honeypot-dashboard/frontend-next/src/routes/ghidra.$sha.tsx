@@ -15,7 +15,8 @@ import { GhidraCallGraph } from '../components/GhidraCallGraph'
 import { confirmAction } from '../components/ConfirmDialog'
 import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
-import { Card, CardContent } from '../components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
+import { Label } from '../components/ui/label'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 import { formatTimestamp } from '../lib/time'
@@ -203,9 +204,9 @@ export const Route = createFileRoute('/ghidra/$sha')({
 
 function KV({ label, value, mono = true }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
-    <div className="card__row">
-      <span className="card__label">{label}</span>
-      <span className={mono ? 'card__value card__value--mono' : 'card__value'}>{value}</span>
+    <div className="flex items-center justify-between">
+      <span className="text-sm font-medium text-muted-foreground">{label}</span>
+      <span className={mono ? 'font-mono text-lg font-semibold' : 'text-lg font-semibold'}>{value}</span>
     </div>
   )
 }
@@ -238,8 +239,11 @@ function rawText(value: unknown): string {
 
 function TriageCard({ triage }: { triage: Triage | null | undefined }) {
   return (
-    <div className="card wide" id="ghidra-triage">
-      <h2>Automated triage</h2>
+    <Card id="ghidra-triage">
+      <CardHeader>
+        <CardTitle>Automated triage</CardTitle>
+      </CardHeader>
+      <CardContent>
       {triage ? (
         <>
           <AIAdvisory>
@@ -274,14 +278,18 @@ function TriageCard({ triage }: { triage: Triage | null | undefined }) {
           off on this host. Everything else on this page is raw Ghidra output and unaffected.
         </p>
       )}
-    </div>
+      </CardContent>
+    </Card>
   )
 }
 
 function RevDeckCard({ revdeck }: { revdeck: RevDeck | null | undefined }) {
   return (
-    <div className="card wide" id="ghidra-revdeck">
-      <h2>Rev·Deck automated triage</h2>
+    <Card id="ghidra-revdeck">
+      <CardHeader>
+        <CardTitle>Rev·Deck automated triage</CardTitle>
+      </CardHeader>
+      <CardContent>
       {revdeck ? (
         <>
           <AIAdvisory>
@@ -320,7 +328,7 @@ function RevDeckCard({ revdeck }: { revdeck: RevDeck | null | undefined }) {
             <div className="hp-ai-citations">
               {revdeck.citations.valid?.length ? (
                 <div className="hp-ai-citations__group">
-                  <p className="hp-ai-citations__label hp-ai-citations__label--valid">Citations</p>
+                  <Label className="hp-ai-citations__label hp-ai-citations__label--valid">Citations</Label>
                   <ul className="hp-ai-citations__list">
                     {revdeck.citations.valid.map((citation, index) => (
                       <li key={index} className="hp-ai-citations__item hp-ai-citations__item--valid">
@@ -332,9 +340,9 @@ function RevDeckCard({ revdeck }: { revdeck: RevDeck | null | undefined }) {
               ) : null}
               {revdeck.citations.invalid?.length ? (
                 <div className="hp-ai-citations__group">
-                  <p className="hp-ai-citations__label hp-ai-citations__label--invalid">
+                  <Label className="hp-ai-citations__label hp-ai-citations__label--invalid">
                     Unverified — referenced by the model but not matched against the analysis
-                  </p>
+                  </Label>
                   <ul className="hp-ai-citations__list">
                     {revdeck.citations.invalid.map((citation, index) => (
                       <li key={index} className="hp-ai-citations__item hp-ai-citations__item--invalid">
@@ -363,7 +371,8 @@ function RevDeckCard({ revdeck }: { revdeck: RevDeck | null | undefined }) {
           was unreachable, or the run produced no usable answer. Everything else on this page is raw Ghidra output and unaffected.
         </p>
       )}
-    </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -372,28 +381,35 @@ function OverviewPanel({ sha, g }: { sha: string; g: GhidraDoc }) {
   return (
     <>
       <SectionHeading title="What this binary is" sub="Analysis identity, and any automated assessment of what the code does." />
-      <div className="card wide">
-        <h2>Analysis identity</h2>
+      <Card>
+        <CardHeader>
+          <CardTitle>Analysis identity</CardTitle>
+        </CardHeader>
+        <CardContent>
         <KV label="SHA-256" value={sha} />
         <KV label="requested" value={formatTimestamp(g.requested_at)} />
         <KV label="started" value={formatTimestamp(g.started_at)} />
         <KV label="completed" value={formatTimestamp(g.completed_at)} />
         <KV label="exit status" value={g.exit_status} />
         <KV label="analysis method" mono={false} value="Ghidra headless decompilation — the binary is read, never executed" />
-      </div>
+        </CardContent>
+      </Card>
 
       <TriageCard triage={g.ai_triage} />
       <RevDeckCard revdeck={g.revdeck} />
 
-      <div className="card wide">
-        <h2>Cryptographic constants</h2>
+      <Card>
+        <CardHeader>
+          <CardTitle>Cryptographic constants</CardTitle>
+        </CardHeader>
+        <CardContent>
         {g.findcrypt?.length ? (
           <>
             <p className="note">
               Constant tables matching known cipher implementations. Their presence indicates the algorithm is compiled in; it does
               not by itself show the binary uses it maliciously. Addresses are file offsets, not virtual addresses.
             </p>
-            <div className="card__scroll">
+            <CardContent>
               <Table className="data-table">
                 <TableHeader>
                   <TableRow>
@@ -412,15 +428,19 @@ function OverviewPanel({ sha, g }: { sha: string; g: GhidraDoc }) {
                   ))}
                 </TableBody>
               </Table>
-            </div>
+            </CardContent>
           </>
         ) : (
           <p className="empty">No known cryptographic constants were found.</p>
         )}
-      </div>
+        </CardContent>
+      </Card>
 
-      <div className="card wide">
-        <h2>Fuzzy hashes</h2>
+      <Card>
+        <CardHeader>
+          <CardTitle>Fuzzy hashes</CardTitle>
+        </CardHeader>
+        <CardContent>
         {g.fuzzy_hashes ? (
           <>
             <p className="note">
@@ -444,10 +464,14 @@ function OverviewPanel({ sha, g }: { sha: string; g: GhidraDoc }) {
             this host.
           </p>
         )}
-      </div>
+        </CardContent>
+      </Card>
 
-      <div className="card wide">
-        <h2>Structural analysis</h2>
+      <Card>
+        <CardHeader>
+          <CardTitle>Structural analysis</CardTitle>
+        </CardHeader>
+        <CardContent>
         {g.lief ? (
           <>
             <p className="note">
@@ -476,10 +500,14 @@ function OverviewPanel({ sha, g }: { sha: string; g: GhidraDoc }) {
             lief did not recognise this file's format.
           </p>
         )}
-      </div>
+        </CardContent>
+      </Card>
 
-      <div className="card wide">
-        <h2>Capabilities (capa)</h2>
+      <Card>
+        <CardHeader>
+          <CardTitle>Capabilities (capa)</CardTitle>
+        </CardHeader>
+        <CardContent>
         {g.capa ? (
           g.capa.unsupported ? (
             <p className="empty">
@@ -501,11 +529,11 @@ function OverviewPanel({ sha, g }: { sha: string; g: GhidraDoc }) {
                     {g.capa.capabilities.length} capabilit{g.capa.capabilities.length === 1 ? 'y' : 'ies'} matched
                     {g.capa.capabilities_truncated ? ' (truncated in this view)' : ''}.
                   </p>
-                  <div className="card__scroll" aria-label="Full capability list">
+                  <CardContent aria-label="Full capability list">
                     <pre className="code">
                       {g.capa.capabilities.map((c) => `${c.name}  [${c.namespace}]  matches=${c.matches}`).join('\n')}
                     </pre>
-                  </div>
+                  </CardContent>
                 </>
               ) : null}
               {g.capa.attack?.length ? (
@@ -544,10 +572,14 @@ function OverviewPanel({ sha, g }: { sha: string; g: GhidraDoc }) {
             architecture reports a distinct message instead of this one.
           </p>
         )}
-      </div>
+        </CardContent>
+      </Card>
 
-      <div className="card wide">
-        <h2>Obfuscated strings (floss)</h2>
+      <Card>
+        <CardHeader>
+          <CardTitle>Obfuscated strings (floss)</CardTitle>
+        </CardHeader>
+        <CardContent>
         {floss ? (
           floss.unsupported ? (
             <p className="empty">
@@ -566,7 +598,7 @@ function OverviewPanel({ sha, g }: { sha: string; g: GhidraDoc }) {
               <KV label="tight strings" value={floss.tight_strings_total ?? 0} />
               <KV label="static strings" value={floss.static_strings_total ?? 0} />
               {floss.truncated ? <p className="note">One or more of the lists above were truncated in this view.</p> : null}
-              <div className="card__scroll" aria-label="Recovered FLOSS strings">
+              <CardContent className="overflow-auto max-h-96" aria-label="Recovered FLOSS strings">
                 <h3>Decoded strings</h3>
                 <pre className="code">{(floss.decoded_strings ?? []).join('\n')}</pre>
                 <h3>Stack strings</h3>
@@ -575,7 +607,7 @@ function OverviewPanel({ sha, g }: { sha: string; g: GhidraDoc }) {
                 <pre className="code">{(floss.tight_strings ?? []).join('\n')}</pre>
                 <h3>Static strings</h3>
                 <pre className="code">{(floss.static_strings ?? []).join('\n')}</pre>
-              </div>
+              </CardContent>
             </>
           )
         ) : (
@@ -584,7 +616,8 @@ function OverviewPanel({ sha, g }: { sha: string; g: GhidraDoc }) {
             format reports a distinct message instead of this one.
           </p>
         )}
-      </div>
+        </CardContent>
+      </Card>
     </>
   )
 }
@@ -594,24 +627,31 @@ function CodePanel({ sha, g }: { sha: string; g: GhidraDoc }) {
   return (
     <>
       <SectionHeading title="What the code contains" sub="Recovered functions and the imported APIs they can reach." />
-      <div className="card wide">
-        <h2>Imports</h2>
+      <Card>
+        <CardHeader>
+          <CardTitle>Imports</CardTitle>
+        </CardHeader>
+        <CardContent>
         {g.imports?.length ? (
           <>
             <p className="note">
               {g.imports.length} imported symbol{g.imports.length === 1 ? '' : 's'}. What a binary imports bounds what it can do
               without further tricks.
             </p>
-            <div className="card__scroll" aria-label="Full import list">
+            <CardContent className="overflow-auto max-h-96" aria-label="Full import list">
               <pre className="code">{g.imports.join('\n')}</pre>
-            </div>
+            </CardContent>
           </>
         ) : (
           <p className="empty">No imports were recovered.</p>
         )}
-      </div>
-      <div className="card wide">
-        <h2>Interactive call graph</h2>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Interactive call graph</CardTitle>
+        </CardHeader>
+        <CardContent>
         {deepened > 0 ? (
           <>
             {/* GhidraCallGraph carries its own filter box and click-to-focus
@@ -629,9 +669,13 @@ function CodePanel({ sha, g }: { sha: string; g: GhidraDoc }) {
             function, or predates it.
           </p>
         )}
-      </div>
-      <div className="card wide">
-        <h2>Call graph (static image)</h2>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Call graph (static image)</CardTitle>
+        </CardHeader>
+        <CardContent>
         {g.call_graph_svg ? (
           <>
             <p className="note">
@@ -656,9 +700,13 @@ function CodePanel({ sha, g }: { sha: string; g: GhidraDoc }) {
             writes the raw <code>.dot</code> beside the result.
           </p>
         )}
-      </div>
-      <div className="card wide">
-        <h2>Functions</h2>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Functions</CardTitle>
+        </CardHeader>
+        <CardContent>
         {g.functions?.length ? (
           <>
             <p className="note">
@@ -670,7 +718,7 @@ function CodePanel({ sha, g }: { sha: string; g: GhidraDoc }) {
                 : ' — none were decompiled for this analysis'}
               .
             </p>
-            <div className="card__scroll" aria-label="Full function list">
+            <CardContent aria-label="Full function list">
               {g.functions.map((fn, index) => (
                 <div key={index}>
                   <pre className="code">
@@ -686,12 +734,13 @@ function CodePanel({ sha, g }: { sha: string; g: GhidraDoc }) {
                   {fn.pseudocode ? <pre className="code">{fn.pseudocode}</pre> : null}
                 </div>
               ))}
-            </div>
+            </CardContent>
           </>
         ) : (
           <p className="empty">No functions were recovered. For a packed or corrupt binary this is itself the finding.</p>
         )}
-      </div>
+        </CardContent>
+      </Card>
     </>
   )
 }
@@ -700,22 +749,26 @@ function DataPanel({ g }: { g: GhidraDoc }) {
   return (
     <>
       <SectionHeading title="What the code references" sub="The string table, which is where hostnames, paths, and commands usually surface." />
-      <div className="card wide">
-        <h2>Strings</h2>
+      <Card>
+        <CardHeader>
+          <CardTitle>Strings</CardTitle>
+        </CardHeader>
+        <CardContent>
         {g.strings?.length ? (
           <>
             <p className="note">
               {g.strings.length} extracted string{g.strings.length === 1 ? '' : 's'}. Strings come from the sample and are
               untrusted input: they are rendered as text and never as markup.
             </p>
-            <div className="card__scroll" aria-label="Full string table">
+            <CardContent className="overflow-auto max-h-96" aria-label="Full string table">
               <pre className="code">{g.strings.join('\n')}</pre>
-            </div>
+            </CardContent>
           </>
         ) : (
           <p className="empty">No strings were extracted.</p>
         )}
-      </div>
+        </CardContent>
+      </Card>
     </>
   )
 }
@@ -750,8 +803,11 @@ function IocCorrelationCard({ correlation }: { correlation: IocCorrelation | nul
   ]
   const count = (values: string[] | undefined) => (values ?? []).length
   return (
-    <div className="card wide">
-      <h2>Floss / Windows-sandbox IOC correlation</h2>
+    <Card>
+      <CardHeader>
+        <CardTitle>Floss / Windows-sandbox IOC correlation</CardTitle>
+      </CardHeader>
+      <CardContent>
       {!correlation?.has_sandbox_run ? (
         <p className="empty">
           No Windows-sandbox run exists yet for this SHA-256 — nothing to correlate floss&apos;s decoded strings against.
@@ -774,7 +830,7 @@ function IocCorrelationCard({ correlation }: { correlation: IocCorrelation | nul
             runtime&rdquo; is the strongest signal here: a value floss decoded from the binary that a sandbox run also
             actually observed happening.
           </p>
-          <div className="card__scroll">
+          <CardContent className="overflow-auto max-h-96">
             <Table className="data-table">
               <TableHeader>
                 <TableRow>
@@ -797,22 +853,23 @@ function IocCorrelationCard({ correlation }: { correlation: IocCorrelation | nul
                 ))}
               </TableBody>
             </Table>
-          </div>
+          </CardContent>
           <p className="note">
             UNC/SMB paths have no dynamic counterpart — the sandbox&apos;s own parsers have no SMB/UNC observation path,
             only the static binary scan does.
           </p>
-          <div className="card__scroll" aria-label="Full IOC correlation lists">
+          <CardContent className="overflow-auto max-h-96" aria-label="Full IOC correlation lists">
             {rows.map((row) => (
               <div key={row.label}>
                 <h3>{row.label}</h3>
                 <IocEvidence kind={row.kind} />
               </div>
             ))}
-          </div>
+          </CardContent>
         </>
       )}
-    </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -826,12 +883,15 @@ function DeepDivePanel({ g, correlation }: { g: GhidraDoc; correlation: IocCorre
         sub="Everything the Ghidra REST v1 surface recovered beyond the functions/imports/strings above: recovered types, non-string globals, any analyst annotations, and the program's memory layout."
       />
       <IocCorrelationCard correlation={correlation} />
-      <div className="card wide">
-        <h2>Recovered types</h2>
+      <Card>
+        <CardHeader>
+          <CardTitle>Recovered types</CardTitle>
+        </CardHeader>
+        <CardContent>
         {g.types?.length ? (
           <>
             <p className="note">{g.types.length} struct/union/enum/typedef recovered from the program's own type database.</p>
-            <div className="card__scroll" aria-label="Full type list">
+            <CardContent className="overflow-auto max-h-96" aria-label="Full type list">
               <pre className="code">
                 {g.types
                   .map((type) =>
@@ -843,7 +903,7 @@ function DeepDivePanel({ g, correlation }: { g: GhidraDoc; correlation: IocCorre
                   )
                   .join('\n')}
               </pre>
-            </div>
+            </CardContent>
           </>
         ) : (
           <p className="empty">
@@ -851,25 +911,33 @@ function DeepDivePanel({ g, correlation }: { g: GhidraDoc; correlation: IocCorre
             the deep-dive worker (#1167).
           </p>
         )}
-      </div>
-      <div className="card wide">
-        <h2>Globals</h2>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Globals</CardTitle>
+        </CardHeader>
+        <CardContent>
         {g.globals?.length ? (
           <>
             <p className="note">
               {g.globals.length} non-string global data symbol{g.globals.length === 1 ? '' : 's'}. Distinct from the string table —
               these are named/typed data locations, not text.
             </p>
-            <div className="card__scroll" aria-label="Full globals list">
+            <CardContent className="overflow-auto max-h-96" aria-label="Full globals list">
               <pre className="code">{g.globals.map((global) => `${global.addr}  ${global.name}  ${global.type}  size=${global.size}`).join('\n')}</pre>
-            </div>
+            </CardContent>
           </>
         ) : (
           <p className="empty">No globals were recovered.</p>
         )}
-      </div>
-      <div className="card wide">
-        <h2>Annotations</h2>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Annotations</CardTitle>
+        </CardHeader>
+        <CardContent>
         {g.annotations ? (
           Object.keys(g.annotations.entries ?? {}).length ? (
             <>
@@ -878,7 +946,7 @@ function DeepDivePanel({ g, correlation }: { g: GhidraDoc; correlation: IocCorre
                 {Object.keys(g.annotations.entries ?? {}).length === 1 ? '' : 's'} (revision {g.annotations.revision}), written
                 through the analysis workbench and mirrored here read-only.
               </p>
-              <div className="card__scroll" aria-label="Full annotation list">
+              <CardContent aria-label="Full annotation list">
                 <pre className="code">
                   {Object.entries(g.annotations.entries ?? {})
                     .map(([addr, entry]) =>
@@ -890,7 +958,7 @@ function DeepDivePanel({ g, correlation }: { g: GhidraDoc; correlation: IocCorre
                     )
                     .join('\n')}
                 </pre>
-              </div>
+              </CardContent>
             </>
           ) : (
             <p className="empty">No annotations have been added for this analysis yet.</p>
@@ -901,16 +969,20 @@ function DeepDivePanel({ g, correlation }: { g: GhidraDoc; correlation: IocCorre
             store was unreachable when it ran.
           </p>
         )}
-      </div>
-      <div className="card wide">
-        <h2>Memory map</h2>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Memory map</CardTitle>
+        </CardHeader>
+        <CardContent>
         {g.memory_map?.length ? (
           <>
             <p className="note">
               {g.memory_map.length} initialized memory block{g.memory_map.length === 1 ? '' : 's'}, each with a bounded preview of
               its opening bytes.
             </p>
-            <div className="card__scroll" aria-label="Memory map">
+            <CardContent className="overflow-auto max-h-96" aria-label="Memory map">
               <pre className="code">
                 {g.memory_map
                   .map((block) =>
@@ -921,7 +993,7 @@ function DeepDivePanel({ g, correlation }: { g: GhidraDoc; correlation: IocCorre
                   )
                   .join('\n')}
               </pre>
-            </div>
+            </CardContent>
           </>
         ) : (
           <p className="empty">
@@ -929,9 +1001,13 @@ function DeepDivePanel({ g, correlation }: { g: GhidraDoc; correlation: IocCorre
             initialized memory blocks within the export budget.
           </p>
         )}
-      </div>
-      <div className="card wide">
-        <h2>Chat threads</h2>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Chat threads</CardTitle>
+        </CardHeader>
+        <CardContent>
         {chat ? (
           <>
             <p className="note">
@@ -940,7 +1016,7 @@ function DeepDivePanel({ g, correlation }: { g: GhidraDoc; correlation: IocCorre
               mirrored from the currently-active thread — the analyst's actual back-and-forth with the RevDeck assistant, distinct
               from the one-shot triage answer above.
             </p>
-            <div className="card__scroll" aria-label="Chat history">
+            <CardContent aria-label="Chat history">
               <h3>Threads</h3>
               <pre className="code">
                 {(chat.threads ?? [])
@@ -968,7 +1044,7 @@ function DeepDivePanel({ g, correlation }: { g: GhidraDoc; correlation: IocCorre
                   </div>
                 ))}
               </div>
-            </div>
+            </CardContent>
           </>
         ) : (
           <p className="empty">
@@ -976,18 +1052,22 @@ function DeepDivePanel({ g, correlation }: { g: GhidraDoc; correlation: IocCorre
             itself never completed, or no analyst has opened a chat session for this job yet.
           </p>
         )}
-      </div>
-      <div className="card wide">
-        <h2>Symbol recovery</h2>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Symbol recovery</CardTitle>
+        </CardHeader>
+        <CardContent>
         {recovery ? (
           <>
             <p className="note">
               RevDeck's own symbol/type-recovery model for this job — recovered function names, renamed symbols, and
               class/type-layout candidates, distinct from the Ghidra-native types/globals above.
             </p>
-            <div className="card__scroll" aria-label="Symbol recovery data">
+            <CardContent className="overflow-auto max-h-96" aria-label="Symbol recovery data">
               <pre className="code">{`--- index ---\n${rawText(recovery.index)}\n\n--- symbols ---\n${rawText(recovery.symbols)}`}</pre>
-            </div>
+            </CardContent>
           </>
         ) : (
           <p className="empty">
@@ -995,7 +1075,8 @@ function DeepDivePanel({ g, correlation }: { g: GhidraDoc; correlation: IocCorre
             the triage chat itself never completed.
           </p>
         )}
-      </div>
+        </CardContent>
+      </Card>
     </>
   )
 }
@@ -1103,11 +1184,13 @@ function GhidraDetail() {
       />
 
       {doc === null ? (
-        <div className="card wide">
-          <span className="skeleton-line" aria-hidden="true" />
-          <span className="skeleton-line" aria-hidden="true" />
-          <span className="skeleton-line" aria-hidden="true" />
-        </div>
+        <Card>
+          <CardContent>
+            <span className="skeleton-line" aria-hidden="true" />
+            <span className="skeleton-line" aria-hidden="true" />
+            <span className="skeleton-line" aria-hidden="true" />
+          </CardContent>
+        </Card>
       ) : (
         <>
           {queued ? (
@@ -1170,16 +1253,22 @@ function GhidraDetail() {
               <DeepDivePanel g={g} correlation={correlation} />
             </TabsContent>
             <TabsContent value="raw">
-              <div className="card wide">
-                <h2>Report artifacts</h2>
-                <ArtifactList kind="ghidra" artifactKey={sha} />
-              </div>
-              <div className="card wide">
-                <h2>Analysis record</h2>
-                <div className="card__scroll">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Report artifacts</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ArtifactList kind="ghidra" artifactKey={sha} />
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Analysis record</CardTitle>
+                </CardHeader>
+                <CardContent className="overflow-auto max-h-96">
                   <pre className="code">{JSON.stringify(doc, null, 2)}</pre>
-                </div>
-              </div>
+                </CardContent>
+              </Card>
             </TabsContent>
           </Tabs>
         </>

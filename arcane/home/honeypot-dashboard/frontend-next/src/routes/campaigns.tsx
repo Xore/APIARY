@@ -9,6 +9,7 @@ import { ErrorStateBlock } from '../components/ErrorState'
 import { formatTimestamp } from '../lib/time'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 import { Badge } from '../components/ui/badge'
+import { Card } from '../components/ui/card'
 
 type CampaignRow = {
   cidr: string
@@ -85,7 +86,7 @@ function CredReuseCard({ edges }: { edges: CredEdge[] | null }) {
   // renders unconditionally; an unusable value renders nothing.
   if (!Array.isArray(edges) || edges.length === 0) return null
   return (
-    <div className="card wide">
+    <Card>
       <h2>Reused credentials</h2>
       <p className="note">
         Username/password pairs tried by 2 or more distinct source IPs — the shared-wordlist signal that survives
@@ -117,7 +118,7 @@ function CredReuseCard({ edges }: { edges: CredEdge[] | null }) {
           ))}
         </TableBody>
       </Table>
-    </div>
+    </Card>
   )
 }
 

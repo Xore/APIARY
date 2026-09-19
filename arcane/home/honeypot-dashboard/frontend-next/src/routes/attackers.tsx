@@ -110,7 +110,7 @@ const COLUMNS: Column<AttackerRow>[] = [
   },
 ]
 
-// One bounded evidence list of the dossier (attackers.html's card__scroll
+// One bounded evidence list of the dossier (attackers.html's scrolling card
 // regions): every recorded value rendered, or the field's own "no X
 // recorded" line so an empty field reads as evidence of absence.
 function EvidenceList<T>({

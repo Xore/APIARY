@@ -10,6 +10,7 @@ import { EChart } from '../components/EChart'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { InvestigateHeader } from '../components/Investigate'
 import { Badge } from '../components/ui/badge'
+import { Card } from '../components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 import { useLiveInterval } from '../lib/live'
 
@@ -203,7 +204,7 @@ function TopologyPage() {
       </div>
       {/* The DAG is drawn once from static config; stage liveness lives in
           the sections below where it can carry a verdict, not just a node. */}
-      <div className="card wide">
+      <Card>
         {/* #2130: the full ingestion DAG does not fit a card legibly —
             zoomable gives it wheel/buttons for magnification, drag-to-pan
             on the canvas itself, and draggable nodes. */}
@@ -213,7 +214,7 @@ function TopologyPage() {
           already-captured logs keep indexing from disk. Canarytokens is drawn deliberately off the Filebeat artery — its
           triggers come back through the HTTP switchboard into the adapter's own index.
         </p>
-      </div>
+      </Card>
 
       <div className="section-heading">
         <div>
@@ -221,7 +222,7 @@ function TopologyPage() {
           <p>Per sensor: the ports an attacker can reach, the path they arrive by, and whether the sensor is still feeding.</p>
         </div>
       </div>
-      <div className="card wide">
+      <Card>
         <Table className="data-table">
           <TableHeader>
             <TableRow>
@@ -266,7 +267,7 @@ function TopologyPage() {
           </TableBody>
         </Table>
         <p className="note">+PROXY means the upstream appends PROXY protocol v1 — those are the sensors that can see a real client address.</p>
-      </div>
+      </Card>
 
       <div className="section-heading">
         <div>
@@ -276,14 +277,14 @@ function TopologyPage() {
       </div>
       <div className="hp-flow--loose">
         {(topology?.stacks ?? []).map((stack) => (
-          <div className="card half" key={stack.stack}>
+          <Card className="sm:w-1/2 w-full" key={stack.stack}>
             <h2>{stack.stack}</h2>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' }}>
               {stack.containers.map((container) => (
                 <span key={container.name}>{containerBadge(containers.get(container.name), container.adapter_visible)}</span>
               ))}
             </div>
-          </div>
+          </Card>
         ))}
       </div>
       {topology && containers.size === 0 ? (

@@ -2685,31 +2685,31 @@ export function SettingsSurface({
               Password, passkeys, two-factor authentication, and sessions are managed by Keycloak. These protected pages open
               in a new tab and are never embedded.
             </p>
-            <div className="card__row">
+            <div className="flex items-center justify-between">
               <div>
-                <div className="card__label">Profile &amp; password</div>
-                <div className="card__value">Account details, password change, and recovery email.</div>
+                <div className="text-sm font-medium text-muted-foreground">Profile &amp; password</div>
+                <div className="text-lg font-semibold">Account details, password change, and recovery email.</div>
               </div>
               <Button asChild variant="secondary" size="sm"><a href={accountActions.profile} target="_blank" rel="noopener noreferrer">Open</a></Button>
             </div>
-            <div className="card__row">
+            <div className="flex items-center justify-between">
               <div>
-                <div className="card__label">Passkeys &amp; two-factor authentication</div>
-                <div className="card__value">Register hardware keys, authenticator apps, and WebAuthn credentials.</div>
+                <div className="text-sm font-medium text-muted-foreground">Passkeys &amp; two-factor authentication</div>
+                <div className="text-lg font-semibold">Register hardware keys, authenticator apps, and WebAuthn credentials.</div>
               </div>
               <Button asChild variant="secondary" size="sm"><a href={accountActions.security} target="_blank" rel="noopener noreferrer">Open</a></Button>
             </div>
-            <div className="card__row">
+            <div className="flex items-center justify-between">
               <div>
-                <div className="card__label">Sessions &amp; devices</div>
-                <div className="card__value">Active sessions and trusted devices; revoke any of them.</div>
+                <div className="text-sm font-medium text-muted-foreground">Sessions &amp; devices</div>
+                <div className="text-lg font-semibold">Active sessions and trusted devices; revoke any of them.</div>
               </div>
               <Button asChild variant="secondary" size="sm"><a href={accountActions.sessions} target="_blank" rel="noopener noreferrer">Open</a></Button>
             </div>
-            <div className="card__row">
+            <div className="flex items-center justify-between">
               <div>
-                <div className="card__label">Security settings</div>
-                <div className="card__value">Open the Keycloak Account Console in a new tab.</div>
+                <div className="text-sm font-medium text-muted-foreground">Security settings</div>
+                <div className="text-lg font-semibold">Open the Keycloak Account Console in a new tab.</div>
               </div>
               <Button asChild variant="secondary" size="sm"><a href={accountActions.manageAccount} target="_blank" rel="noopener noreferrer">Manage account</a></Button>
             </div>
@@ -2990,17 +2990,17 @@ export function SettingsSurface({
                           The resulting artifact is yours to plant anywhere — an email, a fileshare, a USB drive. It phones home
                           the instant it's opened, wherever that is.
                         </p>
-                        <div className="card__row">
+                        <div className="flex items-center justify-between">
                           <div>
-                            <div className="card__label">Canarytokens</div>
-                            <div className="card__value">Create tokens and re-download previously created artifacts.</div>
+                            <div className="text-sm font-medium text-muted-foreground">Canarytokens</div>
+                            <div className="text-lg font-semibold">Create tokens and re-download previously created artifacts.</div>
                           </div>
                           <Button asChild variant="secondary" size="sm"><Link to="/canarytokens">Open full page {'→'}</Link></Button>
                         </div>
-                        <div className="card__row">
+                        <div className="flex items-center justify-between">
                           <div>
-                            <div className="card__label">Planted credentials</div>
-                            <div className="card__value">
+                            <div className="text-sm font-medium text-muted-foreground">Planted credentials</div>
+                            <div className="text-lg font-semibold">
                               Bait usernames and passwords implanted into honeypot filesystems, optionally linked to a
                               canarytoken.
                             </div>
@@ -3022,10 +3022,10 @@ export function SettingsSurface({
                         <p className="note">
                           Documents Elasticsearch rejected, with their original error and field shape for remediation.
                         </p>
-                        <div className="card__row">
+                        <div className="flex items-center justify-between">
                           <div>
-                            <div className="card__label">Dead letters</div>
-                            <div className="card__value">List, search, and purge rejected documents.</div>
+                            <div className="text-sm font-medium text-muted-foreground">Dead letters</div>
+                            <div className="text-lg font-semibold">List, search, and purge rejected documents.</div>
                           </div>
                           <Button asChild variant="secondary" size="sm"><Link to="/dead-letters">Open full page {'→'}</Link></Button>
                         </div>

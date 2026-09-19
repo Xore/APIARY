@@ -17,6 +17,7 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useRef, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
+import { Card } from '../components/ui/card'
 import { applyNoVncTheme } from '../lib/novncTheme'
 import { useAppearanceKey } from '../lib/prefs'
 
@@ -88,7 +89,7 @@ function VncViewer({ bridgeWs }: { bridgeWs: string }) {
   }, [bridgeWs])
 
   return (
-    <div ref={hostRef} className="card wide" data-vnc-state={state}>
+    <Card ref={hostRef} data-vnc-state={state}>
       <div className="hp-vnc-status" role="status">
         {message}
       </div>
@@ -97,7 +98,7 @@ function VncViewer({ bridgeWs }: { bridgeWs: string }) {
           {state === 'connecting' ? <span className="skeleton-line" aria-hidden="true" /> : null}
         </div>
       </div>
-    </div>
+    </Card>
   )
 }
 
@@ -152,13 +153,13 @@ function SandboxVnc() {
         }
       />
       {status === 'loading' ? (
-        <div className="card wide">
+        <Card>
           <span className="skeleton-line" aria-hidden="true" />
-        </div>
+        </Card>
       ) : status === 'error' ? (
-        <div className="card wide">
+        <Card>
           <p className="empty">{error}</p>
-        </div>
+        </Card>
       ) : (
         <VncViewer bridgeWs={status.bridge_ws} />
       )}
