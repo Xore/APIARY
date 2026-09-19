@@ -1191,13 +1191,11 @@ function PayloadAnalysis() {
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium text-muted-foreground">family</span>
                       <span className="text-lg font-semibold">
-                        <Link
-                          className="lnk"
-                          to={`/events?q=${encodeURIComponent(correlation.github.family)}` as string}
+                        <a className="lnk" href={`/events?q=${encodeURIComponent(correlation.github.family)}`}
                           title="Other sessions that delivered this family"
                         >
                           {correlation.github.family}
-                        </Link>
+                        </a>
                       </span>
                     </div>
                   ) : null}
