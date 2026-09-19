@@ -7,13 +7,22 @@ import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { FiltersButton, FiltersModal } from '../components/FiltersModal'
-import { SkeletonRows } from '../components/Investigate'
+import { InvestigateHeader, SkeletonRows } from '../components/Investigate'
 import { RowActions, RowIcons } from '../components/RowActions'
+import { Badge, badgeVariants } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
+import { Checkbox } from '../components/ui/checkbox'
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '../components/ui/empty'
+import { Field, FieldLabel } from '../components/ui/field'
+import { Input } from '../components/ui/input'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 import { copyWithFlash } from '../lib/flash'
 import { subscribeLiveEvents, useLiveState } from '../lib/live'
 import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
 import { countryName } from '../lib/country'
+import { Download, FilterX, Search } from 'lucide-react'
 
 /** Detail-pane pivot groups, extracted server-side (events.rs) so this
  * page never re-derives per-sensor field naming. Empty string = absent. */
@@ -501,17 +510,11 @@ function Events() {
   const open = selectedRow !== null
   return (
     <>
-      <header className="overview-header">
-        <div>
-          <div className="label-section">Investigate</div>
-          <h1>Event explorer</h1>
-          <p className="subtitle">Every normalized event across all sensors — pivot on any value, or export the exact filtered scope.</p>
-        </div>
-      </header>
-      <div className="filters">
-        <span className="chip">{total.toLocaleString('en-US')} events</span>
-        <button
-          className={live ? 'chip is-active' : 'chip'}
+      <InvestigateHeader label="Investigate" title="Event explorer" subtitle="Every normalized event across all sensors — pivot on any value, or export the exact filtered scope." />
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <Badge variant="outline">{total.toLocaleString('en-US')} events</Badge>
+        <Button
+          variant={live ? 'default' : 'outline'} size="sm"
           type="button"
           aria-pressed={live}
           title={
@@ -524,41 +527,40 @@ function Events() {
           onClick={() => setLivePreferred((current) => !current)}
         >
           {live ? '● live' : '○ paused'}
-        </button>
+        </Button>
         <FiltersButton activeCount={baseFilterCount} onClick={() => setFiltersOpen(true)} />
         {/* Link-borne pivot scopes render as removable chips — there is no
             manual control for them, so without a chip an operator can't
             see or clear the scope they arrived with. */}
         {PIVOT_KEYS.filter((key) => search[key]).map((key) => (
-          <button
+          <Button
             key={key}
-            className="chip is-active"
+            variant="secondary" size="sm"
             type="button"
             title={`Remove the ${key} scope`}
             onClick={() => setFilter(key, '')}
           >
             {key}: {(search[key] as string).length > 40 ? `${(search[key] as string).slice(0, 37)}…` : search[key]} ×
-          </button>
+          </Button>
         ))}
         {fingerprintIps && fingerprintIps.length >= 2 ? (
           <IsolateIpMenu ips={fingerprintIps} onApply={(value) => setFilter('ips', value)} />
         ) : null}
         {filtersActive ? (
-          <button className="chip" type="button" onClick={() => void navigate({ search: {} })}>
+          <Button variant="outline" size="sm" type="button" onClick={() => void navigate({ search: {} })}>
             × clear filters
-          </button>
+          </Button>
         ) : null}
-        <a
-          className="chip"
+        <Button asChild variant="outline" size="sm"><a
           title="Download every event matching the current filter scope as CSV — not just the rows loaded here"
           href={`/api/export/events.csv?${new URLSearchParams(
             Object.fromEntries(Object.entries(search).filter(([, value]) => value !== undefined)) as Record<string, string>,
           ).toString()}`}
         >
-          ⇩ CSV
-        </a>
-        <button
-          className="chip"
+          <Download />CSV
+        </a></Button>
+        <Button
+          variant="outline" size="sm"
           type="button"
           disabled={!rows || rows.length === 0}
           title="Download the currently loaded rows' full records as JSON"
@@ -574,8 +576,8 @@ function Events() {
             URL.revokeObjectURL(url)
           }}
         >
-          ⇩ JSON
-        </button>
+          <Download />JSON
+        </Button>
       </div>
       {filtersOpen ? (
         <FiltersModal
@@ -611,12 +613,7 @@ function Events() {
           }}
           clearDisabled={baseFilterCount === 0}
         >
-          <div className="settings-field">
-            <label className="form-label" htmlFor="hp-ev-filter-ip">
-              Source IP
-            </label>
-            <input className="form-input" id="hp-ev-filter-ip" name="ip" type="search" defaultValue={search.ip ?? ''} />
-          </div>
+          <Field><FieldLabel htmlFor="hp-ev-filter-ip">Source IP</FieldLabel><Input id="hp-ev-filter-ip" name="ip" type="search" defaultValue={search.ip ?? ''} /></Field>
           {(
             [
               ['sensor', 'Sensor', values?.sensors],
@@ -627,26 +624,11 @@ function Events() {
               ['kind', 'Kind', values?.kinds],
             ] as const
           ).map(([key, label, options]) => (
-            <div className="settings-field" key={key}>
-              <label className="form-label" htmlFor={`hp-ev-filter-${key}`}>
-                {label}
-              </label>
-              <select className="form-input" id={`hp-ev-filter-${key}`} name={key} defaultValue={(search[key] as string | undefined) ?? ''}>
-                <option value="">all</option>
-                {(options ?? []).map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <Field key={key}><FieldLabel htmlFor={`hp-ev-filter-${key}`}>{label}</FieldLabel><Input id={`hp-ev-filter-${key}`} name={key} defaultValue={(search[key] as string | undefined) ?? ''} list={`hp-ev-${key}-values`} placeholder="all" /><datalist id={`hp-ev-${key}-values`}>{(options ?? []).map((option) => <option key={option} value={option} />)}</datalist></Field>
           ))}
-          <div className="settings-field">
-            <label className="form-label" htmlFor="hp-ev-filter-since">
-              Since
-            </label>
-            <input
-              className="form-input"
+          <Field>
+            <FieldLabel htmlFor="hp-ev-filter-since">Since</FieldLabel>
+            <Input
               id="hp-ev-filter-since"
               name="since"
               type="text"
@@ -660,24 +642,15 @@ function Events() {
                 </option>
               ))}
             </datalist>
-          </div>
+          </Field>
         </FiltersModal>
       ) : null}
       <div className={open ? 'hp-md hp-md--active hp-md--open wide' : 'hp-md hp-md--active wide'} id="events-grid">
         <div className="hp-md__list" ref={listRef}>
-          <div className="card wide">
-            <table className="recent data-table data-table--responsive">
-              <thead>
-                <tr>
-                  <th>time</th>
-                  <th>sensor</th>
-                  <th>source ip</th>
-                  <th>port</th>
-                  <th>detail</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
+          <Card className="min-w-0 overflow-hidden">
+            <Table className="min-w-[760px]">
+              <TableHeader><TableRow><TableHead>time</TableHead><TableHead>sensor</TableHead><TableHead>source ip</TableHead><TableHead>port</TableHead><TableHead>detail</TableHead><TableHead><span className="sr-only">actions</span></TableHead></TableRow></TableHeader>
+              <TableBody>
                 {keyedRows === null ? (
                   /* Ghosts mirror the six real columns (#1967): time short,
                      sensor short, source ip long, port short, detail long,
@@ -700,31 +673,13 @@ function Events() {
                 {loadingMore ? (
                   <SkeletonRows count={Math.min(25, Math.max(1, total - (rows?.length ?? 0)))} cols={6} wide={[2, 4]} stub={[5]} />
                 ) : null}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
             {rows !== null && rows.length === 0 ? (
               /* Design refresh pick 8B (events.html:129-134): a zero-match
                  filter scope gets an explanation and a way out, never a
                  silent empty table. */
-              <div className="empty-state">
-                <div>
-                  <div className="empty-state__icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <circle cx="11" cy="11" r="7" />
-                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                    </svg>
-                  </div>
-                  <div className="empty-state__title">No events match this filter</div>
-                  <p className="empty-state__hint">Loosen a filter chip above, or widen the time window.</p>
-                  <button className="empty-state__action" type="button" onClick={() => void navigate({ search: {} })}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-                      <line x1="2" y1="21" x2="22" y2="17" />
-                    </svg>
-                    Clear filters
-                  </button>
-                </div>
-              </div>
+              <Empty><EmptyHeader><EmptyMedia variant="icon"><Search /></EmptyMedia><EmptyTitle>No events match this filter</EmptyTitle><EmptyDescription>Loosen a filter chip above, or widen the time window.</EmptyDescription></EmptyHeader><Button variant="outline" size="sm" type="button" onClick={() => void navigate({ search: {} })}><FilterX />Clear filters</Button></Empty>
             ) : null}
             {rows === null && failed ? (
               /* #2178: the load failure itself — named here, beside the same
@@ -736,25 +691,25 @@ function Events() {
               />
             ) : null}
             {rows !== null && rows.length < total ? (
-              <div className="hp-lazy-controls" aria-live="polite">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t p-4 text-sm text-muted-foreground" aria-live="polite">
                 <span>
                   {rows.length.toLocaleString('en-US')} of {total.toLocaleString('en-US')} entries
                 </span>
-                <button className="btn btn-secondary btn-sm" type="button" onClick={viewMore} disabled={loadingMore}>
+                <Button variant="secondary" size="sm" type="button" onClick={viewMore} disabled={loadingMore}>
                   View more
-                </button>
+                </Button>
               </div>
             ) : null}
-          </div>
+          </Card>
         </div>
         <div className="hp-md__pane" ref={paneRef}>
           {open && selectedRow ? (
-            <div className="card">
-              <button className="hp-md__close" type="button" aria-label="Close details" title="Close details" onClick={() => setSelectedKey(null)}>
+            <Card className="relative">
+              <Button className="absolute right-3 top-3" variant="ghost" size="icon" type="button" aria-label="Close details" title="Close details" onClick={() => setSelectedKey(null)}>
                 ×
-              </button>
-              <h2>Normalized event</h2>
-              <p className="note">Complete read-only record as stored by the pipeline.</p>
+              </Button>
+              <CardHeader><CardTitle><h2>Normalized event</h2></CardTitle><CardDescription>Complete read-only record as stored by the pipeline.</CardDescription></CardHeader>
+              <CardContent className="space-y-4">
               {/* These two pages render an event's context far more fully
                   than the inspector's own record dump. They were here as
                   inline `.lnk` text and read as footnotes; as buttons they
@@ -762,32 +717,31 @@ function Events() {
                   address and session id stay in the tooltips (and in the
                   table column and EventMeta below) so nothing is lost. */}
               {selectedRow.src_ip || selectedRow.session ? (
-                <div className="filters">
+                <div className="flex flex-wrap gap-2">
                   {selectedRow.src_ip ? (
-                    <a
-                      className="btn btn-sm btn-secondary"
+                    <Button asChild variant="secondary" size="sm"><a
                       href={`/investigate/ip/${encodeURIComponent(selectedRow.src_ip)}`}
                       title={`attacker profile for ${selectedRow.src_ip}`}
                     >
                       Open attacker profile →
-                    </a>
+                    </a></Button>
                   ) : null}
                   {selectedRow.session ? (
-                    <a
-                      className="btn btn-sm btn-secondary sess"
+                    <Button asChild variant="secondary" size="sm"><a
                       href={`/sessions/${encodeURIComponent(selectedRow.session)}`}
                       title={`replay session ${selectedRow.session}`}
                     >
                       Open session replay →
-                    </a>
+                    </a></Button>
                   ) : null}
                 </div>
               ) : null}
               <EventMeta row={selectedRow} onPivot={setFilter} />
-              <div className="card__scroll">
-                <pre className="code">{JSON.stringify(selectedRow.record, null, 2)}</pre>
+              <div className="max-h-[32rem] overflow-auto rounded-md bg-muted p-3">
+                <pre className="whitespace-pre-wrap break-all font-mono text-xs">{JSON.stringify(selectedRow.record, null, 2)}</pre>
               </div>
-            </div>
+              </CardContent>
+            </Card>
           ) : null}
         </div>
       </div>
@@ -810,57 +764,45 @@ function IsolateIpMenu({ ips, onApply }: { ips: CorrelatedIp[]; onApply: (value:
   const [pending, setPending] = useState<Set<string>>(() => new Set(ips.filter((entry) => entry.checked).map((entry) => entry.ip)))
   const anyUnchecked = ips.some((entry) => !pending.has(entry.ip))
   return (
-    <details className="hp-open-in action-menu">
-      <summary title="Check or uncheck IPs to isolate one attacker among several sharing this fingerprint">
+    <details className="relative">
+      <summary className="cursor-pointer rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium shadow-sm" title="Check or uncheck IPs to isolate one attacker among several sharing this fingerprint">
         Isolate IP…
       </summary>
-      <div className="dropdown hp-open-in-menu hp-ip-filter-menu" role="menu">
-        <div className="hp-open-in-heading">
-          IPs behind this fingerprint <span className="text-muted">({pending.size}/{ips.length})</span>
+      <Card className="absolute left-0 top-full z-50 mt-2 w-80 max-w-[calc(100vw-2rem)]" role="menu">
+        <CardHeader className="pb-3"><CardTitle className="text-sm">IPs behind this fingerprint <span className="text-muted-foreground">({pending.size}/{ips.length})</span></CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" type="button" onClick={() => setPending(new Set(ips.map((entry) => entry.ip)))}>All</Button>
+          <Button variant="outline" size="sm" type="button" onClick={() => setPending(new Set())}>None</Button>
         </div>
-        <div className="hp-ip-filter-actions">
-          <button
-            className="btn btn-sm btn-secondary"
-            type="button"
-            onClick={() => setPending(new Set(ips.map((entry) => entry.ip)))}
-          >
-            All
-          </button>
-          <button className="btn btn-sm btn-secondary" type="button" onClick={() => setPending(new Set())}>
-            None
-          </button>
-        </div>
-        <div className="hp-ip-filter-list">
+        <div className="max-h-64 space-y-1 overflow-auto">
           {ips.map((entry) => (
-            <label key={entry.ip} className="hp-ip-filter-row">
-              <input
-                type="checkbox"
+            <label key={entry.ip} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted">
+              <Checkbox
                 checked={pending.has(entry.ip)}
-                onChange={(event) => {
+                onCheckedChange={(checked) => {
                   setPending((current) => {
                     const next = new Set(current)
-                    if (event.target.checked) next.add(entry.ip)
+                    if (checked) next.add(entry.ip)
                     else next.delete(entry.ip)
                     return next
                   })
                 }}
               />
-              <span className="mono hp-ip-filter-ip">{entry.ip}</span>
-              <span className="hp-ip-filter-count">{entry.count.toLocaleString('en-US')}</span>
+              <span className="min-w-0 flex-1 font-mono">{entry.ip}</span>
+              <Badge variant="secondary">{entry.count.toLocaleString('en-US')}</Badge>
             </label>
           ))}
         </div>
-        <div className="hp-ip-filter-actions">
-          <button
-            className="btn btn-sm btn-primary"
+        <div className="flex gap-2">
+          <Button size="sm"
             type="button"
             onClick={() => onApply(anyUnchecked ? Array.from(pending).join(',') : '')}
           >
             Apply
-          </button>
+          </Button>
           {ips.some((entry) => !entry.checked) || anyUnchecked ? (
-            <button
-              className="btn btn-sm btn-secondary"
+            <Button variant="secondary" size="sm"
               type="button"
               onClick={() => {
                 setPending(new Set(ips.map((entry) => entry.ip)))
@@ -868,10 +810,10 @@ function IsolateIpMenu({ ips, onApply }: { ips: CorrelatedIp[]; onApply: (value:
               }}
             >
               Reset
-            </button>
+            </Button>
           ) : null}
-        </div>
-      </div>
+        </div></CardContent>
+      </Card>
     </details>
   )
 }
@@ -881,18 +823,18 @@ function IsolateIpMenu({ ips, onApply }: { ips: CorrelatedIp[]; onApply: (value:
 // threat_intel.rs), which is the same field this pivot reads — so a
 // blocklisted or Tor-exit source already arrives here labelled, and only
 // the colouring was missing.
-function intelBadgeClass(label: string): string {
-  if (label.startsWith('blocklist:')) return 'badge--danger'
-  if (label === 'tor-exit') return 'badge--warning'
-  return 'badge--muted'
+function intelBadgeVariant(label: string): 'destructive' | 'default' | 'secondary' {
+  if (label.startsWith('blocklist:')) return 'destructive'
+  if (label === 'tor-exit') return 'default'
+  return 'secondary'
 }
 
 // Ported from dashboard/dnp3_severity.go's icsSeverityBadgeClass — the same
 // critical/high/muted vocabulary ml-anomalies and agent-campaigns use.
-function icsSeverityBadgeClass(severity: string): string {
-  if (severity === 'critical') return 'badge--danger'
-  if (severity === 'high') return 'badge--warning'
-  return 'badge--muted'
+function icsSeverityVariant(severity: string): 'destructive' | 'default' | 'secondary' {
+  if (severity === 'critical') return 'destructive'
+  if (severity === 'high') return 'default'
+  return 'secondary'
 }
 
 // `/tty-replay/<shasum>` -> `<shasum>`, empty for anything that does not
@@ -912,7 +854,7 @@ function EventMeta({
   const p = row.pivots
   const link = (key: keyof EventFilters, value: string, label: string, title: string) => (
     <a
-      className="lnk"
+      className="text-primary hover:underline"
       href={`/events?${key}=${encodeURIComponent(value)}`}
       title={title}
       onClick={(event) => {
@@ -929,7 +871,7 @@ function EventMeta({
   // more grey pivot link.
   const badgeLink = (key: keyof EventFilters, value: string, label: string, title: string) => (
     <a
-      className={`badge ${intelBadgeClass(value)}`}
+      className={badgeVariants({ variant: intelBadgeVariant(value) })}
       href={`/events?${key}=${encodeURIComponent(value)}`}
       title={title}
       onClick={(event) => {
@@ -955,7 +897,7 @@ function EventMeta({
       title: 'Pivot to every other event sharing this value',
       items: [
         row.session ? (
-          <a className="lnk sess" href={`/sessions/${encodeURIComponent(row.session)}`} title="replay the complete session">
+          <a className="text-primary hover:underline" href={`/sessions/${encodeURIComponent(row.session)}`} title="replay the complete session">
             session {row.session}
           </a>
         ) : null,
@@ -993,29 +935,31 @@ function EventMeta({
     },
   ]
   return (
-    <div className="eventmeta">
+    <div className="grid gap-2 sm:grid-cols-2">
       {groups.map((group) => {
         const items = group.items.filter(Boolean)
         if (items.length === 0) return null
         return (
-          <div className="eventmeta__group" key={group.label}>
-            <span className="eventmeta__label" title={group.title}>
+          <Card className="min-w-0 p-3 shadow-sm" key={group.label}>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground" title={group.title}>
               {group.label}
-            </span>
+            </h3>
+            <div className="flex min-w-0 flex-wrap gap-2 text-sm">
             {items.map((item, index) => (
               <span key={index}>{item}</span>
             ))}
-          </div>
+            </div>
+          </Card>
         )
       })}
       {p.tty_replay ? (
-        <div className="eventmeta__group">
-          <span className="eventmeta__label" title="Full replayable capture of this session">
+        <Card className="min-w-0 p-3 shadow-sm">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground" title="Full replayable capture of this session">
             recording
-          </span>
-          <a className="btn btn-secondary btn-sm" href={p.tty_replay} title="watch the session play back in-browser">
+          </h3>
+          <div className="flex flex-wrap gap-2"><Button asChild variant="secondary" size="sm"><a href={p.tty_replay} title="watch the session play back in-browser">
             view recording
-          </a>
+          </a></Button>
           {/* events.html:27 offered all three; the port kept only the
               viewer, so a session could be watched but never taken out of
               the dashboard. The shasum is the last segment of the replay
@@ -1024,23 +968,22 @@ function EventMeta({
               recording, not a captured payload. */}
           {recordingShasum(p.tty_replay) ? (
             <>
-              <a
-                className="btn btn-ghost btn-sm"
+              <Button asChild variant="ghost" size="sm"><a
                 href={`/api/recording/${encodeURIComponent(recordingShasum(p.tty_replay))}/cast`}
                 title="download as an asciinema-compatible .cast file"
               >
                 .cast
-              </a>
-              <a
-                className="btn btn-ghost btn-sm"
+              </a></Button>
+              <Button asChild variant="ghost" size="sm"><a
                 href={`/api/recording/${encodeURIComponent(recordingShasum(p.tty_replay))}/raw`}
                 title="download the raw cowrie TTY log"
               >
                 raw
-              </a>
+              </a></Button>
             </>
           ) : null}
-        </div>
+          </div>
+        </Card>
       ) : null}
       {/* #1898: the actions menu was here as well as on the row, so every
           action existed twice and the two could drift. The row strip is the
@@ -1089,17 +1032,15 @@ const FragmentRow = memo(function FragmentRow({
   return (
     <>
       {breakLabel ? (
-        <tr className="hp-feed-break" aria-hidden="true">
-          <td colSpan={6}>— {breakLabel} —</td>
-        </tr>
+        <TableRow className="bg-muted/40 hover:bg-muted/40" aria-hidden="true"><TableCell className="py-1 text-xs text-muted-foreground" colSpan={6}>— {breakLabel} —</TableCell></TableRow>
       ) : null}
-      <tr className={selected ? 'selected' : undefined} onClick={() => onToggle(key)}>
-        <td data-hp-time data-label="time">{formatTimestamp(row.time)}</td>
-        <td data-label="sensor">
+      <TableRow data-state={selected ? 'selected' : undefined} className="cursor-pointer" onClick={() => onToggle(key)}>
+        <TableCell data-hp-time data-label="time">{formatTimestamp(row.time)}</TableCell>
+        <TableCell data-label="sensor">
           {/* Per-sensor badge coloring (theme.css's b-{sensor} classes) +
               sensor pivot, events.html:11. */}
           <a
-            className={`badge b-${row.sensor}`}
+            className={badgeVariants({ variant: 'secondary' })}
             href={`/events?sensor=${encodeURIComponent(row.sensor)}`}
             onClick={(event) => {
               event.preventDefault()
@@ -1108,8 +1049,8 @@ const FragmentRow = memo(function FragmentRow({
           >
             {row.sensor}
           </a>
-        </td>
-        <td className="v" data-label="source ip">
+        </TableCell>
+        <TableCell data-label="source ip">
           {row.src_ip ? (
             <a
               href={`/events?ip=${encodeURIComponent(row.src_ip)}`}
@@ -1122,12 +1063,11 @@ const FragmentRow = memo(function FragmentRow({
               {row.src_ip}
             </a>
           ) : (
-            <span
-              className="badge badge--muted"
+            <Badge variant="secondary"
               title="This event reached the sensor over the WireGuard tunnel and could not be joined back to a real client address. The tunnel peer is our own VPS, so it is deliberately not shown as the source."
             >
               unattributed
-            </span>
+            </Badge>
           )}
           {/* #1876: two joins resolved this event to different addresses.
               The one shown is the connection-derived answer; this is what
@@ -1137,19 +1077,18 @@ const FragmentRow = memo(function FragmentRow({
           {row.src_ip_claimed ? (
             <>
               {' '}
-              <span
-                className="badge badge--warning"
+              <Badge
                 title={`This request also claimed to come from ${row.src_ip_claimed}, which disagrees with the address portbridge recorded for the connection. The connection is the stronger evidence, so it is the one shown; the claim is likely forged.`}
               >
                 claims {row.src_ip_claimed}
-              </span>
+              </Badge>
             </>
           ) : null}
           {row.country ? (
             <>
               {' '}
               <a
-                className="badge badge--info"
+                className={badgeVariants({ variant: 'outline' })}
                 title={countryName(row.country)}
                 href={`/events?country=${encodeURIComponent(row.country)}`}
                 onClick={(event) => {
@@ -1161,8 +1100,8 @@ const FragmentRow = memo(function FragmentRow({
               </a>
             </>
           ) : null}
-        </td>
-        <td className="n" data-label="port">
+        </TableCell>
+        <TableCell className="text-right tabular-nums" data-label="port">
           {row.port ? (
             <a
               href={`/events?port=${encodeURIComponent(row.port)}`}
@@ -1176,30 +1115,30 @@ const FragmentRow = memo(function FragmentRow({
           ) : (
             ''
           )}
-        </td>
-        <td className="v" data-label="detail">
+        </TableCell>
+        <TableCell data-label="detail">
           {row.pivots.ics_severity ? (
             <>
-              <span
-                className={`badge ${icsSeverityBadgeClass(row.pivots.ics_severity)}`}
+              <Badge
+                variant={icsSeverityVariant(row.pivots.ics_severity)}
                 title="DNP3 control-function severity: this app_function code changes equipment or device state"
               >
                 {row.pivots.ics_severity}
-              </span>{' '}
+              </Badge>{' '}
             </>
           ) : null}
           {row.pivots.payload_class ? (
             <>
-              <span
-                className="badge badge--info"
+              <Badge
+                variant="outline"
                 title="What this request carried, as opposed to what it asked for — the path is in the category column"
               >
                 {row.pivots.payload_class}
-              </span>{' '}
+              </Badge>{' '}
             </>
           ) : null}
           {row.detail || row.proto}
-        </td>
+        </TableCell>
         {/* Hover-revealed quick actions (design pick 14B, events.html:31-37).
             #1868: these were bare text -- `⧁`, `▶`, and an emoji `👤` --
             which rendered live as the literal string "⧁👤" and read as
@@ -1215,7 +1154,7 @@ const FragmentRow = memo(function FragmentRow({
             actions that were one click away were the least useful of the
             set. The disclosure stays -- it carries what each tool is for,
             which an icon cannot. */}
-        <td className="hp-row-actions-cell" data-label="">
+        <TableCell data-label="">
           <RowActions
             actions={[
               // First is what rests on screen, so it is the one an operator
@@ -1255,8 +1194,8 @@ const FragmentRow = memo(function FragmentRow({
               },
             ]}
           />
-        </td>
-      </tr>
+        </TableCell>
+      </TableRow>
     </>
   )
 })
