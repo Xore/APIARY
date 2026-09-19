@@ -20,6 +20,7 @@ import { cssVar as cssColor } from '../lib/cssVar'
 import { ErrorStateBlock } from './ErrorState'
 import { useServerQuery } from '../lib/useServerQuery'
 import { useAppearanceKey } from '../lib/prefs'
+import { Input } from './ui/input'
 
 type GraphNode = { id: string; label: string; kind: 'function' | 'leaf' }
 type GraphEdge = { source: string; target: string }
@@ -167,7 +168,7 @@ export function GhidraCallGraph({ sha }: { sha: string }) {
   return (
     <>
       <div className="filters hp-flow--tight">
-        <input
+        <Input
           className="form-input"
           type="search"
           placeholder="Filter by function name"
