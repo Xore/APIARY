@@ -1,21 +1,14 @@
-// The hover-revealed quick actions on a table row (#1868).
-//
-// These were bare text: `⧁` for copy, `▶` for replay, `👤` for the
-// attacker profile. `⧁` is not a copy symbol anyone recognises, and the
-// emoji renders in full colour at a different optical weight from every
-// other mark in the interface, so the strip read as unfinished next to the
-// SVG icons used everywhere else — live, it rendered as the literal string
-// "⧁👤".
-//
-// Two things follow from putting them here rather than inline. The actions
-// are drawn the same way on every surface that has them, instead of two
-// hand-rolled copies drifting apart. And each one carries a real
-// accessible name, which a lone glyph in a link never did.
-//
-// `.hp-row-actions` in the stylesheet already provides the 24x24 button
-// surface and the hover reveal; this is what goes inside it.
-import type React from 'react'
+// Shared row actions with accessible names and consistent SVG icons.
+import { Fragment, type ReactNode } from 'react'
 import { Button } from './ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu'
 
 const ICON_PROPS = {
   width: 14,
@@ -29,7 +22,7 @@ const ICON_PROPS = {
   'aria-hidden': true,
 } as const
 
-function Icon({ children }: { children: React.ReactNode }) {
+function Icon({ children }: { children: ReactNode }) {
   return <svg {...ICON_PROPS}>{children}</svg>
 }
 
@@ -138,7 +131,7 @@ export const RowIcons = {
 export type RowAction = {
   /** The accessible name. Also the tooltip — one label, one meaning. */
   label: string
-  icon: React.ReactNode
+  icon: ReactNode
   /** A link action. */
   href?: string
   /** A button action. */
@@ -153,41 +146,37 @@ export type RowAction = {
   danger?: boolean
 }
 
-/** A named set of actions that opens beside its own icon.
- *
- *  For a category rather than a single action -- "open in", with the
- *  external tools inside it. Its members appear next to the trigger when
- *  the pointer or focus arrives, so nothing is behind a click and nothing
- *  claims width it is not using. */
+/** A named set of related menu actions. */
 export type RowActionGroup = {
   label: string
-  icon: React.ReactNode
+  icon: ReactNode
   actions: (RowAction | null | undefined)[]
 }
 
 function Control({ action }: { action: RowAction }) {
-  const shared = {
-    title: action.label,
-    'aria-label': action.label,
-    ...(action.danger ? { className: 'hp-row-actions__danger' } : {}),
-  }
+  const className = action.danger ? 'text-destructive hover:text-destructive' : undefined
   return action.href ? (
-    <a
-      href={action.href}
-      {...shared}
-      {...(action.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
-      // The row itself opens the inspector; an action must not also do that
-      // on its way to somewhere else.
-      onClick={(event) => event.stopPropagation()}
-    >
-      {action.icon}
-    </a>
+    <Button asChild variant="ghost" size="icon" className={className}>
+      <a
+        href={action.href}
+        title={action.label}
+        aria-label={action.label}
+        {...(action.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+        // The row itself opens the inspector; an action must not also do that
+        // on its way to somewhere else.
+        onClick={(event) => event.stopPropagation()}
+      >
+        {action.icon}
+      </a>
+    </Button>
   ) : (
     <Button
       variant="ghost"
       size="icon"
       type="button"
-      {...shared}
+      className={className}
+      title={action.label}
+      aria-label={action.label}
       onClick={(event) => {
         event.stopPropagation()
         action.onClick?.()
@@ -198,15 +187,34 @@ function Control({ action }: { action: RowAction }) {
   )
 }
 
-/** The strip. Renders nothing when there is nothing to offer, so a surface
- *  never shows an empty pill.
- *
- *  #1898: the first action rests on screen and the rest arrive on approach.
- *  The strip used to be `opacity: 0` until the row was hovered, which made
- *  every action discoverable only by accident -- nothing on screen
- *  suggested that hovering would reveal anything, so a reader concludes the
- *  column is empty. It is solid at rest now; what collapses is the width of
- *  the extras, not the existence of the strip. */
+function MenuItem({ action }: { action: RowAction }) {
+  const className = action.danger ? 'text-destructive focus:text-destructive' : undefined
+  return action.href ? (
+    <DropdownMenuItem asChild className={className}>
+      <a
+        href={action.href}
+        {...(action.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+        onClick={(event) => event.stopPropagation()}
+      >
+        {action.icon}
+        <span>{action.label}</span>
+      </a>
+    </DropdownMenuItem>
+  ) : (
+    <DropdownMenuItem
+      className={className}
+      onSelect={(event) => {
+        event.stopPropagation()
+        action.onClick?.()
+      }}
+    >
+      {action.icon}
+      <span>{action.label}</span>
+    </DropdownMenuItem>
+  )
+}
+
+/** Renders nothing when there are no available actions. */
 export function RowActions({
   actions,
   groups = [],
@@ -214,12 +222,7 @@ export function RowActions({
 }: {
   actions: (RowAction | null | undefined)[]
   groups?: (RowActionGroup | null | undefined)[]
-  /** Show every action at rest instead of collapsing all but the first.
-   *
-   *  The collapse is a width budget, and it is a table row's budget. A card
-   *  footer has the whole card width, so collapsing there only recreates
-   *  the disclosure menu's problem -- the actions become discoverable by
-   *  accident. Same strip, same markup, budget lifted. */
+  /** Show every ungrouped action instead of collapsing extras into the menu. */
   expanded?: boolean
 }) {
   const present = actions.filter((action): action is RowAction => Boolean(action))
@@ -234,31 +237,43 @@ export function RowActions({
   if (present.length === 0 && liveGroups.length === 0) return null
 
   const [first, ...rest] = present
+  const visible = expanded ? present : first ? [first] : []
+  const menuActions = expanded ? [] : rest
   return (
-    <div className={expanded ? 'hp-row-actions hp-row-actions--expanded' : 'hp-row-actions'}>
-      {first ? <Control action={first} /> : null}
-      {rest.length > 0 || liveGroups.length > 0 ? (
-        <span className="hp-row-actions__more">
-          {rest.map((action) => (
-            <Control key={action.label} action={action} />
-          ))}
-          {liveGroups.map((group) => (
-            <span className="hp-row-actions__group" key={group.label}>
-              {/* aria-expanded describes a set that opens on hover and
-                  focus rather than on click, so it is never false while the
-                  members are reachable -- it is the group's own state, not
-                  a button's. */}
-              <span role="img" aria-label={group.label} title={group.label} aria-expanded="false">
-                {group.icon}
-              </span>
-              <span className="hp-row-actions__items">
-                {group.actions.map((action) => (
-                  <Control key={action.label} action={action} />
-                ))}
-              </span>
-            </span>
-          ))}
-        </span>
+    <div className="inline-flex items-center gap-0.5">
+      {visible.map((action) => <Control key={action.label} action={action} />)}
+      {menuActions.length > 0 || liveGroups.length > 0 ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              type="button"
+              aria-label="More actions"
+              title="More actions"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <Icon>
+                <circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" />
+                <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
+                <circle cx="19" cy="12" r="1" fill="currentColor" stroke="none" />
+              </Icon>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" onClick={(event) => event.stopPropagation()}>
+            {menuActions.map((action) => <MenuItem key={action.label} action={action} />)}
+            {liveGroups.map((group, index) => (
+              <Fragment key={group.label}>
+                {menuActions.length > 0 || index > 0 ? <DropdownMenuSeparator /> : null}
+                <DropdownMenuLabel className="flex items-center gap-2">
+                  {group.icon}
+                  <span>{group.label}</span>
+                </DropdownMenuLabel>
+                {group.actions.map((action) => <MenuItem key={action.label} action={action} />)}
+              </Fragment>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       ) : null}
     </div>
   )
