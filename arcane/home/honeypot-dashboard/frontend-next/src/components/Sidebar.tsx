@@ -99,7 +99,7 @@ export function Sidebar({ user, onOpenSettings }: { user?: User | null; onOpenSe
   // (hp-app.js:2049-2052's side.append fallback).
   const hasActiveItem = NAV_SECTIONS.some((section) => section.items.some((item) => item.to === activeHref))
   return (
-    <aside className="app-sidebar" aria-label="Primary navigation"><ShadcnSidebar collapsible="none" className="!w-full !bg-transparent">
+    <ShadcnSidebar collapsible="icon" className="!bg-transparent"><aside className="app-sidebar h-full w-full" aria-label="Primary navigation">
       <button
         className="hp-sidebar-search"
         type="button"
@@ -173,6 +173,6 @@ export function Sidebar({ user, onOpenSettings }: { user?: User | null; onOpenSe
       <SidebarFooter>
         <AccountMenu user={user} onOpenSettings={onOpenSettings} />
       </SidebarFooter>
-    </ShadcnSidebar></aside>
+    </aside></ShadcnSidebar>
   )
 }

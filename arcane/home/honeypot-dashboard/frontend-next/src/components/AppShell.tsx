@@ -1,14 +1,11 @@
-// The app shell: topbar pill + sidebar rail + main region, class-compatible
-// with theme.css's .app-shell grid. Ports partials/dashboard.html's
-// structure and hp-app.js's shell mechanics: sidebar collapse (desktop,
-// persisted) / off-canvas drawer + scrim (≤520px), document-title sync on
-// navigation (hp-dynamic-nav.js:153 — also the screen reader's SPA
-// navigation cue), recent-investigation recording, and the shared flash +
-// confirm-dialog hosts every page's actions announce through.
+// The app shell: topbar pill + shadcn sidebar/inset layout, document-title
+// sync on navigation (also the screen reader's SPA navigation cue),
+// recent-investigation recording, and the shared flash + confirm-dialog
+// hosts every page's actions announce through.
 import { useEffect, useState } from 'react'
 import { useRouterState } from '@tanstack/react-router'
 import { Sidebar } from './Sidebar'
-import { SidebarProvider } from './ui/sidebar'
+import { SidebarInset, SidebarProvider } from './ui/sidebar'
 import { Topbar } from './Topbar'
 import { CommandPalette } from './CommandPalette'
 import { ConfirmHost } from './ConfirmDialog'
@@ -21,9 +18,6 @@ import { pageFor } from '../lib/nav'
 import { recordRecentFromLocation } from '../lib/recent'
 import type { BannerView } from '../lib/banner'
 import type { User } from '../lib/auth'
-
-const COLLAPSE_KEY = 'hp-sidebar-collapsed'
-const MOBILE_BREAKPOINT = 520
 
 export function AppShell({
   banner,
@@ -41,10 +35,6 @@ export function AppShell({
 }) {
   usePredictivePrefetch()
   const location = useRouterState({ select: (s) => s.location })
-  // Desktop collapse persists (same key as the Go shell); the mobile
-  // drawer is transient and closes on navigation, scrim click or Escape.
-  const [collapsed, setCollapsed] = useState(false)
-  const [navOpen, setNavOpen] = useState(false)
   // Settings-as-modal from anywhere (hp-settings.js:23-38, per Xore): the
   // topbar avatar and account-menu item open the centered settings modal
   // instead of navigating; on /settings itself the openers stay plain
@@ -53,39 +43,10 @@ export function AppShell({
   const onSettingsRoute = location.pathname === '/settings'
   const openSettings = onSettingsRoute ? undefined : () => setSettingsOpen(true)
 
+  // Navigation side effects: sync the tab title (WCAG 2.4.2 — the title
+  // change is the SPA-navigation cue for screen readers) and record entity
+  // pages into the sidebar's Recent list.
   useEffect(() => {
-    try {
-      if (window.innerWidth > MOBILE_BREAKPOINT && localStorage.getItem(COLLAPSE_KEY) === '1') {
-        setCollapsed(true)
-      }
-    } catch {
-      /* storage unavailable */
-    }
-  }, [])
-
-  // One toggle, two meanings — hp-app.js:1213-1224: at mobile widths the
-  // button opens the drawer, on desktop it collapses the rail.
-  const toggleNav = () => {
-    if (window.innerWidth <= MOBILE_BREAKPOINT) {
-      setNavOpen((open) => !open)
-      return
-    }
-    setCollapsed((value) => {
-      const next = !value
-      try {
-        localStorage.setItem(COLLAPSE_KEY, next ? '1' : '0')
-      } catch {
-        /* storage unavailable */
-      }
-      return next
-    })
-  }
-
-  // Navigation side effects: close the drawer, sync the tab title (WCAG
-  // 2.4.2 — the title change is the SPA-navigation cue for screen
-  // readers), record entity pages into the sidebar's Recent list.
-  useEffect(() => {
-    setNavOpen(false)
     // Navigating underneath the settings overlay (command palette, browser
     // back) dismisses it — the destination page is what the user asked for.
     setSettingsOpen(false)
@@ -93,25 +54,14 @@ export function AppShell({
     recordRecentFromLocation(location.pathname, location.searchStr)
   }, [location.pathname, location.searchStr, appName])
 
-  useEffect(() => {
-    if (!navOpen) return
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setNavOpen(false)
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [navOpen])
-
-  const shellClass = ['app-shell', collapsed ? 'hp-collapsed' : '', navOpen ? 'hp-nav-open' : '']
-    .filter(Boolean)
-    .join(' ')
-
   return (
-    <SidebarProvider className="block min-h-0" open={!collapsed} onOpenChange={(open) => {
-      setCollapsed(!open)
-      try { localStorage.setItem(COLLAPSE_KEY, open ? '0' : '1') } catch { /* storage unavailable */ }
-    }}>
-    <div className={shellClass}>
+    <SidebarProvider
+      style={{
+        '--sidebar-width': '16rem',
+        '--sidebar-width-icon': '3rem',
+        '--header-height': 'calc(var(--spacing) * 14)',
+      } as React.CSSProperties}
+    >
       <a
         href="#main"
         className="skip-link sr-only"
@@ -144,20 +94,16 @@ export function AppShell({
       <ConfirmHost />
       <FlashHost />
       <LiveToasts />
-      <Topbar banner={banner} user={user} onToggleNav={toggleNav} onOpenSettings={openSettings} />
       <Sidebar user={user} onOpenSettings={openSettings} />
-      {settingsOpen && !onSettingsRoute ? (
-        <SettingsModal user={user} onClose={() => setSettingsOpen(false)} />
-      ) : null}
-      {/* Click-to-dismiss backdrop behind the ≤520px drawer — visible only
-          while .hp-nav-open is on the shell (theme.css:2143-2158). */}
-      <div className="app-shell__nav-scrim" aria-hidden="true" onClick={() => setNavOpen(false)} />
-      <main id="main" className="app-main">
+      <SidebarInset id="main" className="app-main min-h-0">
+        <Topbar banner={banner} user={user} onOpenSettings={openSettings} />
         <div className="app-content app-content--wide" data-hp-page-content>
           {children}
         </div>
-      </main>
-    </div>
+      </SidebarInset>
+      {settingsOpen && !onSettingsRoute ? (
+        <SettingsModal user={user} onClose={() => setSettingsOpen(false)} />
+      ) : null}
     </SidebarProvider>
   )
 }

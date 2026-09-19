@@ -15,6 +15,7 @@ import type { User } from '../lib/auth'
 import { Button } from './ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip'
 import { Avatar, AvatarFallback } from './ui/avatar'
+import { SidebarTrigger } from './ui/sidebar'
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -82,12 +83,10 @@ function LiveToggle() {
 export function Topbar({
   banner,
   user,
-  onToggleNav,
   onOpenSettings,
 }: {
   banner?: BannerView | null
   user?: User | null
-  onToggleNav?: () => void
   /** When set, the avatar opens the centered settings modal instead of
    * navigating (hp-settings.js:23-27, per Xore); the /settings href stays
    * as the no-JS / middle-click / new-tab fallback. Unset on /settings. */
@@ -102,18 +101,11 @@ export function Topbar({
   const initial = (user?.displayName || user?.username || '·').trim().charAt(0).toUpperCase()
   return (
     <TooltipProvider><header className="app-toolbar">
-      <Tooltip><TooltipTrigger asChild><Button
-        variant="ghost" size="icon" className="btn-icon"
-        type="button"
+      <Tooltip><TooltipTrigger asChild><SidebarTrigger
+        className="btn-icon"
         aria-label="Toggle navigation"
         title="Toggle navigation"
-        onClick={onToggleNav}
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <rect x="3" y="3" width="18" height="18" rx="2" />
-          <line x1="9" y1="3" x2="9" y2="21" />
-        </svg>
-      </Button></TooltipTrigger><TooltipContent>Toggle navigation</TooltipContent></Tooltip>
+      /></TooltipTrigger><TooltipContent>Toggle navigation</TooltipContent></Tooltip>
       <Link className="app-toolbar__brand" to="/" aria-label="APIARY home">
         <img className="theme-art--dark" src="/static/apiary-compact-mark-for-dark.png" width="22" height="22" alt="" />
         <img className="theme-art--light" src="/static/apiary-compact-mark-for-light.png" width="22" height="22" alt="" />

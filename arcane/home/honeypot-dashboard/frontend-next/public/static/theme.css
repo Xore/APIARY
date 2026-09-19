@@ -2674,11 +2674,6 @@ pre {
 }
 
 @media (max-width: 720px) {
-  :root { --sidebar-width: 76px; }
-  .app-sidebar .sidebar__item span,
-  .app-sidebar .sidebar__section-label,
-  .app-sidebar .sidebar__profile > div { display: none; }
-  .app-sidebar .sidebar__item { justify-content: center; }
   .app-content { width: min(100% - 28px, var(--content-width)); padding-top: var(--space-xl); }
   .command-bar { right: 14px; left: calc(var(--sidebar-width) + 14px); width: auto; }
   /* Stacking to one column here leaves .settings-layout's two rows both
@@ -2699,12 +2694,10 @@ pre {
 }
 
 @media (max-width: 520px) {
-  :root { --sidebar-width: 0px; }
   /* minmax(0, 1fr), not bare 1fr: 1fr's auto minimum floors the track at
      the toolbar's intrinsic width, so one long nowrap toolbar item (the
      11E breadcrumb) stretched the whole shell past a phone viewport. */
   .app-shell { grid-template-columns: minmax(0, 1fr); }
-  .app-sidebar { display: none; }
   .app-main { grid-column: 1; }
   .app-toolbar__title { text-align: left; }
   .command-bar { left: 14px; }
@@ -2752,52 +2745,9 @@ body [hidden] { display: none !important; }
 /* .mono was a full duplicate of theme.css's own `.mono, code, kbd` rule --
    deleted rather than kept in sync twice (Xore/theme is the reference). */
 
-/* ── App shell adaptations (theme.css owns .app-shell geometry) ─────────── */
-.app-shell { height: 100dvh; transition: grid-template-columns var(--transition); }
-/* The modal host is a direct app-shell child. It must not consume a grid cell;
-   its fixed-position backdrops remain layout-neutral through display:contents. */
+/* Fixed-position modal backdrops remain layout-neutral. */
 #hp-modal-root { display: contents; }
-.app-sidebar { grid-column: 1; grid-row: 2; }
-.app-main { grid-column: 2; grid-row: 2; }
-.app-shell.hp-collapsed { --sidebar-width: 0px; }
-.app-shell.hp-collapsed .app-sidebar { padding: 0; border-right: none; overflow: hidden; }
-/* Accessible off-canvas navigation under 520px (sidebar is display:none). */
 @media (max-width: 520px) {
-  .app-main { grid-column: 1; }
-  .app-shell.hp-nav-open .app-sidebar {
-    display: flex; position: fixed; z-index: 60; inset: 0 auto 0 0;
-    width: 224px; padding: var(--space-md) var(--space-sm);
-    background: var(--bg-sidebar);
-    border-right: 1px solid var(--border-100);
-    box-shadow: var(--shadow-dialog);
-  }
-  /* Scrim behind the off-canvas drawer, same dim/blur treatment as
-     .modal-backdrop, z-index just under the sidebar's 60 so it sits
-     between .app-main and the open drawer. Always present in the DOM;
-     theme.js toggles visibility via .hp-nav-open on the shell, same as
-     the sidebar rule above. */
-  .app-shell__nav-scrim {
-    position: fixed; z-index: 50; inset: 0;
-    visibility: hidden; opacity: 0; pointer-events: none;
-    background: var(--overlay-bg);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
-    transition: opacity var(--transition), visibility var(--transition);
-  }
-  .app-shell.hp-nav-open .app-shell__nav-scrim {
-    visibility: visible; opacity: 1; pointer-events: auto;
-  }
-  /* The <=720px compact-rail rule below (icons only, text hidden) still
-     matches at this narrower width too -- override it back to labeled
-     items while the full-width off-canvas drawer is open, since there's
-     room for text here and the rail's icon-only affordance assumes a
-     76px-wide strip, not a 224px drawer. */
-  .app-shell.hp-nav-open .app-sidebar .sidebar__item span { display: inline; }
-  .app-shell.hp-nav-open .app-sidebar .sidebar__section-label,
-  .app-shell.hp-nav-open .app-sidebar .sidebar__profile > div {
-    display: block;
-  }
-  .app-shell.hp-nav-open .app-sidebar .sidebar__item { justify-content: flex-start; }
   /* #210/#215: the live indicator is now the single global one (was
      previously a page-local pill with room to say "Reconnecting…" on the
      overview page only). In the compact toolbar that text is the widest
@@ -4087,6 +4037,16 @@ div.hp-skel-batch .skeleton-line:nth-child(3) { width: 38%; }
 }
 .hp-sidebar-search:hover { background: var(--bg-300); color: var(--text-000); }
 .app-sidebar { position: relative; }
+[data-collapsible="icon"] .app-sidebar .hp-sidebar-search,
+[data-collapsible="icon"] .app-sidebar .hp-brand-text,
+[data-collapsible="icon"] .app-sidebar .sidebar__item span,
+[data-collapsible="icon"] .app-sidebar .sidebar__profile > div,
+[data-collapsible="icon"] .app-sidebar .sidebar__recent,
+[data-collapsible="icon"] .app-sidebar .hp-views-label,
+[data-collapsible="icon"] .app-sidebar [data-hp-sidebar-tabs] { display: none; }
+[data-collapsible="icon"] .app-sidebar .hp-brand,
+[data-collapsible="icon"] .app-sidebar .sidebar__item,
+[data-collapsible="icon"] .app-sidebar .sidebar__profile { justify-content: center; }
 
 /* Sidebar primary action + recents (pick 12B, claude rail). */
 .sidebar__investigate {
