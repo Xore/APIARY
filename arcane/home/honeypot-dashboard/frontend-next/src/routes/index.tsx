@@ -930,8 +930,12 @@ function Overview() {
                           <a href={row.link} title="show events for this captured artifact">{row.download}</a>
                         </TableCell>
                         <TableCell className="v">
-                          <a className="btn btn-ghost btn-sm" href={`/payload-analysis/${row.shasum}`}>static analysis →</a>{' '}
-                          <a className="btn btn-ghost btn-sm" href={row.vt} target="_blank" rel="noopener noreferrer">VirusTotal →</a>
+                          <Button variant="ghost" size="sm" asChild>
+                            <Link to="/payload-analysis/$hash" params={{ hash: row.shasum }}>static analysis →</Link>
+                          </Button>{' '}
+                          <Button variant="ghost" size="sm" asChild>
+                            <a href={row.vt} target="_blank" rel="noopener noreferrer">VirusTotal →</a>
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}

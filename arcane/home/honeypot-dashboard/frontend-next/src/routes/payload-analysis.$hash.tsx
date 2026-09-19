@@ -1136,9 +1136,11 @@ function PayloadAnalysis() {
               ) : correlation.sandbox_runs.length === 0 ? (
                 <p className="empty">
                   No completed KVM sandbox run for this payload. Queue one from the{' '}
-                  <a className="btn btn-ghost btn-sm" href={`/payload-workbench/results?hash=${encodeURIComponent(detail.hash)}#workbench-builder`}>
-                    analysis workbench
-                  </a>
+                  <Button variant="ghost" size="sm" asChild>
+                    <a href={`/payload-workbench/results?hash=${encodeURIComponent(detail.hash)}#workbench-builder`}>
+                      analysis workbench
+                    </a>
+                  </Button>
                   .
                 </p>
               ) : (
@@ -1199,9 +1201,11 @@ function PayloadAnalysis() {
                       </span>
                     </div>
                   ) : null}
-                  <a className="btn btn-ghost btn-sm" href={`/github-analysis/${encodeURIComponent(correlation.github.sha256)}`}>
-                    full result →
-                  </a>
+                  <Button variant="ghost" size="sm" asChild>
+                    <a href={`/github-analysis/${encodeURIComponent(correlation.github.sha256)}`}>
+                      full result →
+                    </a>
+                  </Button>
                 </>
               )}
             </Card>
@@ -1243,16 +1247,20 @@ function PayloadAnalysis() {
                         <>
                           <Badge variant="secondary">{correlation.ghidra.exit_status}</Badge>
                           {correlation.ghidra.completed_at ? ` completed ${formatTimestamp(correlation.ghidra.completed_at)} — ` : ' — '}
-                          <a className="btn btn-ghost btn-sm" href={`/ghidra/${encodeURIComponent(sha256 || detail.hash)}`}>
-                            full result →
-                          </a>
+                          <Button variant="ghost" size="sm" asChild>
+                            <a href={`/ghidra/${encodeURIComponent(sha256 || detail.hash)}`}>
+                              full result →
+                            </a>
+                          </Button>
                         </>
                       ) : (
                         <>
                           <span className="empty">not yet analyzed</span> —{' '}
-                          <a className="btn btn-secondary btn-sm" href={`/payload-workbench/results?hash=${encodeURIComponent(detail.hash)}#workbench-builder`}>
-                            queue Ghidra →
-                          </a>
+                          <Button variant="secondary" size="sm" asChild>
+                            <a href={`/payload-workbench/results?hash=${encodeURIComponent(detail.hash)}#workbench-builder`}>
+                              queue Ghidra →
+                            </a>
+                          </Button>
                         </>
                       )}
                     </span>
@@ -1262,9 +1270,11 @@ function PayloadAnalysis() {
                     <span className="card__value">
                       {related.total} event(s)
                       {related.earliest ? `, first seen ${formatTimestamp(related.earliest.time)}` : ''} —{' '}
-                      <a className="btn btn-ghost btn-sm" href={`/events?shasum=${encodeURIComponent(detail.hash)}`}>
-                        related events →
-                      </a>
+                      <Button variant="ghost" size="sm" asChild>
+                        <a href={`/events?shasum=${encodeURIComponent(detail.hash)}`}>
+                          related events →
+                        </a>
+                      </Button>
                     </span>
                   </div>
                 </>

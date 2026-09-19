@@ -14,6 +14,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
 import { formatTimestamp } from '../lib/time'
 import { countryName } from '../lib/country'
 
@@ -127,9 +128,11 @@ function ReplayPane({ row }: { row: RecordingRow }) {
       </p>
       <p className="subtitle">
         {replay.frames.toLocaleString('en-US')} frames · {replay.duration_seconds.toFixed(1)}s of terminal time ·{' '}
-        <a className="btn btn-secondary btn-sm" href={`/tty-replay/${encodeURIComponent(row.shasum)}`}>
-          open replay page →
-        </a>
+        <Button variant="secondary" size="sm" asChild>
+          <a href={`/tty-replay/${encodeURIComponent(row.shasum)}`}>
+            open replay page →
+          </a>
+        </Button>
       </p>
       <pre className="hp-md__preview">{plainTranscript(replay.transcript)}</pre>
     </>

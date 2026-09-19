@@ -3,6 +3,7 @@
 // inspector (outside-click + × close), skeleton-first first paint.
 // Mirrors the legacy generic inspector's semantics 1:1.
 import { useEffect, useRef, useState } from 'react'
+import { Link } from '@tanstack/react-router'
 import { RowActions, RowIcons } from './RowActions'
 import { Button } from './ui/button'
 import { Card, CardContent, CardHeader } from './ui/card'
@@ -447,9 +448,11 @@ export function MasterDetailTable<Row>({
             <CardHeader><h2 className="font-semibold leading-none tracking-tight">{inspectorTitle}</h2></CardHeader>
             <CardContent>
               {detailPage ? (
-                <a className="btn btn-sm btn-secondary hp-flow" href={detailPage}>
-                  Open full details →
-                </a>
+                <Button variant="secondary" size="sm" asChild className="hp-flow">
+                  <Link to={detailPage}>
+                    Open full details →
+                  </Link>
+                </Button>
               ) : null}
               {inspectorExtra ? <div className="hp-md__extra">{inspectorExtra(rows[selected])}</div> : null}
               <dl>

@@ -113,13 +113,14 @@ export function EsHistoryConsole({ storage, hidden }: { storage: EsStorage | nul
               <CardDescription>Run a query_string search across every indexed honeypot and Suricata document.</CardDescription>
             </div>
             <div className="hp-head-actions">
-              <a
-                className="btn btn-ghost btn-sm"
-                href={`/api/export/history.json${activeQuery ? `?q=${encodeURIComponent(activeQuery)}` : ''}`}
-                title="Download the current result set as JSON"
-              >
-                Export JSON
-              </a>
+              <Button variant="ghost" size="sm" asChild>
+                <a
+                  href={`/api/export/history.json${activeQuery ? `?q=${encodeURIComponent(activeQuery)}` : ''}`}
+                  title="Download the current result set as JSON"
+                >
+                  Export JSON
+                </a>
+              </Button>
             </div>
           </div>
         </CardHeader>

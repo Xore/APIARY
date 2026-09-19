@@ -368,9 +368,11 @@ function GithubAnalysisDetail() {
                               <TableCell className="n">{scanner.ok ? `${scanner.positives ?? 0} / ${scanner.total ?? 0}` : '—'}</TableCell>
                               <TableCell className="v">
                                 {scanner.permalink ? (
-                                  <a className="btn btn-secondary btn-sm" href={scanner.permalink} target="_blank" rel="noopener noreferrer">
-                                    report ↗
-                                  </a>
+                                  <Button variant="secondary" size="sm" asChild>
+                                    <a href={scanner.permalink} target="_blank" rel="noopener noreferrer">
+                                      report ↗
+                                    </a>
+                                  </Button>
                                 ) : (
                                   '—'
                                 )}
@@ -508,9 +510,11 @@ function GithubAnalysisDetail() {
                 ) : (
                   <>
                     <p className="note">No PDF has been generated for this analysis yet — this downloads the JSON record instead.</p>
-                    <a className="btn btn-ghost btn-sm" href={`/api/raw-report/github-analysis/${encodeURIComponent(sha)}`} target="_blank" rel="noopener noreferrer">
-                      download JSON ↓
-                    </a>
+                    <Button variant="ghost" size="sm" asChild>
+                      <a href={`/api/raw-report/github-analysis/${encodeURIComponent(sha)}`} target="_blank" rel="noopener noreferrer">
+                        download JSON ↓
+                      </a>
+                    </Button>
                   </>
                 )}
               </div>
