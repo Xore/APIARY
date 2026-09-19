@@ -2,7 +2,7 @@
 // with minute-break rows, the normalized-record pane opening only on row
 // click (outside-click closes), explicit "View more" paging with
 // skeleton-first batches. Data: server function → Rust /api/v1/events.
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react'
 import { ErrorStateBlock } from '../components/ErrorState'
@@ -719,20 +719,22 @@ function Events() {
               {selectedRow.src_ip || selectedRow.session ? (
                 <div className="flex flex-wrap gap-2">
                   {selectedRow.src_ip ? (
-                    <Button asChild variant="secondary" size="sm"><a
-                      href={`/investigate/ip/${encodeURIComponent(selectedRow.src_ip)}`}
+                    <Button asChild variant="secondary" size="sm"><Link
+                      to="/investigate/ip/$ip"
+                      params={{ ip: selectedRow.src_ip }}
                       title={`attacker profile for ${selectedRow.src_ip}`}
                     >
                       Open attacker profile →
-                    </a></Button>
+                    </Link></Button>
                   ) : null}
                   {selectedRow.session ? (
-                    <Button asChild variant="secondary" size="sm"><a
-                      href={`/sessions/${encodeURIComponent(selectedRow.session)}`}
+                    <Button asChild variant="secondary" size="sm"><Link
+                      to="/sessions/$id"
+                      params={{ id: selectedRow.session }}
                       title={`replay session ${selectedRow.session}`}
                     >
                       Open session replay →
-                    </a></Button>
+                    </Link></Button>
                   ) : null}
                 </div>
               ) : null}
@@ -853,9 +855,10 @@ function EventMeta({
 }) {
   const p = row.pivots
   const link = (key: keyof EventFilters, value: string, label: string, title: string) => (
-    <a
+    <Link
       className="text-primary hover:underline"
-      href={`/events?${key}=${encodeURIComponent(value)}`}
+      to="/events"
+      search={{ [key]: value }}
       title={title}
       onClick={(event) => {
         event.preventDefault()
@@ -863,16 +866,17 @@ function EventMeta({
       }}
     >
       {label}
-    </a>
+    </Link>
   )
   // Same shape as `link`, but rendered as a severity-coloured badge. The Go
   // tier drew the origin class this way (events.html:25) so a blocklisted
   // or Tor-exit source was visible at a glance instead of reading as one
   // more grey pivot link.
   const badgeLink = (key: keyof EventFilters, value: string, label: string, title: string) => (
-    <a
+    <Link
       className={badgeVariants({ variant: intelBadgeVariant(value) })}
-      href={`/events?${key}=${encodeURIComponent(value)}`}
+      to="/events"
+      search={{ [key]: value }}
       title={title}
       onClick={(event) => {
         event.preventDefault()
@@ -880,7 +884,7 @@ function EventMeta({
       }}
     >
       {label}
-    </a>
+    </Link>
   )
   const groups: Array<{ label: string; title: string; items: React.ReactNode[] }> = [
     {
@@ -897,9 +901,9 @@ function EventMeta({
       title: 'Pivot to every other event sharing this value',
       items: [
         row.session ? (
-          <a className="text-primary hover:underline" href={`/sessions/${encodeURIComponent(row.session)}`} title="replay the complete session">
+          <Link className="text-primary hover:underline" to="/sessions/$id" params={{ id: row.session }} title="replay the complete session">
             session {row.session}
-          </a>
+          </Link>
         ) : null,
         p.fingerprint
           ? link(
@@ -1039,21 +1043,23 @@ const FragmentRow = memo(function FragmentRow({
         <TableCell data-label="sensor">
           {/* Per-sensor badge coloring (theme.css's b-{sensor} classes) +
               sensor pivot, events.html:11. */}
-          <a
+          <Link
             className={badgeVariants({ variant: 'secondary' })}
-            href={`/events?sensor=${encodeURIComponent(row.sensor)}`}
+            to="/events"
+            search={{ sensor: row.sensor }}
             onClick={(event) => {
               event.preventDefault()
               pivot(event, 'sensor', row.sensor)
             }}
           >
             {row.sensor}
-          </a>
+          </Link>
         </TableCell>
         <TableCell data-label="source ip">
           {row.src_ip ? (
-            <a
-              href={`/events?ip=${encodeURIComponent(row.src_ip)}`}
+            <Link
+              to="/events"
+              search={{ ip: row.src_ip }}
               title={`attack chain for ${row.src_ip}`}
               onClick={(event) => {
                 event.preventDefault()
@@ -1061,7 +1067,7 @@ const FragmentRow = memo(function FragmentRow({
               }}
             >
               {row.src_ip}
-            </a>
+            </Link>
           ) : (
             <Badge variant="secondary"
               title="This event reached the sensor over the WireGuard tunnel and could not be joined back to a real client address. The tunnel peer is our own VPS, so it is deliberately not shown as the source."
@@ -1087,31 +1093,33 @@ const FragmentRow = memo(function FragmentRow({
           {row.country ? (
             <>
               {' '}
-              <a
+              <Link
                 className={badgeVariants({ variant: 'outline' })}
                 title={countryName(row.country)}
-                href={`/events?country=${encodeURIComponent(row.country)}`}
+                to="/events"
+                search={{ country: row.country }}
                 onClick={(event) => {
                   event.preventDefault()
                   pivot(event, 'country', row.country)
                 }}
               >
                 {row.country}
-              </a>
+              </Link>
             </>
           ) : null}
         </TableCell>
         <TableCell className="text-right tabular-nums" data-label="port">
           {row.port ? (
-            <a
-              href={`/events?port=${encodeURIComponent(row.port)}`}
+            <Link
+              to="/events"
+              search={{ port: row.port }}
               onClick={(event) => {
                 event.preventDefault()
                 pivot(event, 'port', row.port)
               }}
             >
               :{row.port}
-            </a>
+            </Link>
           ) : (
             ''
           )}

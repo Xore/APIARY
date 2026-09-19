@@ -1342,9 +1342,9 @@ function PayloadAnalysis() {
                       {iocs.map((ioc) => (
                         <TableRow key={ioc}>
                           <TableCell className="v">
-                            <a href={`/search?q=${encodeURIComponent(ioc)}`} title="search telemetry for this indicator">
+                            <Link to="/search" search={{ q: ioc }} title="search telemetry for this indicator">
                               {ioc}
-                            </a>
+                            </Link>
                           </TableCell>
                         </TableRow>
                       ))}

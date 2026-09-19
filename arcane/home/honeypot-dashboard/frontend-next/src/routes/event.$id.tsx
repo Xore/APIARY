@@ -191,9 +191,9 @@ function FlowLinkCard({ link, currentId }: { link: FlowLink; currentId: string }
         </ul>
       ) : null}
       <p className="text-sm text-muted-foreground">
-        <a className="text-primary underline-offset-4 hover:underline" href={`/events?community_id=${encodeURIComponent(link.community_id)}`}>
+        <Link className="text-primary underline-offset-4 hover:underline" to="/events" search={{ community_id: link.community_id }}>
           Open the full flow in the event explorer →
-        </a>
+        </Link>
       </p>
     </CardContent></Card>
   )

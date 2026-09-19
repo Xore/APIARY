@@ -14,7 +14,7 @@
 // ghidra page, never a fleet-wide "has this domain shown up anywhere"
 // index — that capability doesn't exist on either dashboard, so this page
 // says so instead of faking a search with no backend behind it.
-import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
@@ -156,9 +156,9 @@ function Lookup() {
           No cluster correlation for <code>{lastHash}</code> as either a payload hash or a fingerprint — it may be
           real but below the correlation floor (fewer than two source IPs). If it's a captured file, its own
           analysis is still reachable directly at{' '}
-          <a className="lnk" href={`/payload-analysis/${lastHash}`}>
+          <Link className="lnk" to="/payload-analysis/$hash" params={{ hash: lastHash }}>
             /payload-analysis/{lastHash}
-          </a>
+          </Link>
           .
         </AlertDescription></Alert>
       ) : null}

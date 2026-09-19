@@ -219,22 +219,23 @@ function PayloadCard({ row, badge }: { row: PayloadRow; badge: GithubBadge | und
       {/* Empty by design — it takes its accessible name from the label,
           because an unlabelled link is worse than the small target it
           replaces. */}
-      <a
+      <Link
         className="absolute inset-0 z-0"
-        href={`/payload-analysis/${encodeURIComponent(row.Hash)}`}
+        to="/payload-analysis/$hash"
+        params={{ hash: row.Hash }}
         aria-label={`Open the analysis for payload ${row.Hash}`}
       />
       <CardHeader className="relative z-10 pointer-events-none">
         <div className="flex min-w-0 items-start gap-3"><PackageOpen className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <CardTitle className="min-w-0"><h2><a className="pointer-events-auto break-all font-mono text-sm text-primary hover:underline" href={`/payload-analysis/${encodeURIComponent(row.Hash)}`}>{row.Hash}</a></h2></CardTitle></div>
+        <CardTitle className="min-w-0"><h2><Link className="pointer-events-auto break-all font-mono text-sm text-primary hover:underline" to="/payload-analysis/$hash" params={{ hash: row.Hash }}>{row.Hash}</Link></h2></CardTitle></div>
         <div className="flex flex-wrap gap-2">
           {row.Sources.map((source) => (
             <Badge key={source} variant="secondary">{source}</Badge>
           ))}
           {badge ? (
-            <a className={`${badgeVariants({ variant: 'secondary' })} pointer-events-auto`} href={`/github-analysis/${encodeURIComponent(row.Hash)}`} title="GitHub analysis verdict">
+            <Link className={`${badgeVariants({ variant: 'secondary' })} pointer-events-auto`} to="/github-analysis/$sha" params={{ sha: row.Hash }} title="GitHub analysis verdict">
               {badge.label}
-            </a>
+            </Link>
           ) : null}
           {badge?.family ? (
             <a

@@ -214,9 +214,9 @@ function Dossier({ row }: { row: AttackerRow }) {
           items={row.ips}
           empty="No member IPs recorded for this identity."
           render={(ip) => (
-            <a className="font-mono text-primary hover:underline" href={`/investigate/ip/${encodeURIComponent(ip)}`}>
+            <Link className="font-mono text-primary hover:underline" to="/investigate/ip/$ip" params={{ ip }}>
               {ip}
-            </a>
+            </Link>
           )}
         />
         <Card><CardHeader><CardTitle><h2>Entity {row.id.slice(0, 8)} — member IPs</h2></CardTitle></CardHeader><CardContent><AttackerGraph id={row.id} /></CardContent></Card>
@@ -246,9 +246,9 @@ function Dossier({ row }: { row: AttackerRow }) {
           items={row.payloads}
           empty="No payload hashes recorded for this identity."
           render={(hash) => (
-            <a className="font-mono text-primary hover:underline" href={`/payload-analysis/${encodeURIComponent(hash)}`}>
+            <Link className="font-mono text-primary hover:underline" to="/payload-analysis/$hash" params={{ hash }}>
               {hash}
-            </a>
+            </Link>
           )}
         />
         <EvidenceList

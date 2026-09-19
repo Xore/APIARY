@@ -479,9 +479,9 @@ function AttackerTab({ shasum }: { shasum: string }) {
       <p className="empty">
         This recording's source IP is <code>{ip}</code>, but its indexed attacker profile isn't available right now —
         open{' '}
-        <a className="lnk" href={`/investigate/ip/${encodeURIComponent(ip)}`}>
+        <Link className="lnk" to="/investigate/ip/$ip" params={{ ip }}>
           its profile page
-        </a>{' '}
+        </Link>{' '}
         directly.
       </p>
     )
@@ -492,9 +492,9 @@ function AttackerTab({ shasum }: { shasum: string }) {
         <div>
           <div className="text-base font-semibold">Attacker profile</div>
           <h2>
-            <a className="lnk" href={`/investigate/ip/${encodeURIComponent(ip)}`}>
+            <Link className="lnk" to="/investigate/ip/$ip" params={{ ip }}>
               {ip}
-            </a>
+            </Link>
           </h2>
           <p className="subtitle">
             {profile.country || 'unknown origin'}
