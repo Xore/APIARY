@@ -4,6 +4,8 @@ node_modules/
 .tanstack/
 dist/
 graphify-out/
+Dash-shots/
+Design-lanes/
 .env
 target/
 
