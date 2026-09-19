@@ -12,10 +12,17 @@ import { cycleTheme, useThemeMode } from '../lib/prefs'
 import { isLivePaused, toggleLive, useLiveInterval, useLiveState } from '../lib/live'
 import type { BannerView } from '../lib/banner'
 import type { User } from '../lib/auth'
-import { Button } from './ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip'
 import { Avatar, AvatarFallback } from './ui/avatar'
 import { SidebarTrigger } from './ui/sidebar'
+import {
+  Menubar,
+  MenubarContent,
+  MenubarItem,
+  MenubarMenu,
+  MenubarSeparator,
+  MenubarTrigger,
+} from './ui/menubar'
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -61,11 +68,10 @@ function LiveToggle() {
     .filter(Boolean)
     .join(' ')
   return (
-    <Button variant="ghost"
+    <MenubarItem
       className={className}
-      type="button"
       aria-pressed={paused}
-      onClick={toggleLive}
+      onSelect={toggleLive}
       title={
         paused
           ? 'Dashboard refresh is paused — resume it'
@@ -76,7 +82,7 @@ function LiveToggle() {
     >
       <span className="status-dot" />
       <span>{paused ? 'Paused' : stalled ? 'Reconnecting…' : 'Live'}</span>
-    </Button>
+    </MenubarItem>
   )
 }
 
@@ -128,23 +134,23 @@ export function Topbar({
         </BreadcrumbList>
       </Breadcrumb>
       <div className="app-toolbar__search" aria-hidden="true" />
-      <div className="hp-toolbar-actions">
-        <Tooltip><TooltipTrigger asChild><Link className="btn btn-icon btn-ghost" to="/alerts" title="Open alerts" aria-label="Open alerts">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-          </svg>
-          <span className="hp-alert-badge" hidden={alertCount === 0}>
-            {alertCount > 99 ? '99+' : alertCount}
-          </span>
-        </Link></TooltipTrigger><TooltipContent>Open alerts</TooltipContent></Tooltip>
-        <Tooltip><TooltipTrigger asChild><Button
-          variant="ghost" size="icon" className="btn-icon"
-          type="button"
-          onClick={cycleTheme}
-          aria-label={`Switch color theme (${mode})`}
-          title={`Theme: ${mode}`}
-        >
+      <Menubar>
+        <MenubarMenu>
+          <MenubarTrigger className="p-0" aria-label="Toolbar actions" title="Toolbar actions">
+            <Avatar className="hp-toolbar-avatar"><AvatarFallback>{initial}</AvatarFallback></Avatar>
+          </MenubarTrigger>
+          <MenubarContent align="end">
+            <MenubarItem asChild><Link to="/alerts">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              </svg>
+              <span>Open alerts</span>
+              <span className="hp-alert-badge" hidden={alertCount === 0}>
+                {alertCount > 99 ? '99+' : alertCount}
+              </span>
+            </Link></MenubarItem>
+            <MenubarItem onSelect={cycleTheme} aria-label={`Switch color theme (${mode})`}>
           {mode === 'system' ? (
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <rect x="2" y="3" width="20" height="14" rx="2" />
@@ -168,24 +174,25 @@ export function Topbar({
               <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
             </svg>
           )}
-        </Button></TooltipTrigger><TooltipContent>Theme: {mode}</TooltipContent></Tooltip>
-        <LiveToggle />
-        <Link
-          className="avatar hp-toolbar-avatar"
-          to="/settings"
-          title="Account & settings"
-          aria-label="Account and settings"
-          onClick={(event) => {
-            // Plain left-click opens the modal; modified clicks keep their
-            // browser meaning (new tab/window) via the real href.
-            if (!onOpenSettings || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-            event.preventDefault()
-            onOpenSettings()
-          }}
-        >
-          <Avatar className="!size-full !bg-transparent"><AvatarFallback className="!bg-transparent">{initial}</AvatarFallback></Avatar>
-        </Link>
-      </div>
+              <span>Theme: {mode}</span>
+            </MenubarItem>
+            <LiveToggle />
+            <MenubarSeparator />
+            <MenubarItem asChild><Link
+              to="/settings"
+              onClick={(event) => {
+                // Plain left-click opens the modal; modified clicks keep their
+                // browser meaning (new tab/window) via the real href.
+                if (!onOpenSettings || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+                event.preventDefault()
+                onOpenSettings()
+              }}
+            >
+              <span>Account &amp; settings</span>
+            </Link></MenubarItem>
+          </MenubarContent>
+        </MenubarMenu>
+      </Menubar>
       {banner ? (
         <div className={`alert alert--${banner.severity} app-toolbar__banner`} role="status">
           {banner.text}
