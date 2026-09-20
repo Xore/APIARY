@@ -924,7 +924,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
         safe — dynamic backends stay isolated and cannot reach the protected live VM or the internet from here.
       </CardDescription></CardHeader><CardContent>
       <div className="filters">
-        <div className="min-w-60 max-w-[30rem]">
+        <div className="grid min-w-60 max-w-[30rem] gap-2">
           <Label htmlFor="workbench-payload-hash">Payload hash (sha256 or md5)</Label>
           <Input id="workbench-payload-hash"
            
@@ -951,7 +951,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
           </div>
 
           {(recipes?.length ?? 0) > 0 ? (
-            <div className="min-w-60 max-w-[30rem]">
+            <div className="grid min-w-60 max-w-[30rem] gap-2">
               <Label htmlFor="workbench-recipe">Load from saved recipe</Label>
               <Select value={pickedRecipeId || 'custom'} onValueChange={(value) => pickRecipe(value === 'custom' ? '' : value)}>
                 <SelectTrigger id="workbench-recipe"><SelectValue placeholder="Custom selection…" /></SelectTrigger>
