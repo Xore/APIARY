@@ -24,6 +24,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    passWithNoTests: true,
     // The route tree is generated; nothing in it is worth asserting, and
     // importing it drags in every route module.
     exclude: ['node_modules/**', '.output/**', 'src/routeTree.gen.ts'],

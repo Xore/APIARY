@@ -25,6 +25,8 @@ listed="$(grep -oE "id: '[a-z][a-z0-9-]*'" "$manifest" | sed -E "s/id: '(.*)'/\1
 # Ids the stylesheet defines a theme block for.
 declared="$(grep -oE '\[data-hp-theme="[a-z][a-z0-9-]*"\]' "$css" \
   | sed -E 's/.*"([^"]+)".*/\1/' | sort -u)"
+# The stock shadcn theme is the unscoped token set, so it has no theme block.
+declared="$(printf '%s\ndefault\n' "$declared" | sort -u)"
 
 missing_css="$(comm -23 <(echo "$listed") <(echo "$declared"))"
 missing_manifest="$(comm -13 <(echo "$listed") <(echo "$declared"))"
@@ -46,4 +48,4 @@ fi
 [ "$status" -eq 0 ] || exit 1
 
 count="$(echo "$listed" | grep -c . || true)"
-echo "theme catalogue ok: $count themes, and theme.css defines a block for each"
+echo "theme catalogue ok: $count themes, and theme.css provides each"
