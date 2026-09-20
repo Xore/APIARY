@@ -117,7 +117,7 @@ export function Topbar({
         <img className="theme-art--dark" src="/static/apiary-compact-mark-for-dark.png" width="22" height="22" alt="" />
         <img className="theme-art--light" src="/static/apiary-compact-mark-for-light.png" width="22" height="22" alt="" />
       </Link>
-      <Breadcrumb className="hp-crumb">
+      <Breadcrumb>
         <BreadcrumbList className="flex-nowrap">
           {section ? (
             <>
@@ -134,8 +134,19 @@ export function Topbar({
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
-      <div className="app-toolbar__search" aria-hidden="true" />
-      <Menubar>
+      <Menubar className="flex-1">
+        {NAV_SECTIONS.map((s) => (
+          <MenubarMenu key={s.label}>
+            <MenubarTrigger>{s.label}</MenubarTrigger>
+            <MenubarContent>
+              {s.items.map((item) => (
+                <MenubarItem key={item.to} asChild>
+                  <Link to={item.to}>{item.label}</Link>
+                </MenubarItem>
+              ))}
+            </MenubarContent>
+          </MenubarMenu>
+        ))}
         <MenubarMenu>
           <MenubarTrigger className="p-0" aria-label="Toolbar actions" title="Toolbar actions">
             <Avatar className="hp-toolbar-avatar"><AvatarFallback>{initial}</AvatarFallback></Avatar>
