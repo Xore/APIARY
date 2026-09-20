@@ -492,7 +492,7 @@ function GithubAnalysisDetail() {
                   // handling comes for free; opens the in-page viewer modal.
                   <div className="project-grid">
                     <Button variant="outline" size="default" type="button" className="project-card" aria-label="View PDF report" onClick={() => setViewerOpen(true)}>
-                      <div className="project-card__header">
+                      <CardHeader>
                         <span className="project-card__icon">
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -502,11 +502,11 @@ function GithubAnalysisDetail() {
                           </svg>
                         </span>
                         <span className="project-card__title">PDF report</span>
-                      </div>
+                      </CardHeader>
                       <CardDescription>The rendered PDF report from the upstream repository.</CardDescription>
-                      <div className="project-card__meta">
+                      <CardDescription>
                         <span>completed {run.completed_at}</span>
-                      </div>
+                      </CardDescription>
                     </Button>
                   </div>
                 ) : (

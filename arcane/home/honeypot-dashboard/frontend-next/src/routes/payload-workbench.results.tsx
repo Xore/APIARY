@@ -532,7 +532,7 @@ function RunDetail({ run, currentOwner, onChanged }: { run: WorkbenchRun; curren
 
   return (
     <div>
-      <div className="filters mt-2">
+      <div className="filters space-y-2">
         <Badge variant={stateBadgeVariant(run.state)}>{run.state}</Badge>
         <Badge variant="outline">recipe: {run.recipe_name || run.recipe_id || 'one-off'}</Badge>
         <code>{run.payload_sha256}</code>
@@ -641,23 +641,23 @@ function RecentRunsCard({ owner, refreshToken }: { owner: string; refreshToken: 
                   }
                 }}
               >
-                <div className="project-card__header">
+                <CardHeader>
                   <span className="project-card__title">{run.recipe_name || run.recipe_id || 'one-off'}</span>
-                  <div className="project-card__badges">
+                  <div className="flex gap-1">
                     <Badge variant={stateBadgeVariant(run.state)}>{run.state}</Badge>
                   </div>
-                </div>
-                <div className="project-card__meta">
+                </CardHeader>
+                <CardDescription>
                   <span>{formatTimestamp(run.created_at)}</span>
                   <span className="mono">{run.payload_sha256.slice(0, 16)}</span>
-                </div>
+                </CardDescription>
               </Card>
             ))}
           </div>
           {(() => {
             const run = runs.find((candidate) => candidate.id === selected)
             return run ? (
-              <div className="mt-2">
+              <div className="space-y-2">
                 <RunDetail run={run} currentOwner={owner} onChanged={updateRun} />
               </div>
             ) : null
@@ -1074,7 +1074,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
             </>
           ) : null}
 
-          <div className="filters mt-2">
+          <div className="filters space-y-2">
             <Label className="note hp-field--wide">
               Run / recipe name
               <Input
@@ -1115,7 +1115,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
             </div>
           ) : null}
 
-          <div className="filters mt-2">
+          <div className="filters space-y-2">
             <Button size="sm" type="button" onClick={submit} disabled={!canSubmit}>
               {busy ? 'Submitting…' : 'Start analysis run'}
             </Button>
@@ -1125,7 +1125,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
       {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
 
       {lastRun ? (
-        <div className="mt-4">
+        <div className="space-y-4">
           <h3 className="text-base font-semibold">Run {lastRun.id}</h3>
           <RunDetail run={lastRun} currentOwner={owner} onChanged={setLastRun} />
         </div>
