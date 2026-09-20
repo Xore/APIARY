@@ -642,7 +642,7 @@ if [ -n "${cb_url}" ]; then
   jar_replay="${flow_dir}/jar-replay.txt"
   replay_ex=$(curl -s -o /dev/null -w '%{http_code}' -c "${jar_replay}" -b "${jar_replay}" "${cb_url}")
   replay_prot=$(curl -s -o /dev/null -w '%{http_code}' -b "${jar_replay}" "${app_base}/")
-  if { [ "${replay_prot}" != "200" ]; } && ! { [ "${replay_ex}" = "302" ] || [ "${replay_ex}" = "303" ] || [ "${replay_ex}" = "307" ]; }; then
+  if [ "${replay_prot}" != "200" ]; then
     ok "replaying the same authorization code does not grant a session (single-use enforced; exchange answered HTTP ${replay_ex})"
   else
     bad "authorization code was accepted twice: exchange=${replay_ex} protected=${replay_prot}"
@@ -650,9 +650,10 @@ if [ -n "${cb_url}" ]; then
 
   # A forged state has no pending redis entry -- completeLogin() must answer
   # a clean 400 ('login expired'), not crash or worse, proceed.
-  forged=$(curl -s -o /dev/null -w '%{http_code}' "${app_base}/auth/callback?state=forged&code=x&session_state=y")
-  [ "${forged}" = "400" ] || bad "forged-state callback returned ${forged}, expected 400"
-  [ "${forged}" = "400" ] && ok "forged-state callback rejects with 400 login-expired"
+  forged=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "${app_base}/auth/callback?state=forged&code=x&session_state=y")
+  expected_forged="303 ${app_base}/auth/error?kind=expired"
+  [ "${forged}" = "${expected_forged}" ] || bad "forged-state callback returned ${forged}, expected ${expected_forged}"
+  [ "${forged}" = "${expected_forged}" ] && ok "forged-state callback rejects via the bundled login-expired page"
 fi
 
 # ═══ Logout really revokes server-side (#1094 port) ════════════════════════

@@ -401,7 +401,7 @@ function RecentEventRow({ row, open, onToggle }: { row: EventRow; open: boolean;
       {open ? (
         <TableRow>
           <TableCell colSpan={6}>
-            <Card className="hp-flow" role="article" aria-label="Full normalized event">
+            <Card className="mt-4" role="article" aria-label="Full normalized event">
               <h3>Normalized event</h3>
               <p className="text-sm text-muted-foreground">Complete read-only record as stored by the pipeline.</p>
               {row.src_ip || row.session ? (

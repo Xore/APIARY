@@ -20,7 +20,10 @@ for (const surface of surfaces) for (const width of [1280, 390]) for (const mode
     await page.setViewportSize({ width, height: 844 })
     await page.addInitScript(theme => localStorage.setItem('hp-theme', theme), mode)
     await page.goto(surface.path)
-    if (surface.name === 'settings-modal') await page.getByRole('link', { name: 'Account and settings' }).click()
+    if (surface.name === 'settings-modal') {
+      await page.getByRole('menuitem', { name: 'Toolbar actions' }).click()
+      await page.getByRole('menuitem', { name: 'Account & settings' }).click()
+    }
     await expect(page.locator(surface.marker).first()).toBeVisible()
     if (surface.name === 'settings-modal') {
       const input = await page.getByRole('searchbox', { name: 'Search settings' }).boundingBox()

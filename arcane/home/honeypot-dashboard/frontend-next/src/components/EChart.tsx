@@ -131,13 +131,13 @@ const builders: Record<ChartKind, Builder> = {
       xAxis: {
         type: 'category',
         data: tactics,
-        splitArea: { show: true, areaStyle: { color: [themeColor('--secondary', '#2c2c2a'), themeColor('--shadcn-muted', '#232321')] } },
+        splitArea: { show: true, areaStyle: { color: [themeColor('--secondary', '#2c2c2a'), themeColor('--muted', '#232321')] } },
         axisLabel: { rotate: 30, color: themeColor('--foreground', '#e9e6df') },
       },
       yAxis: {
         type: 'category',
         data: techniques,
-        splitArea: { show: true, areaStyle: { color: [themeColor('--secondary', '#2c2c2a'), themeColor('--shadcn-muted', '#232321')] } },
+        splitArea: { show: true, areaStyle: { color: [themeColor('--secondary', '#2c2c2a'), themeColor('--muted', '#232321')] } },
         axisLabel: { color: themeColor('--foreground', '#e9e6df') },
       },
       visualMap: {
@@ -147,7 +147,7 @@ const builders: Record<ChartKind, Builder> = {
         orient: 'horizontal',
         left: 'center',
         bottom: '0%',
-        inRange: { color: [themeColor('--shadcn-muted', '#3d3d3b'), themeColor('--chart-1', '#d97757')] },
+        inRange: { color: [themeColor('--muted', '#3d3d3b'), themeColor('--chart-1', '#d97757')] },
       },
       series: [
         {
@@ -198,7 +198,7 @@ const builders: Record<ChartKind, Builder> = {
         indicator: categories.map((c) => ({ name: c, max })),
         axisName: { color: themeColor('--foreground', '#e9e6df') },
         axisLine: { lineStyle: { color: themeColor('--border', 'rgba(255,255,255,0.14)') } },
-        splitLine: { lineStyle: { color: themeColor('--shadcn-muted', 'rgba(255,255,255,0.075)') } },
+        splitLine: { lineStyle: { color: themeColor('--muted', 'rgba(255,255,255,0.075)') } },
         splitArea: { areaStyle: { color: ['transparent'] } },
       },
       series: [

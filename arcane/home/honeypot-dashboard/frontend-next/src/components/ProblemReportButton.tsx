@@ -245,7 +245,7 @@ export function ProblemReportButton({ enabled }: { enabled: boolean }) {
                 onChange={(event) => setExpected(event.target.value)}
               />
             </Label>
-            <Label className="note hp-field hp-flow--tight">
+            <Label className="note hp-field mt-2">
               What actually happened?
               <Textarea rows={3} value={actual} onChange={(event) => setActual(event.target.value)} />
             </Label>

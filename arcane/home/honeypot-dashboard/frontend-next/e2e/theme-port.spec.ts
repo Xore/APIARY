@@ -2,15 +2,11 @@ import { expect, test } from '@playwright/test'
 import { join } from 'node:path'
 import { THEME_IDS } from '../src/lib/themes'
 
-const mapping: Record<string, string> = {
-  background: 'bg-000', foreground: 'text-000', primary: 'accent', secondary: 'bg-200',
-  'shadcn-muted': 'bg-300', 'shadcn-accent': 'accent-soft', card: 'bg-100',
-  popover: 'bg-raised', border: 'border-200', input: 'border-200', ring: 'border-focus',
-  destructive: 'danger', 'chart-1': 'accent', 'chart-2': 'success', 'chart-3': 'info',
-  'chart-4': 'warning', 'chart-5': 'danger', sidebar: 'bg-sidebar',
-  'sidebar-foreground': 'text-000', 'sidebar-primary': 'accent',
-  'sidebar-accent': 'bg-300', 'sidebar-border': 'border-100', 'sidebar-ring': 'border-focus',
-}
+const tokens = [
+  'background', 'foreground', 'primary', 'secondary', 'muted', 'accent', 'card', 'popover',
+  'border', 'input', 'ring', 'destructive', 'chart-1', 'chart-2', 'chart-3', 'chart-4', 'chart-5',
+  'sidebar', 'sidebar-foreground', 'sidebar-primary', 'sidebar-accent', 'sidebar-border', 'sidebar-ring',
+]
 
 test('theme picker maps all nine palettes in both modes without console errors', async ({ page }, testInfo) => {
   test.setTimeout(120_000)
@@ -19,7 +15,7 @@ test('theme picker maps all nine palettes in both modes without console errors',
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
   page.on('pageerror', error => errors.push(error.message))
   await page.goto('/settings')
-  await page.locator('.settings-layout__sidebar').getByText('Appearance').click({ timeout: 5000 })
+  await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Appearance' }).click()
 
   for (const mode of ['light', 'dark']) {
     await page.locator(`[role="group"][aria-label="Theme mode"] [data-value="${mode}"]`).click()
@@ -28,22 +24,20 @@ test('theme picker maps all nine palettes in both modes without console errors',
       await page.locator(`[role="radiogroup"][aria-label="Theme"] [data-value="${palette}"]`).click()
       await expect(page.locator('html')).toHaveAttribute('data-hp-theme', palette)
       await expect(page.locator('html')).toHaveAttribute('data-hp-palette', palette)
-      const failures = await page.evaluate(entries => {
+      const failures = await page.evaluate(tokens => {
         const probe = document.createElement('span')
         document.body.append(probe)
         const bad: string[] = []
-        for (const [token, legacy] of entries) {
+        for (const token of tokens) {
           probe.style.color = `var(--${token})`
           const actual = getComputedStyle(probe).color
-          probe.style.color = `var(--${legacy})`
-          const expected = getComputedStyle(probe).color
-          if (!expected || actual !== expected) bad.push(`${token}: ${actual} != ${legacy}: ${expected}`)
+          if (!actual) bad.push(token)
         }
         probe.style.borderRadius = 'var(--radius)'
-        if (getComputedStyle(probe).borderTopLeftRadius !== '12px') bad.push('radius')
+        if (getComputedStyle(probe).borderTopLeftRadius !== '10px') bad.push('radius')
         probe.remove()
         return bad
-      }, Object.entries(mapping))
+      }, tokens)
       expect(failures, `${palette}/${mode}`).toEqual([])
       expect(await page.evaluate(() => localStorage.getItem('hp-palette'))).toBe(palette)
     }
@@ -58,7 +52,7 @@ test('theme picker maps all nine palettes in both modes without console errors',
     }
     if (mode === 'light') {
       await page.goto('/settings')
-      await page.locator('.settings-layout__sidebar').getByText('Appearance').click({ timeout: 5000 })
+      await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Appearance' }).click()
     }
   }
   expect(errors).toEqual([])

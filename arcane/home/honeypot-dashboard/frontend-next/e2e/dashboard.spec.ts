@@ -106,7 +106,7 @@ test.describe("reports studio content (#2507)", () => {
     await page.goto("/reports");
     // Design step: the wizard's template gallery lists the fixture catalog
     // instead of "No report templates are available.".
-    await expect(page.locator(".hp-rp-templates", { hasText: "Executive report" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Report template" }).getByText("Executive report")).toBeVisible();
     await expect(page.getByText("No report templates are available.")).toHaveCount(0);
 
     // Library step: saved definition with its schedule, plus the generated
@@ -123,7 +123,7 @@ test.describe("modal core", () => {
   test("command palette opens, filters, and Escape closes", async ({ page }) => {
     await page.goto("/");
     await page.click('button[aria-label="Search and investigate"]');
-    const dialog = page.locator('[role="dialog"][aria-label="Investigate an indicator"]');
+    const dialog = page.getByRole('dialog', { name: 'Investigate an indicator' });
     await expect(dialog).toBeVisible();
     // The palette's filter field is a textarea (multi-line query support).
     await dialog.locator("textarea").fill("203.0.113.7");
@@ -186,7 +186,7 @@ test.describe("role-aware action visibility", () => {
 // and exposes no view-state API a test could read instead.
 test.describe("topology sankey roam (#2130)", () => {
   const SETTLE = 1_500; // layout animation + the labelLayout reflow pass
-  const zoomPct = (page: Page) => page.locator(".chip[aria-live]").innerText();
+  const zoomPct = (page: Page) => page.getByText(/^[0-9]+%$/).innerText();
   const canvasShot = (page: Page) => page.locator("canvas").first().screenshot();
 
   // zrender marks elements it considers draggable by putting move/grab on
@@ -293,7 +293,7 @@ test.describe("topology sankey roam (#2130)", () => {
     await page.goto("/kill-chain");
     await page.getByRole("heading", { level: 1 }).waitFor();
     await page.waitForTimeout(SETTLE);
-    expect(await page.locator(".chip[aria-live]").count()).toBe(0);
+    expect(await page.getByText(/^[0-9]+%$/).count()).toBe(0);
     expect(await page.getByText("scroll to zoom").count()).toBe(0);
   });
 });

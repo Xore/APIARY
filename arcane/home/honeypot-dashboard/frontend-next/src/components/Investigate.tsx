@@ -168,12 +168,12 @@ export function SkeletonCards({
             ) : null}
           </div>
           {desc ? (
-            <p className="mt-2 space-y-1 text-sm text-muted-foreground">
+            <div className="mt-2 space-y-1 text-sm text-muted-foreground">
               {/* Two lines: __desc clamps at two, so the ghost claims the
                   same vertical budget the loaded text will. */}
               <Skeleton className="h-4 w-full" style={{ display: 'block', width: '88%' }} />
               <Skeleton className="h-4 w-full" style={{ display: 'block', width: '55%' }} />
-            </p>
+            </div>
           ) : null}
           {metaCols > 0 ? (
             <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -447,7 +447,7 @@ export function MasterDetailTable<Row>({
             <CardHeader><h2 className="font-semibold leading-none tracking-tight">{inspectorTitle}</h2></CardHeader>
             <CardContent>
               {detailPage ? (
-                <Button variant="secondary" size="sm" asChild className="hp-flow">
+                <Button variant="secondary" size="sm" asChild className="mt-4">
                   <Link to={detailPage}>
                     Open full details →
                   </Link>

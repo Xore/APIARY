@@ -6,7 +6,7 @@ const themeProperties = {
   '--novnc-border': ['--border', 'rgba(255,255,255,0.14)'],
   '--novnc-button-background': ['--secondary', '#454541'],
   '--novnc-button-foreground': ['--secondary-foreground', '#e9e6df'],
-  '--novnc-button-hover-background': ['--shadcn-accent', '#49352c'],
+  '--novnc-button-hover-background': ['--accent', '#49352c'],
   '--novnc-button-hover-foreground': ['--accent-foreground', '#e9e6df'],
   '--novnc-focus': ['--ring', '#d97757'],
 } as const

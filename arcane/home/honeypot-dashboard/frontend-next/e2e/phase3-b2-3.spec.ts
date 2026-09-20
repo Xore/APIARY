@@ -24,7 +24,7 @@ for (const route of routes) for (const width of [1280, 390]) for (const mode of 
       for (const label of ['Source IP', 'Sensor', 'Country', 'City', 'Protocol', 'Port', 'Kind', 'Since']) {
         await expect(page.getByText(label, { exact: true })).toBeVisible()
       }
-      await page.getByRole('button', { name: 'Close filters' }).click()
+      await page.keyboard.press('Escape')
     }
     if (route.name === 'payloads') {
       await expect(page.getByRole('heading', { name: 'Payload inventory' })).toBeVisible()

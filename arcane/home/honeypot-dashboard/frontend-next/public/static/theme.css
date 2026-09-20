@@ -772,96 +772,6 @@
   --shadow-pill-color: light-dark(rgba(36, 48, 46, 0.16), rgba(0, 0, 0, 0.24));
 }
 
-/* Default — Stock shadcn zinc surfaces with a blue accent. */
-[data-hp-theme="default"],
-[data-hp-palette="default"] {
-  --bg-000: light-dark(#ffffff, #09090b);
-  --bg-sidebar: light-dark(#f4f4f5, #18181b);
-  --bg-toolbar: light-dark(#ffffff, #18181b);
-  --bg-100: light-dark(#ffffff, #18181b);
-  --bg-200: light-dark(#f4f4f5, #27272a);
-  --bg-300: light-dark(#f4f4f5, #27272a);
-  --bg-400: light-dark(#e4e4e7, #27272a);
-  --bg-500: light-dark(#e4e4e7, #27272a);
-  --bg-raised: light-dark(#ffffff, #18181b);
-  --border-100: light-dark(#e4e4e7, #27272a);
-  --border-200: light-dark(#e4e4e7, #27272a);
-  --border-focus: light-dark(#3b82f6, #60a5fa);
-  --text-000: light-dark(#000000, #fafafa);
-  --text-100: light-dark(#71717a, #a1a1aa);
-  --text-200: light-dark(#71717a, #a1a1aa);
-  --text-300: light-dark(#a1a1aa, #71717a);
-  --accent: light-dark(#2563eb, #3b82f6);
-  --accent-hover: light-dark(#1d4ed8, #60a5fa);
-  --accent-pressed: light-dark(#1e40af, #2563eb);
-  --accent-soft: light-dark(#f4f4f5, #27272a);
-  --accent-text-on-soft: light-dark(#000000, #fafafa);
-  --text-on-accent: #ffffff;
-  --text-link: light-dark(#2563eb, #60a5fa);
-  --text-link-hover: light-dark(#1d4ed8, #93c5fd);
-  --switch-on: light-dark(#2563eb, #3b82f6);
-  --text-on-status: #ffffff;
-  --control-knob: #ffffff;
-  --btn-inverted-bg: light-dark(#000000, #fafafa);
-  --btn-inverted-bg-hover: light-dark(#18181b, #ffffff);
-  --btn-inverted-text: light-dark(#ffffff, #09090b);
-  --overlay-bg: light-dark(rgba(0, 0, 0, 0.36), rgba(0, 0, 0, 0.6));
-  --success: #22c55e;
-  --success-soft: light-dark(rgba(34, 197, 94, 0.14), rgba(34, 197, 94, 0.2));
-  --success-text-on-soft: light-dark(#166534, #86efac);
-  --success-badge-fill: #22c55e;
-  --info: light-dark(#2563eb, #3b82f6);
-  --info-soft: light-dark(rgba(37, 99, 235, 0.14), rgba(59, 130, 246, 0.2));
-  --info-text-on-soft: light-dark(#1e40af, #93c5fd);
-  --info-badge-fill: light-dark(#2563eb, #3b82f6);
-  --warning: #eab308;
-  --warning-soft: light-dark(rgba(234, 179, 8, 0.16), rgba(234, 179, 8, 0.2));
-  --warning-text-on-soft: light-dark(#854d0e, #fde047);
-  --warning-badge-fill: #eab308;
-  --danger: light-dark(#ef4444, #7f1d1d);
-  --danger-soft: light-dark(rgba(239, 68, 68, 0.14), rgba(127, 29, 29, 0.3));
-  --danger-text-on-soft: light-dark(#991b1b, #fca5a5);
-  --danger-badge-fill: light-dark(#ef4444, #7f1d1d);
-  --critical: light-dark(#ef4444, #7f1d1d);
-  --critical-soft: light-dark(rgba(239, 68, 68, 0.14), rgba(127, 29, 29, 0.3));
-  --critical-text-on-soft: light-dark(#991b1b, #fca5a5);
-  --terminal-bg: #09090b;
-  --terminal-fg: #fafafa;
-  --framebuffer-bg: #09090b;
-  --diagram-plate: #ffffff;
-  --shadow-raised-near: light-dark(rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.2));
-  --shadow-raised-far: light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.3));
-  --shadow-dialog-near: light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.3));
-  --shadow-dialog-far: light-dark(rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.55));
-  --shadow-inset-color: light-dark(rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.2));
-  --shadow-pill-color: light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.3));
-  --shadcn-background: light-dark(#ffffff, #09090b);
-  --shadcn-foreground: light-dark(#000000, #fafafa);
-  --shadcn-card: light-dark(#ffffff, #18181b);
-  --shadcn-card-foreground: light-dark(#000000, #fafafa);
-  --shadcn-popover: light-dark(#ffffff, #18181b);
-  --shadcn-popover-foreground: light-dark(#000000, #fafafa);
-  --shadcn-primary: light-dark(#2563eb, #3b82f6);
-  --shadcn-primary-foreground: #ffffff;
-  --shadcn-secondary: light-dark(#f4f4f5, #27272a);
-  --shadcn-secondary-foreground: light-dark(#000000, #fafafa);
-  --shadcn-muted: light-dark(#f4f4f5, #27272a);
-  --shadcn-muted-foreground: light-dark(#71717a, #a1a1aa);
-  --shadcn-accent: light-dark(#f4f4f5, #27272a);
-  --shadcn-accent-foreground: light-dark(#000000, #fafafa);
-  --shadcn-destructive: light-dark(#ef4444, #7f1d1d);
-  --shadcn-destructive-foreground: #ffffff;
-  --shadcn-border: light-dark(#e4e4e7, #27272a);
-  --shadcn-input: light-dark(#e4e4e7, #27272a);
-  --shadcn-ring: light-dark(#3b82f6, #60a5fa);
-  --chart-1: light-dark(#2563eb, #3b82f6);
-  --chart-2: light-dark(#ef4444, #7f1d1d);
-  --chart-3: #f97316;
-  --chart-4: #22c55e;
-  --chart-5: #eab308;
-  --chart-grid: light-dark(#e4e4e7, #27272a);
-}
-
 /* <<< END GENERATED THEME SURFACES */
 
 
@@ -2674,6 +2584,11 @@ pre {
 }
 
 @media (max-width: 720px) {
+  :root { --sidebar-width: 76px; }
+  .app-sidebar .sidebar__item span,
+  .app-sidebar .sidebar__section-label,
+  .app-sidebar .sidebar__profile > div { display: none; }
+  .app-sidebar .sidebar__item { justify-content: center; }
   .app-content { width: min(100% - 28px, var(--content-width)); padding-top: var(--space-xl); }
   .command-bar { right: 14px; left: calc(var(--sidebar-width) + 14px); width: auto; }
   /* Stacking to one column here leaves .settings-layout's two rows both
@@ -2694,10 +2609,12 @@ pre {
 }
 
 @media (max-width: 520px) {
+  :root { --sidebar-width: 0px; }
   /* minmax(0, 1fr), not bare 1fr: 1fr's auto minimum floors the track at
      the toolbar's intrinsic width, so one long nowrap toolbar item (the
      11E breadcrumb) stretched the whole shell past a phone viewport. */
   .app-shell { grid-template-columns: minmax(0, 1fr); }
+  .app-sidebar { display: none; }
   .app-main { grid-column: 1; }
   .app-toolbar__title { text-align: left; }
   .command-bar { left: 14px; }
@@ -2745,9 +2662,52 @@ body [hidden] { display: none !important; }
 /* .mono was a full duplicate of theme.css's own `.mono, code, kbd` rule --
    deleted rather than kept in sync twice (Xore/theme is the reference). */
 
-/* Fixed-position modal backdrops remain layout-neutral. */
+/* ── App shell adaptations (theme.css owns .app-shell geometry) ─────────── */
+.app-shell { height: 100dvh; transition: grid-template-columns var(--transition); }
+/* The modal host is a direct app-shell child. It must not consume a grid cell;
+   its fixed-position backdrops remain layout-neutral through display:contents. */
 #hp-modal-root { display: contents; }
+.app-sidebar { grid-column: 1; grid-row: 2; }
+.app-main { grid-column: 2; grid-row: 2; }
+.app-shell.hp-collapsed { --sidebar-width: 0px; }
+.app-shell.hp-collapsed .app-sidebar { padding: 0; border-right: none; overflow: hidden; }
+/* Accessible off-canvas navigation under 520px (sidebar is display:none). */
 @media (max-width: 520px) {
+  .app-main { grid-column: 1; }
+  .app-shell.hp-nav-open .app-sidebar {
+    display: flex; position: fixed; z-index: 60; inset: 0 auto 0 0;
+    width: 224px; padding: var(--space-md) var(--space-sm);
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border-100);
+    box-shadow: var(--shadow-dialog);
+  }
+  /* Scrim behind the off-canvas drawer, same dim/blur treatment as
+     .modal-backdrop, z-index just under the sidebar's 60 so it sits
+     between .app-main and the open drawer. Always present in the DOM;
+     theme.js toggles visibility via .hp-nav-open on the shell, same as
+     the sidebar rule above. */
+  .app-shell__nav-scrim {
+    position: fixed; z-index: 50; inset: 0;
+    visibility: hidden; opacity: 0; pointer-events: none;
+    background: var(--overlay-bg);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    transition: opacity var(--transition), visibility var(--transition);
+  }
+  .app-shell.hp-nav-open .app-shell__nav-scrim {
+    visibility: visible; opacity: 1; pointer-events: auto;
+  }
+  /* The <=720px compact-rail rule below (icons only, text hidden) still
+     matches at this narrower width too -- override it back to labeled
+     items while the full-width off-canvas drawer is open, since there's
+     room for text here and the rail's icon-only affordance assumes a
+     76px-wide strip, not a 224px drawer. */
+  .app-shell.hp-nav-open .app-sidebar .sidebar__item span { display: inline; }
+  .app-shell.hp-nav-open .app-sidebar .sidebar__section-label,
+  .app-shell.hp-nav-open .app-sidebar .sidebar__profile > div {
+    display: block;
+  }
+  .app-shell.hp-nav-open .app-sidebar .sidebar__item { justify-content: flex-start; }
   /* #210/#215: the live indicator is now the single global one (was
      previously a page-local pill with room to say "Reconnecting…" on the
      overview page only). In the compact toolbar that text is the widest
@@ -2957,10 +2917,38 @@ a.metric:hover { border-color: var(--border-200); background: var(--bg-300); }
      engines in one declaration. */
   scrollbar-width: thin;
   scrollbar-color: var(--border-200) transparent;
+  /* 2. The scrollbar alone only reads as "scrollable" to a viewer who
+     already notices it -- it says nothing about whether more rows exist
+     past the visible edge until they scroll and find out. A bottom fade
+     into the card's own surface answers that on sight: the last row
+     visibly dissolving into the background reads as "this cuts off, not
+     ends" the instant the region renders, no interaction needed.
+     --card-scroll-fade carries the card's real background (.card--raised
+     overrides it below) so the gradient's opaque end always matches
+     instead of a literal color. */
+  --card-scroll-fade: var(--bg-200);
+}
+.card__scroll::after {
+  /* 3. position: sticky (not absolute) pins this to the visible scroll
+     edge instead of drifting with the content transform, and since a
+     stuck sticky box paints as a relative offset rather than a reflow,
+     it overlaps whatever row is currently at that edge with no z-index
+     needed. Deliberately no margin-top pull-up: that would also shift
+     its unstuck resting position, washing the last row on a short list
+     or once scrolled to the true end -- exactly where nothing is left
+     to reveal and the fade should disappear instead. */
+  content: "";
+  display: block;
+  position: sticky;
+  bottom: 0;
+  height: var(--space-2xl);
+  background: linear-gradient(to top, var(--card-scroll-fade), transparent);
+  pointer-events: none;
 }
 .card__scroll::-webkit-scrollbar { width: 8px; height: 8px; }
 .card__scroll::-webkit-scrollbar-track { background: transparent; }
 .card__scroll::-webkit-scrollbar-thumb { background: var(--border-200); border-radius: 4px; }
+.card--raised .card__scroll { --card-scroll-fade: var(--bg-raised); }
 
 /* Render-first data surfaces. These are intentionally content-neutral so a
    server-rendered skeleton and its hydrated result keep exactly the same
@@ -4037,16 +4025,6 @@ div.hp-skel-batch .skeleton-line:nth-child(3) { width: 38%; }
 }
 .hp-sidebar-search:hover { background: var(--bg-300); color: var(--text-000); }
 .app-sidebar { position: relative; }
-[data-collapsible="icon"] .app-sidebar .hp-sidebar-search,
-[data-collapsible="icon"] .app-sidebar .hp-brand-text,
-[data-collapsible="icon"] .app-sidebar .sidebar__item span,
-[data-collapsible="icon"] .app-sidebar .sidebar__profile > div,
-[data-collapsible="icon"] .app-sidebar .sidebar__recent,
-[data-collapsible="icon"] .app-sidebar .hp-views-label,
-[data-collapsible="icon"] .app-sidebar [data-hp-sidebar-tabs] { display: none; }
-[data-collapsible="icon"] .app-sidebar .hp-brand,
-[data-collapsible="icon"] .app-sidebar .sidebar__item,
-[data-collapsible="icon"] .app-sidebar .sidebar__profile { justify-content: center; }
 
 /* Sidebar primary action + recents (pick 12B, claude rail). */
 .sidebar__investigate {

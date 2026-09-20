@@ -266,6 +266,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
     // with no cookie yet, and for a device where cookies are blocked.
     <html
       lang="en"
+      suppressHydrationWarning
       className={appearance?.mode === 'dark' ? 'dark' : undefined}
       {...(appearance?.mode ? { 'data-theme': appearance.mode } : {})}
       {...(appearance?.theme ? { 'data-hp-theme': appearance.theme, 'data-hp-palette': appearance.theme } : {})}

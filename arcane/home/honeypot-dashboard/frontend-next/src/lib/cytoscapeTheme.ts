@@ -1,18 +1,29 @@
 import type cytoscape from 'cytoscape'
 import { cssVar } from './cssVar'
 
+function cytoscapeColor(value: string): string {
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = 1
+  const context = canvas.getContext('2d')
+  if (!context) return value
+  context.fillStyle = value
+  context.fillRect(0, 0, 1, 1)
+  const [red, green, blue, alpha] = context.getImageData(0, 0, 1, 1).data
+  return alpha === 255 ? `rgb(${red}, ${green}, ${blue})` : `rgba(${red}, ${green}, ${blue}, ${alpha / 255})`
+}
+
 export function cytoscapeTheme(): cytoscape.StylesheetStyle[] {
-  const foreground = cssVar('--foreground', '#e9e6df')
-  const card = cssVar('--card', '#383835')
-  const border = cssVar('--border', 'rgba(255,255,255,0.14)')
-  const mutedForeground = cssVar('--muted-foreground', '#a5a9a6')
+  const foreground = cytoscapeColor(cssVar('--foreground', '#e9e6df'))
+  const card = cytoscapeColor(cssVar('--card', '#383835'))
+  const border = cytoscapeColor(cssVar('--border', 'rgba(255,255,255,0.14)'))
+  const mutedForeground = cytoscapeColor(cssVar('--muted-foreground', '#a5a9a6'))
   const charts = [
     cssVar('--chart-1', '#d97757'),
     cssVar('--chart-2', '#79c99e'),
     cssVar('--chart-3', '#78a9d4'),
     cssVar('--chart-4', '#deb36a'),
     cssVar('--chart-5', '#dc7774'),
-  ]
+  ].map(cytoscapeColor)
 
   return [
     {

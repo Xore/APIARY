@@ -6,7 +6,7 @@ export function xtermTheme(): ITheme {
   const background = cssVar('--card', '#383835')
   const primary = cssVar('--primary', '#d97757')
   const primaryForeground = cssVar('--primary-foreground', '#ffffff')
-  const muted = cssVar('--shadcn-muted', '#2c2c2a')
+  const muted = cssVar('--muted', '#2c2c2a')
   const mutedForeground = cssVar('--muted-foreground', '#a5a9a6')
   const border = cssVar('--border', 'rgba(255,255,255,0.14)')
   const red = cssVar('--destructive', '#dc7774')
@@ -20,7 +20,7 @@ export function xtermTheme(): ITheme {
     background,
     cursor: primary,
     cursorAccent: primaryForeground,
-    selectionBackground: cssVar('--shadcn-accent', '#49352c'),
+    selectionBackground: cssVar('--accent', '#49352c'),
     selectionForeground: cssVar('--accent-foreground', foreground),
     selectionInactiveBackground: muted,
     scrollbarSliderBackground: border,

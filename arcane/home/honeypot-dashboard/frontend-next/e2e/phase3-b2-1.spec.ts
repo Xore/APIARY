@@ -24,7 +24,7 @@ for (const route of routes) for (const width of [1280, 390]) for (const mode of 
     if (route.name === 'source-health') await expect(page.getByRole('heading', { name: 'Configured feeds' })).toBeVisible()
     if (route.name === 'commands' || route.name === 'history') {
       await page.locator('table.recent tbody tr').first().click()
-      await expect(page.locator('.hp-md__pane pre').first()).toContainText('honeypot')
+      await expect(page.locator('pre').filter({ hasText: 'honeypot' }).first()).toBeVisible()
     }
     if (route.name === 'dead-letters') {
       await page.getByRole('button', { name: 'purge shown' }).click()

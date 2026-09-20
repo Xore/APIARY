@@ -6,7 +6,7 @@ const themeProperties = {
   '--leaflet-control-background': ['--popover', '#383835'],
   '--leaflet-control-foreground': ['--popover-foreground', '#e9e6df'],
   '--leaflet-control-border': ['--border', 'rgba(255,255,255,0.14)'],
-  '--leaflet-control-hover-background': ['--shadcn-accent', '#454541'],
+  '--leaflet-control-hover-background': ['--accent', '#454541'],
   '--leaflet-control-hover-foreground': ['--accent-foreground', '#e9e6df'],
   '--leaflet-control-focus': ['--ring', '#d97757'],
   '--leaflet-popup-background': ['--popover', '#383835'],

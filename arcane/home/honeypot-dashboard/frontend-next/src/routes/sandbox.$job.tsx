@@ -118,9 +118,9 @@ function Row({ label, value, mono = true, danger = false }: { label: string; val
 function Evidence({ title, note, body }: { title: string; note?: string; body: string }) {
   if (!body.trim()) return null
   return (
-    <details className="hp-flow">
+    <details className="mt-4">
       <summary>{title}</summary>
-      {note ? <CardDescription className="note hp-flow">{note}</CardDescription> : null}
+      {note ? <CardDescription className="note mt-4">{note}</CardDescription> : null}
       <CardContent className="overflow-auto max-h-96">
         <pre className="code">{body}</pre>
       </CardContent>
@@ -134,15 +134,15 @@ function DiffDetails({ diff, emptyAdded, emptyRemoved }: { diff: Diff; emptyAdde
       {diff.added.length ? (
         <details open>
           <summary>Added ({diff.added.length})</summary>
-          <pre className="code hp-flow">{diff.added.map((entry) => `+ ${entry}`).join('\n')}</pre>
+          <pre className="code mt-4">{diff.added.map((entry) => `+ ${entry}`).join('\n')}</pre>
         </details>
       ) : (
         <p className="empty">{emptyAdded}</p>
       )}
       {diff.removed.length ? (
-        <details open className="hp-flow">
+        <details open className="mt-4">
           <summary>Removed ({diff.removed.length})</summary>
-          <pre className="code hp-flow">{diff.removed.map((entry) => `- ${entry}`).join('\n')}</pre>
+          <pre className="code mt-4">{diff.removed.map((entry) => `- ${entry}`).join('\n')}</pre>
         </details>
       ) : (
         <p className="empty">{emptyRemoved}</p>
@@ -583,7 +583,7 @@ function SandboxDetail() {
               )}
               {lines(network.attempts).length ? (
                 <>
-                  <CardDescription className="note hp-flow">
+                  <CardDescription className="note mt-4">
                     {lines(network.attempts).length} IPv4/IPv6 connect attempt{lines(network.attempts).length === 1 ? '' : 's'} observed by
                     strace.
                   </CardDescription>
@@ -774,7 +774,7 @@ function SandboxDetail() {
                 <Evidence title="ExifTool" body={str(artifacts.exiftool)} />
                 <Evidence title="objdump -x" body={str(artifacts.pe_objdump)} />
                 {!lines(windows.exports).length && !lines(windows.warnings).length ? (
-                  <CardDescription className="note hp-flow">No exported symbols or parser warnings.</CardDescription>
+                  <CardDescription className="note mt-4">No exported symbols or parser warnings.</CardDescription>
                 ) : null}
               </Card>
               <Card className="sm:w-1/2 w-full">
@@ -811,7 +811,7 @@ function SandboxDetail() {
                 label="processes before / after"
                 value={`${lines(artifacts.processes_before).length} / ${lines(artifacts.processes_after).length}`}
               />
-              <CardDescription className="note hp-flow">Collected artifacts:</CardDescription>
+              <CardDescription className="note mt-4">Collected artifacts:</CardDescription>
               <Evidence title="Guest kernel" body={str(artifacts.kernel)} />
               <Evidence title={`Processes before (${lines(artifacts.processes_before).length})`} body={lines(artifacts.processes_before).join('\n')} />
               <Evidence title={`Processes after (${lines(artifacts.processes_after).length})`} body={lines(artifacts.processes_after).join('\n')} />
@@ -844,7 +844,7 @@ function SandboxDetail() {
           </TabsContent>
           </Tabs>
 
-          <CardDescription className="note hp-flow">
+          <CardDescription className="note mt-4">
             Guest-produced text is untrusted and size-bounded. Complete raw result directories and syscall traces remain root-only on the
             homeserver.
           </CardDescription>

@@ -372,7 +372,7 @@ function TerminalPlayback({ replay }: { replay: Replay }) {
       <div ref={containerRef} className="min-h-[420px] overflow-x-auto whitespace-pre rounded-lg border border-border bg-[var(--terminal-bg)] p-4 font-mono text-sm leading-[1.35] text-[var(--terminal-fg)]" aria-label="Terminal playback" />
       {/* The whole transcript stays one disclosure away, searchable/
           copyable, no scrubbing to the end required. */}
-      <details className="hp-flow">
+      <details className="mt-4">
         <summary>Full transcript</summary>
         <pre className="code">{text}</pre>
       </details>

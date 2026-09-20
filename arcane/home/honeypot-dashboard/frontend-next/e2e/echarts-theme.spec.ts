@@ -63,16 +63,16 @@ for (const viewport of viewports) {
   }
 }
 
-test('palette switch re-registers the theme and preserves resize and zoom', async ({ page }) => {
+test('mode switch re-registers the theme and preserves resize and zoom', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 })
   await openChart(page, 'claude', 'dark')
   const before = await chartColors(page)
 
   await page.evaluate(() => {
-    localStorage.setItem('hp-palette', 'ocean')
-    window.dispatchEvent(new StorageEvent('storage', { key: 'hp-palette', newValue: 'ocean' }))
+    localStorage.setItem('hp-theme', 'light')
+    window.dispatchEvent(new StorageEvent('storage', { key: 'hp-theme', newValue: 'light' }))
   })
-  await expect(page.locator('html')).toHaveAttribute('data-hp-theme', 'ocean')
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
   await expect.poll(() => chartColors(page)).not.toEqual(before)
 
   const initialWidth = await page.locator('canvas').first().evaluate((canvas) => (canvas as HTMLCanvasElement).width)
@@ -80,5 +80,5 @@ test('palette switch re-registers the theme and preserves resize and zoom', asyn
   await expect.poll(() => page.locator('canvas').first().evaluate((canvas) => (canvas as HTMLCanvasElement).width)).not.toBe(initialWidth)
 
   await page.getByRole('button', { name: 'Zoom in' }).click()
-  await expect(page.locator('.chip[aria-live]')).toHaveText('120%')
+  await expect(page.getByText('120%', { exact: true })).toBeVisible()
 })

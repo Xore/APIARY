@@ -29,10 +29,17 @@ async function graphTheme(page: Page) {
     if (!cy) throw new Error('cytoscape seam missing')
 
     const probe = document.createElement('span')
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = 1
+    const context = canvas.getContext('2d')!
     document.documentElement.appendChild(probe)
     const color = (value: string) => {
       probe.style.color = value
-      return getComputedStyle(probe).color
+      context.clearRect(0, 0, 1, 1)
+      context.fillStyle = getComputedStyle(probe).color
+      context.fillRect(0, 0, 1, 1)
+      const [red, green, blue, alpha] = context.getImageData(0, 0, 1, 1).data
+      return alpha === 255 ? `rgb(${red}, ${green}, ${blue})` : `rgba(${red}, ${green}, ${blue}, ${alpha / 255})`
     }
     const channels = (value: string) => color(value).match(/[\d.]+/g)?.map(Number)
     const token = (name: string) => color(`var(${name})`)
@@ -103,12 +110,12 @@ for (const entry of cases) {
       edgeClass: true,
     })
 
-    const nextPalette = entry.palette === 'claude' ? 'ocean' : 'claude'
-    await page.evaluate((palette) => {
-      localStorage.setItem('hp-palette', palette)
-      window.dispatchEvent(new StorageEvent('storage', { key: 'hp-palette', newValue: palette }))
-    }, nextPalette)
-    await expect(page.locator('html')).toHaveAttribute('data-hp-theme', nextPalette)
+    const nextMode = entry.mode === 'light' ? 'dark' : 'light'
+    await page.evaluate((mode) => {
+      localStorage.setItem('hp-theme', mode)
+      window.dispatchEvent(new StorageEvent('storage', { key: 'hp-theme', newValue: mode }))
+    }, nextMode)
+    await expect(page.locator('html')).toHaveAttribute('data-theme', nextMode)
     const updatedTheme = await graphTheme(page)
     expect(updatedTheme.actual).toEqual(updatedTheme.expected)
     expect(updatedTheme.counts).toEqual(theme.counts)

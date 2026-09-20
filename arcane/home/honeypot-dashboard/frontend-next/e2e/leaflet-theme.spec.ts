@@ -95,17 +95,17 @@ for (const entry of cases) {
     await page.locator('#attack-map .leaflet-control-zoom-in').click()
     await expect.poll(async () => (await mapState(page)).zoom).toBe(before.zoom + 1)
 
-    const nextPalette = entry.palette === 'claude' ? 'ocean' : 'claude'
-    await page.evaluate((palette) => {
-      localStorage.setItem('hp-palette', palette)
-      window.dispatchEvent(new StorageEvent('storage', { key: 'hp-palette', newValue: palette }))
-    }, nextPalette)
+    const nextMode = entry.mode === 'light' ? 'dark' : 'light'
+    await page.evaluate((mode) => {
+      localStorage.setItem('hp-theme', mode)
+      window.dispatchEvent(new StorageEvent('storage', { key: 'hp-theme', newValue: mode }))
+    }, nextMode)
     await page.mouse.move(0, 0)
-    await expect(page.locator('html')).toHaveAttribute('data-hp-theme', nextPalette)
+    await expect(page.locator('html')).toHaveAttribute('data-theme', nextMode)
     await expect.poll(async () => (await themeColors(page)).actual).not.toEqual(colors.actual)
     const updatedColors = await themeColors(page)
     expect(updatedColors.actual).toEqual(updatedColors.expected)
-    expect((await mapState(page)).tileUrl).toBe(before.tileUrl)
+    expect((await mapState(page)).tileUrl).not.toBe(before.tileUrl)
 
     if (process.env.EVIDENCE_DIR) {
       await page.screenshot({
