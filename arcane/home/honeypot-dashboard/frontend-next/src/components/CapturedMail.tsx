@@ -53,7 +53,7 @@ export function formatAddress(address: MailAddress): string {
 export function MailMessage({ mail }: { mail: Mail }) {
   return (
     <>
-      <Table className="data-table hp-flow">
+      <Table className="data-table">
         <TableBody>
           <TableRow>
             <TableCell>From</TableCell>

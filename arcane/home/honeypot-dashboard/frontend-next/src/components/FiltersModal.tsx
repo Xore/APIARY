@@ -70,7 +70,7 @@ export function FiltersModal({
           }}
         >
           {children}
-          <div className="mt-2 flex items-center gap-2">
+          <div className="space-y-2 flex items-center gap-2">
             <Button variant="default" size="default" type="submit">
               Apply filters
             </Button>
