@@ -19,7 +19,10 @@ export function SettingsModal({ user, onClose }: { user?: User | null; onClose: 
         onEscapeKeyDown={(event) => { if (document.getElementById('hp-confirm-backdrop')) event.preventDefault() }}
         onCloseAutoFocus={(event) => {
           event.preventDefault()
-          if (triggerRef.current instanceof HTMLElement && triggerRef.current.isConnected) triggerRef.current.focus()
+          const trigger = triggerRef.current instanceof HTMLElement && triggerRef.current.isConnected
+            ? triggerRef.current
+            : document.querySelector<HTMLElement>('[aria-label="Toolbar actions"]')
+          trigger?.focus()
         }}
       >
         <DialogTitle className="sr-only">Settings</DialogTitle>

@@ -186,3 +186,6 @@
 .leaflet-shadcn .leaflet-popup-tip {
   background: var(--leaflet-popup-background) !important;
 }
+@media (max-width: 520px) {
+  [data-mobile="true"] .app-sidebar { display: flex; }
+}
