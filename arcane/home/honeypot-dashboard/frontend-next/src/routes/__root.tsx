@@ -198,7 +198,7 @@ export const Route = createRootRoute({
   // voice — icon, muted hint, one surface-pill action — given to the 404,
   // instead of a bare heading.
   notFoundComponent: () => (
-    <div className="empty-state hp-notfound" role="status">
+    <div className="empty-state min-h-[56vh]" role="status">
       <div>
         <div className="empty-state__icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

@@ -532,7 +532,7 @@ function RunDetail({ run, currentOwner, onChanged }: { run: WorkbenchRun; curren
 
   return (
     <div>
-      <div className="filters hp-flow--tight">
+      <div className="filters mt-2">
         <Badge variant={stateBadgeVariant(run.state)}>{run.state}</Badge>
         <Badge variant="outline">recipe: {run.recipe_name || run.recipe_id || 'one-off'}</Badge>
         <code>{run.payload_sha256}</code>
@@ -657,7 +657,7 @@ function RecentRunsCard({ owner, refreshToken }: { owner: string; refreshToken: 
           {(() => {
             const run = runs.find((candidate) => candidate.id === selected)
             return run ? (
-              <div className="hp-flow--tight">
+              <div className="mt-2">
                 <RunDetail run={run} currentOwner={owner} onChanged={updateRun} />
               </div>
             ) : null
@@ -924,7 +924,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
         safe — dynamic backends stay isolated and cannot reach the protected live VM or the internet from here.
       </CardDescription></CardHeader><CardContent>
       <div className="filters">
-        <div className="hp-field--wide">
+        <div className="min-w-60 max-w-[30rem]">
           <Label htmlFor="workbench-payload-hash">Payload hash (sha256 or md5)</Label>
           <Input id="workbench-payload-hash"
            
@@ -951,7 +951,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
           </div>
 
           {(recipes?.length ?? 0) > 0 ? (
-            <div className="hp-field--wide">
+            <div className="min-w-60 max-w-[30rem]">
               <Label htmlFor="workbench-recipe">Load from saved recipe</Label>
               <Select value={pickedRecipeId || 'custom'} onValueChange={(value) => pickRecipe(value === 'custom' ? '' : value)}>
                 <SelectTrigger id="workbench-recipe"><SelectValue placeholder="Custom selection…" /></SelectTrigger>
@@ -1074,7 +1074,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
             </>
           ) : null}
 
-          <div className="filters hp-flow--tight">
+          <div className="filters mt-2">
             <Label className="note hp-field--wide">
               Run / recipe name
               <Input
@@ -1115,7 +1115,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
             </div>
           ) : null}
 
-          <div className="filters hp-flow--tight">
+          <div className="filters mt-2">
             <Button size="sm" type="button" onClick={submit} disabled={!canSubmit}>
               {busy ? 'Submitting…' : 'Start analysis run'}
             </Button>
@@ -1125,7 +1125,7 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
       {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
 
       {lastRun ? (
-        <div className="hp-flow">
+        <div className="mt-4">
           <h3 className="text-base font-semibold">Run {lastRun.id}</h3>
           <RunDetail run={lastRun} currentOwner={owner} onChanged={setLastRun} />
         </div>

@@ -18,7 +18,7 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useRef, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
-import { Card } from '../components/ui/card'
+import { Card, CardDescription } from '../components/ui/card'
 import { applyNoVncTheme } from '../lib/novncTheme'
 import { useAppearanceKey } from '../lib/prefs'
 
@@ -91,10 +91,10 @@ function VncViewer({ bridgeWs }: { bridgeWs: string }) {
 
   return (
     <Card ref={hostRef} data-vnc-state={state}>
-      <div className="hp-vnc-status" role="status">
+      <CardDescription className="my-4" role="status">
         {message}
-      </div>
-      <div className="hp-vnc-canvas-wrap">
+      </CardDescription>
+      <div className="min-h-[260px] overflow-hidden rounded-lg border border-border bg-[var(--framebuffer-bg)] [&_.skeleton-line]:block [&_.skeleton-line]:min-h-[inherit] [&_canvas]:block [&_canvas]:h-auto [&_canvas]:w-full">
         <div ref={targetRef} aria-busy={state === 'connecting'}>
           {state === 'connecting' ? <Skeleton className="h-4 w-full" aria-hidden="true" /> : null}
         </div>

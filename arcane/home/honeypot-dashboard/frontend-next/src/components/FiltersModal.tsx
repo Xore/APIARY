@@ -70,7 +70,7 @@ export function FiltersModal({
           }}
         >
           {children}
-          <div className="hp-row hp-flow--tight">
+          <div className="mt-2 flex items-center gap-2">
             <Button variant="default" size="default" type="submit">
               Apply filters
             </Button>

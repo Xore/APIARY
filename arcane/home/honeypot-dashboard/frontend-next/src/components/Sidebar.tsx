@@ -82,7 +82,7 @@ function AccountMenu({ user, onOpenSettings }: { user?: User | null; onOpenSetti
       >
         <Avatar aria-hidden="true"><AvatarFallback>{initial}</AvatarFallback></Avatar>
         <div>
-          <div className="hp-profile-name">{display}</div>
+          <div className="text-[13px] text-foreground">{display}</div>
           {/* Accent badge for admins, muted for users — hp-app.js:1845-1850. */}
           {user ? (
             <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>{user.role}</Badge>
@@ -159,7 +159,7 @@ export function Sidebar({ user, onOpenSettings }: { user?: User | null; onOpenSe
         {!hasActiveItem ? <SidebarViewTabs /> : null}
         {recent.length > 0 ? (
           <>
-            <div className="sidebar__section-label hp-views-label">Recent</div>
+            <div className="sidebar__section-label">Recent</div>
             <div className="sidebar__recent">
               {recent.map((entry) => {
                 const link = linkForRecent(entry)

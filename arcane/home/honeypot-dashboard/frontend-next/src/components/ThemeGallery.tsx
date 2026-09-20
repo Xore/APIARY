@@ -45,7 +45,7 @@ export function ThemeGallery() {
   const current = getThemeName()
 
   return (
-    <div className="hp-theme-gallery" role="radiogroup" aria-label="Theme">
+    <div className="flex flex-wrap gap-4" role="radiogroup" aria-label="Theme">
       {THEMES.map((theme) => {
         const selected = theme.id === current
         return (

@@ -645,8 +645,8 @@ function Events() {
             </datalist>
           </Field>
         </FiltersModal>
-      <div className={open ? 'hp-md hp-md--active hp-md--open wide' : 'hp-md hp-md--active wide'} id="events-grid">
-        <div className="hp-md__list" ref={listRef}>
+      <div className={`col-span-full grid grid-cols-1 items-start gap-6 ${open ? 'min-[1100px]:grid-cols-[minmax(0,11fr)_minmax(340px,9fr)]' : ''}`} id="events-grid">
+        <div className="min-w-0 [&>.card]:overflow-x-auto [&_tbody_tr]:cursor-pointer [&_tbody_tr.selected_td]:bg-accent [&_tbody_tr.selected_td:first-child]:rounded-l-lg [&_tbody_tr.selected_td:first-child]:shadow-[inset_2px_0_0_var(--accent)] [&_tbody_tr.selected_td:last-child]:rounded-r-lg" ref={listRef}>
           <Card className="min-w-0 overflow-hidden">
             <Table className="min-w-[760px]">
               <TableHeader><TableRow><TableHead>time</TableHead><TableHead>sensor</TableHead><TableHead>source ip</TableHead><TableHead>port</TableHead><TableHead>detail</TableHead><TableHead><span className="sr-only">actions</span></TableHead></TableRow></TableHeader>
@@ -702,7 +702,7 @@ function Events() {
             ) : null}
           </Card>
         </div>
-        <div className="hp-md__pane" ref={paneRef}>
+        <div className={open ? 'sticky top-3.5 min-w-0' : 'hidden'} ref={paneRef}>
           {open && selectedRow ? (
             <Card className="relative">
               <Button className="absolute right-3 top-3" variant="ghost" size="icon" type="button" aria-label="Close details" title="Close details" onClick={() => setSelectedKey(null)}>

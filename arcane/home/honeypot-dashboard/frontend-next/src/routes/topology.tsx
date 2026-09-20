@@ -275,7 +275,7 @@ function TopologyPage() {
           <p>Stack membership with live docker state where services-adapter reports it.</p>
         </div>
       </div>
-      <div className="hp-flow--loose">
+      <div className="mt-8">
         {(topology?.stacks ?? []).map((stack) => (
           <Card className="sm:w-1/2 w-full" key={stack.stack}>
             <h2>{stack.stack}</h2>

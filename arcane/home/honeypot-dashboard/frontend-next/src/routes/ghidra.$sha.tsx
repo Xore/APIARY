@@ -314,21 +314,21 @@ function RevDeckCard({ revdeck }: { revdeck: RevDeck | null | undefined }) {
           {revdeck.steps != null ? <KV label="steps" value={revdeck.steps} /> : null}
           <KV label="tool calls" value={revdeck.tool_calls ?? 0} />
           {revdeck.answer ? (
-            <div className="hp-ai-report">
+            <div className="my-2 rounded-md border-l-[3px] border-primary bg-muted p-4">
               <p className="text-sm text-muted-foreground">Answer:</p>
               {/* ghidra.html rendered this markdown via marked.js+DOMPurify
                   (hp-ghidra-markdown.js, #1285); its own documented no-JS
                   fallback is literal markdown text, which is what this port
                   renders — safe, legible, and dependency-free. */}
-              <div className="hp-ai-report__body hp-pre-wrap">
+              <div className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
                 {revdeck.answer}
               </div>
             </div>
           ) : null}
           {revdeck.citations && (revdeck.citations.valid?.length || revdeck.citations.invalid?.length) ? (
-            <div className="hp-ai-citations">
+            <div className="mt-4 flex flex-col gap-4">
               {revdeck.citations.valid?.length ? (
-                <div className="hp-ai-citations__group">
+                <div>
                   <Label className="hp-ai-citations__label hp-ai-citations__label--valid">Citations</Label>
                   <ul className="hp-ai-citations__list">
                     {revdeck.citations.valid.map((citation, index) => (
@@ -340,7 +340,7 @@ function RevDeckCard({ revdeck }: { revdeck: RevDeck | null | undefined }) {
                 </div>
               ) : null}
               {revdeck.citations.invalid?.length ? (
-                <div className="hp-ai-citations__group">
+                <div>
                   <Label className="hp-ai-citations__label hp-ai-citations__label--invalid">
                     Unverified — referenced by the model but not matched against the analysis
                   </Label>
@@ -1024,15 +1024,15 @@ function DeepDivePanel({ g, correlation }: { g: GhidraDoc; correlation: IocCorre
                   .map((thread) => `${thread.thread_id}  ${thread.title}  (${thread.message_count} message${thread.message_count === 1 ? '' : 's'})`)
                   .join('\n')}
               </pre>
-              <div className="hp-chat">
+              <div className="mt-4 flex flex-col gap-4">
                 {(chat.active_thread_messages ?? []).map((message, index) => (
-                  <div key={index} className={`hp-chat-msg hp-chat-msg--${message.role}`}>
-                    <div className="hp-chat-msg__meta">
+                  <div key={index} className={`max-w-[88%] rounded-md px-4 py-3 ${message.role === 'user' ? 'self-end bg-accent' : message.role === 'tool' ? 'self-start bg-muted text-xs' : 'self-start border border-border bg-muted'}`}>
+                    <div className="mb-1 flex items-baseline gap-2">
                       <span className="hp-chat-msg__role">{message.role}</span>
                       {message.name ? <span className="hp-chat-msg__name">{message.name}</span> : null}
                     </div>
                     {message.content != null ? (
-                      <div className="hp-chat-msg__content hp-pre-wrap">
+                      <div className="whitespace-pre-wrap text-sm leading-relaxed text-foreground [&_code]:rounded-sm [&_code]:bg-sidebar [&_code]:px-1 [&_code]:font-mono [&_code]:text-xs [&_pre]:my-2 [&_pre]:overflow-auto [&_pre]:rounded-md [&_pre]:border [&_pre]:border-border [&_pre]:bg-sidebar [&_pre]:p-2">
                         {rawText(message.content)}
                       </div>
                     ) : null}

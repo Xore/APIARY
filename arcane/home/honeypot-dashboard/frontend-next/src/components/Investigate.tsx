@@ -317,8 +317,8 @@ export function MasterDetailTable<Row>({
     setSelected(selected === index ? null : index)
   }
   return (
-    <div className={open ? 'hp-md hp-md--active hp-md--open wide' : 'hp-md hp-md--active wide'}>
-      <div className="hp-md__list" ref={listRef}>
+    <div className={`col-span-full grid grid-cols-1 items-start gap-6 ${open ? 'min-[1100px]:grid-cols-[minmax(0,11fr)_minmax(340px,9fr)]' : ''}`}>
+      <div className="min-w-0 [&>.card]:overflow-x-auto [&_tbody_tr]:cursor-pointer [&_tbody_tr.selected_td]:bg-accent [&_tbody_tr.selected_td:first-child]:rounded-l-lg [&_tbody_tr.selected_td:first-child]:shadow-[inset_2px_0_0_var(--accent)] [&_tbody_tr.selected_td:last-child]:rounded-r-lg" ref={listRef}>
         <Card className="min-w-0 overflow-x-auto">
           {layout === 'cards' ? (
             <CardContent className="p-4">
@@ -429,7 +429,7 @@ export function MasterDetailTable<Row>({
             </Table>
           )}
           {rows !== null && onViewMore && total !== undefined && rows.length < total ? (
-            <div className="hp-lazy-controls" aria-live="polite">
+            <div className="flex items-center justify-center gap-4 pt-4 pb-1 [&>span:first-child]:text-xs [&>span:first-child]:text-muted-foreground" aria-live="polite">
               <span>
                 {rows.length.toLocaleString('en-US')} of {total.toLocaleString('en-US')} entries
               </span>
@@ -440,7 +440,7 @@ export function MasterDetailTable<Row>({
           ) : null}
         </Card>
       </div>
-      <div className="hp-md__pane" ref={paneRef}>
+      <div className={open ? 'sticky top-3.5 min-w-0' : 'hidden'} ref={paneRef}>
         {open ? (
           <Card className="hp-md__rowcard min-w-0">
             <Button variant="ghost" size="icon" className="hp-md__close" type="button" aria-label="Close details" title="Close details" onClick={() => setSelected(null)}>
@@ -455,7 +455,7 @@ export function MasterDetailTable<Row>({
                   </Link>
                 </Button>
               ) : null}
-              {inspectorExtra ? <div className="hp-md__extra">{inspectorExtra(rows[selected])}</div> : null}
+              {inspectorExtra ? <div className="mt-4">{inspectorExtra(rows[selected])}</div> : null}
               <dl>
                 {columns.map((column) => (
                   <FieldPair key={column.header} label={column.header} value={column.render(rows[selected])} />

@@ -302,9 +302,9 @@ function TerminalPlayback({ replay }: { replay: Replay }) {
   if (total === 0) {
     return (
       <Card>
-        <div className="hp-tty-status" role="status">
+        <CardDescription role="status">
           This recording has no replayable output. The terminal is empty.
-        </div>
+        </CardDescription>
       </Card>
     )
   }
@@ -313,7 +313,7 @@ function TerminalPlayback({ replay }: { replay: Replay }) {
 
   return (
     <Card>
-      <div className="hp-tty-controls">
+      <div className="my-3 flex flex-wrap items-center gap-4 [&_input[type=range]]:min-w-40 [&_input[type=range]]:flex-[1_1_260px]">
         <Button
           variant="default"
           size="sm"
@@ -364,11 +364,11 @@ function TerminalPlayback({ replay }: { replay: Replay }) {
           </Select>
         </Label>
       </div>
-      <div className="hp-tty-status" role="status">
+      <CardDescription role="status">
         {replay.frames.toLocaleString('en-US')} frame(s), {replay.size_bytes.toLocaleString('en-US')} bytes recorded ·{' '}
         {replay.duration_seconds.toFixed(1)}s of terminal time.
-      </div>
-      <div ref={containerRef} className="hp-tty-term" aria-label="Terminal playback" />
+      </CardDescription>
+      <div ref={containerRef} className="min-h-[420px] overflow-x-auto whitespace-pre rounded-lg border border-border bg-[var(--terminal-bg)] p-4 font-mono text-sm leading-[1.35] text-[var(--terminal-fg)]" aria-label="Terminal playback" />
       {/* The whole transcript stays one disclosure away, searchable/
           copyable, no scrubbing to the end required. */}
       <details className="hp-flow">

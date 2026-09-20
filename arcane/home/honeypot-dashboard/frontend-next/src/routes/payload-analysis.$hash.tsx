@@ -890,7 +890,7 @@ function PayloadAnalysis() {
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild><Button variant="outline" size="sm" title="Where this payload was captured">Origin</Button></DropdownMenuTrigger>
                   <DropdownMenuContent>
-                    <div className="hp-pl-info-row">
+                    <div className="flex flex-col gap-0.5 px-3 py-2 text-xs [&_.k]:text-[10.5px] [&_.k]:tracking-wide [&_.k]:text-muted-foreground [&_.k]:uppercase [&_.v]:break-all [&_.v]:font-mono [&_.v]:text-foreground">
                       <span className="k">captured by</span>
                       <span className="v">{originLabel}</span>
                     </div>
@@ -899,7 +899,7 @@ function PayloadAnalysis() {
                         Open capturing session →
                       </Link></DropdownMenuItem>
                     ) : (
-                      <div className="hp-pl-info-row">
+                      <div className="flex flex-col gap-0.5 px-3 py-2 text-xs [&_.k]:text-[10.5px] [&_.k]:tracking-wide [&_.k]:text-muted-foreground [&_.k]:uppercase [&_.v]:break-all [&_.v]:font-mono [&_.v]:text-foreground">
                         <span className="k">session</span>
                         <span className="v">none recorded for this capture</span>
                       </div>

@@ -192,7 +192,7 @@ export function AttackVectors({
         />
       ) : null}
       {vectors ? (
-        <div className="hp-duo">
+        <div className="grid grid-cols-1 gap-4 min-[821px]:grid-cols-2">
           {(
             [
               ['Targeted ports', vectors.ports],

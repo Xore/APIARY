@@ -112,7 +112,7 @@ export function EsHistoryConsole({ storage, hidden }: { storage: EsStorage | nul
               <CardTitle>Elasticsearch history</CardTitle>
               <CardDescription>Run a query_string search across every indexed honeypot and Suricata document.</CardDescription>
             </div>
-            <div className="hp-head-actions">
+            <div className="flex shrink-0 gap-2">
               <Button variant="ghost" size="sm" asChild>
                 <a
                   href={`/api/export/history.json${activeQuery ? `?q=${encodeURIComponent(activeQuery)}` : ''}`}

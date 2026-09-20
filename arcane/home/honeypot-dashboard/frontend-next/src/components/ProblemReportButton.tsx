@@ -253,7 +253,7 @@ export function ProblemReportButton({ enabled }: { enabled: boolean }) {
               This report automatically includes your recent click/navigation trail, console errors, failed requests, and a
               snapshot of the current page — reviewed by an admin, never shared outside this dashboard.
             </p>
-            <div className="hp-row hp-row--end hp-flow--tight">
+            <div className="mt-2 flex items-center justify-end gap-2">
               <Button variant="secondary" size="default" type="button" onClick={() => setOpen(false)}>
                 Cancel
               </Button>

@@ -256,7 +256,7 @@ export function SidebarViewTabs() {
   if (!entry || narrow || navigating) return null
   return (
     <div ref={ref}>
-      <div className="sidebar__section-label hp-views-label">Views</div>
+      <div className="sidebar__section-label">Views</div>
       <ViewTabList config={entry.config} sidebar />
     </div>
   )

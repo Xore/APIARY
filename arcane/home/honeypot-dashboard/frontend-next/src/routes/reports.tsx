@@ -789,7 +789,7 @@ function DefinitionForm({
           first or how much is left. Rendered on every build step, and the
           <ol> carries the order the tab rail cannot. */}
       {step !== 'library' ? (
-        <div className="hp-rp-progress">
+        <div className="mb-4 flex flex-wrap items-baseline gap-x-4 gap-y-1">
           <span className="hp-rp-progress__position">
             Step {stepIndex + 1} of {BUILD_STEPS.length} — {BUILD_STEPS[stepIndex]?.label}
           </span>
@@ -823,7 +823,7 @@ function DefinitionForm({
           generated until the Review step.
         </CardDescription></CardHeader>
         <CardContent className="space-y-6">
-        <div className="hp-rp-templates" role="group" aria-label="Report template">
+        <div className="my-1 mb-[18px] grid grid-cols-[repeat(auto-fill,minmax(210px,1fr))] gap-4" role="group" aria-label="Report template">
           {templates.length > 0 ? (
             templates.map((entry) => (
               <Button
@@ -859,7 +859,7 @@ function DefinitionForm({
               "Dark"/"Light" showed nothing. */}
           <Field>
             <FieldLabel htmlFor="report-theme-dark">Theme</FieldLabel>
-            <div className="hp-rp-theme" role="group" aria-label="PDF theme">
+            <div className="flex gap-2.5" role="group" aria-label="PDF theme">
               <Button id="report-theme-dark" variant={theme === 'dark' ? 'default' : 'outline'} type="button" aria-pressed={theme === 'dark'} onClick={() => setTheme('dark')}>
                 <span className="hp-rp-swatch hp-rp-swatch--dark" aria-hidden="true" />
                 Dark
@@ -949,7 +949,7 @@ function DefinitionForm({
                     onChange={(event) => setPayloadQuery(event.target.value)}
                   />
                 </Field>
-                <div className="hp-rp-payload-results" role="listbox" aria-label="Captured payloads">
+                <div className="my-2.5 flex max-h-[280px] flex-col gap-1 overflow-y-auto" role="listbox" aria-label="Captured payloads">
                   {payloadError ? (
                     <p className="text-sm text-destructive">payload search unavailable</p>
                   ) : payloadResults === null ? (
@@ -970,7 +970,7 @@ function DefinitionForm({
                         <span>
                           {row.kind || 'unknown'} · {row.size}
                         </span>
-                        <span className="hp-rp-payload-badges">
+                        <span className="flex shrink-0 gap-1">
                           {row.sources.length ? (
                             row.sources.map((source) => (
                               <Badge key={source} variant="secondary">{source}</Badge>
@@ -1136,9 +1136,9 @@ function DefinitionForm({
       <div className="dashboard-panel" role="tabpanel" id="rp-panel-review" aria-labelledby="rp-review" hidden={!onReview}>
         <Card className="col-span-full">
           <CardHeader><h2 className="font-semibold leading-none tracking-tight">Review</h2><CardDescription>{stepLede('review')}</CardDescription></CardHeader><CardContent>
-          <div className="hp-rp-review">
+          <div className="mt-4 grid gap-0">
             {summaryRows.map((row) => (
-              <div className="hp-rp-review__row" key={`${row.step}:${row.key}`}>
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-2 border-t border-border py-2 first:border-t-0 sm:grid-cols-[minmax(0,11rem)_minmax(0,1fr)_auto]" key={`${row.step}:${row.key}`}>
                 <span className="hp-rp-review__key">{row.key}</span>
                 <span className="hp-rp-review__value" data-unset={row.unset ? '' : undefined}>
                   {row.value}
@@ -1162,7 +1162,7 @@ function DefinitionForm({
           of controls rather than a click-through (#1858). Cancel stays
           available throughout, because abandoning a draft should never
           require walking to the end of it first. */}
-      <div className="hp-rp-actions" hidden={step === 'library'}>
+      <div className="sticky bottom-0 z-[5] mt-4 flex flex-wrap items-center gap-4 rounded-lg border border-border bg-card p-4 shadow-lg" hidden={step === 'library'}>
         <Button variant="ghost" size="sm"
           type="button"
           disabled={!previousStep}

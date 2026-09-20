@@ -14,6 +14,7 @@ import type { BannerView } from '../lib/banner'
 import type { User } from '../lib/auth'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip'
 import { Avatar, AvatarFallback } from './ui/avatar'
+import { Badge } from './ui/badge'
 import { SidebarTrigger } from './ui/sidebar'
 import {
   Menubar,
@@ -140,15 +141,15 @@ export function Topbar({
             <Avatar className="hp-toolbar-avatar"><AvatarFallback>{initial}</AvatarFallback></Avatar>
           </MenubarTrigger>
           <MenubarContent align="end">
-            <MenubarItem asChild><Link to="/alerts">
+            <MenubarItem asChild><Link className="relative" to="/alerts">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
                 <path d="M13.73 21a2 2 0 0 1-3.46 0" />
               </svg>
               <span>Open alerts</span>
-              <span className="hp-alert-badge" hidden={alertCount === 0}>
+              <Badge variant="destructive" className="absolute top-px -right-1 h-3.5 min-w-3.5 rounded-full px-[3px] py-0 text-[9px] leading-none" hidden={alertCount === 0}>
                 {alertCount > 99 ? '99+' : alertCount}
-              </span>
+              </Badge>
             </Link></MenubarItem>
             <MenubarItem onSelect={cycleTheme} aria-label={`Switch color theme (${mode})`}>
           {mode === 'system' ? (

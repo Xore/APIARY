@@ -552,7 +552,7 @@ function Overview() {
               dropped in the port even though the shortcut still works. */}
           <kbd>/</kbd>
         </Button>
-        <div className="hp-hero__links">
+        <div className="mt-4 mb-1 text-[13px] text-muted-foreground [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline">
           <Suspense fallback={null}>
             <Await promise={data.kpis}>{(kpis) => <HeroFreshness ready={Boolean(kpis?.ready)} kpis={kpis} />}</Await>
           </Suspense>

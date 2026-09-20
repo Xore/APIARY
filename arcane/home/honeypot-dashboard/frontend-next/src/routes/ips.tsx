@@ -62,12 +62,12 @@ function SkeletonCards({ count }: { count: number }) {
   return (
     <>
       {Array.from({ length: count }, (_, i) => (
-        <div key={`skel-${i}`} className="hp-src-card" aria-hidden="true">
-          <div className="hp-src-card__head">
+        <div key={`skel-${i}`} className="flex flex-col gap-2 rounded-[14px] bg-muted p-4" aria-hidden="true">
+          <div className="flex items-center justify-between gap-2">
             <Skeleton className="h-4 w-full" style={{ display: 'block', width: '42%' }} />
             <Skeleton className="h-4 w-full" style={{ display: 'block', width: 34, height: 16, borderRadius: 999 }} />
           </div>
-          <div className="hp-src-card__stats">
+          <div className="flex">
             {[0, 1, 2].map((j) => (
               <span key={j} style={{ flex: 1, minWidth: 0, padding: j === 0 ? '0 var(--space-md) 0 0' : '0 var(--space-md)', borderLeft: j === 0 ? 'none' : '1px solid var(--border-100)' }}>
                 <Skeleton className="h-4 w-full" style={{ display: 'block', width: 36, height: 17 }} />
@@ -121,13 +121,13 @@ function Sources() {
         </CardContent>
       </Card>
       <Card id="ips-table">
-        <div className="hp-src-grid">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-4">
           {failed ? null : rows === null ? (
             <SkeletonCards count={10} />
           ) : (
             rows.map((row) => (
-              <div key={row.ip} className="hp-src-card">
-                <div className="hp-src-card__head">
+              <div key={row.ip} className="flex flex-col gap-2 rounded-[14px] bg-muted p-4">
+                <div className="flex items-center justify-between gap-2">
                   <Link className="hp-src-card__ip" to="/investigate/ip/$ip" params={{ ip: row.ip }} title="Open full investigation">
                     {row.ip}
                   </Link>
@@ -138,7 +138,7 @@ function Sources() {
                   ) : null}
                 </div>
                 {/* Distinct stat destinations per ips.html:10-14. */}
-                <div className="hp-src-card__stats">
+                <div className="flex [&_a]:min-w-0 [&_a]:flex-1 [&_a]:border-l [&_a]:border-border [&_a]:px-4 [&_a]:text-foreground [&_a]:no-underline [&_a:first-child]:border-l-0 [&_a:first-child]:pl-0 [&_b]:block [&_b]:font-serif [&_b]:text-[17px] [&_b]:font-medium [&_span]:text-[10.5px] [&_span]:text-muted-foreground">
                   <Link to="/events" search={{ ip: row.ip }}>
                     <b>{row.events.toLocaleString('en-US')}</b>
                     <span>events</span>
@@ -169,7 +169,7 @@ function Sources() {
                     </span>
                   ))}
                 </span>
-                <div className="hp-src-card__when">
+                <div className="font-mono text-[10.5px] text-muted-foreground">
                   <span>{when(row.first)}</span> → <span>{when(row.last)}</span>
                 </div>
               </div>
@@ -188,7 +188,7 @@ function Sources() {
           {!failed && loadingMore ? <SkeletonCards count={5} /> : null}
         </div>
         {rows !== null && rows.length < Math.min(total, 1000) ? (
-          <div className="hp-lazy-controls" aria-live="polite">
+          <div className="flex items-center justify-center gap-4 pt-4 pb-1 [&>span:first-child]:text-xs [&>span:first-child]:text-muted-foreground" aria-live="polite">
             <span>
               {rows.length.toLocaleString('en-US')} of {total.toLocaleString('en-US')} entries
             </span>
