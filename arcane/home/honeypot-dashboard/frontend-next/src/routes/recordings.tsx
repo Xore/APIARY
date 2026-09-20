@@ -16,6 +16,7 @@ import { InvestigateHeader, MasterDetailTable, type Column } from '../components
 import { ErrorStateBlock } from '../components/ErrorState'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
+import { CardDescription } from '../components/ui/card'
 import { formatTimestamp } from '../lib/time'
 import { countryName } from '../lib/country'
 
@@ -87,14 +88,14 @@ function ReplayPane({ row }: { row: RecordingRow }) {
     }
   }, [row.shasum])
   if (replay === 'loading') return <Skeleton className="h-4 w-full" aria-hidden="true" />
-  if (!replay) return <p className="subtitle">Replay unavailable for this recording.</p>
+  if (!replay) return <CardDescription>Replay unavailable for this recording.</CardDescription>
   return (
     <>
       {/* #1716: attribution comes from the row's own close event. It used to
           be fetched here by shasum, which had the same flaw the list did —
           many sessions share one recording, so the lookup returned whichever
           one ES happened to answer with. */}
-      <p className="subtitle">
+      <CardDescription>
         {row.src_ip ? (
           <Link
             className="lnk"
@@ -128,15 +129,15 @@ function ReplayPane({ row }: { row: RecordingRow }) {
             </Link>
           </>
         ) : null}
-      </p>
-      <p className="subtitle">
+      </CardDescription>
+      <CardDescription>
         {replay.frames.toLocaleString('en-US')} frames · {replay.duration_seconds.toFixed(1)}s of terminal time ·{' '}
         <Button variant="secondary" size="sm" asChild>
           <Link to="/tty-replay/$shasum" params={{ shasum: row.shasum }}>
             open replay page →
           </Link>
         </Button>
-      </p>
+      </CardDescription>
       <pre className="hp-md__preview">{plainTranscript(replay.transcript)}</pre>
     </>
   )

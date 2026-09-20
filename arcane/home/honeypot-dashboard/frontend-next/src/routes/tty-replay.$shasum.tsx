@@ -27,7 +27,7 @@ import { ErrorStateBlock } from '../components/ErrorState'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
-import { Card, CardContent } from '../components/ui/card'
+import { Card, CardContent, CardDescription } from '../components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
 import { Table, TableBody, TableCell, TableRow } from '../components/ui/table'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs'
@@ -497,10 +497,10 @@ function AttackerTab({ shasum }: { shasum: string }) {
               {ip}
             </Link>
           </h2>
-          <p className="subtitle">
+          <CardDescription>
             {profile.country || 'unknown origin'}
             {profile.asn ? ` • ${profile.asn}` : ''} — everything this source IP has done, not just this one session.
-          </p>
+          </CardDescription>
         </div>
       </div>
 

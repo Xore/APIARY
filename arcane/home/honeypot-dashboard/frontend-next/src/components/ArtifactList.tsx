@@ -6,6 +6,7 @@ import { useServerQuery } from '../lib/useServerQuery'
 import { ErrorStateBlock } from './ErrorState'
 import { Table, TableBody, TableCell, TableRow } from './ui/table'
 import { Badge } from './ui/badge'
+import { Label } from './ui/label'
 
 type ArtifactRow = {
   filename: string
@@ -40,7 +41,7 @@ export function ArtifactList({ kind, artifactKey }: { kind: 'ghidra' | 'sandbox'
   if (rows.length === 0) return null
   return (
     <>
-      <p className="subtitle">Artifacts</p>
+      <Label>Artifacts</Label>
       <Table className="data-table">
         <TableBody>
           {rows.map((row) => (

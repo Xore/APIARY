@@ -18,6 +18,7 @@ import { useState } from 'react'
 import { ErrorStateBlock } from './ErrorState'
 import { Button } from './ui/button'
 import { Card, CardContent } from './ui/card'
+import { Label } from './ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table'
 
 export type MailAddress = { name: string; address: string }
@@ -80,11 +81,11 @@ export function MailMessage({ mail }: { mail: Mail }) {
           </TableRow>
         </TableBody>
       </Table>
-      <p className="subtitle">Body</p>
+      <Label>Body</Label>
       <pre className="code">{mail.body_text || '(empty body)'}</pre>
       {mail.attachments.length > 0 ? (
         <>
-          <p className="subtitle">Attachments</p>
+          <Label>Attachments</Label>
           <Table className="data-table">
             <TableHeader>
               <TableRow>
