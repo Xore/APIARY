@@ -239,12 +239,12 @@ function SensorPage() {
         // #2178: an empty rail used to read as "the roster has no sensors"
         // rather than "the catalog request failed" — the page's only
         // between-sensor navigation silently vanished.
-        <p className="note text-danger" role="alert">
+        <CardDescription className="note text-danger" role="alert">
           The sensor roster failed to load, so the per-sensor navigation above is missing this load.{' '}
           <Button type="button" variant="link" size="sm" onClick={retry}>
             Retry
           </Button>
-        </p>
+        </CardDescription>
       ) : null}
       {viewTabs}
 

@@ -1084,11 +1084,11 @@ function PersonalPanes({
                     there. They stay visible and disabled rather than removed,
                     because they are wanted; what is removed is the claim that
                     they work. */}
-                <p className="note hp-appearance-note">
+                <CardDescription className="note hp-appearance-note">
                   Density, high contrast and evidence text are not wired up yet. They are shown here because they are
                   planned, not because they work — see #1759. Motion already follows your operating system's
                   reduced-motion setting; the explicit choices below do not override it.
-                </p>
+                </CardDescription>
                 <Segmented
                   label="Density"
                   value={form.density ?? 'comfortable'}

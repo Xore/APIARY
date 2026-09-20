@@ -17,7 +17,7 @@ import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 import type { Json, JsonRecord } from '../lib/json'
@@ -120,7 +120,7 @@ function Evidence({ title, note, body }: { title: string; note?: string; body: s
   return (
     <details className="hp-flow">
       <summary>{title}</summary>
-      {note ? <p className="note hp-flow">{note}</p> : null}
+      {note ? <CardDescription className="note hp-flow">{note}</CardDescription> : null}
       <CardContent className="overflow-auto max-h-96">
         <pre className="code">{body}</pre>
       </CardContent>
@@ -583,10 +583,10 @@ function SandboxDetail() {
               )}
               {lines(network.attempts).length ? (
                 <>
-                  <p className="note hp-flow">
+                  <CardDescription className="note hp-flow">
                     {lines(network.attempts).length} IPv4/IPv6 connect attempt{lines(network.attempts).length === 1 ? '' : 's'} observed by
                     strace.
-                  </p>
+                  </CardDescription>
                   <Evidence title="Open connect attempts" body={lines(network.attempts).join('\n')} />
                 </>
               ) : null}
@@ -774,7 +774,7 @@ function SandboxDetail() {
                 <Evidence title="ExifTool" body={str(artifacts.exiftool)} />
                 <Evidence title="objdump -x" body={str(artifacts.pe_objdump)} />
                 {!lines(windows.exports).length && !lines(windows.warnings).length ? (
-                  <p className="note hp-flow">No exported symbols or parser warnings.</p>
+                  <CardDescription className="note hp-flow">No exported symbols or parser warnings.</CardDescription>
                 ) : null}
               </Card>
               <Card className="sm:w-1/2 w-full">
@@ -811,7 +811,7 @@ function SandboxDetail() {
                 label="processes before / after"
                 value={`${lines(artifacts.processes_before).length} / ${lines(artifacts.processes_after).length}`}
               />
-              <p className="note hp-flow">Collected artifacts:</p>
+              <CardDescription className="note hp-flow">Collected artifacts:</CardDescription>
               <Evidence title="Guest kernel" body={str(artifacts.kernel)} />
               <Evidence title={`Processes before (${lines(artifacts.processes_before).length})`} body={lines(artifacts.processes_before).join('\n')} />
               <Evidence title={`Processes after (${lines(artifacts.processes_after).length})`} body={lines(artifacts.processes_after).join('\n')} />
@@ -844,10 +844,10 @@ function SandboxDetail() {
           </TabsContent>
           </Tabs>
 
-          <p className="note hp-flow">
+          <CardDescription className="note hp-flow">
             Guest-produced text is untrusted and size-bounded. Complete raw result directories and syscall traces remain root-only on the
             homeserver.
-          </p>
+          </CardDescription>
         </>
       )}
       <Card>

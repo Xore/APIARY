@@ -965,12 +965,12 @@ function WorkbenchBuilder({ owner, onRunCreated }: { owner: string; onRunCreated
               </Select>
             </div>
           ) : recipesFailed ? (
-            <p className="note text-danger" role="alert">
+            <CardDescription className="note text-danger" role="alert">
               Saved recipes couldn't be loaded — they exist but the request failed.{' '}
               <Button variant="ghost" size="sm" type="button" className="lnk" onClick={() => setRecipesAttempt((n) => n + 1)}>
                 Retry
               </Button>
-            </p>
+            </CardDescription>
           ) : null}
 
           <div className="filters">

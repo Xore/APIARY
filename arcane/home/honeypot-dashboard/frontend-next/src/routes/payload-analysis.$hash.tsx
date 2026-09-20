@@ -1227,13 +1227,13 @@ function PayloadAnalysis() {
                 blocks a fresh submission.
               </p>
               {lookupFailed ? (
-                <p className="note text-danger" role="alert">
+                <CardDescription className="note text-danger" role="alert">
                   The cross-store lookup failed this load — rows shown here say nothing about stores that were never
                   reached.{' '}
                   <Button type="button" variant="link" size="sm" onClick={() => setAttempt((n) => n + 1)}>
                     Retry
                   </Button>
-                </p>
+                </CardDescription>
               ) : correlation === null || related === null ? (
                 skeleton
               ) : (
@@ -1308,7 +1308,7 @@ function PayloadAnalysis() {
               ) : (
                 <p className="empty">{yara.scanned ? 'No YARA rules matched this sample.' : 'Waiting for the isolated YARA scanner.'}</p>
               )}
-              {yara.error ? <p className="note text-danger">{yara.error}</p> : null}
+              {yara.error ? <CardDescription className="note text-danger">{yara.error}</CardDescription> : null}
               {yara.scanned ? (
                 <p className="text-sm text-muted-foreground">
                   Scanned {formatTimestamp(yara.scanned)} by the networkless YARA sidecar. A match is a triage signal, not

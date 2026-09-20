@@ -13,7 +13,7 @@ import { useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
 import { Badge } from '../components/ui/badge'
-import { Card, CardContent } from '../components/ui/card'
+import { Card, CardContent, CardDescription } from '../components/ui/card'
 import type { Json, JsonRecord } from '../lib/json'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 
@@ -382,7 +382,7 @@ function CapeDetail() {
                       the execution summary.
                     </p>
                     {summary.debug_errors.length ? (
-                      <p className="note text-danger">{summary.debug_errors.length} analyzer error(s) were logged.</p>
+                      <CardDescription className="note text-danger">{summary.debug_errors.length} analyzer error(s) were logged.</CardDescription>
                     ) : null}
                     {summary.debug_log ? (
                       <CardContent aria-label="Analyzer log output">
