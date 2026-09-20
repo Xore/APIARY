@@ -7,6 +7,7 @@ import '../index.css'
 import { HeadContent, Scripts, createRootRoute, Link, redirect, useRouterState } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { AppShell } from '../components/AppShell'
+import { Card, CardDescription, CardTitle } from '../components/ui/card'
 import { getSessionUser, type User } from '../lib/auth'
 import { activeBanner, type BannerView, type BehaviorConfig, type PresentationConfig } from '../lib/banner'
 import { pullAppearance } from '../lib/prefs'
@@ -198,18 +199,18 @@ export const Route = createRootRoute({
   // voice — icon, muted hint, one surface-pill action — given to the 404,
   // instead of a bare heading.
   notFoundComponent: () => (
-    <div className="empty-state min-h-[56vh]" role="status">
+    <Card className="grid min-h-[56vh] place-items-center px-5 py-6 text-center" role="status">
       <div>
-        <div className="empty-state__icon" aria-hidden="true">
+        <div className="text-muted-foreground opacity-60 [&_svg]:size-[26px]" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <circle cx="12" cy="12" r="10" />
             <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
           </svg>
         </div>
-        <h1 className="empty-state__title">Page not found</h1>
-        <p className="empty-state__hint">
+        <CardTitle className="heading-serif mb-0.5 mt-2 text-[17px] font-medium"><h1>Page not found</h1></CardTitle>
+        <CardDescription className="mx-auto max-w-[420px] text-[12.5px]">
           Whatever you were looking for isn't at this address — check the link, or head back to a page that exists.
-        </p>
+        </CardDescription>
         <Link className="empty-state__action" to="/">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
@@ -217,7 +218,7 @@ export const Route = createRootRoute({
           Go back home
         </Link>
       </div>
-    </div>
+    </Card>
   ),
 })
 

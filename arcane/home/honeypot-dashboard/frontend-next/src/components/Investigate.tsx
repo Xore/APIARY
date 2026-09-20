@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { RowActions, RowIcons } from './RowActions'
 import { Button } from './ui/button'
-import { Card, CardContent, CardHeader } from './ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table'
 
 export function InvestigateHeader({
@@ -45,10 +45,8 @@ export type Column<Row> = {
   primary?: boolean
 }
 
-/** A result surface with nothing to show. Mirrors the legacy `.empty-state`
- * block — a calm serif sentence, a muted hint, and at most one
- * surface-pill action. theme.css has carried these rules the whole time;
- * the port simply stopped emitting the markup. */
+/** A result surface with nothing to show: a calm serif sentence, a muted
+ * hint, and at most one surface-pill action. */
 export type EmptyState = {
   title: string
   hint?: string
@@ -68,15 +66,15 @@ const MagnifierIcon = (
 export function EmptyStateBlock({ state }: { state: EmptyState }) {
   const icon = state.icon === undefined ? MagnifierIcon : state.icon
   return (
-    <div className="empty-state">
+    <Card className="grid place-items-center px-5 py-6 text-center">
       <div>
         {icon ? (
-          <div className="empty-state__icon" aria-hidden="true">
+          <div className="text-muted-foreground opacity-60 [&_svg]:size-[26px]" aria-hidden="true">
             {icon}
           </div>
         ) : null}
-        <div className="empty-state__title">{state.title}</div>
-        {state.hint ? <p className="empty-state__hint">{state.hint}</p> : null}
+        <CardTitle className="heading-serif mb-0.5 mt-2 text-[17px] font-medium">{state.title}</CardTitle>
+        {state.hint ? <CardDescription className="mx-auto max-w-[420px] text-[12.5px]">{state.hint}</CardDescription> : null}
         {state.action ? (
           <a className="empty-state__action" href={state.action.href}>
             {state.action.icon}
@@ -84,7 +82,7 @@ export function EmptyStateBlock({ state }: { state: EmptyState }) {
           </a>
         ) : null}
       </div>
-    </div>
+    </Card>
   )
 }
 
