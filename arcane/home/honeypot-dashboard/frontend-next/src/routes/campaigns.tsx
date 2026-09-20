@@ -248,9 +248,9 @@ function Campaigns() {
         chips={
           <>
             <span className="chip">{rows ? `${rows.length} active networks` : failed ? 'load failed' : '…'}</span>
-            <a className="chip" title="Download every correlated campaign as CSV" href="/api/export/campaigns.csv">
+            <Link className="chip" title="Download every correlated campaign as CSV" to="/api/export/$name" params={{ name: 'campaigns.csv' }} reloadDocument>
               ⇩ CSV
-            </a>
+            </Link>
             {generated ? <span className="chip">generated {formatTimestamp(generated)}</span> : null}
           </>
         }

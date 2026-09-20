@@ -61,14 +61,14 @@ function AccountMenu({ user, onOpenSettings }: { user?: User | null; onOpenSetti
         <DropdownMenuSeparator />
         {/* Log out is a real navigation — the /auth/logout server route
             clears the session cookie and bounces through Keycloak. */}
-        <Button asChild><a href="/auth/logout">
+        <Button asChild><Link to="/auth/logout" reloadDocument>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
             <polyline points="16 17 21 12 16 7" />
             <line x1="21" y1="12" x2="9" y2="12" />
           </svg>
           <span>Log out</span>
-        </a></Button>
+        </Link></Button>
         {!user ? (
           <DropdownMenuItem disabled>Account service unavailable</DropdownMenuItem>
         ) : null}

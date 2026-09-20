@@ -104,9 +104,9 @@ function Sources() {
         chips={
           <>
             <span className="chip">{failed ? 'load failed' : `${total.toLocaleString('en-US')} unique IPs`}</span>
-            <a className="chip" title="Download every attack source as CSV" href="/api/export/ips.csv">
+            <Link className="chip" title="Download every attack source as CSV" to="/api/export/$name" params={{ name: 'ips.csv' }} reloadDocument>
               ⇩ CSV
-            </a>
+            </Link>
           </>
         }
       />

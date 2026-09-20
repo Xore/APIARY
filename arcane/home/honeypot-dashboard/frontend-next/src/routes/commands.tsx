@@ -1,6 +1,6 @@
 // Executed commands — the events pipeline filtered to honeypot.event=
 // "command"; the full record rides the inspector.
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
@@ -70,9 +70,9 @@ function Commands() {
         chips={
           <>
             <Badge variant="secondary">{failed ? 'load failed' : `${total.toLocaleString('en-US')} commands`}</Badge>
-            <a className="text-sm text-primary underline-offset-4 hover:underline" title="Download every executed command as CSV" href="/api/export/commands.csv">
+            <Link className="text-sm text-primary underline-offset-4 hover:underline" title="Download every executed command as CSV" to="/api/export/$name" params={{ name: 'commands.csv' }} reloadDocument>
               ⇩ CSV
-            </a>
+            </Link>
           </>
         }
       />

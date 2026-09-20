@@ -111,9 +111,9 @@ function Clusters() {
         chips={
           <>
             <span className="chip">{rows ? `${rows.length} shared pivots` : failed ? 'load failed' : '…'}</span>
-            <a className="chip" title="Download every infrastructure cluster as CSV" href="/api/export/clusters.csv">
+            <Link className="chip" title="Download every infrastructure cluster as CSV" to="/api/export/$name" params={{ name: 'clusters.csv' }} reloadDocument>
               ⇩ CSV
-            </a>
+            </Link>
             {generated ? <span className="chip">generated {formatTimestamp(generated)}</span> : null}
           </>
         }
