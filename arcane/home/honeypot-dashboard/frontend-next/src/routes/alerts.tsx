@@ -7,7 +7,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ConfirmOptions } from '../components/ConfirmDialog'
-import * as Dialog from '@radix-ui/react-dialog'
+import { Dialog, DialogContent, DialogTitle } from '../components/ui/dialog'
 import { Bell, CheckCheck, RefreshCw } from 'lucide-react'
 import { Badge } from '../components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
@@ -408,17 +408,17 @@ function Alerts() {
           </TabsContent>
         })}
       </Tabs>
-      <Dialog.Root open={confirmation !== null} onOpenChange={(open) => { if (!open && !running) setConfirmation(null) }}>
-        <Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-black/80" /><Dialog.Content role="alertdialog" className="fixed left-1/2 top-1/2 z-50 grid max-h-[90dvh] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto rounded-lg border bg-background p-6 text-foreground shadow-lg"
+      <Dialog open={confirmation !== null} onOpenChange={(open) => { if (!open && !running) setConfirmation(null) }}>
+        <DialogContent role="alertdialog" aria-describedby={undefined} className="max-h-[90dvh] w-[calc(100%-2rem)] max-w-lg gap-4 overflow-y-auto rounded-lg p-6 text-foreground"
           onEscapeKeyDown={(event) => { if (running) event.preventDefault() }}
           onInteractOutside={(event) => { if (running) event.preventDefault() }}
           onCloseAutoFocus={(event) => { event.preventDefault(); (triggerRef.current?.isConnected ? triggerRef.current : refreshRef.current)?.focus() }}>
-          <div className="space-y-2"><Dialog.Title className="text-lg font-semibold">{confirmation?.title}</Dialog.Title><Dialog.Description className="text-sm text-muted-foreground">{confirmation?.description}</Dialog.Description></div>
+          <div className="space-y-2"><DialogTitle className="text-lg font-semibold">{confirmation?.title}</DialogTitle><p className="text-sm text-muted-foreground">{confirmation?.description}</p></div>
           {confirmation?.warning && <p className="rounded-md border bg-muted p-3 text-sm break-all">{confirmation.warning}</p>}
           {failure && <p role="alert" className="text-sm text-destructive">{failure}</p>}
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><Button variant="outline" disabled={running} onClick={() => setConfirmation(null)}>Cancel</Button><Button autoFocus variant={confirmation?.danger ? 'destructive' : 'default'} disabled={running} onClick={() => void runConfirm()}>{running ? 'Working…' : failure ? 'Try again' : confirmation?.confirmLabel}</Button></div>
-        </Dialog.Content></Dialog.Portal>
-      </Dialog.Root>
+        </DialogContent>
+      </Dialog>
     </section>
   )
 }
