@@ -33,7 +33,7 @@ test('theme picker maps all nine palettes in both modes without console errors',
           const actual = getComputedStyle(probe).color
           if (!actual) bad.push(token)
         }
-        probe.style.borderRadius = 'var(--radius)'
+        probe.style.borderRadius = 'var(--radius-md)'
         if (Number.parseFloat(getComputedStyle(probe).borderTopLeftRadius) <= 0) bad.push('radius')
         probe.remove()
         return bad

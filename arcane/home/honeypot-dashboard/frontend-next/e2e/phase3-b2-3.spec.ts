@@ -4,7 +4,7 @@ import { join } from 'node:path'
 const routes = [
   { name: 'events', path: '/events', heading: 'Event explorer', loaded: 'login attempt root/admin' },
   { name: 'payloads', path: '/payloads', heading: 'Captured payloads', loaded: 'uname -a' },
-  { name: 'canarytokens', path: '/canarytokens', heading: 'Canarytokens', loaded: 'Fake .docx' },
+  { name: 'canarytokens', path: '/canarytokens', heading: 'Canarytokens', loaded: 'Deployed decoy tokens' },
 ] as const
 
 for (const route of routes) for (const width of [1280, 390]) for (const mode of ['light', 'dark']) {

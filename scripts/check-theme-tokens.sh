@@ -21,9 +21,11 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 src="$root/arcane/home/honeypot-dashboard/frontend-next/src"
 css="$root/arcane/home/honeypot-dashboard/frontend-next/public/static/theme.css"
+app_css="$src/index.css"
 
 [ -d "$src" ] || { echo "missing $src" >&2; exit 1; }
 [ -f "$css" ] || { echo "missing $css" >&2; exit 1; }
+[ -f "$app_css" ] || { echo "missing $app_css" >&2; exit 1; }
 
 missing=0
 # Only tokens the code actually reaches for: var(--x), '--x' or "--x".
@@ -31,7 +33,14 @@ missing=0
 # the component defines for itself.
 while read -r token; do
   [ -n "$token" ] || continue
-  if ! grep -qE "^[[:space:]]*${token}:" "$css"; then
+  # Shadcn tokens live in the app stylesheet, component-owned variables are
+  # assigned by the component, and Tailwind/Radix provide their runtime
+  # variables. chart-grid is an optional canvas token with its own fallback.
+  if grep -qE "^[[:space:]]*${token}:" "$css" "$app_css" \
+    || grep -rqE --include='*.ts' --include='*.tsx' "['\"]${token}['\"]:[[:space:]]" "$src" \
+    || [[ "$token" == --spacing || "$token" == --radix-* || "$token" == --chart-grid ]]; then
+    continue
+  else
     echo "theme token $token is referenced but not defined in the vendored theme.css:" >&2
     grep -rn --include='*.ts' --include='*.tsx' -- "$token" "$src" | head -5 | sed 's/^/    /' >&2
     missing=$((missing + 1))
@@ -50,4 +59,4 @@ if [ "$missing" -gt 0 ]; then
   exit 1
 fi
 
-echo "theme tokens ok: every custom property referenced from frontend-next exists in theme.css"
+echo "theme tokens ok: every theme custom property referenced from frontend-next has a definition"

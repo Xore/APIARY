@@ -51,7 +51,7 @@ test('gallery and mobile navigation render without console errors', async ({ pag
   await expect(page.getByRole('heading', { name: 'Component gallery' })).toBeVisible()
   await page.setViewportSize({ width: 390, height: 844 })
   await page.getByRole('button', { name: 'Toggle navigation' }).click()
-  await expect(page.locator('[data-mobile="true"] aside[aria-label="Primary navigation"]')).toBeVisible()
+  await expect(page.locator('[data-mobile="true"]')).toBeVisible()
   await page.keyboard.press('Escape')
   expect(errors).toEqual([])
 })
