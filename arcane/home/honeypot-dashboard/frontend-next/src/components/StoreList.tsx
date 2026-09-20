@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column, type EmptyState } from './Investigate'
 import { ErrorStateBlock } from './ErrorState'
+import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import type { JsonRecord } from '../lib/json'
 import { formatTimestamp } from '../lib/time'
@@ -141,7 +142,7 @@ export function StoreListPage<Row = StoreRow>({
         subtitle={subtitle}
         chips={
           <>
-            <span className="chip">{total.toLocaleString('en-US')} {chipNoun}</span>
+            <Badge variant="outline" className="font-mono">{total.toLocaleString('en-US')} {chipNoun}</Badge>
             {extraChips}
           </>
         }

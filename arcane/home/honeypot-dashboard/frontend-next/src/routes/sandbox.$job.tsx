@@ -685,9 +685,9 @@ function SandboxDetail() {
                             <TableCell>{group}</TableCell>
                             <TableCell className="v">
                               {lines(names).map((name) => (
-                                <span key={name} className="chip">
+                                <Badge key={name} variant="outline" className="font-mono">
                                   {name}
-                                </span>
+                                </Badge>
                               ))}
                             </TableCell>
                           </TableRow>
@@ -752,9 +752,9 @@ function SandboxDetail() {
                             <TableCell className="v">{str(entry.dll)}</TableCell>
                             <TableCell className="v">
                               {lines(entry.symbols).map((symbol) => (
-                                <span key={symbol} className="chip">
+                                <Badge key={symbol} variant="outline" className="font-mono">
                                   {symbol}
-                                </span>
+                                </Badge>
                               ))}
                             </TableCell>
                           </TableRow>

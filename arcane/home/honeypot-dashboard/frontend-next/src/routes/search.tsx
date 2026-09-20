@@ -5,6 +5,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
+import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '../components/ui/card'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from '../components/ui/empty'
@@ -66,7 +67,7 @@ function SearchPage() {
         label="Investigate"
         title="Search results"
         subtitle="Grouped matches across sources, sessions, payloads, commands, credentials, fingerprints and signatures."
-        chips={result && result !== 'failed' ? <span className="chip">{result.total.toLocaleString('en-US')} matches</span> : undefined}
+        chips={result && result !== 'failed' ? <Badge variant="outline" className="font-mono">{result.total.toLocaleString('en-US')} matches</Badge> : undefined}
       />
       <p className="text-sm text-muted-foreground">
         Every source the dashboard holds, matched against your query.

@@ -247,11 +247,11 @@ function Campaigns() {
         subtitle="Related source networks grouped across sensors over a rolling 7-day window."
         chips={
           <>
-            <span className="chip">{rows ? `${rows.length} active networks` : failed ? 'load failed' : '…'}</span>
+            <Badge variant="outline" className="font-mono">{rows ? `${rows.length} active networks` : failed ? 'load failed' : '…'}</Badge>
             <Link className="chip" title="Download every correlated campaign as CSV" to="/api/export/$name" params={{ name: 'campaigns.csv' }} reloadDocument>
               ⇩ CSV
             </Link>
-            {generated ? <span className="chip">generated {formatTimestamp(generated)}</span> : null}
+            {generated ? <Badge variant="outline" className="font-mono">generated {formatTimestamp(generated)}</Badge> : null}
           </>
         }
       />

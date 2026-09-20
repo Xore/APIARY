@@ -110,11 +110,11 @@ function Clusters() {
         subtitle="Shared fingerprints, payloads, autonomous systems, and provider classifications across multiple source IPs."
         chips={
           <>
-            <span className="chip">{rows ? `${rows.length} shared pivots` : failed ? 'load failed' : '…'}</span>
+            <Badge variant="outline" className="font-mono">{rows ? `${rows.length} shared pivots` : failed ? 'load failed' : '…'}</Badge>
             <Link className="chip" title="Download every infrastructure cluster as CSV" to="/api/export/$name" params={{ name: 'clusters.csv' }} reloadDocument>
               ⇩ CSV
             </Link>
-            {generated ? <span className="chip">generated {formatTimestamp(generated)}</span> : null}
+            {generated ? <Badge variant="outline" className="font-mono">generated {formatTimestamp(generated)}</Badge> : null}
           </>
         }
       />

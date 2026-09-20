@@ -110,18 +110,18 @@ function portChip(port: ExposedPort) {
       ? `${port.host}/${port.proto} · tunnel`
       : `${port.public}/${port.proto} → ${port.host}${port.proxy ? ' +PROXY' : ''}`
   return (
-    <span className="chip" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78rem' }}>
+    <Badge variant="outline" className="font-mono">
       {label}
-    </span>
+    </Badge>
   )
 }
 
 function containerBadge(state: ContainerState | undefined, adapterVisible: boolean) {
   if (!adapterVisible) {
     return (
-      <span className="chip text-muted" title="Outside services-adapter's allowlist — no live state is reported">
+      <Badge variant="outline" className="font-mono text-muted" title="Outside services-adapter's allowlist — no live state is reported">
         {state?.name.replace(/^hp-/, '') ?? ''}
-      </span>
+      </Badge>
     )
   }
   const label = state?.state ?? 'unknown'
@@ -188,9 +188,9 @@ function TopologyPage() {
         chips={
           topology ? (
             <>
-              <span className="chip">{topology.sensors.length} sensors</span>
-              <span className="chip">{topology.stacks.length} stacks</span>
-              <span className="chip">{totalContainers} containers</span>
+              <Badge variant="outline" className="font-mono">{topology.sensors.length} sensors</Badge>
+              <Badge variant="outline" className="font-mono">{topology.stacks.length} stacks</Badge>
+              <Badge variant="outline" className="font-mono">{totalContainers} containers</Badge>
             </>
           ) : undefined
         }

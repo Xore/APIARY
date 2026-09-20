@@ -24,6 +24,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
 import { ErrorStateBlock } from '../components/ErrorState'
+import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
@@ -615,9 +616,9 @@ function TtyReplay() {
         chips={
           replay ? (
             <>
-              <span className="chip">{replay.frames.toLocaleString('en-US')} frames</span>
-              <span className="chip">{replay.duration_seconds.toFixed(1)}s terminal time</span>
-              <span className="chip">{(replay.size_bytes / 1024).toFixed(1)} KB</span>
+              <Badge variant="outline" className="font-mono">{replay.frames.toLocaleString('en-US')} frames</Badge>
+              <Badge variant="outline" className="font-mono">{replay.duration_seconds.toFixed(1)}s terminal time</Badge>
+              <Badge variant="outline" className="font-mono">{(replay.size_bytes / 1024).toFixed(1)} KB</Badge>
               <Link className="chip" to="/recordings" search={{ ip: undefined }}>← all recordings</Link>
             </>
           ) : undefined

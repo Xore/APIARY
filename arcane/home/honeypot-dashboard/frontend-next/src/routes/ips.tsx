@@ -103,7 +103,7 @@ function Sources() {
         subtitle="Every source address observed by the sensors, with event volume, geolocation, and activity window."
         chips={
           <>
-            <span className="chip">{failed ? 'load failed' : `${total.toLocaleString('en-US')} unique IPs`}</span>
+            <Badge variant="outline" className="font-mono">{failed ? 'load failed' : `${total.toLocaleString('en-US')} unique IPs`}</Badge>
             <Link className="chip" title="Download every attack source as CSV" to="/api/export/$name" params={{ name: 'ips.csv' }} reloadDocument>
               ⇩ CSV
             </Link>

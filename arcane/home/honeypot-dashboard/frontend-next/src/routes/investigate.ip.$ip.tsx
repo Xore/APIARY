@@ -413,7 +413,7 @@ function InvestigateIp() {
         chips={
           profile ? (
             <>
-              <span className="chip">{profile.total.toLocaleString('en-US')} events</span>
+              <Badge variant="outline" className="font-mono">{profile.total.toLocaleString('en-US')} events</Badge>
               {/* #1689: only rendered when true. An absent badge means "no
                   such corroboration", not "benign" — most addresses here are
                   hostile and simply never appeared in an analysed sample. */}
@@ -426,10 +426,10 @@ function InvestigateIp() {
                 </Badge>
               ) : null}
               {profile.country ? <Badge variant="secondary" title={countryName(profile.country)}>{profile.country}</Badge> : null}
-              {profile.asn ? <span className="chip">{profile.asn}</span> : null}
-              <span className="chip">
+              {profile.asn ? <Badge variant="outline" className="font-mono">{profile.asn}</Badge> : null}
+              <Badge variant="outline" className="font-mono">
                 {formatTimestamp(profile.first)} → {formatTimestamp(profile.last)}
-              </span>
+              </Badge>
               <Link className="chip" to="/events" search={{ ip }}>
                 all matching events →
               </Link>

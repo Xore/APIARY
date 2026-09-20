@@ -222,7 +222,7 @@ function Recordings() {
         subtitle="Replayable cowrie TTY sessions — every keystroke and screen output an attacker's interactive shell produced, in order. One row per session; sessions that ran identical commands share one recording."
         chips={
           <>
-            <span className="chip">{failed ? 'load failed' : `${total.toLocaleString('en-US')} recorded sessions`}</span>
+            <Badge variant="outline" className="font-mono">{failed ? 'load failed' : `${total.toLocaleString('en-US')} recorded sessions`}</Badge>
             {ip ? <Badge variant="secondary">source {ip}</Badge> : null}
           </>
         }
