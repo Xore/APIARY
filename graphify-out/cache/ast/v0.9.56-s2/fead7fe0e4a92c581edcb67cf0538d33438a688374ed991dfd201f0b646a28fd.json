@@ -1,0 +1,1 @@
+{"nodes": [{"id": "pkg_canarytokens_adapter", "label": "canarytokens-adapter", "file_type": "code", "type": "package", "ecosystem": "go", "source_file": "arcane/home/honeypot-canarytokens/canarytokens-adapter/go.mod", "source_location": "L1"}], "edges": []}

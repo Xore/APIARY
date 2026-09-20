@@ -1,0 +1,1 @@
+{"nodes": [{"id": "pkg_payload_inventory_worker", "label": "payload-inventory-worker", "file_type": "code", "type": "package", "ecosystem": "go", "source_file": "arcane/home/honeypot-payload-inventory-worker/payload-inventory-worker/go.mod", "source_location": "L1"}], "edges": []}

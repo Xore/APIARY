@@ -1,0 +1,1 @@
+{"nodes": [{"id": "pkg_correlator_worker", "label": "correlator-worker", "file_type": "code", "type": "package", "ecosystem": "go", "source_file": "arcane/home/honeypot-correlator-worker/correlator-worker/go.mod", "source_location": "L1"}], "edges": []}

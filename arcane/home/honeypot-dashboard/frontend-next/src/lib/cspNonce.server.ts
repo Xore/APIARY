@@ -54,10 +54,8 @@ export type CspRuntime = {
 
 const globalScope = globalThis as typeof globalThis & { __APIARY_CSP__?: CspRuntime }
 
-if (!globalScope.__APIARY_CSP__) {
-  globalScope.__APIARY_CSP__ = {
-    current: () => storage.getStore(),
-  }
+globalScope.__APIARY_CSP__ = {
+  current: () => storage.getStore(),
 }
 
 export function createCspNonce(): string {
