@@ -774,6 +774,85 @@
 
 /* <<< END GENERATED THEME SURFACES */
 
+/* Shadcn semantic tokens follow the selected Xore palette. The generated
+   palette --accent is already the intended shadcn accent value. */
+[data-hp-palette="claude"],
+[data-hp-palette="slate"],
+[data-hp-palette="ocean"],
+[data-hp-palette="sage"],
+[data-hp-palette="lavender"],
+[data-hp-palette="lime"],
+[data-hp-palette="amber"],
+[data-hp-palette="rose"],
+[data-hp-palette="neon"] {
+  --background: var(--bg-000);
+  --foreground: var(--text-000);
+  --card: var(--bg-raised);
+  --card-foreground: var(--text-000);
+  --popover: var(--bg-raised);
+  --popover-foreground: var(--text-000);
+  --primary: var(--accent);
+  --primary-foreground: var(--text-on-accent);
+  --secondary: var(--bg-200);
+  --secondary-foreground: var(--text-100);
+  --muted: var(--bg-100);
+  --muted-foreground: var(--text-200);
+  --accent-foreground: var(--text-on-accent);
+  --destructive: light-dark(oklch(0.577 0.245 27.325), oklch(0.396 0.141 25.723));
+  --destructive-foreground: light-dark(oklch(0.577 0.245 27.325), oklch(0.637 0.237 25.331));
+  --border: var(--border-200);
+  --input: var(--border-100);
+  --ring: var(--border-focus);
+  --chart-1: var(--accent);
+  --chart-2: var(--success);
+  --chart-3: var(--info);
+  --chart-4: var(--warning);
+  --chart-5: var(--danger);
+  --sidebar: var(--bg-sidebar);
+  --sidebar-foreground: var(--text-000);
+  --sidebar-primary: var(--accent);
+  --sidebar-primary-foreground: var(--text-on-accent);
+  --sidebar-accent: var(--bg-200);
+  --sidebar-accent-foreground: var(--text-000);
+  --sidebar-border: var(--border-200);
+  --sidebar-ring: var(--border-focus);
+}
+
+[data-hp-palette="default"] {
+  --background: light-dark(oklch(1 0 0), oklch(0.145 0 0));
+  --foreground: light-dark(oklch(0.145 0 0), oklch(0.985 0 0));
+  --card: light-dark(oklch(1 0 0), oklch(0.145 0 0));
+  --card-foreground: light-dark(oklch(0.145 0 0), oklch(0.985 0 0));
+  --popover: light-dark(oklch(1 0 0), oklch(0.145 0 0));
+  --popover-foreground: light-dark(oklch(0.145 0 0), oklch(0.985 0 0));
+  --primary: light-dark(oklch(0.205 0.042 265.755), oklch(0.985 0 0));
+  --primary-foreground: light-dark(oklch(0.985 0 0), oklch(0.205 0.042 265.755));
+  --secondary: light-dark(oklch(0.965 0.001 286.375), oklch(0.269 0.015 286.375));
+  --secondary-foreground: light-dark(oklch(0.205 0.042 265.755), oklch(0.985 0 0));
+  --muted: light-dark(oklch(0.965 0.001 286.375), oklch(0.269 0.015 286.375));
+  --muted-foreground: light-dark(oklch(0.556 0.011 286.375), oklch(0.708 0.01 286.375));
+  --accent: light-dark(oklch(0.965 0.001 286.375), oklch(0.269 0.015 286.375));
+  --accent-foreground: light-dark(oklch(0.205 0.042 265.755), oklch(0.985 0 0));
+  --destructive: light-dark(oklch(0.577 0.245 27.325), oklch(0.396 0.141 25.723));
+  --destructive-foreground: light-dark(oklch(0.577 0.245 27.325), oklch(0.637 0.237 25.331));
+  --border: light-dark(oklch(0.91 0.005 286.375), oklch(0.269 0.015 286.375));
+  --input: light-dark(oklch(0.91 0.005 286.375), oklch(0.269 0.015 286.375));
+  --ring: light-dark(oklch(0.205 0.042 265.755), oklch(0.439 0.062 286.375));
+  --chart-1: light-dark(oklch(0.646 0.222 41.116), oklch(0.488 0.243 264.376));
+  --chart-2: light-dark(oklch(0.6 0.118 184.704), oklch(0.696 0.17 162.48));
+  --chart-3: light-dark(oklch(0.398 0.07 227.392), oklch(0.769 0.188 70.08));
+  --chart-4: light-dark(oklch(0.828 0.189 84.429), oklch(0.627 0.265 29.233));
+  --chart-5: light-dark(oklch(0.769 0.188 70.08), oklch(0.645 0.246 16.439));
+  --sidebar: light-dark(oklch(0.985 0 0), oklch(0.205 0.042 265.755));
+  --sidebar-foreground: light-dark(oklch(0.145 0 0), oklch(0.985 0 0));
+  --sidebar-primary: light-dark(oklch(0.205 0.042 265.755), oklch(0.488 0.243 264.376));
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: light-dark(oklch(0.965 0.001 286.375), oklch(0.269 0.015 286.375));
+  --sidebar-accent-foreground: light-dark(oklch(0.205 0.042 265.755), oklch(0.985 0 0));
+  --sidebar-border: light-dark(oklch(0.91 0.005 286.375), oklch(0.269 0.015 286.375));
+  --sidebar-ring: light-dark(oklch(0.205 0.042 265.755), oklch(0.439 0.062 286.375));
+}
+
 
 
 *, *::before, *::after { box-sizing: border-box; }
