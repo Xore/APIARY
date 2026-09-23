@@ -18,6 +18,15 @@ Every push to `main` and every pull request runs:
 Container images are built for pull requests. A push to `main` or a version tag
 publishes the custom images to the repository's GitHub Container Registry.
 
+### CodeQL setup guardrail
+
+`security.yml` uses CodeQL's advanced setup. Keep GitHub's **Settings → Code
+security → CodeQL** configuration on **Advanced**, not **Default**: the two
+setups cannot process the same analysis, and the resulting failure is
+reported as `CodeQL analyses from advanced configurations cannot be processed
+when the default setup is enabled`. If that error appears, disable the
+repository's default CodeQL setup before changing or rerunning this workflow.
+
 ### Trigger, runner, and trust boundary
 
 ```mermaid

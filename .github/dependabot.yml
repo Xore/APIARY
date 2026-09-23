@@ -49,6 +49,19 @@ updates:
         update-types: [minor, patch]
     labels: [dependencies, frontend]
 
+  - package-ecosystem: cargo
+    directory: /arcane/home/honeypot-dashboard/backend-service
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:35"
+      timezone: Europe/Berlin
+    groups:
+      backend-compatible:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    labels: [dependencies]
+
   # #154 phase 4: was only these 7 (a leftover of gomod's own directory
   # list above, never extended past it) -- every other Dockerfile in this
   # tree got zero automated base-image update coverage at all. Now every
@@ -81,6 +94,8 @@ updates:
       - /arcane/home/honeypot-dns-honeypot/dns-honeypot
       - /arcane/home/honeypot-endlessh/endlessh-honeypot
       - /arcane/home/honeypot-http/http-honeypot
+      - /arcane/home/honeypot-dashboard/frontend-next
+      - /arcane/home/honeypot-dashboard/backend-service
       - /llm-worker
       - /ml-worker
       - /arcane/home/honeypot-multipot/multipot
