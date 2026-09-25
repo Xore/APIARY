@@ -78,9 +78,53 @@ COWRIE_SESSION_EVENT_IDS = (
     "cowrie.login.success",
     "cowrie.session.closed",
 )
+TERMINAL_OBSERVATION_CLOSE = "close_observed"
+TERMINAL_OBSERVATION_IDLE = "idle_finalized"
+TERMINAL_OBSERVATION_OPEN = "open_after_window"
+TERMINAL_OBSERVATION_VALUES = frozenset(
+    {
+        TERMINAL_OBSERVATION_CLOSE,
+        TERMINAL_OBSERVATION_IDLE,
+        TERMINAL_OBSERVATION_OPEN,
+    }
+)
+CAPTURE_COVERAGE_OBSERVED = "observed"
+CAPTURE_COVERAGE_MISSING = "missing"
+CAPTURE_COVERAGE_VALUES = frozenset(
+    {
+        CAPTURE_COVERAGE_OBSERVED,
+        CAPTURE_COVERAGE_MISSING,
+    }
+)
 LOG = logging.getLogger("llm-worker")
 
 AnnotationT = TypeVar("AnnotationT", bound=StrictAnnotation)
+
+ENGAGEMENT_BENIGN = "benign"
+ENGAGEMENT_BUCKET_0 = "0"
+ENGAGEMENT_BUCKET_1_4 = "1-4"
+ENGAGEMENT_BUCKET_5_9 = "5-9"
+ENGAGEMENT_BUCKET_10_19 = "10-19"
+ENGAGEMENT_BUCKET_20_PLUS = "20+"
+ENGAGEMENT_BUCKETS = (
+    ENGAGEMENT_BUCKET_0,
+    ENGAGEMENT_BUCKET_1_4,
+    ENGAGEMENT_BUCKET_5_9,
+    ENGAGEMENT_BUCKET_10_19,
+    ENGAGEMENT_BUCKET_20_PLUS,
+)
+ENGAGEMENT_CAPTURED_CLOSE_RATE_KEY = "captured_close_rate"
+ENGAGEMENT_IDLE_FINALIZATION_RATE_KEY = "idle_finalization_rate"
+ENGAGEMENT_COUNTS_SOURCE = "committed_labeled_corpus"
+ENGAGEMENT_NO_COVERED_SESSIONS = "no_covered_sessions"
+ENGAGEMENT_INSUFFICIENT_LABELED_DATA = "insufficient_labeled_data"
+ENGAGEMENT_AMBIGUITY = (
+    "Terminal evidence does not identify a termination reason or a client behavior."
+)
+DEFAULT_ENGAGEMENT_CORPUS = (
+    Path(__file__).resolve().parents[1]
+    / "arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/corpus.jsonl"
+)
 
 
 def utcnow() -> datetime:
@@ -500,6 +544,252 @@ def bounded_string(value: object, maximum: int) -> str:
     return sanitize_text(value, maximum).text.replace("\n", " ")[:maximum]
 
 
+def engagement_command_bucket(command_count: int) -> str:
+    if command_count <= 0:
+        return ENGAGEMENT_BUCKET_0
+    if command_count <= 4:
+        return ENGAGEMENT_BUCKET_1_4
+    if command_count <= 9:
+        return ENGAGEMENT_BUCKET_5_9
+    if command_count <= 19:
+        return ENGAGEMENT_BUCKET_10_19
+    return ENGAGEMENT_BUCKET_20_PLUS
+
+
+def engagement_session_id(raw: dict[str, Any]) -> str | None:
+    session_id = raw.get("session") or nested(raw, "honeypot", "session")
+    return session_id if isinstance(session_id, str) and session_id else None
+
+
+def read_jsonl(path: Path) -> Iterator[dict[str, Any]]:
+    with path.open("r", encoding="utf-8") as source:
+        for line_number, line in enumerate(source, start=1):
+            if not line.strip():
+                continue
+            try:
+                document = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"invalid JSON at {path}:{line_number}") from exc
+            if not isinstance(document, dict):
+                raise ValueError(f"non-object JSON at {path}:{line_number}")
+            yield document
+
+
+def new_engagement_counts() -> dict[str, int]:
+    return {
+        "session_count": 0,
+        "covered_session_count": 0,
+        "uncovered_session_count": 0,
+        "close_observed_session_count": 0,
+        "idle_finalized_session_count": 0,
+        "open_after_window_session_count": 0,
+    }
+
+
+def add_engagement_session(
+    counts: dict[str, int],
+    *,
+    command_count: int,
+    terminal_observation: str,
+    capture_coverage: str,
+) -> None:
+    terminal_count_key = f"{terminal_observation}_session_count"
+    if terminal_observation not in TERMINAL_OBSERVATION_VALUES or terminal_count_key not in counts:
+        raise ValueError("invalid terminal observation")
+    if capture_coverage not in CAPTURE_COVERAGE_VALUES:
+        raise ValueError("invalid capture coverage")
+    if terminal_observation == TERMINAL_OBSERVATION_IDLE and capture_coverage == CAPTURE_COVERAGE_OBSERVED:
+        raise ValueError("idle finalization cannot have captured coverage")
+    if terminal_observation == TERMINAL_OBSERVATION_OPEN and capture_coverage == CAPTURE_COVERAGE_OBSERVED:
+        raise ValueError("open window cannot have captured coverage")
+    counts["session_count"] += 1
+    counts[terminal_count_key] += 1
+    coverage_key = "covered_session_count" if capture_coverage == CAPTURE_COVERAGE_OBSERVED else "uncovered_session_count"
+    counts[coverage_key] += 1
+
+
+def engagement_rate(numerator: int, denominator: int) -> float | None:
+    if denominator <= 0:
+        return None
+    return numerator / denominator
+
+
+def build_engagement_bucket(
+    command_bucket: str,
+    counts: dict[str, int],
+    labeled_benign_baseline: dict[str, Any],
+) -> dict[str, Any]:
+    covered_count = counts["covered_session_count"]
+    close_observed_count = counts["close_observed_session_count"]
+    idle_finalized_count = counts["idle_finalized_session_count"]
+    captured_close_rate = engagement_rate(close_observed_count, covered_count)
+    idle_finalization_rate = engagement_rate(idle_finalized_count, covered_count)
+    bucket: dict[str, Any] = {
+        "command_count_bucket": command_bucket,
+        "session_count": counts["session_count"],
+        "covered_session_count": covered_count,
+        "terminal_observation": {
+            TERMINAL_OBSERVATION_CLOSE: close_observed_count,
+            TERMINAL_OBSERVATION_IDLE: idle_finalized_count,
+            TERMINAL_OBSERVATION_OPEN: counts["open_after_window_session_count"],
+        },
+        "uncovered_session_count": counts["uncovered_session_count"],
+        "labeled_benign_baseline": labeled_benign_baseline,
+    }
+    if captured_close_rate is not None:
+        bucket[ENGAGEMENT_CAPTURED_CLOSE_RATE_KEY] = {
+            "covered_session_denominator": covered_count,
+            "rate": captured_close_rate,
+        }
+    if idle_finalization_rate is not None:
+        bucket[ENGAGEMENT_IDLE_FINALIZATION_RATE_KEY] = {
+            "covered_session_denominator": covered_count,
+            "rate": idle_finalization_rate,
+        }
+    return bucket
+
+
+def aggregate_labeled_engagement(
+    documents: Iterator[dict[str, Any]],
+    summaries: Iterator[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    corpus_events = list(documents)
+    all_session_counts = new_engagement_counts()
+    labeled_session_counts = new_engagement_counts()
+    benign_counts = new_engagement_counts()
+    bucket_counts = {bucket: new_engagement_counts() for bucket in ENGAGEMENT_BUCKETS}
+    session_labels: dict[str, bool] = {}
+    session_command_counts: dict[str, int] = {}
+    corpus_event_count = 0
+    cowrie_event_count = 0
+
+    for document in corpus_events:
+        corpus_event_count += 1
+        if document.get("sensor") != "cowrie" or document.get("is_benign") not in (False, True):
+            continue
+        raw = document.get("raw")
+        if not isinstance(raw, dict):
+            continue
+        session_id = engagement_session_id(raw)
+        event_id = raw.get("eventid")
+        if session_id is None or event_id not in COWRIE_SESSION_EVENT_IDS:
+            continue
+        cowrie_event_count += 1
+        session_labels.setdefault(session_id, bool(document["is_benign"]))
+        session_command_counts.setdefault(session_id, 0)
+        if event_id not in {"cowrie.command.input", "cowrie.command.failed"}:
+            continue
+        session_command_counts[session_id] = session_command_counts.get(session_id, 0) + 1
+
+    summary_by_id: dict[str, dict[str, Any]] = {}
+    if summaries is not None:
+        for summary in summaries:
+            if not isinstance(summary, dict):
+                continue
+            session_id = summary.get("session_id")
+            if not isinstance(session_id, str) or not session_id:
+                continue
+            terminal_observation = summary.get("terminal_observation")
+            capture_coverage = summary.get("capture_coverage")
+            if terminal_observation not in TERMINAL_OBSERVATION_VALUES:
+                raise ValueError("invalid terminal observation")
+            if capture_coverage not in CAPTURE_COVERAGE_VALUES:
+                raise ValueError("invalid capture coverage")
+            session_labels.setdefault(session_id, True)
+            session_command_counts.setdefault(session_id, max(0, int(summary.get("command_count") or 0)))
+            summary_by_id[session_id] = summary
+
+    for session_id, label in session_labels.items():
+        terminal_observation = TERMINAL_OBSERVATION_OPEN
+        capture_coverage = CAPTURE_COVERAGE_MISSING
+        if session_id in summary_by_id:
+            summary = summary_by_id[session_id]
+            terminal_observation = summary["terminal_observation"]
+            capture_coverage = summary["capture_coverage"]
+        add_engagement_session(
+            all_session_counts,
+            command_count=session_command_counts[session_id],
+            terminal_observation=terminal_observation,
+            capture_coverage=capture_coverage,
+        )
+        add_engagement_session(
+            benign_counts if label else labeled_session_counts,
+            command_count=session_command_counts[session_id],
+            terminal_observation=terminal_observation,
+            capture_coverage=capture_coverage,
+        )
+        bucket = bucket_counts[engagement_command_bucket(session_command_counts[session_id])]
+        add_engagement_session(
+            bucket,
+            command_count=session_command_counts[session_id],
+            terminal_observation=terminal_observation,
+            capture_coverage=capture_coverage,
+        )
+
+    labeled_benign_baseline: dict[str, Any] = {
+        "label": ENGAGEMENT_BENIGN,
+        "session_count": benign_counts["session_count"],
+        "status": "available" if benign_counts["session_count"] else ENGAGEMENT_INSUFFICIENT_LABELED_DATA,
+        "covered_session_count": benign_counts["covered_session_count"],
+        "uncovered_session_count": benign_counts["uncovered_session_count"],
+        "close_observed_session_count": benign_counts["close_observed_session_count"],
+        "idle_finalized_session_count": benign_counts["idle_finalized_session_count"],
+    }
+    total_captured_close_rate = engagement_rate(
+        labeled_session_counts["close_observed_session_count"],
+        labeled_session_counts["covered_session_count"],
+    )
+    total_idle_finalization_rate = engagement_rate(
+        labeled_session_counts["idle_finalized_session_count"],
+        labeled_session_counts["covered_session_count"],
+    )
+    report: dict[str, Any] = {
+        "report": "session_engagement",
+        "descriptive_only": True,
+        "source": ENGAGEMENT_COUNTS_SOURCE,
+        "corpus_event_count": corpus_event_count,
+        "corpus_session_count": len(session_labels),
+        "corpus_cowrie_event_count": cowrie_event_count,
+        "all_label_count": all_session_counts["session_count"],
+        "all_covered_session_count": all_session_counts["covered_session_count"],
+        "all_uncovered_session_count": all_session_counts["uncovered_session_count"],
+        "session_count": labeled_session_counts["session_count"],
+        "covered_session_count": labeled_session_counts["covered_session_count"],
+        "uncovered_session_count": labeled_session_counts["uncovered_session_count"],
+        "terminal_observation": {
+            TERMINAL_OBSERVATION_CLOSE: labeled_session_counts["close_observed_session_count"],
+            TERMINAL_OBSERVATION_IDLE: labeled_session_counts["idle_finalized_session_count"],
+            TERMINAL_OBSERVATION_OPEN: labeled_session_counts["open_after_window_session_count"],
+        },
+        "labeled_benign_baseline": labeled_benign_baseline,
+        "command_count_buckets": [
+            build_engagement_bucket(bucket, bucket_counts[bucket], labeled_benign_baseline)
+            for bucket in ENGAGEMENT_BUCKETS
+        ],
+        "no_rate_reason": (
+            ENGAGEMENT_NO_COVERED_SESSIONS if labeled_session_counts["covered_session_count"] == 0 else ""
+        ),
+        "terminal_observation_ambiguity": ENGAGEMENT_AMBIGUITY,
+    }
+    if total_captured_close_rate is not None:
+        report[ENGAGEMENT_CAPTURED_CLOSE_RATE_KEY] = {
+            "covered_session_denominator": labeled_session_counts["covered_session_count"],
+            "rate": total_captured_close_rate,
+        }
+    if total_idle_finalization_rate is not None:
+        report[ENGAGEMENT_IDLE_FINALIZATION_RATE_KEY] = {
+            "covered_session_denominator": labeled_session_counts["covered_session_count"],
+            "rate": total_idle_finalization_rate,
+        }
+    return report
+
+
+def engagement_report_path(path: str | None) -> Path:
+    if path is None:
+        return DEFAULT_ENGAGEMENT_CORPUS
+    return Path(path)
+
+
 @dataclass
 class SessionAccumulator:
     session_id: str
@@ -512,12 +802,20 @@ class SessionAccumulator:
     auth_success: bool = False
     closed: bool = False
     duration_seconds: float = 0.0
+    terminal_observation: str = TERMINAL_OBSERVATION_OPEN
+    capture_coverage: str = CAPTURE_COVERAGE_MISSING
     event_hashes: list[str] = field(default_factory=list)
     finalized: bool = False
     attempts: int = 0
 
     @classmethod
     def from_document(cls, source: dict[str, Any], session_id: str) -> "SessionAccumulator":
+        terminal_observation = source.get("terminal_observation")
+        if terminal_observation not in TERMINAL_OBSERVATION_VALUES:
+            terminal_observation = TERMINAL_OBSERVATION_OPEN
+        capture_coverage = source.get("capture_coverage")
+        if capture_coverage not in CAPTURE_COVERAGE_VALUES:
+            capture_coverage = CAPTURE_COVERAGE_MISSING
         return cls(
             session_id=session_id,
             first_seen=str(source.get("first_seen") or ""),
@@ -529,6 +827,8 @@ class SessionAccumulator:
             auth_success=bool(source.get("auth_success")),
             closed=bool(source.get("closed")),
             duration_seconds=max(0.0, float(source.get("duration_seconds") or 0.0)),
+            terminal_observation=terminal_observation,
+            capture_coverage=capture_coverage,
             event_hashes=[str(value) for value in source.get("event_hashes", []) if isinstance(value, str)][-400:],
             finalized=bool(source.get("finalized")),
             attempts=max(0, int(source.get("attempts") or 0)),
@@ -574,6 +874,8 @@ class SessionAccumulator:
                     self.commands = self.commands[:100] + self.commands[-99:] + [cleaned]
         if event_id == "cowrie.session.closed":
             self.closed = True
+            self.terminal_observation = TERMINAL_OBSERVATION_CLOSE
+            self.capture_coverage = CAPTURE_COVERAGE_OBSERVED
             try:
                 self.duration_seconds = max(0.0, float(nested(source, "honeypot", "duration") or 0.0))
             except (TypeError, ValueError):
@@ -592,6 +894,8 @@ class SessionAccumulator:
             "auth_success": self.auth_success,
             "closed": self.closed,
             "duration_seconds": self.duration_seconds,
+            "terminal_observation": self.terminal_observation,
+            "capture_coverage": self.capture_coverage,
             "event_hashes": self.event_hashes,
             "finalized": self.finalized,
             "attempts": self.attempts,
@@ -670,6 +974,8 @@ def state_mapping() -> dict[str, Any]:
                 "auth_success": {"type": "boolean"},
                 "closed": {"type": "boolean"},
                 "duration_seconds": {"type": "float"},
+                "terminal_observation": {"type": "keyword"},
+                "capture_coverage": {"type": "keyword"},
                 "event_hashes": {"type": "keyword", "index": False, "doc_values": False},
                 "finalized": {"type": "boolean"},
                 "attempts": {"type": "integer"},
@@ -694,6 +1000,12 @@ class LLMWorker:
         self.config = config
         self.es = es
         self.model = model
+        self.session_capture_coverage: dict[str, int] = {
+            "selected_event_count": 0,
+            "usable_event_count": 0,
+            "covered_session_count": 0,
+            "excluded_session_count": 0,
+        }
         if not config.dry_run:
             self.es = es or Elasticsearch(config.es_host, request_timeout=30)
             self.model = model or OllamaClient(config)
@@ -735,6 +1047,12 @@ class LLMWorker:
 
     def collect_session_events(self) -> int:
         assert self.es is not None
+        self.session_capture_coverage = {
+            "selected_event_count": 0,
+            "usable_event_count": 0,
+            "covered_session_count": 0,
+            "excluded_session_count": 0,
+        }
         since = self.load_checkpoint("sessions")
         response = self.es.search(
             index="honeypot-v2-*",
@@ -772,6 +1090,8 @@ class LLMWorker:
         usable = 0
         accumulated = 0
         close_only_skipped = 0
+        covered_session_ids: set[str] = set()
+        excluded_session_ids: set[str] = set()
         for hit in hits:
             source = hit.get("_source") if isinstance(hit.get("_source"), dict) else {}
             session_id = bounded_string(nested(source, "honeypot", "session"), 128)
@@ -779,6 +1099,7 @@ class LLMWorker:
             if not session_id or not timestamp:
                 continue
             usable += 1
+            covered_session_ids.add(session_id)
             accumulator = self.load_accumulator(session_id)
             event_id = bounded_string(nested(source, "honeypot", "eventid"), 120).lower()
             # Most Cowrie connections close without ever reaching a command.
@@ -792,6 +1113,8 @@ class LLMWorker:
             ):
                 latest = max(latest, timestamp)
                 close_only_skipped += 1
+                covered_session_ids.discard(session_id)
+                excluded_session_ids.add(session_id)
                 continue
             if not accumulator.finalized:
                 accumulator.add_event(hit, self.config.max_content_chars)
@@ -800,6 +1123,12 @@ class LLMWorker:
             latest = max(latest, timestamp)
         if latest:
             self.save_checkpoint("sessions", latest)
+        self.session_capture_coverage = {
+            "selected_event_count": len(hits),
+            "usable_event_count": usable,
+            "covered_session_count": len(covered_session_ids),
+            "excluded_session_count": len(excluded_session_ids),
+        }
         LOG.info(
             "session scan selected=%d usable=%d accumulated=%d close_only_skipped=%d checkpoint_advanced=%s",
             len(hits),
@@ -839,7 +1168,11 @@ class LLMWorker:
             source = hit.get("_source") if isinstance(hit.get("_source"), dict) else {}
             session_id = source.get("session_id")
             if isinstance(session_id, str) and session_id:
-                ready.append((str(hit.get("_id")), SessionAccumulator.from_document(source, session_id)))
+                accumulator = SessionAccumulator.from_document(source, session_id)
+                if not accumulator.closed:
+                    accumulator.terminal_observation = TERMINAL_OBSERVATION_IDLE
+                    accumulator.capture_coverage = CAPTURE_COVERAGE_MISSING
+                ready.append((str(hit.get("_id")), accumulator))
         return ready
 
     def base_document(
@@ -1190,7 +1523,7 @@ class LLMWorker:
         self.es.index(index=ANALYSIS_INDEX, id=report_id, document=document)
         return 1
 
-    def run_once(self) -> dict[str, int | str | bool]:
+    def run_once(self) -> dict[str, Any]:
         if self.config.dry_run:
             run_selftest()
             return {"mode": "dry-run", "selftest": True, "sessions": 0, "payloads": 0, "reports": 0}
@@ -1226,6 +1559,8 @@ class LLMWorker:
             "payloads": payloads,
             "reports": reports,
         }
+        if self.config.session_enabled and not stage_errors.get("session_events"):
+            result["session_capture_coverage"] = dict(self.session_capture_coverage)
         # #2228: disclose a truncated payload scan on the status document
         # itself, not just in .env.example -- a run that hit either cap must
         # never read as full coverage.
@@ -1558,6 +1893,15 @@ def main() -> int:
     parser.add_argument("--once", action="store_true", help="run one configured cycle and exit")
     parser.add_argument("--healthcheck", action="store_true", help="check the bounded status heartbeat")
     parser.add_argument(
+        "--offline-engagement-aggregate",
+        action="store_true",
+        help="aggregate the committed labeled session corpus without network access and exit",
+    )
+    parser.add_argument(
+        "--engagement-corpus",
+        help="optional labeled event JSONL for the offline engagement aggregate",
+    )
+    parser.add_argument(
         "--synthetic-canary",
         action="store_true",
         help="run synthetic U1 cases against the configured local Ollama model and exit",
@@ -1580,6 +1924,15 @@ def main() -> int:
         help="maximum bounded event windows for the production U1 canary",
     )
     args = parser.parse_args()
+    if args.offline_engagement_aggregate:
+        try:
+            corpus_path = engagement_report_path(args.engagement_corpus)
+            report = aggregate_labeled_engagement(read_jsonl(corpus_path))
+        except (OSError, TypeError, ValueError) as exc:
+            print(f"offline engagement aggregate failed: {exc}", file=sys.stderr)
+            return 1
+        print(json.dumps(report, sort_keys=True))
+        return 0
     try:
         config = Config.from_env()
     except (ValueError, TypeError) as exc:
