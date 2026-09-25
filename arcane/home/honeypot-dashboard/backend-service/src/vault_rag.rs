@@ -23,7 +23,7 @@
 //! operator told "queued" reads the answer from the queue view later.
 
 use axum::{extract::State, Json};
-use rand::RngCore;
+use rand::Rng;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
