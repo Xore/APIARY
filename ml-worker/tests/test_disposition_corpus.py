@@ -113,10 +113,12 @@ def test_missing_field_and_model_state_counts():
     row = hit("tp-1", "true_positive")
     row["_source"].pop("sensor")
     row["_source"].pop("model_state_id")
+    row["_source"]["model_scores"] = {"isolation_forest": None, "lstm_ae": None, "hbos": None}
     result = corpus.census_from_hits([row])
     groups = corpus._groups(result.rows)
     assert groups["missing_fields"]["sensor"] == 1
     assert groups["missing_fields"]["model_state_id"] == 1
+    assert groups["missing_fields"]["model_scores"] == 1
     assert groups["distinct_model_state_ids"] == 0
 
 

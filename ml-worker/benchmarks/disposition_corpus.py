@@ -142,10 +142,12 @@ def _range(rows: list[dict[str, Any]]) -> dict[str, str | None] | None:
 
 
 def _missing(rows: list[dict[str, Any]]) -> dict[str, int]:
-    return {
+    missing = {
         field: sum(not present(source_value(row, field)) for row in rows)
         for field in EXPORT_FIELDS
     }
+    missing["model_scores"] = sum(model_name(row.get("model_scores")) is None for row in rows)
+    return missing
 
 
 def _counter(values: list[Any]) -> dict[str, int]:
