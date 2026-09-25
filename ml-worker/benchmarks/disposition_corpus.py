@@ -426,6 +426,9 @@ def _census_from_elasticsearch(client: dict[str, Any], pit_id: str) -> Census:
     for status, count in counts.items():
         status_counts.setdefault(status, count)
     labelled = sum(status_counts[status] for status in CLOSED_STATUSES)
+    status_counts = {status: status_counts.get(status, 0) for status in STATUSES}
+    for status, count in counts.items():
+        status_counts.setdefault(status, count)
     return Census(total, status_counts, labelled, [], _stats_range(body.get("aggregations", {})))
 
 
