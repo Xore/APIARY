@@ -219,7 +219,7 @@ TRIAGE_API_BASE = os.environ.get(
     "GHIDRA_TRIAGE_API_BASE", "http://127.0.0.1:11434/v1").rstrip("/")
 TRIAGE_MODEL = os.environ.get("GHIDRA_TRIAGE_MODEL", "qwen3:14b")
 TRIAGE_TIMEOUT = int(os.environ.get("GHIDRA_TRIAGE_TIMEOUT", "300"))
-TRIAGE_OUTPUT_TOKENS = int(os.environ.get("GHIDRA_TRIAGE_OUTPUT_TOKENS", "512"))
+TRIAGE_OUTPUT_TOKENS = int(os.environ.get("GHIDRA_TRIAGE_OUTPUT_TOKENS", "4096"))
 TRIAGE_SEED = int(os.environ.get("GHIDRA_TRIAGE_SEED", "144"))
 
 # #2646: temperature 0 and a fixed seed do not make two runs agree. Ollama

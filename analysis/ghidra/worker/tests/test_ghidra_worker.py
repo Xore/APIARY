@@ -700,7 +700,7 @@ def test_triage(ghidra, model, truncating):
           "the system prompt names the evidence as untrusted")
     check(all(p.get("reasoning_effort") == "none" for p in ModelStub.prompts),
           "bounded triage disables hidden reasoning")
-    check(all(p.get("max_tokens") == 512 for p in ModelStub.prompts),
+    check(all(p.get("max_tokens") == 4096 for p in ModelStub.prompts),
           "the approved output cap is sent to the model")
     check(all(p.get("seed") == 144 for p in ModelStub.prompts),
           "the approved deterministic seed is sent to the model")
