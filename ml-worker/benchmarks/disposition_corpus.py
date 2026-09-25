@@ -390,7 +390,13 @@ def _census_query() -> dict[str, Any]:
     }
 
 
-def _stats_range(stats: dict[str, Any]) -> dict[str, str | None] | None:
+def _stats_range(aggregations: dict[str, Any]) -> dict[str, str | None] | None:
+    alert_time = aggregations.get("alert_time")
+    if not isinstance(alert_time, dict):
+        raise CorpusError("Elasticsearch response has no alert-time stats")
+    stats = alert_time.get("stats", alert_time)
+    if not isinstance(stats, dict):
+        raise CorpusError("Elasticsearch response has invalid alert-time stats")
     minimum = stats.get("min_as_string", stats.get("min"))
     maximum = stats.get("max_as_string", stats.get("max"))
     if minimum is None and maximum is None:
@@ -420,13 +426,7 @@ def _census_from_elasticsearch(client: dict[str, Any], pit_id: str) -> Census:
     for status, count in counts.items():
         status_counts.setdefault(status, count)
     labelled = sum(status_counts[status] for status in CLOSED_STATUSES)
-    aggregation = body.get("aggregations", {}).get("alert_time")
-    if not isinstance(aggregation, dict):
-        raise CorpusError("Elasticsearch response has no alert-time stats")
-    stats = aggregation.get("stats", aggregation)
-    if not isinstance(stats, dict) or "min" not in stats and "max" not in stats:
-        raise CorpusError("Elasticsearch response has no alert-time stats")
-    return Census(total, status_counts, labelled, [], _stats_range(stats))
+    return Census(total, status_counts, labelled, [], _stats_range(body.get("aggregations", {})))
 
 
 def _open_pit(client: dict[str, Any]) -> str:
