@@ -47,15 +47,35 @@ checks against a candidate over the per-sensor fixture corpus and emits a
 hashed JSON report. It is the first reusable acceptance bar `ml-worker` has
 had, and it makes "evaluate this candidate offline" answerable at all.
 
-**Tier 2 (accuracy) is blocked on [#1797](https://github.com/Xore/APIARY/issues/1797).**
-There is no labelled corpus. Until BETH is confirmed usable — or ruled out —
-this benchmark cannot rank candidates, only reject misbehaving ones. Recorded
-plainly rather than shipping a harness that looks like it ranks.
+**Tier 2 (accuracy) was blocked on [#1797](https://github.com/Xore/APIARY/issues/1797).**
+There was no labelled corpus at that point. The date is retained as the
+historical Tier 1 landing record; the later BETH verdict below supersedes the
+blocked status.
 
 **No candidate has been promoted or rejected on this evidence yet.** The two
 deployed detectors have not been run through it as a qualification; doing so is
 the next step, along with the live-threshold measurement
 (#1794-b) that the alert-budget metric and the promotion gate both need.
+
+### 2026-09-25 — BETH Tier 2 sanity rail is available
+
+`ml-worker/benchmarks/evaluate_accuracy.py beth` now provides the bounded
+parallel-corpus rail. It consumes the three published BETH process CSVs as-is,
+uses the authors' encoding from `BETH_Dataset_Analysis/dataset.py`, fits on
+`train`, uses `val` only for the held-out diagnostic split, and scores `test`
+once per declared seed without row re-splitting. It reports AUROC as the
+headline, AUPRC alongside it, mean ± standard deviation over at least five
+seeds, and each split's `sus` base rate beside every printed metric. A missing
+local data directory is a clear CLI error; the harness never downloads data
+or fabricates results.
+
+The command is importable and its parser/validation can be tested without the
+39.8 MB corpus. Runtime reports record CSV and optional archive MD5s outside the
+repository. The report is evidence about the detector architecture/pipeline
+only: it is **not** ground truth for deployed traffic and cannot justify a
+composite-weight or `ML_ALERT_THRESHOLD` change. The disposition corpus tracked
+by [#3295](https://github.com/Xore/APIARY/issues/3295) remains a separate
+deployment-labelled source and is not imported here.
 
 ### 2026-09-05 — #1797 has ruled; Tier 2 is no longer blocked on it
 
