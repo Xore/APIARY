@@ -196,6 +196,65 @@ class SessionAccumulatorTests(unittest.TestCase):
         self.assertTrue(accumulator.auth_success)
         self.assertTrue(accumulator.closed)
         self.assertEqual(accumulator.duration_seconds, 42.5)
+        document = accumulator.document()
+        self.assertEqual(document["terminal_observation"], worker.TERMINAL_OBSERVATION_CLOSE)
+        self.assertEqual(document["capture_coverage"], worker.CAPTURE_COVERAGE_OBSERVED)
+
+    def test_captured_close_is_distinct_from_idle_finalization(self):
+        accumulator = worker.SessionAccumulator("session-fixture")
+        self.assertEqual(accumulator.document()["terminal_observation"], worker.TERMINAL_OBSERVATION_OPEN)
+        close = self.event(event_id="cowrie.session.closed")
+        close["_id"] = "close"
+        accumulator.add_event(close, 12000)
+        closed_document = accumulator.document()
+        self.assertEqual(closed_document["command_count"], 0)
+        self.assertEqual(closed_document["terminal_observation"], worker.TERMINAL_OBSERVATION_CLOSE)
+        self.assertEqual(closed_document["capture_coverage"], worker.CAPTURE_COVERAGE_OBSERVED)
+
+    def test_idle_finalization_is_recorded_without_inventing_a_close(self):
+        fake_es = MagicMock()
+        fake_es.search.return_value = {
+            "hits": {
+                "hits": [
+                    {
+                        "_id": "session-state-id",
+                        "_source": {
+                            "session_id": "session-fixture",
+                            "command_count": 5,
+                            "auth_success": False,
+                            "closed": False,
+                            "duration_seconds": 0.0,
+                            "finalized": False,
+                        },
+                    }
+                ]
+            }
+        }
+        llm_worker = worker.LLMWorker(config(), es=fake_es)
+        ready = llm_worker.ready_sessions()
+        self.assertEqual(len(ready), 1)
+        document = ready[0][1].document()
+        self.assertEqual(document["terminal_observation"], worker.TERMINAL_OBSERVATION_IDLE)
+        self.assertEqual(document["capture_coverage"], worker.CAPTURE_COVERAGE_MISSING)
+        self.assertFalse(document["closed"])
+        self.assertEqual(document["duration_seconds"], 0.0)
+
+    def test_still_open_after_observation_window_remains_unknown(self):
+        accumulator = worker.SessionAccumulator("session-fixture")
+        document = accumulator.document()
+        self.assertEqual(document["terminal_observation"], worker.TERMINAL_OBSERVATION_OPEN)
+        self.assertEqual(document["capture_coverage"], worker.CAPTURE_COVERAGE_MISSING)
+        self.assertFalse(document["closed"])
+        self.assertEqual(document["command_count"], 0)
+
+    def test_state_mapping_keeps_compatibility_and_bounded_observation_fields(self):
+        properties = worker.state_mapping()["mappings"]["properties"]
+        self.assertEqual(properties["command_count"], {"type": "integer"})
+        self.assertEqual(properties["auth_success"], {"type": "boolean"})
+        self.assertEqual(properties["closed"], {"type": "boolean"})
+        self.assertEqual(properties["duration_seconds"], {"type": "float"})
+        self.assertEqual(properties["terminal_observation"], {"type": "keyword"})
+        self.assertEqual(properties["capture_coverage"], {"type": "keyword"})
 
     def test_collection_uses_stable_cowrie_event_ids_not_container_sensor(self):
         fake_es = MagicMock()
@@ -238,6 +297,188 @@ class SessionAccumulatorTests(unittest.TestCase):
             self.assertEqual(llm_worker.collect_session_events(), 1)
         fake_es.index.assert_not_called()
         save_checkpoint.assert_called_once_with("sessions", "2026-08-01T12:00:00Z")
+        self.assertEqual(
+            llm_worker.session_capture_coverage,
+            {
+                "selected_event_count": 1,
+                "usable_event_count": 1,
+                "covered_session_count": 0,
+                "excluded_session_count": 1,
+            },
+        )
+
+
+class OfflineEngagementAggregateTests(unittest.TestCase):
+    def test_missing_capture_is_uncovered_and_has_no_rate(self):
+        report = worker.aggregate_labeled_engagement(
+            [
+                {
+                    "sensor": "cowrie",
+                    "is_benign": True,
+                    "raw": {
+                        "session": "fixture-missing",
+                        "eventid": "cowrie.command.input",
+                    },
+                }
+            ],
+            [
+                {
+                    "session_id": "fixture-missing",
+                    "command_count": 1,
+                    "terminal_observation": worker.TERMINAL_OBSERVATION_OPEN,
+                    "capture_coverage": worker.CAPTURE_COVERAGE_MISSING,
+                }
+            ],
+        )
+        self.assertEqual(report["all_label_count"], 1)
+        self.assertEqual(report["session_count"], 0)
+        self.assertEqual(report["covered_session_count"], 0)
+        self.assertEqual(report["all_uncovered_session_count"], 1)
+        self.assertNotIn(worker.ENGAGEMENT_CAPTURED_CLOSE_RATE_KEY, report)
+        self.assertNotIn(worker.ENGAGEMENT_IDLE_FINALIZATION_RATE_KEY, report)
+        self.assertEqual(report["no_rate_reason"], worker.ENGAGEMENT_NO_COVERED_SESSIONS)
+
+    def test_rates_report_the_labeled_benign_baseline(self):
+        non_benign = worker.aggregate_labeled_engagement(
+            [
+                {
+                    "sensor": "cowrie",
+                    "is_benign": False,
+                    "raw": {"session": "fixture-non-benign", "eventid": "cowrie.session.closed"},
+                }
+            ],
+            [
+                {
+                    "session_id": "fixture-non-benign",
+                    "command_count": 0,
+                    "terminal_observation": worker.TERMINAL_OBSERVATION_CLOSE,
+                    "capture_coverage": worker.CAPTURE_COVERAGE_OBSERVED,
+                }
+            ],
+        )
+        self.assertEqual(non_benign["covered_session_count"], 1)
+        self.assertEqual(non_benign[worker.ENGAGEMENT_CAPTURED_CLOSE_RATE_KEY]["rate"], 1.0)
+        self.assertEqual(non_benign["labeled_benign_baseline"]["status"], worker.ENGAGEMENT_INSUFFICIENT_LABELED_DATA)
+
+        reports = []
+        for session_id, terminal_observation, capture_coverage in (
+            (
+                "fixture-close-zero",
+                worker.TERMINAL_OBSERVATION_CLOSE,
+                worker.CAPTURE_COVERAGE_OBSERVED,
+            ),
+            (
+                "fixture-close-interactions",
+                worker.TERMINAL_OBSERVATION_CLOSE,
+                worker.CAPTURE_COVERAGE_OBSERVED,
+            ),
+            (
+                "fixture-idle",
+                worker.TERMINAL_OBSERVATION_IDLE,
+                worker.CAPTURE_COVERAGE_MISSING,
+            ),
+            (
+                "fixture-incomplete",
+                worker.TERMINAL_OBSERVATION_OPEN,
+                worker.CAPTURE_COVERAGE_MISSING,
+            ),
+        ):
+            reports.append(
+                worker.aggregate_labeled_engagement(
+                    [
+                        {
+                            "sensor": "cowrie",
+                            "is_benign": True,
+                            "raw": {"session": session_id, "eventid": "cowrie.session.closed"},
+                        }
+                    ],
+                    [
+                        {
+                            "session_id": session_id,
+                            "command_count": 2 if session_id == "fixture-close-interactions" else 0,
+                            "terminal_observation": terminal_observation,
+                            "capture_coverage": capture_coverage,
+                        }
+                    ],
+                )
+            )
+
+        captured_zero_report = reports[0]
+        self.assertEqual(captured_zero_report["all_covered_session_count"], 1)
+        self.assertEqual(captured_zero_report["covered_session_count"], 0)
+        self.assertNotIn(worker.ENGAGEMENT_CAPTURED_CLOSE_RATE_KEY, captured_zero_report)
+        self.assertEqual(captured_zero_report["labeled_benign_baseline"]["session_count"], 1)
+        self.assertEqual(
+            captured_zero_report["labeled_benign_baseline"]["covered_session_count"],
+            1,
+        )
+
+        captured_interactions_report = reports[1]
+        self.assertEqual(
+            captured_interactions_report["command_count_buckets"][1]["command_count_bucket"],
+            worker.ENGAGEMENT_BUCKET_1_4,
+        )
+        self.assertEqual(captured_interactions_report["labeled_benign_baseline"]["label"], "benign")
+
+        idle_report = reports[2]
+        self.assertEqual(idle_report["all_uncovered_session_count"], 1)
+        self.assertNotIn(worker.ENGAGEMENT_CAPTURED_CLOSE_RATE_KEY, idle_report)
+        self.assertNotIn(worker.ENGAGEMENT_IDLE_FINALIZATION_RATE_KEY, idle_report)
+
+        incomplete_report = reports[3]
+        self.assertEqual(incomplete_report["all_uncovered_session_count"], 1)
+        self.assertNotIn(worker.ENGAGEMENT_CAPTURED_CLOSE_RATE_KEY, incomplete_report)
+        self.assertNotIn(worker.ENGAGEMENT_IDLE_FINALIZATION_RATE_KEY, incomplete_report)
+
+    def test_absent_terminal_evidence_remains_descriptive(self):
+        report = worker.aggregate_labeled_engagement(
+            [
+                {
+                    "sensor": "cowrie",
+                    "is_benign": True,
+                    "raw": {"session": "fixture-open", "eventid": "cowrie.command.input"},
+                }
+            ]
+        )
+        self.assertEqual(report["all_label_count"], 1)
+        self.assertEqual(report["session_count"], 0)
+        self.assertNotIn(worker.ENGAGEMENT_CAPTURED_CLOSE_RATE_KEY, report)
+        self.assertEqual(report["all_uncovered_session_count"], 1)
+        serialized = json.dumps(report).lower()
+        self.assertNotIn("abandonment", serialized)
+        self.assertNotIn("automation", serialized)
+        self.assertNotIn("ai_attacker", serialized)
+        self.assertNotIn("deliberate_disengagement", serialized)
+        self.assertNotIn("automated", serialized)
+        self.assertNotIn("disengagement", serialized)
+        self.assertEqual(report["terminal_observation_ambiguity"], worker.ENGAGEMENT_AMBIGUITY)
+
+    def test_committed_corpus_is_offline_and_has_no_eligible_rate(self):
+        report = worker.aggregate_labeled_engagement(worker.read_jsonl(worker.DEFAULT_ENGAGEMENT_CORPUS))
+        self.assertEqual(report["corpus_event_count"], 27)
+        self.assertEqual(report["corpus_cowrie_event_count"], 10)
+        self.assertEqual(report["corpus_session_count"], 4)
+        self.assertEqual(report["all_label_count"], 4)
+        self.assertEqual(report["session_count"], 3)
+        self.assertEqual(report["all_uncovered_session_count"], 4)
+        self.assertEqual(report["covered_session_count"], 0)
+        self.assertEqual(report["uncovered_session_count"], 3)
+        self.assertEqual(report["labeled_benign_baseline"]["session_count"], 1)
+        self.assertEqual(report["labeled_benign_baseline"]["uncovered_session_count"], 1)
+        self.assertNotIn(worker.ENGAGEMENT_CAPTURED_CLOSE_RATE_KEY, report)
+        self.assertNotIn(worker.ENGAGEMENT_IDLE_FINALIZATION_RATE_KEY, report)
+
+    def test_main_aggregate_command_does_not_read_worker_config_or_use_clients(self):
+        output = StringIO()
+        with (
+            patch.object(sys, "argv", ["worker.py", "--offline-engagement-aggregate"]),
+            patch.object(worker.Config, "from_env", side_effect=AssertionError("config must not be read")),
+            redirect_stdout(output),
+        ):
+            self.assertEqual(worker.main(), 0)
+        report = json.loads(output.getvalue())
+        self.assertEqual(report["corpus_session_count"], 4)
+        self.assertEqual(report["all_uncovered_session_count"], 4)
 
 
 class ProductionCanaryTests(unittest.TestCase):
@@ -341,6 +582,12 @@ class CycleStageIsolationTests(unittest.TestCase):
         w.analyze_ready_sessions = lambda: 3
         w.analyze_payloads = lambda: 2
         w.payload_scan_truncated = False
+        w.session_capture_coverage = {
+            "selected_event_count": 7,
+            "usable_event_count": 7,
+            "covered_session_count": 2,
+            "excluded_session_count": 1,
+        }
         return w
 
     def test_a_failing_stage_keeps_the_others_results(self):
@@ -362,6 +609,15 @@ class CycleStageIsolationTests(unittest.TestCase):
         result = w.run_once()
         self.assertNotIn("stage_errors", result)
         self.assertEqual(result["reports"], 1)
+        self.assertEqual(
+            result["session_capture_coverage"],
+            {
+                "selected_event_count": 7,
+                "usable_event_count": 7,
+                "covered_session_count": 2,
+                "excluded_session_count": 1,
+            },
+        )
 
     def test_only_the_exception_type_is_recorded_never_its_message(self):
         # These exceptions come from a model fed attacker-controlled text; a

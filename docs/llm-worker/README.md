@@ -109,6 +109,52 @@ itself instead of trusting a filename.
 - after bounded retries, an error annotation is written while raw ingestion
   remains unaffected.
 
+## Session terminal observation
+
+Each `session_accumulator` document records a bounded `terminal_observation`
+value: `close_observed` means a `cowrie.session.closed` event was captured,
+`idle_finalized` means the worker finalized the session through its idle
+readiness path, and `open_after_window` means the observation window ended
+without a close event. `capture_coverage` is `observed` only for a captured
+close and is `missing` otherwise, so a close with zero commands remains
+distinguishable from no close. Existing `command_count`, `auth_success`,
+`closed`, and `duration_seconds` fields retain their contract.
+
+The worker's session scan reports covered and excluded session counts in its
+cycle status: close-only scanner sessions are intentionally excluded from the
+accumulator population, so future aggregates must use that explicit denominator
+and exclusions rather than treating the accumulator population as all sessions.
+Terminal absence is ambiguous. It must remain unknown and must not be described
+as attacker abandonment, deliberate disengagement, automation, or an
+AI/automated attacker; a captured close does not supply a termination reason
+that the sensor did not emit.
+
+## Offline engagement aggregate
+
+The descriptive engagement aggregate runs locally against the committed
+labeled event corpus and does not construct Elasticsearch, model, or status
+clients:
+
+```bash
+python llm-worker/worker.py --offline-engagement-aggregate
+```
+
+It groups non-benign labeled sessions into fixed command-count buckets (`0`,
+`1-4`, `5-9`, `10-19`, and `20+`). Each bucket reports the covered session
+denominator, the bounded terminal-observation counts, and the uncovered count.
+Captured-close and idle-finalization rates use covered non-benign sessions only
+and are omitted when that denominator is zero. The report always includes the
+separately counted labeled benign baseline; if no benign label is present, its
+status is `insufficient_labeled_data`. The one benign session in the current
+corpus is a near-neighbor control, not a representative operational baseline.
+
+The current committed corpus has 27 events, including 10 Cowrie events. Its
+four reconstructed sessions are all uncovered, so the command emits no rate.
+These metrics are descriptive only. Scanners, ordinary clients, network
+failures, and other unknown conditions can share the same observed close or
+missing-terminal signal; disconnect cannot identify an automated or AI client.
+The aggregate is not an alerting or termination-reason feature.
+
 The cross-sensor decoder/correlation expansion remains tracked by
 [#154](https://github.com/Xore/APIARY/issues/154). Dashboard delivery
 is #150, and the customizable analyzer workbench is explicitly tracked by
@@ -125,8 +171,8 @@ python llm-worker/worker.py --selftest
 Fixtures are synthetic and use TEST-NET addresses. Tests cover delimiter and
 secret neutralization, exact schemas, local endpoints, disabled proxies and
 redirects, thinking control, constrained ATT&CK IDs, IOC grounding,
-deterministic criticality, idempotent session accumulation, and safe
-text-payload scanning.
+deterministic criticality, idempotent session accumulation, offline
+engagement coverage and benign denominators, and safe text-payload scanning.
 
 ## Result contract
 
