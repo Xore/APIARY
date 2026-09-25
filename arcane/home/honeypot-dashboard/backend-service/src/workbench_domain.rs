@@ -530,7 +530,7 @@ fn to_hex(bytes: &[u8]) -> String {
 }
 
 pub fn random_id(prefix: &str) -> String {
-    use rand::RngCore;
+    use rand::Rng;
     let mut bytes = [0u8; 16];
     rand::rng().fill_bytes(&mut bytes);
     format!("{prefix}_{}", to_hex(&bytes))

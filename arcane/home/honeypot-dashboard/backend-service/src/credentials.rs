@@ -20,7 +20,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use rand::{Rng, RngCore};
+use rand::{Rng, RngExt};
 use serde::Deserialize;
 use serde_json::{json, Value};
 

@@ -18,7 +18,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use rand::RngCore;
+use rand::Rng;
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::{json, Value};

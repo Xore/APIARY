@@ -554,7 +554,7 @@ fn hash_name(value: &str) -> bool {
 }
 
 fn new_report_id(prefix: &str) -> String {
-    use rand::RngCore;
+    use rand::Rng;
     let mut bytes = [0u8; 16];
     rand::rng().fill_bytes(&mut bytes);
     format!(
