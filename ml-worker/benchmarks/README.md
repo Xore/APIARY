@@ -8,6 +8,61 @@ governance model. The decision record is
 
 **This produces the ruler, not a detector.**
 
+## Operator-disposition corpus
+
+`disposition_corpus.py` is a separate read-only export/census for the
+`ml-anomalies` index. It does not train, calibrate, mutate, re-label, or
+auto-disposition an alert.
+
+```bash
+python3 ml-worker/benchmarks/disposition_corpus.py \
+  --es-host "$ES_HOST" \
+  --output "$HOME/ml-worker-qualification/dispositions.ndjson" \
+  --report "$HOME/ml-worker-qualification/dispositions-census.json"
+```
+
+The endpoint may come from `--es-host`, `ES_HOST`, or `ELASTICSEARCH_URL`; no
+deployment endpoint is hardcoded. Credentials may come from `ES_API_KEY` or
+`ELASTICSEARCH_API_KEY`, or from the `ES_USERNAME`/`ES_PASSWORD` pair. The
+tool issues search and PIT lifecycle requests only. It first opens one PIT,
+uses it for the all-alert status/time census and the closed-label export, then
+closes it. The exported rows and hashed report are written atomically outside
+the repository. The report records a canonical-content SHA-256 (computed
+without the digest field) and prints the same digest after the census.
+
+Open and legacy documents without a disposition are counted in the full alert
+denominator but excluded from the labelled export. Every closed row contains
+the production anomaly timestamp, score, detector scores/contributors,
+threshold, model state, sensor, disposition, actor, and disposal time.
+`disposition_reason` is free text and is replaced with `[REDACTED]` by
+default; the explicit `--include-reason` override is available only when an
+operator has a separate review and storage boundary in place.
+The census reports:
+
+- total alerts and every status count (including `<missing>`);
+- closed-label count, class balance, and labelled/all-alert denominator;
+- all-alert and labelled time ranges;
+- labelled sensor, scoring model, threshold, distinct-model-state, and
+  missing-field counts, including per-status breakdowns;
+- the SHA-256 of the immutable NDJSON snapshot and the canonical-content
+  SHA-256 of the JSON report; and
+- an explicit zero/single-class calibration gate.
+
+The output begins with a non-negotiable warning:
+
+> **PRECISION-ONLY:** only above-threshold alerts are persisted, so this
+> corpus cannot measure deployment recall or calibrate ordinary
+> below-threshold traffic.
+
+An unlabelled alert is not a negative, and an absent below-threshold event is
+not evidence that it was correctly rejected. #2986's calibration work may use
+the snapshot only after the census shows enough labels and model-state
+diversity; this command never performs that calibration.
+
+For an offline verification, pass a complete local JSON array of ES-shaped
+hits to `--fixture`. The fixture includes open/legacy rows as well as closed
+rows so the two denominators can be tested without a network.
+
 ## Safety properties
 
 - Fixtures are the per-sensor documents from `ml-worker/tests/fixtures.py` —

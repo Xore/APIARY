@@ -102,6 +102,30 @@ Wiring Tier 2 — the BETH rail and disposition-corpus calibration — is tracke
 [#1974](https://github.com/Xore/APIARY/issues/1974). It is not tracked by this
 paragraph.
 
+### 2026-09-25 — disposition export/census landed; Tier 2 calibration remains gated
+
+`ml-worker/benchmarks/disposition_corpus.py` now exports the closed
+operator-disposition population and writes a hashed census outside the
+repository. The report carries a canonical-content SHA-256 (the digest field
+is excluded from its own hash), so the saved artifact can be independently
+verified. It is read-only: open and legacy unlabelled alerts remain in the
+full alert denominator but are excluded from the labelled snapshot, and the
+command never updates Elasticsearch or synthesises a verdict.
+
+The census is a gate, not a calibration result. A zero-label or single-class
+labelled subset is reported as non-calibratable. Even after labels accumulate,
+the corpus is **precision-only**: `write_anomaly()` returns before persistence
+below `ML_ALERT_THRESHOLD`, so it can describe precision within alerts and
+within-alert calibration, but it can never measure deployment recall or
+ordinary below-threshold calibration. Any Tier 2 report that consumes this
+corpus must repeat that limitation and must not treat unlabelled or absent
+events as negatives.
+
+The decision record should receive a result only after a concrete snapshot is
+attached to the run and its class/model-state diversity is sufficient. The
+live census is therefore not copied into this file as a durable result; rerun
+the command against the deployment and retain the generated report and hash.
+
 ## Findings carried in from the research phase
 
 Recorded so they are not rediscovered, each with the reason it matters here.
