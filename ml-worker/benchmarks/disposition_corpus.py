@@ -514,7 +514,7 @@ def run_elasticsearch(*, endpoint: str, output: str, report_output: str,
     export = export_rows(census, output, reasons_redacted=not include_reason)
     source = {"kind": "elasticsearch", "index": INDEX, "endpoint": endpoint}
     report = build_report(census, source=source, export=export)
-    report["report_sha256"] = write_atomic(report_output, _json_bytes(report))
+    write_atomic(report_output, _json_bytes(report))
     return census, report
 
 
@@ -524,7 +524,7 @@ def run_fixture(path: str, output: str, report_output: str,
     export = export_rows(census, output, reasons_redacted=not include_reason)
     source = {"kind": "fixture", "path": str(Path(path).resolve())}
     report = build_report(census, source=source, export=export)
-    report["report_sha256"] = write_atomic(report_output, _json_bytes(report))
+    write_atomic(report_output, _json_bytes(report))
     return census, report
 
 

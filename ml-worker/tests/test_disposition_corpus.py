@@ -124,8 +124,6 @@ def test_report_hash_matches_export(tmp_path):
     report, _ = run_local(tmp_path, [hit("tp-1", "true_positive")])
     export = tmp_path / "labels.ndjson"
     assert corpus.hashlib.sha256(export.read_bytes()).hexdigest() == report["export"]["sha256"]
-    report_file = tmp_path / "report.json"
-    assert corpus.hashlib.sha256(report_file.read_bytes()).hexdigest() == report["report_sha256"]
 
 
 def test_endpoint_is_explicit_and_unreachable_is_actionable(monkeypatch):

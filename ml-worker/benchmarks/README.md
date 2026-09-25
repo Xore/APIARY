@@ -43,7 +43,8 @@ The census reports:
 - all-alert and labelled time ranges;
 - labelled sensor, scoring model, threshold, distinct-model-state, and
   missing-field counts, including per-status breakdowns;
-- the SHA-256 of the immutable NDJSON snapshot; and
+- the SHA-256 of the immutable NDJSON snapshot; the JSON report is also
+  written atomically for independent hashing; and
 - an explicit zero/single-class calibration gate.
 
 The output begins with a non-negotiable warning:
