@@ -63,3 +63,22 @@ fi
 
 after=$(du -sb "$dir" 2>/dev/null | cut -f1)
 echo "prune-buildx-cache: $dir after: ${after:-0} bytes"
+
+# Re-grant group write across the whole cache dir. The workflow sets
+# umask 002 before mkdir, but that only governs the workflow's own shell:
+# BuildKit writes index.json / oci-layout / blobs from inside its
+# buildkitd container under that container's umask, so the files land
+# group-read-only. /var/buildx-cache carries a default ACL
+# (group:github-ci-runner:rwx), but an inherited entry is still ANDed with
+# the creating process's umask, which collapses the ACL mask to r-- and
+# leaves every runner user except the one that wrote the file unable to
+# build the next image that shares this cache dir:
+#
+#   ERROR: failed to build: open /var/buildx-cache/<image>/oci-layout: permission denied
+#
+# Seven runner users share this directory and any of them can take any
+# matrix row, so the last writer must not own it exclusively. chmod is
+# idempotent and cheap next to the du -sb passes above; without it the
+# cache is poisoned for whichever runner does not happen to build next.
+chmod -R g+rwX "$dir" 2>/dev/null || true
+find "$dir" -type d -exec chmod g+s {} + 2>/dev/null || true
