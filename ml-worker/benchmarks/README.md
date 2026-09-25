@@ -33,7 +33,9 @@ Open and legacy documents without a disposition are counted in the full alert
 denominator but excluded from the labelled export. Every closed row contains
 the production anomaly timestamp, score, detector scores/contributors,
 threshold, model state, sensor, disposition, actor, and disposal time.
-`disposition_reason` is free text and is always replaced with `[REDACTED]`.
+`disposition_reason` is free text and is replaced with `[REDACTED]` by
+default; the explicit `--include-reason` override is available only when an
+operator has a separate review and storage boundary in place.
 The census reports:
 
 - total alerts and every status count (including `<missing>`);
