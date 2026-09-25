@@ -196,6 +196,65 @@ class SessionAccumulatorTests(unittest.TestCase):
         self.assertTrue(accumulator.auth_success)
         self.assertTrue(accumulator.closed)
         self.assertEqual(accumulator.duration_seconds, 42.5)
+        document = accumulator.document()
+        self.assertEqual(document["terminal_observation"], worker.TERMINAL_OBSERVATION_CLOSE)
+        self.assertEqual(document["capture_coverage"], worker.CAPTURE_COVERAGE_OBSERVED)
+
+    def test_captured_close_is_distinct_from_idle_finalization(self):
+        accumulator = worker.SessionAccumulator("session-fixture")
+        self.assertEqual(accumulator.document()["terminal_observation"], worker.TERMINAL_OBSERVATION_OPEN)
+        close = self.event(event_id="cowrie.session.closed")
+        close["_id"] = "close"
+        accumulator.add_event(close, 12000)
+        closed_document = accumulator.document()
+        self.assertEqual(closed_document["command_count"], 0)
+        self.assertEqual(closed_document["terminal_observation"], worker.TERMINAL_OBSERVATION_CLOSE)
+        self.assertEqual(closed_document["capture_coverage"], worker.CAPTURE_COVERAGE_OBSERVED)
+
+    def test_idle_finalization_is_recorded_without_inventing_a_close(self):
+        fake_es = MagicMock()
+        fake_es.search.return_value = {
+            "hits": {
+                "hits": [
+                    {
+                        "_id": "session-state-id",
+                        "_source": {
+                            "session_id": "session-fixture",
+                            "command_count": 5,
+                            "auth_success": False,
+                            "closed": False,
+                            "duration_seconds": 0.0,
+                            "finalized": False,
+                        },
+                    }
+                ]
+            }
+        }
+        llm_worker = worker.LLMWorker(config(), es=fake_es)
+        ready = llm_worker.ready_sessions()
+        self.assertEqual(len(ready), 1)
+        document = ready[0][1].document()
+        self.assertEqual(document["terminal_observation"], worker.TERMINAL_OBSERVATION_IDLE)
+        self.assertEqual(document["capture_coverage"], worker.CAPTURE_COVERAGE_MISSING)
+        self.assertFalse(document["closed"])
+        self.assertEqual(document["duration_seconds"], 0.0)
+
+    def test_still_open_after_observation_window_remains_unknown(self):
+        accumulator = worker.SessionAccumulator("session-fixture")
+        document = accumulator.document()
+        self.assertEqual(document["terminal_observation"], worker.TERMINAL_OBSERVATION_OPEN)
+        self.assertEqual(document["capture_coverage"], worker.CAPTURE_COVERAGE_MISSING)
+        self.assertFalse(document["closed"])
+        self.assertEqual(document["command_count"], 0)
+
+    def test_state_mapping_keeps_compatibility_and_bounded_observation_fields(self):
+        properties = worker.state_mapping()["mappings"]["properties"]
+        self.assertEqual(properties["command_count"], {"type": "integer"})
+        self.assertEqual(properties["auth_success"], {"type": "boolean"})
+        self.assertEqual(properties["closed"], {"type": "boolean"})
+        self.assertEqual(properties["duration_seconds"], {"type": "float"})
+        self.assertEqual(properties["terminal_observation"], {"type": "keyword"})
+        self.assertEqual(properties["capture_coverage"], {"type": "keyword"})
 
     def test_collection_uses_stable_cowrie_event_ids_not_container_sensor(self):
         fake_es = MagicMock()
@@ -238,6 +297,15 @@ class SessionAccumulatorTests(unittest.TestCase):
             self.assertEqual(llm_worker.collect_session_events(), 1)
         fake_es.index.assert_not_called()
         save_checkpoint.assert_called_once_with("sessions", "2026-08-01T12:00:00Z")
+        self.assertEqual(
+            llm_worker.session_capture_coverage,
+            {
+                "selected_event_count": 1,
+                "usable_event_count": 1,
+                "covered_session_count": 0,
+                "excluded_session_count": 1,
+            },
+        )
 
 
 class ProductionCanaryTests(unittest.TestCase):
@@ -341,6 +409,12 @@ class CycleStageIsolationTests(unittest.TestCase):
         w.analyze_ready_sessions = lambda: 3
         w.analyze_payloads = lambda: 2
         w.payload_scan_truncated = False
+        w.session_capture_coverage = {
+            "selected_event_count": 7,
+            "usable_event_count": 7,
+            "covered_session_count": 2,
+            "excluded_session_count": 1,
+        }
         return w
 
     def test_a_failing_stage_keeps_the_others_results(self):
@@ -362,6 +436,15 @@ class CycleStageIsolationTests(unittest.TestCase):
         result = w.run_once()
         self.assertNotIn("stage_errors", result)
         self.assertEqual(result["reports"], 1)
+        self.assertEqual(
+            result["session_capture_coverage"],
+            {
+                "selected_event_count": 7,
+                "usable_event_count": 7,
+                "covered_session_count": 2,
+                "excluded_session_count": 1,
+            },
+        )
 
     def test_only_the_exception_type_is_recorded_never_its_message(self):
         # These exceptions come from a model fed attacker-controlled text; a

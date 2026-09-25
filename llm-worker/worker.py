@@ -78,6 +78,24 @@ COWRIE_SESSION_EVENT_IDS = (
     "cowrie.login.success",
     "cowrie.session.closed",
 )
+TERMINAL_OBSERVATION_CLOSE = "close_observed"
+TERMINAL_OBSERVATION_IDLE = "idle_finalized"
+TERMINAL_OBSERVATION_OPEN = "open_after_window"
+TERMINAL_OBSERVATION_VALUES = frozenset(
+    {
+        TERMINAL_OBSERVATION_CLOSE,
+        TERMINAL_OBSERVATION_IDLE,
+        TERMINAL_OBSERVATION_OPEN,
+    }
+)
+CAPTURE_COVERAGE_OBSERVED = "observed"
+CAPTURE_COVERAGE_MISSING = "missing"
+CAPTURE_COVERAGE_VALUES = frozenset(
+    {
+        CAPTURE_COVERAGE_OBSERVED,
+        CAPTURE_COVERAGE_MISSING,
+    }
+)
 LOG = logging.getLogger("llm-worker")
 
 AnnotationT = TypeVar("AnnotationT", bound=StrictAnnotation)
@@ -512,12 +530,20 @@ class SessionAccumulator:
     auth_success: bool = False
     closed: bool = False
     duration_seconds: float = 0.0
+    terminal_observation: str = TERMINAL_OBSERVATION_OPEN
+    capture_coverage: str = CAPTURE_COVERAGE_MISSING
     event_hashes: list[str] = field(default_factory=list)
     finalized: bool = False
     attempts: int = 0
 
     @classmethod
     def from_document(cls, source: dict[str, Any], session_id: str) -> "SessionAccumulator":
+        terminal_observation = source.get("terminal_observation")
+        if terminal_observation not in TERMINAL_OBSERVATION_VALUES:
+            terminal_observation = TERMINAL_OBSERVATION_OPEN
+        capture_coverage = source.get("capture_coverage")
+        if capture_coverage not in CAPTURE_COVERAGE_VALUES:
+            capture_coverage = CAPTURE_COVERAGE_MISSING
         return cls(
             session_id=session_id,
             first_seen=str(source.get("first_seen") or ""),
@@ -529,6 +555,8 @@ class SessionAccumulator:
             auth_success=bool(source.get("auth_success")),
             closed=bool(source.get("closed")),
             duration_seconds=max(0.0, float(source.get("duration_seconds") or 0.0)),
+            terminal_observation=terminal_observation,
+            capture_coverage=capture_coverage,
             event_hashes=[str(value) for value in source.get("event_hashes", []) if isinstance(value, str)][-400:],
             finalized=bool(source.get("finalized")),
             attempts=max(0, int(source.get("attempts") or 0)),
@@ -574,6 +602,8 @@ class SessionAccumulator:
                     self.commands = self.commands[:100] + self.commands[-99:] + [cleaned]
         if event_id == "cowrie.session.closed":
             self.closed = True
+            self.terminal_observation = TERMINAL_OBSERVATION_CLOSE
+            self.capture_coverage = CAPTURE_COVERAGE_OBSERVED
             try:
                 self.duration_seconds = max(0.0, float(nested(source, "honeypot", "duration") or 0.0))
             except (TypeError, ValueError):
@@ -592,6 +622,8 @@ class SessionAccumulator:
             "auth_success": self.auth_success,
             "closed": self.closed,
             "duration_seconds": self.duration_seconds,
+            "terminal_observation": self.terminal_observation,
+            "capture_coverage": self.capture_coverage,
             "event_hashes": self.event_hashes,
             "finalized": self.finalized,
             "attempts": self.attempts,
@@ -670,6 +702,8 @@ def state_mapping() -> dict[str, Any]:
                 "auth_success": {"type": "boolean"},
                 "closed": {"type": "boolean"},
                 "duration_seconds": {"type": "float"},
+                "terminal_observation": {"type": "keyword"},
+                "capture_coverage": {"type": "keyword"},
                 "event_hashes": {"type": "keyword", "index": False, "doc_values": False},
                 "finalized": {"type": "boolean"},
                 "attempts": {"type": "integer"},
@@ -694,6 +728,12 @@ class LLMWorker:
         self.config = config
         self.es = es
         self.model = model
+        self.session_capture_coverage: dict[str, int] = {
+            "selected_event_count": 0,
+            "usable_event_count": 0,
+            "covered_session_count": 0,
+            "excluded_session_count": 0,
+        }
         if not config.dry_run:
             self.es = es or Elasticsearch(config.es_host, request_timeout=30)
             self.model = model or OllamaClient(config)
@@ -735,6 +775,12 @@ class LLMWorker:
 
     def collect_session_events(self) -> int:
         assert self.es is not None
+        self.session_capture_coverage = {
+            "selected_event_count": 0,
+            "usable_event_count": 0,
+            "covered_session_count": 0,
+            "excluded_session_count": 0,
+        }
         since = self.load_checkpoint("sessions")
         response = self.es.search(
             index="honeypot-v2-*",
@@ -772,6 +818,8 @@ class LLMWorker:
         usable = 0
         accumulated = 0
         close_only_skipped = 0
+        covered_session_ids: set[str] = set()
+        excluded_session_ids: set[str] = set()
         for hit in hits:
             source = hit.get("_source") if isinstance(hit.get("_source"), dict) else {}
             session_id = bounded_string(nested(source, "honeypot", "session"), 128)
@@ -779,6 +827,7 @@ class LLMWorker:
             if not session_id or not timestamp:
                 continue
             usable += 1
+            covered_session_ids.add(session_id)
             accumulator = self.load_accumulator(session_id)
             event_id = bounded_string(nested(source, "honeypot", "eventid"), 120).lower()
             # Most Cowrie connections close without ever reaching a command.
@@ -792,6 +841,8 @@ class LLMWorker:
             ):
                 latest = max(latest, timestamp)
                 close_only_skipped += 1
+                covered_session_ids.discard(session_id)
+                excluded_session_ids.add(session_id)
                 continue
             if not accumulator.finalized:
                 accumulator.add_event(hit, self.config.max_content_chars)
@@ -800,6 +851,12 @@ class LLMWorker:
             latest = max(latest, timestamp)
         if latest:
             self.save_checkpoint("sessions", latest)
+        self.session_capture_coverage = {
+            "selected_event_count": len(hits),
+            "usable_event_count": usable,
+            "covered_session_count": len(covered_session_ids),
+            "excluded_session_count": len(excluded_session_ids),
+        }
         LOG.info(
             "session scan selected=%d usable=%d accumulated=%d close_only_skipped=%d checkpoint_advanced=%s",
             len(hits),
@@ -839,7 +896,11 @@ class LLMWorker:
             source = hit.get("_source") if isinstance(hit.get("_source"), dict) else {}
             session_id = source.get("session_id")
             if isinstance(session_id, str) and session_id:
-                ready.append((str(hit.get("_id")), SessionAccumulator.from_document(source, session_id)))
+                accumulator = SessionAccumulator.from_document(source, session_id)
+                if not accumulator.closed:
+                    accumulator.terminal_observation = TERMINAL_OBSERVATION_IDLE
+                    accumulator.capture_coverage = CAPTURE_COVERAGE_MISSING
+                ready.append((str(hit.get("_id")), accumulator))
         return ready
 
     def base_document(
@@ -1190,7 +1251,7 @@ class LLMWorker:
         self.es.index(index=ANALYSIS_INDEX, id=report_id, document=document)
         return 1
 
-    def run_once(self) -> dict[str, int | str | bool]:
+    def run_once(self) -> dict[str, Any]:
         if self.config.dry_run:
             run_selftest()
             return {"mode": "dry-run", "selftest": True, "sessions": 0, "payloads": 0, "reports": 0}
@@ -1226,6 +1287,8 @@ class LLMWorker:
             "payloads": payloads,
             "reports": reports,
         }
+        if self.config.session_enabled and not stage_errors.get("session_events"):
+            result["session_capture_coverage"] = dict(self.session_capture_coverage)
         # #2228: disclose a truncated payload scan on the status document
         # itself, not just in .env.example -- a run that hit either cap must
         # never read as full coverage.

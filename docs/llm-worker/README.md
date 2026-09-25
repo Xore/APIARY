@@ -109,6 +109,26 @@ itself instead of trusting a filename.
 - after bounded retries, an error annotation is written while raw ingestion
   remains unaffected.
 
+## Session terminal observation
+
+Each `session_accumulator` document records a bounded `terminal_observation`
+value: `close_observed` means a `cowrie.session.closed` event was captured,
+`idle_finalized` means the worker finalized the session through its idle
+readiness path, and `open_after_window` means the observation window ended
+without a close event. `capture_coverage` is `observed` only for a captured
+close and is `missing` otherwise, so a close with zero commands remains
+distinguishable from no close. Existing `command_count`, `auth_success`,
+`closed`, and `duration_seconds` fields retain their contract.
+
+The worker's session scan reports covered and excluded session counts in its
+cycle status: close-only scanner sessions are intentionally excluded from the
+accumulator population, so future aggregates must use that explicit denominator
+and exclusions rather than treating the accumulator population as all sessions.
+Terminal absence is ambiguous. It must remain unknown and must not be described
+as attacker abandonment, deliberate disengagement, automation, or an
+AI/automated attacker; a captured close does not supply a termination reason
+that the sensor did not emit.
+
 The cross-sensor decoder/correlation expansion remains tracked by
 [#154](https://github.com/Xore/APIARY/issues/154). Dashboard delivery
 is #150, and the customizable analyzer workbench is explicitly tracked by
