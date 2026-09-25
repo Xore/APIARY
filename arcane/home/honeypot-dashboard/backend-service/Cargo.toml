@@ -31,7 +31,7 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 # generation. Both need to agree with the Go tier's algorithm (SHA-256 of
 # the same material; crypto/rand-strength ids) while both write
 # dashboard-workbench-runs-v1/-recipes-v1 during the cutover window.
-sha2 = "0.10"
+sha2 = "0.11"
 rand = "0.10"
 # PDF report composer (#1612 follow-up): only the core Op/graphics/
 # builtin-font API is used (no HTML layout, no raster image decoding — the
