@@ -155,7 +155,7 @@ def test_elasticsearch_client_only_sends_read_methods(monkeypatch):
                 "hits": {"total": {"value": 3, "relation": "eq"}, "hits": []},
                 "aggregations": {
                     "statuses": {"buckets": [{"key": "open", "doc_count": 3}]},
-                    "alert_time": {"stats": {"min": None, "max": None}},
+                    "alert_time": {"count": 3, "min": None, "max": None},
                 },
             }
         if "/_pit" in path and method == "POST":
