@@ -33,3 +33,7 @@ analysis/ghidra/revdeck/
 
 .grit
 .orchestrator/
+
+# External BETH benchmark data. The harness never downloads or writes it.
+ml-worker/benchmarks/data/
+ml-worker/benchmarks/beth-data/

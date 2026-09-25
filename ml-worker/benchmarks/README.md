@@ -13,8 +13,9 @@ governance model. The decision record is
 - Fixtures are the per-sensor documents from `ml-worker/tests/fixtures.py` —
   already reviewed, already TEST-NET addresses and reserved names. A second
   fixture set would mean two things to keep in step with the sensors.
-- The benchmark never trains, downloads, or deploys anything. It calls the
-  candidate's scoring path and nothing else.
+- The Tier 1 benchmark never trains, downloads, or deploys anything. It calls
+  the candidate's scoring path and nothing else. The separate BETH Tier 2 rail
+  is offline and also performs no deployment writes.
 - No Elasticsearch, no network. Everything is in-process.
 
 ## Run
@@ -45,27 +46,54 @@ and serious in production:
 **A skipped check is not a passed check.** Skips are counted and reported
 separately so a partially-exercised candidate cannot read as a clean one.
 
-## Tier 2 — accuracy, and why it is not here
+## Tier 2 — BETH architecture sanity rail
 
-A labelled ranking corpus, **blocked on
-[#1797](https://github.com/Xore/APIARY/issues/1797)**. If BETH does not map onto
-our feature extractors, this benchmark ships as Tier 1 only — said out loud
-here rather than shipping a harness that quietly cannot rank.
+[`evaluate_accuracy.py`](evaluate_accuracy.py) is the bounded, labelled-corpus
+rail. It is intentionally a **parallel-corpus sanity check**, not deployment
+qualification: BETH is eBPF process telemetry, while `ml-worker` scores
+honeypot/network events (`dst_port`, payload entropy, GeoIP, and credentials).
+There is no honest feature mapping in either direction. The DNS half is not a
+usable alternative: its six published files are byte-identical.
 
-When it lands:
+The BETH source is the anonymous Kaggle dataset
+[`katehighnam/beth-dataset`](https://www.kaggle.com/datasets/katehighnam/beth-dataset),
+licensed **CC0 1.0 Public Domain** and frozen at version 3. Prepare it outside
+this repository; this command never downloads it. The expected directory layout
+is direct, not nested:
 
-- **AUPRC is the headline.** Anomalies are rare and AUROC flatters under skew.
-- AUROC secondary, for comparability with BETH's own published baselines.
-- **Alert-budget precision**: precision *and* the absolute alert count per day
-  at the operating threshold. That number decides whether the dashboard is
-  usable.
-- **Seed variance**: mean ± std over ≥ 3 fixed seeds. A delta smaller than the
-  seed spread is not a result. Non-negotiable — the LLM side measured a
-  ±1-point run-to-run spread on a fixed model and prompt, and single-run
-  deltas smaller than that had been read as rankings for months.
-- Calibration (ECE, Brier, reliability diagrams) only after Platt scaling on a
-  held-out labelled split. An ECDF rank transform makes scores commensurable
-  but is **not** calibration; never report ECE on one and call it calibrated.
+```text
+$HOME/beth/
+  labelled_training_data.csv
+  labelled_validation_data.csv
+  labelled_testing_data.csv
+```
+
+Run at least five fixed seeds. The harness fits PCA and IsolationForest on
+`train`, uses `val` only as the held-out diagnostic split (IsolationForest has
+no early-stopping or calibration step here), and scores `test` once per seed.
+The report records runtime MD5s for all three CSVs, optionally the prepared
+archive with `--archive`, split row counts and base rates, package versions,
+elapsed time, and the SHA-256 of the JSON report. The report path must be
+outside the repository. The published split row/label/host fingerprint is
+checked before any model is fitted; a local extraction must not be re-split.
+
+```bash
+python3 ml-worker/benchmarks/evaluate_accuracy.py beth \
+  --data-dir "$HOME/beth" \
+  --output "$HOME/ml-worker-qualification/beth.json"
+```
+
+AUROC is the headline and AUPRC is reported alongside it, as mean ± standard
+deviation over the selected seeds. Every printed metric is accompanied by the
+published per-split `sus` base rates (approximately 0.17% / 0.42% / 90.7%).
+The paper's iForest reference is about 0.850 AUROC. The harness uses a fixed
+±0.05 screening band only to flag a pipeline miss; it is not a promotion gate
+or a reason to retune a deployed threshold.
+
+**No-promotion rule:** this corpus is never evidence for changing the deployed
+composite weights or `ML_ALERT_THRESHOLD`. The disposition corpus in
+[#3295](https://github.com/Xore/APIARY/issues/3295) is the separate,
+deployment-labelled source and is not imported by this BETH command.
 
 ## Banned metrics
 
@@ -76,7 +104,8 @@ When it lands:
   trigger-happy detectors. Build the obvious thing and you get a harness that
   ranks a coin flip above the LSTM-AE while looking rigorous. Use **PA%K** with
   K stated if a segment metric is wanted.
-- Any metric computed on a random or time-shuffled split.
+- Any metric computed on a random or time-shuffled split. The BETH harness
+  consumes the three published files in place and never re-splits rows.
 
 ## Split rule — non-negotiable, and it applies to existing code
 
