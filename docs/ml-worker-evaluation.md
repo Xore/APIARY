@@ -106,7 +106,9 @@ paragraph.
 
 `ml-worker/benchmarks/disposition_corpus.py` now exports the closed
 operator-disposition population and writes a hashed census outside the
-repository. It is read-only: open and legacy unlabelled alerts remain in the
+repository. The report carries a canonical-content SHA-256 (the digest field
+is excluded from its own hash), so the saved artifact can be independently
+verified. It is read-only: open and legacy unlabelled alerts remain in the
 full alert denominator but are excluded from the labelled snapshot, and the
 command never updates Elasticsearch or synthesises a verdict.
 

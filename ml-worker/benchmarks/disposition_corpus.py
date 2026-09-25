@@ -247,6 +247,17 @@ def _json_bytes(value: Any) -> bytes:
     return (json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
 
 
+def report_digest(report: dict[str, Any]) -> str:
+    """Hash the report content without its digest field to avoid self-reference."""
+    content = {key: value for key, value in report.items() if key != "report_sha256"}
+    return hashlib.sha256(_json_bytes(content)).hexdigest()
+
+
+def write_report(path: str | os.PathLike[str], report: dict[str, Any]) -> str:
+    report["report_sha256"] = report_digest(report)
+    return write_atomic(path, _json_bytes(report))
+
+
 def write_atomic(path: str | os.PathLike[str], payload: bytes) -> str:
     destination = Path(path).expanduser().resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -299,6 +310,8 @@ def print_report(report: dict[str, Any]) -> None:
     print(f"Calibration gate: {report['calibration_gate']['status']}")
     print(f"Export: {report['export']['rows']} rows -> {report['export']['path']}")
     print(f"Snapshot SHA-256: {report['export']['sha256']}")
+    if report.get("report_sha256"):
+        print(f"Report SHA-256 (canonical content): {report['report_sha256']}")
 
 
 def load_fixture(path: str | os.PathLike[str]) -> list[dict[str, Any]]:
@@ -516,7 +529,7 @@ def run_elasticsearch(*, endpoint: str, output: str, report_output: str,
     export = export_rows(census, output, reasons_redacted=not include_reason)
     source = {"kind": "elasticsearch", "index": INDEX, "endpoint": endpoint}
     report = build_report(census, source=source, export=export)
-    write_atomic(report_output, _json_bytes(report))
+    write_report(report_output, report)
     return census, report
 
 
@@ -526,7 +539,7 @@ def run_fixture(path: str, output: str, report_output: str,
     export = export_rows(census, output, reasons_redacted=not include_reason)
     source = {"kind": "fixture", "path": str(Path(path).resolve())}
     report = build_report(census, source=source, export=export)
-    write_atomic(report_output, _json_bytes(report))
+    write_report(report_output, report)
     return census, report
 
 
