@@ -51,6 +51,7 @@ from contracts import (
     sanitize_text,
     session_prompt,
 )
+import injection_suite
 
 
 WORKER_VERSION = "0.4.0"
@@ -1778,6 +1779,22 @@ def run_selftest() -> None:
     ]
 
 
+def run_injection_suite(config: Config) -> dict[str, Any]:
+    """#3334: behavioral prompt-injection corpus under the synthetic-canary gates."""
+    config.validate_synthetic_canary()
+    client = OllamaClient(config)
+    digest = client.model_digest()
+    report = injection_suite.run(client.analyze, config.max_content_chars)
+    return {
+        "mode": "injection-suite",
+        "model": config.model,
+        "model_digest": digest,
+        "schema_version": SCHEMA_VERSION,
+        "prompt_version": SESSION_PROMPT_VERSION,
+        **report,
+    }
+
+
 def run_synthetic_model_canary(config: Config, idle_timeout: int = 0) -> dict[str, Any]:
     """Exercise the real local model with deterministic, synthetic U1 cases."""
     config.validate_synthetic_canary()
@@ -1907,6 +1924,11 @@ def main() -> int:
         help="run synthetic U1 cases against the configured local Ollama model and exit",
     )
     parser.add_argument(
+        "--injection-suite",
+        action="store_true",
+        help="run the #3334 prompt-injection corpus against the configured local Ollama model and exit",
+    )
+    parser.add_argument(
         "--idle-unload-timeout",
         type=int,
         default=0,
@@ -1956,6 +1978,14 @@ def main() -> int:
             return 1
         print(json.dumps(result, sort_keys=True))
         return 0
+    if args.injection_suite:
+        try:
+            result = run_injection_suite(config)
+        except (ValueError, ModelRequestError, ModelResponseError) as exc:
+            print(f"injection suite failed to run: {exc}", file=sys.stderr)
+            return 1
+        print(json.dumps(result, sort_keys=True))
+        return 0 if result["passed"] == result["total"] else 1
     if args.production_session_canary:
         try:
             result = run_production_session_canary(config, args.max_canary_cycles)
