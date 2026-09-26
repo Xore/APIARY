@@ -12,7 +12,7 @@ edition = "2021"
 [dependencies]
 axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1", features = ["full"] }
-tower-http = { version = "0.6", features = ["trace", "compression-gzip"] }
+tower-http = { version = "0.7", features = ["trace", "compression-gzip"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 elasticsearch = { version = "8.19.0-alpha.1", default-features = false, features = ["rustls-tls"] }
