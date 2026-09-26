@@ -1296,12 +1296,42 @@ impl Notifier {
         }
 
         // Webhook fan-out for everything that newly notified.
+        //
+        // #3330: this used to discard the response and log nothing but a
+        // transport error, so a webhook answering 500 — rejected token,
+        // wrong path — looked exactly like a delivered alert and the only
+        // trace was a container log this dashboard never reads. Each
+        // message now gets a bounded retry (webhook_delivery decides what
+        // is worth repeating) and its outcome recorded, which is what
+        // Settings and the diagnostics page surface.
         if !mark_only && !self.webhook.is_empty() {
+            let target = crate::webhook_delivery::origin_of(&self.webhook);
             for message in self.messages.clone() {
                 let body = json!({"content": message, "text": message});
-                if let Err(error) = self.client.post(&self.webhook).json(&body).send().await {
-                    tracing::warn!(%error, "alert webhook failed");
+                let attempt =
+                    crate::webhook_delivery::deliver(&self.client, &self.webhook, &body).await;
+                if attempt.ok {
+                    tracing::info!(
+                        latency_ms = attempt.latency_ms,
+                        tries = attempt.tries,
+                        http_code = attempt.http_code.unwrap_or(0),
+                        "alert webhook delivered"
+                    );
+                } else {
+                    tracing::warn!(
+                        latency_ms = attempt.latency_ms,
+                        tries = attempt.tries,
+                        error = %attempt.error.clone().unwrap_or_default(),
+                        "alert webhook delivery failed"
+                    );
                 }
+                crate::webhook_delivery::record(
+                    &self.state.es,
+                    crate::webhook_delivery::ALERT_ID,
+                    &target,
+                    &attempt,
+                )
+                .await;
             }
         }
     }
