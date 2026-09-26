@@ -325,6 +325,11 @@ services:
         else
           echo INIT | /opt/arkime/db/db.pl --insecure http://elasticsearch:9200 init
         fi
+        # #3343: translate the legacy templates db.pl just installed into
+        # composable ones -- Elasticsearch ignores legacy templates wherever a
+        # composable template matches, and elasticsearch-setup's "*" catch-all
+        # always does. See arkime/composable-templates.js.
+        /opt/arkime/bin/node /opt/arkime/composable-templates.js
 
         # Create the admin user once, with a real local password (#122, #134,
 
@@ -391,6 +396,7 @@ services:
         mkdir -p /markers && touch /markers/arkime-init.done
     volumes:
       - ./arkime/config.ini:/opt/arkime/etc/config.ini:ro
+      - ./arkime/composable-templates.js:/opt/arkime/composable-templates.js:ro
       - /opt/stacks/apiary/state/init-markers:/markers
     environment:
       - TZ=Europe/Berlin

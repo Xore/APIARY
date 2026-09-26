@@ -1593,7 +1593,7 @@ curl -fsS -X PUT "$es_url/_all/_settings?expand_wildcards=all" \
 arkime_legacy_wait=60
 while (( arkime_legacy_wait > 0 )); do
   if curl -fsS -o /dev/null "$es_url/_template/arkime_sessions3_template" 2>/dev/null; then
-    echo "elasticsearch-setup: Arkime legacy template present, adding ip-fix overlay"
+    echo "elasticsearch-setup: Arkime legacy template present, adding the composable catch-all"
     break
   fi
   sleep 2
@@ -1609,51 +1609,17 @@ curl -fsS -X PUT "$es_url/_index_template/single-node-replica-default" \
   -H 'Content-Type: application/json' \
   --data-binary '{"index_patterns":["*","-arkime_sessions3-*","-arkime_history_v1-*"],"priority":1,"template":{"settings":{"index.number_of_replicas":0}}}' >/dev/null
 
-# Removing the shadowing above turned out not to be the whole fix. Arkime
-# ships TWO legacy templates matching arkime_sessions3-* simultaneously
-# (arkime_sessions3_template, its older non-ECS field-naming template with
-# no "source"/"destination" properties at all; arkime_sessions3_ecs_template,
-# which explicitly maps source.ip/destination.ip as type "ip"). Confirmed
-# live, repeatedly, with real throwaway indices: even with the composable
-# shadowing above removed, a document written to a fresh arkime_sessions3-*
-# index still gets source.ip/destination.ip as Elasticsearch's own default
-# text+.keyword instead of the ECS template's explicit "ip" typing --
-# Elasticsearch's exact merge behavior for two SIMULTANEOUSLY-matching
-# legacy templates' "properties" trees is under-documented and didn't
-# behave as its own "higher order wins conflicts, per-field merge
-# otherwise" model would predict (the higher-order non-ECS template has no
-# conflicting "source" key at all, yet the ECS template's correct one was
-# still lost). Rather than resolve that legacy-template merge question
-# fully, this repo adds its own small, authoritative composable template
-# for just the two fields that actually crash Arkime's viewer when
-# mistyped (db.js's fixSessionFields walks source.ip/destination.ip
-# assuming an object-typed IP field) -- composable templates have simple,
-# well-defined highest-priority-wins semantics, unlike the legacy ones,
-# and every other index in this whole script already uses this API instead
-# of the legacy one for exactly that reason. Priority 10: higher than the
-# single-node-replica-default catch-all (1) so it's never shadowed by that
-# one, far below every dashboard/sensor template above (460+) since those
-# never share this index pattern anyway.
-#
-# This does not retroactively fix indices already created with the wrong
-# mapping -- Elasticsearch mappings are fixed at index-creation time.
-# arkime_sessions3-* rotates daily (config.ini's rotateIndex=daily), so
-# already-existing indices self-heal on their next daily rotation; a live
-# reindex of the current day's index is a separate, one-time operation if
-# immediate correction is needed rather than waiting for that rotation.
-#
-# #3283: number_of_replicas lives here too, not only in Arkime's legacy
-# arkime_sessions3_template. Once ANY composable template matches an index,
-# Elasticsearch applies no legacy template to it at all -- so this template
-# (the highest-priority composable match) is the only thing deciding the
-# settings of a new arkime_sessions3-* index. Without the line below every
-# daily sessions index got Elasticsearch's default 1 replica, which a single
-# node can never assign: the cluster sat yellow with 12 unassigned shards.
-# The wider consequence -- Arkime's own mappings/settings are shadowed the
-# same way -- is tracked separately in #3343.
-curl -fsS -X PUT "$es_url/_index_template/arkime-sessions3-ip-fix" \
-  -H 'Content-Type: application/json' \
-  --data-binary '{"index_patterns":["arkime_sessions3-*"],"priority":10,"template":{"settings":{"index.number_of_replicas":0},"mappings":{"properties":{"source":{"properties":{"ip":{"type":"ip"}}},"destination":{"properties":{"ip":{"type":"ip"}}}}}}}' >/dev/null
+# #3343: no Arkime template is created here any more. What the comment that
+# used to stand here called "under-documented legacy-template merge behavior"
+# was plain shadowing: Elasticsearch applies NO legacy template to an index
+# once any composable template matches it, and single-node-replica-default
+# above matches "*" (composable templates have no exclusion syntax -- the
+# "-arkime_..." entries are literal names). So neither of Arkime's legacy
+# templates ever applied, and the arkime-sessions3-ip-fix fragment that stood
+# here decided every sessions index alone (firstPacket long, no analyzer, 1
+# replica). arkime-init now translates Arkime's legacy templates into full
+# composable ones right after db.pl (arkime/composable-templates.js) and
+# deletes arkime-sessions3-ip-fix.
 
 echo
 echo "elasticsearch-setup: GeoIP, retention policies, and event templates installed"
