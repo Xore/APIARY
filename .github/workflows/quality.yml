@@ -358,14 +358,38 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # #3331: run on the node major the image actually ships, read out of the
+      # image's own FROM line instead of written here a second time.
+      #
+      # Every step in this job used to run under setup-node's node-version "24"
+      # while the Dockerfile builds and serves on node:22-alpine, so the
+      # typecheck, the unit tests, the production build and the generated
+      # route-tree diff had never once executed on the node that ships the
+      # artifact. The only Node 22 coverage in the whole workflow was the
+      # #1816 lockfile-install step below. A gate that cannot see the runtime it
+      # is gating is not a gate.
+      #
+      # Measured on the Dockerfile's own image before moving the pin
+      # (node:22-alpine@sha256:c610fcdf, v22.23.2, npm 10.9.8): `npm ci`,
+      # `npm run typecheck`, 179/179 vitest cases, `npm run build`, and the
+      # `git diff --exit-code` route-tree check are all clean there. The #2034
+      # browser matrix is 58/58 on node:22 as well, so this moves coverage onto
+      # the runtime rather than trading a gap for a break.
+      #
+      # Deriving instead of re-declaring is the part that stops it recurring. A
+      # second copy of the version is a second thing to forget, and forgetting
+      # it is precisely how the 24/22 split opened up; reading it from the
+      # Dockerfile means an image bump moves CI with it in the same commit.
+      - name: Node major from the image (#3331)
+        id: node-runtime
+        run: ./scripts/node-runtime-major.sh arcane/home/honeypot-dashboard/frontend-next/Dockerfile
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: ${{ steps.node-runtime.outputs.node-version }}
           cache: npm
           cache-dependency-path: arcane/home/honeypot-dashboard/frontend-next/package-lock.json
       # #1816: the lockfile must install under the npm the *image* uses.
       #
-      # setup-node above pins 24; the Dockerfile builds on node:22-alpine.
       # Dependabot resolves with its own npm again, so a group bump can
       # produce a lockfile that satisfies one and not the other -- and the
       # failure then lands on whatever PR runs next, which is usually one
@@ -375,6 +399,13 @@ jobs:
       # Running the image's npm here makes it fail on the PR that caused
       # it. Regenerating automatically would also work; failing loudly in
       # the right place is better than a bot quietly rewriting a lockfile.
+      #
+      # #3331: the image is the derived `node-image` output, not a second
+      # literal `node:22-alpine`. This step is the one place that already ran
+      # the runtime's npm, so leaving the tag written out by hand would have
+      # kept the drift alive on the exact axis this issue is about. The script
+      # also refuses to resolve at all if the Dockerfile's stages ever split
+      # across node majors, which would leave "the image's npm" ambiguous.
       #
       # --user matters: without it the container installs as root and
       # leaves a root-owned node_modules the runner's own `npm ci` below
@@ -388,7 +419,7 @@ jobs:
             --user "$(id -u):$(id -g)" \
             -e HOME=/tmp -e npm_config_cache=/tmp/npm-cache \
             -v "$PWD:/app" -w /app \
-            node:22-alpine npm ci --no-audit --no-fund
+            ${{ steps.node-runtime.outputs.node-image }} npm ci --no-audit --no-fund
           rm -rf node_modules
       - run: npm ci
         working-directory: arcane/home/honeypot-dashboard/frontend-next
@@ -488,9 +519,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # #3331: twin of the homeserver copy -- same derive, same reason.
+      # (Full rationale, and the node:22 measurement behind it, lives there.)
+      - name: Node major from the image (#3331)
+        id: node-runtime
+        run: ./scripts/node-runtime-major.sh arcane/home/honeypot-dashboard/frontend-next/Dockerfile
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: ${{ steps.node-runtime.outputs.node-version }}
           cache: npm
           cache-dependency-path: arcane/home/honeypot-dashboard/frontend-next/package-lock.json
       # #1816: the lockfile must install under the npm the *image* uses.
@@ -502,7 +538,7 @@ jobs:
             --user "$(id -u):$(id -g)" \
             -e HOME=/tmp -e npm_config_cache=/tmp/npm-cache \
             -v "$PWD:/app" -w /app \
-            node:22-alpine npm ci --no-audit --no-fund
+            ${{ steps.node-runtime.outputs.node-image }} npm ci --no-audit --no-fund
           rm -rf node_modules
       - run: npm ci
         working-directory: arcane/home/honeypot-dashboard/frontend-next
@@ -560,9 +596,17 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+      # #3331: same derive as the two jobs above, and it matters most here --
+      # this twin runs the BUILT output, so it is the closest thing CI has to
+      # executing what the container serves, and it was doing that on 24 while
+      # the container serves 22. 58/58 of this matrix is green on node:22
+      # (node:22-bookworm, v22.23.2), measured before the pin moved.
+      - name: Node major from the image (#3331)
+        id: node-runtime
+        run: ./scripts/node-runtime-major.sh arcane/home/honeypot-dashboard/frontend-next/Dockerfile
       - uses: actions/setup-node@v7
         with:
-          node-version: "24"
+          node-version: ${{ steps.node-runtime.outputs.node-version }}
           cache: npm
           cache-dependency-path: arcane/home/honeypot-dashboard/frontend-next/package-lock.json
       - run: npm ci
@@ -594,9 +638,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # #3331: twin -- see the homeserver copy above for the rationale.
+      - name: Node major from the image (#3331)
+        id: node-runtime
+        run: ./scripts/node-runtime-major.sh arcane/home/honeypot-dashboard/frontend-next/Dockerfile
       - uses: actions/setup-node@v7
         with:
-          node-version: "24"
+          node-version: ${{ steps.node-runtime.outputs.node-version }}
           cache: npm
           cache-dependency-path: arcane/home/honeypot-dashboard/frontend-next/package-lock.json
       - run: npm ci
