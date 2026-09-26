@@ -301,7 +301,6 @@ CAP_NOT_YET_HARDENED=(
   "hp-attacker-identity-worker|#3045 -- internal worker, out of #2366's internet-facing scope, unmeasured (custom-built image)"
   "hp-correlator-worker|#3045 -- internal worker, out of #2366's internet-facing scope, unmeasured (custom-built image)"
   "hp-payload-inventory-worker|#3045 -- internal worker, out of #2366's internet-facing scope, unmeasured (custom-built image)"
-  "hp-unsloth-studio|#3337 -- GPU training workbench (Unsloth Studio + Jupyter, runs as root, LAN-bound), not a sensor and outside #2366's internet-facing scope; its repo compose never had cap_drop, so this is a gap in the definition, not deploy drift. Needs a measured cap_add set between training runs"
 )
 
 # Returns the reason string for $1 if it appears in the remaining arguments.
