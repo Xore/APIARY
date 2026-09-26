@@ -320,6 +320,25 @@ def is_harmony_served(model: str) -> bool:
     return any(marker in model.lower() for marker in HARMONY_FAMILY)
 
 
+DEFAULT_API_BASE = "http://127.0.0.1:11434/v1"
+
+
+def ollama_version(api_base: str = DEFAULT_API_BASE) -> str | None:
+    """Version of the serving Ollama, recorded in every result file.
+
+    A runtime bump mid-sweep otherwise leaves the results untraceable: the
+    files carry a model digest but nothing saying which Ollama produced them.
+    """
+    native = api_base.rstrip("/")
+    if native.endswith("/v1"):
+        native = native[: -len("/v1")]
+    try:
+        with urllib.request.urlopen(f"{native}/api/version", timeout=10) as r:
+            return json.loads(r.read()).get("version")
+    except Exception:  # unreachable API must not lose a completed run
+        return None
+
+
 def resolve_digest(api_base: str, model: str) -> str:
     """Read the installed digest for a tag from Ollama's native /api/tags.
 
@@ -462,7 +481,8 @@ def ask_model(
 
 
 def build_report(results: dict, *, model_tag: str, model_digest: str, request: dict,
-                  tier: str, transcript_summary: dict | None = None,
+                  tier: str, api_base: str = DEFAULT_API_BASE,
+                  transcript_summary: dict | None = None,
                   extra: dict | None = None) -> dict:
     total_score = sum(r["score"] for r in results.values())
     total_max = sum(r["max_score"] for r in results.values())
@@ -470,6 +490,7 @@ def build_report(results: dict, *, model_tag: str, model_digest: str, request: d
         "recorded_for_issue": 159,
         "model": model_tag,
         "model_digest": model_digest,
+        "ollama_version": ollama_version(api_base),
         "qualification_request": request,
         "slice": {"toolchain": SLICE_TOOLCHAIN, "opt_level": SLICE_OPT},
         "case_count": len(results),
@@ -538,7 +559,8 @@ def write_report(output_path, report: dict) -> None:
 
 
 def finalize(results: dict, output_path, *, model_tag: str, model_digest: str, request: dict,
-             tier: str, transcript_summary: dict | None = None, extra: dict | None = None) -> int:
+             tier: str, api_base: str = DEFAULT_API_BASE,
+             transcript_summary: dict | None = None, extra: dict | None = None) -> int:
     """Writes the report and returns the process exit code.
 
     #3090: a model that fails every request (e.g. Ollama 500s on every call)
@@ -551,8 +573,8 @@ def finalize(results: dict, output_path, *, model_tag: str, model_digest: str, r
         print(f"UNMEASURABLE {model_tag}: 0 cases scored, no result written", file=sys.stderr)
         return 3
     report = build_report(results, model_tag=model_tag, model_digest=model_digest,
-                          request=request, tier=tier, transcript_summary=transcript_summary,
-                          extra=extra)
+                          request=request, tier=tier, api_base=api_base,
+                          transcript_summary=transcript_summary, extra=extra)
     write_report(output_path, report)
     print(f"\n{model_tag}: {report['total_score']}/{report['total_max_score']} "
           f"({report['percent']}%) across {len(results)} cases")
@@ -633,7 +655,7 @@ def run_cases(slice_builds, rubric: dict, tier: str, *, api_base: str, model_tag
         if output_path is not None:
             write_report(output_path, build_report(
                 results, model_tag=model_tag, model_digest=model_digest,
-                request=request, tier=tier, extra=report_extra))
+                request=request, tier=tier, api_base=api_base, extra=report_extra))
     return results
 
 
@@ -654,7 +676,7 @@ def select_cases(slice_builds: list, rubric: dict, cases_arg: str) -> list:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--api-base", default="http://127.0.0.1:11434/v1")
+    parser.add_argument("--api-base", default=DEFAULT_API_BASE)
     parser.add_argument("--transcript-dir", default=str(DEFAULT_SYNTHETIC_ROOT))
     parser.add_argument("--provenance", default=PROVENANCE_SYNTHETIC, choices=PROVENANCES)
     parser.add_argument("--tier", default="A", choices=TIERS,
@@ -777,8 +799,8 @@ def main() -> int:
     if writer is not None:
         transcript_summary = writer.close()
     return finalize(results, args.output, model_tag=model_tag, model_digest=model_digest,
-                    request=request, tier=args.tier, transcript_summary=transcript_summary,
-                    extra=report_extra)
+                    request=request, tier=args.tier, api_base=args.api_base,
+                    transcript_summary=transcript_summary, extra=report_extra)
 
 
 if __name__ == "__main__":
