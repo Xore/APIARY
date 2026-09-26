@@ -1,0 +1,61 @@
+# rex86-eval -- the evaluation container every script in
+# analysis/ghidra/benchmarks/model-quant-benchmark/ drives.
+#
+# #847: this stack was built on the homeserver by hand and is not in version
+# control, so when the box was rebuilt every rex86_*.sh script became inert --
+# they all begin with `docker exec rex86-eval` against
+# /var/dockge/stacks/rex86-eval/work, and neither the container nor that
+# directory existed any more. This file restores it reproducibly.
+#
+# The scripts assume, per model-quant-benchmark/README.md's "Deployment
+# layout":
+#   - llama.cpp built at /work/llama.cpp
+#   - model files under /work/other-models/
+#   - corpus_eval.py + manifest.json + rev_cases_v2_rubric.json copied
+#     flat into /work/
+#
+# The three Python/rubric files are bind-mounted from the repo rather than
+# copied, so an edit to the scoring harness is the same edit everywhere and
+# cannot drift from the committed one. That is the one deviation from the
+# README's "copy them in": the README predates these being version-controlled,
+# and a copy is a stale copy waiting to happen.
+#
+# GPU: exposed because llama-server needs it. Only one GPU on this host, and
+# every driver in that directory serialises behind the rex86_wait_for_gpu_drivers
+# guard in rex86_common.sh -- do not run two of them at once.
+services:
+  rex86-eval:
+    image: nvidia/cuda:12.4.1-devel-ubuntu22.04
+    container_name: rex86-eval
+    working_dir: /work
+    shm_size: "16gb"
+    environment:
+      # Pinned, not floating: #160 established that the merge is pure weight
+      # arithmetic and must not touch the GPU, so a moving CUDA base could
+      # change a merge result for no visible reason.
+      NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-all}"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    volumes:
+      - ./work:/work
+      # Scoring harness, straight from the repo. On the homeserver that repo
+      # is checked out at /mnt-1/benchmarks/APIARY, which is why the mount is
+      # absolute here while the relative paths below resolve on a normal
+      # checkout -- a stack directory is deployed, not cloned, so its own
+      # parent is not the repo.
+      - ${APIARY_REPO:-../../../../}:/repo:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # Interactive toolchain, not a service: the pipeline enters via
+    # `docker exec` for merge, convert and eval. No command, kept alive so
+    # the drivers have somewhere to exec into.
+    command: ["sleep", "infinity"]
+    healthcheck:
+      test: ["CMD", "test", "-d", "/work/llama.cpp"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
