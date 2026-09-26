@@ -126,14 +126,28 @@ def test_ci_installs_the_lockfile_under_the_builder_image():
     `npm ci` inside the same image the Dockerfile builds with (#1816), which
     is the step that turns an npm-major skew into a red PR. Deleting it
     would leave the pin decorative.
+
+    #3331 rewired how the image is named: it used to grep for a literal
+    `node:<major>-alpine npm ci`, and that literal is now derived from the
+    Dockerfile by scripts/node-runtime-major.sh. The invariant is unchanged
+    -- the container running `npm ci` must be the one that builds -- but it
+    is now expressed as "the image comes from the derive step", so both
+    halves are asserted: the resolve exists, and its output is what the
+    docker run uses. A grep for the tag would have gone red on the fix
+    itself while proving nothing about the runtime.
     """
-    node_major = _builder_node_major()
     workflow = QUALITY_WORKFLOW.read_text(encoding="utf-8")
-    assert re.search(rf"node:{node_major}-alpine\s+npm ci\b", workflow), (
-        f"quality.yml no longer runs `npm ci` inside node:{node_major}-alpine. "
-        f"That step is the enforcement behind engines.npm (#1816, #2421); "
-        f"without it a lockfile written by the wrong npm major reaches the "
-        f"container build instead of the PR that produced it."
+    assert re.search(r"node-runtime-major\.sh\s+\S*frontend-next/Dockerfile\b", workflow), (
+        "quality.yml no longer derives the builder image from frontend-next's "
+        "Dockerfile. That resolve step is where the image's own npm -- and so "
+        "the enforcement behind engines.npm (#1816, #2421) -- comes from."
+    )
+    assert re.search(
+        r"steps\.node-runtime\.outputs\.node-image\s*\}\}\s+npm ci\b", workflow
+    ), (
+        "the `npm ci`-in-the-builder-image step no longer uses the derived "
+        "node-image output. Without it a lockfile written by the wrong npm "
+        "major reaches the container build instead of the PR that produced it."
     )
 
 
