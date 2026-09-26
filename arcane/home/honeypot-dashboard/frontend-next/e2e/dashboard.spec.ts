@@ -30,6 +30,22 @@ async function assertShellHealthy(page: Page) {
   }
 }
 
+// #3333: text markers only catch a render tree that died visibly. These are
+// the failures that leave a plausible-looking shell behind: an uncaught
+// exception, a console error, or a failed navigation/hydration request.
+// Every route is clean today (measured 2026-09-26), so there is no allowlist.
+function trackPageHealth(page: Page) {
+  const problems: string[] = [];
+  page.on("pageerror", (error) => problems.push(`pageerror: ${error.message}`));
+  page.on("console", (message) => {
+    if (message.type() === "error") problems.push(`console.error: ${message.text()}`);
+  });
+  page.on("response", (response) => {
+    if (response.status() >= 400) problems.push(`HTTP ${response.status()} ${new URL(response.url()).pathname}`);
+  });
+  return problems;
+}
+
 async function seedSessionCookie(context: BrowserContext, role: "admin" | "user") {
   // __Host- prefix forces the Secure attribute; injected via explicit
   // domain+path because url + extra attributes is rejected by addCookies.
@@ -71,11 +87,16 @@ test.describe("route smoke across theme x viewport", () => {
             theme,
           );
           const page = await context.newPage();
+          const problems = trackPageHealth(page);
 
-          await page.goto(route);
+          const response = await page.goto(route);
+          expect(response?.status(), `${route} navigation status`).toBeLessThan(400);
           // data-theme comes from the boot script reading hp-theme back out.
           await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
           await assertShellHealthy(page);
+          // Let the hydration fetch settle so its failure is caught here too.
+          await page.waitForLoadState("networkidle");
+          expect(problems, `${route} page errors`).toEqual([]);
           await context.close();
         });
       }
