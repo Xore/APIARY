@@ -15,6 +15,8 @@ Every push to `main` and every pull request runs:
 - actionlint over every workflow (warning-level ShellCheck in `run:` blocks),
   plus a zizmor security audit that fails on anything except the four rules
   #3313's hardening still owns (#3314);
+- hadolint over every tracked Dockerfile, failing on warnings and errors
+  (policy and exemptions in `.hadolint.yaml`, #3320);
 - CodeQL for Go, JavaScript/TypeScript, and Python;
 - dependency review on pull requests.
 
@@ -148,6 +150,26 @@ latest `main` before merging). In an emergency, a repository admin can set the
 ruleset's enforcement to *Disabled* (Settings → Rules) and must re-enable it
 afterwards; there is deliberately no standing bypass actor, since automation
 merges with the owner's token.
+
+## Main health watch (#3324)
+
+`main-health-watch.yml` runs after every Quality/Containers run on `main`
+and hourly (`scripts/main-health-watch.py`):
+
+- **Red:** when the newest completed run of either workflow on `main` failed,
+  it opens one `main-red-alarm` issue naming the failing jobs, the first red
+  and last green commit, and the commits in between. It comments again only
+  when the failing head changes, and closes the issue itself once both are
+  green. It never reverts or re-runs a failed run.
+- **Untested:** merges made by `github-actions` (Dependabot auto-merge) start
+  no push runs, because `GITHUB_TOKEN` events don't trigger workflows. That's
+  how the 2026-09-25 breakage sat on `main` with no red run at all (#3311).
+  When `main`'s head is over an hour old and a watched workflow never ran on
+  it, the watch dispatches that workflow on `main` (`workflow_dispatch` is
+  the exception `GITHUB_TOKEN` may start), and the next sweep judges it.
+
+Replay any past moment without side effects:
+`GITHUB_REPOSITORY=Xore/APIARY python3 scripts/main-health-watch.py --before 2026-09-25T10:00:00Z`.
 
 ## Pull request workflow
 
@@ -969,11 +991,64 @@ ssh homeserver 'for n in 3 4 5 6 7; do
 done'
 ```
 
-They are only `systemctl disable --now`, not deregistered -- the registration,
-`_work` dir and tool cache all survive, so re-enabling costs nothing and needs
-no token. **Stopping a busy instance fails its in-flight job**, so cancel the
-run first or wait for idle; the 2026-09-05 reduction cancelled a run and cost
-16 jobs a re-run.
+They were only `systemctl disable --now`, not deregistered, so the local
+`.runner` file, `_work` dir and tool cache survive. **GitHub, however, removes
+a self-hosted runner that stays offline for more than 14 days.** As of
+2026-09-26, instances 5-7 are no longer registered (the runners API lists only
+`supermicro`, `-ci-2..4` and `supermicro-home`), so re-enabling their units is
+not enough. Remove their stale registration and re-run the installer with a
+token:
+
+```bash
+ssh homeserver 'cd /opt/stacks/apiary && for n in 5 6 7; do
+  sudo rm -f /opt/github-ci-runner-$n/.runner /opt/github-ci-runner-$n/.credentials*
+  sudo scripts/github-ci-runner/install-ci-runner.sh --repo Xore/APIARY --instance $n
+done'
+```
+
+Their `/var/lib/github-runners/github-ci-runner-{5,6,7}/_work` trees (~11 GB)
+are leftovers until then and can be deleted if the instances won't return.
+
+**State on 2026-09-26:** four `honeypot-ci` instances are active
+(`supermicro`, `-ci-2`, `-ci-3`, `-ci-4`), not the two this section prescribes
+for a benchmark window. At the same time the GPU was serving a benchmark model,
+and the load average sat at 27-40, which is the contention described above.
+Whether to drop back to two is an owner decision; record it here when made.
+
+#### Draining a runner before maintenance
+
+**Stopping a busy instance fails its in-flight job** (the 2026-09-05 reduction
+cancelled a run and cost 16 jobs a re-run). Drain first:
+
+1. Stop new work from landing on the instance. The runner has no "pause", so
+   either disable the unit's restart and let the current job finish, or (for
+   host-wide maintenance) wait until the queue is empty:
+   `gh run list --status in_progress` and `--status queued` both empty, or only
+   jobs you are willing to lose.
+2. Check the instance is idle: `gh api repos/Xore/APIARY/actions/runners
+   --jq '.runners[] | {name, busy}'` shows `busy: false`, and on the host
+   `pgrep -u <runner-user> -f Runner.Worker` returns nothing.
+3. `sudo systemctl stop actions.runner.Xore-APIARY.<name>.service`, then do
+   the maintenance.
+4. Afterwards, look for what a killed job can leave behind. That means
+   the throwaway Elasticsearch test containers from `analysis/tests/`
+   (named `<test>-test-<pid>`, published on `127.0.0.1:19000-19899`, where live
+   services use `10.8.0.2`):
+   `docker ps -a --format '{{.Names}}' | grep -E -- '-test-[0-9]+$'`.
+   Also check for root-owned `_work` leftovers (see #3021 above).
+5. `sudo systemctl start ...`, and confirm `status: online` in the runners API
+   within a minute.
+
+Keep any instance's downtime under 14 days, or GitHub deregisters it (above).
+
+#### Resource limits
+
+None. Every runner unit runs with `MemoryMax=infinity` and no CPU quota
+(checked 2026-09-26) on a 48-core / 92 GB host that also runs every sensor,
+Elasticsearch and the GPU workloads. Contention is managed only by instance
+count, as above. A systemd slice with a `CPUWeight`/`MemoryHigh` budget for
+all runner units would bound it structurally, but it would also slow CI when
+the box is idle. That's an owner decision, not something to add quietly.
 
 ### Buildx layer cache: `type=local` on the homeserver (#2822)
 

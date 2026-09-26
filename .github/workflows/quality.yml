@@ -931,6 +931,10 @@ jobs:
             home: true
             run: python arcane/home/honeypot-cowrie/cowrie/tests/test_txtcmds_priority_patch.py
 
+          - name: "cowrie service-request logging patch (#3307)"
+            home: true
+            run: python arcane/home/honeypot-cowrie/cowrie/tests/test_service_request_log_patch.py
+
           # #1982: compose.yml is the only place a stack's knobs are exercised,
           # .env.example is what a deployer copies when standing the stack up
           # manually -- drift between them means a variable exists at runtime
@@ -1029,6 +1033,14 @@ jobs:
           - name: Docs cite existing repo paths (#2458)
             home: true
             run: python scripts/check-doc-paths-exist.py
+
+          # #3332: the inverse of #2458 -- every docs/**/*.md must be reachable
+          # from docs/README.md through relative links (transitively), except
+          # dated record trees listed in the script. 54 of 120 docs, runbooks
+          # among them, were unreachable from the map when this landed.
+          - name: Docs reachable from the documentation map (#3332)
+            home: true
+            run: python scripts/check-docs-reachable.py
 
           # #2576: the CAPE implementation-plan doc claimed the detail page
           # (/cape/{sha256}) was admin-gated. Nothing in backend-service
@@ -1303,6 +1315,20 @@ jobs:
                   print(f"::error::zizmor {f['ident']}: {f['desc']} ({loc['key']})")
               sys.exit(1 if blocking else 0)
               PY
+
+          # #3320: Dockerfile lint, separate from image-security-scan's CVE
+          # check. Policy (and why package-version pins are exempt) lives in
+          # .hadolint.yaml; fails on warnings and errors. Pinned binary,
+          # checksum pinned here -- not fetched next to the download.
+          - name: "Dockerfile lint (hadolint, #3320)"
+            home: true
+            run: |
+              set -euo pipefail
+              bin="$RUNNER_TEMP/hadolint"
+              curl -fsSL -o "$bin" https://github.com/hadolint/hadolint/releases/download/v2.14.0/hadolint-linux-x86_64
+              echo "6bf226944684f56c84dd014e8b979d27425c0148f61b3bd99bcc6f39e9dc5a47  $bin" | sha256sum -c -
+              chmod +x "$bin"
+              git ls-files -z | grep -zE '(^|/)Dockerfile[^/]*$' | xargs -0 "$bin" --config .hadolint.yaml
 
           - name: Shell syntax and high-severity ShellCheck
             home: true

@@ -344,6 +344,17 @@ func classifyPayload(query, body string) string {
 	switch {
 	// --- named exploit chains, most identifying first ---
 
+	// #3309, CVE-2026-87902 (KEV 2026-09-25): WordPress resolves the page
+	// template from `pagename`, which it urldecodes once more itself, so a
+	// double-encoded traversal walks out of the theme directory into any
+	// readable .php -- pearcmd.php for RCE. Checked before pearcmd-rce,
+	// which is this chain's second stage and would otherwise claim it.
+	// Zero matches in the 30 days before this landed; the traffic that
+	// looks similar (theme css.php?files=../, index.php pearcmd LFI) has no
+	// pagename and keeps its own class.
+	case wordpressPagenameTraversal(query, body):
+		return "wordpress-pagename-traversal"
+
 	// 390 events. CVE-2012-1823 / CVE-2024-4577: turns php-cgi's argument
 	// handling into "execute the request body as PHP".
 	case strings.Contains(q, "allow_url_include") && strings.Contains(q, "auto_prepend_file"):
@@ -495,6 +506,44 @@ func classifyPayload(query, body string) string {
 }
 
 // containsAny reports whether s contains any of the needles.
+// wordpressPagenameTraversal reports a `pagename` parameter -- in the query
+// or a form-encoded body -- carrying traversal. Double encoding is the tell:
+// after the one decode url.ParseQuery does, a legitimate page slug never
+// still contains an encoded dot, slash or backslash, and a fully decoded one
+// never contains "../". Parameters are parsed, not substring-matched, so
+// "pagename" inside some other value cannot trigger it.
+func wordpressPagenameTraversal(query, body string) bool {
+	for _, raw := range []string{query, body} {
+		values, err := url.ParseQuery(raw)
+		if err != nil && len(values) == 0 {
+			continue
+		}
+		for key, vals := range values {
+			if !strings.EqualFold(key, "pagename") {
+				continue
+			}
+			for _, v := range vals {
+				once := strings.ToLower(v)
+				if containsAny(once, "%2e", "%2f", "%5c") {
+					return true
+				}
+				full := once
+				for i := 0; i < 3; i++ {
+					next, err := url.QueryUnescape(full)
+					if err != nil || next == full {
+						break
+					}
+					full = next
+				}
+				if containsAny(full, "../", "..\\") {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func containsAny(s string, needles ...string) bool {
 	for _, needle := range needles {
 		if strings.Contains(s, needle) {
