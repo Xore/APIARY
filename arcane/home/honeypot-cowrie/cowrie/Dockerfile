@@ -41,6 +41,12 @@ WORKDIR /cowrie/cowrie-git
 # for the two regressions that scoping prevents.
 COPY txtcmds_priority_patch.py /tmp/txtcmds_priority_patch.py
 RUN python3 /tmp/txtcmds_priority_patch.py && rm /tmp/txtcmds_priority_patch.py
+# #3307: log SSH service requests other than ssh-userauth with the auth
+# state and KEXINIT count -- a rekey-before-auth request for ssh-connection is
+# the CVE-2026-67279 probe, which Twisted refuses silently otherwise; see the
+# patch's docstring.
+COPY service_request_log_patch.py /tmp/service_request_log_patch.py
+RUN python3 /tmp/service_request_log_patch.py && rm /tmp/service_request_log_patch.py
 
 RUN python3 -m venv /cowrie/cowrie-env \
  && /cowrie/cowrie-env/bin/pip install --no-cache-dir --upgrade pip setuptools wheel \

@@ -931,6 +931,10 @@ jobs:
             home: true
             run: python arcane/home/honeypot-cowrie/cowrie/tests/test_txtcmds_priority_patch.py
 
+          - name: "cowrie service-request logging patch (#3307)"
+            home: true
+            run: python arcane/home/honeypot-cowrie/cowrie/tests/test_service_request_log_patch.py
+
           # #1982: compose.yml is the only place a stack's knobs are exercised,
           # .env.example is what a deployer copies when standing the stack up
           # manually -- drift between them means a variable exists at runtime
