@@ -136,6 +136,15 @@ while true; do
   # its mtime current, so -mmin never fires on it (same shape vps/
   # suricata-log-maintenance.sh uses for eve.json).
   find /logs/zeek-proxy -maxdepth 1 -name '*.log' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  # #3284: /logs/zeek here is an sshfs mount of the VPS, deliberately read-only
+  # (fuse.sshfs ro in /etc/fstab), so a delete attempted from this container
+  # fails EROFS on every file. Confirmed live: 12,390 paths printed by this
+  # script's find, file count unchanged, touch and find -delete both returning
+  # "Read-only file system". The 2>/dev/null above hides exactly that error.
+  #
+  # Retention for these files therefore lives on the VPS, in
+  # vps/zeek-log-maintenance.sh, which runs where they are actually written.
+  # Do not re-add a find here -- it cannot work, and it fails quietly.
   # #2323 part 2: extracted-file-importer.py copies carved bytes into ES
   # and tracks what it has seen in state/extracted-files.json, so the disk
   # copy only needs to outlive that importer's lag (IMPORT_INTERVAL=60s,

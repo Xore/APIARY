@@ -202,6 +202,17 @@ filebeat.inputs:
     # content-hash window can.
     id: zeek-logs
     file_identity.native: ~
+    # #3284: this directory accumulates ~13,700 hourly rotation files (2026-09-03
+    # onward) and nothing prunes them, so every restart made filestream open a
+    # harvester per file until the Go runtime hit its 10000-thread limit. The
+    # cap is the fix, not GODEBUG: one harvester per log type is plenty, because
+    # Zeek writes one file per type per hour and only the newest is still being
+    # appended to. Older rotations are finished by definition.
+    harvester_limit: 64
+    # 72h is ~3 days of hourly rotations per log type, comfortably past any
+    # backlog while keeping the scanner off the 13,700 accumulated files. A
+    # rotation older than this is finished; nothing appends to it again.
+    ignore_older: 72h
     paths:
       - /logs/zeek/*.log
     parsers:
@@ -224,6 +235,11 @@ filebeat.inputs:
     # identity is immune to it because it never hashes file content.
     id: zeek-proxy-logs
     file_identity.native: ~
+    # #3284: same cap as zeek-logs, same reason -- this glob matches 834
+    # accumulated hourly rotations and one harvester per file is what exhausts
+    # the runtime's thread limit on restart.
+    harvester_limit: 64
+    ignore_older: 72h
     paths:
       - /logs/zeek-proxy/*.log
     parsers:
