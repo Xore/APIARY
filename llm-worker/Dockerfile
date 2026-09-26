@@ -9,7 +9,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     && useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin llmworker
 
-COPY contracts.py worker.py ./
+COPY contracts.py injection_suite.py worker.py ./
 
 USER 10001:10001
 
