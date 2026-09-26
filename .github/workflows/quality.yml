@@ -1034,6 +1034,14 @@ jobs:
             home: true
             run: python scripts/check-doc-paths-exist.py
 
+          # #3332: the inverse of #2458 -- every docs/**/*.md must be reachable
+          # from docs/README.md through relative links (transitively), except
+          # dated record trees listed in the script. 54 of 120 docs, runbooks
+          # among them, were unreachable from the map when this landed.
+          - name: Docs reachable from the documentation map (#3332)
+            home: true
+            run: python scripts/check-docs-reachable.py
+
           # #2576: the CAPE implementation-plan doc claimed the detail page
           # (/cape/{sha256}) was admin-gated. Nothing in backend-service
           # enforces that -- require_service_token is the actual gate on
