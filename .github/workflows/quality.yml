@@ -1266,6 +1266,20 @@ jobs:
             home: true
             run: python3 -m unittest discover -s sandbox/ghosts/orchestrate -p 'test_*.py' -v
 
+          # #3320: Dockerfile lint, separate from image-security-scan's CVE
+          # check. Policy (and why package-version pins are exempt) lives in
+          # .hadolint.yaml; fails on warnings and errors. Pinned binary,
+          # checksum pinned here -- not fetched next to the download.
+          - name: "Dockerfile lint (hadolint, #3320)"
+            home: true
+            run: |
+              set -euo pipefail
+              bin="$RUNNER_TEMP/hadolint"
+              curl -fsSL -o "$bin" https://github.com/hadolint/hadolint/releases/download/v2.14.0/hadolint-linux-x86_64
+              echo "6bf226944684f56c84dd014e8b979d27425c0148f61b3bd99bcc6f39e9dc5a47  $bin" | sha256sum -c -
+              chmod +x "$bin"
+              git ls-files -z | grep -zE '(^|/)Dockerfile[^/]*$' | xargs -0 "$bin" --config .hadolint.yaml
+
           - name: Shell syntax and high-severity ShellCheck
             home: true
             run: |
