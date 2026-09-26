@@ -1053,10 +1053,14 @@ jobs:
           # so the wrong claim can't silently drift back in on a rewrap or a
           # synonym swap. pytest installed inline, same as the other
           # pytest-based rows above -- it isn't a production dependency.
+          # pyyaml too, for #3328's sizing test: it recomputes
+          # docs/deploy-profiles/README.md's per-profile totals out of the
+          # compose files (scripts/deploy-profile-sizing.py), and the same
+          # reason image-security-scan.yml installs it.
           - name: Docs regression tests (#2576)
             home: true
             run: |
-              python -m pip install pytest
+              python -m pip install pytest pyyaml
               python -m pytest tests/docs/ -v
 
           - name: "Dionaea SMB exploit-signature incidents (#622, #1775)"
