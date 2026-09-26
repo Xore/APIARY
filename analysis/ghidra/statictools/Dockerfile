@@ -43,6 +43,8 @@ RUN pip install --no-cache-dir -U pip 'setuptools<81' wheel six cffi \
 # checksum, not just a URL.
 ARG CAPA_RULES_VERSION=v9.4.0
 ARG CAPA_RULES_SHA256=273591b11737181b3bdaac18964f23627cf10c21c2b143fc9be88e4a33217669
+# the pipe ends in `sha256sum -c -`, whose exit status already decides this step
+# hadolint ignore=DL4006
 RUN curl -fsSL -o /tmp/capa-rules.tar.gz \
       "https://github.com/mandiant/capa-rules/archive/refs/tags/${CAPA_RULES_VERSION}.tar.gz" \
     && echo "${CAPA_RULES_SHA256}  /tmp/capa-rules.tar.gz" | sha256sum -c - \
@@ -60,6 +62,8 @@ RUN curl -fsSL -o /tmp/capa-rules.tar.gz \
 # version-pinned-by-tag-and-digest convention as the rules above.
 ARG CAPA_SIGS_VERSION=v9.4.0
 ARG CAPA_SIGS_SHA256=562edd9617b23286e74d06f0115d99217a4df178e43925375af0c35d5cae8d66
+# the pipe ends in `sha256sum -c -`, whose exit status already decides this step
+# hadolint ignore=DL4006
 RUN curl -fsSL -o /tmp/capa.tar.gz \
       "https://github.com/mandiant/capa/archive/refs/tags/${CAPA_SIGS_VERSION}.tar.gz" \
     && echo "${CAPA_SIGS_SHA256}  /tmp/capa.tar.gz" | sha256sum -c - \

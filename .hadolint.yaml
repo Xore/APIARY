@@ -1,0 +1,12 @@
+# hadolint policy (#3320). CI fails on warnings and errors; infos are shown only.
+failure-threshold: warning
+ignored:
+  # Package version pins (apt / apk / pip). Every base image here is already
+  # digest-pinned; pinning distro package versions on top breaks builds each
+  # time the mirror rotates a version out, which is churn without a safety gain.
+  - DL3008
+  - DL3018
+  - DL3013
+  # `cd` inside a RUN. The multi-step build scripts cd into a source tree for
+  # one command chain; WORKDIR would leak that directory into every later layer.
+  - DL3003

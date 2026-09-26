@@ -23,6 +23,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ARG GHIDRA_VERSION=11.3.2
 ARG GHIDRA_BUILD_DATE=20250415
 ARG GHIDRA_SHA256=99d45035bdcc3d6627e7b1232b7b379905a9fad76c772c920602e2b5d8b2dac2
+# the pipe ends in `sha256sum -c -`, whose exit status already decides this step
+# hadolint ignore=DL4006
 RUN curl -fsSL -o /tmp/ghidra.zip \
       "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_${GHIDRA_VERSION}_build/ghidra_${GHIDRA_VERSION}_PUBLIC_${GHIDRA_BUILD_DATE}.zip" \
     && echo "${GHIDRA_SHA256}  /tmp/ghidra.zip" | sha256sum -c - \
