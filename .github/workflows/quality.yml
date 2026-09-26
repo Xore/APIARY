@@ -1258,7 +1258,7 @@ jobs:
           # check. Policy (and why package-version pins are exempt) lives in
           # .hadolint.yaml; fails on warnings and errors. Pinned binary,
           # checksum pinned here -- not fetched next to the download.
-          - name: Dockerfile lint (hadolint, #3320)
+          - name: "Dockerfile lint (hadolint, #3320)"
             home: true
             run: |
               set -euo pipefail
