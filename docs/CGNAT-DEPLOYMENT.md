@@ -274,6 +274,57 @@ auth to the web honeypots and dashboards. The other protocols (SSH, SMB,
 MySQL, Modbus, …) aren't HTTP, so Traefik can't route them; `portbridge`
 forwards them raw. Both paths terminate on the VPS public IP.
 
+### Origin certificate (#3328)
+
+Traefik serves one **Cloudflare Origin CA** certificate for every proxied
+hostname (`vps/traefik/dynamic.yml`, `tls.certificates`):
+
+| | |
+|---|---|
+| files | `/root/vps/traefik/certs/origin.pem` (0644) and `origin-key.pem` (0600), dir 0750, mounted at `/etc/traefik/certs/` |
+| names | `<zone>` and `*.<zone>`. The wildcard covers exactly one label, which is why `install-vps.sh` refuses a `DOMAIN` that already starts with a service label |
+| key | RSA 2048 |
+| lifetime | chosen at issue time; the current one runs 2026-07-30 → **2028-07-29** |
+| trust | only Cloudflare trusts it. It works because every hostname is proxied (orange cloud) and 443 accepts Cloudflare's ranges only. A browser hitting the origin directly would reject it |
+
+Nothing renews it. Diagnostics' VPS job reports the days left on every run
+and fails a scheduled run once fewer than 30 remain. When it expires,
+Cloudflare answers every proxied hostname with **526**.
+
+**Issuing (first install, or renewal):**
+
+1. Cloudflare dashboard → the zone → **SSL/TLS → Origin Server → Create
+   Certificate**.
+   - Choose "Generate private key and CSR with Cloudflare", key type **RSA (2048)**.
+   - Hostnames: exactly `<zone>` and `*.<zone>`.
+   - Validity: longest offered (15 years), or 2 years to match the current cert.
+   - Format: **PEM**.
+2. The key is shown **once**. Copy the certificate into `origin.pem` and the
+   private key into `origin-key.pem` on a trusted machine, never into the repo.
+3. On the VPS:
+   ```bash
+   install -d -m 0750 /root/vps/traefik/certs
+   install -m 0644 origin.pem     /root/vps/traefik/certs/origin.pem
+   install -m 0600 origin-key.pem /root/vps/traefik/certs/origin-key.pem
+   openssl x509 -in /root/vps/traefik/certs/origin.pem -noout -subject -enddate -ext subjectAltName
+   cd /root/vps && docker compose restart traefik
+   ```
+   Restart rather than relying on the file watcher: `dynamic.yml` records a
+   case where a hot reload left Traefik's per-host TLS cache stale.
+4. SSL/TLS encryption mode for the zone: **Full (strict)**. An Origin CA
+   certificate is valid only under Full/Full (strict), and strict is what
+   makes Cloudflare check it.
+5. Verify through Cloudflare. `curl -sI https://auth.<zone>/` must not
+   return 526, and the next Diagnostics run should report the new expiry.
+6. Get it into the backup. `scripts/backup-essentials.sh` captures
+   `vps/traefik/` on its next daily run. Until then, a VPS rebuild would
+   restore the *old* certificate (`install-vps.sh` `step_restore_certs`).
+   Revoke the old certificate in the same Cloudflare screen once the new one
+   serves.
+
+`deploy.yml` never overwrites `traefik/certs/`. On a normal deploy it only
+checks that `origin.pem` still parses.
+
 ### The forward-auth bridge, generically
 
 Six investigation UIs (Kibana, TANNER, EveBox, Arkime, Rev·Deck,
