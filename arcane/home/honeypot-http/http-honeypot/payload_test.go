@@ -262,3 +262,60 @@ func TestPhpSerializedObject(t *testing.T) {
 		t.Fatal("the length is what makes it a header")
 	}
 }
+
+// TestWordpressPagenameTraversal pins #3309 (CVE-2026-87902). No such request
+// had reached the fleet when this landed, so the positive cases follow the
+// published request shape (anonymous POST, page_id + double-encoded
+// pagename); the negatives are real traffic from the same 30-day window that
+// a looser signature would have mislabelled.
+func TestWordpressPagenameTraversal(t *testing.T) {
+	cases := []struct {
+		name, query, body, want string
+	}{
+		{
+			name: "double-encoded traversal in a form body",
+			body: "page_id=2&pagename=%252e%252e%252f%252e%252e%252f%252e%252e%252fusr%252flocal%252flib%252fphp%252fpearcmd",
+			want: "wordpress-pagename-traversal",
+		},
+		{
+			name:  "double-encoded traversal in the query",
+			query: "page_id=2&pagename=%252E%252E%252Fwp-config",
+			want:  "wordpress-pagename-traversal",
+		},
+		{
+			name: "stage two carries pearcmd too, and must not fall through to pearcmd-rce",
+			body: "page_id=2&pagename=%252e%252e%252fusr%252flocal%252flib%252fphp%252fpearcmd&+config-create+/<?=phpinfo()?>+/tmp/x.php",
+			want: "wordpress-pagename-traversal",
+		},
+		{
+			name:  "backslash variant",
+			query: "pagename=..%255c..%255cwindows",
+			want:  "wordpress-pagename-traversal",
+		},
+		// Negatives.
+		{name: "ordinary page slug", query: "pagename=about-us", want: ""},
+		{name: "ordinary nested slug", query: "pagename=company%2Fteam", want: ""},
+		{
+			name:  "real: theme css.php file disclosure keeps the generic class",
+			query: "files=../../../../wp-config.php",
+			want:  "path-traversal",
+		},
+		{
+			name:  "real: index.php pearcmd LFI keeps its own class",
+			query: "+config-create+/&lang=../../../../../../../../usr/local/lib/php/pearcmd&/<?=phpinfo()?>+/tmp/x.php",
+			want:  "pearcmd-rce",
+		},
+		{
+			name:  "pagename only inside another value is generic traversal",
+			query: "q=pagename%3D..%2F..%2F",
+			want:  "path-traversal",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := classifyPayload(c.query, c.body); got != c.want {
+				t.Errorf("classifyPayload(%q, %q) = %q, want %q", c.query, c.body, got, c.want)
+			}
+		})
+	}
+}
