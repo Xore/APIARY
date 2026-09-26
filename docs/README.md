@@ -63,7 +63,7 @@ the installer).
 Analysis and sandbox components:
 [malware analysis pipeline](analysis/README.md) ·
 [shared GPU job queue](analysis/gpu-queue/README.md) ·
-[YARA sidecar](analysis/yara/README.md) ·
+[YARA sidecar](../../arcane/home/honeypot-payload-analysis/analysis/yara/) ·
 [RE benchmark corpus](analysis/ghidra/benchmarks/corpus/README.md) ·
 [injection gate protocol](analysis/ghidra/benchmarks/injection-gate-protocol.md) ·
 [GHOSTS host stack](sandbox/ghosts/README.md) ·
