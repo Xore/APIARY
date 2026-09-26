@@ -2705,7 +2705,24 @@ step_libvirt_install() {
     # preset leaves both stacks enabled, whichever activates second stops the
     # other via Conflicts= -- permanently, since socket units have no
     # Restart= (#3126). Keep this host on the monolithic stack only.
-    systemctl disable --now virtproxyd.socket virtproxyd-ro.socket >/dev/null 2>&1 || true
+    #
+    # #3312: virtproxyd is not the only conflicting unit. The per-driver
+    # modular sockets (virtqemud, virtnetworkd, virtnwfilterd, ...) are
+    # preset-enabled on EL too and each Conflicts= libvirtd; after the
+    # 2026-09-23 reboot they won the race, libvirtd.socket sat inactive and
+    # /run/libvirt/libvirt-sock never existed. Disable every modular driver
+    # daemon, not just the proxy.
+    local drv sfx modular_units=()
+    for drv in virtqemud virtnetworkd virtnwfilterd virtstoraged virtnodedevd \
+               virtsecretd virtinterfaced virtproxyd; do
+      for sfx in .socket -ro.socket -admin.socket .service; do
+        systemctl cat "$drv$sfx" >/dev/null 2>&1 && modular_units+=("$drv$sfx")
+      done
+    done
+    if [ "${#modular_units[@]}" -gt 0 ]; then
+      systemctl disable --now "${modular_units[@]}" >/dev/null 2>&1 || true
+    fi
+    systemctl enable --now libvirtd.socket libvirtd-ro.socket libvirtd-admin.socket
     systemctl enable --now libvirtd
   else
     # Same Conflicts= hazard in reverse: the monolithic units must not stay
@@ -2733,6 +2750,15 @@ step_libvirt_install() {
   mkdir -p /etc/libvirt/nwfilter
   cp -n /usr/share/libvirt/nwfilter/*.xml /etc/libvirt/nwfilter/ 2>/dev/null || true
   systemctl restart libvirtd
+
+  # #3312: install-deploy-runner.sh adds github-deploy-runner to the libvirt
+  # group only if that group already exists, and on a fresh host the runner
+  # is provisioned before this step installs libvirt -- so the membership
+  # was silently skipped and isolation-audit.sh's virsh checks were denied
+  # by polkit. Re-assert it here, once the group is guaranteed to exist.
+  if id github-deploy-runner >/dev/null 2>&1 && getent group libvirt >/dev/null; then
+    usermod -aG libvirt github-deploy-runner
+  fi
 }
 
 step_sandbox_backup_restore() {

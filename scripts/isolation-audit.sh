@@ -16,6 +16,14 @@
 # diagnostics.yml's own steps already follow).
 set -uo pipefail
 
+# #3312: every virsh call below is bare (no -c). As a non-root caller --
+# Diagnostics runs this as github-deploy-runner -- libvirt's default URI is
+# qemu:///session, the per-user instance, which has no networks or
+# nwfilters at all: the sandbox/honeypot-sandbox/nwfilter checks then
+# reported "does not exist" for objects that were active on qemu:///system.
+# Pin the system instance unless the caller explicitly chose otherwise.
+export LIBVIRT_DEFAULT_URI="${LIBVIRT_DEFAULT_URI:-qemu:///system}"
+
 fail=0
 warns=0
 ok()   { printf '  OK    %s\n' "$*"; }
@@ -293,6 +301,7 @@ CAP_NOT_YET_HARDENED=(
   "hp-attacker-identity-worker|#3045 -- internal worker, out of #2366's internet-facing scope, unmeasured (custom-built image)"
   "hp-correlator-worker|#3045 -- internal worker, out of #2366's internet-facing scope, unmeasured (custom-built image)"
   "hp-payload-inventory-worker|#3045 -- internal worker, out of #2366's internet-facing scope, unmeasured (custom-built image)"
+  "hp-unsloth-studio|#3337 -- GPU training workbench (Unsloth Studio + Jupyter, runs as root, LAN-bound), not a sensor and outside #2366's internet-facing scope; its repo compose never had cap_drop, so this is a gap in the definition, not deploy drift. Needs a measured cap_add set between training runs"
 )
 
 # Returns the reason string for $1 if it appears in the remaining arguments.

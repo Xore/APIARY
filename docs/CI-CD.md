@@ -98,14 +98,53 @@ without a directory move. Go stays co-located; only Python and shell use
 
 ## Dependabot
 
-Dependabot checks GitHub Actions, Go modules, npm dependencies, and Docker base
+Dependabot checks GitHub Actions, Go modules, Cargo, npm, pip, and Docker base
 images every week. Patch and minor Dependabot pull requests are approved and
-placed into GitHub's auto-merge queue. They still wait for branch protection
-and all required checks; major upgrades always require manual review.
+placed into GitHub's auto-merge queue, where they wait for the `main` ruleset's
+required checks (below). Major upgrades always require manual review, and so
+does any minor bump of a `0.x` dependency: semver gives `0.y` no stability
+promise, but `dependabot/fetch-metadata` still labels it `semver-minor`
+(#3287 `rand` 0.9 → 0.10 and #3289 `sha2` 0.10 → 0.11 broke the backend
+build that way, #3311).
+
+Auto-merge only waits if something is required. With no protection on the
+base branch, GitHub considers a PR mergeable at once and `gh pr merge --auto`
+merges it on the spot, before CI has run. That is what happened before the
+ruleset existed (#3311).
 
 The repository setting **Allow auto-merge** and the Actions permission
 **Allow GitHub Actions to create and approve pull requests** must remain
 enabled for this workflow.
+
+## `main` ruleset (#3311)
+
+`main` is protected by the repository ruleset **main protection**:
+
+- changes land through a pull request (no direct pushes), with no required
+  approving review (single maintainer);
+- no force-push and no branch deletion;
+- these status checks must pass, and are the only required ones:
+
+| context | workflow | what it aggregates |
+|---|---|---|
+| `Quality gate` | `quality.yml` | every Quality job pair, homeserver or GitHub-hosted twin |
+| `Containers gate` | `containers.yml` | the router and every image build row |
+| `Go formatting and tests` | `quality.yml` | Go fmt + tests, either executor |
+| `Scripts and Compose` | `quality.yml` | the `scripts-and-compose` job matrix |
+
+Individual jobs are never required directly: their names change with the
+executor (`… (GitHub-hosted)` on fallback days), and a required context that
+never reports leaves every PR pending forever. When adding a job pair to
+`quality.yml`, add both twins to `quality-gate`'s `needs:` and the pair name
+to its `pair` loop, or the new job is not gated. A skipped job counts as
+passing for GitHub, which is why each gate checks results itself instead of
+relying on skip semantics.
+
+Required checks are strict=false (a PR does not have to be rebased onto the
+latest `main` before merging). In an emergency, a repository admin can set the
+ruleset's enforcement to *Disabled* (Settings → Rules) and must re-enable it
+afterwards; there is deliberately no standing bypass actor, since automation
+merges with the owner's token.
 
 ## Pull request workflow
 
@@ -1205,8 +1244,9 @@ is #2027's own argument for doing the VPS half before it grows again.
 
 ## Diagnostics
 
-`diagnostics.yml` is the read-only counterpart to `deploy.yml`, and it is
-`workflow_dispatch` only. It mirrors the deployment topology: the home job runs
+`diagnostics.yml` is the read-only counterpart to `deploy.yml`. It runs on
+`workflow_dispatch` and every six hours on a schedule; only a scheduled run
+turns red on a degraded finding (#2222). It mirrors the deployment topology: the home job runs
 on the `[self-hosted, linux, x64, honeypot-home]` runner, and the VPS job runs
 on a GitHub-hosted runner over the same SSH deployment key. Neither changes
 anything — they report container state, recent logs, and disk and volume usage.
@@ -1221,6 +1261,26 @@ environment approval.
 The workflow reads `HP_BIND` and deliberately never prints it: it is an
 internal WireGuard address, and the job's output is visible to anyone who can
 read the Actions log.
+
+Two checks depend on host provisioning rather than on the workflow (#3312):
+
+- **Pipeline metrics** need the dashboard service token, which lives in
+  `/var/dockge/stacks/honeypot-dashboard/.env` (root-only). The home runner
+  never reads it: `scripts/github-ci-runner/install-deploy-runner.sh` installs
+  the root-owned, argument-less helper
+  `/opt/github-ci-runner-helpers/dashboard-source-health.sh` and a NOPASSWD
+  grant for exactly that path. The helper returns only the source-health JSON.
+  "helper is not installed or not granted" in the summary means re-run that
+  installer.
+- **Isolation invariants** run `scripts/isolation-audit.sh` as
+  `github-deploy-runner`, which must be in the `libvirt` group
+  (`install-homeserver.sh`'s libvirt step re-asserts it). The script pins
+  `LIBVIRT_DEFAULT_URI=qemu:///system`, because a non-root `virsh` otherwise
+  talks to the empty per-user session and reports every network missing.
+
+The OIDC discovery probe runs **from the VPS** over the job's SSH key.
+Cloudflare answers 403 to GitHub-hosted runner address ranges, so the runner's
+own result is printed for information only and never fails the job.
 
 ### Diagnostics vs. mutating deploy
 

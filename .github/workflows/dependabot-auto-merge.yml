@@ -22,6 +22,26 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      # #3311: under semver, 0.y.z has no stability promise -- a 0.9 -> 0.10
+      # bump is a major change, and Cargo's caret rules treat it as one.
+      # fetch-metadata still labels it semver-minor, which is how rand
+      # 0.9 -> 0.10 and sha2 0.10 -> 0.11 qualified for auto-merge and landed
+      # on main with a broken backend build (#3287, #3289). Hold any update
+      # that moves a 0.x dependency's minor version (grouped PRs: any member).
+      - name: Hold 0.x minor bumps for manual review
+        id: zero-major
+        env:
+          DEPS: ${{ steps.metadata.outputs.updated-dependencies-json }}
+        run: |
+          held="$(jq -r '[.[] | select(.updateType == "version-update:semver-minor"
+                                   and ((.prevVersion // "") | startswith("0.")))
+                             | "\(.dependencyName) \(.prevVersion) -> \(.newVersion)"] | join(", ")' <<<"${DEPS:-[]}")"
+          if [ -n "$held" ]; then
+            echo "hold=true" >>"$GITHUB_OUTPUT"
+            echo "held=$held" >>"$GITHUB_OUTPUT"
+            echo "::notice::0.x minor bump(s), not auto-merging: $held"
+          fi
+
       - name: Check out the PR head
         if: >-
           steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
@@ -88,7 +108,8 @@ jobs:
           (steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
            steps.metadata.outputs.update-type == 'version-update:semver-minor') &&
           steps.image-pull.outcome != 'failure' &&
-          steps.lockfile-check.outcome != 'failure'
+          steps.lockfile-check.outcome != 'failure' &&
+          steps.zero-major.outputs.hold != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
@@ -99,7 +120,8 @@ jobs:
           (steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
            steps.metadata.outputs.update-type == 'version-update:semver-minor') &&
           steps.image-pull.outcome != 'failure' &&
-          steps.lockfile-check.outcome != 'failure'
+          steps.lockfile-check.outcome != 'failure' &&
+          steps.zero-major.outputs.hold != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
@@ -140,3 +162,13 @@ jobs:
         run: |
           gh pr comment "$PR_URL" --body \
             "Not auto-merging: pulling node:22-alpine failed (registry rate limit, transient error, or a runner network hiccup) before the lockfile could even be tested. This is not a #2741 lockfile problem -- re-run this workflow (or push a new commit) to retry."
+
+      - name: Leave the 0.x minor bump for a human
+        if: steps.zero-major.outputs.hold == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          HELD: ${{ steps.zero-major.outputs.held }}
+        run: |
+          gh pr comment "$PR_URL" --body \
+            "Not auto-merging: this moves the minor version of a 0.x dependency ($HELD). Under semver that is a breaking change even though Dependabot labels it semver-minor (#3311). Check the changelog and merge by hand once the required checks pass."
