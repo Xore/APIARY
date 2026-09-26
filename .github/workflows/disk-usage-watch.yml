@@ -47,7 +47,10 @@ jobs:
       - name: Sweep /var usage on this host
         env:
           GH_TOKEN: ${{ github.token }}
+          # #3314: through env, not ${{ }} inside the script -- a dispatch
+          # input interpolated into `run:` is shell code.
+          WARN_PERCENT: ${{ inputs.warn_percent || '90' }}
         run: |
           python3 scripts/disk-usage-watch.py \
             --path /var \
-            --warn-percent "${{ inputs.warn_percent || '90' }}"
+            --warn-percent "$WARN_PERCENT"
