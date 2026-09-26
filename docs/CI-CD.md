@@ -130,7 +130,7 @@ enabled for this workflow.
 | `Quality gate` | `quality.yml` | every Quality job pair, homeserver or GitHub-hosted twin |
 | `Containers gate` | `containers.yml` | the router and every image build row |
 | `Go formatting and tests` | `quality.yml` | Go fmt + tests, either executor |
-| `Scripts and Compose` | `quality.yml` | the scripts/compose matrix |
+| `Scripts and Compose` | `quality.yml` | the `scripts-and-compose` job matrix |
 
 Individual jobs are never required directly: their names change with the
 executor (`… (GitHub-hosted)` on fallback days), and a required context that
