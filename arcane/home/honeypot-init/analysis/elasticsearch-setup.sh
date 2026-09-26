@@ -1641,9 +1641,19 @@ curl -fsS -X PUT "$es_url/_index_template/single-node-replica-default" \
 # already-existing indices self-heal on their next daily rotation; a live
 # reindex of the current day's index is a separate, one-time operation if
 # immediate correction is needed rather than waiting for that rotation.
+#
+# #3283: number_of_replicas lives here too, not only in Arkime's legacy
+# arkime_sessions3_template. Once ANY composable template matches an index,
+# Elasticsearch applies no legacy template to it at all -- so this template
+# (the highest-priority composable match) is the only thing deciding the
+# settings of a new arkime_sessions3-* index. Without the line below every
+# daily sessions index got Elasticsearch's default 1 replica, which a single
+# node can never assign: the cluster sat yellow with 12 unassigned shards.
+# The wider consequence -- Arkime's own mappings/settings are shadowed the
+# same way -- is tracked separately in #3343.
 curl -fsS -X PUT "$es_url/_index_template/arkime-sessions3-ip-fix" \
   -H 'Content-Type: application/json' \
-  --data-binary '{"index_patterns":["arkime_sessions3-*"],"priority":10,"template":{"mappings":{"properties":{"source":{"properties":{"ip":{"type":"ip"}}},"destination":{"properties":{"ip":{"type":"ip"}}}}}}}' >/dev/null
+  --data-binary '{"index_patterns":["arkime_sessions3-*"],"priority":10,"template":{"settings":{"index.number_of_replicas":0},"mappings":{"properties":{"source":{"properties":{"ip":{"type":"ip"}}},"destination":{"properties":{"ip":{"type":"ip"}}}}}}}' >/dev/null
 
 echo
 echo "elasticsearch-setup: GeoIP, retention policies, and event templates installed"
