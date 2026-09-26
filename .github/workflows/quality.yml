@@ -1681,3 +1681,57 @@ jobs:
       - name: Fail if any check failed
         if: needs.scripts-and-compose.result != 'success'
         run: exit 1
+
+  # #3311: the one required status check for this workflow. main's ruleset
+  # requires a context that reports on every PR; the jobs above come in
+  # homeserver/GitHub-hosted pairs whose names change with the executor, so
+  # none of them individually is a stable context. Mirrors
+  # go-modules-complete's rule for every pair: the homeserver twin succeeded,
+  # or it was skipped and its GitHub-hosted twin succeeded. A new job pair
+  # must be added to both `needs:` and PAIRS below, or it is not gated.
+  quality-gate:
+    name: Quality gate
+    if: always()
+    needs:
+      - ci-target
+      - public-safety
+      - public-safety-cloud
+      - design-lab-readonly
+      - design-lab-readonly-cloud
+      - go-modules-complete
+      - frontend-next
+      - frontend-next-cloud
+      - frontend-next-browser
+      - frontend-next-browser-cloud
+      - backend-service
+      - backend-service-cloud
+      - vendored-theme
+      - vendored-theme-cloud
+      - scripts-and-compose-complete
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail unless every gated job, or its fallback twin, succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        shell: bash
+        run: |
+          result() { jq -r --arg j "$1" '.[$j].result' <<<"$NEEDS"; }
+          fail=0
+          single() {
+            local r; r="$(result "$1")"
+            [[ "$r" == "success" ]] && return 0
+            echo "::error::$1: expected success, got $r"; fail=1
+          }
+          pair() {
+            local hs cloud; hs="$(result "$1")"; cloud="$(result "$1-cloud")"
+            [[ "$hs" == "success" ]] && return 0
+            [[ "$hs" == "skipped" && "$cloud" == "success" ]] && return 0
+            echo "::error::$1: expected success or skip+fallback-success; got $hs / $cloud"; fail=1
+          }
+          single ci-target
+          single go-modules-complete
+          single scripts-and-compose-complete
+          for p in public-safety design-lab-readonly frontend-next frontend-next-browser backend-service vendored-theme; do
+            pair "$p"
+          done
+          exit "$fail"

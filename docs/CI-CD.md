@@ -98,14 +98,53 @@ without a directory move. Go stays co-located; only Python and shell use
 
 ## Dependabot
 
-Dependabot checks GitHub Actions, Go modules, npm dependencies, and Docker base
+Dependabot checks GitHub Actions, Go modules, Cargo, npm, pip, and Docker base
 images every week. Patch and minor Dependabot pull requests are approved and
-placed into GitHub's auto-merge queue. They still wait for branch protection
-and all required checks; major upgrades always require manual review.
+placed into GitHub's auto-merge queue, where they wait for the `main` ruleset's
+required checks (below). Major upgrades always require manual review, and so
+does any minor bump of a `0.x` dependency: semver gives `0.y` no stability
+promise, but `dependabot/fetch-metadata` still labels it `semver-minor`
+(#3287 `rand` 0.9 → 0.10 and #3289 `sha2` 0.10 → 0.11 broke the backend
+build that way, #3311).
+
+Auto-merge only waits if something is required. With no protection on the
+base branch, GitHub considers a PR mergeable at once and `gh pr merge --auto`
+merges it on the spot, before CI has run. That is what happened before the
+ruleset existed (#3311).
 
 The repository setting **Allow auto-merge** and the Actions permission
 **Allow GitHub Actions to create and approve pull requests** must remain
 enabled for this workflow.
+
+## `main` ruleset (#3311)
+
+`main` is protected by the repository ruleset **main protection**:
+
+- changes land through a pull request (no direct pushes), with no required
+  approving review (single maintainer);
+- no force-push and no branch deletion;
+- these status checks must pass, and are the only required ones:
+
+| context | workflow | what it aggregates |
+|---|---|---|
+| `Quality gate` | `quality.yml` | every Quality job pair, homeserver or GitHub-hosted twin |
+| `Containers gate` | `containers.yml` | the router and every image build row |
+| `Go formatting and tests` | `quality.yml` | Go fmt + tests, either executor |
+| `Scripts and Compose` | `quality.yml` | the scripts/compose matrix |
+
+Individual jobs are never required directly: their names change with the
+executor (`… (GitHub-hosted)` on fallback days), and a required context that
+never reports leaves every PR pending forever. When adding a job pair to
+`quality.yml`, add both twins to `quality-gate`'s `needs:` and the pair name
+to its `pair` loop, or the new job is not gated. A skipped job counts as
+passing for GitHub, which is why each gate checks results itself instead of
+relying on skip semantics.
+
+Required checks are strict=false (a PR does not have to be rebased onto the
+latest `main` before merging). In an emergency, a repository admin can set the
+ruleset's enforcement to *Disabled* (Settings → Rules) and must re-enable it
+afterwards; there is deliberately no standing bypass actor, since automation
+merges with the owner's token.
 
 ## Pull request workflow
 

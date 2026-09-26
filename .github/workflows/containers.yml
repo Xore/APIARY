@@ -251,3 +251,23 @@ jobs:
         # No-ops instantly on the GitHub-hosted fallback (script check).
         if: always() && needs.ci-target.outputs.homeserver == 'true'
         run: scripts/prune-buildx-cache.sh "/var/buildx-cache/${{ matrix.image }}"
+
+  # #3311: the one required status check for this workflow. Matrix row names
+  # carry a "(GitHub-hosted)" suffix on fallback days, so no row is a stable
+  # context for main's ruleset; this job is. always() so a failed router or
+  # row still reports a red gate instead of leaving the check pending.
+  containers-gate:
+    name: Containers gate
+    if: always()
+    needs: [ci-target, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail unless the router and every image row succeeded
+        env:
+          ROUTER: ${{ needs.ci-target.result }}
+          BUILD: ${{ needs.build.result }}
+        run: |
+          if [ "$ROUTER" != "success" ] || [ "$BUILD" != "success" ]; then
+            echo "::error::ci-target=$ROUTER build=$BUILD"
+            exit 1
+          fi
