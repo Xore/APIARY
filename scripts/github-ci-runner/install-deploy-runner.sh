@@ -128,6 +128,12 @@ else
   echo "warning: no 'libvirt' group on this host -- isolation-audit.sh's virsh checks will keep reporting permission errors for $RUNNER_USER" >&2
 fi
 
+# #3312: root-owned so the runner cannot rewrite what its sudoers grant runs.
+install -d -m 0755 -o root -g root /opt/github-ci-runner-helpers
+install -m 0755 -o root -g root \
+  "$(dirname "$(readlink -f "$0")")/dashboard-source-health.sh" \
+  /opt/github-ci-runner-helpers/dashboard-source-health.sh
+
 sudoers_file=/etc/sudoers.d/isolation-audit-github-deploy-runner
 sudoers_tmp=$(mktemp)
 cat > "$sudoers_tmp" <<EOF
@@ -138,6 +144,9 @@ cat > "$sudoers_tmp" <<EOF
 $RUNNER_USER ALL=(root) NOPASSWD: /usr/sbin/iptables -S FORWARD
 $RUNNER_USER ALL=(root) NOPASSWD: /usr/bin/ss -tlnp
 $RUNNER_USER ALL=(root) NOPASSWD: /usr/sbin/aa-status
+# #3312: Diagnostics' source-health read. Takes no arguments; the helper
+# reads the dashboard service token as root and returns only the JSON.
+$RUNNER_USER ALL=(root) NOPASSWD: /opt/github-ci-runner-helpers/dashboard-source-health.sh
 EOF
 if visudo -cf "$sudoers_tmp" >/dev/null 2>&1; then
   install -m 0440 -o root -g root "$sudoers_tmp" "$sudoers_file"

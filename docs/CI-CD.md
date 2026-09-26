@@ -1205,8 +1205,9 @@ is #2027's own argument for doing the VPS half before it grows again.
 
 ## Diagnostics
 
-`diagnostics.yml` is the read-only counterpart to `deploy.yml`, and it is
-`workflow_dispatch` only. It mirrors the deployment topology: the home job runs
+`diagnostics.yml` is the read-only counterpart to `deploy.yml`. It runs on
+`workflow_dispatch` and every six hours on a schedule; only a scheduled run
+turns red on a degraded finding (#2222). It mirrors the deployment topology: the home job runs
 on the `[self-hosted, linux, x64, honeypot-home]` runner, and the VPS job runs
 on a GitHub-hosted runner over the same SSH deployment key. Neither changes
 anything — they report container state, recent logs, and disk and volume usage.
@@ -1221,6 +1222,26 @@ environment approval.
 The workflow reads `HP_BIND` and deliberately never prints it: it is an
 internal WireGuard address, and the job's output is visible to anyone who can
 read the Actions log.
+
+Two checks depend on host provisioning rather than on the workflow (#3312):
+
+- **Pipeline metrics** need the dashboard service token, which lives in
+  `/var/dockge/stacks/honeypot-dashboard/.env` (root-only). The home runner
+  never reads it: `scripts/github-ci-runner/install-deploy-runner.sh` installs
+  the root-owned, argument-less helper
+  `/opt/github-ci-runner-helpers/dashboard-source-health.sh` and a NOPASSWD
+  grant for exactly that path. The helper returns only the source-health JSON.
+  "helper is not installed or not granted" in the summary means re-run that
+  installer.
+- **Isolation invariants** run `scripts/isolation-audit.sh` as
+  `github-deploy-runner`, which must be in the `libvirt` group
+  (`install-homeserver.sh`'s libvirt step re-asserts it). The script pins
+  `LIBVIRT_DEFAULT_URI=qemu:///system`, because a non-root `virsh` otherwise
+  talks to the empty per-user session and reports every network missing.
+
+The OIDC discovery probe runs **from the VPS** over the job's SSH key.
+Cloudflare answers 403 to GitHub-hosted runner address ranges, so the runner's
+own result is printed for information only and never fails the job.
 
 ### Diagnostics vs. mutating deploy
 
