@@ -55,7 +55,13 @@ services:
     # the drivers have somewhere to exec into.
     command: ["sleep", "infinity"]
     healthcheck:
-      test: ["CMD", "test", "-d", "/work/llama.cpp"]
+      # /work/llama.cpp is what the drivers call, so its absence is exactly
+      # the "stack is up but inert" failure that cost #847 its runtime.
+      # autoheal restarts the container; the setup.sh re-run is the operator's
+      # side of the loop.
+      test: ["CMD", "test", "-x", "/work/llama.cpp/build/bin/llama-server"]
       interval: 60s
       timeout: 5s
       retries: 3
+    labels:
+      - autoheal=true
