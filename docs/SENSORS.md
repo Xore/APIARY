@@ -75,12 +75,20 @@ and dead-letter records for 60 days so high-volume scans cannot fill the disk.
 
 Every service has a CPU, memory, and Docker `json-file` log budget. The
 limits are intentionally generous relative to the host (16 logical CPUs and
-91 GiB RAM): Elasticsearch gets 8 GiB with a 4 GiB heap; Arkime capture 6 GiB;
+91 GiB RAM): Elasticsearch gets 12 GiB with a 6 GiB heap; Arkime capture 6 GiB;
 Kibana, Filebeat, and the TANNER analyzer receive 2 GiB; EveBox, Dionaea, Arkime
-viewer, and the live dashboard receive 1 GiB (the dashboard also has one CPU). The
+viewer, and the live dashboard receive 1 GiB (the dashboard also has two CPUs). The
 remaining lightweight sensors receive 128-512 MiB. Docker console logs rotate
 at 25 MiB with three files, independently from sensor event files under
 `./logs`.
+
+These are ceilings, not reservations -- see
+[deploy-profiles/README.md §Host sizing by role](deploy-profiles/README.md#host-sizing-by-role)
+for what they imply as a host minimum, per role. One of them is not a
+ceiling at all: Elasticsearch's 6 GiB heap is mlocked into physical RAM
+(`bootstrap.memory_lock=true` plus an unlimited `memlock` ulimit, so it
+cannot be swapped away), which makes it the one figure in this repository
+that is a genuine floor.
 
 ## HTTPS investigation UIs (each its own subdomain, all Keycloak-gated)
 
