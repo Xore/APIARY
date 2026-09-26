@@ -114,7 +114,12 @@ flowchart LR
   tracks unique samples, not capture volume.
 - Snapshot target: `state/elasticsearch-snapshots`; backup runbook is
   [BACKUP-ESSENTIALS.md](BACKUP-ESSENTIALS.md), recovery in
-  [RECOVERY.md](RECOVERY.md).
+  [RECOVERY.md](RECOVERY.md). Nothing writes snapshots there today — no SLM
+  policy exists, and that path is excluded from the essentials backup's
+  on-host copy, so it is not a backup of anything. The `dashboard-*-v1`
+  indices that hold operator-authored state rather than telemetry are
+  exported as documents instead; see
+  [BACKUP-ESSENTIALS.md §Operator state](BACKUP-ESSENTIALS.md#operator-state).
 
 ## Growth boundaries at a glance
 

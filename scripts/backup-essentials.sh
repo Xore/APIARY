@@ -4,9 +4,11 @@
 #
 # This is the *rebuild* backup, deliberately not a data backup. It captures
 # the things that cannot be recreated from the git repo — secrets, keys,
-# certificates, the identity database, operator-edited config — and nothing
-# else. Everything captured here is small; the whole archive is single-digit
-# megabytes, so all three copies can be kept for a long retention window.
+# certificates, the identity database, operator-edited config, and the
+# operator-authored Elasticsearch documents the dashboard keeps — and
+# nothing else. Everything captured here is small; the whole archive is
+# single-digit megabytes, so all three copies can be kept for a long
+# retention window.
 #
 # Explicitly NOT backed up, because it is bulk capture data that the stack
 # does not need in order to come back up (sizes measured on the live
@@ -27,7 +29,10 @@
 #
 # Losing those means a rebuilt stack starts with no history. That is the
 # intended trade: this backup is about getting the stack *running* again with
-# its own identity intact, not about preserving what it captured.
+# its own identity intact, not about preserving what it captured. The one
+# exception, and the reason `homeserver/es-operator-state/` below exists, is
+# the small set of `dashboard-*-v1` indices holding state an operator typed
+# rather than captured — see the ledger in scripts/es-operator-state-backup.py.
 #
 # Runs on the workstation (the backup host), reaching both servers over SSH.
 # It only ever reads from them.
@@ -258,6 +263,35 @@ if docker inspect hp-keycloak-postgres >/dev/null 2>&1; then
   fi
 fi
 
+# The dashboard's operator-authored Elasticsearch documents (#3323).
+#
+# This script deliberately takes no Elasticsearch data, and `es-data` is
+# where the dashboard keeps more than telemetry: the admin config singleton,
+# the user projections and their preferences, alert acknowledgements,
+# canarytoken and bait-credential definitions, the manual IP block list,
+# report definitions, workbench recipes, ML anomaly acks and submitted
+# problem reports. An operator types those; no pipeline regenerates them;
+# and until this step existed they were in no backup anywhere -- the
+# settings runbook claimed a snapshot policy covered them, and no SLM
+# policy has ever existed (docs/BACKUP-ESSENTIALS.md, History).
+#
+# Kilobytes, exported as mapping + NDJSON, so they ride along in an archive
+# that already goes to three destinations off this host. The index list and
+# its deliberate exclusions live in the tool, not here.
+#
+# The tool runs on this side of the SSH hop, against the deployed checkout
+# at /opt/stacks/apiary -- the same tree the volumes above come from. It is
+# best effort in the same way the Keycloak dump is: its failure is a loud
+# warning, not a reason to abandon an archive that has already collected
+# the secrets.
+es_state_script=/opt/stacks/apiary/scripts/es-operator-state-backup.py
+if [ -f "$es_state_script" ] && command -v python3 >/dev/null 2>&1; then
+  python3 "$es_state_script" --dest "$stage/es-operator-state" \
+    || echo "  es-operator-state: export FAILED -- this archive does NOT carry dashboard config/users/alert state" >&2
+else
+  echo "  es-operator-state: $es_state_script missing, or no python3 -- operator state NOT in this archive" >&2
+fi
+
 # Small config-bearing volumes. Anything holding capture data or a rebuildable
 # cache is left out; see this script's header for the full excluded list and
 # the sizes that motivated it.
@@ -391,13 +425,14 @@ by         $(id -un)@$(hostname)
 stamp      $stamp
 
 This archive holds only what is needed to rebuild the stack: secrets, keys,
-certificates, the Keycloak identity database, operator-edited config, and
-small config-bearing docker volumes.
+certificates, the Keycloak identity database, operator-edited config, small
+config-bearing docker volumes, and the operator-authored Elasticsearch
+documents the dashboard keeps.
 
-It deliberately contains NO Elasticsearch data, NO captured payloads or
+It deliberately contains NO Elasticsearch bulk data, NO captured payloads or
 malware, NO PCAP, NO sandbox images and NO sensor logs. A stack restored from
-this archive comes back with its own identity and configuration intact and
-with an empty event history.
+this archive comes back with its own identity, configuration and dashboard
+state intact and with an empty event history.
 
 Layout:
   homeserver/env/*.env        one file per Arcane/Dockge stack
@@ -406,6 +441,13 @@ Layout:
   homeserver/installer/       install-homeserver.conf, the installer's answers file
   homeserver/technitium/      hand-maintained Technitium DNS config only
   homeserver/keycloak/        keycloak.sql.gz — pg_dump of the identity DB
+  homeserver/es-operator-state/
+                               dashboard config/users/alert acks and the rest
+                               of the operator-state ledger, as mapping +
+                               NDJSON; its own MANIFEST.txt lists what was
+                               captured. Restore with the
+                               es-operator-state-backup.py that rides along
+                               in repo/scripts/.
   homeserver/volumes/         small config-bearing docker volumes
   homeserver/manifest/        host reference notes, not restorable state
   vps/env/vps.env             the VPS's .env
@@ -468,10 +510,12 @@ Each apiary-essentials-<UTC stamp>.tar.gz.gpg here is a GPG symmetric
 (AES256) archive holding everything needed to rebuild the APIARY stack:
 every stack .env, the WireGuard private keys, the Traefik origin
 certificate and key, the OIDC client secrets, a pg_dump of the Keycloak
-identity database, small config-bearing docker volumes, and a copy of the
-repository's own runbooks.
+identity database, small config-bearing docker volumes, the dashboard's
+operator-authored Elasticsearch documents (config, users, alert acks,
+canarytokens, the manual IP block list), and a copy of the repository's own
+runbooks.
 
-It contains NO Elasticsearch data, NO captured payloads or malware, NO
+It contains NO Elasticsearch bulk data, NO captured payloads or malware, NO
 PCAP and NO sandbox images. A stack restored from it comes back configured
 and authenticated with an empty event history.
 
@@ -488,6 +532,16 @@ Then read, in this order:
     repo/docs/BACKUP-ESSENTIALS.md   the full restore procedure
     repo/docs/STACK-REBUILD.md       stack start order and known pitfalls
     homeserver/manifest/             what the host looked like
+
+Dashboard state (config, users, alert acknowledgements, the manual IP block
+list) lives in homeserver/es-operator-state/ as NDJSON. Put it back with the
+tool that rides along in the archive, once honeypot-elk is up:
+
+    python3 repo/scripts/es-operator-state-backup.py \
+        --restore homeserver/es-operator-state
+
+Add --into 'check-{index}' first if you want to rehearse it into scratch
+indices before writing to the live ones.
 
 Verify an archive before trusting it:
 

@@ -58,11 +58,28 @@ gauges:
 
 ## Backup
 
-Config and users (Elasticsearch-backed since #787) are covered by whatever
-snapshot/backup policy this cluster's other Elasticsearch-owned dashboard
-data already has (`arcane/home/honeypot-init/analysis/elasticsearch-setup.sh`) — not
-`scripts/backup-state.sh`, which now only covers what's still on the
-`dashboard-state` volume.
+Config and users (Elasticsearch-backed since #787) are exported as documents by
+[`scripts/es-operator-state-backup.py`](../scripts/es-operator-state-backup.py)
+into every essentials backup — `homeserver/es-operator-state/` in
+`scripts/backup-essentials.sh`'s archive, and the same directory in
+`analysis/backup-honeypot.sh`'s on-host copy. That is a mapping plus NDJSON
+per index, kilobytes each, and it rides along in the same encrypted archive as
+the secrets to three destinations off the homeserver. Full scope, including
+the eight other operator-authored indices captured with these two:
+[`BACKUP-ESSENTIALS.md` §Operator state](BACKUP-ESSENTIALS.md#operator-state).
+
+**#3323:** until then this section deferred to some cluster-wide Elasticsearch
+backup policy for these two stores. No such policy exists — `GET _slm/policy`
+returns `{}`, the script that took an ES snapshot was removed, and it had never
+succeeded once anyway
+([`BACKUP-ESSENTIALS.md` §History](BACKUP-ESSENTIALS.md#history)) — so both
+stores were in no backup at all. An SLM policy into `honeypot-fs` would not
+have fixed that: that repository lives on the same host as `es-data` and is
+excluded from this backup's own on-host copy, so a snapshot there dies with
+the disk.
+
+Neither store is covered by `scripts/backup-state.sh`, which only archives
+what is still on the `dashboard-state` volume.
 
 `scripts/backup-state.sh` archives the whole `dashboard-state` volume —
 audit/history plus the sandbox payload scripts that share it:
@@ -87,10 +104,21 @@ retained. Wire it into the same schedule as the existing host state copies
    `docker run --rm -v dashboard-state:/state -v <backup-dir>:/backup alpine:3 tar xzf /backup/dashboard-state-<ts>.tar.gz -C /state`
 3. Start the dashboard: `docker compose start dashboard`.
 
-**Config/users (Elasticsearch):** restore via whatever mechanism recovers the
-`dashboard-config-v1`/`dashboard-users-v1` indices (snapshot repository
-restore, or `keycloak/restore.sh`-style tooling if one exists for these
-indices) — there is no per-dashboard-replica file to move.
+**Config/users (Elasticsearch):** there is no per-dashboard-replica file to
+move. The documents come back from the essentials backup with
+`scripts/es-operator-state-backup.py` (it rides inside the archive, and its
+copy in the checkout is the same one):
+
+```sh
+python3 scripts/es-operator-state-backup.py --restore homeserver/es-operator-state
+python3 scripts/es-operator-state-backup.py --restore homeserver/es-operator-state \
+  --into 'check-{index}'          # rehearse into scratch indices first
+```
+
+It recreates each index from the exported mapping and bulk-indexes the
+documents, so nothing has to be assembled by hand from the NDJSON. The
+`dashboard-config-v1`/`dashboard-users-v1` singletons come back under their
+original doc ids (`config`, `users`), which is what the CAS writers expect.
 
 Every store fails safe on a load problem: config/users serve compiled
 defaults **read-only** when Elasticsearch is unreachable or the document is
