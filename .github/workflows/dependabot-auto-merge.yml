@@ -10,7 +10,10 @@ permissions:
 
 jobs:
   compatible-update:
-    if: >-
+    # #3314: zizmor flags github.actor as spoofable on its own; it is not the
+    # only test here -- the PR author must also be dependabot[bot], which a
+    # third party cannot fake, and both must hold.
+    if: >- # zizmor: ignore[bot-conditions]
       github.actor == 'dependabot[bot]' &&
       github.event.pull_request.user.login == 'dependabot[bot]' &&
       !github.event.pull_request.draft
@@ -87,7 +90,7 @@ jobs:
         continue-on-error: true
         run: docker pull node:22-alpine
 
-      - name: lockfile installs under the image's npm (#2741, mirrors #1816)
+      - name: "lockfile installs under the image's npm (#2741, mirrors #1816)"
         id: lockfile-check
         if: >-
           (steps.metadata.outputs.update-type == 'version-update:semver-patch' ||

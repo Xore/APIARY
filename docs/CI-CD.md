@@ -12,6 +12,9 @@ Every push to `main` and every pull request runs:
 - TypeScript checks and a reproducible Tailwind frontend build;
 - Python and shell syntax checks plus high-severity ShellCheck findings;
 - Docker Compose validation for the home and VPS stacks;
+- actionlint over every workflow (warning-level ShellCheck in `run:` blocks),
+  plus a zizmor security audit that fails on anything except the four rules
+  #3313's hardening still owns (#3314);
 - hadolint over every tracked Dockerfile, failing on warnings and errors
   (policy and exemptions in `.hadolint.yaml`, #3320);
 - CodeQL for Go, JavaScript/TypeScript, and Python;
