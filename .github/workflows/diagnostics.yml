@@ -164,11 +164,15 @@ jobs:
           # so a missing token falls through to the empty-token branch below
           # instead of aborting before the Elasticsearch/Suricata/Filebeat
           # sections ever run.
-          token=$(sed -n 's/^DASHBOARD_SERVICE_TOKEN=//p' /opt/stacks/honeypot-dashboard/.env 2>/dev/null | head -1) || true
-          if [ -z "$token" ]; then
-            alert "metrics unavailable: no DASHBOARD_SERVICE_TOKEN in /opt/stacks/honeypot-dashboard/.env"
-          elif source_health=$(curl -fsS --max-time 15 -H "X-Service-Token: $token" \
-                 "http://$bind:19090/bff/api/v1/source-health" 2>/dev/null) \
+          # #3312: the token's .env is root:root 0600 and this runner is not
+          # root, so reading it here failed on every run since the stacks
+          # moved under /var/dockge. The root-owned helper reads the token
+          # and returns only the JSON (install-deploy-runner.sh's sudoers
+          # grant); the token never enters this job.
+          helper=/opt/github-ci-runner-helpers/dashboard-source-health.sh
+          if ! sudo -n -l "$helper" >/dev/null 2>&1; then
+            alert "metrics unavailable: $helper is not installed or not granted -- re-run scripts/github-ci-runner/install-deploy-runner.sh"
+          elif source_health=$(sudo -n "$helper" 2>/dev/null) \
                && printf '%s' "$source_health" | jq -e . >/dev/null 2>&1; then
             printf '%s' "$source_health" | jq -r '
               "total_documents: \(.total_documents)",
@@ -424,10 +428,20 @@ jobs:
             report "DOMAIN secret is not set -- cannot check OIDC discovery reachability, only checked for the placeholder string above."
             exit 0
           fi
-          status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
-            "https://auth.${DOMAIN}/realms/apiary/.well-known/openid-configuration" || echo "000")
-          report "OIDC discovery HTTP status: $status"
+          url="https://auth.${DOMAIN}/realms/apiary/.well-known/openid-configuration"
+          # #3312: probe from the VPS, not from this GitHub-hosted runner.
+          # Cloudflare answers 403 to GitHub's runner address ranges while
+          # serving the same URL 200 to the VPS, the homeserver and a
+          # residential client (verified 2026-09-26); every scheduled run
+          # since 2026-08-12 failed here on the runner's vantage point, not
+          # on OIDC. The VPS still goes out through public DNS and
+          # Cloudflare to Traefik to Keycloak -- the path a real login takes.
+          # shellcheck disable=SC2029 # $url is meant to expand on this side
+          status=$(ssh "${ssh_options[@]}" "${VPS_USER:-root}@${VPS_HOST}" \
+            "curl -s -o /dev/null -w '%{http_code}' --max-time 10 '$url'" 2>/dev/null || echo "000")
+          runner_status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$url" || echo "000")
+          report "OIDC discovery HTTP status from the VPS: $status (from this GitHub-hosted runner: $runner_status, informational only)"
           if [ "$status" != "200" ]; then
-            report "::error::OIDC discovery at https://auth.\${DOMAIN}/realms/apiary/.well-known/openid-configuration returned $status, not 200 -- a fresh dashboard container start will fail outright (newOIDCAuth requires this unconditionally at startup). See #1225."
+            report "::error::OIDC discovery at https://auth.\${DOMAIN}/realms/apiary/.well-known/openid-configuration returned $status from the VPS, not 200 -- a fresh dashboard container start will fail outright (newOIDCAuth requires this unconditionally at startup). See #1225."
             exit 1
           fi
