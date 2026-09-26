@@ -31,10 +31,17 @@ curl -fsS -X PUT "$es_url/_snapshot/honeypot-fs" \
 # Policy *names* stay fixed (suricata-7d etc.) even though the actual
 # min_age they enforce is now dynamic -- they are stable ILM policy
 # identifiers referenced by index templates elsewhere in this file, not a
-# literal claim about the configured duration. That holds for all TWELVE
+# literal claim about the configured duration. That holds for all FOURTEEN
 # policies below, including honeypot-30d (#2193: its name predates the
 # knob and other tooling references it by name only).
 retention_days="${HONEYPOT_RETENTION_DAYS:-30}"
+# #3283: zeek and zeek-proxy write one index per log type per MONTH
+# (filebeat.yml), so their delete age is twice the retention window: a month's
+# index is created on its first day, and deleting it at 30 days would drop the
+# last weeks of that month early. zeek-60d / zeek-proxy-60d keep every record
+# 30-60 days. zeek-30d / zeek-proxy-30d stay defined for the daily indices
+# created before the switch (their lifecycle name is fixed at creation), so
+# those still expire on the old schedule.
 suricata_days=$(( retention_days * 7 / 30 ))
 [ "$suricata_days" -ge 1 ] || suricata_days=1
 for spec in "suricata-7d:${suricata_days}d" \
@@ -42,6 +49,7 @@ for spec in "suricata-7d:${suricata_days}d" \
             "dionaea-incidents-30d:${retention_days}d" \
             "traefik-30d:${retention_days}d" \
             "zeek-30d:${retention_days}d" "zeek-proxy-30d:${retention_days}d" "huginn-30d:${retention_days}d" \
+            "zeek-60d:$(( retention_days * 2 ))d" "zeek-proxy-60d:$(( retention_days * 2 ))d" \
             "extracted-files-30d:${retention_days}d" \
             "dashboard-app-30d:${retention_days}d" \
             "analysis-results-180d:$(( retention_days * 6 ))d"; do
@@ -525,7 +533,7 @@ curl -fsS -X PUT "$es_url/_index_template/zeek-events" \
   "template": {
     "settings": {
       "index.default_pipeline": "geoip-honeypot",
-      "index.lifecycle.name": "zeek-30d",
+      "index.lifecycle.name": "zeek-60d",
       "index.number_of_replicas": 0,
       "index.mapping.total_fields.limit": 500,
       "index.mapping.ignore_malformed": true,
@@ -649,7 +657,7 @@ curl -fsS -X PUT "$es_url/_index_template/zeek-proxy-events" \
   "template": {
     "settings": {
       "index.default_pipeline": "geoip-honeypot",
-      "index.lifecycle.name": "zeek-proxy-30d",
+      "index.lifecycle.name": "zeek-proxy-60d",
       "index.number_of_replicas": 0,
       "index.mapping.total_fields.limit": 500,
       "index.mapping.ignore_malformed": true,

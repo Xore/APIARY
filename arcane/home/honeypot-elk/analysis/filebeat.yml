@@ -634,12 +634,21 @@ output.elasticsearch:
     # #1742/S5: Zeek is split per log type the same way Suricata is, so a
     # query can hit zeek-v1-conn-* alone instead of scanning every protocol
     # log. event.category is set by the pipeline from the source filename.
-    - index: "zeek-v1-%{[zeek_log]}-%{+yyyy.MM.dd}"
+    #
+    # #3283: one index per log type per MONTH, not per day. 84 zeek log types
+    # x one index a day was ~90 of the cluster's new shards every day -- at
+    # 30-day retention ~2,700 shards on a single node capped at 1,500, which
+    # is what dead-lettered all ingest on 2026-09-21. The ".01" literal keeps
+    # the yyyy.MM.dd shape every consumer relies on (zeek-v1-<type>-* patterns,
+    # backend-service's flow_family() date-tail regex): zeek-v1-conn-2026.10.01
+    # holds all of October. Retention for it is zeek-60d (see
+    # elasticsearch-setup.sh), so each month is kept 30-60 days.
+    - index: "zeek-v1-%{[zeek_log]}-%{+yyyy.MM}.01"
       when.equals:
         logset: "zeek"
     # Its own family: same fields, different vantage point. Mixing them would
     # make "which sensor saw this" unanswerable at query time.
-    - index: "zeek-proxy-v1-%{[zeek_log]}-%{+yyyy.MM.dd}"
+    - index: "zeek-proxy-v1-%{[zeek_log]}-%{+yyyy.MM}.01"
       when.equals:
         logset: "zeek-proxy"
     - index: "huginn-v1-%{+yyyy.MM.dd}"
