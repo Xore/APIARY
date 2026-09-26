@@ -1093,6 +1093,14 @@ jobs:
               # pulls or loads multi-GB model weights.
               python analysis/ghidra/models/tests/test_model_governance.py
               python analysis/ghidra/models/tests/test_model_status_adapter.py
+              # #3334: the host-side wiring that actually runs the injection
+              # corpus weekly and on a pin change. The corpus itself needs the
+              # real model, so what is provable without a GPU is the part that
+              # made it dead weight before: that the units exist, that the
+              # .path unit watches files the installer deploys, and that the
+              # runner fails closed and skips only when nothing changed. Driven
+              # against a stub `docker` on PATH -- no model, no Ollama.
+              python analysis/ghidra/models/tests/test_llm_injection_suite.py
               # Benchmark transcript records (#1805). No model involved -- this
               # asserts the prompt is stored as sent, that a refusal or timeout
               # is stored rather than dropped, that a stored transcript is never

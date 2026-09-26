@@ -80,10 +80,19 @@ docker compose \
   run --rm --build llm-worker python -u worker.py --injection-suite
 ```
 
-It prints one JSON report and exits non-zero if any case fails. Run it on
-every model or Ollama runtime pin change (#2969), and record the result next
-to the canary records. It loads the configured model, so don't run it while
-a cold-benchmark leg needs an empty card.
+It prints one JSON report and exits non-zero if any case fails. It loads the
+configured model, so don't run it while a cold-benchmark leg needs an empty
+card.
+
+That command is for a one-off. The standing cadence is automated on the
+analysis host, because the corpus needs the real model and no GitHub-hosted
+runner has one: `analysis/ghidra/install-analysis-host.sh` installs
+`honeypot-llm-injection-suite.timer` (weekly) and
+`honeypot-llm-injection-suite.path` (on a model or Ollama runtime pin change,
+#2969), both running `analysis/ghidra/models/run-llm-injection-suite.sh` under
+these same synthetic-canary gates. Reports land in
+`/var/lib/honeypot-ghidra/injection-suite/` and are summarised in
+[`llm-injection-suite-record.md`](../llm-injection-suite-record.md).
 
 ## Captured-data canary
 
