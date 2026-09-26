@@ -1,0 +1,41 @@
+name: Main health watch
+
+# #3324: keep one main-red-alarm issue open while main's own Quality/Containers
+# runs are red, close it when they are green, and start CI on a main head that
+# never got any (merges made by github-actions start no push runs). See
+# scripts/main-health-watch.py for the lifecycle.
+on:
+  workflow_run:
+    workflows: [Quality, Containers]
+    types: [completed]
+    branches: [main]
+  # Hourly as well: an untested head produces no completed run to react to,
+  # which is exactly the case the schedule exists for.
+  schedule:
+    - cron: "41 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: main-health-watch
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/main-health-watch.py
+          sparse-checkout-cone-mode: false
+      - name: Sweep main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/main-health-watch.py

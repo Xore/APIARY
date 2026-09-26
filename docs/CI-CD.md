@@ -146,6 +146,26 @@ ruleset's enforcement to *Disabled* (Settings → Rules) and must re-enable it
 afterwards; there is deliberately no standing bypass actor, since automation
 merges with the owner's token.
 
+## Main health watch (#3324)
+
+`main-health-watch.yml` runs after every Quality/Containers run on `main`
+and hourly (`scripts/main-health-watch.py`):
+
+- **Red:** when the newest completed run of either workflow on `main` failed,
+  it opens one `main-red-alarm` issue naming the failing jobs, the first red
+  and last green commit, and the commits in between. It comments again only
+  when the failing head changes, and closes the issue itself once both are
+  green. It never reverts or re-runs a failed run.
+- **Untested:** merges made by `github-actions` (Dependabot auto-merge) start
+  no push runs, because `GITHUB_TOKEN` events don't trigger workflows. That's
+  how the 2026-09-25 breakage sat on `main` with no red run at all (#3311).
+  When `main`'s head is over an hour old and a watched workflow never ran on
+  it, the watch dispatches that workflow on `main` (`workflow_dispatch` is
+  the exception `GITHUB_TOKEN` may start), and the next sweep judges it.
+
+Replay any past moment without side effects:
+`GITHUB_REPOSITORY=Xore/APIARY python3 scripts/main-health-watch.py --before 2026-09-25T10:00:00Z`.
+
 ## Pull request workflow
 
 ### No AI attribution (#3329)
