@@ -60,6 +60,12 @@ jobs:
             context: arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus
           - image: backend-service
             context: arcane/home/honeypot-dashboard/backend-service
+            # #3321: the two images whose contents had no inventory, so
+            # "are we affected?" for a dashboard CVE meant rebuilding or
+            # exec-ing into the running container. `sbom: true` opts the row
+            # into the digest-keyed CycloneDX + Trivy steps below. Absent on
+            # the other sixteen rows, so they build exactly as before.
+            sbom: true
           - image: cisco-asa-honeypot
             context: arcane/home/honeypot-cisco-asa-honeypot/cisco-asa-honeypot
           - image: citrix-honeypot
@@ -68,6 +74,7 @@ jobs:
             context: arcane/home/honeypot-conpot/conpot
           - image: dashboard-next
             context: arcane/home/honeypot-dashboard/frontend-next
+            sbom: true
           - image: dicompot
             context: arcane/home/honeypot-dicompot/dicompot
           - image: dionaea
@@ -219,6 +226,10 @@ jobs:
             echo "to=type=gha,mode=max,scope=${{ matrix.image }}" >> "$GITHUB_OUTPUT"
           fi
       - uses: docker/build-push-action@v7
+        # id: build -- #3321 reads steps.build.outputs.digest, the pushed
+        # manifest digest, to key the dashboard rows' SBOM to the exact image
+        # rather than to a tag that can be moved underneath it.
+        id: build
         with:
           context: ${{ matrix.context }}
           push: ${{ github.event_name != 'pull_request' }}
@@ -251,6 +262,107 @@ jobs:
         # No-ops instantly on the GitHub-hosted fallback (script check).
         if: always() && needs.ci-target.outputs.homeserver == 'true'
         run: scripts/prune-buildx-cache.sh "/var/buildx-cache/${{ matrix.image }}"
+
+      # ---------------------------------------------------------------------
+      # #3321: digest-bound SBOM for the two dashboard images.
+      #
+      # Only rows with `sbom: true` reach any of this, and only on events
+      # that actually push. A pull_request row builds with `push: false` and
+      # `load: false`, so there is no image and no digest to key an inventory
+      # to -- the artefact that answers a CVE question is the one that got
+      # pushed, and that row's notice below says so rather than leaving the
+      # gap unexplained.
+      #
+      # Failures here are real failures, not warnings: the required
+      # Containers gate aggregates this job, and a silently absent inventory
+      # is precisely the gap #3321 was filed about. That is also why the
+      # publish step degrades (a warning) while this one does not -- the
+      # artifact is written before the homeserver copy is attempted.
+      # ---------------------------------------------------------------------
+      - name: "Generate the digest-bound SBOM (#3321)"
+        id: sbom
+        if: matrix.sbom == true && github.event_name != 'pull_request'
+        env:
+          IMAGE: ${{ matrix.image }}
+          IMAGE_TAG: ${{ steps.metadata.outputs.tags }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          SBOM_DIR: ${{ runner.temp }}/sbom
+          # Empty on the GitHub-hosted fallback, where there is no
+          # homeserver copy to make -- an ephemeral runner's /var dies with
+          # the job, so publishing there would only write a file nobody reads.
+          PUBLISH_DIR: ${{ needs.ci-target.outputs.homeserver == 'true' && '/var/image-sbom' || '' }}
+        run: |
+          set -euo pipefail
+          # Everything interpolated arrives through env: rather than being
+          # pasted into this block. The values are image names and digests,
+          # not attacker input, but zizmor's template-injection audit cannot
+          # tell that from the outside and this is the form it asks for.
+          tag=$(printf '%s\n' "$IMAGE_TAG" | head -1)
+          if [ -z "$tag" ] || [ -z "$IMAGE_DIGEST" ]; then
+            echo "::error::no pushed tag/digest for $IMAGE -- an SBOM cannot be keyed to it"
+            exit 1
+          fi
+          mkdir -p "$SBOM_DIR"
+          # Three attempts, because the failure this absorbs is real and
+          # narrow: the image was pushed moments ago and ghcr's read path
+          # occasionally trails its write path by a few seconds, which shows
+          # up as a manifest-unknown from syft. Everything after the fetch is
+          # local, so a retry costs a second rather than a rebuild.
+          for attempt in 1 2 3; do
+            if scripts/generate-image-sbom.sh \
+                --image "$tag@$IMAGE_DIGEST" \
+                --out "$SBOM_DIR/$IMAGE.sbom.json" \
+                --name "$IMAGE" \
+                --publish-dir "$PUBLISH_DIR"; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::syft could not resolve $tag@$IMAGE_DIGEST yet (attempt $attempt/3); retrying in 20s"
+              sleep 20
+            fi
+          done
+          echo "::error::could not inventory $tag@$IMAGE_DIGEST after 3 attempts"
+          exit 1
+
+      - name: "Scan the SBOM with the pinned Trivy (#3321)"
+        # Same flags as image-security-scan.yml's base-image scan, and the
+        # same pinned binary via scripts/install-trivy.sh, so a digest's
+        # finding and a base image's finding are graded identically. Reading
+        # the SBOM rather than the image is what makes the scan and the
+        # retained inventory describe the same package set.
+        if: matrix.sbom == true && github.event_name != 'pull_request'
+        env:
+          IMAGE: ${{ matrix.image }}
+          SBOM_DIR: ${{ runner.temp }}/sbom
+        run: scripts/scan-image-sbom.sh --sbom "$SBOM_DIR/$IMAGE.sbom.json" --name "$IMAGE" --report "$SBOM_DIR/$IMAGE.trivy.json"
+
+      - name: "Bound the homeserver SBOM store (#3321)"
+        if: always() && matrix.sbom == true && github.event_name != 'pull_request' && needs.ci-target.outputs.homeserver == 'true'
+        run: scripts/prune-image-sbom.sh /var/image-sbom
+
+      - name: "Upload the digest-bound SBOM as a CI artifact (#3321)"
+        if: matrix.sbom == true && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          # Keyed by the digest, not the run: two builds of the same commit
+          # produce the same name, and a digest-keyed name is the one an
+          # operator can paste into `trivy sbom` to re-grade it. The hex, not
+          # the `sha256:` form, because a colon is not a legal artifact-name
+          # character.
+          name: sbom-${{ matrix.image }}-${{ steps.sbom.outputs.sbom_digest_hex }}
+          path: ${{ runner.temp }}/sbom/
+          if-no-files-found: error
+          # Long enough to cover a CVE that is announced weeks after the
+          # build that shipped it. 90 is also the ceiling GitHub allows for a
+          # public repository, so this is the longest retention available --
+          # a value above the repository's own limit fails the upload rather
+          # than being clamped.
+          retention-days: 90
+
+      - name: "Why a pull_request row has no SBOM (#3321)"
+        if: matrix.sbom == true && github.event_name == 'pull_request'
+        run: |
+          echo "::notice title=No SBOM on a pull_request::containers.yml builds with push=false and load=false on a pull request, so this row produced no image and therefore no digest to key an inventory to. The SBOM for this change is produced when it reaches main -- where the image is actually pushed, and where the retained artifact matches the deployed digest."
 
   # #3311: the one required status check for this workflow. Matrix row names
   # carry a "(GitHub-hosted)" suffix on fallback days, so no row is a stable

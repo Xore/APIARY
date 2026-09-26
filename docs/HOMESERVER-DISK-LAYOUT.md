@@ -25,7 +25,7 @@ reinstall of the OS disk alone doesn't touch captured evidence.
 | Device | Model | Size | Partition table | Filesystem | Mount | Role |
 |---|---|---|---|---|---|---|
 | `nvme0n1` | Samsung MZVLW256HEHP | 238.5G | GPT | vfat (p1) / ext4 (p2) | `/boot/efi`, `/` | OS + EFI, boot disk |
-| `sdb` | AVAGO MR9440-8i (RAID LUN) | — | whole-disk (no partition table) | xfs | `/var` | Docker root, Arcane-managed stacks, container state (`/var/lib/docker`, `/var/dockge`) — now also `benchmarks/`, `training/`, `hf-cache/`, `buildx-cache/`, `ci-registry-mirror/`, the former `/mnt-1` workload |
+| `sdb` | AVAGO MR9440-8i (RAID LUN) | — | whole-disk (no partition table) | xfs | `/var` | Docker root, Arcane-managed stacks, container state (`/var/lib/docker`, `/var/dockge`) — now also `benchmarks/`, `training/`, `hf-cache/`, `buildx-cache/`, `ci-registry-mirror/`, `image-sbom/`, the former `/mnt-1` workload |
 | `sda` | Intel SSDSC2KB480G8L | 447.1G | GPT, 1 partition | xfs | `/mnt-2` | Reserved bulk storage (currently empty) |
 | `sr0` | ATAPI optical | — | — | — | — | Unused |
 
@@ -60,6 +60,21 @@ be preserved on any rebuild.
 Swap is an **8G swapfile** at `/swap.img` on the root filesystem, not a
 dedicated partition — simpler to resize than a swap partition and fine at
 this scale (91G RAM, swap is a safety margin not a working set).
+
+`/var` also carries the two CI-created directories, both of which the
+workflows cannot create for themselves (`/var` is `root:root 0755`, so a
+`mkdir` as `github-ci-runner` gets `EACCES`) and both of which
+`scripts/install-homeserver.sh` therefore provisions and then proves writable
+per runner user:
+
+| directory | holds | bounded by |
+|---|---|---|
+| `/var/buildx-cache/<image>` | that image's `type=local` buildx layer cache (#2822) | `scripts/prune-buildx-cache.sh`, 14 days / 2 GiB per image |
+| `/var/image-sbom/<image>` | the digest-keyed CycloneDX SBOMs for the two dashboard images (#3321) | `scripts/prune-image-sbom.sh`, 10 records per image |
+
+Neither is in the `/mnt-1` compatibility symlink list above: both were added
+after the move, so no script hard-codes the old path. See
+[CI-CD.md](CI-CD.md) for what writes them and why.
 
 ## Reproducing it: `autoinstall/homeserver-user-data.yaml`
 
