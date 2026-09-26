@@ -11,10 +11,14 @@ umask 077
 # backup-honeypot.sh — on-host snapshot of the state needed to bring the stack
 # back, taken on the homeserver itself.
 #
-# Scope, deliberately narrow: configuration, secrets and small config-bearing
-# volumes. NOT Elasticsearch data, NOT captured payloads or malware, NOT PCAP,
-# NOT sandbox images. A stack restored from this comes back configured and
-# authenticated with an empty event history, which is the intended trade.
+# Scope, deliberately narrow: configuration, secrets, small config-bearing
+# volumes, the Keycloak identity database, and the operator-authored
+# Elasticsearch documents a human typed rather than a pipeline derived
+# (dashboard config/users/alert acks and the rest of that ledger -- see
+# scripts/es-operator-state-backup.py). NOT Elasticsearch *data*: not events,
+# not captured payloads or malware, not derived indices, not PCAP, not sandbox
+# images. A stack restored from this comes back configured and authenticated
+# with an empty event history, which is the intended trade.
 #
 # Why the Elasticsearch snapshot that used to live here is gone:
 #
@@ -163,6 +167,33 @@ if docker inspect hp-keycloak-postgres >/dev/null 2>&1; then
   fi
 fi
 
+# The dashboard's operator-authored Elasticsearch state (#3323).
+#
+# es-data is out of scope for this script, and it is the only place these
+# documents exist: the admin config singleton, the user projections and
+# their preferences, alert acknowledgements, canarytoken and bait-credential
+# definitions, the manual IP block list, report definitions, workbench
+# recipes, ML anomaly acks and submitted problem reports. Nothing in the
+# pipeline regenerates any of them -- an operator types them -- and until
+# this step ran, none of them was in any backup. They are kilobytes, so
+# they cost this daily archive nothing.
+#
+# The index list, and the deliberate exclusions from it, live in the tool
+# (scripts/es-operator-state-backup.py --list) rather than here, so the two
+# copies of this script cannot disagree about the scope.
+#
+# Best effort, the same posture as the Keycloak dump above: an unreachable
+# Elasticsearch must not take the rest of the backup down with it. The tool
+# exits non-zero when it captured nothing at all, and this script then says
+# so on stderr, but the volume archives below are unaffected either way.
+es_state_script="$stack_dir/scripts/es-operator-state-backup.py"
+if [ -f "$es_state_script" ] && command -v python3 >/dev/null 2>&1; then
+  python3 "$es_state_script" --dest "$destination/es-operator-state" ||
+    echo "backup-honeypot: operator-state export FAILED (above) -- this backup does NOT carry dashboard config/users/alert state" >&2
+else
+  echo "backup-honeypot: $es_state_script missing, or no python3 -- operator state NOT in this backup" >&2
+fi
+
 # Small config-bearing named volumes only.
 #
 # Removed from this list, with the sizes that motivated it (measured live
@@ -192,12 +223,17 @@ for volume in dashboard-state honeypot-arcane_arcane-data honeypot-elk_evebox-co
 done
 
 # Checksum whatever actually got produced -- keycloak.sql.gz is absent if the
-# Keycloak stack is not running, and volumes/ is empty if none of the named
-# volumes exist yet, so neither can be assumed into the argument list.
+# Keycloak stack is not running, volumes/ is empty if none of the named
+# volumes exist yet, and es-operator-state/ is absent or partial if the
+# operator-state export failed, so none of them can be assumed into the
+# argument list.
 (
   cd "$destination"
   set -- stack-config-state.tar.gz
   [ -f keycloak.sql.gz ] && set -- "$@" keycloak.sql.gz
+  for exported in es-operator-state/*; do
+    [ -e "$exported" ] && set -- "$@" "$exported"
+  done
   for archive in volumes/*.tar.gz; do
     [ -e "$archive" ] && set -- "$@" "$archive"
   done

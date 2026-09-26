@@ -132,7 +132,7 @@ Re-run `sudo analysis/ghidra/install-analysis-host.sh` to install or update the 
 
 ## Deployment, backup, and rollback
 
-Recipes and runs live in Elasticsearch (`dashboard-workbench-recipes-v1`, `dashboard-workbench-runs-v1`), backed up by the ES snapshot process, not `scripts/backup-state.sh`. The workbench requires a configured `es *esClient`; without one it reports unconfigured rather than falling back to local storage.
+Recipes and runs live in Elasticsearch (`dashboard-workbench-recipes-v1`, `dashboard-workbench-runs-v1`), not `scripts/backup-state.sh` and not on the `dashboard-state` volume. Recipes are exported into the essentials backup by `scripts/es-operator-state-backup.py` (#3323) — the "ES snapshot process" this used to claim covered them has not existed for some time and never succeeded while it did; runs are derived from a recipe and are re-runnable, so they are not exported. The workbench requires a configured `es *esClient`; without one it reports unconfigured rather than falling back to local storage.
 
 Deploy the dashboard normally after merging. Rollback is additive and safe:
 
