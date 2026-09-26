@@ -140,7 +140,12 @@ async function main() {
     }
     const put = await es('PUT', `/_index_template/${family.name}`, body);
     if (put.status !== 200) throw new Error(`PUT _index_template/${family.name}: HTTP ${put.status} ${JSON.stringify(put.json)}`);
-    const sim = await es('POST', `/_index_template/_simulate_index/${family.pattern.replace('*', 'composable-check')}`);
+    // replaceAll, not replace: replace() substitutes only the first '*', so a
+    // pattern carrying more than one wildcard would be only partly replaced and
+    // the probe would POST against a real index name instead of the synthetic
+    // one. Both current patterns hold a single '*', so behaviour is unchanged
+    // today; replaceAll keeps it correct as the family table grows.
+    const sim = await es('POST', `/_index_template/_simulate_index/${family.pattern.replaceAll('*', 'composable-check')}`);
     const replicas = sim.json?.template?.settings?.index?.number_of_replicas;
     if (replicas !== '0') throw new Error(`${family.name}: simulate shows number_of_replicas=${replicas}, expected 0`);
     console.log(`${family.name}: composable template installed from ${found.length} legacy template(s), priority ${PRIORITY}`);
