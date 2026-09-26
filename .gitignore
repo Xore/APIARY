@@ -37,3 +37,5 @@ analysis/ghidra/revdeck/
 # External BETH benchmark data. The harness never downloads or writes it.
 ml-worker/benchmarks/data/
 ml-worker/benchmarks/beth-data/
+round7/
+1947full/
