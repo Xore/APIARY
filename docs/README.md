@@ -27,6 +27,10 @@ kind of truth it holds.
 | [vps/SSH-ACCESS.md](vps/SSH-ACCESS.md) | VPS admin SSH key inventory; the direct alias vs. the homeserver-hop route |
 | [CI-CD.md](CI-CD.md) | how CI validates and ships changes |
 | [TESTING.md](TESTING.md) | test surfaces per tier |
+| [HOST-TUNING.md](HOST-TUNING.md) | host kernel/sysctl performance tuning (Rocky 10) |
+| [deploy-profiles/README.md](deploy-profiles/README.md) | choosing which stacks a host runs |
+| [llm-worker/README.md](llm-worker/README.md) | running the guarded LLM worker and its canaries |
+| [sandbox/windows/runner/README.md](sandbox/windows/runner/README.md) | how Windows detonation is triggered (not by GitHub Actions) |
 
 ## Deployment records — how it got this way
 
@@ -36,7 +40,8 @@ Point-in-time records kept because the decisions in them still bind:
 [DASHBOARD-CUTOVER.md](DASHBOARD-CUTOVER.md) (the Go→TanStack/Rust cutover,
 completed 2026-08-22), [KEYCLOAK-CUTOVER.md](KEYCLOAK-CUTOVER.md),
 [HOMESERVER-DISK-LAYOUT.md](HOMESERVER-DISK-LAYOUT.md) (physical disks +
-autoinstall).
+autoinstall), [ROCKY-10-MIGRATION.md](ROCKY-10-MIGRATION.md) (Rocky 10 support in
+the installer).
 
 ## Design references — component deep-dives
 
@@ -52,7 +57,18 @@ autoinstall).
 [snapshot-vs-golden-image](kvm-snapshot-vs-golden-image.md) ·
 [Windows 11 malware lab](windows11-malware-lab-hardening.md) ·
 [ES consume patterns](ES-CONSUME-PATTERNS.md) ·
-[dionaea bistreams retention](dionaea-bistreams-retention.md)
+[dionaea bistreams retention](dionaea-bistreams-retention.md) ·
+[knowledge store](knowledge-store-design.md)
+
+Analysis and sandbox components:
+[malware analysis pipeline](analysis/README.md) ·
+[shared GPU job queue](analysis/gpu-queue/README.md) ·
+[YARA sidecar](analysis/yara/README.md) ·
+[RE benchmark corpus](analysis/ghidra/benchmarks/corpus/README.md) ·
+[injection gate protocol](analysis/ghidra/benchmarks/injection-gate-protocol.md) ·
+[GHOSTS host stack](sandbox/ghosts/README.md) ·
+[Windows guest risk model](sandbox/windows-guest-risk-config-model.md) ·
+[win11 detonation-node Packer build](sandbox/windows_kimi/README.md)
 
 ## Plans and evaluations — forward-looking or comparative
 
@@ -66,15 +82,23 @@ autoinstall).
 [synthetic canary record](llm-synthetic-canary-record.md) ·
 [ip reporting plan](ip-reporting-plan.md) ·
 [settings operations](settings-operations.md) ·
-[community sharing policy](community-threat-intel-sharing.md)
+[community sharing policy](community-threat-intel-sharing.md) ·
+[CAPE sandbox plan](sandbox/cape/IMPLEMENTATION_PLAN.md) ·
+[GHOSTS sandbox plan](sandbox/ghosts/IMPLEMENTATION_PLAN.md) ·
+[living analysis workstation research](sandbox/windows_kimi/RESEARCH.md)
 
 ## Records — audit trails
 
 [runtime compatibility record](runtime-compatibility-record.md) ·
 [security fixes](security-fixes.md) ·
+[approved local-model qualification](analysis/ghidra/models/approval-record.md) ·
+[container writable-layer audit, 2026-09-03](container-writable-layer-audit-2026-09-03.md) ·
 [manual ip-block design (#1662: kept for its still-binding decisions;
 era references inside are historical)](dashboard-manual-ip-block-design.md)
 
 Subdirectories (`analysis/`, `research/`, `sandbox/`, `vps/`, `autoinstall/`,
 `deploy-profiles/`, `archive/`) hold the same kinds of documents scoped to
-their component.
+their component. Every doc must be reachable from this page through links;
+dated record trees (`research/`, `benchmarks/`, the VM-detection results,
+`archive/`) are exempt. `scripts/check-docs-reachable.py` enforces this in CI
+(#3332).
