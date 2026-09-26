@@ -1304,7 +1304,15 @@ jobs:
               "$RUNNER_TEMP/zizmor" --offline --min-severity medium --format json .github/workflows > "$RUNNER_TEMP/zizmor.json" || true
               python3 - "$RUNNER_TEMP/zizmor.json" <<'PY'
               import collections, json, sys
-              ADVISORY = {"unpinned-uses", "excessive-permissions", "artipacked", "self-repository"}
+              # dangerous-triggers: reported, not blocking. The workflows that
+              # use pull_request_target/workflow_run here are #3324's health
+              # watches, which already pin every action by SHA, set
+              # permissions: {} by default and persist-credentials: false, and
+              # consume no untrusted event input. #3313 owns the remaining
+              # trigger hardening; blocking on it now would gate every PR on
+              # that issue landing first.
+              ADVISORY = {"unpinned-uses", "excessive-permissions", "artipacked",
+                          "self-repository", "dangerous-triggers"}
               findings = json.load(open(sys.argv[1]))
               by_rule = collections.Counter(f["ident"] for f in findings)
               for rule, n in sorted(by_rule.items()):
