@@ -1682,6 +1682,30 @@ jobs:
         if: needs.scripts-and-compose.result != 'success'
         run: exit 1
 
+  # #3329: no AI/assistant attribution in PR commits, title or body. A
+  # policy that held only by convention -- main collected 461 attributed
+  # commits between 2026-08-01 and 2026-09-26. Reads the PR from the event
+  # file and its commits from the API, so no PR text passes through a shell
+  # and no deep fetch is needed. pull_request only; quality-gate accepts its
+  # skip on every other event.
+  ai-attribution:
+    name: No AI attribution in PR metadata (#3329)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/check-ai-attribution.py
+          sparse-checkout-cone-mode: false
+      - name: Check commits, title and body
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/check-ai-attribution.py
+
   # #3311: the one required status check for this workflow. main's ruleset
   # requires a context that reports on every PR; the jobs above come in
   # homeserver/GitHub-hosted pairs whose names change with the executor, so
@@ -1708,11 +1732,13 @@ jobs:
       - vendored-theme
       - vendored-theme-cloud
       - scripts-and-compose-complete
+      - ai-attribution
     runs-on: ubuntu-latest
     steps:
       - name: Fail unless every gated job, or its fallback twin, succeeded
         env:
           NEEDS: ${{ toJSON(needs) }}
+          EVENT: ${{ github.event_name }}
         shell: bash
         run: |
           result() { jq -r --arg j "$1" '.[$j].result' <<<"$NEEDS"; }
@@ -1729,6 +1755,12 @@ jobs:
             echo "::error::$1: expected success or skip+fallback-success; got $hs / $cloud"; fail=1
           }
           single ci-target
+          # #3329: pull_request-only by design, so a skip is fine elsewhere.
+          if [[ "$EVENT" == "pull_request" ]]; then
+            single ai-attribution
+          elif [[ "$(result ai-attribution)" != "skipped" ]]; then
+            single ai-attribution
+          fi
           single go-modules-complete
           single scripts-and-compose-complete
           for p in public-safety design-lab-readonly frontend-next frontend-next-browser backend-service vendored-theme; do
