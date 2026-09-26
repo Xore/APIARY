@@ -959,38 +959,15 @@ EOF
   # run before any sync can happen is a bootstrap loop, see
   # docs/ARCANE-GIT-SYNC.md), so it's installer-/deploy.yml-managed by a
   # plain file copy from the repo checkout.
-  # #2950: the base compose is deliberately GPU-free, because Arcane's optional
-  # GPU-monitoring panel needs a *hard* NVIDIA device reservation and Docker
-  # refuses to start the container at all without a working nvidia runtime
-  # ("could not select device driver \"nvidia\""). Arcane is the control plane
-  # that materializes every other stack, so it must be able to start on a host
-  # whose GPU driver is absent or not yet loaded -- on the 2026-09-03 rebuild
-  # that single reservation blocked the entire install.
-  #
-  # The overlay is merged in only after confirming the runtime actually works,
-  # rather than trusting ENABLE_GPU_STACK: the driver needs a reboot before its
-  # kernel module loads, so "GPU requested" and "GPU usable" are different
-  # facts, and this step can run in between them.
-  #
-  # --no-interpolate matters: `config` would otherwise resolve ${...} against
-  # this stack's .env and bake ENCRYPTION_KEY/JWT_SECRET/the OIDC secret as
-  # literals into a world-readable compose.yml.
-  local gpu_overlay="$REPO_DIR/docker-compose.arcane.gpu.yml"
-  if [[ "$ENABLE_GPU_STACK" == "true" && -f "$gpu_overlay" ]] \
-     && docker run --rm --gpus all "$GPU_SMOKE_IMAGE" true >/dev/null 2>&1; then
-    if docker compose -f "$REPO_DIR/docker-compose.arcane.yml" -f "$gpu_overlay" \
-         config --no-interpolate > "$dir/compose.yml.tmp" 2>/dev/null; then
-      mv "$dir/compose.yml.tmp" "$dir/compose.yml"
-      echo "Arcane: GPU monitoring enabled (nvidia runtime verified)"
-    else
-      rm -f "$dir/compose.yml.tmp"
-      cp "$REPO_DIR/docker-compose.arcane.yml" "$dir/compose.yml"
-      echo "Arcane: GPU overlay failed to render -- continuing without GPU monitoring" >&2
-    fi
-  else
-    cp "$REPO_DIR/docker-compose.arcane.yml" "$dir/compose.yml"
-    echo "Arcane: no usable NVIDIA runtime -- GPU monitoring left off (see #2950)"
-  fi
+  # #2950 / #3340: what this file contains (base, or base + GPU overlay when
+  # the nvidia runtime demonstrably works) is decided in one place,
+  # scripts/render-arcane-compose.sh, which deploy.yml's "Synchronize
+  # honeypot-arcane" step also runs -- so a routine deploy writes exactly what
+  # the installer did instead of silently dropping the GPU overlay.
+  local gpu_mode=off
+  [[ "$ENABLE_GPU_STACK" == "true" ]] && gpu_mode=auto
+  GPU_SMOKE_IMAGE="$GPU_SMOKE_IMAGE" \
+    sh "$REPO_DIR/scripts/render-arcane-compose.sh" "$REPO_DIR" "$dir/compose.yml" "$gpu_mode"
   (cd "$dir" && docker compose -f compose.yml config --quiet \
     && with_retry 3 15 docker compose -f compose.yml up -d --wait)
 }

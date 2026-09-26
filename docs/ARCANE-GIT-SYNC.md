@@ -34,7 +34,15 @@ CI, and this doc all read from it rather than maintaining separate lists.
 - `honeypot-arcane` itself is **not** in the manifest and never will be —
   syncing the thing that has to already be running before any sync can
   happen is a bootstrap loop, not a simplification. It stays
-  installer/`deploy.yml`-managed exactly as before.
+  installer/`deploy.yml`-managed. Both render its `compose.yml` through
+  `scripts/render-arcane-compose.sh` (#3340): the base
+  `docker-compose.arcane.yml`, plus `docker-compose.arcane.gpu.yml` only when
+  a real GPU container runs on the host (#2950). Never `cp` the base file over
+  the live one by hand: on the GPU homeserver that silently drops Arcane's GPU
+  monitoring. `deploy.yml` replaces the file only when the render differs,
+  keeps the previous one as `compose.yml.bak-<timestamp>`, and runs as
+  docker-group root inside `docker:cli`, because the stack dir, file and
+  `.env` are root-owned.
 
 ## Repository authentication
 

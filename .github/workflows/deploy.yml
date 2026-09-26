@@ -125,18 +125,42 @@ jobs:
       # depends on already existing.
       - name: Synchronize honeypot-arcane
         shell: bash
+        # #3340: this used to `cp docker-compose.arcane.yml` over the live
+        # file. On a GPU host that silently strips the GPU overlay the
+        # installer merges in (#2950), and the step could not even run: the
+        # stack dir, compose.yml and .env are root-owned, this runner is not
+        # root. The render now comes from the same script the installer uses,
+        # and the write + compose run inside docker:cli -- the same
+        # docker-group root the ghidra re-sync step above already relies on.
+        # The stack dir is mounted at its real host path so anything relative
+        # resolves identically for the daemon; the file is only replaced when
+        # the render actually differs, and `up -d` is a no-op when nothing did.
         run: |
           destination=/var/dockge/stacks/honeypot-arcane
-          install -d -m 755 "$destination"
-          cp docker-compose.arcane.yml "$destination/compose.yml"
-          cd "$destination"
-          if test -f .env; then
-            chmod 600 .env
-            docker compose -f compose.yml config --quiet
-            docker compose -f compose.yml up -d
-          else
-            echo "honeypot-arcane synchronized but not started: provision .env (ARCANE_ENCRYPTION_KEY, ARCANE_JWT_SECRET, OIDC_ISSUER_URL, ARCANE_OIDC_CLIENT_SECRET) first"
-          fi
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD:/repo:ro" \
+            -v "$destination:$destination" \
+            -w "$destination" \
+            -e GPU_SMOKE_IMAGE=nvidia/cuda:12.4.0-base-ubuntu22.04 \
+            docker:cli sh -euc '
+              sh /repo/scripts/render-arcane-compose.sh /repo compose.yml.new auto
+              if [ -f compose.yml ] && cmp -s compose.yml.new compose.yml; then
+                rm -f compose.yml.new
+                echo "honeypot-arcane: compose.yml unchanged"
+              else
+                [ -f compose.yml ] && cp -p compose.yml "compose.yml.bak-$(date +%Y%m%d%H%M%S)"
+                mv compose.yml.new compose.yml
+                chmod 0644 compose.yml
+                echo "honeypot-arcane: compose.yml updated (previous kept as compose.yml.bak-*)"
+              fi
+              if [ -f .env ]; then
+                chmod 600 .env
+                docker compose -f compose.yml config --quiet
+                docker compose -f compose.yml up -d
+              else
+                echo "honeypot-arcane synchronized but not started: provision .env (ARCANE_ENCRYPTION_KEY, ARCANE_JWT_SECRET, OIDC_ISSUER_URL, ARCANE_OIDC_CLIENT_SECRET) first"
+              fi'
 
       # #1502: honeypot-init/keycloak/conpot and the 20-stack loop that used
       # to run here (plus ip-enrichment-worker/agent-intrusion-worker/
