@@ -77,3 +77,5 @@ python3 analysis/ghidra/models/model-governance.py rollback \
 ```
 
 After promotion or rollback, deploy the two reviewed files, run `check-runtime` without `--warn-only`, and exercise each consumer. Rev·Deck's upstream client does not expose all generation controls; the manifest records those fields as upstream-controlled instead of pretending they are fixed. Its qualification request remains fully fixed and reproducible.
+
+Deploying also drops the manifest and the synthetic-canary overlay under `/opt/honeypot-ghidra/models/`, which `honeypot-llm-injection-suite.path` watches. So a promotion or rollback re-runs the behavioral prompt-injection corpus (#3334) against the newly pinned model without anyone remembering to ask, alongside the weekly run that catches decay on a host nobody touched. That corpus is the `sessions`-slot consumer of this manifest; see [`llm-injection-suite-record.md`](../../../llm-injection-suite-record.md).

@@ -80,6 +80,7 @@ Analysis and sandbox components:
 [model evaluation](local-llm-model-evaluation.md) /
 [production canary record](llm-production-canary-record.md) /
 [synthetic canary record](llm-synthetic-canary-record.md) ·
+[prompt-injection suite record](llm-injection-suite-record.md) ·
 [ip reporting plan](ip-reporting-plan.md) ·
 [settings operations](settings-operations.md) ·
 [community sharing policy](community-threat-intel-sharing.md) ·

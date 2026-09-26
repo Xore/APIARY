@@ -104,3 +104,20 @@ REVDECK_WORKFLOW=program_triage
 # or standalone. Leave both empty to disable this spool entirely.
 REVDECK_REQUEST_DIR=/var/lib/honeypot-revdeck/requests/pending
 REVDECK_RESULTS_DIR=/var/lib/honeypot-revdeck/results
+
+# ── Prompt-injection regression suite (#3334) ────────────────────────────────
+# Read by honeypot-llm-injection-suite@.service (weekly timer + pin-change
+# .path). The suite builds the worker image from a checkout and asks the pinned
+# local model the same synthetic sessions, so it needs the repository itself,
+# not the deployed /opt copy. Point this at the trusted checkout on this host --
+# a wrong path would qualify a tree that is not the one being deployed, and the
+# runner refuses to run rather than guessing.
+APIARY_REPO_DIR=/opt/apiary
+
+# Where its JSON reports land. Must be writable by the unit, which grants
+# exactly this path in ReadWritePaths= -- moving it means editing the unit too,
+# for the same reason as the spool paths above.
+LLM_INJECTION_SUITE_RECORD_DIR=/var/lib/honeypot-ghidra/injection-suite
+# Reports are pruned past this age, matching the 30-day recommendation for
+# verbose qualification reports.
+LLM_INJECTION_SUITE_RETENTION_DAYS=30

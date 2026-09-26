@@ -1,0 +1,47 @@
+[Unit]
+Description=Run the llm-worker prompt-injection regression corpus (%i) (#3334)
+Documentation=file:/opt/honeypot-ghidra/models/README.md
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Host-specific values (APIARY_REPO_DIR, the record directory) live outside the
+# repository, same file honeypot-ghidra-worker.service reads. The leading -
+# keeps the unit installable before an operator has written the file; the runner
+# then fails on a missing checkout rather than qualifying nothing quietly.
+EnvironmentFile=-/etc/default/honeypot-ghidra
+# %i selects the trigger, and is the only difference between the two instances:
+#
+#   @weekly     the timer. Always runs, so a host that never changed a pin
+#               still re-measures the model against host/runtime decay.
+#   @onchange   the .path unit. Runs only when the pin or the suite itself
+#               actually changed since the last passing run, so re-syncing the
+#               manifest with install-analysis-host.sh --host-files-only does
+#               not load a 20 GiB model for nothing on every deploy.
+ExecStart=/usr/bin/bash /opt/honeypot-ghidra/models/run-llm-injection-suite.sh %i
+# The model is ~20 GiB and every case is a fresh generation against it. Eight
+# cases plus image build, generously; a run that overruns this is wedged, not
+# slow.
+TimeoutStartSec=2h
+UMask=0077
+# Loads the production session model onto the GPU, so this must not race a
+# cold benchmark leg that needs an empty card. The runner takes a lock, which
+# only covers other injection-suite runs -- a human-started benchmark is still
+# the operator's to sequence, exactly as the requalification workflow in
+# docs/analysis/ghidra/models/README.md already requires.
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+# The suite's corpus is synthetic, but this host is the one holding captured
+# malware and the model that reads it. The runner needs the docker socket (it
+# builds and runs the worker image) and nowhere else writable.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/honeypot-ghidra/injection-suite
+
+[Install]
+WantedBy=multi-user.target
