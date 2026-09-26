@@ -406,6 +406,38 @@ jobs:
       # schedule trigger, and a failed step skips every following step by
       # default -- if: always() keeps this check independent of that one,
       # same reasoning as the home job's "Isolation invariants" step.
+      # #3328: the Cloudflare origin certificate Traefik serves is a 2-year
+      # Origin CA cert with no automatic renewal, so nothing notices it
+      # expiring until every proxied hostname starts failing at Cloudflare's
+      # edge (526). Warn 30 days out; renewal is docs/CGNAT-DEPLOYMENT.md's
+      # "Origin certificate" section.
+      - name: Traefik origin certificate expiry (#3328)
+        if: always()
+        shell: bash
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          set -uo pipefail
+          report() { printf '%s\n' "$*" >> "$GITHUB_STEP_SUMMARY"; printf '%s\n' "$*"; }
+          ssh_options=(-i ~/.ssh/honeypot_vps -p "${VPS_PORT:-2222}" -o StrictHostKeyChecking=accept-new)
+          report "# Traefik origin certificate"
+          cert=/root/vps/traefik/certs/origin.pem
+          # shellcheck disable=SC2029 # $cert is meant to expand on this side
+          if ! not_after=$(ssh "${ssh_options[@]}" "${VPS_USER:-root}@${VPS_HOST}" \
+               "openssl x509 -in $cert -noout -enddate" 2>/dev/null); then
+            report "::error::cannot read $cert on the VPS -- Traefik has no origin certificate to serve"
+            exit 1
+          fi
+          not_after=${not_after#notAfter=}
+          days_left=$(( ( $(date -d "$not_after" +%s) - $(date +%s) ) / 86400 ))
+          report "Expires ${not_after} (${days_left} days left)."
+          if [ "$days_left" -lt 30 ]; then
+            report "::error::the Traefik origin certificate expires in ${days_left} days -- renew it (docs/CGNAT-DEPLOYMENT.md, Origin certificate)"
+            [ "${{ github.event_name }}" = "schedule" ] && exit 1
+          fi
+
       - name: OIDC discovery is reachable (#1225)
         if: always()
         shell: bash

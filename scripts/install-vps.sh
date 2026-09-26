@@ -17,9 +17,10 @@
 # firewall, the NIC offload fix, the vps/ stack checkout, secret restore
 # from the LAN backup, and starting the Compose stack). It does NOT
 # partition disks or install the OS itself, and it does NOT issue the
-# Cloudflare origin TLS certificate (docs/CGNAT-DEPLOYMENT.md has no
-# documented issuance procedure either -- restoring the existing one from
-# the LAN backup is the only path this script supports; see step_restore_certs).
+# Cloudflare origin TLS certificate -- it restores the existing one from the
+# LAN backup (step_restore_certs); issuing or renewing one is a manual
+# Cloudflare-dashboard procedure, documented in docs/CGNAT-DEPLOYMENT.md,
+# "Origin certificate" (#3328).
 #
 # Bootstrap order with install-homeserver.sh, for a genuinely fresh pair of
 # hosts: run THIS script first. It prints this VPS's fresh WireGuard public
@@ -589,12 +590,11 @@ step_restore_env() {
 }
 
 step_restore_certs() {
-  # No documented issuance procedure exists for the Cloudflare origin cert
-  # (docs/CGNAT-DEPLOYMENT.md doesn't cover it either) -- restoring the
-  # existing one from backup is the only path this script supports. If the
-  # backup genuinely has no certs (first-ever install, not a rebuild), this
-  # step warns and leaves Traefik unable to serve TLS until a real
-  # certificate is issued and placed by hand.
+  # Restoring the existing Cloudflare origin cert from backup is the only
+  # path this script automates. If the backup genuinely has no certs
+  # (first-ever install, not a rebuild), this step warns and Traefik cannot
+  # serve TLS until one is issued and placed by hand -- the procedure is
+  # docs/CGNAT-DEPLOYMENT.md, "Origin certificate" (#3328).
   install -d -m 750 /root/vps/traefik/certs
   local ok=1
   for f in origin.pem origin-key.pem; do
