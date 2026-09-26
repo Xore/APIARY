@@ -17,6 +17,11 @@ __pycache__/
 # source, and one already reached main inside a backend-service commit.
 .playwright-mcp/
 
+# CI's JUnit XML and retained test logs (#3319). Written by the quality
+# workflow's artifact steps and uploaded, never committed -- same reasoning
+# as the Playwright run artifacts already ignored inside frontend-next.
+.ci-artifacts/
+
 # Filled-in installer answer files. These carry real WireGuard private keys,
 # SSH key paths, backup-host addresses and the deployment's real public domain
 # -- scripts/check-public-leaks.py fails on exactly that content, which is the

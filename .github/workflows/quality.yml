@@ -313,6 +313,14 @@ jobs:
     needs: [go-fmt, go-fmt-cloud, go-test-homeserver, go-test-cloud]
     runs-on: ubuntu-latest
     steps:
+      # #3319: only the lane-summary script, same sparse shape ai-attribution
+      # uses. The report is written to the step summary and is a pure function
+      # of `needs`, so nothing else from the tree is needed here.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci-lane-summary.py
+          sparse-checkout-cone-mode: false
       - name: Fail unless each executor pair produced exactly one success
         env:
           FMT_HS: ${{ needs.go-fmt.result }}
@@ -338,6 +346,14 @@ jobs:
           expect "go formatting"     "$FMT_HS"    "$FMT_CLOUD"    || fail=1
           expect "go tests (matrix)" "$TEST_HS"   "$TEST_CLOUD"   || fail=1
           exit "$fail"
+      # #3319: the same pair results as a table, so a reader can see which
+      # executor ran and which twin the router skipped without opening the
+      # log. Independent of the exit code above -- this reports, it does not
+      # gate, so it still renders on a red aggregate job.
+      - name: Lane summary
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: python3 scripts/ci-lane-summary.py --title "Go formatting and tests" <<<"$NEEDS"
 
   # Homeserver-first as a pair (#2565): the tier's only special
   # requirement is docker (lockfile check) plus node 24 via setup-node --
@@ -459,8 +475,30 @@ jobs:
       # the only things running against it, and neither can see ordering,
       # a pre-hydration string literal, or anything else whose correctness
       # is a matter of what happens rather than of what shape it has.
+      # #3319: CI_ARTIFACTS_DIR is what switches the vitest config's JUnit
+      # reporter on (see its own comment). It is the ONLY thing that does, so
+      # the same `npm test` a developer runs keeps vitest's console output and
+      # writes no report file.
       - run: npm test
         working-directory: arcane/home/honeypot-dashboard/frontend-next
+        env:
+          CI_ARTIFACTS_DIR: ${{ github.workspace }}/.ci-artifacts
+      # #3319: `always()`, not `failure()` -- the JUnit result is worth having
+      # on a green run too, since it is the record of what actually ran rather
+      # than of what the exit code happened to be. 7 days matches the issue's
+      # retention ask: long enough to still be there when a red run is
+      # investigated the following week, short enough that a busy main does
+      # not accumulate them indefinitely. `overwrite` is v4's required
+      # conflict policy for a name that may already exist on a re-run.
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-next-unit-junit
+          path: .ci-artifacts/frontend-next-unit-junit.xml
+          if-no-files-found: warn
+          retention-days: 7
+          overwrite: true
       # No live-ES smoke suite here on purpose: port-tests/ needs the real
       # cluster over an SSH tunnel to the homeserver (see its README) --
       # not reachable from a GitHub-hosted runner, and not appropriate to
@@ -526,8 +564,20 @@ jobs:
           fi
       - run: npm run typecheck
         working-directory: arcane/home/honeypot-dashboard/frontend-next
+      # #3319: twin of the homeserver copy's JUnit wiring above.
       - run: npm test
         working-directory: arcane/home/honeypot-dashboard/frontend-next
+        env:
+          CI_ARTIFACTS_DIR: ${{ github.workspace }}/.ci-artifacts
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-next-unit-junit
+          path: .ci-artifacts/frontend-next-unit-junit.xml
+          if-no-files-found: warn
+          retention-days: 7
+          overwrite: true
       # No live-ES smoke suite here on purpose -- see the homeserver twin.
       - run: npm run build
         working-directory: arcane/home/honeypot-dashboard/frontend-next
@@ -584,8 +634,44 @@ jobs:
             echo "::error::redis-server missing on the runner host -- see #2565's homeserver provision list"
             exit 1
           }
+      # #3319: CI_ARTIFACTS_DIR turns on the config's JUnit reporter. The
+      # trace/screenshots half of the issue needs no flag -- playwright.config
+      # already carries trace: "retain-on-failure" and screenshot:
+      # "only-on-failure" (#2034); what was missing was uploading them, so a
+      # failing browser case was readable only as a log line.
       - run: npm run test:browser
         working-directory: arcane/home/honeypot-dashboard/frontend-next
+        env:
+          CI_ARTIFACTS_DIR: ${{ github.workspace }}/.ci-artifacts
+      # `always()`: the JUnit XML is the machine-readable answer to "which
+      # cases ran, which were skipped, which failed" and is worth keeping on a
+      # green run too. Both paths are `if-no-files-found: warn` rather than
+      # error so a lane that never produced a report -- because it failed at
+      # `npm ci`, say -- reports the absence instead of masking the real
+      # failure behind an upload error.
+      - name: Upload browser test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-next-browser-junit
+          path: .ci-artifacts/playwright-junit.xml
+          if-no-files-found: warn
+          retention-days: 7
+          overwrite: true
+      # `failure()`, not `always()`: the HTML report bundles a trace per
+      # failing test and is the one artifact big enough to matter. On a green
+      # run it holds nothing worth storing.
+      - name: Upload Playwright report and traces
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-next-browser-report
+          path: |
+            arcane/home/honeypot-dashboard/frontend-next/playwright-report/
+            arcane/home/honeypot-dashboard/frontend-next/test-results/
+          if-no-files-found: warn
+          retention-days: 7
+          overwrite: true
 
   frontend-next-browser-cloud:
     name: Dashboard-next browser matrix (GitHub-hosted)
@@ -612,8 +698,31 @@ jobs:
       # (#2224), which apt-installs on every run. Same idiom as the
       # shellcheck guard below.
       - run: command -v redis-server >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y redis-server; }
+      # #3319: twin of the homeserver copy's artifact wiring above.
       - run: npm run test:browser
         working-directory: arcane/home/honeypot-dashboard/frontend-next
+        env:
+          CI_ARTIFACTS_DIR: ${{ github.workspace }}/.ci-artifacts
+      - name: Upload browser test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-next-browser-junit
+          path: .ci-artifacts/playwright-junit.xml
+          if-no-files-found: warn
+          retention-days: 7
+          overwrite: true
+      - name: Upload Playwright report and traces
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-next-browser-report
+          path: |
+            arcane/home/honeypot-dashboard/frontend-next/playwright-report/
+            arcane/home/honeypot-dashboard/frontend-next/test-results/
+          if-no-files-found: warn
+          retention-days: 7
+          overwrite: true
 
   # First CI coverage for this crate (#1608's Rust service tier had none
   # until now -- a broken build or a real regression wouldn't have
@@ -682,7 +791,30 @@ jobs:
           rustup component add clippy
           cargo --version && rustc --version
       - run: PATH="$HOME/.cargo/bin:$PATH" cargo build --all-targets
-      - run: PATH="$HOME/.cargo/bin:$PATH" cargo test
+      # #3319: tees the test output into .ci-artifacts/ and uploads it on
+      # failure. Not a JUnit file: cargo has no built-in JUnit reporter, and
+      # its per-test result stream is only available on the unstable
+      # `--format json`, so the honest artifact here is the full log rather
+      # than a hand-rolled conversion that could misrepresent a result. The
+      # log is what the issue said was the only evidence a red run had; it is
+      # now retained rather than scrolled away.
+      - name: Test (log retained on failure)
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p "$CI_ARTIFACTS_DIR"
+          PATH="$HOME/.cargo/bin:$PATH" cargo test 2>&1 | tee "$CI_ARTIFACTS_DIR/cargo-test.log"
+        env:
+          CI_ARTIFACTS_DIR: ${{ github.workspace }}/.ci-artifacts
+      - name: Upload test log
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: backend-service-cargo-test-log
+          path: .ci-artifacts/cargo-test.log
+          if-no-files-found: warn
+          retention-days: 7
+          overwrite: true
       - run: PATH="$HOME/.cargo/bin:$PATH" cargo clippy --all-targets -- -D warnings
 
   backend-service-cloud:
@@ -706,7 +838,24 @@ jobs:
           key: cargo-${{ runner.os }}-${{ hashFiles('arcane/home/honeypot-dashboard/backend-service/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-
       - run: cargo build --all-targets
-      - run: cargo test
+      # #3319: twin of the homeserver copy's log retention above.
+      - name: Test (log retained on failure)
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p "$CI_ARTIFACTS_DIR"
+          cargo test 2>&1 | tee "$CI_ARTIFACTS_DIR/cargo-test.log"
+        env:
+          CI_ARTIFACTS_DIR: ${{ github.workspace }}/.ci-artifacts
+      - name: Upload test log
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: backend-service-cargo-test-log
+          path: .ci-artifacts/cargo-test.log
+          if-no-files-found: warn
+          retention-days: 7
+          overwrite: true
       - run: cargo clippy --all-targets -- -D warnings
 
   vendored-theme:
@@ -1222,11 +1371,18 @@ jobs:
           # unlike every other Python test dir in this workflow, which is
           # plain unittest -- pytest isn't a production dependency so it's
           # installed here rather than added to ml-worker/requirements.txt.
+          # #3319: --junitxml is pytest's own machine-readable reporter, so
+          # this needs no new dependency. Both pytest rows carry it and both
+          # write into the one .ci-artifacts/ dir the upload step below
+          # collects; the other ~20 rows are plain unittest/shell/go and
+          # simply produce no file, which `if-no-files-found: ignore` treats
+          # as the normal case rather than a warning on every one of them.
           - name: ml-worker anomaly pipeline contracts
             home: true
             run: |
               python -m pip install -r ml-worker/requirements.txt pytest
-              python -m pytest ml-worker/tests/ -v
+              mkdir -p .ci-artifacts
+              python -m pytest ml-worker/tests/ -v --junitxml=.ci-artifacts/ml-worker-junit.xml
 
           # #2219: Keycloak caps every admin-events page silently, and the
           # single-page fetch permanently dropped everything past row 1,000
@@ -1238,7 +1394,9 @@ jobs:
             home: true
             run: |
               python -m pip install -r auth-events-worker/requirements.txt pytest
-              python -m pytest auth-events-worker/tests/ -v
+              mkdir -p .ci-artifacts
+              python -m pytest auth-events-worker/tests/ -v \
+                --junitxml=.ci-artifacts/auth-events-worker-junit.xml
 
           - name: es-results-importer chunked-upload and dedup contracts
             home: true
@@ -1763,6 +1921,22 @@ jobs:
       - name: ${{ matrix.name }}
         shell: bash
         run: ${{ matrix.run }}
+      # #3319: `always()` because the pytest rows emit their JUnit XML on the
+      # passing run too, and that is the record of what ran. `ignore` on the
+      # missing-file case because this job is a ~22-row matrix and most rows
+      # write no report at all -- a warning per row would bury the one that
+      # matters. The matrix row name is in the artifact name so the two
+      # pytest rows don't collide in the run's artifact list (upload-artifact
+      # v4 refuses two uploads sharing a name).
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: scripts-${{ matrix.name }}-results
+          path: .ci-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+          overwrite: true
 
   scripts-and-compose-complete:
     name: Scripts and Compose
@@ -1770,9 +1944,23 @@ jobs:
     needs: [scripts-and-compose]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci-lane-summary.py
+          sparse-checkout-cone-mode: false
       - name: Fail if any check failed
         if: needs.scripts-and-compose.result != 'success'
         run: exit 1
+      # #3319: the matrix is a single job, so its own result is all there is
+      # to report -- a row that was path-filtered away is invisible here and
+      # says nothing about the run. Rendered anyway so the aggregate job's
+      # summary is not empty on a red run.
+      - name: Lane summary
+        if: always()
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: python3 scripts/ci-lane-summary.py --title "Scripts and Compose" <<<"$NEEDS"
 
   # #3329: no AI/assistant attribution in PR commits, title or body. A
   # policy that held only by convention -- main collected 461 attributed
@@ -1859,3 +2047,31 @@ jobs:
             pair "$p"
           done
           exit "$fail"
+      # #3319: the run's lane table, which is the part a human actually reads.
+      # `if: always()` so it renders on the failing run that needs it, and it
+      # runs even when the gate above exits 1 -- reporting is not gating.
+      #
+      # ci-target is excluded from --allow-skip deliberately: on a run where
+      # the router itself never reported, every routed pair below is a
+      # no-executor skip, and that is a red run, not an accounted one.
+      - name: Lane summary
+        if: always()
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci-lane-summary.py
+          sparse-checkout-cone-mode: false
+      - name: Render lane summary
+        if: always()
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          # ai-attribution is pull_request-only by design (#3329), so its skip
+          # is accounted for on every other event. The gate above already
+          # encodes that same rule; this states the reason in the report.
+          allow=()
+          if [[ "$EVENT" != "pull_request" ]]; then
+            allow+=(--allow-skip "ai-attribution:pull_request only (#3329)")
+          fi
+          python3 scripts/ci-lane-summary.py --title "Quality" "${allow[@]}" <<<"$NEEDS"
