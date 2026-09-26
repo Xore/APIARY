@@ -33,6 +33,22 @@ services:
     ulimits:
       memlock: -1
     working_dir: /workspace
+    # #3337: measured, not guessed (2026-09-26, throwaway copy of this exact
+    # digest, scratch mounts with the real ownership). Everything in the
+    # image runs as root (supervisord -> jupyter, studio), and /var/training
+    # is xore:xore 0700 with xore-owned content, so without DAC_OVERRIDE
+    # root cannot even list /workspace and both programs exit FATAL. With
+    # DAC_OVERRIDE alone: Jupyter 200 and Studio 200, notebook save of a
+    # xore-owned 0600 notebook (atomic and in-place) keeps owner and mode,
+    # create/rename/delete, checkpoint writes, pip, and CUDA on the RTX 4000
+    # all work. Not granted: FOWNER/CHOWN -- only chmod/utime of *xore-owned*
+    # files fails without them, which no path above needs.
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true
     # LAN only. UNSLOTH_BIND is the homeserver's LAN address, set in this
     # stack's untracked .env on the box (see .env.example) -- the real address
     # is deployment-specific and never committed. Never 0.0.0.0, never the VPS.
@@ -47,9 +63,12 @@ services:
       - "${UNSLOTH_BIND:-10.8.0.2}:8899:8000"
       - "${UNSLOTH_BIND:-10.8.0.2}:8888:8888"
     environment:
-      # Studio's login password. Legacy variable name; it is what the image's
-      # launcher reads. Real value lives in the untracked .env on the box.
-      JUPYTER_PASSWORD: ${JUPYTER_PASSWORD:-unsloth}
+      # JupyterLab's login password (port 8888; Studio's own admin password
+      # is separate and bootstrapped by Studio). Real value lives in the
+      # untracked .env on the box. #3337: required, no default -- the old
+      # `:-unsloth` fallback would have opened Jupyter, a root code-execution
+      # surface, with a password published in this file.
+      JUPYTER_PASSWORD: ${JUPYTER_PASSWORD:?set JUPYTER_PASSWORD in this stack's .env}
       # Shared cache, same as the batch leg -- don't re-download base weights.
       # Overrides the image default of /workspace/.cache/huggingface.
       HF_HOME: /hf-cache

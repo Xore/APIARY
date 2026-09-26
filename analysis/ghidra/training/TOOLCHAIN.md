@@ -118,10 +118,12 @@ untouched.
 
 | | |
 |---|---|
-| URL | `http://<homeserver-lan-ip>:8899` (Studio UI) |
-| password | `unsloth` (`JUPYTER_PASSWORD` in the untracked stack `.env`) |
-| container ports | 8000 (Studio UI, published on 8899), 8888 (Studio API) |
+| URL | `http://<homeserver-lan-ip>:8899` (Studio UI), `:8888` (JupyterLab) |
+| Studio login | user `unsloth`; bootstrap password printed once in `docker logs hp-unsloth-studio` on first boot — change it on first sign-in, or Studio **shuts itself down after 60 minutes** (it did on 2026-09-23) |
+| JupyterLab login | `JUPYTER_PASSWORD` from the untracked stack `.env` — required, compose refuses to start without it (#3337) |
+| container ports | 8000 (Studio UI, published on 8899), 8888 (JupyterLab) |
 | mounts | `/var/training` → `/workspace`, `/var/hf-cache` → `/hf-cache` |
+| capabilities | `cap_drop: ALL` + `DAC_OVERRIDE`, `no-new-privileges` — measured in #3337; root in the container needs `DAC_OVERRIDE` because `/var/training` is `xore:xore 0700` |
 
 The stack pins the **`studio`** image variant, not the `core` digest the batch
 leg uses. Only `studio` ships `/usr/local/bin/unsloth-studio-launch` and
