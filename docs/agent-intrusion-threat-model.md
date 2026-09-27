@@ -36,9 +36,12 @@
 
 For each of the nine areas #154 asked to cover, this maps to APIARY's
 **actual** current architecture — verified against the real compose files,
-Go/Python source, and docs in this tree, not assumed from what a "typical"
+the source, and docs in this tree, not assumed from what a "typical"
 honeypot stack might do. Each entry records: what exists today, whether the
-published campaign's technique applies here, and the evidence.
+published campaign's technique applies here, and the evidence. (The original
+pass read Go and Python source; the Go tier was deleted at #1628 on
+2026-08-22, so a re-read today should be against the Rust modules named in
+the status banner above.)
 
 ---
 
