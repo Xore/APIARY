@@ -12,16 +12,21 @@
 ## What actually triggers a detonation
 
 The dashboard writes `{sha256}.request` into the request spool and never touches
-a hypervisor itself. A root-owned path unit notices the file and drains the
-queue:
+a hypervisor itself. A root-owned path unit notices the file, and from there it
+is a two-hop handoff, not a straight line to detonation:
 
 | Piece | File |
 |---|---|
 | Path unit watching the spool | `sandbox/windows/honeypot-windows-sandbox-worker.path` |
-| Oneshot service it starts | `sandbox/windows/honeypot-windows-sandbox-worker.service` |
-| Queue drain, one sample at a time under `flock` | `sandbox/windows/run_pending.sh` |
+| Oneshot service it starts — resolves the hash against the capture roots and copies the sample bytes in, root-owned, then `systemctl start --no-block`s the worker | `sandbox/windows/honeypot-windows-sandbox-web-requests.service` (`process-windows-web-requests.sh`) |
+| Queue drain, one sample at a time under `flock` | `sandbox/windows/honeypot-windows-sandbox-worker.service` (`sandbox/windows/run_pending.sh`) |
 | Per-sample orchestration | `sandbox/windows/orchestrate/run_sample.py` |
 | Host-specific values (never in the repo) | `/etc/default/honeypot-windows-sandbox` |
+
+The middle hop exists because the dashboard writes only a *bare*
+`{sha256}.request` — no sample data. The path unit used to point straight at
+the detonation worker, so `run_pending.sh` looked for sample bytes that were
+not there yet and dropped the request every time.
 
 This is the same trust boundary the Linux sandbox uses (`sandbox/worker.sh`),
 and it is the boundary for the same reason: the dashboard container is
@@ -47,9 +52,9 @@ It is the wrong place for it anyway:
   runner executes. The spool worker reads them from a root-owned
   `EnvironmentFile` that no workflow and no container can see.
 - **Detonation is queue work, not build work.** `run_pending.sh` holds a
-  non-blocking lock so overlapping triggers collapse into one drain — a second
-  concurrent detonation would revert the snapshot out from under the first.
-  Two workflow runs have no such interlock.
+  non-blocking `flock` so overlapping triggers collapse into one drain — a
+  second concurrent detonation would revert the snapshot out from under the
+  first. Two workflow runs have no such interlock.
 - **The result has to come back read-only.** The worker writes
   `{sha256}_sandbox.json` where the dashboard mounts it read-only. A workflow
   would have to push artifacts somewhere the dashboard could read, which means

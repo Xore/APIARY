@@ -56,7 +56,7 @@ safe to run anything through.
 Same as `docs/sandbox/windows/IMPLEMENTATION_PLAN.md`:
 - KVM/QEMU/libvirt + docker-compose only — no VMware, no Hyper-V
 - No CI-triggered detonation — the dashboard's Workbench is the only
-  trigger (`workbench_orchestrator.go` → spool file → host-side systemd
+  trigger (`workbench_orchestrator.rs` → spool file → host-side systemd
   worker)
 - VM lifecycle via `virsh`/`qemu-img` only
 - Results written to a spool directory the dashboard reads — no outbound
@@ -129,9 +129,10 @@ Two constraints specific to this chain:
 
 - **Host-side GHOSTS sandbox worker** (systemd path unit) — [#328]
   - Watches `GHOSTS_SANDBOX_REQUEST_DIR` for `{hash}.request` files
-    written by `dashboard/workbench_orchestrator.go`'s "windows-ghosts"
-    analyzer — a deliberately opt-in-only Workbench selection, never
-    auto-routed to by payload classification
+    written by the backend-service's
+    [`workbench_orchestrator.rs`](../../../arcane/home/honeypot-dashboard/backend-service/src/workbench_orchestrator.rs)
+    "windows-ghosts" analyzer — a deliberately opt-in-only Workbench
+    selection, never auto-routed to by payload classification
   - `process-ghosts-web-requests.sh` resolves the hash against the same
     shared sample inbox `sandbox/windows`'s own resolution step uses
   - `orchestrate/run_sample.py`: revert `win11-ghosts.qcow2` → WinRM/SMB
@@ -139,7 +140,7 @@ Two constraints specific to this chain:
     execute sample → Sysmon EVTX snapshot → pull GHOSTS' own activity
     log from `Ghosts.Api`'s database → revert again, unconditionally
   - Writes `windows-ghosts-<job>.json` → `GHOSTS_SANDBOX_RESULTS_DIR`,
-    `dashboard/sandbox.go`'s `sandboxResult` shape, `"route":
+    the same result shape the other sandbox routes use, with `"route":
     "windows-ghosts"` so the result page's isolation description (#327)
     renders correctly instead of the default (wrong, for this route)
     claim of "no forwarding, strict libvirt NIC filter"
@@ -155,7 +156,7 @@ Two constraints specific to this chain:
 | Worker | `honeypot-ghosts-sandbox-worker.path` → `.service`, never run by the dashboard | `honeypot-windows-sandbox-worker.path` → `.service` |
 | Results | `windows-ghosts-<job>.json` → `GHOSTS_SANDBOX_RESULTS_DIR`; dashboard only reads | `windows-<job>.json` → `WINDOWS_SANDBOX_RESULTS_DIR` |
 | Trust boundary | Dashboard never touches libvirt, Docker, or WinRM directly | Same |
-| Detail page | `GET /sandbox/{job}` (shared route, `Route` field distinguishes) | `GET /sandbox/{job}` |
+| Detail page | `GET /api/v1/sandbox/{job}` (shared route, `Route` field distinguishes) | `GET /api/v1/sandbox/{job}` |
 
 No new trust boundary. The dashboard container stays unprivileged and never
 calls `virsh`, `docker`, or WinRM directly — same guarantee `sandbox/windows`

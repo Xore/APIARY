@@ -41,16 +41,23 @@ git clone https://github.com/biniamf/ai-reverse-engineering \
 
 # Copy and configure .env
 cp ai-reverse-engineering/.env.example ai-reverse-engineering/.env
-# Edit: set API_BASE, MODEL_NAME, API_KEY
 ```
+
+`docker-compose.ghidra.yml` sets `API_BASE`, `API_KEY` and `MODEL_NAME` in
+its own `environment:` block, and a compose `environment:` entry wins over
+`env_file` — so editing those three keys in `.env` has no effect on this
+deployment. The model is selected with `REVDECK_MODEL` (default `qwen3:14b`,
+the same model the `ghidra`/`sessions`/`revdeck` slots have shared since the
+#568 re-evaluation); everything else `revdeck` needs (`GHIDRA_API_BASE`,
+`CHATS_DIR`, `LOG_FILE`) is fixed in the compose file.
 
 ## Recommended LLM Configs
 
 ```dotenv
-# Option 1: Local Ollama (free, private)
-API_BASE=http://127.0.0.1:11434/v1
-API_KEY=not-used
-MODEL_NAME=qwen2.5-coder:7b-instruct-q4_K_M
+# Option 1: Local Ollama (free, private) -- what ships today
+API_BASE=http://ollama:11434/v1
+API_KEY=ollama
+MODEL_NAME=qwen3:14b
 
 # Option 2: OpenRouter (hosted)
 API_BASE=https://openrouter.ai/api/v1
@@ -58,16 +65,21 @@ API_KEY=<your-key>
 MODEL_NAME=anthropic/claude-opus-4.8
 ```
 
+Option 2 is illustrative only: the compose file hard-pins `API_BASE` to the
+`ollama` service, so reaching a hosted provider means editing
+`docker-compose.ghidra.yml`, not `.env`.
+
 ## Start the full stack
 
 ```bash
 cd analysis/ghidra
 docker compose -f docker-compose.ghidra.yml --profile revdeck up -d
 
-# Pull the independently selected interactive model into the shared Ollama
-# volume (the analysis-host installer only guarantees the Ghidra model).
+# Pull the shared analysis model into the Ollama volume. The analysis-host
+# installer already pulls it (--model, default qwen3:14b); this is the manual
+# equivalent for a stack brought up without it.
 docker compose -f docker-compose.ghidra.yml exec ollama \
-    ollama pull qwen2.5-coder:7b-instruct-q4_K_M
+    ollama pull qwen3:14b
 ```
 
 Open http://127.0.0.1:19500 — the compose file maps host port `19500` to
@@ -162,10 +174,16 @@ for `attack_surface_triage`, `vulnerability_hypothesis`, or any deeper dive a
 particular sample warrants.
 
 The local default comes from the task-specific
-[model evaluation](../../../local-llm-model-evaluation.md): it tied for
-the highest Rev·Deck score, passed the x86 intent case, and does not depend on
-the thinking-control field that the current upstream Rev·Deck client does not
-send.
+[model evaluation](../../../local-llm-model-evaluation.md). It was
+`qwen2.5-coder:7b-instruct-q4_K_M` — which tied for the highest Rev·Deck score,
+passed the x86 intent case, and does not depend on the thinking-control field
+that the current upstream Rev·Deck client does not send. The #568 re-evaluation
+since promoted `qwen3:14b` to *all three* slots (ghidra, sessions, revdeck) and
+superseded that selection: `qwen3:14b` scores lower on Rev·Deck (87.5% vs
+93.8%) but is the only candidate passing every injection-resistance and
+critical-severity gate across all three slots, which disqualifies the 7b
+baseline on its own gate column. Override with `REVDECK_MODEL` if a deployment
+wants to re-pin the older per-slot choice.
 
 ## Evidence Grounding
 

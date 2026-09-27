@@ -23,7 +23,9 @@ design, since it reads live malware.
 | `rules/upstream/` | Vendored from [`Xore/Honeypot`](https://github.com/Xore/Honeypot) `yara-rules/`. **Do not edit** — changes here are lost on the next sync |
 | `rules/index.yar` | Generated include list. What the scanner loads |
 | `rules/upstream.lock` | The pinned upstream commit and a hash of the vendored tree |
-| `rules/upstream/DROPPED` | Upstream files this corpus does **not** include, with yara's reason |
+| `rules/upstream/MANIFEST` | Per-file record of what the pinned upstream commit contained, as vendored vs dropped |
+| `rules/upstream/AUTO_RULES` | The rule names defined under `upstream/auto/` |
+| `rules/upstream/DROPPED` | Upstream files this corpus does **not** include, with yara's reason. Currently empty |
 
 `scripts/check-yara-corpus.sh` enforces in CI that `rules/upstream/` still
 matches the lock and that `index.yar` names exactly the vendored files. It
@@ -51,10 +53,12 @@ entirely rather than degrading to "everything except that rule". So the sync
 compiles every file before adopting it and drops the ones that fail, rather than
 handing the scanner a corpus that will not load. Two things get a file dropped:
 
-- **It does not compile.** As of the pinned commit, four of upstream's six
-  curated files declare strings their conditions never reference, which yara
-  treats as an error. `rules/upstream/DROPPED` has the details; they come back
-  automatically once upstream fixes them and the sync is re-run.
+- **It does not compile.** yara treats declared-but-unreferenced strings as an
+  error, and an earlier pinned commit had four of upstream's six curated files
+  failing that way. `rules/upstream/DROPPED` records any file the current
+  pinned commit loses and why; it is currently **empty** — all six curated
+  files compile and are vendored. A dropped file comes back automatically once
+  upstream fixes it and the sync is re-run.
 - **It redefines a rule name** already used by `honeypot.yar` or an
   earlier-sorted upstream file. A duplicate identifier is also a hard error.
 
@@ -69,6 +73,7 @@ compile" is only a useful answer from the compiler that will load it.
   index is a list of filenames, `rules_sha256` would not move when upstream
   changed every rule but no filename.
 - `auto_rules` — names defined under `upstream/auto/`. These are generated from
-  observed samples and are broad by construction (`AutoGen_Exe` fires on three
-  of twenty stock .NET strings, so it matches most .NET binaries). Treat an auto
-  hit as "seen something like this before", not as a family identification.
+  observed samples and are broad by construction (`AutoGen_190460923_exe`
+  matches on 8 of 20 stock .NET strings, so it matches most .NET binaries).
+  Treat an auto hit as "seen something like this before", not as a family
+  identification.

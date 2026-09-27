@@ -188,10 +188,19 @@ Elasticsearch store, build the **exact production prompt**
 — not a reimplementation), run it through a model, and print the raw
 reply for a human or an agent to read and judge: is each claim actually
 grounded in the real captured commands, does it surface something useful,
-not "does it match word-for-word." Three stages because `hp-llm-worker`
-joins only an internal synthetic-only network while `LLM_ENABLED` stays
-false, by design — this stays out of that isolation rather than routing
-around it:
+not "does it match word-for-word." Three stages because the probe does not
+flip any of the worker's safe-by-default gates or talk to the model from
+inside the running container. On the Safe #66 base
+(`llm-worker/docker-compose.yml`) `hp-llm-worker` joins only the internal
+`synthetic-only` network and `LLM_ENABLED` stays false, so that is the
+whole story there. On the authorized deployment (#1751's
+`docker-compose.captured-data-deploy.yml`, which composes in
+`docker-compose.captured-data.yml`) the container *does* get
+`honeypot-llm-data` and `honeypot-llm` and an `OLLAMA_URL` — but
+`LLM_ENABLED` and `LLM_ALLOW_CAPTURED_DATA` are still
+`${...:-false}` there, because the overlay does not touch them. Either
+way the gates are the reason this is out-of-band rather than an in-band
+call:
 
 ```bash
 # stage 0: pull real command data from Elasticsearch (read-only _search)
