@@ -36,8 +36,10 @@ export default {
   // than a preference. Read with the note at the bottom of this file.
   ignorePatterns: ['/tsconfig.json'],
   reporters: ['clear-text', 'progress', 'html', 'json'],
-  htmlReporter: { fileName: 'index.html' },
-  jsonReporter: { fileName: 'mutation.json' },
+  // No fileName overrides: the defaults are already reports/mutation/... and
+  // setting them to a bare name puts the report in the package root, which is
+  // both outside the .gitignore entry below and outside the path the nightly
+  // uploads.
   // `string` is the mutator that earns its place here -- this is a parser, so
   // the interesting mutants are the ones that change a literal it compares
   // against. The default set also includes `objectLiteral` and `class`, which

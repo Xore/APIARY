@@ -28,7 +28,39 @@ below.
   at `/var/image-sbom/`, plus a `trivy sbom` scan over that same file
   (#3321, [below](#digest-bound-sboms-for-the-two-dashboard-images-3321));
 - CodeQL for Go, JavaScript/TypeScript, and Python;
-- dependency review on pull requests.
+- dependency review on pull requests;
+- fast-check properties for the dashboard-next appearance cookie
+  (9 properties at 100 runs on a pinned seed, inside the ordinary
+  `frontend-next` unit job — the file matches `vitest.config.ts`'s own include
+  glob, so it costs no extra step, install, or second run). Pinned because a
+  property suite whose cases change every run reports "green" for a defect that
+  is still there; the nightly's unseeded high-run search is the lane that is
+  *meant* to move (#3326, [record](frontend-mutation-pilot.md)).
+
+### Advisory frontend testing pilot (#3326)
+
+`frontend-testing-pilot.yml` runs nightly (`41 4 * * *`) and on
+`workflow_dispatch`, and has **no `pull_request` trigger** — the property pass
+that PRs depend on is already the one in `npm test` above, and the mutation run
+is a measurement rather than a check.
+
+| Job | What it does | Failure means |
+|---|---|---|
+| `property` | 100-run pinned pass, then a 2000-run `FC_SEED=random` search; opens an issue on a counterexample | a real defect, not a score — a counterexample is shrunk small enough to paste into a generator |
+| `mutation` | Stryker over two modules, `continue-on-error: true`, no `thresholds` block | nothing; the run records killed/survived and uploads the report |
+
+The asymmetry is deliberate and is the "no gate" requirement in the two places
+it can be expressed. Nothing anywhere reads the mutation score, and there is no
+threshold to breach: a number that has already started failing CI has stopped
+being a measurement. A property counterexample is the opposite case — it is a
+defect with a reproducer, and a scheduled run's own red X is not an alert
+anyone is watching, which is why that job files an issue instead (the same
+reasoning as #2222 in `diagnostics.yml`).
+
+Both jobs derive their node major from the dashboard-next Dockerfile via
+`scripts/node-runtime-major.sh` rather than writing a second copy (#3331), and
+both run on GitHub-hosted runners only: a measurement has nothing to buy from
+the homeserver, and keeping the pilot off that box costs it nothing.
 
 Container images are built for pull requests. A push to `main` or a version tag
 publishes the custom images to the repository's GitHub Container Registry.
@@ -196,7 +228,10 @@ that ran and passed. Both are now fixed.
 Every upload uses `actions/upload-artifact` pinned by SHA, with a 7-day
 retention — long enough that the evidence is still there when a red run is
 picked up the following week, short enough that a busy `main` does not
-accumulate them indefinitely.
+accumulate them indefinitely. The nightly mutation pilot (#3326) is the one
+exception at 14 days: it runs once a day rather than once a PR, and its report
+is the record a later ratchet decision is read off, so the gap between two runs
+has to be coverable by a reviewer who was away for a fortnight.
 
 | Lane | Artifact | Uploaded |
 | --- | --- | --- |
@@ -205,6 +240,7 @@ accumulate them indefinitely.
 | Dashboard-next browser matrix | `playwright-report/` + `test-results/` (HTML report, per-failure traces and screenshots) | `failure()` |
 | Dashboard backend-service (Rust) | `cargo-test.log` | `failure()` |
 | `scripts-and-compose` pytest rows | `ml-worker-junit.xml`, `auth-events-worker-junit.xml` | `always()` |
+| Frontend mutation pilot (nightly) | `frontend-mutation-report` (`reports/mutation/` + `stryker.log`) | `always()`, 14-day retention |
 
 JUnit XML is uploaded on `always()`, not only on failure, because it is the
 record of *what ran* rather than of what the exit code happened to be. The

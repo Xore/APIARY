@@ -91,6 +91,7 @@ Analysis and sandbox components:
 ## Records — audit trails
 
 [runtime compatibility record](runtime-compatibility-record.md) ·
+[frontend mutation and property testing pilot (#3326)](frontend-mutation-pilot.md) ·
 [security fixes](security-fixes.md) ·
 [approved local-model qualification](analysis/ghidra/models/approval-record.md) ·
 [container writable-layer audit, 2026-09-03](container-writable-layer-audit-2026-09-03.md) ·

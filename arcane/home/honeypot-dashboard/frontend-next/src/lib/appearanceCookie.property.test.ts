@@ -32,27 +32,69 @@ import {
 import { isThemeName } from './prefs'
 
 /** fast-check reads no environment of its own, so the pilot's knobs are ours.
- *  `random` means "pick one, this run" — fast-check's own default is
- *  `Date.now()`, so omitting the seed is exactly that. */
+ *
+ *  The default seed is a constant and that is load-bearing, not tidiness. With
+ *  no seed fast-check uses `Date.now()`, so an unseeded run draws a different
+ *  100 cases every time — which is fine for a search and actively harmful for a
+ *  test: a real defect in the pair then goes red on one PR and green on the
+ *  next, and "green" is indistinguishable from "fixed". That is exactly what
+ *  happened here. Narrowing prefs.ts's copy of the theme-shape rule from {2,31}
+ *  to {2,30} was caught on one of three consecutive runs of this file, because
+ *  whether a name at the top of the length bound gets drawn at all is luck.
+ *  A test whose failures come and go teaches the reader to re-run it.
+ *
+ *  `FC_SEED=random` is how you buy the luck back, and only the nightly sets it:
+ *  that pass is a search, and a counterexample it finds is worth pinning into a
+ *  generator here (which is the whole point of running it). */
+const DEFAULT_SEED = 20260927
 const seed = process.env.FC_SEED
 const PARAMS: fc.Parameters<unknown> = {
   numRuns: Number(process.env.FC_NUM_RUNS ?? 100),
-  ...(seed && seed !== 'random' ? { seed: Number(seed) } : {}),
+  // 'random' means "pick one, this run", which is fast-check's own default and
+  // is therefore expressed by leaving the seed out entirely.
+  ...(seed === 'random' ? {} : { seed: seed === undefined ? DEFAULT_SEED : Number(seed) }),
 }
 
 // The shape appearanceCookie.ts enforces, as a generator rather than as a regex
 // restated from it: a lowercase letter, then 2..31 of [a-z0-9-]. A generator
-// built from the rule cannot drift from the rule the way a copied literal can,
-// and it produces names at both ends of the length bound, which is where an
-// off-by-one in the bound would show.
+// built from the rule cannot drift from the rule the way a copied literal can.
+//
+// The tail is generated at full length and then cut, so the name's length comes
+// from the draw rather than from fast-check's `size`: an array asked for 2..31
+// comes back short, and over a 100-run pass the longest name that produced was
+// 15 characters. This is a distribution of plausible names, not a sweep of the
+// bound — `themeLength` below is what covers the bound, exhaustively.
 const THEME_TAIL = 'abcdefghijklmnopqrstuvwxyz0123456789-'.split('')
 const THEME_HEAD = 'abcdefghijklmnopqrstuvwxyz'.split('')
 const themeName = fc
   .tuple(
     fc.constantFrom(...THEME_HEAD),
-    fc.array(fc.constantFrom(...THEME_TAIL), { minLength: 2, maxLength: 31 }),
+    fc.oneof(fc.constantFrom(2, 3, 30, 31), fc.integer({ min: 2, max: 31 })),
+    fc.array(fc.constantFrom(...THEME_TAIL), { minLength: 31, maxLength: 31 }),
   )
-  .map(([head, tail]) => head + tail.join(''))
+  .map(([head, length, tail]) => head + tail.slice(0, length).join(''))
+
+/** Names at, either side of, and well past the length bound — drawn as lengths
+ *  and spelled out, rather than sampled as strings.
+ *
+ *  This is the case the cross-layer property below exists for, and it is worth
+ *  being precise about why it cannot be left to the sampling generators. A
+ *  one-character change to the theme-shape bound in either file is invisible to
+ *  every test in the repository except one, and it announces itself only as a
+ *  name of length exactly 32 or exactly 33. Put those two strings in a
+ *  near-miss list of two dozen entries and a 100-run pass reaches them
+ *  sometimes: narrowing prefs.ts from {2,31} to {2,30} was caught on one of
+ *  three consecutive runs, and pinning the seed afterwards turned the
+ *  *other* direction — a cookie widened to {2,32}, which needs a 33-character
+ *  name — into a permanent silent pass, because that seed's hundred draws
+ *  happened not to include it.
+ *
+ *  Enumerating the lengths removes the coin flip. 1 and 2 are under the
+ *  three-character minimum, 3 is it, 30 and 31 are the top of the range both
+ *  files currently accept, 32 is the longest a `{2,30}` applier refuses, 33 is
+ *  the shortest a `{2,32}` cookie would wrongly admit, and 34 and 40 are past
+ *  anything a plausible bound edit would reach. */
+const themeLength = fc.constantFrom(1, 2, 3, 4, 30, 31, 32, 33, 34, 40)
 
 /** The closed set the cookie type admits. `system` is deliberately not among
  *  the generated modes even though the wider codebase uses it: the type cannot
@@ -214,6 +256,25 @@ describe('appearance cookie round-trip properties (#3326)', () => {
       fc.property(cookieValue, (raw) => {
         const { mode } = parseAppearance(raw)
         expect(mode === null || mode === 'light' || mode === 'dark').toBe(true)
+      }),
+      PARAMS,
+    )
+  })
+
+  it('agrees with the applier about a name at every length near the bound', () => {
+    // The theme half of the cross-layer invariant again, with the length swept
+    // rather than sampled, and this is the only assertion in the repository
+    // that survives a one-character edit to the theme-shape bound in either
+    // file. `themeLength` enumerates those lengths; see its comment for what a
+    // sampled list of near-miss strings does and does not buy. The candidate is
+    // one repeated character rather than a varied name, because the bound is a
+    // statement about length alone — a mixed name of a given length is the
+    // same case, and varying it would only make a miss likelier.
+    fc.assert(
+      fc.property(themeLength, (length) => {
+        const candidate = 'a'.repeat(length)
+        const { theme } = parseAppearance(`light:${candidate}`)
+        if (theme !== null) expect(isThemeName(theme)).toBe(true)
       }),
       PARAMS,
     )
