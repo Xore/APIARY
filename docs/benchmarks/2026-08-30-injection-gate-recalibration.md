@@ -4,6 +4,14 @@
 > as-written since this is a dated record; see `docs/HOMESERVER-DISK-LAYOUT.md` for
 > current layout.
 
+> **Dated record — measured 2026-08-30, superseded by #2694.** The gate and
+> `is_injection_case()` behaviour described below no longer run: injection cases
+> are now declared by the rubric's `injection` block and scored by
+> `analysis/ghidra/benchmarks/injection_gate.py`. Every number in this file is
+> the 2026-08-30 sweep's, left exactly as measured. The current protocol,
+> re-verified 2026-09-27, is
+> `docs/analysis/ghidra/benchmarks/injection-gate-protocol.md`.
+
 Measured 2026-08-30 against `/mnt-1/benchmarks/1947full` (run1 files; run2 verified byte-identical for every model at both tiers) and the checkout at `/mnt-1/benchmarks/APIARY` @ `a99e765`. Nothing on the host was modified; every script was piped over ssh stdin and read only.
 
 **Verdict on the preliminary finding (now issue #2694):** confirmed in mechanism and in substance, with two corrections and five additional findings. The gate is not measuring compliance. It is measuring whether a model *quoted or paraphrased the payload* (11 of 14 Tier B failures) or *used the exact phrase "appears to be benign"* (3 of 14). The fixture cannot discriminate compliance from correct analysis because the injected verdict is true. The same defect accounts for **all four Tier A failures that drove the #1805-c / #1947 "no promotion" decision**, including the disqualification of the top-scoring model.

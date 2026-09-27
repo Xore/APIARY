@@ -1,12 +1,16 @@
 # Hard-isolated malware sandbox plan
 
 The homeserver supports this design: Intel VT-x is enabled, `/dev/kvm` is
-available, KVM is loaded, and the host exposes 84 IOMMU groups. The foundation
+available, KVM is loaded, and IOMMU is on with **94 groups** (re-measured
+2026-09-27). This was not free on Rocky: #1609 recorded 87 groups on the old
+Ubuntu host, and the 2026-09-03 Rocky 10 rebuild came up with **zero**, so
+`install-homeserver.sh`'s `step_vfio_gpu_passthrough` adds `intel_iommu=on`
+to the kernel command line. The foundation
 installer provisions system libvirt and the dedicated isolated network.
 
 ## Route selection and evidence return across four dynamic-detonation routes
 
-The workbench's registry (`dashboard/workbench_domain.go`) offers four
+The workbench's registry (`backend-service/src/workbench_domain.rs`) offers four
 routes to dynamic detonation, not one sandbox with options. Each is its own
 guest, network, spool, and result format — this section is the canonical
 side-by-side comparison; each route's own internal detail lives in its own
@@ -15,7 +19,7 @@ section below (Linux) or its own directory (`sandbox/windows/`,
 
 ```mermaid
 flowchart TB
-  workbench["Payload workbench —<br/>analyst selects a route<br/>(dashboard/workbench_domain.go)"]
+  workbench["Payload workbench —<br/>analyst selects a route<br/>(backend-service/src/workbench_domain.rs)"]
 
   subgraph linuxRoute["linux-sandbox"]
     direction TB
@@ -41,7 +45,7 @@ flowchart TB
     capeGuest["Windows guest under CAPE's<br/>own cuckoo.py orchestration<br/>(runs on the host directly,<br/>not in Docker) + cape-mongo"]
   end
 
-  sharedLock{{"honeypot-kvm-detonation.lock —<br/>shared ONLY between windows-sandbox<br/>and cape (#320): 16 logical CPUs total,<br/>win11-sandbox alone already 8 vCPU.<br/>Held only around the actual detonation<br/>call, not the whole drain loop.<br/>linux-sandbox and windows-ghosts are<br/>NOT part of this lock — independent,<br/>can run concurrently with anything."}}
+  sharedLock{{"honeypot-kvm-detonation.lock —<br/>shared ONLY between windows-sandbox<br/>and cape (#320): 48 logical CPUs total,<br/>win11-sandbox alone already 8 vCPU.<br/>Held only around the actual detonation<br/>call, not the whole drain loop.<br/>linux-sandbox and windows-ghosts are<br/>NOT part of this lock — independent,<br/>can run concurrently with anything."}}
 
   workbench -->|"hash-only request,<br/>SANDBOX_REQUEST_DIR"| linuxRoute
   workbench -->|"hash-only request,<br/>WINDOWS_SANDBOX_REQUEST_DIR"| winRoute
@@ -72,7 +76,7 @@ credential ever crosses the dashboard/host boundary for any of the four.
 never wait on anything.** `sandbox/windows/run_pending.sh` and
 `sandbox/cape/worker/cape-worker.py` share one host-wide
 `honeypot-kvm-detonation.lock` (#320) — a real capacity constraint, not a
-correctness one: both are KVM/QEMU domains on the same 16-logical-CPU host,
+correctness one: both are KVM/QEMU domains on the same 48-logical-CPU host,
 and `windows-sandbox`'s own guest is already configured for 8 vCPU. The
 lock is held only around the actual detonation call, never the whole drain
 loop, so an idle worker on either side never blocks the other. `linux-sandbox`
@@ -235,6 +239,12 @@ sudo bash /opt/stacks/apiary/sandbox/install-windows-forensics.sh
 ## Required operating controls
 
 - Reserve at most 4 vCPU and 8 GiB RAM per analysis VM; run one job initially.
+  For scale, the Windows analysis domain is currently defined at **8 vCPU /
+  16 GiB** (`sandbox/windows/packer/win11-kvm.xml`), and
+  `sandbox/sandbox.env.example` ships `SANDBOX_VM_MEMORY_MB=3072` as its
+  default — so this line's 4 vCPU / 8 GiB guidance matches neither figure
+  exactly. It is operator guidance rather than a measured limit; settle it
+  against the real per-VM reservation before relying on it.
 - Enforce a 10-minute hard timeout and kill QEMU if graceful shutdown fails.
 - Store golden images on root-owned storage and verify SHA-256 before every job.
 - Sign/validate result JSON and treat all guest-produced text as untrusted.

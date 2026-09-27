@@ -4,6 +4,13 @@
 > as-written since this is a dated record; see `docs/HOMESERVER-DISK-LAYOUT.md` for
 > current layout.
 
+> **Plan of record, written 2026-09-06 (epic #3079) — its §0 already folds in later
+> changes; the rest is as-planned, not as-shipped.** The batch leg shipped as
+> `analysis/ghidra/training/` (`train.py`, `export_to_ollama.sh`, `compose.yaml`,
+> `TOOLCHAIN.md`); the interactive half shipped as the Arcane `unsloth` stack
+> rather than an installer (#3092). `TOOLCHAIN.md`'s "no smoke test yet" still
+> stands — nothing in this plan has been exercised end to end.
+
 **Written** 2026-09-06 from live inspection of `homeserver`, every open benchmark
 issue, and the current Unsloth / llama.cpp / Ollama documentation. Sits beside
 `2026-09-05-1947-resume-plan.md`, which remains the authority on the #1947 sweep
