@@ -62,6 +62,22 @@ Because RFC 1350 TFTP switches to a dynamic transfer-ID port, the internal
 `tftp-relay` keeps public UDP 69 stable while forwarding that exchange to
 Dionaea inside `honeynet`; it is infrastructure and is not shown as a sensor.
 
+## Evidence that is not a sensor
+
+One source is deliberately **not** in the table above, because it is not a
+decoy and does not pretend to be one: an **authorized Cisco Secure FMC
+management-audit export**. A sensor record says an attacker aimed something
+here; a management-audit record says an operator changed something there, and
+the two must never be read as the same kind of claim. The normalized shape such
+an export would be reduced to — and the invariants that keep a request-shaped
+record from ever becoming a completed-change event — are specified in
+[FMC-MANAGEMENT-AUDIT-CONTRACT.md](FMC-MANAGEMENT-AUDIT-CONTRACT.md) (#3215).
+That is a **contract only**: no normalizer, no connector, no live audit reader,
+no index, no new sensor, no compose entry and no decoy exist or are authorized
+by it, and #3215 stays blocked until an authorized audit source does. Cisco
+Secure FMC is also a different product from this table's `cisco-asa-honeypot`
+persona and never borrows its identity.
+
 Filebeat writes sensor events to versioned `honeypot-v2-*` data streams. The
 `elasticsearch-setup` one-shot maps each original `honeypot` object as
 `flattened`, so heterogeneous Dionaea/Conpot/Cowrie fields cannot reject one
