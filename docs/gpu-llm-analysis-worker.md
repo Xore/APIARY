@@ -86,9 +86,18 @@ worker milestones.
 **Settled by [#602](https://github.com/Xore/APIARY/issues/602)** — an
 earlier draft of this table (before #602) named the card as a Quadro RTX
 4000 at compute capability 7.5/Turing; that card was never on this host.
-`lspci` shows a single AD104GL controller and containers enumerate exactly
-one device. Also pinned as the runtime-governance authority in
+`lspci` showed a single AD104GL controller and containers enumerated one
+compute device. Also pinned as the runtime-governance authority in
 `analysis/ghidra/models/approved-models.json`.
+
+> **A second card arrived after #602.** #1539 recorded that the box also
+> carries a **Quadro P2200**, reserved for the Windows sandbox VM's
+> passthrough. Every VRAM budget in this document is still correct — they
+> are budgets against the Ada, and the P2200 is not part of the compute
+> pool — but the host is no longer single-GPU, so "containers enumerate one
+> device" no longer describes the machine. It is why the Ollama reservation
+> in `analysis/ghidra/docker-compose.ghidra.gpu.yml` pins `device_ids` to
+> the Ada's UUID rather than using `count: all`.
 
 | Fact | Value | Verify with |
 |---|---|---|
@@ -501,10 +510,15 @@ Mirrors the pattern `ml-anomalies` already established
   ("any SSE/Redis wake-up path remains optional and non-authoritative");
   polling has not been shown insufficient yet.
 - **Delivered:** semantic search over sessions using `nomic-embed-text`
-  embeddings stored as a `dense_vector` (384-dim) field on `llm-analysis`
+  embeddings stored as a `dense_vector` (768-dim) field on `llm-analysis`
   docs, queried with ES kNN search — `GET /api/v1/llm-search`
   (`main.rs:341`, `llm_search.rs`, over the `llm-analysis` index's
-  `doc_type: session` documents). This section originally deferred it
+  `doc_type: session` documents). The dimensionality is 768, not the 384
+  this document originally stated: #151 confirmed the model's real native
+  output live against `POST /api/embed` and `llm-worker/worker.py` pins
+  `EMBEDDING_DIMS = 768`, rejecting a response of any other width outright
+  rather than indexing it into a mapping it cannot satisfy. This section
+  originally deferred it
   pending U1–U3 stability; it has since shipped, so the list above is not
   a statement of current scope.
 
