@@ -42,7 +42,7 @@ reported alongside accuracy rather than ignored.
 
 ### 2026-08-25 — Tier 1 harness landed; Tier 2 blocked
 
-**Tier 1 (behaviour) is live.** `evaluate_detectors.py` runs six contract
+**Tier 1 (behaviour) is live.** `evaluate_detectors.py` runs seven contract
 checks against a candidate over the per-sensor fixture corpus and emits a
 hashed JSON report. It is the first reusable acceptance bar `ml-worker` has
 had, and it makes "evaluate this candidate offline" answerable at all.
