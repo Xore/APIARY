@@ -400,12 +400,31 @@ def test_script_does_not_resurrect_what_generate_just_rebuilt():
 class _StubElasticsearch:
     """Just enough of ES to drive composable-templates.js end to end."""
 
-    def __init__(self, index_templates: dict, legacy_templates: dict):
+    def __init__(self, index_templates: dict, legacy_templates: dict, indices=()):
         self.index_templates = dict(index_templates)
         self.legacy_templates = dict(legacy_templates)
+        # #3283: the arkime_sessions3-* names the cluster already holds, which
+        # `generate` adopts onto its policy. Empty by default so the #3343
+        # assertions stay about templates; the adoption contract itself is
+        # asserted in tests/docs/test_3283_fix.py, which owns that behaviour.
+        self.indices = list(indices)
         self.deleted: list[str] = []
         self.put_index_templates: dict = {}
         self.calls: list[str] = []
+
+    def compose(self, probe: str) -> dict:
+        """Answer `_simulate_index` by composing what the script really sent.
+
+        Elasticsearch composes every matching composable template, so a canned
+        reply would let the script's own post-install verification pass no
+        matter what it installed. Composing from `put_index_templates` means a
+        template that dropped a setting fails here instead of in production.
+        """
+        pattern = probe.replace("composable-check", "*")
+        for tmpl in self.put_index_templates.values():
+            if pattern in (tmpl.get("index_patterns") or []):
+                return tmpl.get("template", {})
+        return {}
 
     def handle(self, method: str, path: str, body) -> tuple[int, dict]:
         self.calls.append(f"{method} {path}")
@@ -426,12 +445,24 @@ class _StubElasticsearch:
             self.index_templates[name] = body
             return 200, {"acknowledged": True}
         if method == "POST" and path.startswith("/_index_template/_simulate_index/"):
-            return 200, {"template": {"settings": {"index": {"number_of_replicas": "0"}}}}
+            return 200, {"template": self.compose(path.rsplit("/", 1)[-1])}
         if method == "GET" and path.startswith("/_template/"):
             name = path.rsplit("/", 1)[1]
             if name in self.legacy_templates:
                 return 200, {name: self.legacy_templates[name]}
             return 404, {"error": "resource_not_found_exception"}
+        # #3283: the policy `generate` installs immediately before the template
+        # that names it, so the ordering that makes that safe can never depend
+        # on this stub refusing the call.
+        if method == "PUT" and path.startswith("/_ilm/policy/"):
+            return 200, {"acknowledged": True}
+        if method == "GET" and path.startswith("/_cat/indices/"):
+            return 200, [{"index": name} for name in self.indices]
+        if method == "GET" and path.endswith("/_settings?flat_settings=true"):
+            name = path.lstrip("/").split("/", 1)[0]
+            return 200, {name: {"settings": {}}}
+        if method == "PUT" and path.endswith("/_settings"):
+            return 200, {"acknowledged": True}
         raise AssertionError(f"stub Elasticsearch got an unexpected {method} {path}")
 
 
