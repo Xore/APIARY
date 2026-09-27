@@ -13,7 +13,12 @@ sudo ./scripts/tune-rocky10.sh             # apply
 > install it now has differs from the one this script was written against. Read
 > the checklist in "Verifying afterwards" as *the intended end state*, not as a
 > description of the box — re-measured read-only over `ssh homeserver` on
-> 2026-09-27, it currently fails two of its six lines:
+> 2026-09-27, it currently fails two of its six lines (the two `zramctl` /
+> `swapon --show` lines; the other four commands pass). The bullets below are
+> keyed to the **tuning** numbers in the table, not to those six command lines,
+> so they list three tunings rather than two: a tuning can be inapplicable as a
+> durable change while the one command that observes it still reads correct
+> today. That is exactly the case for #2 and #4.
 >
 > - **#1 (zram) is not in effect.** `zram-generator` is not installed, no zram
 >   module is loaded, `zramctl` prints nothing, and `swapon --show` lists only
