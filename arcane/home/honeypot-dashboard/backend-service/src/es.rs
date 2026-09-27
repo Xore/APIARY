@@ -7,6 +7,7 @@
 use elasticsearch::{
     cluster::ClusterHealthParts,
     http::transport::{SingleNodeConnectionPool, TransportBuilder},
+    indices::IndicesGetSettingsParts,
     params::{OpType, Refresh},
     BulkOperation, BulkParts, Elasticsearch, SearchParts,
 };
@@ -50,6 +51,63 @@ pub const EVENT_INDICES: &[&str] = &[
     "zeek-proxy-v1-*",
     "huginn-v1-*",
     "traefik-v1-*",
+];
+
+/// Every index family THIS TIER WRITES TO, as the index expressions
+/// `/readyz` asks Elasticsearch about (`Es::write_blocked`, #3317).
+///
+/// The complement of `EVENT_INDICES` above, not a copy of it: a read-only
+/// index somebody else owns going write-blocked is that tier's outage, but
+/// a write-blocked index in this list means the dashboard can no longer
+/// record what it observes — which is the difference between "the process
+/// is up" (what /livez says) and "the process can do its job" (what
+/// /readyz has to answer).
+///
+/// `dashboard-*` is deliberately one wildcard rather than the twenty-odd
+/// concrete `dashboard-*-v1` names behind it: every serving-tier index
+/// uses that prefix, and a pattern cannot fall out of date the way a
+/// hand-copied list of them can. The unprefixed families are named
+/// individually because nothing about their names is predictable — each is
+/// the sole write target of one bundled worker loop.
+///
+/// The list drifts in one direction harmlessly and in the other loudly. An
+/// index missing from it goes unchecked, so readiness stays green on a
+/// block nobody is watching; an entry for an index this tier only *reads*
+/// reports not-ready during another component's outage, which trains
+/// operators to ignore the endpoint. So when a new write target is added,
+/// add it here, and when in doubt leave it out rather than widening the
+/// claim.
+pub const WRITE_TARGET_FAMILIES: &[&str] = &[
+    // Serving tier: config, users, credentials, IP blocks, report
+    // definitions/generated, workbench runs+recipes, payload inventory and
+    // bytes, canary tokens, problem reports, webhook delivery, ML acks.
+    "dashboard-*",
+    // Bundled worker loops.
+    "attackers-v1",              // attacker_identity
+    "attacker-clusters-v1",      // correlator
+    "campaigns-v1",              // correlator
+    "cred-reuse-v1",             // correlations
+    "flow-links-v1",             // correlations
+    "ioc-verdicts-v1",           // attacker_identity
+    "overview-rollup-v1",        // rollups
+    "geo-rollup-v1",             // rollups
+    "attack-rollup-v1",          // rollups
+    "gpu-job-queue",             // gpu_queue, vault_rag
+    "agent-intrusion-campaigns", // agent_intrusion
+    // es_importer's mirrors of the external analysis workers. Its own
+    // sources table keys these off env vars, so a deployment that never
+    // set one simply has no such index and never gets asked about it.
+    "yara-analysis-v1",
+    "ghidra-analysis-v1",
+    "ghidra-report-artifacts-v1",
+    "sandbox-analysis-v1",
+    "sandbox-export-artifacts-v1",
+    "revdeck-analysis-v1",
+    "cape-analysis-v1",
+    "cowrie-ttylog-v1",
+    "mailoney-mail-v1",
+    "github-analysis-v1",
+    "reporter-metrics-v1",
 ];
 
 /// The "is this a login/auth attempt" query fragment (#1611 workstream C),
@@ -117,17 +175,27 @@ impl Es {
     pub fn connect(url: &str) -> anyhow::Result<Self> {
         // Transport::single_node's own default carries no request timeout at
         // all -- confirmed live during #1628's preflight: backend-worker's
-        // /healthz calls this same shared client's ping() (main.rs's healthz
-        // handler), and a slow/stuck query from any of its four bundled
-        // worker loops (correlator's aggregation was hitting Elasticsearch's
-        // own too_many_buckets_exception on every cycle against real data,
+        // /healthz handler used to share this same client, and a slow/stuck
+        // query from any of its four bundled worker loops (correlator's
+        // aggregation was hitting Elasticsearch's own
+        // too_many_buckets_exception on every cycle against real data,
         // plausibly saturating the cluster's search queue for a while) could
-        // therefore hang ping() indefinitely too, since nothing ever timed
-        // out client-side -- the container never crashed, /healthz just
-        // never returned, and something external kept restarting it every
-        // few minutes on the resulting healthcheck failure. 30s bounds the
-        // worst case without punishing legitimately slower real-data
-        // queries the way CI's fixture-sized indices never needed to.
+        // therefore hang the health probe indefinitely too, since nothing ever
+        // timed out client-side -- the container never crashed, /healthz just
+        // never returned, and something external kept restarting it every few
+        // minutes on the resulting healthcheck failure. 30s bounds the worst
+        // case without punishing legitimately slower real-data queries the
+        // way CI's fixture-sized indices never needed to.
+        //
+        // #3317: that health probe no longer exists. /livez (and its
+        // /healthz alias) never touches Elasticsearch at all, and /readyz
+        // runs its two probes under its own 5s READINESS_TIMEOUT rather than
+        // inheriting this one, so nothing on the probe path can now block for
+        // 30 seconds. The budget below is therefore sized purely for real
+        // queries, which is what it was always for -- kept because those
+        // worker loops are still the callers that can saturate the search
+        // queue, and deleting the only bound they have would reintroduce the
+        // hang for them.
         let conn_pool = SingleNodeConnectionPool::new(url.parse()?);
         let transport = TransportBuilder::new(conn_pool)
             .timeout(Duration::from_secs(30))
@@ -138,22 +206,95 @@ impl Es {
     }
 
     /// Cluster color (green/yellow/red), "unreachable" on transport error.
+    ///
+    /// Deliberately lossy: this feeds the source-health card, which must
+    /// render even when Elasticsearch is the thing that is broken, so it
+    /// has nowhere to put an error string. `/readyz` needs the error
+    /// itself and uses `cluster_health_status` below instead.
     pub async fn cluster_status(&self) -> String {
-        match self
+        self.cluster_health_status().await.unwrap_or_else(|_| "unreachable".into())
+    }
+
+    /// Cluster color as Elasticsearch reports it, or the failure explaining
+    /// why it could not be asked. The fallible half of `cluster_status`,
+    /// for callers that have to say which of the two happened (#3317).
+    pub async fn cluster_health_status(&self) -> anyhow::Result<String> {
+        let response = self
             .client
             .cluster()
             .health(ClusterHealthParts::None)
             .send()
-            .await
-        {
-            Ok(response) => response
-                .json::<Value>()
-                .await
-                .ok()
-                .and_then(|value| value["status"].as_str().map(String::from))
-                .unwrap_or_else(|| "unknown".into()),
-            Err(_) => "unreachable".into(),
+            .await?;
+        let status = response.status_code();
+        let json = response.json::<Value>().await?;
+        if !status.is_success() {
+            anyhow::bail!("elasticsearch cluster health {}: {}", status, json);
         }
+        Ok(json["status"].as_str().unwrap_or("unknown").to_string())
+    }
+
+    /// Which of `indexes` Elasticsearch currently has `index.blocks.write`
+    /// set on, sorted. Empty means "a write to any of them would be
+    /// accepted" (#3317).
+    ///
+    /// The setting is the whole answer to "is this writable", and asking
+    /// for it by name means the response carries nothing else — this runs
+    /// on a probe, where a full settings dump per index family would be
+    /// the most expensive request this tier makes.
+    ///
+    /// Two things it deliberately does not report as a block. An index that
+    /// does not exist is absent from the response, not blocked: every
+    /// dashboard-owned index is created lazily on its first write (see
+    /// `search_paginated`), so a fresh cluster correctly reads ready — and
+    /// the allow_no_indices/ignore_unavailable pair above is what keeps
+    /// "no such index" from arriving as a 404 error instead. The other is
+    /// that a set value is compared rather than the key merely existing:
+    /// Elasticsearch drops the setting entirely when a block is cleared, so
+    /// `false` is not a shape this endpoint has been observed to return,
+    /// but reading the block as "the key is present" would be a claim
+    /// about this Elasticsearch's normalization rather than about the
+    /// block.
+    pub async fn write_blocked(&self, indexes: &[&str]) -> anyhow::Result<Vec<String>> {
+        if indexes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let response = self
+            .client
+            .indices()
+            .get_settings(IndicesGetSettingsParts::IndexName(indexes, &["index.blocks.write"]))
+            // flat_settings is what puts the block at the literal
+            // "index.blocks.write" key; without it the response nests it as
+            // settings.index.blocks.write and the lookup below silently
+            // matches nothing, i.e. always ready.
+            .flat_settings(true)
+            // A family that matches nothing (a worker loop this deployment
+            // never enabled writes into an index that was never created) is
+            // normal, not an error.
+            .allow_no_indices(true)
+            .ignore_unavailable(true)
+            .send()
+            .await?;
+        let status = response.status_code();
+        let json = response.json::<Value>().await?;
+        if !status.is_success() {
+            anyhow::bail!("elasticsearch get_settings {}: {}", status, json);
+        }
+        let Some(indices) = json.as_object() else {
+            return Ok(Vec::new());
+        };
+        let mut blocked: Vec<String> = indices
+            .iter()
+            .filter(|(_, settings)| {
+                settings["settings"]["index.blocks.write"]
+                    .as_str()
+                    .is_some_and(|block| block == "true" || block == "1")
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+        // Sorted so the same outage always names its indices in the same
+        // order, which makes two consecutive /readyz bodies diffable.
+        blocked.sort();
+        Ok(blocked)
     }
 
     /// Cluster-wide index stats summary: (index_count, doc_count, bytes).
@@ -464,15 +605,6 @@ impl Es {
             anyhow::bail!("elasticsearch update_by_query {}: {}", status, body);
         }
         Ok(body["updated"].as_u64().unwrap_or(0))
-    }
-
-    pub async fn ping(&self) -> bool {
-        self.client
-            .ping()
-            .send()
-            .await
-            .map(|r| r.status_code().is_success())
-            .unwrap_or(false)
     }
 
     /// One `_search` against the shared event indices; body is the caller's
