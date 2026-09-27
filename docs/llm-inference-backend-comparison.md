@@ -2,6 +2,18 @@
 
 Status: research for [issue #598](https://github.com/Xore/APIARY/issues/598), 2026-08-05.
 
+> **Superseded in part — read this first.** This is the CPU-only research
+> pass. The *measured* three-engine comparison it asked for was run
+> afterwards and is recorded in
+> `analysis/ghidra/benchmarks/engine-benchmark/README.md` (2026-08-06, on the
+> RTX 4000 Ada 20GB, extended by #832's settings tuning). It corroborates §1,
+> §3 and §4 below and **overturns §6 and §7**: real-card performance was in
+> fact measured, and vLLM's "refuses to start" failure turned out to be
+> specific to the *previous* 8GB Quadro RTX 4000 rather than a property of the
+> image. The sections below are left as written, as the record of what was
+> known on 2026-08-05; where the later run contradicts them, the later run
+> wins.
+
 This is a task-specific decision record, matching
 [`local-llm-model-evaluation.md`](local-llm-model-evaluation.md)'s format for
 the model-selection decision it's paired with. It evaluates the inference
@@ -18,6 +30,11 @@ APIs). No comparison against llama.cpp (the inference engine Ollama itself
 wraps) or vLLM (the throughput-oriented alternative) had been done. #598 asked
 for one, explicitly allowing "switch, and rearchitect" as a valid outcome.
 
+(Still true of the *deployed* stack: `arcane/manifests/home-production.json`
+deploys no llama.cpp or vLLM service. Both now appear in benchmark scripts
+under `analysis/ghidra/benchmarks/` — measured, not depended on. See the
+status banner above.)
+
 ## Method
 
 Every claim below was tested directly — a real container, a real (small)
@@ -33,7 +50,10 @@ Test model: `Qwen/Qwen2.5-0.5B-Instruct-GGUF` (Q4_K_M, 630M params) for
 generation tests; `nomic-ai/nomic-embed-text-v1.5-GGUF` (Q4_K_M) for the
 embeddings test. Images: `ghcr.io/ggml-org/llama.cpp:server`/`:full`,
 `ghcr.io/mostlygeek/llama-swap:cpu`, `ollama/ollama:0.32.0` (this repo's own
-pinned version), `vllm/vllm-openai:latest` (v0.26.0).
+pinned version *at the time*; production has since moved to
+`ollama/ollama:0.32.13` in `analysis/ghidra/docker-compose.ghidra.yml` and
+`analysis/ghidra/models/approved-models.json`), `vllm/vllm-openai:latest`
+(v0.26.0).
 
 ## 1. Structured output enforcement
 
@@ -175,14 +195,18 @@ prompt-processing (`pp`) and text-generation (`tg`) tokens/sec numbers.
 (`qwen3:14b`, promoted to all three slots under #568/#569 now that VRAM is
 confirmed ~20GB) on the real GPU, and compare against Ollama's own measured
 throughput for the same model (`docs/local-llm-model-evaluation.md` already
-has some of these numbers).
+has some of these numbers). **Partly done, on a different model** — the later
+three-engine run in `analysis/ghidra/benchmarks/engine-benchmark/README.md`
+did measure decode throughput on the real 20GB card (llama.cpp ~21.4, Ollama
+~21.5, vLLM ~23.1 tok/s), but against the merged REx86 f16 7B weights, not
+`qwen3:14b`. The `qwen3:14b`-specific comparison is still outstanding.
 
 ## 7. Operational surface
 
 | | Ollama 0.32.0 | llama.cpp `:server` | llama-swap `:cpu` | vLLM 0.26.0 |
 |---|---:|---:|---:|---:|
 | Image size | 8.06 GB | 1.21 GB | 1.24 GB | 28.1 GB |
-| Runs without a GPU present | Yes (CPU fallback) | Yes (CPU fallback) | Yes | **No — confirmed** |
+| Runs without a GPU present | Yes (CPU fallback) | Yes (CPU fallback) | Yes | **No — confirmed**, but hardware-specific; see below |
 
 The vLLM finding is real and concrete, not inferred: the standard
 `vllm/vllm-openai` image fails to even construct its own CLI argument parser
@@ -200,6 +224,20 @@ build target exists upstream per vLLM's own docs, but is a different,
 less-maintained artifact, not the mainline image this stack would pull).
 Ollama and llama.cpp both degrade gracefully to CPU; vLLM does not degrade,
 it refuses to start.
+
+> **Superseded.** That failure was hardware-specific, not a property of the
+> image. On the current 20GB RTX 4000 Ada Generation, `vllm/vllm-openai:latest`
+> (v0.26.0) starts cleanly, loads a 7B model, completes `torch.compile`
+> warmup and serves correct completions — recorded in the "Side finding"
+> section of `analysis/ghidra/benchmarks/engine-benchmark/README.md`. The
+> failure above was observed on the *previous* 8GB Quadro RTX 4000.
+>
+> Whether the mainline image has any CPU-only path at all is therefore
+> **undetermined** from this repo's evidence: the two data points are one
+> failure on the old card and one success on the new one, and neither isolates
+> GPU *presence* from GPU *capability*. The "no CPU path at all" reading above
+> overstates what was shown. Unchanged by the later run: vLLM is by far the
+> largest image of the four, and §2's digest/registry finding stands.
 
 **Embeddings** (relevant to `ml-worker`/#151's planned semantic search, both
 currently spec'd around `nomic-embed-text`): llama.cpp has a native
@@ -290,6 +328,10 @@ serving — not the current shared, bursty, multi-workload shape.
 - Run `llama-bench` against the currently-approved model (`qwen3:14b`,
   promoted under #568/#569) on the real card, side-by-side with Ollama's own
   numbers, to get the actual performance data this research couldn't gather.
+  (Partly superseded: the three-engine run in
+  `analysis/ghidra/benchmarks/engine-benchmark/README.md` gathered real-card
+  throughput for llama.cpp/Ollama/vLLM, but on REx86 f16 7B weights. The
+  `qwen3:14b` case is still open.)
 - Resolve the 768-vs-384 embedding-dimension discrepancy (§7) before #151's
   `dense_vector` ES mapping work begins, regardless of backend choice.
 - If a future re-evaluation is triggered (e.g. `model-governance.py` gets a
