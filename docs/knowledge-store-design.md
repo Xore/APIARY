@@ -58,8 +58,9 @@ stack, not a reuse of one, even though it is a trivial one to stand up
 (`git init` in a directory, a commit per note-write batch). The nearest real
 precedent for "git as a sync/deploy substrate" in this repo is Arcane's own
 GitOps machinery (`docs/ARCANE-GIT-SYNC.md`), which already runs a
-git-pull-and-apply loop against `main` with `auto_sync = 0` set deliberately
-on rows that must not auto-follow (`docs/ARCANE-GIT-SYNC.md:425` and
+git-pull-and-apply loop against `main` and where every live row currently
+carries `auto_sync = 0`, with every deploy still a manual
+sync → build → redeploy (`docs/ARCANE-GIT-SYNC.md:425` and
 `docs/ARCANE-GIT-SYNC.md:478`) — i.e.
 this codebase's existing git-sync tooling defaults to *manual* triggers for
 anything sensitive, which is the posture this decision adopts too (see §4).
@@ -208,10 +209,11 @@ above already bounds and strips what can land in a note, the vault's content
 is closer in sensitivity to the config material `backup-honeypot.sh` already
 carries than to the bulk payload/PCAP data it explicitly excludes — so
 extending that script's existing scope to include it is the correct call,
-not an oversight to patch around later. This is a decision to record
-verbatim in `analysis/backup-honeypot.sh`'s own comment block when #2290
-lands the directory, so a future reader sees it was deliberate rather than
-inferring it from a directory glob matching by accident.
+not an oversight to patch around later. That decision is already recorded
+verbatim in `analysis/backup-honeypot.sh`'s own comment block
+(`backup-honeypot.sh:107-114`, which names #2289, #2290 and this document), so
+a future reader sees it was deliberate rather than inferring it from a
+directory glob matching by accident.
 
 ### Worker authorization gate
 
