@@ -83,6 +83,7 @@ import argparse
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -154,6 +155,17 @@ def gh(*args: str) -> str:
     return out.stdout
 
 
+def is_regular_file(path: Path) -> bool:
+    """`Path.is_file()` does NOT do this: it delegates to `os.path.isfile`,
+    which swallows OSError and returns False. A 0700 root-owned stack dir is
+    therefore indistinguishable from "no compose file here", so every
+    caller's `except PermissionError` is dead code and the stacks this
+    script exists to watch get silently dropped. stat() directly, so EACCES
+    reaches the caller as PermissionError and the two-tier privileged
+    fallback below can actually engage."""
+    return stat.S_ISREG(path.stat().st_mode)
+
+
 def project_dirs(stacks_root: Path) -> list[Path]:
     if not stacks_root.is_dir():
         fail(f"{stacks_root} is not a directory -- refusing to read an absent fleet as healthy")
@@ -162,11 +174,11 @@ def project_dirs(stacks_root: Path) -> list[Path]:
         if not d.is_dir():
             continue
         try:
-            has_compose = (d / "compose.yml").is_file()
+            has_compose = is_regular_file(d / "compose.yml")
         except PermissionError:
             # REVIEW-A/#3040: llm-worker, auth-events-worker and ml-worker
-            # are 0700 root-owned -- `is_file()` on a path inside them
-            # raises rather than returning False. None of the three
+            # are 0700 root-owned -- stat() on a path inside them raises
+            # rather than returning False. None of the three
             # actually uses "compose.yml" as its basename, so this is never
             # a false exclusion of a real match; manifest_extra_targets()
             # is what enumerates these, using the manifest's own basename.
@@ -223,7 +235,7 @@ def retired_projects(stacks_root: Path, known_names: set[str]) -> list[str]:
         if d.name in known_names or d.name in KNOWN_NON_PROJECT_DIRS or d.name in KNOWN_ONDEMAND_STACKS:
             continue
         try:
-            if not (d / "compose.yml").is_file():
+            if not is_regular_file(d / "compose.yml"):
                 continue
         except PermissionError:
             # An unreadable dir that ISN'T a known manifest name: can't
@@ -501,7 +513,7 @@ def manifest_extra_targets(stacks_root: Path, entries: list[dict]) -> list[tuple
         compose_file = Path(compose_path).name
         project = stacks_root / name
         try:
-            exists = (project / compose_file).is_file()
+            exists = is_regular_file(project / compose_file)
         except PermissionError:
             # REVIEW-A/#3040: llm-worker, auth-events-worker, ml-worker are
             # 0700 root-owned. This basename came straight from the
