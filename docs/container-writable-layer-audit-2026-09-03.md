@@ -1,5 +1,14 @@
 # Container writable-layer and build-cache audit (#2859), 2026-09-03
 
+> **Dated record — 2026-09-03.** Every measurement below (245.8 GB, 13.18 GB
+> reclaimable, the 45-hour leaked buildkit container, the dangling-volume
+> census) was a snapshot of the homeserver on that date and is **not** a live
+> status page. Per the same principle `security-fixes.md` states outright: do
+> not mirror a live system's state into a markdown file. Re-run the commands
+> before acting on any number. The attribution, the reasoning and the
+> conclusions are the substance of this document and do not expire; the
+> open items named here are tracked in their issues (#2915, #2904).
+
 `docker system df` on the homeserver showed **245.8 GB in container
 writable layers**, invisible to the volume audit and the retention knob.
 This document is the attribution the issue asked for.
@@ -78,8 +87,8 @@ failing** — GC only starts reclaiming once usage exceeds the 100 GB
 neither of which is close on this host. No config or timer change needed;
 a standing prune timer would be redundant with `builder.gc`, which already
 runs automatically as part of build activity per buildkit's own design
-(the comment in `install-homeserver.sh:431-500` explains why a separate
-timer isn't used).
+(the comment in `install-homeserver.sh:381-465` — the reasoning at 392-397,
+the JSON block itself at 463-465 — explains why a separate timer isn't used).
 
 One stray finding, not actioned: a leaked `buildx_buildkit_builder-<uuid>`
 container (`docker-container` driver) has been running 45+ hours,
