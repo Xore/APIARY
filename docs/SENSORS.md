@@ -71,11 +71,14 @@ GeoIP enrichment is best-effort: empty or malformed addresses are skipped, but
 the original event is always retained.
 ILM keeps raw Suricata indices for 7 days, honeypot data streams for 30 days,
 and dead-letter records for 60 days so high-volume scans cannot fill the disk.
-Those three are the values at the default `HONEYPOT_RETENTION_DAYS=30`: every
-window derives from that one variable (Suricata `retention*7/30`, dead-letter
-`retention*2`), so lowering it reclaims disk across all of them at once. Only
-the ILM *policy names* (`suricata-7d`, `honeypot-30d`, `dead-letter-60d`) stay
-fixed.
+Those are the values at the *code* fallback `HONEYPOT_RETENTION_DAYS=30`. Every
+window derives from that one knob, and the shipped configuration does **not**
+use the fallback: all four tracked `.env.example` files set
+`HONEYPOT_RETENTION_DAYS=21` (#2820), at which the three windows above become
+**4d / 21d / 42d** — Suricata is `retention*7/30` (integer-truncated, floored
+at 1) and dead-letter is `retention*2`. Only the ILM *policy names*
+(`suricata-7d`, `honeypot-30d`, `dead-letter-60d`) stay fixed; they are
+identifiers referenced by the index templates, not claims about duration.
 
 ## Runtime resource budgets
 
