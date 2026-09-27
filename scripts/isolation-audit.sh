@@ -14,6 +14,16 @@
 #
 # Must never print HP_BIND or any WireGuard address (same rule
 # diagnostics.yml's own steps already follow).
+#
+# #3312: every line is prefixed with the category it hit -- OK, FAIL, EXPECT
+# (deliberately absent, per a live dated declaration; see standdown_state),
+# UNMEAS (could not be measured), WARN (triaged gap) or -- (informational) --
+# and the verdict prints the counts. This is not decoration. For the five weeks
+# to 2026-09-27 this audit ended 160 consecutive scheduled runs in failure,
+# and of the things it named, four were the audit's own blind spots and one
+# was a real host fault; a reader of a red run could not tell them apart, so
+# the red X meant nothing and #3312 was the result. An expected state that
+# cannot be distinguished from a broken one is the same defect as no check.
 set -uo pipefail
 
 # #3312: every virsh call below is bare (no -c). As a non-root caller --
@@ -24,10 +34,40 @@ set -uo pipefail
 # Pin the system instance unless the caller explicitly chose otherwise.
 export LIBVIRT_DEFAULT_URI="${LIBVIRT_DEFAULT_URI:-qemu:///system}"
 
-fail=0
+# #3312: every finding below is printed with the CATEGORY it hit, because for
+# four days this audit's whole job was indistinguishable from noise: a run
+# concluded failure on 2026-08-12 through 2026-09-27, and of the four things it
+# named every one was either a check that could not see the object it was
+# looking at (bare `virsh` on a non-root caller's qemu:///session, #3312/#3338)
+# or a host fault with no category attached to it at all. Nobody could tell
+# which was which from the red X, so nobody acted, and a diagnostic that
+# cries wolf on a healthy host is worse than no diagnostic.
+#
+# Four categories, and the label is on every line:
+#
+#   OK       measured; the invariant holds.
+#   FAIL     measured; the invariant is broken. Real, actionable, fatal.
+#   EXPECT   the invariant is not measurable as stated because the operator
+#            has DECLARED the object deliberately absent -- a dated,
+#            issue-referencing declaration (standdown_state below,
+#            scripts/sandbox-standdown.sh). Not fatal while the declaration
+#            is live, and it never excuses anything except the absence of
+#            the object it names.
+#   UNMEAS   the check could not run: no privilege, no tool, no daemon. Not
+#            fatal for the report-only host-posture observations (the section
+#            header already says so), fatal for the isolation barriers, where
+#            an unread FORWARD chain is not evidence of a DROP policy -- "could
+#            not tell" is never folded into a pass.
+#
+# The footer prints the counts per category, so a reader can tell at a glance
+# whether a red run is a broken host or a broken check.
+fails=0
+unmeas_fatal=0
 warns=0
-ok()   { printf '  OK    %s\n' "$*"; }
-bad()  { printf '  FAIL  %s\n' "$*"; fail=1; }
+expected=0
+unmeas=0
+ok()   { printf '  OK      %s\n' "$*"; }
+bad()  { printf '  FAIL    %s\n' "$*"; fails=$((fails + 1)); }
 # A known, triaged gap with a named owner issue: visible on every run, but it
 # does NOT fail the job. diagnostics.yml exits on this script's status, so a
 # finding nobody can act on today would make the whole isolation audit
@@ -35,9 +75,109 @@ bad()  { printf '  FAIL  %s\n' "$*"; fail=1; }
 # stop reading, which is the exact failure mode #2366 exists to end. WARN is
 # for "triaged, tracked, not yet done"; FAIL stays for "nobody has looked at
 # this", which is always actionable.
-warn() { printf '  WARN  %s\n' "$*"; warns=$((warns + 1)); }
-info() { printf '  --    %s\n' "$*"; }
+warn() { printf '  WARN    %s\n' "$*"; warns=$((warns + 1)); }
+# Declared-absent, and therefore not a fault. The message always carries the
+# owner issue and the expiry, so a reader never has to go looking for why a
+# line is not red.
+expect() { printf '  EXPECT  %s\n' "$*"; expected=$((expected + 1)); }
+# Could not be measured. $1 = '1' when that must fail the run anyway (an
+# isolation barrier whose silence would be read as safety), anything else for
+# the report-only observations.
+unmeasured() {
+  if [ "${1:-0}" = "1" ]; then
+    printf '  UNMEAS  %s (fatal: this barrier could not be read)\n' "$2"
+    unmeas_fatal=$((unmeas_fatal + 1))
+  else
+    printf '  UNMEAS  %s\n' "$2"
+  fi
+  unmeas=$((unmeas + 1))
+}
+info() { printf '  --      %s\n' "$*"; }
 section() { printf '\n== %s ==\n' "$*"; }
+
+# ---------------------------------------------------------------------------
+# Declared stand-down of the libvirt-backed sandbox stack (#3312).
+#
+# The sandbox networks, the nwfilter and libvirt's socket are all *absence*
+# invariants: nothing complains when they go missing, which is why this script
+# exists at all. But "missing" has two very different causes, and until #3312
+# the audit reported both identically:
+#
+#   broken   -- the 2026-09-23 reboot let the modular per-driver libvirt
+#               units win the Conflicts= race against libvirtd and took the
+#               socket with them (#3338), or a rebuilt host never re-ran
+#               sandbox/install-host.sh, so the Linux lane's network and
+#               nwfilter were never restored (#3027).
+#   expected -- an operator stood the stack down on purpose, to hand its RAM
+#               and CPU to a training/benchmark leg. Freeing host resources
+#               for a heavy leg is a standing practice here (#3135).
+#
+# A dated declaration (scripts/sandbox-standdown.sh writes it; the audit never
+# writes it) is what tells them apart. It is deliberately hard to leave lying
+# around -- see rule 3 below -- because an exception that outlives its window
+# is the failure mode this whole mechanism exists to prevent.
+#
+# Sets STANDDOWN_ACTIVE=1 and STANDDOWN_WHY to a human sentence when a live
+# declaration is present; STANDDOWN_STALE to a reason when one is present but
+# does not count. Paths and the max-window are env-overridable so the test
+# suite can point them at a tmpfile.
+STANDDOWN_FILE="${APIARY_STANDDOWN_FILE:-/etc/apiary/sandbox-standdown}"
+STANDDOWN_MAX_DAYS="${APIARY_STANDDOWN_MAX_DAYS:-14}"
+standdown_state() {
+  STANDDOWN_ACTIVE=0
+  STANDDOWN_STALE=''
+  STANDDOWN_WHY=''
+  [ -f "$STANDDOWN_FILE" ] || return 0
+  local sd_issue sd_until sd_reason
+  sd_issue=$(sed -n 's/^issue: //p' "$STANDDOWN_FILE" | head -1)
+  sd_until=$(sed -n 's/^until: //p' "$STANDDOWN_FILE" | head -1)
+  sd_reason=$(sed -n 's/^reason: //p' "$STANDDOWN_FILE" | head -1)
+  if [ -z "$sd_issue" ] || [ -z "$sd_until" ] || [ -z "$sd_reason" ]; then
+    STANDDOWN_STALE="malformed: issue, until and reason are all mandatory"
+    return 0
+  fi
+  # The writer (scripts/sandbox-standdown.sh declare) refuses anything that
+  # does not name an issue, but the audit is what decides pass/fail and root can
+  # write anything, so it re-derives the rule rather than trusting the writer.
+  # An exception nobody can be held to is the thing that rots into a permanent
+  # excuse, and a bare number is the shape that rot arrives in.
+  case "$sd_issue" in
+    '#'[0-9]*) ;;
+    *)
+      STANDDOWN_STALE="malformed: issue must be an issue reference like '#1234', got '$sd_issue' -- a stand-down with no issue behind it has no owner to hold it to the window"
+      return 0
+      ;;
+  esac
+  local now until_epoch
+  now=$(date +%s)
+  if ! until_epoch=$(date -d "$sd_until" +%s 2>/dev/null); then
+    STANDDOWN_STALE="until is not a date this host can parse: $sd_issue until '$sd_until'"
+    return 0
+  fi
+  if [ "$until_epoch" -le "$now" ]; then
+    STANDDOWN_STALE="expired $sd_until ($sd_issue) -- a window that has run out excuses nothing"
+    return 0
+  fi
+  if [ "$until_epoch" -gt $(( now + STANDDOWN_MAX_DAYS * 86400 )) ]; then
+    STANDDOWN_STALE="$sd_issue declares a stand-down to $sd_until, more than $STANDDOWN_MAX_DAYS days out -- that is a permanent posture change, not a stand-down"
+    return 0
+  fi
+  STANDDOWN_ACTIVE=1
+  STANDDOWN_WHY="declared stand-down, $sd_issue, until $sd_until: $sd_reason"
+}
+standdown_state
+
+# Reports a sandbox-libvirt object as declared-absent when a live stand-down
+# covers it, and as a real fault otherwise. $1 = what is missing, $2 = the
+# remediation hint. Kept as one function so no caller can accidentally skip
+# the "but is this declared?" question.
+standdown_absent() {
+  if [ "$STANDDOWN_ACTIVE" = "1" ]; then
+    expect "$1 -- EXPECTED, not a fault ($STANDDOWN_WHY)"
+  else
+    bad "$1 -- $2"
+  fi
+}
 
 # ---------------------------------------------------------------------------
 # Every isolated sandbox bridge/network this script audits, in one place the
@@ -59,13 +199,33 @@ GUARDED_BRIDGES=(
 )
 
 # ---------------------------------------------------------------------------
+# Read first, and loudly: it decides how every sandbox object below is
+# categorised, so a reader must never have to infer it from three identical
+# absence lines further down.
+section "Declared stand-down of the sandbox isolation stack"
+if [ -n "$STANDDOWN_STALE" ]; then
+  bad "a sandbox stand-down declaration exists at $STANDDOWN_FILE but does not count: $STANDDOWN_STALE. An exception that does not apply is not an exception: clear it (scripts/sandbox-standdown.sh clear) or re-declare it, and read every absent sandbox object below as the regression it is"
+elif [ "$STANDDOWN_ACTIVE" = "1" ]; then
+  expect "sandbox isolation stack is deliberately absent ($STANDDOWN_WHY). Absent sandbox objects below are EXPECTED, not faults; anything else that breaks below is still a FAIL, and the declaration does not cover it"
+else
+  info "no stand-down declaration at $STANDDOWN_FILE -- the full sandbox stack is expected here (scripts/sandbox-standdown.sh declare --issue '#NNNN' --until YYYY-MM-DD --reason '...' if it is deliberately down)"
+fi
+
+# ---------------------------------------------------------------------------
 section "Sandbox libvirt networks: no <forward>"
 # 'ghosts' is the one deliberate exception (#331: WAN-permitted by design,
 # NAT forward is intentional) -- every OTHER sandbox network must have none.
+#
+# #3312: a network that is not defined at all is a different question from one
+# that is defined and forwards, and a host with the sandbox stack deliberately
+# stood down answers the first way. The distinction is the stand-down
+# declaration (standdown_absent), not a quieter FAIL.
 for entry in "${GUARDED_BRIDGES[@]}"; do
   read -r net _ <<<"$entry"
   if ! virsh net-info "$net" >/dev/null 2>&1; then
-    bad "libvirt network '$net' does not exist (expected active, isolated)"
+    standdown_absent \
+      "libvirt network '$net' does not exist (expected active, isolated)" \
+      "if the sandbox stack is meant to be up, sandbox/install-host.sh defines it and a stray <forward> is what this check is really for"
     continue
   fi
   forwards=$(virsh net-dumpxml "$net" 2>/dev/null | grep -c '<forward' || true)
@@ -90,7 +250,7 @@ section "Phase 0 iptables barrier (guarded sandbox bridges)"
 # would override the default. Checked for every bridge in GUARDED_BRIDGES,
 # not just the Windows one (#2295).
 if ! command -v iptables >/dev/null 2>&1; then
-  bad "iptables not found"
+  unmeasured 1 "iptables is not installed, so the FORWARD barrier cannot be read at all"
 elif iptables_rules=$(sudo -n iptables -S FORWARD 2>&1); then
   policy=$(grep '^-P FORWARD' <<<"$iptables_rules" | awk '{print $3}')
   if [ "$policy" != "DROP" ]; then
@@ -107,7 +267,7 @@ elif iptables_rules=$(sudo -n iptables -S FORWARD 2>&1); then
     done
   fi
 else
-  bad "could not read iptables FORWARD chain (sudo -n iptables failed: needs the isolation-audit sudoers grant)"
+  unmeasured 1 "could not read the iptables FORWARD chain (sudo -n iptables failed -- it needs the isolation-audit sudoers grant). The default policy is unknown, and unknown is not DROP"
 fi
 
 # ---------------------------------------------------------------------------
@@ -131,7 +291,9 @@ section "honeypot-sandbox-strict nwfilter"
 if virsh nwfilter-dumpxml honeypot-sandbox-strict >/dev/null 2>&1; then
   ok "'honeypot-sandbox-strict' nwfilter is defined"
 else
-  bad "'honeypot-sandbox-strict' nwfilter is missing"
+  standdown_absent \
+    "'honeypot-sandbox-strict' nwfilter is missing" \
+    "sandbox/install-host.sh restores it (it was lost the same way in #3027, when a rebuild never re-ran it)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -167,7 +329,21 @@ done
 
 # ---------------------------------------------------------------------------
 section "Stack containers (hp-*/sbx-* only -- this host also runs unrelated stacks: dockge, pihole, ghidra/ollama, ghosts-*, etc.)"
-if containers=$(docker ps -a --format '{{.Names}}\t{{.Image}}' 2>&1 | grep -E '^(hp-|sbx-)'); then
+# #3312: `if containers=$(docker ps -a | grep -E '^(hp-|sbx-)')` fused two
+# different answers into one FAIL. grep exits 1 when nothing matches, so a host
+# with no stack containers at all was reported as "could not enumerate
+# containers (docker ps failed)" -- a claim about the tool, printed when the
+# truth is a claim about the deployment, and the reader had no way to tell
+# which. Enumeration and emptiness are now decided separately.
+all_containers=$(docker ps -a --format '{{.Names}}\t{{.Image}}' 2>&1)
+if [ $? -ne 0 ]; then
+  bad "could not enumerate containers (docker ps failed: ${all_containers//$'\n'/ })"
+  containers=''
+elif ! containers=$(grep -E '^(hp-|sbx-)' <<<"$all_containers"); then
+  bad "no hp-* or sbx-* container exists on this host at all -- the honeypot stack is not deployed here (or every one of its containers was removed). This is not a docker failure"
+  containers=''
+fi
+if [ -n "$containers" ]; then
   privileged_others=""
   while IFS=$'\t' read -r name _; do
     [ -z "$name" ] && continue
@@ -222,8 +398,6 @@ if containers=$(docker ps -a --format '{{.Names}}\t{{.Image}}' 2>&1 | grep -E '^
   else
     ok "NET_ADMIN/NET_RAW confined to sbx-zeek/sbx-suricata/sbx-tcpdump"
   fi
-else
-  bad "could not enumerate containers (docker ps failed)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -399,19 +573,34 @@ if [ -n "${containers:-}" ]; then
   printf '  (capability posture: %d hardened, %d tracked gaps, see WARN lines)\n' \
     "$(wc -w <<<"$cap_hardened_names")" "$warns"
 else
-  bad "could not check capability posture (container enumeration failed above)"
+  # No second fault for one cause: the Stack containers section above has
+  # already reported, with its own category, why there is no inventory (the
+  # docker call failed, or the host has no stack containers at all). Two
+  # faults for one underlying condition is how a red run stops meaning
+  # anything.
+  info "no container inventory to audit capability posture -- the Stack containers section above reports why"
 fi
 
 # ---------------------------------------------------------------------------
 section "Host posture (reports only, does not fix)"
-if ss_out=$(sudo -n ss -tlnp 2>/dev/null | grep ':22 '); then
-  if grep -qE '10\.8\.0\.|10\.10\.10\.' <<<"$ss_out"; then
+# #3312: this check used to be `if ss_out=$(sudo -n ss -tlnp | grep ':22 ')`.
+# That fuses two different outcomes into one branch: "ss could not run" and
+# "nothing is listening on :22" both make the pipeline's last stage exit 1, so
+# both printed 'could not confirm'. On the live homeserver that line has been
+# printing on every run -- an sshd-listen-address check that has never once
+# actually answered the question it exists to answer, and an UNMEAS line is
+# exactly as easy to overlook as a wrong one. The stages are separated now:
+# run ss, and only judge its output if it ran.
+if ss_out=$(sudo -n ss -tlnp 2>/dev/null); then
+  if ! grep -q ':22 ' <<<"$ss_out"; then
+    ok "nothing is listening on :22, so sshd cannot be on a honeypot-facing address"
+  elif grep -qE '10\.8\.0\.|10\.10\.10\.' <<<"$ss_out"; then
     bad "sshd appears to be listening on a honeypot-facing address"
   else
     ok "sshd is not listening on a honeypot-facing address"
   fi
 else
-  info "could not confirm sshd listen address (needs the isolation-audit sudoers grant for 'ss -tlnp')"
+  unmeasured 0 "could not read the sshd listen address at all (sudo -n ss -tlnp failed -- it needs the isolation-audit sudoers grant, or ss is not on this host's PATH). This check has not run; it is not a pass"
 fi
 
 sock_path=/var/run/libvirt/libvirt-sock
@@ -447,7 +636,9 @@ if [ -S "$sock_path" ]; then
     bad "libvirt socket is $mode $owner -- expected root:libvirt with no world access, or an active polkit rule gating org.libvirt.unix.manage"
   fi
 else
-  bad "libvirt socket not found at $sock_path"
+  standdown_absent \
+    "libvirt socket not found at $sock_path" \
+    "the monolithic libvirtd.socket is dead: the per-driver modular units (virtqemud, virtnetworkd, virtnwfilterd, ...) each Conflicts= libvirtd and win the race after a reboot unless install-homeserver.sh's monolithic branch disabled all of them (#3338). Enable it with: systemctl enable --now libvirtd.socket"
 fi
 
 sock_ro_path=/var/run/libvirt/libvirt-sock-ro
@@ -470,7 +661,9 @@ if [ -S "$sock_ro_path" ]; then
     warn "libvirt read-only socket is $mode $owner -- unauthenticated read-only VM enumeration is possible (no polkit rule gates the RO monitor actions); accepted as read-only exposure on this honeypot host, tracked in #3039"
   fi
 else
-  bad "libvirt read-only socket not found at $sock_ro_path"
+  standdown_absent \
+    "libvirt read-only socket not found at $sock_ro_path" \
+    "it ships with the monolithic libvirtd stack and comes back with it (#3338); if libvirtd is up, the -ro socket should be too"
 fi
 if grep -qE '^\s*listen_tcp\s*=\s*1' /etc/libvirt/libvirtd.conf 2>/dev/null; then
   bad "libvirtd.conf has listen_tcp = 1 -- the TCP socket is enabled"
@@ -486,18 +679,41 @@ if command -v aa-status >/dev/null 2>&1; then
       bad "a libvirt/QEMU AppArmor profile is in complain mode, or aa-status output didn't match expectations -- check manually"
     fi
   else
-    info "could not run aa-status (needs the isolation-audit sudoers grant)"
+    unmeasured 0 "could not run aa-status (needs the isolation-audit sudoers grant) -- the libvirt/QEMU AppArmor posture is unmeasured, not fine"
   fi
 else
   info "AppArmor not installed on this host"
 fi
 
 # ---------------------------------------------------------------------------
+# The verdict, with its category counts (#3312). The point of printing them is
+# that a reader must be able to answer "is this host broken, or is this check
+# broken?" from the last five lines, without re-deriving it from the body --
+# the failure this file exists to end is a red run whose meaning has to be
+# reconstructed by hand.
 printf '\n'
-if [ "$fail" -eq 0 ]; then
-  printf 'isolation-audit: all checks passed (or skipped as expected)\n'
+# `fail` counts measured violations; `unmeas_fatal` counts barriers that could
+# not be read at all. Both are faults, and the second is the more dangerous of
+# the two -- an unread FORWARD chain tells you nothing about whether the
+# default policy is still DROP.
+faults=$(( fails + unmeas_fatal ))
+printf 'isolation-audit: categories -- %d unmeasured, %d expected-by-declaration, %d triaged gap(s), %d fault(s)\n' \
+  "$unmeas" "$expected" "$warns" "$faults"
+if [ "$STANDDOWN_ACTIVE" = "1" ]; then
+  printf 'isolation-audit: a declared stand-down is in force (%s) -- the sandbox objects it covers were not checked for presence, and everything else was\n' \
+    "$STANDDOWN_WHY"
+fi
+if [ "$unmeas" -gt 0 ]; then
+  # Also non-fatal on its own: the fatal ones are already counted in
+  # $faults above, so this line is the count a reader needs, not a verdict.
+  printf 'isolation-audit: %d check(s) could not be measured at all -- every UNMEAS line above is an unanswered question, not a pass\n' "$unmeas"
+fi
+if [ "$faults" -eq 0 ]; then
+  printf 'isolation-audit: VERDICT PASS -- every check that could be measured agrees with the invariants (%s)\n' \
+    "$([ "$expected" -gt 0 ] && printf '%d object(s) excused by a live declaration' "$expected" || printf 'nothing excused')"
 else
-  printf 'isolation-audit: ONE OR MORE CHECKS FAILED -- see FAIL lines above\n'
+  printf 'isolation-audit: VERDICT FAIL -- %d fault(s) above: each is a measured violation, an exception that no longer applies, or a barrier that could not be read (%d of the latter). None of them is a configuration problem with this script\n' \
+    "$faults" "$unmeas_fatal"
 fi
 if [ "$warns" -gt 0 ]; then
   # Deliberately does not affect the exit status: these are triaged gaps with
@@ -505,4 +721,4 @@ if [ "$warns" -gt 0 ]; then
   # they stay visible without turning the job red forever (#2366 review).
   printf 'isolation-audit: %d triaged gap(s) reported as WARN -- tracked, not failing this run\n' "$warns"
 fi
-exit "$fail"
+exit "$([ "$faults" -gt 0 ] && echo 1 || echo 0)"
