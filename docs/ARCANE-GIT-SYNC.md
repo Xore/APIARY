@@ -1,6 +1,6 @@
 # Arcane Git sync
 
-How the 37 home-hosted stacks (31 that migrated under `arcane/home/` plus 6
+How the 39 home-hosted stacks (33 that live under `arcane/home/` plus 6
 that were already self-contained and stayed at their existing path) get to
 the live host, replacing the old model of copying or symlinking top-level
 `docker-compose.*.yml` files into place. Everything here was confirmed live
@@ -9,7 +9,10 @@ taken from Arcane's docs — see the risk that motivated that in "Version/API
 compatibility" below. Census numbers and the live sync-store state were
 re-verified 2026-08-27 against the pinned `v2.9.0` image and its own sqlite
 store (#2549): 31 in-tree directories + 6 self-contained = 37, exactly the
-manifest's entry count.
+manifest's entry count *at that date*. The manifest has since grown to 39 —
+#2911 swapped the `pihole` entry for `technitium` and #3092 added `unsloth`
+directly under `arcane/home/` — re-counted 2026-09-27 from
+`arcane/manifests/home-production.json`: 33 in-tree + 6 self-contained = 39.
 
 ## The model
 
@@ -18,19 +21,21 @@ Each stack gets its own **directory-aware Git sync**: Arcane clones the
 selected `compose.yml` (not just that one file) under
 `/var/dockge/stacks/<syncName>/`, and deploys it. The manifest at
 [`arcane/manifests/home-production.json`](../arcane/manifests/home-production.json)
-is the single source of truth for which 37 stacks exist, what branch/path
+is the single source of truth for which 39 stacks exist, what branch/path
 each syncs from, and any per-stack sync limits — `scripts/install-homeserver.sh`,
 CI, and this doc all read from it rather than maintaining separate lists.
 
 - The 32 `honeypot-*` stacks live under `arcane/home/<name>/`: their build
   context and git-tracked config were moved there from repository root
   (see each compose file's own `#1502` comment for what moved and why).
+  `unsloth` is the 33rd directory there — #3092 added it in-tree rather
+  than at a root path, so it never went through the #1502 move.
 - The 6 other stacks (`auth-events-worker`, `llm-worker`, `ml-worker`,
-  `analysis/ghidra`, `sandbox/ghosts`, `pihole`) were already self-contained
-  and stayed at their existing path — moving them would have broken real
-  references from `scripts/install-homeserver.sh`, CI workflows, and
-  `deploy.yml`'s own ghidra-worker resync step. See each one's own compose
-  file header for the specifics.
+  `analysis/ghidra`, `sandbox/ghosts`, `technitium`) were already
+  self-contained and stayed at their existing path — moving them would
+  have broken real references from `scripts/install-homeserver.sh`, CI
+  workflows, and `deploy.yml`'s own ghidra-worker resync step. See each
+  one's own compose file header for the specifics.
 - `honeypot-arcane` itself is **not** in the manifest and never will be —
   syncing the thing that has to already be running before any sync can
   happen is a bootstrap loop, not a simplification. It stays
@@ -58,15 +63,27 @@ been provisioned once.
 `scripts/install-homeserver.sh`'s `step_arcane_import_stacks` reads the
 manifest and creates one `POST /environments/0/gitops-syncs` per matching
 entry (environment `0` is Arcane's single "Local Docker" environment on a
-one-host deployment). Its selection filter matches every `honeypot-*`
-entry — and, since #1505, three of the six non-`honeypot-*` stacks too:
-`auth-events-worker`, `llm-worker` and `ml-worker` are imported by that
-step as well (each confirmed to have no host-local state beyond `.env`).
-The other three keep their dedicated installer steps for reasons specific
-to each: `pihole`'s non-`.env` host state, `analysis/ghidra`'s conditional
-GPU compose overlay, and `sandbox/ghosts`'s Arcane build-context
-limitation (#1506) — see the script's own Phase 8 header comment for the
-reasoning behind each.
+one-host deployment). Its selection filter matches all 32 `honeypot-*`
+entries — and, since #1505, three of the seven non-`honeypot-*` entries
+too: `auth-events-worker`, `llm-worker` and `ml-worker` are imported by
+that step as well (each confirmed to have no host-local state beyond
+`.env`). That is 35 of the manifest's 39 entries. The other three the
+installer provisions itself keep their dedicated steps for reasons specific
+to each: `technitium`'s non-`.env` host state (its `config/` directory needs
+non-root ownership, #2911 — this is the step `pihole` used to have),
+`analysis/ghidra`'s conditional GPU compose overlay, and `sandbox/ghosts`'
+s Arcane build-context limitation (#1506) — see the script's own Phase 8
+header comment for the reasoning behind each.
+
+The 39th entry, `unsloth` (#3092), is the one the installer does not reach
+at all: it matches neither arm of the filter, and the script has no
+`step_unsloth_*` of its own. That is not a defect — `arcane/home/unsloth/compose.yml`'s
+own header documents it as an operator-started stack ("Deployed through
+Arcane like every other homeserver stack … Never `docker compose up` by
+hand"), deliberately carrying no `restart:` policy so the cold-benchmark legs
+in `analysis/ghidra/training/` can have the card to themselves. It is
+covered where fleet-wide operations are concerned — `docs/STACK-REBUILD.md`
+lists it in both reset loops — just not by the from-scratch import path.
 
 To import (or re-import) by hand instead, `POST` the manifest's entries to
 `/environments/0/gitops-syncs/import` — the bulk-import shape matches the
@@ -106,16 +123,19 @@ letting Arcane's own directory check block the whole import.
    not track** — not just `.env` and `secrets/`. Confirmed live: `pihole`
    also keeps its DNSCrypt resolver config and its own Pi-hole database
    directly under its own top-level directory (`dnscrypt-proxy/`,
-   `etc-pihole/`, `etc-dnsmasq.d/`), a shape none of the other 37 stacks
-   have. Back up the *actual* bind-mount sources a stack's compose file
+   `etc-pihole/`, `etc-dnsmasq.d/`), a shape only a handful of stacks have
+   — the live one now is `technitium`, whose `config/` (zones, settings,
+   blocklists) needs non-root ownership for its distroless image, which is
+   exactly why the installer still provisions it by hand (#2911). Back up the *actual* bind-mount sources a stack's compose file
    declares, not an assumed `.env`/`secrets/` checklist — read the compose
    file if in doubt.
 2. Back up everything found in step 1.
 3. Remove the stack's current directory.
 4. Create the Arcane sync (`syncDirectory: true`) — this deploys
    immediately, and will legitimately fail-closed if a required secret
-   isn't present yet (expected, not a bug — see canarytokens/ghosts/
-   keycloak/dashboard's own `:?required` variables).
+   isn't present yet (expected, not a bug — see the four stacks that do
+   declare `:?required` variables: `honeypot-canarytokens`, `ghosts`,
+   `technitium` and `unsloth`).
 5. Restore everything backed up in step 1, **preserving original ownership
    and permissions, not just content**. Confirmed live: restoring a secret
    file as `root:root` when the container expects the previous owning
@@ -194,18 +214,24 @@ alone. Re-verify against whatever Arcane version is pinned in
   is no per-message log-suppression Arcane exposes, and `hp-arcane`'s
   container logs aren't ingested into this repo's ELK pipeline (it tails
   application log files, not `docker logs` streams), so there is no
-  repo-side filter either. Fires for exactly the 9 stacks with at least one
-  relative-source bind mount under this identity mount (`honeypot-cowrie`,
-  `honeypot-dionaea`, `honeypot-elk`, `honeypot-init`, `honeypot-keycloak`,
-  `honeypot-payload-analysis`, `honeypot-tanner`, `honeypot-utilities`,
-  `pihole`) — every relative mount on the 7 of those 9 with running
-  containers was confirmed to resolve to its real, existing host path, zero
-  missing-on-host mounts. (`pihole` and `honeypot-keycloak` were the two
-  without running containers, so their mounts were reasoned from the same
-  identity-mount arithmetic rather than observed — #2853, #2764. `pihole`
-  has since been replaced by `technitium` in the manifest, #2911; the
-  warning's mechanism is per-relative-mount and unchanged by the swap, but
-  the stack name in this list is the pre-#2911 one.) **Decision: live with it — this repo has no fix
+  repo-side filter either. Fires for exactly the 10 stacks with at least one
+  relative-source bind mount under this identity mount (`ghidra`,
+  `honeypot-cowrie`, `honeypot-dionaea`, `honeypot-elk`, `honeypot-init`,
+  `honeypot-keycloak`, `honeypot-payload-analysis`, `honeypot-tanner`,
+  `honeypot-utilities`, `technitium`; the 10 is re-derived 2026-09-27 from
+  each of the manifest's 39 entries' `volumes:` sources) — every relative
+  mount on the 7 of the 9 that existed at the 2026-09-03 check and had
+  running containers was confirmed to resolve to its real, existing host
+  path, zero missing-on-host mounts. (`pihole` and `honeypot-keycloak` were
+  the two without running containers, so their mounts were reasoned from the
+  same identity-mount arithmetic rather than observed — #2853, #2764.
+  `pihole` has since been replaced by `technitium` in the manifest, #2911 —
+  hence the post-#2911 name above; the warning's mechanism is
+  per-relative-mount and unchanged by the swap. The tenth stack, `ghidra`,
+  is not new: its `./revdeck-proxyfix/*` mounts date from #1173, so the
+  2026-09-03 live pass simply never reached it, and the "9" it recorded was
+  a nine-name subset of the real set rather than a different count.)
+  **Decision: live with it — this repo has no fix
   available, and the warning is confirmed harmless.** Re-verified live
   2026-09-03: still firing at the same 9 stacks, ~1 warning per relative
   mount per sync. Not reported upstream (`getarcaneapp/arcane`) as of this
@@ -247,7 +273,7 @@ alone. Re-verify against whatever Arcane version is pinned in
   (`dashboard/vendor/`, exactly 650 tracked files at the #1502 move,
   re-counted from git history), which exceeded the default back then. That
   tree is gone with the Go tier itself (#1659) and the synced directory is
-  down to 268 tracked files (re-counted 2026-08-27,
+  down to 279 tracked files (re-counted 2026-09-27,
   `git ls-files arcane/home/honeypot-dashboard`) — under the default
   again, so the bump is dormant headroom, kept because raising it is an
   Arcane-side change rather than a repo one. The failure mode itself
@@ -262,9 +288,11 @@ alone. Re-verify against whatever Arcane version is pinned in
   `ghosts`'s sync (`sandbox/ghosts/compose.yml`) always failed — either a
   ~40s-then-500 with no detail, or (once `maxSyncTotalSize` alone was
   raised) a fast `file count limit exceeded` — because
-  `sandbox/ghosts/vendor/ghosts-src/` (963 tracked files, ~132 MB) sits in
-  the same directory tree as the compose file, so the sync's whole-directory
-  walk of `sandbox/ghosts/` (989 files, 135,789,139 bytes in total) blows
+  `sandbox/ghosts/vendor/ghosts-src/` (935 tracked files, 135,601,433 bytes)
+  sits in the same directory tree as the compose file, so the sync's
+  whole-directory walk of `sandbox/ghosts/` (962 files, 135,748,394 bytes —
+  both re-counted 2026-09-27; the 2026-08-31 live walk quoted below measured
+  989/135,789,139) blows
   past *both* defaults (`maxSyncFiles: 500`, `maxSyncTotalSize: 50MB`), not
   just the one either failure message names. Fixed the same way as the
   `honeypot-dashboard` case above — both limits raised on the sync record
@@ -347,8 +375,11 @@ alone. Re-verify against whatever Arcane version is pinned in
 ## Local environment overrides
 
 Compose's own `.env`-in-project-directory interpolation already covers
-every `${VAR}` reference in these 37 stacks — none of them use `env_file:`,
-and none needed it added. Arcane's effective environment merge
+every `${VAR}` reference in these 39 stacks — none of them *need* `env_file:`
+and only one declares it: `analysis/ghidra/docker-compose.ghidra.yml`'s
+`revdeck`-profile service carries `env_file: [{path: .env, required: false}]`
+(#110), which duplicates the interpolation it sits beside rather than
+carrying anything. None needed it added. Arcane's effective environment merge
 (`project.env` + `.env.git` → `.env`) feeds that same mechanism
 transparently, so a local override set through Arcane's own UI for a synced
 project works exactly like editing `.env` by hand always did; no stack-file
@@ -407,12 +438,28 @@ Two things worth knowing when setting an override:
 ## Promotion workflow and change control
 
 Decided in #1507: **release/tag promotion**, with `autoSync` enabled for
-exactly the three stacks where a sync is the whole deploy. As of
-2026-08-27 that policy has **never been put into effect** — every sync
-still tracks `main` and nothing auto-deploys (#2549 re-derived the live
-state). What actually runs is the manual model below; #2577 holds the
-one-time activation steps and the dangling-sync cleanup if that ever
-changes.
+exactly the three stacks where a sync is the whole deploy. **The manifest
+half of that policy is in effect: every one of the manifest's 39 entries
+declares `branch: "production"`, and #1943 (2026-08-25) is the commit that
+changed it from `main` — re-derived 2026-09-27, and unchanged since except
+for the `pihole`→`technitium` and `unsloth` entries that inherited it.**
+The live-store half is not. As of the last reads (2026-08-27 #2549, 2026-09-03)
+every live sync still tracked `main` and nothing auto-deployed, so the
+manifest and the host disagree about what a sync follows. #2577 holds the
+one-time activation steps and the dangling-sync cleanup.
+
+**The pointer the manifest names does not exist yet.** `git ls-remote
+--heads origin` on 2026-09-27 returned `main` and assorted agent/dependabot/
+design branches and no `refs/heads/production`; `scripts/promote-release.sh
+--list` reports it as "branch does not exist yet". A sync pointed at
+`production` therefore fails the same way a tag does — Arcane prefixes
+`refs/heads/` onto whatever it is given (see "Arcane cannot track a tag"
+below) — so this is the one place where the manifest is currently ahead of
+reality in a way that bites: the documented bulk-import path,
+`POST /environments/0/gitops-syncs/import`, would create 39 syncs that all
+fail on their first run, on a branch that nothing creates until someone runs
+`scripts/promote-release.sh <tag>`. What actually runs today is the manual
+model below.
 
 ### Two facts (still true today)
 
@@ -457,27 +504,36 @@ treat every sync as a per-project restart and bound the blast radius
 accordingly: scope each run to one stack at a time and verify the result — rather than firing
  a fleet-wide sync pass and racing the timeout. (A purpose-built
  single-project script is a natural follow-up; ship it separately so the
- doc's claim of 'every sync is a restart' is reviewable on its own.)**34 of the 37 stacks build an image.** Only `honeypot-elk`,
-`honeypot-keycloak` and `pihole` pull — re-derived 2026-08-27 from the 37
-manifest compose paths (34 carry `build:`; the same three pullers the
-#1502-era text named, which said "35 of the 38" before #2381 retired
-wordpot and f139fe24 retired the Go ip-enrichment-worker). For any
+ doc's claim of 'every sync is a restart' is reviewable on its own.)**34 of the 39 stacks build an image.** Five pull —
+re-derived 2026-09-27 from the 39 manifest compose paths (34 carry
+`build:`): `honeypot-elk`, `honeypot-keycloak`, `llm-worker`, `technitium`
+and `unsloth`. `llm-worker` is in that set only because the manifest
+deploys `llm-worker/docker-compose.captured-data-deploy.yml`, an overlay
+with no `build:` of its own — `llm-worker/docker-compose.yml` still has
+one. The #1502-era text named "35 of the 38" and the same three pullers,
+before #2381 retired wordpot and f139fe24 retired the Go
+ip-enrichment-worker. For any
 building stack, `autoSync: true` would mean every merge produces a
 deployment that looks successful and changes nothing — worse than a
 manual process, because it is unattended.
 
 ### What actually runs
 
-- **Every sync tracks `branch: "main"`** — all 38 live `gitops_syncs`
-  rows (the 37 manifest stacks plus #2577's dangling `honeypot-wordpot`
-  orphan). The rows predate #1507's decision and nothing re-pointed
-  them; no `production` pointer exists.
+- **Every sync tracks `branch: "main"`** on the live host, while the
+  manifest has said `branch: "production"` for all 39 entries since
+  #1943 — so the rows predate #1507's decision and nothing re-pointed
+  them. Every live `gitops_syncs` row is one of 39 manifest stacks plus
+  #2577's dangling `honeypot-wordpot` orphan, so 40; the 2026-08-27 read
+  saw 38 of them, before #2911's `technitium` and #3092's `unsloth`. The
+  gap between the two is the thing to resolve before the next import, and
+  the branch to resolve it against does not exist yet (see "Promotion
+  workflow" above).
 - **`autoSync` is 0 everywhere, including the three the manifest flags.**
-  `honeypot-elk`, `honeypot-keycloak` and `pihole` carry `autoSync: true`
-  in `arcane/manifests/home-production.json`, but the live store has
-  `auto_sync = 0` on all 38 rows — the elk/keycloak/pihole auto-follow
-  policy is silently inert: a promotion, or any push, will not deploy
-  them.
+  `honeypot-elk`, `honeypot-keycloak` and `technitium` carry
+  `autoSync: true` in `arcane/manifests/home-production.json`, but the live
+  store has `auto_sync = 0` on every row — the elk/keycloak/technitium
+  auto-follow policy is silently inert: a promotion, or any push, will not
+  deploy them.
 - **Every deploy is manual**: sync → build → redeploy per stack. The
   order matters and is not arbitrary: `honeypot-dashboard` must sync
   before `honeypot-dashboard-backend` builds, because the Rust source
@@ -485,8 +541,8 @@ manual process, because it is unattended.
 - **Promotion is CI-only.** `scripts/promote-release.sh v0.1.0` exists
   and still refuses a ref that is not a tag, and a tag that is not an
   ancestor of `main` — so if a pointer ever exists, what reaches it has
-  always been through CI. Today it moves nothing, because there is no
-  pointer to move.
+  always been through CI. As of 2026-09-27 it still moves nothing: there
+  is no `production` branch on `origin` to move.
 
 ### The #1507 design, for the record
 
@@ -501,8 +557,14 @@ manual process, because it is unattended.
   single-sync PATCH work.
 
 #2577 closed (PR #2704) having done only the wordpot-orphan half of its own
-scope — the #1507 activation itself was never done, and #2858 (below)
-decided explicitly not to do it in this round either.
+scope, and #2858 (below) decided explicitly not to do the activation in this
+round either. Two halves of "the #1507 activation" are worth keeping
+distinct: the manifest half **was** done, in #1943 on 2026-08-25, which is
+what put `branch: "production"` and the three `autoSync: true` flags into
+`arcane/manifests/home-production.json`; the live-store half — re-pointing
+the rows already in Arcane at that branch and setting the
+`pullImageAfterSync`/`redeployAfterSync` fields the manifest cannot carry —
+is what is still outstanding.
 
 ## autoSync decision (#2858)
 
@@ -526,7 +588,7 @@ investigated "a merged PR never reached the host" issues.
 **Decision: leave `autoSync: false` fleet-wide. Do not activate #1507's
 three-puller policy in this round either.** Reasoning:
 
-- Turning `autoSync` on for all 37 projects means every merge to `main`
+- Turning `autoSync` on for all 39 projects means every merge to `main`
   redeploys the fleet unattended — a real increase in blast radius, and
   exactly the kind of change that should not happen as a side effect of
   fixing a visibility gap. (This round's own brief calls this out
@@ -560,26 +622,31 @@ three-puller policy in this round either.** Reasoning:
   ops-triage pass. `autoSync` therefore remains `false` fleet-wide for now.
 - #2854's one-shot-abort hazard (a `restart: no` job's clean `exit(0)`
   making Arcane report `failed` on a deploy that actually completed) is
-  fully scoped to `honeypot-init`. It is **not** the only file in the repo
+  scoped to `honeypot-init` **and, since #3128 (2026-09-08), `honeypot-elk`.**
+  It is **not** the only file in the repo
   with that shape, and a grep alone does not establish the claim — YAML
   writes it three ways, so the check has to be
   `git grep -nE "restart:[[:space:]]*[\"']?no[\"']?"`, which on `origin/main`
-  returns fourteen hits — twelve real declarations across seven files (all
-  seven are in the table below), plus two prose matches, in this document and
-  in `scripts/compose-drift-watch.py`'s header. What scopes the hazard is that
-  only one of the seven is a service Arcane actually starts:
+  returns twenty hits — thirteen real declarations across eight files (all
+  eight are in the table below), plus seven prose matches: four in this
+  document, two in `scripts/arcane-sync-drift-report.py`, one in
+  `scripts/compose-drift-watch.py`'s header. (This bullet's own totals were
+  fourteen / twelve / seven / two / one at the 2026-09-04 round-6 pass.)
+  What scopes the hazard is that
+  only two of the eight are services Arcane actually starts:
 
   | hit | why it cannot trip the hazard |
   |---|---|
-  | `arcane/home/honeypot-init/compose.yml` (6×) | **this is the exposed one** |
+  | `arcane/home/honeypot-init/compose.yml` (6×) | **this is an exposed one** |
+  | `arcane/home/honeypot-elk/compose.yml:540` | **the other exposed one** — `arkime-pcap-init`, a `chown`/`chmod` one-shot added by #3128, not profile-gated, in a manifest entry Arcane syncs and starts like any other |
   | `sandbox/ghosts/compose.yml:162` | `ghosts` *is* an Arcane project, but the service is `ghosts-client-test`, gated behind `profiles: ["test"]`, so a default `up` never creates it |
-  | `llm-worker/docker-compose.{production-session-canary,synthetic-canary}.yml` | canary overlays; the manifest deploys `llm-worker/docker-compose.yml`, which has no `restart: no` |
+  | `llm-worker/docker-compose.{production-session-canary,synthetic-canary}.yml` | canary overlays; the manifest deploys `llm-worker/docker-compose.captured-data-deploy.yml`, which has no `restart: no` |
   | `docker-compose.sandbox.yml:48` | per-detonation sandbox lifecycle, not an Arcane manifest entry |
-  | `vps/docker-compose.yml:956` | the VPS stack, deployed by a different mechanism entirely |
+  | `vps/docker-compose.yml:966` | the VPS stack, deployed by a different mechanism entirely |
   | `sandbox/ghosts/vendor/ghosts-src/Ghosts.Api/docker-compose.yml:85` | vendored upstream source, never deployed |
 
-  All six excluded files were checked against
-  `arcane/manifests/home-production.json`'s 37 entries and their
+  All seven excluded files were checked against
+  `arcane/manifests/home-production.json`'s 39 entries and their
   `dockerComposePath` values, not inferred from the file paths.
   `honeypot-init` is not one of #1507's three auto-sync candidates, so this
   decision doesn't change its exposure either way: it keeps deploying
@@ -590,6 +657,18 @@ three-puller policy in this round either.** Reasoning:
   `/var/dockge/stacks/apiary/scripts/arcane-deploy-honeypot-init.sh`, mode
   0755, owned by `github-deploy-runner`, dated 2026-09-03 23:07. #2908 is
   closed.
+
+  **`honeypot-elk` is a #1507 auto-sync candidate, so this one is not
+  hypothetical the way `honeypot-init` is.** Two consequences follow, and
+  neither is established here: whether the live `honeypot-elk` record
+  actually reports `failed` (the #2854 shape is a strong reason to expect
+  it does, but this has not been read off the live API), and, if it does,
+  that `scripts/arcane-sync-drift-report.py`'s `KNOWN_STRUCTURAL_FAILURES`
+  still names only `honeypot-init` — so the report would exit non-zero on a
+  perfectly healthy fleet, which is the exact "permanently red and therefore
+  ignored" failure mode its own comment says the exemption exists to
+  prevent. Worth one `GET /environments/0/gitops-syncs` before #1507's
+  activation is revisited.
 
 **What makes Arcane gitops-sync drift visible, since nothing did before:**
 `scripts/arcane-sync-drift-report.py` — read-only, on-demand (not wired into
@@ -618,7 +697,20 @@ permanently-red-and-therefore-ignored failure mode
 `scripts/isolation-audit.sh`'s own tiering comment was written against.
 Exempted projects are still **printed**, with the reason, under an `EXEMPT`
 heading; they are not silenced. Any project that reports `failed` without
-being named there still fails the run.
+being named there still fails the run. `KNOWN_STRUCTURAL_FAILURES` names
+exactly one project, `honeypot-init`; if the `honeypot-elk` exposure
+described under #2858 above turns out to be real, that table needs a second
+entry for the same reason, or a healthy fleet goes permanently red.
+
+**The baseline is hardcoded to `origin/main`.** `scripts/arcane-sync-drift-report.py`
+fetches `origin main` and measures `<lastSyncCommit>..origin/main`
+unconditionally — it does not read each record's own `branch`. That is
+correct while every live sync tracks `main` (it still does, per the reads
+above), but it becomes the wrong measure the moment #1507's live-store
+activation re-points rows at `production`: a sync correctly caught up to
+the promoted release would then read as N commits behind `main` for every
+merge since the promotion. Same shape as the `honeypot-elk` gap above —
+worth resolving in the same pass.
 
 Exit-code behaviour was demonstrated in both directions (2026-09-03) by
 driving the shipped `main()` with a synthetic record set: a fleet whose only
@@ -636,7 +728,7 @@ owed and worth one look once a current key is to hand.
 The fleet has a second one — `deploy.yml`'s rsync into `/opt/stacks/apiary`
 (the same inode as `/var/dockge/stacks/apiary`) — that no sync record covers.
 That channel had gone 18 days without a successful run, which is what made a
-fleet reading `lastSyncCommit == main` on all 37 records still run a
+fleet reading `lastSyncCommit == main` on all 39 records still run a
 weeks-old copy of every rsynced script: `diagnostics.yml`'s
 isolation-invariants step executes the *deployed* `isolation-audit.sh` from
 that path. Tracked and fixed as **#2908**, now closed — re-derived
