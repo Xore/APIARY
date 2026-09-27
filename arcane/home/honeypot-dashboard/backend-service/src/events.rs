@@ -1035,4 +1035,115 @@ mod session_scope_tests {
             "a null presence must stay null all the way to the response"
         );
     }
+
+    // ── #3212: the capture fields reach the presentation layer ──────────────
+    //
+    // The sensor emits them; the normalization pass keeps them. This is the
+    // last hop of the contract: a document carrying them, as stored in the
+    // index, still carries them when the read path hands the record to the
+    // browser -- and the byte-safe evidence field is not a way for a
+    // credential to get there.
+
+    /// The shape the sensor now writes for a clipped, credential-bearing,
+    /// Java-marked POST: the redacted body, its bounded base64 head, the
+    /// prefix hash under its scope label, the declared length, and the
+    /// marker observation. `body_b64` is the base64 of `body` exactly as the
+    /// sensor derives the two from one redacted string, so the event's own
+    /// internal agreement can be asserted rather than assumed.
+    fn stored_capture_event() -> Value {
+        json!({
+            "@timestamp": "2026-09-27T00:00:00Z",
+            "event": {"sensor": "http-honeypot"},
+            "source": {"ip": "203.0.113.9"},
+            "honeypot": {
+                "sensor": "http-honeypot",
+                "src_ip": "203.0.113.9",
+                "method": "POST",
+                "path": "/api/v1/login",
+                "username": "admin",
+                "body": format!("username=admin&password={}&next=%2F", secrets_boundary::REDACT_MARKER),
+                "headers": {"authorization": format!("Bearer {SECRET}")},
+                "body_capture_state": "truncated",
+                "body_captured_bytes": 65536,
+                "body_encoding": "base64",
+                "body_b64": "dXNlcm5hbWU9YWRtaW4mcGFzc3dvcmQ9W3JlZGFjdGVkXSZuZXh0PSUyRg==",
+                "body_sha256": "05d129712d910c85a45c74ef9f1b825068ddc953e417ba75781e58fa40625eeb",
+                "body_sha256_scope": "captured-prefix-redacted",
+                "body_declared_bytes": 4194304,
+                "java_marker": "stream-magic"
+            }
+        })
+    }
+
+    #[test]
+    fn the_capture_fields_survive_into_the_record() {
+        // row_from_source feeds the explorer list, the SSE live stream and
+        // both CSV exports through one row shape, so this assertion covers
+        // every surface the record is rendered on. Serialized rather than
+        // field-checked for the same reason the #3213 test is: a field
+        // checked by name is only as good as the name someone remembered.
+        let row = row_from_source(&stored_capture_event());
+        let record = row.record.to_string();
+        for fragment in [
+            "\"body_capture_state\":\"truncated\"",
+            "\"body_captured_bytes\":65536",
+            "\"body_encoding\":\"base64\"",
+            "\"body_b64\":\"dXNlcm5hbWU9YWRtaW4mcGFzc3dvcmQ9W3JlZGFjdGVkXSZuZXh0PSUyRg==\"",
+            "\"body_sha256_scope\":\"captured-prefix-redacted\"",
+            "\"body_declared_bytes\":4194304",
+            "\"java_marker\":\"stream-magic\"",
+        ] {
+            assert!(
+                record.contains(fragment),
+                "{fragment} did not survive into the record: {record}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_evidence_fields_carry_no_credential_material() {
+        // The #3213 test proves a stored password never reaches a row. This
+        // extends the same claim to #3212's evidence: the byte-safe head, the
+        // prefix hash and the declared length must not become a second,
+        // differently-encoded copy of a submitted secret -- a base64 blob is
+        // not a disclosure control. Checked on the serialized row, which is
+        // what a browser actually receives.
+        let row = row_from_source(&stored_capture_event());
+        let rendered = serde_json::to_string(&row).unwrap();
+        assert!(
+            !rendered.contains(SECRET),
+            "a captured credential reached the response: {rendered}"
+        );
+        // The header credential has a second encoding -- its own base64,
+        // which is what "Basic <base64(user:secret)>" puts on the wire. The
+        // #3213 test established that this channel is checked too.
+        let mut header_encoding = String::new();
+        header_encoding.push_str("Basic ");
+        header_encoding.push_str(
+            &base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
+                format!("admin:{SECRET}"),
+            ),
+        );
+        assert!(
+            !rendered.contains(&header_encoding),
+            "a bearer credential's Basic encoding reached the response: {rendered}"
+        );
+
+        // And the boundary must not have destroyed the evidence while
+        // keeping it secret: body_b64 is not a scrub target (the sensor
+        // redacts before the field is built), so it has to survive intact
+        // and still decode to the event's own redacted body.
+        let hp = &row.record["honeypot"];
+        let decoded =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, hp["body_b64"].as_str().unwrap())
+                .unwrap();
+        let expected = format!("username=admin&password={}&next=%2F", secrets_boundary::REDACT_MARKER);
+        assert_eq!(decoded, expected.as_bytes(), "the evidence head was corrupted on the way out");
+        assert_eq!(
+            hp["body_sha256"].as_str().unwrap(),
+            "05d129712d910c85a45c74ef9f1b825068ddc953e417ba75781e58fa40625eeb",
+            "the hash covers the redacted captured prefix"
+        );
+    }
 }

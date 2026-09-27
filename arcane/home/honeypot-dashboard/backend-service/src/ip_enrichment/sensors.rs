@@ -958,6 +958,61 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    // ── #3212: the capture fields survive the normalization pass ────────────
+    //
+    // The sensor-side tests prove the fields are emitted and byte-exact. This
+    // proves they survive the one pass between the sensor and Elasticsearch:
+    // http-honeypot has no bespoke enrich function, so the generic
+    // enrich_line is the whole normalization, and filebeat tails the
+    // enriched copy rather than the raw log (filebeat.yml's honeypot-json
+    // input: only /logs/enriched/*.json is tailed for this decoy). A field
+    // this pass dropped would never reach the index, and the backend's
+    // record inspector -- which renders _source verbatim -- would have
+    // nothing to show for it.
+
+    #[test]
+    fn the_capture_fields_survive_the_normalization_pass() {
+        let line = json!({
+            "sensor": "http-honeypot",
+            "src_ip": "203.0.113.9",
+            "src_port": 44321,
+            "time": "2026-09-27T12:00:00Z",
+            "body_capture_state": "truncated",
+            "body_captured_bytes": 65536,
+            "body_encoding": "base64",
+            "body_b64": "rO0ABQ==",
+            "body_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "body_sha256_scope": "captured-prefix-redacted",
+            "body_declared_bytes": 4194304,
+            "body_read_error": "unexpected EOF",
+            "java_marker": "stream-magic"
+        })
+        .to_string();
+        let (out, resolved) =
+            enrich_line(line.as_bytes(), &ViaMap::new(), &ViaMap::new(), "http-honeypot");
+        assert!(resolved, "a complete event is never queued for retry");
+        let out: Value = serde_json::from_slice(&out).unwrap();
+        for key in [
+            "body_capture_state",
+            "body_captured_bytes",
+            "body_encoding",
+            "body_b64",
+            "body_sha256",
+            "body_sha256_scope",
+            "body_declared_bytes",
+            "body_read_error",
+            "java_marker",
+        ] {
+            assert!(
+                out.get(key).is_some(),
+                "{key} did not survive the normalization pass: {out}"
+            );
+        }
+        assert_eq!(out["body_capture_state"], json!("truncated"));
+        assert_eq!(out["body_sha256_scope"], json!("captured-prefix-redacted"));
+        assert_eq!(out["java_marker"], json!("stream-magic"));
+    }
+
     fn vm_with(port: i64, ip: &str) -> ViaMap {
         let mut m = ViaMap::new();
         // at 0 so these keep exercising the join itself rather than
