@@ -41,10 +41,14 @@ WORKDIR /cowrie/cowrie-git
 # for the two regressions that scoping prevents.
 COPY txtcmds_priority_patch.py /tmp/txtcmds_priority_patch.py
 RUN python3 /tmp/txtcmds_priority_patch.py && rm /tmp/txtcmds_priority_patch.py
-# #3307: log SSH service requests other than ssh-userauth with the auth
-# state and KEXINIT count -- a rekey-before-auth request for ssh-connection is
-# the CVE-2026-67279 probe, which Twisted refuses silently otherwise; see the
-# patch's docstring.
+# #3307: answer the CVE-2026-67279 auth-phase probe in the auth phase -- log
+# SSH service requests other than ssh-userauth with the auth state and KEXINIT
+# count, log a rekey before authentication was attempted, and REFUSE a
+# channel open that arrives before any authentication was attempted instead of
+# routing it. The refusal is the decoy's own auth fact, not
+# hasattr(transport, "avatar"), which is the only thing that currently stops an
+# unauthenticated client reaching the connection service; see the patch's
+# docstring.
 COPY service_request_log_patch.py /tmp/service_request_log_patch.py
 RUN python3 /tmp/service_request_log_patch.py && rm /tmp/service_request_log_patch.py
 
