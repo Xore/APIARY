@@ -1,4 +1,19 @@
-# APIARY dashboard design review — the deployed dashboard — 2026-08-17
+# APIARY dashboard design review — dashboard.example — 2026-08-17
+
+> **Public, redacted copy — status as of 2026-09-27.** The address redaction in
+> this file is deliberate and correct as it stands: the only address literals
+> here are `127.0.0.1` (loopback) and `203.0.113.1` (RFC 5737 TEST-NET-3), and
+> the only hostname is a reserved `.example` domain. Do not substitute real
+> values for them, and do not restore anything redacted out of the source copy.
+>
+> The findings below are a **snapshot of a review session on 2026-08-17, not a
+> description of the current code**. Several cite the Go dashboard's static
+> assets and route table by name (`hp-app.js`, `hp-dynamic-nav.js`,
+> `routes.go`); that dashboard was deleted in #1628 on 2026-08-22, five days
+> after this review, and none of those files exist in the repository any more.
+> The current route authority is the Rust `axum` service at
+> `arcane/home/honeypot-dashboard/backend-service/src/main.rs`, so re-locate a
+> finding's code there before acting on it.
 ## Findings (running)
 - Overview (light): loads fast, authenticated. Heatmap "Activity — last 24h" dominates; lower rows (multipot, conpot-kamstrup, endlessh) appear near-empty/pale — visual weight wasted?
 - Theme toggle: monitor icon top-right (left of LIVE). Dark theme renders correctly on Overview.
@@ -6,7 +21,7 @@
 - Heatmap uses one global color scale: dionaea (~90k/h) saturates; low-volume sensors (multipot ~240/h, endlessh, galah) render near-empty. Per-sensor normalization would make rows readable.
 - Header alert badge shows "99+" — alert count overflow, arguably alarming-by-default.
 - Overview "Recent events": every row renders its FULL normalized-event JSON article inline (#1447 intentional). On Overview this makes the stream ~18 x ~600px of JSON inside a fixed-height card__scroll; the table header (time/sensor/source ip/port/detail) no longer matches what the eye sees. Suggest: compact rows on Overview stream (detail on /events only), or max-height+inner-scroll on the article, or collapse-with-summary that keeps content in DOM for a11y.
-- Events table: "source ip" column too narrow → IP wraps mid-address (85.14.245.1 / 22); country badge wraps below. Port cell renders ":25" with leading colon — stylistic, looks like a typo when cell wraps.
+- Events table: "source ip" column too narrow → IP wraps mid-address (203.0.113.1 / 22); country badge wraps below. Port cell renders ":25" with leading colon — stylistic, looks like a typo when cell wraps.
 - Heatmap card keeps internal scroll position after page scroll; no affordance that rows are hidden above/below inside the card.
 - Sections on Live operations tab: Current activity (heatmap), Attack origins — live geographic view (map), Collection status (Sensor feeds, Protocols probed), ML classification backlog, Live event stream.
 - "Attack origins" Leaflet map (dark): world tiles don't fill card width at zoom 2 — large blank light-gray gutters left/right clash with dark theme; "World" reset control top-right is clipped mid-word; Leaflet attribution overlaps the card's bottom edge. Suggest maxBounds/fitBounds or ocean-colored background + unclipped control.
@@ -52,7 +67,7 @@
 - Pages must fill viewport height/width with modest padding; Event explorer card called out as "very small, hard to see".
 - Filter fields should auto-populate on click (works, but broken by session decay; add to attack-path/since too).
 - Nav list should include hidden routes (found in routes.go, not in sidebar): /alerts, /source-health, /search, /sensors, /history, /dead-letters, /canarytokens, /ghidra, /revdeck, /cape, /github-analysis, /sandbox, /payload-workbench, /problem-reports(?), settings modal. Decide which become nav entries (grouped), which stay contextual.
-- Build local variant dashboard w/ real data (against the homeserver, over the `homeserver` ssh alias) for side-by-side design choices incl. PDF design.
+- Build local variant dashboard w/ real data (homeserver xore@<homeserver>) for side-by-side design choices incl. PDF design.
 ## Investigate pages (rest)
 - /ips: solid table; date cols wrap to 2 lines at 1568px; source-ip wraps mid-IP occasionally.
 - /campaigns: worst column-crush — network CIDR wraps mid-value ("169.58.1/70.0/24"), provider wraps "networ/k", dates wrap "2026-/08-16", trailing "ES →" col clipped by card edge; 15 columns is too many for one table. Card shows ~4.5 rows, half viewport dead below.

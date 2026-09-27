@@ -11,6 +11,12 @@ The 28M of variant trees and ~150M of `logskel` and harness binaries were
 deliberately left out — they are reproducible, and the small files here are
 the part that is not.
 
+Real hostnames, the internal server address and a captured attacker IP were
+replaced with documentation-range placeholders when these files were moved
+into the public repository. Nothing else was edited. This tree is the published
+one — `pages.yml` builds `branding/` — so the redaction lives here and not in
+the fork that used to hold it; #3310 removed that fork.
+
 ## What the pick letters mean
 
 Two rounds of review, and they are easy to get backwards — one local note
@@ -40,6 +46,18 @@ still apply:
 - **Skeleton-first hydration** for anything Elasticsearch populates.
 - **One page width** across every page.
 - **SPA-feel navigation**: only the centre content refreshes.
+
+## Colour research
+
+The palettes came from a 2026 UI colour-trend pass, not a brand benchmark.
+Its findings were mostly about **grounds and neutrals** — elevated neutrals
+(soft greys, warm sand, stone, muted clay, oatmeal, taupe), zinc/slate as the
+dominant direction for technology products, lime with cool whites for
+dashboards, "avoid grey-on-grey fatigue" in dark mode, and earth tones for a
+sense of long-term value.
+
+Only the accent half was implementable at the time, because a preset could
+reach eight accent tokens. Finishing the other half is #1753.
 
 ## The files
 

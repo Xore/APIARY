@@ -17,11 +17,16 @@ and are read by date or by issue, not browsed from the map:
   docs/research/                            per-CVE / per-topic research notes
   docs/benchmarks/                          dated benchmark plans, runs, claim pools
   docs/sandbox/windows/vm-detection-results/ per-run VM-detection captures
-  docs/design-lab/                          duplicate of branding/design-lab (#3310)
   docs/archive/                             retired docs kept for history
 
 Anything else unreachable fails: link it from the map (or from a README the
 map reaches), or move it into a record tree if that is what it is.
+
+The design lab is not listed here because it is no longer a docs/ tree at all:
+#3310 removed the duplicate copy this exemption used to name, leaving
+branding/design-lab/ as the single home. A record-tree exemption for a path
+with no tracked file under it is an exemption that exempts nothing, and it is
+one more place a re-added duplicate could hide.
 
 Usage: python scripts/check-docs-reachable.py
 """
@@ -38,7 +43,6 @@ EXEMPT = (
     "docs/research/",
     "docs/benchmarks/",
     "docs/sandbox/windows/vm-detection-results/",
-    "docs/design-lab/",
     "docs/archive/",
 )
 # Relative link targets ending in .md, anchors allowed and ignored.
