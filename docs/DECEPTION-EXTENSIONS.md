@@ -114,6 +114,23 @@ traces back to at least one decision.
 | Mailoney (SMTP) | Integrated | `arcane/home/honeypot-mailoney/` | #1422 |
 | SentryPeer (VoIP/SIP) | Integrated | `arcane/home/honeypot-sentrypeer/` | #1424 |
 
+One candidate was evaluated and **not adopted**, and is recorded here rather
+than left to be re-derived:
+
+- **Cisco Secure FMC management persona** — Evaluated, not built (#3214, the
+  F3 row of #3180's disposition). No FMC persona, port, compose entry or
+  decoy exists in this stack, and none is authorized; the Cisco row above is
+  the **ASA** firewall persona and stays ASA (FMC is a different product —
+  per #3180's verified matrix, ASA/FTD/FDM are not it). What an optional
+  non-vulnerable FMC persona would have to satisfy — surface inventory,
+  fidelity, isolation, provenance, maintenance cost, and an explicit
+  out-of-scope list (no auth bypass, no deserialization, no command execution,
+  no network callbacks, no vulnerable FMC image) — is documented in
+  [`docs/research/3214-fmc-inert-persona.md`](research/3214-fmc-inert-persona.md).
+  The build is undecided and the note deliberately does not argue for one: the
+  coverage it would add is attraction and product context, and it
+  structurally cannot add bypass-success or policy-change evidence.
+
 ---
 
 ## Open questions / experiments
