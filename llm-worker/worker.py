@@ -1784,7 +1784,7 @@ def run_injection_suite(config: Config) -> dict[str, Any]:
     config.validate_synthetic_canary()
     client = OllamaClient(config)
     digest = client.model_digest()
-    report = injection_suite.run(client.analyze, config.max_content_chars)
+    report = injection_suite.run_all(client.analyze, config.max_content_chars)
     return {
         "mode": "injection-suite",
         "model": config.model,
@@ -1985,7 +1985,7 @@ def main() -> int:
             print(f"injection suite failed to run: {exc}", file=sys.stderr)
             return 1
         print(json.dumps(result, sort_keys=True))
-        return 0 if result["passed"] == result["total"] else 1
+        return 0 if injection_suite.all_passed(result) else 1
     if args.production_session_canary:
         try:
             result = run_production_session_canary(config, args.max_canary_cycles)

@@ -54,7 +54,7 @@ class RunnerHarness(unittest.TestCase):
         self.repo = self.tmp / "repo"
         (self.repo / "llm-worker").mkdir(parents=True)
         (self.repo / "analysis" / "ghidra" / "models").mkdir(parents=True)
-        for name in ("contracts.py", "injection_suite.py", "worker.py"):
+        for name in ("contracts.py", "injection_corpus.jsonl", "injection_suite.py", "worker.py"):
             (self.repo / "llm-worker" / name).write_text(f"# {name}\n", encoding="utf-8")
         (self.repo / "llm-worker" / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
         self.write_overlay(DIGEST)
@@ -202,6 +202,26 @@ class TriggerTests(RunnerHarness):
         result = self.run_runner("onchange")
         self.assertNotIn("unchanged since the last passing run", result.stdout)
         self.assertEqual(len(list(self.records.glob("injection-suite-*.json"))), 2)
+
+    def test_onchange_reruns_after_the_corpus_changes(self):
+        # The corpus is data, so it is easy to assume a case edit needs no
+        # re-measurement. It does: a reworded or removed case is exactly the
+        # change that invalidates the last verdict, and the digest never moved.
+        self.assertEqual(self.run_runner("weekly").returncode, 0)
+        corpus = self.repo / "llm-worker" / "injection_corpus.jsonl"
+        corpus.write_text(corpus.read_text(encoding="utf-8") + '{"name":"extra"}\n', encoding="utf-8")
+        result = self.run_runner("onchange")
+        self.assertNotIn("unchanged since the last passing run", result.stdout)
+        self.assertEqual(len(list(self.records.glob("injection-suite-*.json"))), 2)
+
+    def test_a_missing_corpus_is_a_named_error(self):
+        # A checkout without the corpus must say so, not surface as a "No such
+        # file" from inside the container after the model is already loaded.
+        (self.repo / "llm-worker" / "injection_corpus.jsonl").unlink()
+        result = self.run_runner("weekly")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("injection_corpus.jsonl", result.stderr)
+        self.assertEqual(list(self.records.glob("injection-suite-*.json")), [])
 
     def test_weekly_always_measures_even_when_nothing_changed(self):
         # The weekly leg exists to expose decay on a host nobody touched, so it
