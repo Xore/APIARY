@@ -273,7 +273,14 @@ jobs:
         # quotes. upload-artifact resolves paths against the workspace
         # root, not this job's working-directory.
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v6
+        # #3313: this pin's version comment read `# v6` while the SHA is the
+        # v4.6.2 commit (it is also the `v4` tag; `v6` is a different commit,
+        # b7c566a). Verified with `git ls-remote`, not the release page. The
+        # SHA is what every other upload-artifact pin in this tree uses and
+        # what this job was last tested against, so the comment is corrected to
+        # match the code rather than the code bumped to match the comment --
+        # changing the major would be a build-logic change, not a pin fix.
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: schemathesis-reports
           path: |
