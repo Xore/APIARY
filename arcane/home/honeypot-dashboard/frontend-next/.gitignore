@@ -5,6 +5,12 @@ node_modules/
 dist/
 .env
 
+# #3315: generated at image-build time by scripts/write-build-info.mjs from the
+# GIT_SHA build arg and served at /build.json. Never committed -- a checked-in
+# copy would be a revision claim about nobody's build, and the one in the tree
+# is the one a local `npm run build` would serve.
+public/build.json
+
 # #1828: the design lab symlinks variant stylesheets in here at start-up
 # and clears it on exit. Never content, always disposable.
 public/static/lab/

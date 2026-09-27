@@ -453,7 +453,19 @@ services:
 
   dashboard-next:
     <<: *runtime-defaults
-    build: ./frontend-next
+    build:
+      context: ./frontend-next
+      # #3315: the revision this image is built from, baked into the served
+      # /build.json and the image's org.opencontainers.image.revision label.
+      # Read from this stack's .env, not invented here -- compose cannot run
+      # `git rev-parse`, and this stack's synced directory carries no .git (see
+      # docs/ARCANE-GIT-SYNC.md), so whatever builds the image has to say which
+      # commit it is. Unset is the honest default and produces
+      # {"revision":"unknown"} plus an `unknown` label rather than a build
+      # failure: scripts/verify-deploy.sh reports an unstamped image as its own
+      # finding, which is more use than a red build that gets reverted.
+      args:
+        GIT_SHA: ${GIT_SHA:-}
     image: apiary-dashboard-next:latest
     # build: same "never pushed to any registry, Arcane's redeploy pulls
     # unconditionally" issue as apiary-backend:latest above -- this one has

@@ -122,6 +122,23 @@ struct Liveness {
     /// binary newer than the merge" without a second round trip. Same
     /// field main logs at boot.
     built: String,
+    /// #3315: which revision of the repository this binary was compiled from,
+    /// or "unknown". Unauthenticated and deliberately so — this is the field
+    /// that turns "is the running binary newer than the merge?" from a manual
+    /// inference into a curl, and /livez is already the one open probe on this
+    /// service (the token middleware covers /api/v1 only, see
+    /// require_service_token). A git revision names no secret: it is the same
+    /// string the image carries in org.opencontainers.image.revision and that
+    /// ghcr shows on the tag.
+    ///
+    /// This is the *answer* where `built` is the *inference*: `built` can only
+    /// be compared against a time, and a rebuilt-from-old-commit image passes
+    /// that comparison while running month-old code. `revision` is an object
+    /// name, so it can be looked up — which is what
+    /// scripts/verify-deploy.sh does, and why it reads this field rather than
+    /// `built`. Both are here because both have a consumer, and neither is
+    /// derivable from the other after the fact.
+    revision: String,
 }
 
 /// /readyz — Elasticsearch is reachable and this tier's own write targets
@@ -232,7 +249,7 @@ fn readiness_verdict(
 /// GET /livez, and GET /healthz — the same handler under two names. See
 /// `Liveness` for why the response carries no Elasticsearch signal.
 async fn livez() -> Json<Liveness> {
-    Json(Liveness { live: true, built: build_stamp() })
+    Json(Liveness { live: true, built: build_stamp(), revision: git_revision() })
 }
 
 /// `/healthz` is the name the image's HEALTHCHECK, the port-test harness
@@ -392,6 +409,44 @@ pub fn build_stamp() -> String {
             .map(|when| when.to_rfc3339())
             .unwrap_or_else(|| raw.to_string()),
         Err(_) => raw.to_string(),
+    }
+}
+
+/// The honest answer when no revision was baked in. Same word build_stamp
+/// uses, deliberately: a value that reads as a plausible time or a plausible
+/// object name is worse than one that says nothing.
+pub const REVISION_UNKNOWN: &str = "unknown";
+
+/// A git object name is 7-64 hex characters, optionally `sha256:`-prefixed
+/// (git's own object-format naming) — anything else is not a revision.
+///
+/// This is a filter, not a format preference. `APIARY_GIT_SHA` arrives from a
+/// `docker build --build-arg`, and a value that is not an object name is
+/// either a mistake or something injected; either way it must not be echoed
+/// back out of /healthz verbatim and read as "this is the deployed commit".
+/// Case is normalized because GitHub, `git rev-parse` and the OCI label
+/// convention each spell it differently, and a spelling difference must not
+/// read as a deployed-revision mismatch.
+pub fn normalize_revision(raw: &str) -> String {
+    let candidate = raw.strip_prefix("sha256:").unwrap_or(raw);
+    if (7..=64).contains(&candidate.len()) && candidate.bytes().all(|b| b.is_ascii_hexdigit()) {
+        candidate.to_ascii_lowercase()
+    } else {
+        REVISION_UNKNOWN.to_string()
+    }
+}
+
+/// The revision this binary was compiled from, as the image build supplied it.
+///
+/// `option_env!` for the same reason build_stamp() uses it: a missing stamp is
+/// a diagnostic field, not a reason to fail a build. It is set unconditionally
+/// by build.rs (an absent GIT_SHA becomes the empty string), so the None arm
+/// only fires for a crate built by some path that skipped build.rs entirely —
+/// which must read as "unknown", never as a guess.
+pub fn git_revision() -> String {
+    match option_env!("APIARY_GIT_SHA") {
+        Some(raw) => normalize_revision(raw),
+        None => REVISION_UNKNOWN.to_string(),
     }
 }
 
@@ -673,8 +728,16 @@ async fn main() -> anyhow::Result<()> {
     // `built` is the one thing that makes a deploy verifiable from outside.
     // Compare it against the merge time; anything else -- a fresh image id, a
     // recreated container, `{"done":true}` -- says the machinery ran, not
-    // that this code is what is running. See build.rs.
-    tracing::info!(%addr, %es_url, built = %build_stamp(), "apiary-backend listening");
+    // that this code is what is running. See build.rs. `revision` (#3315) is
+    // the same claim without the inference: a timestamp can only be compared,
+    // an object name can be looked up.
+    tracing::info!(
+        %addr,
+        %es_url,
+        built = %build_stamp(),
+        revision = %git_revision(),
+        "apiary-backend listening"
+    );
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
     Ok(())
@@ -682,7 +745,7 @@ async fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod build_stamp_tests {
-    use super::build_stamp;
+    use super::{build_stamp, git_revision, normalize_revision, REVISION_UNKNOWN};
 
     #[test]
     fn build_stamp_is_a_real_recent_timestamp() {
@@ -704,6 +767,63 @@ mod build_stamp_tests {
             age.num_days() < 3650 && age.num_seconds() > -3600,
             "build stamp {stamp} is not a plausible build time (age {age})",
         );
+    }
+
+    // ---- #3315: the revision /healthz reports (main.rs's `revision` field) ----
+
+    #[test]
+    fn a_full_object_name_survives_verbatim() {
+        assert_eq!(normalize_revision("3dca4457f1b2c0d4e5a69788796a5b4c3d2e1f0ab"),
+                   "3dca4457f1b2c0d4e5a69788796a5b4c3d2e1f0ab");
+    }
+
+    /// The table is a file rather than a literal list so that the other
+    /// implementation of this rule -- dashboard-next's normalizeRevision, in
+    /// JavaScript, in a different CI lane -- can be driven from exactly the
+    /// same cases. `scripts/tests/test_3315_image_revision.py` runs both.
+    /// Written inline, the two lists would drift the first time either gained
+    /// a case, and the failure would be a deploy disagreement that is not one:
+    /// two tiers stamping different strings for the same build, which
+    /// scripts/verify-deploy.sh would report as a mismatch.
+    #[test]
+    fn the_shared_corpus_normalizes_as_the_other_tier_does() {
+        let corpus: serde_json::Value =
+            serde_json::from_str(include_str!("revision-corpus.json")).expect("corpus is valid JSON");
+        let unknown = corpus["unknown"].as_str().expect("corpus names its unknown value");
+        let cases = corpus["cases"].as_array().expect("corpus carries a cases array");
+        assert!(!cases.is_empty(), "the corpus is empty, so this test proves nothing");
+        for case in cases {
+            let pair = case.as_array().expect("each case is a [input, expected] pair");
+            let (raw, expected) = (
+                pair[0].as_str().expect("case input is a string"),
+                pair[1].as_str().expect("case expectation is a string"),
+            );
+            assert_eq!(
+                &normalize_revision(raw),
+                expected,
+                "normalize_revision({raw:?}) disagrees with the shared corpus"
+            );
+        }
+        // The one value the whole design turns on: a build with no revision
+        // says so rather than reporting something that reads as an answer.
+        assert_eq!(normalize_revision(""), unknown);
+    }
+
+    #[test]
+    fn this_test_binary_reports_a_revision_or_says_unknown() {
+        // A `cargo test` run has GIT_SHA unset unless the caller exported it,
+        // so the honest value here is "unknown" -- and both are acceptable.
+        // What must never happen is a third thing: a revision that does not
+        // look like an object name coming out of the real accessor.
+        let revision = git_revision();
+        assert!(!revision.is_empty(), "the revision field must never be empty");
+        if revision != REVISION_UNKNOWN {
+            assert_eq!(
+                revision,
+                normalize_revision(&revision),
+                "git_revision() returned {revision:?}, which its own normalizer would not accept"
+            );
+        }
     }
 }
 
