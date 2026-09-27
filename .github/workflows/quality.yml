@@ -1059,10 +1059,14 @@ jobs:
           # so mermaid parsing is now a gate rather than a review habit. Renders
           # every block in one headless browser; mermaid is resolved from the
           # npx cache, so the step is self-bootstrapping (no pinned version to
-          # drift out of date with the docs).
+          # drift out of date with the docs). The warm-up below is what makes
+          # that true: a fresh runner's npx cache is empty, so the lookup inside
+          # check-mermaid.mjs finds nothing and the gate cannot run at all.
           - name: Mermaid diagrams parse (#3395)
             home: true
-            run: node scripts/check-mermaid.mjs
+            run: |
+              npx -y @mermaid-js/mermaid-cli --version
+              node scripts/check-mermaid.mjs
 
           # #2576: the CAPE implementation-plan doc claimed the detail page
           # (/cape/{sha256}) was admin-gated. Nothing in backend-service
