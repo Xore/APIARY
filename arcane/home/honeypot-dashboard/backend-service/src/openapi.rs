@@ -1460,17 +1460,25 @@ mod tests {
         );
     }
 
-    /// #3325's drift gate, direction two: every `.route(...)` main.rs
+    /// #3325's drift gate, direction two: every `.route(...)` the service
     /// registers is in the contract, and nothing in the contract is
     /// missing from the router. The direction that matters is
     /// router -> contract -- a new route with no contract row is how a
     /// fuzz target quietly stops covering the thing it was added for.
     /// The other direction catches a contract path that no longer routes,
     /// which is how a fuzzer ends up measuring a 404.
+    ///
+    /// The route table was read out of `src/main.rs` while the binary
+    /// still owned it. It is read out of `src/lib.rs` now, because the
+    /// table moved there with the handler modules (#3325's utoipa
+    /// migration): the contract is generated from the same builder the
+    /// process serves, and a second binary cannot see a first binary's
+    /// modules. Every assertion below is unchanged -- only the file the
+    /// scan reads moved, because the code it scans moved.
     #[test]
     fn contract_covers_every_router_route() {
         let main_rs =
-            std::fs::read_to_string(crate_dir().join("src/main.rs")).expect("src/main.rs is readable");
+            std::fs::read_to_string(crate_dir().join("src/lib.rs")).expect("src/lib.rs is readable");
         let registered: BTreeSet<(String, String)> = router_routes(&main_rs)
             .into_iter()
             .collect();
@@ -1490,7 +1498,8 @@ mod tests {
         let extra: Vec<_> = published.difference(&registered).collect();
         assert!(
             missing.is_empty() && extra.is_empty(),
-            "the contract and src/main.rs disagree about the /api surface (#3325).\n\
+            "the contract and the service's route table disagree about the /api \
+             surface (#3325).\n\
              registered but not in openapi.json: {missing:#?}\n\
              in openapi.json but not registered: {extra:#?}\n\
              add the row to operations() in src/openapi.rs, then run \
@@ -1674,7 +1683,7 @@ mod tests {
         names
     }
 
-    /// The `(path, method)` pairs main.rs registers, read out of the
+    /// The `(path, method)` pairs the service registers, read out of the
     /// source rather than a hand-kept list. A third list would be a
     /// third thing to update, and the point of the gate is that the
     /// router stays the thing that decides what exists.
