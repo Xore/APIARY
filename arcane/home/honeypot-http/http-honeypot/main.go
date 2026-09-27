@@ -15,7 +15,6 @@
 package main
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -58,11 +57,47 @@ type event struct {
 	UserAgent string            `json:"user_agent,omitempty"`
 	Headers   map[string]string `json:"headers"`
 	Body      string            `json:"body,omitempty"`
-	Username  string            `json:"username,omitempty"`
-	Password  string            `json:"password,omitempty"`
-	AuthType  string            `json:"auth_type,omitempty"`
-	Status    int               `json:"status"`
-	Category  string            `json:"category"`
+	// #3213: the account half of a submitted credential, kept because it
+	// is the analytic value (a spray is a spray of accounts) and it is not
+	// a secret. The secret half of the same credential is never written
+	// here, never logged, and never returned over the API -- see
+	// credentials.go. The pre-#3213 event carried a sibling `password`
+	// field for exactly that half; it is gone, and `body`, `query` and
+	// `headers` are scrubbed of credential values in its place, because a
+	// removed field is not a removed leak.
+	Username string `json:"username,omitempty"`
+	// AuthType is the channel the credential arrived on ("basic",
+	// "bearer", "form", or the name of a scheme this sensor does not
+	// decode) -- never what was in it.
+	AuthType string `json:"auth_type,omitempty"`
+	// #3213: the presence/extraction axis, separate from Status (what the
+	// decoy served) and from AuthOutcome (who decided anything). Always
+	// present, and always one of the four credentialStatus values --
+	// including "unknown", which is the whole reason the field is a string
+	// rather than a boolean.
+	CredentialStatus string `json:"credential_status"`
+	// CredentialPresent is the presence boolean, and it is null exactly
+	// when CredentialStatus is "unknown". That is not a formatting
+	// nicety: a plain false would be indistinguishable from a request we
+	// looked at and found nothing in, which is the collapse #3213 exists
+	// to prevent.
+	CredentialPresent *bool `json:"credential_present"`
+	// CredentialIndicatorMatch is true when an attempt used this decoy's
+	// own FICTIONAL bait credential (credentials.go's decoyIndicators --
+	// not a vendor default list, and not a claim about any product but our
+	// own). It marks an ATTEMPT, scoped by CredentialIndicator, and
+	// nothing else: not access, not a bypass, not a CVE.
+	CredentialIndicatorMatch bool   `json:"credential_indicator_match"`
+	CredentialIndicator      string `json:"credential_indicator,omitempty"`
+	// AuthOutcome is the provenance of any authentication decision this
+	// response made (credentials.go's authOutcome). It is "simulated" for
+	// anything the decoy's persona served and "unknown" when no
+	// authentication decision was made. It is never derived from Status,
+	// so a 200 on a login page -- or on a bearer-authenticated fake model
+	// list -- can never read as a real authentication success.
+	AuthOutcome string `json:"auth_outcome"`
+	Status      int    `json:"status"`
+	Category    string `json:"category"`
 	// What the request *carried*, as opposed to what it asked for (#1888).
 	// Separate from Category on purpose: a POST of an SQL injection to a
 	// WordPress bait path is both a "wordpress" request and an "sqli"
@@ -289,7 +324,14 @@ func headerMap(r *http.Request) map[string]string {
 	for k, v := range r.Header {
 		m[k] = strings.Join(v, ", ")
 	}
-	return m
+	// #3213: a header whose whole value is a credential is replaced, not
+	// shortened. Authorization carries the password (base64, which is
+	// encoding, not protection), and Cookie carries session tokens an
+	// attacker will replay -- neither is a fact about the request that a
+	// log line needs to carry verbatim. The header still appears, with its
+	// scheme where that is not itself a secret, so "did this request
+	// authenticate at all" stays answerable.
+	return redactSecretHeaders(m)
 }
 
 // classifyPayload names what a request carried, from its query string and
@@ -773,8 +815,16 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, _ := io.ReadAll(io.LimitReader(r.Body, 64<<10)) // cap at 64 KiB
+	body, _ := io.ReadAll(io.LimitReader(r.Body, bodyReadCap)) // cap at 64 KiB
 	r.Body.Close()
+
+	// #3213: one pass over every channel that can carry a credential,
+	// answering three questions the event used to answer badly or not at
+	// all -- was a credential present, could it be read, and what (if
+	// anything) did the decoy decide about it. classifyPayload still sees
+	// the raw body and query: redaction must not cost the fleet a payload
+	// signature, and the two passes are independent.
+	creds := inspectCredentials(r, string(body))
 
 	e := event{
 		Time:         time.Now().UTC().Format(time.RFC3339),
@@ -789,44 +839,32 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Method:       r.Method,
 		Host:         r.Host,
 		Path:         r.URL.Path,
-		Query:        r.URL.RawQuery,
+		Query:        creds.redactedQuery,
 		UserAgent:    r.UserAgent(),
 		Headers:      headerMap(r),
-		Body:         string(body),
+		Body:         creds.redactedBody,
 		Category:     classify(r.URL.Path),
 		PayloadClass: classifyPayload(r.URL.RawQuery, string(body)),
-	}
-
-	// Pull credentials from HTTP Basic auth …
-	if u, p, ok := r.BasicAuth(); ok {
-		e.Username, e.Password, e.AuthType = u, p, "basic"
-	} else if a := r.Header.Get("Authorization"); strings.HasPrefix(a, "Basic ") {
-		if raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(a, "Basic ")); err == nil {
-			if u, p, found := strings.Cut(string(raw), ":"); found {
-				e.Username, e.Password, e.AuthType = u, p, "basic"
-			}
-		}
-	}
-	if e.AuthType == "" {
-		if scheme, token, ok := strings.Cut(r.Header.Get("Authorization"), " "); ok &&
-			strings.EqualFold(scheme, "Bearer") && token != "" {
-			e.Username, e.Password, e.AuthType = "bearer", token, "bearer"
-		}
-	}
-	// … or from a submitted login form.
-	if e.Username == "" && len(body) > 0 && strings.Contains(r.Header.Get("Content-Type"), "form-urlencoded") {
-		if vals, err := parseForm(string(body)); err == nil {
-			e.Username = firstNonEmpty(vals, "username", "user", "login", "email", "name", "uname")
-			e.Password = firstNonEmpty(vals, "password", "pass", "passwd", "pwd")
-			if e.Username != "" || e.Password != "" {
-				e.AuthType = "form"
-			}
-		}
+		// The three #3213 axes. AuthOutcome stays authUnknown until a
+		// branch in serve() decides this response was an artifact of the
+		// decoy's simulated authentication surface -- and no branch ever
+		// sets it from the status code.
+		CredentialStatus:         string(creds.status),
+		CredentialPresent:        creds.present(),
+		CredentialIndicatorMatch: creds.indicator != "",
+		CredentialIndicator:      creds.indicator,
+		AuthOutcome:              string(authUnknown),
+		Username:                 creds.username,
+		AuthType:                 creds.authType,
 	}
 
 	if s.tarpitEnabled && tarpitCategory(e.Category) {
 		e.Status = http.StatusOK
 		e.Tarpitted = true
+		// A tarpit is the absence of a decision: the request was slowed
+		// and never answered, so there is no authentication outcome to
+		// report and authUnknown is the honest one. The 200 above is a
+		// drip stream completing, not an authentication result.
 		n, held := tarpit(r.Context(), w)
 		e.TarpitBytes = n
 		e.TarpitMS = held.Milliseconds()
@@ -837,6 +875,15 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // serve writes a plausible response and records the status code onto e.
+//
+// #3213: the branches that answer from the decoy's simulated
+// authentication surface also record auth_outcome=simulated. That is a
+// statement about provenance -- this response was chosen by the persona,
+// not by any authentication backend -- and it is set by the branch, never
+// derived from the status code. A 200 here is the decoy working, and the
+// two 200s below (a login page rendering; a fake model list for a bearer
+// token that was never checked against anything) are exactly why the
+// status code cannot answer this question.
 func (s *server) serve(w http.ResponseWriter, r *http.Request, e *event) {
 	w.Header().Set("Server", s.serverHdr)
 	p := strings.ToLower(r.URL.Path)
@@ -878,20 +925,32 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request, e *event) {
 
 	case strings.HasPrefix(p, "/api/v1/"), strings.HasPrefix(p, "/apis/"):
 		e.Status = http.StatusForbidden
+		// An authorization decision made by the decoy's simulated
+		// Kubernetes API, for the anonymous user. Simulated, not real: no
+		// RBAC was consulted, and the 403 is the persona's answer.
+		e.AuthOutcome = string(authSimulated)
 		writeJSON(w, http.StatusForbidden, `{"kind":"Status","apiVersion":"v1","status":"Failure","message":"forbidden: User system:anonymous cannot access this resource","reason":"Forbidden","code":403}`)
 
 	case p == "/v2/":
 		w.Header().Set("Docker-Distribution-Api-Version", "registry/2.0")
 		w.Header().Set("WWW-Authenticate", `Bearer realm="https://auth.registry.nexusai.internal/token",service="registry.nexusai.internal"`)
 		e.Status = http.StatusUnauthorized
+		e.AuthOutcome = string(authSimulated)
 		writeJSON(w, http.StatusUnauthorized, `{"errors":[{"code":"UNAUTHORIZED","message":"authentication required"}]}`)
 
 	case strings.HasPrefix(p, "/v1/models"), strings.HasPrefix(p, "/v1/chat/completions"):
 		if e.AuthType != "bearer" {
 			e.Status = http.StatusUnauthorized
+			e.AuthOutcome = string(authSimulated)
 			writeJSON(w, http.StatusUnauthorized, `{"error":{"message":"Incorrect API key provided","type":"invalid_request_error","code":"invalid_api_key"}}`)
 		} else {
+			// The branch #3213 is really about. A 200 here, for a token
+			// nobody validated: the outcome is the decoy's own simulated
+			// answer, and reading this status as a successful
+			// authentication is the inference the issue forbids. Nothing
+			// in this binary can record authReal.
 			e.Status = http.StatusOK
+			e.AuthOutcome = string(authSimulated)
 			writeJSON(w, http.StatusOK, `{"object":"list","data":[{"id":"nexusai-chat-70b-v3","object":"model","owned_by":"nexusai-mlops"},{"id":"nexusai-embed-bge-v1","object":"model","owned_by":"nexusai-mlops"}]}`)
 		}
 
@@ -900,14 +959,23 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request, e *event) {
 		if e.AuthType == "" {
 			w.Header().Set("WWW-Authenticate", `Basic realm="Tomcat Manager Application"`)
 			e.Status = http.StatusUnauthorized
+			e.AuthOutcome = string(authSimulated)
 			writeHTML(w, http.StatusUnauthorized, tomcat401)
 		} else {
+			// A submitted credential earns a simulated rejection. The
+			// decoy has no account store to accept or reject against, and
+			// the 403 is a persona's page, not a verdict.
 			e.Status = http.StatusForbidden
+			e.AuthOutcome = string(authSimulated)
 			writeHTML(w, http.StatusForbidden, tomcat403)
 		}
 
 	case strings.Contains(p, "wp-login") || strings.Contains(p, "wp-admin"):
+		// The WordPress login page over 200. status=200 here means the page
+		// rendered; auth_outcome=simulated is what says the authentication
+		// surface answered, and neither field says anybody was let in.
 		e.Status = http.StatusOK
+		e.AuthOutcome = string(authSimulated)
 		writeHTML(w, http.StatusOK, wpLogin)
 
 	case strings.HasSuffix(p, "/readme.html") || p == "/readme.html":
@@ -969,12 +1037,21 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request, e *event) {
 		writeXML(w, http.StatusOK, switchvoxPAFault)
 
 	case strings.Contains(p, "phpmyadmin") || strings.Contains(p, "/pma") || strings.Contains(p, "adminer"):
+		// A database console's login form, rendered over 200. The 200 is
+		// the page rendering; the fact that the decoy's authentication
+		// surface answered is auth_outcome, and neither says a login
+		// succeeded.
 		e.Status = http.StatusOK
+		e.AuthOutcome = string(authSimulated)
 		writeHTML(w, http.StatusOK, phpMyAdmin)
 
 	case strings.Contains(p, "login") || strings.Contains(p, "admin") || strings.Contains(p, "signin"):
-		// Generic login page. Posted creds are already captured above.
+		// Generic login page. Posted creds are already captured above (as a
+		// presence/extraction answer, never as text). A 200 here is the
+		// form rendering, so #3213's "status is not an auth verdict" is
+		// not a hypothetical here -- it is this branch.
 		e.Status = http.StatusOK
+		e.AuthOutcome = string(authSimulated)
 		writeHTML(w, http.StatusOK, genericLogin)
 
 	case strings.HasSuffix(p, ".env") || strings.Contains(p, ".git/") ||

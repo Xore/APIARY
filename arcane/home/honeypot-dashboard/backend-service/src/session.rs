@@ -185,7 +185,13 @@ pub async fn detail(
     let text = |value: &Value| value.as_str().unwrap_or("").to_string();
     for hit in &hits {
         let source = &hit["_source"];
-        let hp = &source["honeypot"];
+        // #3213: the same boundary, on the same rule as everywhere else --
+        // a session summary is an aggregate, and an aggregate that reprints
+        // every secret in the session is how a five-event probe becomes a
+        // credential list. `row_from_hit` below is already guarded; this is
+        // the second read of `hp` in this loop, and it needs its own.
+        let scrubbed = crate::secrets_boundary::scrub_event(&text(&source["event"]["sensor"]), &source["honeypot"]);
+        let hp = scrubbed.as_ref().unwrap_or(&source["honeypot"]);
         let row = crate::events::row_from_hit(hit);
         *sensors.entry(row.sensor.clone()).or_insert(0) += 1;
         let command = {
@@ -202,8 +208,29 @@ pub async fn detail(
         }
         let user = text(&hp["username"]);
         let pass = text(&hp["password"]);
-        if !user.is_empty() || !pass.is_empty() {
-            *credentials.entry(format!("{user} / {pass}")).or_insert(0) += 1;
+        // #3213: for the two decoys the secret is not in the document, so
+        // `{user} / {pass}` would either print a dangling `admin / ` or --
+        // worse, if the pass were defaulted -- claim an empty credential was
+        // offered. The marker is shown only when the sensor's own
+        // `credential_status` says a credential really was there, which is
+        // the field that makes "we are not showing you this" distinguishable
+        // from "there was nothing to show".
+        let label = if !pass.is_empty() {
+            format!("{user} / {pass}")
+        } else {
+            match text(&hp["credential_status"]).as_str() {
+                "extracted" | "present_unparsed" => {
+                    if user.is_empty() {
+                        crate::secrets_boundary::REDACT_MARKER.to_string()
+                    } else {
+                        format!("{user} / {}", crate::secrets_boundary::REDACT_MARKER)
+                    }
+                }
+                _ => user.clone(),
+            }
+        };
+        if !label.is_empty() {
+            *credentials.entry(label).or_insert(0) += 1;
         }
         let shasum = text(&hp["shasum"]);
         if !shasum.is_empty() {

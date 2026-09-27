@@ -375,10 +375,22 @@ pub async fn dashboard(
             ]
         }},
         "aggs": {
-            "creds": {"multi_terms": {
-                "terms": [{"field": "honeypot.username"}, {"field": "honeypot.password"}],
-                "size": 15
-            }},
+            // #3213: this was a `multi_terms` over (username, password), so
+            // the panel was showing the most common PASSWORDS in the fleet.
+            // An aggregation bucket key is the one value on this page that
+            // cannot be scrubbed on the way out -- it is assembled by
+            // Elasticsearch and never passes through a document -- so the
+            // field cannot be asked for at all. Accounts are the analytic
+            // value anyway: a credential spray is a spray of accounts.
+            //
+            // This changes the panel for EVERY sensor, not only the two in
+            // #3213's scope, and that is deliberate: one aggregation over
+            // one time window cannot be sensor-scoped without a second pass,
+            // and leaving cowrie's passwords here would be the same leak with
+            // a smaller blast radius. The response shape is unchanged -- a
+            // `terms` key is a string where a `multi_terms` key was an array,
+            // and the `kv()` helper already accepts both.
+            "creds": {"terms": {"field": "honeypot.username", "size": 15}},
             "commands": {"terms": {"field": "honeypot.canonical_command", "size": 15}},
             "clients": {"terms": {"field": "honeypot.version", "size": 15}},
             "fingerprints": {"terms": {"field": "honeypot.canonical_fingerprint", "size": 15}},
