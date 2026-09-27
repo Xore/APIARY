@@ -14,7 +14,10 @@
 > The two things that stay open are unchanged and are the ones to read first:
 > the base OS is still installed by hand (there is still no kickstart artifact
 > in the tree), and the `:z`/`:Z` label gap below is still real — none of the
-> 34 compose files under `arcane/home/` carries an SELinux relabel.
+> 35 compose files tracked under `arcane/home/` carries an SELinux relabel (34
+> stack-level `compose.yml` files, plus the decoy honeyfs compose nested inside
+> `arcane/home/honeypot-cowrie/cowrie/`, which is an attacker-facing artifact
+> rather than a deployed stack).
 >
 > Everything else in this document was re-checked against
 > `scripts/install-homeserver.sh` and `scripts/lib/install-common.sh` on
