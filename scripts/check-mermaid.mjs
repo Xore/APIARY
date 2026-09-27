@@ -77,6 +77,10 @@ const require_ = createRequire(import.meta.url);
 const puppeteerDir = execFileSync('bash', [
   '-c', 'ls -d "$HOME"/.npm/_npx/*/node_modules/puppeteer 2>/dev/null | head -1',
 ], { encoding: 'utf8' }).trim();
+if (!process.env.MERMAID_PUPPETEER && !puppeteerDir) {
+  console.error('puppeteer not found in npx cache — run: npx -y @mermaid-js/mermaid-cli --version');
+  process.exit(2);
+}
 const puppeteer = process.env.MERMAID_PUPPETEER
   ? (await import(process.env.MERMAID_PUPPETEER)).default
   : require_(join(puppeteerDir, 'lib', 'puppeteer', 'puppeteer.js'));
