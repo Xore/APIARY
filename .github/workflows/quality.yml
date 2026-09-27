@@ -18,14 +18,16 @@ on:
         type: boolean
         default: false
 
-permissions:
-  contents: read
-  # The ci-target router dispatches the ci-heartbeat canary with
-  # GITHUB_TOKEN, and a called reusable workflow can never exceed the
-  # caller's envelope -- under-granting it startup-fails the whole run
-  # as "Invalid workflow file" (containers.yml/security.yml/pages.yml
-  # grant this same way for the same reusable ci-router.yml).
-  actions: write
+# #3313: workflow level defaults to none; every job below declares what it
+# spends. Each of the 20 testing jobs runs actions/checkout, so each carries
+# its own contents: read. actions: write, which used to sit here and so
+# reached all 20 of them, is now on the ci-target router job alone -- that one
+# grant is what dispatches the ci-heartbeat canary with GITHUB_TOKEN, and a
+# called reusable workflow can never exceed the caller's envelope, so
+# under-granting it startup-fails the whole run as "Invalid workflow file"
+# (containers.yml, security.yml and pages.yml grant the same way for the same
+# reusable ci-router.yml).
+permissions: {}
 
 concurrency:
   # #2753: this used to be group: quality-${{ github.ref }} with
@@ -95,6 +97,9 @@ jobs:
   ci-target:
     name: Pick CI executor
     uses: ./.github/workflows/ci-router.yml
+    permissions:
+      contents: read
+      actions: write
     with:
       ci_homeserver_prs: ${{ vars.CI_HOMESERVER_PRS || '' }}
       force_github_hosted: ${{ inputs.force_github_hosted || '' }}
@@ -116,9 +121,14 @@ jobs:
     if: needs.ci-target.outputs.homeserver == 'true'
     runs-on: [self-hosted, linux, x64, honeypot-ci]
     timeout-minutes: 10
+
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
       - run: python scripts/check-public-leaks.py
@@ -130,9 +140,14 @@ jobs:
     needs: [ci-target]
     if: needs.ci-target.outputs.homeserver != 'true'
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
       - run: python scripts/check-public-leaks.py
@@ -149,9 +164,14 @@ jobs:
     if: needs.ci-target.outputs.homeserver == 'true'
     runs-on: [self-hosted, linux, x64, honeypot-ci]
     timeout-minutes: 10
+
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
       - run: node --test branding/design-lab/lab.test.mjs
@@ -161,9 +181,14 @@ jobs:
     needs: [ci-target]
     if: needs.ci-target.outputs.homeserver != 'true'
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
       - run: node --test branding/design-lab/lab.test.mjs
@@ -174,9 +199,14 @@ jobs:
     if: needs.ci-target.outputs.homeserver == 'true'
     runs-on: [self-hosted, linux, x64, honeypot-ci]
     timeout-minutes: 15
+
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           # dicompot's vendored github.com/nsmfoo/dicompot (#413) declares go
           # 1.26.2 in its own go.mod -- the module graph forces that as the
@@ -207,9 +237,14 @@ jobs:
     needs: [ci-target]
     if: needs.ci-target.outputs.homeserver != 'true'
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           # Same floor as the homeserver twin above -- see its comment.
           go-version: "1.26.x"
@@ -234,9 +269,14 @@ jobs:
     if: needs.ci-target.outputs.homeserver == 'true'
     runs-on: [self-hosted, linux, x64, honeypot-ci]
     timeout-minutes: 60
+
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26.x"
           # The homeserver runners keep GOMODCACHE/GOCACHE on disk at
@@ -298,9 +338,14 @@ jobs:
           - arcane/home/honeypot-utilities/reporter
           - portbridge
           - vps/portbridge
+
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26.x"
           cache-dependency-path: "${{ matrix.module }}/go.sum"
@@ -312,6 +357,9 @@ jobs:
     if: always()
     needs: [go-fmt, go-fmt-cloud, go-test-homeserver, go-test-cloud]
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
     steps:
       # #3319: only the lane-summary script, same sparse shape ai-attribution
       # uses. The report is written to the step summary and is a pure function
@@ -370,6 +418,9 @@ jobs:
     if: needs.ci-target.outputs.homeserver == 'true'
     runs-on: [self-hosted, linux, x64, honeypot-ci]
     timeout-minutes: 45
+
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -553,6 +604,9 @@ jobs:
     needs: [ci-target]
     if: needs.ci-target.outputs.homeserver != 'true'
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -644,8 +698,13 @@ jobs:
     if: needs.ci-target.outputs.homeserver == 'true'
     runs-on: [self-hosted, linux, x64, honeypot-ci]
     timeout-minutes: 45
+
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # #3331: same derive as the two jobs above, and it matters most here --
       # this twin runs the BUILT output, so it is the closest thing CI has to
       # executing what the container serves, and it was doing that on 24 while
@@ -654,7 +713,7 @@ jobs:
       - name: Node major from the image (#3331)
         id: node-runtime
         run: ./scripts/node-runtime-major.sh arcane/home/honeypot-dashboard/frontend-next/Dockerfile
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ steps.node-runtime.outputs.node-version }}
           cache: npm
@@ -722,13 +781,18 @@ jobs:
     needs: [ci-target]
     if: needs.ci-target.outputs.homeserver != 'true'
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # #3331: twin -- see the homeserver copy above for the rationale.
       - name: Node major from the image (#3331)
         id: node-runtime
         run: ./scripts/node-runtime-major.sh arcane/home/honeypot-dashboard/frontend-next/Dockerfile
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ steps.node-runtime.outputs.node-version }}
           cache: npm
@@ -799,8 +863,13 @@ jobs:
     defaults:
       run:
         working-directory: arcane/home/honeypot-dashboard/backend-service
+
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Bootstrap rustup into the persistent HOME (no-op after first)
         shell: bash
         run: |
@@ -874,10 +943,15 @@ jobs:
     defaults:
       run:
         working-directory: arcane/home/honeypot-dashboard/backend-service
+
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - run: rustup component add clippy
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -912,8 +986,13 @@ jobs:
     if: needs.ci-target.outputs.homeserver == 'true'
     runs-on: [self-hosted, linux, x64, honeypot-ci]
     timeout-minutes: 10
+
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: theme.css matches the pinned commit
         run: scripts/check-vendored-theme.sh
       # python3, not python: this job has no setup-python step, so on the
@@ -938,8 +1017,13 @@ jobs:
     needs: [ci-target]
     if: needs.ci-target.outputs.homeserver != 'true'
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: theme.css matches the pinned commit
         run: scripts/check-vendored-theme.sh
       # Same python3 choice as the self-hosted twin above: one spelling
@@ -1502,11 +1586,12 @@ jobs:
               fi
 
           # #3314: zizmor security audit of the workflows. Fails on every
-          # medium+ finding EXCEPT the four rules #3313's hardening owns
-          # (unpinned-uses, excessive-permissions, artipacked, self-repository),
-          # which are reported but not failed until #3313 lands -- then drop
-          # them from ADVISORY. zizmor publishes no checksum file; the pin
-          # below was recorded on first download (2026-09-26).
+          # medium+ finding EXCEPT the two rules left in ADVISORY below.
+          # #3313 landed the other three (unpinned-uses, excessive-permissions
+          # and artipacked) across the whole tree, so they are now dropped
+          # from ADVISORY and a regression in any of them is blocking. zizmor
+          # publishes no checksum file; the pin below was recorded on first
+          # download (2026-09-26).
           - name: "Workflow security audit (zizmor, #3314)"
             home: true
             run: |
@@ -1518,15 +1603,27 @@ jobs:
               "$RUNNER_TEMP/zizmor" --offline --min-severity medium --format json .github/workflows > "$RUNNER_TEMP/zizmor.json" || true
               python3 - "$RUNNER_TEMP/zizmor.json" <<'PY'
               import collections, json, sys
-              # dangerous-triggers: reported, not blocking. The workflows that
-              # use pull_request_target/workflow_run here are #3324's health
-              # watches, which already pin every action by SHA, set
-              # permissions: {} by default and persist-credentials: false, and
-              # consume no untrusted event input. #3313 owns the remaining
-              # trigger hardening; blocking on it now would gate every PR on
-              # that issue landing first.
-              ADVISORY = {"unpinned-uses", "excessive-permissions", "artipacked",
-                          "self-repository", "dangerous-triggers"}
+              # Both remaining advisory rules are Low/High-by-rule but not
+              # exploitable as written, and neither is a checkout/pin/permission
+              # property -- so #3313 does not own them:
+              #
+              #   self-repository: the five `uses: ./.github/workflows/ci-router.yml`
+              #   calls. zizmor wants the explicit owner/repo/path@ref form; the
+              #   local-path form is GitHub's own first-party-reusable-workflow
+              #   syntax and is what makes the router pick up edits to the
+              #   shared router without a second SHA to bump. Every one of the
+              #   five is triggered by pull_request/push/schedule, never by
+              #   pull_request_target, so the called workflow is always the
+              #   default branch's own file.
+              #
+              #   dangerous-triggers: main-health-watch.yml's `workflow_run`. It
+              #   runs the default branch's copy of the script and never reads
+              #   the triggering event: every value it reports comes from a
+              #   main-scoped `gh api`/`gh run list` read, and the only
+              #   untrusted-looking text it echoes is main's own commit
+              #   subjects. Changing the trigger would blind the #3324 alarm
+              #   that exists precisely to catch runs nobody started.
+              ADVISORY = {"self-repository", "dangerous-triggers"}
               findings = json.load(open(sys.argv[1]))
               by_rule = collections.Counter(f["ident"] for f in findings)
               for rule, n in sorted(by_rule.items()):
@@ -1615,7 +1712,7 @@ jobs:
           # signing-key-rotation chaos. One shared build feeds both via
           # DASHBOARD_BFF_SKIP_BUILD.
           - name: Set up Node for the dashboard OIDC suites
-            uses: actions/setup-node@v7
+            uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
             with:
               node-version: "22"
               cache: npm
@@ -1946,9 +2043,13 @@ jobs:
             home: true
             run: python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
 
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
       # Needed below by the two dashboard-binary Keycloak integration tests
@@ -1957,7 +2058,7 @@ jobs:
       # entry pays this setup cost even though only two of them use it --
       # simpler and more robust than threading a per-entry needs-go flag
       # through the matrix, and setup-go is fast.
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26.x"
           cache-dependency-path: "**/go.sum"
@@ -1991,6 +2092,9 @@ jobs:
     if: always()
     needs: [scripts-and-compose]
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -2062,6 +2166,9 @@ jobs:
       - scripts-and-compose-complete
       - ai-attribution
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
     steps:
       - name: Fail unless every gated job, or its fallback twin, succeeded
         env:
