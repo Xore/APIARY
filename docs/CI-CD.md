@@ -691,6 +691,60 @@ the actual speed win.
 self-hosted, linux, x64, honeypot-ci
 ```
 
+### Build-only executors on other hosts (#3379)
+
+The `honeypot-ci` pool is not limited to the homeserver. `precision`
+(Dell Precision 5820, i9-10900X 10C/20T, 62 GB RAM, Rocky 10) is a second,
+compute-only executor host registered into the same pool, so a queued
+Quality/Containers/CodeQL job goes to whichever instance on either box is
+idle. The router's trust gate is unchanged: the same code that may run on
+the homeserver may run there, and nothing else.
+
+Three scheduled watches measure **the homeserver itself** rather than the
+checked-out code, and must never land elsewhere:
+
+| Workflow | What it reads on the executing host |
+|---|---|
+| `compose-drift-watch.yml` | `/var/dockge/stacks` via the `compose-drift-ro` sudo helper |
+| `backup-staleness-watch.yml` | `/mnt/usb-recovery` via the `backup-staleness-ro` sudo helper |
+| `disk-usage-watch.yml` | `df` on its own `/var` |
+
+They therefore require an extra label, `honeypot-homeserver`, which only
+the homeserver's own `honeypot-ci` instances carry:
+
+```text
+self-hosted, linux, x64, honeypot-ci, honeypot-homeserver
+```
+
+`install-ci-runner.sh` adds that label by default (the homeserver role).
+On any other box, pass `--build-only`: it registers with plain
+`honeypot-ci` and skips the homeserver-only sudo helpers entirely.
+
+```bash
+# on precision, once per instance
+sudo scripts/github-ci-runner/install-ci-runner.sh --repo Xore/APIARY --build-only --instance N
+```
+
+The installer never re-registers an existing runner, so the label is not
+applied to instances registered before #3379 by re-running it. Add it once
+through the API instead (repo admin):
+
+```bash
+id=$(gh api repos/Xore/APIARY/actions/runners --paginate \
+  --jq '.runners[] | select(.name=="supermicro-ci-2") | .id')
+gh api -X POST "repos/Xore/APIARY/actions/runners/$id/labels" -f 'labels[]=honeypot-homeserver'
+```
+
+Precision-specific layout: its root LV is 70 GB, the same size that filled
+up on the homeserver, and `/home` is a separate 373 GB XFS volume (XFS
+cannot be shrunk to grow root). `/var/lib/docker`, `/var/lib/github-runners`
+and `/var/lib/github-runner-data` are bind mounts from `/home/ci/` (fstab),
+with `semanage fcontext -e` equivalence rules so a relabel of `/home` gives
+the files the same SELinux types as the `/var/lib` paths the installer
+labels. `/etc/docker/daemon.json` carries the homeserver's address-pool,
+log and buildkit-GC policy (minus the NVIDIA runtime; precision's GPU is
+not usable).
+
 ### Executor routing (homeserver first, GitHub-hosted fallback)
 
 Actions has no "runs-on A else B" syntax, so each workflow decides in two
