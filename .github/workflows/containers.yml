@@ -488,7 +488,12 @@ jobs:
             # the label the build step stamped on it -- unique to this
             # matrix row and this run attempt, which matters because the
             # executor's docker daemon is shared.
-            image_id=$(docker image ls --no-trunc \
+            # `--all` is required, not cosmetic: the docker exporter drops
+            # the tag, so this image is dangling, and `docker image ls`
+            # applies the label filter only to tagged images. Without it
+            # the filter silently matched nothing and the step failed on a
+            # build that had loaded correctly (#3316).
+            image_id=$(docker image ls --all --no-trunc \
               --filter "label=apiary.ci.build-row=$BUILD_ROW" \
               --format '{{.ID}}' | head -1)
             [ -n "$image_id" ] || {
