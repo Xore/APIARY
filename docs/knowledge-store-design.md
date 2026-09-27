@@ -59,8 +59,8 @@ stack, not a reuse of one, even though it is a trivial one to stand up
 precedent for "git as a sync/deploy substrate" in this repo is Arcane's own
 GitOps machinery (`docs/ARCANE-GIT-SYNC.md`), which already runs a
 git-pull-and-apply loop against `main` with `auto_sync = 0` set deliberately
-on rows that must not auto-follow (`docs/ARCANE-GIT-SYNC.md:321` and
-`docs/ARCANE-GIT-SYNC.md:374`) — i.e.
+on rows that must not auto-follow (`docs/ARCANE-GIT-SYNC.md:425` and
+`docs/ARCANE-GIT-SYNC.md:478`) — i.e.
 this codebase's existing git-sync tooling defaults to *manual* triggers for
 anything sensitive, which is the posture this decision adopts too (see §4).
 
@@ -191,7 +191,7 @@ A persistent, curated, cross-referenced copy of (bounded, redacted) attacker
 material is qualitatively different from the raw per-event ES documents it's
 derived from: it's smaller, denser, and easier for a human or a script to
 sweep in one pass. Reading `analysis/backup-honeypot.sh`, its archive step
-(`backup-honeypot.sh:87`) already walks `./analysis ./dashboard ./personas
+(`backup-honeypot.sh:119`) already walks `./analysis ./dashboard ./personas
 ./state` by directory-existence check, unconditionally including anything
 found there. If the vault directory (§1: `state/knowledge-vault/`) is placed
 under `$stack_dir/state/`, it is **already** inside this glob and would start
@@ -216,8 +216,8 @@ inferring it from a directory glob matching by accident.
 ### Worker authorization gate
 
 The vault-ingest worker (#2290) must gate non-dry-run writes the same way
-`llm-worker` gates captured-data mode. Reading `llm-worker/worker.py:200-202`
-and `llm-worker/worker.py:254-264`:
+`llm-worker` gates captured-data mode. Reading `llm-worker/worker.py:246-248`
+and `llm-worker/worker.py:314-318`:
 non-dry-run requires `LLM_ENABLED=true` **and** `LLM_ALLOW_CAPTURED_DATA=true`
 together, with the error message naming both. The vault worker adopts the
 same two-flag shape (its own env var names, e.g. `VAULT_ENABLED` /
