@@ -13,6 +13,8 @@
 
 use serde_json::Value;
 
+use crate::secrets_boundary;
+
 fn s(v: &Value) -> &str {
     v.as_str().unwrap_or("")
 }
@@ -159,7 +161,16 @@ fn dicom_event_label(kind: &str) -> &str {
 /// read fields outside `honeypot.*`/`suricata.eve.*` (network.protocol
 /// fallbacks, top-level message).
 pub fn detail_for(sensor: &str, src: &Value) -> String {
-    let hp = &src["honeypot"];
+    // #3213: the boundary is applied HERE, once, before the dispatch, rather
+    // than at each of the reads below that can reach a credential. Six
+    // `hp["password"]` reads live in this file's per-sensor functions and
+    // more arrive with every sensor added; a read site that forgets to think
+    // about the secret cannot leak one, because the field is already gone by
+    // the time it runs. `unwrap_or` keeps the out-of-scope sensors on the
+    // original borrow -- cowrie, tanner and the rest are unchanged by this,
+    // and `scrub_event` returns `None` for them rather than a clone.
+    let scrubbed = secrets_boundary::scrub_event(sensor, &src["honeypot"]);
+    let hp = scrubbed.as_ref().unwrap_or(&src["honeypot"]);
     let eve = &src["suricata"]["eve"];
 
     match sensor {
@@ -169,7 +180,7 @@ pub fn detail_for(sensor: &str, src: &Value) -> String {
         "dnp3" => dnp3_detail(hp),
         "dns-honeypot" => dns_honeypot_detail(hp),
         "citrix-honeypot" => citrix_detail(hp),
-        "cisco-asa-honeypot" => cisco_asa_detail(hp),
+        "cisco-asa-honeypot" => cisco_asa_detail(sensor, hp),
         "rdp-honeypot" => rdp_detail(hp),
         "beelzebub" => beelzebub_detail(hp),
         "hellpot" => hellpot_detail(hp),
@@ -181,8 +192,8 @@ pub fn detail_for(sensor: &str, src: &Value) -> String {
         "canarytokens" => canarytokens_detail(hp),
         "endlessh" => endlessh_detail(hp),
         "dionaea" => dionaea_detail(hp),
-        "tanner" => tanner_or_http_detail(hp),
-        "http-honeypot" | "http" | "api-honeypot" => tanner_or_http_detail(hp),
+        "tanner" => tanner_or_http_detail(sensor, hp),
+        "http-honeypot" | "http" | "api-honeypot" => tanner_or_http_detail(sensor, hp),
         "suricata" => suricata_detail(eve),
         s if s.starts_with("conpot") => conpot_detail(hp),
         _ => {
@@ -373,10 +384,23 @@ fn citrix_detail(hp: &Value) -> String {
     d
 }
 
-fn cisco_asa_detail(hp: &Value) -> String {
+fn cisco_asa_detail(sensor: &str, hp: &Value) -> String {
     let kind = s(&hp["event"]);
     let path = s(&hp["path"]);
     let mut d = format!("{kind} {path}").trim().to_string();
+    // #3213: the ASA's axes too, on the same terms as the HTTP decoy. The
+    // IKE events reach here with `unknown` on both, which is the honest
+    // answer -- nothing in a UDP key exchange carries a login -- and the
+    // fragment is what makes that visible instead of leaving the line bare.
+    // The account is still shown: a username is the analytic value (a spray
+    // is a spray of accounts) and it is not a secret.
+    let user = s(&hp["username"]);
+    if !user.is_empty() {
+        d += &format!("  ({user})");
+    }
+    if let Some(state) = credential_state_fragment(sensor, hp) {
+        d += &format!("  [{state}]");
+    }
     match kind {
         "cve_2018_0101_payload" => d += &format!("  payload: {}", s(&hp["data"])),
         "post" => {
@@ -618,14 +642,31 @@ fn conpot_detail(hp: &Value) -> String {
 
 /// tanner_report.json (method/path/headers shape) and http-honeypot share
 /// this request-log shape in classify.go.
-fn tanner_or_http_detail(hp: &Value) -> String {
+fn tanner_or_http_detail(sensor: &str, hp: &Value) -> String {
     let method = s(&hp["method"]);
     let path = s(&hp["path"]);
     let user = s(&hp["username"]);
     let pass = s(&hp["password"]);
     let mut d = format!("{method} {path}").trim().to_string();
-    if !user.is_empty() || !pass.is_empty() {
-        d += &format!("  ({user} / {pass})");
+    // #3213: the `/ pass` half is rendered only when the document actually
+    // still carries a secret. http-honeypot no longer stores one, and the
+    // boundary has removed it from the ones stored before the fix, so
+    // `{user} / {pass}` would now print a dangling separator and a permanent
+    // empty half. tanner is out of scope, keeps its secret, and is
+    // byte-identical to before.
+    let state = credential_state_fragment(sensor, hp);
+    match state {
+        Some(state) => {
+            if !user.is_empty() {
+                d += &format!("  ({user})");
+            }
+            d += &format!("  [{state}]");
+        }
+        None => {
+            if !user.is_empty() || !pass.is_empty() {
+                d += &format!("  ({user} / {pass})");
+            }
+        }
     }
     if hp["tarpitted"].as_bool() == Some(true) {
         let ms = num_float(&hp["tarpit_ms"]) as i64;
@@ -657,8 +698,36 @@ fn tanner_or_http_detail(hp: &Value) -> String {
     d
 }
 
-/// suricata-v2-* detail. `alert`/`anomaly` mirror classify.go's proven
-/// dashboard/classify.go:1109-1198 exactly. `http`/`tls`/`ssh`/`smtp`/
+/// Renders #3213's three axes as one bracketed detail fragment.
+///
+/// `None` for a sensor this issue does not cover, which is what keeps tanner
+/// on the `{user} / {pass}` line it has always rendered.
+///
+/// A document on the pre-fix schema is the case worth reading twice. It has
+/// no `credential_status`, and the boundary has just removed the `password`
+/// field that was the only evidence of a credential in it -- so reporting
+/// "absent" would be reporting the scrubber's own effect back to the analyst
+/// as an observation about the attacker. It says the secret was removed and
+/// stops there, which is the one claim still true.
+fn credential_state_fragment(sensor: &str, hp: &Value) -> Option<String> {
+    let status = s(&hp["credential_status"]);
+    if status.is_empty() {
+        return secrets_boundary::is_credential_bearing(sensor, hp).then(|| "credentials removed".to_string());
+    }
+    let mut parts = vec![status.replace('_', " ")];
+    // The indicator is an ATTEMPT matched against this fleet's own bait
+    // values, not a verdict that the credential worked -- so it is worded as
+    // a match and nothing more.
+    if hp["credential_indicator_match"].as_bool() == Some(true) {
+        parts.push("decoy indicator".to_string());
+    }
+    let outcome = s(&hp["auth_outcome"]);
+    if !outcome.is_empty() {
+        parts.push(format!("auth {outcome}"));
+    }
+    Some(parts.join(" · "))
+}
+
 /// `dns`/`fileinfo` are new (#1611 workstream A) — classify.go's legacy
 /// renderer excluded every suricata event_type except alert/anomaly
 /// outright (`ev.skip = true`), the same posture this crate keeps for

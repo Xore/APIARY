@@ -263,8 +263,11 @@ pub async fn ip(
             "sensors": {"terms": {"field": "event.sensor", "size": 30}},
             "ports": {"terms": {"field": "destination.port", "size": 20}},
             "protos": {"terms": {"field": "network.protocol", "size": 20}},
-            "creds": {"multi_terms": {"terms": [
-                {"field": "honeypot.username"}, {"field": "honeypot.password"}], "size": 20}},
+            // #3213: the same removal as dashboard.rs's `creds`, for the
+            // same reason -- a multi_terms bucket key carrying the password
+            // cannot be scrubbed after Elasticsearch assembles it, so the
+            // field must not be requested. Accounts only.
+            "creds": {"terms": {"field": "honeypot.username", "size": 20}},
             "commands": {"terms": {"field": "honeypot.canonical_command", "size": 20}},
             "sessions": {"terms": {"field": "honeypot.session", "size": 20}},
             "techniques": {"terms": {"field": "honeypot.canonical_attck_techniques", "size": 20}},

@@ -23,6 +23,7 @@ use axum::{
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use crate::secrets_boundary;
 use crate::AppState;
 
 /// How many neighbouring events to sample per relation. Enough to see the
@@ -270,16 +271,26 @@ pub async fn get(
         },
     );
 
+    // #3213: `record` is the document AS STORED, which is the whole reason
+    // it is the field most likely to hand an analyst a captured password --
+    // Elasticsearch kept every one this fleet indexed before the sensors were
+    // fixed, and this page is where someone opens one. Scrubbed here rather
+    // than in the frontend, because a browser-side scrub is a scrub that
+    // anything else reading this endpoint skips. Sensors outside #3213's
+    // scope keep the original document, un-cloned.
+    let time = text(&source["@timestamp"]);
+    let record = secrets_boundary::scrub_source(&sensor, &source).unwrap_or(source);
+
     Ok(Json(EventPage {
         id,
         index: text(&hit["_index"]),
-        time: text(&source["@timestamp"]),
+        time,
         sensor,
         src_ip,
         session,
         community_id,
         hashes,
-        record: source,
+        record,
         session_events,
         flow_events,
         source_events,

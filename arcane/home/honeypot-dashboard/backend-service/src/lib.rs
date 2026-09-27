@@ -91,6 +91,7 @@ pub mod rollups;
 pub mod sandbox_submit;
 pub mod sensors;
 pub mod search;
+pub mod secrets_boundary;
 pub mod services_control;
 pub mod session;
 pub mod stores;

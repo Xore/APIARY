@@ -12,7 +12,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::{event_detail::detail_for, AppState};
+use crate::{event_detail::detail_for, secrets_boundary, AppState};
 
 #[derive(Deserialize, Clone)]
 pub struct EventsQuery {
@@ -74,6 +74,13 @@ pub struct EventsQuery {
     /// Exact command text (canonical_command, command, input).
     pub cmd: Option<String>,
     /// "user / pass" credential pair, split on the legacy separator.
+    ///
+    /// #3213: a bare account is accepted on its own and filters the account
+    /// half only. Still a filter rather than a response -- nothing is echoed
+    /// back from it -- and the pass half simply stops matching for
+    /// http-honeypot and cisco-asa-honeypot, whose documents no longer carry
+    /// the field. It continues to work for the sensors outside this issue's
+    /// scope.
     pub cred: Option<String>,
     /// Request path (honeypot.path, honeypot.url).
     pub path: Option<String>,
@@ -109,6 +116,13 @@ pub struct EventPivots {
     pub fingerprint_kind: String,
     pub command: String,
     pub user: String,
+    /// #3213: empty for http-honeypot and cisco-asa-honeypot. The field
+    /// stays because the sensors outside this issue's scope still populate
+    /// it, and deleting it would be a breaking change to a dozen rows the
+    /// issue is not about. A pivot is a FILTER value, so an empty one simply
+    /// renders no link -- and the frontend builds the `cred` link only when
+    /// both halves are present, rather than emitting a dangling
+    /// `admin / ` that would filter on an empty password.
     pub pass: String,
     pub path: String,
     pub shasum: String,
@@ -142,7 +156,14 @@ pub struct EventPivots {
 
 pub fn pivots_from_source(src: &Value) -> EventPivots {
     let text = |v: &Value| v.as_str().unwrap_or("").to_string();
-    let hp = &src["honeypot"];
+    // #3213: `pass` is one of the pivots this function reads, so the guard
+    // belongs here, on the function that reads it. For the two decoys in
+    // scope `pass` now comes back empty -- the secret was removed at the
+    // sensor for new events and by the boundary for stored ones -- while
+    // cowrie, tanner and the rest keep theirs, which is the remaining
+    // exposure #3213's PR body declares rather than hides.
+    let scrubbed = secrets_boundary::scrub_event(&text(&src["event"]["sensor"]), &src["honeypot"]);
+    let hp = scrubbed.as_ref().unwrap_or(&src["honeypot"]);
     let first = |keys: &[&str]| -> String {
         keys.iter().map(|k| text(&hp[*k])).find(|s| !s.is_empty()).unwrap_or_default()
     };
@@ -230,11 +251,21 @@ pub struct EventRow {
     /// Detail-pane pivot groups (#1653) — see EventPivots.
     pub pivots: EventPivots,
     /// The complete normalized ECS document, for the record inspector pane
-    /// (the row click opens it; nothing is hidden). #1611 workstream E.4:
-    /// this is also where `network.community_id` (when suricata populated
-    /// it) is already visible and copyable — it's the exact join key an
-    /// Arkime cross-link needs, so no separate field/endpoint is required
-    /// on this side; the pivot link itself is a frontend concern.
+    /// (the row click opens it). #1611 workstream E.4: this is also where
+    /// `network.community_id` (when suricata populated it) is already
+    /// visible and copyable — it's the exact join key an Arkime cross-link
+    /// needs, so no separate field/endpoint is required on this side; the
+    /// pivot link itself is a frontend concern.
+    ///
+    /// #3213: "nothing is hidden" is no longer literally true, and the
+    /// exception is deliberate. For `http-honeypot` and
+    /// `cisco-asa-honeypot` this field used to hand a captured password to
+    /// every row of the list, the SSE live stream and both CSV exports —
+    /// the widest read surface the document has. `secrets_boundary` scrubs
+    /// it at construction, so what the inspector shows is the document with
+    /// credential values replaced by `[redacted]`, alongside the two axes
+    /// that describe them. Out-of-scope sensors are unchanged; see
+    /// `secrets_boundary` for the sensors still carrying plaintext.
     pub record: Value,
 }
 
@@ -432,6 +463,16 @@ fn since_to_range(since: &Option<String>) -> String {
 pub fn row_from_source(src: &Value) -> EventRow {
     let text = |v: &Value| v.as_str().unwrap_or("").to_string();
     let sensor = text(&src["event"]["sensor"]);
+    // #3213: the row is the one place every one of the explorer's outputs
+    // comes from -- `detail`, `pivots.pass` and `record` all read the same
+    // document -- so the boundary runs once here and everything below sees
+    // the scrubbed copy. `record` is the sharpest edge: it is the complete
+    // document "with nothing hidden", so for these two decoys it used to
+    // carry a captured password into every row of the list, into the SSE
+    // live stream and into both CSV exports. Out-of-scope sensors are
+    // returned an untouched borrow, not a clone.
+    let scrubbed = secrets_boundary::scrub_source(&sensor, src);
+    let src = scrubbed.as_ref().unwrap_or(src);
     // Several sensors (multipot, conpot, dnp3) only ever carry proto/port
     // under honeypot.* — network.protocol/destination.port stay empty for
     // them, so fall back rather than showing a blank column (#1611
@@ -581,9 +622,20 @@ pub fn build_filters(q: &EventsQuery) -> Vec<Value> {
     }
     if let Some(cred) = q.cred.as_deref().filter(|v| !v.is_empty()) {
         // "user / pass", the exact separator the credential links carry.
+        //
+        // #3213: a bare account with no " / " used to emit a second filter
+        // for an EMPTY password, which matches essentially nothing -- so
+        // typing an account into the credential box returned an empty result
+        // set and read as "this account was never seen". The pass half is
+        // now emitted only when there is one, which both fixes that and
+        // gives the sensors in scope a working account pivot: their rows no
+        // longer carry a pass to put in the link, and an account on its own
+        // is the half that survives.
         let (user, pass) = cred.split_once(" / ").unwrap_or((cred, ""));
         filters.push(any_of(&["honeypot.canonical_user", "honeypot.username"], user));
-        filters.push(any_of(&["honeypot.canonical_pass", "honeypot.password"], pass));
+        if !pass.is_empty() {
+            filters.push(any_of(&["honeypot.canonical_pass", "honeypot.password"], pass));
+        }
     }
     if let Some(path) = q.path.as_deref().filter(|v| !v.is_empty()) {
         filters.push(any_of(&["honeypot.path", "honeypot.url"], path));
@@ -829,5 +881,158 @@ mod session_scope_tests {
         // place, and events.rs, session.rs and reports_data.rs all call
         // through it. A fourth id field lands here once or nowhere.
         assert_eq!(SESSION_FIELDS, &["honeypot.session", "honeypot.session_id", "session.id"]);
+    }
+
+    // ── #3213: the API-response half of the secret-handling rule ──────────
+    //
+    // The sensors prove a password never reaches an emitted event or a log
+    // line. This proves the other half: that a password ALREADY IN THE INDEX
+    // never reaches a response. The document below is the pre-fix shape --
+    // `password` present, body unredacted -- which is what every stored
+    // event from before the sensor change looks like, and it is the only
+    // version of this test that is worth writing, because a document the new
+    // sensors produce has nothing left to leak.
+
+    const SECRET: &str = "correct-horse-battery-staple-9f2c";
+
+    fn stored_http_login() -> Value {
+        json!({
+            "@timestamp": "2026-09-01T00:00:00Z",
+            "event": {"sensor": "http-honeypot"},
+            "source": {"ip": "203.0.113.9"},
+            "honeypot": {
+                "sensor": "http-honeypot",
+                "src_ip": "203.0.113.9",
+                "method": "POST",
+                "path": "/wp-login.php",
+                "username": "admin",
+                "password": SECRET,
+                "body": format!("log=admin&pwd={SECRET}&wp-submit=Log+In"),
+                "query": format!("redirect_to=/wp-admin&password={SECRET}"),
+                "headers": {
+                    "authorization": format!("Basic YWRtaW46{SECRET}"),
+                    "user-agent": "curl/8.4.0",
+                    "cookie": format!("wordpress_logged_in_{SECRET}=admin")
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn a_stored_password_never_reaches_an_event_row() {
+        // `row_from_source` feeds the explorer list, the SSE live stream and
+        // both CSV exports, so this one assertion covers all four surfaces.
+        // Serialized rather than field-checked on purpose: a new field added
+        // to the row later is covered by the same assertion, and a field
+        // checked by name is only as good as the name someone remembered.
+        let row = row_from_source(&stored_http_login());
+        let rendered = serde_json::to_string(&row).unwrap();
+        assert!(!rendered.contains(SECRET), "a stored password reached an event row: {rendered}");
+    }
+
+    #[test]
+    fn the_row_keeps_the_fields_an_analyst_actually_reads() {
+        // A boundary that deleted the body would pass the test above and
+        // destroy the evidence. The account, the path, the method and the
+        // redacted body shape all have to survive.
+        let row = row_from_source(&stored_http_login());
+        assert_eq!(row.pivots.user, "admin");
+        assert_eq!(row.detail, "POST /wp-login.php  (admin)  [credentials removed]");
+        let record = row.record.to_string();
+        assert!(record.contains("wp-submit=Log+In"), "the redacted body lost its shape: {record}");
+        assert!(record.contains("curl/8.4.0"), "a non-secret header was destroyed: {record}");
+    }
+
+    #[test]
+    fn the_detail_line_says_the_credential_was_removed_not_that_there_was_none() {
+        // The distinction the whole issue turns on. This document had a
+        // credential; the boundary took it away; reporting "absent" would be
+        // reporting the scrubber's own effect as an observation about the
+        // attacker.
+        let row = row_from_source(&stored_http_login());
+        assert!(row.detail.contains("credentials removed"), "{}", row.detail);
+        assert!(!row.detail.contains("absent"), "{}", row.detail);
+    }
+
+    #[test]
+    fn the_password_pivot_is_empty_but_the_account_pivot_is_not() {
+        let row = row_from_source(&stored_http_login());
+        assert_eq!(row.pivots.pass, "", "the password pivot must be empty for a boundary sensor");
+        assert_eq!(row.pivots.user, "admin", "the account is the analytic value and must survive");
+    }
+
+    #[test]
+    fn a_password_outside_this_issues_scope_is_left_exactly_as_it_was() {
+        // The scoping proof. Without it, `scrub_source` returning `None` for
+        // out-of-scope sensors is untested, and a future edit that widens the
+        // sensor list silently would look like a harmless refactor.
+        let cowrie = json!({
+            "event": {"sensor": "cowrie"},
+            "honeypot": {"eventid": "cowrie.login.failed", "username": "root", "password": "toor"}
+        });
+        let row = row_from_source(&cowrie);
+        assert_eq!(row.pivots.pass, "toor", "cowrie is out of scope and must not change");
+        assert_eq!(row.detail, "login.failed: root / toor", "cowrie is out of scope and must not change");
+    }
+
+    #[test]
+    fn a_scrubbed_row_is_the_same_row_on_a_second_pass() {
+        // Idempotence is what lets the boundary sit at the top of
+        // `row_from_source` while `detail_for` and `pivots_from_source`
+        // guard themselves as well. Without it the double guard would
+        // double-redact, and a body read twice would stop matching its own
+        // field names.
+        let once = row_from_source(&stored_http_login());
+        let twice = row_from_source(&once.record);
+        assert_eq!(once.detail, twice.detail);
+        assert_eq!(once.record, twice.record);
+        assert_eq!(once.pivots.pass, twice.pivots.pass);
+    }
+
+    #[test]
+    fn the_new_schema_reads_as_three_separate_questions() {
+        // A post-fix document: the axes are populated and independent, and
+        // the presence boolean survives as `null` for unknown rather than
+        // collapsing to false.
+        let fresh = json!({
+            "event": {"sensor": "http-honeypot"},
+            "honeypot": {
+                "method": "POST", "path": "/api/v1/login",
+                "username": "admin",
+                "credential_status": "extracted",
+                "credential_present": true,
+                "credential_indicator_match": true,
+                "auth_type": "form",
+                "auth_outcome": "simulated"
+            }
+        });
+        let row = row_from_source(&fresh);
+        assert_eq!(row.detail, "POST /api/v1/login  (admin)  [extracted · decoy indicator · auth simulated]");
+        let record = row.record.to_string();
+        assert!(record.contains("\"credential_indicator_match\":true"), "{record}");
+        assert!(record.contains("\"auth_outcome\":\"simulated\""), "{record}");
+    }
+
+    #[test]
+    fn an_unknown_presence_is_not_reported_as_false() {
+        // `credential_present: null` is the whole reason it is a pointer in
+        // the sensor and an Option here. A defaulted false would tell the
+        // analyst a request carried no credential when nobody knows.
+        let unknown = json!({
+            "event": {"sensor": "cisco-asa-honeypot"},
+            "honeypot": {
+                "event": "ike_unexpected_exchange", "data": "isakmp",
+                "credential_status": "unknown", "credential_present": Value::Null,
+                "auth_outcome": "unknown"
+            }
+        });
+        let row = row_from_source(&unknown);
+        // The `(type isakmp)` tail is the pre-existing IKE rendering and is
+        // unaffected; the point of the assertion is the fragment before it.
+        assert_eq!(row.detail, "ike_unexpected_exchange  [unknown · auth unknown] (type isakmp)", "{}", row.detail);
+        assert!(
+            row.record["honeypot"]["credential_present"].is_null(),
+            "a null presence must stay null all the way to the response"
+        );
     }
 }
