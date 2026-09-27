@@ -113,6 +113,12 @@ pub struct SourceHealth {
     pub ingest: IngestFreshness,
     pub dead_letters: u64,
     pub pipeline: PipelineHealth,
+    /// #3330: whether the alerts this page is about actually reach the
+    /// configured webhook. It belongs here rather than only in Settings
+    /// because this is the page an operator opens when something is not
+    /// arriving — "the pipeline is fine, the webhook is refusing us" is
+    /// the distinction it can now make.
+    pub webhook: crate::webhook_delivery::DeliveryHealth,
     /// Events in the last 24h whose source address could not be recovered
     /// — the same documents the events explorer renders as `unattributed`
     /// (#1723). They are counted in every total above but belong to no
@@ -418,6 +424,10 @@ pub async fn source_health(State(state): State<AppState>) -> Result<Json<SourceH
         ingest,
         dead_letters,
         pipeline: pipeline_health(&state).await,
+        // Never a hard failure of this endpoint: a delivery record that
+        // cannot be read leaves the rest of the page worth rendering, and
+        // the card states its own reason.
+        webhook: crate::webhook_delivery::summary(&state.es).await,
         unattributed_24h: result["aggregations"]["unattributed"]["doc_count"].as_u64().unwrap_or(0),
     }))
 }

@@ -85,6 +85,7 @@ mod ics_severity;
 mod ioc_correlation;
 mod threat_intel;
 mod topology;
+mod webhook_delivery;
 mod zeek_proxy_attribution;
 mod worker;
 mod vault_rag;
@@ -297,6 +298,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/investigate/cidr/{cidr}", get(investigate::cidr))
         .route("/api/v1/investigate/cluster", get(investigate::cluster))
         .route("/api/v1/source-health", get(health::source_health))
+        // #3330: the alert fan-out's own delivery outcomes. Also a field on
+        // /api/v1/source-health; this route is what the Settings card
+        // reads, so the operations page's one-snapshot design is not the
+        // only way to get at it.
+        .route("/api/v1/webhook-delivery", get(webhook_delivery::health))
         .route("/api/v1/event/{id}", get(event_page::get))
         // #2047: materialized cross-sensor correlations — the event page's
         // same-flow summary and the re-used-wordlist edges.
