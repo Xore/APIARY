@@ -610,6 +610,45 @@ jobs:
           path: .ci-artifacts/frontend-next-unit-junit.xml
           if-no-files-found: warn
           retention-days: 7
+      # #3318: the tier's first coverage measurement, and the ratchet that
+      # holds it. It runs here rather than in a new job because everything it
+      # needs is already in this one -- the node runtime is the image's own
+      # (#3331), the install is the `npm ci` above, and the test files are the
+      # same 24 the `npm test` step just ran. A new job would mean a second
+      # toolchain install to compute a number the first one is already
+      # positioned to produce.
+      #
+      # The measured baseline is 10.95% lines / 4.77% branches over src/, and
+      # it is low because src/routes/ is 23,450 lines of route module with
+      # almost no unit tests behind it. That is the honest number, recorded as
+      # measured, and the ratchet below is what stops it moving without
+      # somebody writing the new figure down in a commit.
+      - name: Measure coverage (#3318)
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+        run: npm run test:coverage
+      # The gate reads the summary the step above just wrote and compares it
+      # to frontend-next/coverage-baseline.json. No flags: the baseline path
+      # and the tolerance both live in committed files, so there is no
+      # command-line knob here that could widen the gate without a diff. It
+      # also fails if a *.test.ts exists that vitest's own `include:` globs
+      # would never run -- a test file nothing collects is a file, not a
+      # check, and it would otherwise sit inside the number below.
+      - name: Coverage ratchet (#3318)
+        run: python3 scripts/check-frontend-next-coverage.py
+      # `error`, not `ignore`/`warn`: "the report was published" should be a
+      # fact this step can fail on, and a measurement run that produced no
+      # coverage/ directory is exactly the case where a reader would otherwise
+      # find an absent report and assume the gate had nothing to say. The
+      # per-(run, attempt) name and the reused pinned upload-artifact SHA are
+      # the same reasoning as the JUnit upload above.
+      - name: Publish the coverage report (#3318)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-next-coverage-${{ github.run_id }}-${{ github.run_attempt }}
+          path: arcane/home/honeypot-dashboard/frontend-next/coverage/
+          if-no-files-found: error
+          retention-days: 7
       # No live-ES smoke suite here on purpose: port-tests/ needs the real
       # cluster over an SSH tunnel to the homeserver (see its README) --
       # not reachable from a GitHub-hosted runner, and not appropriate to
@@ -698,6 +737,21 @@ jobs:
           name: frontend-next-unit-junit-${{ github.run_id }}-${{ github.run_attempt }}
           path: .ci-artifacts/frontend-next-unit-junit.xml
           if-no-files-found: warn
+          retention-days: 7
+      # #3318: twin of the homeserver copy's three steps above, byte-identical
+      # for the same reason every step in this pair is. Full rationale there.
+      - name: Measure coverage (#3318)
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+        run: npm run test:coverage
+      - name: Coverage ratchet (#3318)
+        run: python3 scripts/check-frontend-next-coverage.py
+      - name: Publish the coverage report (#3318)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-next-coverage-${{ github.run_id }}-${{ github.run_attempt }}
+          path: arcane/home/honeypot-dashboard/frontend-next/coverage/
+          if-no-files-found: error
           retention-days: 7
       # No live-ES smoke suite here on purpose -- see the homeserver twin.
       - run: npm run build

@@ -1,0 +1,20 @@
+{
+  "issue": 3318,
+  "recordedOn": "2026-09-27",
+  "recordedBy": "npm run test:coverage in arcane/home/honeypot-dashboard/frontend-next",
+  "runtime": "node 22.23.2 -- node:22-alpine@sha256:c610fcdf, the frontend-next image's own FROM line (#3331), so this is the number the shipped runtime measures",
+  "vitest": "4.1.11",
+  "coverageProvider": "v8",
+  "suite": "24 test files, 215 cases, all passing",
+  "definition": "vitest.config.ts's own coverage block: include src/**, all: true, minus the *.test.ts/*.test.tsx files themselves and the generated src/routeTree.gen.ts. Excluding the route tree lowers this figure (11.63% -> 10.95% lines) rather than raising it, so it is not an exclusion that flatters the number.",
+  "tolerancePoints": 0.5,
+  "toleranceCounts": 0,
+  "toleranceRationale": "tolerancePoints is 0.5 of a percentage point, about 37 of the 7359 measured lines, so ordinary work that adds untested code does not fail the run for it. toleranceCounts is 0: the covered line and branch counts must not fall at all, because a percentage over a 7,359-line denominator cannot see a seven-line regression (measured -- one new seven-line untested module moved lines 10.95% -> 10.94% and the percentage gate stayed green) while the covered count does. A v8 run of an unchanged tree is bit-identical between runs (measured twice, same summary), so neither allowance is slack for measurement noise: both are slack for a change that moves the denominator, and taking it is a decision someone has to write down here.",
+  "updatePolicy": "The only way to move this number is an explicit commit editing this file, with the new value copied out of a real `npm run test:coverage` run. The gate has no --update flag and no environment override for the tolerance. Lowering coverage must be argued for in that diff, not slipped in beside it.",
+  "total": {
+    "lines": { "total": 7359, "covered": 806, "skipped": 0, "pct": 10.95 },
+    "statements": { "total": 8452, "covered": 859, "skipped": 0, "pct": 10.16 },
+    "functions": { "total": 2666, "covered": 107, "skipped": 0, "pct": 4.01 },
+    "branches": { "total": 7250, "covered": 346, "skipped": 0, "pct": 4.77 }
+  }
+}

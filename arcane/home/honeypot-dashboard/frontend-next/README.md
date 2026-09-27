@@ -75,6 +75,22 @@ for how a commit actually reaches the live host.
 `backend-api.sh`, `bff-load.sh`) — see `../port-tests/README.md`. Run
 against a real build, not `npm run dev`'s HMR server.
 
+Unit tests are `npm test` (vitest) and `npm run test:browser` (Playwright);
+`npm run test:coverage` adds the v8 line/branch measurement over `src/`.
+CI runs the measurement in the `frontend-next` pair in
+`.github/workflows/quality.yml` and then holds the number with
+`scripts/check-frontend-next-coverage.py`, which compares the summary that
+run produced against the committed `coverage-baseline.json` and also fails if
+a `*.test.ts` exists that the `include:` globs in `vitest.config.ts` would
+never collect. The baseline moves only by editing it in a commit, with a
+fresh measurement in the same diff; there is no flag that widens the gate.
+Measured 2026-09-27 on node 22 (the image's own runtime): 10.95% lines,
+4.77% branches, low because `src/routes/` is 23,450 lines of route module
+with almost no unit tests behind it. Line coverage also says nothing about
+whether an assertion would notice a change to the code — see
+`stryker.conf.mjs` and `docs/frontend-mutation-pilot.md` for the pilot that
+asks that question instead.
+
 ## New-page review checklist (capped-truth discipline, #2179)
 
 When authoring or reviewing a page, check the ways a number can quietly lie.

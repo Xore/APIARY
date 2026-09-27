@@ -42,5 +42,62 @@ export default defineConfig({
           outputFile: { junit: join(artifactsDir, 'frontend-next-unit-junit.xml') },
         }
       : {}),
+
+    // #3318: coverage over src/, and the input to the CI ratchet that reads
+    // coverage-summary.json. The report is written to coverage/, which
+    // .gitignore keeps out of the tree -- same reasoning as the Playwright
+    // run artifacts and the Stryker output already ignored there.
+    //
+    // No `thresholds` block, deliberately. A threshold inside vitest is a
+    // constant this file owns, so editing it down is a one-line silent
+    // regression; the ratchet instead compares a *measured* summary against a
+    // committed baseline (scripts/check-frontend-next-coverage.py), which
+    // cannot be adjusted without a visible diff to coverage-baseline.json.
+    coverage: {
+      // v8 is the provider that instruments the same runtime the tests
+      // execute in, so there is no babel/istanbul transform whose own
+      // version becomes a second thing to pin.
+      provider: 'v8',
+      // src/ only, per the issue. Nothing outside it is this tier's own code:
+      // e2e/ is Playwright's and is measured by a different job, and the
+      // server/ directory is BFF build output, not what `npm test` runs.
+      include: ['src/**'],
+      // Everything src/ except the test files themselves and the generated
+      // route tree.
+      //
+      // The test files are not a rounding error in this number: a test file
+      // executes every line it contains, so leaving `src/**/*.test.ts` in the
+      // include would add thousands of near-100% lines and report a figure
+      // that says more about how much test code exists than about how much
+      // source is exercised. They are excluded for the same reason the build
+      // never bundles them: they are not shipped code.
+      //
+      // src/routeTree.gen.ts is the one file in src/ that is generated rather
+      // than written (the tanstackStart() vite plugin emits it on every
+      // build), it is already excluded from the test run above, and its
+      // currency is gated by a different check entirely -- the "Generated
+      // route tree is current" step in quality.yml diffs it after a build.
+      // Left in the denominator, every route anyone adds would lower the
+      // percentage without a single tested behaviour having changed, which is
+      // a ratchet that cries wolf rather than one that holds a line. It is
+      // named here, in the open, with the reason attached, rather than
+      // quietly dropped somewhere nobody reads.
+      exclude: [
+        'src/**/*.test.ts',
+        'src/**/*.test.tsx',
+        'src/routeTree.gen.ts',
+      ],
+      // json-summary is the machine-readable half the ratchet reads; text is
+      // the console table, so a developer running `npm run test:coverage`
+      // sees the same numbers CI gates on; html is the browsable report the
+      // CI artifact upload publishes.
+      reporter: ['text', 'json-summary', 'html'],
+      reportsDirectory: 'coverage',
+      // Untouched files count too (`all` is vitest 4's default and is stated
+      // here because it is the difference between "the code the tests reach"
+      // and "the code that exists"). A file with no test at all reporting 0%
+      // is the drop the ratchet exists to notice.
+      all: true,
+    },
   },
 })

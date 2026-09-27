@@ -25,3 +25,11 @@ playwright-report/
 # there, never committed -- a committed mutation report is a stale report.
 reports/mutation/
 .stryker-tmp/
+
+# Coverage output (#3318): the html report, coverage-summary.json and the v8
+# raw data. Same reasoning as the two entries above -- regenerated on every
+# run, published from CI as an artifact, and a committed copy would be a
+# coverage claim about nobody's tree. The ratchet reads the measured
+# coverage-summary.json; the *baseline* it compares against is the separate,
+# deliberately committed coverage-baseline.json.
+coverage/
