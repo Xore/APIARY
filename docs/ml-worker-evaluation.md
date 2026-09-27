@@ -42,10 +42,16 @@ reported alongside accuracy rather than ignored.
 
 ### 2026-08-25 — Tier 1 harness landed; Tier 2 blocked
 
-**Tier 1 (behaviour) is live.** `evaluate_detectors.py` runs six contract
+**Tier 1 (behaviour) is live.** `evaluate_detectors.py` runs seven contract
 checks against a candidate over the per-sensor fixture corpus and emits a
 hashed JSON report. It is the first reusable acceptance bar `ml-worker` has
-had, and it makes "evaluate this candidate offline" answerable at all.
+had, and it makes "evaluate this candidate offline" answerable at all. The
+sixth of the seven, `check_composite_renormalises_over_present_detectors`
+(#1969), is not a per-candidate probe at all: it calls the production
+`worker.compute_composite()` directly, so candidates are always compared
+under the rules they will actually run with — absent detectors drop out of
+both numerator and denominator, an event no detector opines on composites
+to 0.0, and a single-detector opinion stands at face value.
 
 **Tier 2 (accuracy) was blocked on [#1797](https://github.com/Xore/APIARY/issues/1797).**
 There was no labelled corpus at that point. The date is retained as the
