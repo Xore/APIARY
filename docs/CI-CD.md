@@ -341,6 +341,16 @@ container-owned paths too, crash-looping Keycloak and Filebeat until fixed
 live -- this script is the precise command that should be run instead of
 reasoning through the exclusion list by hand next time).
 
+`sudo ... --helpers-only` (#3312) applies just the root-owned helper scripts
+under `/opt/github-ci-runner-helpers/` and the sudoers grant for them, then
+exits. Same narrow-mode idea as `install-ci-runner.sh`'s `--build-only`. Use
+it when the only thing missing on the host is a grant a merged PR added
+(the Diagnostics source-health helper, most recently): it changes no group
+membership, chowns nothing, registers nothing, and never stops or restarts
+the runner service -- so it cannot kill the job the homeserver is in the
+middle of running. Group membership is deliberately not part of it, because
+supplementary groups only reach the runner across a service restart.
+
 Require a manual reviewer on `production-home`; never accept pull-request code
 on this production runner.
 
@@ -1623,12 +1633,18 @@ Two checks depend on host provisioning rather than on the workflow (#3312):
   `/opt/github-ci-runner-helpers/dashboard-source-health.sh` and a NOPASSWD
   grant for exactly that path. The helper returns only the source-health JSON.
   "helper is not installed or not granted" in the summary means re-run that
-  installer.
+  installer -- with `--helpers-only`, which applies the helper and the grant
+  and stops there, so it does not interrupt whatever job the runner is
+  currently executing. A merged PR that adds a grant here changes nothing on
+  the host until someone runs it, so that message is the only place the
+  dependency is visible.
 - **Isolation invariants** run `scripts/isolation-audit.sh` as
   `github-deploy-runner`, which must be in the `libvirt` group
   (`install-homeserver.sh`'s libvirt step re-asserts it). The script pins
   `LIBVIRT_DEFAULT_URI=qemu:///system`, because a non-root `virsh` otherwise
   talks to the empty per-user session and reports every network missing.
+  Group membership only takes effect across a runner restart, so unlike the
+  helper grant it does need a full installer run.
 
 The OIDC discovery probe runs **from the VPS** over the job's SSH key.
 Cloudflare answers 403 to GitHub-hosted runner address ranges, so the runner's
