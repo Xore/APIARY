@@ -105,6 +105,17 @@ flowchart LR
 
 - Raw event retention is ILM-managed; the dead-letter index has its own
   sweep so rejected-doc accumulation can't outgrow intent.
+- **Arkime sessions are the one family with no template of ours**, so
+  `arkime-sessions-30d` is installed by `arkime-init` rather than by
+  `elasticsearch-setup.sh` — immediately before the composable template
+  that names it, since a template naming a policy that does not exist yet
+  fails index creation outright, and the two init jobs race. The same run
+  adopts the `arkime_sessions3-*` indices already on disk, because a
+  template only governs what is created after it. Before this it was the
+  only daily index family in the stack with no retention at all, and an
+  unbounded family is what took the single node to
+  `cluster.max_shards_per_node`'s 1000 default and dead-lettered all
+  sensor ingest on 2026-09-21 (#3283).
 - PCAP is disk-ceilinged (`PCAP_MAX_GB`, default 200 GB) *and* aged
   (`PCAP_RETENTION_DAYS`, default 14) — the ceiling binds first under
   attack bursts, the age bound wins in quiet periods. These knobs are the
