@@ -122,6 +122,20 @@ inline scripts read-only. Version 1 accepts regular text files no larger than
 1 MiB, refuses symlinks and NUL-containing/binary data, and hashes content
 itself instead of trusting a filename.
 
+**The deployed entry point is a third file, not this one.**
+`arcane/manifests/home-production.json` points the `llm-worker` stack at
+`llm-worker/docker-compose.captured-data-deploy.yml` (#1751), not at
+`docker-compose.captured-data.yml`. The deploy file is a thin `include:`
+wrapper listing `docker-compose.yml` then `docker-compose.captured-data.yml`
+in that order, so the behaviour described above is what actually runs — but the
+network/mount/volume grant lives in the included file, not the deployed one.
+It exists because the captured-data authorization had been applied by hand and
+was in no tracked file, so an Arcane sync silently reverted the container to
+`synthetic-only` while `LLM_ALLOW_CAPTURED_DATA=true` stayed set (#1751); the
+`include` list is a single two-file entry rather than two entries because
+`include` does not override the way repeated `-f` does (#2225). Deleting the
+file returns the deployment to synthetic-only by design.
+
 ## Guardrails
 
 - strict pydantic schemas reject extra keys, invalid enums, malformed ATT&CK
