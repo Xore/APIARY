@@ -41,8 +41,8 @@ Point-in-time records kept because the decisions in them still bind:
 completed 2026-08-22), [KEYCLOAK-CUTOVER.md](KEYCLOAK-CUTOVER.md),
 [HOMESERVER-DISK-LAYOUT.md](HOMESERVER-DISK-LAYOUT.md) (physical disks +
 autoinstall), [ROCKY-10-MIGRATION.md](ROCKY-10-MIGRATION.md) (Rocky 10 support in
-the installer), [PENTAGI-SHUTDOWN.md](PENTAGI-SHUTDOWN.md) (the out-of-band
-PentAGI stack on the homeserver — what it ran, and its 2026-09-27 shutdown).
+the installer), [PENTAGI.md](PENTAGI.md) (the out-of-band PentAGI stack on the
+homeserver — how it runs, its config shape, and a host-side inotify finding).
 
 ## Design references — component deep-dives
 
