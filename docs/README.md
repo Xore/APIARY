@@ -99,8 +99,11 @@ Analysis and sandbox components:
 era references inside are historical)](dashboard-manual-ip-block-design.md)
 
 Subdirectories (`analysis/`, `research/`, `sandbox/`, `vps/`, `autoinstall/`,
-`deploy-profiles/`, `design-lab/`) hold the same kinds of documents scoped to
+`deploy-profiles/`) hold the same kinds of documents scoped to
 their component. Every doc must be reachable from this page through links;
-dated record trees (`research/`, `benchmarks/`, the VM-detection results,
-`design-lab/`, kept as a near-duplicate of `branding/design-lab/`) are
+dated record trees (`research/`, `benchmarks/`, the VM-detection results) are
 exempt. `scripts/check-docs-reachable.py` enforces this in CI (#3332).
+
+The design lab is not a `docs/` subdirectory: it lives at
+[`branding/design-lab/`](../branding/design-lab/README.md), the single copy
+since #3310 removed the duplicate fork this tree used to hold.
