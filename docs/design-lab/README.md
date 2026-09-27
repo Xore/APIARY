@@ -75,8 +75,8 @@ It has since been rebuilt for `frontend-next` as
 playground on 19300. `frontend-next` has no nil-write-services handle — it
 reaches data over HTTP through two bases — so the read-only guarantee is made
 at that seam instead: `BACKEND_URL` goes through a gate that forwards
-GET/HEAD and answers 405 to everything else, and `BACKEND_MOUNTED_URL` is left
-unset so every request 503s. That is stronger than the original, which relied
+GET/HEAD and answers 405 to everything else, and `BACKEND_MOUNTED_URL` is
+pointed at a stub that answers 503 to every request. That is stronger than the original, which relied
 on remembering to pass nil.
 
 This directory is the redacted public copy and does not carry the harness
