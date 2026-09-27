@@ -2,9 +2,10 @@
 # run-llm-injection-suite.sh — run the #3334 behavioral prompt-injection corpus
 # against the pinned local model and record the report (#3334).
 #
-# The corpus itself is llm-worker/injection_suite.py and the entry point is
-# `worker.py --injection-suite`. Neither is run by CI: the suite loads the real
-# model onto the analysis host's GPU, and the same reason the approved-model
+# The corpus itself is llm-worker/injection_corpus.jsonl, judged by
+# llm-worker/injection_suite.py, and the entry point is
+# `worker.py --injection-suite`. None of it is run by CI: the suite loads the
+# real model onto the analysis host's GPU, and the same reason the approved-model
 # requalification in docs/analysis/ghidra/models/README.md is an operator
 # workflow rather than a workflow file. So this is the automation the brief asks
 # for -- weekly, and on a model/runtime pin change -- rather than one more
@@ -33,8 +34,10 @@
 # not move.
 #
 # Exit status: 0 only when every case passed. A single flipped verdict, a
-# low/medium severity, a repeated success marker, or a reproduced system-prompt
-# sentence fails the run.
+# low/medium severity, a repeated success marker, a reproduced system-prompt
+# sentence, an attacker-chosen field, or an unparseable answer fails the run --
+# as does a control case the model could not classify, because that is the twin
+# that makes an injection failure distinguishable from a capability gap.
 
 set -euo pipefail
 
@@ -63,7 +66,11 @@ esac
 
 compose_base="$APIARY_REPO_DIR/llm-worker/docker-compose.yml"
 compose_overlay="$APIARY_REPO_DIR/llm-worker/docker-compose.synthetic-canary.yml"
-for file in "$compose_base" "$compose_overlay"; do
+# The corpus is a data file next to the module, so a checkout that predates it
+# (or a partial sync) has to be named here rather than surfacing later as a
+# confusing "No such file" from inside the container.
+corpus_file="$APIARY_REPO_DIR/llm-worker/injection_corpus.jsonl"
+for file in "$compose_base" "$compose_overlay" "$corpus_file"; do
   [ -f "$file" ] || die "missing $file -- APIARY_REPO_DIR does not look like an APIARY checkout"
 done
 command -v docker >/dev/null 2>&1 || die "docker is not on PATH"
@@ -99,15 +106,17 @@ if ! flock -n 9; then
 fi
 
 # What was actually measured: the approved pin plus the code that builds the
-# prompt and judges the answer. A change to any of them invalidates the last
-# verdict, which is why the fingerprint covers the suite sources and not just
-# the manifest -- an edited SYSTEM_PROMPT or judge() is exactly the kind of
+# prompt, the corpus that is fed through it, and the judge that reads the
+# answer. A change to any of them invalidates the last verdict, which is why
+# the fingerprint covers the suite sources and not just the manifest -- an
+# edited SYSTEM_PROMPT, a reworded case, or judge() is exactly the kind of
 # change that must be re-measured even though the digest never moved.
 fingerprint_file="$LLM_INJECTION_SUITE_RECORD_DIR/.fingerprint"
 fingerprint="$({
   sha256sum \
     "$APIARY_REPO_DIR/analysis/ghidra/models/approved-models.json" \
     "$APIARY_REPO_DIR/llm-worker/contracts.py" \
+    "$APIARY_REPO_DIR/llm-worker/injection_corpus.jsonl" \
     "$APIARY_REPO_DIR/llm-worker/injection_suite.py" \
     "$APIARY_REPO_DIR/llm-worker/worker.py" \
     "$compose_overlay"
