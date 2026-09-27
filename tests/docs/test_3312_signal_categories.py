@@ -155,7 +155,13 @@ def fake_bin(tmp_path):
 
 
 def _can_sandbox() -> bool:
-    """True when this host can give the audit real /var/run/libvirt sockets."""
+    """True when this host can give the audit real /var/run/libvirt sockets.
+
+    The unshare binary being on PATH is not sufficient: GitHub-hosted runners
+    ship it and still refuse the namespace ("write failed /proc/self/uid_map:
+    Operation not permitted"). Probe the capability the test actually needs --
+    a user+mount namespace -- rather than the presence of the tool.
+    """
     if shutil.which("unshare") is None:
         return False
     if not pathlib.Path("/var/run/libvirt").is_dir():
@@ -483,9 +489,7 @@ def test_standdown_helper_and_audit_agree_on_the_path_and_the_window():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(
-    not _can_sandbox(), reason="needs a working user+mount namespace to act as root"
-)
+@pytest.mark.skipif(not SANDBOX_OK, reason="needs a user+mount namespace to stage /var/run/libvirt")
 def test_declare_show_clear_round_trip(tmp_path):
     """Runs the real tool as (namespaced) root, so the file it writes is a real
     root-owned 0644 file -- the exact thing the unprivileged audit has to be
@@ -510,9 +514,7 @@ stat -c '%a %U' '{declaration}'
     assert "no declaration at" in proc.stdout
 
 
-@pytest.mark.skipif(
-    not _can_sandbox(), reason="needs a working user+mount namespace to act as root"
-)
+@pytest.mark.skipif(not SANDBOX_OK, reason="needs a user+mount namespace to stage /var/run/libvirt")
 def test_declare_refuses_what_the_audit_would_refuse_too_honour(tmp_path):
     """The tool and the audit must not disagree about validity -- a window the
     writer accepts but the reader ignores would be an exception that exists on
