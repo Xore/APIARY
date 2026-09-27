@@ -980,6 +980,14 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
       - run: PATH="$HOME/.cargo/bin:$PATH" cargo clippy --all-targets -- -D warnings
+      # #3325: the committed contract has to be what the generator
+      # renders. `cargo test` already fails on a stale openapi.json, but
+      # only the *tests* fail, and only once someone reads which of the
+      # four assertions went red -- `diff` states the actual change and
+      # is the step a reviewer reads when they wonder why the file moved.
+      # Regenerate locally with `cargo run --bin openapi > openapi.json`.
+      - name: OpenAPI contract is not stale (#3325)
+        run: PATH="$HOME/.cargo/bin:$PATH" cargo run --quiet --bin openapi | diff -u openapi.json -
 
   backend-service-cloud:
     name: Dashboard backend-service (Rust) (GitHub-hosted)
@@ -1027,6 +1035,11 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
       - run: cargo clippy --all-targets -- -D warnings
+      # #3325: same drift gate as the homeserver lane -- see the note
+      # there. The two lanes both build this contract, so the contract
+      # cannot pass on one toolchain and fail on the other.
+      - name: OpenAPI contract is not stale (#3325)
+        run: cargo run --quiet --bin openapi | diff -u openapi.json -
 
   vendored-theme:
     name: Vendored Xore/theme is in sync

@@ -44,3 +44,9 @@ ml-worker/benchmarks/data/
 ml-worker/benchmarks/beth-data/
 round7/
 1947full/
+
+# schemathesis's local run cache (case corpus, crash dumps). The weekly job
+# writes its reports to $RUNNER_TEMP instead, so this only appears when a
+# developer runs `schemathesis run` against the crate by hand -- and it is
+# per-machine derived data, not something to review.
+.schemathesis/
