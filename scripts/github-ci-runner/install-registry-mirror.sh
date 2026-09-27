@@ -27,6 +27,23 @@
 # CI_REGISTRY_MIRROR. Setting up this service without ALSO setting that
 # variable changes nothing.
 #
+# And since #3380 the variable is a claim the workflow VERIFIES rather than
+# believes: containers.yml probes `$CI_REGISTRY_MIRROR/v2/` on the executor
+# it is actually running on, and writes the mirror into the buildkit config
+# only if that answers 200. So on a host that never ran this script the
+# variable no longer buys a silently-dead mirror -- the run says so, in its
+# annotations and its job summary, and builds without a cache. Which is
+# exactly the state #3380 was filed from: the variable was set, no host had
+# run this script, and every run pulled from Hub directly with nothing to
+# say so. `gh variable set` is therefore only half the install; this script
+# is the other half, and the two have to land on the same box.
+#
+# The address is a per-host fact that a repository variable can only
+# approximately express. The `honeypot-ci` pool spans more than one box
+# (the homeserver and `precision`, #3379), so one value is right on one and
+# wrong on the other. Run this script on every executor that should have a
+# mirror; the hosts that do not will report the disagreement themselves.
+#
 # Usage:
 #   sudo scripts/github-ci-runner/install-registry-mirror.sh \
 #       --username <hub-user> --token <hub-read-only-PAT>
@@ -66,7 +83,10 @@ while [ $# -gt 0 ]; do
     --token)    token="$2";    shift 2 ;;
     --bind)     BIND_ADDR="${2%%:*}"; BIND_PORT="${2##*:}"; shift 2 ;;
     --data-dir) DATA_DIR="$2"; shift 2 ;;
-    -h|--help)  sed -n '2,40p' "$0"; exit 0 ;;
+    # Print the header, whatever length it has grown to: everything between
+    # the shebang and the first line of code. A hardcoded range silently
+    # truncated the usage text the moment #3380 lengthened the header.
+    -h|--help)  awk 'NR==1{next} /^set -euo/{exit} {print}' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
