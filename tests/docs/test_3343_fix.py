@@ -116,6 +116,11 @@ IP_FIX = {
 DIONAEA = {"index_patterns": ["dionaea-*"], "priority": 5, "template": {"settings": {"index.number_of_shards": 1}}}
 ML = {"index_patterns": ["ml-anomalies", "ml-worker-*"], "priority": 5, "template": {}}
 
+# A sessions index that predates the generated template and carries no
+# lifecycle name -- what #3283's adoption pass exists to pick up.
+PRE_EXISTING_SESSIONS = "arkime_sessions3-2026.09.01"
+SESSIONS_POLICY = "arkime-sessions-30d"
+
 
 # ------------------------------------------------------------ the render ----
 
@@ -407,9 +412,14 @@ class _StubElasticsearch:
         # `generate` adopts onto its policy. Empty by default so the #3343
         # assertions stay about templates; the adoption contract itself is
         # asserted in tests/docs/test_3283_fix.py, which owns that behaviour.
-        self.indices = list(indices)
+        #
+        # A name maps to whatever index.lifecycle.name it currently carries, or
+        # to None for "unmanaged, adopt me". A list is also accepted and reads
+        # as all-unmanaged, so the fixtures above stay terse.
+        self.indices = {name: None for name in indices} if not isinstance(indices, dict) else dict(indices)
         self.deleted: list[str] = []
         self.put_index_templates: dict = {}
+        self.put_ilm_policies: dict = {}
         self.calls: list[str] = []
 
     def compose(self, probe: str) -> dict:
@@ -453,15 +463,26 @@ class _StubElasticsearch:
             return 404, {"error": "resource_not_found_exception"}
         # #3283: the policy `generate` installs immediately before the template
         # that names it, so the ordering that makes that safe can never depend
-        # on this stub refusing the call.
+        # on this stub refusing the call. The body is recorded so the ordering
+        # can be asserted rather than assumed.
         if method == "PUT" and path.startswith("/_ilm/policy/"):
+            self.put_ilm_policies[path.rsplit("/", 1)[1]] = body
             return 200, {"acknowledged": True}
         if method == "GET" and path.startswith("/_cat/indices/"):
             return 200, [{"index": name} for name in self.indices]
         if method == "GET" and path.endswith("/_settings?flat_settings=true"):
             name = path.lstrip("/").split("/", 1)[0]
-            return 200, {name: {"settings": {}}}
+            if name not in self.indices:
+                return 404, {"error": "resource_not_found_exception"}
+            # Only the lifecycle name is modelled; a real reply carries every
+            # flat setting, and the script reads this one.
+            settings = {"index.lifecycle.name": self.indices[name]} if self.indices[name] else {}
+            return 200, {name: {"settings": settings}}
         if method == "PUT" and path.endswith("/_settings"):
+            name = path.lstrip("/").split("/", 1)[0]
+            if name not in self.indices:
+                return 404, {"error": "resource_not_found_exception"}
+            self.indices[name] = (body or {}).get("index.lifecycle.name")
             return 200, {"acknowledged": True}
         raise AssertionError(f"stub Elasticsearch got an unexpected {method} {path}")
 
@@ -518,6 +539,11 @@ def _stubbed():
             "arkime_sessions3_ecs_template": SESSIONS_ECS_LEGACY,
             "arkime_history_v1_template": HISTORY_LEGACY,
         },
+        # #3283's adoption pass runs inside the same generate() that restores
+        # the catch-all, so seeding one unmanaged index means the functional
+        # tests below drive that path too rather than leaving it to a stub
+        # that never receives the call.
+        indices=[PRE_EXISTING_SESSIONS],
     )
     with _serving(stub) as url:
         yield stub, url
@@ -560,6 +586,37 @@ def test_generate_rebuilds_arkimes_templates_and_restores_everything_else(tmp_pa
                                              "single-node-replica-default"}
         # ...and the stash is empty, so a crash later cannot replay a stale body.
         assert json.loads(shadow_file.read_text()) == {}
+
+
+@node_only
+def test_the_restoring_run_is_also_the_one_that_installs_retention(tmp_path):
+    """#3283's obligations, checked from this suite's own fixture.
+
+    The shadow/restore cycle and the retention pass are one run of one script
+    now, so the run that puts the catch-all back is the same run that installs
+    the policy and adopts the indices already on disk. The ordering is the
+    part that breaks silently: an index template naming an ILM policy that
+    does not exist yet fails index creation outright, and Elasticsearch
+    validates it at index creation, not here.
+    """
+    with _stubbed() as (stub, url):
+        shadow_file = tmp_path / "shadow.json"
+        assert _run(url, shadow_file, "shadow").returncode == 0
+        out = _run(url, shadow_file)
+        assert out.returncode == 0, out.stderr
+
+        assert SESSIONS_POLICY in stub.put_ilm_policies, sorted(stub.put_ilm_policies)
+        assert stub.indices[PRE_EXISTING_SESSIONS] == SESSIONS_POLICY, (
+            f"{PRE_EXISTING_SESSIONS} was not adopted onto the policy: "
+            f"{stub.indices[PRE_EXISTING_SESSIONS]!r}"
+        )
+
+        order = [c for c in stub.calls
+                 if c.startswith(("PUT /_ilm/policy/", "PUT /_index_template/arkime-sessions3"))]
+        assert order.index(f"PUT /_ilm/policy/{SESSIONS_POLICY}") < \
+               order.index("PUT /_index_template/arkime-sessions3"), (
+            f"the policy was installed after the template naming it: {order}"
+        )
 
 
 @node_only
