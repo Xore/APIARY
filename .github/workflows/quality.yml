@@ -450,7 +450,7 @@ jobs:
       - name: Node major from the image (#3331)
         id: node-runtime
         run: ./scripts/node-runtime-major.sh arcane/home/honeypot-dashboard/frontend-next/Dockerfile
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ steps.node-runtime.outputs.node-version }}
           cache: npm
@@ -645,7 +645,7 @@ jobs:
       - name: Node major from the image (#3331)
         id: node-runtime
         run: ./scripts/node-runtime-major.sh arcane/home/honeypot-dashboard/frontend-next/Dockerfile
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ steps.node-runtime.outputs.node-version }}
           cache: npm
@@ -1848,6 +1848,22 @@ jobs:
               # "Foo (bar," before #3314. actionlint cannot see it; this can.
               if grep -nE '^[[:space:]]*(- )?name: [^"'"'"'].* #' .github/workflows/*.yml; then
                 echo "::error::unquoted name: containing ' #' -- quote it, YAML reads the rest as a comment"
+                exit 1
+              fi
+              # #3313: every SHA-pinned third-party `uses:` must carry a full
+              # `# vX.Y.Z` comment. zizmor's unpinned-uses audit reads the SHA
+              # and ignores the comment entirely, so a pin can be perfectly
+              # well-formed and still say the wrong thing: two pins here were
+              # labelled `# v7` where the SHA is v7.0.0, and one was labelled
+              # `# v6` for a v4.6.2 SHA. A reviewer reading the comment is
+              # misled about what a job actually runs, which defeats the point
+              # of recording it. Offline and deterministic -- no network, so it
+              # cannot flake. Dependabot rewrites both halves of a pin on a
+              # bump, so this stays satisfied as versions move.
+              if grep -nEo 'uses: +[A-Za-z0-9._-]+/[A-Za-z0-9._/-]+@[0-9a-f]{40}( *# *[^ ]+)?' \
+                   .github/workflows/*.yml \
+                 | grep -vE '@[0-9a-f]{40} *# *v[0-9]+\.[0-9]+\.[0-9]+$'; then
+                echo "::error::action pin without a full '# vX.Y.Z' comment -- SHA is pinned but its version is not stated, or is stated as a bare major"
                 exit 1
               fi
 
