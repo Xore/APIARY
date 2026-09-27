@@ -19,12 +19,50 @@
 # main package, so there is no local source tree to clone at all here. The
 # pin itself lives in go.mod/go.sum (committed, like every other Go
 # sensor's), not as a rebuild-time ARG -- that's what lets CI's `go test`
-# and `go build` run against the exact same resolved deps this image builds.
+# and `go build` resolve the same pinned deps this image starts from.
+#
+# #3179: two DICOM fingerprint tells (2 and 5) can only be fixed inside the
+# library's own DIMSE handling -- an A-ASSOCIATE-AC presentation-context
+# result, and C-FIND/C-MOVE/C-GET response statuses -- so the wrapper in
+# this directory cannot reach them. The dependency is therefore forked, in
+# the same spirit as honeypot-cowrie's txtcmds_priority_patch.py: rather
+# than committing a whole vendored copy of the module (which would turn a
+# one-line `go get -u` pin bump into a hand-merged tree and hide the drift
+# from `go mod` entirely), dimse_status_patch/ is a build-time patch
+# program that rewrites a writable copy of the pinned module in the build
+# stage, and `go mod edit -replace` points the build at that copy.
+# go.mod/go.sum stay pristine, so `go test` and `go build` outside the
+# image still resolve the unpatched pin -- which is exactly what makes the
+# patch's test suite able to assert red-unpatched/green-patched
+# (see dimse_status_patch/ax_status_test.go). The copy is discarded with
+# the build stage; nothing patched is committed, and no upstream code is
+# vendored in-tree.
+#
+# The patcher pins its anchors as exact byte matches against the revision
+# above and hard-fails if any anchor stops matching exactly once, so a pin
+# bump that moves the patched code fails the image build loudly instead of
+# silently shipping an unpatched sensor.
 FROM golang:1.27-alpine@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY main.go proxyproto.go aetitle.go ./
+COPY dimse_status_patch/ ./dimse_status_patch/
+# Patch the pinned dependency, then point this build at the patched copy.
+# Scoped to the build stage: the `-replace` is written to the build stage's
+# go.mod only, never to the committed one, and the patched copy is discarded
+# with the stage. The closing `go list` re-check turns a silently
+# ineffective `go mod edit` into a failed image build rather than a shipped
+# but unpatched sensor.
+RUN set -eu; \
+    patched="$(go list -m -f '{{.Dir}}' github.com/nsmfoo/dicompot)"; \
+    test -n "$patched"; \
+    cp -R "$patched" /src/dicompot-patched; \
+    chmod -R u+w /src/dicompot-patched; \
+    go build -o /patch-dimse-status ./dimse_status_patch; \
+    /patch-dimse-status /src/dicompot-patched; \
+    go mod edit -replace github.com/nsmfoo/dicompot=/src/dicompot-patched; \
+    test "$(go list -m -f '{{.Dir}}' github.com/nsmfoo/dicompot)" = /src/dicompot-patched
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /dicompot .
 
 FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
