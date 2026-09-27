@@ -518,8 +518,12 @@ carry the git revision they were built from, in three places, and
 
 - **Backend** — compiled in. `backend-service/build.rs` reads the `GIT_SHA`
   build arg and re-exports it as `APIARY_GIT_SHA`; `/healthz` returns it as
-  the `revision` field (`{"ok":true,"es":true,"revision":"3dca445…"}`) and
-  the boot log line carries it. `build.rs` also emits
+  the `revision` field of the liveness body
+  (`{"live":true,"built":"2026-09-27T01:46:34+00:00","revision":"3dca445…"}`)
+  and the boot log line carries it. Note the `ok`/`es` pair that used to sit
+  beside it is gone: #3317 split the endpoint into `/livez` (no Elasticsearch)
+  and `/readyz` (503 + `reason`), so `revision` now rides on the
+  liveness side. `build.rs` also emits
   `cargo:rerun-if-env-changed=GIT_SHA`, which is load-bearing: without it
   cargo reuses a cached build and the second build of an identical tree
   keeps the *first* revision, producing the exact failure this fixes.
