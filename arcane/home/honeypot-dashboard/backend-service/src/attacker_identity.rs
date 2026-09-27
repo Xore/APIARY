@@ -15,6 +15,7 @@
 //! mounts, no local state -- runs as the `attacker-identity` WORKER_LOOPS
 //! entry on the existing (stateless-by-design) backend-worker service.
 
+use crate::contract;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -1519,6 +1520,24 @@ fn default_page_size() -> u64 {
     25
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/attackers/{id}/events",
+    summary = "The raw evidence behind one attacker entity.",
+    params(
+        ("id" = inline(String), Path, description = "Attacker entity id from /api/v1/attackers."),
+        ("offset" = inline(Option<contract::NonNegativeInt>), Query, description = "Result window start."),
+        ("size" = inline(Option<contract::PositiveInt>), Query, description = "Page size."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 500, description = "The handler failed in a way it does not model as a 4xx.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// The raw evidence behind an entity: resolves the persisted evidence
 /// pointers (the newest-first event document ids the identity cycle
 /// records on `attackers-v1`) against `honeypot-v2-*` -- the same family

@@ -24,6 +24,16 @@ pub struct ModelHealth {
     pub train_samples: u64,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/ml-health",
+    summary = "Per-model ml-worker health.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<ModelHealth>>, (StatusCode, String)> {
     let body = json!({
         "size": 0,

@@ -48,6 +48,21 @@ flate2 = "1"
 # (the campaign's own DNS-transport exfil shape uses base32, not base64).
 data-encoding = "2"
 mail-parser = "0.11.6"
+# #3325: the /api contract, generated from the routes rather than
+# transcribed beside them. `utoipa-axum` collects the `#[utoipa::path]`
+# annotations off the handlers into the same `Router` the process serves,
+# so the document and the router cannot describe different APIs.
+#
+# The `axum_extras` feature is deliberately *not* enabled. It would make
+# `#[utoipa::path]` derive parameters and request bodies from each
+# handler's extractor signature; every route here answers `Json<Value>` or
+# a per-surface struct that nothing in the crate enforces, so the derived
+# shapes would be a second, silently-different opinion about the same
+# routes. With it off, the `params(...)` and `request_body(...)` in each
+# annotation are the whole story -- see src/contract.rs for the parameter
+# shapes they name.
+utoipa = { version = "6", features = ["macros"] }
+utoipa-axum = "0.3"
 
 [profile.release]
 lto = "thin"

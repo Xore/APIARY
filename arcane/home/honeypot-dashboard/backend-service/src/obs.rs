@@ -357,6 +357,14 @@ pub async fn observe(
     response
 }
 
+#[utoipa::path(
+    get,
+    path = "/metrics",
+    summary = "Prometheus exposition for the #1972 request metrics. Public on purpose, like /healthz.",
+    responses(
+        (status = 200, description = "Prometheus text exposition format.", body = inline(serde_json::Value), content_type = "text/plain"),
+    ),
+)]
 /// GET /metrics — deliberately unauthenticated exactly like /healthz,
 /// /livez and /readyz: all of them are reachable only on LISTEN_ADDR,
 /// which is the internal docker network (Traefik publishes the BFF tier,

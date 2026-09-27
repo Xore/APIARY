@@ -169,6 +169,20 @@ fn attachment(shasum: &str, extension: &str) -> String {
     format!("attachment; filename=\"{shasum}.{extension}\"")
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/recordings/{shasum}/cast",
+    summary = "One TTY recording as asciicast.",
+    params(
+        ("shasum" = inline(String), Path, description = "Recording shasum to replay."),
+    ),
+    responses(
+        (status = 200, description = "The asciicast body.", body = inline(serde_json::Value), content_type = "text/plain"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn replay_cast(
     State(state): State<AppState>,
     Path(shasum): Path<String>,
@@ -184,6 +198,21 @@ pub async fn replay_cast(
     ))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/recordings/{shasum}/raw",
+    summary = "One TTY recording as raw bytes.",
+    params(
+        ("shasum" = inline(String), Path, description = "Recording shasum to replay."),
+    ),
+    responses(
+        (status = 200, description = "The raw log bytes.", body = inline(serde_json::Value), content_type = "application/octet-stream"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 413, description = "The stored artifact is larger than this endpoint will serve.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn replay_raw(
     State(state): State<AppState>,
     Path(shasum): Path<String>,
@@ -198,6 +227,20 @@ pub async fn replay_raw(
     ))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/recordings/{shasum}",
+    summary = "One TTY recording.",
+    params(
+        ("shasum" = inline(String), Path, description = "Recording shasum to replay."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn replay(
     State(state): State<AppState>,
     Path(shasum): Path<String>,

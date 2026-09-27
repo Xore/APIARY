@@ -1,0 +1,292 @@
+name: Weekly schemathesis fuzz of the /api contract
+
+# #3325's second half. The contract in
+# arcane/home/honeypot-dashboard/backend-service/openapi.json is checked in
+# and gated against the router by quality.yml, so it cannot drift from the
+# route table -- but "the routes are all listed" is not "the routes behave
+# the way the document says". This job boots the real service and holds it
+# to its own published contract.
+#
+# Three steps do three different kinds of work, and only the first can fail
+# the job:
+#
+#   1. scripts/check-api-auth-tier.py -- the auth tier, checked against the
+#      running service. Every secured operation must answer 401/403 with no
+#      token, and the two public ones must not. This is the property #3325
+#      was filed for, and it is a hard gate.
+#   2. schemathesis, unauthenticated -- the same ground from the other
+#      side, using generated requests rather than one probe per route.
+#   3. schemathesis, authenticated -- a fixture service token, so the
+#      fuzzer reaches the handlers and checks the status codes and media
+#      types they actually answer.
+#
+# The auth gate is a script and not a schemathesis check on purpose.
+# `ignored_auth` skips any operation the contract declares public, so
+# demoting a live /api/v1 route in the document turns the check green
+# while the route keeps serving unauthenticated callers -- reproduced on
+# this service, where marking /api/v1/events public gave a passing run and
+# one warning. A gate you can switch off by editing the document it is
+# meant to police is not a gate. The script reads the same document for
+# the expected answers but never trusts it about which routes are secured;
+# that direction is openapi.rs's own test, which asserts the public set is
+# exactly /healthz and /metrics.
+#
+# ADVISORY for everything schemathesis finds. A generated-but-invalid
+# request is not automatically a defect: this API validates aggressively
+# and returns 400 for inputs no schema can distinguish from nonsense, so a
+# hard gate would be red on its first run and train everyone to ignore it.
+# The value is the standing record, so a change in that record is visible.
+# The contract defects this job found on its first run -- 415/422 from
+# axum's Json<T> rejection, 400 from Query<T>, four routes answering JSON
+# errors declared as text/plain, a text/plain export declared as JSON --
+# were fixed in the document, not by suppressing the output. That is why
+# pass 3 reports the contract-level finding classes by name even though it
+# cannot fail: a regression there is a regression in the thing we ship.
+#
+# The ES service container is not optional. Every ES-backed route answers
+# 502 when Elasticsearch is unreachable, and 502 is a documented status --
+# so without a cluster this job measures nothing but its own fixtures and
+# buries the real signal under ~85 identical 5xx findings. A plain
+# single-node cluster with security off is the smallest thing that makes
+# the read paths answer, and there are no fixtures to seed: es.rs searches
+# with ignore_unavailable(true), so a bare cluster already returns 200s
+# with empty hits. That is what makes this hermetic in #3316's sense -- it
+# needs a live ES and nothing else, no honeypot, no dashboard BFF, no
+# operator data.
+on:
+  schedule:
+    # 04:23 UTC Mondays. Off the hour on purpose: this repo's other
+    # watchers all sit on :00, and a fleet of cron jobs waking together
+    # on the same minute is how a shared runner starts timing out.
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      max_examples:
+        description: "Fuzzing examples per operation (the weekly run uses 5)"
+        required: false
+        default: "5"
+      base_url:
+        description: "Base URL of an already-running backend-service (skips the local boot)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weekly-schemathesis
+  cancel-in-progress: false
+
+jobs:
+  fuzz:
+    name: schemathesis against a booted backend-service
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        # The contract and the crate both live here, so every step that
+        # names either path gets it for free.
+        working-directory: arcane/home/honeypot-dashboard/backend-service
+    services:
+      elasticsearch:
+        image: docker.elastic.co/elasticsearch/elasticsearch:9.5.3@sha256:f456578fc2a620a8a4f4c21d070fff1f6070345adb2be5e5626b65be72aea350
+        # Same pin as arcane/home/honeypot-elk/compose.yml and
+        # arcane/home/honeypot-init/compose.yml. #2315 is why a fuzz run
+        # must not quietly measure a different cluster than the one that
+        # ships.
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: "false"
+          ES_JAVA_OPTS: -Xms1g -Xmx1g
+        ports:
+          - 9200:9200
+        # A fresh cluster takes 40-60s to accept connections. Without
+        # this, the first routes the fuzzer hits answer 502 and every run
+        # reports the same 5xx wall.
+        options: >-
+          --health-cmd "curl -fsS http://localhost:9200/_cluster/health"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 40
+    env:
+      SCHEMATHESIS_VERSION: "4.28.0"
+      SERVICE_TOKEN: schemathesis-fixture-token
+      LISTEN_ADDR: 127.0.0.1:8081
+      ELASTICSEARCH_URL: http://127.0.0.1:9200
+      BASE_URL: http://127.0.0.1:8081
+      # Through env, not ${{ inputs.* }} inline: a workflow_dispatch input is
+      # attacker-influenced text and zizmor is right that expanding it into a
+      # run block is code injection (audit: template-injection).
+      MAX_EXAMPLES: ${{ inputs.max_examples }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned schemathesis
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet "schemathesis==${SCHEMATHESIS_VERSION}"
+          schemathesis --version
+          # The advisory record only means something against the version
+          # it was written for: a major bump changes which checks exist
+          # and which findings they name, so reading a diff across that is
+          # guesswork. Bumping this line is the deliberate act.
+          schemathesis run --help | grep -q -- "--exclude-path" \
+            || { echo "the pinned schemathesis no longer has --exclude-path"; exit 1; }
+
+      - name: Refuse to fuzz a stale contract
+        # The advisory steps must not be the thing that first learns the
+        # contract is stale: their output is a wall of findings, none of
+        # which would say so. quality.yml already gates this; failing
+        # loudly keeps a manual dispatch from quietly fuzzing last week's
+        # document.
+        run: cargo run --quiet --bin openapi | diff -u openapi.json -
+
+      - name: Build and boot backend-service
+        if: ${{ inputs.base_url == '' }}
+        run: |
+          set -euo pipefail
+          cargo build --quiet --bin apiary-backend
+          # The two state files default to /state/..., which does not
+          # exist on a GitHub runner, and main.rs opens the audit log at
+          # boot -- so an unwritable path is a crash loop before the
+          # fuzzer sends a single request. WORKER_LOOPS stays unset so
+          # the service serves without its background loops mutating
+          # state underneath the fuzzer.
+          mkdir -p "${RUNNER_TEMP}/state"
+          DASHBOARD_AUDIT_FILE="${RUNNER_TEMP}/state/audit.jsonl" \
+          DASHBOARD_CONFIG_HISTORY_FILE="${RUNNER_TEMP}/state/config-history.jsonl" \
+            ./target/debug/apiary-backend > "${RUNNER_TEMP}/backend.log" 2>&1 &
+          echo "$!" > "${RUNNER_TEMP}/backend.pid"
+          for _ in $(seq 1 60); do
+            if curl -fsS "${BASE_URL}/healthz" >/dev/null 2>&1; then
+              echo "backend-service is listening"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "backend-service never became reachable:"
+          cat "${RUNNER_TEMP}/backend.log" || true
+          exit 1
+
+      - name: Wait for an ES-backed read
+        if: ${{ inputs.base_url == '' }}
+        run: |
+          set -euo pipefail
+          # Belt and braces. /healthz answers 200 even when Elasticsearch
+          # is unreachable -- it reports reachability in its body rather
+          # than in the status -- so a green healthz is not proof the
+          # read paths work. A 200 from a real query is.
+          for _ in $(seq 1 30); do
+            if curl -fsS -H "X-Service-Token: ${SERVICE_TOKEN}" \
+                 "${BASE_URL}/api/v1/events?size=1" >/dev/null 2>&1; then
+              echo "an ES-backed read answered 200"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "no ES-backed read succeeded; the passes below would only measure 502s"
+          cat "${RUNNER_TEMP}/backend.log" || true
+          exit 1
+
+      - name: Auth tier - every secured route must refuse an anonymous caller
+        # The one step that can fail this job. See the header comment for
+        # why this is a script and not schemathesis's ignored_auth.
+        run: |
+          set -uo pipefail
+          python3 "${{ github.workspace }}/scripts/check-api-auth-tier.py" \
+            --base-url "${BASE_URL}"
+
+      - name: Unauthenticated fuzz pass (advisory)
+        # No token at all. Kept alongside the gate above because it asks
+        # the same question with generated requests and a wider net, and
+        # because its `ignored_auth` run is what surfaces the tier on any
+        # route the gate's single probe per operation happened to miss.
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          schemathesis run openapi.json \
+            --url "${BASE_URL}" \
+            --phases coverage,fuzzing \
+            --max-examples "${MAX_EXAMPLES}" \
+            --exclude-path '/api/v1/live' \
+            --checks all \
+            --report junit --report-dir "${RUNNER_TEMP}/report-unauthenticated" \
+            2>&1 | tee "${RUNNER_TEMP}/unauthenticated.txt"
+
+      - name: Authenticated fuzz pass (advisory)
+        # X-Actor-Username comes along because the Workbench's
+        # require_actor rejects a valid token with no forwarded actor,
+        # which would otherwise read as "this route refuses everything".
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          schemathesis run openapi.json \
+            --url "${BASE_URL}" \
+            -H "X-Service-Token: ${SERVICE_TOKEN}" \
+            -H "X-Actor-Username: schemathesis" \
+            --phases coverage,fuzzing \
+            --max-examples "${MAX_EXAMPLES}" \
+            --exclude-path '/api/v1/live' \
+            --exclude-path '/metrics' \
+            --report junit --report-dir "${RUNNER_TEMP}/report-authenticated" \
+            2>&1 | tee "${RUNNER_TEMP}/authenticated.txt"
+          # Count the finding classes that indict the *document* rather
+          # than the service. This cannot fail the job, but it is the
+          # number worth watching week to week: it is the contract's own
+          # accuracy, and it is the class that regressed every time the
+          # passes ran for real.
+          python3 - "${RUNNER_TEMP}/report-authenticated" <<'PY'
+          import collections, glob, sys, xml.etree.ElementTree as ET
+          reports = glob.glob(f"{sys.argv[1]}/*.xml")
+          if not reports:
+              print("no JUnit report written")
+              sys.exit(0)
+          kinds = collections.Counter()
+          for case in ET.parse(sorted(reports)[-1]).getroot().iter("testcase"):
+              failure = case.find("failure")
+              if failure is None:
+                  continue
+              for line in (failure.text or "").splitlines():
+                  line = line.strip()
+                  if line.startswith("- "):
+                      kinds[line[2:]] += 1
+          print("\nfinding classes:")
+          for kind, count in kinds.most_common():
+              print(f"  {count:5d}  {kind}")
+          against = (kinds.get("Undocumented HTTP status code", 0)
+                     + kinds.get("Undocumented Content-Type", 0))
+          if against:
+              print(f"\n{against} finding(s) say the contract is wrong about this service.")
+              print("That is a defect in the document, not the service: add the status or")
+              print("media type to the row in operations() (src/openapi.rs), then run")
+              print("`cargo run --bin openapi > openapi.json`.")
+          else:
+              print("\nNothing found against the contract itself: every status code and")
+              print("media type the service returned is one the document declares.")
+          PY
+
+      - name: Upload the fuzz reports
+        # Advisory without a retrievable artifact is a red line in a log
+        # nobody reads. These JUnit reports are what a follow-up issue
+        # quotes. upload-artifact resolves paths against the workspace
+        # root, not this job's working-directory.
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v6
+        with:
+          name: schemathesis-reports
+          path: |
+            ${{ runner.temp }}/report-unauthenticated/
+            ${{ runner.temp }}/report-authenticated/
+            ${{ runner.temp }}/unauthenticated.txt
+            ${{ runner.temp }}/authenticated.txt
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Stop backend-service
+        if: ${{ always() && inputs.base_url == '' }}
+        run: |
+          set -uo pipefail
+          [ -f "${RUNNER_TEMP}/backend.pid" ] || exit 0
+          kill "$(cat "${RUNNER_TEMP}/backend.pid")" 2>/dev/null || true

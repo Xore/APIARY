@@ -4,6 +4,7 @@
 //! (the full artifact stays server-side; only the preview crosses the
 //! wire, mirroring the legacy static-analysis page's posture).
 
+use crate::contract;
 use axum::{
     extract::{Path, State},
     http::{header, StatusCode},
@@ -48,6 +49,20 @@ fn hexdump(bytes: &[u8]) -> Vec<String> {
         .collect()
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/payloads/{hash}",
+    summary = "One captured payload and its analysis.",
+    params(
+        ("hash" = inline(contract::PayloadHash), Path, description = "Payload id: 32 or 64 lower-case hex characters."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn detail(
     State(state): State<AppState>,
     Path(hash): Path<String>,
@@ -124,6 +139,22 @@ pub async fn detail(
     Ok(Json(PayloadDetail { hash, inventory, analysis, yara: yara_rows, size_bytes, hex_preview }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/payloads/{hash}/raw",
+    summary = "One captured payload's bytes.",
+    params(
+        ("hash" = inline(contract::PayloadHash), Path, description = "Payload id: 32 or 64 lower-case hex characters."),
+    ),
+    responses(
+        (status = 200, description = "The payload bytes.", body = inline(serde_json::Value), content_type = "application/octet-stream"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 413, description = "The stored artifact is larger than this endpoint will serve.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// GET /api/v1/payloads/{hash}/raw — streams the full captured binary,
 /// ported from payloads_data.go's servePayload. Admin-gating happens at
 /// the BFF (frontend-next checks the session role before ever calling

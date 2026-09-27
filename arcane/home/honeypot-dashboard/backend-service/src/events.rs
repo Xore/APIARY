@@ -3,6 +3,7 @@
 //! exactly the next batch, nothing loads on scroll) and the filter fields
 //! the Go explorer exposes (ip, sensor, country, port, proto, since).
 
+use crate::contract;
 use axum::{
     extract::{Query, State},
     http::StatusCode,
@@ -608,6 +609,46 @@ pub fn build_filters(q: &EventsQuery) -> Vec<Value> {
     filters
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/events",
+    summary = "Event explorer page: the shared filter set, windowed.",
+    params(
+        ("offset" = inline(Option<contract::NonNegativeInt>), Query, description = "Result window start."),
+        ("size" = inline(Option<contract::PageSize>), Query, description = "Page size, clamped to 100 by the handler."),
+        ("ip" = inline(Option<String>), Query, description = "Single source address."),
+        ("ips" = inline(Option<String>), Query, description = "Comma-separated source addresses."),
+        ("sensor" = inline(Option<String>), Query, description = "Sensor name (honeypot.dionaea, suricata, ...)."),
+        ("country" = inline(Option<String>), Query, description = "ISO country code."),
+        ("city" = inline(Option<String>), Query, description = "City name, as bucketed on the overview map."),
+        ("port" = inline(Option<String>), Query, description = "Destination port."),
+        ("proto" = inline(Option<String>), Query, description = "Transport protocol."),
+        ("kind" = inline(Option<String>), Query, description = "honeypot.event kind (command, login, ...)."),
+        ("shasum" = inline(Option<String>), Query, description = "Captured-payload hash."),
+        ("community_id" = inline(Option<String>), Query, description = "One flow across every sensor that saw it."),
+        ("q" = inline(Option<String>), Query, description = "Free-text query_string, passed to Elasticsearch as-is."),
+        ("since" = inline(Option<String>), Query, description = "Go-style relative window (24h, 7d)."),
+        ("persona" = inline(Option<String>), Query, description = "Decoy persona id."),
+        ("site" = inline(Option<String>), Query, description = "Decoy site id."),
+        ("asset" = inline(Option<String>), Query, description = "Decoy asset id."),
+        ("fingerprint" = inline(Option<String>), Query, description = "Client fingerprint, matched across every field sensors record one in."),
+        ("cmd" = inline(Option<String>), Query, description = "Exact command text."),
+        ("cred" = inline(Option<String>), Query, description = "\"user / pass\" pair."),
+        ("path" = inline(Option<String>), Query, description = "Request path."),
+        ("session" = inline(Option<String>), Query, description = "Session id."),
+        ("asn" = inline(Option<String>), Query, description = "Source AS number."),
+        ("org" = inline(Option<String>), Query, description = "Source network organization."),
+        ("provider" = inline(Option<String>), Query, description = "Provider class."),
+        ("sig" = inline(Option<String>), Query, description = "IDS alert signature."),
+        ("cat" = inline(Option<String>), Query, description = "Detection category (Suricata alert category or honeypot.category)."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn list(
     State(state): State<AppState>,
     Query(q): Query<EventsQuery>,

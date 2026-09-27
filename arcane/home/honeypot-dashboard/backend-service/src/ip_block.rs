@@ -42,6 +42,20 @@ pub struct BlockBody {
     pub actor: String,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/ip-block",
+    summary = "Block or unblock an address.",
+    request_body(content = inline(serde_json::Value), description = "Deserialized by the handler into `BlockBody`. The shape is left open here on purpose -- see the module doc."),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 415, description = "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn set_block(
     State(state): State<AppState>,
     Json(body): Json<BlockBody>,
@@ -72,6 +86,20 @@ pub async fn set_block(
     Ok(Json(record))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/ip-block/{ip}",
+    summary = "One address's block state.",
+    params(
+        ("ip" = inline(String), Path, description = "Address whose block state is wanted."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn get_block(
     State(state): State<AppState>,
     Path(ip): Path<String>,
@@ -91,6 +119,16 @@ pub async fn get_block(
     Ok(Json(out))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/ip-block-export",
+    summary = "The whole block list, for backup or review.",
+    responses(
+        (status = 200, description = "The blocked addresses, one per line.", body = inline(serde_json::Value), content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// Plain text list of actively blocked IPs, sorted — byte-compatible
 /// with the legacy /export/portbridge-manual-blackhole.txt body.
 pub async fn export(State(state): State<AppState>) -> Result<impl IntoResponse, (StatusCode, String)> {

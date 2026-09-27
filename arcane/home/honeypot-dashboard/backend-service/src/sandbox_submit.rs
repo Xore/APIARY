@@ -72,6 +72,21 @@ pub struct SubmitBody {
     hash: String,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/sandbox/submit",
+    summary = "Queue a sandbox detonation.",
+    request_body(content = inline(serde_json::Value), description = "Deserialized by the handler into `SubmitBody`. The shape is left open here on purpose -- see the module doc."),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 503, description = "A dependency this route needs is not configured or not reachable.", body = String, content_type = "text/plain"),
+        (status = 415, description = "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn submit(State(_state): State<AppState>, Json(body): Json<SubmitBody>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     fn err(status: StatusCode, message: impl Into<String>) -> (StatusCode, Json<Value>) {
         (status, Json(json!({"error": message.into()})))
@@ -97,6 +112,15 @@ pub async fn submit(State(_state): State<AppState>, Json(body): Json<SubmitBody>
     Ok(Json(json!({"target": target, "queued": true})))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/sandbox/golden-image-status",
+    summary = "Whether the sandbox golden image is built.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// goldenImageStatus (#86): win11-analysis.qcow2 staleness, written by a
 /// host-side timer into WINDOWS_SANDBOX_RESULTS_DIR — the same directory
 /// already mounted read-only for per-job results, no new mount needed.
@@ -131,6 +155,16 @@ fn running_sha_from(name: &str) -> Option<&str> {
     (sha.len() == 64 && sha.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())).then_some(sha)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/sandbox/vnc",
+    summary = "The VNC port the sandbox advertises, if any.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// GET /api/v1/sandbox/vnc — read-only live-view status, ported from
 /// sandbox_vnc.go's serveSandboxVNC + windowsSandboxLiveJob. This tier
 /// never touches libvirt or the VNC stream itself — it only reports

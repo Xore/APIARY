@@ -326,6 +326,77 @@ the gate itself already encodes.
 
 The script is covered by `scripts/tests/test_ci_lane_summary.py`, which runs
 in the `scripts-and-compose` matrix's `scripts/tests suite` row.
+## The `/api` contract and its weekly fuzz job (#3325)
+
+`backend-service` publishes an OpenAPI 3.1 contract at
+`arcane/home/honeypot-dashboard/backend-service/openapi.json`: 132 paths,
+141 operations — 128 `/api` paths and 137 `/api` operations behind the
+token, plus the four public probes `/healthz`, `/livez`, `/readyz` and
+`/metrics`. It is generated, not hand-edited: the source of truth is the
+`#[utoipa::path]` annotation on each handler plus the route table in
+`arcane/home/honeypot-dashboard/backend-service/src/lib.rs`, rendered by
+`src/openapi.rs` (whose `render()` reconciles the derived document with
+the committed one — the six transform steps are documented in that
+module) and emitted by
+
+```sh
+cd arcane/home/honeypot-dashboard/backend-service
+cargo run --bin openapi > openapi.json
+```
+
+A shared parameter or request-body shape goes in
+`arcane/home/honeypot-dashboard/backend-service/src/contract.rs` behind
+`contract_schema!`; the annotations reference it rather than restating it.
+
+**Three gates keep it honest, and they fail in different directions on
+purpose:**
+
+- **`cargo test`** runs two drift tests in `src/openapi.rs`.
+  `contract_covers_every_router_route` reads `src/lib.rs` and fails if the
+  router and the contract disagree about which `(path, method)` pairs exist
+  — a route added without a contract row is the direction that rots, since
+  it silently drops a fuzz target. `checked_in_contract_is_current` fails
+  if the committed `openapi.json` is not what the module renders.
+- **`OpenAPI contract is not stale (#3325)`** in both `quality.yml` backend
+  jobs runs the same generator as a `diff -u`, because a test failure says
+  "stale" while the diff says what changed.
+- **`weekly-schemathesis.yml`** runs Mondays at 04:23 UTC and on
+  `workflow_dispatch` (`max_examples` and `base_url` are both inputs). It
+  boots the service against a single-node Elasticsearch service container —
+  without a cluster every ES-backed route answers 502 and the run measures
+  nothing — and makes three passes:
+
+  - `scripts/check-api-auth-tier.py` is the **only** step that can fail the
+    job. Every operation the contract secures must answer 401/403 with no
+    token, and `/healthz` and `/metrics` must not. It is a script and not
+    schemathesis's `ignored_auth` check because `ignored_auth` skips any
+    operation the contract declares public: demoting a live route in the
+    document turns the check green while the route keeps serving
+    anonymous callers. Run it against any deployment with
+    `python3 scripts/check-api-auth-tier.py --base-url http://host:8081`.
+  - two `schemathesis run` passes, unauthenticated and with a fixture
+    service token, both `continue-on-error: true` and both reporting into
+    uploaded JUnit artifacts. These are **advisory**: this API validates
+    aggressively and returns 400 for inputs no schema can distinguish from
+    nonsense, so a hard gate would be red on its first run and train
+    everyone to ignore it. The value is the standing record, so a change in
+    the record is visible.
+
+  The pass reports its finding classes by name, and the two that indict the
+  *document* rather than the service — `Undocumented HTTP status code` and
+  `Undocumented Content-Type` — are the number worth watching. Each of
+  those was a real omission in the first version of the contract: `415` and
+  `422` from axum's `Json<T>` rejection on all 25 body routes, `400` from
+  its `Query<T>` rejection, four `services` routes answering JSON errors
+  declared as `text/plain`, and a `text/plain` export declared as JSON.
+  Fix those by editing the handler's `#[utoipa::path]` annotation (or the
+  shape it names in `src/contract.rs`) and regenerating — never by
+  suppressing the output.
+
+`/api/v1/live` is excluded from the fuzz passes and skipped by the auth
+script, and the contract marks it `x-endless-stream: true`. Its body never
+ends, so probing it on a service with auth open would hang the run instead
+of reporting the leak.
 
 ## Pull request workflow
 

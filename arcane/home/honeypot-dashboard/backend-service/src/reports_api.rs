@@ -12,6 +12,7 @@
 //! boundary is the BFF's service token, same posture as every other write
 //! path here (config.rs/preferences.rs).
 
+use crate::contract;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -34,6 +35,15 @@ fn bad_gateway(error: anyhow::Error) -> (StatusCode, String) {
     (StatusCode::BAD_GATEWAY, error.to_string())
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/reports/templates",
+    summary = "The report template and element catalog.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn templates() -> Json<Value> {
     let templates: Vec<Value> = report_template_catalog()
         .into_iter()
@@ -54,6 +64,16 @@ pub async fn templates() -> Json<Value> {
     Json(json!({"templates": templates, "elements": elements}))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/reports/definitions",
+    summary = "Saved report definitions.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn list_definitions(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
@@ -63,6 +83,20 @@ pub async fn list_definitions(
     Ok(Json(json!({"definitions": definitions})))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/reports/definitions/{id}",
+    summary = "One saved report definition.",
+    params(
+        ("id" = inline(String), Path, description = "Saved report-definition id."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn get_definition(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -77,6 +111,21 @@ pub async fn get_definition(
     Ok(Json(json!({"definition": definition})))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/reports/definitions",
+    summary = "Save a new report definition.",
+    request_body(content = inline(serde_json::Value), description = "Deserialized by the handler into `ReportDefinition`. The shape is left open here on purpose -- see the module doc."),
+    responses(
+        (status = 201, description = "The stored definition."),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 409, description = "The record changed since the revision the caller presented.", body = String, content_type = "text/plain"),
+        (status = 415, description = "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn create_definition(
     State(state): State<AppState>,
     Json(mut def): Json<ReportDefinition>,
@@ -91,6 +140,25 @@ pub async fn create_definition(
     Ok((StatusCode::CREATED, Json(json!({"definition": created}))))
 }
 
+#[utoipa::path(
+    put,
+    path = "/api/v1/reports/definitions/{id}",
+    summary = "Replace one saved report definition.",
+    params(
+        ("id" = inline(String), Path, description = "Saved report-definition id."),
+    ),
+    request_body(content = inline(serde_json::Value), description = "Deserialized by the handler into `ReportDefinition`. The shape is left open here on purpose -- see the module doc."),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 409, description = "The record changed since the revision the caller presented.", body = String, content_type = "text/plain"),
+        (status = 415, description = "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn replace_definition(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -106,6 +174,21 @@ pub async fn replace_definition(
     Ok(Json(json!({"definition": updated})))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/v1/reports/definitions/{id}",
+    summary = "Delete one saved report definition.",
+    params(
+        ("id" = inline(String), Path, description = "Saved report-definition id."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn delete_definition(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -116,6 +199,20 @@ pub async fn delete_definition(
     Ok(Json(json!({"deleted": id})))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/v1/reports/generated/{id}",
+    summary = "Delete one generated report.",
+    params(
+        ("id" = inline(String), Path, description = "Generated report id."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn delete_generated(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -146,6 +243,25 @@ fn default_origin() -> String {
     "manual".into()
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/reports/definitions/{id}/generate",
+    summary = "Run a saved definition now and store the result.",
+    params(
+        ("id" = inline(String), Path, description = "Saved report-definition id."),
+    ),
+    request_body(content = inline(serde_json::Value), description = "Deserialized by the handler into `GenerateBody`. The shape is left open here on purpose -- see the module doc.", extensions(("x-optional-body" = json!(true)))),
+    responses(
+        (status = 201, description = "The queued run."),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 409, description = "The record changed since the revision the caller presented.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 415, description = "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn generate(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -167,6 +283,23 @@ pub async fn generate(
     Ok((StatusCode::CREATED, Json(json!({"generated": meta}))))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/payloads/{hash}/report",
+    summary = "One-click payload PDF into the generated store.",
+    params(
+        ("hash" = inline(contract::PayloadHash), Path, description = "Payload id: 32 or 64 lower-case hex characters."),
+    ),
+    responses(
+        (status = 201, description = "The queued report run."),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+        (status = 501, description = "The saved definition's template is not implemented by the renderer yet.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// POST /api/v1/payloads/{hash}/report — #474's one-click "Generate PDF"
 /// trigger on the payload detail page, ported from reports_api.go's
 /// generatePayloadReport: unlike the designer flow it never requires a

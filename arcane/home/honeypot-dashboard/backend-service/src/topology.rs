@@ -693,6 +693,15 @@ pub struct ContainerRef {
 
 // --- Handler ---------------------------------------------------------------
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/topology",
+    summary = "Decoy topology graph.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// GET /api/v1/topology — static fleet shape; liveness joins live elsewhere.
 pub async fn topology() -> Json<TopologyResponse> {
     let raw_index_of: HashMap<&str, &str> = SENSOR_RAW_INDEX.iter().copied().collect();

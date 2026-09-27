@@ -12,6 +12,20 @@ use serde_json::json;
 
 use crate::AppState;
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/reports/{id}/pdf",
+    summary = "One generated report, rendered to PDF.",
+    params(
+        ("id" = inline(String), Path, description = "Generated report id."),
+    ),
+    responses(
+        (status = 200, description = "The rendered PDF.", body = inline(serde_json::Value), content_type = "application/pdf"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn pdf(
     State(state): State<AppState>,
     Path(id): Path<String>,

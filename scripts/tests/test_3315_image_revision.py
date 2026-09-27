@@ -45,7 +45,21 @@ BACKEND_COMPOSE = ROOT / "arcane" / "home" / "honeypot-dashboard-backend" / "com
 FRONTEND_ENV_EXAMPLE = ROOT / "arcane" / "home" / "honeypot-dashboard" / ".env.example"
 BACKEND_ENV_EXAMPLE = ROOT / "arcane" / "home" / "honeypot-dashboard-backend" / ".env.example"
 BUILD_RS = ROOT / "arcane" / "home" / "honeypot-dashboard" / "backend-service" / "build.rs"
-MAIN_RS = ROOT / "arcane" / "home" / "honeypot-dashboard" / "backend-service" / "src" / "main.rs"
+BACKEND_SRC = ROOT / "arcane" / "home" / "honeypot-dashboard" / "backend-service" / "src"
+# #3325 moved every backend-service module and the route table out of
+# `src/main.rs` and into `src/lib.rs`, so the crate root is `lib.rs` and
+# `main.rs` keeps only what is genuinely a process: the environment, the
+# #2183 boot gate, state construction, the listener. `normalize_revision`,
+# `REVISION_UNKNOWN` and the test module that pins them to the shared corpus
+# all moved with the rest, so that is the file this reads.
+#
+# One named file rather than a scan of the tree, deliberately: an assertion
+# against the whole of `src/` dumps every module into the failure message
+# when it trips, and a multi-thousand-line diff for "the include_str! moved"
+# is the kind of report that gets skimmed rather than read. If the next move
+# relocates these again, the assertion fails with the file it looked in --
+# which is the whole signal this test is for.
+LIB_RS = BACKEND_SRC / "lib.rs"
 CORPUS_JSON = ROOT / "arcane" / "home" / "honeypot-dashboard" / "backend-service" / "src" / "revision-corpus.json"
 CONTAINERS_YML = ROOT / ".github" / "workflows" / "containers.yml"
 
@@ -167,7 +181,7 @@ class NormalizerParity(unittest.TestCase):
     """The JS and Rust normalizers are one rule in two languages."""
 
     def test_the_rust_side_is_held_to_the_same_table(self) -> None:
-        # backend-service/src/main.rs is a different CI lane with a different
+        # backend-service/src/lib.rs is a different CI lane with a different
         # toolchain, and its own test module is the only thing that pins
         # normalize_revision. What makes the two sides comparable is that both
         # read the same file: if the Rust test ever drifts to a literal list of
@@ -177,13 +191,16 @@ class NormalizerParity(unittest.TestCase):
         # that is not one.
         self.assertIn(
             'include_str!("revision-corpus.json")',
-            MAIN_RS.read_text(encoding="utf-8"),
+            LIB_RS.read_text(encoding="utf-8"),
             "the Rust normalizer is no longer pinned to the shared corpus",
         )
         # A stubbed-out corpus would pass every assertion above it.
         self.assertGreaterEqual(len(CORPUS), 10, "the shared corpus has been hollowed out")
         self.assertEqual(UNKNOWN, "unknown", "both sides spell the sentinel the same way")
-        self.assertIn(f'pub const REVISION_UNKNOWN: &str = "{UNKNOWN}"', MAIN_RS.read_text(encoding="utf-8"))
+        self.assertIn(
+            f'pub const REVISION_UNKNOWN: &str = "{UNKNOWN}"',
+            LIB_RS.read_text(encoding="utf-8"),
+        )
         # Internal coherence: every expectation is either the sentinel or a
         # value the rule accepts unchanged. Anything else is a case one side
         # could not produce and the table would be describing a third

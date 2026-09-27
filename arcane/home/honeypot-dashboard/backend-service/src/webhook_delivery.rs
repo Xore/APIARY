@@ -374,6 +374,15 @@ pub async fn summary(es: &Es) -> DeliveryHealth {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/webhook-delivery",
+    summary = "Delivery outcomes for the configured alert webhook.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// `GET /api/v1/webhook-delivery` — the alert fan-out's own card, for
 /// Settings. The diagnostics page reads the same value as a field on
 /// `/api/v1/source-health` rather than making a second round trip.

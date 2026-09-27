@@ -19,6 +19,7 @@
 //! token. An admin UI for another operator's runs gets added when it
 //! exists, with its own authorization.
 
+use crate::contract;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
@@ -53,6 +54,20 @@ pub struct AnalyzersQuery {
     hash: String,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/workbench/analyzers",
+    summary = "Analyzers available for one payload.",
+    params(
+        ("hash" = inline(Option<String>), Query, description = "Payload id."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", content((String = "text/plain"), (inline(serde_json::Value) = "application/json"))),
+        (status = 404, description = "No such record, store, or route for the values given.", body = inline(serde_json::Value), content_type = "application/json"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn analyzers(
     Query(query): Query<AnalyzersQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
@@ -84,6 +99,25 @@ pub struct CreateRunBody {
     analyzers: Vec<WorkbenchSelection>,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/workbench/runs",
+    summary = "Start a Workbench run over one payload.",
+    params(
+        ("X-Actor-Username" = inline(String), Header, description = "Operator identity the BFF forwards; workbench_api.rs's require_actor rejects a missing or blank value with a JSON 401."),
+    ),
+    request_body(content = inline(serde_json::Value), description = "Deserialized by the handler into `CreateRunBody`. The shape is left open here on purpose -- see the module doc."),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 401, description = "No valid service token (or, on the Workbench, no actor identity).", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 415, description = "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = inline(serde_json::Value), content_type = "application/json"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn create_run(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -108,6 +142,22 @@ pub async fn create_run(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/workbench/runs/{id}",
+    summary = "One Workbench run, with its children.",
+    params(
+        ("id" = inline(String), Path, description = "Workbench run id."),
+        ("X-Actor-Username" = inline(String), Header, description = "Operator identity the BFF forwards; workbench_api.rs's require_actor rejects a missing or blank value with a JSON 401."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 401, description = "No valid service token (or, on the Workbench, no actor identity).", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = inline(serde_json::Value), content_type = "application/json"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn get_run(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -132,6 +182,23 @@ pub struct ListRunsQuery {
     limit: usize,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/workbench/runs",
+    summary = "Payload Workbench runs owned by the calling operator.",
+    params(
+        ("hash" = inline(Option<String>), Query, description = "Narrow to one payload id."),
+        ("limit" = inline(Option<contract::PositiveCount>), Query, description = "How many runs to return."),
+        ("X-Actor-Username" = inline(String), Header, description = "Operator identity the BFF forwards; workbench_api.rs's require_actor rejects a missing or blank value with a JSON 401."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 401, description = "No valid service token (or, on the Workbench, no actor identity).", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = inline(serde_json::Value), content_type = "application/json"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn list_runs(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -144,6 +211,25 @@ pub async fn list_runs(
     Ok(Json(json!({"runs": runs})))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/workbench/runs/{id}/children/{analyzer_id}/{action}",
+    summary = "Cancel or retry one child of a run.",
+    params(
+        ("id" = inline(String), Path, description = "Workbench run id."),
+        ("analyzer_id" = inline(String), Path, description = "Analyzer entry on this run; the orchestrator looks the child up by it."),
+        ("action" = inline(contract::ChildAction), Path, description = "Child lifecycle action."),
+        ("X-Actor-Username" = inline(String), Header, description = "Operator identity the BFF forwards; workbench_api.rs's require_actor rejects a missing or blank value with a JSON 401."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 401, description = "No valid service token (or, on the Workbench, no actor identity).", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = inline(serde_json::Value), content_type = "application/json"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn child_action(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -161,6 +247,20 @@ pub async fn child_action(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/workbench/recipes",
+    summary = "Saved Workbench recipes owned by the calling operator.",
+    params(
+        ("X-Actor-Username" = inline(String), Header, description = "Operator identity the BFF forwards; workbench_api.rs's require_actor rejects a missing or blank value with a JSON 401."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 401, description = "No valid service token (or, on the Workbench, no actor identity).", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = inline(serde_json::Value), content_type = "application/json"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn list_recipes(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -185,6 +285,26 @@ pub struct SaveRecipeBody {
     base_revision: i64,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/workbench/recipes",
+    summary = "Save a Workbench recipe.",
+    params(
+        ("X-Actor-Username" = inline(String), Header, description = "Operator identity the BFF forwards; workbench_api.rs's require_actor rejects a missing or blank value with a JSON 401."),
+    ),
+    request_body(content = inline(serde_json::Value), description = "Deserialized by the handler into `SaveRecipeBody`. The shape is left open here on purpose -- see the module doc."),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 401, description = "No valid service token (or, on the Workbench, no actor identity).", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 409, description = "The record changed since the revision the caller presented.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 415, description = "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = inline(serde_json::Value), content_type = "application/json"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn save_recipe(
     State(state): State<AppState>,
     headers: HeaderMap,

@@ -124,6 +124,16 @@ async fn poll_loop(state: AppState, tx: broadcast::Sender<Vec<String>>) {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/live",
+    summary = "Server-sent event source: the explorer tailing contract.",
+    responses(
+        (status = 200, description = "An endless text/event-stream of event documents. Never terminates, which is why the fuzz job excludes this path.", body = inline(serde_json::Value), content_type = "text/event-stream"),
+    ),
+    security(("serviceToken" = [])),
+    extensions(("x-endless-stream" = json!(true))),
+)]
 pub async fn stream(
     State(state): State<AppState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {

@@ -8,6 +8,7 @@
 //! - POST /api/v1/ml-anomalies/ack — ack state keyed by the anomaly doc
 //!   _id in dashboard-ml-anomaly-ack-v1 (#913 contract).
 
+use crate::contract;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -50,6 +51,20 @@ async fn one_doc(
         .ok_or((StatusCode::NOT_FOUND, "not found".to_string()))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/sandbox/{job}",
+    summary = "One sandbox run.",
+    params(
+        ("job" = inline(String), Path, description = "Sandbox job id."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn sandbox_run(
     State(state): State<AppState>,
     Path(job): Path<String>,
@@ -65,6 +80,20 @@ pub async fn sandbox_run(
     .await
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/ghidra/{sha}",
+    summary = "One Ghidra analysis run.",
+    params(
+        ("sha" = inline(contract::AnalysisSha), Path, description = "Payload/analysis subject id, lower-case hex."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn ghidra_run(
     State(state): State<AppState>,
     Path(sha): Path<String>,
@@ -83,6 +112,20 @@ pub async fn ghidra_run(
 
 const GHIDRA_CALLGRAPH_MAX_NODES: usize = 200;
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/ghidra-callgraph/{sha}",
+    summary = "The call graph one Ghidra run produced.",
+    params(
+        ("sha" = inline(contract::AnalysisSha), Path, description = "Payload/analysis subject id, lower-case hex."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// /api/v1/ghidra-callgraph/{sha} — an interactive complement to the
 /// static graphviz SVG the detail page already embeds as an <img>, built
 /// from the same per-function Callers/Callees cross-reference data
@@ -202,6 +245,20 @@ fn build_ghidra_callgraph(functions: &[Value]) -> Value {
     json!({"nodes": graph.nodes, "edges": graph.edges, "truncated": graph.truncated})
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/revdeck/{sha}",
+    summary = "One RevDeck analysis run.",
+    params(
+        ("sha" = inline(contract::AnalysisSha), Path, description = "Payload/analysis subject id, lower-case hex."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// /api/v1/revdeck/{sha} — #1611 workstream E.8: revdeck-analysis-v1 had
 /// no detail endpoint at all, so an unconfigured-worker error state (the
 /// live audit's own example) rendered as a blank page rather than a
@@ -222,6 +279,20 @@ pub async fn revdeck_run(
     Ok(Json(doc["revdeck"].clone()))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/cape/{sha}",
+    summary = "One CAPE analysis run.",
+    params(
+        ("sha" = inline(contract::AnalysisSha), Path, description = "Payload/analysis subject id, lower-case hex."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// /api/v1/cape/{sha} — one CAPE detonation result, ported from cape.go's
 /// capeData. `report` is CAPE's own raw report — tens of thousands of
 /// API-call entries per traced process is normal — so it's never shipped
@@ -249,6 +320,20 @@ pub async fn cape_run(
     Ok(Json(result))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/cape/{sha}/raw",
+    summary = "The raw CAPE report JSON for one run.",
+    params(
+        ("sha" = inline(contract::AnalysisSha), Path, description = "Payload/analysis subject id, lower-case hex."),
+    ),
+    responses(
+        (status = 200, description = "The stored report, verbatim.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// /api/v1/cape/{sha}/raw — the untouched result, full report included.
 /// A distinct route from cape_run above (not a query flag on it) so the
 /// page's own fetch never accidentally pulls the full report in — this is
@@ -266,6 +351,20 @@ pub async fn cape_raw(
     Ok(Json(doc["cape"].clone()))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/github-analysis/{sha}",
+    summary = "One GitHub analysis run.",
+    params(
+        ("sha" = inline(contract::AnalysisSha), Path, description = "Payload/analysis subject id, lower-case hex."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// /api/v1/github-analysis/{sha} — one publication result, ported from
 /// github_analysis.go's githubAnalysisData. Adds two fields the producer
 /// scripts never write, computed here the same way Go's dashboard layer
@@ -380,6 +479,21 @@ pub struct GraphQuery {
     pub id: String,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/attackers-graph",
+    summary = "The node/edge graph around one attacker entity.",
+    params(
+        ("id" = inline(Option<String>), Query, description = "Attacker entity id."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn attackers_graph(
     State(state): State<AppState>,
     Query(query): Query<GraphQuery>,
@@ -422,6 +536,20 @@ pub struct VectorsQuery {
     pub sensor: String,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/attack-vectors",
+    summary = "Attack vectors for one sensor.",
+    params(
+        ("sensor" = inline(Option<String>), Query, description = "A specific sensor. Empty, suricata and portbridge are all rejected: those ship to their own index families."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn attack_vectors(
     State(state): State<AppState>,
     Query(query): Query<VectorsQuery>,
@@ -485,6 +613,20 @@ pub struct MlAckBody {
     pub actor: String,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/ml-anomalies/ack",
+    summary = "Acknowledge one ML anomaly.",
+    request_body(content = inline(serde_json::Value), description = "Deserialized by the handler into `MlAckBody`. The shape is left open here on purpose -- see the module doc."),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 415, description = "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn ml_anomaly_ack(
     State(state): State<AppState>,
     Json(body): Json<MlAckBody>,
@@ -517,6 +659,16 @@ pub struct MlAckAllBody {
     pub actor: String,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/ml-anomalies/stats",
+    summary = "Ack statistics.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// GET /api/v1/ml-anomalies/stats — #2396's exact all-time backlog numbers.
 /// The frontend can only see the ack sidecar wholesale and the dispositioned
 /// population through paginated windows, so it cannot form the union the
@@ -575,6 +727,19 @@ pub async fn ml_anomaly_stats(State(state): State<AppState>) -> Result<Json<Valu
     })))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/ml-anomalies/ack-all",
+    summary = "Acknowledge every open ML anomaly.",
+    request_body(content = inline(serde_json::Value), description = "Deserialized by the handler into `MlAckAllBody`. The shape is left open here on purpose -- see the module doc."),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 415, description = "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// POST /api/v1/ml-anomalies/ack-all — #1566's bulk acknowledge, ported
 /// from ml_anomaly_ack.go's serveMLAnomalyAckAll: every open anomaly
 /// across the full index (not just the page the client has loaded),
@@ -627,6 +792,16 @@ pub async fn ml_anomaly_ack_all(
     Ok(Json(json!({"changed": changed})))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/ml-anomalies/acks",
+    summary = "The ack ledger.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// GET /api/v1/ml-anomalies/acks — key → ack record, merged client-side
 /// into the anomalies list (mirrors refreshMLAnomalyAcks).
 pub async fn ml_anomaly_acks(State(state): State<AppState>) -> Result<Json<Value>, (StatusCode, String)> {
@@ -658,6 +833,20 @@ pub struct MlDispositionBody {
     pub actor: String,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/ml-anomalies/disposition",
+    summary = "Record an analyst disposition for anomalies.",
+    request_body(content = inline(serde_json::Value), description = "Deserialized by the handler into `MlDispositionBody`. The shape is left open here on purpose -- see the module doc."),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 415, description = "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// POST /api/v1/ml-anomalies/disposition — #1968's operator verdict, written
 /// ONTO the ml-anomalies document itself so the labelled corpus #1794/#1797
 /// feed on lives beside the score it judges. Deliberately an `_update`
