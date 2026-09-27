@@ -142,7 +142,10 @@ here to implement and no issue to open. Verified by
 `.github/workflows/diagnostics.yml` `home` job.
 
 - **sshd** bound to the management address only, never the honeypot-facing one.
-  `ss -tlnp | grep :22` is the check.
+  The check asks `ss -tlnp` for a port-22 listener, and it distinguishes the two
+  answers that used to be the same one: "nothing is listening on :22" (`OK`) and
+  "the listen address could not be read at all" (`UNMEAS`, fatal). `ss … |
+  grep :22` exits 1 for both, which is why the audit does not use it.
 - **libvirt socket** — `/var/run/libvirt/libvirt-sock` as `srwxrwx---
   root:libvirt`, and `listen_tcp = 0`. The TCP socket is off by default; the
   failure mode is someone enabling it while debugging remotely and leaving it.
@@ -152,7 +155,78 @@ here to implement and no issue to open. Verified by
 - **Docker socket** never mounted into a honeypot-facing container. It is root
   equivalent — a container that has it has the host.
 
-## 5. Pitfalls
+## 5. Declared stand-down
+
+Freeing host RAM and CPU for a heavy leg is standing practice here: #3135
+paused honeypot containers for a training run, and the sandbox VMs are a much
+bigger claim on the same memory. The problem is not the stand-down. The problem
+is that a stand-down and a broken host are *absence*, so the audit reported
+both identically — `FAIL`, exit 1, no difference a reader could act on. That is
+the "cries wolf on a healthy host" case, and it is the same defect as running
+no check at all, because a run that is always red is a run nobody reads.
+
+So absence gets a name, and the name is a dated declaration on the host:
+
+```bash
+sudo scripts/sandbox-standdown.sh declare \
+    --issue '#NNNN' --until YYYY-MM-DD --reason 'why, in one line'
+sudo scripts/sandbox-standdown.sh show      # ACTIVE or INACTIVE, with the reason
+sudo scripts/sandbox-standdown.sh clear     # when the stack comes back
+```
+
+The file is `/etc/apiary/sandbox-standdown` (root-owned, `0644`, because the
+audit runs unprivileged as `github-deploy-runner`; overridable with
+`APIARY_STANDDOWN_FILE` for testing). While a live declaration is in force the
+audit reports the sandbox objects it covers as `EXPECT` and exits 0, and it says
+so out loud — owner issue, expiry, and the reason — in the body, in its footer,
+and in the diagnostics ledger.
+
+The declaration is deliberately hard to leave lying around, and every one of
+these failures is itself a `FAIL` rather than a shrug:
+
+| Declaration | Why it does not count |
+|---|---|
+| no `issue:`, `until:` or `reason:` | Nothing to hold the exception to a window or an owner |
+| `issue: 1` rather than `issue: #1` | Not a reference. An exception nobody can be held to is the thing that rots into a permanent excuse |
+| `until:` in the past | A window that has run out excuses nothing |
+| `until:` unparseable | The window is unknown, and an unknown window is not a long one |
+| `until:` more than `APIARY_STANDDOWN_MAX_DAYS` (14) out | That is a permanent posture change, not a stand-down, and it wants an issue and a decision rather than a file |
+
+What a declaration does **not** cover, deliberately: anything that is present
+and wrong. A libvirt network that exists and *forwards*, or an `ACCEPT` rule in
+the `FORWARD` chain for `virbr-sandbox`, is a measured fault with a live
+declaration in force — the exception is for absence, not for amnesty.
+
+## 6. What the audit's labels mean
+
+Every line the audit prints carries one, so a reader never has to count columns
+or infer intent from a wording change:
+
+| Label | Meaning | Exit contribution |
+|---|---|---|
+| `OK` | Measured, and it agrees with the invariant | none |
+| `FAIL` | A measured violation, an exception that no longer applies, or a barrier that could not be read | **exit 1** |
+| `EXPECT` | Absent on purpose, behind a live dated declaration | none |
+| `UNMEAS` | The check did not run. Counted and named, never folded into a pass | **exit 1** for the isolation barriers |
+| `WARN` | A triaged gap with a named owner issue, tracked and visible | none |
+| `--` | Not applicable, or a note | none |
+
+The footer prints the counts and one verdict line, so the answer to "is this
+host safe" is the last line of the output rather than a reading of the whole
+body:
+
+```
+isolation-audit: categories -- 0 unmeasured, 0 expected-by-declaration, 0 triaged gap(s), 0 fault(s)
+isolation-audit: VERDICT PASS -- every check that could be measured agrees with the invariants (0 object(s) excused by a live declaration)
+```
+
+`UNMEAS` being fatal for the barriers is the load-bearing part. "The `FORWARD`
+chain could not be read" and "the `FORWARD` chain is not DROP" are different
+findings, and only the second one says the host is unprotected. Reporting
+"could not tell" as agreement is the outcome that makes a check worse than not
+having it.
+
+## 7. Pitfalls
 
 | Symptom | Cause |
 |---|---|

@@ -12,11 +12,61 @@ Every push to `main` and every pull request runs:
 - TypeScript checks and a reproducible Tailwind frontend build;
 - Python and shell syntax checks plus high-severity ShellCheck findings;
 - Docker Compose validation for the home and VPS stacks;
+- actionlint over every workflow (warning-level ShellCheck in `run:` blocks),
+  plus a zizmor security audit that fails on anything except the four rules
+  #3313's hardening still owns (#3314);
+
+A red run also leaves evidence behind: machine-readable JUnit XML from the
+frontend unit, browser, and pytest suites, a retained Playwright report with
+per-failure traces, and the Rust test log. See
+[Test evidence retained on failure](#test-evidence-retained-on-failure-3319)
+below.
+- hadolint over every tracked Dockerfile, failing on warnings and errors
+  (policy and exemptions in `.hadolint.yaml`, #3320);
+- a digest-bound CycloneDX SBOM for the `backend-service` and
+  `dashboard-next` images, uploaded as an artifact and kept on the homeserver
+  at `/var/image-sbom/`, plus a `trivy sbom` scan over that same file
+  (#3321, [below](#digest-bound-sboms-for-the-two-dashboard-images-3321));
 - CodeQL for Go, JavaScript/TypeScript, and Python;
-- dependency review on pull requests.
+- dependency review on pull requests;
+- fast-check properties for the dashboard-next appearance cookie
+  (9 properties at 100 runs on a pinned seed, inside the ordinary
+  `frontend-next` unit job — the file matches `vitest.config.ts`'s own include
+  glob, so it costs no extra step, install, or second run). Pinned because a
+  property suite whose cases change every run reports "green" for a defect that
+  is still there; the nightly's unseeded high-run search is the lane that is
+  *meant* to move (#3326, [record](frontend-mutation-pilot.md)).
+
+### Advisory frontend testing pilot (#3326)
+
+`frontend-testing-pilot.yml` runs nightly (`41 4 * * *`) and on
+`workflow_dispatch`, and has **no `pull_request` trigger** — the property pass
+that PRs depend on is already the one in `npm test` above, and the mutation run
+is a measurement rather than a check.
+
+| Job | What it does | Failure means |
+|---|---|---|
+| `property` | 100-run pinned pass, then a 2000-run `FC_SEED=random` search; opens an issue on a counterexample | a real defect, not a score — a counterexample is shrunk small enough to paste into a generator |
+| `mutation` | Stryker over two modules, `continue-on-error: true`, no `thresholds` block | nothing; the run records killed/survived and uploads the report |
+
+The asymmetry is deliberate and is the "no gate" requirement in the two places
+it can be expressed. Nothing anywhere reads the mutation score, and there is no
+threshold to breach: a number that has already started failing CI has stopped
+being a measurement. A property counterexample is the opposite case — it is a
+defect with a reproducer, and a scheduled run's own red X is not an alert
+anyone is watching, which is why that job files an issue instead (the same
+reasoning as #2222 in `diagnostics.yml`).
+
+Both jobs derive their node major from the dashboard-next Dockerfile via
+`scripts/node-runtime-major.sh` rather than writing a second copy (#3331), and
+both run on GitHub-hosted runners only: a measurement has nothing to buy from
+the homeserver, and keeping the pilot off that box costs it nothing.
 
 Container images are built for pull requests. A push to `main` or a version tag
 publishes the custom images to the repository's GitHub Container Registry.
+Base images are watched for advisories on a weekly cron and on any Dockerfile
+change (`image-security-scan.yml`); the two dashboard images additionally get
+a package inventory of the built result (#3321).
 
 ### CodeQL setup guardrail
 
@@ -171,6 +221,188 @@ and hourly (`scripts/main-health-watch.py`):
 Replay any past moment without side effects:
 `GITHUB_REPOSITORY=Xore/APIARY python3 scripts/main-health-watch.py --before 2026-09-25T10:00:00Z`.
 
+## Test evidence retained on failure (#3319)
+
+A red Quality run used to leave one thing behind: the log. Playwright traces,
+screenshots, and machine-readable results were all discarded, and a lane that
+was router-skipped or path-filtered looked identical in the checks list to one
+that ran and passed. Both are now fixed.
+
+### Artifacts
+
+Every upload uses `actions/upload-artifact` pinned by SHA, with a 7-day
+retention — long enough that the evidence is still there when a red run is
+picked up the following week, short enough that a busy `main` does not
+accumulate them indefinitely. The nightly mutation pilot (#3326) is the one
+exception at 14 days: it runs once a day rather than once a PR, and its report
+is the record a later ratchet decision is read off, so the gap between two runs
+has to be coverable by a reviewer who was away for a fortnight.
+
+| Lane | Artifact | Uploaded |
+| --- | --- | --- |
+| Dashboard frontend (next) | `frontend-next-unit-junit.xml` | `always()` |
+| Dashboard-next browser matrix | `playwright-junit.xml` | `always()` |
+| Dashboard-next browser matrix | `playwright-report/` + `test-results/` (HTML report, per-failure traces and screenshots) | `failure()` |
+| Dashboard backend-service (Rust) | `cargo-test.log` | `failure()` |
+| `scripts-and-compose` pytest rows | `ml-worker-junit.xml`, `auth-events-worker-junit.xml` | `always()` |
+| Frontend mutation pilot (nightly) | `frontend-mutation-report` (`reports/mutation/` + `stryker.log`) | `always()`, 14-day retention |
+
+JUnit XML is uploaded on `always()`, not only on failure, because it is the
+record of *what ran* rather than of what the exit code happened to be. The
+Playwright report and the Rust log are `failure()`-only: on a green run they
+hold nothing worth storing.
+
+The report files are all written under `.ci-artifacts/` at the workspace root,
+which is git-ignored. `playwright-report/` and `test-results/` stay where the
+Playwright config already put them inside `frontend-next/`.
+
+The Rust lane gets a log rather than JUnit XML on purpose: `cargo` has no
+built-in JUnit reporter, and its per-test result stream is only reachable
+through the unstable `--format json`. Retaining the full log is honest about
+that; converting it to XML here would mean a hand-rolled translation that
+could itself misreport a result.
+
+### Names and paths
+
+The table above names *files*; the artifact each one lands in is named
+`<that name>-${{ github.run_id }}-${{ github.run_attempt }}`, and no upload in
+`quality.yml` sets `overwrite`. Two rules, both of them learned the hard way:
+
+- **`overwrite: true` is not "the newest run wins".** It deletes an existing
+  artifact of that name before uploading the new one, so on a name two runs
+  share it means "the second uploader destroys the first's evidence", and the
+  name then resolves to whichever run got there last — not the one a reader
+  is looking at. A per-`(run, attempt)` name is claimed exactly once, so there
+  is nothing to overwrite and no name an earlier run on the same ref could
+  poison. The attempt number is part of the name because a GitHub re-run of a
+  run keeps its `run_id`; `run_id` alone still collides on the second attempt
+  of the same run. Nothing in the tree downloads these by name, so the suffix
+  costs no consumer.
+- **Paths name files, never the `.ci-artifacts/` directory.**
+  `actions/upload-artifact` v4.4+ skips hidden paths unless told otherwise, and
+  a directory whose own name begins with `.` is hidden — so `path:
+  .ci-artifacts/` uploads *nothing*, logging "No files were found with the
+  provided path" and, under `if-no-files-found: ignore`, saying so silently.
+  That is exactly what the two `scripts-and-compose` pytest rows did from
+  #3319 until this was fixed: a green run logged 330 ml-worker tests passed
+  and pytest's own "generated xml file" line, and the upload step directly
+  below it still found no files. Naming each report also bounds what can be
+  in it: the contents are the reports the lane's own reporter wrote, not
+  whatever happens to be sitting in a workspace-relative directory that
+  anyone with repo read access can download for the next 7 days.
+
+### The switch
+
+Both reporters are opt-in through a single environment variable,
+`CI_ARTIFACTS_DIR`, which the workflow sets and nothing else does:
+
+- `arcane/home/honeypot-dashboard/frontend-next/vitest.config.ts` adds
+  `junit` alongside the existing `default` reporter and writes
+  `frontend-next-unit-junit.xml` when it is set.
+- `arcane/home/honeypot-dashboard/frontend-next/playwright.config.ts` inserts
+  a `junit` reporter *between* the existing `github` and `html` reporters, so
+  inline PR annotations and the browsable report are unchanged.
+
+Gating on the variable rather than on `CI` is deliberate: the same `npm test`
+and `npm run test:browser` a developer runs locally, and that `deploy.yml`
+runs, keep their console output and write no report file.
+
+`trace: "retain-on-failure"` and `screenshot: "only-on-failure"` were already
+set in the Playwright config (#2034). What was missing was uploading what they
+produced, which is what the `failure()` step above does.
+
+### Lane summary
+
+Each aggregate job (**Go formatting and tests**, **Scripts and Compose**,
+**Quality**) renders a table into the run's step summary via
+`scripts/ci-lane-summary.py`, so a reader can see which executor ran and which
+twin the router skipped without opening the log. An executor pair (the
+homeserver job and its `-cloud` fallback) collapses to one row that names the
+leg that ran. The script reads `${{ toJSON(needs) }}` and is a pure function
+of it.
+
+A skip is not a pass. The script exits non-zero when a lane has no passing
+result behind it at all — a pair where *neither* twin reported is called out as
+*neither executor reported a result*, which is the state that used to read as
+green. One legitimately-skipped lane is accounted for explicitly: the
+`--allow-skip` flag carries a reason, and Quality passes
+`ai-attribution:pull_request only (#3329)` on non-PR events, matching the rule
+the gate itself already encodes.
+
+The script is covered by `scripts/tests/test_ci_lane_summary.py`, which runs
+in the `scripts-and-compose` matrix's `scripts/tests suite` row.
+## The `/api` contract and its weekly fuzz job (#3325)
+
+`backend-service` publishes an OpenAPI 3.1 contract at
+`arcane/home/honeypot-dashboard/backend-service/openapi.json`: 132 paths,
+141 operations — 128 `/api` paths and 137 `/api` operations behind the
+token, plus the four public probes `/healthz`, `/livez`, `/readyz` and
+`/metrics`. It is generated, not hand-edited: the source of truth is the
+`#[utoipa::path]` annotation on each handler plus the route table in
+`arcane/home/honeypot-dashboard/backend-service/src/lib.rs`, rendered by
+`src/openapi.rs` (whose `render()` reconciles the derived document with
+the committed one — the six transform steps are documented in that
+module) and emitted by
+
+```sh
+cd arcane/home/honeypot-dashboard/backend-service
+cargo run --bin openapi > openapi.json
+```
+
+A shared parameter or request-body shape goes in
+`arcane/home/honeypot-dashboard/backend-service/src/contract.rs` behind
+`contract_schema!`; the annotations reference it rather than restating it.
+
+**Three gates keep it honest, and they fail in different directions on
+purpose:**
+
+- **`cargo test`** runs two drift tests in `src/openapi.rs`.
+  `contract_covers_every_router_route` reads `src/lib.rs` and fails if the
+  router and the contract disagree about which `(path, method)` pairs exist
+  — a route added without a contract row is the direction that rots, since
+  it silently drops a fuzz target. `checked_in_contract_is_current` fails
+  if the committed `openapi.json` is not what the module renders.
+- **`OpenAPI contract is not stale (#3325)`** in both `quality.yml` backend
+  jobs runs the same generator as a `diff -u`, because a test failure says
+  "stale" while the diff says what changed.
+- **`weekly-schemathesis.yml`** runs Mondays at 04:23 UTC and on
+  `workflow_dispatch` (`max_examples` and `base_url` are both inputs). It
+  boots the service against a single-node Elasticsearch service container —
+  without a cluster every ES-backed route answers 502 and the run measures
+  nothing — and makes three passes:
+
+  - `scripts/check-api-auth-tier.py` is the **only** step that can fail the
+    job. Every operation the contract secures must answer 401/403 with no
+    token, and `/healthz` and `/metrics` must not. It is a script and not
+    schemathesis's `ignored_auth` check because `ignored_auth` skips any
+    operation the contract declares public: demoting a live route in the
+    document turns the check green while the route keeps serving
+    anonymous callers. Run it against any deployment with
+    `python3 scripts/check-api-auth-tier.py --base-url http://host:8081`.
+  - two `schemathesis run` passes, unauthenticated and with a fixture
+    service token, both `continue-on-error: true` and both reporting into
+    uploaded JUnit artifacts. These are **advisory**: this API validates
+    aggressively and returns 400 for inputs no schema can distinguish from
+    nonsense, so a hard gate would be red on its first run and train
+    everyone to ignore it. The value is the standing record, so a change in
+    the record is visible.
+
+  The pass reports its finding classes by name, and the two that indict the
+  *document* rather than the service — `Undocumented HTTP status code` and
+  `Undocumented Content-Type` — are the number worth watching. Each of
+  those was a real omission in the first version of the contract: `415` and
+  `422` from axum's `Json<T>` rejection on all 25 body routes, `400` from
+  its `Query<T>` rejection, four `services` routes answering JSON errors
+  declared as `text/plain`, and a `text/plain` export declared as JSON.
+  Fix those by editing the handler's `#[utoipa::path]` annotation (or the
+  shape it names in `src/contract.rs`) and regenerating — never by
+  suppressing the output.
+
+`/api/v1/live` is excluded from the fuzz passes and skipped by the auth
+script, and the contract marks it `x-endless-stream: true`. Its body never
+ends, so probing it on a service with auth open would hang the run instead
+of reporting the leak.
+
 ## Pull request workflow
 
 ### No AI attribution (#3329)
@@ -249,6 +481,16 @@ anywhere in that list (#1143: a manual, broader `chown -R` swept those
 container-owned paths too, crash-looping Keycloak and Filebeat until fixed
 live -- this script is the precise command that should be run instead of
 reasoning through the exclusion list by hand next time).
+
+`sudo ... --helpers-only` (#3312) applies just the root-owned helper scripts
+under `/opt/github-ci-runner-helpers/` and the sudoers grant for them, then
+exits. Same narrow-mode idea as `install-ci-runner.sh`'s `--build-only`. Use
+it when the only thing missing on the host is a grant a merged PR added
+(the Diagnostics source-health helper, most recently): it changes no group
+membership, chowns nothing, registers nothing, and never stops or restarts
+the runner service -- so it cannot kill the job the homeserver is in the
+middle of running. Group membership is deliberately not part of it, because
+supplementary groups only reach the runner across a service restart.
 
 Require a manual reviewer on `production-home`; never accept pull-request code
 on this production runner.
@@ -707,6 +949,60 @@ the actual speed win.
 self-hosted, linux, x64, honeypot-ci
 ```
 
+### Build-only executors on other hosts (#3379)
+
+The `honeypot-ci` pool is not limited to the homeserver. `precision`
+(Dell Precision 5820, i9-10900X 10C/20T, 62 GB RAM, Rocky 10) is a second,
+compute-only executor host registered into the same pool, so a queued
+Quality/Containers/CodeQL job goes to whichever instance on either box is
+idle. The router's trust gate is unchanged: the same code that may run on
+the homeserver may run there, and nothing else.
+
+Three scheduled watches measure **the homeserver itself** rather than the
+checked-out code, and must never land elsewhere:
+
+| Workflow | What it reads on the executing host |
+|---|---|
+| `compose-drift-watch.yml` | `/var/dockge/stacks` via the `compose-drift-ro` sudo helper |
+| `backup-staleness-watch.yml` | `/mnt/usb-recovery` via the `backup-staleness-ro` sudo helper |
+| `disk-usage-watch.yml` | `df` on its own `/var` |
+
+They therefore require an extra label, `honeypot-homeserver`, which only
+the homeserver's own `honeypot-ci` instances carry:
+
+```text
+self-hosted, linux, x64, honeypot-ci, honeypot-homeserver
+```
+
+`install-ci-runner.sh` adds that label by default (the homeserver role).
+On any other box, pass `--build-only`: it registers with plain
+`honeypot-ci` and skips the homeserver-only sudo helpers entirely.
+
+```bash
+# on precision, once per instance
+sudo scripts/github-ci-runner/install-ci-runner.sh --repo Xore/APIARY --build-only --instance N
+```
+
+The installer never re-registers an existing runner, so the label is not
+applied to instances registered before #3379 by re-running it. Add it once
+through the API instead (repo admin):
+
+```bash
+id=$(gh api repos/Xore/APIARY/actions/runners --paginate \
+  --jq '.runners[] | select(.name=="supermicro-ci-2") | .id')
+gh api -X POST "repos/Xore/APIARY/actions/runners/$id/labels" -f 'labels[]=honeypot-homeserver'
+```
+
+Precision-specific layout: its root LV is 70 GB, the same size that filled
+up on the homeserver, and `/home` is a separate 373 GB XFS volume (XFS
+cannot be shrunk to grow root). `/var/lib/docker`, `/var/lib/github-runners`
+and `/var/lib/github-runner-data` are bind mounts from `/home/ci/` (fstab),
+with `semanage fcontext -e` equivalence rules so a relabel of `/home` gives
+the files the same SELinux types as the `/var/lib` paths the installer
+labels. `/etc/docker/daemon.json` carries the homeserver's address-pool,
+log and buildkit-GC policy (minus the NVIDIA runtime; precision's GPU is
+not usable).
+
 ### Executor routing (homeserver first, GitHub-hosted fallback)
 
 Actions has no "runs-on A else B" syntax, so each workflow decides in two
@@ -1112,6 +1408,206 @@ deletes a PR's cache entries when the PR closes. Actions scopes cache
 a closed PR's entries are unreadable and still billed until the 7-day GC
 gets to them. Deleting on close reclaims that quota immediately.
 
+### Rust `target/` reuse on the homeserver runner (#3405)
+
+`quality.yml`'s `backend-service` job (the self-hosted twin of the Rust gate)
+was measured at **159s** in run 36317857731 -- the second-longest job in the
+repo -- and it recompiled all 287 packages in `Cargo.lock` on *every* run.
+
+The job's own comment explained why no cache existed: `~/.cargo` and `target/`
+"simply stay warm on disk between runs". That was half right, and the half
+that was wrong was the expensive half.
+
+- `~/.cargo/registry` and `~/.cargo/git` really do persist. They live in the
+  runner user's `$HOME`, outside the checkout, and have always been warm. They
+  need nothing from us.
+- `target/` never persisted at all. It lives *inside* the workspace, and
+  `actions/checkout` defaults to `clean: true` -- i.e. `git clean -ffdx`. The
+  `-x` is the whole story: it deletes **ignored** files, and `target/` is
+  ignored (`.gitignore` line 7). So the checkout destroyed the previous run's
+  build before the build step could touch it.
+
+The fix is therefore not more caching machinery. It is moving the one
+directory that is being wiped to a path that is not: a `Reuse a persistent,
+ref-scoped target/` step exports `CARGO_TARGET_DIR` at
+`<root>/<ref-slug>-<ref-digest>-<toolchain-digest>`, which is outside the
+workspace and so survives `git clean -ffdx`.
+
+**No `actions/cache`, deliberately.** The cloud twin's `actions/cache` block
+over `target/` is correct and unchanged -- an `ubuntu-latest` runner is a fresh
+VM, so the cache service is the only disk that outlives the job. This runner
+is the mirror image: it has persistent disk, and the cache service is the
+wrong tool. See the `go-fmt` job's comment for what using it here cost
+before: Go writes module directories mode 0555, so the restore's `tar -x`
+cannot overwrite them, and the resulting re-uploads put six same-key 465 MB
+copies over the repository's 10 GB Actions quota.
+
+**One directory per ref, never shared.** The `honeypot-ci` label is served by
+several runner instances which between them run every open branch, so a single
+shared `target/` would be written concurrently by unrelated checkouts. The key
+is `GITHUB_REF` (`refs/heads/main` on push, `refs/pull/<n>/merge` on
+`pull_request`) hashed to 8 hex digits, which makes collision impossible even
+though `GITHUB_REF_NAME` mangles distinct refs onto the same slug -- `a/b` and
+`a-b` both slug to `a-b`, and get different digests. The toolchain channel is
+in the key as well, so a pin bump starts clean instead of relying on cargo
+noticing the compiler changed underneath a long-lived directory.
+
+**Keyed per ref, not per commit.** Cargo fingerprints every unit against its
+own inputs, so reusing a branch's directory across that branch's commits is
+exactly what it is built for -- and it is the case that pays. A commit-keyed
+directory would be cold on every push, because a push *is* a new commit: that
+would be a slower spelling of the 159s job.
+
+**A cold cache is a valid outcome, and cannot turn a red crate green.** Root
+resolution is best-effort -- `CI_CARGO_TARGET_ROOT`, then
+`/var/cargo-target-cache`, then `$HOME/.cache/cargo-target` -- and if none is
+writable the step warns and leaves `CARGO_TARGET_DIR` unset, so cargo builds
+into the in-tree `target/` and the run costs what it always cost. The step
+never fails the job. `~/.cargo` may also need repopulating if
+`$HOME/.rustup`/`$HOME/.cargo` are ever cleared; that is a one-off cost, not
+a per-run one.
+
+**`/var/cargo-target-cache` needs provisioning to be used.** `/var` is
+`root:root 0755`, so as `github-ci-runner` the workflow cannot create it --
+the same constraint the buildx cache above runs into, and why the
+`$HOME/.cache/cargo-target` fallback exists and is enough on its own:
+
+```sh
+sudo install -d -m 2775 -o github-ci-runner -g github-ci-runner \
+  /var/cargo-target-cache
+```
+
+Setgid plus the unit's existing `UMask=0002` (see `provision-buildx-cache`'s
+sibling in `scripts/github-ci-runner/install-ci-runner.sh`) keeps it
+group-writable across every instance's user, so any instance can serve the
+cache rather than only whichever one picked up the previous run of that ref.
+
+**Bounding it.** Directories idle for `CI_CARGO_TARGET_PRUNE_DAYS` (7) are
+removed after each run. Eviction reads a `.ci-target-heartbeat` file the job
+touches on entry, *not* the directory's mtime: a warm rebuild writes into
+`target/debug/` and need not touch the `target/` directory entry itself, so an
+mtime rule could delete a directory a running job is using. A 90-minute job
+timeout against a 7-day floor cannot be mistaken for an abandoned directory.
+
+**Reading the result.** The `Build` step tees cargo's own output, and
+`Report target/ reuse outcome` counts its `Compiling` lines: ~287 on a cold
+run, near 0 when every unit was still fresh. That count -- not a cache-hit
+log line -- is the evidence the cache is doing anything.
+
+### Digest-bound SBOMs for the two dashboard images (#3321)
+
+There used to be no inventory of what is inside `apiary-backend`
+(`honeypot-backend-service`) or `dashboard-next`. Every other image in the
+fleet was at least covered at its base — `image-security-scan.yml` walks the
+tree's Dockerfiles and compose files and Trivy-scans every base image they
+pull — but a built dashboard image is its base plus everything `COPY`ed in
+after it, and nothing recorded that difference. Answering "are we affected?"
+when a CVE landed meant rebuilding the image or `exec`-ing into the running
+container.
+
+`containers.yml` now produces a CycloneDX SBOM for those two images at build
+time, keyed by the pushed manifest digest.
+
+**Only those two rows, and only where there is a digest to key to.** The
+matrix gained an `sbom: true` opt-in on `backend-service` and
+`dashboard-next`; every step below is gated on it, so the other sixteen rows
+build exactly as before and pay no syft run and no advisory-DB download. The
+steps are also limited to events that push. A `pull_request` row builds with
+`push: false` and `load: false`, so it produces no image and therefore no
+digest — a tag-keyed inventory would describe whatever that tag pointed at
+when syft ran, which is not the thing a CVE question is about. Those rows
+emit a `::notice` saying so instead of leaving the gap unexplained.
+
+**The digest is stamped into the document, not just the filename.** syft's
+CycloneDX output records the image's name and tag and no digest at all
+(verified against syft 1.52.0), so `scripts/generate-image-sbom.sh` adds
+CycloneDX properties to `metadata.component` afterwards:
+`apiary:image-digest`, `apiary:image-reference`, and `apiary:image-name`,
+plus `component.version` set to the digest for viewers that show only
+name/version. The script then re-reads the file and fails if the property is
+not there — the binding is the feature, so it is verified on disk rather than
+assumed from the exit code of the process that wrote it. It also refuses an
+unpinned reference up front.
+
+**Three copies, one generator.** `scripts/generate-image-sbom.sh` is the only
+thing that writes an SBOM, so the CI path and the homeserver path cannot
+disagree about what a file in `/var/image-sbom` claims to be:
+
+| where | what | lifetime |
+|---|---|---|
+| CI artifact `sbom-<image>-<hex-digest>` | the SBOM plus the Trivy JSON report | 90 days |
+| `/var/image-sbom/<image>/<hex-digest>.sbom.json` | the record, content-addressed | 10 builds per image |
+| `/var/image-sbom/<image>/latest.sbom.json` | the pointer a person or Arcane reads | re-pointed at the newest survivor |
+
+The artifact name is digest-keyed so an operator can paste it straight into
+`trivy sbom`; it uses the hex form because a colon is not a legal
+artifact-name character.
+
+`/var/image-sbom` is published **only when the row ran on the homeserver**.
+The GitHub-hosted fallback has an ephemeral `/var` that dies with the job, so
+publishing there would only write a file nobody reads. Like
+`/var/buildx-cache`, the directory has to be provisioned first —
+`/var` is `root:root 0755`, so the workflow's own `mkdir` gets `EACCES`.
+`scripts/install-homeserver.sh`'s `provision-image-sbom` step creates it
+`2775 github-ci-runner:github-ci-runner` with a default ACL, joins every
+extra runner instance to the group, repairs what is there, and then proves
+each runner user can write it. Without that step the publish step degrades to
+a `::warning` and the CI artifact still has the SBOM — a missing homeserver
+copy must not cost a build.
+
+**What Arcane builds.** The generator takes an image reference and a digest,
+not a tag, so it is not tied to the CI path: an image built on the box rather
+than by a workflow is inventoried by running the same script by hand against
+that image's digest, and the file it writes is the same one CI would have
+written. `scripts/generate-image-sbom.sh --help` documents the interface.
+What the workflow itself does is narrower and worth stating plainly: it
+writes the homeserver copy on the builds that land on this box, and it
+refuses to invent a digest for anything else.
+
+`scripts/prune-image-sbom.sh` keeps the newest 10 records per image and
+re-points `latest.sbom.json` afterwards, because a pointer naming a pruned
+digest is worse than no pointer: it looks authoritative and is wrong. Records
+are pruned by count, never by age — a digest-keyed inventory's whole value is
+that it names one exact image, so dropping a month-old one because a newer
+one exists would make that older image unanswerable.
+
+**The scan reads the SBOM, not the image.**
+`scripts/scan-image-sbom.sh` runs `trivy sbom` over the same file the
+inventory is in, with `image-security-scan.yml`'s flags verbatim
+(`--scanners vuln --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1`).
+Scanning the SBOM is what makes the two agree: the scan and the inventory are
+derived from one artefact, so "the scan says clean" and "the inventory has no
+such package" cannot drift apart. Both now install Trivy through
+`scripts/install-trivy.sh`, because a version + asset + sha256 triple copied
+into two YAML files is exactly how the same CVE ends up graded two different
+ways with no visible cause; a test asserts the pin appears in that script and
+nowhere else.
+
+Like the base-image scan it mirrors, the scan is **report-only** and it
+refuses to conflate two opposite findings: Trivy exits non-zero both for
+"found CRITICAL/HIGH" and for "could not read this", and the second is a
+coverage gap, not a vulnerability. The script tells them apart from Trivy's
+own `Detected SBOM format` log line and annotates accordingly. Generating the
+SBOM, by contrast, is a hard failure — the required `Containers gate`
+aggregates the `build` job, and a silently absent inventory is the gap this
+section exists to close.
+
+Honest limitations:
+
+- **Pull requests get no SBOM.** See above. The inventory that matters is the
+  one for the digest that was actually deployed.
+- **Trivy warns** `Third-party SBOM may lead to inaccurate vulnerability
+  detection` on a Syft-generated CycloneDX file, and recommends Trivy
+  generate SBOMs itself. The issue specifies `trivy sbom` over a CycloneDX
+  inventory, so that is what this does; the warning is Trivy's, not a
+  finding.
+- **Provenance attestation is out of scope.** Cosign or
+  `buildx --provenance` is tracked as a follow-up. An SBOM is an inventory,
+  not a signature: nothing here proves the SBOM was produced by the build it
+  describes.
+- **CVE findings do not fail the build.** Same posture, and same re-arm note,
+  as `image-security-scan.yml`'s base-image backlog.
+
 ### Docker Hub authentication and the pull-through cache (#2819)
 
 `containers.yml` used to hold no Docker Hub credentials at all. Its single
@@ -1154,8 +1650,40 @@ A `registry:3` proxy in front of Docker Hub, run under
 upstream TTL. Eighteen rows times N bases collapse to one upstream fetch,
 and it keeps them across runs.
 
-Two things about it are easy to get wrong:
+Run it on **every** executor that should have one, not just the first. The
+variable is global and the mirror is not, which is the whole of the next
+point.
 
+Three things about it are easy to get wrong:
+
+- **The address is a per-host fact, and it is verified per-run (#3380).**
+  `CI_REGISTRY_MIRROR` is a repository *variable*, but "this executor runs a
+  mirror at this address" is a property of the *box*, and since #3379 the
+  `honeypot-ci` pool is not one box — `precision` is registered into the same
+  pool as a build-only executor, so `ci-target` routing to the homeserver can
+  land on either. One global value is therefore right on one host and dead on
+  the other, where the same `172.16.0.1` is that host's own docker0 gateway
+  with nothing listening on it. `containers.yml` therefore probes
+  `http://$CI_REGISTRY_MIRROR/v2/` **on the executor that is about to use
+  it** and writes the mirror into `buildkitd.toml` only on a `200`. That is
+  the same check `install-registry-mirror.sh` gates its own install on, so
+  the two cannot drift. Any other answer — connection refused, or some other
+  service holding the port (on the homeserver `5555` is also the multipot
+  honeypot's, on the WireGuard address) — means the honest empty config is
+  written instead, and the run says so in a `::warning::` annotation and its
+  job summary. This is not optional belt-and-braces: #3380 was filed from
+  exactly the state it prevents, with the variable set to `172.16.0.1:5555`
+  and no executor in the pool having ever run the installer. Buildkit falls
+  back to `docker.io` on an unreachable mirror, so the run stayed **green**
+  while the cache was never in effect, every base image was pulled from Hub
+  directly, and all 74 non-`scratch` `FROM` lines first paid a
+  connect-refused round trip. Note the failure is a *degradation*, not a
+  failure: the cache is an accelerator, and the authenticated login above is
+  what actually protects against `toomanyrequests`, so a missing mirror must
+  never turn a passing row red — the same fail-safe
+  [ci-router.yml](https://github.com/Xore/APIARY/blob/main/.github/workflows/ci-router.yml)
+  documents ("routing can degrade CI's speed, never its pass/fail
+  correctness").
 - **It is configured on buildkit, not on the host daemon.** buildx's
   `docker-container` driver runs its own containerd and never reads
   `/etc/docker/daemon.json`, so a `registry-mirrors` entry there is
@@ -1330,7 +1858,7 @@ reference already sits inside a job that declares
 `environment: production-vps` — `deploy.yml`'s `vps` job (`:231`, environment
 at `:234`), `diagnostics.yml`'s `vps` job (`:292`/`:295`), and
 `vps-start-blackhole.yml`'s `start-blackhole-profile` job (`:22`/`:24`). The
-`home` jobs (`deploy.yml:21`, `diagnostics.yml:76`) read none of the five.
+`home` jobs (`deploy.yml:21`, `diagnostics.yml:112`) read none of the five.
 Environment secrets also shadow repository secrets of the same name, so
 *writing* the environment copies is non-breaking on its own.
 
@@ -1392,16 +1920,75 @@ Two checks depend on host provisioning rather than on the workflow (#3312):
   `/opt/github-ci-runner-helpers/dashboard-source-health.sh` and a NOPASSWD
   grant for exactly that path. The helper returns only the source-health JSON.
   "helper is not installed or not granted" in the summary means re-run that
-  installer.
+  installer -- with `--helpers-only`, which applies the helper and the grant
+  and stops there, so it does not interrupt whatever job the runner is
+  currently executing. A merged PR that adds a grant here changes nothing on
+  the host until someone runs it, so that message is the only place the
+  dependency is visible.
 - **Isolation invariants** run `scripts/isolation-audit.sh` as
   `github-deploy-runner`, which must be in the `libvirt` group
   (`install-homeserver.sh`'s libvirt step re-asserts it). The script pins
   `LIBVIRT_DEFAULT_URI=qemu:///system`, because a non-root `virsh` otherwise
   talks to the empty per-user session and reports every network missing.
+  Group membership only takes effect across a runner restart, so unlike the
+  helper grant it does need a full installer run. The audit's own host-side
+  expectation — that the sandbox stack is *up* — is suspended by a dated
+  declaration while it is deliberately down; see
+  [honeypot-network-isolation.md](honeypot-network-isolation.md#5-declared-stand-down).
 
 The OIDC discovery probe runs **from the VPS** over the job's SSH key.
 Cloudflare answers 403 to GitHub-hosted runner address ranges, so the runner's
 own result is printed for information only and never fails the job.
+
+### Every finding is categorised (#3312)
+
+This workflow failed 160 consecutive scheduled runs without anybody triaging
+it, which means it carried no signal at all. The reason was not that the
+findings were wrong — several of them were correct — but that a real host
+fault, a lane that had never been able to see anything, a check asking from a
+vantage point the endpoint answers differently to, and a deliberate stand-down
+all produced the same thing: a red X, an `::error::` line with nothing on its
+subject, and a body nobody had time to read. A run that lists five unrelated
+things under one heading gets triaged by ignoring it.
+
+So every finding now carries one of four categories. The category is the
+annotation's own title, and each job ends with a ledger — one table, one row
+per finding, plus the counts — so triage is reading six lines rather than
+reconstructing a run from its log:
+
+| category | Meaning | Fatal on a scheduled run |
+|---|---|---|
+| `fault` | A real regression: the pipeline or the host is broken | yes |
+| `runner-config` | The check could not run because of how the runner or this repository's environment is configured — a helper not installed, a grant not applied, a secret unset | yes |
+| `unmeasured` | The check did not run, and that is not a pass | yes |
+| `expected` | A deliberate, declared absence | no |
+
+`runner-config` being fatal is deliberate, and it is the same position
+`scripts/verify-deploy.sh` already takes with its exit 2: folding "could not
+tell" into a pass is the outcome that makes a check worse than not having it.
+#3283 is what that costs when it is wrong — Elasticsearch at 1000/1000 shards
+with every sensor's events dead-lettered for six days, in a lane whose only
+question is whether the pipeline is flowing. What changes is that it is its own
+category with its own title, so "this lane has never been able to measure
+anything" is tellable apart from "the pipeline is broken" without opening the
+log, and the fix is the operator command the finding names rather than the
+symptom.
+
+The vocabulary lives in `scripts/diagnostics-lib.sh`, which every step sources;
+`alert` takes a category and refuses a non-fatal one, `note` records a finding
+that must not redden the run, and `diag_ledger_report` prints the table. The
+isolation audit has its own finer-grained labels and its own footer, and the
+step carries that line into the ledger verbatim rather than re-deriving it — one
+source of truth for the counts.
+
+Both jobs now check the repository out (#2908). Every other step still reads
+the deployed stack under `/opt/stacks/apiary`; the checkout is for the scripts,
+so a check asks its question with the code that was just fixed. Running
+`isolation-audit.sh` from a copy refreshed only by a `workflow_dispatch`-only
+deploy is why the red X kept naming things that had already been fixed. The
+deployed copy is still diffed against `origin/main` and reported when it drifts,
+because drift is a real finding for everything else on the host that runs a
+deployed script.
 
 ### Diagnostics vs. mutating deploy
 

@@ -22,6 +22,8 @@
 #     the SSRF threat model the check protects against doesn't apply here.
 
 ARG ARCH=amd64
+# the build pins its target platform on purpose (ARCH above)
+# hadolint ignore=DL3029
 FROM --platform=linux/${ARCH} python:3.13@sha256:debad600e8d6e754012528dc796488acc52438fea3d28596b87262df9b91c71e AS builder
 COPY --from=ghcr.io/astral-sh/uv:0.11.24 /uv /uvx /usr/local/bin/
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1

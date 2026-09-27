@@ -14,6 +14,7 @@
 //! other endpoint in this crate; this comment is that decision on record
 //! so the census question doesn't reopen.
 
+use crate::contract;
 use axum::{
     extract::{Query, State},
     http::StatusCode,
@@ -164,6 +165,24 @@ async fn store_page_excluding(
     Ok(json!({"total": total, "rows": rows}))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/campaigns",
+    summary = "Campaign store.",
+    params(
+        ("offset" = inline(Option<contract::NonNegativeInt>), Query, description = "Result window start."),
+        ("size" = inline(Option<contract::PositiveInt>), Query, description = "Page size."),
+        ("q" = inline(Option<String>), Query, description = "Free-text Lucene query string."),
+        ("ip" = inline(Option<String>), Query, description = "Narrow to one source address."),
+        ("aggs" = inline(Option<String>), Query, description = "`sources` adds the payload-inventory source buckets; anything else is ignored."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn campaigns(
     State(state): State<AppState>,
     Query(q): Query<StoreQuery>,
@@ -174,6 +193,24 @@ pub async fn campaigns(
         .map_err(bad_gateway)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/clusters",
+    summary = "Attacker-cluster store.",
+    params(
+        ("offset" = inline(Option<contract::NonNegativeInt>), Query, description = "Result window start."),
+        ("size" = inline(Option<contract::PositiveInt>), Query, description = "Page size."),
+        ("q" = inline(Option<String>), Query, description = "Free-text Lucene query string."),
+        ("ip" = inline(Option<String>), Query, description = "Narrow to one source address."),
+        ("aggs" = inline(Option<String>), Query, description = "`sources` adds the payload-inventory source buckets; anything else is ignored."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn clusters(
     State(state): State<AppState>,
     Query(q): Query<StoreQuery>,
@@ -184,6 +221,24 @@ pub async fn clusters(
         .map_err(bad_gateway)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/attackers",
+    summary = "Attacker-entity store.",
+    params(
+        ("offset" = inline(Option<contract::NonNegativeInt>), Query, description = "Result window start."),
+        ("size" = inline(Option<contract::PositiveInt>), Query, description = "Page size."),
+        ("q" = inline(Option<String>), Query, description = "Free-text Lucene query string."),
+        ("ip" = inline(Option<String>), Query, description = "Narrow to one source address."),
+        ("aggs" = inline(Option<String>), Query, description = "`sources` adds the payload-inventory source buckets; anything else is ignored."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn attackers(
     State(state): State<AppState>,
     Query(q): Query<StoreQuery>,
@@ -218,6 +273,24 @@ pub async fn attackers(
 /// attacked anything (#1714).
 const TUNNEL_IP: &str = "10.8.0.1";
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/recordings",
+    summary = "TTY recording store.",
+    params(
+        ("offset" = inline(Option<contract::NonNegativeInt>), Query, description = "Result window start."),
+        ("size" = inline(Option<contract::PositiveInt>), Query, description = "Page size."),
+        ("q" = inline(Option<String>), Query, description = "Free-text Lucene query string."),
+        ("ip" = inline(Option<String>), Query, description = "Narrow to one source address."),
+        ("aggs" = inline(Option<String>), Query, description = "`sources` adds the payload-inventory source buckets; anything else is ignored."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn recordings(
     State(state): State<AppState>,
     Query(q): Query<StoreQuery>,
@@ -282,6 +355,24 @@ pub async fn recordings(
     Ok(Json(json!({"total": total, "rows": rows})))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/alerts",
+    summary = "Alert-state store.",
+    params(
+        ("offset" = inline(Option<contract::NonNegativeInt>), Query, description = "Result window start."),
+        ("size" = inline(Option<contract::PositiveInt>), Query, description = "Page size."),
+        ("q" = inline(Option<String>), Query, description = "Free-text Lucene query string."),
+        ("ip" = inline(Option<String>), Query, description = "Narrow to one source address."),
+        ("aggs" = inline(Option<String>), Query, description = "`sources` adds the payload-inventory source buckets; anything else is ignored."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn alerts(
     State(state): State<AppState>,
     Query(q): Query<StoreQuery>,
@@ -292,6 +383,24 @@ pub async fn alerts(
         .map_err(bad_gateway)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/payloads",
+    summary = "Captured-payload store.",
+    params(
+        ("offset" = inline(Option<contract::NonNegativeInt>), Query, description = "Result window start."),
+        ("size" = inline(Option<contract::PositiveInt>), Query, description = "Page size."),
+        ("q" = inline(Option<String>), Query, description = "Free-text Lucene query string."),
+        ("ip" = inline(Option<String>), Query, description = "Narrow to one source address."),
+        ("aggs" = inline(Option<String>), Query, description = "`sources` adds the payload-inventory source buckets; anything else is ignored."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn payloads(
     State(state): State<AppState>,
     Query(q): Query<StoreQuery>,
@@ -330,6 +439,22 @@ pub struct AckBody {
     pub ack: bool,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/alerts/{key}/ack",
+    summary = "Acknowledge one alert.",
+    params(
+        ("key" = inline(String), Path, description = "Alert-state document key (the hashified signature triple)."),
+    ),
+    request_body(content = inline(serde_json::Value), description = "Deserialized by the handler into `AckBody`. The shape is left open here on purpose -- see the module doc."),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 415, description = "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// POST /api/v1/alerts/{key}/ack — flip one alert's Acknowledged flag
 /// (dashboard-alert-state-v1 doc id == alert key), the ported
 /// alertManager.acknowledge.
@@ -402,6 +527,26 @@ fn store_config(name: &str) -> Option<StoreConfig> {
     })
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/store/{name}",
+    summary = "One allowlisted store, through the generic passthrough.",
+    params(
+        ("name" = inline(contract::StoreName), Path, description = "Allowlisted generic store. Anything else is a 404 -- this route is not an arbitrary index read."),
+        ("offset" = inline(Option<contract::NonNegativeInt>), Query, description = "Result window start."),
+        ("size" = inline(Option<contract::PositiveInt>), Query, description = "Page size."),
+        ("q" = inline(Option<String>), Query, description = "Free-text Lucene query string."),
+        ("ip" = inline(Option<String>), Query, description = "Narrow to one source address."),
+        ("aggs" = inline(Option<String>), Query, description = "`sources` adds the payload-inventory source buckets; anything else is ignored."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// Generic allowlisted store passthrough: /api/v1/store/{name}. Every
 /// remaining store-shaped page reads through here instead of growing its
 /// own handler; the allowlist keeps arbitrary index reads impossible.
@@ -425,6 +570,22 @@ pub struct PurgeQuery {
     pub q: Option<String>,
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/v1/store/{name}",
+    summary = "Purge dead letters matching ?q= (dead-letters only).",
+    params(
+        ("name" = inline(contract::StoreName), Path, description = "Allowlisted generic store. Anything else is a 404 -- this route is not an arbitrary index read."),
+        ("q" = inline(Option<String>), Query, description = "Lucene query string; absent or empty purges every retained dead letter."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 405, description = "The store exists but exposes no delete side (only dead-letters does).", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// DELETE /api/v1/store/{name} — allowlisted like `generic`'s GET side,
 /// but only dead-letters has a delete today (ported from elastic.go's
 /// purgeDeadLetters). Sharing the route with `generic` rather than

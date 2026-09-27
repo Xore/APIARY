@@ -38,10 +38,12 @@ snapshot" run never has to stop anything.
 
 Be clear about what that backup does and does not hold before relying on it
 ahead of a `--wipe`: it captures configuration, secrets, the Keycloak identity
-database and small config-bearing volumes, and deliberately **not**
-Elasticsearch data, captured payloads, PCAP or sandbox images. A `--wipe`
-followed by a restore brings the stack back configured and authenticated with
-an empty event history. See [`BACKUP-ESSENTIALS.md`](BACKUP-ESSENTIALS.md).
+database, small config-bearing volumes and the dashboard's operator-authored
+Elasticsearch documents, and deliberately **not** Elasticsearch telemetry,
+captured payloads, PCAP or sandbox images. A `--wipe` followed by a restore
+brings the stack back configured and authenticated — settings, alert acks and
+the manual IP block list included — with an empty event history. See
+[`BACKUP-ESSENTIALS.md`](BACKUP-ESSENTIALS.md).
 
 ```bash
 sudo ./factory-reset.sh                          # backup only, nothing else touched
@@ -59,6 +61,44 @@ sudo ./factory-reset.sh --apply --wipe --no-restart   # backup, stop, wipe, leav
 
 `--wipe` and `--git-ref` both require `--apply`; the script refuses to run
 either without it.
+
+## Restoring the dashboard's operator state
+
+A `--wipe` deletes `es-data` along with everything else, and `es-data` is
+where the dashboard keeps the documents an operator typed rather than
+captured: the admin config singleton, user preferences, alert
+acknowledgements, canarytoken and bait-credential definitions, the manual IP
+block list, report definitions, workbench recipes, ML anomaly acks and
+submitted problem reports (#3323). Nothing regenerates them.
+
+So a `--wipe` is only safe because the backup taken immediately before it
+carries them, as `es-operator-state/` — mapping plus NDJSON, one file pair per
+index, with a `MANIFEST.txt` saying exactly what was captured. Put them back
+once `honeypot-elk` is healthy again:
+
+```bash
+cd /opt/stacks/apiary
+python3 scripts/es-operator-state-backup.py --restore /opt/backups/honeypot/<stamp>/es-operator-state
+```
+
+Rehearse it into scratch indices first if you want to see the counts before
+writing anything real — `--into 'check-{index}'` creates
+`check-dashboard-config-v1` and friends, which you can count with
+`GET check-*/_count` and then delete.
+
+Two things to know about that command:
+
+- It **creates** each index from the exported mapping, so a fresh cluster with
+  no `dashboard-config-v1` yet is fine. Against an index that already exists
+  it only overwrites the documents named in the file and leaves the rest
+  alone, so it is safe to re-run.
+- The dashboard serves its compiled defaults read-only whenever a store fails
+  to load, so a restore that half-lands degrades safely rather than serving a
+  corrupt config. `honeypot_settings_store_degraded{store="config"}` staying at
+  1 after a restore is the signal that something did not come back.
+
+Scope, and the derived indices deliberately left out, are in
+[`BACKUP-ESSENTIALS.md` §Operator state](BACKUP-ESSENTIALS.md#operator-state).
 
 ## Stack stop/start order
 

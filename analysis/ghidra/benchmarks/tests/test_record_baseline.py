@@ -646,6 +646,11 @@ class RunCasesIncrementalSaveTest(unittest.TestCase):
         call_count = {"n": 0}
 
         def fake_urlopen(req, timeout=None):
+            # Only count model requests. build_report also reads /api/version
+            # once to stamp the report, which is not a retry attempt and
+            # must not change what this test asserts about the retry budget.
+            if "/chat/completions" not in str(getattr(req, "full_url", req)):
+                raise AssertionError(f"unexpected request: {getattr(req, 'full_url', req)}")
             call_count["n"] += 1
             body = json.loads(req.data)
             prompt = body["messages"][1]["content"]

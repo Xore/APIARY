@@ -319,16 +319,80 @@ services:
 
         # so it can never wipe existing session data.
 
-        if /opt/arkime/db/db.pl --insecure http://elasticsearch:9200 info 2>/dev/null \
-             | grep 'DB Version' | grep -vq -- '-1'; then
-          echo RED | /opt/arkime/db/db.pl --insecure http://elasticsearch:9200 upgradenoprompt
-        else
-          echo INIT | /opt/arkime/db/db.pl --insecure http://elasticsearch:9200 init
-        fi
-        # #3343: translate the legacy templates db.pl just installed into
-        # composable ones -- Elasticsearch ignores legacy templates wherever a
-        # composable template matches, and elasticsearch-setup's "*" catch-all
-        # always does. See arkime/composable-templates.js.
+        # #3343: run it with nothing composable covering Arkime's own index
+
+        # families. Elasticsearch refuses to CREATE a legacy template whose
+
+        # patterns match an existing composable template, and db.pl init
+
+        # deletes and re-creates all three of them, so any composable template
+
+        # left over from an earlier run fails db.pl under `set -e`. The one
+
+        # that matters is elasticsearch-setup's "*" catch-all: it is created by
+
+        # a different one-shot that has already succeeded by then, so one
+
+        # unlucky deploy (db.pl init racing that catch-all) leaves a template
+
+        # standing that every later deploy trips over -- the stack could never
+
+        # finish initialising again without a hand-deleted template. `shadow`
+
+        # stashes and deletes whatever covers an Arkime family; the subcommand
+
+        # after db.pl puts it all back and regenerates the Arkime templates
+
+        # from the legacy ones. See arkime/composable-templates.js.
+        #
+
+        # The retry covers the one race a shadow cannot: a template created
+
+        # *while* db.pl is running, by elasticsearch-setup's catch-all landing
+
+        # mid-run. Both db.pl verbs are safe to re-run, so re-shadow and try
+
+        # again rather than wedge the deploy permanently.
+
+        arkime_db_run() {
+          if /opt/arkime/db/db.pl --insecure http://elasticsearch:9200 info 2>/dev/null \
+               | grep 'DB Version' | grep -vq -- '-1'; then
+            echo RED | /opt/arkime/db/db.pl --insecure http://elasticsearch:9200 upgradenoprompt
+          else
+            echo INIT | /opt/arkime/db/db.pl --insecure http://elasticsearch:9200 init
+          fi
+        }
+
+        arkime_db_runs=0
+
+        until /opt/arkime/bin/node /opt/arkime/composable-templates.js shadow && arkime_db_run; do
+          # A doubled dollar sign is compose's escape for a literal one; a bare
+          # reference would be interpolated by compose instead, warning that the
+          # variable is not set (this is a shell counter, not an .env one) --
+          # including here in the comment, which is interpolated too.
+          arkime_db_runs=$(( arkime_db_runs + 1 ))
+          if [ "$$arkime_db_runs" -ge 3 ]; then
+            echo "arkime-init: db.pl failed $$arkime_db_runs times -- not writing the done marker"
+            exit 1
+          fi
+          echo "arkime-init: db.pl failed, re-shadowing the composable templates and retrying"
+        done
+
+        # #3343: translate the legacy templates db.pl just installed (or
+
+        # refreshed) into composable ones -- Elasticsearch ignores legacy
+
+        # templates wherever a composable template matches, and this cluster
+
+        # always has one. Also restores everything the shadow stashed.
+        #
+
+        # #3343: this call was folded into the comment above it by the `>`
+
+        # block scalar and so has never actually run; the blank line between
+
+        # the comment and the command is what keeps it out of the comment.
+
         /opt/arkime/bin/node /opt/arkime/composable-templates.js
 
         # Create the admin user once, with a real local password (#122, #134,
@@ -405,6 +469,14 @@ services:
       - ARKIME_ADMIN_PASSWORD=${ARKIME_ADMIN_PASSWORD:-change-me-arkime}
       - ARKIME__elasticsearch=http://elasticsearch:9200
       - ARKIME__passwordSecret=${ARKIME_PASSWORD_SECRET:-change-me-in-env}
+      # #3283: the retention knob, for the delete-only policy
+      # composable-templates.js installs over arkime_sessions3-*. Passed
+      # here rather than read inside the script because this stack already
+      # passes it to elasticsearch-setup for the other twelve ILM policies
+      # (#261); without it Arkime sessions would silently expire on a
+      # hardcoded 30-day default while every other window in the stack
+      # followed the operator's setting. Same knob, same default, one stack.
+      - HONEYPOT_RETENTION_DAYS=${HONEYPOT_RETENTION_DAYS:-30}
     networks:
       - honeynet
     # #3045 (#2825 repointed here on closure): measured, not assumed.

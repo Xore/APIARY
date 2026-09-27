@@ -23,8 +23,10 @@ on:
         required: false
         default: "48"
 
-permissions:
-  issues: write
+# #3313: the only grant this workflow needs is the one that opens and closes
+# its own tracking issue, so it is declared on the job that spends it and the
+# workflow level defaults to none.
+permissions: {}
 
 concurrency:
   group: backup-staleness-watch
@@ -32,10 +34,16 @@ concurrency:
 
 jobs:
   sweep:
-    runs-on: [self-hosted, linux, x64, honeypot-ci]
+    # honeypot-homeserver (#3379): this job measures the homeserver itself,
+    # so it must never land on a --build-only honeypot-ci executor elsewhere.
+    runs-on: [self-hosted, linux, x64, honeypot-ci, honeypot-homeserver]
     timeout-minutes: 5
+    permissions:
+      issues: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Check server-USB essentials backup for staleness
         env:
           GH_TOKEN: ${{ github.token }}

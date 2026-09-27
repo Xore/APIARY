@@ -17,6 +17,17 @@ use crate::AppState;
 
 const INDEX: &str = "reporter-metrics-v1";
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/reporter-stats",
+    summary = "What the reporting loops produced and when.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 500, description = "The handler failed in a way it does not model as a 4xx.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = inline(serde_json::Value), content_type = "application/json"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn stats(State(state): State<AppState>) -> (StatusCode, Json<Value>) {
     let result = match state.es.search_index(&[INDEX], json!({"size": 1, "sort": [{"updated_at": {"order": "desc", "unmapped_type": "date"}}]})).await {
         Ok(result) => result,

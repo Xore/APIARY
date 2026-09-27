@@ -64,7 +64,14 @@ const MAX_SINK_BYTES: u64 = 25 << 20;
 pub fn family_for_path(path: &str) -> String {
     let mut segments = path.split('/').filter(|s| !s.is_empty());
     match (segments.next(), segments.next(), segments.next()) {
+        // The three probe routes, each its own family rather than folded
+        // into "other" (#3317): /readyz answers 503 whenever Elasticsearch
+        // is not ready, so an operator watching the request-rate series
+        // needs to be able to tell a readiness probe's failures from an
+        // unrelated path that happens to be misshapen.
         (Some("healthz"), None, None) => "healthz".to_string(),
+        (Some("livez"), None, None) => "livez".to_string(),
+        (Some("readyz"), None, None) => "readyz".to_string(),
         (Some("metrics"), None, None) => "metrics".to_string(),
         (Some("api"), Some("v1"), Some(family)) => {
             // Only clean single-segment names become labels; anything odd
@@ -292,8 +299,9 @@ async fn append_line(
 }
 
 /// Outermost middleware: metrics + request-id echo/span + durable line for
-/// everything this tier serves, healthz and metrics included (the probe's
-/// own behavior is part of the observability story too).
+/// everything this tier serves, the liveness/readiness probes and metrics
+/// included (the probes' own behavior is part of the observability story
+/// too -- /readyz's 503s are the record of an Elasticsearch outage).
 pub async fn observe(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -349,10 +357,19 @@ pub async fn observe(
     response
 }
 
-/// GET /metrics — deliberately unauthenticated exactly like /healthz: both
-/// are reachable only on LISTEN_ADDR, which is the internal docker network
-/// (Traefik publishes the BFF tier, not this listener). Adding auth here
-/// would just mean operators punt and scrape over SSH tunnels anyway.
+#[utoipa::path(
+    get,
+    path = "/metrics",
+    summary = "Prometheus exposition for the #1972 request metrics. Public on purpose, like /healthz.",
+    responses(
+        (status = 200, description = "Prometheus text exposition format.", body = inline(serde_json::Value), content_type = "text/plain"),
+    ),
+)]
+/// GET /metrics — deliberately unauthenticated exactly like /healthz,
+/// /livez and /readyz: all of them are reachable only on LISTEN_ADDR,
+/// which is the internal docker network (Traefik publishes the BFF tier,
+/// not this listener). Adding auth here would just mean operators punt and
+/// scrape over SSH tunnels anyway.
 pub async fn metrics_route(State(state): State<AppState>) -> Response {
     (
         [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
@@ -368,6 +385,8 @@ mod tests {
     #[test]
     fn families_match_the_tier_path_shapes() {
         assert_eq!(family_for_path("/healthz"), "healthz");
+        assert_eq!(family_for_path("/livez"), "livez");
+        assert_eq!(family_for_path("/readyz"), "readyz");
         assert_eq!(family_for_path("/metrics"), "metrics");
         assert_eq!(family_for_path("/api/v1/store/ml-anomalies?offset=0"), "store");
         assert_eq!(family_for_path("/api/v1/live"), "live");

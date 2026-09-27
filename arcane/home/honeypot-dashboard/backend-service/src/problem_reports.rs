@@ -188,6 +188,26 @@ async fn button_enabled(state: &AppState) -> bool {
         .unwrap_or(false)
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/problem-reports",
+    summary = "File a problem report from the dashboard UI.",
+    params(
+        ("actor_subject" = inline(Option<String>), Query, description = "OIDC subject recorded on the audit/history entry."),
+        ("actor_username" = inline(Option<String>), Query, description = "Operator name recorded on the audit/history entry."),
+    ),
+    request_body(content = inline(serde_json::Value), description = "Deserialized by the handler into `Submission`. The shape is left open here on purpose -- see the module doc."),
+    responses(
+        (status = 201, description = "The stored report."),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 409, description = "The record changed since the revision the caller presented.", body = String, content_type = "text/plain"),
+        (status = 415, description = "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// POST /api/v1/problem-reports — any authenticated operator; the BFF
 /// checks for a live session before ever calling this and passes the
 /// caller's identity along as query params (this tier has no session
@@ -258,6 +278,25 @@ pub struct StatusPatch {
 
 const VALID_STATUSES: [&str; 3] = ["open", "triaged", "closed"];
 
+#[utoipa::path(
+    patch,
+    path = "/api/v1/problem-reports/{id}",
+    summary = "Move a problem report through open/triaged/closed.",
+    params(
+        ("id" = inline(String), Path, description = "Problem-report id."),
+    ),
+    request_body(content = inline(serde_json::Value), description = "Deserialized by the handler into `StatusPatch`. The shape is left open here on purpose -- see the module doc."),
+    responses(
+        (status = 204, description = "No content; the status was stored."),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 409, description = "The record changed since the revision the caller presented.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 415, description = "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// PATCH /api/v1/problem-reports/{id} — admin-gated at the BFF. The only
 /// mutation an existing report ever gets is its status; captured content
 /// is never edited after submission, so this is a single-field

@@ -299,8 +299,19 @@ install -m 0755 -o root -g root "$here/worker/gpu-queue-drain.py" "$target/worke
 install -m 0755 -o root -g root "$here/report/generate_report.py" "$target/report/generate_report.py"
 install -m 0755 -o root -g root "$here/models/model-governance.py" "$target/models/model-governance.py"
 install -m 0755 -o root -g root "$here/models/model-status-adapter.py" "$target/models/model-status-adapter.py"
+# #3334: the host-side runner for the llm-worker prompt-injection corpus. It
+# lives next to the governance tools because that is where the approved pin it
+# checks against already lives.
+install -m 0755 -o root -g root "$here/models/run-llm-injection-suite.sh" "$target/models/run-llm-injection-suite.sh"
 install -m 0644 -o root -g root \
   "$here/models/approved-models.json" "$target/models/approved-models.json"
+# honeypot-llm-injection-suite.path watches this copy next to the manifest, so
+# the pin-change leg fires whichever of the two moved. The runner still refuses
+# a digest that disagrees with the manifest; installing it here is what makes
+# that disagreement visible without a manual poll.
+install -m 0644 -o root -g root \
+  "$here/../../llm-worker/docker-compose.synthetic-canary.yml" \
+  "$target/models/llm-worker-synthetic-canary.yml"
 install -m 0644 -o root -g root \
   "$here/models/session-schema.json" "$target/models/session-schema.json"
 install -m 0644 -o root -g root \
@@ -330,6 +341,13 @@ install -d -m 0700 -o root -g root \
 install -d -m 0700 -o root -g root \
   /var/lib/honeypot-revdeck/requests/pending /var/lib/honeypot-revdeck/results
 
+# #3334: injection-suite reports. Owner-only directory with owner-only files
+# inside, same posture as the qualification reports the governance README asks
+# operators to keep outside the repository. A report holds model verdicts and
+# digests rather than captured data, but it is written by a unit that can reach
+# the model, so it does not get looser than the spools beside it.
+install -d -m 0700 -o root -g root /var/lib/honeypot-ghidra/injection-suite
+
 for unit in honeypot-ghidra-worker.service honeypot-ghidra-worker.path \
             honeypot-gpu-queue-drain.service honeypot-gpu-queue-drain.timer; do
   install -m 0644 -o root -g root "$here/worker/$unit" "/etc/systemd/system/$unit"
@@ -337,15 +355,27 @@ done
 for unit in honeypot-model-drift.service honeypot-model-drift.timer honeypot-model-status-adapter.service; do
   install -m 0644 -o root -g root "$here/models/$unit" "/etc/systemd/system/$unit"
 done
+# #3334: the template unit plus its two triggers. Installed unconditionally,
+# like the units above -- the runner fails on a missing APIARY_REPO_DIR rather
+# than reporting a pass it never measured, so an operator who has not pointed
+# it at a checkout finds out from the journal instead of a silent no-op.
+install -m 0644 -o root -g root \
+  "$here/models/honeypot-llm-injection-suite.service" \
+  "/etc/systemd/system/honeypot-llm-injection-suite@.service"
+for unit in honeypot-llm-injection-suite.timer honeypot-llm-injection-suite.path; do
+  install -m 0644 -o root -g root "$here/models/$unit" "/etc/systemd/system/$unit"
+done
 systemctl daemon-reload
 systemctl reset-failed honeypot-ghidra-worker.service honeypot-gpu-queue-drain.service 2>/dev/null || true
 systemctl enable --now honeypot-ghidra-worker.path
 systemctl enable --now honeypot-gpu-queue-drain.timer
 systemctl enable --now honeypot-model-drift.timer
+systemctl enable --now honeypot-llm-injection-suite.timer
+systemctl enable --now honeypot-llm-injection-suite.path
 systemctl enable --now honeypot-model-status-adapter.service
-# The only long-running (Type=simple) unit installed here -- the other three
-# are path/timer-triggered oneshots that naturally pick up a re-installed
-# .py on their next invocation, with no running process to go stale.
+# The only long-running (Type=simple) unit installed here -- every other is a
+# path/timer-triggered oneshot that naturally picks up a re-installed .py or
+# .sh on its next invocation, with no running process to go stale.
 # enable --now is a no-op on a re-run against an already-active unit, so a
 # re-sync (#1406) that only overwrote the .py file would otherwise leave
 # this one serving the old code from memory indefinitely.

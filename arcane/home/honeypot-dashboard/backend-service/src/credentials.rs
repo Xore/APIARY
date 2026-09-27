@@ -84,6 +84,15 @@ async fn get(state: &AppState, id: &str) -> Option<Value> {
     state.es.get_doc(INDEX, id).await.ok().flatten()
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/credentials",
+    summary = "HoneyFS implant credentials, with secrets redacted.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// GET /api/v1/credentials — list every provisioned credential, newest
 /// first.
 pub async fn list(State(state): State<AppState>) -> Json<Value> {
@@ -127,6 +136,22 @@ pub struct CreateBody {
     actor_username: String,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/credentials",
+    summary = "Provision a honeyfs-implant credential.",
+    request_body(content = inline(serde_json::Value), description = "Deserialized by the handler into `CreateBody`. The shape is left open here on purpose -- see the module doc."),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 500, description = "The handler failed in a way it does not model as a 4xx.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 503, description = "A dependency this route needs is not configured or not reachable.", body = String, content_type = "text/plain"),
+        (status = 415, description = "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// POST /api/v1/credentials — provision a new credential (implants it
 /// live, then records it). Cowrie-honeyfs is the only implant target this
 /// pass wires up ("cowrie_honeyfs", matching the Go tier — Beelzebub's
@@ -212,6 +237,25 @@ pub struct RotateBody {
     actor_username: String,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/credentials/{id}/rotate",
+    summary = "Rotate a honeyfs-implant credential's secret.",
+    params(
+        ("id" = inline(String), Path, description = "HoneyFS implant credential id."),
+    ),
+    request_body(content = inline(serde_json::Value), description = "Deserialized by the handler into `RotateBody`. The shape is left open here on purpose -- see the module doc.", extensions(("x-optional-body" = json!(true)))),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 500, description = "The handler failed in a way it does not model as a 4xx.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 503, description = "A dependency this route needs is not configured or not reachable.", body = String, content_type = "text/plain"),
+        (status = 415, description = "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// POST /api/v1/credentials/{id}/rotate — rotate a credential's password
 /// (re-implants at the same path with a freshly rendered body; "Rotation =
 /// calling implant again with new content", no separate verb on the wire).
@@ -277,6 +321,24 @@ pub struct LinkTokenBody {
     actor_username: String,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/credentials/{id}/link-token",
+    summary = "Mint a link token for a honeyfs-implant credential.",
+    params(
+        ("id" = inline(String), Path, description = "HoneyFS implant credential id."),
+    ),
+    request_body(content = inline(serde_json::Value), description = "Deserialized by the handler into `LinkTokenBody`. The shape is left open here on purpose -- see the module doc."),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 500, description = "The handler failed in a way it does not model as a 4xx.", body = String, content_type = "text/plain"),
+        (status = 415, description = "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// POST /api/v1/credentials/{id}/link-token — associate/clear a
 /// canarytoken id. Bookkeeping only, per the #1487 design comment: "a
 /// dashboard-side data-model concern only ... no new backend mechanism."

@@ -968,8 +968,20 @@ function EventMeta({
             )
           : null,
         p.command ? link('cmd', p.command, 'command', 'show every occurrence of this exact command') : null,
-        p.user || p.pass
+        // #3213: the `cred` pivot is a "user / pass" PAIR. http-honeypot and
+        // cisco-asa-honeypot no longer report a pass, so this branch handles
+        // only the sensors that still have one, and the branch below handles
+        // the account on its own. Building the pair unconditionally would
+        // produce a `admin / ` that filters on an empty password.
+        p.user && p.pass
           ? link('cred', `${p.user} / ${p.pass}`, 'credentials', 'show every use of these credentials')
+          : null,
+        // The account is the half that survives for the sensors in #3213's
+        // scope. Same `cred` key, because the backend accepts a bare
+        // account and filters the account half only -- a second filter type
+        // for the same field would be a second vocabulary to keep in step.
+        p.user && !p.pass
+          ? link('cred', p.user, p.user, 'show every event for this exact account')
           : null,
         p.path ? link('path', p.path, `path ${p.path}`, 'show every request for this exact path') : null,
       ],

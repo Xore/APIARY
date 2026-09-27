@@ -23,7 +23,9 @@ jobs:
     runs-on: [self-hosted, linux, x64, honeypot-home]
     environment: production-home
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # #258, updated by #1502: this rsync's only remaining direct consumer
       # in THIS workflow is the ghidra-worker.py host-level re-sync step
       # right below it (bash /opt/stacks/apiary/analysis/ghidra/
@@ -233,7 +235,9 @@ jobs:
     runs-on: ubuntu-latest
     environment: production-vps
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Configure deployment key
         shell: bash
         env:

@@ -56,6 +56,16 @@ fn bad_gateway(error: anyhow::Error) -> (StatusCode, String) {
     (StatusCode::BAD_GATEWAY, error.to_string())
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/charts/ml-backlog",
+    summary = "ML anomaly backlog over time.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// /api/v1/charts/ml-backlog — hourly average queue depth per source
 /// index from ml-worker-metrics' backlog gauge documents.
 pub async fn ml_backlog(State(state): State<AppState>) -> Result<Json<Vec<Series>>, (StatusCode, String)> {
@@ -288,6 +298,16 @@ async fn traffic_from_rollup(state: &AppState, hours: usize, name: &str) -> Opti
     })
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/charts/netflow-bytes",
+    summary = "Netflow bytes over time.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn netflow_bytes(State(state): State<AppState>) -> Result<Json<Vec<Series>>, (StatusCode, String)> {
     traffic_sum(
         &state,
@@ -300,6 +320,16 @@ pub async fn netflow_bytes(State(state): State<AppState>) -> Result<Json<Vec<Ser
     .map_err(bad_gateway)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/charts/netflow-packets",
+    summary = "Netflow packets over time.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn netflow_packets(State(state): State<AppState>) -> Result<Json<Vec<Series>>, (StatusCode, String)> {
     traffic_sum(
         &state,
@@ -312,6 +342,16 @@ pub async fn netflow_packets(State(state): State<AppState>) -> Result<Json<Vec<S
     .map_err(bad_gateway)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/charts/anomaly-trend",
+    summary = "Anomaly counts over time.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// /api/v1/charts/anomaly-trend — protocol-conformance violations per
 /// claimed app protocol, hourly. Live aggregation over
 /// suricata-v2-anomaly-* (the Go tier derived this from its in-memory
@@ -357,6 +397,16 @@ pub async fn anomaly_trend(State(state): State<AppState>) -> Result<Json<Vec<Ser
     Ok(Json(series))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/charts/dionaea-cves",
+    summary = "Dionaea exploit attempts by CVE.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// /api/v1/charts/dionaea-cves — top exploited CVEs / named incidents.
 /// data.* is flattened: terms on a flattened leaf works, no .keyword.
 ///
@@ -395,6 +445,16 @@ pub async fn dionaea_cves(State(state): State<AppState>) -> Result<Json<Bar>, (S
     Ok(Json(bar))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/charts/os-distribution",
+    summary = "Fingerprint-derived OS distribution.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// /api/v1/charts/os-distribution — unique attacker IPs per p0f OS guess
 /// (portbridge-v2-*, #241/#1277).
 pub async fn os_distribution(State(state): State<AppState>) -> Result<Json<Vec<PiePoint>>, (StatusCode, String)> {
@@ -427,6 +487,16 @@ pub async fn os_distribution(State(state): State<AppState>) -> Result<Json<Vec<P
     Ok(Json(points))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/charts/tcp-stack-clusters",
+    summary = "JA4T stack clusters.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// /api/v1/charts/tcp-stack-clusters — unique attacker IPs per JA4T TCP-stack
 /// fingerprint (`zeek-v1-conn-*`).
 ///
@@ -487,6 +557,16 @@ async fn fingerprint_bar(state: &AppState, indices: &[&str], body: Value, agg: &
     Ok(bar)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/charts/ics-functions",
+    summary = "ICS function codes seen.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// /api/v1/charts/ics-functions — what attackers actually asked the fake PLCs
 /// to do, by ICS function code (`zeek-v1-*`, #1736).
 ///
@@ -542,6 +622,16 @@ pub async fn ics_functions(State(state): State<AppState>) -> Result<Json<Bar>, (
     Ok(Json(bar))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/charts/decoy-requests",
+    summary = "Requests per decoy.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// /api/v1/charts/decoy-requests — what was requested from the TLS-terminated
 /// decoys (`traefik-v1-*`, #1739).
 ///
@@ -557,6 +647,16 @@ pub async fn decoy_requests(State(state): State<AppState>) -> Result<Json<Bar>, 
     fingerprint_bar(&state, &["traefik-v1-*"], body, "paths").await.map(Json).map_err(bad_gateway)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/charts/decoy-client-fingerprints",
+    summary = "Decoy requests joined against ClientHello fingerprints.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// /api/v1/charts/decoy-client-fingerprints — the JA4 of clients that actually
 /// reached a TLS-terminated decoy (#1765).
 ///
@@ -611,6 +711,16 @@ pub async fn decoy_client_fingerprints(
     fingerprint_bar(&state, &["huginn-v1-*"], body, "ja4").await.map(Json).map_err(bad_gateway)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/charts/ja4h-fingerprints",
+    summary = "JA4H fingerprint distribution.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// /api/v1/charts/ja4h-fingerprints — HTTP client fingerprints (`http.log`).
 ///
 /// The HTTP counterpart to the TLS JA4 chart below: it fingerprints the
@@ -625,6 +735,16 @@ pub async fn ja4h_fingerprints(State(state): State<AppState>) -> Result<Json<Bar
     fingerprint_bar(&state, &["zeek-v1-http-*"], body, "ja4h").await.map(Json).map_err(bad_gateway)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/charts/ja4x-fingerprints",
+    summary = "JA4X fingerprint distribution.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// /api/v1/charts/ja4x-fingerprints — X.509 construction fingerprints
 /// (`x509.log`).
 ///
@@ -641,6 +761,16 @@ pub async fn ja4x_fingerprints(State(state): State<AppState>) -> Result<Json<Bar
     fingerprint_bar(&state, &["zeek-v1-x509-*"], body, "ja4x").await.map(Json).map_err(bad_gateway)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/charts/ja4l-fingerprints",
+    summary = "JA4L fingerprint distribution.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// /api/v1/charts/ja4l-fingerprints — connection-latency fingerprints
 /// (`conn.log`, 92.9 % coverage measured).
 ///
@@ -658,6 +788,16 @@ pub async fn ja4l_fingerprints(State(state): State<AppState>) -> Result<Json<Bar
     fingerprint_bar(&state, &["zeek-v1-conn-*"], body, "ja4l").await.map(Json).map_err(bad_gateway)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/charts/tls-fingerprints",
+    summary = "TLS fingerprint distribution.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// /api/v1/charts/tls-fingerprints — JA4 counts, excluding dest_port 443
 /// (the deployment's own operator HTTPS; see scanner_fingerprints.go).
 pub async fn tls_fingerprints(State(state): State<AppState>) -> Result<Json<Bar>, (StatusCode, String)> {
@@ -672,6 +812,16 @@ pub async fn tls_fingerprints(State(state): State<AppState>) -> Result<Json<Bar>
     fingerprint_bar(&state, &["suricata-v2-tls-*"], body, "ja4").await.map(Json).map_err(bad_gateway)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/charts/ssh-fingerprints",
+    summary = "SSH fingerprint distribution.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// /api/v1/charts/ssh-fingerprints — SSH client software counts.
 pub async fn ssh_fingerprints(State(state): State<AppState>) -> Result<Json<Bar>, (StatusCode, String)> {
     let body = json!({
@@ -682,6 +832,16 @@ pub async fn ssh_fingerprints(State(state): State<AppState>) -> Result<Json<Bar>
     fingerprint_bar(&state, &["suricata-v2-ssh-*"], body, "software").await.map(Json).map_err(bad_gateway)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/charts/ml-anomaly-scores",
+    summary = "ML anomaly scores over time.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// /api/v1/charts/ml-anomaly-scores — one scatter series per detector
 /// model plus the composite (#1284), reshaped from ml-anomalies docs.
 pub async fn ml_anomaly_scores(State(state): State<AppState>) -> Result<Json<Vec<Series>>, (StatusCode, String)> {
@@ -769,6 +929,16 @@ fn held_ranges() -> Vec<Value> {
         .collect()
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/charts/endlessh-held-histogram",
+    summary = "How long endlessh held each connection.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn endlessh_histogram(State(state): State<AppState>) -> Result<Json<Bar>, (StatusCode, String)> {
     let ranges = held_ranges();
     let body = json!({

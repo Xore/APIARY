@@ -110,6 +110,16 @@ async fn unique_ips_live(state: &AppState) -> Result<u64, (StatusCode, String)> 
     Ok(result["aggregations"]["unique_ips"]["value"].as_u64().unwrap_or(0))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/overview/kpis",
+    summary = "KPI counters behind the overview tiles.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn kpis(State(state): State<AppState>) -> Result<Json<OverviewKpis>, (StatusCode, String)> {
     // #2046: the rolled fleet hours are the primary path; the aggregation
     // below runs only while the worker hasn't covered the window yet (fresh

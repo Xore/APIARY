@@ -86,6 +86,21 @@ swapfile described in the 2026-08-04 capture no longer exists. 92G of RAM
 means swap is a safety margin rather than a working set, though it was
 under real pressure at measurement time (14.6G in use, priority -2).
 
+`/var` also carries the two CI-created directories, both of which the
+workflows cannot create for themselves (`/var` is `root:root 0755`, so a
+`mkdir` as `github-ci-runner` gets `EACCES`) and both of which
+`scripts/install-homeserver.sh` therefore provisions and then proves writable
+per runner user:
+
+| directory | holds | bounded by |
+|---|---|---|
+| `/var/buildx-cache/<image>` | that image's `type=local` buildx layer cache (#2822) | `scripts/prune-buildx-cache.sh`, 14 days / 2 GiB per image |
+| `/var/image-sbom/<image>` | the digest-keyed CycloneDX SBOMs for the two dashboard images (#3321) | `scripts/prune-image-sbom.sh`, 10 records per image |
+
+Neither is in the `/mnt-1` compatibility symlink list above: both were added
+after the move, so no script hard-codes the old path. See
+[CI-CD.md](CI-CD.md) for what writes them and why.
+
 ## Reproducing it: `autoinstall/homeserver-user-data.yaml`
 
 The autoinstall config in

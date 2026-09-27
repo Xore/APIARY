@@ -3,6 +3,7 @@
 //! by chunk_index). List endpoints exclude the data; download endpoints
 //! stream the decoded bytes with the stored content type.
 
+use crate::contract;
 use axum::{
     extract::{Path, State},
     http::{header, StatusCode},
@@ -23,6 +24,21 @@ fn store_for(kind: &str) -> Option<(&'static str, &'static str)> {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/artifacts/{kind}/{key}",
+    summary = "Artifacts a run produced, one row per filename.",
+    params(
+        ("kind" = inline(contract::ArtifactKind), Path, description = "Artifact family."),
+        ("key" = inline(String), Path, description = "Run id the artifacts belong to (a sha256 for ghidra, a job id for sandbox)."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn list(
     State(state): State<AppState>,
     Path((kind, key)): Path<(String, String)>,
@@ -59,6 +75,25 @@ pub async fn list(
     Ok(Json(json!({"rows": rows})))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/artifacts/{kind}/{key}/{filename}",
+    summary = "Download one artifact of a run.",
+    params(
+        ("kind" = inline(contract::ArtifactKind), Path, description = "Artifact family."),
+        ("key" = inline(String), Path, description = "Run id the artifacts belong to."),
+        ("filename" = inline(String), Path, description = "Exact stored filename; the handler refuses a path separator or a name outside this key."),
+    ),
+    responses(
+        (status = 200, description = "The stored artifact bytes.", body = inline(serde_json::Value), content_type = "application/octet-stream"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 413, description = "The stored artifact is larger than this endpoint will serve.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 503, description = "A dependency this route needs is not configured or not reachable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn download(
     State(state): State<AppState>,
     Path((kind, key, filename)): Path<(String, String, String)>,

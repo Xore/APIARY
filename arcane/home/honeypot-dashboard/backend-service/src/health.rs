@@ -34,6 +34,16 @@ pub struct Storage {
     pub store_bytes: u64,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings/storage",
+    summary = "Index sizes and document counts.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// /api/v1/settings/storage — the ES storage summary the legacy settings
 /// modal's storage pane shows.
 pub async fn storage(State(state): State<AppState>) -> Result<Json<Storage>, (StatusCode, String)> {
@@ -113,6 +123,12 @@ pub struct SourceHealth {
     pub ingest: IngestFreshness,
     pub dead_letters: u64,
     pub pipeline: PipelineHealth,
+    /// #3330: whether the alerts this page is about actually reach the
+    /// configured webhook. It belongs here rather than only in Settings
+    /// because this is the page an operator opens when something is not
+    /// arriving — "the pipeline is fine, the webhook is refusing us" is
+    /// the distinction it can now make.
+    pub webhook: crate::webhook_delivery::DeliveryHealth,
     /// Events in the last 24h whose source address could not be recovered
     /// — the same documents the events explorer renders as `unattributed`
     /// (#1723). They are counted in every total above but belong to no
@@ -319,6 +335,16 @@ fn sensor_state(age_s: i64, recent_7d: u64) -> &'static str {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/source-health",
+    summary = "Per-source ingestion health, the page behind \"Source & pipeline health\".",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn source_health(State(state): State<AppState>) -> Result<Json<SourceHealth>, (StatusCode, String)> {
     let body = json!({
         "size": 0,
@@ -418,6 +444,10 @@ pub async fn source_health(State(state): State<AppState>) -> Result<Json<SourceH
         ingest,
         dead_letters,
         pipeline: pipeline_health(&state).await,
+        // Never a hard failure of this endpoint: a delivery record that
+        // cannot be read leaves the rest of the page worth rendering, and
+        // the card states its own reason.
+        webhook: crate::webhook_delivery::summary(&state.es).await,
         unattributed_24h: result["aggregations"]["unattributed"]["doc_count"].as_u64().unwrap_or(0),
     }))
 }

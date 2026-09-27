@@ -7,15 +7,15 @@ on:
   pull_request:
   workflow_dispatch:
 
-permissions:
-  contents: read
-  packages: write
-  # The ci-target router dispatches the ci-heartbeat canary with
-  # GITHUB_TOKEN, and a called reusable workflow can never exceed the
-  # caller's envelope -- under-granting it startup-fails the whole run
-  # as "Invalid workflow file" (quality.yml's inline router instead
-  # elevates at its own job level).
-  actions: write
+# #3313: workflow level defaults to none; each job declares what it spends.
+# packages: write belongs to the build job alone -- it is what pushes the
+# 18 images to ghcr, and the gate below needs no token at all. The ci-target
+# router dispatches the ci-heartbeat canary with GITHUB_TOKEN, and a called
+# reusable workflow can never exceed the caller's envelope -- under-granting
+# it startup-fails the whole run as "Invalid workflow file" (quality.yml's
+# inline router instead elevates at its own job level), so that grant stays
+# on ci-target and reaches no other job.
+permissions: {}
 
 jobs:
   # Executor routing ("homeserver first, GitHub-hosted fallback") -- the
@@ -38,6 +38,9 @@ jobs:
   ci-target:
     name: Pick CI executor
     uses: ./.github/workflows/ci-router.yml
+    permissions:
+      contents: read
+      actions: write
     with:
       ci_homeserver_prs: ${{ vars.CI_HOMESERVER_PRS || '' }}
 
@@ -46,6 +49,14 @@ jobs:
     needs: [ci-target]
     runs-on: ${{ needs.ci-target.outputs.homeserver == 'true' && fromJSON('["self-hosted", "linux", "x64", "honeypot-ci"]') || fromJSON('["ubuntu-latest"]') }}
     timeout-minutes: ${{ needs.ci-target.outputs.homeserver == 'true' && 120 || 360 }}
+    permissions:
+      contents: read
+      # What docker/build-push-action spends on the ghcr push
+      # (push: ${{ github.event_name != 'pull_request' }}). Held here
+      # rather than workflow-wide so the router job and the gate below
+      # carry no package-write token; on a pull_request the rows do not
+      # push, and GitHub downgrades the grant to read for fork PRs anyway.
+      packages: write
     strategy:
       fail-fast: false
       # #1502: contexts below repointed at arcane/home/honeypot-<name>/ for
@@ -60,6 +71,33 @@ jobs:
             context: arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus
           - image: backend-service
             context: arcane/home/honeypot-dashboard/backend-service
+            # #3321: the two images whose contents had no inventory, so
+            # "are we affected?" for a dashboard CVE meant rebuilding or
+            # exec-ing into the running container. `sbom: true` opts the row
+            # into the digest-keyed CycloneDX + Trivy steps below. Absent on
+            # the other sixteen rows, so they build exactly as before.
+            sbom: true
+            # #3315: the two dashboard images that now report which commit
+            # they were built from -- one compiled into the binary (where
+            # /livez and its /healthz alias answer it as `revision`) or baked
+            # into the served /build.json, and both on the image's
+            # org.opencontainers.image.revision label. Only these two
+            # Dockerfiles declare `ARG GIT_SHA`, so only these two rows pass
+            # it; the other sixteen would take an unused-build-arg warning
+            # per build for an arg they do not read.
+            stamp: true
+            # #3316: ...and the two images that are actually deployed as
+            # long-lived HTTP services are also started and waited on
+            # below. `boot_smoke: true` is the reason a build row needs a
+            # local image to run, which is a different requirement on each
+            # event -- see the `load:` input's comment. The remaining rows
+            # are one-shot capture daemons whose whole job is to stay up;
+            # there is no entrypoint contract to break and no endpoint to
+            # answer, so they keep building exactly as before. (No count
+            # here on purpose: #3131 grew this matrix after #3321's
+            # comments named a number, and a stale number reads as a
+            # fresh fact. The smoke tests assert the row names instead.)
+            boot_smoke: true
           - image: cisco-asa-honeypot
             context: arcane/home/honeypot-cisco-asa-honeypot/cisco-asa-honeypot
           - image: citrix-honeypot
@@ -68,6 +106,9 @@ jobs:
             context: arcane/home/honeypot-conpot/conpot
           - image: dashboard-next
             context: arcane/home/honeypot-dashboard/frontend-next
+            sbom: true
+            stamp: true
+            boot_smoke: true
           - image: dicompot
             context: arcane/home/honeypot-dicompot/dicompot
           - image: dionaea
@@ -95,7 +136,9 @@ jobs:
           - image: vps-portbridge
             context: vps/portbridge
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # #2819: point buildkit at the self-hosted executor's Docker Hub
       # pull-through cache when there is one. This has to be buildkit's
       # own config -- the docker-container driver runs its own containerd
@@ -109,6 +152,15 @@ jobs:
       # inline expression because the "no mirror" case still needs a
       # valid (empty) config -- an unset buildkitd-config would be one
       # more conditional step to keep in sync.
+      #
+      # #3380 adds a second, stronger gate. The gate above asks "is this a
+      # self-hosted executor?"; it cannot ask "does this executor have the
+      # mirror?", because CI_REGISTRY_MIRROR is one global value describing
+      # a per-host fact and the honeypot-ci pool now spans two boxes. The
+      # address is therefore probed here, on the box that is about to use
+      # it, and the mirror is written into the config only if it answers.
+      # See the comment in the script for why a dead mirror degrades loudly
+      # instead of silently.
       - name: Compose the buildkit registry config
         id: buildkit
         env:
@@ -116,7 +168,82 @@ jobs:
         run: |
           set -euo pipefail
           cfg="$RUNNER_TEMP/buildkitd.toml"
+
+          # #3380: CI_REGISTRY_MIRROR is a repo VARIABLE but the fact it
+          # names -- "this executor runs a Docker Hub pull-through cache at
+          # this address" -- is a property of the BOX. A variable can only
+          # be global, and the `honeypot-ci` pool is not one box: since
+          # #3379 `precision` is registered into the same pool as a
+          # --build-only executor, so the router's homeserver=true can land
+          # on either. An address that answers on the homeserver is a dead
+          # address on precision, where 172.16.0.1 is precision's own docker0
+          # gateway with nothing listening on it.
+          #
+          # That is what #3380 found: the variable said 172.16.0.1:5555, no
+          # executor in the pool had run install-registry-mirror.sh, and
+          # buildkit quietly fell back to docker.io -- so the #2819 cache was
+          # never in effect, every run pulled every base from Hub directly,
+          # and each of the 74 non-scratch FROM lines first paid a
+          # connect-refused round trip. Green run, no cache, nothing said so.
+          #
+          # So the only trustworthy source for a per-host fact is the host:
+          # probe the address here, on the executor that is about to use it,
+          # before buildkit is told to trust it. `/v2/` is the Docker Registry
+          # API base and is exactly the check install-registry-mirror.sh
+          # already gates its own success on, so this asks the installer the
+          # question it answered, rather than a second, weaker question.
+          #
+          # A non-200 is treated as "not a usable mirror" rather than
+          # "maybe": something else can hold a port (on the homeserver 5555
+          # is also where the multipot honeypot listens, on the WireGuard
+          # address), and a wrong mirror is worse than none.
+          #
+          # A dead mirror DEGRADES, it does not fail the run. The cache is an
+          # accelerator; the authenticated Hub login below is what actually
+          # protects against `toomanyrequests`. Turning a missing accelerator
+          # into a red main would be a worse regression than the one #3380
+          # reports, and it would contradict the router's own documented
+          # fail-safe ("routing can degrade CI's speed, never its pass/fail
+          # correctness"). So the config written is the honest empty one and
+          # the disagreement is announced -- loudly, in both the run's
+          # annotations and its summary -- rather than absorbed silently.
+          mirror=""
           if [ -n "$MIRROR" ]; then
+            probe="$(curl -sS -o /dev/null -w '%{http_code}' \
+              --connect-timeout 5 --max-time 15 "http://$MIRROR/v2/" 2>/dev/null)" \
+              || probe="000"
+            echo "registry mirror probe: http://$MIRROR/v2/ -> ${probe:-000}"
+            if [ "$probe" = "200" ]; then
+              mirror="$MIRROR"
+            else
+              {
+                echo "### Docker Hub pull-through cache not in effect"
+                echo
+                echo "CI_REGISTRY_MIRROR=\`$MIRROR\` is set, but \`http://$MIRROR/v2/\`"
+                echo "answered \`${probe:-000}\` on this executor (\`$RUNNER_NAME\`,"
+                echo "\`$RUNNER_OS\`). The #2819 pull-through cache is therefore NOT"
+                echo "in effect: every base image is being pulled from Docker Hub"
+                echo "directly, behind the authenticated login below."
+                echo
+                echo "The address is a property of the box, not of the repository."
+                echo "Either deploy the mirror on this host:"
+                echo
+                echo '```bash'
+                echo "sudo scripts/github-ci-runner/install-registry-mirror.sh \\"
+                echo "    --username <hub-user> --token <hub-read-only-PAT>"
+                echo '```'
+                echo
+                echo "or, if no host runs one, say so honestly:"
+                echo
+                echo '```bash'
+                echo "gh variable delete CI_REGISTRY_MIRROR --repo \$GITHUB_REPOSITORY"
+                echo '```'
+              } >>"$GITHUB_STEP_SUMMARY"
+              echo "::warning title=Docker Hub pull-through cache inactive::CI_REGISTRY_MIRROR=$MIRROR is set but http://$MIRROR/v2/ answered ${probe:-000} on this executor, so the #2819 pull-through cache is not in effect and every base image is pulled from Hub directly. Deploy the mirror on this host (scripts/github-ci-runner/install-registry-mirror.sh), or unset CI_REGISTRY_MIRROR so the config honestly says 'no mirror'."
+            fi
+          fi
+
+          if [ -n "$mirror" ]; then
             # http = true: the mirror is a plain-HTTP service bound to a
             # container-only address on the executor, not a public
             # registry, so there is no certificate to verify. Built with
@@ -125,16 +252,19 @@ jobs:
             # scalar's indentation.
             printf '%s\n' \
               '[registry."docker.io"]' \
-              "  mirrors = [\"$MIRROR\"]" \
-              "[registry.\"$MIRROR\"]" \
+              "  mirrors = [\"$mirror\"]" \
+              "[registry.\"$mirror\"]" \
               '  http = true' >"$cfg"
-            echo "using registry mirror $MIRROR"
+            echo "using registry mirror $mirror"
             cat "$cfg"
           else
-            echo '# no registry mirror configured for this executor' >"$cfg"
+            echo '# no registry mirror on this executor' >"$cfg"
+            if [ -z "$MIRROR" ]; then
+              echo '# CI_REGISTRY_MIRROR is unset -- no executor is claimed to run one'
+            fi
           fi
           echo "config=$cfg" >>"$GITHUB_OUTPUT"
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           # Concurrent matrix rows share the single self-hosted runner
           # instance; without an explicit stop+rm at job end, a builder
@@ -153,20 +283,20 @@ jobs:
       # FROM against the registry. Guarded on the secret being non-empty
       # so a fork pull_request -- which by design cannot see secrets --
       # keeps building anonymously rather than failing on empty creds.
-      - uses: docker/login-action@v4
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         if: env.DOCKERHUB_USERNAME != ''
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - uses: docker/login-action@v4
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         if: github.event_name != 'pull_request'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/metadata-action@v6
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         id: metadata
         with:
           images: ghcr.io/${{ github.repository_owner }}/honeypot-${{ matrix.image }}
@@ -218,13 +348,48 @@ jobs:
             echo "from=type=gha,scope=${{ matrix.image }}" >> "$GITHUB_OUTPUT"
             echo "to=type=gha,mode=max,scope=${{ matrix.image }}" >> "$GITHUB_OUTPUT"
           fi
-      - uses: docker/build-push-action@v7
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        # id: build -- #3321 reads steps.build.outputs.digest, the pushed
+        # manifest digest, to key the dashboard rows' SBOM to the exact image
+        # rather than to a tag that can be moved underneath it.
+        id: build
         with:
           context: ${{ matrix.context }}
           push: ${{ github.event_name != 'pull_request' }}
-          load: false
+          # #3316: the boot-smoke below needs an image it can `docker run`,
+          # and the two ways to get one are mutually exclusive here -- a
+          # build either pushes it or loads it into the local daemon. On a
+          # pull_request there is no push, so `load` is free and the smoke
+          # covers forks too (which #3321's SBOM cannot: it needs a pushed
+          # digest and so skips PRs entirely). On a push the image is already
+          # in ghcr and the step that resolves an image ID pulls that exact
+          # digest back down. Unset on the other sixteen rows, so they
+          # build byte-identically to before.
+          load: ${{ matrix.boot_smoke == true && github.event_name == 'pull_request' }}
           tags: ${{ steps.metadata.outputs.tags }}
-          labels: ${{ steps.metadata.outputs.labels }}
+          # The docker exporter does not carry a tag, so a loaded image
+          # arrives on the shared executor's daemon anonymous. `docker
+          # images` cannot pick it out by name -- and this box runs seven
+          # runner users, any of which can be loading an image at the same
+          # moment (see the umask note in "Pick cache backend" above), so
+          # "newest dangling image" would be a race that boots a
+          # neighbour's build. A per-row, per-attempt label is the only
+          # handle that is unique to *this* build. Appended only for the two
+          # boot-smoke rows: on a push it is redundant (the digest names the
+          # image) and the manifest should not carry a CI run id.
+          labels: ${{ steps.metadata.outputs.labels }}${{ matrix.boot_smoke == true && format('\napiary.ci.build-row={0}-{1}-{2}', matrix.image, github.run_id, github.run_attempt) || '' }}
+          # #3315: the revision this image is built from, for the two rows
+          # whose Dockerfile declares `ARG GIT_SHA` (matrix.stamp). It has to
+          # be a build arg and not only a label: backend-service compiles it
+          # into the binary, and nothing in the shipped image can be edited
+          # after the fact without changing the image id. Note that
+          # metadata-action already emits its own org.opencontainers.revision
+          # for the same image, and both are wired from the same
+          # `${{ github.sha }}` here -- so whichever key wins the merge, the
+          # label and the compiled-in value cannot disagree about which commit
+          # this is. scripts/verify-deploy.sh compares them against origin/main
+          # and against the live /healthz.
+          build-args: ${{ matrix.stamp == true && format('GIT_SHA={0}', github.sha) || '' }}
           # Scope the layer cache per image (#2771). Without an explicit
           # scope every matrix row defaults to `buildkit`, so all 18
           # concurrent builds read and write ONE shared cache index per
@@ -252,6 +417,235 @@ jobs:
         if: always() && needs.ci-target.outputs.homeserver == 'true'
         run: scripts/prune-buildx-cache.sh "/var/buildx-cache/${{ matrix.image }}"
 
+      # ---------------------------------------------------------------------
+      # #3316: start the exact image this row just built, wait for its own
+      # healthcheck, and assert the contract its tier answers.
+      #
+      # The gap: containers.yml built, image-security-scan.yml scanned, and
+      # nothing ever ran the result. A passing compile gate and a clean
+      # vulnerability scan are both silent about the four things that decide
+      # whether a container comes up at all -- the entrypoint, the runtime
+      # user, the file layout, and the env contract. The #2183/#2299
+      # boot-refusal class ("worker containers refuse to boot") reached
+      # production precisely because of that, and was found by hand on a
+      # deployed host.
+      #
+      # By image ID, never by tag: a tag can move underneath the step, so a
+      # green smoke on `...:pr-1234` would be a statement about whatever it
+      # resolved to at that instant. The ID is what the build just produced
+      # and (on a push) exactly what was published under the digest
+      # deploy.yml consumes.
+      #
+      # On the required Containers gate, deliberately: a boot that cannot
+      # happen is a bad image, and shipping it is worse than a red run. The
+      # two rows that fail this are the two long-lived HTTP services; the
+      # other rows are capture daemons with no entrypoint contract and no
+      # endpoint to answer, so they are untouched.
+      # ---------------------------------------------------------------------
+      - name: "Resolve the image ID to boot-smoke (#3316)"
+        id: bootsmoke
+        if: matrix.boot_smoke == true
+        env:
+          IMAGE: ${{ matrix.image }}
+          # First tag only: metadata-action emits one per ref, and only one
+          # of them is the branch build this smoke is about.
+          IMAGE_TAG: ${{ steps.metadata.outputs.tags }}
+          # Empty exactly when nothing was pushed, which is the
+          # pull_request case -- there the build loaded the image locally
+          # (see the `load:` input) and there is no digest to pull.
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          BUILD_ROW: ${{ matrix.image }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          # Everything interpolated arrives through env:, never pasted into
+          # this block -- the same form #3321's SBOM step uses, because
+          # zizmor's template-injection audit cannot tell an image name from
+          # attacker input from the outside.
+          if [ -n "$IMAGE_DIGEST" ]; then
+            tag=$(printf '%s\n' "$IMAGE_TAG" | head -1)
+            ref="$tag@$IMAGE_DIGEST"
+            # Three attempts, for the narrow reason #3321's syft fetch
+            # needed them: ghcr's read path occasionally trails its write
+            # path by a few seconds, and a manifest-unknown here would read
+            # as "the image is broken" when nothing is wrong with it.
+            for attempt in 1 2 3; do
+              if docker pull "$ref"; then
+                break
+              fi
+              if [ "$attempt" -lt 3 ]; then
+                echo "::warning::ghcr has not served $ref yet (attempt $attempt/3); retrying in 15s"
+                sleep 15
+              fi
+            done
+            image_id=$(docker image inspect --format '{{.Id}}' "$ref" 2>/dev/null || true)
+            [ -n "$image_id" ] || { echo "::error::could not resolve $ref after 3 attempts"; exit 1; }
+          else
+            # The docker exporter drops the tag, so the build is found by
+            # the label the build step stamped on it -- unique to this
+            # matrix row and this run attempt, which matters because the
+            # executor's docker daemon is shared.
+            image_id=$(docker image ls --no-trunc \
+              --filter "label=apiary.ci.build-row=$BUILD_ROW" \
+              --format '{{.ID}}' | head -1)
+            [ -n "$image_id" ] || {
+              echo "::error::no local image carries label apiary.ci.build-row=$BUILD_ROW -- the build was expected to load one (load: true on pull_request). Nothing to boot-smoke."
+              exit 1
+            }
+          fi
+          echo "boot-smoke target for $IMAGE: $image_id"
+          echo "image_id=$image_id" >>"$GITHUB_OUTPUT"
+
+      - name: "Boot-smoke backend-service (#3316)"
+        if: matrix.boot_smoke == true && matrix.image == 'backend-service'
+        env:
+          IMAGE_ID: ${{ steps.bootsmoke.outputs.image_id }}
+        run: |
+          set -euo pipefail
+          # A real token rather than APIARY_ALLOW_UNAUTH_DEV=1, so the smoke
+          # walks the production boot path -- the #2183 gate satisfied the
+          # way a deployment satisfies it -- and the log is not full of the
+          # override's warning. Throwaway and loopback-only; generated so
+          # the value is obviously not a credential in the tree.
+          token=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+          scripts/boot-smoke-image.sh \
+            --image-id "$IMAGE_ID" \
+            --name ci-bootsmoke-backend-service \
+            --container-port 8081 \
+            --health-timeout 120 \
+            --stub-es-env ELASTICSEARCH_URL \
+            --env "SERVICE_TOKEN=$token" \
+            --expect-status 'backend liveness (/healthz)' /healthz 200 \
+            --expect-json 'backend readiness against the stub ES (/readyz)' /readyz \
+              'd["ready"] is True and d["cluster"] == "green"'
+
+      - name: "Boot-smoke dashboard-next (#3316)"
+        if: matrix.boot_smoke == true && matrix.image == 'dashboard-next'
+        env:
+          IMAGE_ID: ${{ steps.bootsmoke.outputs.image_id }}
+        run: |
+          set -euo pipefail
+          token=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+          # Nothing else is set on purpose. OIDC_DISABLED stays unset, so /
+          # has to take the auth guard and bounce to /auth/login -- which is
+          # both the contract #3316 asks for and the proof that the #3112
+          # gate did not fire under the image's production defaults.
+          # WEB_CONCURRENCY is left at the image default (min(4, cpus))
+          # because the fork loop in server/cluster.mjs is part of the
+          # entrypoint; a smoke that ran it single-process would skip the
+          # part most likely to break. BACKEND_URL is left at its built-in
+          # loopback default: beforeLoad throws the redirect before the root
+          # loader ever reaches the Rust tier, so this assertion
+          # deliberately needs no backend.
+          scripts/boot-smoke-image.sh \
+            --image-id "$IMAGE_ID" \
+            --name ci-bootsmoke-dashboard-next \
+            --container-port 8080 \
+            --health-timeout 120 \
+            --env "SERVICE_TOKEN=$token" \
+            --expect-redirect 'unauthenticated / redirects to /auth/login' / /auth/login \
+            --expect-status 'vendored theme.css is served' /static/theme.css 200
+
+      # ---------------------------------------------------------------------
+      # #3321: digest-bound SBOM for the two dashboard images.
+      #
+      # Only rows with `sbom: true` reach any of this, and only on events
+      # that actually push. A pull_request row builds with `push: false` and
+      # `load: false`, so there is no image and no digest to key an inventory
+      # to -- the artefact that answers a CVE question is the one that got
+      # pushed, and that row's notice below says so rather than leaving the
+      # gap unexplained.
+      #
+      # Failures here are real failures, not warnings: the required
+      # Containers gate aggregates this job, and a silently absent inventory
+      # is precisely the gap #3321 was filed about. That is also why the
+      # publish step degrades (a warning) while this one does not -- the
+      # artifact is written before the homeserver copy is attempted.
+      # ---------------------------------------------------------------------
+      - name: "Generate the digest-bound SBOM (#3321)"
+        id: sbom
+        if: matrix.sbom == true && github.event_name != 'pull_request'
+        env:
+          IMAGE: ${{ matrix.image }}
+          IMAGE_TAG: ${{ steps.metadata.outputs.tags }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          SBOM_DIR: ${{ runner.temp }}/sbom
+          # Empty on the GitHub-hosted fallback, where there is no
+          # homeserver copy to make -- an ephemeral runner's /var dies with
+          # the job, so publishing there would only write a file nobody reads.
+          PUBLISH_DIR: ${{ needs.ci-target.outputs.homeserver == 'true' && '/var/image-sbom' || '' }}
+        run: |
+          set -euo pipefail
+          # Everything interpolated arrives through env: rather than being
+          # pasted into this block. The values are image names and digests,
+          # not attacker input, but zizmor's template-injection audit cannot
+          # tell that from the outside and this is the form it asks for.
+          tag=$(printf '%s\n' "$IMAGE_TAG" | head -1)
+          if [ -z "$tag" ] || [ -z "$IMAGE_DIGEST" ]; then
+            echo "::error::no pushed tag/digest for $IMAGE -- an SBOM cannot be keyed to it"
+            exit 1
+          fi
+          mkdir -p "$SBOM_DIR"
+          # Three attempts, because the failure this absorbs is real and
+          # narrow: the image was pushed moments ago and ghcr's read path
+          # occasionally trails its write path by a few seconds, which shows
+          # up as a manifest-unknown from syft. Everything after the fetch is
+          # local, so a retry costs a second rather than a rebuild.
+          for attempt in 1 2 3; do
+            if scripts/generate-image-sbom.sh \
+                --image "$tag@$IMAGE_DIGEST" \
+                --out "$SBOM_DIR/$IMAGE.sbom.json" \
+                --name "$IMAGE" \
+                --publish-dir "$PUBLISH_DIR"; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::syft could not resolve $tag@$IMAGE_DIGEST yet (attempt $attempt/3); retrying in 20s"
+              sleep 20
+            fi
+          done
+          echo "::error::could not inventory $tag@$IMAGE_DIGEST after 3 attempts"
+          exit 1
+
+      - name: "Scan the SBOM with the pinned Trivy (#3321)"
+        # Same flags as image-security-scan.yml's base-image scan, and the
+        # same pinned binary via scripts/install-trivy.sh, so a digest's
+        # finding and a base image's finding are graded identically. Reading
+        # the SBOM rather than the image is what makes the scan and the
+        # retained inventory describe the same package set.
+        if: matrix.sbom == true && github.event_name != 'pull_request'
+        env:
+          IMAGE: ${{ matrix.image }}
+          SBOM_DIR: ${{ runner.temp }}/sbom
+        run: scripts/scan-image-sbom.sh --sbom "$SBOM_DIR/$IMAGE.sbom.json" --name "$IMAGE" --report "$SBOM_DIR/$IMAGE.trivy.json"
+
+      - name: "Bound the homeserver SBOM store (#3321)"
+        if: always() && matrix.sbom == true && github.event_name != 'pull_request' && needs.ci-target.outputs.homeserver == 'true'
+        run: scripts/prune-image-sbom.sh /var/image-sbom
+
+      - name: "Upload the digest-bound SBOM as a CI artifact (#3321)"
+        if: matrix.sbom == true && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          # Keyed by the digest, not the run: two builds of the same commit
+          # produce the same name, and a digest-keyed name is the one an
+          # operator can paste into `trivy sbom` to re-grade it. The hex, not
+          # the `sha256:` form, because a colon is not a legal artifact-name
+          # character.
+          name: sbom-${{ matrix.image }}-${{ steps.sbom.outputs.sbom_digest_hex }}
+          path: ${{ runner.temp }}/sbom/
+          if-no-files-found: error
+          # Long enough to cover a CVE that is announced weeks after the
+          # build that shipped it. 90 is also the ceiling GitHub allows for a
+          # public repository, so this is the longest retention available --
+          # a value above the repository's own limit fails the upload rather
+          # than being clamped.
+          retention-days: 90
+
+      - name: "Why a pull_request row has no SBOM (#3321)"
+        if: matrix.sbom == true && github.event_name == 'pull_request'
+        run: |
+          echo "::notice title=No SBOM on a pull_request::containers.yml builds with push=false and load=false on a pull request, so this row produced no image and therefore no digest to key an inventory to. The SBOM for this change is produced when it reaches main -- where the image is actually pushed, and where the retained artifact matches the deployed digest."
+
   # #3311: the one required status check for this workflow. Matrix row names
   # carry a "(GitHub-hosted)" suffix on fallback days, so no row is a stable
   # context for main's ruleset; this job is. always() so a failed router or
@@ -261,6 +655,10 @@ jobs:
     if: always()
     needs: [ci-target, build]
     runs-on: ubuntu-latest
+    # No permissions block on purpose (#3313): this job only reads the
+    # two `needs:` results above, which is job metadata rather than an API
+    # call, so it inherits the workflow's empty envelope and runs with no
+    # token at all.
     steps:
       - name: Fail unless the router and every image row succeeded
         env:

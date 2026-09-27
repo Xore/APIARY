@@ -130,6 +130,17 @@ EXPECTED_ABSENT_WHILE = {
     "llm-worker": "#3023 sweep-owner-gated for the #1947 benchmark run; stays down until the operator releases it",
 }
 
+# #3361: stacks that are version-controlled under arcane/home/<name>/ but
+# deliberately NOT in the always-on production manifest -- they are brought up
+# on demand for a benchmark/eval run and torn down after, so "deployed, not in
+# the manifest" is their normal running state, not the retired-but-not-torn-down
+# drift retired_projects() looks for. Keyed by name with the reason, same shape
+# and same rule as EXPECTED_ABSENT_WHILE above: one documented entry per
+# operator decision, never a blanket "no manifest entry, don't alarm".
+KNOWN_ONDEMAND_STACKS = {
+    "rex86-eval": "#847/#3345 on-demand REx86 evaluation stack; version-controlled at arcane/home/rex86-eval/ but run only during an eval and intentionally kept out of home-production.json",
+}
+
 
 def fail(msg: str) -> "None":
     print(f"FAIL: {msg}", file=sys.stderr)
@@ -209,7 +220,7 @@ def retired_projects(stacks_root: Path, known_names: set[str]) -> list[str]:
         # llm-worker/auth-events-worker/ml-worker are all 0700 root-owned
         # AND all three are known manifest entries, so this short-circuits
         # before the is_file() below would otherwise crash (REVIEW-A).
-        if d.name in known_names or d.name in KNOWN_NON_PROJECT_DIRS:
+        if d.name in known_names or d.name in KNOWN_NON_PROJECT_DIRS or d.name in KNOWN_ONDEMAND_STACKS:
             continue
         try:
             if not (d / "compose.yml").is_file():

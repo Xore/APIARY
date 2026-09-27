@@ -14,6 +14,7 @@ import { ErrorStateBlock } from './ErrorState'
 import { MasterDetailTable, type Column } from './Investigate'
 import { CapturedMailInline } from './CapturedMail'
 import { formatTimestamp } from '../lib/time'
+import { describeCredentialState } from '../lib/credentialState'
 
 type MailoneySession = {
   session_id: string
@@ -43,7 +44,16 @@ type HttpRequest = {
   headers: Record<string, string>
   body: string
   username: string
-  password: string
+  // #3213: there is no `password` here any more, and that is the point --
+  // the API stopped sending one rather than sending an empty string, so a
+  // consumer cannot be handed a field to read that holds nothing. The three
+  // axes below replace it, and `credential_present` is deliberately
+  // nullable: null means the sensor never said, which is not the same answer
+  // as false.
+  credential_status: string
+  credential_present: boolean | null
+  credential_indicator_match: boolean
+  auth_outcome: string
   auth_type: string
   status: number
   category: string
@@ -144,7 +154,19 @@ const HTTP_COLUMNS: Column<HttpRequest>[] = [
   },
   { header: 'host', detail: true, render: (row) => row.host },
   { header: 'user agent', detail: true, render: (row) => row.user_agent },
-  { header: 'credentials', detail: true, render: (row) => (row.username ? `${row.username} / ${row.password} (${row.auth_type})` : '') },
+  {
+    // #3213: this cell used to print the captured password next to the
+    // account. It now says which of the three questions has an answer --
+    // was there a credential, could we read it, was the auth real -- and the
+    // wording lives in lib/credentialState so it is testable without React.
+    header: 'credentials',
+    detail: true,
+    render: (row) => {
+      const state = describeCredentialState(row)
+      if (!state.label) return ''
+      return <span className={`badge badge--${state.tone}`}>{state.label}</span>
+    },
+  },
   { header: 'category', detail: true, render: (row) => row.category },
   { header: 'headers', detail: true, render: (row) => kvList(row.headers) },
   {
@@ -167,7 +189,16 @@ const TANNER_COLUMNS: Column<TannerRequest>[] = [
     render: (row) => (row.tarpitted ? <span className="badge badge--success">{row.tarpit_ms} ms</span> : ''),
   },
   { header: 'user agent', detail: true, render: (row) => row.user_agent },
-  { header: 'credentials', detail: true, render: (row) => (row.username ? `${row.username} / ${row.password}` : '') },
+  {
+    // Deliberately NOT migrated, and the asymmetry with the http-honeypot
+    // table above is the point: #3213 covers two decoys, and tanner still
+    // stores a real password that this API still returns. That is the
+    // remaining exposure the PR declares. Changing it belongs in its own
+    // change, where the tanner tests can move with it.
+    header: 'credentials',
+    detail: true,
+    render: (row) => (row.username ? `${row.username} / ${row.password}` : ''),
+  },
   { header: 'post data', detail: true, render: (row) => kvList(row.post_data) },
   { header: 'cookies', detail: true, render: (row) => kvList(row.cookies) },
   {

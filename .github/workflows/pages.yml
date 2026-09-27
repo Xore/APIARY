@@ -13,14 +13,13 @@ on:
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
-permissions:
-  contents: read
-  # The ci-target router dispatches the ci-heartbeat canary with
-  # GITHUB_TOKEN, and a called reusable workflow can never exceed the
-  # caller's envelope -- under-granting it startup-fails the whole run
-  # as "Invalid workflow file". The deploy job keeps its own narrower
-  # job-level envelope (pages: write, id-token: write).
-  actions: write
+# #3313: workflow level defaults to none; each job declares what it spends.
+# The ci-target router dispatches the ci-heartbeat canary with GITHUB_TOKEN,
+# and a called reusable workflow can never exceed the caller's envelope --
+# under-granting it startup-fails the whole run as "Invalid workflow file",
+# so that one grant stays on ci-target and reaches no other job. The deploy
+# job keeps its own narrower envelope (pages: write, id-token: write).
+permissions: {}
 
 concurrency:
   group: pages
@@ -37,6 +36,9 @@ jobs:
   ci-target:
     name: Pick CI executor
     uses: ./.github/workflows/ci-router.yml
+    permissions:
+      contents: read
+      actions: write
     with:
       ci_homeserver_prs: ${{ vars.CI_HOMESERVER_PRS || '' }}
 
@@ -45,18 +47,22 @@ jobs:
     needs: [ci-target]
     runs-on: ${{ needs.ci-target.outputs.homeserver == 'true' && fromJSON('["self-hosted", "linux", "x64", "honeypot-ci"]') || fromJSON('["ubuntu-latest"]') }}
     timeout-minutes: ${{ needs.ci-target.outputs.homeserver == 'true' && 15 || 360 }}
+    permissions:
+      contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Configure Pages
-        uses: actions/configure-pages@v6
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       - name: Build branding site
         run: python3 branding/scripts/build_pages_site.py --output _site
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v5
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: _site
 
@@ -78,4 +84,4 @@ jobs:
     steps:
       - name: Deploy Pages
         id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

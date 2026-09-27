@@ -1,0 +1,26 @@
+[Unit]
+Description=Watch for a model/runtime pin change to re-verify injection resistance (#3334)
+Documentation=file:/opt/honeypot-ghidra/models/README.md
+After=docker.service
+
+[Path]
+# The approved manifest is the pin: it carries the sessions model digest and,
+# in its runtime block, the Ollama image/version/environment this host is
+# qualified against. install-analysis-host.sh deploys it to /opt, so a
+# promotion or rollback (docs/analysis/ghidra/models/README.md, "Explicit
+# promotion and rollback") lands here and re-runs the corpus against the newly
+# pinned model -- the "exercise each consumer" step that promotion already asks
+# for.
+#
+# The deployed copy under /opt is what is watched, not the repository file:
+# editing a pin in a checkout is a PR, not a qualification event, and only the
+# host that serves the model can measure it.
+PathChanged=/opt/honeypot-ghidra/models/approved-models.json
+# The canary overlay repeats the digest as an environment value, so a pin
+# edited there but not in the manifest is a mismatch the runner refuses
+# rather than measures.
+PathChanged=/opt/honeypot-ghidra/models/llm-worker-synthetic-canary.yml
+Unit=honeypot-llm-injection-suite@onchange.service
+
+[Install]
+WantedBy=multi-user.target

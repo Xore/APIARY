@@ -1,0 +1,21 @@
+[Unit]
+Description=Weekly prompt-injection regression run against the pinned model (#3334)
+Documentation=file:/opt/honeypot-ghidra/models/README.md
+
+[Timer]
+# Weekly, matching the "routine rerun" cadence the governance README already
+# recommends for the model slots: it is there to expose host/runtime decay, so
+# it runs unconditionally rather than only on a changed pin.
+#
+# RandomizedDelaySec keeps this off the same minute as honeypot-model-drift.timer
+# (every 5 min) and away from the top of the hour, where the other watch timers
+# in this stack fire.
+OnCalendar=Thu 04:17
+RandomizedDelaySec=30min
+# A host that was off at 04:17 runs the corpus on the next boot instead of
+# silently skipping a week.
+Persistent=true
+Unit=honeypot-llm-injection-suite@weekly.service
+
+[Install]
+WantedBy=timers.target

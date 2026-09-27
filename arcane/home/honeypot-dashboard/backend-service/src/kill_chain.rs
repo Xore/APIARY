@@ -143,6 +143,16 @@ async fn coverage_counts(state: &AppState) -> Option<HashMap<String, u64>> {
     Some(counts)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/charts/attck-coverage",
+    summary = "ATT&CK technique coverage as a grid.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn attck_coverage(State(state): State<AppState>) -> Result<Json<AttckGrid>, (StatusCode, String)> {
     // #2046: summed tech docs are the primary path; the plain terms
     // aggregation below remains the fall-through while coverage is missing.
@@ -223,6 +233,16 @@ async fn sankey_from_rollup(state: &AppState) -> Option<SankeyData> {
     Some(SankeyData { nodes, links })
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/charts/kill-chain-sankey",
+    summary = "Kill-chain stages as a sankey.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn sankey(State(state): State<AppState>) -> Result<Json<SankeyData>, (StatusCode, String)> {
     // #2046: rolled links/touches are the primary path; the two-level
     // grouping aggregation below remains the fall-through while coverage
@@ -301,6 +321,16 @@ pub struct TimelineRow {
     pub events: u64,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/charts/campaign-timeline",
+    summary = "Campaigns over time.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn campaign_timeline(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<TimelineRow>>, (StatusCode, String)> {

@@ -573,6 +573,122 @@ the rows already in Arcane at that branch and setting the
 `pullImageAfterSync`/`redeployAfterSync` fields the manifest cannot carry —
 is what is still outstanding.
 
+## Proving which revision is deployed (#3315)
+
+The failure this section exists for is quoted above: a content-change
+redeploy leaves the dashboard *"green, healthy, running the old code."*
+Everything else about that state is a lie by omission — a fresh container
+id, a passing healthcheck and a recent image build all say the machinery
+ran, not that this code is what is running. So both dashboard images now
+carry the git revision they were built from, in three places, and
+`scripts/verify-deploy.sh` compares them.
+
+**Where the stamp is.**
+
+- **Backend** — compiled in. `backend-service/build.rs` reads the `GIT_SHA`
+  build arg and re-exports it as `APIARY_GIT_SHA`; `/healthz` returns it as
+  the `revision` field of the liveness body
+  (`{"live":true,"built":"2026-09-27T01:46:34+00:00","revision":"3dca445…"}`)
+  and the boot log line carries it. Note the `ok`/`es` pair that used to sit
+  beside it is gone: #3317 split the endpoint into `/livez` (no Elasticsearch)
+  and `/readyz` (503 + `reason`), so `revision` now rides on the
+  liveness side. `build.rs` also emits
+  `cargo:rerun-if-env-changed=GIT_SHA`, which is load-bearing: without it
+  cargo reuses a cached build and the second build of an identical tree
+  keeps the *first* revision, producing the exact failure this fixes.
+- **Frontend** — a static `public/build.json` (`{"revision":…,"built":…,
+  "source":…}`), written by `frontend-next/scripts/write-build-info.mjs`
+  into the build stage before `npm run build` so vite copies it into the
+  output. Served by Nitro from `public/`, the same mechanism the image
+  healthcheck already uses for `/static/theme.css`. It is gitignored: a
+  committed `build.json` would be a revision claim about nobody's build.
+- **Both** — `org.opencontainers.image.revision` (plus `.source` and
+  `.created`) as image labels, readable without running anything:
+  `docker image inspect apiary-backend:latest --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}'`.
+
+**Where the revision comes from.** The stacks' compose files take
+`build.args.GIT_SHA: ${GIT_SHA:-}`, and `.env.example` documents the knob.
+It is a variable rather than an inline `git rev-parse` because Arcane's
+directory sync explicitly excludes `.git` — there is no repository on the
+host for compose to ask. Unset is normal, not an error: a hand-run build
+gets `unknown` and a developer never has to pass the arg to get a working
+image. CI (`.github/workflows/containers.yml`) passes `github.sha` for
+exactly the two Dockerfiles that declare the arg.
+
+**Nothing on the homeserver sets it yet, and that is deliberate to state
+plainly.** Arcane reads `${GIT_SHA:-}` out of the stack's own `.env`, and no
+repo-tracked file, deploy step or installer writes that variable — the
+`.env` files are root-owned `0600` and are provisioned outside this
+repository (the same root-owned `.env` the #3312 token helper exists for).
+It also cannot be computed in place: `/opt/stacks/apiary` looks like a
+checkout but is a working-tree rsync with `.git/` excluded (`deploy.yml`'s
+own sync step), and Arcane's synced directory has no `.git` either, so
+there is no repository on the host to ask. So the first
+`verify-deploy.sh` run after this lands reports **not stamped**, correctly:
+the live image was built before the knob existed. Turning it on is one line
+per stack, from whatever clone you are deploying —
+
+```
+echo "GIT_SHA=$(git rev-parse HEAD)" \
+  >> /var/dockge/stacks/honeypot-dashboard-backend/.env
+```
+
+— followed by the `POST /projects/{id}/build` the "Two facts" section above
+says a content-change sync does *not* do. The two dashboard stacks carry
+the variable independently, so it goes in both. Reporting the gap honestly
+beats having the image invent a revision.
+
+Both tiers normalize the value to a bare lowercase hex object name
+(optional `sha256:` prefix stripped, 7–64 hex characters) or `unknown`, and
+both are held to the same table — `backend-service/src/revision-corpus.json`,
+read by a cargo test and by `scripts/tests/test_3315_image_revision.py` —
+because the two implementations are in different languages in different CI
+lanes and the failure mode of their disagreeing is silent: the same build
+stamped two ways, which the verification tool would then report as a
+mismatch that is not one.
+
+**How to check a deploy.** The tool compares the running revision, the image
+label, and an expected revision — which it takes from `origin/main` in a
+clone, or from an explicit argument:
+
+```
+# On a host with a real clone of apiary, the full check:
+scripts/verify-deploy.sh --healthz-exec \
+  'docker exec hp-apiary-backend curl -sf http://127.0.0.1:8081/healthz' \
+  --image apiary-backend:latest
+
+# Without one, name the expected revision yourself:
+scripts/verify-deploy.sh --behind-days 0 "$(git rev-parse origin/main)" \
+  --healthz-exec 'docker exec hp-apiary-backend curl -sf http://127.0.0.1:8081/healthz'
+```
+
+`--healthz-url http://host:19090/build.json` is the frontend form. Exit
+codes are the point: **0** the deployed revision matches, **1** a finding
+(missing, unstamped, malformed, or stale past `--behind-days`), **2**
+"could not tell" — deliberately distinct, so an unreadable body or an image
+that is not on this host can never be mistaken for a stale deploy. Add
+`--image` to check a label against the running container, which catches the
+commoner variant where a `compose up` recreated from an older image than
+the one whose label you just read.
+
+The lag check measures the age of the *deployed commit*, not of the
+container, so it survives a container that has been up since before the
+merge it is missing — but it needs a clone to measure against, which is why
+`--behind-days 0` is the form that works without one. A short revision
+(`git rev-parse --short HEAD`) is accepted and reported as an abbreviation
+rather than as a mismatch — otherwise the tool would cry wolf on the first
+thing an operator tries.
+
+**`diagnostics.yml` runs it in `--warn-only` mode**, in its own "Deployed
+revision" section: a scheduled diagnostics red X is the alert, and a stale
+deploy is not on #2222's list of things that should redden a run. It passes
+`$GITHUB_SHA` as the expected revision and `--behind-days 0`, for the
+reason above — the home runner has no clone to measure against (`deploy.yml`
+rsyncs into `/opt/stacks/apiary` with `--exclude .git/`, and diagnostics.yml
+deliberately has no `actions/checkout`), so the section degrades to "is the
+running revision the current tip of `main`" and says so in the report. Its
+exit 2 is still reported as **could not tell** rather than as a pass.
+
 ## autoSync decision (#2858)
 
 Re-measured 2026-09-03 against `GET /environments/0/gitops-syncs?limit=100`

@@ -12,6 +12,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # same, unmodified modules already proven against corpus.jsonl in CI (see
 # tests/) -- this container runs the exact code that testing already
 # covers, not a copy or a reimplementation.
-COPY decode_correlate.py campaign_correlator.py criticality_rules.py worker.py .
+COPY decode_correlate.py campaign_correlator.py criticality_rules.py worker.py ./
 
 CMD ["python", "-u", "worker.py"]

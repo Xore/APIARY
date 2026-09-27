@@ -1556,48 +1556,46 @@ curl -fsS -X PUT "$es_url/_all/_settings?expand_wildcards=all" \
 # number_of_replicas explicitly and outranks this one on priority, so this
 # only ever applies to an index nothing more specific already covers.
 #
-# EXCEPT arkime_sessions3-*/arkime_history_v1-*, explicitly excluded below.
-# Elasticsearch's own documented precedence rule: when ANY composable index
-# template (the modern _index_template API, what this whole script and
-# every "priority": N template above uses) matches an index, EVERY legacy
-# template (the old _template API) is ignored outright for that index, not
-# merged -- even a priority-1 catch-all like this one wins outright over a
-# legacy template with no priority concept at all. Arkime's own db.pl
-# still creates its real field-typing templates (arkime_sessions3_template/
-# _ecs_template, arkime_history_v1_template) via that legacy API, and this
-# catch-all's original "*" pattern silently shadowed them completely --
-# confirmed live: every arkime_sessions3-* index's source.ip/destination.ip
-# fell through to Elasticsearch's own dynamic string default (text +
-# .keyword) instead of a real `ip`-typed field, breaking session-detail
-# lookups outright ("TypeError: Cannot create property 'keyword' on
-# string" in Arkime's own viewer, since it assumes an object-typed IP
-# field it can attach a .keyword accessor to). Both excluded index
-# families already set their own number_of_replicas: 0 in their real
-# legacy templates, so excluding them here doesn't reintroduce the
-# yellow-cluster problem this template exists to prevent -- it only lets
-# their own already-correct settings apply uncontested again. Every OTHER
-# arkime_* index (dstats, files, stats, users, etc) has no legacy template
-# of its own and still needs this catch-all, so the exclusion is scoped to
-# exactly these two, not arkime_* broadly.
-# Wait for Arkime's own legacy template before adding ANY composable template that overlaps it.
-# Elasticsearch allows a composable template to overlap an existing legacy one
-# (it only warns), but REFUSES the reverse:
+# #3343: the "EXCEPT arkime_sessions3-*/arkime_history_v1-*, explicitly
+# excluded below" claim that used to stand here was simply false. Composable
+# index templates have no exclusion syntax, so the "-arkime_..." entries this
+# template carried matched nothing but literal index names -- the "*" really
+# did match every arkime_sessions3-* index. The inert entries are gone, and so
+# is any pretence that this catch-all leaves Arkime alone. It does not.
+#
+# That is not only a mapping wart, it is why Arkime could not be installed at
+# all. Elasticsearch applies NO legacy template to an index once ANY
+# composable template matches it (even a priority-1 catch-all like this one
+# wins outright over a legacy template, which has no priority concept at all),
+# and it refuses the reverse direction outright:
 #
 #   illegal_argument_exception: legacy template [arkime_sessions3_template] has
 #   index patterns [arkime_sessions3-*] matching patterns from existing
-#   composable templates [arkime-sessions3-ip-fix, ...] -- use composable
+#   composable templates [single-node-replica-default, ...] -- use composable
 #   templates (/_index_template) instead
 #
-# arkime-init and elasticsearch-setup are both honeypot-init one-shots with no
-# depends_on between them, so they race. On the 2026-09-04 rebuild this script
-# won, and `db.pl init` then failed with the above and exited 255 -- Arkime got
-# no session indices at all, while hp-arkime-capture and -viewer both looked
-# healthy. Ordering the composable templates behind it makes Arkime win deterministically,
-# without coupling the whole of this script to arkime-init succeeding (a hard
-# depends_on would let one Arkime failure block every template here).
+# `db.pl init` DELETEs and re-creates all three of Arkime's legacy templates,
+# so against this catch-all it fails and exits 255, and Arkime ends up with no
+# session indices at all while hp-arkime-capture and -viewer both look healthy.
 #
-# Bounded, and non-fatal on timeout: a deployment with arkime-init disabled
-# entirely should still get this mapping fix rather than hang.
+# arkime-init now owns Arkime's mappings properly: it deletes this catch-all
+# for the duration of db.pl, puts it straight back afterwards, and translates
+# Arkime's own legacy templates into full composable equivalents at priority 11
+# -- above this priority-1 one -- so the real field typing wins. See
+# arkime/composable-templates.js. That is what replaced the
+# arkime-sessions3-ip-fix fragment which used to stand below: it decided every
+# sessions index alone (firstPacket long, no wordSplit analyzer, 1 replica) and
+# left source.ip/destination.ip as text + .keyword, breaking session-detail
+# lookups outright ("TypeError: Cannot create property 'keyword' on string" in
+# Arkime's own viewer, since it assumes an object-typed IP field it can attach
+# a .keyword accessor to).
+#
+# Waiting for Arkime's own legacy template before adding this catch-all is
+# still worth doing -- it is the common case and needs no shadow/restore cycle
+# at all -- but it is no longer load-bearing, since arkime-init now handles
+# either order itself. It stays bounded and non-fatal: this script must not
+# depend on arkime-init succeeding, or one Arkime failure would block every
+# template here.
 arkime_legacy_wait=60
 while (( arkime_legacy_wait > 0 )); do
   if curl -fsS -o /dev/null "$es_url/_template/arkime_sessions3_template" 2>/dev/null; then
@@ -1609,25 +1607,31 @@ while (( arkime_legacy_wait > 0 )); do
 done
 if (( arkime_legacy_wait <= 0 )); then
   echo "elasticsearch-setup: Arkime legacy template did not appear within 60s --" \
-       "adding the composable templates anyway (arkime-init may be disabled; if it" \
-       "runs later it will fail its own template creation, see #2961)"
+       "adding the composable catch-all anyway (arkime-init may be disabled; if it" \
+       "runs later it shadows this template and regenerates Arkime's own, so the" \
+       "worst case is a needless shadow/restore cycle, not a failure -- #3343)"
 fi
 
 curl -fsS -X PUT "$es_url/_index_template/single-node-replica-default" \
   -H 'Content-Type: application/json' \
-  --data-binary '{"index_patterns":["*","-arkime_sessions3-*","-arkime_history_v1-*"],"priority":1,"template":{"settings":{"index.number_of_replicas":0}}}' >/dev/null
+  --data-binary '{"index_patterns":["*"],"priority":1,"template":{"settings":{"index.number_of_replicas":0}}}' >/dev/null
 
-# #3343: no Arkime template is created here any more. What the comment that
-# used to stand here called "under-documented legacy-template merge behavior"
-# was plain shadowing: Elasticsearch applies NO legacy template to an index
-# once any composable template matches it, and single-node-replica-default
-# above matches "*" (composable templates have no exclusion syntax -- the
-# "-arkime_..." entries are literal names). So neither of Arkime's legacy
-# templates ever applied, and the arkime-sessions3-ip-fix fragment that stood
-# here decided every sessions index alone (firstPacket long, no analyzer, 1
-# replica). arkime-init now translates Arkime's legacy templates into full
-# composable ones right after db.pl (arkime/composable-templates.js) and
-# deletes arkime-sessions3-ip-fix.
+# #3283: arkime_sessions3-*'s retention is NOT here, with the other twelve
+# policies, and that placement is the fix rather than an omission. This
+# script's own catch-all cannot reach that family: since #3343 its pattern is
+# a bare "*", so it really does match arkime_sessions3-* -- what keeps it off
+# that family is that the composable template arkime-init generates for it
+# outranks this one on priority, and composable templates replace rather than
+# merge, so nothing set here would survive to govern an index. The generated
+# template is also what creates those indices. An index template naming an
+# ILM policy that does not exist yet fails index creation outright. This job
+# and arkime-init are independent one-shots that race -- the wait above exists
+# because of exactly that -- and arkime-capture waits only on arkime-init.done,
+# so a policy created here could not be relied on to exist before the first
+# sessions index is created. composable-templates.js therefore installs
+# arkime-sessions-30d immediately before the template that names it, and
+# adopts the indices already on disk in the same run. One definition, one
+# owner, an ordering that cannot lose.
 
 echo
 echo "elasticsearch-setup: GeoIP, retention policies, and event templates installed"

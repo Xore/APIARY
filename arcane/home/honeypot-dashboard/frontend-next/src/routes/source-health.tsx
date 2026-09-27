@@ -8,6 +8,12 @@ import { InvestigateHeader, MasterDetailTable, type Column } from '../components
 import { ErrorStateBlock } from '../components/ErrorState'
 import { useLiveInterval } from '../lib/live'
 import { formatTimestamp } from '../lib/time'
+import {
+  describeWebhookAttempt,
+  webhookDeliveryNote,
+  webhookDeliveryTone,
+  type WebhookDelivery,
+} from '../lib/webhookDelivery'
 
 type SensorHealth = {
   sensor: string
@@ -50,6 +56,14 @@ type SourceHealth = {
     active: number
     decode_failures: number
   }
+  /**
+   * #3330: whether the alerts this page is about actually reach the
+   * configured webhook. Read off this same snapshot rather than through a
+   * second request — the page is the one an operator opens when something
+   * is not arriving, and "the pipeline is fine, the webhook is refusing
+   * us" is the distinction it can now make.
+   */
+  webhook: WebhookDelivery
 }
 
 const fetchHealth = createServerFn({ method: 'GET' }).handler(async (): Promise<SourceHealth | null> => {
@@ -77,6 +91,32 @@ const COLUMNS: Column<SensorHealth>[] = [
 function clusterBadge(status: string) {
   const cls = status === 'green' ? 'badge badge--success' : status === 'yellow' ? 'badge badge--warning' : 'badge badge--danger'
   return <span className={cls}>cluster {status}</span>
+}
+
+/**
+ * #3330. Deliberately reuses the page's existing badge vocabulary rather
+ * than inventing a fourth tone, so the webhook verdict reads the same way
+ * as the cluster and sensor badges already on this page. `disabled` is
+ * neutral: a deployment with no webhook configured is not unhealthy, and a
+ * red badge for it would be crying wolf on the common case.
+ */
+const DELIVERY_TONE_CLASS: Record<'ok' | 'warn' | 'bad' | 'flat', string> = {
+  ok: 'badge badge--success',
+  warn: 'badge badge--warning',
+  bad: 'badge badge--danger',
+  flat: 'badge',
+}
+
+function webhookBadge(delivery: WebhookDelivery | undefined) {
+  // A chip is a verdict, and "disabled" is not one: a deployment that
+  // chose not to configure a webhook is working as intended, and putting
+  // that in the header strip would add a badge to every install for no
+  // information. The card below still says so, in its own words. Every
+  // other state earns the strip -- `unknown` especially, because that one
+  // means this tier could not read the record, and saying so beats
+  // rendering a card with nothing in it.
+  if (!delivery || delivery.state === 'disabled') return null
+  return <span className={DELIVERY_TONE_CLASS[webhookDeliveryTone(delivery.state)]}>webhook {delivery.state}</span>
 }
 
 function formatDuration(totalSeconds: number): string {
@@ -143,6 +183,7 @@ function SourceHealthPage() {
   const runtime = health?.runtime
   const ingest = health?.ingest
   const pipeline = health?.pipeline
+  const webhook = health?.webhook
   return (
     <>
       <InvestigateHeader
@@ -153,6 +194,7 @@ function SourceHealthPage() {
           health ? (
             <>
               {clusterBadge(health.cluster_status)}
+              {webhookBadge(webhook)}
               <span className="chip">{health.total_documents.toLocaleString('en-US')} documents</span>
               <span className="chip">{health.sensors.length} sensors</span>
               <Link className="chip" to="/dead-letters" title="Inspect documents Elasticsearch rejected">
@@ -287,6 +329,49 @@ function SourceHealthPage() {
               Filebeat successfully shipped them. Failed/dropped counters or decode-failure growth indicate a pipeline
               error.
             </p>
+          </div>
+          {/* #3330. Everything above this card describes ingestion; nothing
+              on this page said whether the alerts it raises then reached
+              the configured webhook, so a webhook that had been rejecting
+              them looked identical to a healthy one. This is the last
+              stage of the same path, and the one that fails silently. */}
+          <div className="card half" id="webhook-delivery">
+            <h2>Alert webhook delivery</h2>
+            {!webhook ? (
+              <p className="empty">The delivery record is not part of this backend&apos;s response.</p>
+            ) : !webhook.available ? (
+              <>
+                <CardRow label="state" value={<span className={DELIVERY_TONE_CLASS.flat}>unknown</span>} />
+                <p className="note">{webhookDeliveryNote(webhook)}</p>
+              </>
+            ) : webhook.state === 'disabled' ? (
+              <p className="empty">{webhookDeliveryNote(webhook)}</p>
+            ) : (
+              <>
+                <CardRow label="state" value={<span className={DELIVERY_TONE_CLASS[webhookDeliveryTone(webhook.state)]}>{webhook.state}</span>} />
+                <CardRow label="target" value={webhook.target || '—'} />
+                <CardRow label="deliveries attempted" value={webhook.messages.toLocaleString('en-US')} />
+                <CardRow
+                  label="consecutive failures"
+                  value={`${webhook.consecutive_failures.toLocaleString('en-US')} (warns at ${webhook.failure_threshold})`}
+                />
+                <CardRow
+                  label="last success"
+                  value={webhook.last_success ? `${describeWebhookAttempt(webhook.last_success)} · ${formatTimestamp(webhook.last_success.at)}` : '—'}
+                />
+                <CardRow
+                  label="last failure"
+                  value={webhook.last_failure ? `${describeWebhookAttempt(webhook.last_failure)} · ${formatTimestamp(webhook.last_failure.at)}` : '—'}
+                />
+                {webhook.last_failure?.error ? <p className="note">Last error: {webhook.last_failure.error}</p> : null}
+                <p className="note">{webhookDeliveryNote(webhook)}</p>
+                <p className="note">
+                  The worker records the outcome of every delivery — status, latency, retries, and the error — and never the
+                  alert body, which quotes attacker-controlled text by construction. The target shown is the
+                  webhook&apos;s origin only: a bot URL&apos;s path and query is where its secret lives, so neither is stored.
+                </p>
+              </>
+            )}
           </div>
         </div>
       ) : null}

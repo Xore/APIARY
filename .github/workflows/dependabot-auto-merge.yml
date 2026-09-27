@@ -4,21 +4,29 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
-permissions:
-  contents: write
-  pull-requests: write
+# #3313: nothing at the workflow level. The one job below is the only thing
+# here that needs a token and it declares what it spends -- approving, arming
+# auto-merge and commenting -- so a job or step added later starts with no
+# token rather than inheriting two write scopes by accident.
+permissions: {}
 
 jobs:
   compatible-update:
-    if: >-
+    # #3314: zizmor flags github.actor as spoofable on its own; it is not the
+    # only test here -- the PR author must also be dependabot[bot], which a
+    # third party cannot fake, and both must hold.
+    if: >- # zizmor: ignore[bot-conditions]
       github.actor == 'dependabot[bot]' &&
       github.event.pull_request.user.login == 'dependabot[bot]' &&
       !github.event.pull_request.draft
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Read Dependabot update metadata
         id: metadata
-        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -46,7 +54,9 @@ jobs:
         if: >-
           steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
           steps.metadata.outputs.update-type == 'version-update:semver-minor'
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # #2741: four times now, a dependabot frontend-next bump has resolved
       # its lockfile with npm 11/12 (whatever dependabot's own service
@@ -87,7 +97,7 @@ jobs:
         continue-on-error: true
         run: docker pull node:22-alpine
 
-      - name: lockfile installs under the image's npm (#2741, mirrors #1816)
+      - name: "lockfile installs under the image's npm (#2741, mirrors #1816)"
         id: lockfile-check
         if: >-
           (steps.metadata.outputs.update-type == 'version-update:semver-patch' ||

@@ -274,6 +274,49 @@ const gpuJob = {
 /** Paths that already answered the bare {} catch-all -- logged once each. */
 const catchAllWarned = new Set();
 
+/**
+ * #3330: webhook_delivery.rs's DeliveryHealth, seeded *failing* -- five
+ * consecutive 503s against the warning threshold of five, with a last
+ * success three hours earlier. Every branch the card renders is therefore
+ * reachable from one fixture: the red state badge, a streak at the
+ * threshold, both a last success and a last failure, and the error text.
+ *
+ * A healthy fixture would exercise the other end and nothing in between,
+ * and the failing end is the one this surface exists for.
+ *
+ * `target` is an origin with no path, which is what the backend records --
+ * it never stores a webhook URL's path or query, because that is where a
+ * bot's secret lives.
+ */
+function webhookDelivery() {
+  return {
+    available: true,
+    reason: "",
+    state: "failing",
+    target: "https://hooks.example.com:443",
+    messages: 137,
+    consecutive_failures: 5,
+    failure_threshold: 5,
+    last_success: {
+      at: "2026-08-25T06:12:00Z",
+      status: "delivered",
+      http_code: 200,
+      latency_ms: 142,
+      tries: 1,
+      error: null,
+    },
+    last_failure: {
+      at: "2026-09-26T11:40:00Z",
+      status: "failed",
+      http_code: 503,
+      latency_ms: 15021,
+      tries: 3,
+      error: "HTTP 503 Service Unavailable",
+    },
+    updated_at: "2026-09-26T11:40:00Z",
+  };
+}
+
 /** Minimal handler table; keys are matched by startsWith after the query
  *  string is split off, first match wins, then the catch-all. */
 function route(pathname) {
@@ -517,6 +560,9 @@ function route(pathname) {
       dead_letters: 0,
       unattributed_24h: 17,
       pipeline: { state: "running", acked: 1000, failed: 0, dropped: 2, active: 12, decode_failures: 1 },
+      // #3330: the alert webhook's own delivery record, folded into this
+      // snapshot rather than fetched separately.
+      webhook: webhookDelivery(),
     };
   }
   if (pathname === "/api/v1/services") {
@@ -533,6 +579,13 @@ function route(pathname) {
   }
   if (pathname === "/api/v1/ml-health") return [];
   if (pathname === "/api/v1/ml-anomalies/acks") return {};
+  // #3330: the alert fan-out's delivery record, in the two shapes the
+  // backend serves it — the `webhook` field of source-health above, and
+  // this standalone route the Settings card reads. Seeded deliberately
+  // *failing*: a healthy fixture would render the green path only, and
+  // this is the surface whose whole job is to be alarming. Mirrors
+  // backend-service src/webhook_delivery.rs's DeliveryHealth.
+  if (pathname === "/api/v1/webhook-delivery") return webhookDelivery();
   if (pathname.startsWith("/api/v1/store/")) return { rows: [], total: 0 };
   if (pathname === "/api/v1/search") return { results: [] };
   if (pathname === "/api/v1/live") {

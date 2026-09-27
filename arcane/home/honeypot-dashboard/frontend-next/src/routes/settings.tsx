@@ -31,6 +31,12 @@ import type { JsonRecord } from '../lib/json'
 import { prefetchEnabled, setPrefetchEnabled } from '../lib/prefetch'
 import { getSessionUser, getAccountActions, type User, type AccountActions } from '../lib/auth'
 import { formatTimestamp, writeTimePrefs } from '../lib/time'
+import {
+  describeWebhookAttempt,
+  webhookDeliveryNote,
+  webhookDeliveryTone,
+  type WebhookDelivery,
+} from '../lib/webhookDelivery'
 
 // The full presentation.* field list from the legacy settings modal's
 // "Branding & text" pane (data-hp-pane="branding") — config.rs's
@@ -196,6 +202,14 @@ const fetchAudit = createServerFn({ method: 'GET' })
 const fetchReporterStats = createServerFn({ method: 'GET' }).handler(async (): Promise<ReporterStats | null> => {
   const { serviceJSON } = await import('../lib/backend.server')
   return serviceJSON<ReporterStats>('/api/v1/reporter-stats')
+})
+
+// #3330: the alert fan-out's own delivery outcomes. Same envelope as
+// reporter-stats above, and for the same reason — `null` is a failed read,
+// not "no deliveries", and the card below tells those apart.
+const fetchWebhookDelivery = createServerFn({ method: 'GET' }).handler(async (): Promise<WebhookDelivery | null> => {
+  const { serviceJSON } = await import('../lib/backend.server')
+  return serviceJSON<WebhookDelivery>('/api/v1/webhook-delivery')
 })
 
 // Personal preferences (#1653): the full field set the Rust tier's
@@ -415,6 +429,7 @@ export type SettingsData = {
   history: Promise<HistoryResponse | null>
   audit: Promise<AuditResponse | null>
   reporterStats: Promise<ReporterStats | null>
+  webhookDelivery: Promise<WebhookDelivery | null>
 }
 
 export function fetchSettingsData(): SettingsData {
@@ -426,6 +441,7 @@ export function fetchSettingsData(): SettingsData {
     history: fetchHistory(),
     audit: fetchAudit({ data: { action: '' } }),
     reporterStats: fetchReporterStats(),
+    webhookDelivery: fetchWebhookDelivery(),
   }
 }
 
@@ -539,6 +555,8 @@ const SEARCH_INDEX: Record<PaneId, Record<string, string>> = {
   },
   honeypot: {
     'reporter-stats': 'honeypot reporter stats attempted sent suppressed dry run failed send counters cooldown greynoise',
+    'webhook-delivery':
+      'honeypot alert webhook delivery notifications notify slack discord teams outgoing fan-out last success last failure http status code latency retries consecutive failures streak target origin endpoint rejected timeout unreachable degraded failing healthy threshold',
     operations:
       'honeypot staged restart apply operations alerting alert cooldown duration campaign score threshold sandbox risk score ml worker anomaly scanners yara scan interval seconds max bytes limit payload dedupe',
   },
@@ -2332,6 +2350,80 @@ function ReporterStatsCard({ data }: { data: ReporterStats | null }) {
   )
 }
 
+function WebhookDeliveryCard({ data, failed }: { data: WebhookDelivery | null; failed: boolean }) {
+  const hidden = useFieldHidden('honeypot', 'webhook-delivery')
+  // #2311's shape, for the same reason adminFailed exists: `null` from
+  // fetchSettingsData means the fetch failed, and a card that leaves its
+  // skeleton up forever has turned a read error into an absence. So the
+  // three states are tracked apart — still loading, read failed, and read
+  // succeeded with a record that may itself have no deliveries yet. The
+  // middle one is the case where an operator most needs to be told
+  // something, and the case this whole change is about.
+  const tone = webhookDeliveryTone(data?.state)
+  const toneClass =
+    tone === 'ok' ? 'badge badge--success' : tone === 'warn' ? 'badge badge--warning' : tone === 'bad' ? 'badge badge--danger' : 'badge'
+  return (
+    <div className="card hp-field" hidden={hidden}>
+      <h2>Alert webhook delivery</h2>
+      <p className="note">
+        Whether alerts the notifier raises actually reach the configured webhook — the last success, the last failure, and how
+        long the current failure streak has been running.
+      </p>
+      {failed ? (
+        <p className="empty">The delivery record could not be read from the backend.</p>
+      ) : data === null ? (
+        <>
+          <span className="skeleton-line" aria-hidden="true" />
+          <span className="skeleton-line" aria-hidden="true" />
+        </>
+      ) : !data.available ? (
+        <p className="empty">{webhookDeliveryNote(data)}</p>
+      ) : (
+        <>
+          <div className="metric-grid">
+            <div className="metric">
+              <div className="metric__label">State</div>
+              <div className="metric__value">
+                <span className={toneClass}>{data.state}</span>
+              </div>
+            </div>
+            <div className="metric">
+              <div className="metric__label">Attempted</div>
+              <div className="metric__value">{data.messages.toLocaleString('en-US')}</div>
+            </div>
+            <div className="metric">
+              <div className="metric__label">Consecutive failures</div>
+              <div className="metric__value">{data.consecutive_failures.toLocaleString('en-US')}</div>
+            </div>
+          </div>
+          {data.state === 'disabled' ? (
+            <p className="empty">{webhookDeliveryNote(data)}</p>
+          ) : (
+            <>
+              <p className="note">Target: {data.target || '—'}</p>
+              <p className="note">
+                Last success:{' '}
+                {data.last_success ? `${describeWebhookAttempt(data.last_success)} at ${formatTimestamp(data.last_success.at)}` : 'never'}
+              </p>
+              <p className="note">
+                Last failure:{' '}
+                {data.last_failure ? `${describeWebhookAttempt(data.last_failure)} at ${formatTimestamp(data.last_failure.at)}` : 'never'}
+              </p>
+              {data.last_failure?.error ? <p className="note">Last error: {data.last_failure.error}</p> : null}
+            </>
+          )}
+          <p className="note">{webhookDeliveryNote(data)}</p>
+          <p className="note">
+            The worker records each delivery&apos;s outcome — status, latency, retries, error — and never the alert body, which
+            quotes attacker-controlled text by construction. The target is the webhook&apos;s origin only: a bot URL&apos;s path
+            and query is where its secret lives, so neither is stored.
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
 function ConfigHistoryCard({ initial, editable }: { initial: HistoryResponse | null; editable: boolean }) {
   const [data, setData] = useState<HistoryResponse | null>(initial)
   const [busy, setBusy] = useState<number | null>(null)
@@ -2570,7 +2662,7 @@ export function SettingsSurface({
   /** Present in modal mode: renders modal chrome and the close button. */
   onClose?: () => void
 }) {
-  const { storage, preferences, admin, services, history, audit, reporterStats } = data
+  const { storage, preferences, admin, services, history, audit, reporterStats, webhookDelivery } = data
   const theme = useThemeMode()
   const [prefetch, setPrefetch] = useState(true)
   const [prefsData, setPrefsData] = useState<Prefs | null | 'loading'>('loading')
@@ -2587,6 +2679,9 @@ export function SettingsSurface({
   const [historyData, setHistoryData] = useState<HistoryResponse | null>(null)
   const [auditData, setAuditData] = useState<AuditResponse | null>(null)
   const [reporterStatsData, setReporterStatsData] = useState<ReporterStats | null>(null)
+  const [webhookDeliveryData, setWebhookDeliveryData] = useState<WebhookDelivery | null>(null)
+  // Settled-null, not pending — see WebhookDeliveryCard.
+  const [webhookDeliveryFailed, setWebhookDeliveryFailed] = useState(false)
 
   const isAdmin = !user || user.role === 'admin'
 
@@ -2726,10 +2821,15 @@ export function SettingsSurface({
     reporterStats.then((result) => {
       if (!cancelled) setReporterStatsData(result)
     })
+    webhookDelivery.then((result) => {
+      if (cancelled) return
+      setWebhookDeliveryData(result)
+      if (!result) setWebhookDeliveryFailed(true)
+    })
     return () => {
       cancelled = true
     }
-  }, [storage, preferences, admin, services, history, audit, reporterStats])
+  }, [storage, preferences, admin, services, history, audit, reporterStats, webhookDelivery])
 
   const modes: { id: ThemeMode; label: string }[] = [
     { id: 'system', label: 'System' },
@@ -3019,6 +3119,7 @@ export function SettingsSurface({
                   </Pane>
                   <Pane id="honeypot">
                     <ReporterStatsCard data={reporterStatsData} />
+                    <WebhookDeliveryCard data={webhookDeliveryData} failed={webhookDeliveryFailed} />
                     {adminData ? (
                       <HoneypotOperationsCard
                         initial={adminData.honeypot}

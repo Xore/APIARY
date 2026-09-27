@@ -23,6 +23,7 @@ use axum::{
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use crate::secrets_boundary;
 use crate::AppState;
 
 /// How many neighbouring events to sample per relation. Enough to see the
@@ -155,6 +156,21 @@ async fn relation(state: &AppState, key: &str, filter: Value, exclude_id: &str) 
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/event/{id}",
+    summary = "One event, with the pivot groups its detail pane needs.",
+    params(
+        ("id" = inline(String), Path, description = "Event document id."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn get(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -255,16 +271,26 @@ pub async fn get(
         },
     );
 
+    // #3213: `record` is the document AS STORED, which is the whole reason
+    // it is the field most likely to hand an analyst a captured password --
+    // Elasticsearch kept every one this fleet indexed before the sensors were
+    // fixed, and this page is where someone opens one. Scrubbed here rather
+    // than in the frontend, because a browser-side scrub is a scrub that
+    // anything else reading this endpoint skips. Sensors outside #3213's
+    // scope keep the original document, un-cloned.
+    let time = text(&source["@timestamp"]);
+    let record = secrets_boundary::scrub_source(&sensor, &source).unwrap_or(source);
+
     Ok(Json(EventPage {
         id,
         index: text(&hit["_index"]),
-        time: text(&source["@timestamp"]),
+        time,
         sensor,
         src_ip,
         session,
         community_id,
         hashes,
-        record: source,
+        record,
         session_events,
         flow_events,
         source_events,

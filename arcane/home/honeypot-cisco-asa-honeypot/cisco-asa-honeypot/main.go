@@ -55,6 +55,63 @@ type event struct {
 	Data      string            `json:"data,omitempty"`
 	UserAgent string            `json:"user_agent,omitempty"`
 	Headers   map[string]string `json:"headers,omitempty"`
+
+	// #3213: the response status, separate from everything below. It did
+	// not exist on this sensor at all before -- webvpn.go logged the event
+	// BEFORE writing the response, so there was no status to record, and
+	// the only evidence an analyst had of what the decoy served was the
+	// event kind ("get" / "post" / "cve_2018_0101_payload"), which cannot
+	// distinguish the logon page from a wrong-url 403. See statusRecorder.
+	Status int `json:"status,omitempty"`
+
+	// #3213: the presence/extraction axis, separate from Status (what the
+	// decoy served) and from AuthOutcome (who decided anything). Always
+	// present, and always one of the four credentialStatus values --
+	// including "unknown", which is the whole reason the field is a string
+	// rather than a boolean. IKE events go through no credential
+	// inspection at all, so they are filed as unknown by emit() rather
+	// than being left to imply "absent" by omission.
+	CredentialStatus string `json:"credential_status"`
+	// CredentialPresent is the presence boolean, and it is null exactly
+	// when CredentialStatus is "unknown". That is not a formatting
+	// nicety: a plain false would be indistinguishable from a request we
+	// looked at and found nothing in, which is the collapse #3213 exists
+	// to prevent.
+	CredentialPresent *bool `json:"credential_present"`
+	// CredentialIndicatorMatch is true when an attempt used this decoy's
+	// own FICTIONAL bait credential (credentials.go's decoyIndicators --
+	// not a Cisco default list, despite this being a Cisco decoy, and not
+	// a claim about any product but our own). It marks an ATTEMPT, scoped
+	// by CredentialIndicator, and nothing else: not access, not a bypass,
+	// not a CVE.
+	CredentialIndicatorMatch bool   `json:"credential_indicator_match"`
+	CredentialIndicator      string `json:"credential_indicator,omitempty"`
+	// Username is the account half of a submitted credential, kept
+	// because it is the analytic value (a spray is a spray of accounts)
+	// and it is not a secret. The secret half of the same credential is
+	// never written here, never logged, and never returned over the API.
+	// Before #3213 the whole form body -- both halves -- went into Data.
+	Username string `json:"username,omitempty"`
+	// AuthType is the channel the credential arrived on ("form",
+	// "basic", or the name of a scheme this sensor does not decode) --
+	// never what was in it.
+	AuthType string `json:"auth_type,omitempty"`
+	// AuthOutcome is the provenance of any authentication decision this
+	// response made (credentials.go's authOutcome). It is "simulated" for
+	// anything the decoy's persona served and "unknown" when no
+	// authentication decision was made. It is never derived from Status,
+	// so the 200 carrying the "Login failed" page -- and the 200 carrying
+	// a parse-error envelope for a submitted logon form -- can never read
+	// as a real authentication success.
+	AuthOutcome string `json:"auth_outcome"`
+	// DecoySessionPresent is the only genuine session signal this sensor
+	// has, and it is deliberately a presence boolean rather than a session
+	// id. This decoy sets the same seven fixed cookie values for every
+	// client and mints no per-client identifier, so a session id here
+	// would correlate nothing while looking as joinable as a real one.
+	// #3213 asks for a join key only where one genuinely exists; this is
+	// what exists. See decoySessionCookies in credentials.go.
+	DecoySessionPresent bool `json:"decoy_session_present"`
 }
 
 type logger struct {
@@ -125,6 +182,20 @@ func (l *logger) emit(e event) {
 		e.Proto = "ike"
 	} else {
 		e.Proto = "https"
+	}
+	// #3213: an event that reached here without going through credential
+	// inspection -- every IKE event, and the two "listening" notices --
+	// is filed as unknown, explicitly. The alternative is leaving the field
+	// empty, which a consumer reading a non-omitempty string would have to
+	// guess at, and a missing field reads far more like "there were no
+	// credentials" than like "nobody looked". An IKE packet does carry
+	// identity and key material; this decoy parses none of it, so unknown
+	// is the true answer and the one that keeps the axis honest.
+	if e.CredentialStatus == "" {
+		e.CredentialStatus = string(credUnknown)
+	}
+	if e.AuthOutcome == "" {
+		e.AuthOutcome = string(authUnknown)
 	}
 	line, _ := json.Marshal(e)
 	l.mu.Lock()

@@ -16,6 +16,7 @@
 //! "session" so every existing caller's behavior is byte-for-byte
 //! unchanged.
 
+use crate::contract;
 use axum::{
     extract::{Query, State},
     Json,
@@ -155,6 +156,21 @@ pub(crate) async fn embed(base: &str, model: &str, text: &str) -> anyhow::Result
     Ok(vector)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/llm-search",
+    summary = "Natural-language search over the corpus, answered by the local model.",
+    params(
+        ("q" = inline(Option<String>), Query, description = "The question."),
+        ("limit" = inline(Option<contract::PositiveCount>), Query, description = "How many hits to summarise."),
+        ("source" = inline(Option<String>), Query, description = "\"session\", \"vault\" or \"vault-note\"; an unknown value falls back to session."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn search(State(state): State<AppState>, Query(query): Query<SearchQuery>) -> Json<Value> {
     let mut text = query.q.trim().to_string();
     if text.is_empty() {

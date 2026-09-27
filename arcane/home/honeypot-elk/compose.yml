@@ -51,7 +51,7 @@ services:
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
-      # 2g heap: the per-event-type index layout multiplies shard count, and
+      # 6g heap: the per-event-type index layout multiplies shard count, and
       # geoip mmdb files + reindex jobs OOM-killed the node at 512m (exit 137).
       - ES_JAVA_OPTS=-Xms6g -Xmx6g
       # No internet egress on this host — the GeoLite2 auto-downloader can

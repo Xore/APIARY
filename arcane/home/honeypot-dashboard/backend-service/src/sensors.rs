@@ -4,11 +4,13 @@
 //! classify.go deliberately collapses into one-line summaries). Same
 //! caps and 48h window as the Go loaders.
 
+use crate::contract;
 use axum::{extract::State, http::StatusCode, Json};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 
+use crate::secrets_boundary;
 use crate::AppState;
 
 const RAW_EVENT_CAP: u64 = 3000;
@@ -47,7 +49,27 @@ pub struct HttpRequest {
     pub headers: HashMap<String, String>,
     pub body: String,
     pub username: String,
-    pub password: String,
+    /// #3213: `password` is GONE from this response, not blanked. An
+    /// always-empty `password` key is still a field a consumer can be told to
+    /// read, and the issue's acceptance criteria are about what this API
+    /// returns. `username` stays: an account identifier is the analytic value
+    /// -- a spray is a spray of accounts -- and it is not a secret.
+    ///
+    /// The three axes below replace it, and each answers a different
+    /// question: whether a credential was there, whether we could parse it,
+    /// and whether the authentication that followed was real. They are
+    /// distinct on purpose -- "there was one and we could not read it" is not
+    /// "there was none", and a simulated answer is not a real one.
+    pub credential_status: String,
+    /// `Option<bool>`, not `bool`: `None` is `unknown` and has to survive
+    /// serialization as `null`, because a defaulted `false` would report a
+    /// request we could not read as one that carried no credential.
+    pub credential_present: Option<bool>,
+    /// This fleet's own bait values were attempted. An ATTEMPT, matched
+    /// against bait we generated -- not a vendor default list, and not a
+    /// verdict that anything was accessed.
+    pub credential_indicator_match: bool,
+    pub auth_outcome: String,
     pub auth_type: String,
     pub status: u64,
     pub category: String,
@@ -179,7 +201,11 @@ fn http_requests(hits: &[Value]) -> Vec<HttpRequest> {
     hits.iter()
         .filter_map(|hit| {
             let source = &hit["_source"];
-            let event = &source["honeypot"];
+            // #3213: the boundary runs on the way in, so the body and query
+            // below are already redacted and `password` is already gone --
+            // including for documents indexed before the sensors were fixed.
+            let scrubbed = secrets_boundary::scrub_event("http-honeypot", &source["honeypot"]);
+            let event = scrubbed.as_ref().unwrap_or(&source["honeypot"]);
             if !event.is_object() {
                 return None;
             }
@@ -195,7 +221,12 @@ fn http_requests(hits: &[Value]) -> Vec<HttpRequest> {
                 headers: header_map(&event["headers"]),
                 body: s(&event["body"]),
                 username: s(&event["username"]),
-                password: s(&event["password"]),
+                credential_status: s(&event["credential_status"]),
+                // `as_bool().or(...)` would flatten a missing field into
+                // `false`; this keeps "the sensor never said" as `None`.
+                credential_present: event["credential_present"].as_bool(),
+                credential_indicator_match: event["credential_indicator_match"].as_bool().unwrap_or(false),
+                auth_outcome: s(&event["auth_outcome"]),
                 auth_type: s(&event["auth_type"]),
                 status: n(&event["status"]),
                 category: s(&event["category"]),
@@ -270,6 +301,16 @@ fn tanner_requests(hits: &[Value]) -> Vec<TannerRequest> {
         .collect()
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/sensors",
+    summary = "Per-sensor counts, last-seen, and state.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn detail(State(state): State<AppState>) -> Result<Json<SensorDetail>, (StatusCode, String)> {
     let (mailoney, http, tanner) = tokio::try_join!(
         query_sensor_raw(&state, "mailoney", false),
@@ -374,6 +415,16 @@ const CATALOG_WINDOW: &str = "now-14d";
 const EVENT_LIMIT_DEFAULT: u64 = 200;
 const EVENT_LIMIT_MAX: u64 = 1000;
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/sensors/catalog",
+    summary = "The sensor catalog the setup pages read.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn catalog(State(state): State<AppState>) -> Result<Json<SensorCatalog>, (StatusCode, String)> {
     let body = json!({
         "size": 0,
@@ -413,6 +464,21 @@ pub async fn catalog(State(state): State<AppState>) -> Result<Json<SensorCatalog
     Ok(Json(SensorCatalog { window: CATALOG_WINDOW.to_string(), sensors }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/sensors/{sensor}/events",
+    summary = "Recent events from one sensor.",
+    params(
+        ("sensor" = inline(contract::SensorName), Path, description = "Sensor name; the handler rejects an empty value or one over 128 characters."),
+        ("limit" = inline(Option<String>), Query, description = "How many events to return; clamped by the handler."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn events(
     State(state): State<AppState>,
     axum::extract::Path(sensor): axum::extract::Path<String>,
@@ -624,6 +690,20 @@ fn measures_for(sensor: &str) -> Vec<(&'static str, &'static str, &'static str)>
 
 const OVERVIEW_WINDOW: &str = "now-7d";
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/sensors/{sensor}/overview",
+    summary = "Protocols, ports and fingerprints for one sensor.",
+    params(
+        ("sensor" = inline(contract::SensorName), Path, description = "Sensor name; the handler rejects an empty value or one over 128 characters."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn overview(
     State(state): State<AppState>,
     axum::extract::Path(sensor): axum::extract::Path<String>,
@@ -742,4 +822,141 @@ pub async fn overview(
         top_lists,
         measures,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // #3213: `http_requests` is what the curated sensor view renders as the
+    // HTTP request table, and it used to carry a `password` column holding
+    // the captured value. The canary below stands in for that value; every
+    // assertion is on the SERIALIZED response, because a field check by name
+    // only covers the name someone thought to check.
+
+    const SECRET: &str = "correct-horse-battery-staple-9f2c";
+
+    fn stored_login() -> Value {
+        json!({"_id": "e2e-1", "_source": {
+            "@timestamp": "2026-09-01T00:00:00Z",
+            "honeypot": {
+                "sensor": "http-honeypot",
+                "src_ip": "203.0.113.9",
+                "method": "POST",
+                "host": "portal.example",
+                "path": "/wp-login.php",
+                "query": format!("redirect_to=/wp-admin&password={SECRET}"),
+                "body": format!("log=admin&pwd={SECRET}&wp-submit=Log+In"),
+                "headers": {"authorization": format!("Basic YWRtaW46{SECRET}"), "user-agent": "curl/8.4.0"},
+                "username": "admin",
+                "password": SECRET
+            }
+        }})
+    }
+
+    fn rendered() -> String {
+        serde_json::to_string(&http_requests(&[stored_login()])).unwrap()
+    }
+
+    #[test]
+    fn a_stored_password_never_reaches_the_http_request_response() {
+        let out = rendered();
+        assert!(!out.contains(SECRET), "a stored password reached the sensor response: {out}");
+    }
+
+    #[test]
+    fn the_password_field_is_gone_rather_than_empty() {
+        // An always-present `password: ""` is still a field a consumer can be
+        // told to read, and this issue's criteria are about what the API
+        // returns rather than about what it declines to fill in.
+        let out = rendered();
+        assert!(!out.contains("\"password\""), "the password key survived as an empty field: {out}");
+    }
+
+    #[test]
+    fn the_request_stays_readable_after_the_scrub() {
+        // The other failure mode: deleting the body because it held a
+        // secret. Method, host, path, user agent and the account all have to
+        // survive, or the table becomes a list of blanks.
+        let rows = http_requests(&[stored_login()]);
+        let row = &rows[0];
+        assert_eq!(row.method, "POST");
+        assert_eq!(row.host, "portal.example");
+        assert_eq!(row.path, "/wp-login.php");
+        assert_eq!(row.username, "admin");
+        assert_eq!(row.headers.get("user-agent").map(String::as_str), Some("curl/8.4.0"));
+        assert!(row.body.contains("wp-submit=Log+In"), "the body lost its shape: {}", row.body);
+        assert!(row.body.contains(&format!("pwd={}", crate::secrets_boundary::REDACT_MARKER)), "{}", row.body);
+    }
+
+    #[test]
+    fn a_historical_request_reports_no_status_rather_than_reporting_absent() {
+        // No `credential_status` on a pre-fix document. Reporting "absent"
+        // would be reporting the scrubber's own removal as an observation
+        // about the attacker, so the field is simply left empty -- which is
+        // the one thing a consumer cannot mistake for an answer.
+        let rows = http_requests(&[stored_login()]);
+        assert_eq!(rows[0].credential_status, "", "a pre-fix document has no status to report");
+        assert_eq!(rows[0].credential_present, None, "and no presence to report either");
+    }
+
+    #[test]
+    fn the_new_axes_are_reported_independently() {
+        let hit = json!({"_id": "e2e-2", "_source": {
+            "@timestamp": "2026-09-01T00:00:00Z",
+            "honeypot": {
+                "method": "POST", "path": "/api/v1/login", "username": "admin",
+                "credential_status": "extracted",
+                "credential_present": true,
+                "credential_indicator_match": true,
+                "auth_type": "form",
+                "auth_outcome": "simulated",
+                "status": 200
+            }
+        }});
+        let rows = http_requests(&[hit]);
+        let row = &rows[0];
+        assert_eq!(row.credential_status, "extracted");
+        assert_eq!(row.credential_present, Some(true));
+        assert!(row.credential_indicator_match);
+        assert_eq!(row.auth_type, "form");
+        assert_eq!(row.auth_outcome, "simulated");
+        // The status is its own field and is NOT the auth answer. A 200 on a
+        // login page has to stay a 200.
+        assert_eq!(row.status, 200);
+        assert_ne!(row.auth_outcome, "real");
+    }
+
+    #[test]
+    fn an_unknown_presence_serializes_as_null() {
+        // The wire form matters: `Option<bool>` has to reach the client as
+        // `null` rather than being defaulted to false on the way out.
+        let hit = json!({"_id": "e2e-3", "_source": {
+            "@timestamp": "2026-09-01T00:00:00Z",
+            "honeypot": {
+                "method": "GET", "path": "/",
+                "credential_status": "unknown",
+                "credential_present": Value::Null,
+                "auth_outcome": "unknown"
+            }
+        }});
+        let out = serde_json::to_string(&http_requests(&[hit])).unwrap();
+        assert!(out.contains("\"credential_present\":null"), "unknown collapsed into false: {out}");
+    }
+
+    #[test]
+    fn a_tanner_request_is_untouched_by_this_boundary() {
+        // tanner is out of #3213's scope, and this is the test that keeps
+        // the scope a decision rather than an accident. `tanner_requests`
+        // has no boundary call in it at all, so a future edit that widened
+        // `CREDENTIAL_SENSORS` would not change this -- and one that wrongly
+        // added a scrub to the shared helper would fail it.
+        let hit = json!({"_id": "t-1", "_source": {
+            "@timestamp": "2026-09-01T00:00:00Z",
+            "honeypot": {"sensor": "tanner", "method": "POST", "path": "/index.php", "username": "root", "password": "toor"}
+        }});
+        let rows = tanner_requests(&[hit]);
+        assert_eq!(rows[0].password, "toor", "tanner is out of scope and must not change behaviour here");
+    }
 }

@@ -1,0 +1,73 @@
+name: Bug
+description: Something deployed or in the repo behaves wrongly
+title: "fix(<scope>): "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security problems (host escape, sandbox bypass, exposed secrets) go through the
+        **private security report** link on the previous screen, not here.
+
+        This repository is public. **Redact** before pasting: no real source IPs of
+        yours, credentials, tokens, `.env` contents, production domains, or live payloads.
+        Attacker IPs from captured traffic are fine.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - honeypot / sensor
+        - dashboard
+        - ops / deploy / CI
+        - vps / edge
+        - llm-worker
+        - ml-worker
+        - ghidra / analysis
+        - reporting
+        - windows-sandbox / CAPE / GHOSTS
+        - other
+    validations:
+      required: true
+  - type: dropdown
+    id: host
+    attributes:
+      label: Where
+      options:
+        - homeserver
+        - VPS
+        - both
+        - CI only
+        - repo only (not deployed behaviour)
+    validations:
+      required: true
+  - type: input
+    id: revision
+    attributes:
+      label: Deployed revision
+      description: Commit or image the host was actually running, if known (a green deploy is not proof of what runs).
+      placeholder: e.g. main@1d86623a, or apiary-backend:latest created 2026-09-08
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed
+      description: What happened. Exact error text, and where you saw it.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce or check it
+      description: Commands, queries or steps someone else can run. "Observed once" is fine; say so.
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence (redacted)
+      description: Log lines, query results, run links. Separate what you observed from what you think it means.
+      render: text

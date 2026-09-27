@@ -216,6 +216,19 @@ async fn generate(base: &str, model: &str, keep_alive: &str, context: &str, ques
     Ok(answer)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/vault-rag",
+    summary = "Answer a question from the Vault corpus through the local model.",
+    params(
+        ("q" = inline(Option<String>), Query, description = "The question."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// GET /api/v1/vault-rag?q=... — operator-invoked only (#2292), not linked
 /// from any nav yet. Retrieval failures and generation failures both report
 /// `available:false` with a reason rather than a broken page or a faked

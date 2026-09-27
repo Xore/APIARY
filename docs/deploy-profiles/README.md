@@ -60,6 +60,47 @@ analysis-plane workers (`ip-enrichment-worker`,
 are either unconditional infrastructure or governed separately from
 sensor choices.
 
+## Sizing per profile (#3328)
+
+`scripts/deploy-profile-sizing.py` sums the `cpus:`, `mem_limit:` and
+`memory:` values the compose files already declare, for exactly the stacks a
+profile lists:
+
+```bash
+scripts/deploy-profile-sizing.py
+```
+
+| profile | stacks | declared cpus | declared memory |
+|---|---|---|---|
+| `full` | 26 | 120.5 | 68.1 GiB |
+| `minimal-web` | 7 | 82 | 50.8 GiB |
+| `ics-focused` | 7 | 73 | 45.1 GiB |
+
+**These are ceilings, not measurements.** A `mem_limit` is the most a container
+may claim, so the column is an upper bound on what the profile could ask the
+host for if every stack peaked at once. It is not steady-state use: a
+`minimal-web` host does not sit at 50.8 GiB with two sensors running. Nothing
+here was measured under load, and the numbers are only as current as the last
+`cpus:` edit. `tests/docs/test_3328_profile_sizing_matches_compose.py`
+recomputes the table on every CI run and fails if it drifts.
+
+Two things the table deliberately leaves out, because a summed number would
+mislead:
+
+- **The ES heap is not in the memory column.** Elasticsearch gets its memory
+  from `ES_JAVA_OPTS=-Xms6g -Xmx6g`
+  (`arcane/home/honeypot-elk/compose.yml`), not from a `mem_limit`, so the
+  `elk` figure above covers Logstash/Filebeat/Beats only. The 6g heap is the
+  floor that actually matters on a small host -- a profile cannot be sized
+  below it, and #240 is why it is pinned rather than left to the JVM default.
+- **A stack with no declared limit contributes zero.** That is the dangerous
+  case, not the small one: Docker will not stop an undeclared container from
+  growing. The script lists those stacks by name under each profile, so an
+  undeclared limit is visible rather than silently zero.
+
+Sizing the analysis-plane workers, the `dashboard`/`elk`/`keycloak` backbone
+and the VPS is out of scope here, matching the "Not covered here" note above.
+
 ## Validating a profile
 
 ```bash

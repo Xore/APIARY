@@ -31,6 +31,26 @@
 # install-ci-runner.sh -- omit it to have this script fetch one itself via
 # `gh api` (needs `gh auth login` for an account with admin on the repo).
 #
+# --helpers-only (#3312) applies ONLY the root-owned helper scripts and the
+# sudoers grant that workflows invoke as root, then exits. It needs no
+# --repo, touches no group membership, no DEPLOY_DIRS ownership, no runner
+# registration, and never stops or restarts the runner service. Same shape as
+# install-ci-runner.sh's --build-only: the narrow mode exists so applying a
+# grant a merged PR depends on does not require the full installer.
+#
+# Why it exists: every capability this repo hands the runner (the
+# isolation-audit sudoers trio from #2778, the libvirt group from #3338, the
+# source-health helper grant from #3312) reaches the host only when an
+# operator re-runs this script -- merging the PR that adds one changes
+# nothing on the box, the same way #2908 found for /opt/stacks/apiary. A
+# full re-run stops and restarts the runner service (`svc.sh stop` on an
+# already-installed unit), so running it while the homeserver is executing a
+# job risks killing that job mid-step. That is the whole cost of applying
+# the source-health grant, which is the one grant a Diagnostics run needs
+# and the one it cannot do without -- and that cost is what left #3312's
+# last step pending. The helper and its grant need no restarted process:
+# they take effect on the runner's next sudo call.
+#
 # Safe to re-run: every step below is idempotent (skips what already
 # exists/is already correct) and the ownership fix specifically is safe to
 # run repeatedly or on a partially-provisioned host -- it only ever touches
@@ -75,20 +95,97 @@ STATE_SUBTREE_NAMES=(state dashboard-state logs)
 repo=""
 token=""
 name="${HOSTNAME:-homeserver}-home"
+helpers_only=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo) repo="$2"; shift 2 ;;
     --token) token="$2"; shift 2 ;;
     --name) name="$2"; shift 2 ;;
+    --helpers-only) helpers_only=1; shift ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
 done
-[[ -n "$repo" ]] || { echo "Usage: $0 --repo OWNER/NAME [--token TOKEN] [--name RUNNER_NAME]" >&2; exit 1; }
+usage() {
+  echo "Usage: $0 --repo OWNER/NAME [--token TOKEN] [--name RUNNER_NAME]" >&2
+  echo "       $0 --helpers-only   # root-owned helpers + sudoers grant only (#3312)" >&2
+  exit 1
+}
+# --repo is only needed to register the runner, which --helpers-only never
+# reaches; demanding it there would be a flag the operator has to look up
+# for a command that does not talk to GitHub at all.
+[[ -n "$helpers_only" || -n "$repo" ]] || usage
 
-if [[ -z "$token" && ! -f "$RUNNER_HOME/.runner" ]]; then
+# --helpers-only registers nothing, so it never needs a registration token
+# and must not call out to gh api for one.
+if [[ -z "$helpers_only" && -z "$token" && ! -f "$RUNNER_HOME/.runner" ]]; then
   command -v gh >/dev/null 2>&1 || { echo "no --token given and gh is not installed to fetch one" >&2; exit 1; }
   echo "fetching a fresh registration token via gh api..."
   token=$(gh api -X POST "repos/$repo/actions/runners/registration-token" --jq .token)
+fi
+
+# The root-owned helper scripts plus the sudoers fragment that lets the
+# runner run them. Split out of the main flow because #3312 needs it
+# reachable without the rest of this script: a grant a merged PR depends on
+# only reaches the host when someone re-runs the installer, and the full run
+# stops and restarts the runner service (see --helpers-only in the header).
+# Everything in here takes effect on the runner's next sudo call -- nothing
+# here needs a restarted process, which is the whole point of the narrow
+# mode.
+install_root_helpers() {
+  # #3312: root-owned so the runner cannot rewrite what its sudoers grant runs.
+  install -d -m 0755 -o root -g root /opt/github-ci-runner-helpers
+  install -m 0755 -o root -g root \
+    "$(dirname "$(readlink -f "$0")")/dashboard-source-health.sh" \
+    /opt/github-ci-runner-helpers/dashboard-source-health.sh
+  echo "installed /opt/github-ci-runner-helpers/dashboard-source-health.sh"
+
+  local sudoers_file=/etc/sudoers.d/isolation-audit-github-deploy-runner
+  local sudoers_tmp
+  sudoers_tmp=$(mktemp)
+  cat > "$sudoers_tmp" <<EOF
+# Managed by scripts/github-ci-runner/install-deploy-runner.sh (#2778).
+# Read-only commands scripts/isolation-audit.sh needs and cannot reach via
+# docker-group membership or libvirt-group membership alone. Do not widen
+# past exactly these three invocations.
+$RUNNER_USER ALL=(root) NOPASSWD: /usr/sbin/iptables -S FORWARD
+$RUNNER_USER ALL=(root) NOPASSWD: /usr/bin/ss -tlnp
+$RUNNER_USER ALL=(root) NOPASSWD: /usr/sbin/aa-status
+# #3312: Diagnostics' source-health read. Takes no arguments; the helper
+# reads the dashboard service token as root and returns only the JSON.
+$RUNNER_USER ALL=(root) NOPASSWD: /opt/github-ci-runner-helpers/dashboard-source-health.sh
+EOF
+  if visudo -cf "$sudoers_tmp" >/dev/null 2>&1; then
+    install -m 0440 -o root -g root "$sudoers_tmp" "$sudoers_file"
+    echo "installed $sudoers_file"
+  else
+    echo "error: generated sudoers fragment failed visudo -cf, not installing $sudoers_file" >&2
+    visudo -cf "$sudoers_tmp" >&2 || true
+    rm -f "$sudoers_tmp"
+    exit 1
+  fi
+  rm -f "$sudoers_tmp"
+}
+
+# The narrow mode, deliberately ahead of every other side effect: it must not
+# create the runner user, change a group, chown a tree or stop the service, or
+# "apply the grant without disturbing the runner" is not what an operator
+# running it mid-workday is getting. A sudoers entry for a user that does not
+# exist yet simply never matches; a fresh host wants the full installer.
+if [[ -n "$helpers_only" ]]; then
+  install_root_helpers
+  cat <<'EOF'
+
+--helpers-only: applied the Diagnostics helper and the sudoers grant for it.
+Both take effect on the runner's next sudo call -- no restart, no job killed.
+Deliberately NOT done here:
+  * group memberships (docker, deploy-runner, libvirt) -- a running runner
+    keeps the groups it started with, so these only take effect across the
+    service restart a full run does
+  * the DEPLOY_DIRS ownership fix
+  * runner download, registration, and svc.sh stop/start
+Run without --helpers-only for those.
+EOF
+  exit 0
 fi
 
 # System user + its two groups: RUNNER_GROUP (secondary, deploy-runner) and
@@ -128,36 +225,7 @@ else
   echo "warning: no 'libvirt' group on this host -- isolation-audit.sh's virsh checks will keep reporting permission errors for $RUNNER_USER" >&2
 fi
 
-# #3312: root-owned so the runner cannot rewrite what its sudoers grant runs.
-install -d -m 0755 -o root -g root /opt/github-ci-runner-helpers
-install -m 0755 -o root -g root \
-  "$(dirname "$(readlink -f "$0")")/dashboard-source-health.sh" \
-  /opt/github-ci-runner-helpers/dashboard-source-health.sh
-
-sudoers_file=/etc/sudoers.d/isolation-audit-github-deploy-runner
-sudoers_tmp=$(mktemp)
-cat > "$sudoers_tmp" <<EOF
-# Managed by scripts/github-ci-runner/install-deploy-runner.sh (#2778).
-# Read-only commands scripts/isolation-audit.sh needs and cannot reach via
-# docker-group membership or libvirt-group membership alone. Do not widen
-# past exactly these three invocations.
-$RUNNER_USER ALL=(root) NOPASSWD: /usr/sbin/iptables -S FORWARD
-$RUNNER_USER ALL=(root) NOPASSWD: /usr/bin/ss -tlnp
-$RUNNER_USER ALL=(root) NOPASSWD: /usr/sbin/aa-status
-# #3312: Diagnostics' source-health read. Takes no arguments; the helper
-# reads the dashboard service token as root and returns only the JSON.
-$RUNNER_USER ALL=(root) NOPASSWD: /opt/github-ci-runner-helpers/dashboard-source-health.sh
-EOF
-if visudo -cf "$sudoers_tmp" >/dev/null 2>&1; then
-  install -m 0440 -o root -g root "$sudoers_tmp" "$sudoers_file"
-  echo "installed $sudoers_file"
-else
-  echo "error: generated sudoers fragment failed visudo -cf, not installing $sudoers_file" >&2
-  visudo -cf "$sudoers_tmp" >&2 || true
-  rm -f "$sudoers_tmp"
-  exit 1
-fi
-rm -f "$sudoers_tmp"
+install_root_helpers
 
 # --- #1143: precisely scoped ownership fix, the actual replacement for the
 # broad manual chown that caused this issue. ---

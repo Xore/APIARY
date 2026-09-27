@@ -80,6 +80,7 @@ Analysis and sandbox components:
 [model evaluation](local-llm-model-evaluation.md) /
 [production canary record](llm-production-canary-record.md) /
 [synthetic canary record](llm-synthetic-canary-record.md) ·
+[prompt-injection suite record](llm-injection-suite-record.md) ·
 [ip reporting plan](ip-reporting-plan.md) ·
 [settings operations](settings-operations.md) ·
 [community sharing policy](community-threat-intel-sharing.md) ·
@@ -90,6 +91,7 @@ Analysis and sandbox components:
 ## Records — audit trails
 
 [runtime compatibility record](runtime-compatibility-record.md) ·
+[frontend mutation and property testing pilot (#3326)](frontend-mutation-pilot.md) ·
 [security fixes](security-fixes.md) ·
 [approved local-model qualification](analysis/ghidra/models/approval-record.md) ·
 [container writable-layer audit, 2026-09-03](container-writable-layer-audit-2026-09-03.md) ·

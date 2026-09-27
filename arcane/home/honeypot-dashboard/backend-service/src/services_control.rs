@@ -14,6 +14,7 @@
 //! close`, bounded by max_body, which sidesteps needing a real
 //! Content-Length/chunked-transfer parser.
 
+use crate::contract;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -164,6 +165,16 @@ pub fn urlencode(value: &str) -> String {
     out
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/services",
+    summary = "The compose services the operator can act on.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 503, description = "A dependency this route needs is not configured or not reachable.", body = inline(serde_json::Value), content_type = "application/json"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn list(State(_state): State<AppState>) -> impl axum::response::IntoResponse {
     match load_services_status().await {
         Ok(services) => (StatusCode::OK, Json(json!({"available": true, "services": services}))),
@@ -179,6 +190,21 @@ pub struct LogsQuery {
     lines: Option<u32>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/services/{name}/logs",
+    summary = "Recent log lines for one service, via the services adapter.",
+    params(
+        ("name" = inline(String), Path, description = "compose service name."),
+        ("lines" = inline(Option<contract::LogLines>), Query, description = "How many lines; the handler defaults to 200."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", content((String = "text/plain"), (inline(serde_json::Value) = "application/json"))),
+        (status = 503, description = "A dependency this route needs is not configured or not reachable.", body = inline(serde_json::Value), content_type = "application/json"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn logs(
     State(_state): State<AppState>,
     Path(name): Path<String>,
@@ -201,6 +227,23 @@ pub struct ActionQuery {
     actor_username: String,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/services/{name}/{action}",
+    summary = "Start, stop or restart one service.",
+    params(
+        ("name" = inline(String), Path, description = "compose service name."),
+        ("action" = inline(contract::ServiceAction), Path, description = "Lifecycle action the services adapter accepts."),
+        ("actor_subject" = inline(Option<String>), Query, description = "OIDC subject recorded on the audit/history entry."),
+        ("actor_username" = inline(Option<String>), Query, description = "Operator name recorded on the audit/history entry."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", content((String = "text/plain"), (inline(serde_json::Value) = "application/json"))),
+        (status = 503, description = "A dependency this route needs is not configured or not reachable.", body = inline(serde_json::Value), content_type = "application/json"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn action(
     State(state): State<AppState>,
     Path((name, action)): Path<(String, String)>,
