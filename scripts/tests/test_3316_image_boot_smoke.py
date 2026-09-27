@@ -40,11 +40,80 @@ BACKEND_DOCKERFILE = (
 DASHBOARD_DOCKERFILE = (
     ROOT / "arcane" / "home" / "honeypot-dashboard" / "frontend-next" / "Dockerfile"
 )
-BACKEND_MAIN = (
-    ROOT / "arcane" / "home" / "honeypot-dashboard" / "backend-service" / "src" / "main.rs"
-)
+BACKEND_SRC = ROOT / "arcane" / "home" / "honeypot-dashboard" / "backend-service" / "src"
+BACKEND_MAIN = BACKEND_SRC / "main.rs"
 
 IMAGE_ID = "sha256:" + "ab" * 32
+
+
+# ------------------------------------------------------- the route table --
+
+def declared_backend_routes() -> set[str]:
+    r"""Every path backend-service's router registers, as a set of literals.
+
+    Where this reads from moved twice, and both moves are invisible in a
+    diff, so they are recorded here rather than left to be rediscovered:
+
+    - #3325's first commit put the route table in `src/main.rs` as
+      `Router::new().route("/livez", get(livez))` -- the path spelled out
+      beside the handler.
+    - #3325's second commit moved every module and the table itself into
+      `src/lib.rs`, because the OpenAPI document is generated from the same
+      `Router` the process serves and a second binary cannot see a first
+      binary's modules. `main.rs` kept only what is genuinely a process.
+    - #3325's third commit replaced each `.route(path, method(handler))`
+      with `.routes(utoipa_axum::routes!(handler))`, which takes the path
+      and the method off the handler's `#[utoipa::path]` annotation. So
+      after that commit there is no `path` literal in the table at all --
+      `src/lib.rs` is an index of handlers, and the paths live next to the
+      handlers, in their own modules.
+
+    So the answer is the set of `path = "..."` values declared by a
+    `#[utoipa::path(` attribute anywhere under `src/`, plus any literal
+    `.route("..."` registration still present. The second form is not
+    expected to match anything today: `contract_covers_every_router_route`
+    in `src/openapi.rs` fails if `.route(` appears in `src/lib.rs` at all,
+    because `OpenApiRouter` would inherit it as a pass-through that serves
+    a route with no OpenAPI operation. It is kept so that a future table
+    written in plain axum is still checked rather than silently passing on
+    an empty scan.
+
+    Both patterns require the captured value to start with `/`, and that is
+    not decoration. `openapi.rs`'s own test module holds
+    `const BYPASSING_ROUTES: [&str; 3] = [".route(", ".route_service(",
+    ".nest_service("];` -- the very strings `contract_covers_every_router_route`
+    greps for -- so a looser `\.route\(\s*\"([^\"]+)\"` reads that Rust string
+    literal as a route registration and invents entries. Every real path in
+    this crate begins with `/`, so requiring it costs nothing and keeps the
+    crate from being evidence about itself.
+
+    That Rust test is also what makes the annotation half sufficient on its
+    own: it fails if a `#[utoipa::path]` is not routed, so a declared path
+    here is a routed path there.
+    """
+    paths: set[str] = set()
+    for source in sorted(BACKEND_SRC.rglob("*.rs")):
+        text = source.read_text(encoding="utf-8")
+        for match in re.finditer(r"\.route\(\s*\"(/[^\"]+)\"", text):
+            paths.add(match.group(1))
+        # Each attribute's own text, from just inside `#[utoipa::path(` to
+        # its matching close paren, so a `path = "..."` belonging to some
+        # other attribute cannot be mistaken for this one's.
+        for start in (m.start() for m in re.finditer(r"#\[utoipa::path\(", text)):
+            open_at = start + len("#[utoipa::path(")
+            depth = 1
+            end = open_at
+            while depth > 0 and end < len(text):
+                if text[end] == "(":
+                    depth += 1
+                elif text[end] == ")":
+                    depth -= 1
+                end += 1
+            declared = re.search(r"path\s*=\s*\"(/[^\"]+)\"", text[open_at:end])
+            if declared:
+                paths.add(declared.group(1))
+    return paths
+
 
 # --------------------------------------------------------------- the stubs --
 
@@ -757,7 +826,7 @@ class ParityWithTheDockerfiles(unittest.TestCase):
         """/healthz and /readyz are the two names #3317's liveness/readiness
         split left behind; if a rename ever removes one, this fails rather
         than letting a 404 read as a broken assertion."""
-        main = BACKEND_MAIN.read_text(encoding="utf-8")
+        declared = declared_backend_routes()
         step = self.step("Boot-smoke backend-service (#3316)")
         # Anchored on the flag, past the quoted label, to the bare path --
         # and required to find something, because a pattern that stops
@@ -767,29 +836,39 @@ class ParityWithTheDockerfiles(unittest.TestCase):
         self.assertGreaterEqual(
             len(paths), 2, f"no assertion paths parsed out of the step:\n{step}"
         )
+        # The scan is the input to every comparison below, so an empty one
+        # would report each route as missing for a reason that has nothing to
+        # do with the route. Caught here instead, where the cause is legible:
+        # see declared_backend_routes() for where the paths live and why.
+        self.assertGreaterEqual(
+            len(declared),
+            4,
+            "no route paths parsed out of backend-service/src -- the table moved "
+            "and this scan no longer knows where to look",
+        )
         for path in paths:
             with self.subTest(path=path):
-                # assertTrue, not assertIn: a failure here would otherwise
-                # dump all 800 lines of main.rs into the job log instead of
-                # naming the one route that went missing.
-                self.assertTrue(
-                    f'.route("{path}"' in main,
-                    f"backend-service/src/main.rs no longer registers {path}",
+                self.assertIn(
+                    path,
+                    declared,
+                    f"backend-service no longer registers {path} "
+                    f"(declared: {sorted(declared)})",
                 )
 
     def test_the_backend_healthcheck_path_is_a_registered_route_too(self) -> None:
         """The healthcheck is the gate the smoke waits on, and nothing else
         checks that its path still exists -- a rename would leave the
         container permanently unhealthy with a green build."""
-        main = BACKEND_MAIN.read_text(encoding="utf-8")
+        declared = declared_backend_routes()
         healthcheck = re.search(r"--start-period=\d+s \\\n\s+CMD (.*)", self.backend)
         self.assertIsNotNone(healthcheck)
         path = re.search(r"/(\w+)\"", healthcheck.group(1))
         self.assertIsNotNone(path, healthcheck.group(1))
-        self.assertTrue(
-            f'.route("/{path.group(1)}"' in main,
-            f"the backend HEALTHCHECK curls /{path.group(1)}, which main.rs "
-            f"no longer registers",
+        self.assertIn(
+            f"/{path.group(1)}",
+            declared,
+            f"the backend HEALTHCHECK curls /{path.group(1)}, which "
+            f"backend-service no longer registers (declared: {sorted(declared)})",
         )
 
     def test_dashboard_next_smokes_the_redirect_the_bff_actually_issues(self) -> None:
