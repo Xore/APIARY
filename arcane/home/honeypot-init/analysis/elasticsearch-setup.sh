@@ -11,26 +11,18 @@ curl -fsS -X PUT "$es_url/_snapshot/honeypot-fs" \
   -H 'Content-Type: application/json' \
   --data-binary '{"type":"fs","settings":{"location":"/snapshots","compress":true}}' >/dev/null
 
-# #3283: raise the per-node shard ceiling from Elasticsearch's 1000 default.
+# #3283: the per-node shard ceiling stays at Elasticsearch's 1000 default, and
+# is deliberately NOT pinned here. The 1000 default is what stopped every new
+# index being created on 2026-09-21, dead-lettering all sensor ingest -- but the
+# fix is that every shard family is bounded, not that the ceiling moves. Raising
+# it in the repo hides the next unbounded family instead of failing it.
 #
-# This node is single-node and hosts 1014 indices / 1068 primary shards. The
-# ceiling is what stopped every new index being created on 2026-09-21, which
-# dead-lettered all sensor ingest until it was raised. It was raised live on
-# 2026-09-24 and existed only in the running cluster -- nothing in the repo
-# carried it, so any rebuild of this stack silently regressed to 1000 and
-# silently re-broke ingest.
-#
-# 1500 is headroom over the current steady state, not a licence to grow: the
-# test in tests/docs/test_3283_shard_budget.py projects the real steady state
-# from the filebeat routing rules and the ILM min_ages (467 shards at 21d,
-# 656 at 30d) and fails if that projection ever approaches 1000. Raising this
-# number without fixing retention would push the same wall out further, so if
-# a future run needs more than 1500, the answer is a shorter retention window
-# and fewer index families, not a bigger ceiling.
-curl -fsS -X PUT "$es_url/_cluster/settings" \
-  -H 'Content-Type: application/json' \
-  --data-binary '{"persistent":{"cluster.max_shards_per_node":"1500"}}' >/dev/null
-
+# tests/docs/test_3283_shard_budget.py projects the real steady state from the
+# filebeat routing rules and the ILM min_ages (467 shards at 21d, 656 at 30d)
+# and fails if that projection ever approaches 1000. If a future run ever needs
+# more than 1000, the answer is a shorter retention window and fewer index
+# families, not a larger ceiling. test_3283_fix.py asserts this file does not
+# pin the ceiling, so the two tests cannot drift apart again.
 # Bounded retention prevents a noisy internet-wide scan or IDS signature from
 # filling the homeserver disk. Daily Filebeat names already provide rollover
 # for suricata/portbridge/dead-letter/analysis-results (a fresh, plain
