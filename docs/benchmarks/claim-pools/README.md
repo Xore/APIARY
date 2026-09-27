@@ -47,11 +47,12 @@ expensive half, and #1805's ladder does not relieve it as designed:
   `true` (absence from a one-line summary is not evidence a claim is false), so
   its low yield costs nothing but settles little.
 - The **semantic-harness rung named "cheapest first" in #1805 is not
-  implementable as described.** The 240 executable checks are `assert()`
+  implementable as described.** The 280 executable checks are `assert()`
   expressions like `rotate_checksum(one, 1) == 0x41`, and `semantic_checks.json`
-  records only that they ran (240 checked, 0 failed). There is no mechanism to
-  check a prose claim such as "XORs each byte with a single-byte key" against a
-  numeric assertion. Making that rung real would be its own piece of work.
+  records only that they ran (280 checked, 0 failed, 14 cases covered). There
+  is no mechanism to check a prose claim such as "XORs each byte with a
+  single-byte key" against a numeric assertion. Making that rung real would be
+  its own piece of work.
 
 **Do not read the 90% solo rate as unique contribution.** Only 37 of 382 claims
 (10%) were made by both models; 345 by exactly one. Two models describing the

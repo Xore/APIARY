@@ -7,7 +7,7 @@
 > Open scoring-semantics defects are tracked in issues #1946/#1969 under
 > epic #1974 rather than here.
 
-> **Status:** `ml-worker/` has its own Dockge stack
+> **Status:** `ml-worker/` has its own Arcane-managed stack
 > ([`docker-compose.yml`](../ml-worker/docker-compose.yml) +
 > [`docker-compose.ml-worker.gpu.yml`](../ml-worker/docker-compose.ml-worker.gpu.yml),
 > mirroring `analysis/ghidra/`), builds, connects to Elasticsearch, and polls
@@ -515,7 +515,7 @@ rediscovered from an empty index:
   (`ml-worker/worker.py:73`); `run_worker()` installs a delete-only policy
   (`ANOMALY_ILM_POLICY = "ml-anomalies-retention"`) via
   `ensure_ilm_policy(es, ANOMALY_ILM_POLICY,
-  build_ilm_policy(ML_ANOMALIES_RETENTION_DAYS))` (`worker.py:939`) before
+  build_ilm_policy(ML_ANOMALIES_RETENTION_DAYS))` (`worker.py:1002`) before
   the index itself is created, because an index whose
   `index.lifecycle.name` points at a missing policy fails its own
   creation. These documents are the labelled-corpus substrate
@@ -524,7 +524,8 @@ rediscovered from an empty index:
   `honeypot-30d`'s own 30-day source window, while still bounding the
   index rather than leaving it permanent. The window is an env-tunable
   default, not a hardcoded constant, per #261's convention.
-- **`ml-worker-metrics`: delete after 180d** (`ML_METRICS_RETENTION`,
+- **`ml-worker-metrics`: delete after 90d** (`ML_METRICS_RETENTION_DAYS`, default
+  `90` at `ml-worker/worker.py:74`,
   ILM policy `ml-worker-metrics-retention`, installed idempotently by
   the same `ensure_ilm_policy()` call at startup and bound via index
   settings when the index is created). Diagnostic evidence for
@@ -698,7 +699,7 @@ scores to the dashboard":
 
 ## 10. Docker Compose Integration
 
-**Rewritten 2026-07-31 (#62).** ml-worker is its own Dockge stack now, not a
+**Rewritten 2026-07-31 (#62).** ml-worker is its own standalone stack now, not a
 service folded into the root `docker-compose.yml`, and the file this section
 used to show (`ml-worker/docker-compose.override.yml`, built against a
 network named `analysis-net` that never existed anywhere in this
