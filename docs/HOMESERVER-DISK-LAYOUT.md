@@ -75,9 +75,9 @@ load-bearing: `/var/lib/docker` is **2.9T** and `/var/dockge` (stack data
 for the 45 directories under `/var/dockge/stacks/`, including
 Elasticsearch indices, Cowrie logs, payload captures, sandbox disks) is
 **350G**. `/var` is 70% full (6.1T of 8.8T) with 2.7T free. The manifest
-still declares 39 sync entries and 34 of those directories are
-manifest-managed; `rex86-eval` is present on disk but **not** in the
-manifest. Putting `/var` on the RAID LUN instead of growing the root
+still declares 39 sync entries, 33 of which name one of the 34 directories
+under `arcane/home/`; `rex86-eval` is present on disk but **not** in the
+manifest (the other 6 manifest entries are root-level stacks). Putting `/var` on the RAID LUN instead of growing the root
 filesystem remains the right call and should be preserved on any rebuild.
 
 Swap is a **32G LVM logical volume** (`rl-swap`) in the `rl` volume group,
