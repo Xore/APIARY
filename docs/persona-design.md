@@ -5,8 +5,12 @@
 Two related pieces of persona design that were implicit rather than
 documented decisions: whether a honeypot may reach the internet outbound,
 and how to name/place a honeypot host so it doesn't look staged. T-Pot's
-own README calls both out by name (`README.md` line 296 for outbound; the
-"where to place a honeypot" guidance for siting). This repo already does
+own upstream README calls both out by name (its `README.md` line 296 for
+outbound; the "where to place a honeypot" guidance for siting). That line
+number refers to T-Pot's own repository, not to this repo's `README.md`, which
+is ~135 lines; it was recorded from an unpinned upstream read and could not be
+re-verified during this reconciliation, so treat the line number as a pointer
+to look up rather than a stable citation. This repo already does
 deep, source-verified realism work for Windows personas
 ([#91](https://github.com/Xore/APIARY/issues/91)/[#94](https://github.com/Xore/APIARY/issues/94)/[#96](https://github.com/Xore/APIARY/issues/96))
 and has a full fictional-organization inventory
