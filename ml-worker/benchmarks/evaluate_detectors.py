@@ -50,9 +50,11 @@ And one check encodes the ensemble itself:
 - **Tier 2: a labelled ranking corpus.** Answers "is it accurate", and needs
   AUPRC as the headline (anomalies are rare and AUROC flatters under skew),
   alert-budget precision at the operating threshold, and seed variance over
-  >= 3 seeds. **Blocked on #1797** -- if BETH does not map onto our feature
-  extractors, this benchmark ships as Tier 1 only, and that is said out loud
-  rather than shipping a harness that quietly cannot rank.
+  >= 3 seeds. **No longer blocked**: #1797 ruled, and Tier 2 shipped under
+  #2986 as `evaluate_accuracy.py` -- a BETH architecture sanity rail plus a
+  precision-only calibration over the #1968/#2395 disposition corpus. What it
+  cannot do is measure *deployment* recall, because only above-threshold
+  alerts are persisted.
 
 ## Rules inherited from the LLM side rather than reinvented
 
@@ -532,7 +534,9 @@ def main() -> int:
         "benchmark": BENCHMARK_VERSION,
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "tier": 1,
-        "tier_2_status": "blocked on #1797 (labelled corpus); this run does not measure accuracy",
+        "tier_2_status": "not blocked; see evaluate_accuracy.py (BETH sanity rail + "
+                         "disposition-corpus calibration). This run still measures behaviour "
+                         "only, never accuracy.",
         "reports": reports,
     }
     if args.output:
