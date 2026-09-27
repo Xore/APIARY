@@ -26,6 +26,12 @@
 # Usage:
 #   sudo scripts/github-ci-runner/install-ci-runner.sh --repo Xore/APIARY [--token TOKEN]
 #
+# --build-only (#3379) provisions a compute-only executor on a box that is
+# NOT the homeserver (e.g. precision): same honeypot-ci pool and toolchain,
+# but no compose-drift/backup-staleness sudo helpers and no
+# honeypot-homeserver label, so the watches that measure the homeserver
+# itself never run there. Without it, the default role is the homeserver.
+#
 # --token is a short-lived (1h) registration token. If omitted, this script
 # tries to fetch one itself via `gh api` (needs `gh auth login` done for an
 # account with admin on the repo) -- convenient for an operator re-running
@@ -166,16 +172,18 @@ repo=""
 token=""
 name=""
 instance="1"
+role="homeserver"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo) repo="$2"; shift 2 ;;
     --token) token="$2"; shift 2 ;;
     --name) name="$2"; shift 2 ;;
     --instance) instance="$2"; shift 2 ;;
+    --build-only) role="build"; shift ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
 done
-[[ -n "$repo" ]] || { echo "Usage: $0 --repo OWNER/NAME [--token TOKEN] [--name RUNNER_NAME] [--instance N]" >&2; exit 1; }
+[[ -n "$repo" ]] || { echo "Usage: $0 --repo OWNER/NAME [--token TOKEN] [--name RUNNER_NAME] [--instance N] [--build-only]" >&2; exit 1; }
 
 if [[ -z "$name" ]]; then
   name="${HOSTNAME:-homeserver}-ci"
@@ -211,6 +219,14 @@ else
 fi
 RUNNER_HOME="${RUNNER_ROOT}/${RUNNER_USER}"
 RUNNER_COMPAT_LINK="/opt/${RUNNER_USER}"
+# #3379: the homeserver's instances additionally carry honeypot-homeserver,
+# which the watches that measure that host itself (compose-drift,
+# backup-staleness, disk-usage) require on top of honeypot-ci. A
+# --build-only executor on another box shares the honeypot-ci pool for
+# compute jobs but must never pick those up.
+if [[ "$role" == "homeserver" ]]; then
+  RUNNER_LABELS="${RUNNER_LABELS},honeypot-homeserver"
+fi
 # --- END instance derivation ---
 
 [[ ${EUID} -eq 0 ]] || { echo "Run as root" >&2; exit 1; }
@@ -265,105 +281,115 @@ if [[ ! -e "$RUNNER_COMPAT_LINK" || -L "$RUNNER_COMPAT_LINK" ]]; then
   ln -sfn "$RUNNER_HOME" "$RUNNER_COMPAT_LINK"
 fi
 
-# #2764: the one deliberate, narrow exception to "no sudo BY DESIGN" above.
-# compose-drift-watch.py needs `docker compose config` AND `docker compose
-# ps` on every stack under /var/dockge/stacks/, and four of them have a
-# root/deploy-runner-owned .env this user can't read -- confirmed live,
-# permission denied for both subcommands, regardless of the 600/640 split.
-# Widening group membership (e.g. adding this user to deploy-runner) was the
-# simpler option and explicitly rejected: it would hand a scheduled,
-# gh-token-bearing job direct read access to Keycloak admin credentials and
-# every other secret those .env files hold. Instead: a dedicated group whose
-# only grant is running one specific, narrow root-run helper
-# (scripts/compose-project-state.py) that resolves the project as root but
-# returns nothing except {"services": {name: restart_policy}, "containers":
-# [{Service, State}]} -- never a secret value, an image, a label or a
-# command line. Every instance's RUNNER_USER joins this same group, so N
-# runner instances share one sudoers grant instead of needing one per
-# instance.
-#
-# Note this script is NOT invoked by install-homeserver.sh -- it is a manual
-# runbook step (docs/CI-CD.md), so a rebuild only replays this grant if the
-# operator runs it.
-compose_drift_group=compose-drift-ro
-if ! getent group "$compose_drift_group" >/dev/null 2>&1; then
-  groupadd --system "$compose_drift_group"
-fi
-usermod -aG "$compose_drift_group" "$RUNNER_USER"
+# Homeserver-only watch helpers (#3379). compose-drift-watch and
+# backup-staleness-watch measure THE HOMESERVER (/var/dockge/stacks,
+# /mnt/usb-recovery), so their sudo grants only make sense there. A
+# --build-only executor on another box gets neither grant and registers
+# without the honeypot-homeserver label, so those watches never land on it.
+# (Heredoc bodies below stay at column 0 -- the terminator has to.)
+if [[ "$role" == "homeserver" ]]; then
+  # #2764: the one deliberate, narrow exception to "no sudo BY DESIGN" above.
+  # compose-drift-watch.py needs `docker compose config` AND `docker compose
+  # ps` on every stack under /var/dockge/stacks/, and four of them have a
+  # root/deploy-runner-owned .env this user can't read -- confirmed live,
+  # permission denied for both subcommands, regardless of the 600/640 split.
+  # Widening group membership (e.g. adding this user to deploy-runner) was the
+  # simpler option and explicitly rejected: it would hand a scheduled,
+  # gh-token-bearing job direct read access to Keycloak admin credentials and
+  # every other secret those .env files hold. Instead: a dedicated group whose
+  # only grant is running one specific, narrow root-run helper
+  # (scripts/compose-project-state.py) that resolves the project as root but
+  # returns nothing except {"services": {name: restart_policy}, "containers":
+  # [{Service, State}]} -- never a secret value, an image, a label or a
+  # command line. Every instance's RUNNER_USER joins this same group, so N
+  # runner instances share one sudoers grant instead of needing one per
+  # instance.
+  #
+  # Note this script is NOT invoked by install-homeserver.sh -- it is a manual
+  # runbook step (docs/CI-CD.md), so a rebuild only replays this grant if the
+  # operator runs it.
+  compose_drift_group=compose-drift-ro
+  if ! getent group "$compose_drift_group" >/dev/null 2>&1; then
+    groupadd --system "$compose_drift_group"
+  fi
+  usermod -aG "$compose_drift_group" "$RUNNER_USER"
 
-install -d -m 0755 -o root -g root /opt/github-ci-runner-helpers
-install -m 0755 -o root -g root \
-  "$here/compose-project-state.py" \
-  /opt/github-ci-runner-helpers/compose-project-state.py
+  install -d -m 0755 -o root -g root /opt/github-ci-runner-helpers
+  install -m 0755 -o root -g root \
+    "$here/compose-project-state.py" \
+    /opt/github-ci-runner-helpers/compose-project-state.py
 
-# The trailing '*' only ever reaches this helper's own argument validation
-# (rejects anything but a clean path under /var/dockge/stacks or
-# /opt/stacks -- see compose-project-state.py's own header), not a general
-# command -- sudoers itself grants nothing broader than "run this one file
-# as root."
-#
-# Written to a temp file and validated BEFORE it is installed: a syntax
-# error in a file already sitting in /etc/sudoers.d breaks sudo host-wide
-# for as long as it is there, however briefly.
-sudoers_file=/etc/sudoers.d/compose-drift-ro
-sudoers_tmp="$(mktemp)"
-cat > "$sudoers_tmp" <<EOF
+  # The trailing '*' only ever reaches this helper's own argument validation
+  # (rejects anything but a clean path under /var/dockge/stacks or
+  # /opt/stacks -- see compose-project-state.py's own header), not a general
+  # command -- sudoers itself grants nothing broader than "run this one file
+  # as root."
+  #
+  # Written to a temp file and validated BEFORE it is installed: a syntax
+  # error in a file already sitting in /etc/sudoers.d breaks sudo host-wide
+  # for as long as it is there, however briefly.
+  sudoers_file=/etc/sudoers.d/compose-drift-ro
+  sudoers_tmp="$(mktemp)"
+  cat > "$sudoers_tmp" <<EOF
 %${compose_drift_group} ALL=(root) NOPASSWD: /usr/bin/python3 /opt/github-ci-runner-helpers/compose-project-state.py *
 EOF
-if ! visudo -cf "$sudoers_tmp"; then
-  echo "generated sudoers file failed validation, not installing it" >&2
+  if ! visudo -cf "$sudoers_tmp"; then
+    echo "generated sudoers file failed validation, not installing it" >&2
+    rm -f "$sudoers_tmp"
+    exit 1
+  fi
+  install -m 0440 -o root -g root "$sudoers_tmp" "$sudoers_file"
   rm -f "$sudoers_tmp"
-  exit 1
-fi
-install -m 0440 -o root -g root "$sudoers_tmp" "$sudoers_file"
-rm -f "$sudoers_tmp"
 
-# REVIEW-A/#3030: compose-drift-watch.py's failing-healthcheck-streak
-# duration tracker needs a state file every runner instance can both read
-# and write across scheduled sweeps -- shared /tmp does NOT give it that:
-# the file itself ends up owned by whichever single runner user created it,
-# at that user's umask (confirmed live: 0644 owned by one account, EACCES
-# for the other three github-ci-runner-{2,3,4} accounts). Reuses
-# compose-drift-ro rather than a new group -- every RUNNER_USER is already
-# a member from the grant just above, and this state file is no more
-# sensitive than the drift findings it feeds. setgid (g+s) makes new files
-# inherit the group; compose-drift-watch.py's own write path still chmods
-# each write to 0664 since setgid does not touch permission bits.
-install -d -m 2775 -o root -g "$compose_drift_group" /var/lib/compose-drift-watch
+  # REVIEW-A/#3030: compose-drift-watch.py's failing-healthcheck-streak
+  # duration tracker needs a state file every runner instance can both read
+  # and write across scheduled sweeps -- shared /tmp does NOT give it that:
+  # the file itself ends up owned by whichever single runner user created it,
+  # at that user's umask (confirmed live: 0644 owned by one account, EACCES
+  # for the other three github-ci-runner-{2,3,4} accounts). Reuses
+  # compose-drift-ro rather than a new group -- every RUNNER_USER is already
+  # a member from the grant just above, and this state file is no more
+  # sensitive than the drift findings it feeds. setgid (g+s) makes new files
+  # inherit the group; compose-drift-watch.py's own write path still chmods
+  # each write to 0664 since setgid does not touch permission bits.
+  install -d -m 2775 -o root -g "$compose_drift_group" /var/lib/compose-drift-watch
 
-# REVIEW-A/#3025: same narrow shape as the #2764 grant just above, for a
-# different unreadable-by-this-user directory. `/mnt/usb-recovery/apiary-
-# backups` is `drwx------ xore xore`; widening its mode or this user's
-# group membership was rejected for the same reason as the .env case --
-# it is the only on-disk copy of the essentials backup archives, and
-# should stay closed to every account except xore and root. The helper
-# (scripts/backup-freshness-check.py) returns only a bare mtime or
-# `EMPTY`, never a filename or listing.
-backup_staleness_group=backup-staleness-ro
-if ! getent group "$backup_staleness_group" >/dev/null 2>&1; then
-  groupadd --system "$backup_staleness_group"
-fi
-usermod -aG "$backup_staleness_group" "$RUNNER_USER"
+  # REVIEW-A/#3025: same narrow shape as the #2764 grant just above, for a
+  # different unreadable-by-this-user directory. `/mnt/usb-recovery/apiary-
+  # backups` is `drwx------ xore xore`; widening its mode or this user's
+  # group membership was rejected for the same reason as the .env case --
+  # it is the only on-disk copy of the essentials backup archives, and
+  # should stay closed to every account except xore and root. The helper
+  # (scripts/backup-freshness-check.py) returns only a bare mtime or
+  # `EMPTY`, never a filename or listing.
+  backup_staleness_group=backup-staleness-ro
+  if ! getent group "$backup_staleness_group" >/dev/null 2>&1; then
+    groupadd --system "$backup_staleness_group"
+  fi
+  usermod -aG "$backup_staleness_group" "$RUNNER_USER"
 
-install -m 0755 -o root -g root \
-  "$here/backup-freshness-check.py" \
-  /opt/github-ci-runner-helpers/backup-freshness-check.py
+  install -m 0755 -o root -g root \
+    "$here/backup-freshness-check.py" \
+    /opt/github-ci-runner-helpers/backup-freshness-check.py
 
-# Dir argument pinned to the one known backup dir so sudoers itself only
-# wildcards the glob argument; the helper's own validation (rejects a
-# glob containing '/' or '..') is still the real boundary for that part.
-backup_sudoers_file=/etc/sudoers.d/backup-staleness-ro
-backup_sudoers_tmp="$(mktemp)"
-cat > "$backup_sudoers_tmp" <<EOF
+  # Dir argument pinned to the one known backup dir so sudoers itself only
+  # wildcards the glob argument; the helper's own validation (rejects a
+  # glob containing '/' or '..') is still the real boundary for that part.
+  backup_sudoers_file=/etc/sudoers.d/backup-staleness-ro
+  backup_sudoers_tmp="$(mktemp)"
+  cat > "$backup_sudoers_tmp" <<EOF
 %${backup_staleness_group} ALL=(root) NOPASSWD: /usr/bin/python3 /opt/github-ci-runner-helpers/backup-freshness-check.py /mnt/usb-recovery/apiary-backups *
 EOF
-if ! visudo -cf "$backup_sudoers_tmp"; then
-  echo "generated sudoers file failed validation, not installing it" >&2
+  if ! visudo -cf "$backup_sudoers_tmp"; then
+    echo "generated sudoers file failed validation, not installing it" >&2
+    rm -f "$backup_sudoers_tmp"
+    exit 1
+  fi
+  install -m 0440 -o root -g root "$backup_sudoers_tmp" "$backup_sudoers_file"
   rm -f "$backup_sudoers_tmp"
-  exit 1
+else
+  echo "--build-only: skipping homeserver watch helpers (compose-drift-ro, backup-staleness-ro)"
 fi
-install -m 0440 -o root -g root "$backup_sudoers_tmp" "$backup_sudoers_file"
-rm -f "$backup_sudoers_tmp"
 
 # Host provision for the routed checks, kept idempotent so re-running this
 # script restores a drifted box. The runner user has no general sudo BY

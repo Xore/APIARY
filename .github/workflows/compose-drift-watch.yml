@@ -30,7 +30,9 @@ concurrency:
 
 jobs:
   sweep:
-    runs-on: [self-hosted, linux, x64, honeypot-ci]
+    # honeypot-homeserver (#3379): this job measures the homeserver itself,
+    # so it must never land on a --build-only honeypot-ci executor elsewhere.
+    runs-on: [self-hosted, linux, x64, honeypot-ci, honeypot-homeserver]
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7

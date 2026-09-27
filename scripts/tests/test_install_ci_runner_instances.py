@@ -89,6 +89,18 @@ class InstallCiRunnerInstancesTest(unittest.TestCase):
         self.assertEqual(primary["labels"], second["labels"])
         self.assertIn("honeypot-ci", primary["labels"])
 
+    def test_homeserver_role_adds_the_homeserver_label(self) -> None:
+        # #3379: compose-drift/backup-staleness/disk-usage measure the
+        # homeserver itself and require this label on top of honeypot-ci.
+        labels = derive("--repo", "Xore/APIARY")["labels"].split(",")
+        self.assertIn("honeypot-ci", labels)
+        self.assertIn("honeypot-homeserver", labels)
+
+    def test_build_only_joins_the_pool_without_the_homeserver_label(self) -> None:
+        labels = derive("--repo", "Xore/APIARY", "--build-only")["labels"].split(",")
+        self.assertIn("honeypot-ci", labels)
+        self.assertNotIn("honeypot-homeserver", labels)
+
     def test_missing_repo_still_fails_loudly(self) -> None:
         with self.assertRaises(subprocess.CalledProcessError):
             derive()
