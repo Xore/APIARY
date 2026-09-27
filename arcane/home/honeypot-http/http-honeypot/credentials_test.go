@@ -839,3 +839,178 @@ func mustJSON(t *testing.T, line string) string {
 	}
 	return string(out)
 }
+
+// ----------------------------------------------------- the shapes that leaked ----
+//
+// Everything below this line was found by running the built binary and
+// grepping its own emitted event stream for a known password, not by reading
+// the code. Each of these five requests stored the secret AND (for the last
+// two) claimed `credential_status: absent` while holding it, which is the
+// failure #3213 exists to end: the event was simultaneously saying "there is
+// nothing here" and "here is the password".
+//
+// The common cause is that the scrubber only knows how to bound a value that
+// is introduced by a separator (`=`, `:`, `>`, a quote). Every shape below
+// puts something between the credential field name and its value, or has no
+// field name and no separator at all.
+
+// TestAMultipartLoginPostIsScrubbed covers the shape that is not exotic at
+// all: a login form posted as multipart. It leaked for a structural reason --
+// in multipart the name and the value are separated by a blank LINE, so there
+// was no separator for the key/value scrubber to act on and the whole body
+// passed through with the password in it.
+func TestAMultipartLoginPostIsScrubbed(t *testing.T) {
+	s, _ := newTestServer()
+	body := "--X\r\n" +
+		"Content-Disposition: form-data; name=\"username\"\r\n\r\n" + canaryUsername + "\r\n" +
+		"--X\r\n" +
+		"Content-Disposition: form-data; name=\"password\"\r\n\r\n" + canarySecret + "\r\n" +
+		"--X\r\n" +
+		"Content-Disposition: form-data; name=\"note\"\r\n\r\nkeep-this\r\n" +
+		"--X--"
+	_, e := postForm(t, s, http.MethodPost, "/upload", "multipart/form-data; boundary=X", body)
+
+	if strings.Contains(e.Body, canarySecret) {
+		t.Fatalf("a multipart password reached the event: %q", e.Body)
+	}
+	if !strings.Contains(e.Body, redactMarker) {
+		t.Fatalf("nothing was redacted from the multipart body: %q", e.Body)
+	}
+	// The rest of the upload still has to be readable: the field names, the
+	// account, the boundaries, and the part nobody asked us to scrub. A
+	// redactor that destroyed these would cost the fleet the whole reason
+	// it records the request.
+	for _, keep := range []string{`name="username"`, `name="password"`, `name="note"`, canaryUsername, "keep-this", "--X--"} {
+		if !strings.Contains(e.Body, keep) {
+			t.Errorf("redaction destroyed %q: %q", keep, e.Body)
+		}
+	}
+	if e.CredentialStatus != string(credUnparsed) {
+		t.Errorf("credential_status = %q, want %q for a multipart login post", e.CredentialStatus, credUnparsed)
+	}
+}
+
+// TestAMultipartBoundaryIsCaseSensitive is a bug this suite introduced and
+// then caught in itself: the boundary was being extracted from a
+// lower-cased Content-Type, and a boundary is case-sensitive, so `--X` was
+// looked for as `--x` and the body was passed through untouched. It is here
+// because the fix is a `strings.ToLower` that looks like a cleanup and is not.
+func TestAMultipartBoundaryIsCaseSensitive(t *testing.T) {
+	body := "--BoundaryZ9\r\n" +
+		"Content-Disposition: form-data; name=\"password\"\r\n\r\n" + canarySecret + "\r\n" +
+		"--BoundaryZ9--"
+	got, material := redactSecretValues(body, `multipart/form-data; boundary=BoundaryZ9`)
+	if strings.Contains(got, canarySecret) {
+		t.Fatalf("a case-sensitive boundary was missed: %q", got)
+	}
+	if !material {
+		t.Errorf("material = false, want true: the sensor must not report this body as credential-free")
+	}
+}
+
+// TestAMultipartFilenameIsScrubbedWhenItCarriesACredentialField stops short
+// of redacting every filename. An uploaded filename is payload signal -- what
+// did the attacker try to drop? -- so `invoice.docx` is kept verbatim. What is
+// not kept is a filename carrying a credential-shaped field name, which is
+// how a credential gets reflected back through a header nobody reads.
+func TestAMultipartFilenameIsScrubbedWhenItCarriesACredentialField(t *testing.T) {
+	leaky := "--X\r\n" +
+		"Content-Disposition: form-data; name=\"file\"; filename=\"password=" + canarySecret + ".txt\"\r\n\r\nx\r\n--X--"
+	got, _ := redactSecretValues(leaky, "multipart/form-data; boundary=X")
+	if strings.Contains(got, canarySecret) {
+		t.Errorf("a credential inside a filename survived: %q", got)
+	}
+
+	benign := "--X\r\n" +
+		"Content-Disposition: form-data; name=\"file\"; filename=\"invoice.docx\"\r\n\r\nx\r\n--X--"
+	got, _ = redactSecretValues(benign, "multipart/form-data; boundary=X")
+	if !strings.Contains(got, "invoice.docx") {
+		t.Errorf("an ordinary upload filename was redacted away: %q", got)
+	}
+	// "filename=" contains "name=" as a substring. Reading the filename
+	// parameter as if it were the field name would report every file part
+	// as a credential field.
+	if got != benign {
+		t.Errorf("a file part was rewritten with no credential in it: %q", got)
+	}
+}
+
+// TestAnHTMLFormFieldIsScrubbed covers `<input name="password" value="...">`,
+// which is how every HTML login form in the fleet spells the field, quoted
+// and unquoted. The scrubber wrote the name, met a 'v' where it expected a
+// separator, and gave up.
+func TestAnHTMLFormFieldIsScrubbed(t *testing.T) {
+	for _, body := range []string{
+		`<form action="/login"><input name="password" value="` + canarySecret + `"></form>`,
+		`<input name=password value=` + canarySecret + `>`,
+		`<input name='password' value='` + canarySecret + `'>`,
+		`<input name="loginPassword" value="` + canarySecret + `">`,
+		`<input type="text" name="username" value="admin"><input type="password" name="password" value="` + canarySecret + `">`,
+	} {
+		got, _ := redactSecretValues(body, "text/html")
+		if strings.Contains(got, canarySecret) {
+			t.Errorf("redactSecretValues(%q) = %q -- the secret survived", body, got)
+		}
+		if !strings.Contains(got, redactMarker) {
+			t.Errorf("redactSecretValues(%q) = %q -- nothing was redacted", body, got)
+		}
+	}
+	// The non-credential attributes stay, so the probe is still readable.
+	got, _ := redactSecretValues(`<input name="username" value="admin"><input name="password" value="`+canarySecret+`">`, "text/html")
+	if !strings.Contains(got, `name="username" value="admin"`) {
+		t.Errorf("redaction destroyed the surrounding markup: %q", got)
+	}
+	// A tag boundary stops the search. A field name must not reach into a
+	// later element's value, or the scrubber becomes a document rewriter.
+	got, _ = redactSecretValues(`<a title="password"><b value="`+canarySecret+`">`, "text/html")
+	if !strings.Contains(got, canarySecret) {
+		t.Errorf("the search escaped its own tag and redacted an unrelated value: %q", got)
+	}
+}
+
+// TestAContentTypeThatLiesIsNotBelieved is the last of the five, and the one
+// with the worst consequence. A body of `password: <secret>` labelled
+// form-urlencoded was reported `credential_status: absent` -- a positive
+// claim that the request carried no credentials -- while the stored body held
+// the password. The JSON branch already refused to take the header's word for
+// it; the form branch did not.
+func TestAContentTypeThatLiesIsNotBelieved(t *testing.T) {
+	cases := []struct{ name, body string }{
+		{"form-typed bytes that are not a form", "password: " + canarySecret},
+		{"form-typed JSON", `{"password":"` + canarySecret + `"}`},
+		{"form-typed, the value itself carrying the name", "password=" + canarySecret},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, material := redactSecretValues(tc.body, "application/x-www-form-urlencoded")
+			if strings.Contains(got, canarySecret) {
+				t.Errorf("a lying Content-Type stored the secret: %q", got)
+			}
+			if !material {
+				t.Errorf("material = false, want true: reporting this body as credential-free " +
+					"is the bug -- the event claimed absent while holding the password")
+			}
+		})
+	}
+
+	// And end to end, because "material" is only useful if it reaches the
+	// event: the status has to stop saying absent.
+	s, _ := newTestServer()
+	_, e := postForm(t, s, http.MethodPost, "/login", "application/x-www-form-urlencoded", "password: "+canarySecret)
+	if e.CredentialStatus == string(credAbsent) {
+		t.Errorf("credential_status = absent for a body holding a password: the header lied and we believed it")
+	}
+	if e.CredentialPresent == nil || !*e.CredentialPresent {
+		t.Errorf("credential_present = %v, want true", e.CredentialPresent)
+	}
+	if strings.Contains(mustJSON(t, mustLog(t, s)), canarySecret) {
+		t.Errorf("the secret survived into the emitted log line")
+	}
+}
+
+// mustLog returns the whole log buffer for a server whose single request has
+// already been driven, so an assertion can search every field at once.
+func mustLog(t *testing.T, s *server) string {
+	t.Helper()
+	return s.log.out.(*bytes.Buffer).String()
+}

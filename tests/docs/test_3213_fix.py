@@ -20,10 +20,17 @@ assumed:
   with no dependency on each other, so `redaction.go` and `credentials.go`
   exist as deliberate byte-identical copies. That is exactly how a redaction
   bug is inherited: the fix lands in one module, the other keeps the old
-  behaviour, and both look correct in review. Two redaction bugs found while
-  writing this (a field name truncated to `pass[redacted]`, and a quoted JSON
-  value bounded by the wrong separator so `{"password":"secret"}` leaked) were
-  in the shared body precisely because it was copied rather than derived.
+  behaviour, and both look correct in review. Bugs found by running the built
+  binaries and grepping their own emitted event streams, not by reading the
+  code, are recorded here because each one is a shape a reviewer reads past:
+  a field name truncated to `pass[redacted]`; a quoted JSON value bounded by
+  the wrong separator so `{"password":"secret"}` leaked; a multipart part,
+  whose value sits after a blank LINE and so had no separator for a
+  key/value scan to act on; an HTML `name="password" value="..."` field,
+  where another attribute sits between the name and the value; a form-typed
+  body whose bytes are not a form, which was reported `absent` *and* stored
+  verbatim; and `type="password"` read as a field name, which rewrote the
+  following `name=` and walked the cursor past the real value.
 * **a `password` field returning on the event**, in either module. It is
   absent from both structs today; nothing stops a later field from reintroducing
   it under a new name or an `omitempty` that a test would not notice.
@@ -387,6 +394,10 @@ def test_the_headline_go_tests_are_still_here():
             "TestUnknownIsNeverCollapsedIntoAbsent",
             "TestAuthRealIsUnreachable",
             "TestAuthOutcomeIsNeverDerivedFromStatus",
+            "TestAMultipartLoginPostIsScrubbed",
+            "TestAMultipartBoundaryIsCaseSensitive",
+            "TestAnHTMLFormFieldIsScrubbed",
+            "TestAContentTypeThatLiesIsNotBelieved",
         ],
         ASA: [
             "TestPasswordNeverReachesTheEvent",
@@ -396,6 +407,9 @@ def test_the_headline_go_tests_are_still_here():
             "TestTheLoginFailurePageIsNotAnAuthSuccess",
             "TestNoSessionIdWasInvented",
             "TestCVEPayloadSurvivesRedaction",
+            "TestAMultipartLogonPostIsScrubbedOnTheASA",
+            "TestAnHTMLFormFieldIsScrubbedOnTheASA",
+            "TestAContentTypeThatLiesIsNotBelievedOnTheASA",
         ],
     }
     for root, names in expected.items():

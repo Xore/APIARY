@@ -460,8 +460,27 @@ func redactSecretValues(raw, contentType string) (string, bool) {
 	}
 	ct := strings.ToLower(contentType)
 	switch {
+	case strings.Contains(ct, "multipart/form-data"):
+		// A multipart part's value sits after a blank LINE, so it needs
+		// its own pass. Checked before the general scrubber for the same
+		// reason redactBareBasic is: this shape carries no separator for a
+		// key/value scan to act on, and the password is in the part body.
+		if out, ok := redactMultipart(raw, multipartBoundary(contentType)); ok {
+			return out, true
+		}
+		// Not multipart after all, or nothing credential-shaped in it.
+		// The general scrubber is the honest fallback.
 	case strings.Contains(ct, "application/x-www-form-urlencoded"):
-		return redactForm(raw)
+		if out, ok := redactForm(raw); ok {
+			return out, true
+		}
+		// Content-Type claims a form and the bytes are not one. Fall
+		// through to the opaque scrubber rather than passing unparsed bytes
+		// through on the strength of a header the attacker wrote -- which
+		// is the same rule the JSON case below follows. A body of
+		// `password: hunter2` labelled as a form was reported absent AND
+		// stored verbatim, so the sensor claimed there was nothing here
+		// while holding the secret.
 	case strings.Contains(ct, "json"):
 		if out, ok := redactJSON(raw); ok {
 			return out, ok

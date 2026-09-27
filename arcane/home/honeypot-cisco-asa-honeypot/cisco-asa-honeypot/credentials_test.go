@@ -852,3 +852,129 @@ func TestSecretWithSpacesIsFullyRedacted(t *testing.T) {
 		t.Errorf("the scrubber ate the line after the credential: %q", got)
 	}
 }
+
+// ----------------------------------------------------- the shapes that leaked ----
+//
+// Everything below was found by running the built binary and grepping its own
+// emitted event stream for a known password, not by reading the code. The
+// scrubber is shared with http-honeypot as a deliberate byte-identical copy
+// (redaction.go), so the shapes are the same on both decoys; what differs is
+// where the body lands afterwards, and here it lands in the event's `data`
+// field -- the field that held this sensor's full WebVPN logon form,
+// username and password both, before #3213.
+//
+// The common cause is that the scrubber only knows how to bound a value
+// introduced by a separator (`=`, `:`, `>`, a quote). Each shape below puts
+// something between the credential field name and its value, or has no
+// separator at all.
+
+// TestAMultipartLogonPostIsScrubbedOnTheASA is the shared scrubber's newest
+// shape, and it leaked for a structural reason: in multipart the name and the
+// value are separated by a blank LINE, so there was no separator for a
+// key/value scan to act on and the whole body reached `data` with the
+// password in it.
+func TestAMultipartLogonPostIsScrubbedOnTheASA(t *testing.T) {
+	h := newFileLoggerHandler(t)
+	body := "--X\r\n" +
+		"Content-Disposition: form-data; name=\"username\"\r\n\r\nadmin\r\n" +
+		"--X\r\n" +
+		"Content-Disposition: form-data; name=\"password\"\r\n\r\n" + canarySecret + "\r\n" +
+		"--X\r\n" +
+		"Content-Disposition: form-data; name=\"group\"\r\n\r\nnexusai\r\n" +
+		"--X--"
+	events := asaExchange(t, h, http.MethodPost, "/+webvpn+/index.html", "multipart/form-data; boundary=X", body)
+
+	for _, e := range events {
+		if strings.Contains(e.Data, canarySecret) {
+			t.Fatalf("a multipart password reached the event data: %q", e.Data)
+		}
+	}
+	post := last(t, events)
+	for _, keep := range []string{`name="username"`, `name="password"`, "admin", "nexusai", "--X--"} {
+		if !strings.Contains(post.Data, keep) {
+			t.Errorf("redaction destroyed %q: %q", keep, post.Data)
+		}
+	}
+	if post.CredentialStatus == string(credAbsent) {
+		t.Errorf("credential_status = absent for a body holding a password")
+	}
+}
+
+// TestAMultipartFilenameIsScrubbedWhenItCarriesACredentialField stops short
+// of redacting every filename: an uploaded filename is payload signal. What
+// is not kept is a filename carrying a credential-shaped field name, which is
+// how a credential gets reflected back through a header nobody reads.
+func TestAMultipartFilenameIsScrubbedWhenItCarriesACredentialField(t *testing.T) {
+	leaky := "--X\r\n" +
+		"Content-Disposition: form-data; name=\"file\"; filename=\"password=" + canarySecret + ".txt\"\r\n\r\nx\r\n--X--"
+	got, _ := redactSecretValues(leaky, "multipart/form-data; boundary=X")
+	if strings.Contains(got, canarySecret) {
+		t.Errorf("a credential inside a filename survived: %q", got)
+	}
+	// "filename=" contains "name=" as a substring, so reading the filename
+	// parameter as the field name would report every file part as one.
+	benign := "--X\r\n" +
+		"Content-Disposition: form-data; name=\"file\"; filename=\"seed.txt\"\r\n\r\nx\r\n--X--"
+	if got, _ := redactSecretValues(benign, "multipart/form-data; boundary=X"); got != benign {
+		t.Errorf("a file part was rewritten with no credential in it: %q", got)
+	}
+}
+
+// TestAnHTMLFormFieldIsScrubbedOnTheASA covers `<input name="password"
+// value="...">`, which is how every HTML login form spells the field. The
+// scrubber wrote the name, met a 'v' where it expected a separator, and gave
+// up.
+func TestAnHTMLFormFieldIsScrubbedOnTheASA(t *testing.T) {
+	for _, body := range []string{
+		`<form action="/+webvpn+/index.html"><input name="password" value="` + canarySecret + `"></form>`,
+		`<input name=password value=` + canarySecret + `>`,
+		`<input type="text" name="username" value="admin"><input type="password" name="password" value="` + canarySecret + `">`,
+	} {
+		got, _ := redactSecretValues(body, "text/html")
+		if strings.Contains(got, canarySecret) {
+			t.Errorf("redactSecretValues(%q) = %q -- the secret survived", body, got)
+		}
+		if !strings.Contains(got, redactMarker) {
+			t.Errorf("redactSecretValues(%q) = %q -- nothing was redacted", body, got)
+		}
+	}
+	// A tag boundary stops the search: a field name must not reach into a
+	// later element's value, or the scrubber becomes a document rewriter.
+	got, _ := redactSecretValues(`<a title="password"><b value="`+canarySecret+`">`, "text/html")
+	if !strings.Contains(got, canarySecret) {
+		t.Errorf("the search escaped its own tag and redacted an unrelated value: %q", got)
+	}
+}
+
+// TestAContentTypeThatLiesIsNotBelievedOnTheASA is the one with the worst
+// consequence. A body of `password: <secret>` labelled form-urlencoded was
+// reported `credential_status: absent` -- a positive claim that the request
+// carried no credentials -- while `data` held the password. The JSON branch
+// already refused to take the header's word for it; the form branch did not.
+func TestAContentTypeThatLiesIsNotBelievedOnTheASA(t *testing.T) {
+	for _, body := range []string{
+		"password: " + canarySecret,
+		`{"password":"` + canarySecret + `"}`,
+	} {
+		got, material := redactSecretValues(body, "application/x-www-form-urlencoded")
+		if strings.Contains(got, canarySecret) {
+			t.Errorf("a lying Content-Type stored the secret: %q", got)
+		}
+		if !material {
+			t.Errorf("material = false for %q, want true: reporting this body as "+
+				"credential-free is the bug -- the event claimed absent while holding the password", body)
+		}
+	}
+
+	// And end to end, because "material" is only useful if it reaches the
+	// event: the status has to stop saying absent.
+	h := newFileLoggerHandler(t)
+	post := last(t, asaExchange(t, h, http.MethodPost, "/+CSCOE+/logon.html",
+		"application/x-www-form-urlencoded", "password: "+canarySecret))
+	if post.CredentialStatus == string(credAbsent) {
+		t.Errorf("credential_status = absent for a body holding a password: the header lied and we believed it")
+	}
+	if strings.Contains(post.Data, canarySecret) {
+		t.Errorf("the secret survived into the event data: %q", post.Data)
+	}
+}
