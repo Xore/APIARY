@@ -1,4 +1,19 @@
 # APIARY dashboard design review — dashboard.example — 2026-08-17
+
+> **Public, redacted copy — status as of 2026-09-27.** The address redaction in
+> this file is deliberate and correct as it stands: the only address literals
+> here are `127.0.0.1` (loopback) and `203.0.113.1` (RFC 5737 TEST-NET-3), and
+> the only hostname is a reserved `.example` domain. Do not substitute real
+> values for them, and do not restore anything redacted out of the source copy.
+>
+> The findings below are a **snapshot of a review session on 2026-08-17, not a
+> description of the current code**. Several cite the Go dashboard's static
+> assets and route table by name (`hp-app.js`, `hp-dynamic-nav.js`,
+> `routes.go`); that dashboard was deleted in #1628 on 2026-08-22, five days
+> after this review, and none of those files exist in the repository any more.
+> The current route authority is the Rust `axum` service at
+> `arcane/home/honeypot-dashboard/backend-service/src/main.rs`, so re-locate a
+> finding's code there before acting on it.
 ## Findings (running)
 - Overview (light): loads fast, authenticated. Heatmap "Activity — last 24h" dominates; lower rows (multipot, conpot-kamstrup, endlessh) appear near-empty/pale — visual weight wasted?
 - Theme toggle: monitor icon top-right (left of LIVE). Dark theme renders correctly on Overview.
