@@ -484,7 +484,7 @@ def test_standdown_helper_and_audit_agree_on_the_path_and_the_window():
 
 
 @pytest.mark.skipif(
-    shutil.which("unshare") is None, reason="needs a user+mount namespace to act as root"
+    not _can_sandbox(), reason="needs a working user+mount namespace to act as root"
 )
 def test_declare_show_clear_round_trip(tmp_path):
     """Runs the real tool as (namespaced) root, so the file it writes is a real
@@ -510,6 +510,9 @@ stat -c '%a %U' '{declaration}'
     assert "no declaration at" in proc.stdout
 
 
+@pytest.mark.skipif(
+    not _can_sandbox(), reason="needs a working user+mount namespace to act as root"
+)
 def test_declare_refuses_what_the_audit_would_refuse_too_honour(tmp_path):
     """The tool and the audit must not disagree about validity -- a window the
     writer accepts but the reader ignores would be an exception that exists on
