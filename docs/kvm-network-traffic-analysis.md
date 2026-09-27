@@ -18,7 +18,9 @@
 
 Traffic is captured on the host side of an isolated libvirt bridge, never
 inside the guest and never by an agent the guest could interfere with. There
-are **two** such bridges, because there are two sandboxes:
+are **two** such bridges for the detonation pair documented here (CAPE adds
+`virbr-cape` and GHOSTS adds `virbr-ghosts`, and controlled mode puts
+`198.18.0.0/24` on `virbr-hpsbx` itself):
 
 | | Windows detonation guest | Linux / Wine runner |
 |---|---|---|
@@ -27,7 +29,7 @@ are **two** such bridges, because there are two sandboxes:
 | Network XML | `sandbox/windows/setup/sandbox-network.xml` | `sandbox/network.xml` |
 | Fake internet | INetSim at `10.10.10.1` | none by default; optional logged DNS + Squid allowlist (`controlled` mode) |
 | Capture | `docker-compose.sandbox.yml` (tcpdump, Zeek, Suricata) | root-owned `tcpdump` per job, host and guest side |
-| Results | `sandbox/results/<run>/` | `/var/lib/honeypot-sandbox/results/` (root-only), sanitized export copied out |
+| Results | `$WINDOWS_SANDBOX_RESULTS_DIR/<sha256>/` — `run_sample.py` overrides the compose default of `sandbox/results/current` per run | root-only, sanitized export copied out |
 | Orchestrator | `sandbox/windows/orchestrate/run_sample.py` | `sandbox/run-linux-sample.sh` |
 
 Neither bridge has a `<forward>` element, so neither can route anywhere. That
@@ -85,7 +87,11 @@ For the Windows bridge:
 1. The libvirt network has no `<forward>`.
 2. The gateway containers sit on a macvlan marked `internal: true`, which
    removes the default route Docker would otherwise install.
-3. Phase 0 adds an iptables DROP pair across `virbr-sandbox`.
+3. Phase 0 asks the operator to add a FORWARD DROP pair across
+   `virbr-sandbox`. This is a documented manual step, not something a script
+   applies — re-verify it against this host's firewall backend, which is now
+   Rocky 10.2 with firewalld/nftables rather than the iptables the step was
+   originally written for.
 
 Removing any one of them because "the container needs to pull something" puts
 live malware on the internet. Build images ahead of time instead.
@@ -170,8 +176,10 @@ for a run the worker does not know about.
   Authenticated administrators can download the pcaps. Oversize pcaps and the
   raw result directories stay root-only.
 - **`generate_report.py`** folds `zeek_logs/http.log` into the Windows report.
-  The Linux sandbox has no Zeek equivalent — also
-  [#87](https://github.com/Xore/APIARY/issues/87).
+  The Linux sandbox now gets Zeek too, offline over the finished pcap rather
+  than live on the bridge (`sandbox/run-linux-sample.sh` runs `zeek -r` and
+  `sandbox/export-result.py` reads `conn`/`dns`/`http`/`ssl`/`files` from
+  `zeek_logs/`).
 
 ## 5. Retention
 
