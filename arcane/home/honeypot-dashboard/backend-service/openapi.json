@@ -10584,6 +10584,26 @@
         ]
       }
     },
+    "/livez": {
+      "get": {
+        "operationId": "get_livez",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Success."
+          }
+        },
+        "summary": "Liveness. The same handler as /healthz under a second name (main.rs); public like it.",
+        "tags": [
+          "other"
+        ]
+      }
+    },
     "/metrics": {
       "get": {
         "operationId": "get_metrics",
@@ -10601,6 +10621,26 @@
         "summary": "Prometheus exposition for the #1972 request metrics. Public on purpose, like /healthz.",
         "tags": [
           "platform"
+        ]
+      }
+    },
+    "/readyz": {
+      "get": {
+        "operationId": "get_readyz",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Success."
+          }
+        },
+        "summary": "Readiness: Elasticsearch reachable and this tier's write targets checked. Public like /healthz.",
+        "tags": [
+          "other"
         ]
       }
     }
@@ -10643,6 +10683,10 @@
     {
       "description": "Operator housekeeping: block lists, service accounts, canary tokens, problem reports.",
       "name": "operations"
+    },
+    {
+      "description": "Routes this service exposes that do not fit the groups above; grouped so nothing is unrouted.",
+      "name": "other"
     },
     {
       "description": "The dashboard's own view of the service: landing overview and KPIs, health, source and pipeline health, and platform settings.",

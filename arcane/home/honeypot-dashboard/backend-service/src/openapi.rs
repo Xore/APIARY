@@ -1091,6 +1091,12 @@ fn operations() -> Vec<Op> {
             .public()
             .ok()
             .err(502),
+        op("GET", "/livez", "Liveness. The same handler as /healthz under a second name (main.rs); public like it.")
+            .public()
+            .ok(),
+        op("GET", "/readyz", "Readiness: Elasticsearch reachable and this tier's write targets checked. Public like /healthz.")
+            .public()
+            .ok(),
         op("GET", "/metrics", "Prometheus exposition for the #1972 request metrics. Public on purpose, like /healthz.")
             .public()
             .ok_media("text/plain", "Prometheus text exposition format."),
@@ -1535,9 +1541,12 @@ mod tests {
                 );
                 assert_eq!(
                     secured,
-                    !(path.starts_with("/healthz") || path.starts_with("/metrics")),
-                    "{method} {path}: /healthz and /metrics are the only routes outside \
-                     the service-token tier (main.rs)"
+                    !matches!(
+                        path.as_str(),
+                        "/healthz" | "/livez" | "/readyz" | "/metrics"
+                    ),
+                    "{method} {path}: /healthz, /livez, /readyz and /metrics are the only \
+                     routes outside the service-token tier (main.rs)"
                 );
 
                 // Every `Json<T>` body can be refused by the extractor

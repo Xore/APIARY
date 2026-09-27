@@ -114,8 +114,12 @@ jobs:
       LISTEN_ADDR: 127.0.0.1:8081
       ELASTICSEARCH_URL: http://127.0.0.1:9200
       BASE_URL: http://127.0.0.1:8081
+      # Through env, not ${{ inputs.* }} inline: a workflow_dispatch input is
+      # attacker-influenced text and zizmor is right that expanding it into a
+      # run block is code injection (audit: template-injection).
+      MAX_EXAMPLES: ${{ inputs.max_examples }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install the pinned schemathesis
         run: |
@@ -203,7 +207,7 @@ jobs:
           schemathesis run openapi.json \
             --url "${BASE_URL}" \
             --phases coverage,fuzzing \
-            --max-examples "${{ inputs.max_examples }}" \
+            --max-examples "${MAX_EXAMPLES}" \
             --exclude-path '/api/v1/live' \
             --checks all \
             --report junit --report-dir "${RUNNER_TEMP}/report-unauthenticated" \
@@ -221,7 +225,7 @@ jobs:
             -H "X-Service-Token: ${SERVICE_TOKEN}" \
             -H "X-Actor-Username: schemathesis" \
             --phases coverage,fuzzing \
-            --max-examples "${{ inputs.max_examples }}" \
+            --max-examples "${MAX_EXAMPLES}" \
             --exclude-path '/api/v1/live' \
             --exclude-path '/metrics' \
             --report junit --report-dir "${RUNNER_TEMP}/report-authenticated" \
@@ -267,7 +271,7 @@ jobs:
         # quotes. upload-artifact resolves paths against the workspace
         # root, not this job's working-directory.
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v6
         with:
           name: schemathesis-reports
           path: |
