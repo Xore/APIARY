@@ -52,8 +52,9 @@ The `payload-dedupe` service scans these stores hourly and atomically replaces
 same-filesystem duplicates with hard links. Existing event/download URLs remain
 valid while duplicate disk blocks are reclaimed; its last-run report is stored
 at `state/dedupe/payload-dedupe.json`.
-Its diagnostic logger is limited to `info,warning,error` so debug chatter cannot
-consume the data disk. The `log-maintenance` sidecar copy-truncates and gzips
+Neither service produces per-event chatter: `payload-dedupe` prints a single
+JSON result line per pass, and `log-maintenance` writes one stderr line per
+rotation. The `log-maintenance` sidecar copy-truncates and gzips
 human-readable Dionaea, Conpot, and Cowrie logs at 256 MiB (four archives).
 Structured JSON event streams are deliberately never rotated by that sidecar,
 which preserves Filebeat offsets and dashboard ingestion.
@@ -70,14 +71,22 @@ GeoIP enrichment is best-effort: empty or malformed addresses are skipped, but
 the original event is always retained.
 ILM keeps raw Suricata indices for 7 days, honeypot data streams for 30 days,
 and dead-letter records for 60 days so high-volume scans cannot fill the disk.
+Those are the values at the *code* fallback `HONEYPOT_RETENTION_DAYS=30`. Every
+window derives from that one knob, and the shipped configuration does **not**
+use the fallback: all four tracked `.env.example` files set
+`HONEYPOT_RETENTION_DAYS=21` (#2820), at which the three windows above become
+**4d / 21d / 42d** — Suricata is `retention*7/30` (integer-truncated, floored
+at 1) and dead-letter is `retention*2`. Only the ILM *policy names*
+(`suricata-7d`, `honeypot-30d`, `dead-letter-60d`) stay fixed; they are
+identifiers referenced by the index templates, not claims about duration.
 
 ## Runtime resource budgets
 
 Every service has a CPU, memory, and Docker `json-file` log budget. The
 limits are intentionally generous relative to the host (16 logical CPUs and
-91 GiB RAM): Elasticsearch gets 8 GiB with a 4 GiB heap; Arkime capture 6 GiB;
+91 GiB RAM): Elasticsearch gets 12 GiB with a 6 GiB heap; Arkime capture 6 GiB;
 Kibana, Filebeat, and the TANNER analyzer receive 2 GiB; EveBox, Dionaea, Arkime
-viewer, and the live dashboard receive 1 GiB (the dashboard also has one CPU). The
+viewer, and the live dashboard receive 1 GiB (the dashboard also has two CPUs). The
 remaining lightweight sensors receive 128-512 MiB. Docker console logs rotate
 at 25 MiB with three files, independently from sensor event files under
 `./logs`.
@@ -86,7 +95,7 @@ at 25 MiB with three files, independently from sensor event files under
 
 | Dashboard | Subdomain | Container |
 |---|---|---|
-| Live sensor view (ours) | `honeypot.<domain>` | `dashboard` :8090 |
+| Live sensor view (ours) | `honeypot.<domain>` | `dashboard-next` :8080 |
 | Kibana (ELK + Suricata) | `kibana.<domain>` | `kibana` :5601 |
 | TANNER web-attack analysis | `tanner.<domain>` | `tanner_web` :8091 |
 | EveBox (Suricata events) | `evebox.<domain>` | `evebox` :5636 |
@@ -116,10 +125,13 @@ XSS, command execution, PHP code/object injection, XXE, CRLF and template
 injection) and stores sessions in Redis. TANNER's emulation containers are
 isolated from the homeserver Docker socket and are not a malware detonation
 environment. Suspicious payload detonation belongs in the separate KVM/libvirt
-sandbox described in [`sandbox/README.md`](sandbox/README.md). Containers: `tanner_redis`,
-`tanner_phpox`, `tanner_api`, `tanner` (analyzer, `:8090`), `tanner_web`
-(dashboard, `:8091`), `snare_clone` (one-shot deterministic persona installer),
-`snare` (`:8080`). The page source lives under [snare/persona](../arcane/home/honeypot-tanner/snare/persona)
+sandbox described in [`sandbox/README.md`](sandbox/README.md). Containers: `tanner_docker`
+(the nested disposable emulator daemon), `tanner_redis`, `tanner_phpox`, `tanner_api`,
+`tanner` (analyzer, `:8090`), `tanner_web` (dashboard, `:8091`), `snare` (`:8080`) --
+seven services, all on `tanner_local`. The persona clone itself is not one of them:
+`snare-clone` is a one-shot job in `honeypot-init` (`hp-snare-clone`) that writes the
+`snare-pages` volume `snare` reads. The page source lives under
+[snare/persona](../arcane/home/honeypot-tanner/snare/persona)
 and is transformed into SNARE's content-addressed store during the image build;
 no third-party site is cloned. All `mushorg/*` images are third-party
 — verify tags/args upstream (needs a live build/pull).
@@ -127,8 +139,10 @@ no third-party site is cloned. All `mushorg/*` images are third-party
 ## Suricata — analysing all the traffic
 
 `suricata` runs **on the VPS** (host networking, sniffing the public interface
-`SURICATA_IFACE`, default `ens6`) so it sees real attacker source IPs before the
-tunnel. It writes to `/opt/stacks/apiary/logs/suricata/` on the VPS:
+`CAPTURE_INTERFACE`, written at boot by `detect-capture-interface.service`,
+falling back to the legacy `SURICATA_IFACE` and then to `eth0` — *not* the old
+`ens6`, which a reboot has already renamed) so it sees real attacker source IPs
+before the tunnel. It writes to `/opt/stacks/apiary/logs/suricata/` on the VPS:
 
 - `eve.json` (alerts, http, dns, tls, flow) — Filebeat on the home server ships
   it to the `suricata-*` Elasticsearch index (stats events are dropped, see
@@ -180,7 +194,9 @@ Web UI: `http://<HP_BIND>:19080` (`arkime.<domain>` via Traefik).
 >   **http/api-honeypots** (`PROXY_PROTOCOL=1`), **dnp3** (`PROXY_PROTOCOL=1`),
 >   **dicompot** (`PROXY_PROTOCOL=1`), **citrix-honeypot**,
 >   **sonicwall-sma-honeypot** (`PROXY_PROTOCOL=1`),
->   **cisco-asa-honeypot**'s WebVPN side and **rdp-honeypot** (`PROXY_PROTOCOL=1`) and **all conpot sensors** (`CONPOT_PROXY_PROTOCOL=1`, gevent shim baked in
+>   **cisco-asa-honeypot**'s WebVPN side and **rdp-honeypot** (`PROXY_PROTOCOL=1`),
+>   **endlessh** (`PROXY_PROTOCOL=1`, public 2022) and **all conpot sensors**
+>   (`CONPOT_PROXY_PROTOCOL=1`, gevent shim baked in
 >   by `conpot/proxy_patch.py`) parse it, so those events log the true IP and
 >   port. The http listener sniffs the header, so Traefik-routed requests (no
 >   header) keep working too.

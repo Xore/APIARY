@@ -36,9 +36,12 @@
 
 For each of the nine areas #154 asked to cover, this maps to APIARY's
 **actual** current architecture — verified against the real compose files,
-Go/Python source, and docs in this tree, not assumed from what a "typical"
+the source, and docs in this tree, not assumed from what a "typical"
 honeypot stack might do. Each entry records: what exists today, whether the
-published campaign's technique applies here, and the evidence.
+published campaign's technique applies here, and the evidence. (The original
+pass read Go and Python source; the Go tier was deleted at #1628 on
+2026-08-22, so a re-read today should be against the Rust modules named in
+the status banner above.)
 
 ---
 
@@ -233,20 +236,24 @@ gap is outbound-to-internet egress policy, tracked separately in #538.
 **Substantially addressed for the dashboard; inconsistent elsewhere.**
 
 - The dashboard's own Docker-socket boundary is the strongest example in
-  this tree: the dashboard container itself never mounts `/var/run/docker.sock`
-  (`arcane/home/honeypot-dashboard/compose.yml`, grepped directly — absent). All
+  this tree: the dashboard containers themselves never mount
+  `/var/run/docker.sock` (`arcane/home/honeypot-dashboard/compose.yml`, grepped
+  directly — its one socket mount belongs to `services-adapter`, below). All
   Docker-lifecycle actions (start/stop/restart) go through
   `hp-services-adapter`, a separate container that is `cap_drop: [ALL]`,
   `read_only: true`, `network_mode: none`, and reachable only via an
   AF_UNIX socket the dashboard also holds — no TCP path exists to abuse it
   remotely even if the dashboard container itself were compromised.
-- `hp-autoheal` is the one other service that does bind-mount the real
-  `/var/run/docker.sock` (`arcane/home/honeypot-utilities/compose.yml`) — it watches
-  containers by label daemon-wide and restarts unhealthy ones. This is a
-  broad, standing grant (full Docker API access, not scoped to specific
-  containers) held by a long-running service; workload-identity-scoped
-  alternatives (e.g. a narrower label-filtered API surface) were not found
-  in this tree.
+- `hp-autoheal` was the one other service that bind-mounted the real
+  `/var/run/docker.sock` (`arcane/home/honeypot-utilities/compose.yml`) — it
+  watches containers by label daemon-wide and restarts unhealthy ones. **That
+  grant has since been narrowed by #592** (the strikethrough item in
+  [Follow-up scope](#follow-up-scope)): it now talks to `hp-docker-socket-proxy`
+  at `tcp://docker-socket-proxy:2375` with no socket bind mount of its own, and
+  the proxy holds the socket `:ro` scoped to `CONTAINERS=1`, `IMAGES=1`,
+  `POST=1` on a private network. What remains is that `CONTAINERS=1` is still
+  daemon-wide rather than label-filtered — the label scoping is
+  `AUTOHEAL_CONTAINER_LABEL` inside autoheal, not an API-side restriction.
 - `tanner_docker` (`arcane/home/honeypot-tanner/compose.yml`) is `privileged: true` with
   its own `tmpfs /var/lib/docker` — explicitly isolated Docker-in-Docker on
   the private `tanner_local` network, not a bind mount of the host socket.
@@ -259,11 +266,10 @@ gap is outbound-to-internet egress policy, tracked separately in #538.
   repo has to short-lived workload identity today.
 
 **Verdict:** the dashboard/services-adapter split is a good existing
-least-privilege pattern worth citing as the template for any future
-privileged-access surface. `hp-autoheal`'s standing daemon-wide Docker
-socket grant is the one credential-lifetime/least-privilege gap worth a
-scoped look (whether its watch scope can be narrowed), separate from #88's
-network-isolation focus.
+least-privilege pattern worth citing as the template for any new
+privileged-access surface. It is also now the template autoheal was moved onto:
+its raw socket grant is gone, replaced by the same narrow-proxy shape, leaving
+only the daemon-wide `CONTAINERS=1` scope.
 
 ---
 
@@ -400,8 +406,10 @@ finding.**
   state; the same fragmentation carried into the Rust cutover's per-source
   worker functions): Suricata/sensor event alerts, `ghidraAlerts`, `githubAnalysisAlerts`,
   sandbox queue/verdict alerts, ML anomaly severity, and (as of #150) the
-  new `llm-analysis` index's own severity field is not yet wired into
-  `alerts.go` at all — it is currently browse-only via `/llm-analysis`.
+  new `llm-analysis` index's own severity field — which was browse-only via
+  `/llm-analysis` until it was wired into the sink as `llm_flagged_alerts` in
+  the Rust cutover, the "Done" item in [Follow-up scope](#follow-up-scope)
+  below.
 - No single "this source_ip/session/sample crossed N independent trust
   boundaries in a Y-minute window" correlation exists — each alert source
   answers its own narrow question. This is exactly the shape the campaign's
@@ -413,11 +421,11 @@ finding.**
   identity for investigation, not by trust-boundary-crossing count for
   alerting.
 
-**Verdict:** this is the clearest concrete gap this research surfaced. Wiring
-`llm-analysis`'s severity into the existing alert sink is a small, immediate
-follow-up; a genuine cross-source trust-boundary-crossing correlation engine
-is squarely phase 3's scope, not something to build inside this research
-pass.
+**Verdict:** this is the clearest concrete gap this research surfaced. Its
+smallest piece — wiring `llm-analysis`'s severity into the alert sink — has
+since landed (`llm_flagged_alerts` in the Rust `alert-notifier`); what remains
+is a genuine cross-source trust-boundary-crossing correlation engine, which is
+squarely phase 3's scope, not something to build inside this research pass.
 
 ---
 
@@ -429,11 +437,11 @@ pass.
 | 2 | Untrusted structured-data processing | Yes, broadly | `html/template` auto-escaping; CI YARA corpus gate | No archive/container-format parsing exists yet — must inherit this discipline when added |
 | 3 | Env/`/proc/*/environ` secret exposure | Yes | `secretFromEnvironment`'s `_FILE` pattern (one use) | Pattern not applied to `ARKIME_*`, `GH_PAT`, VPS SSH key |
 | 4 | Metadata-service / RFC 1918 reachability | No cloud metadata surface exists | Per-sensor private Docker networks | Outbound-to-internet egress policy (tracked in #538) |
-| 5 | Credential lifetime / workload identity | Yes | dashboard/services-adapter split (strong pattern, since carried into the backend-service/worker split) | `hp-autoheal`'s standing daemon-wide docker.sock grant |
+| 5 | Credential lifetime / workload identity | Yes | dashboard/services-adapter split (strong pattern, since carried into the backend-service/worker split); autoheal moved onto the same narrow-proxy shape by #592 | Proxy's `CONTAINERS=1` is still daemon-wide, not label-filtered |
 | 6 | Encoded/chunked C2 | Yes, as honeypot capture surface | Raw payload capture (tanner/Suricata); narrow fixed-destination outbound HTTP clients | No network-layer egress enforcement (folds into #538) |
 | 7 | Repeated recon / low-signal escalation | Yes — core motivating gap | ml-worker anomaly scoring; dashboard campaign clustering | No behavioral-phase correlation or combination-based severity escalation |
 | 8 | Source-control/CI write paths | Yes | `analysis/github/` publish gate (CI-tested); vendored-dep hash pinning | No image digest pinning for this repo's own built images |
-| 9 | Cross-source alert correlation | Yes — core motivating gap | Multiple independent alert sources feed one sink | No trust-boundary-crossing correlation; `llm-analysis` severity not yet wired into alerts |
+| 9 | Cross-source alert correlation | Yes — core motivating gap | Multiple independent alert sources feed one sink, `llm-analysis` severity included | No trust-boundary-crossing correlation engine |
 
 ---
 

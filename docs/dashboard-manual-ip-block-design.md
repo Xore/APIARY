@@ -100,18 +100,31 @@ that already exists** (home is reachable at `10.8.0.2`,
 `docs/CGNAT-DEPLOYMENT.md`), the same "pull, don't get pushed to" posture
 `portbridge-blackhole-refresh.sh` already uses against GitHub. Concretely:
 
-- The dashboard exposes `GET /export/portbridge-manual-blackhole.txt`
-  (then `dashboard/ip_block.go`'s `serveManualBlackholeExport`, now
-  `backend-service/src/ip_block.rs`'s `export`) — plain text, one
+- The dashboard exposes the export as `GET /api/v1/ip-block-export`
+  (`backend-service/src/ip_block.rs`'s `export`) — plain text, one
   IPv4 address per line, the exact format `blackhole.go`'s existing parser
   already reads. No admin auth on the handler itself, the same posture every
-  other `/export/*.csv` GET already takes (access control is the network
+  other `/api/v1/export/*.csv` GET already takes (access control is the network
   boundary — WireGuard-only reachability — not a second app-layer secret);
   the data itself (a list of IPs an operator already chose to block) is no
   more sensitive than the maltrail feed it sits alongside. Reachable from the
   VPS at `10.8.0.2:19090` — the `dashboard` service's real published port
   (`arcane/home/honeypot-dashboard/compose.yml`, `${HP_BIND:-10.8.0.2}:19090:8080`), not an
   assumed default.
+  **The path moved at the Rust cutover and one caller was not carried across.**
+  This decision was written against the Go route
+  `GET /export/portbridge-manual-blackhole.txt` (then `dashboard/ip_block.go`'s
+  `serveManualBlackholeExport`); the Rust `export` keeps that handler's
+  *byte-compatible body* but is registered at `/api/v1/ip-block-export`, and
+  `backend-service/src/main.rs` has no `/export/portbridge-manual-blackhole.txt`
+  route at all. `vps/portbridge-manual-blackhole-refresh.sh` still defaults its
+  `MANUAL_BLACKHOLE_URL` to the **old** path
+  (`http://10.8.0.2:19090/export/portbridge-manual-blackhole.txt`), so on any
+  deployment that has not overridden that variable the sidecar is fetching a
+  404. Either the default needs repointing at `/api/v1/ip-block-export` or the
+  VPS `.env` must set `MANUAL_BLACKHOLE_URL` explicitly — worth confirming
+  against the live host before trusting that manual blocks are reaching
+  portbridge.
 - A new sidecar, `vps/portbridge-manual-blackhole-refresh.sh`, is a near-
   verbatim copy of `portbridge-blackhole-refresh.sh` pointed at that URL
   instead of GitHub's maltrail mirror, writing to a second local file

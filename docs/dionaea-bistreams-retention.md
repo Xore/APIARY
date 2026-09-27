@@ -1,5 +1,15 @@
 # Dionaea bistreams retention — consumer inventory and decision (#2862)
 
+> **Dated decision record — 2026-09-03.** `BISTREAMS_RETENTION_DAYS=30` is
+> still the pinned value in `arcane/home/honeypot-payload-analysis/.env.example`
+> and the decision has not been reopened. Read the forward-looking sections
+> ("nothing is 30 days old yet", "when this window first destroys something —
+> 2026-09-09") as written on 2026-09-03: that date has passed, so the pruning
+> path is now live rather than pending, and the size projections below are the
+> ones that were made then, not current measurements. Re-measure before acting
+> on the capacity numbers. The consumer inventory and the forensic argument are
+> unaffected by the passage of time and are the substance of this document.
+
 `dionaea-lib`'s `bistreams/` tree holds Dionaea's raw per-connection capture
 stream: every accepted connection gets a date-named subdirectory
 (`YYYY-MM-DD/`) full of raw capture files, payload or not — a superset of
