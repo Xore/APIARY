@@ -1628,6 +1628,19 @@ curl -fsS -X PUT "$es_url/_index_template/single-node-replica-default" \
 # replica). arkime-init now translates Arkime's legacy templates into full
 # composable ones right after db.pl (arkime/composable-templates.js) and
 # deletes arkime-sessions3-ip-fix.
+#
+# #3283: arkime_sessions3-*'s retention is NOT here, with the other twelve
+# policies, and that placement is the fix rather than an omission. This
+# script's own catch-all cannot reach that family (it is excluded above, and
+# the generated composable template is what creates the indices), and an
+# index template naming an ILM policy that does not exist yet fails index
+# creation outright. This job and arkime-init are independent one-shots that
+# race -- the wait above exists because of exactly that -- and arkime-capture
+# waits only on arkime-init.done, so a policy created here could not be
+# relied on to exist before the first sessions index is created.
+# composable-templates.js therefore installs arkime-sessions-30d immediately
+# before the template that names it, and adopts the indices already on disk
+# in the same run. One definition, one owner, an ordering that cannot lose.
 
 echo
 echo "elasticsearch-setup: GeoIP, retention policies, and event templates installed"
