@@ -8,6 +8,34 @@ sudo ./scripts/tune-rocky10.sh --dry-run   # show what would change
 sudo ./scripts/tune-rocky10.sh             # apply
 ```
 
+> **Status (2026-09-27): the script is not fully applied on the live homeserver.**
+> The host was re-provisioned onto Rocky Linux 10.2 on 2026-09-03, and the
+> install it now has differs from the one this script was written against. Read
+> the checklist in "Verifying afterwards" as *the intended end state*, not as a
+> description of the box — re-measured read-only over `ssh homeserver` on
+> 2026-09-27, it currently fails two of its six lines:
+>
+> - **#1 (zram) is not in effect.** `zram-generator` is not installed, no zram
+>   module is loaded, `zramctl` prints nothing, and `swapon --show` lists only
+>   the 32G LVM swap. An `/etc/systemd/zram-generator.conf` *does* exist, but it
+>   is not the file this script writes: it has no `# Managed by` header and
+>   sizes the device with `min(ram / 2, 32768)` rather than the computed MB
+>   value the script emits, so it was hand-written — and nothing consumes it
+>   while the package is missing.
+> - **#2 (scheduler rule) is not in effect.**
+>   `/etc/udev/rules.d/60-apiary-ioscheduler.rules` does not exist. The
+>   schedulers that *are* set came from elsewhere: `nvme0n1` is on `none` and
+>   the 8.7T rotational `sdb` is on `mq-deadline`, but the non-rotational `sda`
+>   is also on `none` where this script's rule would put it on `kyber`.
+> - **#4 (noatime) is half done.** `/var` carries `noatime` in `/etc/fstab`;
+>   `/home`, which is a separate mount on this install and did not exist in
+>   `/etc/fstab` before the re-provision, is still `defaults`.
+> - **#5 (CPU governor) is in effect** — `tuned-adm active` reports
+>   `throughput-performance` and cpu0's governor is `performance`.
+>
+> The 20 GB figure in the sizing note below is still right: the live
+> `NVIDIA RTX 4000 Ada Generation` reports 20475 MiB.
+
 These are the Rocky/RHEL-family equivalents of the tunings, not a
 transliteration of the Debian recipe. The differences are the point: the
 Debian instructions do not work here, and two of them do not survive a reboot
