@@ -76,7 +76,8 @@ flowchart TD
 The `reporter` container:
 - Watches the same log/event volume already mounted by the `analysis` and `ml-worker` containers
 - Maintains a local SQLite DB (`/data/reported.db`) to deduplicate IPs per service per 24 h
-- Exposes a `/metrics` endpoint (Prometheus) so Grafana can graph reports-per-hour
+- Exposes no HTTP listener at all: Phase 4 writes a `metrics.json` snapshot into the
+  data volume on an interval instead (see the status banner's Phase 4 note)
 
 ---
 
@@ -262,7 +263,9 @@ flowchart TD
     DocsDir["docs/"] --> PlanMd["ip-reporting-plan.md<br/>this file"]
 ```
 
-Every `.go` file has a matching `_test.go`. There is no `requirements.txt`,
+Every function here is exercised by a test, though not always in a
+same-named file: `categorize.go` is covered from `event_test.go` and `main.go`
++ `report.go` from `dryrun_test.go`. There is no `requirements.txt`,
 no `sources.py`/`apis.py`/`dedup.py`/`metrics.py`, and no Prometheus
 exporter — see the Phase 4 note in the status banner.
 
