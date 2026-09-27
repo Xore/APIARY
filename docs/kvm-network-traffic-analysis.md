@@ -29,7 +29,7 @@ are **two** such bridges for the detonation pair documented here (CAPE adds
 | Network XML | `sandbox/windows/setup/sandbox-network.xml` | `sandbox/network.xml` |
 | Fake internet | INetSim at `10.10.10.1` | none by default; optional logged DNS + Squid allowlist (`controlled` mode) |
 | Capture | `docker-compose.sandbox.yml` (tcpdump, Zeek, Suricata) | root-owned `tcpdump` per job, host and guest side |
-| Results | `$WINDOWS_SANDBOX_RESULTS_DIR/<sha256>/` — `run_sample.py` overrides the compose default of `sandbox/results/current` per run | root-only, sanitized export copied out |
+| Results | `$WINDOWS_SANDBOX_RESULTS_DIR/<sha256>/`, set per run; `run_sample.py` falls back to `reports/windows-sandbox` and the dashboard's results importer populates the variable | root-only, sanitized export copied out |
 | Orchestrator | `sandbox/windows/orchestrate/run_sample.py` | `sandbox/run-linux-sample.sh` |
 
 Neither bridge has a `<forward>` element, so neither can route anywhere. That
