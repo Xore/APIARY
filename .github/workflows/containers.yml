@@ -7,15 +7,15 @@ on:
   pull_request:
   workflow_dispatch:
 
-permissions:
-  contents: read
-  packages: write
-  # The ci-target router dispatches the ci-heartbeat canary with
-  # GITHUB_TOKEN, and a called reusable workflow can never exceed the
-  # caller's envelope -- under-granting it startup-fails the whole run
-  # as "Invalid workflow file" (quality.yml's inline router instead
-  # elevates at its own job level).
-  actions: write
+# #3313: workflow level defaults to none; each job declares what it spends.
+# packages: write belongs to the build job alone -- it is what pushes the
+# 18 images to ghcr, and the gate below needs no token at all. The ci-target
+# router dispatches the ci-heartbeat canary with GITHUB_TOKEN, and a called
+# reusable workflow can never exceed the caller's envelope -- under-granting
+# it startup-fails the whole run as "Invalid workflow file" (quality.yml's
+# inline router instead elevates at its own job level), so that grant stays
+# on ci-target and reaches no other job.
+permissions: {}
 
 jobs:
   # Executor routing ("homeserver first, GitHub-hosted fallback") -- the
@@ -38,6 +38,9 @@ jobs:
   ci-target:
     name: Pick CI executor
     uses: ./.github/workflows/ci-router.yml
+    permissions:
+      contents: read
+      actions: write
     with:
       ci_homeserver_prs: ${{ vars.CI_HOMESERVER_PRS || '' }}
 
@@ -46,6 +49,14 @@ jobs:
     needs: [ci-target]
     runs-on: ${{ needs.ci-target.outputs.homeserver == 'true' && fromJSON('["self-hosted", "linux", "x64", "honeypot-ci"]') || fromJSON('["ubuntu-latest"]') }}
     timeout-minutes: ${{ needs.ci-target.outputs.homeserver == 'true' && 120 || 360 }}
+    permissions:
+      contents: read
+      # What docker/build-push-action spends on the ghcr push
+      # (push: ${{ github.event_name != 'pull_request' }}). Held here
+      # rather than workflow-wide so the router job and the gate below
+      # carry no package-write token; on a pull_request the rows do not
+      # push, and GitHub downgrades the grant to read for fork PRs anyway.
+      packages: write
     strategy:
       fail-fast: false
       # #1502: contexts below repointed at arcane/home/honeypot-<name>/ for
@@ -102,7 +113,9 @@ jobs:
           - image: vps-portbridge
             context: vps/portbridge
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # #2819: point buildkit at the self-hosted executor's Docker Hub
       # pull-through cache when there is one. This has to be buildkit's
       # own config -- the docker-container driver runs its own containerd
@@ -228,7 +241,7 @@ jobs:
             fi
           fi
           echo "config=$cfg" >>"$GITHUB_OUTPUT"
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           # Concurrent matrix rows share the single self-hosted runner
           # instance; without an explicit stop+rm at job end, a builder
@@ -247,20 +260,20 @@ jobs:
       # FROM against the registry. Guarded on the secret being non-empty
       # so a fork pull_request -- which by design cannot see secrets --
       # keeps building anonymously rather than failing on empty creds.
-      - uses: docker/login-action@v4
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         if: env.DOCKERHUB_USERNAME != ''
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - uses: docker/login-action@v4
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         if: github.event_name != 'pull_request'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/metadata-action@v6
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         id: metadata
         with:
           images: ghcr.io/${{ github.repository_owner }}/honeypot-${{ matrix.image }}
@@ -312,7 +325,7 @@ jobs:
             echo "from=type=gha,scope=${{ matrix.image }}" >> "$GITHUB_OUTPUT"
             echo "to=type=gha,mode=max,scope=${{ matrix.image }}" >> "$GITHUB_OUTPUT"
           fi
-      - uses: docker/build-push-action@v7
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         # id: build -- #3321 reads steps.build.outputs.digest, the pushed
         # manifest digest, to key the dashboard rows' SBOM to the exact image
         # rather than to a tag that can be moved underneath it.
@@ -429,7 +442,7 @@ jobs:
 
       - name: "Upload the digest-bound SBOM as a CI artifact (#3321)"
         if: matrix.sbom == true && github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           # Keyed by the digest, not the run: two builds of the same commit
           # produce the same name, and a digest-keyed name is the one an
@@ -460,6 +473,10 @@ jobs:
     if: always()
     needs: [ci-target, build]
     runs-on: ubuntu-latest
+    # No permissions block on purpose (#3313): this job only reads the
+    # two `needs:` results above, which is job metadata rather than an API
+    # call, so it inherits the workflow's empty envelope and runs with no
+    # token at all.
     steps:
       - name: Fail unless the router and every image row succeeded
         env:

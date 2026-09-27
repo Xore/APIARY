@@ -21,8 +21,9 @@ on:
     - cron: "*/30 * * * *"
   workflow_dispatch:
 
-permissions:
-  issues: write
+# #3313: job-scoped, workflow level defaults to none -- see the same note in
+# backup-staleness-watch.yml.
+permissions: {}
 
 concurrency:
   group: compose-drift-watch
@@ -34,8 +35,12 @@ jobs:
     # so it must never land on a --build-only honeypot-ci executor elsewhere.
     runs-on: [self-hosted, linux, x64, honeypot-ci, honeypot-homeserver]
     timeout-minutes: 5
+    permissions:
+      issues: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Sweep the fleet for compose services missing all containers
         env:
           GH_TOKEN: ${{ github.token }}

@@ -7,15 +7,14 @@ on:
   schedule:
     - cron: "23 3 * * 3"
 
-permissions:
-  contents: read
-  security-events: write
-  # The ci-target router dispatches the ci-heartbeat canary with
-  # GITHUB_TOKEN, and a called reusable workflow can never exceed the
-  # caller's envelope -- under-granting it startup-fails the whole run
-  # as "Invalid workflow file" (quality.yml's inline router instead
-  # elevates at its own job level).
-  actions: write
+# #3313: workflow level defaults to none; each job declares what it spends.
+# security-events: write belongs to the analyze job alone -- it is what lets
+# CodeQL upload a SARIF result, and no other job here talks to code scanning.
+# The ci-target router dispatches the ci-heartbeat canary with GITHUB_TOKEN,
+# and a called reusable workflow can never exceed the caller's envelope --
+# under-granting it startup-fails the whole run as "Invalid workflow file",
+# so that grant stays on ci-target and reaches no other job.
+permissions: {}
 
 jobs:
   # Executor routing ("homeserver first, GitHub-hosted fallback") via the
@@ -32,6 +31,9 @@ jobs:
   ci-target:
     name: Pick CI executor
     uses: ./.github/workflows/ci-router.yml
+    permissions:
+      contents: read
+      actions: write
     with:
       ci_homeserver_prs: ${{ vars.CI_HOMESERVER_PRS || '' }}
 
@@ -40,6 +42,10 @@ jobs:
     needs: [ci-target]
     runs-on: ${{ needs.ci-target.outputs.homeserver == 'true' && fromJSON('["self-hosted", "linux", "x64", "honeypot-ci"]') || fromJSON('["ubuntu-latest"]') }}
     timeout-minutes: ${{ needs.ci-target.outputs.homeserver == 'true' && 90 || 360 }}
+    permissions:
+      contents: read
+      # What github/codeql-action/analyze spends: the SARIF upload.
+      security-events: write
     strategy:
       fail-fast: false
       matrix:
@@ -49,7 +55,7 @@ jobs:
         with:
           persist-credentials: false
       - if: matrix.language == 'go'
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           # CodeQL's Go autobuild shell-outs to `go` to enumerate build
           # targets; neither the homeserver runner nor the GitHub-hosted

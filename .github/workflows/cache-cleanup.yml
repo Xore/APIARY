@@ -13,14 +13,18 @@ on:
   pull_request:
     types: [closed]
 
-permissions:
-  actions: write
-  contents: read
+# #3313: this workflow's entire reason to exist is the actions: write below,
+# so it is declared on the job that spends it and the workflow level defaults
+# to none.
+permissions: {}
 
 jobs:
   sweep:
     name: Delete this PR's caches
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
     steps:
       - name: Delete caches scoped to this PR's ref
         env:

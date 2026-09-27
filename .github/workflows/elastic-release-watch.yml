@@ -28,8 +28,9 @@ on:
     - cron: "0 9 1 * *" # 09:00 UTC on the 1st of each month
   workflow_dispatch:
 
-permissions:
-  issues: write
+# #3313: job-scoped, workflow level defaults to none -- see the same note in
+# backup-staleness-watch.yml.
+permissions: {}
 
 concurrency:
   group: elastic-release-watch
@@ -42,8 +43,12 @@ jobs:
     # allows 90s per fetch with one retry, so the worst case is ~9 min of
     # network. 5 minutes would have cut a slow-but-working run short.
     timeout-minutes: 15
+    permissions:
+      issues: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Check the pinned Elastic trio against docker.elastic.co
         env:
           GH_TOKEN: ${{ github.token }}
