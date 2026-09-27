@@ -1822,10 +1822,10 @@ scratch twice, reaching the same blocker both times.
 
 **No workflow edit is needed.** Every `secrets.VPS_*` / `secrets.DOMAIN`
 reference already sits inside a job that declares
-`environment: production-vps` — `deploy.yml`'s `vps` job (`:207`, environment
-at `:210`), `diagnostics.yml`'s `vps` job (`:252`/`:255`), and
+`environment: production-vps` — `deploy.yml`'s `vps` job (`:233`, environment
+at `:236`), `diagnostics.yml`'s `vps` job (`:439`/`:442`), and
 `vps-start-blackhole.yml`'s `start-blackhole-profile` job (`:22`/`:24`). The
-`home` jobs (`deploy.yml:21`, `diagnostics.yml:76`) read none of the five.
+`home` jobs (`deploy.yml:21`, `diagnostics.yml:112`) read none of the five.
 Environment secrets also shadow repository secrets of the same name, so
 *writing* the environment copies is non-breaking on its own.
 
@@ -1898,11 +1898,64 @@ Two checks depend on host provisioning rather than on the workflow (#3312):
   `LIBVIRT_DEFAULT_URI=qemu:///system`, because a non-root `virsh` otherwise
   talks to the empty per-user session and reports every network missing.
   Group membership only takes effect across a runner restart, so unlike the
-  helper grant it does need a full installer run.
+  helper grant it does need a full installer run. The audit's own host-side
+  expectation — that the sandbox stack is *up* — is suspended by a dated
+  declaration while it is deliberately down; see
+  [honeypot-network-isolation.md](honeypot-network-isolation.md#5-declared-stand-down).
 
 The OIDC discovery probe runs **from the VPS** over the job's SSH key.
 Cloudflare answers 403 to GitHub-hosted runner address ranges, so the runner's
 own result is printed for information only and never fails the job.
+
+### Every finding is categorised (#3312)
+
+This workflow failed 160 consecutive scheduled runs without anybody triaging
+it, which means it carried no signal at all. The reason was not that the
+findings were wrong — several of them were correct — but that a real host
+fault, a lane that had never been able to see anything, a check asking from a
+vantage point the endpoint answers differently to, and a deliberate stand-down
+all produced the same thing: a red X, an `::error::` line with nothing on its
+subject, and a body nobody had time to read. A run that lists five unrelated
+things under one heading gets triaged by ignoring it.
+
+So every finding now carries one of four categories. The category is the
+annotation's own title, and each job ends with a ledger — one table, one row
+per finding, plus the counts — so triage is reading six lines rather than
+reconstructing a run from its log:
+
+| category | Meaning | Fatal on a scheduled run |
+|---|---|---|
+| `fault` | A real regression: the pipeline or the host is broken | yes |
+| `runner-config` | The check could not run because of how the runner or this repository's environment is configured — a helper not installed, a grant not applied, a secret unset | yes |
+| `unmeasured` | The check did not run, and that is not a pass | yes |
+| `expected` | A deliberate, declared absence | no |
+
+`runner-config` being fatal is deliberate, and it is the same position
+`scripts/verify-deploy.sh` already takes with its exit 2: folding "could not
+tell" into a pass is the outcome that makes a check worse than not having it.
+#3283 is what that costs when it is wrong — Elasticsearch at 1000/1000 shards
+with every sensor's events dead-lettered for six days, in a lane whose only
+question is whether the pipeline is flowing. What changes is that it is its own
+category with its own title, so "this lane has never been able to measure
+anything" is tellable apart from "the pipeline is broken" without opening the
+log, and the fix is the operator command the finding names rather than the
+symptom.
+
+The vocabulary lives in `scripts/diagnostics-lib.sh`, which every step sources;
+`alert` takes a category and refuses a non-fatal one, `note` records a finding
+that must not redden the run, and `diag_ledger_report` prints the table. The
+isolation audit has its own finer-grained labels and its own footer, and the
+step carries that line into the ledger verbatim rather than re-deriving it — one
+source of truth for the counts.
+
+Both jobs now check the repository out (#2908). Every other step still reads
+the deployed stack under `/opt/stacks/apiary`; the checkout is for the scripts,
+so a check asks its question with the code that was just fixed. Running
+`isolation-audit.sh` from a copy refreshed only by a `workflow_dispatch`-only
+deploy is why the red X kept naming things that had already been fixed. The
+deployed copy is still diffed against `origin/main` and reported when it drifts,
+because drift is a real finding for everything else on the host that runs a
+deployed script.
 
 ### Diagnostics vs. mutating deploy
 

@@ -37,6 +37,42 @@ name: Diagnostics
 # adding coverage. A manual (workflow_dispatch) run never turns red for any
 # of the above; it keeps the original browsable report-only style, since a
 # human is already looking at it.
+#
+# #3312: this workflow ran 160 consecutive scheduled runs in failure, and the
+# red X meant different things in each of them -- a real host fault, a lane
+# that had never been able to see anything, a check asking from a vantage
+# point the endpoint answers differently to, and a declared, deliberate
+# stand-down -- all filed identically, with an ::error:: line that named none
+# of them. Nobody triaged it, and that is the whole reason this file now
+# has a vocabulary. Every finding is categorised on the way out, into one of
+# exactly four categories, and each job ends with a ledger of what it found
+# and what kind of thing each finding was:
+#
+#   fault           a real regression. Fatal, as before.
+#   runner-config   the check could not run because of how the runner or this
+#                   repository's environment is configured -- a helper not
+#                   installed, a sudoers grant not applied, a secret unset.
+#                   Still fatal: folding "could not tell" into a pass is the
+#                   outcome that makes a check worse than not having it, and
+#                   #3283 is what that costs when the lane is dark for six
+#                   days. But it is its own category with its own annotation
+#                   title, so it reads as an operator command to run rather
+#                   than as a broken pipeline.
+#   expected        a deliberate, declared absence. Never fatal.
+#   unmeasured      the check did not run, and that is not a pass. Fatal.
+#
+# The vocabulary, and the four-category argument, live in
+# scripts/diagnostics-lib.sh, which every step here sources. A check is never
+# deleted and no finding is ever folded into a pass to make this run green --
+# the only thing this change does is make the run say which of the four
+# situations it is in.
+#
+# Both jobs check the repo out now (#2908). Every other step still reads the
+# deployed stack under /opt/stacks/apiary -- the checkout is for the scripts,
+# so that a check asks its question with the code that was just fixed rather
+# than with a copy refreshed only by a workflow_dispatch-only deploy. For the
+# five weeks of #3312 the red X kept naming things #3338 had already fixed
+# precisely because the deployed isolation-audit.sh was weeks behind.
 
 on:
   workflow_dispatch:
@@ -78,30 +114,28 @@ jobs:
     runs-on: [self-hosted, linux, x64, honeypot-home]
     environment: production-home
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Inspect the home Compose stack
         shell: bash
         run: |
           set -uo pipefail
           stack=/opt/stacks/apiary
-          # #2222: on a scheduled run, alert() additionally turns the
-          # condition into the run's own red X (no human reads
+          # #2222: on a scheduled run, a categorised finding additionally turns
+          # the condition into the run's own red X (no human reads
           # GITHUB_STEP_SUMMARY on a cron trigger); on workflow_dispatch it
           # behaves exactly like report().
           is_schedule=${{ github.event_name == 'schedule' && 'true' || 'false' }}
           schedule_failed=0
-          report() { printf '%s\n' "$*" >> "$GITHUB_STEP_SUMMARY"; printf '%s\n' "$*"; }
-          alert() {
-            report "$*"
-            if [ "$is_schedule" = "true" ]; then
-              printf '::error::%s\n' "$*"
-              schedule_failed=1
-            fi
-          }
-          section() { report ''; report "## $*"; report ''; }
+          # report/alert/note/section and the ledger come from the repo (#3312):
+          # five steps in two jobs have to agree on the vocabulary, and a
+          # second copy of it in YAML is a second thing to keep in step.
+          . "$GITHUB_WORKSPACE/scripts/diagnostics-lib.sh"
 
           report "# Home stack diagnostics"
           if [ ! -d "$stack" ]; then
-            report "Stack directory is missing. The home stack has never been deployed to this host."
+            note expected "stack directory" "Stack directory is missing. The home stack has never been deployed to this host, so there is nothing here to inspect -- expected, not a fault."
             exit 0
           fi
 
@@ -142,7 +176,7 @@ jobs:
           if curl -fsS --max-time 10 "http://$bind:19090/healthz" >/dev/null 2>&1; then
             report "healthz: responding"
           else
-            alert "healthz: **unreachable** — the dashboard container is down or not bound"
+            alert fault "dashboard healthz" "healthz: **unreachable** — the dashboard container is down or not bound"
           fi
 
           # #3315: "green, healthy, running the old code" is indistinguishable
@@ -228,7 +262,14 @@ jobs:
           # this workflow cannot make for them.
           helper=/opt/github-ci-runner-helpers/dashboard-source-health.sh
           if ! sudo -n -l "$helper" >/dev/null 2>&1; then
-            alert "metrics unavailable: $helper is not installed or not granted -- apply it with: sudo scripts/github-ci-runner/install-deploy-runner.sh --helpers-only (no runner restart; a full re-run also stops and starts the runner service)"
+            # #3312: the category is the point. This lane has never been able
+            # to see anything on a scheduled run -- the token is root-only and
+            # the job is not root -- and it was reported under the same red X
+            # as a dead sensor pipeline, which is why the ingest outage in
+            # #3283 went unread for six days. It stays fatal (an unmeasurable
+            # lane is not a pass), but as a runner-config gap whose fix is the
+            # one command below, not as a fault in the pipeline.
+            alert runner-config "sensor -> Elasticsearch -> dashboard" "metrics unavailable: $helper is not installed or not granted -- this lane has not been able to measure anything. Apply it with: sudo scripts/github-ci-runner/install-deploy-runner.sh --helpers-only (no runner restart; a full re-run also stops and starts the runner service)"
           elif source_health=$(sudo -n "$helper" 2>/dev/null) \
                && printf '%s' "$source_health" | jq -e . >/dev/null 2>&1; then
             printf '%s' "$source_health" | jq -r '
@@ -239,7 +280,10 @@ jobs:
               "filebeat: \(.pipeline.state)",
               "unattributed_24h: \(.unattributed_24h)"' | tee -a "$GITHUB_STEP_SUMMARY"
           else
-            alert "metrics unavailable: source-health unreachable or unauthorized (401 = wrong/missing service token)"
+            # The grant is in place and the helper ran, so this is the
+            # pipeline's own answer and not a provisioning gap: the token is
+            # wrong (401) or the backend is not answering.
+            alert fault "sensor -> Elasticsearch -> dashboard" "metrics unavailable: source-health unreachable or unauthorized (401 = wrong/missing service token)"
           fi
           report '```'
           report 'cluster_status: 1 green, 2 yellow, 3 red. sensor state ACTIVE means the feed'
@@ -261,7 +305,7 @@ jobs:
           # window (suricata-log-maintenance.sh prunes past it).
           suricata_dir="$stack/logs/suricata"
           if ! mountpoint -q "$suricata_dir"; then
-            alert "\`logs/suricata\` is **not a mount point** — the sshfs mount from the VPS is gone."
+            alert fault "VPS Suricata mount" "\`logs/suricata\` is **not a mount point** — the sshfs mount from the VPS is gone."
             report "Filebeat and EveBox are reading a stale local directory, if anything."
           else
             report "\`logs/suricata\` is mounted."
@@ -272,9 +316,12 @@ jobs:
             total=$(du -cb "$suricata_dir"/eve-*.json 2>/dev/null | tail -1 | cut -f1)
             report "\`$(basename "$latest")\`: last written ${age}s ago. Retained eve-*.json total: ${total} bytes."
             if [ "$age" -gt 900 ]; then
-              alert "That is over fifteen minutes old — treat the Suricata feed as **stale**."
+              alert fault "VPS Suricata mount" "\`$(basename "$latest")\` was last written ${age}s ago — over fifteen minutes old. Treat the Suricata feed as **stale**."
             fi
           else
+            # Report-only, and deliberately not a second alert: when the mount
+            # is already gone, "no files" is the same finding seen from the
+            # other side, and one cause gets one row in the ledger (#3312).
             report "No \`eve-*.json\` files found."
           fi
           report "$(df -h "$suricata_dir" | tail -1 | awk '{print "VPS filesystem: "$2" total, "$4" available ("$5" used)"}')"
@@ -300,19 +347,21 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          # #2908: measure how stale the deployed copy is BEFORE trusting its
-          # output. /opt/stacks/apiary is refreshed only by deploy.yml's rsync
-          # step, which is workflow_dispatch-only, so it drifts silently -- it
-          # was found 18 days behind main, running a pre-#2839 isolation-audit
-          # whose capability-posture section simply did not exist yet. Nothing
-          # measured that channel: #2858's drift reporting reads the Arcane
-          # gitops-syncs API, which has no record covering this directory at
-          # all, so every project could report lastSyncCommit == main while
-          # every rsynced script was weeks old.
+          is_schedule=${{ github.event_name == 'schedule' && 'true' || 'false' }}
+          schedule_failed=0
+          . "$GITHUB_WORKSPACE/scripts/diagnostics-lib.sh"
+          # #2908: measure how stale the deployed copy is, and report it,
+          # because a drifted copy is a real finding even now that the audit
+          # no longer depends on it. /opt/stacks/apiary is refreshed only by
+          # deploy.yml's rsync step, which is workflow_dispatch-only, so it
+          # drifts silently -- it was found 18 days behind main, running a
+          # pre-#2839 isolation-audit whose capability-posture section simply
+          # did not exist yet. Nothing measured that channel: #2858's drift
+          # reporting reads the Arcane gitops-syncs API, which has no record
+          # covering this directory at all, so every project could report
+          # lastSyncCommit == main while every rsynced script was weeks old.
           #
-          # This job deliberately has no actions/checkout (see the job header:
-          # it inspects the stack as deployed, not the triggering ref), but the
-          # deployed tree is itself a git clone, so its WORKING TREE can be
+          # The deployed tree is itself a git clone, so its WORKING TREE can be
           # diffed against origin/main in place -- which catches rsync-applied
           # changes too, not just an un-advanced HEAD.
           #
@@ -328,8 +377,8 @@ jobs:
             else
               drift=$(git -C /opt/stacks/apiary -c safe.directory=/opt/stacks/apiary \
                         diff --stat origin/main -- scripts/ 2>/dev/null | tail -20)
-              echo "::warning title=Deployed scripts differ from main::isolation-audit.sh below ran from a copy that does not match origin/main (see #2908)"
-              printf 'deployed `scripts/` DIFFERS from `origin/main` -- the audit below ran from that copy:\n\n```\n%s\n```\n' \
+              echo "::warning title=Deployed scripts differ from main::the deployed copy of isolation-audit.sh is not what main has; this step audits the host with the triggering ref's copy instead (see #2908)"
+              printf 'deployed `scripts/` DIFFERS from `origin/main` -- anything else on this host that runs a deployed script is still using that copy:\n\n```\n%s\n```\n' \
                 "$drift" >> "$GITHUB_STEP_SUMMARY"
             fi
           else
@@ -337,20 +386,64 @@ jobs:
           fi
 
           printf '\n## Isolation audit\n\n```\n' >> "$GITHUB_STEP_SUMMARY"
-          # Runs the deployed stack's own copy, same as every other step in
-          # this job -- this workflow has no actions/checkout, by design
-          # (see this job's header comment): it inspects the stack as
-          # actually deployed, not whatever ref triggered the run.
-          /opt/stacks/apiary/scripts/isolation-audit.sh 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
-          status=${PIPESTATUS[0]}
+          # #2908/#3312: the audit runs from this job's checkout, not from
+          # /opt/stacks/apiary. A check that audits the host with a stale copy
+          # of its own question cannot report a fix as fixed, and that is
+          # precisely why the red X kept naming things #3338 had already
+          # fixed: the audit that named them had not been redeployed. The
+          # audit reads only the host (docker, libvirt, iptables, the
+          # stand-down declaration in /etc/apiary), so running it from the
+          # checkout changes which questions it asks, not what it asks them
+          # about.
+          audit_output=$("$GITHUB_WORKSPACE/scripts/isolation-audit.sh" 2>&1) || status=$?
+          printf '%s\n' "$audit_output" | tee -a "$GITHUB_STEP_SUMMARY"
           printf '```\n' >> "$GITHUB_STEP_SUMMARY"
-          exit "$status"
+          # The audit categorises its own findings and prints its own counts;
+          # the ledger takes that line verbatim rather than re-deriving it
+          # here, so there is one source of truth for them (#3312).
+          audit_categories=$(grep -m1 '^isolation-audit: categories --' <<<"$audit_output" || true)
+          audit_unmeasured=$(sed -n 's/^isolation-audit: categories -- \([0-9][0-9]*\) unmeasured.*/\1/p' <<<"$audit_categories")
+          audit_unmeasured=${audit_unmeasured:-0}
+          if [ "${status:-0}" -ne 0 ] && [ "$audit_unmeasured" -gt 0 ]; then
+            # An unread barrier is its own category: "this barrier's status
+            # is unknown" is a different claim from "this invariant was
+            # violated", and it must never read as a pass.
+            alert unmeasured "isolation audit (scripts/isolation-audit.sh)" "$audit_categories -- at least one barrier could not be read at all, which is not a pass"
+          elif [ "${status:-0}" -ne 0 ]; then
+            alert fault "isolation audit (scripts/isolation-audit.sh)" "$audit_categories"
+          elif [ "$audit_unmeasured" -gt 0 ]; then
+            # The audit's own verdict is exit 0: not every UNMEAS it prints is
+            # one it treats as fatal (AppArmor's is advisory). It is still not
+            # an agreement, so it takes a row of its own instead of being filed
+            # as clean -- and the exit code stays the audit's to decide, since
+            # second-guessing it here would change what the check asks.
+            diag_row unmeasured "isolation audit (scripts/isolation-audit.sh)" "$audit_categories -- not fatal to the audit, but an unanswered question rather than an agreement"
+          else
+            diag_row ok "isolation audit (scripts/isolation-audit.sh)" "$audit_categories"
+          fi
+          exit "${status:-0}"
+
+      - name: Category ledger (#3312)
+        # The triage view, last, and if: always() so it is printed even when
+        # the steps above have already reddened the run. Report-only: the
+        # fatal signal is each step's own exit status, so this step cannot
+        # turn a run red on its own account.
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          is_schedule=${{ github.event_name == 'schedule' && 'true' || 'false' }}
+          . "$GITHUB_WORKSPACE/scripts/diagnostics-lib.sh"
+          diag_ledger_report
 
   vps:
     if: github.event_name == 'schedule' || inputs.target == 'vps' || inputs.target == 'both'
     runs-on: ubuntu-latest
     environment: production-vps
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Configure deployment key
         shell: bash
         env:
@@ -367,19 +460,12 @@ jobs:
           VPS_PORT: ${{ secrets.VPS_PORT }}
         run: |
           set -uo pipefail
-          # #2222: on a scheduled run, alert() additionally turns the
-          # condition into the run's own red X; on workflow_dispatch it
+          # #2222: on a scheduled run, a categorised finding additionally turns
+          # the condition into the run's own red X; on workflow_dispatch it
           # behaves exactly like report().
           is_schedule=${{ github.event_name == 'schedule' && 'true' || 'false' }}
           schedule_failed=0
-          report() { printf '%s\n' "$*" >> "$GITHUB_STEP_SUMMARY"; printf '%s\n' "$*"; }
-          alert() {
-            report "$*"
-            if [ "$is_schedule" = "true" ]; then
-              printf '::error::%s\n' "$*"
-              schedule_failed=1
-            fi
-          }
+          . "$GITHUB_WORKSPACE/scripts/diagnostics-lib.sh"
           ssh_options=(-i ~/.ssh/honeypot_vps -p "${VPS_PORT:-2222}" -o StrictHostKeyChecking=accept-new)
           report "# VPS edge diagnostics"
           report '```'
@@ -440,12 +526,15 @@ jobs:
           printf '%s\n' "$vps_output" | tee -a "$GITHUB_STEP_SUMMARY"
           if printf '%s\n' "$vps_output" | grep -q -- '--- end of vps report ---'; then
             if printf '%s\n' "$vps_output" | grep -q 'No compiled suricata.rules found'; then
-              alert "VPS: compiled suricata.rules is missing."
+              alert fault "VPS Suricata ruleset" "VPS: compiled suricata.rules is missing."
             elif printf '%s\n' "$vps_output" | grep -q 'over twelve hours old'; then
-              alert "VPS: compiled suricata.rules is over twelve hours old."
+              alert fault "VPS Suricata ruleset" "VPS: compiled suricata.rules is over twelve hours old."
             fi
           else
-            alert "SSH to the VPS failed"
+            # The sentinel never printed, so the report was not delivered. Every
+            # rule above it is then unknown, not fine -- the whole edge is one
+            # unmeasurable question, and this row says so once.
+            alert unmeasured "VPS edge" "SSH to the VPS failed, or the report did not run to its end sentinel: the ruleset age, the eve files, the disk and the WireGuard peers are all unmeasured, not healthy"
           fi
           report '```'
           if [ "$schedule_failed" -eq 1 ]; then
@@ -477,22 +566,35 @@ jobs:
           VPS_PORT: ${{ secrets.VPS_PORT }}
         run: |
           set -uo pipefail
-          report() { printf '%s\n' "$*" >> "$GITHUB_STEP_SUMMARY"; printf '%s\n' "$*"; }
+          is_schedule=${{ github.event_name == 'schedule' && 'true' || 'false' }}
+          schedule_failed=0
+          . "$GITHUB_WORKSPACE/scripts/diagnostics-lib.sh"
           ssh_options=(-i ~/.ssh/honeypot_vps -p "${VPS_PORT:-2222}" -o StrictHostKeyChecking=accept-new)
           report "# Traefik origin certificate"
           cert=/root/vps/traefik/certs/origin.pem
           # shellcheck disable=SC2029 # $cert is meant to expand on this side
           if ! not_after=$(ssh "${ssh_options[@]}" "${VPS_USER:-root}@${VPS_HOST}" \
                "openssl x509 -in $cert -noout -enddate" 2>/dev/null); then
-            report "::error::cannot read $cert on the VPS -- Traefik has no origin certificate to serve"
+            # Not fatal-by-schedule-gate: there is no expiry to be early for,
+            # so this is a plain fault and it fails a manual run too -- which is
+            # what the exit 1 below already did.
+            alert fault "Traefik origin certificate" "cannot read $cert on the VPS -- Traefik has no origin certificate to serve"
             exit 1
           fi
           not_after=${not_after#notAfter=}
           days_left=$(( ( $(date -d "$not_after" +%s) - $(date +%s) ) / 86400 ))
           report "Expires ${not_after} (${days_left} days left)."
           if [ "$days_left" -lt 30 ]; then
-            report "::error::the Traefik origin certificate expires in ${days_left} days -- renew it (docs/CGNAT-DEPLOYMENT.md, Origin certificate)"
-            [ "${{ github.event_name }}" = "schedule" ] && exit 1
+            # #3312: this used to be `report "::error::..."` followed by
+            # `[ "${{ github.event_name }}" = "schedule" ] && exit 1`, whose
+            # non-schedule case left the step exiting 1 anyway -- the compound
+            # was the last command in the block, so a manual run went red for a
+            # warning it was explicitly meant to report only. alert() has the
+            # schedule gate inside it, so the intent is now the behaviour.
+            alert fault "Traefik origin certificate" "the Traefik origin certificate expires in ${days_left} days -- renew it (docs/CGNAT-DEPLOYMENT.md, Origin certificate). A 2-year Origin CA cert does not renew itself: nothing else in the fleet notices until every proxied hostname starts failing at Cloudflare's edge with a 526."
+            if [ "$schedule_failed" -eq 1 ]; then
+              exit 1
+            fi
           fi
 
       - name: OIDC discovery is reachable (#1225)
@@ -505,16 +607,21 @@ jobs:
           DOMAIN: ${{ secrets.DOMAIN }}
         run: |
           set -uo pipefail
-          report() { printf '%s\n' "$*" >> "$GITHUB_STEP_SUMMARY"; printf '%s\n' "$*"; }
+          is_schedule=${{ github.event_name == 'schedule' && 'true' || 'false' }}
+          schedule_failed=0
+          . "$GITHUB_WORKSPACE/scripts/diagnostics-lib.sh"
           ssh_options=(-i ~/.ssh/honeypot_vps -p "${VPS_PORT:-2222}" -o StrictHostKeyChecking=accept-new)
           report "# OIDC discovery check"
           if ssh "${ssh_options[@]}" "${VPS_USER:-root}@${VPS_HOST}" \
             'grep -q "honeypot.example" /root/vps/traefik/dynamic.yml 2>/dev/null'; then
-            report "::error::traefik/dynamic.yml on the live VPS contains placeholder domains (auth.honeypot.example) -- every Traefik router keyed on the real domain is unreachable. Was this file touched outside deploy.yml's own domain-substitution step? See #1225."
+            alert fault "VPS traefik/dynamic.yml" "traefik/dynamic.yml on the live VPS contains placeholder domains (auth.honeypot.example) -- every Traefik router keyed on the real domain is unreachable. Was this file touched outside deploy.yml's own domain-substitution step? See #1225."
             exit 1
           fi
           if [ -z "$DOMAIN" ]; then
-            report "DOMAIN secret is not set -- cannot check OIDC discovery reachability, only checked for the placeholder string above."
+            # A missing secret is a provisioning gap, not a broken endpoint, and
+            # it stays report-only as it always was -- but it now says which of
+            # the two it is, so nobody reads it as "OIDC is fine".
+            note runner-config "OIDC discovery" "DOMAIN secret is not set -- cannot check OIDC discovery reachability, only checked for the placeholder string above. This lane is unmeasured, not passing."
             exit 0
           fi
           url="https://auth.${DOMAIN}/realms/apiary/.well-known/openid-configuration"
@@ -531,6 +638,24 @@ jobs:
           runner_status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$url" || echo "000")
           report "OIDC discovery HTTP status from the VPS: $status (from this GitHub-hosted runner: $runner_status, informational only)"
           if [ "$status" != "200" ]; then
-            report "::error::OIDC discovery at https://auth.\${DOMAIN}/realms/apiary/.well-known/openid-configuration returned $status from the VPS, not 200 -- a fresh dashboard container start will fail outright (newOIDCAuth requires this unconditionally at startup). See #1225."
+            if [ "$status" = "000" ]; then
+              # No HTTP status at all is a different finding from a status that
+              # is not 200: the first is "we could not ask", the second is "the
+              # endpoint answered, and not with a discovery document".
+              alert unmeasured "OIDC discovery" "OIDC discovery at https://auth.\${DOMAIN}/realms/apiary/.well-known/openid-configuration could not be reached from the VPS (no HTTP response at all), so its status is unknown rather than broken. See #1225."
+            else
+              alert fault "OIDC discovery" "OIDC discovery at https://auth.\${DOMAIN}/realms/apiary/.well-known/openid-configuration returned $status from the VPS, not 200 -- a fresh dashboard container start will fail outright (newOIDCAuth requires this unconditionally at startup). See #1225."
+            fi
             exit 1
           fi
+
+      - name: Category ledger (#3312)
+        # Report-only, and last: the triage view of everything the steps above
+        # categorised, printed even when they have already reddened the run.
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          is_schedule=${{ github.event_name == 'schedule' && 'true' || 'false' }}
+          . "$GITHUB_WORKSPACE/scripts/diagnostics-lib.sh"
+          diag_ledger_report
