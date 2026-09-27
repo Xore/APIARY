@@ -66,6 +66,18 @@ jobs:
             # into the digest-keyed CycloneDX + Trivy steps below. Absent on
             # the other sixteen rows, so they build exactly as before.
             sbom: true
+            # #3316: ...and the two images that are actually deployed as
+            # long-lived HTTP services are also started and waited on
+            # below. `boot_smoke: true` is the reason a build row needs a
+            # local image to run, which is a different requirement on each
+            # event -- see the `load:` input's comment. The remaining rows
+            # are one-shot capture daemons whose whole job is to stay up;
+            # there is no entrypoint contract to break and no endpoint to
+            # answer, so they keep building exactly as before. (No count
+            # here on purpose: #3131 grew this matrix after #3321's
+            # comments named a number, and a stale number reads as a
+            # fresh fact. The smoke tests assert the row names instead.)
+            boot_smoke: true
           - image: cisco-asa-honeypot
             context: arcane/home/honeypot-cisco-asa-honeypot/cisco-asa-honeypot
           - image: citrix-honeypot
@@ -75,6 +87,7 @@ jobs:
           - image: dashboard-next
             context: arcane/home/honeypot-dashboard/frontend-next
             sbom: true
+            boot_smoke: true
           - image: dicompot
             context: arcane/home/honeypot-dicompot/dicompot
           - image: dionaea
@@ -233,9 +246,28 @@ jobs:
         with:
           context: ${{ matrix.context }}
           push: ${{ github.event_name != 'pull_request' }}
-          load: false
+          # #3316: the boot-smoke below needs an image it can `docker run`,
+          # and the two ways to get one are mutually exclusive here -- a
+          # build either pushes it or loads it into the local daemon. On a
+          # pull_request there is no push, so `load` is free and the smoke
+          # covers forks too (which #3321's SBOM cannot: it needs a pushed
+          # digest and so skips PRs entirely). On a push the image is already
+          # in ghcr and the step that resolves an image ID pulls that exact
+          # digest back down. Unset on the other sixteen rows, so they
+          # build byte-identically to before.
+          load: ${{ matrix.boot_smoke == true && github.event_name == 'pull_request' }}
           tags: ${{ steps.metadata.outputs.tags }}
-          labels: ${{ steps.metadata.outputs.labels }}
+          # The docker exporter does not carry a tag, so a loaded image
+          # arrives on the shared executor's daemon anonymous. `docker
+          # images` cannot pick it out by name -- and this box runs seven
+          # runner users, any of which can be loading an image at the same
+          # moment (see the umask note in "Pick cache backend" above), so
+          # "newest dangling image" would be a race that boots a
+          # neighbour's build. A per-row, per-attempt label is the only
+          # handle that is unique to *this* build. Appended only for the two
+          # boot-smoke rows: on a push it is redundant (the digest names the
+          # image) and the manifest should not carry a CI run id.
+          labels: ${{ steps.metadata.outputs.labels }}${{ matrix.boot_smoke == true && format('\napiary.ci.build-row={0}-{1}-{2}', matrix.image, github.run_id, github.run_attempt) || '' }}
           # Scope the layer cache per image (#2771). Without an explicit
           # scope every matrix row defaults to `buildkit`, so all 18
           # concurrent builds read and write ONE shared cache index per
@@ -262,6 +294,134 @@ jobs:
         # No-ops instantly on the GitHub-hosted fallback (script check).
         if: always() && needs.ci-target.outputs.homeserver == 'true'
         run: scripts/prune-buildx-cache.sh "/var/buildx-cache/${{ matrix.image }}"
+
+      # ---------------------------------------------------------------------
+      # #3316: start the exact image this row just built, wait for its own
+      # healthcheck, and assert the contract its tier answers.
+      #
+      # The gap: containers.yml built, image-security-scan.yml scanned, and
+      # nothing ever ran the result. A passing compile gate and a clean
+      # vulnerability scan are both silent about the four things that decide
+      # whether a container comes up at all -- the entrypoint, the runtime
+      # user, the file layout, and the env contract. The #2183/#2299
+      # boot-refusal class ("worker containers refuse to boot") reached
+      # production precisely because of that, and was found by hand on a
+      # deployed host.
+      #
+      # By image ID, never by tag: a tag can move underneath the step, so a
+      # green smoke on `...:pr-1234` would be a statement about whatever it
+      # resolved to at that instant. The ID is what the build just produced
+      # and (on a push) exactly what was published under the digest
+      # deploy.yml consumes.
+      #
+      # On the required Containers gate, deliberately: a boot that cannot
+      # happen is a bad image, and shipping it is worse than a red run. The
+      # two rows that fail this are the two long-lived HTTP services; the
+      # other rows are capture daemons with no entrypoint contract and no
+      # endpoint to answer, so they are untouched.
+      # ---------------------------------------------------------------------
+      - name: "Resolve the image ID to boot-smoke (#3316)"
+        id: bootsmoke
+        if: matrix.boot_smoke == true
+        env:
+          IMAGE: ${{ matrix.image }}
+          # First tag only: metadata-action emits one per ref, and only one
+          # of them is the branch build this smoke is about.
+          IMAGE_TAG: ${{ steps.metadata.outputs.tags }}
+          # Empty exactly when nothing was pushed, which is the
+          # pull_request case -- there the build loaded the image locally
+          # (see the `load:` input) and there is no digest to pull.
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          BUILD_ROW: ${{ matrix.image }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          # Everything interpolated arrives through env:, never pasted into
+          # this block -- the same form #3321's SBOM step uses, because
+          # zizmor's template-injection audit cannot tell an image name from
+          # attacker input from the outside.
+          if [ -n "$IMAGE_DIGEST" ]; then
+            tag=$(printf '%s\n' "$IMAGE_TAG" | head -1)
+            ref="$tag@$IMAGE_DIGEST"
+            # Three attempts, for the narrow reason #3321's syft fetch
+            # needed them: ghcr's read path occasionally trails its write
+            # path by a few seconds, and a manifest-unknown here would read
+            # as "the image is broken" when nothing is wrong with it.
+            for attempt in 1 2 3; do
+              if docker pull "$ref"; then
+                break
+              fi
+              if [ "$attempt" -lt 3 ]; then
+                echo "::warning::ghcr has not served $ref yet (attempt $attempt/3); retrying in 15s"
+                sleep 15
+              fi
+            done
+            image_id=$(docker image inspect --format '{{.Id}}' "$ref" 2>/dev/null || true)
+            [ -n "$image_id" ] || { echo "::error::could not resolve $ref after 3 attempts"; exit 1; }
+          else
+            # The docker exporter drops the tag, so the build is found by
+            # the label the build step stamped on it -- unique to this
+            # matrix row and this run attempt, which matters because the
+            # executor's docker daemon is shared.
+            image_id=$(docker image ls --no-trunc \
+              --filter "label=apiary.ci.build-row=$BUILD_ROW" \
+              --format '{{.ID}}' | head -1)
+            [ -n "$image_id" ] || {
+              echo "::error::no local image carries label apiary.ci.build-row=$BUILD_ROW -- the build was expected to load one (load: true on pull_request). Nothing to boot-smoke."
+              exit 1
+            }
+          fi
+          echo "boot-smoke target for $IMAGE: $image_id"
+          echo "image_id=$image_id" >>"$GITHUB_OUTPUT"
+
+      - name: "Boot-smoke backend-service (#3316)"
+        if: matrix.boot_smoke == true && matrix.image == 'backend-service'
+        env:
+          IMAGE_ID: ${{ steps.bootsmoke.outputs.image_id }}
+        run: |
+          set -euo pipefail
+          # A real token rather than APIARY_ALLOW_UNAUTH_DEV=1, so the smoke
+          # walks the production boot path -- the #2183 gate satisfied the
+          # way a deployment satisfies it -- and the log is not full of the
+          # override's warning. Throwaway and loopback-only; generated so
+          # the value is obviously not a credential in the tree.
+          token=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+          scripts/boot-smoke-image.sh \
+            --image-id "$IMAGE_ID" \
+            --name ci-bootsmoke-backend-service \
+            --container-port 8081 \
+            --health-timeout 120 \
+            --stub-es-env ELASTICSEARCH_URL \
+            --env "SERVICE_TOKEN=$token" \
+            --expect-status 'backend liveness (/healthz)' /healthz 200 \
+            --expect-json 'backend readiness against the stub ES (/readyz)' /readyz \
+              'd["ready"] is True and d["cluster"] == "green"'
+
+      - name: "Boot-smoke dashboard-next (#3316)"
+        if: matrix.boot_smoke == true && matrix.image == 'dashboard-next'
+        env:
+          IMAGE_ID: ${{ steps.bootsmoke.outputs.image_id }}
+        run: |
+          set -euo pipefail
+          token=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+          # Nothing else is set on purpose. OIDC_DISABLED stays unset, so /
+          # has to take the auth guard and bounce to /auth/login -- which is
+          # both the contract #3316 asks for and the proof that the #3112
+          # gate did not fire under the image's production defaults.
+          # WEB_CONCURRENCY is left at the image default (min(4, cpus))
+          # because the fork loop in server/cluster.mjs is part of the
+          # entrypoint; a smoke that ran it single-process would skip the
+          # part most likely to break. BACKEND_URL is left at its built-in
+          # loopback default: beforeLoad throws the redirect before the root
+          # loader ever reaches the Rust tier, so this assertion
+          # deliberately needs no backend.
+          scripts/boot-smoke-image.sh \
+            --image-id "$IMAGE_ID" \
+            --name ci-bootsmoke-dashboard-next \
+            --container-port 8080 \
+            --health-timeout 120 \
+            --env "SERVICE_TOKEN=$token" \
+            --expect-redirect 'unauthenticated / redirects to /auth/login' / /auth/login \
+            --expect-status 'vendored theme.css is served' /static/theme.css 200
 
       # ---------------------------------------------------------------------
       # #3321: digest-bound SBOM for the two dashboard images.
