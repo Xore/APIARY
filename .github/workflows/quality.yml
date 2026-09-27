@@ -887,8 +887,32 @@ jobs:
   # on GH images), the homeserver twin bootstraps rustup itself
   # into the runner user's persistent HOME -- rustup then honours the
   # crate's own rust-toolchain.toml (#1720 pin) exactly like every other
-  # execution path does, and `~/.cargo` + `target/` simply stay warm on
-  # disk between runs, which is why no actions/cache block exists here.
+  # execution path does.
+  #
+  # This comment used to also claim `~/.cargo` + `target/` "simply stay warm
+  # on disk between runs, which is why no actions/cache block exists here".
+  # Only the first half was ever true, and the second half was the reason the
+  # 159s job rebuilt its whole crate graph on every single run:
+  #
+  #   * `~/.cargo` (registry/, git/) really does persist -- it is in $HOME,
+  #     outside the checkout.
+  #   * `target/` does NOT persist. It lives inside the workspace, and
+  #     actions/checkout defaults to `clean: true`, i.e. `git clean -ffdx`.
+  #     The `-x` is what matters: it deletes *ignored* files, and `target/` is
+  #     ignored (.gitignore line 7). Verified locally, not inferred: a
+  #     `sub/target/debug/libfoo.rlib` under a `target/` ignore rule does not
+  #     survive `git clean -ffdx`. So every run recompiled all 287 packages in
+  #     Cargo.lock from an empty target/.
+  #
+  # The cloud twin already carries an actions/cache block over target/ and
+  # pays this correctly (each ubuntu-latest runner is a fresh VM, so the
+  # cache service is the only disk that survives). This twin has the opposite
+  # situation -- a persistent disk that the checkout was destroying -- so the
+  # fix is to move the one directory that is being wiped to a path that is
+  # not. Deliberately NOT an actions/cache block: see the "Reuse a persistent,
+  # ref-scoped target/" step below and the go-fmt job's comment for what
+  # actions/cache did on this runner (six same-key 465 MB copies put the repo
+  # over its 10 GB quota).
   #
   # `cargo fmt --check` deliberately isn't part of this gate: the crate
   # predates any formatting pass and has never been run through rustfmt
@@ -948,7 +972,146 @@ jobs:
           rustup show active-toolchain
           rustup component add clippy
           cargo --version && rustc --version
-      - run: PATH="$HOME/.cargo/bin:$PATH" cargo build --all-targets
+      # #3405: put target/ somewhere `git clean -ffdx` cannot reach, so the
+      # 159s of "recompile all 287 packages" stops happening every run.
+      #
+      # This is the self-hosted counterpart of the cloud twin's actions/cache
+      # block, and it is NOT an actions/cache block. On this runner the
+      # persistent disk already *is* the cache: the go-fmt job's comment
+      # records what happens when actions/cache is used anyway -- Go's 0555
+      # module dirs make the restore's `tar -x` fail, the job then re-uploads,
+      # and six same-key 465 MB copies push the repo past its 10 GB Actions
+      # quota and evict unrelated caches. ~/.cargo/registry and ~/.cargo/git
+      # need nothing from us for the same reason: they are in $HOME and have
+      # been warm all along. target/ is the only one checkout destroys.
+      #
+      # Keyed per ref, never shared across refs. The honeypot-ci label is
+      # served by several runner instances that between them run every open
+      # branch, so a single shared target/ would be written concurrently by
+      # unrelated checkouts. One directory per ref makes that structurally
+      # impossible: two refs never touch the same path.
+      #
+      # NOT keyed per commit, and that is the whole trick. Cargo fingerprints
+      # each unit against its own inputs, so reusing a branch's directory
+      # across that branch's commits is exactly what it is designed for -- and
+      # it is the case that pays. A commit-keyed directory would be cold on
+      # every push (a push *is* a new commit), which is a slower spelling of
+      # the 159s job we are trying to remove.
+      #
+      # The root is resolved best-effort and this step can never fail the job:
+      # if no persistent root is writable, CARGO_TARGET_DIR is left unset,
+      # cargo builds into the in-tree target/ it uses today, and the run costs
+      # what it always cost. A cold cache is therefore a normal outcome here,
+      # not an error -- and it cannot turn a red crate green, because cargo
+      # rebuilds anything whose source, toolchain or deps changed.
+      - name: Reuse a persistent, ref-scoped target/ (best-effort)
+        shell: bash
+        run: |
+          set -uo pipefail
+          warn() { echo "::warning::cargo-target: $*"; }
+
+          # Precedence: ops override, then a cross-instance shared root, then
+          # this runner instance's own HOME. The middle option needs the box
+          # provisioned (install-ci-runner.sh already sets UMask=0002 and a
+          # setgid shared group, so a group-writable root is all it takes) and
+          # raises the hit rate from "the same instance happened to take this
+          # job again" to "any instance". The HOME option needs no
+          # provisioning at all, so the cache is live on an un-provisioned box
+          # rather than being dead code waiting for an ops ticket.
+          root=""
+          for candidate in \
+            "${CI_CARGO_TARGET_ROOT:-}" \
+            /var/cargo-target-cache \
+            "$HOME/.cache/cargo-target"; do
+            [ -n "$candidate" ] || continue
+            if mkdir -p "$candidate" 2>/dev/null && [ -w "$candidate" ]; then
+              root="$candidate"
+              break
+            fi
+          done
+
+          if [ -z "$root" ]; then
+            warn "no writable persistent root; building into the in-tree target/ as before"
+            exit 0
+          fi
+
+          # GITHUB_REF is fully qualified -- refs/heads/main on push,
+          # refs/pull/<n>/merge on pull_request -- and for a given PR that
+          # merge ref is stable across every run of that PR, so one directory
+          # is reused for a PR's whole review loop and then abandoned when it
+          # closes. The slug is for humans; the digest is what actually
+          # guarantees uniqueness, since GITHUB_REF_NAME mangles ("a/b" and
+          # "a-b" both slug to "a-b").
+          slug="$(printf '%s' "${GITHUB_REF_NAME:-noref}" \
+            | tr -c 'A-Za-z0-9._-' '-' | cut -c1-40)"
+          ref_digest="$(printf '%s' "${GITHUB_REF:-noref}" | sha256sum | cut -c1-8)"
+          channel="$(sed -n 's/^channel[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' \
+            rust-toolchain.toml 2>/dev/null | head -1)"
+          [ -n "$channel" ] || channel="unpinned"
+          # Toolchain in the key so a pin bump starts clean rather than
+          # leaning on cargo noticing the compiler changed underneath a
+          # long-lived shared directory.
+          toolchain_digest="$(printf '%s' "$channel" | sha256sum | cut -c1-8)"
+          dir="$root/${slug}-${ref_digest}-${toolchain_digest}"
+
+          if ! mkdir -p "$dir" 2>/dev/null; then
+            warn "could not create $dir; building into the in-tree target/ as before"
+            exit 0
+          fi
+          # Heartbeat, not the directory's own mtime, is what eviction reads.
+          # A warm rebuild writes into target/debug/ and does not necessarily
+          # touch the target/ directory entry itself, so an mtime rule could
+          # delete a directory a running job is actively using. The job below
+          # has a 90-minute timeout against a 7-day floor, so a heartbeat
+          # touched now cannot be mistaken for an abandoned one.
+          touch "$dir/.ci-target-heartbeat" 2>/dev/null || true
+          if [ -d "$dir/debug" ] || [ -d "$dir/.fingerprint" ]; then
+            warm=yes
+          else
+            warm=no
+          fi
+
+          if ! echo "CARGO_TARGET_DIR=$dir" >>"$GITHUB_ENV"; then
+            warn "could not export CARGO_TARGET_DIR; building into the in-tree target/ as before"
+            exit 0
+          fi
+
+          {
+            echo "### Rust target/ reuse"
+            echo ""
+            echo "- root: \`$root\`"
+            echo "- directory: \`$dir\`"
+            echo "- ref: \`${GITHUB_REF:-noref}\` (slug \`$slug\`, digest \`$ref_digest\`)"
+            echo "- toolchain: \`$channel\` (digest \`$toolchain_digest\`)"
+            echo "- state on arrival: **$warm** (\"warm\" = a previous run left a target tree here)"
+          } >>"$GITHUB_STEP_SUMMARY"
+          echo "cargo-target: using $dir (warm=$warm)"
+
+          # Eviction: drop directories whose job has not run in
+          # CI_CARGO_TARGET_PRUNE_DAYS days, keyed on the heartbeat. Without
+          # this the shared box accumulates one full target/ per ref ever
+          # opened. Never fatal, and only ever removes a directory that has
+          # provably been idle for a week.
+          prune_days="${CI_CARGO_TARGET_PRUNE_DAYS:-7}"
+          find "$root" -maxdepth 2 -name '.ci-target-heartbeat' -type f \
+            -mtime "+$prune_days" -print0 2>/dev/null \
+            | while IFS= read -r -d '' heartbeat; do
+                victim="$(dirname "$heartbeat")"
+                # Defence in depth: never hand rm -rf anything but a direct
+                # child of the root we resolved above.
+                case "$victim" in
+                  "$root"/*) rm -rf "$victim" && echo "cargo-target: pruned $victim" ;;
+                  *) warn "refusing to prune $victim (not under $root)" ;;
+                esac
+              done || true
+      # Teed so the "did the cache actually hit" question is answered by cargo's
+      # own output rather than by inference. pipefail keeps a build failure a
+      # build failure; nothing here asserts anything new.
+      - name: Build
+        run: |
+          set -o pipefail
+          PATH="$HOME/.cargo/bin:$PATH" cargo build --all-targets 2>&1 \
+            | tee "${RUNNER_TEMP}/cargo-build.log"
       # #3319: tees the test output into .ci-artifacts/ and uploads it on
       # failure. Not a JUnit file: cargo has no built-in JUnit reporter, and
       # its per-test result stream is only available on the unstable
@@ -988,6 +1151,48 @@ jobs:
       # Regenerate locally with `cargo run --bin openapi > openapi.json`.
       - name: OpenAPI contract is not stale (#3325)
         run: PATH="$HOME/.cargo/bin:$PATH" cargo run --quiet --bin openapi | diff -u openapi.json -
+
+      # The measurement, not an assertion. Cargo prints one "Compiling <pkg>"
+      # line per unit it actually rebuilt, so this counts the work the cache
+      # did NOT save: ~287 on a cold run, 0 when every unit was still fresh.
+      # That number is the proof the cache hits, and it is read off a real
+      # build rather than inferred from a cache-hit log line.
+      - name: Report target/ reuse outcome
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          log="${RUNNER_TEMP}/cargo-build.log"
+          # `grep -c` prints the count AND exits 1 when the count is 0, so a
+          # bare `|| echo 0` would yield "0\n0" and break the arithmetic
+          # below. Swallow the status instead and keep only the count.
+          count() { grep -c "$1" "$2" 2>/dev/null || true; }
+          total="$(count '^[[:space:]]*\[\[package\]\]' Cargo.lock)"
+          [ -n "$total" ] || total=0
+          if [ -r "$log" ]; then
+            compiled="$(count '^[[:space:]]*Compiling ' "$log")"
+            [ -n "$compiled" ] || compiled=0
+            reused="$(( total - compiled ))"
+          else
+            compiled="n/a"
+            reused="n/a"
+          fi
+          size="n/a"
+          if [ -n "${CARGO_TARGET_DIR:-}" ] && [ -d "$CARGO_TARGET_DIR" ]; then
+            size="$(du -sh "$CARGO_TARGET_DIR" 2>/dev/null | cut -f1)"
+            [ -n "$size" ] || size="n/a"
+          fi
+          {
+            echo "### Rust build work actually done"
+            echo ""
+            echo "- packages compiled this run: **$compiled** of $total in Cargo.lock"
+            echo "- units served from the reused target/: **$reused**"
+            echo "- target/ size after the build: \`$size\`"
+            echo ""
+            echo "A cold cache is a valid outcome: the step above falls back to the"
+            echo "in-tree target/ and this run costs what it always cost."
+          } >>"$GITHUB_STEP_SUMMARY"
+          echo "cargo-target: compiled=$compiled reused=$reused size=$size"
 
   backend-service-cloud:
     name: Dashboard backend-service (Rust) (GitHub-hosted)

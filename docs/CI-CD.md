@@ -1386,6 +1386,92 @@ deletes a PR's cache entries when the PR closes. Actions scopes cache
 a closed PR's entries are unreadable and still billed until the 7-day GC
 gets to them. Deleting on close reclaims that quota immediately.
 
+### Rust `target/` reuse on the homeserver runner (#3405)
+
+`quality.yml`'s `backend-service` job (the self-hosted twin of the Rust gate)
+was measured at **159s** in run 36317857731 -- the second-longest job in the
+repo -- and it recompiled all 287 packages in `Cargo.lock` on *every* run.
+
+The job's own comment explained why no cache existed: `~/.cargo` and `target/`
+"simply stay warm on disk between runs". That was half right, and the half
+that was wrong was the expensive half.
+
+- `~/.cargo/registry` and `~/.cargo/git` really do persist. They live in the
+  runner user's `$HOME`, outside the checkout, and have always been warm. They
+  need nothing from us.
+- `target/` never persisted at all. It lives *inside* the workspace, and
+  `actions/checkout` defaults to `clean: true` -- i.e. `git clean -ffdx`. The
+  `-x` is the whole story: it deletes **ignored** files, and `target/` is
+  ignored (`.gitignore` line 7). So the checkout destroyed the previous run's
+  build before the build step could touch it.
+
+The fix is therefore not more caching machinery. It is moving the one
+directory that is being wiped to a path that is not: a `Reuse a persistent,
+ref-scoped target/` step exports `CARGO_TARGET_DIR` at
+`<root>/<ref-slug>-<ref-digest>-<toolchain-digest>`, which is outside the
+workspace and so survives `git clean -ffdx`.
+
+**No `actions/cache`, deliberately.** The cloud twin's `actions/cache` block
+over `target/` is correct and unchanged -- an `ubuntu-latest` runner is a fresh
+VM, so the cache service is the only disk that outlives the job. This runner
+is the mirror image: it has persistent disk, and the cache service is the
+wrong tool. See the `go-fmt` job's comment for what using it here cost
+before: Go writes module directories mode 0555, so the restore's `tar -x`
+cannot overwrite them, and the resulting re-uploads put six same-key 465 MB
+copies over the repository's 10 GB Actions quota.
+
+**One directory per ref, never shared.** The `honeypot-ci` label is served by
+several runner instances which between them run every open branch, so a single
+shared `target/` would be written concurrently by unrelated checkouts. The key
+is `GITHUB_REF` (`refs/heads/main` on push, `refs/pull/<n>/merge` on
+`pull_request`) hashed to 8 hex digits, which makes collision impossible even
+though `GITHUB_REF_NAME` mangles distinct refs onto the same slug -- `a/b` and
+`a-b` both slug to `a-b`, and get different digests. The toolchain channel is
+in the key as well, so a pin bump starts clean instead of relying on cargo
+noticing the compiler changed underneath a long-lived directory.
+
+**Keyed per ref, not per commit.** Cargo fingerprints every unit against its
+own inputs, so reusing a branch's directory across that branch's commits is
+exactly what it is built for -- and it is the case that pays. A commit-keyed
+directory would be cold on every push, because a push *is* a new commit: that
+would be a slower spelling of the 159s job.
+
+**A cold cache is a valid outcome, and cannot turn a red crate green.** Root
+resolution is best-effort -- `CI_CARGO_TARGET_ROOT`, then
+`/var/cargo-target-cache`, then `$HOME/.cache/cargo-target` -- and if none is
+writable the step warns and leaves `CARGO_TARGET_DIR` unset, so cargo builds
+into the in-tree `target/` and the run costs what it always cost. The step
+never fails the job. `~/.cargo` may also need repopulating if
+`$HOME/.rustup`/`$HOME/.cargo` are ever cleared; that is a one-off cost, not
+a per-run one.
+
+**`/var/cargo-target-cache` needs provisioning to be used.** `/var` is
+`root:root 0755`, so as `github-ci-runner` the workflow cannot create it --
+the same constraint the buildx cache above runs into, and why the
+`$HOME/.cache/cargo-target` fallback exists and is enough on its own:
+
+```sh
+sudo install -d -m 2775 -o github-ci-runner -g github-ci-runner \
+  /var/cargo-target-cache
+```
+
+Setgid plus the unit's existing `UMask=0002` (see `provision-buildx-cache`'s
+sibling in `scripts/github-ci-runner/install-ci-runner.sh`) keeps it
+group-writable across every instance's user, so any instance can serve the
+cache rather than only whichever one picked up the previous run of that ref.
+
+**Bounding it.** Directories idle for `CI_CARGO_TARGET_PRUNE_DAYS` (7) are
+removed after each run. Eviction reads a `.ci-target-heartbeat` file the job
+touches on entry, *not* the directory's mtime: a warm rebuild writes into
+`target/debug/` and need not touch the `target/` directory entry itself, so an
+mtime rule could delete a directory a running job is using. A 90-minute job
+timeout against a 7-day floor cannot be mistaken for an abandoned directory.
+
+**Reading the result.** The `Build` step tees cargo's own output, and
+`Report target/ reuse outcome` counts its `Compiling` lines: ~287 on a cold
+run, near 0 when every unit was still fresh. That count -- not a cache-hit
+log line -- is the evidence the cache is doing anything.
+
 ### Digest-bound SBOMs for the two dashboard images (#3321)
 
 There used to be no inventory of what is inside `apiary-backend`
