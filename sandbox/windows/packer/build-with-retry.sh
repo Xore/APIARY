@@ -184,6 +184,32 @@ while (( attempt <= max_attempts )); do
     echo "=== build-with-retry: attempt ${attempt} succeeded $(date -u +%FT%TZ) ==="
     built_qcow2="$build_output_dir/$vm_name.qcow2"
     if [[ -f "$built_qcow2" ]]; then
+      # #3018: verify the image's CONTENTS before it is promoted, and before
+      # the checksum that certifies it. This runs the #100/#2023 check
+      # (Regshot, FakeNet exe + config, Procmon, and the Inbox/Logs SMB
+      # shares) that the provisioner's own comment claimed was enforced here
+      # but which nothing actually ran: the only callers of
+      # verify_golden_image_contents() were run_sample.py at detonation time
+      # and kvm_manage.sh on a manual create/revert, so the first question
+      # about a built image's completeness was asked at the first detonation
+      # attempt against a clone of it. That is how the restored
+      # win11-analysis.qcow2 got promoted: built 2026-08-05, three days
+      # before #956 renamed 'Samples' to 'Inbox', so it shipped with no
+      # 'Inbox' share, passed its own checksum, and only failed once
+      # something tried to use it. A failed build is a re-run; an incomplete
+      # golden image is a restore-from-backup and a code change.
+      #
+      # Deliberately not skippable. A check that could not run is not a check
+      # that passed (#2023), and an opt-out here would be a one-flag bypass of
+      # the only thing standing between a bad build and every detonation guest
+      # cloned from it.
+      echo "=== build-with-retry: verifying $built_qcow2 contents before promotion ==="
+      if ! bash "$dir/verify-built-image-contents.sh" "$built_qcow2"; then
+        echo "=== build-with-retry: content check FAILED -- refusing to promote the image ===" >&2
+        echo "=== build-with-retry: $qcow2_path left untouched, no .sha256 written ===" >&2
+        echo "=== build-with-retry: the built image is left at $built_qcow2 for inspection ===" >&2
+        exit 1
+      fi
       echo "=== build-with-retry: moving $built_qcow2 -> $qcow2_path ==="
       mv -f "$built_qcow2" "$qcow2_path.new"
       mv -f "$qcow2_path.new" "$qcow2_path"
