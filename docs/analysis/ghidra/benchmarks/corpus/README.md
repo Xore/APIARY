@@ -49,7 +49,7 @@ primitive, one vulnerability class) that the first slice of this corpus had.
 
 ## Build matrix and provenance (`build_corpus.py`, `manifest.json`)
 
-Each of the 14 sources is compiled with:
+Each of the 17 sources is compiled with:
 
 - **Toolchains**: `gcc` and `clang` across five architectures --
   `x86_64`, `aarch64`, `i686` (32-bit x86), `mipsel`, and `armhf`. All 4 of
@@ -70,9 +70,9 @@ Each of the 14 sources is compiled with:
   object's own instruction set rather than erroring, so this matters for
   correctness, not just cleanliness).
 - **Train/validation/test split**, recorded per case in `CASE_SPLITS` and
-  carried onto every build variant of that case (`"split"` field). All 14
+  carried onto every build variant of that case (`"split"` field). All 17
   cases are currently `"test"`: every one has already been used (or, for
-  the 6 added most recently, is used from the moment it exists) as scored
+  the 9 added most recently, is used from the moment it exists) as scored
   evaluation data, never shown to a model as a training example, so
   tagging any of them `"train"` now would be retroactively wrong.
   Splitting a single case's own toolchain/opt-level variants across train
@@ -80,8 +80,8 @@ Each of the 14 sources is compiled with:
   underlying case in both and leak exactly the case-level knowledge the
   split exists to prevent.
 
-14 sources x 10 toolchains x 5 opt levels = 700 builds, each with both a
-stripped and unstripped variant recorded (`manifest.json`).
+17 sources x 10 toolchains x 5 opt levels = 850 builds, each carrying both a
+stripped and unstripped variant (`manifest.json`).
 
 ## The injection payload must survive compilation (#1948)
 
@@ -165,7 +165,7 @@ code, not a whole program.
 **Determinism verified two ways**: (1) built twice into separate output
 directories in the same environment; after normalizing the one
 build-directory-dependent string objdump embeds in its own header line
-(`build_corpus.py`'s `normalize_disassembly`), all 700 disassembly outputs
+(`build_corpus.py`'s `normalize_disassembly`), all 850 disassembly outputs
 were byte-identical across the two builds. (2) Built in two genuinely
 independent, freshly-provisioned containers (`ci_verify.sh`'s own check,
 which is exactly the property CI now enforces on every change -- see
@@ -243,7 +243,7 @@ pointer write, or format-string read/write on purpose is not something an
 automated corpus-verification script should ever do; the bug is already
 known and static, and there is nothing to gain from triggering it for real.
 
-240 executions (12 cases x 10 toolchains x 2 representative opt levels,
+280 executions (14 cases x 10 toolchains x 2 representative opt levels,
 `-O0`/`-O2`), 0 failures, reverified in two independent fresh containers.
 
 ## Scoring rubric and contract (`rev_cases_v2_rubric.json`, `rev_cases_v2_contract.json`)
@@ -384,7 +384,7 @@ Direct mapping to #159's own checklist:
   (variable names, control flow) rather than a bare conclusion.
 - [x] **Scoring is semantic and reviewed before model outputs are seen.**
   Rubric authored from ground truth before any model output was inspected,
-  for both the original 8 cases and the 6 added since.
+  for both the original 8 cases and the 9 added since.
 - [x] **CI verifies provenance, fixture safety, hashes, and reproducible
   generation.** `validate_manifest.py` + `ci_verify.sh`, wired into
   `quality.yml`.

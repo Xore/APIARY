@@ -29,12 +29,12 @@ split out into [`AI_TRIAGE.md`](AI_TRIAGE.md) (#142).
 
 ```mermaid
 flowchart LR
-  subgraph dashboardBox["dashboard container"]
+  subgraph dashboardBox["dashboard container (backend-service)"]
     direction TB
-    submit["POST /ghidra/submit"]
-    poll["GET /ghidra/{sha256}"]
+    submit["POST /api/v1/ghidra/submit"]
+    poll["GET /api/v1/ghidra/{sha}"]
     revdeckSubmit["workbench: select Rev·Deck"]
-    revdeckPoll["GET /revdeck/{sha256}"]
+    revdeckPoll["GET /api/v1/revdeck/{sha}"]
   end
 
   subgraph hostBox["host (root)"]
@@ -139,7 +139,7 @@ sequenceDiagram
     RevDeck-->>Worker: answer, citations, warnings
   end
   Worker->>Spool: write {sha256}_ghidra.json + HTML/PDF report
-  Dashboard->>Spool: GET /ghidra/{sha256} reads the result
+  Dashboard->>Spool: GET /api/v1/ghidra/{sha} reads the result
 ```
 
 Every sidecar call in that diagram is independently fail-soft: a down or
@@ -188,7 +188,7 @@ sudo analysis/ghidra/install-analysis-host.sh                # the worker half
 | Flag | Effect |
 |---|---|
 | `--containers-only` | Bring up/refresh the containers and stop |
-| `--model NAME` | Model to pull. Defaults to `GHIDRA_TRIAGE_MODEL` from `/etc/default/honeypot-ghidra` if that file exists, else `qwen3:8b` |
+| `--model NAME` | Model to pull. Defaults to `GHIDRA_TRIAGE_MODEL` from `/etc/default/honeypot-ghidra` if that file exists, else `qwen3:14b` |
 | `--no-gpu` | Run the model on CPU even if an NVIDIA runtime is present |
 | `--skip-pull` | Do not pull the model |
 | `--stack-dir PATH` | Where to deploy the compose file. `""` runs it in place |
@@ -285,7 +285,7 @@ which documents each setting inline. The ones worth knowing:
 | `GHIDRA_API_BASE` | `http://127.0.0.1:9090` | The headless REST service |
 | `GHIDRA_ANALYSIS_TIMEOUT` | `4200` | Per binary. Deliberately longer than the container's own `ANALYSIS_TIMEOUT` |
 | `GHIDRA_TRIAGE_API_BASE` | `http://127.0.0.1:11434/v1` | Empty switches triage off |
-| `GHIDRA_TRIAGE_MODEL` | `qwen3:8b` | Recorded in every result |
+| `GHIDRA_TRIAGE_MODEL` | `qwen3:14b` | Recorded in every result. `qwen3:14b` for all three slots (ghidra/sessions/revdeck) since the #568 re-evaluation — see the [model evaluation](../../local-llm-model-evaluation.md) |
 | `GHIDRA_TRIAGE_TIMEOUT` | `300` | Per workflow call; two calls run per sample |
 | `GHIDRA_TRIAGE_MAX_STRINGS` / `_IMPORTS` / `_FUNCTIONS` | `200` / `150` / `100` | How much of the binary the model is shown. Around 8000 tokens together — see [the context window](AI_TRIAGE.md#the-context-window-is-part-of-the-configuration) before raising them |
 | `STATICTOOLS_API_BASE` | `http://127.0.0.1:9091` | ssdeep/tlsh/lief/capa/floss sidecar, see [its contract above](#the-statictools-sidecar-contract). Empty switches it off |
@@ -384,7 +384,7 @@ API_BASE      : http://127.0.0.1:9090
 REQUEST_DIR   : /var/lib/honeypot-ghidra/requests/pending (exists=True)
 RESULTS_DIR   : /var/lib/honeypot-ghidra/results (exists=True)
 SAMPLES_DIR   : /var/lib/honeypot-sandbox/inbox/samples (exists=True)
-TRIAGE        : http://127.0.0.1:11434/v1 OK, model qwen3:8b available, context fits a full evidence block (7972 tokens read)
+TRIAGE        : http://127.0.0.1:11434/v1 OK, model qwen3:14b available, context fits a full evidence block (7972 tokens read)
 STATICTOOLS   : http://127.0.0.1:9091 OK
 REVDECK       : disabled (REVDECK_API_BASE is empty)
 
@@ -426,8 +426,8 @@ docker compose -f /opt/stacks/ghidra/compose.yml exec ollama ollama list
 that decide whether triage works and how long it takes:
 
 ```
-NAME      ID            SIZE     PROCESSOR    CONTEXT
-qwen3:8b  500a1f067a9f  7.8 GB   12%/88% CPU/GPU  16384
+NAME       ID            SIZE     PROCESSOR    CONTEXT
+qwen3:14b  bdbd181c33f2  8.6 GB   12%/88% CPU/GPU  32768
 ```
 
 `4096` there means the window setting is not reaching the container. A mixed

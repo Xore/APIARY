@@ -3,8 +3,11 @@
 > **Status**: Design document. Phase 4 (plugin selection) is built as of
 > 2026-08-01 — scoped down to `capa` alone; the other eight candidates from
 > the original plugin list are decided out (see Phase 4 below). Phases 1, 2,
-> 3, 4 and 5 are built — five of the six `scripts/` exporters exist
-> (`findcrypt.py` was deleted, superseded by `scan_crypto()` in the worker),
+> 3, 4 and 5 are built — five of the six `scripts/` postScripts that once
+> existed are gone, and the sixth (`export_imports.py`) is unused by
+> anything: `findcrypt.py` was deleted in #136, superseded by
+> `scan_crypto()` in the worker, and `call_graph.py`, `export_functions.py`,
+> `export_strings.py` and `yara_scan.py` were deleted in #141,
 > the `revdeck` service is deployed (profile-gated in
 > `docker-compose.ghidra.yml`) and, as of 2026-08-01 (#78), the worker
 > automates it too — `worker/ghidra-worker.py`'s `revdeck_triage()` drives a
@@ -338,8 +341,12 @@ Nine candidates were originally listed here with no decision behind any of
 them, same problem [#85](https://github.com/Xore/APIARY/issues/85)
 found in the "Additional Static Analysis Tooling" list below. Applying the
 same standard — burden of proof on inclusion, since each addition is
-third-party code pinned/updated/trusted on the analysis host — exactly one
-of the nine survives: `capa`.
+third-party code pinned/updated/trusted on the analysis host — **all nine of
+the original candidates are decided out** (the "Decided out" table below is
+exactly those nine). `capa` is the one capability that survives, but it was
+never one of the nine: it arrives through the #85 `statictools` sidecar
+route as a plain CLI against the raw sample, not as an awesome-ghidra
+plugin.
 
 ### Decided in
 

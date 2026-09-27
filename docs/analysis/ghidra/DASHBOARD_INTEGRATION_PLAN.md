@@ -1,5 +1,20 @@
 # Ghidra Dashboard Integration — Implementation Plan
 
+> **Design record, not current-behaviour documentation.** Every `dashboard/*.go`
+> reference below, and every route in the Precedent table and the Architecture
+> diagram (`/ghidra/submit`, `/api/ghidra/{sha256}`, `/export/ghidra/{sha256}`,
+> `ghidra.go`, `sandbox_submit.go`, `dashboard/ui/`), describes the Go dashboard
+> that was deleted at #1628. The same phases were re-implemented in the Rust
+> `backend-service` under
+> `arcane/home/honeypot-dashboard/backend-service/src/` and the
+> `frontend-next` routes; current route table is `main.rs` (`POST
+> /api/v1/ghidra/submit`, `GET /api/v1/ghidra/{sha}`,
+> `GET /api/v1/ghidra-callgraph/{sha}`, `GET /api/v1/revdeck/{sha}`), and
+> current operator documentation is [`README.md`](README.md). The plan's
+> decisions — the spool-file trust boundary, the phase split, the
+> fail-soft and result-shape rules — carried over and are still the binding
+> content. Read the Go paths as history, not as somewhere to write code.
+>
 > **Status: all six phases built** (2026-07-31). Host worker, dashboard API,
 > UI, alerting, environment and compose wiring are in place, tested, and
 > rendered in a browser against fixture results.
