@@ -454,3 +454,229 @@ of leaving an operator to compare N identical percentages by hand. Shape:
 `elasticsearch-data` alerts (from `_cat/allocation`, since `es-data` is a
 stack-private volume never bind-mounted cross-stack) are unaffected --
 there is only ever one of them per check.
+
+## Pausing decoys to free host CPU (#3135)
+
+When a benchmark or training leg needs more headroom than the homeserver has,
+pause the decoy stacks, run the leg, resume them afterwards. The
+classification and the command list both live in
+[`scripts/honeypot-pause.sh`](../scripts/honeypot-pause.sh) — this section is
+the reasoning behind the table it carries, and the two measured facts that
+make the procedure different from a one-liner.
+
+```bash
+scripts/honeypot-pause.sh list                          # the table, with reasons
+scripts/honeypot-pause.sh pause honeypot-elasticpot     # pause (gate first)
+scripts/honeypot-pause.sh status                        # what is paused, in order
+scripts/honeypot-pause.sh resume                        # reverse order, verified
+```
+
+### Read this before you expect it to free RAM
+
+**`docker pause` frees CPU, not RAM.** The issue says "free RAM/CPU"; only
+the CPU half is true. Measured on 2026-09-27, cgroup v2 `memory.current` for
+`hp-elasticpot` was `36,339,712` B running and `36,360,192` B while paused —
+it went *up* 20 KiB. `docker pause` freezes the cgroup (the kernel stops
+scheduling its tasks) but keeps the memory charged to it. For real RAM you
+want `docker stop`, which is a different and more destructive operation: it
+tears down the container, so in-container state and live sessions are gone
+unless they are on a volume. This script does **not** substitute `stop` for
+`pause` — the issue specifies `pause`, and silently substituting a more
+destructive call is not a call this script gets to make on its own. If a leg
+is genuinely RAM-bound, that is a separate decision with its own rollback.
+
+So the honest summary of what a pause buys you: CPU scheduling, and the
+*appearance* of a dark decoy. On a CPU-starved leg that is real. On a
+RAM-starved leg it is close to nothing.
+
+### Why `hp-autoheal` is paused first and resumed last
+
+This is the part that will bite you if you improvise. Every decoy on this
+host carries the label `autoheal=true`, and `hp-autoheal` polls every
+`AUTOHEAL_INTERVAL=30` seconds. A paused container's healthcheck exec cannot
+complete, so Docker marks it `unhealthy` and autoheal `docker restart`s it —
+which unpauses it. Measured on 2026-09-27, pausing `hp-elasticpot` at
+`18:12:21Z` produced this in `docker logs hp-autoheal`:
+
+```
+18:12:38 Container /hp-elasticpot (4c07ab37c137) found to be unhealthy - Restarting container now with 10s timeout
+```
+
+Seventeen seconds later the decoy was running again, `docker ps` showed a
+normal `Up`, and `RestartCount` was still `0` — a `docker restart` is not a
+policy restart, so nothing in the container's own bookkeeping says anything
+happened. **A naive pause is a ~30-second no-op that leaves the operator
+believing a decoy is dark when it is not.** That is worse than an honest
+outage, so `pause` shuts `hp-autoheal` down first and `resume` brings it back
+last, after every decoy has been probed healthy again.
+
+### The classification
+
+Default-**deny**: a stack not in this table cannot be paused at all, and the
+refusal prints the reason. The wrong "safe" does not fail loudly — it
+silently breaks a decoy that was carrying the honeypot surface.
+
+The test applied to each container, in order:
+
+1. **Is it a decoy?** A sensor whose only job is to answer an attacker. A
+   pipeline stage, a datastore, an orchestrator or an operator surface is not
+   a decoy, however much RAM it holds.
+2. **Does it hold a listener or capture path?** Pausing a listener does not
+   refuse connections — the kernel keeps the socket and the SYN is queued, so
+   a client *hangs* until it times out. For a decoy that is the intended
+   dark. For anything in front of a capture path it is silent data loss.
+3. **Does anything depend on it?** Shared state, a FUSE mount, an internal
+   datastore. A partial pause hangs a live session instead of ending it
+   cleanly, so these go as a whole stack.
+4. **Is it a worker anything waits on, or an active test's fixture?** No.
+5. **Is it a GPU, training or eval leg?** Never — those are the reason for
+   pausing, not a target of it.
+
+#### Pause-safe
+
+| Stack | Containers | Verdict | Reason |
+| --- | --- | --- | --- |
+| `honeypot-elasticpot` | `hp-elasticpot` | safe | Standalone Elasticsearch decoy, no dependents, no shared state. Single container, so no in-flight session to strand. |
+| `honeypot-multipot` | `hp-multipot` | safe | pop3/imap/socks/dockerv2/tls/adb/redis/elastic decoy, no dependents, no upstream. |
+| `honeypot-dicompot` | `hp-dicompot` | safe | Standalone DICOM decoy, no dependents. |
+| `honeypot-dnp3` | `hp-dnp3` | safe | Standalone DNP3 decoy, no dependents. |
+| `honeypot-sentrypeer` | `hp-sentrypeer` | safe | Standalone SIP decoy, no dependents. |
+| `honeypot-hellpot` | `hp-hellpot` | safe | Standalone SMTP/HTTP/FTP decoy, no dependents. |
+| `honeypot-endlessh` | `hp-endlessh` | safe | Standalone SSH tarpit. Long-lived tarpit sessions are abandoned, which is the intended dark. |
+| `honeypot-rdp-honeypot` | `hp-rdp-honeypot` | safe | Standalone RDP decoy, no dependents. |
+| `honeypot-cisco-asa-honeypot` | `hp-cisco-asa-honeypot` | safe | Standalone ASA decoy, no dependents. |
+| `honeypot-sonicwall-sma-honeypot` | `hp-sonicwall-sma-honeypot` | safe | Standalone SMA decoy, no dependents. |
+| `honeypot-citrix-honeypot` | `hp-citrix-honeypot` | safe | Standalone Citrix decoy, no dependents. |
+| `honeypot-mailoney` | `hp-mailoney` | safe | Standalone SMTP decoy, no dependents. |
+| `honeypot-beelzebub` | `hp-beelzebub` | safe | Standalone adaptive SSH/HTTP/MCP decoy. It hosts an MCP endpoint; pausing it is a deliberate dark, not a defect. |
+
+#### Pause-safe only as a whole stack
+
+These have a real dependency on each other. Pausing half of one hangs a live
+session rather than ending it cleanly, so the script refuses to pause a
+partial set — it takes the named stacks whole, in dependency order.
+
+| Stack | Containers (pause order) | Reason |
+| --- | --- | --- |
+| `honeypot-conpot` | `hp-conpot`, `hp-conpot-guardian`, `hp-conpot-s7-1500`, `hp-conpot-s7-1200`, `hp-conpot-iec104`, `hp-conpot-kamstrup` | Six OT decoys sharing an image and a project. `hp-conpot` is the shared modbus/s7 front and the rest are peers on it, so a partial pause leaves listeners up with no engine behind them. |
+| `honeypot-cowrie` | `hp-cowrie`, `hp-honeyfs-implant` | `hp-honeyfs-implant` is the FUSE server serving cowrie's fake filesystem. Freezing the implant alone hangs every filesystem operation inside a live session. Resume implant first, cowrie second. |
+| `honeypot-dionaea` | `hp-dionaea`, `hp-tftp-relay` | The largest single decoy (~369 MiB, ~14% CPU) and the one most worth pausing. `hp-tftp-relay` is stack-internal, and dionaea holds an internal MySQL plus live sessions. Never dionaea alone. |
+| `honeypot-galah` | `hp-galah`, `hp-galah-llm-broker` | `hp-galah` proxies its LLM calls through the broker. Freezing the broker alone makes galah's own decoy paths fail in a way that looks like a *broken* decoy rather than a stand-down. |
+| `honeypot-canarytokens` | `hp-canarytokens-http-router`, `-frontend`, `-adapter`, `-switchboard`, `-redis` | Internal chain router → adapter → switchboard → redis. A partial pause leaves the switchboard blocked on a frozen redis. |
+
+#### Never pause
+
+| Stack | Containers | Reason |
+| --- | --- | --- |
+| `honeypot-elk` | `hp-elasticsearch`, `hp-filebeat`, `hp-zeek-proxy`, `hp-arkime-capture`, `hp-arkime-viewer`, `hp-kibana`, `hp-evebox`, `hp-pcap-sync`, `hp-extracted-file-importer` | The capture pipeline. Freezing `arkime-capture`/`zeek-proxy`/`pcap-sync` stops packet capture at the point of arrival — silent data loss. Freezing `hp-elasticsearch` stalls every sensor's event write. Not a decoy; it is what makes the decoys worth running. Highest single allocation on the host (~10.6 GiB) and the least safe to interrupt. |
+| `honeypot-dashboard` | `hp-dashboard-next`, `hp-dashboard-oidc-sessions`, `hp-apiary-worker`, `-worker-enrichment`, `-worker-importer`, `-worker-payload-inventory`, `hp-apiary-backend-mounted`, `hp-services-adapter` | The operator surface and the ES write consumers. Freezing the workers buffers Elasticsearch bulk queues, and a frozen dashboard means you cannot observe the stand-down you are performing — which defeats the point of recording it. |
+| `honeypot-dashboard-backend` | `hp-apiary-backend` | Auth and API surface. A frozen backend fails every dashboard and CLI call with a hang, not a clean error. |
+| `honeypot-keycloak` | `hp-keycloak`, `hp-keycloak-postgres` | Identity tier. Dashboard, Arcane and the OIDC login tests all authenticate through it. |
+| `honeypot-arcane` | `hp-arcane` | GitOps control plane — the container that would *re-create* a paused decoy on its next sync, so freezing it is arguably necessary. But it is also what reconciles the fleet, and a control plane held frozen across a long leg cannot report or repair drift. Reconcile first, pause decoys, do not freeze the orchestrator. |
+| `honeypot-utilities` | `hp-docker-socket-proxy`, `hp-disk-space-monitor`, `hp-docker-hygiene`, `hp-log-maintenance`, `hp-reporter` | Host watchdogs. Freezing the disk and hygiene monitors during exactly the memory-hungry leg they exist to catch removes the guard against the failure you are creating. `hp-docker-socket-proxy` is also the socket autoheal drives. |
+| `honeypot-tanner` | `hp-tanner`, `hp-tanner-api`, `hp-tanner-web`, `hp-tanner-redis`, `hp-tanner-docker`, `hp-tanner-phpox`, `hp-snare` | Event sink, not a decoy. cowrie and dionaea POST events here, so freezing it makes live sensors error on their own event path, and `hp-tanner-redis` holds session state in flight. Analysis of collected events is exactly what a leg must not interrupt. |
+| `honeypot-payload-analysis` | `hp-yara-scanner`, `hp-payload-dedupe` | Downstream payload analysis fed from Elasticsearch. Not a decoy and holds no listener, but it is a pipeline stage and freezing it mid-file leaves partial state. |
+| `honeypot-init` | `hp-geoipupdate`, `hp-threat-cidrs-refresh` | Periodic updaters. Freezing `hp-geoipupdate` mid-write can leave a truncated GeoIP database, which then fails every enrichment silently. |
+| `ml-worker` | `hp-ml-worker` | Named in the cold protocol's `LIVE_WORKERS`. The cold-run mechanism governs this container via `STOP_WORKERS=1` + trap; pausing it here would create a second, unreconciled source of truth for whether it is running. |
+| `auth-events-worker` | `hp-auth-events-worker` | Consumes Keycloak auth-failure events. Freezing it drops the signal that tier exists to capture. |
+| `ghidra` | `ghidra-ollama-1`, `ghidra-revdeck-1`, `ghidra-statictools-1`, `ghidra-ghidra-1` | **Hard prohibition.** `ghidra-ollama-1` is the GPU slot holder, named explicitly in #3135: never pause it while a benchmark holds the GPU. `ghidra-revdeck-1` is in the cold protocol's `LIVE_WORKERS`. These are also the containers a leg runs to make room *for*. |
+| `unsloth` | `hp-unsloth-studio` | The training leg itself — the reason for pausing, not a target of it. |
+| `rex86-eval` | `rex86-eval` | The eval leg itself, same reasoning. |
+| `technitium` | `technitium-dns` | Real recursive DNS for `192.168.42.50`, not a decoy. A frozen resolver takes the host's name resolution with it. |
+| `pentagi` | `graphiti`, `neo4j`, `pentagi`, `pgvector`, `pentagi-ollama-embedding`, `pgexporter`, `scraper` | Unrelated product stack, not part of the honeypot. Out of scope. |
+| `ghosts` | `ghosts-ghosts-api-1`, `ghosts-ghosts-postgres-1` | Belongs to the sandbox isolation stack that #3312 audits. Standing that down is a separate, declared act (`scripts/sandbox-standdown.sh`), not a decoy pause. |
+| `dashkcnext-dashkcchaos` | `dashkcnext-{pg,kc,redis}-414734`, `dashkcchaos-{pg,kc,redis}-404812` | OIDC chaos-test fixtures — these **are** an active test. "Depended on by an active test" is an explicit not-pause-safe condition in #3135. |
+
+The `pentagi-terminal-*` containers and the buildkit builder carry no compose
+project label and are out of scope for this table; none is a decoy.
+
+### Procedure
+
+**Pause**
+
+1. Confirm nothing in the cold-run protocol is running. `pause` refuses on
+   its own (`pgrep` over `sweep_extra.sh`, `record_baseline.py`,
+   `round7_sweep.sh`, `coldrun.sh`, `round7_coldrun.sh` — the same guard
+   `coldrun.sh` uses to avoid double-booking the GPU), but the refusal is
+   worth reading rather than working around.
+2. `scripts/honeypot-pause.sh pause <stack> [stack...]`
+3. The script pauses `hp-autoheal` first, then each stack in dependency
+   order, and records every container in `APIARY_PAUSE_DIR/inventory`
+   (default `/var/lib/apiary/honeypot-pause/`) plus an append-only
+   what-and-when line in `record.log` next to it.
+4. `scripts/honeypot-pause.sh status` — what is paused, in pause order.
+
+**Resume**
+
+5. `scripts/honeypot-pause.sh resume` walks the inventory in
+   **strict reverse order**. For each container it unpauses, waits for the
+   healthcheck to return to `healthy` *before* releasing `hp-autoheal` (so
+   autoheal cannot restart it mid-verification), then makes **one real probe
+   request** at the decoy's own port: a completed TCP connect, or an HTTP
+   request that must come back `200` with a body.
+6. Any container that does not verify keeps the inventory on disk and exits
+   non-zero. Do not treat the leg as clean until they answer.
+
+**Verify by hand** (the two things the script does, if you are checking):
+
+```bash
+docker ps --filter status=paused            # should be empty when resumed
+docker ps --filter name=hp-elasticpot        # status, including (healthy)
+curl -s -o /dev/null -w '%{http_code}\n' http://10.8.0.2:9201/   # expect 200
+docker logs --since 5m hp-autoheal           # expect no "found to be unhealthy"
+```
+
+A paused decoy **hangs** rather than refusing: the kernel keeps the listening
+socket and queues the SYN, so `curl` exits `28` (timeout), not `7`
+(connection refused). Expect the timeout, and do not read it as a decoy that
+is wedged differently from how you paused it.
+
+### Dry-run evidence (2026-09-27)
+
+Recorded here rather than only in a PR, because the next person to run this
+will want to know what has actually been executed against the live host.
+
+**Proven on the live homeserver, on the real `honeypot-elasticpot` stack** —
+pause → probe stops answering → unpause → probe answers again:
+
+| Step | Observed |
+| --- | --- |
+| Baseline | `Up (healthy)`, probe `HTTP 200`, 339 bytes of decoy ES (`"name": "Green Goblin"`) |
+| Naive pause (no gate) | Paused, probe `HTTP 000` / `curl` exit `28`; **autoheal restored it 17s later** — see above |
+| Pause with the autoheal gate | Held `Paused` through 100s (3+ `AUTOHEAL_INTERVAL`s), `State.Health=unhealthy`, autoheal silent |
+| cgroup memory across the pause | `36,339,712` B running → `36,360,192` B paused — **no memory released** |
+| Reverse-order resume | Unpaused, health `unhealthy` → `healthy` at t+35s |
+| Probe after resume | `HTTP 200`, 339 bytes, **byte-identical to baseline** (`cmp` clean) |
+| After autoheal released last | Both healthy, no restart in `docker logs hp-autoheal` |
+
+The resume path was additionally exercised for real against throwaway
+containers (never decoys, never autoheal, never the GPU leg): an inventory of
+`a,b` was walked as `b,a`; a genuinely paused container was unpaused and
+returned to `healthy`; and a container that could not return to `healthy`
+produced `WARN`, exit `1`, and **kept its inventory for retry** rather than
+reporting a clean leg.
+
+**Not yet proven end to end:** a full script-driven `pause` → `resume` on a
+live decoy. The attempt was correctly *refused* — a benchmark was holding the
+GPU slot at the time (`record_baseline.py`, 8h in, 18.4 GB resident in
+`ghidra-ollama-1`), and the interlock fired:
+
+```
+ABORT: cold-run protocol is active (matched 'record_baseline.py').
+```
+
+That refusal is the interlock working, not a gap in it. The consequence to be
+honest about is narrower: the script's own `pause` path has not yet been run
+end to end against a decoy, so the first operator to use it after the GPU slot
+frees should expect to watch it once rather than treat it as battle-tested.
+The measurements above were taken with the same `docker pause`/`unpause` calls
+the script makes, on the same host, against the same stack.
+
+### Scope boundary: this does not touch the cold-run protocol
+
+Stop-workers-during-cold-run stays governed by `STOP_WORKERS=1` and the
+restore trap in `analysis/ghidra/benchmarks/corpus/sweep_extra.sh`. That
+mechanism is unchanged by #3135, and `honeypot-pause.sh` does not stop,
+start, or otherwise manage a worker. It only refuses to run while a cold-run
+pattern is live, so that ad-hoc pausing cannot become a second, competing
+record of which workers are down.
