@@ -773,7 +773,28 @@ class ParityWithTheDockerfiles(unittest.TestCase):
         self.assertIsNotNone(load)
         self.assertIn("matrix.boot_smoke", load.group(1))
         labels = re.search(r"^\s+labels: (.+)$", self.containers, re.M)
-        self.assertIn("matrix.boot_smoke", labels.group(1))
+        self.assertIsNotNone(labels, "the build step lost its labels: input")
+        # The build-row label is appended by a shell step (#3316), because an
+        # expression cannot produce the real newline that separates labels --
+        # `format('\n...')` emits a literal backslash-n that gets glued onto
+        # the previous label's value. So the gating moved from the `labels:`
+        # expression to that step's `if:`. The invariant is unchanged: only a
+        # boot-smoke row gets the label, and every row still gets the base
+        # labels the build-push-action reads.
+        labels_value = labels.group(1)
+        self.assertIn("steps.metadata.outputs.labels", labels_value)
+        self.assertRegex(
+            labels_value, r"\$\{\{\s*steps\.buildrow\.outputs\.labels\s*\|\|",
+        )
+        buildrow = re.search(
+            r"- name: Append the boot-smoke build-row label\s*\n"
+            r"\s*id: buildrow\s*\n"
+            r"\s*if: (.+)$",
+            self.containers,
+            re.M,
+        )
+        self.assertIsNotNone(buildrow, "the label-append step is gone")
+        self.assertIn("matrix.boot_smoke", buildrow.group(1))
 
     def test_every_smoked_row_has_a_step_and_no_other_row_does(self) -> None:
         steps = set(re.findall(r"- name: \"?Boot-smoke (\S+)", self.containers))
