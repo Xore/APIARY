@@ -105,15 +105,183 @@ pub struct AppState {
     pub observability: Arc<obs::Obs>,
 }
 
+/// /livez — the process is up and its HTTP stack is answering. Says nothing
+/// about Elasticsearch, and must never ask it.
+///
+/// This is the endpoint the container HEALTHCHECK curls on an interval, and
+/// the reason it stays dependency-free is the whole point of #3317: a probe
+/// that can block on Elasticsearch turns that dependency's outage into a
+/// restart loop of a container which was never the thing that broke. The
+/// old /healthz answered `{"ok": true, "es": <bool>}` from inside this
+/// handler, so an ES outage showed up here as a slow or failed probe
+/// instead of as an ES outage.
 #[derive(Serialize)]
-struct Health {
-    ok: bool,
-    es: bool,
+struct Liveness {
+    live: bool,
+    /// build.rs's compile stamp, so a probe can answer "is the running
+    /// binary newer than the merge" without a second round trip. Same
+    /// field main logs at boot.
+    built: String,
 }
 
-async fn healthz(State(state): State<AppState>) -> Json<Health> {
-    let es_ok = state.es.ping().await;
-    Json(Health { ok: true, es: es_ok })
+/// /readyz — Elasticsearch is reachable and this tier's own write targets
+/// are not write-blocked, i.e. the backend can actually do its job rather
+/// than merely be running. 503 plus a `reason` when it cannot.
+///
+/// Unlike liveness this endpoint is allowed to fail, so it is the one
+/// diagnostics and the #3315 deploy verifier probe: "the process is up" is
+/// the wrong question during an ingest outage, and it is the only question
+/// the old endpoint could ask.
+#[derive(Serialize)]
+struct Readiness {
+    ready: bool,
+    /// Present exactly when `ready` is false, and specific enough to act
+    /// on — "Elasticsearch is unreachable" and "these four indices are
+    /// write-blocked" send an operator to different pages.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+    /// green / yellow / red / unreachable. Reported even when ready, since
+    /// yellow is the ordinary shape of a replicated cluster and a probe
+    /// that only ever printed green would be no better than the constant
+    /// it replaces.
+    cluster: String,
+    /// The write-blocked members of `es::WRITE_TARGET_FAMILIES`. Always
+    /// present so a consumer can read one shape; named rather than counted,
+    /// because the point is to be able to act on which ones.
+    write_blocked: Vec<String>,
+}
+
+/// /readyz's own deadline, independent of the shared client's.
+///
+/// es::connect gives the transport 30s, sized for real multi-second queries
+/// rather than for a probe — and es.rs's own comment on that budget records
+/// a /healthz that stopped responding because a worker loop's aggregation
+/// saturated the search queue. A readiness answer somebody is waiting on
+/// should arrive in seconds, and a probe that blocks for 30 is
+/// indistinguishable from the outage it exists to report.
+const READINESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The one place readiness is decided, kept pure so its truth table is
+/// testable without an Elasticsearch to ask — the same discipline as
+/// `resolve_service_token` below, and for the same reason: the interesting
+/// cases are the ones where two independent probes disagree about how bad
+/// things are, and a test that needs a live cluster to reach them is a test
+/// that does not get run.
+///
+/// `cluster` and `write_blocked` are two Results rather than one tuple of
+/// plain values so a partial failure is a case this function has to answer
+/// for, instead of one a caller has to.
+fn readiness_verdict(
+    cluster: anyhow::Result<String>,
+    write_blocked: anyhow::Result<Vec<String>>,
+) -> Readiness {
+    // Unreachable outranks everything else. A write-block reading against a
+    // cluster we could not reach is not a fact, it is the absence of one,
+    // and reporting it as the cause would be a guess.
+    let cluster = match cluster {
+        Ok(status) => status,
+        Err(error) => {
+            return Readiness {
+                ready: false,
+                reason: Some(format!("elasticsearch is unreachable: {error}")),
+                cluster: "unreachable".to_string(),
+                write_blocked: Vec::new(),
+            }
+        }
+    };
+    let blocked = match write_blocked {
+        Ok(blocked) => blocked,
+        Err(error) => {
+            return Readiness {
+                ready: false,
+                reason: Some(format!("elasticsearch refused the readiness probe: {error}")),
+                cluster,
+                write_blocked: Vec::new(),
+            }
+        }
+    };
+    // Red means unassigned primaries, against which both reads and writes
+    // fail. Yellow means unassigned *replicas*, which is the ordinary shape
+    // of a replicated cluster during a rolling restart and costs this tier
+    // nothing — a red-only gate would go not-ready on every deploy.
+    if cluster == "red" {
+        return Readiness {
+            ready: false,
+            reason: Some("elasticsearch cluster health is red (unassigned primaries)".to_string()),
+            cluster,
+            write_blocked: blocked,
+        };
+    }
+    if !blocked.is_empty() {
+        return Readiness {
+            ready: false,
+            reason: Some(format!(
+                "elasticsearch has index.blocks.write set on: {}. The flood-stage disk \
+                 watermark sets this on every index at once, and so does an operator's \
+                 `PUT /<index>/_block/write`; this endpoint cannot tell those apart, so \
+                 check _cat/allocation free space before concluding which one it is.",
+                blocked.join(", ")
+            )),
+            cluster,
+            write_blocked: blocked,
+        };
+    }
+    Readiness { ready: true, reason: None, cluster, write_blocked: blocked }
+}
+
+/// GET /livez, and GET /healthz — the same handler under two names. See
+/// `Liveness` for why the response carries no Elasticsearch signal.
+async fn livez() -> Json<Liveness> {
+    Json(Liveness { live: true, built: build_stamp() })
+}
+
+/// `/healthz` is the name the image's HEALTHCHECK, the port-test harness
+/// and the ops scripts already use, so it stays as an alias rather than
+/// being broken (killing a 2024-era name in a health-probe rename is how a
+/// stack ends up reporting permanently unhealthy with nothing wrong). It
+/// used to answer `{"ok": true, "es": <bool>}` where `ok` was the constant
+/// #3317 is about; the `es` half of that answer now lives on /readyz, which
+/// can say no.
+async fn healthz() -> Json<Liveness> {
+    livez().await
+}
+
+/// GET /readyz — see `Readiness`. Unauthenticated exactly like the liveness
+/// probes and /metrics, because the callers are infrastructure: the deploy
+/// verifier, diagnostics, and an operator on a jump host. Authentication
+/// would not make it safer here, only less answerable.
+async fn readyz(State(state): State<AppState>) -> (StatusCode, Json<Readiness>) {
+    // Both probes in flight together: they are independent round trips and
+    // the endpoint's whole value is being quick to answer. The async block
+    // is what makes the pair a single future the deadline can wrap --
+    // `join!` on its own expands to the values, not to something awaitable.
+    let probes = tokio::time::timeout(READINESS_TIMEOUT, async {
+        tokio::join!(
+            state.es.cluster_health_status(),
+            state.es.write_blocked(es::WRITE_TARGET_FAMILIES),
+        )
+    })
+    .await;
+    let (cluster, write_blocked) = match probes {
+        Ok(probes) => probes,
+        Err(_elapsed) => {
+            // Both halves report the deadline, because a probe pair that
+            // timed out established nothing about either question. The
+            // verdict resolves the cluster half as unreachable; this one
+            // exists so the pair stays a pair of Results rather than a
+            // Result of a pair, and its text is never what gets reported.
+            let expired = || anyhow::anyhow!("no answer within {}s", READINESS_TIMEOUT.as_secs());
+            (Err(expired()), Err(expired()))
+        }
+    };
+    let readiness = readiness_verdict(cluster, write_blocked);
+    let status = if readiness.ready {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    tracing::debug!(ready = readiness.ready, cluster = %readiness.cluster, "readyz");
+    (status, Json(readiness))
 }
 
 /// A boot refusal carries the code the cutover doc and dashboards grep
@@ -476,7 +644,17 @@ async fn main() -> anyhow::Result<()> {
         .layer(middleware::from_fn_with_state(state.clone(), require_service_token));
 
     let app = Router::new()
+        // #3317: liveness and readiness are different questions with
+        // different consequences, and conflating them is what let a backend
+        // that could not reach Elasticsearch keep answering `ok: true` to
+        // its own healthcheck. /livez (and its /healthz alias) is "the
+        // process is up" and never touches Elasticsearch, so an ES outage
+        // cannot restart-loop the container; /readyz is "this can do its
+        // job" and answers 503 with a reason when it cannot. All three are
+        // unauthenticated, like the /healthz they grew out of.
+        .route("/livez", get(livez))
         .route("/healthz", get(healthz))
+        .route("/readyz", get(readyz))
         // #1972: same listener, same internal-network posture as /healthz.
         .route("/metrics", get(obs::metrics_route))
         .merge(api)
@@ -587,5 +765,114 @@ mod service_token_tests {
         // enforcement alongside it.
         let resolved = resolve_service_token(Some("s3cret"), true).expect("must boot");
         assert_eq!(resolved, Some("s3cret"));
+    }
+}
+
+#[cfg(test)]
+mod readiness_tests {
+    use super::readiness_verdict;
+
+    fn blocked(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| name.to_string()).collect()
+    }
+
+    #[test]
+    fn a_reachable_unblocked_cluster_is_ready() {
+        let readiness = readiness_verdict(Ok("green".into()), Ok(vec![]));
+        assert!(readiness.ready);
+        assert_eq!(readiness.reason, None, "a ready verdict carries no reason");
+        // Still reported when ready: yellow is the ordinary shape of a
+        // replicated cluster, and a probe that only ever printed green
+        // would be no better than the constant #3317 replaced.
+        assert_eq!(readiness.cluster, "green");
+        assert!(readiness.write_blocked.is_empty());
+    }
+
+    #[test]
+    fn yellow_stays_ready() {
+        // Yellow is unassigned *replicas*, which costs this tier nothing.
+        // Gating on it would take the backend not-ready on every rolling
+        // restart and every replica relocation.
+        assert!(readiness_verdict(Ok("yellow".into()), Ok(vec![])).ready);
+    }
+
+    #[test]
+    fn an_unreachable_cluster_is_not_ready_and_says_why() {
+        // The bug in #3317's report, in the shape it took there: a backend
+        // that cannot reach Elasticsearch still answering healthy.
+        let readiness = readiness_verdict(Err(anyhow::anyhow!("connection refused")), Ok(vec![]));
+        assert!(!readiness.ready);
+        assert_eq!(readiness.cluster, "unreachable");
+        let reason = readiness.reason.expect("not-ready must carry a reason");
+        assert!(reason.contains("unreachable"), "{reason}");
+        assert!(reason.contains("connection refused"), "{reason}");
+    }
+
+    #[test]
+    fn unreachable_outranks_a_write_block_report() {
+        // A block reading taken against a cluster we could not reach is not
+        // a fact about that cluster. Reporting it as the cause would be a
+        // guess, and it would be the wrong one to send an operator after.
+        let readiness = readiness_verdict(
+            Err(anyhow::anyhow!("no route to host")),
+            Ok(blocked(&["dashboard-config-v1"])),
+        );
+        assert!(!readiness.ready);
+        assert!(
+            readiness.write_blocked.is_empty(),
+            "an unreachable cluster has no block state to report, got {:?}",
+            readiness.write_blocked
+        );
+        assert!(readiness.reason.unwrap().contains("unreachable"));
+    }
+
+    #[test]
+    fn a_write_block_is_not_ready_and_names_the_indices() {
+        // The disk-flood-stage / operator-block case: ES answers health
+        // fine and the block is the only evidence there is. Names rather
+        // than counts, because the point is to be actionable.
+        let readiness = readiness_verdict(
+            Ok("green".into()),
+            Ok(blocked(&["dashboard-config-v1", "dashboard-users-v1"])),
+        );
+        assert!(!readiness.ready, "a green cluster is not the same as a writable one");
+        assert_eq!(readiness.cluster, "green");
+        assert_eq!(readiness.write_blocked, blocked(&["dashboard-config-v1", "dashboard-users-v1"]));
+        let reason = readiness.reason.expect("not-ready must carry a reason");
+        assert!(reason.contains("dashboard-config-v1"), "{reason}");
+        assert!(reason.contains("dashboard-users-v1"), "{reason}");
+        assert!(
+            reason.contains("_cat/allocation"),
+            "the reason has to point at the two causes it cannot tell apart: {reason}"
+        );
+    }
+
+    #[test]
+    fn red_is_not_ready_even_with_nothing_blocked() {
+        let readiness = readiness_verdict(Ok("red".into()), Ok(vec![]));
+        assert!(!readiness.ready);
+        assert!(readiness.reason.unwrap().contains("red"));
+    }
+
+    #[test]
+    fn a_probe_refused_itself_is_not_ready() {
+        // Reachable enough to answer health, but the settings call itself
+        // failed. "Ready" would be an answer this endpoint has no basis
+        // for -- it asked whether writes are permitted and was not told.
+        let readiness =
+            readiness_verdict(Ok("green".into()), Err(anyhow::anyhow!("403 forbidden")));
+        assert!(!readiness.ready);
+        assert!(readiness.reason.unwrap().contains("refused the readiness probe"));
+    }
+
+    #[test]
+    fn an_unknown_color_is_not_treated_as_red_or_green() {
+        // Neither branch claims it. The verdict is ready because no
+        // condition was met -- but `cluster` carries the honest "unknown"
+        // for the reader, rather than the endpoint inventing a color it
+        // was not told.
+        let readiness = readiness_verdict(Ok("unknown".into()), Ok(vec![]));
+        assert!(readiness.ready);
+        assert_eq!(readiness.cluster, "unknown");
     }
 }

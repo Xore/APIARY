@@ -296,7 +296,7 @@ async fn run_cycle(state: &AppState, fetch_window: Duration, max_events_per_sour
     // rules::evaluate_event's per-event decode/hash rule chain, run once per
     // fetched event — up to 20,000 under the default fetch caps) starves
     // every other task sharing this process's tokio runtime, including
-    // main.rs's /healthz handler: confirmed live during #1628's preflight —
+    // main.rs's probe handlers: confirmed live during #1628's preflight —
     // agent-intrusion run alone reliably made /healthz stop responding
     // entirely (a direct curl timed out at 45s with zero response) within
     // ~90s of every cycle start. The container's own cpu.max cgroup quota
