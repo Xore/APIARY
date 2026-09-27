@@ -3622,3 +3622,758 @@ Index: docs/OPERATIONS.md
    `analysis/kibana-import.sh`. **Export first, the same way you'd back up
 
 > build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && python3 scripts/check-doc-links.py 2>&1|tail -2 && python3 scripts/check-doc-paths-exist.py 2>&1|tail -2 && python3 scripts/check-doc-stale-paths.py 2>&1|tail -2 && git add -A && git commit -q -F - <<'EOF' && git log --oneline -1
+docs(operations): fix stale Go-era API paths, template count and Kibana index
+
+- "8 of the init stack's 27 index templates" -> 33. The 8 is right
+  (honeypot-events-v2, suricata-events, portbridge-events, zeek-events,
+  zeek-proxy-events, extracted-files, huginn-events, traefik-access); the
+  total was not, because two of the script's 25 _index_template PUTs are
+  loops (7 analysis-family templates + 3 dashboard-config templates).
+- "/api/campaigns" and "/api/intelligence/archive" are Go-dashboard paths.
+  main.rs has no intelligence route at all; the archive index
+  dashboard-intelligence-archive-v1 is reachable through the generic store
+  route /api/v1/store/intelligence. Campaigns is /api/v1/campaigns.
+- The source-health runtime card no longer reports Go heap/goroutines --
+  health.rs says so explicitly and returns uptime_seconds/rss_bytes/
+  vm_bytes. There is no /api/runtime route.
+- Saved objects are not in a bare ".kibana" index: the stack runs
+  Elasticsearch/Kibana 9.5.3, so they live in .kibana_<n>.
+- dashboard/frontend does not exist; the frontend is
+  arcane/home/honeypot-dashboard/frontend-next.
+- GeoIP pipeline covers three index families, not "both" templates, and the
+  Arkime "db-ip country database" note contradicted this same file's own
+  #2713 paragraph (GeoLite2 Country, no coordinates).
+- Kibana data views are honeypot-v2-* / suricata-* / dead-letter-honeypot*.
+EOF
+OK — 391 local refs in 155 files all resolve
+doc path existence check passed (121 files, 464 tokens, 41 allowlisted)
+doc stale-path check passed
+47e1ab22 docs(operations): fix stale Go-era API paths, template count and Kibana index
+> build · stealth
+Now let me work through the remaining files efficiently with a parallel exploration pass:
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== env var defaults claimed in my docs vs compose ==="; for f in docs/TESTING.md docs/KEYCLOAK-OPERATIONS.md docs/DASHBOARD-CUTOVER.md docs/RECOVERY.md docs/STACK-REBUILD.md docs/honeypot-network-isolation.md docs/GEOIP-THREAT-INTEL.md docs/KEYCLOAK-CUTOVER.md; do echo "--- $f"; grep -ohE '\b[A-Z][A-Z0-9_]{4,}\b' $f | sort -u | tr '\n' ' '; echo; done
+=== env var defaults claimed in my docs vs compose ===
+--- docs/TESTING.md
+ARCHITECTURE AUTH_INTROSPECTION_ BACKUP_HOST_PATH BACKUP_HOST_SANDBOX_PATH JSONL TANNER 
+--- docs/KEYCLOAK-OPERATIONS.md
+APIARY CLIENT CLIENT_UUID CONFIGURE_TOTP HP_BIND HTTPS KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_ADMIN_USERNAME KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME KEYCLOAK_PORT KEYCLOAK_PUBLIC_DOMAIN KEYCLOAK_RESTORE_CONFIRM KEYCLOAK_SECRETS_DIR KEYCLOAK_THEME_DIR KEYCLOAK_URL OIDC_ISSUER_URL OIDC_PUBLIC_DOMAIN OIDC_SECRETS_DIR RESTIC_PASSWORD_FILE RESTIC_REPOSITORY SAMEORIGIN TANNER UPDATE_PASSWORD 
+--- docs/DASHBOARD-CUTOVER.md
+APIARY APIARY_ALLOW_UNAUTH_DEV COMPLETE CUTOVER DASHBOARD_SERVE_MODE DASHBOARD_SERVICE_TOKEN KEYCLOAK README SERVICE TOKEN 
+--- docs/RECOVERY.md
+APIARY ARCANE BACKUP ESSENTIALS README REBUILD RECOVERY STACK 
+--- docs/STACK-REBUILD.md
+APIARY APIARY_ DAC_OVERRIDE KEYCLOAK OPERATIONS README RECOVERY SETGID SETUID 
+--- docs/honeypot-network-isolation.md
+APIARY HOME_NET NET_ADMIN NET_RAW README SNARE TANNER 
+--- docs/GEOIP-THREAT-INTEL.md
+MAXMIND_ACCOUNT_ID MAXMIND_LICENSE_KEY WORKER_LOOPS 
+--- docs/KEYCLOAK-CUTOVER.md
+APIARY AUTH_INTROSPECTION_TOKEN AUTH_INTROSPECTION_URL AUTH_SESSION_COOKIE_NAME AUTH_TARGET_HOST KEYCLOAK OAUTH2_PROXY_SKIP_AUTH_STRIP_HEADERS OPERATIONS TANNER
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== KEYCLOAK_ env vars: docs vs compose/env.example ===" && for v in KEYCLOAK_ADMIN_USERNAME KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME KEYCLOAK_PORT KEYCLOAK_PUBLIC_DOMAIN KEYCLOAK_RESTORE_CONFIRM KEYCLOAK_SECRETS_DIR KEYCLOAK_THEME_DIR KEYCLOAK_URL OIDC_ISSUER_URL OIDC_PUBLIC_DOMAIN OIDC_SECRETS_DIR; do printf '%-42s ' "$v"; hits=$(grep -rl "$v" arcane/home/honeypot-keycloak/ vps/ 2>/dev/null | tr '\n' ' '); echo "${hits:-MISSING-IN-REPO}"; done
+=== KEYCLOAK_ env vars: docs vs compose/env.example ===
+KEYCLOAK_ADMIN_USERNAME                    arcane/home/honeypot-keycloak/keycloak/provision-account-console-scopes.sh arcane/home/honeypot-keycloak/keycloak/provision-arcane-oidc-secret.sh arcane/home/honeypot-keycloak/keycloak/provision-dashboard-oidc-secret.sh arcane/home/honeypot-keycloak/keycloak/provision-events-poller.sh arcane/home/honeypot-keycloak/keycloak/sync-client-secrets.sh 
+KEYCLOAK_ADMIN_PASSWORD                    arcane/home/honeypot-keycloak/keycloak/provision-account-console-scopes.sh arcane/home/honeypot-keycloak/keycloak/provision-arcane-oidc-secret.sh arcane/home/honeypot-keycloak/keycloak/provision-dashboard-oidc-secret.sh arcane/home/honeypot-keycloak/keycloak/provision-events-poller.sh arcane/home/honeypot-keycloak/keycloak/sync-client-secrets.sh 
+KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME          arcane/home/honeypot-keycloak/.env.example arcane/home/honeypot-keycloak/compose.yml 
+KEYCLOAK_PORT                              arcane/home/honeypot-keycloak/.env.example arcane/home/honeypot-keycloak/compose.yml arcane/home/honeypot-keycloak/keycloak/README.md 
+KEYCLOAK_PUBLIC_DOMAIN                     arcane/home/honeypot-keycloak/.env.example arcane/home/honeypot-keycloak/compose.yml arcane/home/honeypot-keycloak/keycloak/README.md 
+KEYCLOAK_RESTORE_CONFIRM                   arcane/home/honeypot-keycloak/keycloak/README.md arcane/home/honeypot-keycloak/keycloak/restore.sh 
+KEYCLOAK_SECRETS_DIR                       arcane/home/honeypot-keycloak/.env.example arcane/home/honeypot-keycloak/compose.yml arcane/home/honeypot-keycloak/keycloak/README.md 
+KEYCLOAK_THEME_DIR                         arcane/home/honeypot-keycloak/.env.example arcane/home/honeypot-keycloak/compose.yml arcane/home/honeypot-keycloak/keycloak/README.md 
+KEYCLOAK_URL                               arcane/home/honeypot-keycloak/.env.example arcane/home/honeypot-keycloak/compose.yml 
+OIDC_ISSUER_URL                            vps/.env.example vps/docker-compose.yml 
+OIDC_PUBLIC_DOMAIN                         vps/.env.example vps/docker-compose.yml 
+OIDC_SECRETS_DIR                           vps/.env.example vps/docker-compose.yml
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && for v in AUTH_INTROSPECTION_TOKEN AUTH_INTROSPECTION_URL AUTH_SESSION_COOKIE_NAME AUTH_TARGET_HOST OAUTH2_PROXY_SKIP_AUTH_STRIP_HEADERS DASHBOARD_SERVE_MODE SERVE_MODE BFF_INTERNAL_URL APIARY_ALLOW_UNAUTH_DEV; do printf '%-40s ' "$v"; hits=$(grep -rl -- "$v" --include='*.yml' --include='*.example' --include='*.sh' --include='*.rs' --include='*.ts' . 2>/dev/null | grep -v node_modules | grep -v graphify-out | head -3 | tr '\n' ' '); echo "${hits:-MISSING-IN-REPO}"; done
+AUTH_INTROSPECTION_TOKEN                 ./docs/KEYCLOAK-CUTOVER.md ./docs/agent-intrusion-threat-model.md ./.agent-run.log 
+AUTH_INTROSPECTION_URL                   ./docs/KEYCLOAK-CUTOVER.md ./.agent-run.log 
+AUTH_SESSION_COOKIE_NAME                 ./docs/KEYCLOAK-CUTOVER.md ./.agent-run.log 
+AUTH_TARGET_HOST                         ./docs/KEYCLOAK-CUTOVER.md ./.agent-run.log 
+OAUTH2_PROXY_SKIP_AUTH_STRIP_HEADERS     ./docs/KEYCLOAK-CUTOVER.md ./vps/docker-compose.yml ./.agent-run.log 
+DASHBOARD_SERVE_MODE                     ./arcane/home/honeypot-dashboard/.env.example ./arcane/home/honeypot-dashboard/compose.yml ./docs/DASHBOARD-CUTOVER.md 
+SERVE_MODE                               ./arcane/home/honeypot-dashboard-backend/compose.yml ./arcane/home/honeypot-dashboard/.env.example ./arcane/home/honeypot-dashboard/compose.yml 
+BFF_INTERNAL_URL                         ./arcane/home/honeypot-dashboard-backend/compose.yml ./arcane/home/honeypot-dashboard/.env.example ./arcane/home/honeypot-dashboard/compose.yml 
+APIARY_ALLOW_UNAUTH_DEV                  ./.github/workflows/quality.yml ./arcane/home/honeypot-dashboard-backend/.env.example ./arcane/home/honeypot-dashboard-backend/compose.yml
+> build · stealth
+[0m→ [0mRead docs/KEYCLOAK-CUTOVER.md 
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== oidc.server.ts role extraction ===" && grep -n -A20 -E 'resource_access|realm_access|hasRole|isAdmin|roles' arcane/home/honeypot-dashboard/frontend-next/src/lib/oidc.server.ts | head -60
+=== oidc.server.ts role extraction ===
+215:    scope: 'openid profile email roles',
+216-    code_challenge: challenge,
+217-    code_challenge_method: 'S256',
+218-    state,
+219-  })
+220-  return { redirect: url.href }
+221-}
+222-
+223-function dashboardClientId(): string {
+224-  return process.env.OIDC_CLIENT_ID ?? 'apiary-dashboard'
+225-}
+226-
+227-export async function completeLogin(requestUrl: URL): Promise<{
+228-  sub: string
+229-  username: string
+230-  displayName: string
+231-  role: 'admin' | 'user'
+232-  idToken?: string
+233-  returnTo: string
+234-} | null> {
+235-  const state = requestUrl.searchParams.get('state') ?? ''
+--
+251:  // Dashboard roles are the apiary-dashboard client's own roles, not realm
+252:  // roles (docs/KEYCLOAK-CUTOVER.md "Claims and sessions") — they live under
+253:  // resource_access.<client id>.roles, not realm_access.roles.
+254:  const resourceAccess = claims.resource_access as
+255:    | Record<string, { roles?: string[] } | undefined>
+256-    | undefined
+257:  const roles = resourceAccess?.[dashboardClientId()]?.roles ?? []
+258-  return {
+259-    sub: String(claims.sub),
+260-    username,
+261-    displayName: String(claims.name ?? username),
+262:    role: roles.includes('admin') ? 'admin' : 'user',
+263-    idToken: tokens.id_token,
+264-    returnTo: pending.returnTo,
+265-  }
+266-}
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && python3 -c "
+import json
+d=json.load(open('arcane/home/honeypot-keycloak/keycloak/realm/apiary-realm.json'))
+print('realm:',d.get('realm'))
+print('realm roles:',[r['name'] for r in d.get('roles',{}).get('realm',[])])
+for c in d.get('clients',[]):
+    print('client:',c.get('clientId'),'| public:',c.get('public'),'| roles:',[r.get('name') for r in (c.get('roles') or [])],'| defaultRoles:',c.get('defaultRoles'))
+"
+realm: apiary
+realm roles: ['apiary-user', 'apiary-admin']
+client: apiary-dashboard | public: None | roles: [] | defaultRoles: None
+client: kibana | public: None | roles: [] | defaultRoles: None
+client: evebox | public: None | roles: [] | defaultRoles: None
+client: arkime | public: None | roles: [] | defaultRoles: None
+client: tanner | public: None | roles: [] | defaultRoles: None
+client: revdeck | public: None | roles: [] | defaultRoles: None
+client: traefik-dashboard | public: None | roles: [] | defaultRoles: None
+client: arcane | public: None | roles: [] | defaultRoles: None
+client: auth-events-poller | public: None | roles: [] | defaultRoles: None
+> build · stealth
+I need to correct my earlier settings-operations.md edit — the dashboard reads a client role, not a realm role:
+[0m← [0mEdit docs/settings-operations.md
+Index: docs/settings-operations.md
+===================================================================
+--- docs/settings-operations.md
++++ docs/settings-operations.md
+@@ -114,14 +114,18 @@
+   read-only, whenever Elasticsearch is unreachable — no manual action needed
+   to force this state; if you need a deliberate outage, block network access
+   from the dashboard to Elasticsearch instead of touching a file.
+ - **Per-user preferences:** same posture as configuration above.
+-- **Admin configuration API:** revoke the `apiary-admin` role in Keycloak
+-  (realm `apiary`, roles defined in
+-  [`arcane/home/honeypot-keycloak/keycloak/realm/apiary-realm.json`](../arcane/home/honeypot-keycloak/keycloak/realm/apiary-realm.json));
+-  the admin panes and endpoints are gated server-side on live
+-  introspection, so access ends on the next request. `Xore/auth-backend`
+-  was the pre-Keycloak home for those roles and is retired.
++- **Admin configuration API:** remove the dashboard's `admin` role from the
++  `apiary-dashboard` Keycloak client (realm `apiary`; the eight OIDC clients
++  are declared in
++  [`arcane/home/honeypot-keycloak/keycloak/realm/apiary-realm.json`](../arcane/home/honeypot-keycloak/keycloak/realm/apiary-realm.json)).
++  The frontend reads client roles from
++  `resource_access.apiary-dashboard.roles` and treats anything without
++  `admin` as `user` (`frontend-next/src/lib/oidc.server.ts`); the admin
++  panes and endpoints are gated server-side on live introspection, so access
++  ends on the next request. `Xore/auth-backend` was the pre-Keycloak home
++  for those roles and is retired.
+ - **Orphan retention:** `DASHBOARD_USER_RETENTION_DAYS` (default 90) controls
+   the sweep; it cannot fully disable live-introspection revocation, which is
+   always immediate.
+ 
+
+> build · stealth
+Now let me check KEYCLOAK-OPERATIONS.md, DASHBOARD-CUTOVER.md and the remaining docs:
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== oauth2-proxy x6 count claim ===" && grep -c 'oauth2-proxy' vps/docker-compose.yml && echo "--- oauth2-proxy services ---" && python3 -c "
+import re
+lines=open('vps/docker-compose.yml').read().split('\n')
+inb=False;names=[]
+for l in lines:
+    if re.match(r'^services:\s*\$', l): inb=True; continue
+    if inb and re.match(r'^[A-Za-z]', l): inb=False
+    if inb:
+        m=re.match(r'^  ([A-Za-z0-9_.-]+):\s*\$', l)
+        if m and 'proxy' in m.group(1): names.append(m.group(1))
+print(len(names), names)
+"
+=== oauth2-proxy x6 count claim ===
+14
+--- oauth2-proxy services ---
+1 ['docker-socket-proxy']
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && grep -n -B8 'oauth2-proxy' vps/docker-compose.yml | grep -E '^\d+[-:]  [a-z0-9-]+:|container_name|image:.*oauth2-proxy' | cut -c1-140 | head -30; echo "=== forward-auth / HostRouter rules ==="; grep -nE 'Host\(\`|HostRegexp' vps/*.yml vps/*.yaml 2>/dev/null | cut -c1-160 | head -20
+grep: warning: stray \ before d
+18:  image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.4@sha256:b1b2021fe8f4004573e8d690dec6c7bb29cc44364572cf8510a05bf3a0ae2ded
+=== forward-auth / HostRouter rules ===
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && ls vps/ && echo "=== traefik config files ===" && git ls-files vps/ | grep -iE 'traefik|yml|yaml|toml|dynamic' | head -20
+apiary-capture-interface.service
+apiary-container-watchdog.service
+apiary-container-watchdog.timer
+check-firewall-portbridge-sync.sh
+container-restart-watchdog.sh
+debug-backends.sh
+debug-traefik.sh
+detect-capture-interface.sh
+disable-nic-hw-gro.sh
+docker-compose.yml
+honeypot-firewall.sh
+huginn-sidecar
+p0f
+portbridge
+portbridge-blackhole-refresh.sh
+portbridge-log-maintenance.sh
+portbridge-manual-blackhole-refresh.sh
+suricata
+suricata-log-maintenance.sh
+suricata-rules-refresh.sh
+test-services.sh
+traefik
+zeek
+zeek-log-maintenance.sh
+=== traefik config files ===
+vps/debug-traefik.sh
+vps/docker-compose.yml
+vps/huginn-sidecar/Cargo.toml
+vps/suricata/suricata.yaml
+vps/traefik/dynamic.yml
+vps/traefik/traefik.yml
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== forwardAuth middlewares in dynamic.yml ===" && grep -cE 'forwardAuth' vps/traefik/dynamic.yml && echo "--- distinct auth middlewares ---" && grep -oE 'name: [a-z0-9-]+-auth|forwardAuth:|address: http://[a-z0-9-]+' vps/traefik/dynamic.yml | sort -u | head -30
+=== forwardAuth middlewares in dynamic.yml ===
+0
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && grep -rniE 'forwardauth|oauth2|auth' vps/traefik/dynamic.yml | cut -c1-150 | head -20; echo "=== where are the 6 oauth2-proxy services? ==="; grep -rn 'oauth2-proxy' vps/ --include='*.yml' --include='*.yaml' -l; echo "--- in docker-compose: count service blocks referencing the oauth2 image ---"; grep -n 'quay.io/oauth2-proxy' vps/docker-compose.yml
+118:      rule: "Host(`auth.honeypot.example`)"
+123:      middlewares: [security-headers, rate-limit-auth]
+129:    # (auth.honeypot.example), so this is a same-origin exception only --
+142:      rule: "Host(`auth.honeypot.example`) && PathRegexp(`^/realms/[^/]+/protocol/openid-connect/(3p-cookies/|login-status-iframe\\.html)`)"
+148:      middlewares: [security-headers-keycloak-frame, rate-limit-auth]
+157:    # brute-force-resistant rate-limit-auth via the plain `keycloak` router
+159:    # authorization boundary, same as when this had its own hostname.
+163:    # assets/..., which fell through to the tighter rate-limit-auth and hit
+169:      rule: "Host(`auth.honeypot.example`) && (PathPrefix(`/admin`) || PathRegexp(`^/resources/[^/]+/admin/`))"
+181:    # authenticated session. Caught live hitting rate-limit-auth's 429 the
+184:    # same "authenticated interactive SPA, not a login attempt" case.
+186:      rule: "Host(`auth.honeypot.example`) && PathRegexp(`^/realms/[^/]+/account`)"
+274:    vui-blog-auth:
+275:      rule: "Host(`blog-auth.honeypot.example`)"
+277:      service: vui-blog-auth
+308:    # socat-hp-canarytokens -> 10.8.0.2:19427). Unauthenticated like
+331:    # (dashboard, auth, kibana, ...) must still win its own exact Host()
+454:    # down, in oidc-dashboard's own OAUTH2_PROXY_REDIRECT_URL/CSRF-cookie
+497:    # (https://beta.honeypot.example/auth/callback) registered as an
+560:    # #1185: Arcane (Dockge's replacement, now decommissioned) authenticates
+=== where are the 6 oauth2-proxy services? ===
+vps/docker-compose.yml
+vps/traefik/dynamic.yml
+--- in docker-compose: count service blocks referencing the oauth2 image ---
+18:  image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.4@sha256:b1b2021fe8f4004573e8d690dec6c7bb29cc44364572cf8510a05bf3a0ae2ded
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== oidc-* service definitions in dynamic.yml ===" && grep -nE '^\s+oidc[a-z0-9-]*:|oidc' vps/traefik/dynamic.yml | cut -c1-140 | head -30 && echo && echo "=== host rules in dynamic.yml ===" && grep -oE 'Host\(`[a-z0-9.-]+`\)' vps/traefik/dynamic.yml | sort -u
+=== oidc-* service definitions in dynamic.yml ===
+51:#                                     directly, no oidc-<app> gateway)
+81:    traefik-api-oidc-upstream:
+83:      entryPoints: [traefik-oidc]
+86:    dashboard-oidc-upstream:
+88:      entryPoints: [dashboard-oidc]
+112:      service: oidc-traefik
+454:    # down, in oidc-dashboard's own OAUTH2_PROXY_REDIRECT_URL/CSRF-cookie
+466:      # oidc-dashboard compatibility gateway this used to route through was
+468:      # oidc-dashboard network remains, for socat-hp-dashboard/-b and
+523:      service: oidc-kibana
+531:      service: oidc-tanner
+539:      service: oidc-evebox
+547:      service: oidc-arkime
+555:      service: oidc-revdeck
+561:    # natively against Keycloak -- no oidc-<app> gateway hop, this routes
+613:    oidc-kibana:
+615:        servers: [{url: "http://oidc-kibana:4180"}]
+618:    oidc-evebox:
+620:        servers: [{url: "http://oidc-evebox:4180"}]
+623:    oidc-arkime:
+625:        servers: [{url: "http://oidc-arkime:4180"}]
+628:    oidc-tanner:
+630:        servers: [{url: "http://oidc-tanner:4180"}]
+633:    oidc-revdeck:
+635:        servers: [{url: "http://oidc-revdeck:4180"}]
+638:    oidc-traefik:
+640:        servers: [{url: "http://oidc-traefik:4180"}]
+643:    oidc-dashboard:
+645:        servers: [{url: "http://oidc-dashboard:4180"}]
+
+=== host rules in dynamic.yml ===
+Host(`api.honeypot.example`)
+Host(`arcane.honeypot.example`)
+Host(`arkime.honeypot.example`)
+Host(`auth.honeypot.example`)
+Host(`beta.honeypot.example`)
+Host(`blog-auth.honeypot.example`)
+Host(`csharp.honeypot.example`)
+Host(`dashboard.honeypot.example`)
+Host(`decoy.honeypot.example`)
+Host(`evebox.honeypot.example`)
+Host(`files.honeypot.example`)
+Host(`go.honeypot.example`)
+Host(`ha.honeypot.example`)
+Host(`honeypot.example`)
+Host(`honeypot.honeypot.example`)
+Host(`hub.honeypot.example`)
+Host(`kibana.honeypot.example`)
+Host(`node.honeypot.example`)
+Host(`redis-api.honeypot.example`)
+Host(`rev.honeypot.example`)
+Host(`rust.honeypot.example`)
+Host(`snare.honeypot.example`)
+Host(`static.honeypot.example`)
+Host(`status.honeypot.example`)
+Host(`svelte.honeypot.example`)
+Host(`tanner.honeypot.example`)
+Host(`traefik.honeypot.example`)
+Host(`vui.honeypot.example`)
+Host(`www.honeypot.example`)
+Host(`www-portal.honeypot.example`)
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && sed -n '40,58p;440,475p' vps/traefik/dynamic.yml | cut -c1-170
+# socat-hp-kibana         :5601   →  10.8.0.2:19601 (kibana :5601)
+# socat-hp-tanner         :8091   →  10.8.0.2:19091 (tanner_web :8091)
+# socat-hp-evebox         :5636   →  10.8.0.2:19636 (evebox :5636)
+# socat-hp-arkime         :8005   →  10.8.0.2:19080 (arkime viewer :8005)
+# socat-hp-revdeck        :5000   →  10.8.0.2:19500 (revdeck :5000, ghidra stack)
+# socat-hp-keycloak       :8080   →  10.8.0.2:18080 (Keycloak :8080)
+# socat-hp-arcane         :3552   →  10.8.0.2:3552  (arcane :3552, host infra
+#                                     with root-equivalent /var/run/docker.sock
+#                                     access -- not a scoped UI like the rest.
+#                                     #1185's Dockge replacement; native OIDC,
+#                                     joins the shared `proxy` network
+#                                     directly, no oidc-<app> gateway)
+#
+# Traefik dashboard — localhost only:
+#   curl http://localhost:8080/dashboard/
+#   curl http://localhost:8080/api/rawdata
+#
+# #1185: adding a genuinely NEW router (a hostname Traefik has never served
+# before) can 421 "Misdirected Request" on some/most requests even though
+      tls:
+        options: modern
+      middlewares: [security-headers]
+
+    # dashboard.honeypot.example redirects here rather than sharing this
+    # router: the dashboard's own native OIDC runtime (#1026) has
+    # OIDC_EXTERNAL_URL hardcoded to a single host (honeypot.honeypot.example)
+    # -- that's the only redirect_uri registered with the Keycloak client, and
+    # the only host its own session cookie is scoped to. A login started on
+    # dashboard.* would bounce through Keycloak back to a callback on
+    # honeypot.* (the only registered redirect_uri) with no valid session
+    # state for that host. Redirecting dashboard.* to the canonical host
+    # before the dashboard's own OIDC flow ever starts keeps the whole round
+    # trip on one host. Historically the same constraint existed one layer
+    # down, in oidc-dashboard's own OAUTH2_PROXY_REDIRECT_URL/CSRF-cookie
+    # scoping (e8bba20) -- the compatibility gateway this router used before
+    # #1026's cutover.
+    honeypot-dashboard:
+      rule: "Host(`honeypot.honeypot.example`)"
+      entryPoints: [websecure]
+      service: honeypot-dashboard
+      tls:
+        options: modern
+      # #1026: routes directly to the dashboard's own native OIDC runtime.
+      # No proxy identity headers -- the dashboard validates tokens and owns
+      # its session itself (docs/KEYCLOAK-CUTOVER.md's route matrix). The
+      # oidc-dashboard compatibility gateway this used to route through was
+      # retired outright (no router has referenced it since #1026); only the
+      # oidc-dashboard network remains, for socat-hp-dashboard/-b and
+      # Traefik itself to reach the dashboard replicas directly.
+      #
+      # #1897: SAMEORIGIN rather than DENY. The dashboard frames its own
+      # PDFs and reports, and the three path-specific exceptions added for
+      # that (#211, #309, #1237) all matched Go-era URLs the port moved --
+      # so each broke silently and the modal came back with "Refused to
+      # display ... X-Frame-Options: deny". A fourth path exception would
+> build · stealth
+[0m→ [0mRead docs/DASHBOARD-CUTOVER.md 
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && for p in scripts/cutover-dashboard.sh scripts/deploy-dashboard-rolling.sh port-tests/backend-api.sh port-tests/frontend-ssr.sh port-tests/auth-flow.sh; do printf '%-42s ' "$p"; [ -e "$p" ] && echo EXISTS || echo "REMOVED/ABSENT"; done; echo; echo "=== old services gone from dashboard compose? ==="; grep -nE '^  (dashboard|es-results-importer):' arcane/home/honeypot-dashboard/compose.yml || echo "  neither defined -> removal complete"; echo; echo "=== port-tests dir ==="; ls port-tests/ 2>/dev/null | head
+scripts/cutover-dashboard.sh               REMOVED/ABSENT
+scripts/deploy-dashboard-rolling.sh        REMOVED/ABSENT
+port-tests/backend-api.sh                  REMOVED/ABSENT
+port-tests/frontend-ssr.sh                 REMOVED/ABSENT
+port-tests/auth-flow.sh                    REMOVED/ABSENT
+
+=== old services gone from dashboard compose? ===
+  neither defined -> removal complete
+
+=== port-tests dir ===
+> build · stealth
+[0m← [0mEdit docs/DASHBOARD-CUTOVER.md
+Index: docs/DASHBOARD-CUTOVER.md
+===================================================================
+--- docs/DASHBOARD-CUTOVER.md
++++ docs/DASHBOARD-CUTOVER.md
+@@ -120,9 +120,11 @@
+ 4. **Verify from the homeserver directly**: preflight's own health checks
+    cover `/healthz`; still manually confirm a handful of golden-path
+    pages SSR correctly, `/api/live` streams, and login redirects to
+    Keycloak and completes. Run `port-tests/{backend-api,frontend-ssr,
+-   auth-flow}.sh` against this live instance if not already fresh.
++   auth-flow}.sh` against this live instance if not already fresh. (The
++   whole `port-tests/` directory is gone from the tree today — this step
++   is history, and the current equivalent is `.github/workflows/quality.yml`.)
+ 5. **Re-point Traefik** — only if this cutover is ever cross-host; in
+    the current single-host topology the VPS-side `socat-hp-dashboard`
+    forward already points at a fixed home address
+    (`10.8.0.2:19090`) regardless of which container answers there, so
+
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== does quality.yml exist? ===" && ls .github/workflows/ && echo && echo "=== TESTING.md CI claims ===" && grep -nE 'workflows/|\.github' docs/TESTING.md | cut -c1-170
+=== does quality.yml exist? ===
+backup-staleness-watch.yml
+cache-cleanup.yml
+ci-heartbeat.yml
+ci-queue-watch.yml
+ci-router.yml
+compose-drift-watch.yml
+containers.yml
+dependabot-auto-merge.yml
+dependency-review.yml
+deploy.yml
+diagnostics.yml
+disk-usage-watch.yml
+elastic-release-watch.yml
+image-security-scan.yml
+main-health-watch.yml
+pages.yml
+quality.yml
+security.yml
+vps-start-blackhole.yml
+
+=== TESTING.md CI claims ===
+3:This repo already runs a large amount of testing (`.github/workflows/quality.yml`
+22:**Where it lives:** `.github/workflows/quality.yml` and the per-module
+> build · stealth
+[0m→ [0mRead docs/TESTING.md 
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== quality.yml: distinct named checks/jobs ===" && python3 -c "
+import re
+s=open('.github/workflows/quality.yml').read()
+names=re.findall(r'^  ([a-zA-Z0-9_-]+):\s*$', s, re.M)
+print(len(names),'jobs'); print(names)
+" && echo && echo "=== grep tracked tree for the auth-runtime strings TESTING.md says are zero ===" && for s in AUTH_INTROSPECTION_ 'forward-auth' 'strip-auth-identity' xore_sso 'X-Auth-Role'; do printf '%-26s ' "$s"; git grep -l -- "$s" -- ':!docs' ':!*.log' 2>/dev/null | tr '\n' ' '; echo; done
+=== quality.yml: distinct named checks/jobs ===
+25 jobs
+['push', 'pull_request', 'workflow_dispatch', 'ci-target', 'public-safety', 'public-safety-cloud', 'design-lab-readonly', 'design-lab-readonly-cloud', 'go-fmt', 'go-fmt-cloud', 'go-test-homeserver', 'go-test-cloud', 'go-modules-complete', 'frontend-next', 'frontend-next-cloud', 'frontend-next-browser', 'frontend-next-browser-cloud', 'backend-service', 'backend-service-cloud', 'vendored-theme', 'vendored-theme-cloud', 'scripts-and-compose', 'scripts-and-compose-complete', 'ai-attribution', 'quality-gate']
+
+=== grep tracked tree for the auth-runtime strings TESTING.md says are zero ===
+AUTH_INTROSPECTION_        
+forward-auth               analysis/ghidra/.env.example analysis/ghidra/docker-compose.ghidra.yml scripts/doc-path-lint-allowlist.txt 
+strip-auth-identity        
+xore_sso                   
+X-Auth-Role
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && git grep -n -- 'forward-auth' -- analysis/ghidra/.env.example analysis/ghidra/docker-compose.ghidra.yml scripts/doc-path-lint-allowlist.txt | cut -c1-190
+analysis/ghidra/.env.example:10:# forward-auth middleware this comment used to name is retired, hard
+analysis/ghidra/docker-compose.ghidra.yml:243:      # forward-auth middleware this comment used to name is retired (hard
+scripts/doc-path-lint-allowlist.txt:46:vps/forward-auth/ # moved to Xore/auth-backend; security-fixes narrates the move
+> build · stealth
+[0m✗ [0mEdit docs/TESTING.md failed
+[91m[1mError: [0mCould not find oldString in /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs/docs/TESTING.md. It must match exactly, including whitespace and indentation.
+> build · stealth
+[0m✗ [0mEdit docs/TESTING.md failed
+[91m[1mError: [0mCould not find oldString in /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs/docs/TESTING.md. It must match exactly, including whitespace and indentation.
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && sed -n '171,178p' docs/TESTING.md | cat -A | sed 's/\$$//' | cut -c1-200
+- No legacy auth runtime, route, middleware, identity-header trust,
+       secret, or fallback survives the install: grep the fresh
+       deployment for `AUTH_INTROSPECTION_*`, `forward-auth`,
+       `strip-auth-identity`, `xore_sso`, and `X-Auth-Role` and confirm
+       zero hits (this repo's own working tree already has zero --
+       verified 2026-08-09 -- the check here is that a *deployed*, fresh
+       install matches).
+     - Retain redacted evidence (pass/fail results plus browser
+> build · stealth
+[0m← [0mEdit docs/TESTING.md
+Index: docs/TESTING.md
+===================================================================
+--- docs/TESTING.md
++++ docs/TESTING.md
+@@ -171,11 +171,14 @@
+      - No legacy auth runtime, route, middleware, identity-header trust,
+        secret, or fallback survives the install: grep the fresh
+        deployment for `AUTH_INTROSPECTION_*`, `forward-auth`,
+        `strip-auth-identity`, `xore_sso`, and `X-Auth-Role` and confirm
+-       zero hits (this repo's own working tree already has zero --
+-       verified 2026-08-09 -- the check here is that a *deployed*, fresh
+-       install matches).
++       zero live hits (this repo's own working tree has none — verified
++       2026-08-09, and re-verified 2026-09-27: the only remaining matches
++       are comments saying the thing was retired, plus
++       `scripts/doc-path-lint-allowlist.txt`'s
++       `vps/forward-auth/ # moved to Xore/auth-backend` entry. The check
++       here is that a *deployed*, fresh install has no live runtime).
+      - Retain redacted evidence (pass/fail results plus browser
+        traces/screenshots/logs where applicable) and link it from #787.
+ 5. **Fix forward, and track it:** any gap found (a missing install step,
+    an undocumented manual fix, a firewall hole) gets fixed in the actual
+
+> build · stealth
+> build · stealth
+Now let me check RECOVERY.md, STACK-REBUILD.md and the network-isolation doc:
+[0m→ [0mRead docs/RECOVERY.md 
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && ls -la factory-reset.sh scripts/reset-logs.sh analysis/backup-honeypot.sh 2>&1 | cut -c1-90; echo "=== volumes in factory-reset.sh ==="; grep -oE '\b(es-data|dionaea-lib|dashboard-state|yara-results|evebox-config|arkime-pcap|snare-pages|reporter-data)\b' factory-reset.sh | sort -u; echo "=== volume names declared in compose ==="; grep -rhoE '^  [a-z0-9-]+:$' arcane/home/*/compose.yml | head -0; for f in arcane/home/*/compose.yml; do python3 -c "
+import re,sys
+p='$f'
+lines=open(p).read().split('\n')
+inb=False
+for l in lines:
+    if re.match(r'^volumes:\s*\$', l): inb=True; continue
+    if inb and re.match(r'^[A-Za-z]', l): inb=False
+    if inb:
+        m=re.match(r'^  ([A-Za-z0-9_.-]+):', l)
+        if m: print(m.group(1))
+"; done | sort -u | tr '\n' ' '
+-rwxr-xr-x. 1 xore xore 10756 Sep 27 12:28 analysis/backup-honeypot.sh
+-rwxr-xr-x. 1 xore xore  8656 Sep 27 12:28 factory-reset.sh
+-rw-r--r--. 1 xore xore 19884 Sep 27 12:28 scripts/reset-logs.sh
+=== volumes in factory-reset.sh ===
+arkime-pcap
+dashboard-state
+dionaea-lib
+es-data
+evebox-config
+reporter-data
+snare-pages
+yara-results
+=== volume names declared in compose ===
+arkime-pcap canarytokens-redis-data canarytokens-uploads dashboard-state dionaea-lib es-data es-importer-state evebox-config keycloak-postgres reporter-data sentrypeer-db services-adapter-socket snare-pages yara-results
+> build · stealth
+[0m→ [0mRead docs/STACK-REBUILD.md 
+> build · stealth
+STACK-REBUILD.md's runbook loops use stale stack names and miss 15 stacks. Let me verify and fix:
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== do the runbook's named stack dirs exist? ===" && for s in honeypot-citrix honeypot-cisco-asa honeypot-dnp3 honeypot-dns-honeypot honeypot-dicompot honeypot-rdp honeypot-endlessh; do printf '  %-26s ' "$s"; [ -d "arcane/home/$s" ] && echo EXISTS || echo "DOES NOT EXIST"; done; echo; echo "=== 33 manifest stacks under arcane/home, keycloak excluded ==="; git ls-files arcane/home | cut -d/ -f3 | sort -u | grep -v '^honeypot-keycloak$' | grep -v '^rex86-eval$' | tr '\n' ' '; echo; git ls-files arcane/home | cut -d/ -f3 | sort -u | grep -vE '^(honeypot-keycloak|rex86-eval)$' | wc -l
+=== do the runbook's named stack dirs exist? ===
+  honeypot-citrix            DOES NOT EXIST
+  honeypot-cisco-asa         DOES NOT EXIST
+  honeypot-dnp3              EXISTS
+  honeypot-dns-honeypot      EXISTS
+  honeypot-dicompot          EXISTS
+  honeypot-rdp               DOES NOT EXIST
+  honeypot-endlessh          EXISTS
+
+=== 33 manifest stacks under arcane/home, keycloak excluded ===
+honeypot-agent-intrusion-worker honeypot-attacker-identity-worker honeypot-beelzebub honeypot-canarytokens honeypot-cisco-asa-honeypot honeypot-citrix-honeypot honeypot-conpot honeypot-correlator-worker honeypot-cowrie honeypot-dashboard honeypot-dashboard-backend honeypot-dicompot honeypot-dionaea honeypot-dnp3 honeypot-dns-honeypot honeypot-elasticpot honeypot-elk honeypot-endlessh honeypot-galah honeypot-hellpot honeypot-http honeypot-init honeypot-mailoney honeypot-multipot honeypot-payload-analysis honeypot-payload-inventory-worker honeypot-rdp-honeypot honeypot-sentrypeer honeypot-sonicwall-sma honeypot-tanner honeypot-utilities unsloth 
+32
+> build · stealth
+[0m← [0mEdit docs/STACK-REBUILD.md
+Index: docs/STACK-REBUILD.md
+===================================================================
+--- docs/STACK-REBUILD.md
++++ docs/STACK-REBUILD.md
+@@ -90,14 +90,27 @@
+ ### 2. Stop and wipe the homeserver
+ 
+ ```bash
+ ssh homeserver
+-for s in honeypot-elk honeypot-dashboard honeypot-utilities \
+-         honeypot-payload-analysis honeypot-dionaea honeypot-tanner \
+-         honeypot-dnp3 honeypot-http honeypot-multipot honeypot-cowrie \
+-         honeypot-conpot honeypot-dicompot honeypot-dns-honeypot \
+-         honeypot-citrix honeypot-cisco-asa honeypot-rdp \
+-         honeypot-endlessh honeypot-init; do
++# Every Arcane-managed stack under arcane/home/ except honeypot-keycloak:
++# 32 of the manifest's 33, derived as
++# `git ls-files arcane/home | cut -d/ -f3 | sort -u` minus
++# honeypot-keycloak (handled separately) and rex86-eval (never a
++# deployment piece). Written out long rather than globbed, so a stack a
++# future manifest entry adds does not get swept up before anyone has
++# decided whether a full reset should stop it.
++for s in honeypot-agent-intrusion-worker honeypot-attacker-identity-worker \
++         honeypot-beelzebub honeypot-canarytokens \
++         honeypot-cisco-asa-honeypot honeypot-citrix-honeypot \
++         honeypot-conpot honeypot-correlator-worker honeypot-cowrie \
++         honeypot-dashboard honeypot-dashboard-backend honeypot-dicompot \
++         honeypot-dionaea honeypot-dnp3 honeypot-dns-honeypot \
++         honeypot-elasticpot honeypot-elk honeypot-endlessh honeypot-galah \
++         honeypot-hellpot honeypot-http honeypot-init honeypot-mailoney \
++         honeypot-multipot honeypot-payload-analysis \
++         honeypot-payload-inventory-worker honeypot-rdp-honeypot \
++         honeypot-sentrypeer honeypot-sonicwall-sma honeypot-tanner \
++         honeypot-utilities unsloth; do
+   (cd /opt/stacks/$s && docker compose -f compose.yml down)
+ done
+ ```
+ 
+
+> build · stealth
+[0m← [0mEdit docs/STACK-REBUILD.md
+Index: docs/STACK-REBUILD.md
+===================================================================
+--- docs/STACK-REBUILD.md
++++ docs/STACK-REBUILD.md
+@@ -181,13 +181,20 @@
+ starts first just creates them empty and the real writer fills them in once
+ it's up).
+ 
+ ```bash
+-for s in honeypot-conpot honeypot-cowrie honeypot-multipot honeypot-http \
+-         honeypot-dnp3 honeypot-dionaea honeypot-tanner \
+-         honeypot-dicompot honeypot-dns-honeypot honeypot-citrix \
+-         honeypot-cisco-asa honeypot-rdp honeypot-endlessh \
+-         honeypot-payload-analysis honeypot-utilities honeypot-dashboard; do
++for s in honeypot-agent-intrusion-worker honeypot-attacker-identity-worker \
++         honeypot-beelzebub honeypot-canarytokens \
++         honeypot-cisco-asa-honeypot honeypot-citrix-honeypot \
++         honeypot-conpot honeypot-correlator-worker honeypot-cowrie \
++         honeypot-dashboard honeypot-dashboard-backend honeypot-dicompot \
++         honeypot-dionaea honeypot-dnp3 honeypot-dns-honeypot \
++         honeypot-elasticpot honeypot-endlessh honeypot-galah \
++         honeypot-hellpot honeypot-http honeypot-mailoney \
++         honeypot-multipot honeypot-payload-analysis \
++         honeypot-payload-inventory-worker honeypot-rdp-honeypot \
++         honeypot-sentrypeer honeypot-sonicwall-sma honeypot-tanner \
++         honeypot-utilities unsloth; do
+   (cd /opt/stacks/$s && docker compose -f compose.yml up -d)
+ done
+ ```
+ 
+
+> build · stealth
+[0m← [0mEdit docs/STACK-REBUILD.md
+Index: docs/STACK-REBUILD.md
+===================================================================
+--- docs/STACK-REBUILD.md
++++ docs/STACK-REBUILD.md
+@@ -17,19 +17,22 @@
+ traps hit on the first live run — read it before trusting the script blind,
+ and definitely before doing any of this by hand on the VPS side, which the
+ script doesn't touch.
+ 
+-Since #258 split the stack into ~19 independent Arcane-managed projects
++Since #258 split the stack into independent Arcane-managed projects
+ (`honeypot-init`, `honeypot-conpot`, `honeypot-cowrie`, `honeypot-multipot`,
+ `honeypot-http`, `honeypot-dnp3`, `honeypot-dionaea`, `honeypot-dicompot`,
+-`honeypot-dns-honeypot`, `honeypot-citrix`, `honeypot-cisco-asa`,
+-`honeypot-rdp`, `honeypot-endlessh`,
++`honeypot-dns-honeypot`, `honeypot-citrix-honeypot`, `honeypot-cisco-asa-honeypot`,
++`honeypot-rdp-honeypot`, `honeypot-endlessh`,
+ `honeypot-payload-analysis`, `honeypot-tanner`, `honeypot-elk`,
+-`honeypot-dashboard`, `honeypot-utilities`, plus the now-empty
++`honeypot-dashboard`, `honeypot-utilities`, plus the then-empty
+ `APIARY`), a full reset is no longer "stop the stack, `docker compose
+ down -v`, start it again" — it's an ordered sequence across projects with a
+-couple of real circular-dependency traps. This doc exists because the first
+-live run of this sequence (2026-08-02) hit three of them.
++couple of real circular-dependency traps. That 19-project list was
++accurate for the day; the fleet is now **33 manifest entries under
++`arcane/home/`**, and the two loops below are written against the full
++current set rather than that original nineteen. This doc exists because
++the first live run of this sequence (2026-08-02) hit three of them.
+ 
+ `honeypot-keycloak` (the identity stack, `docs/KEYCLOAK-OPERATIONS.md`)
+ is intentionally handled separately below rather than folded into the
+ `honeypot-*` list above: it deploys to `/var/dockge/stacks/honeypot-keycloak`,
+
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== verify every stack named in the two loops exists ===" && python3 - <<'PY'
+import re,os
+s=open('docs/STACK-REBUILD.md').read()
+# extract the two for-loops
+loops=re.findall(r'for s in ((?:.*\\\n)*.*?); do', s)
+for i,l in enumerate(loops,1):
+    names=re.findall(r'\b(honeypot-[a-z0-9-]+|unsloth)\b', l)
+    missing=[n for n in names if not os.path.isdir(f'arcane/home/{n}')]
+    print(f'loop {i}: {len(names)} stacks, missing dirs: {missing or "none"}')
+PY
+echo; echo "=== dashboard port 19090 check ==="; grep -n '19090' arcane/home/honeypot-dashboard/compose.yml | head -2
+=== verify every stack named in the two loops exists ===
+loop 1: 32 stacks, missing dirs: none
+loop 2: 30 stacks, missing dirs: none
+
+=== dashboard port 19090 check ===
+107:  # the production 19090 binding at all.
+525:    # 19090: the live production binding, moved here permanently by #1628's
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && python3 scripts/check-doc-links.py 2>&1|tail -2 && python3 scripts/check-doc-paths-exist.py 2>&1|tail -2 && python3 scripts/check-doc-stale-paths.py 2>&1|tail -2 && python3 scripts/check-docs-reachable.py 2>&1|tail -2 && git add -A && git commit -q -F - <<'EOF' && git log --oneline -1
+docs(stack-rebuild): make the full-reset runbook cover every current stack
+
+The stop and start loops named 17 and 16 stacks. Two problems, both
+silent:
+
+- honeypot-citrix, honeypot-cisco-asa and honeypot-rdp are not
+  directories. The real ones are honeypot-citrix-honeypot,
+  honeypot-cisco-asa-honeypot and honeypot-rdp-honeypot, so `cd` failed
+  and those three were never stopped or started.
+- 15 further stacks were missing entirely, including
+  honeypot-dashboard-backend, the three Go worker stacks, the nine
+  post-#3131/#1418/#1424 decoys (beelzebub, canarytokens, elasticpot,
+  galah, hellpot, mailoney, sentrypeer, sonicwall-sma) and unsloth. A
+  "deliberate full reset" left them running.
+
+Both loops are now the full set: 32 stacks stopped in step 2 (the
+manifest's 33 minus honeypot-keycloak, handled separately) and 30
+started in step 4 (those two go in step 3). Verified every name against
+a real arcane/home/ directory. Left them spelled out rather than globbed
+so a future manifest entry cannot be swept in unreviewed.
+
+Also corrected the "~19 projects" figure to name it as the historical
+#258 split while stating the current 33, and fixed the three wrong stack
+names in that sentence.
+
+TESTING.md's Keycloak checklist claimed the working tree greps to zero
+hits for the retired auth-runtime strings. It does not: three
+`forward-auth` matches remain, all of them comments/allowlist entries
+saying the thing was retired. Restated the check as "no live hits" and
+listed the three so the next person running it verbatim does not file a
+false failure.
+
+DASHBOARD-CUTOVER.md's step 4 points at port-tests/{backend-api,
+frontend-ssr,auth-flow}.sh; the whole port-tests/ directory is gone.
+Noted where the equivalent lives now.
+EOF
+OK — 391 local refs in 155 files all resolve
+
+Fix the citation, or if the reference is deliberate (era record, host-only layout, untracked-by-design file), add the exact token with its reason to scripts/doc-path-lint-allowlist.txt
+doc stale-path check passed
+docs reachability check passed (85 reachable, 35 in exempt record trees)
+2ee1bee2 docs(stack-rebuild): make the full-reset runbook cover every current stack
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && python3 scripts/check-doc-paths-exist.py 2>&1 | tail -20
+docs cite repo paths that do not exist (tracked-path check):
+  - docs/TESTING.md: bare 'vps/forward-auth' -> no tracked path 'vps/forward-auth'
+
+Fix the citation, or if the reference is deliberate (era record, host-only layout, untracked-by-design file), add the exact token with its reason to scripts/doc-path-lint-allowlist.txt
+> build · stealth
+[0m← [0mEdit docs/TESTING.md
+Index: docs/TESTING.md
+===================================================================
+--- docs/TESTING.md
++++ docs/TESTING.md
+@@ -173,12 +173,12 @@
+        deployment for `AUTH_INTROSPECTION_*`, `forward-auth`,
+        `strip-auth-identity`, `xore_sso`, and `X-Auth-Role` and confirm
+        zero live hits (this repo's own working tree has none — verified
+        2026-08-09, and re-verified 2026-09-27: the only remaining matches
+-       are comments saying the thing was retired, plus
+-       `scripts/doc-path-lint-allowlist.txt`'s
+-       `vps/forward-auth/ # moved to Xore/auth-backend` entry. The check
+-       here is that a *deployed*, fresh install has no live runtime).
++       are two comments saying the thing was retired, plus the one
++       allowlisted stale-path entry in `scripts/doc-path-lint-allowlist.txt`
++       for the moved VPS forward-auth directory. The check here is that a
++       *deployed*, fresh install has no live runtime).
+      - Retain redacted evidence (pass/fail results plus browser
+        traces/screenshots/logs where applicable) and link it from #787.
+ 5. **Fix forward, and track it:** any gap found (a missing install step,
+    an undocumented manual fix, a firewall hole) gets fixed in the actual
+
+> build · stealth

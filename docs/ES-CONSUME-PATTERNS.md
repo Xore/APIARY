@@ -121,8 +121,9 @@ analysis/es-consume/
 │                                  # same pages in -> same consumed set + checkpoint out
 └── tests/test_es_consume.py       # vendoring registry + parity + query-shape contracts
 ml-worker/es_consume.py            # vendored copy (byte-for-byte asserted)
-attacker-identity-worker/esconsume.go   # Go reference engine, behaviourally
-                                        # identical, tested against the same fixtures
+arcane/home/honeypot-attacker-identity-worker/attacker-identity-worker/
+└── esconsume.go                  # Go reference engine, behaviourally
+                                  # identical, tested against the same fixtures
 ```
 
 Tests, run in CI (`.github/workflows/quality.yml`):

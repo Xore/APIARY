@@ -96,9 +96,13 @@ TANNER and its dependencies keep their own separate `tanner_local`, unchanged.
   [#89](https://github.com/Xore/APIARY/issues/89) (SNARE/TANNER) and
   the per-service measurement passes referenced next to `dionaea`'s and
   `conpot`'s own `cap_add` lists closed the gap this section used to describe.
-- `NET_ADMIN`/`NET_RAW` exist only on the three sandbox sniffers in
-  `docker-compose.sandbox.yml`, a separate file brought up around a single
-  detonation that must never be merged into `docker-compose.yml`.
+- `NET_ADMIN`/`NET_RAW` are confined to sniffers that need the bridge device
+  or a raw socket, never to a decoy. Three sit in `docker-compose.sandbox.yml`
+  (`zeek`, `suricata`, `tcpdump`), a separate file brought up around a single
+  detonation that must never be merged into `docker-compose.yml`. The rest are
+  the passive-capture services that cannot sniff without them:
+  `honeypot-elk`'s `zeek-proxy`, and the VPS's `zeek`, `huginn-sidecar`,
+  `suricata`, and `p0f`.
 
 ## 4. Host posture
 

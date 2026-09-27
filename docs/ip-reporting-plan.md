@@ -3,15 +3,18 @@
 Report attacker IPs observed by APIARY to public threat-intel
 blocklists via their APIs.
 
-> **Status:** built. `reporter/` (Go, not the Python layout sketched below --
+> **Status:** built. `arcane/home/honeypot-utilities/reporter/` (Go, not the
+> Python layout sketched below --
 > that part of this plan is superseded) is a real service in
 > `arcane/home/honeypot-utilities/compose.yml`. Phase 1
 > ([#68](https://github.com/Xore/APIARY/issues/68)) and Phase 2
 > ([#69](https://github.com/Xore/APIARY/issues/69)) are both closed.
 > Phase 3-4 (reputation validation, operator observability) is
 > [#153](https://github.com/Xore/APIARY/issues/153), closed and implemented:
-> `reporter/greynoise.go` implements the Phase 3 GreyNoise validation, and
-> `reporter/metrics.go` implements Phase 4's observability counters
+> `arcane/home/honeypot-utilities/reporter/greynoise.go` implements the Phase 3
+> GreyNoise validation, and
+> `arcane/home/honeypot-utilities/reporter/metrics.go` implements Phase 4's
+> observability counters
 > (attempted/suppressed/dryRun/sent/failed) as a JSON snapshot — a
 > deliberate deviation from the Prometheus sketch originally proposed below.
 >

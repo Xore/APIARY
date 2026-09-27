@@ -10,7 +10,7 @@ stream this document does not cover.
 
 | reader | code path | reach |
 |---|---|---|
-| `payload-dedupe` (`hp-payload-dedupe`) | `arcane/home/honeypot-payload-analysis/analysis/dedupe-payloads.py`: `prune_old_directories()` deletes whole date subtrees older than `BISTREAMS_RETENTION_DAYS`; `dedupe()` then hard-link-dedupes whatever's left (`PAYLOAD_ROOTS` includes `/payloads/dionaea/bistreams`) | whatever the retention window currently leaves on disk — no independent age requirement |
+| `payload-dedupe` (`hp-payload-dedupe`) | `arcane/home/honeypot-payload-analysis/analysis/dedupe-payloads.py`: `prune_old_directories()` deletes whole date subtrees older than `BISTREAMS_RETENTION_DAYS`. The bistreams tree is reached through its own `BISTREAMS_ROOT=/payloads/dionaea/bistreams` (compose.yml), not through `PAYLOAD_ROOTS` — that variable is the dedupe root list (`/payloads/cowrie:/payloads/dionaea/binaries:/payloads/scripts/script-payloads`), so `dedupe()` never hard-links anything inside bistreams; pruning is the only thing that touches it | whatever the retention window currently leaves on disk — no independent age requirement |
 | `yara-scanner` (`hp-yara-scanner`) | `arcane/home/honeypot-payload-analysis/compose.yml`'s `YARA_PAYLOAD_ROOTS=/payloads/dionaea:...` mounts the whole `dionaea-lib` volume read-only, so it scans bistreams as part of `/payloads/dionaea` | same — whatever's currently present |
 | Elasticsearch / dashboard | none — nothing indexes bistreams content directly. `HONEYPOT_RETENTION_DAYS` (21d) governs *derived* ES indices, which is a shorter and unrelated window over structured events, not a copy of the raw stream | n/a |
 | manual forensic review | ad hoc, off-repo | as far back as the window allows |
