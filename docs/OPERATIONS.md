@@ -231,6 +231,78 @@ commands/credentials, payloads, enriched IDS alerts, and ingest failures.
 - Dionaea/Conpot write their own JSON into the shared volume for jq/ELK; the
   live dashboard ingests them alongside Cowrie, multipot, HTTP, and Suricata.
 
+## Service health contract (backend-service)
+
+`apiary-backend` (the Rust tier behind every `/api/v1` route) answers two
+different questions on two different endpoints. They used to be one endpoint
+with a constant answer: `/healthz` returned `{"ok": true, "es": <bool>}`,
+where `ok` was literally hardcoded to `true`, so a backend that could not
+reach Elasticsearch at all still told its own healthcheck, and anything else
+that probed it, that it was healthy. The `#3283` ingest outage would not have
+appeared there. Split into:
+
+| Endpoint | Question | Touches Elasticsearch | Non-200 |
+|---|---|---|---|
+| `/livez` | Is the process up and serving? | **No** | never |
+| `/healthz` | Same handler as `/livez`, historical name | **No** | never |
+| `/readyz` | Can it actually do its job? | Yes (2 probes) | 503 + `reason` |
+
+```console
+$ curl -s http://backend-service:8081/livez
+{"live":true,"built":"2026-09-27T01:46:34+00:00"}
+
+$ curl -s http://backend-service:8081/readyz
+{"ready":true,"cluster":"green","write_blocked":[]}
+
+$ curl -s -o /dev/null -w '%{http_code}\n' http://backend-service:8081/readyz   # during an ES outage
+503
+```
+
+**`/livez` is what the container `HEALTHCHECK` curls, and it must stay that
+way.** A probe that can block on Elasticsearch converts that dependency's
+outage into a restart loop of a container that was never the problem. The
+image's own comment on the `HEALTHCHECK` line says this too. `/healthz` is
+kept as an alias because the port-test harness
+(`arcane/home/honeypot-dashboard/port-tests/lib.sh`) and the ops scripts
+already use that name; it is a rename-with-a-twist, not a rename.
+
+### What `/readyz` actually checks
+
+1. **Reachable** — `GET /_cluster/health` answers. This is the check the old
+   `es: <bool>` field gestured at; the difference is that failing it now
+   produces a 503.
+2. **Not red** — red means unassigned primaries, against which reads and
+   writes both fail. **Yellow stays ready**: it means unassigned *replicas*,
+   which is the ordinary shape of a replicated cluster during a rolling
+   restart, and gating on it would mark the backend not-ready on every deploy.
+3. **Writable** — no `index.blocks.write` set on any of the index families
+   this tier writes to (the list is `es::WRITE_TARGET_FAMILIES` in
+   `backend-service/src/es.rs`, `dashboard-*` plus the bundled worker loops'
+   own families). This is what catches the flood-stage disk watermark, which
+   sets the block on every index at once, and an operator's
+   `PUT /<index>/_block/write`.
+
+The response names the blocked indices rather than counting them, and the
+`reason` string points at `_cat/allocation` because the endpoint **cannot
+tell those two causes apart** — an honest limit, stated rather than papered
+over. A *missing* index is not a block: every dashboard-owned index is created
+lazily on its first write, so a fresh cluster correctly reads ready.
+
+Both probes run concurrently under a 5s deadline
+(`READINESS_TIMEOUT`), shorter than the shared client's 30s, because a probe
+that blocks for 30s is indistinguishable from the outage it exists to report.
+
+### What to point at what
+
+- **Docker/compose healthcheck, Traefik, uptime pings** → `/livez` (or
+  `/healthz`). Never `/readyz`; see above.
+- **Deploy verification, diagnostics, "is ingest actually working?"** →
+  `/readyz`, and treat 503 as a real answer, not a transport error. This is
+  the endpoint that would have shown `#3283`.
+- **"Why is the dashboard empty?"** → `/api/v1/source-health` (the
+  per-sensor freshness page). `/readyz` says the backend cannot write; only
+  source-health says whether events are arriving.
+
 ## Disk space monitoring
 
 `hp-disk-space-monitor` (`arcane/home/honeypot-utilities/analysis/disk-space-check.sh`)

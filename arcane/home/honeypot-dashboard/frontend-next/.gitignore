@@ -19,3 +19,9 @@ public/static/lab/
 # test-results/, and report.html + attachments land in playwright-report/.
 test-results/
 playwright-report/
+
+# Stryker run artifacts (#3326): the html report, mutation.json and the
+# sandbox scratch directory. Regenerated on every run and uploaded to CI from
+# there, never committed -- a committed mutation report is a stale report.
+reports/mutation/
+.stryker-tmp/

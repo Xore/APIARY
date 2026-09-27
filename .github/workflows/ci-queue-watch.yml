@@ -24,9 +24,9 @@ on:
     - cron: "*/15 * * * *"
   workflow_dispatch:
 
-permissions:
-  actions: read
-  issues: write
+# #3313: job-scoped, workflow level defaults to none -- see the same note in
+# backup-staleness-watch.yml.
+permissions: {}
 
 concurrency:
   group: ci-queue-watch
@@ -36,8 +36,15 @@ jobs:
   sweep:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      # Reading the run queue to find stalled runs ...
+      actions: read
+      # ... and writing the labeled tracking issue the finding becomes.
+      issues: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Sweep for runs parked in the queue beyond the stall threshold
         env:
           GH_TOKEN: ${{ github.token }}

@@ -60,6 +60,15 @@ RUN apt-get update \
 COPY --from=build /src/target/release/apiary-backend /usr/local/bin/apiary-backend
 ENV LISTEN_ADDR=0.0.0.0:8081
 EXPOSE 8081
+# Liveness, deliberately NOT /readyz (#3317). /livez is the bare question
+# "is this process up" and never touches Elasticsearch; /readyz answers 503
+# whenever ES is unreachable or write-blocked, and curling that from a
+# container healthcheck would restart a perfectly healthy backend every time
+# Elasticsearch had a bad minute -- turning a dependency's outage into a
+# crash loop in the thing that was not broken. Anything that wants to know
+# whether the backend can actually do its job probes /readyz itself
+# (diagnostics, the deploy verifier); see docs/OPERATIONS.md.
+#
 # Port derived from $LISTEN_ADDR at check time, not hardcoded to the 8081
 # default: every non-default LISTEN_ADDR consumer of this image (backend-
 # worker at 127.0.0.1:8099, backend-worker-importer at 127.0.0.1:8098,
@@ -70,6 +79,6 @@ EXPOSE 8081
 # not by any test -- CI never runs the image under a non-default
 # LISTEN_ADDR).
 HEALTHCHECK --interval=15s --timeout=5s --retries=5 --start-period=20s \
-    CMD curl -sf "http://127.0.0.1:${LISTEN_ADDR##*:}/healthz" || exit 1
+    CMD curl -sf "http://127.0.0.1:${LISTEN_ADDR##*:}/livez" || exit 1
 USER nobody
 CMD ["apiary-backend"]

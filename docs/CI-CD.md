@@ -28,7 +28,39 @@ below.
   at `/var/image-sbom/`, plus a `trivy sbom` scan over that same file
   (#3321, [below](#digest-bound-sboms-for-the-two-dashboard-images-3321));
 - CodeQL for Go, JavaScript/TypeScript, and Python;
-- dependency review on pull requests.
+- dependency review on pull requests;
+- fast-check properties for the dashboard-next appearance cookie
+  (9 properties at 100 runs on a pinned seed, inside the ordinary
+  `frontend-next` unit job — the file matches `vitest.config.ts`'s own include
+  glob, so it costs no extra step, install, or second run). Pinned because a
+  property suite whose cases change every run reports "green" for a defect that
+  is still there; the nightly's unseeded high-run search is the lane that is
+  *meant* to move (#3326, [record](frontend-mutation-pilot.md)).
+
+### Advisory frontend testing pilot (#3326)
+
+`frontend-testing-pilot.yml` runs nightly (`41 4 * * *`) and on
+`workflow_dispatch`, and has **no `pull_request` trigger** — the property pass
+that PRs depend on is already the one in `npm test` above, and the mutation run
+is a measurement rather than a check.
+
+| Job | What it does | Failure means |
+|---|---|---|
+| `property` | 100-run pinned pass, then a 2000-run `FC_SEED=random` search; opens an issue on a counterexample | a real defect, not a score — a counterexample is shrunk small enough to paste into a generator |
+| `mutation` | Stryker over two modules, `continue-on-error: true`, no `thresholds` block | nothing; the run records killed/survived and uploads the report |
+
+The asymmetry is deliberate and is the "no gate" requirement in the two places
+it can be expressed. Nothing anywhere reads the mutation score, and there is no
+threshold to breach: a number that has already started failing CI has stopped
+being a measurement. A property counterexample is the opposite case — it is a
+defect with a reproducer, and a scheduled run's own red X is not an alert
+anyone is watching, which is why that job files an issue instead (the same
+reasoning as #2222 in `diagnostics.yml`).
+
+Both jobs derive their node major from the dashboard-next Dockerfile via
+`scripts/node-runtime-major.sh` rather than writing a second copy (#3331), and
+both run on GitHub-hosted runners only: a measurement has nothing to buy from
+the homeserver, and keeping the pilot off that box costs it nothing.
 
 Container images are built for pull requests. A push to `main` or a version tag
 publishes the custom images to the repository's GitHub Container Registry.
@@ -196,7 +228,10 @@ that ran and passed. Both are now fixed.
 Every upload uses `actions/upload-artifact` pinned by SHA, with a 7-day
 retention — long enough that the evidence is still there when a red run is
 picked up the following week, short enough that a busy `main` does not
-accumulate them indefinitely.
+accumulate them indefinitely. The nightly mutation pilot (#3326) is the one
+exception at 14 days: it runs once a day rather than once a PR, and its report
+is the record a later ratchet decision is read off, so the gap between two runs
+has to be coverable by a reviewer who was away for a fortnight.
 
 | Lane | Artifact | Uploaded |
 | --- | --- | --- |
@@ -205,6 +240,7 @@ accumulate them indefinitely.
 | Dashboard-next browser matrix | `playwright-report/` + `test-results/` (HTML report, per-failure traces and screenshots) | `failure()` |
 | Dashboard backend-service (Rust) | `cargo-test.log` | `failure()` |
 | `scripts-and-compose` pytest rows | `ml-worker-junit.xml`, `auth-events-worker-junit.xml` | `always()` |
+| Frontend mutation pilot (nightly) | `frontend-mutation-report` (`reports/mutation/` + `stryker.log`) | `always()`, 14-day retention |
 
 JUnit XML is uploaded on `always()`, not only on failure, because it is the
 record of *what ran* rather than of what the exit code happened to be. The
@@ -340,6 +376,16 @@ anywhere in that list (#1143: a manual, broader `chown -R` swept those
 container-owned paths too, crash-looping Keycloak and Filebeat until fixed
 live -- this script is the precise command that should be run instead of
 reasoning through the exclusion list by hand next time).
+
+`sudo ... --helpers-only` (#3312) applies just the root-owned helper scripts
+under `/opt/github-ci-runner-helpers/` and the sudoers grant for them, then
+exits. Same narrow-mode idea as `install-ci-runner.sh`'s `--build-only`. Use
+it when the only thing missing on the host is a grant a merged PR added
+(the Diagnostics source-health helper, most recently): it changes no group
+membership, chowns nothing, registers nothing, and never stops or restarts
+the runner service -- so it cannot kill the job the homeserver is in the
+middle of running. Group membership is deliberately not part of it, because
+supplementary groups only reach the runner across a service restart.
 
 Require a manual reviewer on `production-home`; never accept pull-request code
 on this production runner.
@@ -1394,8 +1440,40 @@ A `registry:3` proxy in front of Docker Hub, run under
 upstream TTL. Eighteen rows times N bases collapse to one upstream fetch,
 and it keeps them across runs.
 
-Two things about it are easy to get wrong:
+Run it on **every** executor that should have one, not just the first. The
+variable is global and the mirror is not, which is the whole of the next
+point.
 
+Three things about it are easy to get wrong:
+
+- **The address is a per-host fact, and it is verified per-run (#3380).**
+  `CI_REGISTRY_MIRROR` is a repository *variable*, but "this executor runs a
+  mirror at this address" is a property of the *box*, and since #3379 the
+  `honeypot-ci` pool is not one box — `precision` is registered into the same
+  pool as a build-only executor, so `ci-target` routing to the homeserver can
+  land on either. One global value is therefore right on one host and dead on
+  the other, where the same `172.16.0.1` is that host's own docker0 gateway
+  with nothing listening on it. `containers.yml` therefore probes
+  `http://$CI_REGISTRY_MIRROR/v2/` **on the executor that is about to use
+  it** and writes the mirror into `buildkitd.toml` only on a `200`. That is
+  the same check `install-registry-mirror.sh` gates its own install on, so
+  the two cannot drift. Any other answer — connection refused, or some other
+  service holding the port (on the homeserver `5555` is also the multipot
+  honeypot's, on the WireGuard address) — means the honest empty config is
+  written instead, and the run says so in a `::warning::` annotation and its
+  job summary. This is not optional belt-and-braces: #3380 was filed from
+  exactly the state it prevents, with the variable set to `172.16.0.1:5555`
+  and no executor in the pool having ever run the installer. Buildkit falls
+  back to `docker.io` on an unreachable mirror, so the run stayed **green**
+  while the cache was never in effect, every base image was pulled from Hub
+  directly, and all 74 non-`scratch` `FROM` lines first paid a
+  connect-refused round trip. Note the failure is a *degradation*, not a
+  failure: the cache is an accelerator, and the authenticated login above is
+  what actually protects against `toomanyrequests`, so a missing mirror must
+  never turn a passing row red — the same fail-safe
+  [ci-router.yml](https://github.com/Xore/APIARY/blob/main/.github/workflows/ci-router.yml)
+  documents ("routing can degrade CI's speed, never its pass/fail
+  correctness").
 - **It is configured on buildkit, not on the host daemon.** buildx's
   `docker-container` driver runs its own containerd and never reads
   `/etc/docker/daemon.json`, so a `registry-mirrors` entry there is
@@ -1623,12 +1701,18 @@ Two checks depend on host provisioning rather than on the workflow (#3312):
   `/opt/github-ci-runner-helpers/dashboard-source-health.sh` and a NOPASSWD
   grant for exactly that path. The helper returns only the source-health JSON.
   "helper is not installed or not granted" in the summary means re-run that
-  installer.
+  installer -- with `--helpers-only`, which applies the helper and the grant
+  and stops there, so it does not interrupt whatever job the runner is
+  currently executing. A merged PR that adds a grant here changes nothing on
+  the host until someone runs it, so that message is the only place the
+  dependency is visible.
 - **Isolation invariants** run `scripts/isolation-audit.sh` as
   `github-deploy-runner`, which must be in the `libvirt` group
   (`install-homeserver.sh`'s libvirt step re-asserts it). The script pins
   `LIBVIRT_DEFAULT_URI=qemu:///system`, because a non-root `virsh` otherwise
   talks to the empty per-user session and reports every network missing.
+  Group membership only takes effect across a runner restart, so unlike the
+  helper grant it does need a full installer run.
 
 The OIDC discovery probe runs **from the VPS** over the job's SSH key.
 Cloudflare answers 403 to GitHub-hosted runner address ranges, so the runner's

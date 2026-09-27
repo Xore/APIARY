@@ -405,6 +405,14 @@ services:
       - ARKIME_ADMIN_PASSWORD=${ARKIME_ADMIN_PASSWORD:-change-me-arkime}
       - ARKIME__elasticsearch=http://elasticsearch:9200
       - ARKIME__passwordSecret=${ARKIME_PASSWORD_SECRET:-change-me-in-env}
+      # #3283: the retention knob, for the delete-only policy
+      # composable-templates.js installs over arkime_sessions3-*. Passed
+      # here rather than read inside the script because this stack already
+      # passes it to elasticsearch-setup for the other twelve ILM policies
+      # (#261); without it Arkime sessions would silently expire on a
+      # hardcoded 30-day default while every other window in the stack
+      # followed the operator's setting. Same knob, same default, one stack.
+      - HONEYPOT_RETENTION_DAYS=${HONEYPOT_RETENTION_DAYS:-30}
     networks:
       - honeynet
     # #3045 (#2825 repointed here on closure): measured, not assumed.

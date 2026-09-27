@@ -218,9 +218,17 @@ jobs:
           # moved under /var/dockge. The root-owned helper reads the token
           # and returns only the JSON (install-deploy-runner.sh's sudoers
           # grant); the token never enters this job.
+          #
+          # The command named below is the narrow one on purpose: it applies
+          # the helper and the grant and nothing else, so it does not stop
+          # the runner service out from under whichever job is running when
+          # the operator reads this. That cost is what left this lane red
+          # after #3338 merged -- a full re-run is the only path to the
+          # grant, and re-running it safely is an operator's judgement call
+          # this workflow cannot make for them.
           helper=/opt/github-ci-runner-helpers/dashboard-source-health.sh
           if ! sudo -n -l "$helper" >/dev/null 2>&1; then
-            alert "metrics unavailable: $helper is not installed or not granted -- re-run scripts/github-ci-runner/install-deploy-runner.sh"
+            alert "metrics unavailable: $helper is not installed or not granted -- apply it with: sudo scripts/github-ci-runner/install-deploy-runner.sh --helpers-only (no runner restart; a full re-run also stops and starts the runner service)"
           elif source_health=$(sudo -n "$helper" 2>/dev/null) \
                && printf '%s' "$source_health" | jq -e . >/dev/null 2>&1; then
             printf '%s' "$source_health" | jq -r '
