@@ -4,6 +4,25 @@ Decision record for #2289, gating #2290–#2292. No code changes ship with
 this document — it is the design pass #1634 asked for before any ingest
 worker exists.
 
+> **Status, re-measured 2026-09-27: authored and tracked, not deployed.** The
+> ingest worker does exist in git — `vault-worker/` carries a `worker.py`, a
+> `sanitize.py`, a `Dockerfile` and two compose files, the shipped output of
+> #2289/#2290 — but nothing deploys it. It is absent from
+> `arcane/manifests/home-production.json`; no vault-worker container has ever
+> run on the homeserver, and there is no `vault-worker` stack directory among
+> the deployed ones; Elasticsearch carries no `knowledge-vault*` index, so the
+> `knowledge-vault-state-v1` checkpoint cited for this worker in
+> [PIPELINES.md](PIPELINES.md) does not exist either (that row is planned, the
+> same way); and the live APIARY worker runs
+> `WORKER_LOOPS=alert-notifier,attacker-identity,agent-intrusion,correlator,dashboard-rollups,threat-intel,zeek-proxy-attribution`
+> — there is no vault loop in it.
+>
+> So everything below is the design and implementation record of a **planned**
+> subsystem, kept because #2289/#2290 shipped real code against it. Read it as
+> intent that has not been switched on: none of the paths, indices or
+> checkpoints it names exist on a live host, and no deployment decision is
+> recorded anywhere in the repository.
+
 ## 1. Storage: plain markdown directory, carried by the existing off-host
    backup path, not git/Syncthing
 
