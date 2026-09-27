@@ -145,6 +145,55 @@ jobs:
             alert "healthz: **unreachable** — the dashboard container is down or not bound"
           fi
 
+          # #3315: "green, healthy, running the old code" is indistinguishable
+          # from a correct deploy by looking at it -- a fresh container, a
+          # passing healthcheck and a recent image build all describe the
+          # machinery, not the code. Both dashboard images now carry their git
+          # revision (#/healthz's `revision` field and
+          # org.opencontainers.image.revision), and scripts/verify-deploy.sh
+          # compares what is running against what is newest.
+          #
+          # The expected revision is $GITHUB_SHA rather than a clone's
+          # origin/main because this host has no usable one: deploy.yml's
+          # rsync into $stack carries --exclude .git/ (see its own step), and
+          # Arcane's directory sync has no .git either. On a schedule trigger
+          # GITHUB_SHA is the default branch's head, which is exactly the
+          # "newest merge" this has to be measured against. For the same
+          # reason --behind-days is 0 here: the day-count needs a clone to
+          # measure commit age against, and without one it would exit 2
+          # ("could not tell") on every run. Degrade to "is this the tip of
+          # main" and say so, rather than shipping a check that can only
+          # report that it failed to run.
+          #
+          # Report-only, like the Elasticsearch section: a stale deploy is a
+          # scheduling fact, not one of the failures #2222 lists. --warn-only
+          # stops the tool's own exit 1 from reddening a scheduled run; its
+          # exit 2 is still separated out below, because folding "could not
+          # tell" into a pass is the one outcome that would make this section
+          # worse than not having it.
+          section "Deployed revision"
+          verify=$stack/scripts/verify-deploy.sh
+          if [ ! -x "$verify" ]; then
+            report "not checked: $verify is not on this host yet (it arrives with the merge that adds it)"
+          else
+            if stamp=$("$verify" --warn-only --repo-root "$stack" \
+              --healthz-exec 'docker exec hp-apiary-backend curl -sf http://127.0.0.1:8081/healthz' \
+              --image apiary-backend:latest --behind-days 0 "$GITHUB_SHA" 2>&1); then
+              printf '%s\n' "$stamp" | tee -a "$GITHUB_STEP_SUMMARY"
+            else
+              stamp_rc=$?
+              printf '%s\n' "$stamp" | tee -a "$GITHUB_STEP_SUMMARY"
+              if [ "$stamp_rc" -eq 2 ]; then
+                report "could not tell: the deployed revision was not readable (exit 2), which is not a pass"
+              else
+                report "findings above: the running revision is not verifiably the expected one"
+              fi
+            fi
+            report 'PASS means the running binary was built from the current main tip.'
+            report 'A finding means it was not; "not stamped" means the image was built'
+            report 'without --build-arg GIT_SHA. Neither reddens this run.'
+          fi
+
           section "Sensor to Elasticsearch to Dashboard"
           # #2096: the Go dashboard's Prometheus /metrics died with it
           # (#1659) -- frontend-next owns :19090 now and answers 307

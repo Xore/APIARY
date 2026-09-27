@@ -79,7 +79,25 @@ services:
   # ------------------------------------------------------------------
   backend-service:
     <<: *runtime-defaults
-    build: ../honeypot-dashboard/backend-service
+    build:
+      context: ../honeypot-dashboard/backend-service
+      # #3315: the revision this image is built from. build.rs compiles it into
+      # the binary (where /healthz reports it as `revision`) and the Dockerfile
+      # stamps it on the image as org.opencontainers.image.revision, so the two
+      # can be compared against each other and against main by
+      # scripts/verify-deploy.sh.
+      #
+      # Read from this stack's .env, not invented here: compose cannot run
+      # `git rev-parse`, and Arcane's directory sync explicitly excludes .git
+      # from the tree it materializes (docs/ARCANE-GIT-SYNC.md), so the synced
+      # checkout has no repository to ask. Set it from the checkout you are
+      # deploying, before the build -- see this stack's .env.example.
+      #
+      # Unset is the honest default and yields "unknown" in /healthz and on the
+      # label rather than a build failure. A build that refuses to produce an
+      # unstamped image is a build that gets reverted; a stale one is reported.
+      args:
+        GIT_SHA: ${GIT_SHA:-}
     image: apiary-backend:latest
     # build: this image is never pushed to any registry -- Arcane's
     # redeploy does an unconditional `docker compose pull` across every

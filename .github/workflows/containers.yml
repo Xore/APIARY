@@ -66,6 +66,15 @@ jobs:
             # into the digest-keyed CycloneDX + Trivy steps below. Absent on
             # the other sixteen rows, so they build exactly as before.
             sbom: true
+            # #3315: the two dashboard images that now report which commit
+            # they were built from -- one compiled into the binary (where
+            # /healthz answers it as `revision`) or baked into the served
+            # /build.json, and both on the image's
+            # org.opencontainers.image.revision label. Only these two
+            # Dockerfiles declare `ARG GIT_SHA`, so only these two rows pass
+            # it; the other sixteen would take an unused-build-arg warning
+            # per build for an arg they do not read.
+            stamp: true
           - image: cisco-asa-honeypot
             context: arcane/home/honeypot-cisco-asa-honeypot/cisco-asa-honeypot
           - image: citrix-honeypot
@@ -75,6 +84,7 @@ jobs:
           - image: dashboard-next
             context: arcane/home/honeypot-dashboard/frontend-next
             sbom: true
+            stamp: true
           - image: dicompot
             context: arcane/home/honeypot-dicompot/dicompot
           - image: dionaea
@@ -236,6 +246,18 @@ jobs:
           load: false
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
+          # #3315: the revision this image is built from, for the two rows
+          # whose Dockerfile declares `ARG GIT_SHA` (matrix.stamp). It has to
+          # be a build arg and not only a label: backend-service compiles it
+          # into the binary, and nothing in the shipped image can be edited
+          # after the fact without changing the image id. Note that
+          # metadata-action already emits its own org.opencontainers.revision
+          # for the same image, and both are wired from the same
+          # `${{ github.sha }}` here -- so whichever key wins the merge, the
+          # label and the compiled-in value cannot disagree about which commit
+          # this is. scripts/verify-deploy.sh compares them against origin/main
+          # and against the live /healthz.
+          build-args: ${{ matrix.stamp == true && format('GIT_SHA={0}', github.sha) || '' }}
           # Scope the layer cache per image (#2771). Without an explicit
           # scope every matrix row defaults to `buildkit`, so all 18
           # concurrent builds read and write ONE shared cache index per
