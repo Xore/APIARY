@@ -52,8 +52,9 @@ The `payload-dedupe` service scans these stores hourly and atomically replaces
 same-filesystem duplicates with hard links. Existing event/download URLs remain
 valid while duplicate disk blocks are reclaimed; its last-run report is stored
 at `state/dedupe/payload-dedupe.json`.
-Its diagnostic logger is limited to `info,warning,error` so debug chatter cannot
-consume the data disk. The `log-maintenance` sidecar copy-truncates and gzips
+Neither service produces per-event chatter: `payload-dedupe` prints a single
+JSON result line per pass, and `log-maintenance` writes one stderr line per
+rotation. The `log-maintenance` sidecar copy-truncates and gzips
 human-readable Dionaea, Conpot, and Cowrie logs at 256 MiB (four archives).
 Structured JSON event streams are deliberately never rotated by that sidecar,
 which preserves Filebeat offsets and dashboard ingestion.
@@ -70,6 +71,11 @@ GeoIP enrichment is best-effort: empty or malformed addresses are skipped, but
 the original event is always retained.
 ILM keeps raw Suricata indices for 7 days, honeypot data streams for 30 days,
 and dead-letter records for 60 days so high-volume scans cannot fill the disk.
+Those three are the values at the default `HONEYPOT_RETENTION_DAYS=30`: every
+window derives from that one variable (Suricata `retention*7/30`, dead-letter
+`retention*2`), so lowering it reclaims disk across all of them at once. Only
+the ILM *policy names* (`suricata-7d`, `honeypot-30d`, `dead-letter-60d`) stay
+fixed.
 
 ## Runtime resource budgets
 
@@ -130,8 +136,10 @@ no third-party site is cloned. All `mushorg/*` images are third-party
 ## Suricata — analysing all the traffic
 
 `suricata` runs **on the VPS** (host networking, sniffing the public interface
-`SURICATA_IFACE`, default `ens6`) so it sees real attacker source IPs before the
-tunnel. It writes to `/opt/stacks/apiary/logs/suricata/` on the VPS:
+`CAPTURE_INTERFACE`, written at boot by `detect-capture-interface.service`,
+falling back to the legacy `SURICATA_IFACE` and then to `eth0` — *not* the old
+`ens6`, which a reboot has already renamed) so it sees real attacker source IPs
+before the tunnel. It writes to `/opt/stacks/apiary/logs/suricata/` on the VPS:
 
 - `eve.json` (alerts, http, dns, tls, flow) — Filebeat on the home server ships
   it to the `suricata-*` Elasticsearch index (stats events are dropped, see
