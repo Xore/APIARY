@@ -329,21 +329,30 @@ in the `scripts-and-compose` matrix's `scripts/tests suite` row.
 ## The `/api` contract and its weekly fuzz job (#3325)
 
 `backend-service` publishes an OpenAPI 3.1 contract at
-`arcane/home/honeypot-dashboard/backend-service/openapi.json`, covering all
-129 registered `/api` paths (138 operations). It is generated, not
-hand-edited: the source of truth is the operation table in
-`arcane/home/honeypot-dashboard/backend-service/src/openapi.rs`, rendered by
+`arcane/home/honeypot-dashboard/backend-service/openapi.json`: 132 paths,
+141 operations — 128 `/api` paths and 137 `/api` operations behind the
+token, plus the four public probes `/healthz`, `/livez`, `/readyz` and
+`/metrics`. It is generated, not hand-edited: the source of truth is the
+`#[utoipa::path]` annotation on each handler plus the route table in
+`arcane/home/honeypot-dashboard/backend-service/src/lib.rs`, rendered by
+`src/openapi.rs` (whose `render()` reconciles the derived document with
+the committed one — the six transform steps are documented in that
+module) and emitted by
 
 ```sh
 cd arcane/home/honeypot-dashboard/backend-service
 cargo run --bin openapi > openapi.json
 ```
 
+A shared parameter or request-body shape goes in
+`arcane/home/honeypot-dashboard/backend-service/src/contract.rs` behind
+`contract_schema!`; the annotations reference it rather than restating it.
+
 **Three gates keep it honest, and they fail in different directions on
 purpose:**
 
 - **`cargo test`** runs two drift tests in `src/openapi.rs`.
-  `contract_covers_every_router_route` reads `src/main.rs` and fails if the
+  `contract_covers_every_router_route` reads `src/lib.rs` and fails if the
   router and the contract disagree about which `(path, method)` pairs exist
   — a route added without a contract row is the direction that rots, since
   it silently drops a fuzz target. `checked_in_contract_is_current` fails
@@ -380,8 +389,9 @@ purpose:**
   `422` from axum's `Json<T>` rejection on all 25 body routes, `400` from
   its `Query<T>` rejection, four `services` routes answering JSON errors
   declared as `text/plain`, and a `text/plain` export declared as JSON.
-  Fix those by editing the row in `operations()` and regenerating — never
-  by suppressing the output.
+  Fix those by editing the handler's `#[utoipa::path]` annotation (or the
+  shape it names in `src/contract.rs`) and regenerating — never by
+  suppressing the output.
 
 `/api/v1/live` is excluded from the fuzz passes and skipped by the auth
 script, and the contract marks it `x-endless-stream: true`. Its body never
