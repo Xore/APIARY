@@ -1,6 +1,7 @@
 # Rocky Linux 10 support in `install-homeserver.sh`
 
-The homeserver is moving from Ubuntu to Rocky Linux 10. `scripts/install-homeserver.sh`
+The homeserver has moved from Ubuntu to Rocky Linux 10 (the rebuild hit
+live 2026-09-03). `scripts/install-homeserver.sh`
 now runs on both, so the reinstall smoke test in #1609 has a working installer.
 
 ## How it works
@@ -61,6 +62,13 @@ open kernel modules only support Turing and newer. The homeserver holds a Pascal
 Quadro P2200 alongside the Ada RTX 4000; the P2200 is meant to be bound to
 `vfio-pci` for the Windows sandbox rather than driven by the host, but choosing
 the open modules would make it unusable on the host if ever needed.
+
+Both cards are still on the PCI bus (P2200 at `17:00.0` / `10de:1c31`, Ada at
+`65:00.0`), re-measured 2026-09-27. Only the Ada currently has a driver bound
+(`Kernel driver in use: nvidia`); the P2200 shows under *Kernel modules* with
+none *in use*, so `nvidia-smi -L` lists exactly one GPU. That is expected, and
+it is **not** evidence the P2200 is missing — the `nvidia-open` reasoning above
+only bites if the P2200 is ever handed back to the host.
 
 **NVIDIA container toolkit** — same rpm repofile approach. On RHEL the
 `container_use_devices` SELinux boolean is also set, without which a container

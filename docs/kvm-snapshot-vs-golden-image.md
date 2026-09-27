@@ -233,6 +233,13 @@ virsh start "analysis-${SAMPLE}"
 echo "VM analysis-${SAMPLE} started with overlay $OVERLAY"
 ```
 
+> §5's `golden-win10` and `/var/lib/libvirt/golden/` are **illustrative**, not
+> this stack's real names or paths. The live mechanism uses
+> `SANDBOX_ROOT=/var/dockge/sandbox`, a base image of
+> `golden-images/win11-analysis.qcow2` and a per-run
+> `vms/win11-sandbox.qcow2`, and it spawns with `qemu-img create -b` plus
+> `virsh define` rather than `virt-clone` — see §7.
+
 ### 5.3 Destroy and Clean Up After the Run
 
 ```bash
