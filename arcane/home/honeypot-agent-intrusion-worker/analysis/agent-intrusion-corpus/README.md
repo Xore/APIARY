@@ -259,7 +259,8 @@ change reviewed content. To extend the corpus, add events directly to
 
 `corpus.jsonl` is not itself schema-versioned (no top-level `version`
 field) — the file's own git history is the version record, matching how
-this repo treats `analysis/yara/` and other reviewed-fixture directories.
+this repo treats `arcane/home/honeypot-payload-analysis/analysis/yara/` and
+other reviewed-fixture directories.
 A future breaking change to `schema.json` (a required field added/removed,
 an enum value changed) should bump `schema.json`'s own `$id` and add a
 note here, not silently reinterpret old corpus rows under a new meaning.

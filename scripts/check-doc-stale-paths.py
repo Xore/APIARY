@@ -26,8 +26,18 @@ WAIVER = "stale-path-ok:"
 def main() -> int:
     repo = Path(__file__).resolve().parent.parent
     findings = []
-    for md in sorted(repo.rglob("*.md")):
-        rel = md.relative_to(repo)
+    # Scan TRACKED docs only. rglob walked the working tree, so untracked
+    # scratch (main-red/, .grit/worktrees/) produced findings CI can never
+    # reproduce -- it checks out clean. Same file set the other doc gates use.
+    import subprocess
+
+    tracked = subprocess.run(
+        ["git", "-C", str(repo), "ls-files", "*.md"],
+        capture_output=True, text=True, check=True,
+    ).stdout.split()
+    for rel_str in sorted(tracked):
+        md = repo / rel_str
+        rel = Path(rel_str)
         parts = rel.parts
         if not parts:
             continue
