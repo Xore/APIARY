@@ -4,6 +4,14 @@
 > as-written since this is a dated record; see `docs/HOMESERVER-DISK-LAYOUT.md` for
 > current layout.
 
+> **Dated handoff — written 2026-09-06 (epic #3079); not a live brief.** The
+> toolchain, model roster and dispatch rules in §5 are as-written on that date.
+> What shipped since: the #3080 toolchain (`analysis/ghidra/training/`) and the
+> corpus builders with their decontamination report. Unsloth (#3092) has **no
+> installer path** — it is the Arcane stack `unsloth`
+> (`arcane/manifests/home-production.json`), deployed by gitops-sync and a
+> redeploy, never by hand. Stop it before any cold GPU leg.
+
 **Read this first.** It names the plan of record, the state of the GPU, the
 kickoff order, the dispatch pattern and the hard rules. Written 2026-09-06,
 after the round-7 cold baseline was launched. Epic **#3079**, children
