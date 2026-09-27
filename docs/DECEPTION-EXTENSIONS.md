@@ -109,6 +109,7 @@ traces back to at least one decision.
 | RDP decoy (rdphoneypot lineage) | Integrated | `arcane/home/honeypot-rdp-honeypot/` | #238 batch, per-decoy plan #412 |
 | Cisco ASA VPN gateway decoy | Integrated | `arcane/home/honeypot-cisco-asa-honeypot/` | #238 batch, CVE context #414 |
 | Citrix ADC gateway decoy | Integrated | `arcane/home/honeypot-citrix-honeypot/` | #238 batch, CVE context #414 |
+| SonicWall SMA1000 Work Place/AMC decoy | Integrated | `arcane/home/honeypot-sonicwall-sma/` | #3033; CVE-2026-83548 SSRF / CVE-2026-83549 AMC command-injection chain |
 | DNS amplification bait | Integrated | `arcane/home/honeypot-dns-honeypot/` | #238 batch, safety-sensitive design #415 |
 | Mailoney (SMTP) | Integrated | `arcane/home/honeypot-mailoney/` | #1422 |
 | SentryPeer (VoIP/SIP) | Integrated | `arcane/home/honeypot-sentrypeer/` | #1424 |
