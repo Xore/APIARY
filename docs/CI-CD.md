@@ -257,6 +257,35 @@ through the unstable `--format json`. Retaining the full log is honest about
 that; converting it to XML here would mean a hand-rolled translation that
 could itself misreport a result.
 
+### Names and paths
+
+The table above names *files*; the artifact each one lands in is named
+`<that name>-${{ github.run_id }}-${{ github.run_attempt }}`, and no upload in
+`quality.yml` sets `overwrite`. Two rules, both of them learned the hard way:
+
+- **`overwrite: true` is not "the newest run wins".** It deletes an existing
+  artifact of that name before uploading the new one, so on a name two runs
+  share it means "the second uploader destroys the first's evidence", and the
+  name then resolves to whichever run got there last — not the one a reader
+  is looking at. A per-`(run, attempt)` name is claimed exactly once, so there
+  is nothing to overwrite and no name an earlier run on the same ref could
+  poison. The attempt number is part of the name because a GitHub re-run of a
+  run keeps its `run_id`; `run_id` alone still collides on the second attempt
+  of the same run. Nothing in the tree downloads these by name, so the suffix
+  costs no consumer.
+- **Paths name files, never the `.ci-artifacts/` directory.**
+  `actions/upload-artifact` v4.4+ skips hidden paths unless told otherwise, and
+  a directory whose own name begins with `.` is hidden — so `path:
+  .ci-artifacts/` uploads *nothing*, logging "No files were found with the
+  provided path" and, under `if-no-files-found: ignore`, saying so silently.
+  That is exactly what the two `scripts-and-compose` pytest rows did from
+  #3319 until this was fixed: a green run logged 330 ml-worker tests passed
+  and pytest's own "generated xml file" line, and the upload step directly
+  below it still found no files. Naming each report also bounds what can be
+  in it: the contents are the reports the lane's own reporter wrote, not
+  whatever happens to be sitting in a workspace-relative directory that
+  anyone with repo read access can download for the next 7 days.
+
 ### The switch
 
 Both reporters are opt-in through a single environment variable,
