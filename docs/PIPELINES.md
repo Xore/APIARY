@@ -150,6 +150,22 @@ No processor makes a network call — GeoIP reads local `.mmdb` files.
 | SSE `/api/v1/live` | live tail pages | resume carries the full sort tuple, so same-millisecond rows are neither dropped nor duplicated (#1979 closed by #2039) |
 | Bounded local-file tail | suricata + portbridge only | the two index families without a `honeypot-v2-*` mirror (#1103 Cat. 2); every other sensor is ES-only by design |
 
+**One non-attacker source is specified but absent.** An authorized Cisco Secure
+FMC management-audit export is not a sensor and has no path through any of the
+above: it would arrive as operator activity about a real appliance, not as an
+attacker touching a decoy, and it must never share a correlation key with the
+decoy stream, because the join itself would then manufacture the claim that an
+attacker's request caused an operator's change. The normalized shape such an
+export would be reduced to, and the invariants that hold regardless of its
+actual format, are specified in
+[FMC-MANAGEMENT-AUDIT-CONTRACT.md](FMC-MANAGEMENT-AUDIT-CONTRACT.md) (#3215).
+Nothing implements it: no normalizer, no connector, no reader, no index family,
+and no sensor. The closest existing precedent for the shape it *would* take — a
+non-decoy source with its own index, its own mapping, an explicit field
+allowlist, and the source's own stable id as the document id — is
+`auth-events-worker`, which reads Keycloak's admin API rather than an appliance's
+audit view.
+
 ---
 
 ## 2. Derived intelligence: the worker loops

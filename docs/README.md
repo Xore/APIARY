@@ -47,6 +47,7 @@ the installer).
 
 [Sensors](SENSORS.md) · [persona design](persona-design.md) ·
 [deception extensions](DECEPTION-EXTENSIONS.md) ·
+[FMC management-audit contract (#3215: specified, not built)](FMC-MANAGEMENT-AUDIT-CONTRACT.md) ·
 [GeoIP/threat intel](GEOIP-THREAT-INTEL.md) ·
 [payload workbench](payload-analysis-workbench.md) ·
 [network isolation](honeypot-network-isolation.md) ·
