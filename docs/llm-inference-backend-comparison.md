@@ -6,13 +6,21 @@ Status: research for [issue #598](https://github.com/Xore/APIARY/issues/598), 20
 > pass. The *measured* three-engine comparison it asked for was run
 > afterwards and is recorded in
 > `analysis/ghidra/benchmarks/engine-benchmark/README.md` (2026-08-06, on the
-> RTX 4000 Ada 20GB, extended by #832's settings tuning). It corroborates §1,
-> §3 and §4 below and **overturns §6 and §7**: real-card performance was in
-> fact measured, and vLLM's "refuses to start" failure turned out to be
-> specific to the *previous* 8GB Quadro RTX 4000 rather than a property of the
-> image. The sections below are left as written, as the record of what was
-> known on 2026-08-05; where the later run contradicts them, the later run
-> wins.
+> RTX 4000 Ada 20GB, extended by #832's settings tuning). It **overturns §6
+> and §7**: real-card performance was in fact measured, and vLLM's "refuses to
+> start" failure turned out to be specific to the *previous* 8GB Quadro
+> RTX 4000 rather than a property of the image. It explicitly leaves §2
+> standing ("no digest/registry system", `model-governance.py`'s pipeline being
+> "Ollama-shaped"), and it does not re-test §1's structured-output axis or §3's
+> keep-alive/swap behaviour — it runs one engine at a time by construction, so
+> it says nothing about multi-model sharing. The sections below are left as
+> written, as the record of what was known on 2026-08-05; where later work
+> contradicts them, the later work wins.
+>
+> Two later findings bear on this doc and are flagged inline where they
+> apply: #2646 (a warm resident slot is *not* reproducible at temperature 0
+> with a fixed seed, which revises §4's premise) and `ghidra-worker.py`'s
+> deliberate OpenAI-compatible `/v1` client, which revises §8's cost estimate.
 
 This is a task-specific decision record, matching
 [`local-llm-model-evaluation.md`](local-llm-model-evaluation.md)'s format for
@@ -107,7 +115,7 @@ llama.cpp/vLLM lose on — Ollama's digest happens to be *exactly* what
 equivalent. A migration would replace "query the running server's registry
 digest" with "hash the GGUF file on disk directly" — simpler and arguably
 more auditable (no trust in a registry's own digest computation), but a real
-rewrite of `collect_snapshot()`/`compare_against_approved()`'s identity model,
+rewrite of `collect_snapshot()`/`evaluate_drift()`'s identity model,
 and every recorded `approved-models.json` entry's `ollama_repo_digest`-shaped
 field.
 
@@ -152,6 +160,21 @@ instances with strict, static VRAM partitions instead of dynamic sharing).
 ## 4. Deterministic sampling
 
 `temperature: 0, seed: 66` is relied on for reproducible output today.
+
+> **Revised after the fact (#2646).** That reliance did not survive contact
+> with the deployed configuration. `OLLAMA_KEEP_ALIVE=30m` keeps the weights
+> resident between samples, and a **warm** Ollama slot returns different text
+> for a byte-identical prompt at temperature 0 with a fixed seed — production
+> therefore runs permanently in the drifting regime, and no setting fixes that
+> without paying a reload. The fix that shipped is accounting, not determinism:
+> every stored assessment now records a `slot_generation` fingerprint (read
+> from Ollama's `/api/ps`) naming the resident instance that answered, so two
+> results are never compared as though one instance produced both — see
+> `docs/analysis/ghidra/AI_TRIAGE.md`. This is attributed to a warm **Ollama**
+> slot specifically; the llama.cpp result below is not stated to have
+> exercised an equivalent long-lived warm-slot regime, so it stands as
+> measured. What the finding removes is this section's *premise* — that the
+> deployed stack is reproducible today — not its per-engine results.
 
 **llama.cpp**: confirmed bit-identical output across 3 repeated identical
 requests (`temperature: 0, seed: 66`) against the same model. No loss.
@@ -269,7 +292,16 @@ contract) replaced Ollama:
   `/v1/chat/completions`'s `response_format` shape instead of `/api/chat`'s
   `format`; digest verification (`model_digest()`) rewritten to hash the
   local GGUF file instead of querying `/api/tags`.
-- `analysis/ghidra/worker/ghidra-worker.py` — same client-shape change.
+- `analysis/ghidra/worker/ghidra-worker.py` — **no client-shape change needed**,
+  as of the current code. It already speaks an OpenAI-compatible `/v1` chat
+  dialect (`GHIDRA_TRIAGE_API_BASE`, default `http://127.0.0.1:11434/v1`) and
+  does so deliberately: the worker records that this is what makes "llama.cpp's
+  server, vLLM and LM Studio work unchanged; the requirement is that it is
+  *local*, not that it is Ollama." The one Ollama-specific coupling left is the
+  `/api/ps` probe behind `GHIDRA_TRIAGE_RUNTIME_BASE` that populates
+  `slot_generation` (#2646); the code already handles a server that is not
+  Ollama, recording `unavailable`. This line was a real cost when this doc was
+  written and is no longer one.
 - `analysis/ghidra/models/model-governance.py` — the largest rewrite. Its
   entire `collect_snapshot()`/drift-comparison model is built around Ollama's
   registry APIs and Docker-image-reference identity; every field in
