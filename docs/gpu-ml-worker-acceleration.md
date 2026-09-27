@@ -91,7 +91,7 @@ hypothesis is refuted) and pinned as the runtime-governance authority in
 - Stack network is `honeynet`. The old `ml-worker/docker-compose.override.yml`
   targeted a network, `analysis-net`, that never existed anywhere in this
   repository; that file has been replaced by `ml-worker/docker-compose.yml`
-  (its own Dockge stack), which joins `honeynet` as an external network —
+  (its own standalone stack), which joins `honeynet` as an external network —
   resolved under #61.
 
 **Wheel compatibility rule for Ada (sm_89), compute capability 8.9:**
