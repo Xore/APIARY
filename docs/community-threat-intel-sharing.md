@@ -54,8 +54,11 @@ commitment than this repo's existing IP-blocklist reporting:
   destinations (AbuseIPDB, Blocklist.de), stays dry-run by default, and
   needed its own multi-phase build (#68 for the dry-run foundation and
   safeguards, #69 for validation and metrics, #153 for reputation
-  filtering and observability, still open) to get the privacy posture
-  right.
+  filtering and observability) to get the privacy posture
+  right. All three are closed and implemented: #153 shipped GreyNoise
+  RIOT pre-checks (`reporter/greynoise.go`, off unless `GREYNOISE_ENABLED=1`)
+  and a `metrics.json` counter snapshot that the dashboard mirrors into
+  `reporter-metrics-v1`.
 - A generic `hpfeeds` publisher would share *richer* structured data
   (commands, credentials, payload hashes, session metadata -- whatever
   TANNER or another sensor chose to publish) with *whichever broker an
