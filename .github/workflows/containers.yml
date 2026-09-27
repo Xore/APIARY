@@ -450,10 +450,14 @@ jobs:
           # First tag only: metadata-action emits one per ref, and only one
           # of them is the branch build this smoke is about.
           IMAGE_TAG: ${{ steps.metadata.outputs.tags }}
-          # Empty exactly when nothing was pushed, which is the
-          # pull_request case -- there the build loaded the image locally
-          # (see the `load:` input) and there is no digest to pull.
-          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          # Only meaningful when a push actually happened. build-push-action
+          # emits a digest even with `push: false`, where it describes the
+          # locally built image and names nothing in the registry -- so
+          # testing this for non-empty sent every pull_request down the
+          # docker-pull path against a tag that was never pushed (#3316).
+          # On a pull_request the build loaded the image locally (see the
+          # `load:` input), which is the else branch below.
+          IMAGE_DIGEST: ${{ github.event_name != 'pull_request' && steps.build.outputs.digest || '' }}
           BUILD_ROW: ${{ matrix.image }}-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
