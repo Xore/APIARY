@@ -15,6 +15,15 @@
 package main
 
 import (
+	// #3212: bytes and crypto/sha256 for the byte-safe evidence and its
+	// hash, encoding/base64 for the former and encoding/hex for the latter.
+	// #3213 removed base64 from this file when the Basic/Bearer header
+	// parsing moved into credentials.go; #3212 needs it again for a
+	// different reason, which is not a reason to move the parsing back.
+	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -56,7 +65,19 @@ type event struct {
 	Query     string            `json:"query,omitempty"`
 	UserAgent string            `json:"user_agent,omitempty"`
 	Headers   map[string]string `json:"headers"`
-	Body      string            `json:"body,omitempty"`
+	// Body is the captured prefix as text, for the same reason it has
+	// always been logged: it is what an analyst greps. It is NOT a
+	// byte-preserving record of the request on two counts, and both are
+	// now stated rather than left for a reader to discover.
+	//
+	// Lossiness: every byte outside UTF-8 is replaced by U+FFFD on the way
+	// into JSON, so the stored value is a different byte string from the
+	// one received. BodyB64/BodyEncoding are the byte-exact half.
+	//
+	// Redaction (#3213): this is creds.redactedBody, never the bytes off
+	// the wire. BodyB64 is built from this same string, so the two cannot
+	// disagree and neither is a way around the redaction.
+	Body string `json:"body,omitempty"`
 	// #3213: the account half of a submitted credential, kept because it
 	// is the analytic value (a spray is a spray of accounts) and it is not
 	// a secret. The secret half of the same credential is never written
@@ -110,6 +131,108 @@ type event struct {
 	Tarpitted   bool  `json:"tarpitted,omitempty"`
 	TarpitBytes int   `json:"tarpit_bytes,omitempty"`
 	TarpitMS    int64 `json:"tarpit_ms,omitempty"`
+
+	// --- #3212: what we captured, how much of it, and the bytes ---
+	//
+	// Before this block, the only statement this event made about a body
+	// was `body`, a Go string of whatever one io.ReadAll behind a 64 KiB
+	// LimitReader happened to return -- with its error discarded. Two
+	// defects followed from that, and both are unfixable by a consumer:
+	//
+	//  1. A JSON string does not preserve arbitrary bytes. A Java
+	//     serialized object, a PNG, a lone 0x80 -- json.Marshal replaces
+	//     every byte that is not valid UTF-8 with U+FFFD, so the stored
+	//     value is a different byte string from the one received, and
+	//     nothing in the document says so.
+	//  2. A 40-byte body and the first 64 KiB of a 4 MB one serialized to
+	//     the same shape. "The attacker sent 40 bytes" and "we kept 4 KB
+	//     of something much larger" were the same record.
+	//
+	// So the capture is now described rather than implied. BodyCaptureState
+	// is the authoritative answer to "is this the whole body": "complete",
+	// "truncated" (we stopped at the cap and more bytes existed), or
+	// "unknown" (the read failed, so completeness is not knowable). It is
+	// set on every request event, including zero-byte ones, so an aggregate
+	// over it has no missing-value bucket -- a genuinely short body answers
+	// "complete", which is exactly the distinction defect 2 was missing.
+	//
+	// BodyReadError is the discarded io error, kept because "truncated" and
+	// "we never found out" are different failures and the state field can
+	// only carry one of them.
+	//
+	// BodySHA256 covers the CAPTURED PREFIX and says so in
+	// BodySHA256Scope -- the same field name galah's body_sha256 already
+	// established (see ip_enrichment/sensors.rs's promotion of
+	// httpRequest.bodySha256), with the scope its hash could not claim. A
+	// hash whose scope is ambiguous is worse than no hash: it looks
+	// comparable across sensors and is not. It is deliberately NOT the
+	// complete body's hash, because computing that would mean draining
+	// whatever the client claims to be sending -- unbounded work, on
+	// time this sensor does not spend, to obtain a fact nobody downstream
+	// needs. See captureBody.
+	//
+	// BodyB64 is the byte-safe half of the answer: a bounded head, base64,
+	// with BodyEncoding naming that encoding so a consumer never has to
+	// guess it. BodyDeclaredBytes is the Content-Length the request CLAIMED
+	// -- attacker-controlled, so it is recorded as a claim and never trusted
+	// as a fact, and it is the only thing that turns "truncated at 64 KiB"
+	// into "truncated at 64 KiB of 4 MB".
+	//
+	// JavaMarker is #3212's other half: a separate, Java-only observation,
+	// deliberately not a new payload_class (see javaMarker).
+	//
+	// --- #3213 changed one of these premises, and the change is load-bearing
+	//
+	// This block was written against a `body` that held the raw capture, and
+	// on that basis the byte-safe evidence was free: it carried the same
+	// bytes `body` already published, so it disclosed nothing new. #3213
+	// redacted `body`, and with it that argument. The evidence is now built
+	// from the same redacted string, so the two fields still agree and
+	// neither reintroduces what #3213 removed -- a base64 blob is not a
+	// disclosure control, and treating it as one would have made this field
+	// the single place a submitted credential survived.
+	//
+	// The per-field comments below say which of the two questions each field
+	// answers, because the capture and the published bytes are now different
+	// things and only one of them is allowed out of the process.
+	// BodyCaptureState / BodyCapturedBytes / BodyReadError describe the
+	// CAPTURE: how many bytes came off the wire, whether that was all of
+	// them, and what ended the read. Nothing about redaction changes any of
+	// the three, because redaction is not a fact about the wire.
+	BodyCaptureState string `json:"body_capture_state"`
+	// BodyCapturedBytes is the raw captured length, so it can exceed
+	// len(decode(body_b64)) whenever the redactor shortened the body. See
+	// bodyCapture.apply.
+	BodyCapturedBytes int    `json:"body_captured_bytes"`
+	BodyReadError     string `json:"body_read_error,omitempty"`
+	// BodyB64 and BodySHA256 describe the PUBLISHED bytes: the redacted
+	// body, bounded to a head, and the hash of the whole redacted captured
+	// prefix. They are derived from the same string Body carries, so a
+	// consumer can decode one, hash it, and get the other -- and neither
+	// field is a route around the redaction that #3213 put on `body`.
+	// Before #3213 these were safe to publish only because `body` already
+	// published the same bytes; that is exactly the premise #3213
+	// invalidated, and it is why the evidence is no longer built from the
+	// raw capture.
+	BodyEncoding string `json:"body_encoding,omitempty"`
+	BodyB64      string `json:"body_b64,omitempty"`
+	// BodySHA256 covers the CAPTURED PREFIX, post-redaction, and says so in
+	// BodySHA256Scope -- the same field name galah's body_sha256 already
+	// established (see ip_enrichment/sensors.rs's promotion of
+	// httpRequest.bodySha256), with a scope label that names both bounds. A
+	// hash whose scope is ambiguous is worse than no hash: it looks
+	// comparable across sensors and is not. It is deliberately NOT the
+	// complete body's hash, because computing that would mean draining
+	// whatever the client claims to be sending -- unbounded work, on time
+	// this sensor does not spend, to obtain a fact nobody downstream needs.
+	// See captureBody and bodyCapture.apply.
+	BodySHA256      string `json:"body_sha256,omitempty"`
+	BodySHA256Scope string `json:"body_sha256_scope,omitempty"`
+	// BodyDeclaredBytes is the Content-Length the client CLAIMED, and
+	// BodyJavaMarker the byte-pattern Java observation. See declaredLength
+	// and javaMarker.
+	BodyDeclaredBytes int64  `json:"body_declared_bytes,omitempty"`
+	JavaMarker        string `json:"java_marker,omitempty"`
 }
 
 type logger struct {
@@ -352,8 +475,10 @@ func headerMap(r *http.Request) map[string]string {
 // payloads nest -- the second most common body here is a <?php wrapper
 // around a base64 blob that decodes to a wget|sh chain, which is three of
 // these classes at once -- so the outermost, most identifying shape is
-// checked first. The raw body is stored regardless, so nothing is lost by
-// naming only one.
+// checked first. This runs on the RAW body: naming one class does not
+// decide what is kept, and since #3213 the kept copy is redacted, so this
+// pass must not be the thing that reads a redacted string and finds nothing
+// in it.
 //
 // Counts in the comments come from running this function over that whole
 // window rather than over examples, which is also how the one surprising
@@ -565,7 +690,12 @@ func classifyPayload(query, body string) string {
 		return "multipart-padding"
 
 	// Java and PHP serialised objects, by their headers rather than their
-	// contents. rO0AB is base64 for the Java stream magic.
+	// contents. rO0AB is base64 for the Java stream magic. Unchanged by
+	// #3212 and deliberately so: this is one ordered class shared by two
+	// languages, and the Java-specific evidence it lacked now lives in
+	// its own java_marker field (see javaMarker) rather than in a split of
+	// this value, which existing queries already mean and the PHP case
+	// would lose.
 	case strings.HasPrefix(body, "rO0AB"), strings.Contains(body, "\xac\xed\x00\x05"), phpSerializedObject(b):
 		return "serialized-object"
 
@@ -874,6 +1004,221 @@ func phpSerializedObject(s string) bool {
 	return digits > 0 && strings.HasPrefix(rest[digits:], `:"`)
 }
 
+// javaStreamMagic is the four-byte header a Java serialization stream begins
+// with -- STREAM_MAGIC 0xACED followed by STREAM_VERSION 5 -- and the same
+// four bytes "rO0AB" is the base64 of. Named once so the classifier case
+// above and javaMarker below cannot drift apart on the literal.
+var javaStreamMagic = []byte{0xac, 0xed, 0x00, 0x05}
+
+// javaMarker names the Java serialization marker observed in the captured
+// bytes, or "" when there is none (#3212). "stream-magic" and
+// "stream-magic-base64" say a marker was seen. They do not say an object
+// graph was valid, a gadget was named, or anything executed -- nothing here
+// can, and nothing here tries.
+//
+// Byte patterns only. No ObjectInputStream, no class loading, no
+// instantiation of anything that arrived over the socket: the sole decode
+// performed is base64's, on eight characters, to check whether they decode to
+// four known bytes -- a comparison, not a parse. A received stream is never
+// read as a stream, only compared against four literals.
+//
+// This is a SEPARATE field, not a new payload_class, and that is the whole
+// point of it. classifyPayload is an ordered first-match-wins classifier, and
+// its "serialized-object" value is shared with PHP's serialize(); splitting
+// Java out of that value would repurpose a class existing queries already
+// mean, and would lose the PHP case the moment a Java-looking body arrived
+// first. Kept separate, a request can carry both at once: a body that trips
+// "sqli" three cases earlier and also starts with the Java header keeps
+// payload_class "sqli" AND java_marker "stream-magic", so neither observation
+// erases the other.
+func javaMarker(body []byte) string {
+	// Offset 0 only. A serialization stream starts with this header, so
+	// that is the only position where seeing it means what it says. The
+	// classifier's Contains above accepts the four bytes anywhere in the
+	// body; that looser class label stays exactly as it was, and this field
+	// reports the narrower observation it is able to stand behind.
+	if bytes.HasPrefix(body, javaStreamMagic) {
+		return "stream-magic"
+	}
+	// The same header transported as base64 text, which is how it arrives
+	// when the payload is submitted as a form value. Verified rather than
+	// assumed: eight characters is the shortest run that can carry four
+	// bytes, so a body that merely starts with the five-character "rO0AB"
+	// is a coincidental prefix and is not evidence of anything. That is
+	// the whole difference between this and the classifier's HasPrefix.
+	const b64Run = 8
+	if bytes.HasPrefix(body, []byte("rO0AB")) && len(body) >= b64Run {
+		if decoded, err := base64.StdEncoding.DecodeString(string(body[:b64Run])); err == nil &&
+			bytes.Equal(decoded, javaStreamMagic) {
+			return "stream-magic-base64"
+		}
+	}
+	return ""
+}
+
+// bodyCaptureMaxBytes is how much of a request body this sensor keeps. The
+// value is unchanged from the io.LimitReader(64<<10) it replaces -- a bounded
+// capture is the point, and an unbounded one is the denial of service an
+// attacker picks the size of. What #3212 adds is the record of WHICH bound
+// was hit, so a reader can tell a short body from a clipped one.
+const bodyCaptureMaxBytes = 64 << 10
+
+// bodyEvidenceMaxBytes is how much of the captured prefix is also retained
+// as a byte-safe head. Sized for the job the head exists to do: hold any
+// serialization header, its class descriptor and the class name, which is
+// what the marker evidence is about, in a few hundred bytes. It is not sized
+// to reproduce a body -- body_sha256 covers the whole captured prefix, and
+// nothing in the fleet reads a 64 KiB body out of a log line to re-hash it.
+//
+// It also has to stay under the 32000-character ignore_above on the
+// flattened `honeypot` field (honeypot-init's elasticsearch-setup.sh), or the
+// value stops being indexed and only survives in _source -- so 4 KiB raw,
+// 5464 characters of base64, against a 32000-character ceiling. The test
+// asserts that margin rather than trusting the arithmetic.
+const bodyEvidenceMaxBytes = 4 << 10
+
+// The three capture states, and the two fixed strings that make the rest of
+// the block self-describing: the encoding of body_b64, and the scope
+// body_sha256 covers. Both are recorded on the event rather than left to
+// documentation, because a consumer reading a log line three months from now
+// does not have this file.
+const (
+	captureComplete  = "complete"
+	captureTruncated = "truncated"
+	captureUnknown   = "unknown"
+
+	bodyEvidenceEncoding = "base64"
+
+	// bodySHA256Scope names both axes the hash is bounded on, because
+	// "captured-prefix" alone would now be a half-truth: it says which part
+	// of the body is covered, and says nothing about the fact that the bytes
+	// covered are the credential-scrubbed ones (#3213). A reader comparing
+	// this hash against a body they hold elsewhere would get a mismatch on
+	// any request that carried a credential, with no field on the event to
+	// explain it -- which is the "hash whose scope is ambiguous" defect this
+	// field exists to prevent, reintroduced one axis over. So the value says
+	// "a prefix, and post-redaction", and a body with no credential in it
+	// hashes identically under either reading, because redaction is a no-op
+	// there.
+	bodySHA256Scope = "captured-prefix-redacted"
+)
+
+// bodyCapture is what came off the wire and how much of it that was. Bytes
+// is the captured prefix, never longer than bodyCaptureMaxBytes.
+type bodyCapture struct {
+	Bytes []byte
+	// Truncated records that more bytes existed than were kept. It is a
+	// fact about the cap, independent of ReadErr.
+	Truncated bool
+	// ReadErr is whatever ended the read early. A non-nil error means
+	// completeness is not knowable, whatever the length.
+	ReadErr error
+}
+
+// state is the one authoritative answer to "is this the whole body". The two
+// failure facts are separate fields because a single string cannot carry
+// both: a body that hit the cap AND whose read then failed is reported as
+// truncated (the cap is a fact; the error is in BodyReadError) rather than
+// as unknown, which would discard something that is known.
+func (c bodyCapture) state() string {
+	switch {
+	case c.Truncated:
+		return captureTruncated
+	case c.ReadErr != nil:
+		return captureUnknown
+	default:
+		return captureComplete
+	}
+}
+
+// captureBody reads at most bodyCaptureMaxBytes of r, and says which of the
+// three things happened.
+//
+// One byte past the cap is the whole trick: a read that stops exactly at the
+// limit is indistinguishable from a body of precisely that size, so
+// truncating to the cap and reporting nothing is the ambiguity this exists
+// to remove. Reading one more byte is what makes "there was more" knowable.
+//
+// The read error is returned rather than dropped, which is the other half of
+// it: the old `body, _ := io.ReadAll(...)` threw away the only signal that
+// the capture was not what it appeared to be.
+func captureBody(r io.Reader) bodyCapture {
+	data, err := io.ReadAll(io.LimitReader(r, bodyCaptureMaxBytes+1))
+	if len(data) > bodyCaptureMaxBytes {
+		return bodyCapture{Bytes: data[:bodyCaptureMaxBytes], Truncated: true, ReadErr: err}
+	}
+	return bodyCapture{Bytes: data, ReadErr: err}
+}
+
+// apply records the capture's completeness, its byte-safe evidence and the
+// hash of exactly the bytes it is allowed to publish onto e. The state is
+// written even for a zero-byte capture -- a request with no body is genuinely
+// a short body, and answering "complete" is what distinguishes it from a
+// clipped one.
+//
+// redacted is the credential-scrubbed body (#3213's creds.redactedBody),
+// passed in rather than recomputed here so that this cannot become a second
+// redaction path with its own rules. It is deliberately NOT c.Bytes: the
+// completeness fields below describe the CAPTURE, which is a fact about what
+// came off the wire and is unaffected by redaction, while the two evidence
+// fields describe the PUBLISHED bytes, which are the redacted ones. Both are
+// recorded because both are true and they answer different questions -- "how
+// much arrived" and "what are you allowed to see" are not the same question,
+// and answering only the first would still be a leak.
+//
+// The consequence, stated rather than hidden: when redaction shortened the
+// body, the retained head and the hash are of the redacted form, so
+// len(decode(body_b64)) can be less than body_captured_bytes. That is the
+// redaction working, and BodySHA256Scope is what says so on the event.
+func (c bodyCapture) apply(e *event, redacted string) {
+	e.BodyCaptureState = c.state()
+	e.BodyCapturedBytes = len(c.Bytes)
+	if c.ReadErr != nil {
+		e.BodyReadError = c.ReadErr.Error()
+	}
+	if redacted == "" {
+		// Nothing to preserve and nothing to identify. The sha256 of the
+		// empty string is a real hash of the empty string, and carrying it
+		// on every bodyless request would be noise wearing a hash's clothes.
+		return
+	}
+	published := []byte(redacted)
+	head := published
+	if len(head) > bodyEvidenceMaxBytes {
+		head = head[:bodyEvidenceMaxBytes]
+	}
+	e.BodyEncoding = bodyEvidenceEncoding
+	e.BodyB64 = base64.StdEncoding.EncodeToString(head)
+	sum := sha256.Sum256(published)
+	e.BodySHA256 = hex.EncodeToString(sum[:])
+	e.BodySHA256Scope = bodySHA256Scope
+}
+
+// declaredLength is the Content-Length the request claimed, or 0 when it
+// claimed nothing usable. A claim, never a fact: it is written by the
+// attacker, it disagrees with the wire as often as not, and it exists here
+// only so "we kept 64 KiB" can be read as "we kept 64 KiB of 4 MB" when --
+// and only when -- the client was straight about it.
+//
+// Read from the header, falling back to the value net/http parsed out of that
+// same header, so the field describes the wire rather than one particular
+// way of asking for it. A chunked request arrives as -1 and has no declared
+// length to record, which is 0 here rather than a made-up number.
+func declaredLength(r *http.Request) int64 {
+	raw := strings.TrimSpace(r.Header.Get("Content-Length"))
+	if raw == "" {
+		if r.ContentLength > 0 {
+			return r.ContentLength
+		}
+		return 0
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
 // classify guesses the intent of a request path so logs are easy to triage.
 func classify(path string) string {
 	p := strings.ToLower(path)
@@ -969,8 +1314,16 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, _ := io.ReadAll(io.LimitReader(r.Body, bodyReadCap)) // cap at 64 KiB
+	// #3212: read through captureBody instead of a bare LimitReader. The
+	// cap is the same 64 KiB it always was, and it is bodyReadCap's value:
+	// #3213's credential pass reads the same bytes, so the two have to
+	// agree on where "all of it" ends. What the event now carries is which
+	// of "all of it", "a bounded prefix" and "we never found out" this
+	// request was, so that a 40-byte POST and the first 64 KiB of a 4 MB
+	// upload stop being the same record.
+	capture := captureBody(r.Body)
 	r.Body.Close()
+	body := capture.Bytes
 
 	// #3213: one pass over every channel that can carry a credential,
 	// answering three questions the event used to answer badly or not at
@@ -1010,7 +1363,24 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		AuthOutcome:              string(authUnknown),
 		Username:                 creds.username,
 		AuthType:                 creds.authType,
+		// Recorded from the raw bytes, independently of PayloadClass: an
+		// earlier case in that ordered switch must not be able to erase
+		// the fact that a Java marker was seen, and vice versa. Byte
+		// patterns only, and detection rather than disclosure, so these read
+		// the raw body the way classifyPayload does -- what leaves the
+		// process is a fixed marker name, never a byte of the payload.
+		JavaMarker:        javaMarker(body),
+		BodyDeclaredBytes: declaredLength(r),
 	}
+	// The evidence of what was captured is built from the SAME redacted
+	// string Body was just given, never from string(body). Before #3213
+	// these bytes were safe to publish because `body` already published
+	// them; that stopped being true when `body` was redacted, and had this
+	// call still read the raw capture it would have made body_b64 the only
+	// copy of a submitted credential anywhere in the event. One string, two
+	// fields -- the two cannot drift apart, and neither is a way around
+	// inspectCredentials.
+	capture.apply(&e, creds.redactedBody)
 
 	if s.tarpitEnabled && tarpitCategory(e.Category) {
 		e.Status = http.StatusOK
