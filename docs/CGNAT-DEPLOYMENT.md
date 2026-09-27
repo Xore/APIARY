@@ -22,13 +22,19 @@ flowchart TD
   validation), `honeypot-elk`, `honeypot-cowrie`, `honeypot-dionaea`,
   `honeypot-conpot`, `honeypot-dnp3`, `honeypot-http`, `honeypot-multipot`,
   `honeypot-payload-analysis`, `honeypot-tanner`, `honeypot-dashboard`,
-  `honeypot-utilities`, the standalone honeypots (cisco-asa, citrix, rdp,
-  dicompot, dns-honeypot, endlessh, beelzebub, hellpot, elasticpot, galah,
+  `honeypot-dashboard-backend`, `honeypot-utilities`, the standalone
+  honeypots (cisco-asa, citrix, rdp, sonicwall-sma, dicompot, dns-honeypot,
+  endlessh, beelzebub, hellpot, elasticpot, galah,
   sentrypeer, mailoney, canarytokens), `honeypot-keycloak`, and the
-  workers (ip-enrichment, agent-intrusion, attacker-identity, correlator,
-  payload-inventory) — 31 stacks total, one Arcane-managed directory each
+  workers (agent-intrusion, attacker-identity, correlator,
+  payload-inventory) — 32 stacks total, one Arcane-managed directory each
   under `arcane/home/<name>/` (`honeypot-wordpot` sat here until #2381
-  retired it). `honeypot-init` still deploys first; every
+  retired it; `ip-enrichment-worker` was in that worker list until
+  f139fe24 retired the Go service, `honeypot-dashboard-backend` joined when
+  #1622 split it out of `honeypot-dashboard`, and `honeypot-sonicwall-sma`
+  when #3131 added it — re-counted 2026-09-27 against
+  `arcane/manifests/home-production.json`, which holds 33 in-tree entries:
+  these 32 plus `unsloth`). `honeypot-init` still deploys first; every
   sensor stack waits on its completion markers at its own entrypoint rather
   than a Compose-level dependency, same reasoning as before, just across
   more projects now. See `docs/STACK-REBUILD.md` for the full current list
@@ -39,7 +45,7 @@ flowchart TD
 - VPS: plain Docker Compose manages `/root/vps/docker-compose.yml`.
   Unchanged by #1502 — VPS deployment stays outside Arcane entirely, as
   that issue's own scope decision.
-- Each of the 31 migrated stacks' Compose source (build context, git-tracked config,
+- Each of the 33 in-tree stacks' Compose source (build context, git-tracked config,
   `compose.yml` with an explicit top-level `name:` pinned to its live
   project name) lives self-contained under `arcane/home/<name>/` in this
   repository. Arcane clones the repo and materializes the *entire
@@ -52,25 +58,31 @@ flowchart TD
   these syncs on a from-scratch install, driven by the single source of
   truth at `arcane/manifests/home-production.json`. Six more home-hosted
   stacks (`auth-events-worker`, `llm-worker`, `ml-worker`,
-  `analysis/ghidra`, `sandbox/ghosts`, `pihole`) are Arcane-managed too but
+  `analysis/ghidra`, `sandbox/ghosts`, `technitium`) are Arcane-managed too but
   were already self-contained, so they kept their existing repository-root
   path instead of moving. Three of those six (`auth-events-worker`,
   `llm-worker`, `ml-worker`) are also imported by
   `step_arcane_import_stacks` itself now (#1505 — confirmed to have no
   host-local state beyond `.env`); the other three keep their own dedicated
-  installer steps for reasons specific to each (`pihole`'s non-`.env` host
-  state, `analysis/ghidra`'s conditional GPU compose overlay, and
+  installer steps for reasons specific to each (`technitium`'s non-`.env` host
+  state — the step `pihole` had until #2911 swapped the two — `analysis/ghidra`'s conditional GPU compose overlay, and
   `sandbox/ghosts`'s confirmed Arcane build-context limitation, #1506) —
   see `scripts/install-homeserver.sh`'s own Phase 8 header comment for the
-  full reasoning behind each.
+  full reasoning behind each. That filter reaches 35 of the manifest's 39
+  entries; `unsloth` is the one the installer reaches neither way (no
+  `step_unsloth_*`, and not a `honeypot-*` name), by design — see
+  `docs/ARCANE-GIT-SYNC.md`'s "Manifest import".
 - The public gateway source is under `vps/`.
 
 Arcane is used only on the home server. The VPS uses `docker compose` directly.
 See `docs/ARCANE-GIT-SYNC.md` for the sync model, cutover procedure, and
-confirmed Arcane v2.8.0 platform limitations (a required compose variable
+confirmed Arcane platform limitations (a required compose variable
 in a port-binding position, remote build contexts pinned to a Git tag, the
 sync file-count limit, and stale project records after a `destroy` call
-all have confirmed workarounds documented there).
+all have confirmed workarounds documented there). Those were each confirmed
+against `v2.8.0`–`v2.9.0`; `docker-compose.arcane.yml` now pins
+`manager:v2.11.1`, and none of them has been re-confirmed against that
+image — its own section header says to re-verify on upgrade.
 
 ## WireGuard addressing
 
@@ -135,12 +147,15 @@ the only internet-facing component.
 8. Run `python3 analysis/verify-stack.py` (with `DASHBOARD_SERVICE_TOKEN`
    from `honeypot-dashboard/.env`) and inspect `/source-health`.
 
-Each stack is a folder under your Arcane stacks dir (default `/opt/stacks/`).
-Upload the whole home folder via SFTP — compose **and** the build
-sub-folders (`cowrie/`, `multipot/`, `http-honeypot/`, `dashboard/`, …) —
-since Arcane's own editor only edits the compose file. After editing Go
-source or honeyfs content, rebuild from the `APIARY` stack's Arcane
-**terminal**: `docker compose -f compose.yml up -d --build`.
+Each stack is a folder under your Arcane stacks dir (`/var/dockge/stacks`;
+`/opt/stacks` is a symlink to it, #1185). **Since #1502 nothing is uploaded
+by SFTP** — Arcane materializes each stack's whole directory from its Git
+sync, and `honeypot-wordpot` aside the source of truth is the repository, not
+a hand-copied folder. The SFTP-upload and "edit then rebuild from Arcane's
+terminal" instructions this paragraph used to give are part of the pre-#258
+model the callout above already flags; what replaces them is a commit plus a
+sync, and a separate `POST /projects/{id}/build` for the stacks that have a
+`build:` service — see `docs/ARCANE-GIT-SYNC.md`.
 
 ### Boot-safe home networking and VPS log mounts
 
@@ -263,11 +278,12 @@ template is in [`vps/traefik/dynamic.yml`](../vps/traefik/dynamic.yml):
 `honeypot-http` (`decoy.<domain>`) + `honeypot-web` (catch-all) → fake nginx,
 `honeypot-snare` (`www-portal.<domain>` and `snare.<domain>`) → SNARE, one
 native-OIDC route for the dashboard (no gateway, since #1026), one native-OIDC
-route for Arcane (no gateway, #1185), and six forward-auth-protected
+route for Arcane (no gateway, #1185), and six gateway-fronted
 investigation routes sitting behind their own Keycloak-backed `oauth2-proxy`
 gateway: Kibana, TANNER, EveBox, Arkime, Rev·Deck, and the Traefik dashboard
-itself. Each has a matching
-`socat-hp-*` bridge in [`vps/docker-compose.yml`](../vps/docker-compose.yml).
+itself. Five of the six have a matching
+`socat-hp-*` bridge in [`vps/docker-compose.yml`](../vps/docker-compose.yml);
+the Traefik dashboard's gateway terminates on the VPS, not through one.
 
 Traefik is an HTTP(S) reverse proxy — it adds TLS, per-subdomain routing and
 auth to the web honeypots and dashboards. The other protocols (SSH, SMB,
@@ -325,14 +341,22 @@ Cloudflare answers every proxied hostname with **526**.
 `deploy.yml` never overwrites `traefik/certs/`. On a normal deploy it only
 checks that `origin.pem` still parses.
 
-### The forward-auth bridge, generically
+### The gateway-fronted chain, generically
 
 Six investigation UIs (Kibana, TANNER, EveBox, Arkime, Rev·Deck,
 the Traefik dashboard) reach home through the identical chain — one pattern,
-six routers in `vps/traefik/dynamic.yml`, six `socat-hp-*` bridges, each
-fronted by its own Keycloak-backed `oauth2-proxy` gateway container, not
-six different mechanisms. The honeypot dashboard and Arcane are the two
-exceptions — both speak native OIDC directly, no gateway — see the note below.
+six routers in `vps/traefik/dynamic.yml`, six `oauth2-proxy` gateway
+containers, five `socat-hp-*` bridges, not six different mechanisms. The
+gateway *is* the router's upstream rather than a `forwardAuth` middleware:
+`honeypot-kibana`'s `service:` is a loadBalancer at `http://oidc-kibana:4180`,
+and that container's `OAUTH2_PROXY_UPSTREAMS` is the socat bridge
+(`http://socat-hp-kibana:5601`). `grep -c forwardAuth vps/traefik/dynamic.yml`
+is 0, so nothing in the config uses the forward-auth middleware form. The
+sixth gateway, `oidc-traefik`, has no socat hop at all — its upstream is
+Traefik's own dashboard (`http://traefik:8081`) on the VPS, which is why the
+bridge count is five and not six. The honeypot dashboard and Arcane are the
+two exceptions — both speak native OIDC directly, no gateway — see the note
+below.
 
 ```mermaid
 sequenceDiagram
@@ -340,7 +364,7 @@ sequenceDiagram
   actor Op as operator's browser
   participant CF as Cloudflare<br/>(proxied DNS)
   participant TR as Traefik<br/>(TLS termination + routing)
-  participant OA as oauth2-proxy<br/>(forward-auth, one per service)
+  participant OA as oauth2-proxy<br/>(gateway, one per service)
   participant KC as Keycloak<br/>(honeypot-keycloak, at home)
   participant SOC as socat-hp-*<br/>(VPS container)
   participant WG as WireGuard tunnel
@@ -348,14 +372,13 @@ sequenceDiagram
 
   Op->>CF: HTTPS request, e.g. kibana.<domain>
   CF->>TR: proxied, real client IP in X-Forwarded-For
-  TR->>OA: forward-auth check
+  TR->>OA: routed to the app's own gateway (oidc-kibana:4180)
   alt no valid session
     OA-->>Op: redirect to Keycloak login (auth.<domain>)
     Op->>KC: authenticate (password + mandatory TOTP)
     KC-->>OA: OIDC callback, session established
   end
-  OA-->>TR: identity headers
-  TR->>SOC: request, security-headers applied
+  OA->>SOC: proxied request, identity headers added
   SOC->>WG: raw TCP, VPS listen port → 10.8.0.2:home-exposed-port
   WG->>APP: delivered to the app's own internal port
   APP-->>Op: response, relayed back through the same chain
