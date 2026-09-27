@@ -7,7 +7,7 @@
 > an existing one) has a real model to check itself against instead of
 > re-deriving the reasoning from scratch. See "Follow-up work" for what
 > this surfaced but didn't build.
-> **Last updated**: 2026-08-08
+> **Last updated**: 2026-09-27
 > **Tracking**: [#467](https://github.com/Xore/APIARY/issues/467)
 
 ---
@@ -87,7 +87,7 @@ insufficient without the loud warning).
 | Axis | `win11-sandbox` | `win11-ghosts` | `win11-cape` |
 |---|---|---|---|
 | 1. Network exposure | Isolated (no `<forward>`; FakeNet-served for intercepted outbound) | **Real WAN** (`<forward>` present, deliberate — #325/#331) | Isolated (no `<forward>`, same posture as the Linux runner) |
-| 2. Persona / NPC | Legacy persona daemon (`07-living-persona.ps1`, #290) | GHOSTS NPC (real `Ghosts.Api` client, `sandbox/ghosts/Dockerfile.client-win`) | **None** — no NPC daemon, deliberately excluded (`win11-cape.pkr.hcl`'s own header). Static identity (`autounattend.xml`'s `ComputerName`/`FullName`/etc.) is distinct from `win11-analysis`'s own as of #904, closing the fingerprint-reuse gap this cell used to flag |
+| 2. Persona / NPC | Legacy persona daemon (`07-living-persona.ps1`, #290) | GHOSTS NPC — upstream `Ghosts.Client.Universal`, not `Ghosts.Client.Windows` (#326) and not the `Ghosts.Api` server, built by `sandbox/ghosts/Dockerfile.client-win`; the built assembly is renamed to `EndpointAgent` there (and `C:\ghosts\Ghosts.Client.Universal.exe` is not shipped) because the original filename is itself a giveaway | **None** — no NPC daemon, deliberately excluded (`win11-cape.pkr.hcl`'s own header). Static identity (`autounattend.xml`'s `ComputerName`/`FullName`/etc.) is distinct from `win11-analysis`'s own as of #904, closing the fingerprint-reuse gap this cell used to flag |
 | 3. Simulated input | Yes — cubic-Bezier mouse movement, Gaussian jitter, periodic typing (`07-living-persona.ps1`) | N/A — GHOSTS' own real activity substitutes | No |
 | 4. Simulated background traffic | Yes (`08-traffic-noise.ps1`) | N/A — real traffic from real browsing | No |
 | 5. Filesystem bait | Yes (`05-decoy-content.ps1`) | No | No |
@@ -122,13 +122,22 @@ filed as its own issue rather than bundled here (every one of them
 needs an actual golden-image rebuild to verify, the same rebuild-gated
 posture #368/#787's own comments already hold every other
 guest-behavior change to — not something to casually re-trigger inside
-a documentation change):
+a documentation change). #904 has since landed and is marked as such
+below; the other three are still open:
 
 - [#901](https://github.com/Xore/APIARY/issues/901) — Validate the
   admin-gated LOLDrivers toggle end-to-end against a real
   `win11-ghosts.qcow2` cycle (with-set vs. without, gate-on vs.
   gate-off) — the code (#873) already exists and is untested against a
-  real image; this is verification work, not new engineering.
+  real image; this is verification work, not new engineering. The
+  evidence-gathering half now exists too
+  (`sandbox/ghosts/loldriver-gate-test.ps1`, #901's own acceptance
+  script: load-attempt `RTCore64.sys` as a kernel service, report
+  whether it actually loaded, read back
+  `VulnerableDriverBlocklistEnable`, delete the service). No run
+  output is recorded in this repo, so the validation itself is still
+  outstanding — the script being present is not the same as it having
+  been run.
 - [#902](https://github.com/Xore/APIARY/issues/902) — Design and add a
   userspace-only vulnerable-software attack-surface option (axis 7) —
   genuinely new engineering: which software, which CVEs, how it's
@@ -139,9 +148,12 @@ a documentation change):
   (axis 6 and/or 7) at all, given its debugger-class-evasion focus
   differs from `win11-analysis`'s AV/behavioral-evasion one — and
   implement whichever way that decision goes.
-- [#904](https://github.com/Xore/APIARY/issues/904) — Give
-  `win11-cape` its own persona identity distinct from
-  `win11-analysis`'s (not full persona/input/traffic-noise parity,
-  which stays deliberately excluded — just fixing the fingerprint-reuse
-  gap `autounattend.xml`'s own header already flags, promoted here to a
-  tracked issue instead of a comment-only note).
+- ~~[#904](https://github.com/Xore/APIARY/issues/904)~~ — Give
+  `win11-cape` its own persona identity distinct from `win11-analysis`'s
+  — **landed**. `sandbox/cape/packer/autounattend.xml` now carries
+  `VPM-ENG0089` / Daniel Kowalski / Vantage Precision Manufacturing
+  against `win11-analysis`'s `ACP-FIN0142` / Robert Tanaka / Ashford
+  Capital Partners, and the matrix cell above reflects that. Note the
+  scope it actually shipped at: identity/fingerprint distinctness only
+  — not full persona/input/traffic-noise parity, which stays
+  deliberately excluded (see that cell, and the file's own header).
